@@ -26,6 +26,7 @@
 import { registerTheme } from '../../core/registry.js';
 import { createAct } from './act.js';
 import { createChanges } from './changes.js';
+import { createFold } from './fold.js';
 import { wireControls } from './controls-wire.js';
 import { wireDevice } from './device-wire.js';
 import { PHONE_MAX_PX, sheet } from './draw/sheet.js';
@@ -58,6 +59,7 @@ function mount(root, core, { signal }) {
   root.innerHTML = sheet(core.model.page());
   const narrow = window.matchMedia(`(max-width: ${PHONE_MAX_PX}px)`);
   const touch = window.matchMedia('(pointer: coarse)');
+  const fold = createFold(() => core.prefs);
   const view = {
     phone: narrow.matches,
     coarse: touch.matches,
@@ -65,6 +67,11 @@ function mount(root, core, { signal }) {
     keys: core.keys,
     /** The step the person last asked of the volume, until the device reports it. */
     asked: null,
+    /** `The device`'s fold: open or folded, in memory and in this browser; folded until chosen. */
+    fold,
+    get deviceOpen() {
+      return fold.open;
+    },
     /** The last change seen on the device (changes.js) and the log of what this page asked. */
     changes: createChanges(),
     log: () => [],
@@ -117,7 +124,7 @@ function mount(root, core, { signal }) {
   wireTone({ root, core, live, act, signal });
   wireControls({ root, core, live, act, signal });
   wirePresets({ root, core, live, act, signal });
-  wireDevice({ root, core, act, signal });
+  wireDevice({ root, core, live, view, act, signal });
   return function unmount() {
     bound.core = null;
     live.stop();

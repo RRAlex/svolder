@@ -9,7 +9,7 @@
 
 import { place } from '../place.js';
 import {
-  NARROW_PX, fractionOf, marks, ticks, zones,
+  NARROW_PX, fractionOf, labelGap, marks, ticks, zones,
 } from '../ruler.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
@@ -80,7 +80,8 @@ function signature(volume, device, view) {
   const table = volume.db ?? [];
   return JSON.stringify([volume.lo, volume.hi, volume.risk, volume.cap, volume.mute, volume.unit,
     volume.silence, table.length, table.find(Number.isFinite), table.at(-1),
-    (volume.marks ?? []).length, Boolean(device?.inert), widthOf(view) < NARROW_PX]);
+    (volume.marks ?? []).length, Boolean(device?.inert), widthOf(view) < NARROW_PX,
+    Number(labelGap(widthOf(view)).toFixed(4))]);
 }
 
 /** The tick marks as two SVG paths (minor and major), on the ruler's own box. */

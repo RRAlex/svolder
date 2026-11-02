@@ -15,7 +15,7 @@ const TICK_MS = 1000;
 
 /** Wire the sections of the sheet in `root` until `signal` aborts. */
 export function wireDevice({
-  root, core, act, signal,
+  root, core, live, view, act, signal,
 }) {
   const store = core.model;
   const on = (id, fn) => root.querySelector(`#p-${id}`)?.addEventListener('click', (event) => {
@@ -43,6 +43,10 @@ export function wireDevice({
   });
 
   on('device', (_el, what) => {
+    if (what === 'device-fold') {
+      view.fold.toggle();
+      live.draw('device');
+    }
     if (what === 'identify') core.actions.identify({ device: store.shown() });
   });
 

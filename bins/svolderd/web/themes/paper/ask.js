@@ -3,7 +3,8 @@
 // What a written word asks before it writes: a form for a name (save a preset, rename one) and a
 // question for something that cannot be undone (delete a preset, replace what a slot of the device
 // holds). Both are drawn in a place the section keeps for them (`within`), as ruled lines and
-// words, and give a hand back to the word that opened them when they close. An answer that is
+// words, and give a hand back to the word that opened them when they close (found again by its id
+// if its section was drawn again meanwhile). An answer that is
 // refused leaves the form or the question open, with what was typed: the core has said why. The
 // question's safe answer has the focus, so Enter keeps things as they are. One is open at a time.
 
@@ -26,6 +27,7 @@ function open({ within, html, className, signal, onClose, opener, finish, no }) 
   box.innerHTML = html;
   within.replaceChildren(box);
   const stop = new AbortController();
+  const openerId = opener?.id;
   let closed = false;
   const handle = {
     box,
@@ -35,7 +37,10 @@ function open({ within, html, className, signal, onClose, opener, finish, no }) 
       stop.abort();
       box.remove();
       if (current === handle) current = null;
-      if (refocus && opener?.isConnected) opener.focus({ preventScroll: true });
+      // The word that opened it may have been drawn again meanwhile: its twin by id gets the focus.
+      const back = opener?.isConnected ? opener
+        : (openerId ? within.ownerDocument.getElementById(openerId) : null);
+      if (refocus) back?.focus({ preventScroll: true });
       onClose?.();
     },
   };

@@ -135,17 +135,20 @@ make docker                 # the container image, from the same static binaries
 make repro-check            # make packages twice; fails if any artifact differs
 ```
 
-The release is built the same way on GitHub when the project goes public:
-`.github/workflows/release.yml` builds each architecture on a native runner
-(`make packages ARCH=...`) without write access, pushes the multi-architecture image, then a last
+The release is built the same way on GitHub: pushing a `v*` tag starts
+`.github/workflows/release.yml` (by hand, `gh workflow run release.yml --ref vX -f version=X` runs it
+for a tag that has no release yet). It builds each architecture on a native runner
+(`make packages ARCH=...`) without write access and runs `make check` on an arm64 runner; the
+images and the release wait for that check. It then pushes the multi-architecture image, then a last
 job combines the files (`make release-files`), attaches the compose file
 (`packaging/release-compose.sh`: `docker-compose.yml` with its `image:` line and the comment above
 it changed for `ghcr.io/rralex/svolder:VERSION`), checks the draft against `SHA256SUMS` and
 publishes it; a failed run leaves no release. The image is tagged `VERSION` (both architectures)
 and, as each architecture is built on its own runner, `VERSION-amd64` and `VERSION-arm64`; there is
-no `latest`, so pin a version. `docker-compose.yml` is the one asset outside `SHA256SUMS`. Until
-go-public the workflow is dormant: it can only be started by hand, and `make workflow-check` (part
-of `make check`) fails if it gains another trigger, a job with a write scope beyond its own
+no `latest`, so pin a version. `docker-compose.yml` is the one asset outside `SHA256SUMS`.
+`make workflow-check` (part of `make check`) allows the workflow's two triggers and
+nothing else (`workflow_dispatch`, and `push` of `v*` tags with no branch or path filter); it also
+fails on a job with a write scope beyond its own
 (`contents` for the release job, `packages` for the image jobs), a step that runs `make` with a
 token in its environment, a `run:` that interpolates untrusted input, a persisted clone token or an
 action that is not pinned to a commit SHA.
@@ -181,10 +184,12 @@ svolder-<version>-1.x86_64.rpm   svolder-<version>-source.tar.gz          SHA256
 ```
 
 `SHA256SUMS` lists the other eight files and is written last; `sha256sum -c SHA256SUMS` in
-`target/dist` checks them. `RELEASE-NOTES.md` is the release page's text and not an asset: the
+`target/dist` checks them. `RELEASE-NOTES.md` is the release page's text and not an asset: a
+Beta paragraph (what has and has not been tested, and to start with the volume low), the
 version's section of `CHANGELOG.md` (a version without one, or one still the placeholder, stops
 `make release-files`), then the install lines, a line per file and the check
-(`packaging/release-notes.md.in`, filled in by `packaging/release-files.sh`). The bare arm64
+(`packaging/release-notes.md.in`, filled in by `packaging/release-files.sh`, which puts the section at the template's `@CHANGELOG@`
+line). The bare arm64
 binaries are in `target/dist/aarch64`, which is not an asset either.
 
 `svolder-<version>-source.tar.gz` is the commit with every crate the build uses vendored beside it
@@ -927,7 +932,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.31.2 on /run/user/1000/svolder.sock
+daemon: 0.31.3 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)

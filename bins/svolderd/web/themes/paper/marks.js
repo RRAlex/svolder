@@ -3,7 +3,9 @@
 // Where the notes stand and what is drawn over the sheet for them. On a desktop the notes are in
 // the band under the two columns, a grid of three, each note in the third under the centre of the
 // section it is about, in note order; ink arrows run from the EQ's note and from the red note to
-// what they are about, and an ellipse rings the red note. On a phone every note follows the
+// what they are about, and an ellipse rings the red note. The volume is above both columns, so the
+// red note's arrow to it runs along the gap under the columns to the sheet's margin on the side of
+// the needle, climbs it clear of the sections and turns in to end beside the written reading. On a phone every note follows the
 // section it is about in the flow, and the lead words of the red note are ringed in pencil. The
 // marks are drawn in `svg#p-marks` in pixels of the sheet, so they are drawn again after the notes,
 // the sheet's width or the fonts change.
@@ -21,6 +23,15 @@ const RING_TILT = -3;
 /** The arrow's head: how long (px) and how far from the shaft's line (radians). */
 const HEAD = 10;
 const SPREAD = 0.5;
+
+/** How far inside the sheet's edge (px) the arrow to the volume climbs, how far it stops short of
+ * the written reading, and how round the corner is where the lane meets the margin. */
+const MARGIN_X = 14;
+const STOP = 8;
+const CORNER = 18;
+
+/** How far under the columns (px) the arrow's sweep to the margin runs. */
+const GAP_DROP = 8;
 
 /** Take away the notes that were moved out of the band to follow their sections, before the band
  * is drawn again. */
@@ -81,6 +92,13 @@ function mark(svg, tag, attrs) {
   return el;
 }
 
+/** The open head of an arrow at `to`, for a shaft that arrives heading from `via`. */
+function head(svg, via, to, cls) {
+  const heading = Math.atan2(to.y - via.y, to.x - via.x);
+  const wing = (side) => `${to.x - HEAD * Math.cos(heading + side)} ${to.y - HEAD * Math.sin(heading + side)}`;
+  mark(svg, 'path', { class: `arrow ${cls}`, d: `M${wing(SPREAD)}L${to.x} ${to.y}L${wing(-SPREAD)}` });
+}
+
 /** An ink arrow with an open head from the note at `from` to the point `to`, bowed a little the
  * way a hand draws it; `cls` is `ink` or `red`. */
 function arrow(svg, from, to, cls) {
@@ -88,9 +106,29 @@ function arrow(svg, from, to, cls) {
   const cx = (from.x + to.x) / 2 + bow;
   const cy = (from.y + to.y) / 2;
   mark(svg, 'path', { class: `arrow ${cls}`, d: `M${from.x} ${from.y}Q${cx} ${cy} ${to.x} ${to.y}` });
-  const heading = Math.atan2(to.y - cy, to.x - cx);
-  const wing = (side) => `${to.x - HEAD * Math.cos(heading + side)} ${to.y - HEAD * Math.sin(heading + side)}`;
-  mark(svg, 'path', { class: `arrow ${cls}`, d: `M${wing(SPREAD)}L${to.x} ${to.y}L${wing(-SPREAD)}` });
+  head(svg, { x: cx, y: cy }, to, cls);
+}
+
+/** A red arrow from the top of the note at `box` to the written reading `text` of the volume, with
+ * the head pointing in: up into the gap under the two columns, along it to the sheet's margin on
+ * the needle's side (`right` or left), up the margin and in to the reading's near edge. `gap` is
+ * the page's y of the gap's line, `rel` turns page pixels into the sheet's and `width` is the
+ * sheet's. */
+function marginArrow(svg, { rel, width }, box, text, gap, right) {
+  const dir = right ? 1 : -1;
+  const from = rel(box.left + box.width / 2, box.top - 4);
+  const lane = rel(0, gap).y;
+  const margin = right ? width - MARGIN_X : MARGIN_X;
+  const to = rel(right ? text.right + STOP : text.left - STOP, text.top + text.height / 2);
+  const corner = margin - dir * CORNER;
+  const up = lane - CORNER;
+  const mid = (up + to.y) / 2;
+  mark(svg, 'path', {
+    class: 'arrow red',
+    d: `M${from.x} ${from.y}C${from.x} ${lane} ${corner - dir * 20} ${lane} ${corner} ${lane}`
+      + `Q${margin} ${lane} ${margin} ${up}C${margin} ${mid} ${margin} ${to.y} ${to.x} ${to.y}`,
+  });
+  head(svg, { x: margin, y: to.y }, to, 'red');
 }
 
 /** What `note` points at: the section it is about; nothing for a note with no section on show. */
@@ -111,6 +149,18 @@ function draw(root, svg, paper, red) {
     if (!aim) continue;
     const box = note.getBoundingClientRect();
     const below = aim.top > box.bottom;
+    if (note === red && note.dataset.about === 'volume' && !below) {
+      const cols = root.querySelector('.p-cols')?.getBoundingClientRect();
+      const text = root.querySelector('#p-volume-text')?.getBoundingClientRect();
+      const ruler = root.querySelector('#p-ruler')?.getBoundingClientRect();
+      const needle = root.querySelector('#p-needle')?.getBoundingClientRect();
+      if (text && ruler && needle) {
+        const gap = Math.min(box.top - 8, (cols?.bottom ?? box.top) + GAP_DROP);
+        const right = needle.left + needle.width / 2 > ruler.left + ruler.width / 2;
+        marginArrow(svg, { rel, width: paper.clientWidth }, box, text, gap, right);
+        continue;
+      }
+    }
     const x = Math.min(aim.right - 16, Math.max(aim.left + 16, box.left + box.width / 2));
     arrow(svg, rel(box.left + box.width / 2, below ? box.bottom + 4 : box.top - 4),
       rel(x, below ? aim.top - 4 : aim.bottom + 6), note === red ? 'red' : 'ink');

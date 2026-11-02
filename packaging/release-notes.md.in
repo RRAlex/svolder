@@ -3,6 +3,16 @@ SPDX-FileCopyrightText: 2026 the svolder authors
 SPDX-License-Identifier: GPL-3.0-or-later
 -->
 
+**Beta.** svolder has been tested against a fake device and a Bluetooth simulator that speaks the
+Forkbeard protocol, and has not yet driven real Schiit hardware. Before you plug in, turn the
+volume down and start low. Try it with cheap headphones or speakers first, and keep headphones off
+your ears while you try a new device or a new version. Cap the volume for the web UI, MQTT and MCP
+with `max_volume_db`. If something goes wrong, run `svolder daemon stop` and tell us in an
+[issue](https://github.com/RRAlex/svolder/issues), with the output of `svolder doctor`. The
+[README](https://github.com/RRAlex/svolder#before-you-plug-in) has the details.
+
+@CHANGELOG@
+
 **Install**
 
 - Debian, Ubuntu, Raspberry Pi OS (64-bit): `sudo apt install ./svolder_@VERSION@_amd64.deb`, or

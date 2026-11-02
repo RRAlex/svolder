@@ -45,8 +45,14 @@ title, a card, the volume, two columns, the notes band, the device and a footer.
 - **Columns.** Left: the tone, the amp's power, the meters. Right: the controls, Now playing, the
   presets, the device's presets. Each starts with a small mono label in capitals.
 - **Notes band.** The handwritten notes (below).
-- **The device.** A label, a table of facts (product, unit, firmware, DSP, profile, link, signal,
-  passphrase) with every reading and the age it was heard, and `identify`.
+- **The device.** A heading that is a button (underlined like the other written words, with
+  `aria-expanded` and `aria-controls`), and under it, folded until the person opens it, a table of
+  facts (product, unit, firmware, DSP, profile, link, signal, passphrase), every reading with the
+  age it was heard, and `identify`. The folded part stays in the page (`hidden`), so the ages keep
+  ticking. The last choice is held in memory (`fold.js`), so it works when storage is refused, and
+  is also the theme's preference `deviceOpen` in the core's store for Paper (the same one that
+  keeps the scheme), so it survives redraws, device switches and reloads. A guest may fold it too,
+  since it changes nothing on the device. The test driver unfolds it before it reaches a fact.
 - **Footer.** `svolder <version> · <day month>`, `T for themes` taken from the core's key list, and
   `sign out · Paper` (a guest sees `sign in · Paper`).
 
@@ -182,8 +188,12 @@ DAC and Amp`. The card's red note is drawn once, in the card under the title.
 Each note takes the third its section's centre is over, in note order. An ink arrow runs from the
 EQ note to its section and a pencil arrow from the red note to its section, except that when both
 are about the tone only the red note's is drawn; the red note is circled by a pencil ellipse, the
-card's included. Under 720 px each note follows its section in the flow, the red note's first
-three words get a pencil ring, and there are no arrows. Notes are placed again when the window or
+card's included. The volume stands above both columns, so the red note's pencil arrow to it leaves
+the note's top, runs along the gap under the columns to the sheet's margin on the needle's side
+(the right margin while the needle is in the right half of the ruler, else the left), climbs the
+margin and turns in to end beside the written reading. It never crosses a section. Under 720 px
+each note follows its section in the flow, the red note's first three words get a pencil ring, and
+there are no arrows. Notes are placed again when the window or
 the fonts change.
 
 **The last change.** The volume, the mute, every choice and toggle, the tone mode and the
@@ -280,7 +290,8 @@ meta for each scheme and the toast's shadow token are described in [the frame](f
   date, only the characters the faces carry), `paper-live.mjs` (the skeleton, the store's events,
   held sections, the log, `place`), `paper-ruler.mjs` (the ruler's maths, the volume section),
   `paper-draw.mjs` (every section from every fixture, guests quiet, the transport, the amp, the
-  facts, the card), `paper-notes.mjs` (the notes, the red order, the last change).
+  facts, the card), `paper-notes.mjs` (the notes, the red order, the last change), `paper-fold.mjs`
+  (the fold of The device, with storage that refuses).
 - **Browser** (`paper.py`, Chromium and Firefox): the button, the menu and Auto, dark from the first
   byte, the needle's value against its place, drags and keys, the cap, a reading from elsewhere
   during a drag, the controls, the presets and their questions, the transport, the amp, the

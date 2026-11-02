@@ -1,9 +1,9 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The device's facts as a spec table, every reading it holds with how long ago it was heard, and
-// the Identify word. The card for a device out of reach or at fault, or for a page with no device,
-// is here too. Pure: the model in, markup out; the ages are written once here and kept current by
-// device-wire.js.
+// the Identify word, under a heading that folds them away (folded unless the person opened them).
+// The card for a device out of reach or at fault, or for a page with no device, is here too. Pure:
+// the model in, markup out; the ages are written once here and kept current by device-wire.js.
 
 import { ageWords } from '../../../core/words.js';
 import { WORDS } from '../words.js';
@@ -18,7 +18,7 @@ const row = (label, value, attrs = '', cls = '') => `<tr><th scope="row">${esc(l
 const since = (nowMs, heardAt) => (nowMs - heardAt) / 1000;
 
 /** The device's facts: the spec table, all the readings, and Identify where it is offered. */
-export function device(_page, dev, _view) {
+export function device(_page, dev, view) {
   const f = dev?.facts;
   if (!f) return '';
   const age = f.signal_age;
@@ -46,10 +46,14 @@ export function device(_page, dev, _view) {
     ? `<p class="p-identify">${word('identify', WORDS.identify, !f.identify || Boolean(dev.inert))}`
       + ` <span class="p-note">${esc(WORDS.identifyNote)}</span></p>`
     : '';
-  return `<h2 class="p-label p-head">${esc(WORDS.deviceLabel)}</h2>`
+  const open = Boolean(view?.deviceOpen);
+  return `<h2 class="p-label p-head"><button type="button" class="p-w p-fold" data-act="device-fold"`
+    + ` aria-expanded="${open}" aria-controls="p-device-body">${esc(WORDS.deviceLabel)}</button>`
+    + ` <span class="p-note">${esc(open ? WORDS.deviceHide : WORDS.deviceShow)}</span></h2>`
+    + `<div id="p-device-body"${open ? '' : ' hidden'}>`
     + `<table id="p-spec" class="p-spec" data-now="${esc(f.now_ms)}"><tbody>${spec}</tbody></table>`
     + `<h2 class="p-label p-head">${esc(WORDS.readingsLabel)}</h2>`
-    + `<table id="p-readings" class="p-spec"><tbody>${readings}</tbody></table>${identify}`;
+    + `<table id="p-readings" class="p-spec"><tbody>${readings}</tbody></table>${identify}</div>`;
 }
 
 /** The card's words from its spans (code in mono), or its plain detail. */

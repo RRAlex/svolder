@@ -4,7 +4,7 @@
 
 # Writes what combines the two architectures' packages in target/dist: PKGBUILD (both tarballs'
 # checksums in it), SHA256SUMS (every release asset but itself, written last) and
-# RELEASE-NOTES.md (the version's section of CHANGELOG.md, then packaging/release-notes.md.in).
+# RELEASE-NOTES.md (packaging/release-notes.md.in with the version's section of CHANGELOG.md at its @CHANGELOG@ line).
 # `make packages` runs it on the host, from the repository root, with the version as its argument.
 set -eu
 
@@ -39,10 +39,12 @@ sed -e "s|@VERSION@|$version|g" -e "s|@SUMMARY@|$summary|g" \
   -e "s|@SHA256_X86_64@|$(sum "$tar_x86")|g" -e "s|@SHA256_AARCH64@|$(sum "$tar_arm")|g" \
   packaging/PKGBUILD.in > "$dist/PKGBUILD"
 
-{
-  printf '%s\n\n' "$section"
-  sed -e '/^<!--$/,/^-->$/d' -e "s|@VERSION@|$version|g" packaging/release-notes.md.in | sed '/./,$!d'
-} > "$dist/RELEASE-NOTES.md"
+# The template's @CHANGELOG@ line takes the version's section, so the Beta paragraph comes first.
+printf '%s\n' "$section" > "$dist/.changelog-section"
+sed -e '/^<!--$/,/^-->$/d' -e "s|@VERSION@|$version|g" packaging/release-notes.md.in | sed '/./,$!d' \
+  | awk -v f="$dist/.changelog-section" '$0 == "@CHANGELOG@" { while ((getline l < f) > 0) print l; next } { print }' \
+  > "$dist/RELEASE-NOTES.md"
+rm -f "$dist/.changelog-section"
 
 rm -f "$dist/SHA256SUMS"
 (cd "$dist" && sha256sum $assets > SHA256SUMS)

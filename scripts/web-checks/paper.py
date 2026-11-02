@@ -50,6 +50,10 @@ dark paper. Later tasks add the sections' checks here.
   from_this_browser_only_for_this_pages_change         the last change, and whose it is
   each_note_sits_near_what_it_is_about                 the band's third on a desktop, the flow on a phone
   one_red_note_is_circled                              one red note, the ellipse, the ring, the arrows
+  the_red_volume_arrow_stays_off_the_band_table        the red volume note's arrow keeps to the left
+                                                       margin at 1100, 1440 and 1920 px
+  the_device_starts_folded                             `The device` is a button over folded facts,
+                                                       readings and Identify; the choice is kept
 Usage: python3 paper.py chromium|firefox"""
 import json
 import math
@@ -789,6 +793,56 @@ def the_point_drag(b, d):
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
+def the_point_drag_without_capture(b, d):
+    """A browser that refuses `setPointerCapture` (it throws): the drag still begins, writes the
+    steps nearest the release point and lets go of the section."""
+    forget(b, d)
+    load(b, d)
+    d.post(DEVICE, 'eq/mode', {'mode': 'eq'})
+    time.sleep(0.5)
+    b.page("""(() => { window.__refused = 0; Element.prototype.setPointerCapture = function () {
+      window.__refused++; throw new DOMException('refused', 'NotFoundError'); }; return 1; })()""")
+    steps = d.model(DEVICE)['tone_steps']
+    got = points(b)
+    gx, gy, gw, gh = got['graph']
+    four = next(p for p in got['points'] if p['band'] == 4)
+    x1, y1 = four['cx'] - 60, four['cy'] + 25
+    drag_xy(b, four['cx'], four['cy'], x1, y1)
+    hz = 20 * math.exp((x1 - gx) / gw * math.log(1000))
+    db = 13 - ((y1 - gy) / gh * 260) / 10
+    want = [nearest_step(steps['bands'][3]['f'], hz, log=True), nearest_step(steps['gain'], db)]
+    check('a_point_drag_without_pointer_capture_still_writes: the browser refused the capture and band 4 '
+          'lands on the steps nearest the release point',
+          b.page('window.__refused') >= 1 and poll(lambda: bands(d)[3][:2] == want, 8.0),
+          [b.page('window.__refused'), bands(d)[3], want])
+    check('  the section is let go: the point has the focus again and a change from elsewhere is drawn',
+          poll(lambda: b.page("document.activeElement?.id") == 'p-pt-4', 5.0)
+          and d.post(DEVICE, 'eq/mode', {'mode': 'flat'}) is not None
+          and poll(lambda: b.page("__core.model.device().tone?.mode") == 'flat', 8.0)
+          and poll(lambda: 'Flat' in b.page("document.querySelector('#p-tone .p-label')?.textContent ?? ''"), 8.0),
+          [b.page("document.activeElement?.id"), b.page("__core.model.device().tone?.mode")])
+    check('  no page error', errors(b) == [], errors(b)[:3])
+
+
+def the_ask_focus(b, d):
+    """The word that opened a form is drawn again while the form is open: closing the form gives the
+    focus to the word's twin by its id, not to the one that went."""
+    forget(b, d)
+    load(b, d)
+    d.post(DEVICE, 'eq/mode', {'mode': 'eq'})
+    time.sleep(0.6)
+    reach(b, '#p-preset-save')
+    poll(lambda: b.page("!!document.querySelector('#p-presets .p-askbox')"), 5.0)
+    b.page("""(() => { const old = document.getElementById('p-preset-save');
+      old.replaceWith(old.cloneNode(true)); return 1; })()""")
+    click_el(b, '#p-presets .p-askbox [data-answer=cancel]')
+    check('an_ask_gives_the_focus_to_its_opener_drawn_again: cancelling the form focuses the new `save as…`, '
+          'not the detached one',
+          poll(lambda: b.page("document.activeElement?.id") == 'p-preset-save', 5.0)
+          and b.page("document.activeElement.isConnected"), b.page("document.activeElement?.id"))
+    check('  no page error', errors(b) == [], errors(b)[:3])
+
+
 def the_table(b, d):
     forget(b, d)
     load(b, d)
@@ -1418,6 +1472,58 @@ def drag_across_a_switch():
         fleet.stop()
 
 
+def graph_drag_across_a_switch():
+    """A point drag still going when another device is shown ends there: the pointer going on after
+    the way back to the Gungnir writes nothing, the section is not left held, and a fresh drag
+    writes."""
+    fleet = common.Daemon('gungnir2-v2', host='fake', fleet=[('fake-amp', 'Amp', '1112131415161718')])
+    b = make()
+    try:
+        forget(b, fleet)
+        load(b, fleet)
+        fleet.post(DEVICE, 'eq/mode', {'mode': 'eq'})
+        poll(lambda: b.page("__core.model.device().tone?.mode") == 'eq', 10.0)
+        time.sleep(0.8)
+        band_posts = lambda: [u for u, _ in b.page('window.__posts') if '/eq/bands/' in u]
+        got = points(b)
+        two = next(p for p in got['points'] if p['band'] == 2)
+        b.page(POSTS)
+        press(b, two['cx'], two['cy'])
+        for i in range(1, 4):
+            move(b, two['cx'] + 8 * i, two['cy'])
+        poll(lambda: len(band_posts()) > 0, 5.0)
+        b.page("__core.actions.showDevice(__core.model.page().fleet.devices.find((d) => d.name === 'Amp').url)")
+        poll(lambda: b.page("document.querySelector('#p-title h1').textContent") == 'Amp', 8.0)
+        b.page("__core.actions.showDevice(__core.model.page().fleet.devices.find((d) => d.name === 'Gungnir 2').url)")
+        poll(lambda: b.page("!!document.getElementById('p-graph')"), 10.0)
+        time.sleep(0.8)
+        got = points(b)
+        two = next(p for p in got['points'] if p['band'] == 2)
+        b.page(POSTS)
+        for i in range(1, 8):
+            move(b, two['cx'] + 12 * i, two['cy'] - 6 * i)
+        time.sleep(0.8)
+        release(b, two['cx'] + 100, two['cy'] - 50)
+        time.sleep(0.5)
+        check('a_point_drag_that_outlives_a_device_switch_ends_there: the pointer kept moving after the way '
+              'back and nothing was written', band_posts() == [], band_posts())
+        fleet.post(DEVICE, 'eq/bands/3', {'param': 'gain', 'raw': 70})
+        poll(lambda: bands(fleet)[2][1] == 70, 8.0)
+        time.sleep(1.0)
+        cell = b.page("document.querySelector('#p-bands tr[data-band=\"3\"] td:nth-child(3) .p-val')?.textContent")
+        check('  the tone section is not held: a change from elsewhere is drawn at once', cell not in (None, '')
+              and cell == b.page("__core.model.device().tone_steps.gain[70][1]"), cell)
+        got = points(b)
+        four = next(p for p in got['points'] if p['band'] == 4)
+        b.page(POSTS)
+        drag_xy(b, four['cx'], four['cy'], four['cx'] - 40, four['cy'] + 20)
+        check('  and a fresh drag writes', poll(lambda: len(band_posts()) > 0, 5.0), band_posts())
+        check('  no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        b.close()
+        fleet.stop()
+
+
 def the_list_hold():
     hati = common.Daemon(profile='hati', name='Hati')
     b = make()
@@ -1572,10 +1678,11 @@ def the_spec(b, d):
           'Signal' in got and all(r['id'] in got for r in facts['rows'])
           and b.page("document.querySelectorAll('#p-readings tr').length") == len(facts['rows']),
           [len(facts['rows']), b.page("document.querySelectorAll('#p-readings tr').length")])
-    check('  the device\'s section is headed `The device` and `All readings`',
-          b.page("[...document.querySelectorAll('#p-device .p-label')].map((h) => h.textContent)")
-          == ['The device', 'All readings'])
+    check('  the device\'s section is headed `The device` (the fold\'s button) and `All readings`',
+          b.page("[...document.querySelectorAll('#p-device .p-label')].map((h) => h.firstElementChild?.textContent"
+                 " ?? h.textContent)") == ['The device', 'All readings'])
     b.page(POSTS)
+    reach(b, '[data-act=device-fold]')
     reach(b, '[data-act=identify]')
     check('  `identify` asks the unit and says so',
           poll(lambda: posts_to(b, '/identify') == ['{}'], 5.0), posts_to(b, '/identify'))
@@ -1682,6 +1789,91 @@ def the_fleet():
     finally:
         b.close()
         fleet.stop()
+
+
+FOLD = """(() => { const btn = document.querySelector('#p-device [data-act=device-fold]');
+  const shown = (s) => { const e = document.querySelector(s); return Boolean(e) && e.checkVisibility()
+    && e.getBoundingClientRect().height > 0; };
+  let stored = null; try { stored = localStorage.getItem('svolder.theme.paper.deviceOpen'); } catch (e) {}
+  return { tag: btn && btn.tagName, expanded: btn && btn.getAttribute('aria-expanded'),
+    controls: btn && btn.getAttribute('aria-controls'),
+    head: [...document.querySelectorAll('#p-device .p-label')][0].getBoundingClientRect().height > 0,
+    spec: shown('#p-spec'), readings: shown('#p-readings'), identify: shown('.p-identify'),
+    facts: document.querySelectorAll('#p-device [data-fact]').length, stored }; })()"""
+
+
+def the_device_fold():
+    fleet = common.Daemon('gungnir2-v2', host='fake', fleet=[('fake-amp', 'Amp', '1112131415161718')],
+                          env={'SVOLDER_FAKE_SIGNAL': '1'})
+    b = make()
+    try:
+        forget(b, fleet)
+        load(b, fleet)
+        got = b.page(FOLD)
+        check('the_device_starts_folded: with no stored choice only the heading shows, a button that says '
+              '`aria-expanded=false`; the facts, the readings and Identify are folded away',
+              got['tag'] == 'BUTTON' and got['expanded'] == 'false' and got['controls'] == 'p-device-body'
+              and got['head'] and not got['spec'] and not got['readings'] and not got['identify']
+              and got['facts'] > 8 and got['stored'] is None, got)
+        reach(b, '[data-act=device-fold]')
+        got = b.page(FOLD)
+        check('  the heading unfolds it: expanded, the facts, the readings and Identify show, the choice is stored',
+              got['expanded'] == 'true' and got['spec'] and got['readings'] and got['identify']
+              and got['stored'] == 'true', got)
+        time.sleep(2.5)
+        got = b.page(FOLD)
+        check('  it stays open across the one-second redraws', got['expanded'] == 'true' and got['spec'], got)
+        reach(b, '.p-also [data-go=device]')
+        poll(lambda: b.page("document.querySelector('#p-title h1').textContent") == 'Amp', 8.0)
+        time.sleep(0.5)
+        got = b.page(FOLD)
+        check('  a switch to the amp keeps it open', got['expanded'] == 'true' and got['spec']
+              and got['readings'], got)
+        load(b, fleet)
+        got = b.page(FOLD)
+        check('  the choice survives a reload', got['expanded'] == 'true' and got['spec'] and got['readings'], got)
+        b.page("document.querySelector('[data-act=device-fold]').focus()")
+        b.press('Enter')
+        time.sleep(0.4)
+        got = b.page(FOLD)
+        check('  the heading takes the keyboard: Enter on it folds the section and the focus stays on it',
+              got['expanded'] == 'false' and not got['spec'] and got['stored'] == 'false'
+              and b.page("document.activeElement?.dataset.act") == 'device-fold', got)
+        load(b, fleet)
+        got = b.page(FOLD)
+        check('  folding back is kept across a reload too', got['expanded'] == 'false' and not got['spec']
+              and not got['readings'] and not got['identify'], got)
+        check('  no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        b.close()
+        fleet.stop()
+
+
+def the_device_fold_without_storage():
+    """Storage refused (every write throws, every read finds nothing): the heading still unfolds
+    `The device` and it stays open across the redraws."""
+    d = common.Daemon('gungnir2-v2', host='fake')
+    b = make()
+    try:
+        forget(b, d)
+        b.preload("""(() => { const no = () => { throw new DOMException('refused', 'SecurityError'); };
+          Storage.prototype.setItem = no; Storage.prototype.getItem = no; })();""")
+        load(b, d)
+        got = b.page(FOLD)
+        check('the_device_fold_works_without_storage: with storage refused the section starts folded',
+              got['expanded'] == 'false' and not got['spec'], got)
+        reach(b, '[data-act=device-fold]')
+        got = b.page(FOLD)
+        check('  the heading unfolds it', got['expanded'] == 'true' and got['spec'] and got['readings'], got)
+        d.post(DEVICE, 'eq/mode', {'mode': 'eq'})
+        time.sleep(2.5)
+        got = b.page(FOLD)
+        check('  and it stays open across a redraw of the section', got['expanded'] == 'true' and got['spec'], got)
+        reach(b, '[data-act=device-fold]')
+        check('  a second tap folds it again', b.page(FOLD)['expanded'] == 'false')
+    finally:
+        b.close()
+        d.stop()
 
 
 def presets_toml(names):
@@ -1889,6 +2081,68 @@ def the_red_note():
 
 
 
+ARROW_PATH = """(() => { const svg = document.querySelector('#p-marks'); const s = svg.getBoundingClientRect();
+  const k = s.width / svg.viewBox.baseVal.width;
+  const boxes = Object.fromEntries(['#p-bands', '#p-graph', '#p-controls', '#p-volume-text'].map((sel) => {
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return [sel, { l: r.left, t: r.top, r: r.right, b: r.bottom }]; }));
+  const inside = (p, r, g) => p.x > r.l + g && p.x < r.r - g && p.y > r.t + g && p.y < r.b - g;
+  const hits = { '#p-bands': 0, '#p-graph': 0, '#p-controls': 0 };
+  let ends = [];
+  const paths = [...svg.querySelectorAll('path.arrow.red')];
+  for (const path of paths) {
+    const len = path.getTotalLength();
+    for (let i = 0; i <= 120; i++) {
+      const q = path.getPointAtLength((len * i) / 120);
+      const p = { x: s.left + q.x * k, y: s.top + q.y * k };
+      for (const sel of Object.keys(hits)) if (inside(p, boxes[sel], 2)) hits[sel]++;
+      if (i === 120) ends.push(p);
+    }
+  }
+  const note = document.querySelector('.pn.red').getBoundingClientRect();
+  const near = (p, r) => Math.max(r.l - p.x, p.x - r.r, r.t - p.y, p.y - r.b, 0);
+  return { paths: paths.length, hits, reading: boxes['#p-volume-text'],
+    reach: ends.map((p) => Math.round(near(p, boxes['#p-volume-text']))),
+    noteTop: note.top, ink: svg.querySelectorAll('path.arrow.ink').length,
+    ellipses: svg.querySelectorAll('ellipse').length, scroll: document.documentElement.scrollWidth,
+    width: innerWidth }; })()"""
+
+
+def the_volume_arrow():
+    for profile, name in (('gungnir2-v2', DEVICE), ('bifrost3', 'Bifrost 3')):
+        d = common.Daemon(profile, name=name, host='fake')
+        b = make(size=(1440, 1000))
+        try:
+            forget(b, d)
+            load(b, d)
+            hi = d.model(name)['volume']['hi']
+            d.post(name, 'eq/mode', {'mode': 'eq'})
+            poll(lambda: b.page("__core.model.device().tone?.mode") == 'eq', 10.0)
+            time.sleep(1.0)
+            for _ in range(14):
+                click_el(b, '#p-b3gp')
+            d.post(name, 'volume', {'raw': hi})
+            red = poll(lambda: b.page("document.querySelector('.pn.red')?.dataset.note") == 'volume-0', 30.0)
+            check(f'the_red_volume_arrow_stays_off_the_band_table: {profile}: a boosted EQ at full volume '
+                  'puts a red note under the volume', red)
+            for mode in ('light', 'dark'):
+                b.page(f"__core.scheme.set('{mode}')")
+                for width in (720, 900, 1100, 1440, 1920):
+                    b.resize(width, 1000)
+                    time.sleep(0.6)
+                    got = b.page(ARROW_PATH)
+                    check(f'  {profile}, {mode} paper at {width} px: the red arrow (shaft and head) never '
+                          'crosses the band table, the graph or the controls, ends within 40 px of the written '
+                          'reading, and the ellipse stays',
+                          got['paths'] == 2 and got['hits'] == {'#p-bands': 0, '#p-graph': 0, '#p-controls': 0}
+                          and max(got['reach']) <= 40 and got['ellipses'] == 1
+                          and got['scroll'] <= got['width'], got)
+            check('  no page error', errors(b) == [], errors(b)[:3])
+        finally:
+            b.close()
+            d.stop()
+
+
 def zone_label():
     d = common.Daemon('gungnir2-v2', host='fake')
     b = make(size=(390, 1000))
@@ -1992,6 +2246,8 @@ try:
         if browser == 'chromium':
             the_hold(b, d)
         the_point_drag(b, d)
+        the_point_drag_without_capture(b, d)
+        the_ask_focus(b, d)
         the_table(b, d)
         the_lists(b, d)
         if browser == 'chromium':
@@ -2018,12 +2274,16 @@ the_device_presets()
 the_switch()
 the_amp()
 the_red_note()
+the_volume_arrow()
 the_states()
 the_fleet()
+the_device_fold()
+the_device_fold_without_storage()
 zone_label()
 long_words()
 if browser == 'chromium':
     the_list_hold()
     drag_across_a_switch()
+    graph_drag_across_a_switch()
 print(f'paper.py {browser}: {passed} passed, {len(fails)} failed in {time.time() - t0:.0f} s')
 sys.exit(1 if fails else 0)

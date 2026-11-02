@@ -131,6 +131,8 @@ export function wireGraph({
             // already let go
           }
           Promise.all(pending.map((p) => p.drag.settled)).then(() => {
+            // A switch has reset the holds and forgotten the drag: nothing is left to give back.
+            if (entry.switched) return;
             pending.splice(pending.indexOf(entry), 1);
             if (pending.length === 0) heldRaws.clear();
             keep.drop();
@@ -190,6 +192,19 @@ export function wireGraph({
   box.addEventListener('pointerup', finish(false), { signal });
   box.addEventListener('pointercancel', finish(true), { signal });
   box.addEventListener('lostpointercapture', finish(true), { signal });
+
+  // Another device is shown: the drag ends where it is, and the hold it took was let go by the
+  // tone section's own reset, so it is not given back again later (that would drop a hold taken
+  // since).
+  live.onSwitch(() => {
+    const ending = pending.splice(0);
+    heldRaws.clear();
+    active = null;
+    for (const entry of ending) {
+      entry.switched = true;
+      entry.drag.cancel('switch');
+    }
+  });
 
   // The stream lost: what is left of a drag writes nothing more.
   live.onReading('state', (state) => {

@@ -8,6 +8,23 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.31.3
+
+Paper's follow-ups, and releases that start themselves.
+
+- **Paper**: the red volume note's arrow no longer runs over the tone section. It climbs the
+  margin on the needle's side and ends at the volume's written value.
+- **Paper**: The device (the facts table, every reading and Identify) starts folded. Its heading
+  unfolds it, and the choice is kept per browser; it still opens in a private window.
+- Paper: a device switch during a point drag ends the drag cleanly; a question returns the focus
+  to the word that opened it after a redraw; the ruler's labels keep their gap after a resize; the
+  Caveat font names its Medium weight.
+- **Releases**: pushing a version tag starts the release workflow, which now also runs the whole
+  test suite on arm64 before anything is published. Each release's notes open with the Beta
+  paragraph.
+- `svolder-sim --trace` stamps every line with the milliseconds since the simulator started, so
+  two traces can be compared for pacing and reconnect time.
+
 ## 0.31.2
 
 The web page gets its second theme, Paper: the device drawn as a spec sheet someone wrote on.

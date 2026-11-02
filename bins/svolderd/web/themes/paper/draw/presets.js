@@ -25,8 +25,8 @@ export function presets(_page, device, _view) {
     ` id="p-pr-${i}" data-name="${esc(r.name)}"`, `${r.on ? 'on' : ''}${r.built_in ? '' : ' own'}`.trim()));
   const writes = [];
   if (p.editable && !inert) {
-    writes.push(word('preset-save', WORDS.saveAs, false));
-    if ((p.rows ?? []).some((r) => !r.built_in)) writes.push(word('preset-edit', WORDS.editPresets, false));
+    writes.push(word('preset-save', WORDS.saveAs, false, ' id="p-preset-save"'));
+    if ((p.rows ?? []).some((r) => !r.built_in)) writes.push(word('preset-edit', WORDS.editPresets, false, ' id="p-preset-edit"'));
   }
   return `<h2 class="p-label">${esc(WORDS.presetsLabel)}</h2>`
     + `<p class="p-status">${esc(status?.lead ?? '')}${name}${esc(status?.tail ?? '')}</p>`
@@ -43,7 +43,7 @@ export function devicePresets(_page, device, _view) {
   const quiet = inert || d.recall === false;
   const slots = (d.slots ?? []).map((s) => word('slot', s.name, quiet,
     ` id="p-sl-${esc(s.slot)}" data-slot="${esc(s.slot)}"`));
-  const save = d.save && !inert ? word('slot-save-list', WORDS.saveBands, false) : '';
+  const save = d.save && !inert ? word('slot-save-list', WORDS.saveBands, false, ' id="p-slot-save"') : '';
   const built = (d.builtins ?? []).map((b, i) => word('setting', b.name, quiet,
     ` id="p-st-${i}" data-name="${esc(b.name)}"`, b.on ? 'on' : ''));
   return `<h2 class="p-label">${esc(WORDS.onDevice)}</h2>`

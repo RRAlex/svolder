@@ -161,7 +161,7 @@ run() {
 for name in effects facts model sources notes director keep tone-curve tone-drag playing viz \
     core-store core-stream core-actions core-prefs core-registry core-climb core-loop ember-parts \
     level-write toast frame-keys switch ember-order contract \
-    paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes; do
+    paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes paper-fold; do
     run "node-$name" env LOOK_RETUNED_SKIPS=1 node "$here/node/$name.mjs"
 done
 run gate-refusal bash "$here/gate_refusal.sh"

@@ -458,8 +458,14 @@ back.
   adds *from this phone* or *from this browser* only for a change this page asked for in the last
   three seconds. Several fields changed together tell one. On a wide screen the notes sit in a band
   under the columns. The EQ's note and the red note each have an arrow to their section, and when
-  both are about the tone only the red note's arrow is drawn; the red note is also circled. On a
-  phone each note follows its section.
+  both are about the tone only the red note's arrow is drawn; the red note is also circled. The
+  volume is above both columns, so a red note about it has its arrow go along the gap under them
+  and up the sheet's margin on the needle's side, then in to the written volume, clear of the tone
+  section and the controls. On a phone each note follows its section.
+- **The device.** Near the foot, *The device* is a heading you tap (or reach with Tab and open
+  with Enter or Space) to unfold the facts table, *All readings* and Identify; they start folded.
+  Open or folded, the choice is kept in this browser, for every device, like the paper's light or
+  dark, and a guest may open it too.
 - **A guest, or a page with writes off,** sees the same words with no underline, and a tap says
   *Sign in to change this*.
 - **A lost connection** reads *Reconnecting to svolder…* under the name and fades the sheet; a

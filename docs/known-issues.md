@@ -596,10 +596,6 @@ that branch rather than listed here.
   clickable.** The sheet goes inert only when nothing is held, and an open list or form holds its
   section; the core still drops raises while the page is not open, so no volume is written
   (`bins/svolderd/web/themes/paper/live.js`).
-- [bug, with Paper] **A red volume note's arrow crosses the band table.** On a wide screen the
-  notes sit under both columns, so the arrow from a red volume note (the EQ can clip at this
-  volume) climbs to the ruler at the top of the sheet and runs over the tone section's band table
-  on the way (`bins/svolderd/web/themes/paper/marks.js`).
 - [debt, with Paper] **A tap that cannot write goes through a turned-away `setMode`.** Paper's
   `refuse()` asks the core to set the mode it is already in, so that the core turns the tap away
   and says why; the core has no public helper that only says it

@@ -128,9 +128,17 @@ async function toward(target, raw) {
 /** Whether a switch is in the state `on` says. */
 const stands = (element, on) => element.getAttribute('aria-pressed') === String(on);
 
+/** Open `The device` when `target` is drawn inside it folded away, as a person taps its heading. */
+async function unfold(target) {
+  if (!find(target)?.closest('#p-device-body[hidden]')) return;
+  tap(one('[data-act="device-fold"]'));
+  await settle();
+}
+
 /** Scroll to `target` and say whether it is drawn and in view; looked for again after the
  * scroll, which a section drawn again may have replaced. */
 async function seen(target) {
+  await unfold(target);
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);

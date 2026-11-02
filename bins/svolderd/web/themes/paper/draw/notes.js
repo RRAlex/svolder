@@ -51,12 +51,13 @@ function clockOf(p, now) {
 }
 
 /** What the track note carries for the clock that keeps its time current: the player's reading
- * and the daemon's clock as of this draw. */
-function trackData(p, track, now) {
+ * and the daemon's clock as of this draw, and the words as drawn (the clock writes the note again
+ * only when its words differ). */
+function trackData(p, track, now, text) {
   const clock = clockOf(p, now);
   const prog = track.progress;
   return `${clock === undefined ? '' : ` data-clock="${clock}" data-drawn="${now}"`}`
-    + ` data-status="${esc(track.status)}"`
+    + ` data-words="${esc(text)}" data-status="${esc(track.status)}"`
     + `${prog ? ` data-position="${prog.position_us}" data-rate="${prog.rate_milli}" data-read-at="${prog.read_at_ms}"` : ''}`
     + `${track.length_us ? ` data-length="${track.length_us}"` : ''}`
     + ` data-album="${esc(track.album ?? '')}"`;
@@ -71,7 +72,7 @@ export function notes(page, device, view) {
     .filter((n) => n.id !== 'card')
     .map((n, i) => `<span class="pn t${tiltOf(n.id)}${n.red ? ' red' : ''}" data-note="${esc(n.id)}"`
       + ` data-n="${i}"`
-      + ` data-about="${esc(n.about)}"${n.id === 'track' ? trackData(p, p.track, now) : ''}>`
+      + ` data-about="${esc(n.about)}"${n.id === 'track' ? trackData(p, p.track, now, n.text) : ''}>`
       + `${ink(n.text)}</span>`)
     .join('');
 }

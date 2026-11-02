@@ -94,6 +94,8 @@ export const WORDS = {
   metersLabel: 'Meters',
   /** The device's facts and the card's words. */
   deviceLabel: 'The device',
+  deviceShow: 'show the facts',
+  deviceHide: 'hide',
   readingsLabel: 'All readings',
   identify: 'identify',
   identifyNote: 'Asks the unit to show itself, so you can tell it from the others.',

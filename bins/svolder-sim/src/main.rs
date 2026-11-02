@@ -69,7 +69,8 @@ struct Args {
     /// Seed all fault controls active.
     #[arg(long)]
     faults: bool,
-    /// Print every frame a central writes and every notification sent back, decoded, on stderr.
+    /// Print every frame a central writes and every notification sent back, decoded, on stderr, each
+    /// line starting with the milliseconds since the sim started: `[   12345 ms]`.
     #[arg(long)]
     trace: bool,
     /// How the advertisement is laid out on the air.

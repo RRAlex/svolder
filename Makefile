@@ -166,7 +166,8 @@ spdx-check: deps-check ## Fail if a source file lacks its SPDX licence or copyri
 theme-css-check: ## Fail if a theme's style sheet names the frame's own parts (the menu button, its menu, the picker): a theme dresses them with the --frame-* tokens only
 	@python3 -I scripts/theme-css-check.py
 
-workflow-check: ## Fail if a GitHub Actions workflow could start by itself (any trigger but workflow_dispatch), uses an action not pinned to a commit SHA, or runs a make target that does not exist
+workflow-check: ## Fail if a GitHub Actions workflow could start by itself (any trigger but workflow_dispatch and a v* tag push), uses an action not pinned to a commit SHA, or runs a make target that does not exist
+	python3 -I scripts/workflow-check.py --self-test
 	python3 -I scripts/workflow-check.py
 
 # SVOLDER_TEST_PREBUILT: this one cargo invocation builds every binary in the workspace

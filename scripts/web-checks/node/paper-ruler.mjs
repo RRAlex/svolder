@@ -172,4 +172,13 @@ ok('shown_raw_is_the_ask_until_the_device_answers_or_the_ask_is_old', () => {
   assert.equal(shownRaw(v(null), { asked: asked(60, 0), now: 10 }), null, 'unread stays unread');
 });
 
+ok('the_drawn_ruler_is_replaced_when_the_label_gap_in_pixels_changes_within_a_band', () => {
+  const page = pageOf('dac-facts-heard');
+  const sig = (rulerPx) => /data-sig="([^"]*)"/.exec(SECTIONS.volume(page, page.device,
+    { phone: false, coarse: false, state: 'open', keys: [], now: 0, rulerPx }))[1];
+  assert.notEqual(sig(700), sig(900), 'under 1000 px the pixel floor sets the gap');
+  assert.equal(sig(1100), sig(1500), 'wide enough, the gap is the fraction and the sheet is as drawn');
+  assert.equal(sig(900), sig(900));
+});
+
 console.log(`paper-ruler: ${n} passed`);

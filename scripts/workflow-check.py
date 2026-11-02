@@ -5,8 +5,8 @@
 # Check the GitHub Actions workflows in .github/workflows (or the files named on the command
 # line) without running them. `make workflow-check` runs this; it fails when:
 #   - a file is not valid YAML or has no jobs;
-#   - its trigger is anything but `workflow_dispatch` (the release workflow is dormant: it must
-#     not start by accident);
+#   - its triggers are anything but `workflow_dispatch` and `push` of the tags `v*` and nothing
+#     else (no branches, no paths, no pull_request: only a version tag or a person starts it);
 #   - an action (`uses:`) is not `owner/repo@<40 hex commit SHA>` followed by a `# vX` comment
 #     naming its version;
 #   - there is no top-level `permissions: {}`, or a job holds a write scope outside its allowance
@@ -35,14 +35,19 @@ WRITE_ALLOWED = {"release": {"contents"}, "image": {"packages"}, "manifest": {"p
 TOKEN = re.compile(r"github\.token|secrets\.|github\s*\[\s*['\"]token['\"]\s*\]|secrets\s*\[")
 
 
-def triggers(doc):
-    # YAML 1.1 reads the bare key `on` as the boolean True.
+def trigger_errors(doc):
     on = doc.get(True, doc.get("on"))
     if isinstance(on, str):
-        return {on}
-    if isinstance(on, list):
-        return set(on)
-    return set(on or {})
+        on = {on: None}
+    elif isinstance(on, list):
+        on = {name: None for name in on}
+    on = on or {}
+    errors = []
+    for name in sorted(set(on) - {"workflow_dispatch", "push"}, key=str):
+        errors.append(f"trigger `{name}` is not allowed; only workflow_dispatch and push of tags v*")
+    if "push" in on and on["push"] != {"tags": ["v*"]}:
+        errors.append("`push` must be exactly `tags: ['v*']`, with no branches, paths or other filter")
+    return errors
 
 
 def make_targets():
@@ -72,9 +77,7 @@ def check(path, targets):
     if not isinstance(doc, dict) or not doc.get("jobs"):
         return ["no jobs"]
 
-    found = triggers(doc)
-    if found != {"workflow_dispatch"}:
-        errors.append(f"triggers are {sorted(found)}; only workflow_dispatch is allowed")
+    errors += trigger_errors(doc)
 
     for n, line in enumerate(text.splitlines(), 1):
         m = USES.match(line)
@@ -131,7 +134,36 @@ def check(path, targets):
     return errors
 
 
+def self_test():
+    cases = [
+        ("on:\n  workflow_dispatch:\n", True),
+        ("on:\n  push:\n    tags: ['v*']\n", True),
+        ("on:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\n", True),
+        ("on: workflow_dispatch\n", True),
+        ("on:\n  push:\n    branches: [main]\n", False),
+        ("on:\n  push:\n    tags: ['v*']\n    branches: [main]\n", False),
+        ("on:\n  push:\n    tags: ['v*']\n    paths: ['a']\n", False),
+        ("on:\n  push:\n    tags: ['*']\n", False),
+        ("on:\n  push:\n", False),
+        ("on: push\n", False),
+        ("on:\n  pull_request:\n", False),
+        ("on:\n  workflow_dispatch:\n  pull_request:\n", False),
+        ("on:\n  push:\n    tags: ['v*']\n  schedule:\n    - cron: '0 0 * * *'\n", False),
+    ]
+    bad = 0
+    for text, ok in cases:
+        got = not trigger_errors(yaml.safe_load(text))
+        if got != ok:
+            print(f"workflow-check: self-test: {text!r} should {'pass' if ok else 'fail'}")
+            bad += 1
+    if not bad:
+        print(f"workflow-check: self-test: {len(cases)} trigger cases agree")
+    return 1 if bad else 0
+
+
 def main():
+    if sys.argv[1:] == ["--self-test"]:
+        return self_test()
     files = sys.argv[1:] or sorted(glob.glob(os.path.join(ROOT, ".github/workflows/*.y*ml")))
     if not files:
         print("workflow-check: no workflow files found")

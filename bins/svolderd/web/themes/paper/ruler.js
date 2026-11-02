@@ -75,6 +75,11 @@ function bottomWords(volume) {
   return level === undefined ? '' : written(Math.round(level));
 }
 
+/** The least distance between two labels of a ruler `widthPx` wide, as a fraction of it. */
+export function labelGap(widthPx) {
+  return Math.max(LABEL_GAP, LABEL_GAP_PX / widthPx);
+}
+
 /**
  * The labels along a ruler `widthPx` wide, `[{ at, text }]`: the bottom mark first, then one at
  * each multiple of ten dB (twenty on a narrow ruler), each dropped when it would stand within
@@ -83,7 +88,7 @@ function bottomWords(volume) {
 export function marks(volume, widthPx) {
   if (!(span(volume) > 0)) return [];
   const list = [{ at: fractionOf(volume, volume.marks?.[0]?.at ?? volume.lo), text: bottomWords(volume) }];
-  const gap = Math.max(LABEL_GAP, LABEL_GAP_PX / widthPx);
+  const gap = labelGap(widthPx);
   const keep = (at, text) => {
     if (list.every((m) => Math.abs(m.at - at) >= gap)) list.push({ at, text });
   };

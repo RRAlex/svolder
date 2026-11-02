@@ -286,6 +286,20 @@ ok('every_fact_is_on_the_sheet', () => {
   assert.ok(hh.includes('product 9'), 'a product the app does not name');
 });
 
+ok('the_device_is_folded_unless_the_view_says_it_is_open', () => {
+  const page = pageOf('dac-facts-heard');
+  for (const open of [false, true]) {
+    const html = SECTIONS.device(page, page.device, { ...view, deviceOpen: open });
+    const fold = tags(html, 'button').find((b) => b['data-act'] === 'device-fold');
+    assert.ok(fold, 'a heading button');
+    assert.equal(fold['aria-expanded'], String(open));
+    assert.equal(fold['aria-controls'], 'p-device-body');
+    assert.ok(html.includes('<div id="p-device-body"'), 'the body');
+    assert.equal(html.includes('<div id="p-device-body" hidden>'), !open, `hidden when folded (open=${open})`);
+    assert.ok(html.includes('id="p-spec"') && html.includes('id="p-readings"'), 'facts stay in the markup');
+  }
+});
+
 ok('the_amp_draws_power_and_a_needle_per_meter', () => {
   for (const name of ['amp', 'five', 'mono']) {
     const { device, html } = sectionOf(name, 'meters');
@@ -363,6 +377,14 @@ ok('no_device_draws_only_the_card', () => {
   }
 });
 
+ok('the_track_note_carries_the_words_it_was_drawn_with', () => {
+  const { html } = sectionOf('playing', 'notes');
+  const m = /<span class="pn[^"]*" data-note="track"[^>]*? data-words="([^"]*)"[^>]*>([\s\S]*?)<\/span>/.exec(html);
+  assert.ok(m, html);
+  const shown = unescape(m[2].replace(/<[^>]*>/g, '').replace(/ to /g, ' to '));
+  assert.equal(unescape(m[1]), shown, 'the clock compares against what is on the sheet');
+});
+
 ok('the_transport_is_drawn_for_a_writer_only', () => {
   const { device, html } = sectionOf('playing', 'playing');
   assert.ok(html.includes('>Playing<'));
@@ -405,7 +427,8 @@ ok('a_guests_sheet_has_no_underlined_word', () => {
     if (!page.device) continue;
     for (const [name, draw] of Object.entries(SECTIONS)) {
       const html = draw(page, page.device, view);
-      for (const b of tags(html, 'button').filter((t) => 'data-act' in t)) {
+      // The fold of `The device` changes nothing on the device: a guest may open it.
+      for (const b of tags(html, 'button').filter((t) => 'data-act' in t && t['data-act'] !== 'device-fold')) {
         words++;
         assert.equal(b['aria-disabled'], 'true', `${c.name} ${name} ${b['data-act']}`);
         assert.ok((b.class ?? '').split(' ').includes('quiet'), `${c.name} ${name} ${b['data-act']}`);

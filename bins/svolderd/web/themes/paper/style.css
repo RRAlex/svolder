@@ -282,6 +282,8 @@
 
 #p-controls, #p-presets, #p-device-presets { margin-bottom: 26px; position: relative; }
 .p-head { margin-bottom: 4px; }
+.p-head .p-fold { text-transform: inherit; letter-spacing: inherit; }
+.p-head .p-note { margin-left: 8px; text-transform: none; letter-spacing: 0; }
 .p-row { margin: 0; font-size: 17px; line-height: 1.8; }
 .p-row .p-label { margin-top: 6px; }
 .p-line { margin: 0; }

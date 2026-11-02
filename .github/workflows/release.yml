@@ -1,37 +1,40 @@
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# DORMANT until go-public: this workflow only runs when someone starts it by hand
-# (`workflow_dispatch`), and nothing has. The go-public step adds
-#   push:
-#     tags: ['v*']
-# under `on:` (and `make workflow-check` is then changed to expect it).
+# Starts when a `v*` tag is pushed, and by hand for a tag that has no release yet:
+#   gh workflow run release.yml --ref vX -f version=X
+# Either way the run must be on the tag `vX`, and Cargo.toml's version at that commit must be X.
 #
 # It builds the release on GitHub's own runners, one native build per architecture (no
 # emulation), and publishes it:
-#   build     `make packages ARCH=...` on x86_64 and on arm64; contents: read, no token while it builds
+#   test      `make check` on an arm64 runner (the x86_64 suite runs before the tag is pushed)
+#   build     `make packages ARCH=...` on x86_64 and on arm64; contents: read, no token while
+#             it builds
 #   image     the Docker image on each architecture, from that build's tarball (packages: write)
 #   manifest  joins the two images as ghcr.io/rralex/svolder:VERSION
 #   release   the only job that writes the release: combines both builds (`make release-files`),
 #             writes the compose file and the notes, attaches everything to a draft, checks the
 #             draft against SHA256SUMS, publishes it, and deletes the draft if any step fails
-# A failed run leaves no release behind (images already pushed stay on ghcr).
+# A failing `test` stops the run before the images or the release exist. A failed run leaves no
+# release behind (images already pushed stay on ghcr).
 #
 # The images are tagged VERSION (both architectures) and, because each architecture is built on
 # its own runner, VERSION-amd64 and VERSION-arm64. There is no :latest on purpose: owners pin a
 # version.
 #
-# The clones: a private repository needs the token, which is given to the clone step alone and
+# The clones: a clone is given the job's read-only token, which goes to the clone step alone and
 # passed as `git -c http.extraheader=... clone`, so it is never written to .git/config. After
-# go-public the repository is public and the clones need no token at all.
+# the repository is public the clones need no token at all.
 name: release
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'The version to release, as in Cargo.toml (0.25.4); the tag is v plus this'
-        required: true
+        description: 'The version to release, as in Cargo.toml (0.25.4); the tag is v plus this. Ignored on a tag push, which takes it from the tag'
+        required: false
         type: string
 
 # Every job asks for what it needs; nothing is granted by default.
@@ -41,10 +44,45 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-env:
-  VERSION: ${{ inputs.version }}
-
 jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            VERSION=$INPUT_VERSION
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Check out the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            clone -q "https://github.com/$GITHUB_REPOSITORY" src
+          git -C src checkout -q "$GITHUB_SHA"
+      - name: Install what make check needs
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends build-essential pkg-config libdbus-1-dev python3-yaml
+          # The same compiler as the release container (packaging/Dockerfile.build).
+          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.93.1
+      - name: Run the test suite
+        run: |
+          set -euo pipefail
+          make -C src check
+
   build:
     strategy:
       fail-fast: true
@@ -58,12 +96,23 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            VERSION=$INPUT_VERSION
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
       - name: Check out the commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
           git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
             clone -q "https://github.com/$GITHUB_REPOSITORY" src
           git -C src checkout -q "$GITHUB_SHA"
@@ -90,7 +139,7 @@ jobs:
           if-no-files-found: error
 
   image:
-    needs: build
+    needs: [build, test]
     strategy:
       matrix:
         include:
@@ -105,6 +154,18 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            VERSION=$INPUT_VERSION
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
       - name: Check out the commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,6 +208,18 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            VERSION=$INPUT_VERSION
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
       - name: Join the two images under the version's tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -157,18 +230,29 @@ jobs:
           docker buildx imagetools create -t "$image:$VERSION" "$image:$VERSION-amd64" "$image:$VERSION-arm64"
 
   release:
-    needs: [build, manifest]
+    needs: [build, test, manifest]
     runs-on: ubuntu-24.04
     # The only job that writes the release, and it runs no build code.
     permissions:
       contents: write
     steps:
+      - name: Work out the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            VERSION=$INPUT_VERSION
+          else
+            VERSION=${GITHUB_REF_NAME#v}
+          fi
+          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
       - name: Check out the commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
           git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
             clone -q "https://github.com/$GITHUB_REPOSITORY" src
           git -C src checkout -q "$GITHUB_SHA"

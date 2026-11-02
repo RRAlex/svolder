@@ -6,8 +6,8 @@
 //! fake device from the arguments and hands it here.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use bluer::adv::Advertisement;
 use bluer::gatt::local::{
@@ -43,6 +43,7 @@ pub(super) async fn run(
     device: Arc<Mutex<FakeDevice>>,
     manufacturer_bytes: Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    STARTED.get_or_init(Instant::now);
     let session = bluer::Session::new().await?;
     let _agent_handle = register_agent(&session, args.accept_pairing).await?;
     let adapter = session.adapter(&args.adapter)?;
@@ -250,6 +251,18 @@ async fn connected_links(adapter: &bluer::Adapter) -> Option<usize> {
     Some(held)
 }
 
+/// The moment the sim started, taken by the first `trace_stamp` call, which `run` makes at start.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// The prefix of a trace line: milliseconds since the sim started in an eight-wide field, as in
+/// `[   12345 ms] `; the field widens after about 27 hours.
+fn trace_stamp() -> String {
+    format!(
+        "[{:>8} ms] ",
+        STARTED.get_or_init(Instant::now).elapsed().as_millis()
+    )
+}
+
 /// The GATT application: the Forkbeard service with its TX characteristic, which answers writes
 /// through `device`, and its RX characteristic, which stashes the subscriber in `notifier`.
 fn gatt_application(
@@ -279,7 +292,8 @@ fn gatt_application(
                             async move {
                                 if trace {
                                     eprintln!(
-                                        "svolder-sim: {} from {} (mtu {})",
+                                        "{}svolder-sim: {} from {} (mtu {})",
+                                        trace_stamp(),
                                         describe_tx(&value),
                                         req.device_address,
                                         req.mtu
@@ -294,13 +308,14 @@ fn gatt_application(
                                     Some(n) => {
                                         for f in frames {
                                             if trace {
-                                                eprintln!("svolder-sim: {}", describe_rx(&f));
+                                                eprintln!("{}svolder-sim: {}", trace_stamp(), describe_rx(&f));
                                             }
                                             let _ = n.notify(f).await;
                                         }
                                     }
                                     None if trace && !frames.is_empty() => eprintln!(
-                                        "svolder-sim: {} answer(s) not sent: RX is not subscribed",
+                                        "{}svolder-sim: {} answer(s) not sent: RX is not subscribed",
+                                        trace_stamp(),
                                         frames.len()
                                     ),
                                     None => {}
@@ -324,7 +339,7 @@ fn gatt_application(
                             let notifier = notifier_for_notify.clone();
                             async move {
                                 if trace {
-                                    eprintln!("svolder-sim: RX subscribed");
+                                    eprintln!("{}svolder-sim: RX subscribed", trace_stamp());
                                 }
                                 *notifier.lock().await = Some(n);
                             }
@@ -584,5 +599,13 @@ mod tests {
         let line = describe_tx(&[0x01, 0x02]);
         assert!(line.contains("undecodable"), "{line}");
         assert_eq!(hex(&[0x00, 0xab, 0xff]), "00abff");
+    }
+
+    #[test]
+    fn a_trace_stamp_is_fixed_width_milliseconds() {
+        let stamp = trace_stamp();
+        assert!(stamp.starts_with("[ "), "{stamp}");
+        assert_eq!(stamp.len(), "[   12345 ms] ".len(), "{stamp}");
+        assert!(stamp.ends_with(" ms] "), "{stamp}");
     }
 }

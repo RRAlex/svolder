@@ -266,7 +266,9 @@ exclusion, so that the `ExecStart` line reads
 
 `--trace` prints every frame the phone writes, decoded through this project's codec, and every
 notification the fake device answers with, so a session reads as `Command 10 64` followed by
-`Status 10 64`. `--accept-pairing` registers a Just Works agent for a central that insists on
+`Status 10 64`, each line starting with the milliseconds since the sim started
+(`[   12345 ms] svolder-sim: ...`, the number in an eight-wide field that widens after about 27
+hours). `--accept-pairing` registers a Just Works agent for a central that insists on
 bonding; it answers pairing requests for every adapter on the host while the sim runs, so it is off
 by default and not needed for the app.
 

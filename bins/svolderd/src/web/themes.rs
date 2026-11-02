@@ -143,7 +143,8 @@ pub(crate) static THEMES: &[Theme] = &[
             js "graph.js", js "lists.js", js "tone-wire.js", js "draw/controls.js",
             js "draw/presets.js", js "ask.js", js "controls-wire.js", js "presets-wire.js",
             js "draw/playing.js", js "draw/amp.js", js "draw/device.js", js "device-wire.js",
-            js "changes.js", js "notes.js", js "draw/notes.js", js "marks.js", js "driver.js"
+            js "changes.js", js "fold.js", js "notes.js", js "draw/notes.js", js "marks.js",
+            js "driver.js"
         ]
     },
 ];
