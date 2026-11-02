@@ -1,0 +1,43 @@
+{# SPDX-FileCopyrightText: 2026 the svolder authors #}
+{# SPDX-License-Identifier: GPL-3.0-or-later #}
+<!doctype html>
+<html lang="en" data-theme="{{ theme.id }}"{% if let Some(scheme) = scheme %} data-scheme="{{ scheme }}"{% endif %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+{% if let Some(scheme) = scheme -%}
+<meta name="color-scheme" content="{{ scheme }}">
+{% else -%}
+<meta name="color-scheme" content="{{ theme.color_scheme }}">
+{% endif -%}
+<title>svolder</title>
+<link rel="stylesheet" href="assets/core/frame.css">
+{% for style in theme.styles -%}
+<link rel="stylesheet" href="assets/{{ style }}" data-sheet="{{ theme.id }}">
+{% endfor -%}
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+{% if let Some(scheme) = scheme -%}
+<meta name="theme-color" content="{{ theme.colour_for(Some(scheme)) }}">
+{% else if let Some(dark) = theme.theme_color_dark -%}
+<meta name="theme-color" content="{{ theme.theme_color }}" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="{{ dark }}" media="(prefers-color-scheme: dark)">
+{% else -%}
+<meta name="theme-color" content="{{ theme.theme_color }}">
+{% endif -%}
+{% for (name, content) in theme.metas -%}
+<meta name="{{ name }}" content="{{ content }}" data-sheet="{{ theme.id }}">
+{% endfor -%}
+{% for script in theme.scripts -%}
+<script src="assets/{{ script }}"></script>
+{% endfor -%}
+<script type="module" src="assets/{{ theme.module }}"></script>
+<script type="module" src="assets/core/boot.js"></script>
+</head>
+<body{% if guest %} class="guest"{% else if writes %} class="writes"{% endif %}>
+<div id="theme"></div>
+<template id="svolder-wordmark">{{ crate::web::pages::WORDMARK|safe }}</template>
+<script type="application/json" id="svolder-page">{{ page|safe }}</script>
+<script type="application/json" id="svolder-themes">{{ themes|safe }}</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "phono-common"
+family = "preamp"
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+
+[[control]]
+id = [4]
+key = "mute"
+label = "Mute"
+kind = "toggle"
+mutes_output = true
+
+[[control]]
+id = [7, 2]
+key = "subsonic"
+label = "Subsonic filter"
+kind = "toggle"
+
+[[control]]
+id = [11, 1]
+key = "load_capacitance"
+label = "Load capacitance"
+kind = "select"
+
+[[control]]
+id = [11, 2]
+key = "load_resistance"
+label = "Load resistance"
+kind = "select"

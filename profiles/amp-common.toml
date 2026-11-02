@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "amp-common"
+family = "amp"
+
+# A power amp's meter reads on a logarithmic scale of its own: `scale` gives a zero (a raw
+# reading, or on Tyr and Wotan the key of the u16 floor readout the amp reports, `zero_from`), a
+# full-scale reading and a class-A block, the fraction of the bar its left end covers. A meter
+# that sets `range`, with an optional `floor` and `tick`, draws a linear one instead; a meter
+# sets one or the other.
+
+[[control]]
+id = [21, 2]
+key = "power_meters"
+label = "Power meters"
+kind = "toggle"
+
+[[control]]
+id = [21, 1]
+key = "temperature_reporting"
+label = "Temperature reporting"
+kind = "readout"
+value_type = "bool"
+# The app answers every report of true with a write of false, and so does the session.
+auto_off = true
+
+[[control]]
+id = [230, 1]
+key = "fault_overcurrent"
+label = "Over-current"
+kind = "fault"
+advice = "Power-cycle the device. Check for shorts in speakers or headphones if it continues."
+
+[[control]]
+id = [230, 2]
+key = "fault_overtemp"
+label = "Over-temperature"
+kind = "fault"
+advice = "Switch the device off and let it cool down before turning on again. Check ventilation if it continues."

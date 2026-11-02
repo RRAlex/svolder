@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolder-mqtt"
+description = "MQTT topics, Home Assistant discovery, payloads, command parsing and the broker client for svolder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rumqttc.workspace = true
+serde_json.workspace = true
+svolder-proto.workspace = true
+svolder-profiles.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rumqttd.workspace = true

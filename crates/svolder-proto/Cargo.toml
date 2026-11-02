@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolder-proto"
+description = "Codec for the Schiit Forkbeard BLE protocol"
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[features]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+hex.workspace = true

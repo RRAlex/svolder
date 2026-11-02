@@ -1,0 +1,48 @@
+{# SPDX-FileCopyrightText: 2026 the svolder authors #}
+{# SPDX-License-Identifier: GPL-3.0-or-later #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Sign in · svolder</title>
+<link rel="stylesheet" href="assets/core/frame.css">
+<link rel="stylesheet" href="assets/themes/ember/style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0f0d0b">
+<script type="module" src="assets/core/login.js"></script>
+</head>
+<body class="signin">
+<main class="lg">
+  {{ crate::web::pages::WORDMARK|safe }}
+  <h1>Sign in</h1>
+  <p class="to">to the svolder on <code>{{ host }}</code></p>
+  {% if ended %}
+  <p class="said warn" role="status">
+    Your sign-in on this browser ended after three years. Sign in again.
+  </p>
+  {% endif %}
+  <form id="token-form" class="stack" method="post" action="login">
+    <label for="token">Token</label>
+    <div class="field">
+      <input id="token" name="token" type="password" autocomplete="current-password"
+        spellcheck="false">
+      <button type="button" id="show" class="pill">Show</button>
+    </div>
+    <button type="submit" class="pill primary">Sign in</button>
+    <p class="hint"><code>svolder web token</code> prints it on the computer svolder runs on.</p>
+  </form>
+  <p class="rule"><span>or pair this browser</span></p>
+  <form id="pair-form" class="stack" method="post" action="pair">
+    <p class="hint">Scan the QR code that <code>svolder web --qr</code> prints, or type the six
+      digits from <code>svolder web pair</code>.</p>
+    <input id="code" name="code" class="code" inputmode="numeric"
+      autocomplete="one-time-code" maxlength="7" aria-label="Pairing code">
+    <button type="submit" class="pill">Pair</button>
+  </form>
+  <p id="said" class="said" role="status"></p>
+</main>
+</body>
+</html>

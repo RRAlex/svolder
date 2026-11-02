@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "wotan"
+display = "Wotan"
+product_id = 4
+min_firmware = 0
+extends = "amp-standby"
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "XLR", 2 = "RCA" }
+
+[[control]]
+id = [3]
+key = "feedback"
+label = "Feedback"
+kind = "toggle"
+
+[[control]]
+id = [20, 3]
+key = "meter_floor_r"
+label = "Meter floor R"
+kind = "readout"
+value_type = "u16"
+
+[[control]]
+id = [20, 4]
+key = "meter_floor_l"
+label = "Meter floor L"
+kind = "readout"
+value_type = "u16"
+
+# The faults come per channel, on a third id: svolder reads channels 1 and 2, and a plain 230.1
+# or 230.2 raises no fault.
+[[control]]
+id = [230, 1, 1]
+key = "fault_overcurrent"
+label = "Over-current L"
+kind = "fault"
+advice = "Power-cycle the device. Check for shorts in speakers or headphones if it continues."
+
+[[control]]
+id = [230, 1, 2]
+key = "fault_overcurrent_r"
+label = "Over-current R"
+kind = "fault"
+advice = "Power-cycle the device. Check for shorts in speakers or headphones if it continues."
+
+[[control]]
+id = [230, 2, 1]
+key = "fault_overtemp"
+label = "Over-temperature L"
+kind = "fault"
+advice = "Switch the device off and let it cool down before turning on again. Check ventilation if it continues."
+
+[[control]]
+id = [230, 2, 2]
+key = "fault_overtemp_r"
+label = "Over-temperature R"
+kind = "fault"
+advice = "Switch the device off and let it cool down before turning on again. Check ventilation if it continues."
+
+# The amp's meter scale; unconfirmed on a real amp (see known-issues).
+[[control]]
+id = [20, 1]
+key = "meter_1"
+label = "Meter L"
+kind = "meter"
+channel = "L"
+scale = { zero_from = "meter_floor_l", full = 160, class_a = 0.10 }
+
+[[control]]
+id = [20, 2]
+key = "meter_2"
+label = "Meter R"
+kind = "meter"
+channel = "R"
+scale = { zero_from = "meter_floor_r", full = 420, class_a = 0.10 }

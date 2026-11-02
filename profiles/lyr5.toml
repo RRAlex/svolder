@@ -1,0 +1,75 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "lyr5"
+display = "Lyr 5"
+product_id = 14
+min_firmware = 0
+family = "preamp"
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "RCA 1", 2 = "RCA 2" }
+
+[[control]]
+id = [3]
+key = "gain"
+label = "Gain"
+kind = "select"
+values = { 1 = "Low Gain (1x)", 2 = "High Gain (7x)" }
+output_gain = true
+
+[[control]]
+id = [4, 1]
+key = "headphone_mute"
+label = "Headphone mute"
+kind = "toggle"
+mutes_output = true
+
+[[control]]
+id = [4, 2]
+key = "preout"
+label = "Pre-out"
+kind = "toggle"
+asks_on_change = true
+
+[[control]]
+id = [6]
+key = "volume"
+label = "Volume"
+kind = "level"
+range = [0, 63]
+unit = "dB"
+convert = { linear = [-64.0, 0.0] }
+
+[[control]]
+id = [7]
+key = "mode"
+label = "Mode"
+kind = "select"
+values = { 1 = "Solid State", 2 = "Tube" }
+
+[[control]]
+id = [22]
+key = "class_state"
+label = "Class state"
+kind = "readout"
+values = { 1 = "Class A", 2 = "Class AB", 3 = "Warning" }
+
+[[control]]
+id = [230, 1]
+key = "fault_overcurrent"
+label = "Over-current"
+kind = "fault"
+advice = "Power-cycle the device. Check for shorts in speakers or headphones if it continues."
+
+[[control]]
+id = [230, 2]
+key = "fault_headphone"
+label = "Headphone fault"
+kind = "fault"
+advice = "Unplug the headphones, power-cycle the device, and check the cable for shorts."

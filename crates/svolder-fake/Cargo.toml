@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolder-fake"
+description = "In-process fake Schiit Forkbeard device that answers real protocol frames"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+svolder-proto.workspace = true
+svolder-profiles.workspace = true

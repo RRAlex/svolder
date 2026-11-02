@@ -1,0 +1,26 @@
+S   ID  QUANT   RATE    WAIT    BUSY   W/Q   B/Q  ERR FORMAT           NAME 
+C   30      0      0    ---     ---   ---   ---     0                  Dummy-Driver
+C   31      0      0    ---     ---   ---   ---     0                  Freewheel-Driver
+C   51      0      0    ---     ---   ---   ---     0                  Midi-Bridge
+C   54      0      0    ---     ---   ---   ---     0                  alsa_input.usb-046d_0821_6DC0C6A0-00.analog-stereo
+C   34      0      0    ---     ---   ---   ---     0                  alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink
+C   47      0      0    ---     ---   ---   ---     0                  alsa_output.usb-Generic_USB_Audio-00.HiFi__Headphones__sink
+C   46      0      0    ---     ---   ---   ---     0                  alsa_input.usb-Generic_USB_Audio-00.HiFi__Mic1__source
+C   45      0      0    ---     ---   ---   ---     0                  alsa_input.usb-Generic_USB_Audio-00.HiFi__Mic2__source
+C   80      0      0    ---     ---   ---   ---     0                  v4l2_input.pci-0000_0e_00.0-usb-0_9_1.2
+C   83      0      0    ---     ---   ---   ---     0                  speech-dispatcher-dummy
+C   87      0      0    ---     ---   ---   ---     0                  alsa_output.pci-0000_11_00.1.hdmi-stereo
+C   92      0      0    ---     ---   ---   ---     0                  Firefox
+S   ID  QUANT   RATE    WAIT    BUSY   W/Q   B/Q  ERR FORMAT           NAME 
+S   30      0      0    ---     ---   ---   ---     0                  Dummy-Driver
+S   31      0      0    ---     ---   ---   ---     0                  Freewheel-Driver
+S   51      0      0    ---     ---   ---   ---     0                  Midi-Bridge
+S   54      0      0    ---     ---   ---   ---     0                  alsa_input.usb-046d_0821_6DC0C6A0-00.analog-stereo
+S   34      0      0    ---     ---   ---   ---     0                  alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink
+S   47      0      0    ---     ---   ---   ---     0                  alsa_output.usb-Generic_USB_Audio-00.HiFi__Headphones__sink
+S   46      0      0    ---     ---   ---   ---     0                  alsa_input.usb-Generic_USB_Audio-00.HiFi__Mic1__source
+S   45      0      0    ---     ---   ---   ---     0                  alsa_input.usb-Generic_USB_Audio-00.HiFi__Mic2__source
+S   80      0      0    ---     ---   ---   ---     0                  v4l2_input.pci-0000_0e_00.0-usb-0_9_1.2
+I   83      0      0   0,0us   0,0us  ???   ???     0    S16LE 1 44100 speech-dispatcher-dummy
+S   87      0      0    ---     ---   ---   ---     0                  alsa_output.pci-0000_11_00.1.hdmi-stereo
+I   92      0      0   0,0us   0,0us  ???   ???     0    F32LE 2 48000 Firefox

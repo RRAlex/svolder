@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "bifrost3"
+display = "Bifrost 3"
+product_id = 10
+min_firmware = 0
+extends = "mesh-eq-5"
+firmware_subsystems = [1, 2]
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "USB", 2 = "Optical", 3 = "Coaxial" }
+
+[[control]]
+id = [7]
+key = "usb_connected"
+label = "USB connected"
+kind = "readout"
+value_type = "bool"
+
+# The Bifrost 3 reports this as a UInt8, 1 while locked; a bool readout reads 1 as true.
+[[control]]
+id = [8]
+key = "spdif_locked"
+label = "S/PDIF locked"
+kind = "readout"
+value_type = "bool"

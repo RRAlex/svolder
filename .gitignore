@@ -1,0 +1,9 @@
+target/
+# Written by `make docker` and by `docker compose up` from the repository root.
+.env
+/config/
+/run/
+# The link `nix build` leaves.
+/result
+# What running the checks in scripts/web-checks leaves.
+__pycache__/

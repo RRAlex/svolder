@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "gungnir2-v2"
+display = "Gungnir 2"
+product_id = 2
+min_firmware = 2
+extends = "mesh-eq-5"
+firmware_subsystems = [1, 2]
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "USB 1", 2 = "USB 2", 3 = "Optical", 4 = "Coaxial", 5 = "AES" }
+
+[[control]]
+id = [7, 1]
+key = "usb1_connected"
+label = "USB 1 connected"
+kind = "readout"
+value_type = "bool"
+
+[[control]]
+id = [7, 2]
+key = "usb2_connected"
+label = "USB 2 connected"
+kind = "readout"
+value_type = "bool"
+
+[[control]]
+id = [8]
+key = "spdif_locked"
+label = "S/PDIF locked"
+kind = "readout"
+value_type = "bool"

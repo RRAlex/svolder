@@ -1,0 +1,41 @@
+<!--
+SPDX-FileCopyrightText: 2026 the svolder authors
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+**Install**
+
+- Debian, Ubuntu, Raspberry Pi OS (64-bit): `sudo apt install ./svolder_@VERSION@_amd64.deb`, or
+  `sudo apt install ./svolder_@VERSION@_arm64.deb` on a Raspberry Pi or another arm64 machine.
+- Fedora, RHEL: `sudo dnf install ./svolder-@VERSION@-1.x86_64.rpm`
+- Arch: download `PKGBUILD` and your architecture's tarball into an empty folder and run
+  `makepkg -si`; `yay -S svolder-bin` once the package is on the AUR.
+- Nix: `nix run github:RRAlex/svolder/v@VERSION@` or
+  `nix profile install github:RRAlex/svolder/v@VERSION@`
+- Any Linux: unpack `svolder-@VERSION@-x86_64-linux.tar.gz` or
+  `svolder-@VERSION@-aarch64-linux.tar.gz`; the binaries are static and need only BlueZ.
+
+A package enables nothing; each user turns the daemon on with
+`systemctl --user enable --now svolderd.socket svolderd.service` (from a tarball: put the binaries
+on `PATH` and run `svolder daemon install`). On a machine nobody logs in to, such as a Raspberry Pi
+beside the DAC, `loginctl enable-linger $USER` keeps the user's units running after a reboot.
+
+**Files**
+
+| File | For |
+| --- | --- |
+| `svolder_@VERSION@_amd64.deb` | Debian, Ubuntu and relatives on x86_64 |
+| `svolder_@VERSION@_arm64.deb` | Raspberry Pi OS (64-bit), Debian and Ubuntu on arm64 |
+| `svolder-@VERSION@-1.x86_64.rpm` | Fedora, RHEL and relatives on x86_64 |
+| `svolder-@VERSION@-x86_64-linux.tar.gz` | any x86_64 Linux: static binaries, docs, unit templates |
+| `svolder-@VERSION@-aarch64-linux.tar.gz` | any arm64 Linux: the same for arm64 |
+| `svolder-@VERSION@-source.tar.gz` | our source plus every dependency's, for offline and reproducible builds |
+| `THIRD-PARTY-LICENSES` | the licence of everything inside the binaries |
+| `PKGBUILD` | Arch's `makepkg`, around the two tarballs |
+| `SHA256SUMS` | the checksum of every other file here |
+
+**Check the download:** `sha256sum -c SHA256SUMS`. To rebuild it, `make repro-check` in a clone of the
+tag (`git clone --branch v@VERSION@ https://github.com/RRAlex/svolder`) builds every file twice and
+checks the two builds agree; then `cmp target/dist/SHA256SUMS` with the release's `SHA256SUMS`. On an
+x86_64 machine the arm64 half needs QEMU user-mode emulation
+(`sudo apt install qemu-user qemu-user-binfmt`).

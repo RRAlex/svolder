@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolder-ble"
+description = "Bluetooth LE transport and device session for Schiit Forkbeard products"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true }
+tokio-stream.workspace = true
+svolder-proto.workspace = true
+svolder-profiles.workspace = true
+svolder-fake.workspace = true
+btleplug.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "test-util"] }

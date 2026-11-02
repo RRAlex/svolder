@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[workspace]
+resolver = "3"
+members = ["crates/*", "bins/*"]
+
+[workspace.package]
+version = "0.31.2"
+edition = "2024"
+rust-version = "1.93"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/RRAlex/svolder"
+# The crates depend on each other by path; svolder ships as binaries, not to crates.io.
+publish = false
+
+[workspace.dependencies]
+thiserror = "2"
+hex = "0.4"
+libc = "0.2"
+qrcode = { version = "0.14.1", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+# The Levenberg-Marquardt solver the AutoEq fitter runs: pure Rust, no bounds support (the fitter
+# reparameterises), and nalgebra underneath without its default features.
+levenberg-marquardt = "0.15"
+# The vector and matrix types that solver's problem trait is written in; the same version it
+# builds on, std only.
+nalgebra = { version = "0.34", default-features = false, features = ["std"] }
+# The toml-rs project's editing front end, which the settings writer needs: `toml` parses a
+# file into values and drops the formatting and comments around them, while `toml_edit` keeps
+# the document itself, so writing the `[tui]` table back leaves the rest of a hand-written
+# config byte for byte as its author left it. Both read through the same `toml_parser`.
+toml_edit = "0.25"
+clap = { version = "4", features = ["derive", "env"] }
+svolder-proto = { path = "crates/svolder-proto" }
+svolder-profiles = { path = "crates/svolder-profiles" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "net", "io-util"] }
+tokio-stream = "0.1"
+futures = "0.3"
+async-trait = "0.1"
+svolder-ble = { path = "crates/svolder-ble" }
+svolder-ipc = { path = "crates/svolder-ipc" }
+svolder-mqtt = { path = "crates/svolder-mqtt" }
+svolder-fake = { path = "crates/svolder-fake" }
+svolder-host = { path = "crates/svolder-host" }
+svolder-autoeq = { path = "crates/svolder-autoeq" }
+# The HTTP client the AutoEq download speaks through: rustls with the ring provider, no gzip,
+# and never the baked-in Mozilla roots (`webpki-roots`, a CDLA-Permissive-2.0 data licence this
+# project does not allow). ureq's own `platform-verifier` feature would do, but it lists
+# `webpki-root-certs` (the same licence) for wasm and android, which the licence check reads.
+# The roots come from the operating system through `rustls-native-certs` instead.
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider"] }
+rustls-native-certs = "0.8"
+# Font outlines and their coverage for the README screenshots' rasteriser, a dev-dependency of
+# bins/svolder only: TrueType and OpenType through ttf-parser, variable axes included.
+ab_glyph = "0.2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+percent-encoding = "2"
+# The MQTT client svolderd's Home Assistant bridge speaks through (3.1.1), without TLS: plain
+# TCP with a username and password. `rumqttd` is the in-process broker the bridge's tests run
+# against on 127.0.0.1, a dev-dependency only, with its TLS and websocket servers left out.
+rumqttc = { version = "0.25", default-features = false }
+rumqttd = { version = "0.20", default-features = false }
+btleplug = "0.13"
+# The D-Bus bindings the health checks, the simulator and the host's MPRIS client build on,
+# and the tokio glue the last two drive them through, pinned once so they never ask for
+# different versions of the same C library's wrapper.
+dbus = "0.9"
+dbus-tokio = "0.7"
+uuid = "1"
+bluer = { version = "0.17", features = ["bluetoothd"] }
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+tachyonfx = "0.25"
+# The Model Context Protocol server svolderd hosts on `/mcp`: rmcp's streamable-HTTP service
+# (stateless, JSON responses), served over plain HTTP/1 by hyper on the daemon's own runtime.
+# TLS and an HTTP client live in svolder-autoeq only: the daemon serves plain HTTP and a
+# reverse proxy terminates TLS.
+rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = "0.1"
+tokio-util = "0.7"
+# The web UI svolderd serves on a port of its own: axum's router with its own features only
+# (HTTP/1, JSON bodies, query strings, the tokio glue), askama's templates checked at compile
+# time, and Tower, through which the shared accept loop and the router's tests call the router.
+axum = { version = "0.8.9", default-features = false, features = [
+    "http1", "json", "query", "tokio",
+] }
+askama = { version = "0.16.1", default-features = false, features = ["derive", "std"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+# HMAC-SHA256 for the web UI's sign-in cookie and SHA-256 for its assets' ETags; the same ring
+# the AutoEq download's TLS already builds.
+ring = "0.17"
+
+# The AutoEq fitter solves hundreds of least-squares problems in its tests; unoptimised, that
+# is minutes. This crate, and the solver it runs, build optimised even in dev and test builds.
+[profile.dev.package.svolder-profiles]
+opt-level = 3
+[profile.dev.package.levenberg-marquardt]
+opt-level = 3
+[profile.dev.package.nalgebra]
+opt-level = 3

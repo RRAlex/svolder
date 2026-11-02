@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Maintainer: the svolder authors
+#
+# packaging/release-files.sh fills in the version and the tarballs' checksums; each `source` is
+# the tarball's address on the release page.
+pkgname=svolder-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="@SUMMARY@"
+arch=('x86_64' 'aarch64')
+url='https://github.com/RRAlex/svolder'
+license=('GPL-3.0-or-later')
+depends=('bluez' 'dbus')
+optdepends=('pipewire: the host audio level and spectrum (pw-record), the intro sound (pw-play)'
+            'wireplumber: the host volume (wpctl)')
+provides=('svolder')
+conflicts=('svolder')
+# The binaries go in as the tarball carries them: not stripped again, no debug package.
+options=('!strip' '!debug')
+source_x86_64=("https://github.com/RRAlex/svolder/releases/download/v$pkgver/svolder-$pkgver-x86_64-linux.tar.gz")
+source_aarch64=("https://github.com/RRAlex/svolder/releases/download/v$pkgver/svolder-$pkgver-aarch64-linux.tar.gz")
+sha256sums_x86_64=('@SHA256_X86_64@')
+sha256sums_aarch64=('@SHA256_AARCH64@')
+
+package() {
+  cd "svolder-$pkgver-$CARCH-linux"
+  install -Dm755 svolder svolderd svolder-sim -t "$pkgdir/usr/bin/"
+  for unit in svolderd.service svolderd.socket; do
+    install -dm755 "$pkgdir/usr/lib/systemd/user"
+    sed -e 's|__BINDIR__|/usr/bin|g' -e 's|__SOCKET__|%t/svolder.sock|g' \
+      "systemd/$unit" > "$pkgdir/usr/lib/systemd/user/$unit"
+    chmod 644 "$pkgdir/usr/lib/systemd/user/$unit"
+  done
+  install -Dm644 README.md LEGAL.md AUTHORS -t "$pkgdir/usr/share/doc/svolder/"
+  install -Dm644 usage/*.md -t "$pkgdir/usr/share/doc/svolder/usage/"
+  install -Dm644 LICENSE THIRD-PARTY-LICENSES -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

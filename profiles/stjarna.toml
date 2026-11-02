@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "stjarna"
+display = "Stjarna"
+product_id = 13
+min_firmware = 0
+extends = "phono-common"
+
+[[control]]
+id = [3]
+key = "gain"
+label = "Gain"
+kind = "select"
+values = { 1 = "40 dB", 2 = "47 dB", 3 = "55 dB", 4 = "60 dB" }
+output_gain = true
+
+[[control]]
+id = [7, 1]
+key = "mono"
+label = "Mono"
+kind = "toggle"
+
+[[control]]
+id = [10]
+key = "power"
+label = "Power"
+kind = "toggle"
+powers_output = true
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "RCA 1", 2 = "RCA 2" }
+
+[[control]]
+id = [11, 1]
+key = "load_capacitance"
+label = "Load capacitance"
+kind = "select"
+values = { 1 = "50 pF", 2 = "100 pF", 3 = "150 pF", 4 = "200 pF" }
+
+[[control]]
+id = [11, 2]
+key = "load_resistance"
+label = "Load resistance"
+kind = "select"
+values = { 1 = "10 Ω", 2 = "50 Ω", 3 = "100 Ω", 4 = "150 Ω", 5 = "200 Ω" }
+
+# The app shows nothing for 201; "remote lock" is a best guess at its meaning.
+[[control]]
+id = [201]
+key = "remote_lock"
+label = "Remote lock"
+kind = "readout"
+value_type = "bool"

@@ -1,0 +1,1020 @@
+[
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "connectivity",
+      "name": "Link",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "offline",
+      "payload_on": "online",
+      "state_topic": "svolder/0102030405060708/availability",
+      "unique_id": "svolder_0102030405060708_link"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/link/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Mute",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_mute",
+      "value_template": "{{ value_json.mute }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/mute/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "NOS filter",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_nos",
+      "value_template": "{{ value_json.nos }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/nos/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Phase invert",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_phase",
+      "value_template": "{{ value_json.phase }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/phase/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "S/PDIF locked",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_spdif_locked",
+      "value_template": "{{ value_json.spdif_locked }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/spdif_locked/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "USB 1 connected",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_usb1_connected",
+      "value_template": "{{ value_json.usb1_connected }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/usb1_connected/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "USB 2 connected",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_usb2_connected",
+      "value_template": "{{ value_json.usb2_connected }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/usb2_connected/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Balance",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_balance",
+      "value_template": "{{ value_json.balance }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/balance/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "entity_category": "diagnostic",
+      "name": "DSP firmware",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/dsp_firmware/state",
+      "unique_id": "svolder_0102030405060708_dsp_firmware"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/dsp_firmware/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 1 frequency",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_1_frequency",
+      "unit_of_measurement": "Hz",
+      "value_template": "{{ value_json.eq_band_1_frequency }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_1_frequency/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 1 gain",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_1_gain",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.eq_band_1_gain }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_1_gain/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 1 Q",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_1_q",
+      "value_template": "{{ value_json.eq_band_1_q }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_1_q/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 2 frequency",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_2_frequency",
+      "unit_of_measurement": "Hz",
+      "value_template": "{{ value_json.eq_band_2_frequency }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_2_frequency/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 2 gain",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_2_gain",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.eq_band_2_gain }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_2_gain/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 2 Q",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_2_q",
+      "value_template": "{{ value_json.eq_band_2_q }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_2_q/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 3 frequency",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_3_frequency",
+      "unit_of_measurement": "Hz",
+      "value_template": "{{ value_json.eq_band_3_frequency }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_3_frequency/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 3 gain",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_3_gain",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.eq_band_3_gain }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_3_gain/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 3 Q",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_3_q",
+      "value_template": "{{ value_json.eq_band_3_q }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_3_q/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 4 frequency",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_4_frequency",
+      "unit_of_measurement": "Hz",
+      "value_template": "{{ value_json.eq_band_4_frequency }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_4_frequency/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 4 gain",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_4_gain",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.eq_band_4_gain }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_4_gain/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 4 Q",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_4_q",
+      "value_template": "{{ value_json.eq_band_4_q }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_4_q/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 5 frequency",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_5_frequency",
+      "unit_of_measurement": "Hz",
+      "value_template": "{{ value_json.eq_band_5_frequency }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_5_frequency/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 5 gain",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_5_gain",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.eq_band_5_gain }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_5_gain/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Band 5 Q",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_band_5_q",
+      "value_template": "{{ value_json.eq_band_5_q }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_band_5_q/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Loudness strength",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_loudness",
+      "value_template": "{{ value_json.eq_loudness }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_loudness/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Tone control mode",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_mode",
+      "value_template": "{{ value_json.eq_mode }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_mode/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "EQ preset",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_preset",
+      "value_template": "{{ value_json.eq_preset }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/eq_preset/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "entity_category": "diagnostic",
+      "name": "Firmware",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/firmware/state",
+      "unique_id": "svolder_0102030405060708_firmware"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/firmware/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Input",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_input",
+      "value_template": "{{ value_json.input }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/input/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Sample rate",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_sample_rate",
+      "value_template": "{{ value_json.sample_rate }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/sample_rate/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "signal_strength",
+      "entity_category": "diagnostic",
+      "json_attributes_topic": "svolder/0102030405060708/signal/attributes",
+      "name": "Signal",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/0102030405060708/signal/state",
+      "unique_id": "svolder_0102030405060708_signal",
+      "unit_of_measurement": "dBm"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/signal/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Volume",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_volume",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.volume }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/volume/config"
+  }
+]

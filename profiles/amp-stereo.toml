@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "amp-stereo"
+extends = "amp-common"
+
+[[control]]
+id = [20, 1]
+key = "meter_1"
+label = "Meter L"
+kind = "meter"
+channel = "L"
+
+[[control]]
+id = [20, 2]
+key = "meter_2"
+label = "Meter R"
+kind = "meter"
+channel = "R"

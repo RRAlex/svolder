@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+services:
+  svolder:
+    container_name: svolder
+    # The image `make docker` builds: the static release binaries, running as the host user's
+    # uid so the files under ./config and ./run belong to them. After an update, `make docker`
+    # again, then `docker compose up -d`.
+    image: svolder:local
+    restart: unless-stopped
+    # Longer than the daemon's own shutdown (up to 30 s for a stop that finds a connect in
+    # flight, then a final settle): Docker's default 10 s would kill the daemon mid-connect
+    # and leave the adapter's link behind.
+    stop_grace_period: 45s
+    # The bind-mounted system bus is mediated by the host's mandatory access control, which
+    # confines the container's process by profile, not by user: Docker's default AppArmor
+    # profile carries no D-Bus rules, so the bus refuses even the connection's Hello, and
+    # SELinux hosts refuse a confined container the bus socket outright. Both options run
+    # the container without that profile and change nothing in the host's own policy; a
+    # host without AppArmor or SELinux ignores them. The process still runs as the non-root
+    # user with Docker's capability set and seccomp filter.
+    security_opt:
+      - apparmor=unconfined
+      - label=disable
+    volumes:
+      - ./config:/config
+      - ./run:/run/svolder
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
+    # The web UI, when ./config/svolder/config.toml has [web] enabled = true and
+    # listen = "0.0.0.0:8738": publish its port to reach it from this computer and your network.
+    # ports:
+    #   - "8738:8738"
+    # The host's bluetooth group, so this container's user can reach bluetoothd over the
+    # bind-mounted system bus. The gid differs between hosts (`getent group bluetooth`), so
+    # there is no default: `make docker` writes the host's into .env, which compose reads.
+    group_add:
+      - "${BLUETOOTH_GID:?set BLUETOOTH_GID in .env or the environment: make docker writes it}"

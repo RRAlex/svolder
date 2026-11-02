@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "freya"
+display = "Freya"
+product_id = 19
+min_firmware = 0
+extends = "preamp-common"
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "Input 1 (XLR)", 2 = "Input 2 (XLR)", 3 = "Input 3", 4 = "Input 4", 5 = "Input 5" }
+
+[[control]]
+id = [3]
+key = "mode"
+label = "Mode"
+kind = "select"
+values = { 1 = "Passive", 2 = "Buffer", 3 = "Tube Gain" }
+output_gain = true
+
+[[control]]
+id = [6]
+key = "volume"
+label = "Volume"
+kind = "level"
+range = [0, 127]
+unit = "dB"
+convert = { linear = [-80.0, 0.0] }

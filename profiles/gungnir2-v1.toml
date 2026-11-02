@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "gungnir2-v1"
+display = "Gungnir 2"
+product_id = 2
+min_firmware = 0
+extends = "dac-common"
+firmware_subsystems = [1, 2]
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "USB 1", 2 = "USB 2", 3 = "Optical", 4 = "Coaxial", 5 = "AES" }
+
+[[control]]
+id = [4]
+key = "nos"
+label = "NOS filter"
+kind = "toggle"
+
+[[control]]
+id = [6]
+key = "sample_rate"
+label = "Sample rate"
+kind = "readout"
+values = { 0 = "—", 1 = "44.1 kHz", 2 = "48 kHz", 3 = "88.2 kHz", 4 = "96 kHz", 5 = "176.4 kHz", 6 = "192 kHz", 7 = "352.8 kHz", 8 = "384 kHz" }
+
+[[control]]
+id = [7, 1]
+key = "usb1_connected"
+label = "USB 1 connected"
+kind = "readout"
+value_type = "bool"
+
+[[control]]
+id = [7, 2]
+key = "usb2_connected"
+label = "USB 2 connected"
+kind = "readout"
+value_type = "bool"
+
+[[control]]
+id = [8]
+key = "spdif_locked"
+label = "S/PDIF locked"
+kind = "readout"
+value_type = "bool"

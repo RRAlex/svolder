@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "preamp-common"
+family = "preamp"
+
+[[control]]
+id = [3]
+key = "mode"
+label = "Mode"
+kind = "select"
+values = { 1 = "Mode 1", 2 = "Mode 2", 3 = "Mode 3" }
+
+[[control]]
+id = [4]
+key = "mute"
+label = "Mute"
+kind = "toggle"
+mutes_output = true
+
+[[control]]
+id = [230, 1]
+key = "fault_overcurrent"
+label = "Over-current"
+kind = "fault"
+advice = "Power-cycle the device. Check for shorts in speakers or headphones if it continues."

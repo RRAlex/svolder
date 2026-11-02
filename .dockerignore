@@ -1,0 +1,11 @@
+target/*
+!target/dist/svolder
+!target/dist/svolderd
+!target/dist/THIRD-PARTY-LICENSES
+.git/
+.worktrees/
+# The compose service's data: config.toml can hold the MQTT password.
+config/
+run/
+.env
+result

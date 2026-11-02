@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "freya2"
+display = "Freya 2"
+product_id = 24
+min_firmware = 0
+family = "preamp"
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "Input 1 (XLR)", 2 = "Input 2 (XLR)", 3 = "Input 3", 4 = "Input 4", 5 = "Input 5" }
+
+# The app shows the mode as 1 to 5 and sends that number minus one; the values here are the
+# wire values.
+[[control]]
+id = [3, 1]
+key = "mode"
+label = "Mode"
+kind = "select"
+values = { 0 = "Passive", 1 = "SS voltage / SS current", 2 = "Tube voltage / SS current", 3 = "SS voltage / Tube current", 4 = "Tube voltage / Tube current" }
+output_gain = true
+
+# The app refuses a gain change in Passive; svolder sends it and the device decides.
+[[control]]
+id = [3, 2]
+key = "gain"
+label = "Gain"
+kind = "select"
+values = { 1 = "Low Gain (1x)", 2 = "High Gain (4x)" }
+output_gain = true
+
+[[control]]
+id = [4, 1]
+key = "mute"
+label = "Mute"
+kind = "toggle"
+mutes_output = true
+
+[[control]]
+id = [6, 1]
+key = "volume"
+label = "Volume"
+kind = "level"
+range = [0, 127]
+unit = "dB"
+convert = { linear = [-80.0, 0.0] }
+
+# Balance runs 0 to 200 on the wire, with the centre at 100.
+[[control]]
+id = [6, 2]
+key = "balance"
+label = "Balance"
+kind = "level"
+range = [0, 200]
+center = 100
+
+[[control]]
+id = [10]
+key = "power"
+label = "Power"
+kind = "toggle"
+powers_output = true
+
+[[control]]
+id = [230, 1]
+key = "fault_overcurrent_input"
+label = "Over-current (input)"
+kind = "fault"
+advice = "Power-cycle the device. Check the source and cables if it continues."
+
+[[control]]
+id = [230, 2]
+key = "fault_overcurrent_output"
+label = "Over-current (output)"
+kind = "fault"
+advice = "Power-cycle the device. Check for shorts on the outputs if it continues."

@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolder-host"
+description = "The host's own audio for svolder: its sink, its media players, and a spectrum of what the sink plays"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+# The same D-Bus bindings the rest of the workspace uses, for MPRIS on the session bus.
+dbus = { workspace = true, features = ["futures"] }
+dbus-tokio.workspace = true
+futures.workspace = true
+# SHA-1 names Spotify's cache files (a name, not a security check).
+ring.workspace = true
+# The computer EQ's state file is TOML, and its filters are a correction from the profiles crate.
+serde.workspace = true
+# `pw-dump` prints the PipeWire graph as JSON, read for the route from a player to the sink.
+serde_json.workspace = true
+toml.workspace = true
+svolder-profiles = { workspace = true, features = ["serde"] }
+# `process` runs `wpctl` without holding a thread while it answers.
+tokio = { workspace = true, features = ["process"] }

@@ -1,0 +1,30 @@
+{{!-- SPDX-FileCopyrightText: 2026 the svolder authors --}}
+{{!-- SPDX-License-Identifier: GPL-3.0-or-later --}}
+{{!-- The THIRD-PARTY-LICENSES template `make third-party-licenses` fills with cargo-about. --}}
+Third-party licences
+
+svolder is free software under the GNU General Public License, version 3 or
+(at your option) any later version; its text is in LICENSE. The svolder
+binaries are also built from the crates below, each used under the licence
+it is listed with, and contain libdbus (built in from the source the
+libdbus-sys crate bundles), the Rust standard library and musl libc.
+The full text of each licence follows the summary; those three come
+last. The complete corresponding source of the binaries is the
+svolder-<version>-source.tar.gz published beside them.
+
+Summary
+{{#each overview}}
+  {{{name}}} ({{id}}), crates: {{count}}
+{{/each}}
+{{#each licenses}}
+
+================================================================================
+{{{name}}} ({{id}})
+
+Used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

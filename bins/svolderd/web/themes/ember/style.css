@@ -1,0 +1,1146 @@
+/* SPDX-FileCopyrightText: 2026 the svolder authors */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* The web UI's stylesheet: tokens, the page's frame, the sign-in page and every part
+   of a device's screen (volume, tone control, controls, amp meters, strip, effects layer). No rule
+   relies on an inline style attribute: the page's CSP forbids one. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0f0d0b; --card: #17140f; --card-2: #1f1b16; --ctl: #26211b;
+  --glass: color-mix(in srgb, var(--card) 70%, transparent);
+  --hair: rgba(255, 236, 212, .10); --hair-2: rgba(255, 236, 212, .19);
+  --hair-3: rgba(255, 236, 212, .34);
+  --ink: #f4eee5; --dim: #ada396; --faint: #897f73;
+  --seg-off: #2c261f; --seg-off-red: #43201a;
+  --r-gold: #f8d67c; --r-gold-2: #f4c158; --r-amber: #f0a73a; --r-amber-2: #e98f32;
+  --r-copper: #dd762f; --r-target: #ffe9b0; --r-brass: #8e7f63; --r-red: #ff4b3b;
+  --good: #7cc27e; --warn: #ead27a; --on-acc: #1b1206; --err: #ff8a7e;
+  --glow-1: #8b5cf6; --glow-2: #6d3fd1; --glow-3: #b9a0ff;
+  --dac: var(--r-amber); --amp: var(--r-copper); --preamp: var(--r-gold); --acc: var(--dac);
+  --f-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --f-big: "IBM Plex Sans", system-ui, sans-serif;
+  --f-title: "Geist", var(--f-big);
+  --f-num: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --f-code: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --big-w: 300; --hist-h: 64px;
+  --t-xs: 12px; --t-s: 13.5px; --t-m: 15px; --t-l: 17px; --t-xl: 22px;
+  /* the frame's dress: the button, the menu, the picker and the popups */
+  --frame-btn-size: 30px; --frame-btn-bg: none; --frame-btn-fg: var(--dim);
+  --frame-btn-border: var(--hair); --frame-btn-radius: 50%;
+  --frame-btn-fg-hover: var(--ink); --frame-btn-border-hover: var(--hair-3);
+  --frame-surface: var(--card-2); --frame-ink: var(--ink); --frame-dim: var(--dim);
+  --frame-faint: var(--faint); --frame-line: var(--hair-2); --frame-line-strong: var(--hair-3);
+  --frame-hover: var(--ctl); --frame-accent: var(--acc); --frame-on-accent: var(--bg);
+  --frame-font: var(--f-ui); --frame-mono: var(--f-code); --frame-tap: var(--tap, 44px);
+  --frame-toast-lift: var(--hist-h);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 var(--t-m)/1.5 var(--f-ui);
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input { font: inherit; color: inherit; letter-spacing: inherit; }
+button { background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit; }
+h1, h2, h3, p, dl, dd, form { margin: 0; }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 10px; }
+code { font: 12.5px var(--f-code); color: var(--ink); background: var(--card-2);
+  border-radius: 5px; padding: 1px 5px; }
+
+/* the wordmark: its face in the text colour, its two shadows fainter */
+.wm {
+  display: block;
+  width: 92px;
+  height: auto;
+  color: var(--ink);
+  --wm2: color-mix(in srgb, var(--ink) 34%, transparent);
+  --wm3: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.wm1 { fill: currentColor; }
+.wm2 { fill: var(--wm2); }
+.wm3 { fill: var(--wm3); }
+
+/* the page: one container, phone first, a desktop from 820 px */
+.app, body.signin {
+  --px: 20px; --gap: 40px; --tap: 44px;
+}
+.app {
+  container: app / inline-size;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 1280px;
+  margin: 0 auto;
+  /* the room below the footer is the strip's: the footer's key line never runs over the bars */
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    calc(env(safe-area-inset-bottom, 0px) + var(--hist-h)) env(safe-area-inset-left, 0px);
+}
+.top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "wm . side" "devs devs devs";
+  align-items: center;
+  gap: 18px 12px;
+  padding: 18px var(--px) 0;
+}
+.top .wm { grid-area: wm; }
+.top .devs { grid-area: devs; }
+.top .side { grid-area: side; display: flex; align-items: center; justify-content: flex-end;
+  flex-wrap: wrap; gap: 8px 10px; }
+/* a phone: the header's middle track goes (its two gaps were 24 px) and the pills tighten, so the
+   wordmark, the effects button, the link pill and a guest's Sign in pill share one row at 360 px */
+@container app (max-width: 819px) {
+  .top { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "wm side" "devs devs";
+    column-gap: 8px; }
+  .top .side { gap: 8px 6px; }
+  .top .side .pill { padding: 0 14px; }
+  .top .side .link { padding: 7px 10px; }
+}
+#screen { flex: 1; padding: 18px var(--px) 22px; display: flex; flex-direction: column;
+  gap: var(--gap); }
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin: 0 var(--px);
+  padding: 14px 0 22px;
+  border-top: 1px solid var(--hair);
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.foot .ro { color: var(--warn); }
+.foot .link {
+  font: inherit;
+  color: var(--dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.foot .link:hover, .foot .link:focus-visible { color: var(--ink); }
+
+/* a pill: a button or a tag, round */
+.pill, .btn, .mute, .power {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--tap);
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-2);
+  font: 500 14.5px/1.2 var(--f-ui);
+  color: var(--ink);
+  transition: background .15s, border-color .15s, color .15s, transform .1s;
+}
+button.pill:hover, .btn:hover, .mute:hover, .power:hover, .step:hover {
+  border-color: var(--hair-3);
+}
+button.pill:active, .btn:active, .mute:active, .power:active, .step:active, .opt:active {
+  transform: scale(.97);
+}
+.pill.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.pill.primary:hover { background: #fff; }
+
+/* the sign-in page */
+body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28px var(--px); }
+.lg { display: grid; gap: 22px; width: 100%; max-width: 400px; margin: 0 auto; }
+.lg .wm { width: 140px; margin: 0 auto; }
+.lg h1 { font: var(--big-w) 38px/1.05 var(--f-big); letter-spacing: -.02em; text-align: center; }
+.lg .to { margin-top: -12px; text-align: center; font-size: var(--t-s); color: var(--dim); }
+.lg .to code { font-weight: 500; font-size: 13px; }
+.stack { display: grid; gap: 8px; }
+.lg label { font: 500 12.5px var(--f-ui); color: var(--faint); }
+.field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.field .pill { padding: 0 14px; }
+.lg input {
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 16px;
+  background: var(--card);
+  border: 1px solid var(--hair-2);
+  border-radius: 999px;
+}
+.lg input.code {
+  font: 400 24px var(--f-num);
+  letter-spacing: .42em;
+  text-align: center;
+  padding-left: calc(16px + .42em);
+}
+.hint { font-size: var(--t-s); color: var(--dim); }
+.rule { display: flex; align-items: center; gap: 12px; font-size: var(--t-s); color: var(--faint); }
+.rule::before, .rule::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+.said { min-height: 1.5em; font-size: var(--t-s); color: var(--err); text-align: center; }
+.said.warn { color: var(--warn); }
+
+/* the tone control: the mode track, the curve (display only), the presets and the bands */
+.tone { gap: 18px; container: tone / inline-size; }
+.tone > .seg { margin: 0; }
+.eqg {
+  position: relative; height: 172px; margin: 0; border-radius: 14px; overflow: hidden;
+  background: var(--glass); border: 1px solid var(--hair);
+  font: 500 10.5px/1 var(--f-ui); color: var(--faint); font-variant-numeric: tabular-nums;
+}
+.eqg .plot { position: absolute; left: 34px; right: 14px; top: 12px; bottom: 24px; }
+.eqg svg {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible;
+}
+.eqg .gl { fill: none; stroke: var(--hair); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.eqg .g0 { fill: none; stroke: var(--hair-3); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.eqg .line {
+  fill: none; stroke: var(--acc); stroke-width: 2; stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.eqg .area { fill: url(#eqfill); }
+.eqg .eqs0, .eqg .eqs2 { stop-color: var(--acc); stop-opacity: .26; }
+.eqg .eqs1 { stop-color: var(--acc); stop-opacity: .06; }
+.eqg .ghost {
+  fill: none; stroke: var(--dim); stroke-width: 1.2; opacity: .45;
+  vector-effect: non-scaling-stroke;
+}
+.eqg .peak {
+  stroke: color-mix(in srgb, var(--r-red) 85%, transparent); stroke-width: 1;
+  stroke-dasharray: 4 3; vector-effect: non-scaling-stroke;
+}
+.eqg .mk {
+  fill: var(--bg); stroke: var(--dim); stroke-width: 1.5; vector-effect: non-scaling-stroke;
+}
+/* a point under the mouse or a finger: the grab cursor within reach, the grabbing one during a
+   drag, the dragged point filled, and its label above it (placed by the page through --lx and
+   --ly); two fingers on the plot never zoom the page */
+.eqg .plot { user-select: none; touch-action: pan-x pan-y; }
+.eqg .plot.can-grab { cursor: grab; }
+.eqg .plot.grabbing { cursor: grabbing; }
+.eqg .mk.on { fill: var(--acc); stroke: var(--ink); r: 7px; }
+.eqg .dlab {
+  position: absolute; left: calc(var(--lx, 0) * 1px); top: calc(var(--ly, 0) * 1px);
+  padding: 3px 7px; border-radius: 7px; pointer-events: none; white-space: nowrap;
+  color: var(--ink); background: color-mix(in srgb, var(--bg) 90%, transparent);
+  border: 1px solid var(--hair-3);
+}
+/* the peak's words sit in the margin above the plot, where no axis label is */
+.eqg .pkt { position: absolute; right: 14px; top: 1px; color: var(--r-red); white-space: nowrap; }
+.eqg .gx, .eqg .gy { position: absolute; pointer-events: none; }
+.eqg .gx { top: calc(100% + 7px); transform: translateX(-50%); white-space: nowrap; }
+.eqg .gx.x0 { transform: none; }
+.eqg .gy { right: calc(100% + 8px); transform: translateY(-50%); }
+.eqg .x0 { left: 0; }
+.eqg .x100 { left: 23.3%; }
+.eqg .x1k { left: 56.63%; }
+.eqg .x10k { left: 89.97%; }
+.eqg .y12 { top: 3.85%; }
+.eqg .y6 { top: 26.9%; }
+.eqg .y0 { top: 50%; }
+.eqg .ym6 { top: 73.1%; }
+.eqg .ym12 { top: 96.15%; }
+.tone .row .val {
+  font: var(--big-w) var(--t-l)/1 var(--f-big); font-variant-numeric: tabular-nums;
+}
+
+.presets { display: grid; gap: 8px; }
+.presets h3 { font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); letter-spacing: .01em; }
+.presets h4 { margin-top: 6px; font: 500 var(--t-xs) var(--f-ui); color: var(--faint); }
+.pstat { font-size: var(--t-s); color: var(--dim); min-width: 0; overflow-wrap: anywhere; }
+.pstat strong { color: var(--acc); font-weight: 500; }
+.prow {
+  display: flex; align-items: center; gap: 6px; min-height: 50px; min-width: 0;
+  border-bottom: 1px solid var(--hair);
+}
+.pre {
+  flex: 1; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center;
+  gap: 14px; min-height: 50px; padding: 4px 4px 4px 2px; min-width: 0; text-align: left;
+  color: var(--dim); border-radius: 10px; transition: color .15s;
+}
+.prow.slot .lamp { visibility: hidden; }
+.pre .lamp {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--seg-off);
+  transition: background .2s, box-shadow .2s;
+}
+.pre span {
+  font: 400 var(--t-m)/1.3 var(--f-ui); min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pre small { font: 500 var(--t-xs) var(--f-ui); color: var(--faint); }
+.pre:hover { color: var(--ink); }
+.pre[aria-pressed=true] { color: var(--ink); }
+.pre[aria-pressed=true] .lamp {
+  background: var(--acc); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 60%, transparent);
+}
+.pre[aria-disabled=true] { cursor: default; }
+.pre[aria-disabled=true]:hover { color: var(--dim); }
+.pre[aria-disabled=true][aria-pressed=true]:hover { color: var(--ink); }
+.ronote { font-size: var(--t-s); color: var(--faint); line-height: 1.45; }
+
+.bands { display: grid; font-variant-numeric: tabular-nums; }
+.bh, .band {
+  display: grid; grid-template-columns: 3.2em minmax(0, 1.2fr) minmax(0, 1.15fr) minmax(0, .7fr);
+  gap: 8px; align-items: center;
+}
+.bh { padding: 0 12px 6px; font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); }
+.bh span:not(:first-child), .band span:not(:first-child) { text-align: right; }
+.band {
+  min-height: var(--tap); padding: 0 12px; border-radius: 12px; text-align: left;
+  font: 400 14.5px var(--f-num); color: var(--dim); transition: color .15s, background .15s;
+}
+.band span:first-child { font: 500 var(--t-xs) var(--f-ui); color: var(--faint); }
+.band:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.band[aria-pressed=true] {
+  color: var(--ink); background: color-mix(in srgb, var(--acc) 12%, transparent);
+}
+.band[aria-pressed=true] span:first-child { color: var(--acc); }
+.band[aria-disabled=true] { cursor: default; }
+.bands.faint .band:not([aria-pressed=true]) { color: var(--faint); }
+.bedit { display: grid; gap: 6px; padding: 10px 12px 4px; }
+.bedit[hidden] { display: none; }
+.bedit h4 { font: 500 var(--t-xs) var(--f-ui); color: var(--acc); }
+.stp {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(7.5em, auto) auto;
+  align-items: center; gap: 10px; min-height: 52px;
+}
+.stp .lbl { color: var(--dim); font-size: var(--t-s); }
+.stp .v {
+  min-height: var(--tap); padding: 0 6px; text-align: center; white-space: nowrap;
+  font: var(--big-w) 19px/1 var(--f-big); font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.stp .v input {
+  width: 7.5em; min-height: var(--tap); text-align: center; background: transparent;
+  color: var(--ink); border: 0; border-bottom: 1px solid var(--acc); font: inherit;
+}
+.psave { display: grid; gap: 10px; justify-items: start; }
+.pform {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 6px 0;
+  border-bottom: 1px solid var(--hair);
+}
+.pform[hidden] { display: none; }
+.pform input {
+  flex: 1 1 12em; min-width: 0; min-height: var(--tap); background: transparent;
+  color: var(--ink); border: 0; border-bottom: 1px solid var(--hair-2);
+  font: var(--t-m) var(--f-ui);
+}
+.pform input:focus { border-bottom-color: var(--acc); outline: none; }
+.pform > p { flex: 1 1 12em; margin: 0; font-size: var(--t-s); color: var(--ink); }
+.ico {
+  display: inline-grid; place-items: center; flex: none; width: 44px; height: 44px;
+  border-radius: 50%; color: var(--faint); transition: color .15s, background .15s;
+}
+.ico svg {
+  width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ico:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.btn.danger { border-color: color-mix(in srgb, var(--r-red) 55%, transparent); color: var(--err); }
+.btn.danger:hover { background: color-mix(in srgb, var(--r-red) 12%, transparent); }
+@media (max-width: 559px) {
+  .stp { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .stp .lbl { grid-column: 1 / -1; }
+}
+@media (min-width: 560px) {
+  .bedit { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 18px; }
+  .bedit h4 { grid-column: 1 / -1; }
+  .stp { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .stp .lbl { grid-column: 1 / -1; }
+}
+
+/* the strip along the bottom of the page, drawn from the daemon's ring by the page's script: in
+   the band .app leaves under the footer, behind the content */
+.app { position: relative; isolation: isolate; }
+.hist {
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--hist-h); width: 100%; z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%);
+  mask-image: linear-gradient(90deg, transparent, #000 30%);
+}
+
+@container app (min-width: 820px) {
+  .app > * { --px: 48px; --gap: 44px; --tap: 40px; }
+  .wm { width: 108px; }
+}
+
+/* the device switcher and the link pill */
+.devs { display: flex; gap: 28px; align-items: end; flex-wrap: wrap; }
+.dev {
+  display: grid; gap: 4px; min-height: 52px; align-content: end; color: var(--faint);
+  text-decoration: none; transition: color .2s;
+}
+.dev b { font: 500 25px/1.05 var(--f-title); letter-spacing: -.01em; }
+.dev small { font: 500 var(--t-xs)/1 var(--f-ui); display: flex; align-items: center; gap: 6px; }
+.dev small::before {
+  content: ""; width: 7px; height: 7px; flex: none; border-radius: 50%;
+  background: var(--fam); opacity: .55; transition: opacity .2s;
+}
+.dev.dac { --fam: var(--dac); }
+.dev.amp { --fam: var(--amp); }
+.dev.preamp { --fam: var(--preamp); }
+.dev:hover { color: var(--dim); }
+.dev[aria-current=page], .dev.one { color: var(--ink); }
+.dev[aria-current=page] small, .dev.one small { color: var(--dim); }
+.dev[aria-current=page] small::before, .dev.one small::before { opacity: 1; }
+/* where the frame's menu button sits: an empty slot of its size in the header, before the link
+   pill, which the frame draws the button over */
+.fxslot { display: inline-block; width: var(--frame-btn-size); height: var(--frame-btn-size);
+  flex: none; }
+.top .link {
+  display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  font: 500 13px/1 var(--f-ui); color: var(--dim);
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--hair);
+}
+.link i {
+  position: relative; width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 16%, transparent);
+}
+.link.wait, .link.off {
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.link.wait i, .link.off i {
+  background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+/* the screen: a DAC in two columns, an amp meters first */
+.view {
+  position: relative; display: grid; gap: var(--gap); align-content: start; isolation: isolate;
+  overflow-x: clip; margin-inline: -8px; padding-inline: 8px;
+  --acc: var(--dac);
+}
+.view[data-family=amp] { --acc: var(--amp); }
+.view[data-family=preamp] { --acc: var(--preamp); }
+.view .col { display: grid; gap: var(--gap); align-content: start; min-width: 0; }
+.view section { display: grid; gap: 18px; align-content: start; min-width: 0; position: relative; }
+.view h2, .card h2 { font: 500 var(--t-xl)/1.2 var(--f-title); letter-spacing: -.005em; }
+.view.away > :not(.card, .p-facts) {
+  opacity: .36; filter: grayscale(.75); transition: opacity .3s, filter .3s;
+}
+/* the effects layer: fixed to the viewport behind the whole page, so no column clips the glow;
+   the script centres the glow on what it glows behind (the dial of a DAC, the meters of an amp)
+   and carries the content column's width, a screen without either keeps the fallback */
+.fx {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100vh; height: 100lvh; overflow: hidden;
+  pointer-events: none; --lvl: .4;
+}
+.glow {
+  position: absolute; left: var(--fx-x, 50%); top: var(--fx-y, 170px);
+  width: min(calc(var(--fx-col, 400px) * 1.6), 760px); aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  opacity: calc(.22 + .78 * var(--lvl));
+  background:
+    radial-gradient(32% 30% at 38% 40%,
+      color-mix(in srgb, var(--glow-1) 21%, transparent), transparent),
+    radial-gradient(30% 34% at 64% 58%,
+      color-mix(in srgb, var(--glow-2) 17.5%, transparent), transparent),
+    radial-gradient(26% 24% at 52% 30%,
+      color-mix(in srgb, var(--glow-3) 12%, transparent), transparent);
+}
+.fx.away .glow { filter: grayscale(1); opacity: .25; }
+/* until the script sets the level, the glow waits; it appears at once, at its level and place,
+   and only the level changes after that fade (the script adds .settled a frame later) */
+.fx:not([data-level]) .glow { opacity: 0; }
+.fx.settled .glow { transition: opacity 1s; }
+/* while the music adds to the level, the glow keeps up with it */
+.fx.settled.hearing .glow { transition-duration: .3s; }
+.fx[data-level=smoke] .glow, .fx[data-level=off] .glow { display: none; }
+.fx .smoke { position: absolute; inset: 0; width: 100%; height: 100%; }
+.note { font-size: var(--t-s); line-height: 1.45; color: var(--dim); text-wrap: pretty; }
+.note.risk { transition: color .3s; }
+.note.risk.hot { color: var(--r-red); }
+.lbl { font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); letter-spacing: .01em; }
+
+/* a card above the view: a lost link, a fault, a refusal, a device not seen yet */
+.card {
+  display: grid; gap: 6px 16px; padding: 14px 16px 12px; border-radius: 16px;
+  border: 1px solid var(--hair-2); background: var(--card);
+}
+.card h2 { font-size: 20px; }
+.card p { font-size: 14px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.card.warn { border-color: color-mix(in srgb, var(--warn) 28%, transparent);
+  background: color-mix(in srgb, var(--warn) 5%, var(--bg)); }
+.card.warn p { color: var(--warn); }
+.card.fault { border-color: color-mix(in srgb, var(--r-red) 40%, transparent);
+  background: color-mix(in srgb, var(--r-red) 6%, var(--bg)); }
+.card.fault p { color: var(--err); }
+.card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
+.card.fault li { color: var(--err); }
+.card.fault li strong { font-weight: 600; margin-right: 4px; }
+.card .btn { justify-self: start; margin-top: 8px; }
+.countdown { display: block; height: 3px; border-radius: 2px; background: var(--seg-off);
+  overflow: hidden; margin-top: 8px; }
+.countdown i { display: block; height: 100%; width: var(--rp, 100%); background: var(--warn);
+  border-radius: 2px; transition: width 1s linear; }
+
+/* Now playing and the visualizer. A desktop gets a band under the header, full width, of a height
+   fixed here so the visualizer beside Now playing moves nothing when it starts; a phone gets a
+   compact Now playing line (cover thumbnail, title, artist, play/pause, a thin bar) that a tap
+   opens into the whole card, and the visualizer under the volume. The cover's box is always
+   there, empty when there is no cover, and the player going leaves the card's box as it was:
+   nothing around it moves. */
+.view, .p-band { --band-h: 240px; }
+.p-band { min-width: 0; }
+.p-playing {
+  --cover: 48px;
+  position: relative; display: block; min-width: 0; border-radius: 16px;
+  border: 1px solid var(--hair-2); background: var(--glass); padding: 10px 14px 14px;
+}
+.np { display: grid; gap: 12px; min-width: 0; }
+.np-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center;
+  gap: 12px; min-width: 0;
+}
+.np-cover { width: var(--cover); height: var(--cover); border-radius: 9px; overflow: hidden; }
+.np-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.np-who { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 0; }
+.np-title, .np-artist, .np-source {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.np-title { font: 500 var(--t-m)/1.3 var(--f-title); }
+.np-artist { font-size: var(--t-s); line-height: 1.35; color: var(--dim); }
+.np-source { display: none; font-size: var(--t-xs); line-height: 1.35; color: var(--faint); }
+.np-trans { display: flex; align-items: center; gap: 8px; }
+.np-btn {
+  display: grid; place-items: center; width: var(--tap); height: var(--tap); flex: none;
+  border-radius: 50%; border: 1px solid var(--hair-2); color: var(--ink);
+  transition: border-color .15s, background .15s;
+}
+.np-btn:hover {
+  border-color: var(--hair-3); background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.np-btn svg { width: 18px; height: 18px; fill: currentColor; }
+.np-btn.prev, .np-btn.next { display: none; }
+.np-fold {
+  display: grid; place-items: center; width: 32px; height: var(--tap); color: var(--faint);
+}
+.np-fold svg {
+  width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; transition: transform .15s;
+}
+.p-playing[data-expanded] .np-fold svg { transform: rotate(180deg); }
+.np-prog {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+}
+.np-t { min-width: 4ch; font: 12px/1 var(--f-num); color: var(--dim); }
+.np-t.np-len { text-align: right; }
+.np-bar {
+  display: block; height: 4px; border-radius: 3px; background: var(--seg-off); overflow: hidden;
+}
+.np-bar i {
+  display: block; width: var(--p, 0%); height: 100%; border-radius: 3px; background: var(--acc);
+}
+.np-path {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px;
+  font-size: 12.5px; line-height: 1.3; color: var(--dim);
+}
+.np-hop, .np-verdict {
+  border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
+}
+.np-hop + .np-hop::before { content: "→ "; color: var(--faint); }
+/* a hop that does not fit stays for a screen reader, out of sight; the dots chip ends the row */
+.np-cut {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.np-more {
+  border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
+  color: var(--faint);
+}
+.np-hop b { font-weight: 500; color: var(--faint); }
+.np-hop.changes {
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.np-path.ok .np-verdict {
+  color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent);
+}
+.np-path.ok .np-verdict::after { content: " ✓"; }
+.np-path.changed .np-verdict {
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.p-playing.idle { display: flex; align-items: center; height: 72px; padding-block: 0; }
+.np-none { font: var(--t-s)/1.4 var(--f-ui); color: var(--faint); }
+
+/* the visualizer: a fixed box (its height is the band's on a desktop, 180 px on a phone), the
+   canvas filling it, the face a button that a tap or Enter turns to the next look. What stands on
+   the canvas: the chip that names the look, the graph toggle, the quiet line when nothing can be
+   captured and the sink's name when it is not this page's DAC. The card is translucent like
+   Now playing and the tone control's panels (`--glass`) and the canvas paints no ground, so the
+   smoke shows through where nothing is drawn. */
+.p-viz {
+  position: relative; min-width: 0; overflow: hidden; border-radius: 16px;
+  border: 1px solid var(--hair-2); background: var(--glass);
+}
+.viz-face { display: block; width: 100%; height: 100%; border-radius: inherit; cursor: pointer; }
+.viz-face canvas { display: block; width: 100%; height: 100%; }
+.viz-face:focus-visible { outline: 2px solid var(--acc); outline-offset: -3px; }
+.viz-chip, .viz-graph, .viz-sink {
+  position: absolute; font: 500 11px/1 var(--f-ui); color: rgba(255, 255, 255, .7);
+  background: rgba(0, 0, 0, .4); padding: 5px 10px; border-radius: 99px;
+}
+.viz-chip { left: 10px; top: 8px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+.viz-chip.show { opacity: 1; }
+.viz-graph {
+  right: 10px; top: 8px; color: rgba(255, 255, 255, .5); border: 1px solid rgba(255, 255, 255, .16);
+  transition: color .15s, border-color .15s;
+}
+.viz-graph[aria-pressed=true] { color: rgba(255, 255, 255, .78); }
+.viz-graph[aria-pressed=true]::after { content: " ✓"; }
+.viz-graph:hover { border-color: rgba(255, 255, 255, .34); }
+.viz-graph:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+@media (pointer: coarse) { .viz-graph { padding: 9px 13px; } }
+.viz-note {
+  position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 0 28px;
+  text-align: center; font: var(--t-s)/1.4 var(--f-ui); color: var(--faint); pointer-events: none;
+}
+.viz-sink {
+  left: 10px; bottom: 8px; max-width: calc(100% - 20px); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; margin: 0; color: rgba(255, 255, 255, .55);
+  pointer-events: none;
+}
+.viz-note[hidden], .viz-sink[hidden] { display: none; }
+/* the visualizer switched off (viz-pref.js says so before the first paint, visualizer.js takes the
+   card out of the screen): no card; on a desktop Now playing has the whole band, at the lower
+   height that still holds a changed path's chips */
+html[data-viz=off] .p-viz { display: none; }
+
+/* a phone: the folded line is 72 px tall whatever the player says, its time only a thin bar along
+   the foot; open, it shows the whole card with the transport on a row of its own. The band
+   dissolves into the screen's own column so the visualizer can stand under the volume: the
+   columns do too, and the parts are ordered (Now playing, the volume or the meters, the
+   visualizer, the rest, the Device fold-out). */
+@container app (max-width: 819px) {
+  html:not([data-viz=off]) .view:has(.p-viz) :is(.p-band, .col) { display: contents; }
+  .p-viz { height: 180px; }
+  .view:not(.arranged) .p-viz { order: 1; }
+  /* the volume holds a room for the tone control's note below its buttons, so it already stands
+     off from what follows: the card takes the screen's gap out of that, not on top of it */
+  .view:not(.arranged):has(sv-knob .notes.room) .p-viz { margin-top: calc(-1 * var(--gap)); }
+  .view:not(.arranged):has(.p-viz) .col > :not(#part-volume, #part-meters, .p-viz) { order: 2; }
+  .view:has(.p-viz) .p-facts { order: 3; }
+  .view.away:has(.p-viz) :is(.p-band, .col) > * {
+    opacity: .36; filter: grayscale(.75); transition: opacity .3s, filter .3s;
+  }
+  .p-playing { margin-bottom: -18px; }
+  .view.arranged .p-playing { margin-bottom: 0; }
+  .p-playing:not([data-expanded], .idle) { height: 72px; cursor: pointer; }
+  .p-playing:not([data-expanded]) .np-prog {
+    position: absolute; left: 14px; right: 34px; bottom: 7px; display: block;
+  }
+  /* the folded line's transport: a round play and a bare next (previous waits for the open card),
+     and the fold arrow, small and quiet, in the corner where the thin bar stops short of it */
+  .p-playing:not([data-expanded]) .np-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .p-playing:not([data-expanded]) .np-trans { gap: 2px; }
+  .p-playing:not([data-expanded]) .np-btn.go { width: 40px; height: 40px; }
+  .p-playing:not([data-expanded]) .np-btn.next {
+    display: grid; width: 32px; height: var(--tap); border-color: transparent; border-radius: 0;
+  }
+  .p-playing:not([data-expanded]) .np-btn.next:hover { background: none; }
+  .p-playing:not([data-expanded]) .np-fold {
+    position: absolute; right: 8px; bottom: 0; width: 22px; height: 14px;
+  }
+  .p-playing:not([data-expanded]) .np-fold svg { width: 14px; height: 14px; }
+  /* the folded title is one line that fades over its last 14 px in place of "…" (from the first
+     paint, with no script; a title that fits is touched only if it ends in those 14 px); the script
+     marks one that is cut, whose text scrolls in a loop after a copy of itself */
+  .p-playing:not([data-expanded]) .np-title {
+    text-overflow: clip;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 14px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 14px), transparent);
+  }
+  .np-title.cut > span { display: inline-block; }
+  .np-copy { user-select: none; -webkit-user-select: none; pointer-events: none; }
+  .p-playing:not([data-expanded]) :is(.np-t, .np-path) { display: none; }
+  .p-playing:not([data-expanded]) .np-bar { height: 3px; }
+  .p-playing[data-expanded] { --cover: 72px; padding: 12px 14px 14px; }
+  .p-playing[data-expanded] .np-title { font-size: var(--t-l); white-space: normal; }
+  .p-playing[data-expanded] .np-source { display: block; }
+  .p-playing[data-expanded] .np-trans {
+    grid-column: 1 / -1; grid-row: 2; justify-content: center;
+  }
+  .p-playing[data-expanded] :is(.np-btn.prev, .np-btn.next) { display: grid; }
+  .p-playing[data-expanded] .np-btn.go { width: 52px; height: 52px; }
+}
+
+/* a desktop: a band across the page, a fixed height, Now playing on the left and the visualizer
+   on the right; below about 1100 px Now playing takes three fifths so a changed path still fits */
+@container app (min-width: 820px) {
+  .p-band {
+    grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 24px;
+  }
+  .p-viz { height: var(--band-h); }
+  .p-playing {
+    --cover: 64px; height: var(--band-h); padding: 16px 22px; overflow: hidden;
+  }
+  .p-playing.idle { height: var(--band-h); }
+  .np { height: 100%; grid-template-rows: auto auto minmax(0, 1fr); gap: 12px; }
+  .np-head { grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; }
+  .np-fold { display: none; }
+  .np-title { font-size: 21px; }
+  .np-artist { font-size: var(--t-m); }
+  .np-source { display: block; }
+  .np-btn.prev, .np-btn.next { display: grid; }
+  .np-btn.go { width: 52px; height: 52px; }
+  .np-path { align-content: start; }
+}
+
+@container app (min-width: 1100px) {
+  .p-band { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .p-playing { --cover: 84px; }
+}
+/* the band's path chips are set smaller, so a changed path (the verdict, then each hop) sits
+   inside Now playing's half of the 240 px; below 1100 px, where it is narrower, so is the title */
+@container app (min-width: 820px) {
+  .np { gap: 8px; }
+  .p-playing .np-path { gap: 5px; font-size: 11.5px; min-height: 0; }
+  .p-playing :is(.np-hop, .np-verdict, .np-more) { padding: 2px 8px; }
+}
+@container app (min-width: 820px) and (max-width: 1099px) {
+  .p-playing .np-title { font-size: 18px; }
+  .p-playing .np-head { gap: 14px; }
+}
+/* the visualizer off: Now playing alone across the whole band, at the least fixed height that
+   still holds a changed path's two rows of chips (measured at 820 and at 1100, where the cover
+   grows from 64 to 84 px); playing.py checks that every chip stands inside it */
+@container app (min-width: 820px) {
+  html[data-viz=off] .p-band { grid-template-columns: minmax(0, 1fr); --band-h: 168px; }
+}
+@container app (min-width: 1100px) {
+  html[data-viz=off] .p-band { --band-h: 188px; }
+}
+
+/* buttons */
+.step {
+  display: inline-grid; place-items: center; width: var(--tap); height: var(--tap); flex: none;
+  border-radius: 50%; border: 1px solid var(--hair-2); font: 300 24px/1 var(--f-ui);
+  color: var(--ink); transition: border-color .15s, background .15s, transform .1s;
+}
+.step.big { width: 52px; height: 52px; font-size: 28px; }
+.step:active {
+  background: color-mix(in srgb, var(--acc) 18%, transparent); border-color: var(--acc);
+}
+.mute { min-width: 128px; min-height: 52px; }
+.mute[aria-pressed=true], .power[aria-pressed=true] {
+  background: var(--acc); border-color: var(--acc); color: var(--on-acc);
+}
+[aria-disabled=true] { cursor: default; }
+[aria-disabled=true]:hover { border-color: var(--hair-2); }
+.opt[aria-disabled=true]:hover { background: none; color: var(--dim); }
+
+/* the volume: a knob, its readout in its middle, its buttons and notes under */
+.p-vol { justify-items: center; gap: 20px; padding-top: 4px; }
+sv-knob {
+  --dial-w: 330px; display: grid; justify-items: center; gap: 20px; width: var(--dial-w);
+  max-width: 100%; container-type: inline-size; position: relative;
+}
+.dial {
+  grid-area: 1 / 1; display: block; width: 100%; height: auto; overflow: visible;
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none;
+}
+.dial[data-zone=centre] { cursor: ns-resize; }
+.dial[data-zone=ring] { cursor: pointer; }
+.dial[data-zone=turn] { cursor: grabbing; }
+.dial[aria-disabled=true] { cursor: default; }
+/* while the volume climbs slowly the page says it is busy; the dial still says how it moves */
+body.climbing, body.climbing * { cursor: progress; }
+body.climbing .dial { cursor: grab; }
+body.climbing .dial * { cursor: inherit; }
+body.climbing .dial[data-zone=centre] { cursor: ns-resize; }
+body.climbing .dial[data-zone=turn] { cursor: grabbing; }
+body.climbing .dial[aria-disabled=true] { cursor: default; }
+.dial .track { fill: none; stroke: var(--hair-2); stroke-width: 1.4; stroke-linecap: round; }
+.dial .zone {
+  fill: none; stroke: var(--r-red); stroke-width: 1.4; stroke-linecap: round; opacity: .75;
+}
+.dial .value { fill: none; stroke: url(#ramp-h); stroke-width: 2.6; stroke-linecap: round; }
+.dial .target { fill: none; stroke: var(--r-target); stroke-width: 2.6; stroke-linecap: round;
+  stroke-dasharray: 1 5; opacity: .75; }
+.g0 { stop-color: var(--r-gold); } .g1 { stop-color: var(--r-gold-2); }
+.g2 { stop-color: var(--r-amber); } .g3 { stop-color: var(--r-amber-2); }
+.g4 { stop-color: var(--r-copper); }
+.dial .tick { stroke-width: 2.4; stroke-linecap: round; stroke: var(--seg-off); }
+.dial .tick.off.zone { stroke: var(--seg-off-red); }
+.dial .tick.off.cap { stroke: var(--seg-off); opacity: .35; }
+.dial .tick.lit.r0 { stroke: var(--r-gold); } .dial .tick.lit.r1 { stroke: var(--r-gold-2); }
+.dial .tick.lit.r2 { stroke: var(--r-amber); } .dial .tick.lit.r3 { stroke: var(--r-amber-2); }
+.dial .tick.lit.r4 { stroke: var(--r-copper); } .dial .tick.lit.red { stroke: var(--r-red); }
+.dial .ltick { stroke: var(--hair-3); stroke-width: 1; stroke-linecap: round; }
+.dial .lbl { fill: var(--faint); font: 500 10px var(--f-ui); font-variant-numeric: tabular-nums;
+  text-anchor: middle; dominant-baseline: middle; }
+.dial .lbl.red { fill: var(--r-red); }
+.dial .ltick.red { stroke: var(--r-red); }
+.dial .ttick { stroke: var(--r-target); stroke-width: 2.6; stroke-linecap: round; }
+.dial .ctick { stroke: var(--hair-3); stroke-width: 2.6; stroke-linecap: round; }
+.dial .handle { fill: var(--ink); stroke: var(--bg); stroke-width: 3; }
+.dial:focus-visible .handle { stroke: var(--acc); stroke-width: 2.2; }
+sv-knob.muted .dial :is(.tick.lit, .value) { opacity: .28; }
+sv-knob.muted .dial .handle { fill: var(--faint); }
+sv-knob p.big {
+  grid-area: 1 / 1; align-self: start; margin-top: 44.6cqi; transform: translateY(-50%);
+  position: relative; display: flex; align-items: baseline; justify-content: center;
+  pointer-events: none; font-family: var(--f-big); font-weight: var(--big-w);
+}
+sv-knob .num {
+  position: relative; font-size: 15.5cqi; line-height: 1; letter-spacing: -.025em;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+/* the minus hangs outside the digits, smaller and level with their middle, as the unit hangs
+   right of them */
+sv-knob .num .neg {
+  position: absolute; right: 100%; top: 0; margin-right: .04em; font-size: .7em;
+  transform: translateY(.2em);
+}
+sv-knob .unit {
+  position: absolute; left: 100%; bottom: .12em; margin-left: .35em;
+  font: 500 4.4cqi/1 var(--f-ui); color: var(--dim);
+}
+sv-knob .sub {
+  grid-area: 1 / 1; align-self: start; margin-top: 54cqi; pointer-events: none;
+  font: 500 4.1cqi/1.2 var(--f-ui); color: var(--r-target); min-height: 1.2em; white-space: nowrap;
+}
+sv-knob.muted .num { color: var(--faint); }
+sv-knob.muted .sub { color: var(--dim); }
+.vol-btns { display: flex; justify-content: center; align-items: center; gap: 18px; }
+/* the notes: the EQ's has a slot of two lines where a tone control can show it, so its coming
+   leaves the cap's note and the page below where they are; nothing is drawn with no note */
+sv-knob .notes { display: grid; gap: 8px; justify-items: center; }
+sv-knob .notes:not(.room):not(:has(.note)) { display: none; }
+sv-knob .notes .slot:not(:has(.note)) { display: none; }
+sv-knob .notes.room .slot {
+  display: grid; min-height: calc(2 * 1.45 * var(--t-s)); align-content: start;
+}
+sv-knob .notes .rest { display: grid; gap: 8px; justify-items: center; }
+sv-knob .note { text-align: center; max-width: 36ch; text-wrap: balance; }
+
+/* the controls */
+.controls { gap: 18px; }
+.row { display: grid; gap: 10px; min-width: 0; }
+.row > .seg, .tone > .seg {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 3px;
+  border-radius: 999px; background: var(--card); border: 1px solid var(--hair);
+}
+.opt {
+  display: flex; align-items: center; justify-content: center; min-height: var(--tap);
+  padding: 0 6px; border-radius: 999px; color: var(--dim); font: 500 14px/1.15 var(--f-ui);
+  text-align: center; transition: background .18s, color .18s, transform .1s;
+}
+.tone > .seg { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* where an equal third is too narrow for "Loudness" and "strength 127" between the round buttons
+   (a segment under 412 px), the Loudness button is wider, in every mode */
+@container tone (max-width: 411px) {
+  .tone > .seg { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr); }
+}
+.optw { position: relative; display: grid; min-width: 0; }
+.seg.loud .opt { padding: 0 34px; }
+.seg.loud .opt[data-mode=loudness] { flex-direction: column; gap: 1px; }
+.lv { font: 400 11px/1.1 var(--f-ui); opacity: .85; white-space: nowrap; }
+.rb {
+  position: absolute; top: 50%; width: 30px; height: 30px; margin-top: -15px; padding: 0;
+  display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  font: 500 18px/1 var(--f-ui); color: var(--on-acc); transition: background .18s, transform .1s;
+  background: color-mix(in srgb, var(--on-acc) 20%, transparent);
+}
+.rb::after {
+  content: ""; position: absolute; left: -4px; right: -4px;
+  top: calc((30px - var(--tap)) / 2); bottom: calc((30px - var(--tap)) / 2);
+}
+.rb:focus-visible { border-radius: 50%; outline-offset: 2px; }
+.rb:first-child { left: 4px; }
+.rb:last-child { right: 4px; }
+.rb:hover { background: color-mix(in srgb, var(--on-acc) 34%, transparent); }
+.rb:active { transform: scale(.94); }
+.rb[aria-disabled=true]:hover { background: color-mix(in srgb, var(--on-acc) 20%, transparent); }
+.opt:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.opt[aria-pressed=true] { background: var(--acc); color: var(--on-acc); }
+.row select {
+  display: block; width: 100%; min-height: var(--tap); margin-top: 6px; padding: 0 12px;
+  border-radius: 999px; background: var(--card); border: 1px solid var(--hair-2); color: var(--ink);
+}
+.row select:disabled { opacity: .6; cursor: default; }
+.r-bal .head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.r-bal .val {
+  font: var(--big-w) var(--t-l)/1 var(--f-big); color: var(--ink); min-height: var(--tap);
+  padding: 0 12px; margin-right: -12px; border-radius: 999px; font-variant-numeric: tabular-nums;
+}
+.r-bal .val:hover { background: var(--card-2); }
+sv-slider { display: grid; gap: 10px; }
+.bal {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px;
+}
+.bal > span { font-size: var(--t-xs); color: var(--faint); }
+.bslider { display: block; width: 100%; height: var(--tap); touch-action: none; cursor: pointer;
+  overflow: visible; }
+.bslider .b-track { stroke: var(--hair-2); stroke-width: 2; stroke-linecap: round; }
+.bslider .b-mid { stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
+.bslider .b-fill { stroke: var(--acc); stroke-width: 4; stroke-linecap: round; }
+.bslider .b-thumb { fill: var(--ink); stroke: var(--bg); stroke-width: 4; }
+.bslider[aria-disabled=true] { cursor: default; }
+.sws { display: grid; grid-template-columns: 1fr; gap: 4px 24px; }
+.sw {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: var(--tap); text-align: left; font-size: var(--t-m);
+}
+.sw .tg {
+  position: relative; width: 42px; height: 26px; border-radius: 999px; flex: none;
+  border: 1px solid var(--hair-2); transition: background .2s, border-color .2s;
+}
+.sw .tg::after {
+  content: ""; position: absolute; top: 5px; left: 5px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--dim); transition: transform .2s, background .2s;
+}
+.sw:hover .tg { border-color: var(--hair-3); }
+.sw[aria-checked=true] .tg { background: var(--acc); border-color: var(--acc); }
+.sw[aria-checked=true] .tg::after { transform: translateX(16px); background: var(--on-acc); }
+.readout { display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+  padding-top: 12px; border-top: 1px solid var(--hair); }
+.readout dt { font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); }
+.readout dd { font: var(--big-w) var(--t-l)/1.3 var(--f-big); font-variant-numeric: tabular-nums; }
+.readout dd.good { color: var(--good); }
+.readout dd.faint { color: var(--faint); }
+
+/* the Device fold-out: closed it is one quiet line at the foot of the screen; open it holds the
+   device's facts and every reading it reports, which the page ages itself */
+.view .p-facts { grid-column: 1 / -1; display: block; border-top: 1px solid var(--hair); }
+.device-facts > summary {
+  display: flex; align-items: center; gap: 10px; min-height: var(--tap); cursor: pointer;
+  font: 500 var(--t-m) var(--f-ui); color: var(--dim); list-style: none;
+}
+.device-facts > summary::-webkit-details-marker { display: none; }
+.device-facts > summary::before {
+  content: ""; width: 7px; height: 7px; flex: none; transform: rotate(-45deg);
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transition: transform .15s;
+}
+.device-facts[open] > summary::before { transform: rotate(45deg); }
+.device-facts > summary:hover { color: var(--ink); }
+.device-facts .facts { display: grid; gap: 0 40px; padding-bottom: 12px; }
+.device-facts .facts .readout:first-child { border-top: 0; }
+.device-facts .readout dd.mono { font: 12.5px var(--f-code); }
+.device-facts .readout dd { text-align: right; overflow-wrap: anywhere; }
+.device-facts .readout dd.warn { color: var(--warn); }
+.device-facts h3 {
+  font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); letter-spacing: .01em;
+  padding: 12px 0 6px; border-top: 1px solid var(--hair);
+}
+.readings { width: 100%; border-collapse: collapse; font-size: var(--t-s); }
+.readings th {
+  font: 500 12px/1.3 var(--f-ui); color: var(--faint); text-align: left; padding: 4px 8px 6px 0;
+}
+.readings td {
+  padding: 5px 8px 5px 0; border-top: 1px solid var(--hair); vertical-align: baseline;
+}
+.readings td.id { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.readings td.val { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.readings td.age { color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap;
+  text-align: right; padding-right: 0; }
+.readings th:last-child { text-align: right; padding-right: 0; }
+.device-facts .identify { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 16px 0 14px; }
+
+/* an amp: its meters, its power */
+.p-meters { gap: 20px; }
+.meters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.meter {
+  margin: 0; display: grid; justify-items: center; gap: 4px; min-width: 0; position: relative;
+}
+.meter svg { display: block; width: 100%; max-width: 300px; height: auto; }
+.meter .seg { stroke-width: 2.6; stroke-linecap: round; stroke: var(--seg-off); }
+.meter .seg.red { stroke: var(--seg-off-red); }
+.meter .seg.on.brass { stroke: var(--r-brass); }
+.meter .seg.on.red { stroke: var(--r-red); }
+.meter .seg.on.ramp { stroke: var(--r-amber); }
+.meter .seg.on.ramp:nth-child(-n+12) { stroke: var(--r-gold); }
+.meter .seg.on.ramp:nth-child(n+13):nth-child(-n+18) { stroke: var(--r-gold-2); }
+.meter .seg.on.ramp:nth-child(n+19):nth-child(-n+24) { stroke: var(--r-amber-2); }
+.meter .seg.on.ramp:nth-child(n+25) { stroke: var(--r-copper); }
+.meter .seg.peak { stroke: var(--ink); }
+.m-read { text-align: center; display: grid; gap: 2px; }
+.m-pct { font: var(--big-w) 28px/1 var(--f-big); letter-spacing: -.02em; }
+.m-ch { font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); }
+.mstate { font-size: var(--t-s); color: var(--faint); min-height: 1.5em; }
+.amp-top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.power { min-height: 52px; padding: 0 24px 0 18px; }
+.pstate { font: var(--big-w) 24px/1 var(--f-big); }
+.pstate.warm { color: var(--warn); }
+
+@container app (min-width: 820px) {
+  .view.dac { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 40px 72px; }
+  .view.amp { grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 40px 72px; }
+  /* meters alone: one column, the block centred in the view */
+  .view.amp.lone { grid-template-columns: minmax(0, 1fr); }
+  .view.amp.lone .p-meters { width: min(100%, 760px); justify-self: center; }
+  .view .card { grid-column: 1 / -1; }
+  .device-facts .facts { grid-template-columns: 1fr 1fr; }
+  .device-facts .facts .readout:nth-child(2) { border-top: 0; }
+  sv-knob { --dial-w: 372px; }
+  .top { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "wm devs side";
+    gap: 20px 44px; align-items: end; }
+  .top .side { align-self: center; }
+  .dev b { font-size: 30px; }
+  .meters { gap: 36px; }
+  .sws { grid-template-columns: 1fr 1fr; }
+  .eqg { height: 196px; }
+  .presets { grid-template-columns: 1fr 1fr; column-gap: 28px; }
+  .presets > :is(h3, h4, .pstat, .prow.user, .prow.slot, .pform, .psave, .ronote) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* a stream that is lost: the screen dims and goes inert, the pill says why, the glow greys; a woken
+   page that waits for its first reading (`waking`) dims the screen alone */
+body.lost #screen { opacity: .5; }
+body.lost:not(.waking) .glow { filter: grayscale(1); animation: none; }
+body.lost .link[data-said] { font-size: 0; color: var(--warn); }
+body.lost .link[data-said]::after { content: attr(data-said); font-size: 13px; }
+body.lost .link[data-said] i {
+  background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+.btn.sm { min-height: 30px; padding: 0 12px; font-size: var(--t-xs); }
+
+/* the desktop keys: a line in the footer from 820 px wide, and the list `?` opens */
+.kh2 { display: none; align-items: center; gap: 6px; margin: 0 0 0 auto; }
+@media (min-width: 820px) { .kh2 { display: inline-flex; } }
+kbd {
+  font: 500 11px/1 var(--f-ui); color: var(--dim); border: 1px solid var(--hair-2);
+  border-radius: 6px; padding: 3px 6px; min-width: 20px; text-align: center;
+}
+.keys {
+  position: fixed; right: 24px; bottom: 64px; z-index: 55; display: grid; gap: 10px;
+  min-width: 270px; padding: 16px 18px; border-radius: 16px; background: var(--card-2);
+  border: 1px solid var(--hair-2); box-shadow: 0 18px 44px -12px rgba(0, 0, 0, .8);
+}
+.keys[hidden] { display: none; }
+/* no card (switched off, or none on the screen), no look to change */
+html[data-viz=off] .keys .kviz, .keys .kviz[hidden] { display: none; }
+.keys .ktitle { margin: 0; font: 600 16px var(--f-ui); color: var(--ink); }
+.keys dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+.keys dt { display: flex; gap: 4px; }
+.keys dd { margin: 0; color: var(--dim); font-size: 14px; }
+
+/* a ring once: the link's dot when the stream is back, a preset's lamp when it is recalled; and
+   a band value's flash when it changed */
+.link i.ring::after, .pre .lamp.ring::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  border: 1.5px solid currentColor;
+}
+.link i.ring::after { color: var(--good); }
+.pre .lamp { position: relative; }
+.pre .lamp.ring::after { color: var(--acc); }
+@keyframes ring {
+  0% { opacity: .9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(3.2); }
+}
+@keyframes flash {
+  0% { background: color-mix(in srgb, var(--acc) 34%, transparent); color: var(--ink); }
+  100% { background: transparent; }
+}
+.link i.ring::after, .pre .lamp.ring::after { animation: ring .6s ease-out 1 both; }
+.band span.flash { animation: flash .9s ease-out 1; border-radius: 4px; }
+
+/* what moves whatever the system says (the effects menu's Off stills the page): the dot of a link
+   that is not up pulses and the glow turns slowly */
+.link.wait i, .link.off i { animation: pulse 1.2s ease-in-out infinite; }
+.glow { animation: glow-turn 35s linear infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+@keyframes glow-turn { to { transform: translate(-50%, -50%) rotate(1turn); } }
+
+/* Arrange mode (arrange.js): the sections show a dashed outline and a handle, the zones a label, the
+   page's own drags are inert (the sections' children carry `inert`), and a lifted section follows
+   the pointer while its old place keeps a faint outline and a line shows where it lands. An
+   arranged screen (`.arranged`) keeps the order of the page: no phone `order` rule above reaches
+   it, and its band holds any section. */
+.arr-bar, .view { --arr: var(--r-amber); }
+.arr-bar {
+  position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px 18px; padding: 10px var(--px, 20px); background: var(--arr); color: var(--on-acc);
+  font: 500 var(--t-s)/1.3 var(--f-ui);
+}
+.arr-title { font: 600 15px/1.3 var(--f-ui); }
+.arr-hint { flex: 1 1 220px; min-width: 0; }
+.arr-live {
+  position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+.arr-reset, .arr-done {
+  min-height: 36px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(27, 18, 6, .5);
+  text-align: center;
+}
+.arr-done { background: var(--on-acc); border-color: var(--on-acc); color: var(--arr); font-weight: 600; }
+.arr-bar :focus-visible { outline-color: var(--on-acc); }
+.view.arranging { padding-top: 26px; }
+.view.arranging [data-zone] { position: relative; }
+.view.arranging [data-zone]::before {
+  position: absolute; left: 0; top: -22px; font: 500 10.5px/1 var(--f-ui); letter-spacing: .12em;
+  text-transform: uppercase; color: var(--arr); opacity: .85; pointer-events: none;
+}
+.view.arranging [data-zone=band]::before { content: "Top band"; }
+.view.arranging [data-zone=left]::before { content: "Left column"; }
+.view.arranging [data-zone=right]::before { content: "Right column"; }
+.view.arranging [data-zone]:not(:has([data-arr])) {
+  min-height: 72px; border-radius: 16px;
+  outline: 1.5px dashed color-mix(in srgb, var(--arr) 30%, transparent); outline-offset: 6px;
+}
+.view.arranging [data-arr] {
+  position: relative; border-radius: 16px;
+  outline: 1.5px dashed color-mix(in srgb, var(--arr) 55%, transparent); outline-offset: 6px;
+}
+.arr-handle {
+  position: absolute; top: 4px; right: 6px; z-index: 4; display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 10px; background: var(--arr); color: var(--on-acc);
+  font: 700 20px/1 var(--f-ui); cursor: grab; touch-action: none; user-select: none;
+  -webkit-user-select: none; text-align: center; scroll-margin: 72px 0;
+}
+.arr-handle:active { cursor: grabbing; }
+.arr-handle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (pointer: coarse) { .arr-handle { width: 44px; height: 44px; } }
+.view.arranging .p-viz .viz-graph { visibility: hidden; }
+.view.arranging .arr-lift {
+  z-index: 20; background: var(--card-2); transition: none;
+  transform: translate(var(--arr-x, 0px), var(--arr-y, 0px)) rotate(-1.2deg);
+  box-shadow: 0 24px 50px rgba(0, 0, 0, .7), 0 0 0 2px var(--arr);
+  outline-style: solid;
+}
+.arr-ghost {
+  position: absolute; z-index: 1; border-radius: 16px; pointer-events: none;
+  border: 1.5px dashed color-mix(in srgb, var(--arr) 30%, transparent);
+  background: color-mix(in srgb, var(--arr) 4%, transparent);
+}
+.arr-drop {
+  position: absolute; z-index: 25; border-radius: 2px; pointer-events: none; background: var(--arr);
+  box-shadow: 0 0 12px var(--arr);
+}
+@container app (min-width: 820px) {
+  .view.arranged .p-band:not(:has(> .p-playing + .p-viz)) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  }
+  /* a Now playing cell narrower than a card needs (arranged: three sections in the band) drops its
+     cover and sets a smaller transport; the previous, play and next buttons stay, and a wide cell
+     has the whole card */
+  .view.arranged .p-playing { container: np / inline-size; }
+  @container np (max-width: 400px) {
+    .p-playing .np-cover { display: none; }
+    .p-playing .np-head { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+    .p-playing .np-title { font-size: 17px; }
+    .p-playing .np-trans { gap: 4px; }
+    .p-playing .np-btn.go { width: 44px; height: 44px; }
+  }
+}
+@container app (max-width: 819px) {
+  /* a phone shows the three zones one under the other while arranging, so each can be dropped
+     into; afterwards the band and the columns dissolve into the screen again, in this order */
+  html:not([data-viz=off]) .view.arranging:has(.p-viz) :is(.p-band, .col) {
+    display: grid; gap: var(--gap); align-content: start;
+  }
+}

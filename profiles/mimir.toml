@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "mimir"
+display = "Mimir"
+product_id = 11
+min_firmware = 0
+extends = "mesh-eq-3"
+firmware_subsystems = [1]
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "USB 1", 2 = "Optical", 3 = "Coaxial", 4 = "AES" }
+
+[[control]]
+id = [4]
+key = "nos"
+label = "NOS filter"
+kind = "toggle"
+
+[[control]]
+id = [10]
+key = "usb_connected"
+label = "USB connected"
+kind = "readout"
+value_type = "bool"
+
+[[control]]
+id = [11]
+key = "spdif_locked"
+label = "S/PDIF locked"
+kind = "readout"
+value_type = "bool"

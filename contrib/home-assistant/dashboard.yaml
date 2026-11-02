@@ -1,0 +1,591 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# A Home Assistant dashboard for one svolder DAC with a five-band tone control (Gungnir 2,
+# Yggdrasil, Bifrost 3), built from the entities svolderd's MQTT bridge announces with
+# `commands = true`, and drawn in the `svolder` theme from themes/svolder.yaml (without the theme
+# installed, the view keeps Home Assistant's own). Paste it into a new dashboard's raw
+# configuration editor, then replace every `gungnir` with your device's entity prefix. README.md
+# has the steps, and what to delete for a device with three bands.
+title: svolder
+views:
+  - title: DAC
+    path: dac
+    icon: mdi:knob
+    theme: svolder
+    type: sections
+    max_columns: 3
+    dense_section_placement: true
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Gungnir
+            icon: mdi:amplifier
+            badges:
+              - type: entity
+                entity: binary_sensor.gungnir_link
+                show_state: true
+              - type: entity
+                entity: sensor.gungnir_sample_rate
+                show_state: true
+                show_icon: false
+          - type: tile
+            entity: number.gungnir_volume
+            name: Volume
+            icon: mdi:volume-high
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Source
+            icon: mdi:import
+          - type: tile
+            entity: select.gungnir_input
+            name: Input
+            icon: mdi:import
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: select-options
+          # The balance centres on 0: a needle shows where it sits, the slider beside it moves
+          # it, and a click on the gauge opens Home Assistant's own slider too.
+          - type: gauge
+            entity: number.gungnir_balance
+            name: Balance
+            min: -63
+            max: 63
+            needle: true
+            segments:
+              - from: -63
+                color: "#7a7a7a"
+              - from: -1
+                color: "#e0341c"
+              - from: 2
+                color: "#7a7a7a"
+            grid_options:
+              columns: 6
+              rows: 2
+            tap_action:
+              action: more-info
+          - type: tile
+            entity: number.gungnir_balance
+            name: Balance
+            icon: mdi:scale-balance
+            color: primary
+            grid_options:
+              columns: 6
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Tone control
+            icon: mdi:tune-vertical
+          - type: tile
+            entity: select.gungnir_tone_control_mode
+            name: Mode
+            icon: mdi:tune
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: select-options
+          - type: tile
+            entity: select.gungnir_eq_preset
+            name: Preset
+            icon: mdi:playlist-music
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: select-options
+          - type: tile
+            entity: number.gungnir_loudness_strength
+            name: Loudness strength
+            icon: mdi:ear-hearing
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+            visibility:
+              - condition: state
+                entity: select.gungnir_tone_control_mode
+                state: loudness
+          - type: markdown
+            content: >-
+              The bands apply in **eq** mode: switch the mode to `eq` to shape them.
+            visibility:
+              - condition: state
+                entity: select.gungnir_tone_control_mode
+                state_not: eq
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Inputs
+            icon: mdi:connection
+          - type: tile
+            entity: binary_sensor.gungnir_usb_1_connected
+            name: USB 1
+            icon: mdi:usb
+            vertical: true
+            grid_options:
+              columns: 4
+          - type: tile
+            entity: binary_sensor.gungnir_usb_2_connected
+            name: USB 2
+            icon: mdi:usb
+            vertical: true
+            grid_options:
+              columns: 4
+          - type: tile
+            entity: binary_sensor.gungnir_s_pdif_locked
+            name: S/PDIF
+            icon: mdi:lock
+            vertical: true
+            grid_options:
+              columns: 4
+          - type: heading
+            heading: Output
+            icon: mdi:speaker
+            heading_style: subtitle
+          - type: tile
+            entity: switch.gungnir_mute
+            name: Mute
+            icon: mdi:volume-off
+            color: primary
+            vertical: true
+            grid_options:
+              columns: 4
+            tap_action:
+              action: toggle
+          - type: tile
+            entity: switch.gungnir_nos_filter
+            name: NOS filter
+            icon: mdi:sine-wave
+            color: primary
+            vertical: true
+            grid_options:
+              columns: 4
+            tap_action:
+              action: toggle
+          - type: tile
+            entity: switch.gungnir_phase_invert
+            name: Phase invert
+            icon: mdi:swap-vertical
+            color: primary
+            vertical: true
+            grid_options:
+              columns: 4
+            tap_action:
+              action: toggle
+
+      # The bands, shown in eq mode. On a screen 1024 px wide or more they share one row, each
+      # band a column of its gain, frequency and Q; a narrower screen gets one section per band,
+      # stacked. A device with three bands has no bands 4 and 5: delete their column below and
+      # their sections after it, and the three left share the row.
+      - type: grid
+        column_span: 3
+        visibility:
+          - condition: state
+            entity: select.gungnir_tone_control_mode
+            state: eq
+          - condition: screen
+            media_query: "(min-width: 1024px)"
+        cards:
+          - type: heading
+            heading: Bands
+            icon: mdi:equalizer
+          - type: horizontal-stack
+            grid_options:
+              columns: full
+            cards:
+              - type: vertical-stack
+                cards:
+                  - type: heading
+                    heading: Band 1
+                    icon: mdi:numeric-1-box-outline
+                    heading_style: subtitle
+                  - type: tile
+                    entity: number.gungnir_band_1_gain
+                    name: Gain
+                    icon: mdi:plus-minus-variant
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: slider
+                  - type: tile
+                    entity: number.gungnir_band_1_frequency
+                    name: Frequency
+                    icon: mdi:sine-wave
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+                  - type: tile
+                    entity: number.gungnir_band_1_q
+                    name: Q
+                    icon: mdi:chart-bell-curve
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+              - type: vertical-stack
+                cards:
+                  - type: heading
+                    heading: Band 2
+                    icon: mdi:numeric-2-box-outline
+                    heading_style: subtitle
+                  - type: tile
+                    entity: number.gungnir_band_2_gain
+                    name: Gain
+                    icon: mdi:plus-minus-variant
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: slider
+                  - type: tile
+                    entity: number.gungnir_band_2_frequency
+                    name: Frequency
+                    icon: mdi:sine-wave
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+                  - type: tile
+                    entity: number.gungnir_band_2_q
+                    name: Q
+                    icon: mdi:chart-bell-curve
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+              - type: vertical-stack
+                cards:
+                  - type: heading
+                    heading: Band 3
+                    icon: mdi:numeric-3-box-outline
+                    heading_style: subtitle
+                  - type: tile
+                    entity: number.gungnir_band_3_gain
+                    name: Gain
+                    icon: mdi:plus-minus-variant
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: slider
+                  - type: tile
+                    entity: number.gungnir_band_3_frequency
+                    name: Frequency
+                    icon: mdi:sine-wave
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+                  - type: tile
+                    entity: number.gungnir_band_3_q
+                    name: Q
+                    icon: mdi:chart-bell-curve
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+              - type: vertical-stack
+                cards:
+                  - type: heading
+                    heading: Band 4
+                    icon: mdi:numeric-4-box-outline
+                    heading_style: subtitle
+                  - type: tile
+                    entity: number.gungnir_band_4_gain
+                    name: Gain
+                    icon: mdi:plus-minus-variant
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: slider
+                  - type: tile
+                    entity: number.gungnir_band_4_frequency
+                    name: Frequency
+                    icon: mdi:sine-wave
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+                  - type: tile
+                    entity: number.gungnir_band_4_q
+                    name: Q
+                    icon: mdi:chart-bell-curve
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+              - type: vertical-stack
+                cards:
+                  - type: heading
+                    heading: Band 5
+                    icon: mdi:numeric-5-box-outline
+                    heading_style: subtitle
+                  - type: tile
+                    entity: number.gungnir_band_5_gain
+                    name: Gain
+                    icon: mdi:plus-minus-variant
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: slider
+                  - type: tile
+                    entity: number.gungnir_band_5_frequency
+                    name: Frequency
+                    icon: mdi:sine-wave
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+                  - type: tile
+                    entity: number.gungnir_band_5_q
+                    name: Q
+                    icon: mdi:chart-bell-curve
+                    color: primary
+                    features_position: bottom
+                    features:
+                      - type: numeric-input
+                        style: buttons
+      - type: grid
+        visibility:
+          - condition: state
+            entity: select.gungnir_tone_control_mode
+            state: eq
+          - condition: screen
+            media_query: "(max-width: 1023px)"
+        cards:
+          - type: heading
+            heading: Band 1
+            icon: mdi:numeric-1-box-outline
+            heading_style: subtitle
+          - type: tile
+            entity: number.gungnir_band_1_gain
+            name: Gain
+            icon: mdi:plus-minus-variant
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
+            entity: number.gungnir_band_1_frequency
+            name: Frequency
+            icon: mdi:sine-wave
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.gungnir_band_1_q
+            name: Q
+            icon: mdi:chart-bell-curve
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+      - type: grid
+        visibility:
+          - condition: state
+            entity: select.gungnir_tone_control_mode
+            state: eq
+          - condition: screen
+            media_query: "(max-width: 1023px)"
+        cards:
+          - type: heading
+            heading: Band 2
+            icon: mdi:numeric-2-box-outline
+            heading_style: subtitle
+          - type: tile
+            entity: number.gungnir_band_2_gain
+            name: Gain
+            icon: mdi:plus-minus-variant
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
+            entity: number.gungnir_band_2_frequency
+            name: Frequency
+            icon: mdi:sine-wave
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.gungnir_band_2_q
+            name: Q
+            icon: mdi:chart-bell-curve
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+      - type: grid
+        visibility:
+          - condition: state
+            entity: select.gungnir_tone_control_mode
+            state: eq
+          - condition: screen
+            media_query: "(max-width: 1023px)"
+        cards:
+          - type: heading
+            heading: Band 3
+            icon: mdi:numeric-3-box-outline
+            heading_style: subtitle
+          - type: tile
+            entity: number.gungnir_band_3_gain
+            name: Gain
+            icon: mdi:plus-minus-variant
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
+            entity: number.gungnir_band_3_frequency
+            name: Frequency
+            icon: mdi:sine-wave
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.gungnir_band_3_q
+            name: Q
+            icon: mdi:chart-bell-curve
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+      - type: grid
+        visibility:
+          - condition: state
+            entity: select.gungnir_tone_control_mode
+            state: eq
+          - condition: screen
+            media_query: "(max-width: 1023px)"
+        cards:
+          - type: heading
+            heading: Band 4
+            icon: mdi:numeric-4-box-outline
+            heading_style: subtitle
+          - type: tile
+            entity: number.gungnir_band_4_gain
+            name: Gain
+            icon: mdi:plus-minus-variant
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
+            entity: number.gungnir_band_4_frequency
+            name: Frequency
+            icon: mdi:sine-wave
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.gungnir_band_4_q
+            name: Q
+            icon: mdi:chart-bell-curve
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+      - type: grid
+        visibility:
+          - condition: state
+            entity: select.gungnir_tone_control_mode
+            state: eq
+          - condition: screen
+            media_query: "(max-width: 1023px)"
+        cards:
+          - type: heading
+            heading: Band 5
+            icon: mdi:numeric-5-box-outline
+            heading_style: subtitle
+          - type: tile
+            entity: number.gungnir_band_5_gain
+            name: Gain
+            icon: mdi:plus-minus-variant
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: slider
+          - type: tile
+            entity: number.gungnir_band_5_frequency
+            name: Frequency
+            icon: mdi:sine-wave
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+          - type: tile
+            entity: number.gungnir_band_5_q
+            name: Q
+            icon: mdi:chart-bell-curve
+            color: primary
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons

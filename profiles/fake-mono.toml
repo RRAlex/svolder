@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# The fake's own device: a single-meter amplifier that exists only in the simulator and the
+# in-process fake, so a front end with only one channel to draw has something moving to test
+# against without a real single-meter amp on the bench. Its meter carries the Tyr's scale, with
+# the zero following a floor readout, so something moving to draw reads like a Tyr.
+schema = 1
+name = "fake-mono"
+display = "Fake mono"
+extends = "amp-common"
+# A product id no Schiit device carries, so nothing on the air can be taken for this.
+product_id = 65533
+
+[[control]]
+id = [4]
+key = "mute"
+label = "Mute"
+kind = "toggle"
+mutes_output = true
+
+[[control]]
+id = [20, 1]
+key = "meter_1"
+label = "Meter M"
+kind = "meter"
+channel = "M"
+scale = { zero_from = "meter_floor", full = 1000, class_a = 0.10 }
+
+# The floor the meter's zero follows, as on the Tyr.
+[[control]]
+id = [20, 2]
+key = "meter_floor"
+label = "Meter floor"
+kind = "readout"
+value_type = "u16"

@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# svolder: a dark Home Assistant theme in the colours of the TUI's `red` palette. Off-white text on
+# near-black, Schiit-style scarlet for what is on, green and amber for states, nothing blue, and the
+# terminal's monospace type where the browser has one. Copy this file into Home Assistant's
+# `themes/` folder; README.md has the steps.
+svolder:
+  # Type: a terminal's monospace, falling back to the browser's own.
+  primary-font-family: '"JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace'
+  ha-font-family-body: '"JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace'
+  ha-font-family-heading: '"JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace'
+  code-font-family: '"JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace'
+
+  # The accent: the scarlet the `red` palette draws a DAC in.
+  primary-color: "#e0341c"
+  rgb-primary-color: "224, 52, 28"
+  accent-color: "#e0341c"
+  rgb-accent-color: "224, 52, 28"
+  dark-primary-color: "#a02414"
+  light-primary-color: "#ff8a5a"
+
+  # Text: off-white, a dim grey for what is secondary, a fainter one for what is off.
+  primary-text-color: "#f2f0ea"
+  rgb-primary-text-color: "242, 240, 234"
+  secondary-text-color: "#7a7a7a"
+  rgb-secondary-text-color: "122, 122, 122"
+  disabled-text-color: "#5a5a5a"
+  text-primary-color: "#f2f0ea"
+  text-light-primary-color: "#f2f0ea"
+
+  # Grounds: near-black under everything, a step lighter for the cards.
+  primary-background-color: "#0c0c0c"
+  rgb-primary-background-color: "12, 12, 12"
+  secondary-background-color: "#141414"
+  card-background-color: "#141414"
+  rgb-card-background-color: "20, 20, 20"
+  ha-card-background: "#141414"
+  divider-color: "#1e1e1e"
+  input-fill-color: "#1e1e1e"
+  input-ink-color: "#f2f0ea"
+  input-label-ink-color: "#7a7a7a"
+  input-idle-line-color: "#5a5a5a"
+  input-hover-line-color: "#7a7a7a"
+  code-editor-background-color: "#0c0c0c"
+
+  # Cards: flat, a hairline frame, corners barely rounded.
+  ha-card-border-radius: "6px"
+  ha-card-border-width: "1px"
+  ha-card-border-color: "#1e1e1e"
+  ha-card-box-shadow: "none"
+
+  # The toolbar and the sidebar, where the theme reaches them.
+  app-header-background-color: "#0c0c0c"
+  app-header-text-color: "#f2f0ea"
+  app-header-edit-background-color: "#141414"
+  sidebar-background-color: "#0c0c0c"
+  sidebar-text-color: "#7a7a7a"
+  sidebar-icon-color: "#7a7a7a"
+  sidebar-selected-text-color: "#f2f0ea"
+  sidebar-selected-icon-color: "#e0341c"
+
+  # States: scarlet for on, green for good, amber for a warning, the alert red for a fault.
+  state-icon-color: "#7a7a7a"
+  state-active-color: "#e0341c"
+  state-inactive-color: "#5a5a5a"
+  state-switch-active-color: "#e0341c"
+  state-binary_sensor-active-color: "#6fbf73"
+  state-binary_sensor-connectivity-on-color: "#6fbf73"
+  state-binary_sensor-problem-on-color: "#ff5a4a"
+  success-color: "#6fbf73"
+  warning-color: "#d9a441"
+  error-color: "#ff5a4a"
+  info-color: "#7a7a7a"
+
+  # Switches and sliders.
+  switch-checked-color: "#e0341c"
+  switch-checked-button-color: "#e0341c"
+  switch-checked-track-color: "#a02414"
+  switch-unchecked-button-color: "#7a7a7a"
+  switch-unchecked-track-color: "#1e1e1e"
+  slider-color: "#e0341c"
+  slider-bar-color: "#1e1e1e"
+  mdc-theme-primary: "#e0341c"

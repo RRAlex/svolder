@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "mesh-eq-5"
+extends = "dac-common"
+
+[[control]]
+id = [4]
+key = "nos"
+label = "NOS filter"
+kind = "toggle"
+
+[[control]]
+id = [6]
+key = "sample_rate"
+label = "Sample rate"
+kind = "readout"
+values = { 0 = "—", 1 = "44.1 kHz", 2 = "48 kHz", 3 = "88.2 kHz", 4 = "96 kHz", 5 = "176.4 kHz", 6 = "192 kHz", 7 = "352.8 kHz", 8 = "384 kHz" }
+
+[[control]]
+id = [10]
+key = "volume"
+label = "Volume"
+kind = "level"
+range = [0, 127]
+unit = "dB"
+convert = { table = "dac-attenuation-db" }
+
+[[control]]
+id = [11]
+key = "balance"
+label = "Balance"
+kind = "level"
+range = [1, 127]
+center = 64
+
+[eq]
+id = 12
+bands = [40, 160, 632, 2515, 10000]
+fscale = [[0.005554, 0.00544], [0.00536, 0.005435], [0.005435, 0.005435], [0.005435, 0.005435], [0.005435, 0.005435]]
+range = 1.95
+gain = { range = [-20, 6], zero = 98 }
+q = { range = [0.5, 8.0], center = 4.3 }

@@ -1,0 +1,448 @@
+/* SPDX-FileCopyrightText: 2026 the svolder authors */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* The theme Paper: graph paper, print in a serif, a red pencil, blue handwriting. Light paper is
+   the base; dark paper is the paper and its lines turned (charcoal sheet, chalk print) with the
+   inks kept in their hues, lightened to read. Dark paper applies under the system's dark setting
+   unless the person chose light (Auto), and always when the person chose dark; the two dark
+   blocks set the same values. The frame's button, menu and popups are dressed by the --frame-*
+   tokens below and by nothing else. */
+
+:root[data-theme="paper"] {
+  color-scheme: light;
+  --paper-sheet: #f3efe6;
+  --paper-grid: rgba(60, 80, 120, .07);
+  --paper-print: #23201b;
+  --paper-print-dim: #6b6458;
+  --paper-print-soft: #4a443a;
+  --paper-pencil: #b3261e;
+  --paper-ink: #2b4a8a;
+  --paper-hatch: rgba(179, 38, 30, .18);
+  --paper-serif: "Crimson Pro", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --paper-hand: "Caveat", "Segoe Print", cursive;
+  --paper-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --frame-btn-fg: #23201b;
+  --frame-btn-border: #23201b;
+  --frame-btn-fg-hover: #b3261e;
+  --frame-btn-border-hover: #b3261e;
+  --frame-btn-bg: transparent;
+  --frame-btn-size: 30px;
+  --frame-btn-radius: 50%;
+  --frame-surface: #faf7f0;
+  --frame-hover: #ece6d9;
+  --frame-ink: #23201b;
+  --frame-dim: #6b6458;
+  --frame-faint: #6b6458;
+  --frame-line: rgba(35, 32, 27, .18);
+  --frame-line-strong: rgba(35, 32, 27, .4);
+  --frame-accent: #b3261e;
+  --frame-on-accent: #f3efe6;
+  --frame-scrim: rgba(35, 32, 27, .35);
+  --frame-shadow: 0 8px 24px rgba(35, 32, 27, .18);
+  --frame-toast-shadow: 0 8px 20px -8px rgba(35, 32, 27, .35);
+  --frame-radius: 4px;
+  --frame-font: var(--paper-serif);
+  --frame-toast-lift: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="paper"]:not([data-scheme="light"]) {
+    color-scheme: dark;
+    --paper-sheet: #1e1f22;
+    --paper-grid: rgba(236, 232, 223, .07);
+    --paper-print: #ece8df;
+    --paper-print-dim: #a8a398;
+    --paper-print-soft: #c9c3b8;
+    --paper-pencil: #f2786b;
+    --paper-ink: #8fb0f5;
+    --paper-hatch: rgba(242, 120, 107, .22);
+    --frame-btn-fg: #ece8df;
+    --frame-btn-border: #ece8df;
+    --frame-btn-fg-hover: #f2786b;
+    --frame-btn-border-hover: #f2786b;
+    --frame-surface: #26282b;
+    --frame-hover: #2e3034;
+    --frame-ink: #ece8df;
+    --frame-dim: #a8a398;
+    --frame-faint: #a8a398;
+    --frame-line: rgba(236, 232, 223, .18);
+    --frame-line-strong: rgba(236, 232, 223, .4);
+    --frame-accent: #f2786b;
+    --frame-on-accent: #1e1f22;
+    --frame-scrim: rgba(0, 0, 0, .55);
+    --frame-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    --frame-toast-shadow: 0 8px 20px -8px rgba(0, 0, 0, .6);
+  }
+}
+
+:root[data-theme="paper"][data-scheme="dark"] {
+  color-scheme: dark;
+  --paper-sheet: #1e1f22;
+  --paper-grid: rgba(236, 232, 223, .07);
+  --paper-print: #ece8df;
+  --paper-print-dim: #a8a398;
+  --paper-print-soft: #c9c3b8;
+  --paper-pencil: #f2786b;
+  --paper-ink: #8fb0f5;
+  --paper-hatch: rgba(242, 120, 107, .22);
+  --frame-btn-fg: #ece8df;
+  --frame-btn-border: #ece8df;
+  --frame-btn-fg-hover: #f2786b;
+  --frame-btn-border-hover: #f2786b;
+  --frame-surface: #26282b;
+  --frame-hover: #2e3034;
+  --frame-ink: #ece8df;
+  --frame-dim: #a8a398;
+  --frame-faint: #a8a398;
+  --frame-line: rgba(236, 232, 223, .18);
+  --frame-line-strong: rgba(236, 232, 223, .4);
+  --frame-accent: #f2786b;
+  --frame-on-accent: #1e1f22;
+  --frame-scrim: rgba(0, 0, 0, .55);
+  --frame-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+  --frame-toast-shadow: 0 8px 20px -8px rgba(0, 0, 0, .6);
+}
+
+/* ---- the page ---- */
+
+:root[data-theme="paper"] body {
+  margin: 0;
+  background-color: var(--paper-sheet);
+  background-image:
+    linear-gradient(var(--paper-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--paper-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--paper-print);
+  font: 400 17px/1.5 var(--paper-serif);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.paper, .paper *, .paper *::before, .paper *::after { box-sizing: border-box; }
+:where(.paper) :is(h1, h2, p, small) { margin: 0; }
+.paper [hidden] { display: none !important; }
+.paper section:empty { display: none; }
+
+/* the sheet; faded while the stream is lost, still while the page reads the device again */
+.paper {
+  position: relative; max-width: 1180px; margin: 0 auto; padding: 30px 46px 24px;
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+.paper.faded { opacity: .45; }
+.paper.waiting { opacity: .7; }
+
+/* arrows and rings the notes draw, over the whole sheet and out of the way of the pointer */
+#p-marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* a word that goes somewhere is underlined; a guest's or a read-only page's is not */
+.paper .p-w {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit;
+  text-align: inherit; cursor: pointer; text-decoration: underline;
+  text-decoration-thickness: 1.5px; text-decoration-color: var(--paper-print);
+  text-underline-offset: 3px;
+}
+.paper .p-w:hover { color: var(--paper-pencil); text-decoration-color: var(--paper-pencil); }
+.paper .p-w.quiet { text-decoration: none; cursor: default; }
+.paper :focus-visible { outline: 2px solid var(--paper-pencil); outline-offset: 2px; border-radius: 2px; }
+
+/* ---- the title ---- */
+
+#p-title {
+  position: relative; display: flex; flex-wrap: wrap; align-items: baseline; padding-right: 44px;
+}
+#p-title h1 { font: 400 26px/1.2 var(--paper-serif); overflow-wrap: anywhere; min-width: 0; }
+.p-sub {
+  margin-left: 12px; font: italic 400 14px/1.3 var(--paper-serif); color: var(--paper-print-dim);
+  overflow-wrap: anywhere; min-width: 0;
+}
+.p-sub.lost { color: var(--paper-pencil); }
+.p-also {
+  flex-basis: 100%; margin-top: 4px; font: italic 400 15px/1.4 var(--paper-serif);
+  color: var(--paper-print-dim);
+}
+.p-also .p-w { font-style: normal; color: var(--paper-print); }
+.paper-slot { position: absolute; right: 0; top: 0; width: 30px; height: 30px; }
+
+/* ---- what the sections share ---- */
+
+.p-card { margin-top: 14px; }
+.p-detail { margin-top: 4px; font-size: 15px; line-height: 1.4; color: var(--paper-print); overflow-wrap: anywhere; }
+.p-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px; margin-top: 26px; margin-bottom: 24px; }
+.p-cols > div { min-width: 0; }
+.p-label {
+  font: 400 11px/1.4 var(--paper-mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--paper-print-dim);
+}
+
+/* ---- the volume: a printed ruler, a pencil needle, the written words ---- */
+
+#p-volume { margin-top: 6px; }
+.p-big { display: none; font: italic 400 40px/1.1 var(--paper-serif); color: var(--paper-pencil); }
+.p-big small { margin-left: 6px; font-size: 15px; font-style: normal; color: var(--paper-print-dim); }
+.p-ruler {
+  position: relative; height: 70px; margin: 28px 0 8px; touch-action: pan-y; user-select: none;
+  -webkit-user-select: none; cursor: pointer;
+}
+.p-ticks { position: absolute; left: 0; top: 0; width: 100%; height: 20px; overflow: visible; }
+.p-ticks path { fill: none; stroke: var(--paper-print); vector-effect: non-scaling-stroke; }
+.p-ticks .minor { stroke-width: 1px; }
+.p-ticks .major { stroke-width: 1.5px; }
+.p-mark {
+  position: absolute; top: 24px; transform: translateX(-50%); white-space: nowrap;
+  font: 400 11px/1 var(--paper-mono); color: var(--paper-print-dim);
+}
+.p-mark:first-of-type { transform: none; }
+.p-zone {
+  position: absolute; top: 0; right: 0; height: 20px; pointer-events: none;
+  background: repeating-linear-gradient(135deg, var(--paper-hatch) 0 2px, transparent 2px 6px);
+  border-left: 1.5px solid var(--paper-pencil);
+}
+.p-zone span {
+  position: absolute; top: 42px; left: 4px; white-space: nowrap;
+  font: 400 11px/1 var(--paper-mono); color: var(--paper-pencil);
+}
+.p-zone.flip span { left: auto; right: 0; }
+.p-zone.cap { border-left-style: dashed; background: repeating-linear-gradient(135deg, var(--paper-hatch) 0 2px, var(--paper-hatch) 2px 3px); }
+.p-zone.cap span { top: 56px; }
+.p-target {
+  position: absolute; top: 0; width: 0; height: 20px; border-left: 1.5px dotted var(--paper-pencil);
+  pointer-events: none;
+}
+.p-needle {
+  position: absolute; top: -6px; width: 16px; height: 56px; transform: translateX(-50%);
+  cursor: grab; touch-action: pan-y;
+}
+.p-needle::before {
+  content: ""; position: absolute; left: 7px; top: 0; width: 2px; height: 100%;
+  background: var(--paper-pencil);
+}
+#p-volume-text {
+  position: absolute; top: 4px; margin-left: 12px; white-space: nowrap; pointer-events: none;
+  font: italic 400 20px/1.2 var(--paper-serif); color: var(--paper-pencil);
+}
+#p-volume-text.flip { margin-left: -12px; transform: translateX(-100%); }
+.p-written { margin: 0; text-align: right; font-size: 15px; line-height: 1.6; }
+.p-written .p-w { text-decoration-color: var(--paper-print); }
+.p-written .p-w[data-act="mute"] { color: var(--paper-pencil); }
+.p-written .p-w.quiet { text-decoration: none; }
+
+/* ---- the tone: the EQ plotted like a measurement, its words and its band table ---- */
+
+#p-tone { margin-bottom: 26px; }
+#p-tone .p-label .p-w {
+  text-transform: none; letter-spacing: 0; font: italic 400 16px/1 var(--paper-serif);
+  color: var(--paper-print); overflow-wrap: anywhere; text-align: left;
+}
+.p-strength { margin-top: 6px; font: italic 400 15px/1.6 var(--paper-serif); color: var(--paper-print-dim); }
+.p-strength .p-val { color: var(--paper-print); font-style: normal; margin: 0 4px; }
+.p-graph {
+  position: relative; height: 150px; margin: 10px 0 8px; touch-action: pan-y; user-select: none;
+  -webkit-user-select: none; border: 1px solid var(--paper-print-dim);
+}
+.p-graph svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.p-graph path { fill: none; vector-effect: non-scaling-stroke; }
+.p-zero { stroke: var(--paper-print-dim); stroke-width: .8px; stroke-dasharray: 3 4; }
+.p-curve { stroke: var(--paper-print); stroke-width: 2px; }
+.p-curve.faint { stroke: var(--paper-print-dim); stroke-dasharray: 6 4; }
+.pt {
+  position: absolute; width: 12px; height: 12px; padding: 0; margin: 0; transform: translate(-50%, -50%);
+  border: 2px solid var(--paper-pencil); border-radius: 50%; background: var(--paper-sheet);
+  cursor: grab; touch-action: none;
+}
+.pt::before { content: ""; position: absolute; inset: -16px; border-radius: 50%; }
+.pt.quiet { cursor: default; }
+.p-dlab {
+  position: absolute; z-index: 2; padding: 1px 6px; pointer-events: none; white-space: nowrap;
+  font: 400 11px/1.5 var(--paper-mono); color: var(--paper-print); background: var(--paper-sheet);
+  border: 1px solid var(--paper-print-dim);
+}
+.p-bands { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
+.p-bands th { font: 400 11px/1.4 var(--paper-mono); color: var(--paper-print-dim); text-align: center; padding: 2px 0; }
+.p-bands th[scope="row"] { font-size: 12px; }
+.p-bands tbody tr { border-top: 1px dotted var(--paper-print-dim); }
+.p-bands td { text-align: center; white-space: nowrap; padding: 1px 0; }
+.p-bands .p-val { display: inline-block; min-width: 4.4em; }
+.p-bands .p-w, .p-strength .p-w { padding: 3px 5px; min-width: 20px; }
+.p-bands.faint .p-val { color: var(--paper-print-dim); }
+
+/* the paper list a written word opens: the current value pencil-underlined, the others dotted */
+.plist {
+  position: absolute; z-index: 5; min-width: 150px; max-width: calc(100% - 8px); padding: 4px 0;
+  display: flex; flex-direction: column; align-items: stretch;
+  background: var(--frame-surface); border: 1px solid var(--paper-print); box-shadow: var(--frame-shadow);
+}
+.p-opt {
+  background: none; border: 0; margin: 0; padding: 0 14px; text-align: left; font: 400 17px/1.8 var(--paper-serif);
+  color: var(--paper-print); overflow-wrap: anywhere; cursor: pointer; text-decoration: underline dotted;
+  text-decoration-thickness: 1px; text-decoration-color: var(--paper-print-dim); text-underline-offset: 4px;
+}
+.p-opt:hover, .p-opt:focus-visible { background: var(--frame-hover); }
+.p-opt.on { text-decoration: underline; text-decoration-style: solid; text-decoration-thickness: 2px; text-decoration-color: var(--paper-pencil); }
+
+/* ---- the controls, the presets and their questions ---- */
+
+#p-controls, #p-presets, #p-device-presets { margin-bottom: 26px; position: relative; }
+.p-head { margin-bottom: 4px; }
+.p-row { margin: 0; font-size: 17px; line-height: 1.8; }
+.p-row .p-label { margin-top: 6px; }
+.p-line { margin: 0; }
+.p-choice, .p-names, .p-writes { margin: 0; overflow-wrap: anywhere; }
+.p-writes { margin-top: 4px; font-style: italic; }
+.p-status { margin-top: 2px; font-size: 15px; font-style: italic; color: var(--paper-print-dim); }
+.p-status i { color: var(--paper-print); }
+.p-ronote { margin-top: 6px; font: italic 400 14px/1.4 var(--paper-serif); color: var(--paper-print-dim); }
+.p-row .p-val { color: var(--paper-print); }
+[data-readout] { color: var(--paper-print); }
+[data-readout].faint { color: var(--paper-print-dim); }
+
+/* a value that is not the current one is dotted, the current one underlined in pencil */
+.paper .p-choice .p-w, .paper .p-names .p-w, .paper .p-line .p-w[data-act="choice-list"] {
+  text-decoration-style: dotted; text-decoration-thickness: 1px; text-decoration-color: var(--paper-print-dim);
+  text-underline-offset: 4px; padding: 2px 3px; margin: -2px -3px;
+}
+.paper .p-w.on {
+  text-decoration-style: solid; text-decoration-thickness: 2px; text-decoration-color: var(--paper-pencil);
+}
+.paper .p-w.own { font-style: italic; }
+.paper .p-w.quiet { text-decoration: none; }
+.paper .p-line .p-w[data-act="toggle"] { text-decoration-style: solid; text-decoration-color: var(--paper-print); }
+.paper .p-line .p-w[data-act="toggle"].on { text-decoration-color: var(--paper-pencil); }
+
+/* a level: a printed scale with a pencil mark */
+.p-level { margin-bottom: 6px; }
+.p-scalebox { display: flex; align-items: center; gap: 10px; }
+.p-end { font: 400 11px/1 var(--paper-mono); color: var(--paper-print-dim); }
+.p-scale {
+  position: relative; flex: 1; min-width: 0; height: 34px; cursor: pointer; touch-action: pan-y;
+  user-select: none; -webkit-user-select: none;
+}
+.p-scale.quiet { cursor: default; }
+.p-scale svg { position: absolute; left: 0; top: 11px; width: 100%; height: 12px; overflow: visible; }
+.p-scale path { fill: none; stroke: var(--paper-print); vector-effect: non-scaling-stroke; }
+.p-scale .minor { stroke-width: 1px; }
+.p-scale .major { stroke-width: 1.5px; }
+.p-scale .p-mark, .p-scale .p-mark:first-of-type {
+  position: absolute; top: 3px; width: 2px; height: 28px; transform: translateX(-50%);
+  background: var(--paper-pencil); font-size: 0;
+}
+
+/* the form for a name and the question before something that cannot be undone */
+.p-askbox { margin-top: 10px; padding: 8px 0 2px; border-top: 1px dotted var(--paper-print-dim); }
+.p-form { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.p-input {
+  flex: 1 1 140px; min-width: 0; max-width: 100%; padding: 2px 0; border: 0;
+  border-bottom: 1.5px solid var(--paper-print); border-radius: 0; background: transparent;
+  font: italic 400 17px/1.5 var(--paper-serif); color: var(--paper-print);
+}
+.p-input:focus-visible { outline: none; border-bottom-color: var(--paper-pencil); }
+.p-question { margin: 0 0 2px; overflow-wrap: anywhere; font-style: italic; }
+.p-askbox p { margin: 0; }
+.p-askbox button:disabled { opacity: .5; cursor: default; }
+
+/* the notes: handwriting in blue ink; the one that needs attention in red pencil. On a desktop they
+   stand in a band of three under the columns, each leaning a little the way its id says. */
+#p-notes {
+  display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-flow: row dense; align-content: start;
+  gap: 24px 40px; min-height: 180px; padding: 18px 0 8px;
+}
+.pn {
+  position: relative; display: block; width: fit-content; max-width: 100%;
+  font: 500 23px/1.15 var(--paper-hand); color: var(--paper-ink); overflow-wrap: anywhere;
+}
+.pn.red { color: var(--paper-pencil); }
+.pn.t0 { transform: rotate(-1.5deg); }
+.pn.t1 { transform: rotate(-.75deg); }
+.pn.t3 { transform: rotate(.75deg); }
+.pn.t4 { transform: rotate(1.5deg); }
+.p-card .pn { margin: 0; }
+/* the arrow and the tick are strokes in the note's own colour; the word `to` is for the ear */
+.p-arrow, .p-tick {
+  display: inline-block; height: auto; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.p-arrow { width: 1.6em; margin: 0 .25em; vertical-align: -.05em; }
+.p-tick { width: .65em; margin-left: .3em; vertical-align: 0; }
+.p-sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+  clip-path: inset(50%); white-space: nowrap;
+}
+#p-marks .arrow { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#p-marks .arrow.ink { stroke: var(--paper-ink); }
+#p-marks .arrow.red { stroke: var(--paper-pencil); }
+#p-marks .ring { fill: none; stroke: var(--paper-pencil); stroke-width: 1.6; }
+
+/* ---- now playing, the amp, the device's facts and the card ---- */
+
+#p-playing, #p-power, #p-meters { margin-bottom: 26px; }
+.p-track { margin: 0; font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.p-transport { margin: 2px 0 0; font-size: 15px; line-height: 1.8; }
+#p-power .p-w[data-act="power"], .p-transport .p-w { text-decoration-color: var(--paper-print); }
+#p-power .p-w[data-act="power"].on { text-decoration-color: var(--paper-pencil); text-decoration-thickness: 2px; }
+.p-meter { display: flex; align-items: center; gap: 10px; }
+.p-chan { flex: 0 0 1.4em; font: 400 11px/1 var(--paper-mono); color: var(--paper-print-dim); }
+.p-text { flex: 0 0 3.4em; text-align: right; font: 400 12px/1 var(--paper-mono); color: var(--paper-print); }
+.p-scale.meter { cursor: default; height: 30px; }
+.p-scale.meter .p-zone {
+  left: 0; right: auto; top: 11px; height: 12px; border-left: 0; border-right: 1.5px solid var(--paper-pencil);
+}
+.p-scale.meter .p-mark.off { display: none; }
+.p-mstate { margin: 2px 0 0; font-size: 15px; color: var(--paper-print-dim); }
+.p-mstate:empty { display: none; }
+.p-spec { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 4px 0 14px; font-size: 14px; line-height: 1.5; }
+.p-spec th {
+  width: 36%; padding: 1px 8px 1px 0; text-align: left; font-weight: 400; color: var(--paper-print-dim);
+  overflow-wrap: anywhere; vertical-align: top;
+}
+.p-spec td { padding: 1px 0; overflow-wrap: anywhere; vertical-align: top; }
+.p-spec td.mono { font-family: var(--paper-mono); font-size: 13px; }
+.p-spec td.warn { color: var(--paper-pencil); }
+.p-spec td.p-age { width: 22%; color: var(--paper-print-dim); text-align: right; padding-left: 8px; }
+.p-identify { margin: 0; line-height: 1.6; }
+.p-note { font-style: italic; font-size: 14px; color: var(--paper-print-dim); overflow-wrap: anywhere; }
+.p-faults { margin: 4px 0 0; padding-left: 20px; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.p-faults li + li { margin-top: 4px; }
+.p-detail code { font: 400 .92em var(--paper-mono); }
+.p-tryline { margin-top: 6px; }
+.p-retry { font-style: italic; color: var(--paper-print-dim); margin-left: 8px; }
+
+/* ---- the footer ---- */
+
+#p-foot {
+  margin-top: auto; padding-top: 8px; border-top: 1px solid var(--paper-print);
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px;
+  font: italic 400 14px/1.4 var(--paper-serif); color: var(--paper-print-soft);
+}
+#p-foot .p-keys { font: normal 400 11px/1.9 var(--paper-mono); }
+#p-foot .p-w { color: var(--paper-print-soft); }
+#p-foot .p-w:hover { color: var(--paper-pencil); }
+
+/* ---- a phone ---- */
+
+@media (max-width: 719px) {
+  :root[data-theme="paper"] body { background-size: 18px 18px; font-size: 15px; }
+  .paper { padding: 34px 18px 16px; }
+  #p-title h1 { font-size: 21px; }
+  .p-sub { display: block; flex-basis: 100%; margin-left: 0; font-size: 11.5px; }
+  .p-big { display: block; }
+  .p-ruler { height: 34px; margin: 20px 0 8px; }
+  .p-mark { top: 14px; font-size: 9px; }
+  .p-zone { height: 12px; }
+  .p-zone span { top: 24px; }
+  .p-zone.cap span { top: 36px; }
+  .p-ticks, .p-target { height: 12px; }
+  .p-needle { height: 30px; top: -4px; }
+  #p-volume-text { display: none; }
+  .p-written { text-align: left; }
+  .p-cols { grid-template-columns: 1fr; gap: 0; margin-top: 18px; }
+  .p-label { font-size: 9.5px; }
+  #p-notes { display: block; min-height: 0; padding: 0; }
+  .pn { font-size: 17px; margin: 8px 0 14px; }
+  /* the red note's lead words, ringed in pencil */
+  .pn .ring {
+    padding: 0 .4em; border: 1.5px solid var(--paper-pencil); border-radius: 50% / 70%;
+    box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  }
+  .p-graph { height: 120px; }
+  .p-opt { font-size: 15px; }
+  .p-row { font-size: 15px; }
+  #p-foot { font-size: 11.5px; }
+}

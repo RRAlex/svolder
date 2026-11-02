@@ -1,0 +1,436 @@
+[
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "connectivity",
+      "name": "Link",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "offline",
+      "payload_on": "online",
+      "state_topic": "svolder/0102030405060708/availability",
+      "unique_id": "svolder_0102030405060708_link"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/link/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/identify/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "entity_category": "config",
+      "name": "Identify",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_press": "PRESS",
+      "unique_id": "svolder_0102030405060708_identify"
+    },
+    "topic": "homeassistant/button/svolder_0102030405060708/identify/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/band1/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "max": 12.0,
+      "min": -12.0,
+      "mode": "slider",
+      "name": "20 Hz",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "step": 0.8,
+      "unique_id": "svolder_0102030405060708_band1",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.band1 }}"
+    },
+    "topic": "homeassistant/number/svolder_0102030405060708/band1/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/band2/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "max": 9.0,
+      "min": -9.0,
+      "mode": "slider",
+      "name": "120 Hz",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "step": 0.6,
+      "unique_id": "svolder_0102030405060708_band2",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.band2 }}"
+    },
+    "topic": "homeassistant/number/svolder_0102030405060708/band2/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/band3/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "max": 6.0,
+      "min": -6.0,
+      "mode": "slider",
+      "name": "550 Hz",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "step": 0.4,
+      "unique_id": "svolder_0102030405060708_band3",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.band3 }}"
+    },
+    "topic": "homeassistant/number/svolder_0102030405060708/band3/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/band4/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "max": 6.0,
+      "min": -6.0,
+      "mode": "slider",
+      "name": "2 kHz",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "step": 0.4,
+      "unique_id": "svolder_0102030405060708_band4",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.band4 }}"
+    },
+    "topic": "homeassistant/number/svolder_0102030405060708/band4/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/band5/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "max": 9.0,
+      "min": -9.0,
+      "mode": "slider",
+      "name": "6 kHz",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "step": 0.6,
+      "unique_id": "svolder_0102030405060708_band5",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.band5 }}"
+    },
+    "topic": "homeassistant/number/svolder_0102030405060708/band5/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/band6/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "max": 12.0,
+      "min": -12.0,
+      "mode": "slider",
+      "name": "20 kHz",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "step": 0.8,
+      "unique_id": "svolder_0102030405060708_band6",
+      "unit_of_measurement": "dB",
+      "value_template": "{{ value_json.band6 }}"
+    },
+    "topic": "homeassistant/number/svolder_0102030405060708/band6/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/eq_preset/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Preset",
+      "options": [
+        "Preset 1",
+        "Preset 2",
+        "Preset 3",
+        "Flat",
+        "Bass Boost",
+        "Treble Boost",
+        "Smiley",
+        "Loudness",
+        "custom"
+      ],
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_eq_preset",
+      "value_template": "{{ value_json.eq_preset }}"
+    },
+    "topic": "homeassistant/select/svolder_0102030405060708/eq_preset/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/input/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Input",
+      "options": [
+        "XLR",
+        "RCA"
+      ],
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_input",
+      "value_template": "{{ value_json.input }}"
+    },
+    "topic": "homeassistant/select/svolder_0102030405060708/input/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/mode/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Mode",
+      "options": [
+        "Process",
+        "Bypass"
+      ],
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_mode",
+      "value_template": "{{ value_json.mode }}"
+    },
+    "topic": "homeassistant/select/svolder_0102030405060708/mode/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Loki Max",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "signal_strength",
+      "entity_category": "diagnostic",
+      "json_attributes_topic": "svolder/0102030405060708/signal/attributes",
+      "name": "Signal",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/0102030405060708/signal/state",
+      "unique_id": "svolder_0102030405060708_signal",
+      "unit_of_measurement": "dBm"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/signal/config"
+  }
+]

@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# The safety tests: each line is `path|function`, a test that guards the volume rule (the
+# three-quarters glide, the climb's cancellation), the firmware-update refusals, the passphrase
+# refusals (function 250 never sent raw, never a control, never exposed) with the layers below the
+# profile loader that refuse it on their own, the capture's argv, the capture file's scrub (the
+# passphrase and the unit ids it must never hold), the remote views (the passphrase never reaches
+# a remote view) or the device presets' questions (a built-in setting's rise and a slot's recall
+# over MCP, and a save).
+# `make safety-tests` fails if a listed file no longer defines the function, so none of these
+# tests can be removed or renamed without someone noticing. To rename one, change its line in the
+# same commit; to remove one, say why in the commit message.
+bins/svolder/tests/device_cli.rs|raw_set_of_firmware_update_is_refused
+crates/svolder-ble/tests/session.rs|set_of_a_restricted_id_never_reaches_the_device
+bins/svolderd/tests/daemon.rs|restricted_raw_is_refused_by_the_daemon
+crates/svolder-host/src/capture.rs|pw_record_captures_the_sinks_monitor_and_nothing_else
+crates/svolder-host/src/capture.rs|the_capture_sink_property_and_the_target_go_together
+crates/svolder-profiles/src/safety/tests.rs|a_raise_above_three_quarters_glides
+crates/svolder-profiles/src/safety/tests.rs|the_cap_applies_before_the_glide
+crates/svolder-profiles/src/safety/tests.rs|a_climb_writes_three_quarters_at_once_then_a_tenth_of_the_range_a_second
+bins/svolder/src/tui/app/glide/tests.rs|a_held_key_above_three_quarters_steps_no_faster_than_the_glide
+bins/svolder/src/tui/run/tests/writes.rs|a_burst_of_raises_above_three_quarters_writes_once
+bins/svolderd/src/writer/tests.rs|a_slider_at_the_top_climbs_instead_of_jumping
+bins/svolderd/src/writer/tests.rs|a_write_from_another_front_end_cancels_a_climb
+bins/svolderd/src/writer/tests.rs|mute_on_or_power_off_ends_the_climb
+bins/svolderd/src/writer/tests.rs|a_step_answered_with_another_value_ends_the_climb_where_the_device_is
+bins/svolderd/src/writer/tests.rs|a_knob_turn_ends_the_climb
+bins/svolderd/src/writer/tests.rs|a_raw_write_to_the_volume_cancels_the_climb
+bins/svolderd/src/writer/tests.rs|a_lost_link_or_a_changed_profile_ends_the_climb
+bins/svolderd/src/web/writes/tests.rs|the_web_knob_at_the_top_climbs_instead_of_jumping
+bins/svolderd/src/web/writes/tests.rs|a_web_touch_stops_another_front_ends_climb
+bins/svolderd/src/web/writes/tests.rs|a_guest_is_refused_on_every_write_route
+crates/svolder-profiles/src/safety/tests.rs|the_web_judges_by_mqtts_rules
+bins/svolderd/src/mcp/tools/tests.rs|a_rise_above_three_quarters_climbs_and_reports_the_level_reached
+bins/svolderd/src/writer/tests.rs|an_unread_volume_is_written_three_quarters_first_then_climbs_from_its_echo
+bins/svolderd/src/writer/tests.rs|a_mute_while_the_first_step_is_on_its_way_stops_the_climb_before_it_starts
+bins/svolderd/src/writer/tests.rs|a_first_step_answered_with_another_value_starts_no_climb
+bins/svolderd/src/writer/tests.rs|a_write_of_the_step_reached_from_another_front_end_ends_the_climb
+bins/svolderd/src/writer/tests.rs|a_down_after_a_lowering_sent_without_waiting_steps_from_the_lowering
+bins/svolderd/src/writer/tests.rs|a_down_after_a_lowering_given_as_text_steps_from_the_lowering
+bins/svolderd/src/writer/tests.rs|a_glide_after_a_lowering_given_as_text_writes_three_quarters_first
+bins/svolder/src/backend/direct/tests.rs|a_step_after_a_lowering_sent_without_waiting_starts_from_the_lowering
+bins/svolder/src/backend/direct/tests.rs|two_quick_steps_after_a_lowering_sent_without_waiting_never_undo_it
+bins/svolder/src/backend/direct/tests.rs|a_step_after_a_waited_lowering_that_timed_out_steps_from_the_lowering
+bins/svolder/src/backend/direct/tests.rs|a_step_after_a_refused_write_goes_on_from_the_lowering_before_it
+bins/svolder/src/backend/direct/tests.rs|a_step_after_its_note_was_read_back_and_the_knob_turned_steps_from_the_knob
+bins/svolderd/src/writer/tests.rs|a_down_after_a_waited_lowering_that_timed_out_steps_from_the_lowering
+bins/svolder/src/backend/direct/tests.rs|a_write_that_fails_on_a_lost_link_leaves_the_lowering_before_it_noted
+bins/svolderd/src/writer/tests.rs|a_down_waiting_behind_a_lowering_stays_below_it_when_the_reading_rises
+bins/svolderd/src/writer/tests.rs|two_ups_sent_without_waiting_move_two_steps_before_either_echo
+bins/svolderd/src/writer/tests.rs|an_up_after_a_superseded_slider_value_steps_from_the_device
+bins/svolderd/src/writer/tests.rs|an_up_after_a_superseded_first_step_steps_from_the_write_in_flight
+bins/svolderd/src/writer/tests.rs|a_down_waiting_while_the_knob_turns_up_is_never_louder_than_its_arrival_step
+bins/svolderd/src/writer/tests.rs|a_relative_step_after_a_refused_write_steps_from_the_reading
+bins/svolderd/src/writer/tests.rs|a_relative_step_after_a_knob_answer_steps_from_the_reading
+bins/svolderd/src/writer/tests.rs|a_step_answered_by_a_knob_turn_and_then_by_its_own_status_ends_the_climb
+bins/svolderd/src/writer/tests.rs|a_climb_step_waiting_behind_writes_to_another_control_does_not_end_the_climb
+bins/svolderd/src/writer/tests.rs|quick_relative_steps_up_never_lower_the_volume
+bins/svolderd/src/writer/tests.rs|a_mute_or_power_off_the_device_reports_ends_the_climb
+bins/svolderd/src/writer/tests.rs|a_knob_turn_while_a_climb_step_waits_ends_the_climb_and_the_step_is_never_sent
+bins/svolderd/src/writer/tests.rs|a_relative_step_after_an_absolute_raise_not_yet_shown_steps_from_the_reading
+bins/svolderd/src/writer/tests.rs|a_climb_that_starts_while_a_write_is_in_flight_goes_on_from_it
+bins/svolderd/src/writer/tests.rs|a_muted_device_is_not_climbed_even_from_above_three_quarters
+bins/svolderd/src/writer/tests.rs|a_knob_turn_while_a_first_step_waits_ends_the_glide_and_the_step_is_never_sent
+bins/svolderd/src/writer/tests.rs|a_knob_turn_ready_with_the_reply_that_releases_a_first_step_keeps_the_knobs_value
+bins/svolderd/src/writer/tests.rs|a_knob_turn_ready_with_the_reply_that_releases_a_climb_step_keeps_the_knobs_value
+bins/svolderd/src/writer/tests.rs|a_climbs_last_step_waiting_over_a_knob_turn_is_never_sent
+bins/svolderd/src/writer/tests.rs|an_up_after_a_first_step_that_will_not_be_sent_steps_from_the_reading
+bins/svolderd/src/writer/tests.rs|a_glide_after_an_outlived_first_step_is_judged_from_the_write_in_flight
+bins/svolderd/src/writer/tests.rs|a_relative_step_waiting_behind_another_control_steps_from_the_knobs_value
+bins/svolderd/src/writer/tests.rs|a_glide_that_replaces_a_waiting_write_climbs_past_the_write_in_flight
+bins/svolderd/src/writer/tests.rs|a_glide_climbs_past_the_echoes_of_the_writes_that_wait
+bins/svolderd/src/writer/tests.rs|a_glide_climbs_past_the_echo_of_a_write_answered_ack_shown_alone
+bins/svolderd/src/writer/tests.rs|an_mcp_glide_waiting_is_not_replaced_by_a_later_mqtt_command
+bins/svolderd/src/writer/tests.rs|a_glide_with_a_first_step_on_a_muted_device_lands_it_and_starts_no_climb
+bins/svolderd/src/writer/tests.rs|a_glide_without_a_first_step_on_a_device_that_is_off_answers_the_reading
+bins/svolderd/tests/mqtt.rs|a_slider_at_the_top_climbs_through_the_daemon
+bins/svolderd/src/writer/tests.rs|repeated_glides_from_the_slider_steer_one_climb_at_the_glides_pace
+bins/svolderd/src/mcp/tools/tests.rs|a_climb_cut_short_is_reported_at_the_level_reached
+bins/svolderd/src/mcp/tools/tests.rs|every_volume_write_goes_through_the_writer_and_one_that_may_land_at_once_lands
+bins/svolder/src/commands/capture/scrub/tests.rs|a_sent_frame_loses_its_passphrase_field
+bins/svolder/src/commands/capture/scrub/tests.rs|a_passphrase_message_loses_its_value_both_ways
+bins/svolder/src/commands/capture/scrub/tests.rs|a_frame_with_a_bad_checksum_still_loses_its_passphrase_value
+bins/svolder/src/commands/capture/scrub/tests.rs|a_cut_passphrase_notification_keeps_none_of_the_value
+bins/svolder/src/commands/capture/tests.rs|a_fake_capture_leaves_no_unit_or_passphrase
+bins/svolder/src/commands/capture/scrub/tests.rs|a_cut_passphrase_notification_keeps_its_header_and_function_id
+bins/svolder/src/commands/capture/scrub/tests.rs|an_address_in_a_bluez_object_path_goes_too
+bins/svolder/src/commands/capture/scrub/tests.rs|a_unit_in_words_is_learned_by_its_standalone_word
+bins/svolder/src/commands/capture/tests.rs|a_unit_named_with_d_is_scrubbed_from_the_ended_line
+bins/svolder/src/commands/capture/tests.rs|the_file_is_not_readable_by_others
+bins/svolder/src/commands/capture/handover/tests.rs|a_panic_in_the_stop_still_brings_the_units_back
+bins/svolder/src/commands/capture/handover/tests.rs|programs_in_an_own_group_do_not_share_ours
+bins/svolder/src/commands/capture/tests.rs|an_idle_service_behind_a_listening_socket_is_never_connected_to
+bins/svolder/tests/capture_cli.rs|the_owners_input_names_stay_out_of_the_file
+
+# The passphrase never reaches a remote view: the web's facts table and its JSON model (for the
+# owner and for a guest) and the MCP tool's state hold no function 250 row and no encoded code, and
+# no profile can make the passphrase or the firmware update a control.
+bins/svolderd/src/web/view/tests.rs|the_passphrase_never_reaches_a_remote_view_in_the_facts
+bins/svolderd/src/web/model/tests.rs|the_passphrase_never_reaches_the_model
+bins/svolderd/src/mcp/tools/tests.rs|the_passphrase_never_reaches_a_remote_view_in_get_state
+crates/svolder-profiles/src/registry/tests.rs|a_control_on_the_passphrase_function_is_a_load_error
+crates/svolder-profiles/src/registry/tests.rs|a_control_on_the_firmware_update_family_is_a_load_error
+crates/svolder-profiles/src/registry/tests.rs|an_action_on_a_restricted_function_is_refused
+
+# A device preset never reaches the device unasked or by the wrong door: a built-in setting never
+# names the volume or the mode, a save needs its confirmation (CLI, TUI, web) or is not offered
+# (MCP, MQTT), a recall through MCP asks first naming the highest level it can reach, and an
+# action key is never a plain control write.
+crates/svolder-profiles/src/registry/tests.rs|a_builtin_setting_can_only_name_level_controls
+crates/svolder-profiles/src/registry/tests.rs|a_builtin_setting_cannot_name_the_volume
+crates/svolder-profiles/src/device_presets/tests.rs|no_builtin_setting_or_action_of_the_loki_max_writes_the_mode
+bins/svolder/tests/device_cli.rs|set_save_off_a_terminal_without_yes_is_refused_and_sends_nothing
+bins/svolder/src/commands/device/device_presets/tests.rs|a_refused_save_leaves_the_slot_as_the_last_save_left_it
+bins/svolder/src/tui/boxes/device_presets/tests.rs|u_then_n_on_a_slot_sends_nothing
+bins/svolder/tests/backend.rs|set_save_with_yes_saves_and_a_later_recall_brings_the_bands_back
+crates/svolder-profiles/src/registry/tests.rs|an_action_keyed_save_must_overwrite
+crates/svolder-profiles/src/registry/tests.rs|an_actions_changes_cannot_name_the_volume_or_the_mode
+bins/svolderd/src/mcp/tools/tests.rs|a_builtin_setting_that_raises_a_band_more_than_6_db_asks_first
+bins/svolderd/src/mcp/tools/tests.rs|a_declined_builtin_setting_writes_nothing
+bins/svolderd/src/mcp/tools/tests.rs|a_yes_under_one_floor_does_not_answer_the_question_under_another
+bins/svolderd/src/mcp/tools/tests.rs|a_floor_noted_between_judging_and_the_state_does_not_change_the_state
+bins/svolderd/src/mcp/tools/tests.rs|a_slot_recall_asks_first_naming_the_12_db_it_can_raise
+bins/svolderd/src/mcp/tools/tests.rs|a_slot_recall_without_confirm_from_a_client_that_cannot_ask_is_refused
+bins/svolderd/src/mcp/tools/tests.rs|load_preset_refuses_a_save
+bins/svolderd/src/mcp/tools/tests.rs|a_name_that_merely_starts_with_save_is_not_refused_as_a_save
+bins/svolderd/src/mcp/tools/tests.rs|set_control_refuses_an_action_key
+bins/svolderd/src/mqtt_bridge/tests.rs|a_command_on_an_action_topic_is_dropped
+bins/svolderd/src/web/writes/tests.rs|a_slot_save_without_confirm_true_is_refused_and_sends_nothing
+bins/svolderd/src/web/writes/tests.rs|a_slot_save_needs_writes
+bins/svolderd/src/web/writes/tests.rs|the_control_route_refuses_an_action_key
+
+# The layers below the profile loader: each refuses the passphrase function or the firmware update
+# on its own, so a profile that got past the loader (or a verb that is not a profile) still sends
+# nothing, exposes nothing and lists nothing.
+crates/svolder-proto/src/function.rs|refuses_the_firmware_family_and_the_passphrase_function
+bins/svolderd/src/device/tests.rs|the_firmware_family_and_the_passphrase_function_are_refused
+crates/svolder-mqtt/src/discovery/tests.rs|nothing_in_the_firmware_family_is_ever_exposed
+crates/svolder-mqtt/src/discovery/tests.rs|the_passphrase_function_is_never_exposed_either
+bins/svolder/tests/device_cli.rs|raw_set_of_passphrase_id_is_refused
+bins/svolder/src/backend/direct/tests.rs|a_control_on_the_passphrase_function_is_refused_by_the_direct_send
+bins/svolderd/tests/daemon.rs|raw_set_of_the_passphrase_function_is_refused_by_the_daemon

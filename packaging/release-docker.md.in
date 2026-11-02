@@ -1,0 +1,19 @@
+<!--
+SPDX-FileCopyrightText: 2026 the svolder authors
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+**Docker**
+
+The image runs as uid 1000, so create its two folders owned by that uid first. Then pull and start it
+with the attached `docker-compose.yml`, setting `BLUETOOTH_GID` in `.env`
+(`getent group bluetooth | cut -d: -f3`):
+
+```
+mkdir -p config run && sudo chown 1000:1000 config run
+docker pull ghcr.io/rralex/svolder:@VERSION@
+docker compose up -d
+```
+
+To update, `docker compose pull` and then `docker compose up -d`. The image is built for x86_64 and arm64. The attached `docker-compose.yml` is the one file here
+`SHA256SUMS` does not list.

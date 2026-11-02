@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "kara"
+display = "Kara"
+product_id = 1
+min_firmware = 0
+extends = "freya"
+
+[[control]]
+id = [2]
+key = "input"
+label = "Input"
+kind = "select"
+values = { 1 = "Input 1 (XLR)", 2 = "Input 2 (XLR)", 3 = "Input 3", 4 = "Input 4", 5 = "Input 5" }
+
+[[control]]
+id = [3]
+key = "mode"
+label = "Mode"
+kind = "select"
+values = { 1 = "Passive", 2 = "Low Gain", 3 = "High Gain" }
+output_gain = true
+
+[[control]]
+id = [5]
+key = "headphone"
+label = "Headphone output"
+kind = "readout"
+value_type = "bool"
+
+[[control]]
+id = [230, 2]
+key = "fault_headphone"
+label = "Headphone fault"
+kind = "fault"
+advice = "Unplug the headphones, power-cycle the device, and check the cable for shorts."

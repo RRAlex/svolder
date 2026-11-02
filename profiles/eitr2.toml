@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "eitr2"
+display = "Eitr 2"
+product_id = 21
+min_firmware = 0
+extends = "mesh-eq-3"
+firmware_subsystems = [1]
+
+[[control]]
+id = [10]
+key = "usb_connected"
+label = "USB connected"
+kind = "readout"
+value_type = "bool"

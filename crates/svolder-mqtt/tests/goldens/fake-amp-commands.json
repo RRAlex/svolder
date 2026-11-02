@@ -1,0 +1,334 @@
+[
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "problem",
+      "name": "Over-current",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_fault_overcurrent",
+      "value_template": "{{ value_json.fault_overcurrent }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/fault_overcurrent/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "problem",
+      "name": "Over-temperature",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_fault_overtemp",
+      "value_template": "{{ value_json.fault_overtemp }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/fault_overtemp/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "connectivity",
+      "name": "Link",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "offline",
+      "payload_on": "online",
+      "state_topic": "svolder/0102030405060708/availability",
+      "unique_id": "svolder_0102030405060708_link"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/link/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Temperature reporting",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_temperature_reporting",
+      "value_template": "{{ value_json.temperature_reporting }}"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_0102030405060708/temperature_reporting/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/identify/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "entity_category": "config",
+      "name": "Identify",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_press": "PRESS",
+      "unique_id": "svolder_0102030405060708_identify"
+    },
+    "topic": "homeassistant/button/svolder_0102030405060708/identify/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Meter L",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/0102030405060708/meters",
+      "unique_id": "svolder_0102030405060708_meter_1",
+      "unit_of_measurement": "%",
+      "value_template": "{{ value_json.meter_1 }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/meter_1/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Meter R",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/0102030405060708/meters",
+      "unique_id": "svolder_0102030405060708_meter_2",
+      "unit_of_measurement": "%",
+      "value_template": "{{ value_json.meter_2 }}"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/meter_2/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "device_class": "signal_strength",
+      "entity_category": "diagnostic",
+      "json_attributes_topic": "svolder/0102030405060708/signal/attributes",
+      "name": "Signal",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_class": "measurement",
+      "state_topic": "svolder/0102030405060708/signal/state",
+      "unique_id": "svolder_0102030405060708_signal",
+      "unit_of_measurement": "dBm"
+    },
+    "topic": "homeassistant/sensor/svolder_0102030405060708/signal/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/mute/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Mute",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_mute",
+      "value_template": "{{ value_json.mute }}"
+    },
+    "topic": "homeassistant/switch/svolder_0102030405060708/mute/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/0102030405060708/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/0102030405060708/power_meters/set",
+      "device": {
+        "identifiers": [
+          "svolder_0102030405060708"
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Fake amp",
+        "name": "Living room DAC",
+        "sw_version": "3"
+      },
+      "name": "Power meters",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/0102030405060708/state",
+      "unique_id": "svolder_0102030405060708_power_meters",
+      "value_template": "{{ value_json.power_meters }}"
+    },
+    "topic": "homeassistant/switch/svolder_0102030405060708/power_meters/config"
+  }
+]

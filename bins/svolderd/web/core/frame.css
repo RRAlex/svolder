@@ -1,0 +1,505 @@
+/* SPDX-FileCopyrightText: 2026 the svolder authors */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* The fonts every theme may use: one `@font-face` per file under `fonts/`. */
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/Geist-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/Geist-Medium-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+/* Paper's print (Crimson Pro) and hand (Caveat): SIL Open Font License 1.1, no Reserved Font
+   Name, each cut into two Latin subsets. */
+
+@font-face {
+  font-family: "Crimson Pro";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/CrimsonPro-Regular-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "Crimson Pro";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/CrimsonPro-Regular-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "Crimson Pro";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/CrimsonPro-Italic-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "Crimson Pro";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/CrimsonPro-Italic-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "Caveat";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/Caveat-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "Caveat";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/Caveat-Medium-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Light-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Light-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Light-Pi.woff2") format("woff2");
+  unicode-range: U+0E3F, U+2000-200D, U+2015, U+2028-2029, U+202F, U+2032-2033, U+2070,
+      U+2074-2079, U+2080-2089, U+2113, U+2116, U+2126, U+212E, U+2150-2151,
+      U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB,
+      U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211, U+2215, U+221A, U+221E,
+      U+222B, U+2248, U+2260, U+2264-2265, U+25CA, U+2713, U+274C, U+2B0E-2B11,
+      U+ECE0, U+EFCC, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Regular-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Regular-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Regular-Pi.woff2") format("woff2");
+  unicode-range: U+0E3F, U+2000-200D, U+2015, U+2028-2029, U+202F, U+2032-2033, U+2070,
+      U+2074-2079, U+2080-2089, U+2113, U+2116, U+2126, U+212E, U+2150-2151,
+      U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB,
+      U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211, U+2215, U+221A, U+221E,
+      U+222B, U+2248, U+2260, U+2264-2265, U+25CA, U+2713, U+274C, U+2B0E-2B11,
+      U+ECE0, U+EFCC, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Medium-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-Medium-Pi.woff2") format("woff2");
+  unicode-range: U+0E3F, U+2000-200D, U+2015, U+2028-2029, U+202F, U+2032-2033, U+2070,
+      U+2074-2079, U+2080-2089, U+2113, U+2116, U+2126, U+212E, U+2150-2151,
+      U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB,
+      U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211, U+2215, U+221A, U+221E,
+      U+222B, U+2248, U+2260, U+2264-2265, U+25CA, U+2713, U+274C, U+2B0E-2B11,
+      U+ECE0, U+EFCC, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-SemiBold-Latin1.woff2") format("woff2");
+  unicode-range: U+0000, U+000D, U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6,
+      U+02DA, U+02DC, U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026,
+      U+2030, U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-SemiBold-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/IBMPlexSans-SemiBold-Pi.woff2") format("woff2");
+  unicode-range: U+0E3F, U+2000-200D, U+2015, U+2028-2029, U+202F, U+2032-2033, U+2070,
+      U+2074-2079, U+2080-2089, U+2113, U+2116, U+2126, U+212E, U+2150-2151,
+      U+2153-215E, U+2190-2199, U+21A9-21AA, U+21B0-21B3, U+21B6-21B7, U+21BA-21BB,
+      U+21C4, U+21C6, U+2202, U+2206, U+220F, U+2211, U+2215, U+221A, U+221E,
+      U+222B, U+2248, U+2260, U+2264-2265, U+25CA, U+2713, U+274C, U+2B0E-2B11,
+      U+ECE0, U+EFCC, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC,
+      U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030,
+      U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Regular-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Regular-Pi.woff2") format("woff2");
+  unicode-range: U+03C0, U+0E3F, U+2000-200D, U+2010-2012, U+2015, U+2028-2029, U+202F,
+      U+2032-2033, U+203E, U+205F, U+2070, U+2074-2079, U+2080-2089, U+2113,
+      U+2116, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA,
+      U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206,
+      U+220F, U+2211, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260,
+      U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11,
+      U+3000, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Medium-Latin1.woff2") format("woff2");
+  unicode-range: U+0020-007E, U+00A0-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC,
+      U+2013-2014, U+2018-201A, U+201C-201E, U+2020-2022, U+2026, U+2030,
+      U+2039-203A, U+2044, U+20AC, U+2122, U+2212, U+FB01-FB02;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Medium-Latin2.woff2") format("woff2");
+  unicode-range: U+0100-0101, U+0104-0130, U+0132-0151, U+0154-017F, U+018F, U+0192,
+      U+01A0-01A1, U+01AF-01B0, U+01FA-01FF, U+0218-021B, U+0237, U+0259,
+      U+1E80-1E85, U+1E9E, U+20A1, U+20A4, U+20A6, U+20A8-20AA, U+20AD-20AE,
+      U+20B1-20B2, U+20B4-20B5, U+20B8-20BA, U+20BD, U+20BF;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/IBMPlexMono-Medium-Pi.woff2") format("woff2");
+  unicode-range: U+03C0, U+0E3F, U+2000-200D, U+2010-2012, U+2015, U+2028-2029, U+202F,
+      U+2032-2033, U+203E, U+205F, U+2070, U+2074-2079, U+2080-2089, U+2113,
+      U+2116, U+2126, U+212E, U+2150-2151, U+2153-215E, U+2190-2199, U+21A9-21AA,
+      U+21B0-21B3, U+21B6-21B7, U+21BA-21BB, U+21C4, U+21C6, U+2202, U+2206,
+      U+220F, U+2211, U+2215, U+2219-221A, U+221E, U+222B, U+2236, U+2248, U+2260,
+      U+2264-2265, U+2400-2421, U+2500-259F, U+25CA, U+2713, U+274C, U+2B0E-2B11,
+      U+3000, U+FEFF, U+FFFD;
+}
+
+/* The layer that holds what a theme cannot undo, declared first: an important declaration in an
+   earlier layer beats every important declaration of a later layer and of no layer, whatever
+   their selectors. */
+@layer frame-guard;
+
+/* The frame: what the page draws over every theme (the menu's button and its menu, the picker of
+   themes, the popups). A theme sets the `--frame-*` tokens on `:root` to dress them in its own
+   colours and shapes; the values here are the ones it gets when it sets none. The theme itself is
+   drawn into `#theme`, below the frame, and never touches the frame's nodes. */
+
+:root {
+  --frame-btn-size: 30px; --frame-btn-bg: transparent; --frame-btn-fg: #ada396;
+  --frame-btn-border: rgba(255, 236, 212, .10); --frame-btn-radius: 50%;
+  --frame-btn-fg-hover: #f4eee5; --frame-btn-border-hover: rgba(255, 236, 212, .34);
+  --frame-surface: #1f1b16; --frame-ink: #f4eee5; --frame-dim: #ada396; --frame-faint: #897f73;
+  --frame-line: rgba(255, 236, 212, .19); --frame-line-strong: rgba(255, 236, 212, .34);
+  --frame-hover: #26211b; --frame-accent: #f0a73a; --frame-on-accent: #0f0d0b;
+  --frame-scrim: rgba(8, 6, 4, .72); --frame-radius: 16px; --frame-tap: 44px;
+  --frame-font: "IBM Plex Sans", system-ui, sans-serif;
+  --frame-mono: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --frame-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  --frame-toast-shadow: 0 14px 34px -12px rgba(0, 0, 0, .8);
+  --frame-toast-lift: 64px;
+}
+
+/* the theme's root sits under the frame: its own stacking context, so nothing a theme draws can
+   reach above the button */
+#theme { position: relative; z-index: 0; isolation: isolate; }
+
+/* the frame's layer: no size of its own, in page coordinates, above the theme */
+#frame { top: 0; left: 0; width: 0; height: 0; z-index: 20; }
+#frame [hidden], #picker [hidden] { display: none !important; }
+
+/* the menu's button, over the theme's slot (or at the top right): a theme cannot hide it, these
+   declarations being the guard's */
+@layer frame-guard {
+  #frame { position: absolute !important; display: block !important;
+    visibility: visible !important; pointer-events: auto !important; }
+  #frame .fxmenu { position: absolute !important; display: inline-flex !important;
+    visibility: visible !important; pointer-events: auto !important; }
+  #frame .fxbtn { position: relative !important; display: grid !important;
+    visibility: visible !important; pointer-events: auto !important; opacity: 1 !important; }
+  #frame .fxbtn.faded { opacity: 0 !important; }
+}
+#frame .fxbtn {
+  width: var(--frame-btn-size); height: var(--frame-btn-size); padding: 0; flex: none;
+  place-items: center; border-radius: var(--frame-btn-radius); cursor: pointer;
+  color: var(--frame-btn-fg); background: var(--frame-btn-bg);
+  border: 1px solid var(--frame-btn-border);
+  transition: color .15s, border-color .15s, background .15s, opacity 0s;
+}
+#frame .fxbtn.faded { transition: color .15s, border-color .15s, background .15s, opacity .6s; }
+@media (prefers-reduced-motion: reduce) {
+  #frame .fxbtn.faded { transition: color .15s, border-color .15s, background .15s, opacity 0s; }
+}
+#frame .fxbtn::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; }
+#frame .fxbtn:hover, #frame .fxbtn[aria-expanded=true] {
+  color: var(--frame-btn-fg-hover); border-color: var(--frame-btn-border-hover);
+}
+#frame .fxbtn svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+#frame .fxbtn svg .solid { fill: currentColor; stroke: none; }
+#frame :focus-visible, #picker :focus-visible {
+  outline: 2px solid var(--frame-accent); outline-offset: 3px; border-radius: 10px;
+}
+
+/* the menu under the button */
+#frame .fxpop {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; min-width: 200px;
+  display: grid; gap: 2px; padding: 6px; border-radius: var(--frame-radius);
+  background: var(--frame-surface); border: 1px solid var(--frame-line);
+  box-shadow: var(--frame-shadow); font-family: var(--frame-font); color: var(--frame-ink);
+}
+#frame .fxh { padding: 6px 12px 4px; font: 500 12.5px/1.3 var(--frame-font); color: var(--frame-faint); }
+#frame .fxpop [role^=menuitem] {
+  display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px;
+  border-radius: 10px; border: 0; background: none; text-align: left; cursor: pointer;
+  font: 500 14.5px/1.2 var(--frame-font); color: var(--frame-ink); text-decoration: none;
+}
+#frame .fxpop [role^=menuitem]:hover { background: var(--frame-hover); }
+#frame .fxpop [aria-disabled=true] { color: var(--frame-faint); cursor: default; }
+#frame .fxpop [aria-disabled=true]:hover { background: none; }
+#frame .fxpop [role=menuitemradio]::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; flex: none;
+  border: 1.5px solid var(--frame-line-strong);
+}
+#frame .fxpop [role=menuitemradio][aria-checked=true]::before {
+  background: var(--frame-accent); border-color: var(--frame-accent);
+}
+#frame .fxpop [role=menuitemcheckbox]::before {
+  content: ""; width: 20px; height: 12px; border-radius: 6px; flex: none;
+  border: 1.5px solid var(--frame-line-strong); box-sizing: border-box;
+  background: radial-gradient(circle at 5px 50%, var(--frame-faint) 3px, transparent 3.5px);
+}
+#frame .fxpop [role=menuitemcheckbox][aria-checked=true]::before {
+  background: radial-gradient(circle at 11px 50%, var(--frame-on-accent) 3px, transparent 3.5px),
+    var(--frame-accent);
+  border-color: var(--frame-accent);
+}
+#frame .fxpop .mgo { margin-left: auto; color: var(--frame-faint); }
+#frame .fxpop .mkey {
+  margin-left: auto; font: 500 11px/1 var(--frame-font); color: var(--frame-dim);
+  border: 1px solid var(--frame-line); border-radius: 6px; padding: 3px 6px;
+}
+#frame .fxpop .mthumb {
+  width: 32px; height: 21px; flex: none; border-radius: 4px; overflow: hidden;
+  border: 1px solid var(--frame-line);
+}
+#frame .fxpop .mthumb > * { display: block; width: 100%; height: 100%; }
+/* the theme's own rows set off by a rule, and the frame's by another */
+#frame .fxsep, #frame .menu-sep { height: 1px; margin: 4px 6px 2px; background: var(--frame-line); }
+@media (pointer: coarse) {
+  #frame .fxpop [role^=menuitem] { min-height: var(--frame-tap); }
+}
+
+/* the picker: a sheet over everything, a card for each theme */
+#picker {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px;
+  background: var(--frame-scrim); font-family: var(--frame-font); color: var(--frame-ink);
+}
+#picker .picker-sheet {
+  display: flex; flex-direction: column; gap: 6px; width: min(640px, 100%); max-height: 100%;
+  padding: 20px; border-radius: 20px; background: var(--frame-surface);
+  border: 1px solid var(--frame-line); box-shadow: var(--frame-shadow);
+}
+#picker h2 { margin: 0; font: 600 18px/1.3 var(--frame-font); }
+#picker .picker-note, #picker .picker-foot {
+  margin: 0; font: 400 13.5px/1.5 var(--frame-font); color: var(--frame-dim);
+}
+#picker .picker-foot { color: var(--frame-faint); font-size: 12.5px; }
+#picker kbd, #picker code { white-space: nowrap;
+  font: 500 11.5px/1 var(--frame-mono); color: var(--frame-dim); border: 1px solid var(--frame-line);
+  border-radius: 6px; padding: 2px 5px; background: none;
+}
+#picker .picker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px;
+  margin: 12px 0; overflow-y: auto; min-height: 0; padding: 4px;
+}
+#picker .tcard {
+  display: grid; gap: 4px; justify-items: start; padding: 8px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--frame-line); background: none; color: var(--frame-ink); text-align: left;
+  font: inherit;
+}
+#picker .tcard:hover { background: var(--frame-hover); }
+#picker .tcard[aria-current=true] { border-color: var(--frame-accent); }
+#picker .tcard b { font: 600 14.5px/1.2 var(--frame-font); }
+#picker .tcard small { font: 400 12.5px/1.3 var(--frame-font); color: var(--frame-dim); }
+#picker .tprev {
+  display: block; width: 160px; height: 104px; max-width: 100%; border-radius: 10px;
+  overflow: hidden; border: 1px solid var(--frame-line);
+}
+#picker .tprev > * { display: block; width: 100%; height: 100%; }
+
+/* a word from the page: saved, refused, signed out */
+.toasts {
+  position: fixed; right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--frame-toast-lift) + 12px + env(safe-area-inset-bottom, 0px)); z-index: 70;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  max-width: min(92vw, 380px); pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 14px; width: max-content; max-width: 100%;
+  text-wrap: balance; padding: 10px 18px; border-radius: 18px; background: var(--frame-surface);
+  border: 1px solid var(--frame-line); color: var(--frame-ink); font: 500 14px var(--frame-font);
+  box-shadow: var(--frame-toast-shadow);
+  opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s;
+}
+.toast.show { opacity: 1; transform: none; }
+/* a popup lets clicks through to what it covers; only its button takes one */
+.toast, .toast.show { pointer-events: none; }
+.toast .toast-action {
+  pointer-events: auto; display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px;
+  border-radius: 999px; border: 1px solid var(--frame-line); color: var(--frame-ink);
+  font: 500 12px/1.2 var(--frame-font); text-decoration: none;
+}
+/* centred on a phone */
+@media (max-width: 600px) {
+  .toasts { left: 50%; right: auto; transform: translateX(-50%); align-items: center; }
+}

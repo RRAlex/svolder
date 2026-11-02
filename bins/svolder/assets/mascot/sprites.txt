@@ -1,0 +1,577 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Ratatoskr, pixel by pixel. One letter per pixel; '.' is see-through.
+# "== name dx dy": the layer's top-left in pixels from the squirrel's top-left (the body's).
+# Negative dx reaches into the carry columns on its left; negative dy into the headroom above.
+
+== body 0 0
+..................
+..................
+............TTTT..
+...........TTSSTT.
+...........TSTTST.
+...........TST.TT.
+......FFF..TST....
+..CCCCFFFFTSST....
+..CCCCCFFTSST.....
+..DD.DDDTTTT......
+
+== body_flick 0 0
+..................
+...............TT.
+............TTTTST
+...........TTSSST.
+...........TSTTT..
+...........TST....
+......FFF..TST....
+..CCCCFFFFTSST....
+..CCCCCFFTSST.....
+..DD.DDDTTTT......
+
+== body_run1 0 0
+..................
+..................
+..................
+..............TTT.
+............TTSSTT
+...........TSSTT.T
+......FFF.TSST....
+..CCCCFFFFSST.....
+..CCCCCFFTST......
+.DD....DDTT.......
+
+== body_run2 0 0
+..................
+..................
+..................
+.............TTT..
+...........TTSSTTT
+..........TSSTT..T
+......FFF.TST.....
+..CCCCFFFFSST.....
+..CCCCCFFTST......
+....DDD.DTT.......
+
+== body_curl 0 0
+..................
+..................
+..........TTTT....
+........TTSSSSTT..
+.......TSSTTTTSST.
+.D.D..TSTFFFFTTST.
+DFDFDTSTFFFFFFTST.
+FFFFFFTFFFFFFFTST.
+FDDDFFFFFFFFFTSST.
+.FCCFFDDDDTTTTTT..
+
+== head 0 2
+FFFFFFFFF
+FWWWFWWWF
+FWKWFWKWF
+FWWWFWWWF
+.FCNNCCF.
+..CWWCF..
+
+== ears 0 0
+.D....D..
+DFD..DFD.
+
+== ears_back -1 1
+DDF....FDD
+
+== ears_fold 0 1
+DD...DD..
+
+== eyes 0 3
+FWWWFWWWF
+FWKWFWKWF
+FWWWFWWWF
+
+== eyes_closed 0 3
+FFFFFFFFF
+FDDDFDDDF
+FFFFFFFFF
+
+== eyes_lid 0 3
+FDDDFDDDF
+FWKWFWKWF
+FWWWFWWWF
+
+== eyes_up 0 3
+FWKWFWKWF
+FWWWFWWWF
+FWWWFWWWF
+
+== eyes_down 0 3
+FWWWFWWWF
+FWWWFWWWF
+FWKWFWKWF
+
+== eyes_left 0 3
+FWWWFWWWF
+FKWWFKWWF
+FWWWFWWWF
+
+== eyes_right 0 3
+FWWWFWWWF
+FWWKFWWKF
+FWWWFWWWF
+
+== eyes_happy 0 3
+FFFFFFFFF
+FFDFFFDFF
+FDFDFDFDF
+
+== mouth_open 2 7
+CKKC
+
+== arms_up -1 3
+C.........C
+C.........C
+F.........F
+.F.......F.
+..F........
+
+== paws_ears 0 0
+CC....CC.
+CC....CC.
+
+== point -3 7
+...F
+.FF.
+C...
+
+== alarm -6 0
+E.
+E.
+E.
+..
+E.
+
+== zz_small -4 0
+HHH
+..H
+.H.
+HHH
+
+== phones -1 0
+..hHHHHHh..
+.H.......H.
+AA.......AA
+AA.......AA
+aa.......aa
+
+== helmet 0 0
+Y.GGGGG.Y
+YGGGgGGGY
+gGGGGGGGg
+
+== scarf 1 8
+RRRRRRRR
+.Rr.....
+
+== horn -5 0
+......
+......
+......
+......
+.uU...
+UUUU..
+UUUUUw
+UUU...
+.uU...
+
+== waves -7 0
+..
+..
+..
+V.
+.V
+V.
+.V
+V.
+
+== lantern1 -7 4
+.hh.
+h..h
+gGGg
+GVAG
+GAAG
+gGGg
+
+== lantern2 -7 4
+.hh.
+h..h
+gGGg
+GAVG
+GAaG
+gGGg
+
+== exclaim -6 1
+E
+E
+E
+.
+E
+
+== eyes_downleft 0 3
+FWWWFWWWF
+FWWWFWWWF
+FKWWFKWWF
+
+== curl 0 0
+..................
+..................
+..........TTTT....
+........TTSSSSTT..
+.......TSSTTTTSST.
+.D....D.TSTTTTTST.
+DFD..DFDTSTTTTTST.
+FFFFFFFFFTSSSSST..
+FDDDFDDDFFTTTTT...
+.FCNNCCFFFFFFFDD..
+
+== ship -8 0
+..DD.......................
+.DPPD......................
+.DPKP......................
+..PPD....................pP
+...PP....................P.
+...PP...................PP.
+...PPPPPPPPPPPPPPPPPPPPPPP.
+....pAAGGAAGGAAGGAAGGAApp..
+.....pppppppppppppppppppp..
+.......PPPPPPPPPPPPPPPPP...
+
+== ship_head 3 0
+Y.GGGGG.Y
+YGGGgGGGY
+gGGGGGGGg
+FWWWFWWWF
+FWKWFWKWF
+FWWWFWWWF
+
+== oar1 -8 7
+...................pp......
+....................pp.....
+.....................p.....
+
+== oar2 -8 7
+..................pp.......
+.................pp........
+................p..........
+
+== wake1 -8 9
+BB.B.....................B.
+
+== wake2 -8 9
+.B.BB...................B.B
+
+== breath1 -3 6
+.I
+I.
+
+== breath2 -5 5
+I.I
+.I.
+
+== ember1 14 1
+.VE
+E.V
+
+== ember2 14 1
+VE.
+.EV
+
+== fw1 -8 -2
+...V...
+.......
+...A...
+.......
+...a...
+.......
+.......
+
+== fw2 -8 -2
+...2...
+..2.2..
+.2.V.2.
+..2.2..
+...2...
+.......
+.......
+
+== fw3 -8 -2
+1..4..5
+.......
+4.....1
+.......
+5..1..4
+.......
+.......
+
+== shadow -8 7
+.hh.....
+hhhh.hhh
+.hhhhhhh
+
+== pi_sign -7 -1
+WWWWW
+.W.W.
+.W.W.
+
+== pie -8 6
+..PPP..
+.P1P1P.
+PPPPPPP
+.ppppp.
+
+== egg1 -6 4
+.LLL.
+LlLlL
+LLLLL
+LlLLL
+LLlLL
+.LLL.
+
+== egg2 -6 4
+L.l.L
+LlKlL
+LLLLL
+LlLLL
+LLlLL
+.LLL.
+
+== towel -6 4
+4444
+WWWW
+4444
+WWWW
+4.44
+
+== crown 0 0
+.2.1.5.2.
+3W3.3.3W3
+
+== poutine -7 6
+.V.V.V
+VDDDDV
+1W1W1W
+.W1W1.
+
+== maple -7 2
+...1...
+.1.1.1.
+.11111.
+1111111
+.11111.
+..1.1..
+...D...
+
+== spark1 -7 0
+V...V
+..W..
+.WAW.
+..W..
+V.h.V
+...h.
+....h
+
+== spark2 -7 0
+..V..
+V.W.V
+.WAW.
+V.W.V
+..h..
+...h.
+....h
+
+== beret 0 0
+....9....
+.9499999.
+999999999
+
+== baguette -8 2
+......PP
+.....PpP
+....PpP.
+...PpP..
+..PpP...
+.PpP....
+PPP.....
+
+== infinity -8 3
+.ZZ..ZZ.
+Z..ZZ..Z
+Z..ZZ..Z
+.ZZ..ZZ.
+
+== shades 0 3
+KKKKKKKKK
+FKKKFKEKF
+FFFFFFFFF
+
+== tricorn 0 0
+N.NNNNN.N
+NNNNWNNNN
+.NNNNNNN.
+
+== eyepatch 0 3
+FNNNFWWWF
+FNNNFWKWF
+FNNNFWWWF
+
+== shirt 1 7
+O.....O
+OOOOOOO
+
+== pumpkin1 -7 4
+...3..
+.OOOO.
+OVOOVO
+OOOOOO
+OVVVVO
+.OOOO.
+
+== pumpkin2 -7 4
+...3..
+.OOOO.
+OaOOaO
+OOOOOO
+OaaaaO
+.OOOO.
+
+== poppy 6 7
+.1.
+1K1
+.1.
+
+== yulecap 0 0
+....111W.
+.1111111.
+WWWWWWWWW
+
+== scroll1 -7 4
+qQQQQQq
+qQwQQQq
+qwQwQwq
+qQQQwQq
+qQQQQQq
+
+== scroll2 -7 4
+qQQQQQq
+qwQQQwq
+qQwQwQq
+qQQwQQq
+qQQQQQq
+
+== scroll3 -7 4
+qQQQQQq
+qQQQwQq
+qwQwQwq
+qQwQQQq
+qQQQQQq
+
+== scroll4 -7 4
+qQQQQQq
+qQQwQQq
+qQwQwQq
+qwQQQwq
+qQQQQQq
+
+== palette1 -7 5
+..PPPP..
+.P1P7PP.
+P0PPP3P.
+.PP4PPPp
+..PPPpp.
+
+== palette2 -7 5
+..PPPP..
+.P1P2PP.
+P5PPP8P.
+.PP4PPPp
+..PPPpp.
+
+== palette3 -7 5
+..PPPP..
+.P6P2PP.
+P5PPP3P.
+.PP9PPPp
+..PPPpp.
+
+== palette4 -7 5
+..PPPP..
+.P1P2PP.
+P0PPP3P.
+.PP9PPPp
+..PPPpp.
+
+== steam1 -8 2
+.H..H.
+..H..H
+.H..H.
+H..H..
+
+== steam2 -8 2
+......
+.H..H.
+H..H..
+.H..H.
+
+== steam3 -8 2
+.H..H.
+H..H..
+.H..H.
+..H..H
+
+== steam4 -8 2
+......
+.H..H.
+..H..H
+.H..H.
+
+== towel2 -6 4
+4444.
+WWWW.
+4444.
+.WWWW
+.4.44
+
+== crown2 0 0
+.5.2.1.5.
+3W3.3.3W3
+
+== maple2 -6 2
+...1...
+.1.1.1.
+.11111.
+1111111
+.11111.
+..1.1..
+..D....
+
+== baguette2 -8 1
+......PP
+.....PpP
+....PpP.
+...PpP..
+..PpP...
+.PpP....
+PPP.....
+
+== infinity2 -8 3
+.ZW..ZZ.
+Z..ZZ..Z
+Z..ZZ..W
+.ZZ..ZZ.
+
+== shades2 0 3
+KKKKKKKKK
+FKKKFKKKF
+FFFFFFFFF
+
+== eyepatch2 0 3
+FNNNFWWWF
+FNNNFWWKF
+FNNNFWWWF

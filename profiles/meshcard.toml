@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "meshcard"
+display = "Mesh Card"
+product_id = 20
+min_firmware = 0
+extends = "mesh-eq-3"
+firmware_subsystems = [1]
+identify = false
+
+[[control]]
+id = [4]
+key = "nos"
+label = "NOS filter"
+kind = "toggle"
+
+[[control]]
+id = [10]
+key = "usb_connected"
+label = "USB connected"
+kind = "readout"
+value_type = "bool"

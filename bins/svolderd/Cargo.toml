@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolderd"
+description = "The svolder daemon: keeps sessions to configured Forkbeard devices and serves them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "svolderd"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+futures.workspace = true
+tokio = { workspace = true }
+async-trait.workspace = true
+svolder-proto.workspace = true
+svolder-profiles.workspace = true
+svolder-ble.workspace = true
+svolder-ipc.workspace = true
+svolder-fake.workspace = true
+svolder-host.workspace = true
+svolder-mqtt.workspace = true
+rmcp.workspace = true
+serde_json.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+tokio-util.workspace = true
+axum.workspace = true
+askama.workspace = true
+tower.workspace = true
+ring.workspace = true
+serde.workspace = true
+percent-encoding.workspace = true
+tokio-stream.workspace = true
+# The lock that keeps one daemon per socket is a `flock`; the integration tests also use
+# `dup2` to hand a bound socket to a spawned daemon on descriptor 3, the way a service manager
+# does.
+libc.workspace = true
+
+[dev-dependencies]
+# The MQTT integration tests run a broker in this process on 127.0.0.1 and watch it with a
+# client of their own.
+rumqttc.workspace = true
+rumqttd.workspace = true
+# The Ember fixture test reads the page's model back; `float_roundtrip` keeps every number exact
+# to its last bit, as the browser's parser does. The daemon's own parsing is unchanged.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+# `test-util` is what lets an actor's close grace run out on a paused clock.
+tokio = { workspace = true, features = ["test-util"] }

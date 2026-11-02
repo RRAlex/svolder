@@ -1,0 +1,44 @@
+Look	Palette	amber	The colour preset every screen draws from: amber, ice, red or neon. Each names an accent per device family and the good, warn and alert colours.	[tui] palette = "amber"
+Look	Accent · DAC	(preset)	What a DAC draws its accent in: the cursor, the rule under the header and the key hints. (preset) keeps the palette's own colour; the arrows step through the colours the palette gives the other two families, and back to a colour of your own.	[tui.accents] dac  (not set)
+Look	Accent · amp	(preset)	What an amplifier draws its accent in: the cursor, the rule under the header and the key hints. (preset) keeps the palette's own colour; the arrows step through the colours the palette gives the other two families, and back to a colour of your own.	[tui.accents] amp  (not set)
+Look	Accent · preamp	(preset)	What a preamplifier draws its accent in: the cursor, the rule under the header and the key hints. (preset) keeps the palette's own colour; the arrows step through the colours the palette gives the other two families, and back to a colour of your own.	[tui.accents] preamp  (not set)
+Look	Colours	auto	The colour depth the screens draw at: auto detects the terminal's own, or force 16, 256 or true colour. The animation layer needs true colour.	[tui] colors = "auto"
+Look	Monochrome	off	Whether every role drops its colour. The selection is then marked by reverse video alone.	[tui] monochrome = false
+Look	Theme background	on	Paints each palette's own dark greys under the screen, its panes and its boxes, so svolder looks the same on any terminal. Off, the terminal's own background shows. Truecolor and 256 colours only.	[tui] theme_background = true
+Look	Graphs	on	Whether the screens draw their graphs: the Telemetry columns, the level history and the connection strip. Off draws every screen without them.	[tui] graphs = true
+Look	Graph span	5m	How much history the Telemetry and level graphs span: 1m, 2m, 3m, 5m, 10m, 15m, 30m or 60m.	[tui] graph_span = "5m"
+Look	Link span	12h	How much history the connection strip spans: 1h, 3h, 6h, 12h or 24h.	[tui] link_span = "12h"
+Effects	Effects	on (inactive)	The animation layer as a whole: off stops every animation, the transitions included. It reads on (inactive) where the terminal cannot show it, below true colour or in monochrome.	[tui.effects] enabled = true
+Effects	Eased values	on	Whether a changed value's bar glides to its new length instead of jumping there. A meter's bar never glides.	[tui.effects] eased = true
+Effects	Selection glow	on	Whether the row the cursor just left keeps a fading trail for about 300 ms.	[tui.effects] glow = true
+Effects	Shimmer	on	Whether a bright band crosses the row you just changed or moved onto, as feedback. While you rest it crosses the selected row again after 2 s, 10 s, 30 s and 2 minutes.	[tui.effects] shimmer = true
+Effects	Breathing borders	on	Whether the pane borders pulse with the level: the meters' while they stream, else what the host plays. They stay still with neither.	[tui.effects] breathing = true
+Effects	Focus runner	on	Whether a band of light runs once round the frame of the pane that takes the focus. Its brightness and pace follow the level where there is one.	[tui.effects] frames = true
+Effects	Fault presence	on	Whether a standing fault's row and the header border pulse slowly while the fault stays active.	[tui.effects] fault_presence = true
+Effects	Peak hold	on	Whether a marker lingers at a meter's recent peak and decays over about a second.	[tui.effects] peak_hold = true
+Effects	List fade	on	Rows of a list dim a little with their distance from the selected row, as btop does.	[tui.effects] list_fade = true
+Effects	Mascot	on	Whether Ratatoskr, the squirrel, may come out. It stays hidden until it is called.	[tui.effects] mascot = true
+Effects	Hue drift	off	Whether the pane borders, titles, the header rule and the key hints drift along the palette's spectrum, cool to hot, glowing hotter as the level rises. The selection and every value keep the resting accent.	[tui.effects] hue_drift = false
+Effects	Rainbow scroll	off	Whether the tone curve's colours scroll slowly round the hue circle, one round trip every 20 s, rather than resting red at 20 Hz and violet at 20 kHz. On red and neon the curve's own ramp slides along its colours and back instead.	[tui.effects] spectrum_drift = false
+Effects	Transition	trace	How one screen gives way to the next: none, trace, noise or melt. Every one but none belongs to the animation layer, so Effects off plays none of them.	[tui] transition = "trace"
+Behaviour	Mouse capture	on	Whether the TUI takes the mouse. Capture stops the terminal's own text selection and copy while it is on.	[tui] mouse = true
+Behaviour	Confirm quit	on	Whether q asks Quit svolder? [Y/n] before the TUI quits. Off quits on the one q. Ctrl-C quits at once either way.	[tui] confirm_quit = true
+Behaviour	Title meter	on	Whether the terminal's title carries one bar per channel of the device's meters, else of what the host plays, while they stream.	[tui] title_meter = true
+Behaviour	Intro on launch	on	Whether the wordmark plays while the device opens. Any key skips it.	[tui] intro = true
+Behaviour	Intro effect	random	Which effect builds the wordmark at launch: random picks a demo effect each launch, never the fade; fade is the plain fade-in; particles throws sparks in from the edges. Below truecolor, or with Effects off, the mark is drawn static whatever this says.	[tui] intro_effect = "random"
+Behaviour	Intro sound	off	Whether a short sound plays with the wordmark, through PipeWire's pw-play, at the sample rate the device already runs at. Any key that skips the intro stops it.	[tui] intro_sound = false
+Behaviour	AutoEq refresh	13 weeks	How old the cached AutoEq index may get before the search fetches it again: never, or 1 to 99 weeks. Ctrl-R in the search fetches it at once whatever this says.	[autoeq] refresh_weeks
+Host audio	Host audio	on	Whether the TUI reaches the host's own audio: what plays, the sink's volume and the media player's transport. SVOLDER_HOST=off holds it off for one process whatever this says.	[tui] host_audio = true
+Host audio	Visualizer	on	Whether the device screen's Spectrum row draws what the host plays in sixteen bands. It needs host audio on.	[tui] visualizer = true
+Connect	Web UI	no daemon	The web UI serves this screen's controls to a browser on this computer or your network. Enter opens its box: on and off, how far it reaches, a link or a pairing code to sign a browser in, and its token.	[web] enabled, listen
+Connect	MCP server	off	Whether the daemon serves the Model Context Protocol over HTTP, for AI assistants. Off, it opens no port. The change is written to the file and the daemon reloads.	[mcp] enabled
+Connect	MCP listen	loopback:8737	The address the MCP server listens on. Enter types one: loopback keeps the server on this machine.	[mcp] listen
+Connect	MCP writes	read-only	Whether the server offers the tools that change a device. Read-only offers only the tools that look.	[mcp] writes
+Connect	MCP token	…	The bearer token a client sends. v shows it for 10 s, c copies it to the clipboard (to the terminal, and to the display's tool where there is one), R replaces it after a question.	[mcp] token_file, or SVOLDER_MCP_TOKEN
+Connect	MCP status	no daemon	Where the daemon says its MCP server stands. The daemon answers.	from the daemon
+Connect	MQTT bridge	off	Whether the daemon bridges its devices to an MQTT broker, for Home Assistant. It needs a broker host.	[mqtt] enabled
+Connect	MQTT broker host	not set	The broker's host name or address. Enter types it.	[mqtt] host
+Connect	MQTT broker port	1883	The broker's port. Enter types it.	[mqtt] port
+Connect	MQTT commands	read-only	Whether the bridge takes commands back from the broker and writes them to the devices. Read-only only reports.	[mqtt] commands
+Connect	MQTT password	not set	Whether a broker password is set, as this session's environment and config file say; the daemon's own environment may differ. It is never shown and never edited here: put it in SVOLDER_MQTT_PASSWORD, or in the config file.	[mqtt] password, or SVOLDER_MQTT_PASSWORD
+Connect	MQTT status	no daemon	Where the daemon says its MQTT bridge stands. The daemon answers.	from the daemon

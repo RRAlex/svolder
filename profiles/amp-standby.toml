@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "amp-standby"
+extends = "amp-stereo"
+
+[[control]]
+id = [10]
+key = "power"
+label = "Power"
+kind = "toggle"
+powers_output = true
+
+# The app shows "warming up" while the amp is awake with its mute relay still closed.
+[[control]]
+id = [4]
+key = "warming_up"
+label = "Warming up"
+kind = "readout"
+value_type = "bool"
+only_while = "power"

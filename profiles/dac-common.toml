@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "dac-common"
+family = "dac"
+
+[[control]]
+id = [3]
+key = "phase"
+label = "Phase invert"
+kind = "toggle"
+
+[[control]]
+id = [5]
+key = "mute"
+label = "Mute"
+kind = "toggle"
+
+mutes_output = true

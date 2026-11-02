@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[Unit]
+Description=svolder Forkbeard daemon
+Requires=svolderd.socket
+After=svolderd.socket bluetooth.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=__BINDIR__/svolderd
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

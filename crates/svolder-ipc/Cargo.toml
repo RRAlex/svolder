@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "svolder-ipc"
+description = "Wire protocol, config, socket resolution, and Unix-socket server/client for svolder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+dbus.workspace = true
+futures.workspace = true
+tokio = { workspace = true }
+libc.workspace = true
+svolder-proto = { workspace = true, features = ["serde"] }
+svolder-profiles = { workspace = true, features = ["serde"] }
+svolder-host.workspace = true
+
+# A musl build is the static release binary (`make static`): libdbus is built in from the
+# source libdbus-sys bundles rather than linked from the system.
+[target.'cfg(target_env = "musl")'.dependencies]
+dbus = { workspace = true, features = ["vendored"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net", "io-util", "sync", "test-util"] }

@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+schema = 1
+name = "tyr"
+display = "Tyr"
+product_id = 18
+min_firmware = 0
+extends = "amp-common"
+
+[[control]]
+id = [10]
+key = "power"
+label = "Power"
+kind = "toggle"
+powers_output = true
+
+# The amp's meter scale; unconfirmed on a real amp (see known-issues).
+[[control]]
+id = [20, 1]
+key = "meter_1"
+label = "Meter"
+kind = "meter"
+channel = "M"
+scale = { zero_from = "meter_floor", full = 1000, class_a = 0.10 }
+
+[[control]]
+id = [20, 2]
+key = "meter_floor"
+label = "Meter floor"
+kind = "readout"
+value_type = "u16"
+
+# The app shows "warming up" while the amp is awake with its mute relay still closed.
+[[control]]
+id = [4]
+key = "warming_up"
+label = "Warming up"
+kind = "readout"
+value_type = "bool"
+only_while = "power"
+
+# Over-temperature is taken to come with a channel id: svolder listens on channel 1 only, so a
+# plain 230.2 raises no fault (known-issues: "Tyr's over-temperature channel is assumed").
+[[control]]
+id = [230, 2, 1]
+key = "fault_overtemp"
+label = "Over-temperature"
+kind = "fault"
+advice = "Switch the device off and let it cool down before turning on again. Check ventilation if it continues."
