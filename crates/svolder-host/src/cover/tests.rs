@@ -380,6 +380,7 @@ fn the_places_come_from_the_environment_s_directories() {
     let got = places_from(
         Some(OsStr::new("/home/ann")),
         Some(OsStr::new("/run/user/1000")),
+        None,
     );
     assert_eq!(
         got.roots,
@@ -406,10 +407,43 @@ fn the_places_come_from_the_environment_s_directories() {
 
 #[test]
 fn unset_empty_or_relative_directories_are_left_out() {
-    let none = places_from(None, None);
+    let none = places_from(None, None, None);
     assert_eq!(none.roots, [PathBuf::from("/tmp")]);
     assert!(none.spotify.is_empty());
-    let odd = places_from(Some(OsStr::new("")), Some(OsStr::new("run")));
+    let odd = places_from(
+        Some(OsStr::new("")),
+        Some(OsStr::new("run")),
+        Some(OsStr::new("pw")),
+    );
     assert_eq!(odd.roots, [PathBuf::from("/tmp")]);
     assert!(odd.spotify.is_empty());
+}
+
+/// A demo with the host on keeps the real runtime directory in `PIPEWIRE_RUNTIME_DIR` while its
+/// own is private: both are roots, once each.
+#[test]
+fn the_pipewire_runtime_directory_is_a_root_too() {
+    let got = places_from(
+        Some(OsStr::new("/home/ann")),
+        Some(OsStr::new("/tmp/sd-abcdef")),
+        Some(OsStr::new("/run/user/1000")),
+    );
+    assert_eq!(
+        got.roots,
+        [
+            PathBuf::from("/home/ann"),
+            PathBuf::from("/tmp"),
+            PathBuf::from("/tmp/sd-abcdef"),
+            PathBuf::from("/run/user/1000")
+        ]
+    );
+    let same = places_from(
+        None,
+        Some(OsStr::new("/run/user/1000")),
+        Some(OsStr::new("/run/user/1000")),
+    );
+    assert_eq!(
+        same.roots,
+        [PathBuf::from("/tmp"), PathBuf::from("/run/user/1000")]
+    );
 }

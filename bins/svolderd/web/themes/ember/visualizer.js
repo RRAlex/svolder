@@ -41,7 +41,7 @@
 // the volume's level) and each beat that is due (the smoke puffs); when the drawing stops, the
 // effects are told the music has, and the page is as it was without frames.
 
-import { BANDS, VizModel, posFreq } from './viz-model.js';
+import { BANDS, VizModel, posFreq } from '../../core/viz-model.js';
 import { CURVE_FILL_ALPHA, CURVE_LEFT, CURVE_RIGHT, alpha, pixel } from './viz-colour.js';
 import { watchVisible } from '../../core/visible.js';
 import { ember, mine, orderOf } from './bind.js';

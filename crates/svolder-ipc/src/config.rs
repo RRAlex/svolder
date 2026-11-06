@@ -1190,6 +1190,12 @@ pub fn state_home() -> PathBuf {
         .unwrap_or_else(|| home_dir().unwrap_or_default().join(".local").join("state"))
 }
 
+/// Where this machine's computer EQ keeps its saved state: `host-eq.toml` in svolder's state
+/// directory.
+pub fn host_eq_state_path() -> PathBuf {
+    state_home().join("svolder").join("host-eq.toml")
+}
+
 /// `$XDG_CACHE_HOME`, or `~/.cache`: where svolder keeps what it can fetch again, in a
 /// `svolder` directory of its own.
 pub fn cache_home() -> PathBuf {

@@ -111,7 +111,12 @@ fn main() -> ExitCode {
         }
     };
     let demo = match cli.command {
-        Some(Command::Tui { demo: true, .. }) => match demo::Demo::start() {
+        Some(Command::Tui {
+            demo: true,
+            host,
+            web,
+            ..
+        }) => match demo::Demo::start(demo::Options { host, web }) {
             Ok(demo) => Some(demo),
             Err(failure) => return failure.report(),
         },
@@ -162,9 +167,17 @@ async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String>
         Command::Tui {
             no_color,
             demo: true,
+            host,
+            web,
             ..
         } => match demo_socket {
-            Some(socket) => Ok(demo::run(&g, monochrome(no_color), socket).await),
+            Some(socket) => Ok(demo::run(
+                &g,
+                monochrome(no_color),
+                socket,
+                demo::Options { host, web },
+            )
+            .await),
             None => Err("the demo was not started".to_string()),
         },
         Command::Tui {
@@ -176,6 +189,7 @@ async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String>
             no_color,
             demo: false,
             join: None,
+            ..
         } => Ok(tui::run(
             &g,
             tui::TuiOptions {

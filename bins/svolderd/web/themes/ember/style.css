@@ -26,7 +26,7 @@
   --big-w: 300; --hist-h: 64px;
   --t-xs: 12px; --t-s: 13.5px; --t-m: 15px; --t-l: 17px; --t-xl: 22px;
   /* the frame's dress: the button, the menu, the picker and the popups */
-  --frame-btn-size: 30px; --frame-btn-bg: none; --frame-btn-fg: var(--dim);
+  --frame-btn-size: 44px; --frame-btn-bg: var(--card-2); --frame-btn-fg: var(--dim);
   --frame-btn-border: var(--hair); --frame-btn-radius: 50%;
   --frame-btn-fg-hover: var(--ink); --frame-btn-border-hover: var(--hair-3);
   --frame-surface: var(--card-2); --frame-ink: var(--ink); --frame-dim: var(--dim);
@@ -90,20 +90,20 @@ code { font: 12.5px var(--f-code); color: var(--ink); background: var(--card-2);
   grid-template-areas: "wm . side" "devs devs devs";
   align-items: center;
   gap: 18px 12px;
-  padding: 18px var(--px) 0;
+  /* the right side keeps the frame's button (44 px, 8 px in) clear */
+  padding: 18px max(var(--px), 60px) 0 var(--px);
 }
 .top .wm { grid-area: wm; }
 .top .devs { grid-area: devs; }
 .top .side { grid-area: side; display: flex; align-items: center; justify-content: flex-end;
   flex-wrap: wrap; gap: 8px 10px; }
-/* a phone: the header's middle track goes (its two gaps were 24 px) and the pills tighten, so the
-   wordmark, the effects button, the link pill and a guest's Sign in pill share one row at 360 px */
+/* a phone: the header's middle track goes (its two gaps were 24 px) and the pill tightens, so the
+   wordmark and a guest's Sign in pill share one row at 360 px, clear of the frame's button */
 @container app (max-width: 819px) {
   .top { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "wm side" "devs devs";
     column-gap: 8px; }
   .top .side { gap: 8px 6px; }
   .top .side .pill { padding: 0 14px; }
-  .top .side .link { padding: 7px 10px; }
 }
 #screen { flex: 1; padding: 18px var(--px) 22px; display: flex; flex-direction: column;
   gap: var(--gap); }
@@ -374,13 +374,13 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
   .wm { width: 108px; }
 }
 
-/* the device switcher and the link pill */
+/* the device switcher and the link's dot */
 .devs { display: flex; gap: 28px; align-items: end; flex-wrap: wrap; }
 .dev {
   display: grid; gap: 4px; min-height: 52px; align-content: end; color: var(--faint);
   text-decoration: none; transition: color .2s;
 }
-.dev b { font: 500 25px/1.05 var(--f-title); letter-spacing: -.01em; }
+.dev b { font: 500 var(--dev-name)/1.05 var(--f-title); letter-spacing: -.01em; }
 .dev small { font: 500 var(--t-xs)/1 var(--f-ui); display: flex; align-items: center; gap: 6px; }
 .dev small::before {
   content: ""; width: 7px; height: 7px; flex: none; border-radius: 50%;
@@ -393,22 +393,33 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
 .dev[aria-current=page], .dev.one { color: var(--ink); }
 .dev[aria-current=page] small, .dev.one small { color: var(--dim); }
 .dev[aria-current=page] small::before, .dev.one small::before { opacity: 1; }
-/* where the frame's menu button sits: an empty slot of its size in the header, before the link
-   pill, which the frame draws the button over */
-.fxslot { display: inline-block; width: var(--frame-btn-size); height: var(--frame-btn-size);
-  flex: none; }
-.top .link {
-  display: flex; align-items: center; gap: 8px; white-space: nowrap;
-  font: 500 13px/1 var(--f-ui); color: var(--dim);
-  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--hair);
+/* where the frame's menu button sits: an empty slot of its size, pinned to the window's top right
+   corner (8 px in, as in every theme); the header keeps that corner clear (`.top`) */
+.fxslot {
+  position: fixed; right: max(8px, env(safe-area-inset-right, 0px));
+  top: max(8px, env(safe-area-inset-top, 0px));
+  width: var(--frame-btn-size); height: var(--frame-btn-size); pointer-events: none;
+}
+/* each device and, on the shown one, its link: a dot beside the name; whatever is not "connected"
+   shows its word too, so trouble is never told by colour alone */
+.devs { --dev-name: 25px; }
+.devrow { display: flex; align-items: flex-end; gap: 10px; }
+.devs .link {
+  position: relative; display: flex; align-items: center; gap: 7px; white-space: nowrap;
+  font: 500 var(--t-xs)/1 var(--f-ui); color: var(--dim);
+  /* the dot's centre on the name's line: the small line and its gap under it, half the name's line,
+     less half the link's own line */
+  margin-bottom: calc(var(--t-xs) + 4px + var(--dev-name) * .525 - var(--t-xs) / 2);
+}
+.link.on .lw {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap;
 }
 .link i {
   position: relative; width: 8px; height: 8px; border-radius: 50%; flex: none;
   background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 16%, transparent);
 }
-.link.wait, .link.off {
-  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent);
-}
+.link.wait, .link.off { color: var(--warn); }
 .link.wait i, .link.off i {
   background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
 }
@@ -987,7 +998,7 @@ sv-slider { display: grid; gap: 10px; }
   .top { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "wm devs side";
     gap: 20px 44px; align-items: end; }
   .top .side { align-self: center; }
-  .dev b { font-size: 30px; }
+  .devs { --dev-name: 30px; }
   .meters { gap: 36px; }
   .sws { grid-template-columns: 1fr 1fr; }
   .eqg { height: 196px; }
@@ -997,12 +1008,13 @@ sv-slider { display: grid; gap: 10px; }
   }
 }
 
-/* a stream that is lost: the screen dims and goes inert, the pill says why, the glow greys; a woken
+/* a stream that is lost: the screen dims and goes inert, the link says why, the glow greys; a woken
    page that waits for its first reading (`waking`) dims the screen alone */
 body.lost #screen { opacity: .5; }
 body.lost:not(.waking) .glow { filter: grayscale(1); animation: none; }
-body.lost .link[data-said] { font-size: 0; color: var(--warn); }
-body.lost .link[data-said]::after { content: attr(data-said); font-size: 13px; }
+body.lost .link[data-said] { color: var(--warn); }
+body.lost .link[data-said] .lw { display: none; }
+body.lost .link[data-said]::after { content: attr(data-said); }
 body.lost .link[data-said] i {
   background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
 }

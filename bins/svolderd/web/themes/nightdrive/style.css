@@ -1,0 +1,550 @@
+/* SPDX-FileCopyrightText: 2026 the svolder authors */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* The theme Night drive: an outrun road that moves with the music, on a dusk-purple ground. Dark
+   only. The scene is two canvases under an HTML layer; the page itself never scrolls. The frame's
+   button, menu and popups are dressed by the --frame-* tokens below and by nothing else. */
+
+:root[data-theme="nightdrive"] {
+  color-scheme: dark;
+  --nd-night: #0a0018;
+  --nd-dusk: #5b0f5e;
+  --nd-deep: #05030a;
+  --nd-ink: #f3e9ff;
+  --nd-mid: #b9a9cf;
+  --nd-dim: #8a7aa3;
+  --nd-pink: #ff3cc8;
+  --nd-pink-ink: #ffb3ec;
+  --nd-track: #ff9ae6;
+  --nd-track-sub: #b388c9;
+  --nd-cyan: #22d3ee;
+  --nd-cyan-ink: #7ff3ff;
+  --nd-cyan-key: #b5f7ff;
+  --nd-warn: #ffd166;
+  --nd-bad: #ff5a6e;
+  --nd-hair: rgba(243, 233, 255, .10);
+  --nd-panel: rgba(10, 0, 24, .62);
+  --nd-sheet: rgba(12, 6, 24, .9);
+  /* the outrun volume's height over its width (its viewBox is 640 by 170) */
+  --nd-vaspect: .2656;
+  --nd-dim-scene: brightness(.45) saturate(.8);
+  --nd-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --nd-mono: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  --frame-btn-fg: var(--nd-cyan-ink);
+  --frame-btn-border: rgba(34, 211, 238, .55);
+  --frame-btn-fg-hover: var(--nd-cyan-key);
+  --frame-btn-border-hover: var(--nd-cyan-key);
+  --frame-btn-bg: var(--nd-night);
+  --frame-btn-size: 44px;
+  --frame-btn-radius: 50%;
+  --frame-surface: #1a0d2e;
+  --frame-hover: #26143f;
+  --frame-ink: var(--nd-ink);
+  --frame-dim: var(--nd-mid);
+  --frame-faint: var(--nd-dim);
+  --frame-line: rgba(243, 233, 255, .19);
+  --frame-line-strong: rgba(243, 233, 255, .34);
+  --frame-accent: var(--nd-pink);
+  --frame-on-accent: var(--nd-night);
+  --frame-scrim: rgba(5, 3, 10, .72);
+  --frame-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+  --frame-font: var(--nd-sans);
+}
+
+/* ---- the page: it fits the window and does not scroll ---- */
+
+:root[data-theme="nightdrive"], :root[data-theme="nightdrive"] body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--nd-night);
+  color: var(--nd-ink);
+  font: 400 15px/1.5 var(--nd-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nd, .nd *, .nd *::before, .nd *::after { box-sizing: border-box; }
+:where(.nd) :is(h1, h2, p, b) { margin: 0; }
+.nd [hidden] { display: none !important; }
+
+.nd {
+  position: relative; width: 100vw; height: 100dvh; overflow: hidden; background: var(--nd-deep);
+  /* the HUD sizes against the smaller side of the window, so a tall window keeps it whole */
+  --nd-hud: clamp(11px, calc(.7vmin + 6px), 15px);
+  --nd-edge: clamp(14px, 2.2vmin, 28px);
+  --nd-top: clamp(10px, 1.6vmin, 20px);
+  --nd-clear: calc(max(8px, env(safe-area-inset-right, 0px)) + 44px + 12px);
+}
+
+/* ---- the scene: sky and sun under, the ridge and the road over ---- */
+
+.nd-scene { position: absolute; inset: 0; touch-action: none; }
+/* the cursor rests with the pointer: hidden over the scene after 2 s without a move (rest.js) */
+.nd-rest .nd-scene { cursor: none; }
+.nd-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* the words above a bubble held on the mountains; its place is set from the script */
+.nd-label {
+  position: absolute; left: 0; top: 0; padding: 3px 9px; white-space: nowrap; pointer-events: none;
+  font: 500 var(--nd-hud)/1.3 var(--nd-mono); letter-spacing: .06em; color: var(--nd-cyan-key);
+  background: var(--nd-panel); border: 1px solid var(--nd-hair); border-radius: 4px;
+  text-shadow: 0 0 6px var(--nd-cyan);
+}
+
+/* ---- the HTML layer over the scene ---- */
+
+.nd-layer { position: absolute; inset: 0; pointer-events: none; }
+.nd-layer > * { pointer-events: auto; }
+
+/* where the frame's menu button sits: the scene's top right, which the top line and the EQ line
+   keep clear of */
+.nd-slot {
+  position: fixed; right: max(8px, env(safe-area-inset-right, 0px));
+  top: max(8px, env(safe-area-inset-top, 0px)); width: 44px; height: 44px; pointer-events: none;
+}
+
+/* ---- the top line, the outrun volume and the EQ line ---- */
+
+.nd-layer > .nd-hud, .nd-hud > * { pointer-events: none; }
+/* the wrapper has no box of its own, except on a phone held upright (below) */
+.nd-hud { display: contents; }
+
+.nd-top {
+  position: absolute; left: var(--nd-edge); right: var(--nd-clear); top: var(--nd-top);
+  display: flex; justify-content: space-between; gap: 2em;
+  font: 500 var(--nd-hud)/1.3 var(--nd-mono); letter-spacing: .18em; text-transform: uppercase;
+  color: var(--nd-cyan-ink); text-shadow: 0 0 6px var(--nd-cyan);
+}
+.nd-right { text-align: right; }
+.nd-right.warn { color: var(--nd-warn); text-shadow: 0 0 8px rgba(255, 209, 102, .5); }
+.nd-right.bad { color: var(--nd-bad); text-shadow: 0 0 8px rgba(255, 90, 110, .5); }
+
+.nd-vol {
+  position: absolute; left: 0; right: 0; top: clamp(18px, 2.6vmin, 34px);
+  display: flex; justify-content: center;
+}
+.nd-odb { width: clamp(200px, 50vmin, 460px); height: auto; overflow: visible; }
+.nd-novol {
+  max-width: min(32em, 80vw); text-align: center; font: 400 calc(var(--nd-hud) * 1.15)/1.4 var(--nd-sans);
+  color: var(--nd-mid);
+}
+
+.nd-eq {
+  position: absolute; right: var(--nd-clear);
+  top: calc(var(--nd-top) + var(--nd-hud) * 1.3 + 6px);
+  font: 500 var(--nd-hud)/1.3 var(--nd-mono); letter-spacing: .18em; text-transform: uppercase;
+  color: var(--nd-cyan-ink); text-shadow: 0 0 6px var(--nd-cyan); white-space: nowrap;
+}
+.nd-eq b { color: #fff; font-weight: 500; }
+.nd-gains { letter-spacing: .06em; color: var(--nd-mid); text-shadow: none; margin-left: .6em; }
+
+/* ---- the fade: opacity only, so the HUD stays in the tab order and the accessibility tree ---- */
+
+.nd-faded :is(.nd-top, .nd-vol, .nd-eq) { opacity: 0; transition: opacity 2.5s ease; }
+.nd-dash-dim .nd-dash { opacity: .1; transition: opacity 2.5s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .nd-faded :is(.nd-top, .nd-vol, .nd-eq), .nd-dash-dim .nd-dash { transition: none; }
+}
+.nd-faded.nd-vol-on .nd-vol { opacity: 1; transition: opacity .3s ease; }
+.nd-faded.nd-vol-back .nd-vol { transition-duration: .8s; }
+
+/* ---- the dash: the strip along the bottom; it fades to a tenth with the HUD (dash-fade.js) ---- */
+
+.nd-dash {
+  position: absolute; left: var(--nd-edge); right: var(--nd-edge);
+  bottom: calc(var(--nd-edge) * .6); display: flex; align-items: center; justify-content: space-between;
+  gap: clamp(10px, 1.9vmin, 24px); padding: 10px clamp(10px, 1.4vmin, 18px); border-radius: 12px;
+  background: var(--nd-panel); border: 1px solid rgba(255, 60, 200, .45);
+  box-shadow: 0 0 18px rgba(255, 60, 200, .25), inset 0 0 12px rgba(34, 211, 238, .12);
+}
+.nd-grp { display: flex; align-items: center; gap: 8px; flex: none; }
+
+.nd-k {
+  display: inline-flex; align-items: center; justify-content: center; position: relative;
+  min-width: 40px; height: 40px; padding: 0 12px; margin: 0; border-radius: 7px;
+  border: 1px solid var(--nd-pink); background: transparent; color: var(--nd-pink-ink);
+  font: 600 calc(var(--nd-hud) * 1.1)/1 var(--nd-mono); text-shadow: 0 0 6px var(--nd-pink);
+  box-shadow: 0 0 8px rgba(255, 60, 200, .35); cursor: pointer; user-select: none; touch-action: manipulation;
+  -webkit-user-select: none; white-space: nowrap;
+}
+.nd-k.cy {
+  border-color: var(--nd-cyan); color: var(--nd-cyan-key); text-shadow: 0 0 6px var(--nd-cyan);
+  box-shadow: 0 0 8px rgba(34, 211, 238, .35);
+}
+.nd-k.on { background: var(--nd-pink); color: var(--nd-night); text-shadow: none; }
+.nd-k.cy.on { background: var(--nd-cyan); color: var(--nd-night); }
+.nd-k:hover { filter: brightness(1.2); }
+.nd-k:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-k.quiet { opacity: .5; }
+.nd-ic { width: 16px; height: 16px; fill: currentColor; display: block; }
+
+.nd-gauge { font: 500 var(--nd-hud)/1.2 var(--nd-mono); color: var(--nd-cyan-ink); letter-spacing: .08em; white-space: nowrap; }
+.nd-gauge i { font-style: normal; color: var(--nd-mid); text-transform: uppercase; }
+.nd-gauge[data-gauge] { display: inline-flex; align-items: center; gap: 6px; }
+.nd-arc { width: 32px; height: 20px; flex: none; overflow: visible; }
+.nd-arc path { stroke-width: 3; stroke-linecap: round; }
+.nd-arc-bg { stroke: rgba(34, 211, 238, .25); }
+.nd-arc-fg { stroke: var(--nd-cyan); }
+.nd-gauge[data-gauge="temperature"] .nd-arc-fg { stroke: var(--nd-warn); }
+
+.nd-now {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  /* the track's block, from the top of the title's text to the bottom of the bar, is these lines and gaps; the
+     track's rules below use the same values, and the cover is a square of their sum */
+  --nd-title: calc(var(--nd-hud) * 1.05 * 1.25);
+  --nd-artist: calc(var(--nd-hud) * .92 * 1.25);
+  --nd-artist-gap: 2px;
+  --nd-bar-gap: 6px;
+  --nd-bar: 3px;
+  --nd-cover: calc(var(--nd-title) + var(--nd-artist) + var(--nd-artist-gap) + var(--nd-bar-gap) + var(--nd-bar));
+}
+.nd-cover {
+  flex: none; width: var(--nd-cover); height: var(--nd-cover); border-radius: 4px; overflow: hidden;
+  border: 1px solid var(--nd-cyan); box-shadow: 0 0 6px rgba(34, 211, 238, .35);
+}
+.nd-cover[hidden] { display: none; }
+.nd-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.nd-track {
+  flex: 1; min-width: 0; font: 600 calc(var(--nd-hud) * 1.05)/1.25 var(--nd-sans); letter-spacing: .14em;
+  text-transform: uppercase; color: var(--nd-track); text-shadow: 0 0 6px var(--nd-pink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nd-title { display: block; min-height: var(--nd-title); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.nd-sub {
+  display: block; margin-top: var(--nd-artist-gap); letter-spacing: .1em; color: var(--nd-track-sub); font-weight: 500;
+  font-size: calc(var(--nd-hud) * .92); min-height: var(--nd-artist); text-shadow: none; overflow: hidden; text-overflow: ellipsis;
+}
+.nd-prog { display: block; height: var(--nd-bar); margin-top: var(--nd-bar-gap); border-radius: 3px; background: rgba(243, 233, 255, .15); }
+.nd-prog i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--nd-pink); box-shadow: 0 0 8px var(--nd-pink); }
+
+/* the list a long input opens, over the chip */
+.nd-list {
+  position: absolute; z-index: 5; display: flex; flex-direction: column; min-width: 8em; padding: 4px;
+  border-radius: 8px; background: var(--nd-sheet); border: 1px solid var(--nd-cyan);
+  box-shadow: 0 0 14px rgba(34, 211, 238, .35);
+}
+.nd-opt {
+  min-height: 40px; padding: 0 14px; border: 0; border-radius: 5px; background: transparent; text-align: left;
+  color: var(--nd-cyan-key); font: 600 calc(var(--nd-hud) * 1.1)/1 var(--nd-mono); cursor: pointer;
+}
+.nd-opt:hover, .nd-opt:focus-visible { background: rgba(34, 211, 238, .18); outline: none; }
+.nd-opt.on { background: var(--nd-cyan); color: var(--nd-night); }
+
+/* ---- the neon sheet: the rest of the device over the dimmed scene ---- */
+
+/* the scene and the dash under the sheet run dimmed (and are out of reach, `inert`) while it stands */
+.nd[data-sheet] :is(.nd-scene, .nd-layer) { filter: var(--nd-dim-scene); }
+
+.nd-sheet-wrap { position: absolute; inset: 0; z-index: 3; }
+.nd { --nd-sheet-top: clamp(56px, 8vmin, 96px); --nd-sheet-bottom: clamp(84px, 12vmin, 150px); }
+
+.nd-sheet {
+  position: absolute; left: 50%; top: var(--nd-sheet-top); transform: translateX(-50%);
+  width: min(1100px, 94vw); max-height: calc(100% - var(--nd-sheet-top) - var(--nd-sheet-bottom));
+  display: flex; flex-direction: column; border-radius: 14px; padding: 18px 22px 20px;
+  background: var(--nd-sheet); border: 1px solid rgba(34, 211, 238, .55);
+  box-shadow: 0 0 30px rgba(34, 211, 238, .22), inset 0 0 20px rgba(255, 60, 200, .08);
+  font: 400 13px/1.45 var(--nd-mono); color: var(--nd-ink); outline: none;
+}
+.nd-sheet-body {
+  display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px 28px; align-content: start;
+  overflow-y: auto; min-height: 0; padding-right: 2px; overscroll-behavior: contain;
+}
+.nd-sec, .nd-side { min-width: 0; }
+.nd-side { display: flex; flex-direction: column; gap: 16px; }
+.nd-x {
+  position: absolute; right: 10px; top: 8px; min-width: 36px; height: 36px; padding: 0; border: 0;
+  border-radius: 8px; background: transparent; color: var(--nd-mid); font: 400 18px/1 var(--nd-sans); cursor: pointer;
+}
+.nd-x:hover { color: var(--nd-ink); }
+.nd-x:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 1px; }
+.nd-lbl {
+  margin: 0 0 8px; font: 600 12px/1 var(--nd-sans); letter-spacing: .16em; text-transform: uppercase;
+  color: var(--nd-cyan-ink);
+}
+.nd-sec > .nd-lbl:not(:first-child) { margin-top: 16px; }
+.nd-set { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.nd-chip, .nd-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 32px; margin: 0;
+  padding: 4px 14px; border-radius: 99px; border: 1px solid rgba(255, 60, 200, .5); background: transparent;
+  color: var(--nd-pink-ink); font: 500 13px/1.2 var(--nd-mono); letter-spacing: .04em; cursor: pointer;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+.nd-chip:hover, .nd-btn:hover { border-color: var(--nd-pink); }
+.nd-chip.on { background: var(--nd-pink); color: var(--nd-night); border-color: var(--nd-pink); }
+.nd-chip.own { font-style: italic; }
+.nd-chip.quiet, .nd-st.quiet, .nd-rb.quiet { opacity: .5; }
+.nd-chip:focus-visible, .nd-btn:focus-visible, .nd-st:focus-visible, .nd-rb:focus-visible, .nd-v:focus-visible,
+.nd-opt:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-btn.danger { border-color: var(--nd-bad); color: var(--nd-bad); }
+
+/* Loudness: the round `−` and `+` over its ends, the strength under its name */
+.nd-loud { position: relative; display: inline-flex; }
+.nd-loud .nd-chip { flex-direction: column; gap: 0; padding: 4px 40px; line-height: 1.15; }
+.nd-loud .nd-chip i { font-style: normal; font-size: 10px; opacity: .85; letter-spacing: .06em; }
+.nd-rb {
+  position: absolute; top: 50%; width: 24px; height: 24px; margin: -12px 0 0; padding: 0; border: 0;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 1;
+  font: 500 15px/1 var(--nd-mono); color: var(--nd-night); background: rgba(10, 0, 24, .22); cursor: pointer;
+}
+.nd-rb.l { left: 6px; }
+.nd-rb.r { right: 6px; }
+.nd-rb::after { content: ""; position: absolute; inset: -4px; }
+
+/* the band table */
+.nd-bandtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.nd-bandtable th { color: var(--nd-dim); font-weight: 400; text-align: left; padding: 3px 4px; white-space: nowrap; }
+.nd-bandtable tbody th { color: var(--nd-mid); }
+.nd-bandtable td { padding: 3px 4px; white-space: nowrap; }
+.nd-bandtable.faint { opacity: .6; }
+.nd-stepper { display: inline-flex; align-items: center; gap: 2px; }
+.nd-st {
+  display: inline-flex; width: 24px; height: 24px; margin: 0; padding: 0; border-radius: 6px; align-items: center;
+  justify-content: center; border: 1px solid rgba(34, 211, 238, .45); background: transparent;
+  color: var(--nd-cyan-ink); font: 500 15px/1 var(--nd-mono); cursor: pointer; touch-action: manipulation;
+  -webkit-user-select: none; user-select: none;
+}
+.nd-st:hover { border-color: var(--nd-cyan-key); }
+.nd-v {
+  width: 6.4em; min-width: 0; height: 24px; padding: 0 2px; text-align: center; border: 1px solid transparent;
+  border-radius: 6px; background: transparent; color: var(--nd-ink); font: 400 13px/1 var(--nd-mono);
+  font-variant-numeric: tabular-nums;
+}
+.nd-v:focus { border-color: var(--nd-cyan); background: rgba(34, 211, 238, .08); outline: none; }
+.nd-v.quiet { color: var(--nd-mid); }
+
+.nd-note { margin: 8px 0 0; color: var(--nd-dim); font: 400 12px/1.4 var(--nd-sans); }
+.nd-status { margin: 8px 0; color: var(--nd-mid); font: 400 12px/1.4 var(--nd-sans); }
+.nd-status i { color: var(--nd-ink); font-style: normal; font-weight: 600; }
+
+/* the sheet's Controls, the device's slots and its facts */
+.nd-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0 0 10px; }
+.nd-name { color: var(--nd-mid); font: 400 13px/1.3 var(--nd-mono); }
+.nd-rv, .nd-val { color: var(--nd-ink); font: 500 13px/1.3 var(--nd-mono); font-variant-numeric: tabular-nums; }
+.nd-rv.faint { color: var(--nd-dim); }
+.nd-link { padding: 0; border: 0; background: none; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.nd-link:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-level { margin: 0 0 12px; }
+.nd-lrow { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.nd-sbox { display: flex; align-items: center; gap: 8px; }
+.nd-end { color: var(--nd-dim); font: 400 11px/1 var(--nd-mono); }
+.nd-scale {
+  position: relative; flex: 1; height: 24px; touch-action: none; cursor: pointer; border-radius: 12px;
+}
+.nd-scale::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px;
+  background: rgba(34, 211, 238, .3);
+}
+.nd-scale.quiet { opacity: .5; }
+.nd-scale:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-ctr { position: absolute; top: 4px; bottom: 4px; width: 2px; margin-left: -1px; background: var(--nd-dim); }
+.nd-knob {
+  position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  background: var(--nd-pink); box-shadow: 0 0 8px var(--nd-pink);
+}
+.nd-foldhead { display: flex; align-items: baseline; gap: 10px; }
+.nd-fold {
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit;
+  text-transform: inherit; cursor: pointer;
+}
+.nd-fold:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-caret { display: inline-block; width: 1.2em; }
+.nd-spec { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 10px; }
+.nd-spec th { color: var(--nd-dim); font-weight: 400; text-align: left; padding: 3px 12px 3px 0; white-space: nowrap; }
+.nd-spec td { padding: 3px 4px; word-break: break-word; }
+.nd-spec td.nd-age { color: var(--nd-dim); text-align: right; white-space: nowrap; }
+.nd-spec td.warn { color: var(--nd-warn); }
+.nd-spec td.mono { font-family: var(--nd-mono); }
+#nd-faults, #nd-facts { grid-column: 1 / -1; }
+.nd-meter { display: grid; grid-template-columns: 24px 1fr 70px; align-items: center; gap: 12px; margin: 10px 0; }
+.nd-chan { color: var(--nd-dim); }
+.nd-mscale { position: relative; height: 14px; border-radius: 7px; background: rgba(34, 211, 238, .12); }
+.nd-zone { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 7px; background: rgba(34, 211, 238, .28); }
+.nd-needle {
+  position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px;
+  background: var(--nd-pink); box-shadow: 0 0 8px var(--nd-pink);
+}
+.nd-needle.off { display: none; }
+.nd-mtext { text-align: right; color: var(--nd-mid); font-variant-numeric: tabular-nums; }
+.nd-lbl.bad, .nd-faults .bad { color: var(--nd-bad); }
+.nd-faults { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 8px; }
+.nd-faults dt { color: var(--nd-mid); }
+.nd-faults dd { margin: 0; }
+.nd-advice { margin: 0; padding-left: 18px; color: var(--nd-ink); font: 400 13px/1.45 var(--nd-sans); }
+.nd-advice b { color: var(--nd-bad); font-weight: 600; }
+
+/* what a written word asks, in place */
+.nd-askbox { margin-top: 8px; padding: 10px 12px; border: 1px solid rgba(34, 211, 238, .45); border-radius: 10px; background: rgba(34, 211, 238, .06); }
+.nd-askbox:empty, .nd-ask:empty { display: none; }
+.nd-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; }
+.nd-input {
+  flex: 1 1 10em; min-width: 0; min-height: 32px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--nd-cyan); background: rgba(5, 3, 10, .6); color: var(--nd-ink); font: 400 13px/1 var(--nd-mono);
+}
+.nd-input:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-question { margin: 0 0 8px; color: var(--nd-ink); font: 400 13px/1.4 var(--nd-sans); }
+
+/* the list over the sheet's chip stands above the sheet */
+.nd-list { z-index: 8; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .nd-sheet { animation: nd-sheet-in .18s ease-out; }
+  @keyframes nd-sheet-in { from { opacity: 0; } }
+}
+
+/* a phone (a narrow window, or a short one held sideways): 44 px keys */
+@media (max-width: 719px), (max-height: 499px) {
+  .nd-dash { flex-wrap: wrap; gap: 8px 12px; }
+  .nd-k { min-width: 44px; height: 44px; }
+  .nd-opt { min-height: 44px; }
+}
+/* the sheet on a phone held upright: it slides up from the dash to 30 % from the top, one column */
+@media (max-width: 719px) and (min-height: 500px) {
+  .nd-sheet {
+    left: 0; right: 0; top: 30%; bottom: 0; width: auto; max-height: none; transform: none; border-radius: 22px 22px 0 0;
+    padding: 20px 16px calc(16px + env(safe-area-inset-bottom, 0px)); border-bottom: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .nd-sheet { animation: nd-sheet-up .22s ease-out; }
+    @keyframes nd-sheet-up { from { transform: translateY(100%); } }
+  }
+}
+/* held sideways (a short window): from the right, the same column */
+@media (max-height: 499px) {
+  .nd-sheet {
+    left: auto; right: 0; top: 0; bottom: 0; width: min(420px, 60vw); max-height: none; transform: none;
+    border-radius: 14px 0 0 14px; padding: 16px 14px; border-right: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .nd-sheet { animation: nd-sheet-side .22s ease-out; }
+    @keyframes nd-sheet-side { from { transform: translateX(100%); } }
+  }
+}
+@media (max-width: 719px), (max-height: 499px) {
+  .nd-sheet-body { display: flex; flex-direction: column; gap: 18px; }
+  .nd-side { display: contents; }
+  #nd-faults { order: 0; }
+  #nd-mode { order: 1; }
+  #nd-input { order: 2; }
+  #nd-presets { order: 3; }
+  #nd-bands { order: 4; }
+  #nd-slots { order: 5; }
+  #nd-controls { order: 6; }
+  #nd-meters { order: 6; }
+  #nd-facts { order: 7; }
+  .nd-x { min-width: 44px; height: 44px; right: 6px; top: 6px; }
+  .nd-chip, .nd-btn { min-height: 44px; padding: 4px 18px; }
+  .nd-rb { width: 32px; height: 32px; margin-top: -16px; }
+  .nd-rb::after { inset: -6px; }
+  .nd-loud .nd-chip { padding: 4px 48px; }
+  .nd-st { width: 44px; height: 44px; }
+  .nd-scale { height: 44px; }
+  .nd-v { height: 44px; width: 6em; font-size: 15px; }
+  .nd-input { min-height: 44px; }
+  /* the device's controls and facts: a value that writes its centre and the facts' fold are 44 px to the hand, and the fold's
+     heading wraps instead of running past the edge */
+  .nd-link { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; }
+  .nd-fold { min-height: 44px; text-align: left; overflow-wrap: anywhere; }
+  .nd-foldhead { flex-wrap: wrap; align-items: center; gap: 0 10px; }
+  /* a band is a block: its three values one under another, each named */
+  .nd-bandtable, .nd-bandtable tbody { display: block; }
+  .nd-bandtable thead { display: none; }
+  .nd-bandtable tr { display: block; padding: 6px 0; border-top: 1px solid var(--nd-hair); }
+  .nd-bandtable tbody th { display: block; padding: 2px 4px; }
+  .nd-bandtable tbody th::before { content: "Band "; }
+  .nd-bandtable td { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; }
+  .nd-bandtable td::before { content: attr(data-head); color: var(--nd-dim); }
+}
+
+/* ---- the states: out of reach, lost, reading again, no analysis; every look is opacity or a static colour,
+   nothing here moves with the frame ---- */
+
+/* the card in the middle of the scene (the top half of a phone held upright) */
+.nd-cardbox {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: grid; place-items: center;
+  padding: 0 var(--nd-edge);
+}
+.nd-layer > .nd-cardbox { pointer-events: none; }
+.nd-card {
+  pointer-events: auto; width: min(28em, 100%); padding: 16px 22px 18px; text-align: center; border-radius: 14px;
+  background: var(--nd-sheet); border: 1px solid var(--nd-bad); box-shadow: 0 0 22px rgba(255, 90, 110, .25);
+}
+.nd-card h2 {
+  font: 600 calc(var(--nd-hud) * 1.15)/1.3 var(--nd-mono); letter-spacing: .18em; text-transform: uppercase;
+  color: var(--nd-bad);
+}
+.nd-detail { margin: 8px 0 0; color: var(--nd-mid); font: 400 calc(var(--nd-hud) * 1.05)/1.45 var(--nd-sans); }
+.nd-detail code { font: 500 .95em var(--nd-mono); color: var(--nd-cyan-ink); }
+.nd-tryline { margin: 12px 0 0; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.nd-retry { font: 500 var(--nd-hud)/1.2 var(--nd-mono); letter-spacing: .08em; color: var(--nd-dim); }
+
+/* the quiet line: under the outrun volume on a desktop, in the top column on a phone */
+.nd-quiet {
+  position: absolute; left: 0; right: 0; padding: 0 var(--nd-clear); text-align: center;
+  top: calc(clamp(18px, 2.6vmin, 34px) + clamp(200px, 50vmin, 460px) * var(--nd-vaspect) + 14px);
+  font: 400 calc(var(--nd-hud) * 1.05)/1.4 var(--nd-sans); color: var(--nd-mid);
+}
+.nd[data-mood="lost"] .nd-quiet { color: var(--nd-bad); }
+.nd[data-mood="wait"] .nd-quiet { color: var(--nd-warn); }
+
+/* what is out of reach, or frozen, is dimmed; the dash is `inert` as well (card-wire.js) */
+.nd[data-mood="unreachable"] :is(.nd-vol, .nd-eq, .nd-dash), .nd[data-mood="lost"] :is(.nd-vol, .nd-eq, .nd-dash) {
+  opacity: .35; transition: opacity .6s ease;
+}
+.nd[data-mood="wait"] :is(.nd-vol, .nd-eq) { opacity: .5; transition: opacity .6s ease; }
+.nd[data-mood="lost"] .nd-scene, .nd[data-mood="unreachable"] .nd-scene { pointer-events: none; }
+
+
+/* ---- the readout and the bisect switches (`?nd-debug`, debug.js) ---- */
+
+.nd-debug {
+  position: absolute; left: 8px; top: calc(var(--nd-top) + var(--nd-hud) * 3.2); z-index: 4; max-width: 90vw;
+  padding: 4px 8px; border-radius: 6px; background: rgba(0, 0, 0, .78); color: #fff; white-space: pre;
+  font: 500 11px/1.35 var(--nd-mono); pointer-events: none;
+}
+.nd-nodash .nd-dash, .nd-nohud :is(.nd-top, .nd-vol, .nd-eq) { display: none; }
+.nd-noglow * { box-shadow: none !important; text-shadow: none !important; }
+.nd-noglow .nd-odb :is(g, text) { }
+
+/* a phone held upright: the scene is the window down to the dash panel, which is only its own rows (`−` `MUTE` `+` and
+   the input, the track, the transport and `DEVICE ▴`) pinned to the bottom. The scene holds, from the top, the device
+   line, the verdict, the EQ line (with its values) and the volume, each in its own space and clear of the menu button's
+   corner; all of it is the HUD and fades with it. The panel is drawn once and never repainted by the frame: no blur, no
+   moving shadow. The grid's two rows make the scene end where the panel begins, whatever the panel's content. */
+@media (max-width: 719px) and (min-height: 500px) {
+  .nd { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .nd-layer { display: contents; }
+  .nd-scene { grid-area: 1 / 1 / 2 / 2; }
+  .nd-hud {
+    grid-area: 1 / 1; position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    min-height: 0; overflow: hidden; padding: 14px var(--nd-clear) 0;
+  }
+  .nd-hud > * { position: static; }
+  .nd-top { flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+  .nd-right { text-align: center; }
+  .nd-left { overflow-wrap: anywhere; }
+  .nd-eq { white-space: normal; text-align: center; font-size: calc(var(--nd-hud) * .92); letter-spacing: .1em; }
+  .nd-gains { margin-left: .3em; letter-spacing: .04em; }
+  .nd-debug { top: 150px; }
+  .nd-eq { order: 1; }
+  .nd-vol { order: 2; margin-top: 6px; }
+  .nd-quiet { order: 3; }
+  .nd-odb { width: min(60vw, 20dvh); }
+  .nd-novol { max-width: 100%; overflow: hidden; font-size: 12px; }
+  .nd-cardbox { grid-area: 1 / 1 / 2 / 2; }
+  /* the layer has no box here, so the dimming under the sheet goes on what it holds */
+  .nd[data-sheet] :is(.nd-hud, .nd-dash, .nd-cardbox) { filter: var(--nd-dim-scene); }
+  .nd-dash {
+    grid-area: 2 / 1; position: relative; left: auto; right: auto; bottom: auto; border-radius: 0; border-width: 1px 0 0;
+    padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px))
+      max(16px, env(safe-area-inset-left, 0px));
+    align-content: flex-start; justify-content: center; gap: 14px 12px; overscroll-behavior: contain;
+    background: linear-gradient(180deg, rgba(20, 8, 34, .96), #07040d); box-shadow: none;
+  }
+  .nd-keys, .nd-tr { width: 100%; justify-content: center; flex-wrap: wrap; }
+  .nd-keys { order: 1; }
+  .nd-now { order: 2; flex: 0 0 100%; justify-content: center; }
+  .nd-tr { order: 3; }
+  .nd-track { flex: 0 1 auto; text-align: center; }
+}

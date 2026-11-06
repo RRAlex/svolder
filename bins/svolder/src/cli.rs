@@ -216,6 +216,15 @@ pub(crate) enum Command {
         /// that is removed on exit; nothing of yours is read or written
         #[arg(long)]
         demo: bool,
+        /// With --demo, leave the computer's audio on: the real default sink's volume and
+        /// meters, the real media player and the computer EQ, on the fake device. A volume or
+        /// player change stays after the demo; the computer EQ the demo applied is removed
+        #[arg(long, requires = "demo")]
+        host: bool,
+        /// With --demo, serve the web UI on a port of its own on every interface, signed in by
+        /// token; the TUI's Web box and standard error show the link
+        #[arg(long, requires = "demo")]
+        web: bool,
         /// Open the TUI on the daemon listening on SOCKET and nothing else: no daemon is
         /// started and no direct session stands in, so a second front end can join a demo or
         /// any private daemon

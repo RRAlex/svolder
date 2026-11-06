@@ -571,14 +571,51 @@ async fn the_fake_host_can_lose_its_cover_and_then_its_player() {
     assert_eq!(view.playing, None, "the player quit");
 }
 
+/// The fake player quits, or loses its art, on a file's appearing, not on a clock: nothing goes
+/// before the file does, however long the host has run.
+#[tokio::test(start_paused = true)]
+async fn the_fake_host_loses_its_cover_and_its_player_when_a_file_appears() {
+    let dir = std::env::temp_dir().join(format!("svolder-fake-gone-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temp dir");
+    let cover = dir.join("cover");
+    let player = dir.join("player");
+    let knobs = FakeKnobs {
+        cover_gone_file: Some(cover.clone()),
+        player_gone_file: Some(player.clone()),
+        ..FakeKnobs::default()
+    };
+    let service = HostService::idle();
+    service.run_with(Parts::fake(knobs));
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert!(service.view().playing.expect("a player").cover.is_some());
+
+    std::fs::write(&cover, b"").expect("the cover file");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let playing = service.view().playing.expect("still playing");
+    assert_eq!(playing.cover, None, "the art was dropped");
+    assert!(!playing.title.is_empty(), "the track stays");
+
+    std::fs::write(&player, b"").expect("the player file");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(service.view().playing, None, "the player quit");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The knobs are plain milliseconds; anything else is unset.
 #[test]
 fn the_fake_knobs_read_milliseconds() {
     let knobs = FakeKnobs::from_knobs(|name| match name {
         "SVOLDER_FAKE_COVER_GONE_AFTER_MS" => Some("1500".to_string()),
         "SVOLDER_FAKE_PLAYER_GONE_AFTER_MS" => Some("soon".to_string()),
+        "SVOLDER_FAKE_COVER_GONE_FILE" => Some("/run/cover-gone".to_string()),
+        "SVOLDER_FAKE_PLAYER_GONE_FILE" => Some(String::new()),
         _ => None,
     });
+    assert_eq!(
+        knobs.cover_gone_file,
+        Some(std::path::PathBuf::from("/run/cover-gone"))
+    );
+    assert_eq!(knobs.player_gone_file, None);
     assert_eq!(knobs.cover_gone_after, Some(Duration::from_millis(1500)));
     assert_eq!(knobs.player_gone_after, None);
     assert!(!knobs.route_changed);

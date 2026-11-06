@@ -344,6 +344,27 @@ impl Bands {
     }
 }
 
+/// The levels the Spectrum row draws across `cells` columns: the [`BANDS`] bands laid on the
+/// same log frequency axis the bands are cut on, each column reading the axis at its own place,
+/// linearly between the two bands it falls between, so a wider row shows a hump rather than a
+/// stair of equal blocks. A row with no more cells than bands draws the lowest `cells` bands as
+/// they are.
+pub fn spread(bands: &[f32; BANDS], cells: usize) -> Vec<f32> {
+    if cells <= BANDS {
+        return bands.iter().copied().take(cells).collect();
+    }
+    let last = (BANDS - 1) as f32;
+    (0..cells)
+        .map(|cell| {
+            let at = cell as f32 * last / (cells - 1) as f32;
+            let below = (at.floor() as usize).min(BANDS - 1);
+            let above = (below + 1).min(BANDS - 1);
+            let into = at - below as f32;
+            bands[below] + (bands[above] - bands[below]) * into
+        })
+        .collect()
+}
+
 /// The glyph the Spectrum row draws a band `level` loud in: [`BLOCKS`]' lowest for silence and
 /// its full block for the top of the scale, the nearest of the eight between.
 pub fn glyph(level: f32) -> char {
@@ -545,6 +566,26 @@ mod tests {
         assert_eq!(landed[6], 0.0, "a band that is not a number is not silence");
         assert!(bands.moving(half + FALL / 2));
         assert!(!bands.moving(half + FALL), "the row never settled");
+    }
+
+    /// A wider row reads the bands on the same log axis, between neighbours.
+    #[test]
+    fn a_wider_row_reads_the_bands_on_the_same_axis_between_neighbours() {
+        let mut bands = [0.0; BANDS];
+        bands[5] = 1.0;
+        // no more cells than bands: the bands themselves, as many as there are cells
+        assert_eq!(spread(&bands, BANDS), bands.to_vec());
+        assert_eq!(spread(&bands, 4), vec![0.0; 4]);
+        // twice the cells: the ends stay the ends, and the loud band is a hump
+        let wide = spread(&bands, 31);
+        assert_eq!(wide.len(), 31);
+        assert_eq!(wide[10], 1.0, "band 5 is at cell 10 of 31");
+        assert!(wide[9] > 0.0 && wide[9] < 1.0 && wide[11] > 0.0 && wide[11] < 1.0);
+        assert_eq!(wide[8], 0.0);
+        assert!(wide[..10].windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(wide[10..].windows(2).all(|pair| pair[0] >= pair[1]));
+        let flat = spread(&[0.5; BANDS], 77);
+        assert!(flat.iter().all(|level| (level - 0.5).abs() < 1e-6));
     }
 
     /// A band is drawn in the nearest of the eight block glyphs: the lowest for silence and

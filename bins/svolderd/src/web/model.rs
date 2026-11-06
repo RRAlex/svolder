@@ -22,7 +22,11 @@ use device::{
     ControlModel, DevicePresetsModel, FactsModel, MetersModel, PowerModel, PresetsModel, ToneModel,
     VolumeModel,
 };
-pub(crate) use page::{PageModel, fleet_model, host_model, page_model};
+#[cfg(test)]
+pub(crate) use page::route_model;
+pub(crate) use page::{
+    HostModel, PageModel, RouteModel, fleet_model, host_model, host_parts, page_model,
+};
 
 /// One of the parts a device's model is made of, as the stream sends them: each part is sent
 /// again when it changes.

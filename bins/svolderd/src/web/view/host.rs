@@ -75,6 +75,8 @@ pub(crate) struct Hop {
     pub(crate) detail: String,
     /// Whether this hop alters the signal.
     pub(crate) changes: bool,
+    /// Whether something of this hop was not read.
+    pub(crate) unknown: bool,
 }
 
 impl Playing {
@@ -110,8 +112,8 @@ impl Playing {
             key.push_str(&format!("{SEP}path={}{SEP}{}", path.class, path.words));
             for hop in &path.hops {
                 key.push_str(&format!(
-                    "{SEP}{}{SEP}{}{SEP}{}",
-                    hop.label, hop.detail, hop.changes
+                    "{SEP}{}{SEP}{}{SEP}{}{SEP}{}",
+                    hop.label, hop.detail, hop.changes, hop.unknown
                 ));
             }
         }
@@ -234,6 +236,7 @@ fn path(line: &PathLine) -> Path {
                 label: hop.label.clone(),
                 detail: hop.detail.clone(),
                 changes: hop.changes,
+                unknown: hop.unknown,
             })
             .collect(),
         words: line.words_line(),

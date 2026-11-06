@@ -12,6 +12,8 @@
 //                                       { recall } | { save } | {}
 //   shown(target) -> string | null      the words shown for a control, or for a fact by its label
 //   state() -> { lost, waiting, resting, toasts }
+//   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
+//                                       state (null when none are drawn)
 
 /** The core Paper was given, `null` until Paper is mounted (paper.js fills it). */
 export const bound = { core: null };
@@ -57,6 +59,7 @@ function controlOf(key) {
 
 /** The element a target is, as the sheet draws it, or nothing. */
 function find(target) {
+  if (target === 'Cover') return one('#p-playing .p-cover img');
   if (typeof target === 'string') return one(`td[data-fact="${q(target)}"]`);
   if ('control' in target) {
     const key = q(target.control);
@@ -200,6 +203,7 @@ export const driver = {
   shown(target) {
     const element = find(target);
     if (!element) return null;
+    if (target === 'Cover') return element.getAttribute('src');
     if (typeof target === 'string') return element.textContent;
     if ('control' in target) {
       const kind = controlOf(target.control)?.kind;
@@ -218,6 +222,10 @@ export const driver = {
     if ('band' in target) return element.closest('td').querySelector('.p-val')?.textContent ?? null;
     if ('loudness' in target) return one('.p-strength .p-val')?.textContent ?? null;
     return element.textContent.trim();
+  },
+
+  linkWords() {
+    return one('#p-title .p-sub')?.textContent.trim() || null;
   },
 
   state() {

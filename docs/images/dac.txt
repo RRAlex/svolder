@@ -16,7 +16,7 @@
 │    Host volume  ████████54%░░░░░░░░  Digital…  │ │                                                                   │
 │    Transport    ◀◀  ▶  ▮▮  ▶▶                  │ │                                                                   │
 │    Host EQ      off                            │ │                                                                   │
-│    Spectrum     ▃▄▄▇▆▆▆▅▅▄▄▂▂▂▁▁               │ │                                                                   │
+│    Spectrum     ▃▄▄▄▄▆▇▆▆▆▆▆▆▅▅▅▄▄▄▄▂▂▂▂▂▂▁▁▁  │ │                                                                   │
 │                                                │ │                                                                   │
 │    host ⣶⣿⣷⣼⣿⣷⣶⣿⣷⣾⣾⣿⣷⣿⣇⣼⣾⣇⣷⣿⣇⣼⣾⣆⣿⣷⣇⣾⣾⣆⣷⣷⣇⣾⣾⣄⣿  │ │                                                                   │
 │         ⠿⣿⡿⢿⣿⡿⠿⡿⡿⢿⣿⣿⡿⣿⡟⢻⢿⡏⡿⡿⡏⢻⢿⠏⡿⡿⡏⢿⢿⠏⡿⣿⡏⢿⢿⠋⡿  │ │                                                                   │
@@ -31,7 +31,7 @@
 
 ┌ Status ────────────────────────────────────────────────────────────────────────────────────────────────────── advice ┐
 │                                                                                                                      │
-│  Sample rate 48 kHz   USB 1 not connected   USB 2 not connected   S/PDIF locked   fw 3   DSP 3                       │
+│  Sample rate 48 kHz   USB 1 connected   USB 2 not connected   S/PDIF locked   fw 3   DSP 3                           │
 │  Raw: none                                                                                                           │
 │  Gungnir 2 (product 2) · profile gungnir2-v2 · −58 dBm advert, 3 min ago                                             │
 │  Link  ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⢁⡈⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉  12 h  │

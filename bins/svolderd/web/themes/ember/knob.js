@@ -19,9 +19,6 @@ const SVG = 'http://www.w3.org/2000/svg';
 const WHEEL_STEP = 40;
 /** The steps' worth of travel it takes to cross between silence and the step above it. */
 const DETENT = 4;
-/** A held − or + repeats after this long, then at this pace (ms). */
-const HOLD_AFTER = 380;
-const HOLD_EVERY = 70;
 /** How long a step asked stays the one shown while the device has not echoed it (ms). */
 const ASKED_FOR = 3000;
 /** How long the lit ticks, the arc, the handle and the numeral take to move between two
@@ -32,14 +29,7 @@ const EASE_MS = 70;
 class Knob extends HTMLElement {
   connectedCallback() {
     // Kept across swaps, and connected again each time: what it has been sent stands.
-    if (this.ready) {
-      // Moved by a swap that kept it: listen on the window again.
-      if (this.leaving.signal.aborted) {
-        this.leaving = new AbortController();
-        this.blurs();
-      }
-      return;
-    }
+    if (this.ready) return;
     this.ready = true;
     const d = this.dataset;
     this.lo = Number(d.lo);
@@ -64,18 +54,7 @@ class Knob extends HTMLElement {
     // The climb target a touch cancelled, ignored in readings until the stream drops it.
     this.cancelled = null;
     this.travel = 0;
-    this.leaving = new AbortController();
     this.wire();
-  }
-
-  /** The knob left the page: what listens on the window goes with it. */
-  disconnectedCallback() {
-    this.leaving.abort();
-  }
-
-  /** A window that loses focus ends a held − or +; the listener goes when the knob leaves. */
-  blurs() {
-    window.addEventListener('blur', this.stopHold, { signal: this.leaving.signal });
   }
 
   /** Whether the knob takes input: not inert, and the volume has been read. */
@@ -187,6 +166,8 @@ class Knob extends HTMLElement {
   /** What the knob reads out: the asked step's words until the device's echo arrives. */
   show() {
     const asked = this.asked;
+    // Muted reads `−∞ dB`, as the other themes say it.
+    if (this.classList.contains('muted')) return this.readout('−∞ dB');
     if (asked === null) return this.readout(this.words);
     this.readout(this.texts[asked - this.lo] ?? this.words);
   }
@@ -288,54 +269,31 @@ class Knob extends HTMLElement {
     if (!signal.aborted && answer.ok && stops) core.frame.dismissToast('climb');
   }
 
-  /** The − and + buttons: a press steps once, held it repeats after a pause. */
+  /** The − and + buttons: a press steps once, held it repeats after a pause (the core's hold). */
   repeat() {
-    let first = 0;
-    let every = 0;
-    const stop = () => {
-      clearTimeout(first);
-      clearInterval(every);
+    let hold = null;
+    // One step, unless the page cannot take it: the knob swapped out, the stream lost.
+    const press = (button) => {
+      if (!this.isConnected || !this.live() || document.body.classList.contains('lost')) return;
+      this.nudge(Number(button.dataset.step));
     };
-    // A hold ends when the page cannot take it: the stream lost, the tab hidden, the window
-    // blurred, or the knob swapped out.
-    this.stopHold = stop;
-    this.blurs();
     for (const button of this.querySelectorAll('.step[data-step]')) {
-      const press = () => {
-        if (!this.isConnected || !this.live() || document.hidden
-          || document.body.classList.contains('lost')) {
-          return stop();
-        }
-        this.nudge(Number(button.dataset.step));
-      };
       // A key press on a focused button clicks it with no pointer: one step.
       button.addEventListener('click', (event) => {
-        if (event.detail === 0) press();
+        if (event.detail === 0) press(button);
       });
       button.addEventListener('pointerdown', (event) => {
         if (event.button !== 0 || !this.live()) return;
-        event.preventDefault();
-        try {
-          button.setPointerCapture(event.pointerId);
-        } catch {
-          // A pointer that is gone cannot be captured; the hold ends with its pointer events.
-        }
-        press();
-        stop();
-        first = setTimeout(() => {
-          every = setInterval(press, HOLD_EVERY);
-        }, HOLD_AFTER);
-        // One set of end listeners a press: the first to fire ends the hold and all go.
-        button.pressing?.abort();
-        const done = new AbortController();
-        button.pressing = done;
-        const ended = () => {
-          stop();
-          done.abort();
-        };
-        for (const end of ['pointerup', 'pointerleave', 'pointercancel', 'lostpointercapture']) {
-          button.addEventListener(end, ended, { signal: done.signal });
-        }
+        hold?.end();
+        hold = ember.core.hold.repeat(event, {
+          root: this,
+          el: button,
+          step: press,
+          live: () => this.isConnected && this.live() && !document.body.classList.contains('lost'),
+          leave: true,
+          cap: Infinity,
+          signal: ember.signal ?? undefined,
+        });
       });
     }
   }

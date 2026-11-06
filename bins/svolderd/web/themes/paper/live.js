@@ -148,7 +148,7 @@ export function createLive({ core, root, signal, view }) {
     box.innerHTML = SECTIONS[name]?.(store.page(), store.device(), view) ?? '';
     if (focused) box.querySelector(focused)?.focus();
     // The slot the frame's button sits over is part of the title, which was just drawn again.
-    if (name === 'title') core.frame.anchor(box.querySelector('.paper-slot'));
+    if (name === 'title') core.frame.anchor(box.querySelector('.paper-slot'), { fixed: true });
     return true;
   }
 

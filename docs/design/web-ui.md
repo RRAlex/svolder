@@ -151,7 +151,7 @@ on (a `HostWatch`), so the daemon reads PipeWire for a page that is open and sho
 nobody else; an amp's or a preamp's stream holds nothing. A rotated token ends the stream. The page's first answer is a frame carrying the first snapshot of the model (the
 strip's bars included) in a `<script type="application/json" id="svolder-page">` block, which the
 CSP does not execute; the theme draws the page from it before the stream opens. A lost stream dims
-the controls and the link pill says so until it returns.
+the controls and the link's dot beside the device's name says so until it returns.
 
 ## Components and the page script
 

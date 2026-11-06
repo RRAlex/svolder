@@ -219,8 +219,8 @@ alone.
   leaves the Loudness words as they were" and "a held Loudness button is lost when its part is
   swapped"; the Rust view test `loudness_steps_on_its_own_button_and_no_row_follows` proves the
   words appear in Loudness only.
-- A click on the volume knob's ring jumps to that step, and the rest of the knob does not:
-  `knob_click.py`. Mutants: `mutate_webui.py`.
+- A click on the volume knob's ring jumps to that step, and the rest of the knob does not; holding its `+` or `-`
+  repeats the step (after about 380 ms, then every 70 ms) and the release ends it: `knob_click.py`. Mutants: `mutate_webui.py`.
 - A Loki Max's page draws a Presets part of three slots and five built-in settings, and no tone
   part; a built-in's click posts its name to `device-presets/apply` and its lamp lights, as it does
   when another client applies one (the stream redraws the part, and the page makes no request);
@@ -719,7 +719,36 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   tone mode's note on a change into Flat or Loudness or the person's own click within 8 s:
   `node/core-climb.mjs`. The canvas loop (on show only, a long gap held to 0.1 s,
   one still frame for reduced motion) and the analysis frames (one stream for every holder, a late
-  holder told what was said, a doubling wait): `node/core-loop.mjs`.
+  holder told what was said, a doubling wait): `node/core-loop.mjs`. A loop may keep running under
+  reduced motion (`reduced: 'theme'`, the theme reads `loop.reduced`; the default `'still'` is as
+  before) and draw at a pace (a timer for 100 ms or more, then one frame; every frame below; `dt`
+  held to twice the pace, never under 0.1 s; nothing drawn while hidden; a pace that changes
+  between draws leaves one timer or frame outstanding and draws at the new rate):
+  `node/core-loop.mjs`. The analysis rules (`core/viz-model.js`) are served from the core
+  for any theme: `the_analysis_rules_are_served_from_the_core`, tested by `node/viz.mjs`.
+- The tab's title, for every theme: `<device> · connected — svolder`, `reconnecting` while the
+  stream is lost, `reading again`, `resting`, a card's title in lower case for a device out of reach
+  and `fault` for a fault (the stream's state first, then the card), plain `svolder` with no
+  device; a part another piece adds follows the status and goes when removed, one that throws is left
+  out (`node/core-title.mjs`). Proved on Ember, Paper, Signal and Night drive, connected, with the daemon gone and
+  back, and after a device switch, by `core_rows.py` (both browsers).
+- The held `−` and `+`, for every theme: one step at the press, after 380 ms a step every 70 ms; it
+  follows the button of the pressed one's id through a redraw, and ends at the release or cancel of
+  that pointer anywhere, a move of it with no button down, the window's blur, the page hidden, the
+  hold no longer allowed, no button left, 10 s of repeats, the signal's abort, `end()` (with `leave`
+  also the pointer leaving the button or the button losing the capture); a viewer who may not write
+  gets one step, no repeat; a context menu over the held button is prevented; `onStart`/`onEnd`
+  bracket it once (`node/core-hold.mjs`).
+
+- The frame's Space key plays and pauses the computer's player, in every theme (`space_key.py`, both browsers):
+  `space_on_the_body_posts_one_press_and_does_not_scroll`, Space on a focused button activates it and posts no press,
+  an open menu owns it, a text field types it, `space_with_no_player_posts_nothing`; the key's rule and the button
+  chosen in `node/frame-keys.mjs` (`space_plays_and_pauses_unless_the_focus_owns_it`,
+  `space_presses_the_button_the_players_state_calls_for_and_nothing_without_a_player`). Hand-run mutant, killed: the
+  key not prevented (the page scrolls).
+- The theme picker's close button (`effects_menu.py`, both browsers): `the_picker_close_button_is_44_px_inside_the_window`
+  at 1280x800, 412x915 and 360x780 in all four themes, and a click on it closes the picker with the focus back on the
+  menu button.
 
 ## Ember's drawing
 
@@ -727,6 +756,12 @@ Ember (`bins/svolderd/web/themes/ember/draw/`) draws the page's parts from the J
 browser, and what it draws is the markup the templates give today: the page's styles and scripts
 read the same DOM.
 
+- The link is a dot after the shown device's name (the part is `#part-link`, drawn in the switcher by
+  the shell and again by the `link` part): `node/ember-parts.mjs` "the_link_dot_follows_the_shown_devices_name_for_everyone"
+  and "a_guests_sign_in_shares_the_side_with_the_slot_and_the_link_is_beside_the_name" against the frozen
+  fixture; in the browser `ember_link.py` ("the_link_is_a_green_dot_beside_the_name",
+  "the_dot_is_named_and_not_focusable", "trouble_shows_its_word_and_changes_the_dot", both browsers,
+  a desktop and a phone), and `effects_menu.py` "the button stays where it is when the link changes".
 - The link, card, controls (every kind of control: segments, list, switch, slider, readout; inert
   for a guest and for a read-only page), power (the amp's with its switches and readouts, a
   preamp's alone, the hidden one), meters (32 segments an arch, the class-A and red shares, lit by
@@ -834,6 +869,14 @@ read the same DOM.
 
 ## The theme contract and the core's own rows
 
+- The conventions every theme keeps (`docs/design/web-themes.md`, "What every theme does the same way"):
+  the menu button in the top-right corner of every theme and nothing right of it in Ember's header
+  (`frame_button.py`, both browsers: "the_menu_button_is_in_the_top_right_corner_in_every_theme",
+  "ember_keeps_nothing_right_of_the_button"); the cover of the track is a fact of `factsOf(device)`
+  that Ember, Paper and Signal show (`node/contract.mjs` "facts_name_what_the_device_section_shows",
+  `completeness.py` "the cover is a fact" and "all N facts are reached and shown with the model's
+  words"; Night drive's driver reads them from the dash and the sheet).
+
 Every theme presents everything a device offers, on every kind of device, and shows every fact of
 the Device section (design 4.6). `core/contract.js` lists what that is from a device's model, and a
 theme's test driver (`theme.driver`: `reach`, `operate`, `shown`, `state`) is what the checks use
@@ -887,6 +930,15 @@ to prove it. They judge what the fake daemon holds and what the theme shows, nev
   pane into view before each click and waits for what it measures.
 
 ## Paper
+
+- The cover in Now playing, in monochrome (`paper.py`, both browsers): "the_cover_shows_in_monochrome" (the
+  host's picture, 56 px, left of the words, a same-origin address with the version, no style
+  attribute; the computed `filter` of the picture holds `grayscale(1)` in light paper and in dark
+  paper), "the_cover_follows_the_track" (another track's own address; a real 404 hides the box and the
+  words move to the section's left; a track with no cover has no box; the first picture comes back),
+  "no_cover_leaves_no_gap" (the daemon stops holding it, `SVOLDER_FAKE_COVER_GONE_AFTER_MS`),
+  "the_cover_shows_on_a_phone" (inside the window, no sideways scroll). Each killed by a mutant made by
+  hand once: no cover drawn, no filter, no dark filter, no hidden handler.
 
 The theme Paper (design section 7), built on the core alone. Its tokens, its words and its sheet are
 proved by node harnesses; its light and dark and its first frame by `paper.py` in both browsers.
@@ -1033,6 +1085,687 @@ proved by node harnesses; its light and dark and its first frame by `paper.py` i
   share (killed by "a meter's first draw puts the needle at its fraction", which draws the section
   from a reading with a fraction of 0.7 and a class-A share of 0.25; the node harness's amp test
   kills it too). Each must make a check of `paper.py` fail.
+
+## Signal
+
+- The cover in the Now playing bar and the player's own area (`signal_theme.py`, both browsers):
+  "the_bar_shows_the_cover_when_there_is_one" (36 px, before the transport, a same-origin address
+  with the version, no style attribute; the player's area shows it before the title),
+  "the_cover_follows_the_track" (another track's address; a real 404 hides it with no gap; no cover,
+  no box; it comes back), "no_cover_leaves_no_gap" (`SVOLDER_FAKE_COVER_GONE_AFTER_MS`),
+  "the_bar_shows_the_cover_on_a_phone". Each killed by a mutant made by hand once: no cover drawn,
+  an address with no version, no hidden handler.
+
+The theme Signal (design sections 3, 8 and 9), built on the core alone. Its frame: the registration,
+the line of hops, its dots and the choice of a hop. The open area below the line is filled by the
+later tasks through `openers`.
+
+- Registration: Signal is the third theme, dark only, on the ground `#0f0d0b`, with no rows of its own
+  in the frame's menu. Proved by the Rust tests `signal_is_listed_dark_only` and
+  `the_list_is_the_pickers_and_the_registrys_data`; the picker lists Ember, Paper and Signal and
+  Signal's card has its name, its blurb and a picture (`signal_theme.py`
+  "signal_is_listed_and_mounts_from_the_picker", `paper.py`, `effects_menu.py`, `completeness.py`).
+- The hops (`node/signal-line.mjs`): `the_line_runs_player_computer_dac_then_its_hops_in_file_order`,
+  `a_hop_after_another_dac_is_not_on_this_line`, `a_linked_hop_is_live_only_when_listed`,
+  `no_host_means_the_line_starts_at_the_dac`,
+  `the_computer_hop_stays_while_the_route_is_not_read` (the words `route not read`), `an_amp_no_hop_links_stands_alone_after_a_stand_in_ring`,
+  `the_host_eq_marks_the_computers_stretch_as_changing` (the path's `computer` hop wins, the route's
+  host EQ stands in when there is no path),
+  `the_autoeq_headphones_ring_ends_the_line_when_no_headphones_are_declared`,
+  `a_band_preset_draws_no_headphones_ring`, `a_declared_headphones_hop_replaces_the_autoeq_ring`,
+  `the_dac_says_neither_while_its_rate_is_not_read` (a DAC hop marked unknown draws neither
+  `arrives as sent` nor `changes the sound`; the Rust test
+  `a_dac_with_no_read_rate_is_unknown_and_not_changing` holds the mark) and
+  `a_choice_that_disappears_goes_back_to_the_shown_device`.
+- The line in a browser (`signal_theme.py`, both browsers): `the_line_shows_every_hop_in_order` (the
+  ids in order, spread between 10 % and 90 %, the band 140 px, the box 200 by 104 at y 30, the dots on
+  y 60, one horizontal listbox, no `style` attribute in the markup),
+  `declared_hops_are_rings_and_live_ones_dots` (the colours of the dots, the ring's italic words),
+  `a_click_moves_the_box` (a click on a label or a dot), `left_right_move_the_choice` (arrows, Home,
+  End, the focus and the one tab stop), `a_hop_that_leaves_gives_the_box_back` (Review Focus 1: a hop
+  removed from the model, a device switch), `no_host_starts_the_line_at_the_device`,
+  `an_amp_no_hop_links_stands_alone`, `a_draw_between_press_and_release` (the line is drawn again
+  between the press and the release of a click on a hop, on the computer and on a declared hop: the
+  one click still chooses it, and the hop element is the same one before and after, so the draw keeps
+  the elements of the line; fails on the page that replaced them, 6 of 6), `a_draw_in_a_drag` (a draw
+  while a finger drags the strip's track keeps the drag class and the track where the finger has it).
+- The dots (Review Focus 4): `the_dots_move_while_playing_and_stop_on_pause` (the dashes' offset
+  changes only while the track plays), `the_dots_stand_still_under_reduced_motion` (the player plays,
+  the offset never changes, the dashes are drawn once), `no_frame_while_hidden` (no change of the
+  offset while the page is hidden, movement again once it shows).
+- The DAC's first screen (Task 3). `node/signal-draw.mjs`: `the_volume_reads_the_devices_db_with_its_unit`
+  (the number and the unit, the track's slider values, the three buttons, `muted` after a mute),
+  `the_volume_shows_the_step_asked_for_until_it_is_read_back`, `the_cap_is_marked_on_the_track`,
+  `the_curve_has_one_point_per_band` (a point at each band's marker, the curve's 181 points, Flat
+  dashed, Loudness without points, an unread band without its point), `the_choices_are_chips_with_the_one_on_marked` (the input chips; the mode chips come from `modeRow`; no Preset chip),
+  `a_guests_controls_are_drawn_inert` (every guest and read-only fixture: every button and slider
+  `aria-disabled` and quiet, and a writer's not), `no_markup_carries_a_style_attribute` (also the opener's whole screen; in the browser `#signal [style]` is empty but for the elements Signal places through the CSSOM, named in `CSSOM`),
+  `words_from_the_model_are_escaped`, `the_bar_names_the_track_and_the_transport` (the progress
+  against the daemon's clock, a paused track standing still) and the opener (a DAC's screen for the
+  shown device only, an amp none).
+- The first screen in a browser (`signal_theme.py`, both browsers): `the_first_screen_has_h6s_columns`
+  (a DAC's: the volume at 310 px and the curve, 40 px apart, two columns from 1020 px; 96 px weight 200; no input or mode in it), `minus_and_plus_step_the_volume` (the
+  buttons from the step asked for, Mute and Unmute, the focus kept through the redraw, the keys on the
+  track, a drag of the knob), `dragging_past_the_cap_writes_the_cap` (no write above the cap, the knob
+  and the cap mark meet), `a_point_drag_sets_a_band`, `a_tone_update_waits_for_the_point_drag` (Chromium only: the button
+  stays down; the
+  open area held through the drag, drawn from the newest model after it), `an_input_chip_sets_the_input`
+  (also the mode chips and the preset list: open, Escape, kept through a change from elsewhere, a
+  press on another chip while it waits is not lost to the redraw, a recall), `a_guests_tap_posts_nothing` (a real guest page, `guest = "read"`: every control inert, a tap on volume, mute, input, mode, preset and a point and the keys post nothing; a guest gets no transport at all) and
+  `the_bottom_bar_plays_and_pauses` (the buttons press the player, the dots stop with the player paused
+  through the bar and start when it plays, the time moves).
+- The rest of a device, the shelf, and the slim bar (Task 4). `node/signal-draw.mjs`:
+  `the_shelf_lists_every_control_the_model_has` (every fake fixture: each control but the input, which
+  the first screen draws, once, whatever its kind; every band's three values with their steppers,
+  the loudness, every preset, slot and setting), `the_band_table_has_typed_values_and_steppers` (a
+  guest's fields read-only), `the_facts_start_folded`, `the_fold_is_kept_as_open_or_closed_and_works_without_storage`,
+  `a_loki_max_shows_its_slots_and_settings` (in the middle column, no band table, a guest cannot save),
+  `the_presets_have_save_as_rename_and_delete_for_a_writer_only`, `a_shelf_without_a_device_is_nothing`,
+  `the_slim_bar_names_the_hops_and_rings_the_chosen_one` (escaped, the volume beside the shown device),
+  `a_hold_given_back_before_a_reset_does_not_count_after_it` (the carried minor: a deferred give-back
+  planned before a device switch does not drop a hold taken after it); `no_markup_carries_a_style_attribute`
+  and the guest check now cover the shelf and the slim bar.
+- The shelf in a browser (`signal_theme.py`, both browsers): `the_band_table_steps_each_value` (each
+  of the three values steps up and down, a typed value is written with its unit and the field shows
+  what the device took, Escape writes nothing, a value being typed stays through a change from
+  elsewhere), `a_preset_saves_renames_and_deletes` (Save as, Rename and Delete in place; Delete asks
+  first and Keep sends nothing), `the_shelf_controls` lines (a switch, a key on the balance scale, the
+  centre, a drag, the Loudness strength: see `the_loudness_buttons_step_the_strength`), `a_slot_save_asks_first` (a Loki Max: slots, settings, the
+  question before the write, `confirm: true` only after `Save`, recall and a built-in setting),
+  `an_open_list_survives_a_part_update` (a list and a question both stay through a change from
+  elsewhere), `the_facts_unfold_and_the_choice_survives_a_reload` (`svolder.theme.signal.facts`,
+  folded by default, still folds with storage refused, Identify posts),
+  `the_slim_bar_pins_when_the_line_scrolls_away` (64 px at the top, under the frame's layer, the same
+  hops as the line, the chosen one with the DAC's volume, gone at the top) and
+  `a_slim_bar_tap_chooses_and_scrolls_up` (and no bar on a phone). The guest check also taps the shelf.
+- Fix round 1 of Task 4: the shelf draws the device's power (the switch, its switches, its readouts) for
+  every family; the completeness test also walks every `targetsOf` target of every fixture;
+  `the_power_switch_writes` (a Hati's shelf, a tap writes the opposite); the host and fleet events
+  arriving while a question is open leave it open; `the_slim_bar_sits_at_the_safe_area_and_the_focus_keeps_clear_of_both_bars`
+  (node: the stylesheet's safe-area top and the scroll margins) and `focus_clear` in the browser (the
+  last shelf control and a band field focused on a 600 px window are fully visible between the bars).
+- A live amp (Task 5): `node/signal-draw.mjs` `an_amp_opens_power_meters_and_faults` (power first with its
+  switch, switches and readouts, a scale per channel with the class A share shaded and a needle at the
+  reading, the amp's name, Identify, Unlink with the hop's id, an amp not read, in standby and warming up,
+  a followed amp not read yet), `the_amp_has_its_power_once_per_page_and_the_shelf_leaves_it_out`,
+  `an_amps_controls_are_inert_for_a_viewer_who_may_not_write`,
+  `the_meters_are_put_in_place_without_drawing_the_area_again`,
+  `the_dac_keeps_its_volume_written_while_the_amp_is_chosen` (muted, no volume read),
+  `an_amps_shelf_is_its_facts_and_not_its_power`; `node/signal-line.mjs`
+  `a_chosen_amp_that_leaves_the_fleet_gives_the_box_back_to_the_dac` (unplugged, unlinked, the list of
+  followed devices). The completeness test now asserts the drawn hook of every preset, slot, setting, mode,
+  loudness and transport target (it asserted nothing for them) and walks the amp's area; the no-style and
+  escaping tests cover a linked amp. In the browser (`signal_theme.py`, both browsers):
+  `a_linked_amp_is_a_live_dot` (solid amber, the thin stretch, followed by the stream, its area),
+  `an_amp_control_writes_to_the_amps_url` (power, a switch, Identify; the needles move in place; no request
+  to the DAC), `the_dac_keeps_its_volume_written_while_the_amp_is_chosen` (follows a volume change, the slim
+  bar says the same), `the_dacs_name_opens_the_device_list`, `a_chosen_amp_that_leaves_the_fleet_gives_the_box_back_to_the_dac`
+  (a question open for it closes, nothing written to the gone URL), `unlink_removes_the_hop_and_the_amp_stands_alone`
+  (asks once, Keep sends nothing, one removal by the hop's id, the amp alone on its line when shown) and
+  `a_guest_cannot_unlink_or_switch_an_amp`.
+- Task 5 fix round 1: the amp's area draws its faults (`an_amp_opens_power_meters_and_faults`:
+  the `fault` fixture's Over-temperature / Over-current rows and the card's advice, none for none; browser: a `fake-amp` fleet draws each fault row with the device's words), the chosen DAC's name
+  carries a caret and `aria-haspopup` only with another device to list
+  (`the_chosen_dacs_name_shows_that_it_opens_the_device_list`), the device list closes on a fleet change and on
+  another choice, and the completeness test checks each preset's and setting's own button.
+- `contrast_on_the_ground`: every kind of text (names, the chosen name, ring names and words, the
+  green and yellow words, the quiet word) reads at 4.5 or more on both ends of the ground.
+- The test driver (`themes/signal/driver.js`, Task 9): `reach` chooses the hop that holds the target as a person taps it on
+  the line (the shown device's own, or a linked amp's when the control is the amp's, so its writes carry `{ device: url }`),
+  unfolds the facts, scrolls to the word, scale, chip or field (`#sg-vtrack`, `[data-act=...]`, `[data-key]`, `.sg-scale`,
+  `#sg-facts-body td[data-fact]`), `operate` taps it, presses the arrow keys on a scale, types nothing but steps a band
+  with its `-` and `+`, picks an option of the list a chip opens (a longer choice, the slot to save over, then the
+  question's `save`), and `shown` reads the words on the page (the volume's `aria-valuetext`, a band's field, a scale's
+  value); `state` reads the core's state, the card and the toasts. `contract.py` and `completeness.py` run Signal like every
+  listed theme (`NO_DRIVER_YET` is gone from both). Proved by `contract.py` in both browsers (66 checks) and by
+  `completeness.py` (every target reached, operated and read back from the model route, one write each; every fact shown
+  with the model's words) on the Gungnir 2 (36 targets, 36 facts), the amp (3, 14), the five-meter amp (3, 17), the mono
+  amp (3, 14) and the Loki Max (19, 15): the counts equal Ember's and Paper's on every kind.
+- Every theme lists what the first theme lists (`completeness.py`, `same_counts`): per device kind, the count of targets of
+  each kind and of facts must equal the first theme's, failing with the kind and the two counts, so Signal's counts equal Ember's.
+- The four hands-on passes of 0.31.4 (checks written after the code; each new check was run against the page of
+  `1219166c` and fails there, by the browser run of `the_mode_has_its_place`, `the_loudness_buttons_step_the_strength`,
+  `holding_a_band_stepper_repeats`, `the_menu_row_adds_a_device`, `the_tab_title_names_the_device_and_the_connection` and
+  `the_menu_button_is_fixed_on_a_phone`; `other_themes_pin_the_button_too` holds on both pages, as it should):
+  - The menu button on a phone (`signal_theme.py`, both browsers): `the_menu_button_is_fixed_on_a_phone` (the frame is
+    `fixed`, position fixed, and the button keeps its place against the pinned strip across scroll steps 0, 150, 400, 700
+    and back; at 1280 px it is pinned too, 8 px from the top after a scroll) and
+    `other_themes_pin_the_button_too` (Paper and Ember: `fixed` too, the button 8 px from the top after a scroll).
+  - A DAC's choices (`node/signal-draw.mjs`): `the_choices_are_chips_with_the_one_on_marked` (input chips only, no Preset
+    chip), `the_mode_sits_where_the_screen_puts_it` (on a desktop the mode heads `#sg-mid` and the input is under the
+    band table, neither in the first screen; on a phone the mode is under the curve and the shelf is `sg-up` (input,
+    presets), the band table, the rest). Browser, `the_mode_has_its_place`: 1280 px and 390 px, a breakpoint change
+    redrawing both ways, the mode drawn once, no sideways scroll; `the_first_screen_has_h6s_columns` (two columns from
+    1020 px) and `the_curve_has_a_row_of_its_own_in_the_middle_layout`.
+  - One write per tap on the input chips, now in the shelf (`an_input_chip_sets_the_input` counts the posts;
+    `completeness.py` found the double write the shelf's own click handler added, fixed in `controls-wire.js`).
+  - Loudness (`node/signal-draw.mjs` `the_loudness_chip_carries_round_steppers_while_loudness_is_on`; browser
+    `the_loudness_buttons_step_the_strength`): the wrap `#sg-loud.sg-loudw` with round `−`/`+` over the chip's ends and the
+    strength under its name, no separate box for a DAC, a click is one step, the strength follows, held it repeats and a
+    release stops it, a key is one step, and the wrap is under the curve at 390 px.
+  - Review round: an amp's shelf keeps its Loudness box in the middle column after the controls and a DAC without an
+    input draws no empty choices section (`node/signal-draw.mjs`); the Loudness round buttons answer a touch anywhere in
+    a 44 px square at 390 px (a pseudo-element grows the 38 px disc; `the_loudness_buttons_step_the_strength`); the Add
+    device row is offered only when the sheet can open (node); a held stepper also ends on a move reporting no button
+    down and after 10 s, and a second, non-primary pointer starts no hold and cannot end the first one's.
+  - Holding (`holding_a_band_stepper_repeats`): a held band `+` steps at once, repeats after the pause across the
+    redraws of the shelf (the button is replaced, the hold follows it by id), and stops on release, cancel, blur, a hidden
+    page, the button leaving and another device shown; no context menu and no selection or panning on a stepper; a key is one
+    step.
+  - Add device (`node/signal-draw.mjs` `the_menu_row_adds_a_device_while_a_device_is_shown`; browser `the_menu_row_adds_a_device`
+    and every `the_plus_sheet_*` check, which now open the sheet from the menu): the row is there with a device shown,
+    absent without one, opens the sheet, and the focus goes back to the menu button.
+  - The tab's title (`the_tab_title_names_the_device_and_the_connection`, `a_lost_stream_*`, `a_lost_device_*`):
+    `Gungnir 2 · connected — svolder`, `reconnecting` while the stream is lost, the trouble card's words lowercased for a
+    lost device, and plain `svolder` after another theme is picked.
+- Mutants of Signal's sources, run by hand with `node/mutate_signal.sh` (each killed by the harness named): the line
+  dropping the hops after the DAC (`signal-draw.mjs` `a_declared_hop_says_where_it_sits_and_moves_by_the_whole_lists_places`,
+  and `signal-line.mjs` `the_line_runs_player_computer_dac_then_its_hops_in_file_order`), a declared hop drawn live
+  (`signal-line.mjs` `a_linked_hop_is_live_only_when_listed`), a chosen hop that disappears staying chosen (`signal-line.mjs`
+  `a_choice_that_disappears_goes_back_to_the_shown_device`), the facts starting open (`signal-draw.mjs`
+  `the_fold_is_kept_as_open_or_closed_and_works_without_storage`), the computer's hop gaining a write
+  (`signal-draw.mjs` `the_computer_opens_the_routes_facts_read_only`), the strip not centring the chosen hop
+  (`signal-draw.mjs` `the_strip_is_the_same_hops_a_step_apart_with_the_wire_under_them`).
+- Mutants of Signal's page, run by hand with `mutate_signal.py` (one worker, `signal_theme.py` in Chromium; each killed by
+  the check named): an amp control written without `{ device: url }` (`an_amp_control_writes_to_the_amps_url`), the dots
+  ignoring reduced motion (`the_dots_stand_still_under_reduced_motion`), the slim bar never pinning (`the_slim_bar` "scrolled
+  past the line, it is shown" and `a_slim_bar_tap_chooses_and_scrolls_up`), the Add device row opening the sheet for a guest
+  (the core refuses a guest's post, so the sheet's opening is what is mutated; killed by `a_guest_cannot_add_or_edit_a_hop`), the strip not centring (`the_strip_centres_the_chosen_hop`).
+- Declared hops (Task 6): `node/signal-draw.mjs` `the_sheet_offers_unlinked_amps_first` (the amps no hop links as
+  `<name> (connected)` before Amp / Headphones / Speakers / Other, the first chosen with its own name; none left: an
+  Amp, declared), `a_linked_hop_edits_only_its_note` (the Edit form of a hop that links a device has the note field
+  and no name or kind; a declared hop's has all three; a live linked amp's tools have no Remove),
+  `a_declared_hop_says_where_it_sits_and_moves_by_the_whole_lists_places` (Move earlier / later name the place in the
+  whole `[[hop]]` list of the previous / next hop of the same line, disabled at the ends, the place in words, a note
+  escaped, a hop the list lost draws nothing), `the_sheet_and_the_declared_area_are_inert_for_a_viewer_who_may_not_write`,
+  `no_style_attribute_in_the_sheet_or_the_declared_area`; `node/signal-line.mjs`
+  `a_chosen_hop_removed_elsewhere_gives_the_box_back` (removed, renamed, moved to another line). In the browser
+  (`signal_theme.py`, both browsers): `the_plus_sheet_adds_a_declared_hop` (opened from the menu's Add device… row; the sheet, Escape and Cancel send nothing,
+  the typed fields survive a host / fleet / part reading, Add posts name / kind / note / the DAC's name, the new hop is
+  chosen with its dashed box, then the repo-built `svolder hops list` on the same temp homes lists it; a refused name
+  keeps the sheet open; a connected amp is linked and followed), `edit_changes_the_name_and_note` (in place, Escape,
+  the box follows a renamed hop, the CLI lists the new name) and `a_linked_hop_edits_only_its_note`,
+  `move_earlier_reorders_the_line` (the whole list's place posted, the CLI order, the ends disabled; a linked amp
+  moves too), `remove_asks_then_removes` (Keep sends nothing, one removal by id, the box back on the DAC),
+  `a_chosen_hop_removed_elsewhere_gives_the_box_back` (with the Edit form open, with a Remove question open; nothing
+  posted) and `a_guest_cannot_add_or_edit_a_hop` (a real guest: the menu's Add device… row refuses, every button inert, the core's words, nothing
+  posted).
+- The player, the computer and the states (Task 7). `node/signal-draw.mjs`: `the_player_opens_the_track_and_the_verdict`
+  (the title, the byline, the progress that moves, the transport, the path's hops and its verdict in the colour of its
+  class, nothing playing, paused offers Play), `the_player_goes_inert_for_a_viewer_who_may_not_write`,
+  `the_computer_opens_the_routes_facts_read_only` (the sink's words, rate and format, PipeWire's volume, muted, the host
+  EQ off / on / on with its escaped preset, the other streams, the path verdict; no button, input, link, tabindex, data-act
+  or role in it), `the_computer_says_route_not_read_before_the_route_arrives`, `a_lost_link_breaks_the_line_at_the_dac`
+  (a hollow red ring, the stretch after it still and the dashes before it moving, what follows dimmed, amber for waiting and
+  resting, no ring for a lost stream), `the_lost_card_offers_try_now_and_the_seconds` (Try now, the seconds, none for a
+  refusal, the fault advice, inert for a viewer who may not write, the waiting and resting cards),
+  `a_device_in_trouble_keeps_what_was_last_heard_dimmed_and_inert` and `player_and_computer_hops_open_their_areas` (no
+  `style` attribute); `node/signal-line.mjs` `the_player_quitting_while_chosen_gives_the_box_back_to_the_dac` and
+  `a_device_card_or_a_waiting_page_marks_the_shown_hop_in_trouble`. In the browser (`signal_theme.py`, both browsers):
+  `the_player_transport_works_when_chosen` (the bottom bar hides and returns, previous / pause / next post the host's press,
+  the dots move and stop with the player, the time in the area moves), `the_computer_hop_has_no_control` (the facts from
+  the route, nothing focusable, a click or Enter sends nothing), `a_lost_device_shows_try_now_and_the_seconds` (the card in
+  the open area, the seconds counting down, the red ring, the stillness and dimming after it, the player's dots still
+  moving, the last heard volume and curve dimmed and inert, Try now posts connect, the device back clears it),
+  `a_lost_stream_greys_the_line_and_makes_the_page_inert` (`Reconnecting to svolder…`, faded, inert, the dots still, back
+  after a restart) and `a_refused_write_toasts` (a rename onto a taken name: the core toasts, nothing renamed, the page
+  usable). Fix round 1: a card means a down link only for lost / looking / refused / waiting / resting (the ring, the still
+  stretch, the dimmed inert columns); `a_fault_on_a_connected_device_keeps_its_controls_live` (a red ring, the line goes on,
+  the controls live; the browser harness cannot fault a fake device, so node only); the lost-stream check waits for the dash
+  and its movement first; a lost card under reduced motion and hidden.
+- The phone (Task 8, under 720 px). `node/signal-draw.mjs`: `the_strip_is_the_same_hops_a_step_apart_with_the_wire_under_them`
+  (the hops of the line and no other, a step of 110 px, the wire's dots on the same step, the dash loops and the yellow
+  stretch, one line of words, the box, a ring chosen boxed dashed, an escaped name, no `style` attribute),
+  `a_lost_link_on_the_strip_draws_the_same_ring_and_dims_what_follows`,
+  `each_value_of_the_band_table_names_its_column_for_the_phone_rows`. In the browser (`signal_theme.py`, both browsers; 390 by
+  844, Chromium under mobile and touch emulation, Firefox with its touch events on): `the_strip_centres_the_chosen_hop` (92 px
+  high, the hops of the desktop line, the chosen at the middle with the neighbours 110 px either side, the box 112 by 74, one
+  listbox, no `+` after the last hop, the wire not cut at the strip's width, the dots moving, the arrow, End and
+  Home keys sliding it, no `style` attribute but where the CSSOM places), `a_swipe_chooses_the_neighbour` (a drag past a short
+  way chooses one hop, a short one nothing, a tap on a neighbour, a swipe is not also a tap, nothing past the ends, a vertical
+  stroke scrolls the page (Chromium) and chooses nothing, nothing posted), `the_strip_pins_when_scrolled` (sticky at the top
+  under the frame's layer, no slim bar, a tap while pinned chooses, keyboard focus lands under the strip and above the Now
+  playing bar), `touch_targets_are_44_px` (every button, hop, field and slider of a DAC page and the Add device sheet),
+  `no_sideways_scroll_with_long_hop_names` (a DAC, an amp and a Loki Max with six hops after the device, a 40-character name and
+  `Left/Right Cans`, at 390 and 1100 px: the page does not scroll sideways, also with the long hop chosen; at 1100 px the labels
+  stay inside the page and clear of each other) and `the_said_and_stub_do_not_overlap` (host off and the stream lost, 1280, 720
+  and 390 px). The floating `+` is gone: Add device… is a row of the frame's menu.
+  Fix round 1: the frame's menu button is 44 px on a phone, sized by Signal's `--frame-btn-size` token (the frame is not
+  edited), and keeps the page's right 60 px to itself (its hit area reaches 7 px past it); the strip is centred in the
+  rest. `the_menu_button_clears_the_strip` (360, 390 and 719 px, with the first, the DAC and the last hop chosen: the
+  button's rect and hit area against the box, dots, wire and every point of every hop), `the_strips_dots_stop` (reduced motion; hidden, then shown),
+  `focus_clears_the_pinned_block_with_both_lines` (the scroll-margin follows the pinned block's real height), the 44 px
+  measure also on a declared hop's area, an amp's, the lost card (Try now), and on the frame's button (its size comes from
+  Signal's token, so Signal's check owns it).
+- Final pass (0.31.4, after the whole-branch review). A page open at shutdown never hears the computer go: the daemon stops
+  the web server before the host service (Rust test `a_page_open_at_shutdown_never_hears_the_host_go` in
+  `web/tests.rs`, which fails on the old order with the `host: null` event in the stream), and `a_lost_stream_greys_the_line_and_makes_the_page_inert`
+  now names `host === null` and the flow stretches in the detail of its `dots stand still` check. A linked amp shown on its own page
+  (`node/signal-line.mjs` `a_linked_amp_shown_alone_has_the_dac_its_row_names_before_it`, also the amp whose DAC is not listed and the
+  computer hop without words on a page that holds no route; `node/signal-draw.mjs`
+  `a_linked_amp_shown_alone_draws_a_grey_way_in_then_a_thin_stretch_from_the_dac`; browser, both browsers:
+  `a_linked_amp_shown_alone_has_the_dac_before_it`: the hops, one grey stretch, two greyed dots, one thin flowing stretch
+  from the DAC, no ring, no words on the computer; an ArrowLeft onto the DAC boxes it in place, the page stays on the amp, focus and box agree and the area offers `Show <DAC>`; Enter or a tap on the DAC shows that device). The middle layout
+  (`the_curve_has_a_row_of_its_own_in_the_middle_layout`, both browsers, 768 and 900 px: the curve 300 px or wider under the
+  volume and beside nothing, a point of band 2 dragged and written, an amp's meters 300 px or wider in a row under its power;
+  at 1020 px H6's three columns). An amp's faults are the facts' rows of the fault family by id (`node/signal-draw.mjs`
+  `an_amp_opens_power_meters_and_faults`: a renamed fault is still drawn, a row outside the family is not). The `host-eq.toml`
+  stamp that finds a preset applied to the same sink is `a_state_file_written_again_has_another_stamp` (Rust). The
+  chosen box is narrower than a step (the clearance sweep of `no_sideways_scroll_with_long_hop_names` and
+  `the_menu_button_clears_the_strip` still pass). Mutants: `node/mutate_signal.sh` has two more (a linked amp losing its DAC, an
+  amp's faults picked by their words); `mutate_signal.py` counts a kill only when the mutant's own check fails.
+- The user's pass (0.31.4), each proved by a check that failed on the page before the change.
+  `node/signal-draw.mjs` and `signal_theme.py`: `the_volume_buttons_are_in_embers_order` (`−`, Mute,
+  `+`; a device with no mute key keeps `−` and `+`) and `muted_shows_minus_infinity` (the number
+  `−∞` with the unit `dB`, Unmute pressed, the slider's value text `muted`; the slim bar's and the
+  line's volume words `−∞ dB`, `volumeWords`). `holding_plus_repeats` (`signal_theme.py`, both
+  browsers; a press steps once, 380 ms later the steps come every 70 ms; a release, a cancelled
+  pointer, a blur of the window, a hidden page and the button leaving the page each stop them; Enter
+  on the focused button stays one step; in Chromium a real held mouse on `−` too).
+  `a_pinch_sets_the_q` (`signal_theme.py`, both browsers, a phone: synthetic touches on the curve;
+  twice as far apart halves the Q of the band nearest the midpoint, half the distance doubles it,
+  frequency and gain untouched, the touch events prevented, a lifted finger ends it).
+  `the_transport_is_drawn_as_icons_no_font_can_swap` (`node/signal-draw.mjs`: no glyph text, one
+  svg per button, `currentColor`, `aria-hidden`, no `style`, the labels kept) and
+  `transport_icons_are_drawn_shapes` (`signal_theme.py`: 14 px, the button's colour, no text).
+  `the_page_fills_a_window_up_to_1100` and `a_tall_window_keeps_the_block_together` (1280 by 1000 the
+  line at the top and the bar at the bottom as always; 1280 by 2000 the gap between the open area
+  and the shelf no larger than at 1100 and the block centred within 3 px; a 600 px wide window
+  keeps the page as it is) and `the_shelf_has_two_columns` (900, 1100, 1280 and 1700 px: the
+  band table beside the middle column, the facts below across the width; one column at 600, 720,
+  800 and 899 px).
+  The hold also stops when another device is shown, survives a redraw of the open area (the button
+  stays, the steps go on), and a context menu on a held button is prevented; `a_pinch_handoff` (a
+  finger on band 2's point, a second one centred near band 3: band 2's Q changes, band 3's does not).
+  Mutants (`mutate_signal.py`, `node/mutate_signal.sh`): a hold that does not hold the open area, a held plus that never repeats, a held band stepper that never repeats, a blur
+  that does not stop a hold, the menu button following the page on a phone, the mode missing under the curve on a phone, a tab that keeps its plain title, a pinch the wrong way, a tall window that stretches the open area, a
+  shelf of three columns, a muted volume that says the word, a transport icon not hidden, the mode kept on a desktop's first screen, a Loudness chip without its round buttons, the menu row offered with no device (`node/mutate_signal.sh`).
+
+## Night drive
+
+The theme Night drive (design sections 3, 8 and 10), built on the core
+alone. Its frame: the registration, the scene (sky, sun, stars, the plain side grid, the floor of lit
+cells rolling with the music and the mountains' ridge), its motion levels, the sky's rare events and
+what it costs, and the HUD over it (the top line, the outrun volume, the EQ line and the fade). The
+dash and the sheet come with the later tasks.
+
+- Registration: Night drive is the fourth theme, dark only, on the ground `#0a0018`, with the Motion rows (below) in
+  the frame's menu. Proved by the Rust tests `nightdrive_is_listed_dark_only` and
+  `the_list_is_the_pickers_and_the_registrys_data`; the picker lists Ember, Paper, Signal and Night
+  drive and Night drive's card has its name, its blurb and a picture (`nightdrive_theme.py`
+  "nightdrive_is_listed_and_mounts_from_the_picker", `paper.py`, `signal_theme.py`,
+  `effects_menu.py`). `contract.py` and `completeness.py` run it like every listed theme (below, "The driver").
+- The camera and the axis (`node/nightdrive-scene.mjs`): `the_nearest_row_is_at_the_bottom_and_the_far_row_near_the_horizon`,
+  `the_far_rows_are_wider_than_f6s` (x = 6 at the horizon is 0.16 of the width from the middle, F6's
+  0.069), `the_axis_puts_20_hz_left_and_20_khz_right_and_round_trips`,
+  `every_band_lands_in_one_column_and_every_column_has_a_band`.
+- The music's levels and the floor (`node/nightdrive-scene.mjs`): `a_lone_band_at_1_khz_lights_its_column_only`,
+  `the_ridge_reads_minus_60_to_0_db`, `the_bass_and_the_highs_are_the_means_of_their_columns`,
+  `rows_come_twice_a_beat_or_steadily` (`rowRate(120) = 4`, no tempo 3.5, 300 is 6, 30 is 2),
+  `the_floor_keeps_22_rows_newest_at_the_horizon`, `a_still_floor_does_not_roll`.
+- The scene in a browser (`nightdrive_theme.py`, both browsers, the host's synthetic capture):
+  `the_scene_draws_sky_sun_mountains_and_floor` (sampled pixels: the top of the sky within 12 of
+  `#0a0018`, the sun's centre warm, a floor cell lit after 2 s, the ridge's cyan edge),
+  `the_floor_rolls_with_the_music` (the draws go on and the newest row is a new one, with the music's
+  columns, within 1 s), `the_menu_button_sits_in_its_slot` (a 44 px slot at the top right, the frame's
+  button over it), `contrast_on_the_scene` (each text token on `#0a0018` and on the panel over the
+  dusk at the horizon at 4.5 or more).
+- The sky's rare events (`node/nightdrive-sky.mjs`), by the clock and never by the frame:
+  `rays_need_the_bass_held_high_for_3_s` (0.7 for 2.9 s none, 3.0 s one, a dip starts the hold again),
+  `rays_come_at_most_once_a_minute` (10 minutes of high bass, 9 or 10 rays, 60 s apart),
+  `the_rays_fade_in_2_s_hold_6_s_fade_out_4_s` (0.5 at 1 s, 1 at 5 s, 0.5 at 10 s, 0 at 12 s, peak
+  alpha 0.55), `a_star_needs_a_strong_transient` (steady highs no star, a jump of 0.3 one, 0.15 and a
+  faint rise under the floor of the range none), `a_star_has_its_place_and_lasts_0_8_s`, `stars_come_at_most_one_every_5_s` (a
+  transient every 100 ms for 5 minutes, 55 to 60 stars, 5 s apart),
+  `a_shower_comes_on_intense_highs_at_most_every_40_s` (highs at 0.7: none before 2 s, then 3 to 6 stars over
+  1.5 s ignoring the 5 s gap, 40 s apart, the same at 30 and 144 steps a second; a dip restarts the hold),
+  `the_levels_readout_says_what_the_music_reaches` (`driver.sky().levels`: now, how long the bass has held, the
+  highs' jump, the maxima of the last 60 s, and each against the loudest of the last minute),
+  `music_with_dynamics_fires_rays_a_shower_and_stars_at_the_users_levels` (kick-shaped bass 0.16 to 0.54 at 2 a second, hat-shaped
+  highs 0.09 to 0.22 at 4 a second, a 40 s verse at 60 % and a 30 s chorus: 300 s give 1 to 4 rays, 1 to 4 showers and 3 or more
+  stars), `a_flat_drone_and_near_silence_fire_nothing`, `a_smooth_bass_swell_from_0_30_to_0_54_over_20_s_fires_rays`,
+  `quiet_listening_fires_what_loud_does` (rays and showers read by their place in the minute's range, a leaky count of how long they
+  are high),
+  `the_dice_is_rolled_for_a_transient_not_for_a_frame`, `the_limits_hold_at_any_frame_rate`
+  (200 s at 30, 60 and 144 steps a second, and with a 2 s gap, the same firings
+  within one), `nothing_fires_when_off`, `the_log_keeps_the_last_20`.
+- Motion (`node/nightdrive-sky.mjs`): `reduced_motion_starts_on_calm_unless_a_level_is_kept`,
+  `the_pace_of_each_level_and_of_silence_and_the_idle_pace_is_the_phones_alone` (Full 0, Calm 100, Still 1000 ms; on a
+  coarse pointer only, silent or paused at least 125; fine and coarse across the three levels and playing, paused and silent). In a browser (`nightdrive_theme.py`, both): `the_menu_has_motion_full_calm_still` (three
+  radios, Full checked), `motion_is_kept_per_browser` (Calm under `svolder.theme.nightdrive.motion`,
+  still Calm after a load), `calm_stops_the_road` (no new floor row in 2 s, draws go on, Full rolls
+  it again), `still_draws_about_one_frame_a_second` (3 to 7 draws in 5 s),
+  The timing cases, in `nightdrive_timing.py` (both browsers, the gate's serial lane),
+  are `a_paused_player_on_a_desktop_keeps_its_levels_own_pace` (the draws go on at the rate they had, the asked pace under 125 ms), `a desktop starts with the wet road allowed by the budget` (the budget, fed the real draws, allows the wet road at the start), `reduced_motion_starts_on_calm_and_full_can_be_picked` (the system asks for less: pace 100, Full
+  picked: draws keep coming) and `what_a_draw_costs` (below).
+- What it costs (`nightdrive_theme.py`): `the_analysis_is_held_while_shown_and_let_go_when_hidden_or_unmounted`
+  (one holder of the core's analysis while shown, still held inside the core's grace, none after it,
+  held again once shown, none after a switch to Paper) and `a_switch_away_and_back_leaves_one_loop` (the page's frame requests for each frame of the browser
+  after a round trip to Paper are what they were: a second loop adds one a frame; killed by `a mount starts a loop nothing ends`); in `nightdrive_timing.py` `no_frame_while_hidden` (no draw while the
+  page is hidden, draws again once shown).
+- The HUD's words and fade (`node/nightdrive-hud.mjs`): `the_top_line_names_device_input_and_rate`
+  (`Bifrost 3 · USB · 96 kHz`, each left out when absent), `the_verdict_shows_when_the_computer_changes_the_sound`
+  (`host EQ on · changes the sound` in amber; `host EQ on` alone when the path says it changes
+  nothing; nothing with the host EQ off), `trouble_replaces_the_verdict` (lost, an unreachable card,
+  a fault, reading again, resting: the core title's words), `the_eq_line_reads_mode_or_preset_and_gains`
+  (`EQ WARM +3.0 +1.5 0.0 −1.0 +2.0`, `EQ`, `LOUDNESS 3`, `FLAT`, no tone: no line),
+  `the_volume_reads_its_db_and_muted_reads_minus_infinity`, `an_amp_without_a_volume_says_who_sets_it`,
+  `the_outrun_volume_has_no_style_attribute_and_prefixed_ids` (no `style`, no script, the four `nd-`
+  ids, the minus and the infinity are paths and never glyphs), `the_fade_waits_its_time_and_any_input_wakes_it`
+  (a fake clock: six kinds of input, the idle time counted from the last), `trouble_holds_the_fade_off`
+  (and trouble arriving while faded wakes it), `wire_hud_holds_the_fade_for_every_trouble_word` (waiting,
+  resting, lost, an unreachable card and a fault card through `wireHud.draw`; back to connected the
+  fade resumes after the full idle time), `a_volume_from_elsewhere_shows_the_volume_for_5_s_while_faded`.
+- The HUD in a browser (`nightdrive_theme.py`, both browsers, the fade preference set to 2 s):
+  `the_hud_says_what_the_model_says` (the top line, the volume's aria and the EQ line against the
+  model), `the_top_fades_after_the_idle_time_and_any_input_wakes_it` (opacity 0 within 5 s, 1 at
+  once after a pointer move), `the_faded_hud_stays_in_the_tab_order_and_focus_wakes_it` (not
+  `display: none`, not hidden, in the tree; a Tab wakes it), `a_volume_change_from_elsewhere_shows_the_volume_for_5_s`
+  (only the volume shows; faded again by 6 s), `trouble_while_faded_shows_the_top_line`
+  (the device dropped while faded brings the top line back with the tab title's status word and keeps
+  it up 5 s past the idle time), `the_menu_button_is_not_in_the_fade`, `the_figures_are_russo_one_and_the_unit_mr_dafoe`
+  (`document.fonts`), `the_hud_words_clear_the_sun_or_pass_contrast_there` (1280x800 and 1280x1600:
+  each word's box against the sun's drawn box, no overlap or 4.5 on the sun's darkest stop). The
+  dash's half of the fade checks is below.
+- The dash's markup (`node/nightdrive-hud.mjs`): `the_dash_runs_minus_mute_plus_input_track_transport_device`
+  (`−` `MUTE` `+`, the input, the track, the transport, `DEVICE ▴`, in that order; ids for the held keys; no
+  `style`; MUTE pressed while muted; no volume keys on a device with none),
+  `three_inputs_are_chips_and_more_are_one_chip_with_a_list` (3 chips; 4 or more one chip naming the
+  current input, `aria-haspopup="listbox"`), `the_transport_is_svg_not_glyphs` (one svg and a path per
+  key, no glyph; pause while playing, play while paused), `a_guests_dash_is_drawn_inert` (the keys
+  `quiet` and `aria-disabled`, the sheet's key not; a guest has no transport), `the_track_reads_title_artist_album_and_time`
+  (`Massive Attack · Mezzanine · 1:42 / 5:29`, the fill's share, the time moving two seconds on, a paused
+  track standing still, `Nothing playing`), `an_amp_has_power_and_readouts_where_the_input_would_be`.
+- The dash in a browser (`nightdrive_theme.py`, both browsers): `the_dash_runs_minus_mute_plus_input_track_transport_device`
+  and `the_track_reads_title_artist_album_and_time` and `the_transport_is_svg_not_glyphs` against the
+  model (40 px keys along the bottom), `minus_and_plus_step_the_volume_and_mute_toggles` (a tap steps one,
+  two quick taps two from the step asked, a key on the focused `+` keeps the focus through the redraw),
+  `muted_reads_minus_infinity` (the HUD's figures gone, the infinity drawn, `muted, minus infinity dB`,
+  MUTE pressed), `holding_plus_repeats_and_the_release_ends_it` (a step at the press, the next about 380 ms
+  on, then every 70 ms; a release, a cancel, a blur, a hidden page and a lost stream end it; a redraw
+  keeps the button; a long press's context menu is prevented; Enter stays one step),
+  `dragging_past_the_cap_writes_the_cap` (`[web] max_volume_db`, a held `+` writes the cap and nothing above
+  it), `an_input_chip_sets_the_input` (the Loki Max's two chips), `a_long_input_list_opens_and_picks`
+  (five inputs: one chip, the list over it, Escape closes it with no write, a pick writes it),
+  `the_transport_plays_and_pauses` (pause posts the host's press and the key turns to play; the time and
+  the fill move on), `a_guests_tap_posts_nothing` (a real guest: only the sheet's key is live; a tap on
+  `+`, `−`, MUTE and the input posts nothing and the core says to sign in),
+  `the_dash_fades_to_a_tenth_with_the_hud` (1280x900 and 915x412: the dash at 0.1 with the HUD after the idle time),
+  `a_move_wakes_the_dash_at_once`, `a_tap_on_a_faded_key_only_wakes_the_dash` (nothing posted, the next tap writes, the
+  click of the waking tap presses no transport key), `the_dash_stays_while_its_input_list_is_open` (the HUD faded, the
+  dash at 1; it fades again once the list is closed), `the_portrait_panel_never_fades` (412x915) and
+  `a_long_press_that_woke_a_faded_dash_presses_nothing_when_let_go` (held 1.5 s, then released and clicked: nothing posted; the next press does) and
+  `a_press_on_the_dash_while_faded_acts_and_wakes` (a mouse arriving wakes it and its press on `+` posts the volume,
+  the top shows again); in `node/nightdrive-hud.mjs`: `the_fade_waits_15_seconds_unless_the_viewer_kept_another_time`
+  and `the_fade_tells_its_watchers_when_it_fades_and_what_woke_it`.
+- The sun at the horizon (`nightdrive_theme.py`, dpr 1 and 2 in Chromium): `the_sun_reaches_the_horizon` (a band at
+  its lowest gain brings the curve down to the horizon; the sky canvas is sun-coloured in every pixel from 0.05h
+  above the horizon to 2 CSS px above it, no stripe or dark gap).
+- The ridge as heights (`node/nightdrive-ridge.mjs`): `the_ridge_has_no_sawtooth_in_silence`,
+  `a_bass_band_makes_a_rounded_hill`, `the_swell_drifts_slowly_and_freezes_in_still`,
+  `the_swell_gives_way_to_the_music`, `the_ridge_is_drawn_as_curves_with_no_run_of_straight_segments`.
+- The floor as a heat grid (`node/nightdrive-floor.mjs`): `a_quiet_row_is_flat`, `a_loud_cell_is_lifted_and_hotter_than_a_quiet_one`,
+  `a_crossing_of_level_1_at_the_nearest_row_is_lifted_by_the_floors_height`, `strips_are_drawn_far_first`,
+  `the_rows_roll_toward_the_viewer_and_a_floor_not_rolling_is_drawn_the_same`,
+  `the_heat_follows_the_ramp_and_leans_warm_for_bass_and_cool_for_highs`, `the_wet_road_thins_the_ground_so_the_reflection_shows`,
+  `the_mood_dims_the_lines_and_the_heat`, `a_wave_runs_down_the_floor_from_the_horizon_and_fades`,
+  `cells_alike_in_colour_and_alpha_are_filled_together_and_unlike_ones_apart`,
+  `a_lifted_near_edge_still_has_floor_under_it_to_the_bottom_of_the_scene`; in both browsers
+  (`nightdrive_theme.py`) `the_loud_floor_is_hotter_than_the_quiet_one` and `the_loud_floor_is_lifted` (pixels, the mood's layers
+  off); in `nightdrive_timing.py` `what_a_draw_costs` prints drawMs with every cell lit and in the quiet with the wet road, and in Chromium holds the median of five readings to 4.5 ms for
+  every cell lit and asserts the draws went on between the readings (a stalled loop would keep its last mean; slow machines are covered by the budget's step-down).
+- The ear and the mood (`node/nightdrive-mood.mjs`): `a_level_is_read_against_the_loudest_of_the_last_minute`,
+  `the_medium_view_eases_over_1_2_s_and_the_long_over_8_s`, `quiet_music_at_a_low_volume_still_reaches_long_near_1_after_a_minute`,
+  `a_drop_after_a_breakdown_fires_one_moment_and_a_steady_loud_song_fires_none_after_the_first`,
+  `a_moment_comes_at_most_once_every_15_s`, `the_balance_leans_to_the_highs_or_the_bass_and_silence_holds_it`,
+  `a_peak_of_6_s_brings_the_embers_which_ease_in_and_out`, `the_ear_is_the_same_at_30_60_and_144_steps_a_second_and_after_a_gap`;
+  the look (`the_mood_is_0_18_plus_0_82_of_the_long_view_and_0_7_looks_as_it_did`,
+  `the_road_is_wet_and_the_air_hazy_in_the_quiet_and_dry_and_clear_when_loud`, `the_heat_leans_warm_for_bass_and_cool_for_bright_music`,
+  `the_cruise_speed_is_0_6_to_1_4_times_the_tempo_s_and_eases_over_seconds`,
+  `a_moment_flares_the_sun_for_2_5_s_and_sends_a_wave_in_full_only`, `calm_halves_the_ears_rates_of_change_and_still_takes_the_colours_as_they_come`,
+  `still_finds_no_moment_so_spends_none_and_a_flare_stops_on_a_switch_to_it`,
+  `embers_only_at_a_peak_and_only_in_full`) and the sparks (`embers_rise_from_hot_cells_only_while_the_peak_lasts_and_fade_and_die`,
+  `sparks_rise_only_from_the_near_half_of_the_floor`, `the_number_alive_is_capped_by_the_canvas_s_area`,
+  `the_births_follow_the_strength_and_the_clock_not_the_frame`). In both browsers (`nightdrive_theme.py`, the bands held and the ear moved; the cruise case is in `nightdrive_timing.py`):
+  `the_night_follows_the_song` (mood over 0.9, a dry road and no haze when loud; under 0.3, wet and thick haze in the silence; the sky
+  deeper in the quiet), `the_wet_road_shows_the_sun_in_the_quiet_and_not_when_loud` and `the_haze_lies_over_the_far_floor_in_the_quiet_only`
+  (pixels), `nowet_takes_its_layer_away_and_leaves_the_others`, `nohaze_takes_its_layer_away_and_leaves_the_others`,
+  `nomood_keeps_the_scene_as_it_was`, `a_drop_brings_a_flare_and_a_wave` (flare over 0.6 within 4 s of loud music after the silence, with the wave; the pixel
+  just outside the sun's rim is sun-coloured during the flare and the night before and after, the green channel at 1.4 radii
+  rises 8 or more over the sky at the same height; all gone 2.5 s later), `the_embers_rise_after_a_peak_of_6_s`, `noembers_takes_the_sparks_away` and `the_road_cruises_with_the_song_and_keeps_the_tempo` (rows a second about 5.6 when loud, 2.4 in
+  the silence and 4 with the mood off: the cruise factor multiplies the tempo's rate).
+- A phone stays usable (`node/nightdrive-budget.mjs`): `the_budget_caps_the_density_at_2_and_the_canvas_at_2_5_megapixels`,
+  `a_slow_mean_steps_the_scale_down_by_0_75_to_one_backing_px_and_then_caps_the_rate`,
+  `one_slow_draw_among_fast_ones_changes_nothing`, `the_scale_comes_back_only_after_10_s_comfortably_under_budget`,
+  `a_middling_mean_neither_steps_down_nor_counts_as_comfortable`, `a_phone_that_is_never_slow_stays_at_its_capped_density`,
+  and the wet road (`the_wet_road_is_the_first_thing_a_slow_mean_drops_before_the_scale_and_then_the_rate`,
+  `too_few_draws_a_second_drops_the_wet_road_first_too`, `a_phone_starts_without_the_wet_road_and_it_comes_last_after_the_cap_and_the_scale`,
+  `the_wet_road_stays_off_for_3_minutes_after_a_step_down_dropped_it`; in the browser `a_phone_starts_without_the_wet_road`);
+  in Chromium `a_phone_stays_usable` (density 3 held to 2; with the CPU 30x slower the scale steps down with the CSS size
+  and the Motion choice untouched; with it 6x slower a tap on the frame's button opens the menu within a second);
+  the rate as a second trigger (`node/nightdrive-budget.mjs`:
+  `too_few_draws_a_second_for_3_s_steps_down_while_every_frame_is_asked_for_though_each_draw_is_fast`,
+  `a_rate_under_24_means_nothing_when_the_scene_asks_for_less_than_every_frame_or_the_draws_are_comfortable`,
+  `a_brief_dip_under_3_s_is_not_a_step_down`, `after_a_step_down_for_the_rate_the_way_back_stays_shut_for_a_minute`,
+  `a_pause_between_draws_restarts_the_rate_too`, `the_30_a_second_cap_keeps_its_cadence_at_any_screen_rate_and_never_trips_the_rate_trigger`
+  (50 to 144 Hz: the frame nearest the pace is drawn, 28 or more a second from 60 Hz up, no step down); both browsers, in `nightdrive_timing.py`, `a_slow_page_steps_down_on_the_rate`: the main thread busy
+  45 ms in 50 gives 20 draws a second of 3 ms, and the scale steps down or the rate is capped within 14 s while the same
+  page left alone does not) and a phone's start at the cap (`a_phone_starts_at_the_rate_s_cap_and_the_cap_lifts_after_10_s_under_budget`;
+  Chromium, in `nightdrive_timing.py`, `a_phone_starts_at_30_a_second`: a coarse pointer begins capped and the draws keep to 21 to 34 a second).
+- The readout and the bisect switches (`node/nightdrive-debug.mjs`: `an_address_without_the_parameter_asks_for_nothing`,
+  `the_bare_parameter_shows_the_readout_with_every_layer_on`, `the_switches_are_comma_separated_and_a_wrong_word_is_named_not_obeyed`,
+  `the_rate_is_the_draws_of_the_last_second_not_the_one_asked_for`, `the_mean_and_the_95th_percentile_are_of_the_last_60_draws`,
+  `the_box_says_each_number_and_n_a_where_the_browser_has_none`, `the_new_switches_are_named_and_obeyed`, `the_box_without_an_ear_says_so`;
+  `nightdrive_theme.py`, both browsers):
+  `the_readout_is_not_made_without_the_parameter`, `the_readout_shows_the_numbers_and_hides_from_the_tree_and_the_query_stays`
+  (aria-hidden, the query kept, the draws a second within 10 of the loop's own count, drawn twice a second and no more),
+  `nosky_nodash_nohud_and_noglow_turn_off_what_they_name`, `nofloor_noridge_nohaze_and_noembers_leave_the_road_canvas_empty` and, in Chromium,
+  `dpr1_draws_at_one_backing_pixel_per_css_pixel`. Firefox's checks now set the density they are asked for.
+- The glow is drawn, never blurred (`node/nightdrive-glow.mjs`): `nothing_in_the_scene_is_blurred` (no `shadowBlur` or
+  `shadowColor` set by the sky, the ridge, the floor, the bubbles or the diamonds, glow on or off, lit or dull),
+  `the_suns_glow_is_a_gradient_round_it_and_is_left_out_when_the_glow_is_off`,
+  `the_ridges_edge_and_the_bubbles_glow_with_wider_fainter_strokes_under_the_line`, `the_wet_roads_slices_sway_as_one_wave`
+  (adjacent slices differ by under 1 px at 1280 wide at any time, every slice leans the same way, the near ones further). In a
+  browser (`nightdrive_theme.py`, both): `the_wet_roads_mirror_is_never_older_than_one_draw` (a copy of the sky at every draw).
+- The phone's top (`nightdrive_theme.py`, both browsers, density 3): `the_phone_top_has_room` (at 412x915 and 360x780, in EQ and in
+  Flat: the device line, the dB readout, the EQ readout, the menu button and the verdict meet nowhere; the EQ readout holds the bands' gains; with every band at the device's highest gain the curve's top and the highest bubble are below the lowest of the readouts' boxes, which fails when the stack grows past them; and a 55-character device name wraps without meeting the dB or the button).
+- The ridge keeps its detail (`node/nightdrive-ridge.mjs`): `a_notch_a_quarter_octave_wide_is_still_there_after_smoothing`
+  (a notch of 6 bands and one of 2 show 40 % or more of their depth), the ripple case and `a_bass_band_makes_a_rounded_hill`
+  bracketed from both sides round sigma 0.87, radius 2, step 3 px (a kernel twice as wide or half as wide fails: ratio 0.5 to 1.2 per 5 px of axis, peak 45 to 85 px); the ripple case measures the tooth as the second difference of the smoothed bands in px (it does not shrink with a finer step) and holds it under 0.5 px: 0.87 is the smallest sigma that does so at radius 2 (0.84 leaves 0.61, 0.6 leaves 3.2).
+- The cursor rests (`node/nightdrive-hud.mjs`: `the_cursor_rests_after_2_s_still_over_the_scene_and_a_move_brings_it_back`,
+  `a_move_restarts_the_2_s`, `the_cursor_stays_over_the_dash_and_the_menu`,
+  `the_cursor_stays_over_the_huds_words_though_they_are_click_through`,
+  `the_cursor_stays_while_a_button_is_held_and_rests_2_s_after_the_release`, `a_finger_has_no_cursor_to_hide`,
+  `stop_brings_the_cursor_back_and_lets_the_document_go`; `nightdrive_theme.py`, both browsers):
+  `the_cursor_hides_when_it_rests` (computed cursor over the scene is not none after 0.5 s, none after 2.2 s, back on the next move,
+  never none over the dash or over a word of the HUD (click-through, so the scene is under it), and not none while a bubble is held
+  still, in both browsers; `the_cursor_stays_over_the_huds_words_though_they_are_click_through` on a fake clock).
+- The cover is as tall as the track (`nightdrive_theme.py`, both browsers): `the_cover_spans_the_title_to_the_bar` (at 1280x800
+  and 412x915: top within 2 px of the title's text box, bottom within 2 px of the bar's bottom, square).
+- The picker on a phone (`effects_menu.py`, both browsers, density 3; a finger in Chromium, a wheel in Firefox, which has no
+  touch path in these runs): `the_picker_reaches_every_theme_on_a_phone` (915x412, 412x915 and 360x780, Night drive and Ember:
+  the sheet ends inside the window; where the grid scrolls a drag brings the last card fully into view, where it fits the last
+  card is inside it; red at 360x780 against the old CSS). The frame menu under a finger (Chromium):
+  `the_menu_ends_inside_what_is_seen` (412x915 pinched to 3x, so the visual viewport is a third of the window: the menu's bottom
+  is inside it) and a touch drag of the open menu in a 390x300 window brings its last row into view, Night drive and Ember.
+- The theme's thumbnail (`node/nightdrive-draw.mjs`: `the_thumbnails_sun_stripes_show_at_the_menus_size_in_the_palettes_colour`):
+  each stripe is 1.5 px or more at the menu's 32 px, in the palette's stripe colour.
+- The pinned button's scrolled case is tried against a scroll (`frame_button.py`): a theme whose page has room to scroll must have
+  moved, and at the phone sizes at least one theme's page scrolled (`the_scrolled_case_scrolls`); Ember's glow-edge check
+  (`effects_layout.py`) skips only the button's own rows and columns.
+- The cover in the dash (`node/nightdrive-hud.mjs`: `the_cover_sits_between_the_input_and_the_title_and_a_track_with_none_has_no_box`;
+  `nightdrive_theme.py`, both browsers): `the_dash_shows_the_cover_when_there_is_one` (the fake host's picture drawn, 30 px, rounded
+  4 px with a cyan edge, between the input and the title, a same-origin address with its version, no style attribute; on a phone
+  held upright it stays on the track's own row), `no_cover_leaves_no_gap` (`SVOLDER_FAKE_COVER_GONE_AFTER_MS`: no box, the title
+  moves left to the track's own start) and `the_cover_follows_the_track` (another track's address; a real 404 is hidden and leaves
+  no gap; a track with none has no box; the first one comes back).
+- The tuning on the mountains (`node/nightdrive-tune.mjs`): `the_map_puts_0_db_at_the_baseline_and_the_range_inside_the_mountains`
+  (0 dB at `H - 0.08h`, the largest gain `0.075h` away, the whole range inside the band that shows the curve),
+  `the_map_round_trips_hz_and_db`, `the_morph_rises_over_the_mountains_and_falls_1_5_s_after_the_last_touch`
+  (fake clock: 12 % of the gap a frame, the grace measured from the release, a touch and a lifted finger the
+  same grace, the bubbles shown before they are grabbable), `a_guest_or_no_writes_never_morphs`,
+  `no_bands_never_morphs` (an amp, a device in Flat with no bands), `loudness_shows_the_curve_without_bubbles`,
+  `bubbles_sit_at_each_bands_own_gain` (also in Flat), the held band's curve and label from the raw steps,
+  `the_pace_returns_to_the_levels_once_the_morph_has_settled` (the morph is moving only on its way, not at rest).
+  In a browser (`nightdrive_theme.py`, both unless noted; the page's requests read from its own request log,
+  relative paths): `hovering_the_mountains_shows_the_curve_and_leaving_lets_it_go` (`data-tune`, a bubble per
+  band), `a_bubble_drag_sets_frequency_and_gain` (the last write of each parameter is the step nearest the drop,
+  worked out here from the scene's size and the device's tables, to that band of that device only),
+  `a_flat_device_switches_to_eq_on_the_first_drag` (one toast), `the_curve_stays_1_5_s_after_the_drag` (on at
+  1.2 s, off by 2.5 s with the pointer gone from the mountains), `a_guest_tap_on_the_mountains_says_why` (a real
+  guest: no morph, nothing posted, the core's sign-in words). Chromium (a button held across calls):
+  `the_value_shows_above_the_bubble` (`250 Hz · +1.5 dB · Q 1.00` from the steps' words, above the bubble, gone
+  with the release), `a_tone_update_waits_for_the_drag` (a write from elsewhere moves no bubble under the hand,
+  and is drawn after the release), `a_device_switch_mid_drag_writes_nothing_to_the_new_device` (a second DAC with
+  its own gain range; nothing posted to it, nothing posted by the drag after the switch, its bands unchanged,
+  the curve drawn from it), `a_device_switch_without_a_drag_shows_no_curve` (both browsers: a switch with no drag on leaves `data-tune` off and
+  the morph at 0; mutant, the grace given on every switch, killed), `a_bubble_is_grabbed_at_dpr_2` (the ring drawn at its place on a canvas of twice
+  the size, a press 6 px away grabs, 16 px away does not). Mutants (run by hand, each killed): a guest tap that
+  posts straight to the daemon; no word to the core; the switch handler off (the drag goes on writing, to the
+  old device) and with the writer taking the shown device (writes land on the new one); the model read live
+  under the hand; the gain map upside down; the pointer in canvas px at dpr 2.
+- Q on the mountains (`node/nightdrive-tune.mjs`): `the_diamonds_sit_where_the_bell_is_at_half_its_gain` (the core's
+  `responseDb` of the band alone at `lo` and `hi`, within 0.05 dB of half the gain; an axis end where it never comes
+  down), `a_diamond_at_a_steps_half_point_picks_that_step`, `the_wider_the_diamonds_the_lower_the_q`,
+  `a_flat_band_has_its_diamonds_at_the_analog_width`, `the_upper_diamond_stops_at_20_khz`,
+  `a_diamond_drag_lands_on_the_step_it_names` (the core's `createDrag` pinch with `spread(q0 / qs[i])`), the
+  diamonds' places on the curve (`the_diamonds_sit_on_the_curve_at_the_half_gain_points`,
+  `a_flat_band_s_highlight_spans_the_analog_width_around_its_bubble`) and the morph's idle rule
+  (`a_resting_pointer_lets_the_curve_go`). In a browser
+  (`nightdrive_theme.py`, request log read by relative paths): `hovering_a_bubble_lights_its_bell_and_diamonds` (both:
+  the diamonds sit ON the curve and are the band alone at half its gain by the core's own response; the diamonds
+  are on the canvas; `the_highlight_is_the_curve_in_pink_between_the_diamonds`: pink on the curve inside
+  lo..hi, its own colour well outside), `a_flat_band_highlights_the_analog_width_around_its_bubble`,
+  `the_tuning_range_fits_the_scene` (the bubble at the largest gain inside the scene and clear of the top line at
+  1280x800 and, in Chromium, 390x844; the smallest below the horizon on the floor, inside the scene),
+  `a_resting_pointer_lets_the_curve_go` (on at once, off by 2.5 s, a 1 px move brings it back), `dragging_a_diamond_sets_q` (both: the drop at a step's half point writes that step's
+  Q and only Q, to that band), `the_wheel_steps_the_nearest_bands_q` (both: one notch, one step, up narrows; the band
+  nearest in x when no bubble is near; a wheel in the sky writes nothing),
+  `the_wheel_and_the_pinch_keep_the_curve_1_5_s` (both for the wheel and the diamond; Chromium for the lifted
+  fingers). Chromium: `a_diamond_is_grabbed_at_dpr_2` (dark centre under a pink edge on a canvas of twice the size;
+  a press 6 px away grabs, 16 px does not), `a_pinch_sets_the_q_of_the_band_nearest_the_fingers` (real touch events:
+  twice the distance halves the Q, of band 3 only, nothing else written), `a_first_touch_shows_the_curve_and_a_second_grabs`,
+  a finger held on a lit bell's diamond keeping the curve past the grace and writing the step it is dragged to, a
+  held diamond keeping the curve and the full rate with the pointer out of the band (mouse),
+  `a_press_on_the_bubble_takes_the_bubble_beside_a_diamond` (narrowest Q, a diamond within 12 px: the press moves
+  the band and never writes the Q; killed by the diamonds-first grab order). Every tuning case starts by putting the
+  bands at known values (`reset_bands`), so the group passes in any order. Mutants (run by hand, each killed): the wheel's step sign
+  flipped, the wheel without the grace, the wheel not limited to the mountains' band (it wrote from the sky), the
+  diamond press in device px at dpr 2, the diamond's Q read from the wrong side, a diamond drag not counted as held,
+  the pinch always on band 1.
+- The neon sheet's markup (`node/nightdrive-draw.mjs`): `the_sheet_runs_mode_input_then_bands_beside_presets` (the
+  sections in order, the presets in the side column, a modal dialog with a close key, nothing for no device),
+  `a_device_with_no_tone_draws_no_mode_bands_or_presets`, `loudness_carries_its_round_minus_and_plus_and_strength`
+  (round keys either side of the chip, the strength under the name, none while Loudness is off),
+  `every_band_value_has_a_field_and_steppers` (15 fields, 30 steppers, each named), `a_guests_sheet_is_drawn_inert`
+  (a guest, a read-only viewer, a page whose writes are off: every key `quiet` and `aria-disabled`, every field
+  read only, nothing to save with), `nothing_in_the_sheet_has_a_style_attribute` (no style attribute, inline
+  script or style in any model of the fixtures; a preset name is escaped). Mutants (run by hand, each killed): the
+  viewer's inertness ignored, a style attribute on a heading, a band value with no `+`.
+- The neon sheet in a browser (`nightdrive_sheet.py`, both browsers; the helpers it shares with `nightdrive_theme.py` are in `nightdrive_base.py`; the page's requests read from its own request
+  log by relative paths; every case starts by putting the bands, the mode and the presets where it needs them, so
+  the group passes in any order): `device_opens_the_sheet_and_focus_goes_in` (a modal dialog, the focus inside, the
+  scene and the dash `inert`, two columns on a desktop and a tall window kept whole), `the_menu_device_row_opens_it`
+  (Escape returns the focus to the menu button), `close_by_x_escape_or_a_tap_on_the_scene_and_focus_returns`,
+  `the_scene_runs_dimmed_under_it` (brightness .45, saturate .8, draws keep coming), `the_band_table_steps_and_types_each_value`
+  (a `+` on all fifteen values, a `−`, a typed value written as typed, Escape writing nothing),
+  `holding_a_band_stepper_repeats` (the first repeat at about 380 ms, then about every 70 ms; a release, a cancel, a
+  blur, a hidden page and a lost stream end it; a redraw keeps the key; let go at 10 s), `the_mode_and_loudness_strength_set`,
+  `a_preset_saves_renames_and_deletes` (nothing deleted before the answer, Keep deletes nothing, a list of the
+  person's own when the bands are on another preset), `the_sheet_holds_while_typing_or_a_list_is_open` (the list on a
+  six-input device), `a_device_switch_with_the_sheet_open_redraws_it_for_the_new_device` (a held stepper and an
+  open form for the old device write nothing, nothing at all reaches the new one), a real guest's sheet inert with
+  every tap asked of the core, and the phone's sheet (30 % from the top, one column in the settled order, 44 px
+  targets; from the right, `min(420px, 60vw)`, in landscape). Mutants (run by hand, each killed): the hold without
+  its 10 s cap (and with a 9 s one: steps must still come past 10.2 s), a hold that outlives a switch and writes to the device then shown, the focus not returned, typing not
+  holding the sheet, a guest's mode tap not asked of the core, the scene not dimmed, a delete without its question,
+  Escape in a field writing the value, a list's Escape choosing an option.
+- The rest of a device on the sheet, amps and other kinds (`node/nightdrive-draw.mjs`):
+  `the_sheet_lists_every_control_the_model_has` (every control of every fixture once: a toggle a pill, a slider a
+  scale with a knob and its centre, a readout its words, the power key and its switches), `the_facts_start_folded`,
+  `a_loki_max_shows_its_slots_and_settings`, `an_amps_dash_has_power_and_temperature_gauges` (arcs filled by the
+  state and the number, the model's minus read), `an_amp_never_morphs` (no bands, nothing tunable),
+  `faults_are_listed_with_their_advice_and_turn_the_top_red` (the top line's tone is `bad`). In a browser
+  (`nightdrive_sheet.py`, both): `a_slot_save_asks_first` (nothing posted before `Save`; then the slot with
+  `confirm`), `the_facts_unfold_and_the_choice_survives_a_reload` (the fold kept under `svolder.theme.nightdrive.facts`),
+  `an_amp_shown_alone_keeps_the_music_and_its_gauges`, `an_amps_meters_move_live_on_the_sheet` (the fake amp with its signal
+  on: a needle changes at least twice in 3 s with the sheet left open, the same element), `every_control_writes` (a toggle, a scale by key and by the
+  centre tap and a press along it, the amp's power key and switch), `identify_says_the_daemons_words`.
+
+- The phone (`nightdrive_phone.py`, both browsers): `portrait_puts_the_scene_above_the_dash_panel` (412x915 and 360x780: the panel is its own rows, under 30 % of the window, to the window's bottom and edges; the scene's bottom is the panel's top within 2 px and the canvas fills it; the volume is in the scene, centred, under the device line and the EQ line and above the sun at rest; `−` `MUTE` `+` in that order on one row, the track, the transport and `DEVICE ▴` on one row in the panel; the EQ line holds the gains; no scroll), `the_portrait_volume_fades_with_the_hud` (upright, the volume, the device line and the EQ line reach opacity 0 and the panel stays at 1), `landscape_shows_the_scene_full_with_a_slim_dash` (844x390 and 667x375: the scene and
+  its canvas are the window, the dash under a quarter of the height with every key inside, the volume above it),
+  `the_menu_button_is_fixed_on_a_phone` (44 px, 8 px from the top and the right, the frame fixed, in both turns),
+  `the_sheet_slides_up_in_portrait_and_in_from_the_right_in_landscape` (30 % from the top and the full width with the `nd-sheet-up`
+  keyframes; `min(420px, 60vw)` against the right edge with `nd-sheet-side`), `turning_the_phone_keeps_an_open_sheet_open` (the sheet
+  open with a control focused: still open, the same control focused and the other layout after a turn, and back),
+  `touch_targets_are_44_px` (the dash, the sheet in Loudness and the menu button, in both turns: each is 44 px or a 44 px box about its middle
+  lands on it; the round Loudness keys are 32 px to the eye and 44 px to the hand), `touching_the_mountains_tunes_on_a_phone` (the mountains
+  lie in the window's top half; Chromium: a touch in the panel shows no curve, a first touch on the mountains shows it and grabs nothing, a second
+  grabs the bubble and a move writes that band of this device; Firefox: the pointer over the mountains shows the curve, over the panel it does
+  not), `no_sideways_scroll_with_long_names` (a 40-character device name with no break, a long track and a long preset: the page no wider than the
+  window and no part of the HUD, the dash or the sheet past its edge at 390, 844 and 1100 px) and `a_tall_window_keeps_the_scene_whole`
+  (1280x1600 and 2560x1440: the sun whole, the dash on screen along the bottom, the volume above the sun, no scroll). Each is red against a
+  broken stylesheet (the scene's share, the volume's width, a 40 px key, a 4 px hit area, the sheet at 40 %, a window-wide volume, a name that does not
+  wrap), the menu button against a header that does not pin it, the rotation against a sheet that closes on a resize, and the request log's
+  band write against a wrong band.
+- The controls' writes (`node/nightdrive-controls.mjs`, and `node/signal-controls.mjs` for Signal's): `a_scale_step_asked_after_a_switch_is_written_to_the_new_device_only` (a write to device A in flight, the
+  device B shown, a step on B: B has its own run and nothing more reaches A) and `a_scale_keeps_one_write_in_flight_and_the_latest_waiting`.
+- The states (`node/nightdrive-states.mjs`): `the_mood_of_each_state` (every state and the order they win in: a lost stream, then a page
+  reading again, then a card, then no capture; a fault on a connected device and a guest are `ok`), `an_unreachable_card_has_try_now_and_the_seconds`
+  (the title, Try now, `next try in 8 s`, `trying again now` at 0, no key and no seconds for a card that has none, a command in mono, the key quiet for a
+  viewer who may not write, the words escaped, no `style`), `a_fault_keeps_the_controls_live` (the mood is `ok`, the top line says fault in red, no key of the
+  dash is quiet, the faults with their advice are the sheet's) and `no_capture_says_why` (the line says the reason, a default when there is none). In a browser
+  (`nightdrive_states.py`, both): `out_of_reach_stops_the_road_and_shows_the_card` (the device dropped: no floor row in 2.5 s, the sun's pixel grey, the mountains' edge
+  within 6 % of the horizon, the card centred with its words, Try now and the seconds counting down, the dash inert and dimmed, Try now posting `connect` to this
+  device), `a_lost_stream_freezes_and_fades_with_one_line` (no row, the pace slowed to 400 ms or more, the sun darker under the veil, one quiet line, the volume, the EQ
+  line and the dash faded, the dash inert; the stream back brings it all again), `reading_again_and_resting_say_their_words`,
+  `no_capture_breathes_the_curve_and_says_why` (`SVOLDER_FAKE_CAPTURE=off`: the ridge's edge within the breath of the tone curve at six columns for 8 s and moving by 0.6 to 2 times
+  the breath, the floor's rows all 0.05 and rolling, the line's reason, a tap on `−` still lowers the volume), `a_guest_sees_the_scene_with_quiet_controls`,
+  `a_refused_write_toasts` (the daemon refuses a rename onto a taken name, asked of the core from Night drive's page: the core toasts its words, nothing is renamed) and `a_card_while_faded_wakes_the_top` (the top faded, the device dropped: the top
+  line's words and the card, the fade held off). A fault card on a live device cannot be made by the fake and stays node-only. A lost stream makes the page inert but its words (the scene, the dash, the sheet and the card are `inert`; the top line and the quiet line are not), asserted in `a_lost_stream_freezes_and_fades_with_one_line`. With no capture a guest's mountains rest at the baseline instead of taking the curve (the same page, a signed-in viewer then a guest: within the breath of the curve, then of the baseline), and with the breath amplitude at 0 the "it breathes" assertion goes red. `themes.rs`'s test `every_script_and_stylesheet_in_a_themes_folder_is_listed` fails for a file on disk that the list does not name.
+
+- The driver (`themes/nightdrive/driver.js`, `contract.py` and `completeness.py`, which no longer leave Night drive out): `reach` shuts or
+  opens the sheet as the target needs it (the volume, the mute, the input, an amp's power key, the transport and the cover are on the dash; every
+  other control, the bands, the modes, the presets, the slots and the facts are on the sheet, whose folded facts it unfolds), scrolls to the word,
+  scale or chip and says whether it is drawn and in view; `operate` taps a key (a step of the volume is a tap with no pointer, which is one step),
+  presses the arrow keys on a scale, steps a band with its `-` and `+`, picks an option of the list a chip opens (a long input, the slot to save over,
+  then the question's `save`); `shown` reads the words on the page (the outrun volume's reading, a band's field, a scale's value, the strength under
+  Loudness, a fact's cell, the cover's address); `state` reads the core's state, the card and the toasts; `linkWords` reads the top line's left, where the
+  device's link word stands beside its name while the link is not on (`the_link_state_is_in_words_beside_the_name`, found missing by the contract and
+  fixed in `hud.js`). Proved by `contract.py` in both browsers (67 checks each) and by `completeness.py` in both (every target reached, operated and
+  read back from the model route, one write each; every fact shown with the model's words) on the Gungnir 2 (36 targets, 36 facts), the amp (3, 14), the
+  five-meter amp (3, 17), the mono amp (3, 14) and the Loki Max (19, 15): run with `WEB_CHECK_THEMES=ember,nightdrive`, the per-kind counts of targets and facts
+  equal Ember's (the 36 `count equals` checks). The menu-button check accepts a page that does not scroll (Night drive's page never does: its root is the
+  window), where it still wants the button pinned to the window.
+- The top line with the link words (`nightdrive_theme.py`, both browsers, density 3): `the_top_line_with_the_link_words_has_room` (the device dropped, so the left reads
+  `Gungnir 2 · not connected · USB 1 · 48 kHz` and the right the card's words: at 1280x800, 412x915 and 360x780 the two parts, the dB readout, the EQ readout and the
+  menu button meet nowhere and the line stays inside the window; red against a left that does not wrap, `mutate_nightdrive.py`).
+- A fade woken by focus alone (`nightdrive_theme.py`, `the_faded_hud_stays_in_the_tab_order_and_focus_wakes_it`, "a focus moved with no key or pointer wakes
+  the faded HUD": a Tab already wakes it through the key, so the check moves the focus from the page with neither).
+- A quick rise of the highs is one transient at any frame rate (`node/nightdrive-sky.mjs`, `a_quick_rise_is_a_transient_at_any_frame_rate`: the highs' average is a
+  time constant, so a rise over 0.5 s gives one star at 30, 60 and 144 steps a second; the average taken per frame fails it).
+- Mutants of Night drive's sources, run by hand with `node/mutate_nightdrive.sh` (nineteen, each killed by the harness named): the camera's K back to 12
+  (`nightdrive-floor.mjs`), a band's column off by one, the ridge over -72 dB and the rows ignoring the tempo (`nightdrive-scene.mjs`), the rays every 6 s, a star
+  every half second, a shower every 4 s, the highs' average taken per frame and the level's easing taken per frame (`nightdrive-sky.mjs`), the diamonds on the closed
+  form and a grace of 0 (`nightdrive-tune.mjs`), the EQ line without the preset's name, a muted volume reading `-0.0` and four inputs drawn as chips
+  (`nightdrive-hud.mjs`), the ear's moment every second and embers in Calm (`nightdrive-mood.mjs`), the wet road coming back with no window after an idle drop
+  (`nightdrive-budget.mjs`), the heat's curve linear and the near edge's lift not fading (`nightdrive-floor.mjs`).
+- Mutants of Night drive's page, run by hand with `mutate_nightdrive.py` (one worker, Chromium; each run names the cases it needs and runs them unmutated first,
+  and a kill is a failure of a check the mutant names): focus not waking the faded HUD (`the_faded_hud_stays_in_the_tab_order_and_focus_wakes_it`), trouble letting the fade
+  go on (`trouble_while_faded_shows_the_top_line`, `a_card_while_faded_wakes_the_top`), the analysis kept while hidden
+  (`the_analysis_is_held_while_shown_and_let_go_when_hidden_or_unmounted`), reduced motion starting on Full
+  (`reduced_motion_starts_on_calm_and_full_can_be_picked`, in `nightdrive_timing.py`), Still at the screen's rate (`still_draws_about_one_frame_a_second`), a dash hold that never
+  repeats (`holding_plus_repeats_and_the_release_ends_it`), a diamond drag that writes nothing (`dragging_a_diamond_sets_q`), a pinch on band 1
+  (`a_pinch_sets_the_q_of_the_band_nearest_the_fingers`), hit tests in canvas pixels (`a_bubble_is_grabbed_at_dpr_2`, `a_diamond_is_grabbed_at_dpr_2`), a device
+  switch that lets a drag go on and write to the new device (`a_device_switch_mid_drag_writes_nothing_to_the_new_device`), a guest's tap that morphs the mountains
+  (`a_guest_tap_on_the_mountains_says_why`), a first touch that grabs (`a_first_touch_shows_the_curve_and_a_second_grabs`), the sheet's focus not given back
+  (`close_by_x_escape_or_a_tap_on_the_scene_and_focus_returns`), its columns swapped (`device_opens_the_sheet_and_focus_goes_in`), the menu button following the page
+  on a phone (`the_menu_button_is_fixed_on_a_phone`), Space playing under the open menu (`space_key.py`, "with the menu open ... space presses nothing"), a 30 px picker
+  close key (`effects_menu.py`, `the_picker_close_button_is_44_px_inside_the_window (nightdrive ...)`). Every "nothing posted" assertion has a mutant that does post, so its
+  request filter is known to match the core's relative paths (`api/v1/...`): a question that sends on Keep or before the answer (`Keep deletes nothing`,
+  `Keep writes nothing`, `a_slot_save_asks_first`), a band field that writes on Escape, a second tap on the input chip that writes, the core letting a guest's and a
+  read-only page's call go out (`a_guests_tap_posts_nothing`, `a_guests_sheet_is_inert_in_a_browser`, `a_guest_tap_on_the_mountains_says_why`: a request brings the sign-in, so those
+  checks read the page going away as a request that went out), a switch that writes and a first touch that grabs. Twenty-two mutants, 17 minutes 40 seconds in all.
 
 ## The quick gate
 

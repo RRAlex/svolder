@@ -548,14 +548,15 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
         .expect("the tall tier draws the row");
     assert_eq!(
         tall[at].chars().take(38).collect::<String>(),
-        "│   Spectrum     ▁▂▃▄▅▆▇█████████    │"
+        "│   Spectrum     ▁▂▃▄▄▅▆▇███████████ │"
     );
     assert!(tall[at - 1].contains("Host EQ"), "{tall:#?}");
     assert_eq!(landed.map(|row| row.y), u16::try_from(at).ok());
 
     let (wide, landed) = spectrum_of(&spectral(), 130, 30);
     assert!(
-        wide.iter().any(|row| row.contains("Spectrum     ▁▂▃▄▅▆▇█")),
+        wide.iter()
+            .any(|row| row.contains("Spectrum     ▁▂▂▃▃▄▄▅▅")),
         "{wide:#?}"
     );
     assert!(
@@ -612,14 +613,14 @@ fn the_spectrum_row_falls_back_between_blocks() {
             .into_iter()
             .find(|row| row.contains("Spectrum"))
             .expect("the row");
-        row.chars().skip(17).take(16).collect::<String>()
+        row.chars().skip(17).take(19).collect::<String>()
     };
     let mut app = spectral();
     let landed = app.now;
     app.now = landed + host::FALL / 7;
-    assert_eq!(row(&app), "▁▁▂▃▄▅▆▇▇▇▇▇▇▇▇▇");
+    assert_eq!(row(&app), "▁▁▂▂▃▄▅▆▇▇▇▇▇▇▇▇▇▇▇");
     app.now = landed + host::FALL;
-    assert_eq!(row(&app), "▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁", "the row never settled");
+    assert_eq!(row(&app), "▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁", "the row never settled");
     let block = svolder_host::Block {
         bands: [1.0; svolder_host::fft::BANDS],
         left: 1.0,
@@ -628,7 +629,7 @@ fn the_spectrum_row_falls_back_between_blocks() {
     app.heard_block(&block, landed + host::FALL);
     assert_eq!(
         row(&app),
-        "████████████████",
+        "███████████████████",
         "the block did not land at once"
     );
 }
@@ -1122,4 +1123,128 @@ fn the_path_row_of_a_dac_with_no_input_control_reads_untouched() {
     );
     let line = app.host_path().expect("a path");
     assert_eq!(line.words_line(), "untouched");
+}
+
+/// The Spectrum row's cells in `app`'s frame at `width`: the glyphs it draws, the column of
+/// the first and its Volume row's last non-blank column.
+fn spectrum_cells(
+    app: &App,
+    width: u16,
+    theme: &Theme,
+) -> (Vec<(u16, String, Option<Color>)>, u16) {
+    let buffer = frame_with_theme(app, width, 45, theme);
+    let rows = text(&buffer);
+    let at = |word: &str| {
+        u16::try_from(
+            rows.iter()
+                .position(|row| row.contains(word))
+                .expect("a row"),
+        )
+        .expect("y")
+    };
+    let (spectrum, volume) = (at("Spectrum"), at("Volume"));
+    let cells = (0..buffer.area.width)
+        .filter_map(|x| {
+            let cell = buffer.cell((x, spectrum)).expect("a cell");
+            "▁▂▃▄▅▆▇█"
+                .contains(cell.symbol())
+                .then(|| (x, cell.symbol().to_string(), cell.fg))
+        })
+        .map(|(x, symbol, fg): (u16, String, Color)| {
+            (x, symbol, (fg != Color::Reset).then_some(fg))
+        })
+        .collect();
+    // the Controls pane's right border is the row's second `│`'s column
+    let border = (1..buffer.area.width)
+        .find(|x| buffer.cell((*x, volume)).expect("a cell").symbol() == "│")
+        .expect("the pane's border");
+    let end = (0..border)
+        .rev()
+        .find(|x| buffer.cell((*x, volume)).expect("a cell").symbol() != " ")
+        .expect("the Volume row draws something");
+    (cells, end)
+}
+
+/// The row spreads over the pane at any width: it ends where the Volume row's value does
+/// (the pane's inner width less its trailing blank), and its cells are one contiguous run
+/// of at least the sixteen bands.
+#[test]
+fn the_spectrum_row_ends_where_the_volume_row_does_at_any_pane_width() {
+    let theme = Theme::new(false);
+    for width in [80_u16, 100, 140] {
+        let (cells, volume_end) = spectrum_cells(&spectral(), width, &theme);
+        let first = cells.first().expect("cells").0;
+        let last = cells.last().expect("cells").0;
+        assert!(
+            cells.windows(2).all(|pair| pair[1].0 == pair[0].0 + 1),
+            "gaps at {width}"
+        );
+        assert_eq!(last, volume_end, "ends off the Volume row's end at {width}");
+        // the pane's room less the label column: the tall tier's pane at 80 and 100
+        // columns, the wide tier's at 140
+        let expected = match width {
+            140 => 29,
+            _ => 19,
+        };
+        assert_eq!(
+            usize::from(last - first + 1),
+            expected,
+            "cell count at {width}"
+        );
+    }
+}
+
+/// One loud band is a smooth hump over several columns on a wide row, not a spike.
+#[test]
+fn a_single_loud_band_is_a_hump_across_several_columns() {
+    let mut bands = [0.0; svolder_host::fft::BANDS];
+    bands[8] = 1.0;
+    let mut app = spectral();
+    app.host.bands = host::Bands::default();
+    app.host.bands.land(&bands, app.now);
+    let (cells, _) = spectrum_cells(&app, 140, &Theme::new(false));
+    let lit: Vec<&str> = cells
+        .iter()
+        .map(|(_, glyph, _)| glyph.as_str())
+        .filter(|glyph| *glyph != "▁")
+        .collect();
+    assert!(lit.len() >= 3, "a spike, not a hump: {lit:?}");
+    let peak = lit.iter().position(|glyph| *glyph == "█").expect("a peak");
+    let rank = |glyph: &str| {
+        "▁▂▃▄▅▆▇█"
+            .chars()
+            .position(|c| glyph.starts_with(c))
+            .expect("block")
+    };
+    assert!(
+        lit[..=peak]
+            .windows(2)
+            .all(|pair| rank(pair[0]) <= rank(pair[1])),
+        "{lit:?}"
+    );
+    assert!(
+        lit[peak..]
+            .windows(2)
+            .all(|pair| rank(pair[0]) >= rank(pair[1])),
+        "{lit:?}"
+    );
+}
+
+/// The colour runs from the row's first cell to its last, red at the bass end to violet at
+/// the treble, at the width the row now has.
+#[test]
+fn the_spectrum_rows_colour_runs_end_to_end() {
+    let theme = Theme::from_config(&TuiConfig::default(), false, ColorDepth::TrueColor);
+    let (cells, _) = spectrum_cells(&spectral(), 140, &theme);
+    let (first, last) = (cells.first().expect("cells"), cells.last().expect("cells"));
+    assert_eq!(first.2, theme.spectrum_row_colour(0.0), "the bass end");
+    assert_eq!(last.2, theme.spectrum_row_colour(1.0), "the treble end");
+    assert_ne!(first.2, last.2);
+    let distinct: std::collections::BTreeSet<_> =
+        cells.iter().map(|cell| format!("{:?}", cell.2)).collect();
+    assert!(
+        distinct.len() > 16,
+        "a run of colours, not blocks: {}",
+        distinct.len()
+    );
 }

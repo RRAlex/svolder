@@ -24,10 +24,11 @@ live" lists where each module's tests are.
   sizes (below). Run it after editing any Markdown; it is part of `make check`.
 - **`make web-checks-quick`**: the node harnesses, the browser checks that leave the smoke alone
   and one short smoke check per browser. Run it after a change to the page, its styles or its
-  templates that does not touch the smoke; it takes about five minutes.
+  templates that does not touch the smoke; it takes about 38 minutes with the default six checks at a time (much longer with
+  `WEB_CHECKS_JOBS=1`, one by one).
 - **`make web-checks`**: everything the quick gate runs plus every smoke check, in headless
   Chromium and Firefox. Run it before merging any change to the web page and whenever a smoke file
-  changed; it takes about 41 minutes.
+  changed; it takes over an hour with six checks at a time.
 - **`make e2e`**: the daemon, the CLI and a web write against a simulator over real Bluetooth. Run
   it after a change to the transport, the session, the scanner, the daemon's reconnect or the
   simulator; it is not part of `make check`.
@@ -35,7 +36,7 @@ live" lists where each module's tests are.
   merge that touches a smoke file; it is part of neither web gate.
 
 `make check` does not run the web checks, `make e2e` or the soak: they need browsers, two
-controllers or 41 minutes, and a machine without them must still be able to run the ordinary
+controllers or an hour, and a machine without them must still be able to run the ordinary
 gate. The quick web gate refuses (exit 1, naming the file) when a smoke file or one of the smoke's
 checks changed since `main`, so it cannot stand in for the full one; the lists and the reasoning
 are in [scripts/web-checks/README.md](../../scripts/web-checks/README.md).
@@ -82,9 +83,11 @@ same, the moment a file appears at that path, for a check that must drop it on i
 and releases and can advertise differently, go quiet or push readings, for tests of the scanner and
 the session. `docs/usage/environment.md` lists the variables.
 
-`make demo` and `svolder tui --demo` run a fake device behind a throwaway daemon in a directory of
-their own, touching nothing of the user's; the daemon's host is the fake one (`SVOLDER_HOST=fake`),
-so the demo's web page shows a Now playing card, and the TUI's own host is off.
+`make demo-safe` and `svolder tui --demo` run a fake device behind a throwaway daemon in a directory
+of their own, touching nothing of the user's; the daemon's host is the fake one
+(`SVOLDER_HOST=fake`), so the demo's web page shows a Now playing card, and the TUI's own host is
+off. `--host` (which `make demo` adds, with `--web`) leaves the host on instead: the user's real
+volume, player and computer EQ, which no test ever runs with.
 `bins/svolder/tests/demo.rs` proves every way the TUI can end leaves neither the daemon nor the
 directory behind.
 

@@ -53,7 +53,7 @@ title, a card, the volume, two columns, the notes band, the device and a footer.
   is also the theme's preference `deviceOpen` in the core's store for Paper (the same one that
   keeps the scheme), so it survives redraws, device switches and reloads. A guest may fold it too,
   since it changes nothing on the device. The test driver unfolds it before it reaches a fact.
-- **Footer.** `svolder <version> · <day month>`, `T for themes` taken from the core's key list, and
+- **Footer.** `svolder <version> · <day month>`, `T for themes · Space for play or pause` taken from the core's key list, and
   `sign out · Paper` (a guest sees `sign in · Paper`).
 
 At 720 px and wider the columns are 1.4 to 1 with a 40 px gap. Under 720 px the page is one

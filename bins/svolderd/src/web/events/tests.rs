@@ -1417,3 +1417,51 @@ fn the_models_parts_hold_every_key_of_the_streams_events() {
         read_by_scripts(meter, &["fraction", "text"], "a meter");
     }
 }
+
+#[test]
+fn the_host_key_changes_with_the_route_and_not_without() {
+    use super::page::HostKey;
+    use crate::web::model::route_model;
+    use crate::web::view::{Access, playing_of};
+    use svolder_ipc::host::HostView;
+
+    let host = HostView {
+        available: true,
+        ..HostView::default()
+    };
+    let card = playing_of(
+        &host,
+        Access {
+            writes: true,
+            guest: false,
+        },
+        None,
+    )
+    .expect("a card");
+    let route = |milli| {
+        let sink = svolder_host::SinkFacts {
+            name: "sink".to_string(),
+            volume_milli: Some(milli),
+            ..Default::default()
+        };
+        route_model(
+            &svolder_host::RouteFacts {
+                sink: Some(sink),
+                ..Default::default()
+            },
+            None,
+        )
+    };
+    let key = HostKey::new(&card, Some(route(540)));
+    assert_eq!(
+        key,
+        HostKey::new(&card, Some(route(540))),
+        "same route, same key"
+    );
+    assert_ne!(
+        key,
+        HostKey::new(&card, Some(route(550))),
+        "a changed route sends"
+    );
+    assert_ne!(key, HostKey::new(&card, None), "a lost route sends");
+}

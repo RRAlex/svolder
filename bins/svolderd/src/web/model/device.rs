@@ -741,6 +741,7 @@ pub(crate) struct HopModel {
     pub(crate) label: String,
     pub(crate) detail: String,
     pub(crate) changes: bool,
+    pub(crate) unknown: bool,
 }
 
 impl From<&Playing> for PlayingModel {
@@ -769,6 +770,7 @@ impl From<&Playing> for PlayingModel {
                         label: hop.label.clone(),
                         detail: hop.detail.clone(),
                         changes: hop.changes,
+                        unknown: hop.unknown,
                     })
                     .collect(),
             }),

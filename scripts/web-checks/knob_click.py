@@ -4,7 +4,7 @@
 stands for; a click above three quarters climbs; a click while a climb shows only stops it; a
 cap held in [web] max_volume_db holds a click too; a press that moves 10 px is a drag; a click in
 the centre, on the readout, in the SVG's corners, in the gap at the bottom and on the step
-already held write nothing; a tap under
+already held write nothing; holding + or - repeats the step and a release ends it; a tap under
 Chromium's touch emulation jumps like a click. Numbers from the page, no pictures.
 Usage: python3 knob_click.py chromium|firefox"""
 import math
@@ -79,6 +79,28 @@ def press_move_release(b, x, y, dx, dy):
                                           'parameters': {'pointerType': 'mouse'},
                                           'actions': acts}]})
     b.sleep(0.2)
+
+
+STEP_AT = """((sign) => { const r = document.querySelector('sv-knob .step[data-step="' + sign + '"]').getBoundingClientRect();
+  return [(r.left + r.right) / 2, (r.top + r.bottom) / 2]; })"""
+
+
+def hold_at(b, x, y, secs):
+    """A press at (x, y), held `secs` with the pointer still, a release."""
+    if browser == 'chromium':
+        base = {'button': 'left', 'clickCount': 1}
+        b.send('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': x, 'y': y})
+        b.send('Input.dispatchMouseEvent', {'type': 'mousePressed', 'x': x, 'y': y, **base, 'buttons': 1})
+        b.sleep(secs)
+        b.send('Input.dispatchMouseEvent', {'type': 'mouseReleased', 'x': x, 'y': y, **base})
+    else:
+        b._post('/actions', {'actions': [{'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'},
+                                          'actions': [{'type': 'pointerMove', 'duration': 0, 'origin': 'viewport',
+                                                       'x': int(x), 'y': int(y)},
+                                                      {'type': 'pointerDown', 'button': 0},
+                                                      {'type': 'pause', 'duration': int(secs * 1000)},
+                                                      {'type': 'pointerUp', 'button': 0}]}]})
+    b.sleep(0.3)
 
 
 def make(daemon, **kw):
@@ -189,6 +211,19 @@ try:
         gap = state(b)
         check(f'a click in the gap ({deg} deg) writes nothing',
               gap['posts'] == before['posts'] and gap['raw'] == before['raw'], [before, gap])
+    # the + and - buttons: a press steps once, held it repeats (after about 380 ms, then every 70 ms), a release ends it
+    before = state(b)
+    hold_at(b, *b.ev(f'({STEP_AT})(1)'), 1.3)
+    b.sleep(0.7)
+    up = state(b)
+    b.sleep(1.0)
+    rest = state(b)
+    check('holding + repeats the step and the release ends it',
+          up['raw'] >= before['raw'] + 5 and rest['raw'] == up['raw'], [before, up, rest])
+    hold_at(b, *b.ev(f'({STEP_AT})(-1)'), 1.3)
+    b.sleep(0.7)
+    down = state(b)
+    check('  holding - steps it down the same way', down['raw'] <= up['raw'] - 5, [up, down])
     check('no page error', (b.errors if browser == 'chromium' else b.collect_errors()) == [])
 finally:
     b.close()

@@ -91,6 +91,10 @@ function follow() {
     if (choice.dataset.device === device) choice.setAttribute('aria-current', 'page');
     else choice.removeAttribute('aria-current');
   }
+  // The link's dot stands beside the name of the device shown.
+  const link = document.getElementById('part-link');
+  const row = document.querySelector('.devs .dev[aria-current=page]')?.parentElement;
+  if (link && row && link.parentElement !== row) row.append(link);
   effectsFor();
   countdowns();
   syncEditor();
@@ -162,8 +166,8 @@ function mount(root, core, { signal }) {
     const layer = document.querySelector('.fx');
     if (layer && !layer.dataset.level) layer.dataset.level = 'glow';
   }
-  // The frame's button sits over the empty slot beside the link pill.
-  core.frame.anchor(document.querySelector('.fxslot'));
+  // The frame's button sits over its slot, pinned to the window's top right corner.
+  core.frame.anchor(document.querySelector('.fxslot'), { fixed: true });
   follow();
   startStrip();
   // What the mount registered and holds goes with it, once every listener of its signal has run.

@@ -667,13 +667,14 @@ finally:
     dac.stop()
 
 # ------------------------------------------------------------------ the cover goes
-gone = common.Daemon(host='fake', env={'SVOLDER_FAKE_COVER_GONE_AFTER_MS': '4000'})
+gone = common.Daemon(host='fake')
 b = make(gone)
 try:
     s = state(b)
     with_cover = until(b, lambda s: s['img'] is not None)
     box = [with_cover['band'], with_cover['cover']]
     check('the fake cover shows first', with_cover['img'] is not None, with_cover)
+    gone.drop_cover()
     after = until(b, lambda s: s['img'] is None, secs=10)
     check('with the cover gone the card shows no picture and the title still', after['img'] is None
           and after['title'] == 'Test Pressing', after)
@@ -687,11 +688,12 @@ finally:
     gone.stop()
 
 # ------------------------------------------------------------------ the player goes
-quit_ = common.Daemon(host='fake', env={'SVOLDER_FAKE_PLAYER_GONE_AFTER_MS': '4000'})
+quit_ = common.Daemon(host='fake')
 b = make(quit_)
 try:
     playing = until(b, lambda s: s['title'] is not None)
     check('the player is there first', playing['title'] == 'Test Pressing', playing)
+    quit_.drop_player()
     after = until(b, lambda s: s['title'] is None, secs=10)
     check('with the player gone the card is one quiet line, no buttons, no stale title or art',
           after['none'] == 'No player' and after['presses'] == [] and after['title'] is None
@@ -708,13 +710,14 @@ finally:
     quit_.stop()
 
 # ------------------------------------------------------------------ the open card, the player quits
-quit_ = common.Daemon(host='fake', env={'SVOLDER_FAKE_PLAYER_GONE_AFTER_MS': '6000'})
+quit_ = common.Daemon(host='fake')
 b = make(quit_, size=(390, 800))
 try:
     x, y = common.center(b, '.np-title')
     b.click(x, y)
     s = state(b)
     check('the card is open when the player quits', s['open'] and s['band'][3] > 72, s)
+    quit_.drop_player()
     s = until(b, lambda s: s['title'] is None, secs=12)
     check('an open card whose player quits folds to the quiet line, 72 px, not expanded',
           s['none'] == 'No player' and s['open'] is False and s['band'][3] == 72, s)

@@ -13,7 +13,7 @@ import {
 import {
   BANDS, BeatClock, DelayMedian, VIZ, VizModel, bandCentreHz, bandPos, decode, freqPos, posBand,
   posFreq, rowBands,
-} from '../../../bins/svolderd/web/themes/ember/viz-model.js';
+} from '../../../bins/svolderd/web/core/viz-model.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };

@@ -14,9 +14,9 @@ use tokio::time::Instant;
 
 use super::{Context, host_changed, send_json};
 use crate::fleet::HostWatch;
-use crate::web::model::{self, PageModel};
+use crate::web::model::{self, HostModel, PageModel, RouteModel};
 use crate::web::router::devices;
-use crate::web::view::{self, playing_of};
+use crate::web::view::{self, Playing};
 
 /// What the fleet's event says, from what it is made of: the devices' names, links and
 /// families, and when the configuration file (which holds the hops) last changed.
@@ -30,8 +30,11 @@ struct FleetKey {
 pub(super) struct Task {
     cx: Arc<Context>,
     host: Option<HostWatch>,
-    /// What the `host` event last said (`Playing::key`); `None` with no card.
-    host_key: Option<String>,
+    /// What the `host` event last said; `None` with no card.
+    host_key: Option<HostKey>,
+    /// When the computer EQ's state file last changed: a preset applied to the same sink changes
+    /// no route, so the second's turn looks for it.
+    eq_stamp: Option<SystemTime>,
     /// Woken when something outside the page's own reads changed the fleet.
     fleet_changed: watch::Receiver<u64>,
     /// What the `fleet` event last said, and what it was made of.
@@ -52,10 +55,11 @@ impl Task {
         }
         let mut fleet_changed = cx.web.fleet_changed.subscribe();
         fleet_changed.borrow_and_update();
-        let host_key = host_key(&cx);
+        let host_key = host_parts(&cx).map(|(card, route)| HostKey::new(&card, route));
         Task {
             host,
             host_key,
+            eq_stamp: eq_stamp(),
             fleet_changed,
             fleet_key: None,
             fleet_sent: String::new(),
@@ -100,7 +104,7 @@ impl Task {
                     }
                 }
                 _ = second.tick() => {
-                    if !self.fleet_turn(&tx, false).await {
+                    if !self.fleet_turn(&tx, false).await || !self.eq_turn(&tx).await {
                         return;
                     }
                 }
@@ -153,19 +157,90 @@ impl Task {
         send_json(tx, "fleet", &fleet).await.is_ok()
     }
 
+    /// Send the computer's player when the computer EQ's state file has changed since the last
+    /// look, for a page that follows the host. `false` when the page has gone.
+    async fn eq_turn(&mut self, tx: &mpsc::Sender<Event>) -> bool {
+        if self.host.is_none() {
+            return true;
+        }
+        let stamp = eq_stamp();
+        if stamp == self.eq_stamp {
+            return true;
+        }
+        self.eq_stamp = stamp;
+        self.host_turn(tx).await
+    }
+
     /// Send the computer's player when what it says changed. `false` when the page has gone.
     async fn host_turn(&mut self, tx: &mpsc::Sender<Event>) -> bool {
-        let key = host_key(&self.cx);
+        // One read of the route (and of the state file behind it): the key and the event say the same.
+        let parts = host_parts(&self.cx);
+        let key = parts
+            .as_ref()
+            .map(|(card, route)| HostKey::new(card, route.clone()));
         if key == self.host_key {
             return true;
         }
         self.host_key = key;
-        let host = model::host_model(&self.cx.web, self.cx.access);
+        let host = parts.map(|(card, route)| HostModel::new(&card, route));
         send_json(tx, "host", &host).await.is_ok()
     }
 }
 
-/// What the computer's player says now, by `Playing::key`.
-fn host_key(cx: &Context) -> Option<String> {
-    playing_of(&cx.web.fleet.host_view(), cx.access, None).map(|card| card.key())
+/// What the `host` event says, to tell whether it changed: the card's key (`Playing::key`) and
+/// the route's model.
+#[derive(Debug, PartialEq)]
+pub(super) struct HostKey {
+    card: String,
+    route: Option<RouteModel>,
+}
+
+impl HostKey {
+    pub(super) fn new(card: &Playing, route: Option<RouteModel>) -> HostKey {
+        HostKey {
+            card: card.key(),
+            route,
+        }
+    }
+}
+
+/// What the computer's player and route say now: the card and the route's model.
+fn host_parts(cx: &Context) -> Option<(Playing, Option<RouteModel>)> {
+    model::host_parts(&cx.web, cx.access)
+}
+
+/// When the computer EQ's state file last changed; `None` while there is none.
+fn eq_stamp() -> Option<SystemTime> {
+    stamp_of(&svolder_ipc::config::host_eq_state_path())
+}
+
+/// When `path` was last written; `None` while it is not there.
+fn stamp_of(path: &std::path::Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_state_file_written_again_has_another_stamp() {
+        let dir = std::env::temp_dir().join(format!("svolderd-eq-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("host-eq.toml");
+        assert_eq!(stamp_of(&file), None, "no file, no stamp");
+        std::fs::write(&file, "on = true\n").unwrap();
+        let first = stamp_of(&file);
+        assert!(first.is_some());
+        let later = first.unwrap() + Duration::from_secs(2);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert_eq!(stamp_of(&file), Some(later));
+        assert_ne!(stamp_of(&file), first);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

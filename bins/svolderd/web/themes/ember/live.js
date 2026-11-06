@@ -30,7 +30,7 @@ const SWAPPED = ['link', 'card', 'controls', 'power', 'tone', 'presets', 'device
 /** The preset lists, whose swap waits while one of their forms is open. */
 const PRESET_LISTS = ['part-presets', 'part-device-presets'];
 
-/** How long after the link comes back a freshly drawn pill still rings, in milliseconds. */
+/** How long after the link comes back a freshly drawn link dot still rings, in milliseconds. */
 const RING_MS = 1500;
 
 /** The id of the part the model calls `name`. */
@@ -142,14 +142,14 @@ export function installLive(core, hooks, signal) {
     const lost = lostLink();
     const page = store.page();
     htmx().swap(screenEl(), drawScreen(page, orderOf(page.device)), { swapStyle: 'innerHTML' });
-    // The pill lives in the header, outside the screen: it is drawn again with it.
+    // The link lives in the header, outside the screen: it is drawn again with it.
     swapParts(core, ['link']);
     note(SWAPPED);
     linkBack(core, lost);
     hooks.screenIn();
   }
 
-  /** The pill says the link to svolder is being found again while the stream is lost. */
+  /** The link says the stream to svolder is being found again while the stream is lost. */
   function paintLost() {
     const pill = document.getElementById('part-link');
     if (!pill) return;

@@ -842,12 +842,12 @@ fn stale_dims_at_sixteen_colours_and_greys_at_256() {
 fn the_spectrum_runs_red_to_violet_through_the_cube_at_256_colours() {
     let ansi256 = Theme::from_config(&TuiConfig::default(), false, ColorDepth::Ansi256);
     assert_eq!(
-        ansi256.spectrum(0.0),
+        ansi256.curve_colour(0.0, 0.0, false),
         Some(Color::Indexed(196)),
         "the low end of the curve is not the cube's red"
     );
     assert_eq!(
-        ansi256.spectrum(270.0),
+        ansi256.curve_colour(0.0, 270.0, false),
         Some(Color::Indexed(93)),
         "the high end of the curve is not a cube violet"
     );
@@ -861,14 +861,18 @@ fn a_theme_with_no_spectrum_answers_none_at_every_hue() {
     let sixteen = Theme::from_config(&TuiConfig::default(), false, ColorDepth::Ansi16);
     let monochrome = |depth| Theme::from_config(&TuiConfig::default(), true, depth);
     for degrees in [0.0, 90.0, 180.0, 270.0, 359.0] {
-        assert_eq!(sixteen.spectrum(degrees), None, "16 colours at {degrees}°");
+        assert_eq!(
+            sixteen.curve_colour(0.0, degrees, false),
+            None,
+            "16 colours at {degrees}°"
+        );
         for depth in [
             ColorDepth::TrueColor,
             ColorDepth::Ansi256,
             ColorDepth::Ansi16,
         ] {
             assert_eq!(
-                monochrome(depth).spectrum(degrees),
+                monochrome(depth).curve_colour(0.0, degrees, false),
                 None,
                 "monochrome at {depth:?}, {degrees}°"
             );
@@ -877,7 +881,7 @@ fn a_theme_with_no_spectrum_answers_none_at_every_hue() {
 }
 
 /// The muted spectrum keeps each hue's own colour rather than blending toward a fixed
-/// grey: it stays less saturated than [`Theme::spectrum`]'s own colour at the same hue, and
+/// grey: it stays less saturated than [`Theme::curve_colour`]'s unmuted colour at the same hue, and
 /// is not the flat dim grey — the low end stays reddish and the high end blue-violet, both
 /// just less so.
 #[test]
@@ -886,10 +890,10 @@ fn the_muted_spectrum_keeps_the_hue_desaturated_and_darker() {
     let dim = theme.style(Role::Dim).fg.expect("the dim role's colour");
     let spread = |r: u8, g: u8, b: u8| r.max(g).max(b) - r.min(g).min(b);
     for degrees in [0.0, 90.0, 180.0, 270.0] {
-        let Some(Color::Rgb(pr, pg, pb)) = theme.spectrum(degrees) else {
+        let Some(Color::Rgb(pr, pg, pb)) = theme.curve_colour(0.0, degrees, false) else {
             panic!("no spectrum at {degrees}°");
         };
-        let Some(muted @ Color::Rgb(mr, mg, mb)) = theme.muted_spectrum(degrees) else {
+        let Some(muted @ Color::Rgb(mr, mg, mb)) = theme.curve_colour(0.0, degrees, true) else {
             panic!("no muted spectrum at {degrees}°");
         };
         assert!(
@@ -901,14 +905,14 @@ fn the_muted_spectrum_keeps_the_hue_desaturated_and_darker() {
             "{degrees}°: the muted spectrum is the flat dim grey"
         );
     }
-    let Some(Color::Rgb(r, g, b)) = theme.muted_spectrum(0.0) else {
+    let Some(Color::Rgb(r, g, b)) = theme.curve_colour(0.0, 0.0, true) else {
         panic!("no muted spectrum at the low end");
     };
     assert!(
         r > g && r > b,
         "the low end is not still reddish: {r},{g},{b}"
     );
-    let Some(Color::Rgb(r, g, b)) = theme.muted_spectrum(270.0) else {
+    let Some(Color::Rgb(r, g, b)) = theme.curve_colour(0.0, 270.0, true) else {
         panic!("no muted spectrum at the high end");
     };
     assert!(
@@ -923,8 +927,12 @@ fn a_theme_with_no_spectrum_has_no_muted_one_either() {
     let sixteen = Theme::from_config(&TuiConfig::default(), false, ColorDepth::Ansi16);
     let monochrome = Theme::from_config(&TuiConfig::default(), true, ColorDepth::TrueColor);
     for degrees in [0.0, 90.0, 270.0] {
-        assert_eq!(sixteen.muted_spectrum(degrees), None, "{degrees}°");
-        assert_eq!(monochrome.muted_spectrum(degrees), None, "{degrees}°");
+        assert_eq!(sixteen.curve_colour(0.0, degrees, true), None, "{degrees}°");
+        assert_eq!(
+            monochrome.curve_colour(0.0, degrees, true),
+            None,
+            "{degrees}°"
+        );
     }
 }
 
@@ -1056,12 +1064,12 @@ fn a_palette_without_an_emphasis_keeps_its_bars_selection_and_titles_in_the_acce
                     let degrees = 45.0 + SPECTRUM_ARC * along;
                     assert_eq!(
                         theme.curve_colour(along, 45.0, false),
-                        theme.spectrum(degrees),
+                        theme.curve_colour(0.0, degrees, false),
                         "{drawn}: the curve left the hue circle"
                     );
                     assert_eq!(
                         theme.curve_colour(along, 45.0, true),
-                        theme.muted_spectrum(degrees),
+                        theme.curve_colour(0.0, degrees, true),
                         "{drawn}: the muted curve left the hue circle"
                     );
                 }
@@ -1275,6 +1283,78 @@ fn reds_curve_runs_a_warm_ramp_that_the_scroll_slides_and_brings_back() {
         ColorDepth::TrueColor,
     );
     assert_eq!(monochrome.curve_colour(0.5, 0.0, true), None);
+}
+
+/// The Spectrum row draws the curve's rainbow at half the colourfulness: the hue kept, less
+/// saturated than the curve and more than the muted curve, on a preset with its own stops too,
+/// and none at 16 colours or monochrome.
+#[test]
+fn the_spectrum_row_is_a_softer_rainbow() {
+    let spread = |c: Option<Color>| {
+        let (r, g, b) = palette::rgb_of(c.expect("a colour"));
+        i32::from(r.max(g).max(b)) - i32::from(r.min(g).min(b))
+    };
+    for name in ["red", "neon", "ember"] {
+        let theme = true_colour(name);
+        for along in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let (row, full, muted) = (
+                theme.spectrum_row_colour(along),
+                theme.curve_colour(along, 0.0, false),
+                theme.curve_colour(along, 0.0, true),
+            );
+            assert!(spread(row) < spread(full), "{name} {along}: not softer");
+            assert!(
+                spread(row) > spread(muted),
+                "{name} {along}: not more than muted"
+            );
+        }
+    }
+    let default = Theme::from_config(&TuiConfig::default(), false, ColorDepth::TrueColor);
+    let hue = |c: Option<Color>| {
+        let (r, g, b) = palette::rgb_of(c.expect("a colour"));
+        let (r, g, b) = (f32::from(r), f32::from(g), f32::from(b));
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let degrees = if max == r {
+            (g - b) / (max - min) * 60.0
+        } else if max == g {
+            120.0 + (b - r) / (max - min) * 60.0
+        } else {
+            240.0 + (r - g) / (max - min) * 60.0
+        };
+        degrees.rem_euclid(360.0)
+    };
+    for along in [0.0, 0.3, 0.6, 0.9] {
+        let (row, full) = (
+            hue(default.spectrum_row_colour(along)),
+            hue(default.curve_colour(along, 0.0, false)),
+        );
+        assert!(
+            (row - full).abs() < 6.0,
+            "{along}: hue {row} against {full}"
+        );
+    }
+    let red = true_colour("red");
+    for along in [0.1, 0.4, 0.7] {
+        let (row, full) = (
+            hue(red.spectrum_row_colour(along)),
+            hue(red.curve_colour(along, 0.0, false)),
+        );
+        assert!(
+            (row - full).abs() < 6.0,
+            "red {along}: hue {row} against {full}"
+        );
+    }
+    let sixteen = theme_on("red", Family::Dac, ColorDepth::Ansi16);
+    assert_eq!(sixteen.spectrum_row_colour(0.5), None);
+    let monochrome = Theme::from_config(
+        &TuiConfig {
+            palette: "red".into(),
+            ..TuiConfig::default()
+        },
+        true,
+        ColorDepth::TrueColor,
+    );
+    assert_eq!(monochrome.spectrum_row_colour(0.5), None);
 }
 
 /// `neon`'s tone curve runs a sunset of its own — violet at the lowest frequency, hot pink a

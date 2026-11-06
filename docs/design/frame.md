@@ -17,9 +17,12 @@ around it is in [web-ui.md](web-ui.md).
 
 The button is one node, drawn by the frame, dressed from the `--frame-*` tokens the theme sets on
 `:root` (size, background, colour, border, radius; frame.css has defaults). A theme says where it
-sits by anchoring it to an element (`core.frame.anchor(el)`: Ember's empty `.fxslot` beside the link
-pill), and the frame places it over that element in page coordinates, again at a resize, a font's
-arrival and `realign()`; with no anchor it sits at the top right, 16 px in. A theme may ask it to
+sits by anchoring it to an element (`core.frame.anchor(el)`: Ember's empty `.fxslot`, pinned to the
+window's corner), and the frame places it over that element in page coordinates, again at a resize, a font's
+arrival and `realign()`; with no anchor it sits at the top right, 16 px in. `anchor(el, { fixed })`
+(a boolean, or a function asked at each placing) places it against the window instead of the page,
+for a slot that is pinned at the top and never moves as the page scrolls (every theme's slot is, so the button is 8 px from the window's top right corner in all of them);
+the frame then carries the class `fixed`. A theme may ask it to
 fade (`fade(true)`): after 2 s without a pointer move, touch or key it goes to opacity 0, and any of
 those brings it back at once; it never fades while the menu or the picker is open.
 

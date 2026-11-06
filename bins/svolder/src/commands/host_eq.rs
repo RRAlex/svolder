@@ -367,11 +367,7 @@ pub struct Host {
 
 /// Where this machine's computer EQ keeps its saved state, made absolute.
 fn state_path() -> PathBuf {
-    which::absolute(
-        &svolder_ipc::config::state_home()
-            .join("svolder")
-            .join("host-eq.toml"),
-    )
+    which::absolute(&svolder_ipc::config::host_eq_state_path())
 }
 
 impl Host {

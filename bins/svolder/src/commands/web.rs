@@ -98,7 +98,7 @@ pub(crate) const LOGIN_FRAGMENT: &str = "#login=";
 
 /// The link that signs a browser in: `base` and the one-use `code` in the fragment, which a
 /// browser never sends to a server and a proxy never logs.
-fn login_link(base: &str, code: &str) -> String {
+pub(crate) fn login_link(base: &str, code: &str) -> String {
     format!("{base}{LOGIN_FRAGMENT}{code}")
 }
 
@@ -114,7 +114,7 @@ fn pairing_note(lasts: &str, base: &str) -> String {
 }
 
 /// Where the web UI of the daemon on `socket` listens, or why there is nothing to reach.
-async fn served(socket: &Path) -> Result<SocketAddr, String> {
+pub(crate) async fn served(socket: &Path) -> Result<SocketAddr, String> {
     match version_within(socket, VERSION_WAIT).await {
         Some(info) => listening_at(info.web.as_ref()),
         None => Err(format!(
@@ -142,7 +142,7 @@ fn listening_at(web: Option<&WebStatus>) -> Result<SocketAddr, String> {
 }
 
 /// A link code (`link`) or a pairing code from the daemon on `socket`, and its seconds.
-async fn code(socket: &Path, link: bool) -> Result<(String, u64), String> {
+pub(crate) async fn code(socket: &Path, link: bool) -> Result<(String, u64), String> {
     let mut client = Client::connect(socket).await.map_err(|e| e.to_string())?;
     let ask = match link {
         true => Request::WebLink,
@@ -322,7 +322,7 @@ fn open_link_within(opener: &Path, link: &str, moment: std::time::Duration) -> R
 }
 
 /// `secs` in words: `5 minutes`, `1 minute`, `90 seconds`.
-fn minutes(secs: u64) -> String {
+pub(crate) fn minutes(secs: u64) -> String {
     match (secs % 60, secs / 60) {
         (0, 1) => "1 minute".to_string(),
         (0, m) => format!("{m} minutes"),

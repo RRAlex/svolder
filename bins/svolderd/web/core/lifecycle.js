@@ -5,22 +5,33 @@
 // pixel density, and, with the system set for less motion, draws one still frame (again at each
 // resize) and runs no loop. `draw(dt, now)` gets seconds, `dt` held to a tenth of one so a pause
 // does not arrive as a jump; `resize(width, height, dpr)` gets CSS pixels and the density.
+// A theme that draws its own reduced look asks for `reduced: 'theme'`: the loop then runs under
+// reduced motion too and the theme reads `loop.reduced`. A theme that draws less often gives
+// `pace()`, the least milliseconds between two draws: 0 or null is every frame, 100 or more is
+// waited on a timer (then one frame), `dt` held to twice the pace (never under a tenth of a second).
 
 /** The longest step a frame is told of, in seconds. */
 const MAX_DT = 0.1;
 
+/** The shortest pace that is waited on a timer rather than drawn at every frame, in ms. */
+const MIN_PACE = 100;
+
 /**
  * The loop of `canvas`. `watchVisible` is visible.js's, `matchMedia` the window's. Returns
- * `{ start(), stop(), running, reduced }`: `running` is true while frames are being asked for,
- * `reduced` whether the system asks for less motion.
+ * `{ start(), stop(), running, reduced }`: `running` is true while frames (or the timer for the
+ * next one) are being asked for, `reduced` whether the system asks for less motion. `reduced` is
+ * `'still'` (one still frame, no loop) or `'theme'` (the loop runs); `pace` is a function or null.
  */
-export function canvasLoop({ canvas, draw, resize, watchVisible, matchMedia }) {
+export function canvasLoop({
+  canvas, draw, resize, watchVisible, matchMedia, reduced = 'still', pace = null,
+}) {
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   let watch = null;
   let observer = null;
   let started = false;
   let shown = false;
   let frame = 0;
+  let timer = 0;
   let last = null;
   let size = null;
 
@@ -35,23 +46,34 @@ export function canvasLoop({ canvas, draw, resize, watchVisible, matchMedia }) {
     return true;
   }
 
-  const animated = () => started && shown && !motion.matches;
+  const animated = () => started && shown && (reduced === 'theme' || !motion.matches);
+
+  const stillFrame = () => reduced === 'still' && motion.matches;
 
   function tick(ms) {
     frame = 0;
     if (!animated()) return;
     const now = ms / 1000;
-    const dt = last === null ? 0 : Math.min(MAX_DT, Math.max(0, now - last));
+    const wait = Math.max(0, Number(pace?.()) || 0);
+    const longest = Math.max(MAX_DT, (2 * wait) / 1000);
+    const dt = last === null ? 0 : Math.min(longest, Math.max(0, now - last));
     last = now;
     fit();
     draw(dt, now);
-    frame = requestAnimationFrame(tick);
+    if (wait >= MIN_PACE) {
+      timer = globalThis.setTimeout(() => {
+        timer = 0;
+        if (animated()) frame = requestAnimationFrame(tick);
+      }, wait);
+    } else {
+      frame = requestAnimationFrame(tick);
+    }
   }
 
   /** Run the frames when they should run, stop them when not; a still frame for reduced motion. */
   function sync() {
     if (animated()) {
-      if (!frame) {
+      if (!frame && !timer) {
         last = null;
         frame = requestAnimationFrame(tick);
       }
@@ -61,7 +83,11 @@ export function canvasLoop({ canvas, draw, resize, watchVisible, matchMedia }) {
       cancelAnimationFrame(frame);
       frame = 0;
     }
-    if (started && shown && motion.matches) {
+    if (timer) {
+      globalThis.clearTimeout(timer);
+      timer = 0;
+    }
+    if (started && shown && stillFrame()) {
       fit();
       draw(0, (globalThis.performance?.now?.() ?? 0) / 1000);
     }
@@ -77,7 +103,7 @@ export function canvasLoop({ canvas, draw, resize, watchVisible, matchMedia }) {
       motion.addEventListener?.('change', onMotion);
       if (typeof globalThis.ResizeObserver === 'function') {
         observer = new globalThis.ResizeObserver(() => {
-          if (fit() && motion.matches && started && shown) {
+          if (fit() && stillFrame() && started && shown) {
             draw(0, (globalThis.performance?.now?.() ?? 0) / 1000);
           }
         });
@@ -104,7 +130,7 @@ export function canvasLoop({ canvas, draw, resize, watchVisible, matchMedia }) {
       frame = 0;
     },
 
-    get running() { return frame !== 0; },
+    get running() { return frame !== 0 || timer !== 0; },
     get reduced() { return motion.matches; },
   };
 }

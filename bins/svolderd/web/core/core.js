@@ -16,11 +16,13 @@ import { createActions } from './actions.js';
 import { createAnalysis } from './analysis.js';
 import { createClimb } from './climb.js';
 import { createFrame } from './frame.js';
+import { HOLD_AFTER_MS, HOLD_EVERY_MS, holdRepeat } from './hold.js';
 import { bootScheme, createPrefs, storageOf, writeChoice } from './prefs.js';
 import { createRegistry } from './registry.js';
 import { createScheme, paintChrome } from './scheme.js';
 import { createStore } from './store.js';
 import { createStream } from './stream.js';
+import { createTitle } from './title.js';
 import { createToneNote } from './tone-note.js';
 import { dismissToast, toast } from './toast.js';
 import { canvasLoop } from './lifecycle.js';
@@ -90,17 +92,21 @@ export function createCore({
     theme: null,
     lifecycle: { watchVisible, canvasLoop },
     analysis,
+    title: null,
+    hold: { repeat: holdRepeat, AFTER_MS: HOLD_AFTER_MS, EVERY_MS: HOLD_EVERY_MS },
     curve,
     drag,
     words,
     clock,
     frame: null,
-    keys: [{ key: 'T', words: 'Themes' }],
+    keys: [{ key: 'T', words: 'Themes' }, { key: 'Space', words: 'Play or pause' }],
     registry,
     climb,
     toneNote,
     stream: null,
   };
+
+  core.title = createTitle({ store, document });
 
   const framed = createFrame({ window, core, pick: (id) => pick(id) });
   core.frame = framed.frame;

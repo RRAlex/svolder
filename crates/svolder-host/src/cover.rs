@@ -54,25 +54,36 @@ pub struct CoverPlaces {
 }
 
 impl CoverPlaces {
-    /// The places for this process: `$HOME`, `/tmp` and `$XDG_RUNTIME_DIR` (those that are set
-    /// to an absolute path) as roots, and Spotify's cache under `$HOME` as the snap, deb and
+    /// The places for this process: `$HOME`, `/tmp`, `$XDG_RUNTIME_DIR` and `$PIPEWIRE_RUNTIME_DIR`
+    /// (those that are set to an absolute path; the last is where a demo with the host on keeps
+    /// the real runtime directory) as roots, and Spotify's cache under `$HOME` as the snap, deb and
     /// Flatpak installs lay it out.
     pub fn from_env() -> CoverPlaces {
         places_from(
             std::env::var_os("HOME").as_deref(),
             std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+            std::env::var_os("PIPEWIRE_RUNTIME_DIR").as_deref(),
         )
     }
 }
 
-/// [`CoverPlaces::from_env`] with the two variables passed in.
-pub(crate) fn places_from(home: Option<&OsStr>, runtime: Option<&OsStr>) -> CoverPlaces {
+/// [`CoverPlaces::from_env`] with the three variables passed in.
+pub(crate) fn places_from(
+    home: Option<&OsStr>,
+    runtime: Option<&OsStr>,
+    pipewire: Option<&OsStr>,
+) -> CoverPlaces {
     let absolute =
         |value: Option<&OsStr>| value.map(PathBuf::from).filter(|path| path.is_absolute());
     let home = absolute(home);
     let mut roots: Vec<PathBuf> = home.iter().cloned().collect();
     roots.push(PathBuf::from("/tmp"));
     roots.extend(absolute(runtime));
+    if let Some(extra) = absolute(pipewire)
+        && !roots.contains(&extra)
+    {
+        roots.push(extra);
+    }
     let spotify = home
         .iter()
         .flat_map(|home| {

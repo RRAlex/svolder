@@ -14,7 +14,7 @@ use hyper::{HeaderMap, StatusCode};
 use svolder_ipc::host::HostView;
 use svolder_ipc::{Config, DeviceInfo, Request, Response as Answer};
 
-use super::model::{self, PlayingModel};
+use super::model::{self, HostModel};
 use super::router::{bare, devices, error};
 use super::view::{self, Access, Snapshot};
 use super::{Viewer, Web, viewer};
@@ -172,7 +172,7 @@ async fn host(State(web): State<Web>, headers: HeaderMap) -> Response {
         Ok(viewer) => viewer,
         Err(refused) => return refused,
     };
-    let host: Option<PlayingModel> = model::host_model(&web, access(&web, viewer));
+    let host: Option<HostModel> = model::host_model(&web, access(&web, viewer));
     axum::Json(host).into_response()
 }
 

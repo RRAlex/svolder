@@ -5,8 +5,11 @@
 //! shown device, as the first snapshot a page carries.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::Serialize;
+use svolder_host::eq::HostEqState;
+use svolder_host::{RouteFacts, SinkFacts};
 use svolder_ipc::DeviceInfo;
 use svolder_ipc::config::{HopKind, HopWhat};
 use svolder_profiles::Family;
@@ -33,7 +36,7 @@ pub(crate) struct PageModel {
     /// The card for a page with no device to show: none listed, or one that cannot be read.
     pub(crate) card: Option<CardModel>,
     /// The computer's player, when the daemon watches it.
-    pub(crate) host: Option<PlayingModel>,
+    pub(crate) host: Option<HostModel>,
     pub(crate) strip: Option<view::Strip>,
 }
 
@@ -157,10 +160,126 @@ pub(crate) async fn fleet_model(web: &Web, devices: &[DeviceInfo]) -> FleetModel
     }
 }
 
+/// The computer's player and route: the Now playing card with the route's facts beside it.
+#[derive(Debug, Serialize)]
+pub(crate) struct HostModel {
+    #[serde(flatten)]
+    pub(crate) playing: PlayingModel,
+    /// What the last read of the audio graph says of the route to the sink; `None` while it is
+    /// not read.
+    pub(crate) route: Option<RouteModel>,
+}
+
+/// The route from the player to the computer's sink.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct RouteModel {
+    /// The default sink; `None` when the graph names none.
+    pub(crate) sink: Option<SinkModel>,
+    /// The sample rate the player's stream plays at.
+    pub(crate) player_rate_hz: Option<u32>,
+    /// Whether the computer EQ sits in the player's path.
+    pub(crate) host_eq: bool,
+    /// The applied preset's name: given only while the computer EQ is in the path, on, and in
+    /// front of this sink.
+    pub(crate) eq_preset: Option<String>,
+    /// Whether that preset came from AutoEq (it names a headphone).
+    pub(crate) eq_autoeq: bool,
+    /// How many other running streams mix into the sink.
+    pub(crate) others_mixing: u32,
+}
+
+/// The computer's sink.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(crate) struct SinkModel {
+    /// What the sink is called for people: its description, else its node name.
+    pub(crate) words: String,
+    pub(crate) rate_hz: Option<u32>,
+    pub(crate) format: Option<String>,
+    /// PipeWire's volume as a percentage.
+    pub(crate) volume_pct: Option<u32>,
+    pub(crate) muted: bool,
+}
+
+impl From<&SinkFacts> for SinkModel {
+    fn from(sink: &SinkFacts) -> Self {
+        SinkModel {
+            words: if sink.description.is_empty() {
+                sink.name.clone()
+            } else {
+                sink.description.clone()
+            },
+            rate_hz: sink.rate_hz,
+            format: sink.format.clone(),
+            volume_pct: sink.volume_milli.map(|milli| (milli + 5) / 10),
+            muted: sink.muted,
+        }
+    }
+}
+
+/// The route's model, naming the preset `eq` says is applied when it is in the player's path
+/// in front of this very sink.
+pub(crate) fn route_model(route: &RouteFacts, eq: Option<&HostEqState>) -> RouteModel {
+    let applied = eq.filter(|eq| {
+        route.host_eq
+            && eq.on
+            && route
+                .sink
+                .as_ref()
+                .is_some_and(|sink| sink.name == eq.target)
+    });
+    RouteModel {
+        sink: route.sink.as_ref().map(Into::into),
+        player_rate_hz: route.player.as_ref().and_then(|player| player.rate_hz),
+        host_eq: route.host_eq,
+        eq_preset: applied.map(|eq| eq.name.clone()),
+        eq_autoeq: applied.is_some_and(|eq| eq.origin.is_some()),
+        others_mixing: route.others_mixing,
+    }
+}
+
+/// The computer EQ's saved state, as this machine's `svolder host eq` keeps it; `None` when
+/// there is none or it cannot be read (then no preset is named).
+pub(super) fn host_eq_state(path: &Path) -> Option<HostEqState> {
+    HostEqState::load(path).ok().flatten()
+}
+
+/// The route's model as `web`'s daemon has it now; `None` while the route is not read. The
+/// state file is read only when the route says the computer EQ is in the path.
+pub(crate) fn host_route_model(web: &Web) -> Option<RouteModel> {
+    let view = web.fleet.host_view();
+    let route = view.route.as_ref()?;
+    let eq = if route.host_eq {
+        host_eq_state(&svolder_ipc::config::host_eq_state_path())
+    } else {
+        None
+    };
+    Some(route_model(route, eq.as_ref()))
+}
+
+/// The computer's player and route as `web`'s daemon has them, for a viewer with `access`, with
+/// no device to judge the path against: the card, and the route read once. `None` while the host
+/// is not watched.
+pub(crate) fn host_parts(web: &Web, access: Access) -> Option<(view::Playing, Option<RouteModel>)> {
+    let view = web.fleet.host_view();
+    let playing = view::playing_of(&view, access, None)?;
+    Some((playing, host_route_model(web)))
+}
+
+impl HostModel {
+    /// The model of `card` and `route`, as [`host_parts`] has them.
+    pub(crate) fn new(card: &view::Playing, route: Option<RouteModel>) -> HostModel {
+        HostModel {
+            playing: card.into(),
+            route,
+        }
+    }
+}
+
 /// The computer's player and route as `web`'s daemon has them, for a viewer with `access`, with
 /// no device to judge the path against; `None` while the host is not watched.
-pub(crate) fn host_model(web: &Web, access: Access) -> Option<PlayingModel> {
-    view::playing_of(&web.fleet.host_view(), access, None).map(|card| (&card).into())
+pub(crate) fn host_model(web: &Web, access: Access) -> Option<HostModel> {
+    let (card, route) = host_parts(web, access)?;
+    Some(HostModel::new(&card, route))
 }
 
 /// The page for `viewer` showing `shown`, read as `loaded`: the first snapshot, with the strip

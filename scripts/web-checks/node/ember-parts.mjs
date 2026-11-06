@@ -909,20 +909,25 @@ const readOnlyCase = fixture.cases.find(
   (c) => !c.page.viewer.guest && !c.page.viewer.writes && c.page.device,
 ).name;
 
-ok('a_guests_link_pill_and_sign_in_share_one_container', () => {
+ok('a_guests_sign_in_is_in_the_side_and_the_link_is_beside_the_name', () => {
   const side = sideOf(shellOf(guestCase));
-  assert.ok(side.includes('id="part-link"') && side.includes('href="./?sign-in"'), side);
+  assert.ok(side.includes('href="./?sign-in"') && !side.includes('fxslot'), side);
+  assert.ok(!side.includes('part-link'), side);
   assert.ok(!sideOf(shellOf('dac')).includes('sign-in'));
 });
 
-ok('the_menu_slot_sits_before_the_link_pill_for_everyone', () => {
+ok('the_link_dot_follows_the_shown_devices_name_for_everyone', () => {
   for (const [who, name] of [['signed in', 'dac'], ['guest', guestCase]]) {
     const html = shell(caseOf(name).page, WORDMARK);
-    const side = html.split('<div class="side">')[1];
-    const pill = side.indexOf('<span id="part-link"');
-    const slot = side.indexOf('<span class="fxslot"></span>');
-    assert.ok(pill >= 0 && slot >= 0 && slot < pill, `${who}: ${side}`);
-    assert.equal(side.slice(slot + 28, pill).trim(), '', `${who}: nothing between them`);
+    const devs = html.split('<nav class="devs"')[1].split('</nav>')[0];
+    assert.equal(devs.split('id="part-link"').length - 1, 1, `${who}: one link in the switcher`);
+    const link = devs.indexOf('<span id="part-link"');
+    const small = devs.lastIndexOf('</small>', link);
+    assert.ok(small >= 0 && devs.slice(small + 8, link).replace(/<\/(a|span)>/g, '').trim() === '', `${who}: right after a device's name: ${devs}`);
+    const word = caseOf(name).page.device.link.word;
+    assert.ok(devs.includes(`<span class="lw">${word}</span>`), `${who}: the state's word is in the markup`);
+    assert.ok(devs.includes(`role="img" aria-label="${word}"`), `${who}: the link is an image named by the state's words`);
+    assert.ok(/<span class="devrow"><(a|span) class="dev[^]*?<span id="part-link"[^]*?<\/span><\/span>(<span class="devrow">|\s*$)/.test(devs), `${who}: the link is in its device's row`);
     // The button and its menu are the frame's, never the theme's.
     for (const frame of ['fxbtn', 'fxpop', 'aria-haspopup', 'menuitem']) {
       assert.ok(!html.includes(frame), `${who}: the shell draws no ${frame}`);
@@ -930,11 +935,11 @@ ok('the_menu_slot_sits_before_the_link_pill_for_everyone', () => {
   }
 });
 
-ok('every_shell_has_one_slot_first_in_the_headers_side_even_with_no_device', () => {
+ok('every_shell_has_one_slot_after_the_side_even_with_no_device', () => {
   for (const c of fixture.cases) {
     const html = shell(c.page, WORDMARK);
     assert.equal(html.split('class="fxslot"').length - 1, 1, c.name);
-    assert.ok(html.includes('<div class="side"> <span class="fxslot"></span>'), c.name);
+    assert.ok(html.includes('</div> <span class="fxslot"></span> </header>'), c.name);
   }
 });
 
@@ -955,6 +960,7 @@ ok('the_keys_are_offered_to_a_viewer_who_may_write', () => {
     '<div class="keys" id="keys" hidden>',
     '<dt><kbd>A</kbd></dt><dd>Arrange sections</dd>',
     '<dt><kbd>T</kbd></dt><dd>Themes</dd>',
+    '<dt><kbd>Space</kbd></dt><dd>Play or pause</dd>',
     '<dt><kbd>?</kbd></dt><dd>This list</dd>',
     '<dd>Centre the balance</dd>',
   ]) {

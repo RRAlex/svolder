@@ -64,17 +64,23 @@ export function targetsOf(device) {
 /**
  * The facts `device` holds, each by the label the Device section gives it: Product, Unit (when
  * the viewer may see it), Firmware, DSP, Profile, Link, Signal, Passphrase (when the device has
- * a note on it) and the id of every reading row; `[]` for a device with no facts.
+ * a note on it) and the id of every reading row; then Cover, when the computer's player has a
+ * cover for the track (shown as a picture whose address carries the cover's version). `[]` for a
+ * device with no facts and no cover.
  */
 export function factsOf(device) {
+  const labels = [];
   const facts = device?.facts;
-  if (!facts) return [];
-  const labels = ['Product'];
-  if (facts.unit) labels.push('Unit');
-  labels.push('Firmware', 'DSP', 'Profile', 'Link', 'Signal');
-  if (facts.passphrase_note !== null && facts.passphrase_note !== undefined) {
-    labels.push('Passphrase');
+  if (facts) {
+    labels.push('Product');
+    if (facts.unit) labels.push('Unit');
+    labels.push('Firmware', 'DSP', 'Profile', 'Link', 'Signal');
+    if (facts.passphrase_note !== null && facts.passphrase_note !== undefined) {
+      labels.push('Passphrase');
+    }
+    for (const row of facts.rows ?? []) labels.push(row.id);
   }
-  for (const row of facts.rows ?? []) labels.push(row.id);
+  const cover = device?.playing?.track?.cover;
+  if (cover !== null && cover !== undefined) labels.push('Cover');
   return labels;
 }

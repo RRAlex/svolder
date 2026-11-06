@@ -5,6 +5,7 @@ the page lists (`svolder-themes`), driven only through the theme's test driver (
 reach, operate, shown, state), judged by what the fake daemon holds and what the theme shows, never
 by pixels or positions:
   volume_up_and_down, mute, a_band_change, a_preset_applied, the_device_lost_and_back,
+  the_link_state_is_in_words_beside_the_name (the driver's `linkWords()`),
   a_refused_write (a write the daemon refuses, its words shown), resting_and_waking,
   the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade,
   theme_query_switches_and_is_kept, and the same pass as a guest (every operate sends no request
@@ -41,8 +42,9 @@ ONLY = set(filter(None, os.environ.get('WEB_CHECK_THEMES', '').split(',')))
 FLEET = [('fake-amp', 'Amp', '1112131415161718'), ('fake-five', 'Five', '2122232425262728'),
          ('fake-mono', 'Mono', '3132333435363738'), ('lokimax', 'Loki Max', '4142434445464748')]
 # the members of `core`, which every theme may rely on and none may find missing
-CORE = ['actions', 'analysis', 'climb', 'clock', 'curve', 'drag', 'frame', 'keys', 'lifecycle',
-        'model', 'prefs', 'registry', 'scheme', 'stream', 'theme', 'toneNote', 'words']
+CORE = ['actions', 'analysis', 'climb', 'clock', 'curve', 'drag', 'frame', 'hold', 'keys',
+        'lifecycle', 'model', 'prefs', 'registry', 'scheme', 'stream', 'theme', 'title', 'toneNote',
+        'words']
 HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {"
         " if (a[1] && a[1].method === 'POST') window.__posts.push([String(a[0]), a[1].body]);"
         " return f(...a); };")
@@ -117,6 +119,9 @@ class Pass:
 
     def state(self):
         return self.b.page('__driver.state()')
+
+    def link_words(self):
+        return self.b.page('__driver.linkWords()')
 
     def model(self):
         return self.d.model(self.name)
@@ -226,14 +231,16 @@ def menu_and_picker(p):
     b.press('Escape')
     check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
                 'Escape closes it'), poll(lambda: not b.page("!!document.getElementById('picker')")))
-    # scrolled down, the button out of view: T still opens the picker
+    # scrolled down, the button out of view (or pinned): T still opens the picker
     b.page('window.scrollTo(0, document.documentElement.scrollHeight)')
     time.sleep(0.3)
     away = b.page("(() => { const r = document.getElementById('fx-button').getBoundingClientRect();"
-                  " return { y: scrollY, out: r.bottom <= 0 || r.top >= innerHeight }; })()")
+                  " return { y: scrollY, scrolls: document.documentElement.scrollHeight > innerHeight,"
+                  " out: r.bottom <= 0 || r.top >= innerHeight,"
+                  " pinned: Math.abs(r.top - 8) <= 1 }; })()")
     check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
-                'the page is scrolled so the button is out of view'),
-          away['y'] > 0 and away['out'], away)
+                'the page is scrolled and the button is out of view, or pinned to the window'),
+          (away['y'] > 0 or not away['scrolls']) and (away['out'] or away['pinned']), away)
     b.press('T')
     check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
                 'T opens the picker mid-page'),
@@ -306,7 +313,15 @@ def lost_and_back(theme):
         time.sleep(0.5)
         p = Pass(b, daemon, theme)
         check(p.tag('the_device_lost_and_back: not lost to begin with'), not p.state()['lost'])
+        before = p.link_words()
         daemon.drop()
+        # the state is told in words beside the device's name (a mark alone, or a colour, is not enough)
+        word = poll(lambda: (p.model().get('link') or {}).get('word') not in (None, 'connected')
+                    and p.model()['link']['word'], 10.0)
+        check(p.tag('the_link_state_is_in_words_beside_the_name: a device out of reach has words beside its '
+                    'name that name its state (the model\'s link word)'),
+              bool(word) and poll(lambda: word.lower() in (p.link_words() or '').lower(), 10.0)
+              and word.lower() not in (before or '').lower(), [before, p.link_words(), word])
         check(p.tag('the_device_lost_and_back: the theme shows the device lost'),
               poll(lambda: p.state()['lost'], 10.0), p.state())
         daemon.restart()

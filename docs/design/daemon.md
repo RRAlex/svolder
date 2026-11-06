@@ -32,8 +32,9 @@ change walks the same code from a key press; the words (actor, writer, slot, fle
 A daemon that finds the socket taken exits 3 and has opened no link, so a second daemon never steals
 devices from the first. While it serves, `stop_or_signal` ends the accept loop on SIGINT, SIGTERM, a
 `stop` request, or the socket file being unlinked or replaced under the listener (`socket_taken`
-compares the inode it bound, every second). Then `Daemon::shutdown` stops the host service, the
-HTTP servers, the MQTT bridge (which says `offline` first), and asks every actor to close at once.
+compares the inode it bound, every second). Then `Daemon::shutdown` stops the HTTP servers, the host service
+(after them, so no open page is told on the way down that the computer is no longer watched), the MQTT
+bridge (which says `offline` first), and asks every actor to close at once.
 
 `Daemon` (`bins/svolderd/src/handler.rs`) is the one object everything reaches: the set of device
 handles, the transport, the shared scanner, the registry, the host service (the computer's player,

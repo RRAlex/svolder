@@ -7,7 +7,8 @@ page's own device switch, and for every theme the page lists:
   - every target of `targetsOf(device)` (core/contract.js) is reached by the theme's test driver
     and operated, and the model route then reports the change (a readout is not operated: what
     the driver shows equals the model's words); each operation sends one write request;
-  - every fact of `factsOf(device)` is reached and shown with the model's words.
+  - every fact of `factsOf(device)` is reached and shown with the model's words; the cover of the
+    track is one (shown as a picture whose address is `api/v1/host/cover?v=<version>`).
 The Gungnir 2 is put into Loudness first, so the strength has its target; the Loki Max's slots are
 saved over and recalled (a slot's effect is the bands it brings back), the amp's power is turned
 off and on again.
@@ -267,6 +268,8 @@ def facts(run, dev):
             return f['product'] or f'product {f["product_id"]}'
         if label == 'Signal':
             return (f.get('signal_age') or {}).get('head', f['signal'])
+        if label == 'Cover':
+            return f"api/v1/host/cover?v={run.model()['playing']['track']['cover']}"
         known = {'Unit': f.get('unit'), 'Firmware': f['firmware'],
                  'DSP': '—' if f['dsp'] is None else f['dsp'], 'Profile': f['profile'],
                  'Link': f['link'], 'Passphrase': f.get('passphrase_note')}
@@ -304,6 +307,22 @@ def facts(run, dev):
           'model\'s words', not bad, bad[:6])
 
 
+FIRST = {}  # per device: the per-kind target counts and the fact count of the first theme listed
+
+
+def same_counts(run, name, theme, targets):
+    """Every theme lists the same targets and facts as the first theme listed."""
+    counts = {}
+    for target in targets:
+        counts[kind_of(target)] = counts.get(kind_of(target), 0) + 1
+    counts['facts'] = len(run.b.page('__contract.factsOf(__core.model.device())'))
+    first = FIRST.setdefault(name, (theme, counts))
+    for kind in sorted(set(counts) | set(first[1])):
+        check(f'{theme} / {name}: {kind} count equals {first[0]}\'s',
+              counts.get(kind, 0) == first[1].get(kind, 0),
+              f'{theme} {counts.get(kind, 0)}, {first[0]} {first[1].get(kind, 0)}')
+
+
 def one_device(b, d, name, theme):
     url = name.replace(' ', '%20')
     b.page(f"__core.actions.showDevice('{url}').then(() => new Promise((r) => setTimeout(r, 900)))")
@@ -315,6 +334,7 @@ def one_device(b, d, name, theme):
     targets.sort(key=lambda t: t.get('control') == (dev.get('power') or {}).get('key'))
     print(f'{theme} / {name}: {len(targets)} targets')
     check(f'{theme} / {name}: the page lists targets', len(targets) > 0)
+    same_counts(run, name, theme, targets)
     if name == 'Gungnir 2':
         # the DAC with the host fake has a player to press: transport coverage must not drop
         # silently (the contract lists the buttons only with buttons and a track)
@@ -324,6 +344,9 @@ def one_device(b, d, name, theme):
               and bool(playing.get('track')), playing)
         check(f'{theme} / {name}: the transport targets are listed (previous, play or pause, next)',
               len(shown) == 3 and shown[0] == 'previous' and shown[2] == 'next', shown)
+        # the fake host carries a cover: the contract lists it, and every theme shows it
+        check(f'{theme} / {name}: the cover is a fact (the host\'s picture for the track)',
+              'Cover' in b.page('__contract.factsOf(__core.model.device())'), playing.get('track'))
     for target in targets:
         reached = run.reach(target)
         check(f'{run.label(target)}: reached', reached is True, reached)
@@ -343,7 +366,7 @@ try:
     b.goto(d.url, settle=1.0)
     b.page(BOOT)
     listed = [t['id'] for t in b.page('__core.registry.list()')]
-    check('the page lists the themes the checks go through', listed == ['ember', 'paper'], listed)
+    check('the page lists the themes the checks go through', listed == ['ember', 'paper', 'signal', 'nightdrive'], listed)
     check('WEB_CHECK_THEMES names only listed themes', ONLY <= set(listed), sorted(ONLY - set(listed)))
     for theme in [t for t in listed if not ONLY or t in ONLY]:
         # the Gungnir 2 starts in Loudness, where the strength has its target

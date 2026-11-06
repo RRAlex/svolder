@@ -207,14 +207,14 @@ route. The view is sent on change only. A bus that cannot be reached, or one tha
   again 1 s and then 3 s after the first read (a player may name a picture a moment before it has
   written it), then left. A player that quits clears the cover with the track.
 - **The route** is read out of `pw-dump` only while a `Watcher` is held: by each `Subscribe`
-  connection that asked for the host (`host: true`) for its life and by the event stream of each web
-  page of a DAC (an amp's page shows no path, so its stream holds none); a page hidden for 2 s lets
-  its stream go, so a background tab holds no route reads. The first watcher gets a read at once,
-  then one every 2 s, and never two closer than that: a player change does not force a read inside
-  the 2 s (the next timed read picks it up, except that a player that quits is dropped from the
-  route at once), and a sink switch shows on the next read. With nobody watching there is no
-  `pw-dump` run and no route kept; the in-process readers that never show the host (the MQTT bridge,
-  the MCP server) read `Daemon::device_events`, which holds no watcher.
+  connection that asked for the host (`host: true`) for its life and by the event stream of each
+  web page of a DAC (an amp's page shows no path, so its stream holds none); a page hidden for 2 s
+  lets its stream go, so a background tab holds no route reads. The first watcher gets a read at
+  once, then one every 2 s, never two closer: a player change does not force a read inside the 2 s
+  (a player that quits is dropped at once), and a sink switch shows on the next read. With nobody
+  watching there is no `pw-dump` run and no route kept; the in-process readers that never show the
+  host (the MQTT bridge, the MCP server) read `Daemon::device_events`, which holds no watcher. The
+  web model names the applied preset from `host-eq.toml`, read only when the filter is in the path.
 - **The presses** go to the followed player through `Players::press`; `Request::HostPress` names the
   button as a word, and answers `Ack` when the player took it, an error for an unknown word, a host
   that is off, no player, or a player that refused.
@@ -222,9 +222,9 @@ route. The view is sent on change only. A bus that cannot be reached, or one tha
   status over), a fake route on a Schiit sink named for the fake device with the player matched at
   the rate the fake device reads (48 kHz, `svolder_fake::SAMPLE_RATE_HZ`), and the bundled picture
   as the cover, through the same cover path. Knobs: `SVOLDER_FAKE_COVER_GONE_AFTER_MS` and
-  `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` make it lose its art or its player after a delay, for checks
-  of a card that goes quiet; `SVOLDER_FAKE_ROUTE=changed` makes the route alter the signal in every
-  way (a quieter player and sink, a resample, the host EQ, two other sounds), for a long changed
+  `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` drop its art or its player after a delay, `..._GONE_FILE`
+  (what the checks use) when the named file appears; `SVOLDER_FAKE_ROUTE=changed` makes the route
+  alter the signal in every way (a quieter player and sink, a resample, the host EQ, two other sounds), for a long changed
   path line; `SVOLDER_FAKE_TITLE` names the track, for a title too long for a phone's folded line.
 - **The capture** is held, not followed: one capture runs in the daemon while a page's frames
   stream or a joined TUI's frames connection lives, and nothing runs without one

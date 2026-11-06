@@ -39,6 +39,8 @@ dark paper. Later tasks add the sections' checks here.
   a_controls_list_holds_its_section                    (Chromium) the same for a control's list
   a_touch_beside_a_point_scrolls_and_on_it_drags       (Chromium) the phone graph's touch
   the_transport_words_press                            `next` posts the host's press and the track changes
+  the_cover_shows_in_monochrome                        the host's picture beside the track, a grey filter in light
+                                                       and in dark paper; none leaves no box and no gap
   an_amp_shows_power_meters_and_its_readouts           a needle per meter at the model's fraction; power
   the_spec_table_lists_every_fact                      each fact with the model's words
   the_states_in_papers_words                           the card as the red note, try now, the lost
@@ -180,7 +182,8 @@ def the_sheet(b, d):
     check('  the page without the theme is Ember', load(b, d, '?effects=off') == 'ember')
     b.press('T')
     cards = b.page(PICKER_CARDS)
-    check('  the picker lists Ember and Paper', cards == ['ember', 'paper'], cards)
+    check('  the picker lists Ember, Paper, Signal and Night drive',
+          cards == ['ember', 'paper', 'signal', 'nightdrive'], cards)
     previews = b.page("[...document.querySelectorAll('#picker .tcard')]"
                       ".map((c) => [c.querySelector('b').textContent,"
                       " c.querySelector('small').textContent, !!c.querySelector('.tprev svg')])")
@@ -213,8 +216,8 @@ def title_and_footer(b, d):
     check('  the footer has the version, the key to the themes and the theme\'s name',
           f"svolder {got['version']}" in got['foot'] and 'T for themes' in got['foot']
           and got['foot'].endswith('Paper'), got['foot'])
-    check('  the slot is 30 by 30 and a device that is reachable has no card',
-          got['slot'] == [30, 30] and got['card'] == 0, got)
+    check('  the slot is 44 by 44 and a device that is reachable has no card',
+          got['slot'] == [44, 44] and got['card'] == 0, got)
     # an open page across midnight: its date is written again by the clock's tick
     b.page("document.querySelector('#p-foot .p-left').textContent = 'svolder 0.0.0 \\u00b7 1 January'")
     today = b.page("new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })")
@@ -694,6 +697,34 @@ def the_hold(b, d):
     after = poll(lambda: abs(needle(b)['at'] - (other - lo) / (hi - lo)) * needle(b)['w'] <= 1.5, 3.5)
     check('  once released, within 3 s, it shows the newest reading', after,
           [needle(b), other, volume(d)['raw']])
+    check('  no page error', errors(b) == [], errors(b)[:3])
+
+
+def the_ask_again(b, d):
+    """A step asked, then another hand sets the device back: the same step asked again is written."""
+    forget(b, d)
+    load(b, d)
+    b.page(POSTS)
+    lo = volume(d)['lo']
+    d.post(DEVICE, 'volume', {'raw': lo + 30})
+    settled(d, lo + 30, 10.0)
+    time.sleep(0.5)
+    b.page('window.__posts.length = 0')
+    asked_at = time.time()
+    click_el(b, '[data-act=volume-up]')
+    time.sleep(0.9)
+    check('a_step_asked_again_after_another_hand_set_the_device_back_is_written: `louder +` writes one step',
+          volume_posts(b) == [lo + 31], volume_posts(b))
+    d.post(DEVICE, 'volume', {'raw': lo + 30})
+    settled(d, lo + 30, 10.0)
+    time.sleep(0.4)
+    b.page('window.__posts.length = 0')
+    click_el(b, '[data-act=volume-up]')
+    time.sleep(0.6)
+    check('  the step asked before is still under 3 s old, as the check needs',
+          time.time() - asked_at < 3.0, time.time() - asked_at)
+    check('  a step asked again after another hand set the device back is written',
+          volume_posts(b) == [lo + 31], volume_posts(b))
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
@@ -1573,6 +1604,110 @@ def reach(b, selector):
     click_el(b, selector)
 
 
+COVER = """(() => { const c = document.querySelector('#p-playing .p-cover'); const i = c && c.querySelector('img');
+  const r = (e) => { const b = e.getBoundingClientRect(); return [b.left, b.right, b.width, b.height]; };
+  const t = document.querySelector('#p-playing .p-track');
+  return { has: !!c, hidden: c ? getComputedStyle(c).display === 'none' : null, box: c ? r(c) : null,
+    loaded: i ? i.complete && i.naturalWidth > 0 : null, src: i ? i.getAttribute('src') : null,
+    abs: i ? i.src : null, alt: i ? i.getAttribute('alt') : null,
+    filter: i ? getComputedStyle(i).filter : null, track: t ? r(t) : null,
+    sect: r(document.getElementById('p-playing')),
+    style: !!document.querySelector('#p-playing [style]') }; })()"""
+SWAP = """(() => { const url = __core.model.shown(); const p = structuredClone(__core.model.page().device.playing);
+  p.track.cover = %s; p.track.headline = %s;
+  __core.model.applyPart(url, 'playing', p); return 1; })()"""
+WHERE = """(() => { const r = document.getElementById('p-playing').getBoundingClientRect();
+  const v = document.getElementById('p-volume').getBoundingClientRect();
+  return { top: r.top + scrollY, left: r.left, width: r.width, volumeBottom: v.bottom + scrollY,
+    page: document.documentElement.scrollHeight, view: innerHeight, vw: innerWidth }; })()"""
+
+
+def the_cover(b, d):
+    """The cover in Now playing, in monochrome in light and dark paper; another track another
+    address; none leaves no box and no gap."""
+    forget(b, d)
+    load(b, d)
+    poll(lambda: b.page(COVER)['loaded'], 6.0)
+    c = b.page(COVER)
+    check('the_cover_shows_in_monochrome: the host\'s picture is there, drawn, 56 CSS px square, left of '
+          'the track\'s words',
+          c['has'] and c['loaded'] and abs(c['box'][2] - 56) <= 2.5 and c['alt'] == ''
+          and c['box'][1] <= c['track'][0] + 0.5, c)
+    check('  it is the daemon\'s own, a same-origin address with the version, and the markup has no style attribute',
+          (c['src'] or '').startswith('api/v1/host/cover?v=') and (c['abs'] or '').startswith(d.url) and not c['style'], c)
+    check('  light paper: its computed filter is grey, with the ink\'s contrast',
+          c['filter'] == 'grayscale(1) contrast(1.15)', c['filter'])
+    choose(b, 'dark')
+    dark = b.page(COVER)
+    check('  dark paper: its computed filter is grey, with the contrast and the dimming of dark paper',
+          html_scheme(b) == 'dark' and dark['filter'] == 'grayscale(1) contrast(1.05) brightness(0.85)',
+          [html_scheme(b), dark['filter']])
+    choose(b, 'light')
+    first = c['src']
+    b.page(SWAP % (json.dumps('deadbeefdeadbeef'), json.dumps('Another Song')))
+    other = poll(lambda: (b.page(COVER)['src'] or '').endswith('deadbeefdeadbeef') and b.page(COVER), 5.0)
+    hidden = poll(lambda: b.page(COVER)['hidden'], 5.0)
+    mid = b.page(COVER)
+    check('the_cover_follows_the_track: another track\'s picture is asked for by its own address, and one the '
+          'daemon does not hold (a real 404) is hidden, its box gone, the words where the section begins',
+          bool(other) and other['src'] != first and hidden is True and mid['box'][2] == 0
+          and abs(mid['track'][0] - mid['sect'][0]) <= 0.5, [first, other and other['src'], mid])
+    b.page(SWAP % ('null', json.dumps('No Picture')))
+    none = poll(lambda: not b.page(COVER)['has'], 5.0)
+    check('  a track with no cover has no box at all and the words begin the section',
+          none is True and abs(b.page(COVER)['track'][0] - b.page(COVER)['sect'][0]) <= 0.5, b.page(COVER))
+    b.page(SWAP % (json.dumps(first.split('v=')[1]), json.dumps('Back')))
+    back = poll(lambda: b.page(COVER)['has'] and b.page(COVER)['loaded'] and not b.page(COVER)['hidden'], 5.0)
+    check('  and the first picture comes back when the track does', back is True, b.page(COVER))
+    check('  no page error', [e for e in errors(b) if 'cover' not in e and '404' not in e] == [], errors(b)[:3])
+    # the 404 of the picture the daemon does not hold was the check's own ask
+    if browser == 'chromium':
+        b.errors[:] = [e for e in b.errors if 'host/cover' not in e]
+
+
+def the_cover_gone():
+    """The host's picture goes (a daemon that stops holding it): no box and no gap."""
+    g = common.Daemon('gungnir2-v2', host='fake')
+    b = make()
+    try:
+        forget(b, g)
+        load(b, g)
+        poll(lambda: b.page(COVER)['loaded'], 6.0)
+        before = b.page(COVER)
+        g.drop_cover()
+        gone = poll(lambda: not b.page(COVER)['has'] or b.page(COVER)['hidden'], 14.0)
+        after = b.page(COVER)
+        check('no_cover_leaves_no_gap: with the cover gone there is no box, and the words start where the '
+              'section does, further left than before',
+              before['has'] and gone and abs(after['track'][0] - after['sect'][0]) <= 0.5
+              and after['sect'][2] > 0
+              and after['track'][0] < before['track'][0] - 20, [before['track'], after])
+    finally:
+        b.close()
+        g.stop()
+
+
+def the_cover_on_a_phone():
+    """On a phone the cover stays inside the one column; and where Now playing sits is measured."""
+    d = common.Daemon('gungnir2-v2', host='fake')
+    b = make(size=(390, 844))
+    try:
+        forget(b, d)
+        load(b, d)
+        poll(lambda: b.page(COVER)['loaded'], 6.0)
+        c = b.page(COVER)
+        where = b.page(WHERE)
+        check('the_cover_shows_on_a_phone: 56 px, inside the window, left of the words, no sideways scroll',
+              c['has'] and c['loaded'] and abs(c['box'][2] - 56) <= 2.5 and c['box'][0] >= 0
+              and c['box'][1] <= c['track'][0] + 0.5 and c['sect'][1] <= where['vw'] + 0.5
+              and b.page('document.documentElement.scrollWidth') <= where['vw'], [c, where])
+        print('INFO phone: Now playing top', round(where['top']), 'px of a', where['page'], 'px page,',
+              where['view'], 'px window; the volume ends at', round(where['volumeBottom']))
+    finally:
+        b.close()
+        d.stop()
+
+
 def the_transport(b, d):
     forget(b, d)
     load(b, d)
@@ -2245,6 +2380,7 @@ try:
         the_cap()
         if browser == 'chromium':
             the_hold(b, d)
+        the_ask_again(b, d)
         the_point_drag(b, d)
         the_point_drag_without_capture(b, d)
         the_ask_focus(b, d)
@@ -2264,12 +2400,16 @@ try:
         from_this_browser(b, d)
         the_places(b, d)
         the_transport(b, d)
+        the_cover(b, d)
+        print('INFO desktop 1280x900:', b.page(WHERE))
         the_spec(b, d)
         check('no page error in the whole run', errors(b) == [], errors(b)[:3])
     finally:
         b.close()
 finally:
     d.stop()
+the_cover_gone()
+the_cover_on_a_phone()
 the_device_presets()
 the_switch()
 the_amp()

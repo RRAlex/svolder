@@ -237,6 +237,10 @@ pub(crate) struct FakeKnobs {
     pub(crate) cover_gone_after: Option<Duration>,
     /// How long after it starts the fake player quits.
     pub(crate) player_gone_after: Option<Duration>,
+    /// A path: the fake player's art is dropped the moment a file appears there.
+    pub(crate) cover_gone_file: Option<std::path::PathBuf>,
+    /// A path: the fake player quits the moment a file appears there.
+    pub(crate) player_gone_file: Option<std::path::PathBuf>,
     /// The display name of the fake device, which the fake route's sink is named for.
     pub(crate) display: String,
     /// Whether the fake route changes the signal in every way it can: a quieter player, a
@@ -253,6 +257,8 @@ impl Default for FakeKnobs {
         FakeKnobs {
             cover_gone_after: None,
             player_gone_after: None,
+            cover_gone_file: None,
+            player_gone_file: None,
             display: "Gungnir 2".to_string(),
             route_changed: false,
             capture_off: false,
@@ -269,6 +275,8 @@ impl FakeKnobs {
 
     /// The knobs `knob` answers by variable name: `SVOLDER_FAKE_COVER_GONE_AFTER_MS` and
     /// `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` in milliseconds (anything else is unset),
+    /// `SVOLDER_FAKE_COVER_GONE_FILE` and `SVOLDER_FAKE_PLAYER_GONE_FILE` as paths (unset when
+    /// empty),
     /// `SVOLDER_FAKE_ROUTE=changed` for the route that alters the signal,
     /// `SVOLDER_FAKE_CAPTURE=off` for a host with no capture, `SVOLDER_FAKE_TITLE` for the
     /// fake track's title (unset when empty), and the display name of the profile
@@ -279,9 +287,16 @@ impl FakeKnobs {
                 .and_then(|ms| ms.trim().parse::<u64>().ok())
                 .map(Duration::from_millis)
         };
+        let path = |name: &str| {
+            knob(name)
+                .filter(|path| !path.is_empty())
+                .map(std::path::PathBuf::from)
+        };
         let mut knobs = FakeKnobs {
             cover_gone_after: millis("SVOLDER_FAKE_COVER_GONE_AFTER_MS"),
             player_gone_after: millis("SVOLDER_FAKE_PLAYER_GONE_AFTER_MS"),
+            cover_gone_file: path("SVOLDER_FAKE_COVER_GONE_FILE"),
+            player_gone_file: path("SVOLDER_FAKE_PLAYER_GONE_FILE"),
             route_changed: knob("SVOLDER_FAKE_ROUTE")
                 .is_some_and(|route| route.trim().eq_ignore_ascii_case("changed")),
             capture_off: knob("SVOLDER_FAKE_CAPTURE")
@@ -301,6 +316,13 @@ impl FakeKnobs {
     }
 }
 
+/// Returns once a file exists at `path`, looking again every 50 ms.
+async fn wait_for_file(path: &std::path::Path) {
+    while !path.exists() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 impl Parts {
     /// The fake host: one fixed track playing from the moment it starts, which answers
     /// presses; the bundled cover; a route on a Schiit sink named for the fake device, at the
@@ -309,22 +331,41 @@ impl Parts {
     pub(crate) fn fake(knobs: FakeKnobs) -> Parts {
         let players = fake_players(knobs.title.as_deref());
         let mut helpers = Vec::new();
-        if let Some(after) = knobs.cover_gone_after {
+        let drop_cover = {
             let players = players.clone();
-            helpers.push(tokio::spawn(async move {
-                tokio::time::sleep(after).await;
+            move || {
                 if let Some(now) = players.now_playing() {
                     players.set(Some(NowPlaying {
                         art_url: None,
                         ..now
                     }));
                 }
+            }
+        };
+        if let Some(after) = knobs.cover_gone_after {
+            let drop_cover = drop_cover.clone();
+            helpers.push(tokio::spawn(async move {
+                tokio::time::sleep(after).await;
+                drop_cover();
+            }));
+        }
+        if let Some(path) = knobs.cover_gone_file {
+            helpers.push(tokio::spawn(async move {
+                wait_for_file(&path).await;
+                drop_cover();
             }));
         }
         if let Some(after) = knobs.player_gone_after {
             let players = players.clone();
             helpers.push(tokio::spawn(async move {
                 tokio::time::sleep(after).await;
+                players.set(None);
+            }));
+        }
+        if let Some(path) = knobs.player_gone_file {
+            let players = players.clone();
+            helpers.push(tokio::spawn(async move {
+                wait_for_file(&path).await;
                 players.set(None);
             }));
         }

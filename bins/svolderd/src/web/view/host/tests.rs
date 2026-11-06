@@ -385,6 +385,17 @@ fn the_key_holds_the_sink_label() {
     assert!(key(&other).contains("sink_label=true"));
 }
 
+/// A hop's unread mark is something a viewer sees (Signal's DAC box), so it is in the key.
+#[test]
+fn the_key_holds_a_hops_unknown_mark() {
+    let view = host(Some(track_view()), Some(route("Schiit Gungnir 2")));
+    let mut card = card_on(&view, Some("2"), OPEN).expect("a card");
+    let first = card.key();
+    let hop = &mut card.path.as_mut().expect("a path").hops[2];
+    hop.unknown = !hop.unknown;
+    assert_ne!(card.key(), first);
+}
+
 /// Only a signed-in viewer with writes on gets the transport buttons.
 #[test]
 fn the_buttons_follow_what_the_viewer_may_do() {

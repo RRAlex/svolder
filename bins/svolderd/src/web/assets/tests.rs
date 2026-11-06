@@ -18,6 +18,9 @@ fn only_listed_names_are_served_and_a_directory_is_read_afresh() {
         "OFL-CrimsonPro.txt",
         "OFL-Caveat.txt",
         "fonts/OFL-Caveat.txt",
+        "OFL-RussoOne.txt",
+        "OFL-MrDafoe.txt",
+        "fonts/OFL-MrDafoe.txt",
     ] {
         assert!(Assets::Embedded.get(name).is_none(), "{name}");
     }
@@ -75,6 +78,9 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "core/scheme.js",
         "core/lifecycle.js",
         "core/analysis.js",
+        "core/hold.js",
+        "core/title.js",
+        "core/viz-model.js",
         "core/registry.js",
         "core/climb.js",
         "core/tone-note.js",
@@ -88,7 +94,6 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "core/contract.js",
         "themes/ember/visualizer.js",
         "themes/ember/viz-colour.js",
-        "themes/ember/viz-model.js",
         "themes/ember/viz-pref.js",
         "themes/ember/htmx.min.js",
     ] {
@@ -114,6 +119,17 @@ fn the_core_and_embers_files_are_served_by_their_paths() {
     for name in ["smoke.js", "themes/ember/../../core/api.js"] {
         assert!(Assets::Embedded.get(name).is_none(), "{name}");
     }
+}
+
+/// The analysis rules are the core's, so any theme may read them; Ember no longer has its own copy.
+#[test]
+fn the_analysis_rules_are_served_from_the_core() {
+    let asset = Assets::Embedded
+        .get("core/viz-model.js")
+        .expect("core/viz-model.js");
+    assert_eq!(asset.mime, "text/javascript; charset=utf-8");
+    assert!(!asset.bytes.is_empty());
+    assert!(Assets::Embedded.get("themes/ember/viz-model.js").is_none());
 }
 
 /// The icons are served with their types.
@@ -193,6 +209,34 @@ fn the_paper_fonts_are_served_and_the_core_names_them() {
         let geist_rule = &css[at..at + css[at..].find('}').unwrap()];
         assert_eq!(range(rule), range(geist_rule), "{name}");
         assert!(!rule.contains("U+2192"), "{name}");
+    }
+}
+
+/// Night drive's fonts, Russo One (the figures) and Mr Dafoe (the script), carry Reserved Font
+/// Names, so each is served as its Original Version, one TrueType file under 60 000 bytes, and
+/// the core's stylesheet names it.
+#[test]
+fn the_night_drive_fonts_are_served_and_the_core_names_them() {
+    let css = String::from_utf8(
+        Assets::Embedded
+            .get("core/frame.css")
+            .unwrap()
+            .bytes
+            .to_vec(),
+    )
+    .unwrap();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("web/fonts");
+    for name in ["RussoOne-Regular.ttf", "MrDafoe-Regular.ttf"] {
+        let asset = Assets::Embedded.get(&format!("fonts/{name}")).expect(name);
+        assert_eq!(asset.mime, "font/ttf", "{name}");
+        assert_eq!(&asset.bytes[..4], &[0, 1, 0, 0], "{name}");
+        assert!(asset.bytes.len() < 60_000, "{name}");
+        assert_eq!(
+            &asset.bytes[..],
+            std::fs::read(dir.join(name)).unwrap(),
+            "{name}"
+        );
+        assert!(css.contains(&format!("url(\"../fonts/{name}\")")), "{name}");
     }
 }
 

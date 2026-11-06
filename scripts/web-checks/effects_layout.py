@@ -37,22 +37,31 @@ def edge_report(b, tag):
       const v = document.querySelector('#screen .view').getBoundingClientRect();
       const k = document.querySelector('sv-knob').geometry();
       const g = document.querySelector('.glow').getBoundingClientRect();
+      const b = document.querySelector('#fx-button').getBoundingClientRect();
       return { left: v.left, right: v.right, gx: g.left + g.width / 2, gy: g.top + g.height / 2,
-               gw: g.width, cx: k.cx, cy: k.cy, radius: k.radius, sy: scrollY };
+               gw: g.width, cx: k.cx, cy: k.cy, radius: k.radius, sy: scrollY,
+               btn: [b.left - 4, b.top - 4, b.right + 4, b.bottom + 4] };
     })()""")
     img = np.asarray(Image.open(io.BytesIO(b.shot())).convert('RGB')).astype(int)
     h, w, _ = img.shape
     k = w / b.ev('window.innerWidth')  # image pixels per CSS pixel
     for key in ('left', 'right', 'cy'):
         info[key] = info[key] * k
-    rows = range(max(0, int(info['cy'] - 380 * k)), min(h, int(info['cy'] + 380 * k)))
+    info['btn'] = [v * k for v in info['btn']]
+    # from the top of the window down (the button's own box is stepped over below), so a hard glow edge along the top fails too
+    rows = range(0, min(h, int(info['cy'] + 380 * k)))
     out = {}
     for side in ('left', 'right'):
         e = int(round(info[side]))
         edge, beside, clean = [], [], 0
         lo, hi = min(8, e - 4), min(8, w - e - 5)  # the 8 px of focus-ring room beside the edge
         if lo >= 6 and hi >= 6:
+            # the frame's button, pinned at the corner, is not the glow's: only its own rows, and only where
+            # the columns looked at are its own (a glow regression elsewhere along the top still fails)
+            bl, bt, br, bb = info['btn']
             for y in rows:
+                if bt <= y <= bb and e - lo <= br and e + hi >= bl:
+                    continue
                 row = img[y]
                 # the steps over 4 px beside the edge, left and right of it
                 steps = [int(np.abs(row[x + 2] - row[x - 2]).max())
@@ -154,16 +163,21 @@ def run():
                 rows = b.ev("""(() => {
                   const top = (s) => { const e = document.querySelector(s);
                     return e ? e.getBoundingClientRect() : null; };
-                  const items = ['.top .wm', '.fxbtn', '#part-link', '.side a.pill']
+                  const items = ['.top .wm', '.side a.pill']
                     .map(top).filter(Boolean);
                   return { tops: items.map(r => Math.round(r.top + r.height / 2)),
                            right: Math.max(...items.map(r => r.right)), n: items.length,
                            top: document.querySelector('.top').getBoundingClientRect().height,
+                           btn: (top('.fxbtn') || { left: 0 }).left,
+                           pill: top('.side a.pill') ? top('.side a.pill').right : 0,
                            w: document.documentElement.clientWidth };
                 })()""")
                 one_row = max(rows['tops']) - min(rows['tops']) <= 3
-                check(f'{who} at {w}: wordmark, button and pills share one header row, inside the '
+                check(f'{who} at {w}: wordmark and Sign in share one header row, inside the '
                       f'viewport ({rows["n"]} items)', one_row and rows['right'] <= rows['w'], rows)
+                if who == 'guest':
+                    check(f'{who} at {w}: Sign in is there and ends left of the frame\'s button',
+                          0 < rows['pill'] <= rows['btn'] - 0.5, rows)
         check('no page error', errors(b) == [], errors(b))
     finally:
         b.close()

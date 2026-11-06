@@ -165,6 +165,22 @@ const ENV_VARS: &[EnvVar] = &[
                Unset by default.",
     },
     EnvVar {
+        name: "SVOLDER_FAKE_COVER_GONE_FILE",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "A path: with `SVOLDER_HOST=fake`, the fake player's cover art is dropped, as \
+               with `SVOLDER_FAKE_COVER_GONE_AFTER_MS`, the moment a file appears there, so a \
+               test drops it on its own cue. Unset by default.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_PLAYER_GONE_FILE",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "A path: with `SVOLDER_HOST=fake`, the fake player quits, as with \
+               `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS`, the moment a file appears there, so a test \
+               drops it on its own cue. Unset by default.",
+    },
+    EnvVar {
         name: "SVOLDER_FAKE_ROUTE",
         read_by: "svolderd",
         dev_only: true,

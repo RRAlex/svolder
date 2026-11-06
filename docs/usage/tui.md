@@ -27,14 +27,17 @@ Options:
       --demo                   Try the TUI against a fake device on a daemon of its own, in a private directory that is removed on exit; nothing of yours is read or written
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
-      --join <SOCKET>          Open the TUI on the daemon listening on SOCKET and nothing else: no daemon is started and no direct session stands in, so a second front end can join a demo or any private daemon
+      --host                   With --demo, leave the computer's audio on: the real default sink's volume and meters, the real media player and the computer EQ, on the fake device. A volume or player change stays after the demo; the computer EQ the demo applied is removed
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --web                    With --demo, serve the web UI on a port of its own on every interface, signed in by token; the TUI's Web box and standard error show the link
+      --join <SOCKET>          Open the TUI on the daemon listening on SOCKET and nothing else: no daemon is started and no direct session stands in, so a second front end can join a demo or any private daemon
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
 
 `svolder tui --demo` tries the TUI with no device, no configuration and no daemon of your own
-(`make demo` builds and runs it from a checkout). It makes a private directory (mode 0700, `sd-` and
+(`make demo-safe` builds and runs it from a checkout; `make demo` is the variant below that uses your
+computer's real audio). It makes a private directory (mode 0700, `sd-` and
 six random hex digits, under the system's temporary directory), starts the `svolderd` that stands
 beside `svolder` (there is no search of `PATH`; it says what to build when that one is missing) in
 it over the fake device, and opens the TUI on that daemon. The fake device honours
@@ -44,7 +47,7 @@ meters play a music-like signal.
 
 The daemon and the TUI read their configuration and state from the private directory, which is also
 their runtime directory, and the daemon's `systemctl` and unit directory are not there either, with
-MQTT off, and `SVOLDER_HOST` is set to `off` for both, since the host controls would change your own
+MQTT off, and `SVOLDER_HOST` is set to `off` for the TUI (and the daemon runs a fake host), since the host controls would change your own
 speakers' volume and your media players: nothing of yours is read, written or acted on, not your
 configuration, your state, your socket, your daemon or your audio. The TUI only ever connects to
 that daemon's socket, so no daemon is started beside it and `--transport`, `--adapter` and
@@ -60,6 +63,39 @@ own log in it (the next demo removes it); Ctrl-C while it starts prints
 Quitting (`q`, Ctrl-C), an error, a panic and a signal stop the daemon and remove the directory; a
 TUI killed outright leaves the directory behind but not the daemon, which ends with it, and the next
 demo removes any such directory that is over a minute old and has no daemon holding it.
+
+`--host` and `--web` are opt-in extras of `--demo` and are refused without it (`make demo` runs
+`svolder tui --demo --host --web`; `make demo-dac` and `make demo-amp` pick the fake DAC or the fake
+amplifier with its meters moving; `PROFILE=<fake profile>` and `SIGNAL=1` reach the fake device as
+`SVOLDER_FAKE_PROFILE` and `SVOLDER_FAKE_SIGNAL`). The fake device list has one device per run, so
+there is no DAC-with-an-amplifier demo.
+
+`--host` leaves the host on for the daemon and the TUI, so the fake device sits beside your computer's
+real audio: the spectrum and meters follow the default sink, the Now playing card and its transport
+drive your real media player, the Host volume row turns your real sink, and `h` in the preset list
+puts the computer EQ on. These are your real ones: a volume or player change made in the demo stays
+after it. The demo says so once on standard error before the TUI opens and once in the TUI,
+`demo: fake devices, your computer's real audio (volume, player, EQ)`. The private directory stays the
+runtime directory, since the computer EQ's pid file goes in the runtime directory and must not sit
+beside one of yours, so the host tools are pointed at your session instead: `PIPEWIRE_RUNTIME_DIR` is
+the `XDG_RUNTIME_DIR` you ran it from (else `/run/user/<uid>`, or `$PIPEWIRE_RUNTIME_DIR` when you
+set one; `wpctl`, `pw-record`, `pw-dump`, `pw-play` and the computer EQ's `pipewire` all read it) and
+`DBUS_SESSION_BUS_ADDRESS` is yours (else the `bus` socket in that directory), which the player
+watcher reads. With no PipeWire socket there the demo does not start and says so. The computer EQ is
+kept by the `process` manager (`SVOLDER_HOST_EQ_MANAGER=process`), never a systemd unit, so nothing
+reaches your unit directory; its configuration, state, pid file and autostart entry are all in the
+private directory. A computer EQ the demo applied is removed when the demo ends (`q`, an error, a
+panic or a signal); one of yours that was already on is left as it was, since the demo reads and
+writes only its own state file, so turn yours off before trying `h` (two chains would stack). A TUI
+killed outright cannot remove its chain: `pkill -f '^[^ ]*pipewire -c /[^ ]*/sd-[0-9a-f]{6}/config/svolder/host-eq\.conf$'` stops the demo's, and only the demo's. MQTT stays off, and the
+daemon's `systemctl` and unit directory stay out as before.
+
+`--web` writes a `[web]` block into the demo's own configuration: enabled, listening on every
+interface (`0.0.0.0`) on a free port the kernel picked (never 8737 or 8738), `auth = "token"`, writes
+on. The page is plain HTTP, so anyone on your network who copies a sign-in link or token could use
+it while the demo runs. Standard error shows a link that signs this computer in, once and for five
+minutes, as `svolder web` does, before the TUI opens; the TUI's Web box (Settings) shows the link and
+the QR code for a phone, as it does for any daemon.
 
 `svolder tui --join <socket>` opens the TUI on the daemon listening on that socket and nothing else:
 it never walks the launcher chain, starts no daemon, opens no direct session and adds no device, so
@@ -583,8 +619,11 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     CLI shows without a key. In the wide tier the header also names it while it is on, as
     `Host EQ NAME`.
   - `Spectrum`, in the wide and tall tiers only and while `visualizer` is on: what the default sink
-    plays, in sixteen cells for its bands from 40 Hz to 16 kHz, each a block glyph (`▁▂▃▄▅▆▇█`) as
-    tall as the band is loud, `▁` for silence, as `Spectrum     ▁▃▅▇█▆▅▃▂▂▁▁▁▁▁▁`. Each block the
+    plays, in its sixteen bands from 40 Hz to 16 kHz spread over the pane's width to the edge the
+    Volume row reaches (between neighbouring bands, on the same log axis; a pane with no more room
+    than sixteen cells draws the lowest bands as they are), each cell a block glyph (`▁▂▃▄▅▆▇█`)
+    as tall as the band is loud, `▁` for silence, as `Spectrum     ▁▃▅▇█▆▅▃▂▂▁▁▁▁▁▁`, coloured
+    from red at the bass to violet at the treble where the theme has a spectrum. Each block the
     capture reads, every 21⅓ ms, takes a band straight up to the block's own value where that is
     higher than the band stands; a quieter block does not drop the band to its value but leaves it
     falling back at its one rate, the whole scale in 750 ms, so the row settles once the music
@@ -1429,7 +1468,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.31.3 │
+│                          v0.31.5 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1935,8 +1974,8 @@ shows the device name alone.
 With `intro_sound = true` under `[tui]` (off by default, and the Settings box's **Intro sound** row,
 in Behaviour), a short sound of about five and a half seconds plays with the wordmark, through
 PipeWire's `pw-play`. It plays once per `svolder tui` start, and only when the intro is shown, host
-audio is allowed (`host_audio` on, and `SVOLDER_HOST=off` not set, so `svolder tui --demo` never
-plays it) and `pw-play` is on `PATH`. It starts the moment the opening device first answers while
+audio is allowed (`host_audio` on, and `SVOLDER_HOST=off` not set, so `svolder tui --demo` without `--host`
+never plays it) and `pw-play` is on `PATH`. It starts the moment the opening device first answers while
 the wordmark is still up, because that is when its sample rate is known: a start that ends without a
 device answering during the intro, on the waiting panel, the Devices screen or the setup wizard, or
 with the intro skipped first, plays nothing.

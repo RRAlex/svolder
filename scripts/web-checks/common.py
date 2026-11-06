@@ -28,6 +28,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 CHECKS = f'{REPO}/target/web-checks'
 WEB = os.environ.get('SMOKE_WEB', f'{REPO}/bins/svolderd/web')
 SVOLDERD = os.environ.get('SVOLDERD', f'{REPO}/target/debug/svolderd')
+SVOLDER = os.environ.get('SVOLDER', f'{REPO}/target/debug/svolder')
 # Read the page's files from the tree (the developer's switch), unless the run asks for the
 # binary's own copies (SMOKE_EMBEDDED=1).
 LIVE_ASSETS = os.environ.get('SMOKE_EMBEDDED') != '1' and os.environ.get('SVOLDERD') is None
@@ -141,6 +142,12 @@ class Daemon:
         # the fake takes the first device off the air when this file appears (`drop`)
         self.gone_file = f'{home}/gone'
         environ['SVOLDER_FAKE_GONE_FILE'] = self.gone_file
+        # the fake host's player loses its art, or quits, when these files appear (`drop_cover`,
+        # `drop_player`)
+        self.cover_gone_file = f'{home}/cover-gone'
+        self.player_gone_file = f'{home}/player-gone'
+        environ['SVOLDER_FAKE_COVER_GONE_FILE'] = self.cover_gone_file
+        environ['SVOLDER_FAKE_PLAYER_GONE_FILE'] = self.player_gone_file
         environ.update(env or {})
         self.log = open(f'{home}/daemon.log', 'w')
         self._cmd = [SVOLDERD, '--socket', f'{home}/run/svolder.sock', '--config',
@@ -200,10 +207,24 @@ class Daemon:
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b'{}')
 
+    def cli(self, *args):
+        """The repo-built `svolder` run with this daemon's homes and config (never the installed one):
+        its stdout, or the failure's words."""
+        run = subprocess.run([SVOLDER, *args], env=self._environ, capture_output=True, text=True, timeout=30)
+        return run.stdout if run.returncode == 0 else f'exit {run.returncode}: {run.stderr}'
+
     def drop(self):
         """Take the first device off the air now, as a device out of reach: its link is cut and it
         is not heard or reached again (a restart brings it back)."""
         open(self.gone_file, 'w').close()
+
+    def drop_cover(self):
+        """The fake host's player loses its cover art now, the track staying (`host='fake'`)."""
+        open(self.cover_gone_file, 'w').close()
+
+    def drop_player(self):
+        """The fake host's player quits now (`host='fake'`)."""
+        open(self.player_gone_file, 'w').close()
 
     def restart(self):
         """Stop the daemon and start it again on the same port and homes (a reconnect); a device
@@ -273,18 +294,24 @@ class Chromium:
              '--hide-scrollbars',
              f'--window-size={size[0]},{size[1]}', *args, 'about:blank'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        port_file = f'{self.profile}/DevToolsActivePort'
-        for _ in range(200):
-            if os.path.exists(port_file) and open(port_file).read().count('\n') >= 1:
-                break
-            time.sleep(0.1)
-        self.port = int(open(port_file).read().split('\n')[0])
+        # From here close() can reap the process, so an exit (or a TERM) while the port is awaited,
+        # or a failure while it connects, leaves nothing behind.
         self.size, self.reduced, self.dpr, self.touch = size, reduced, dpr, touch
         self.errors = []
         self.warnings = []
         _live.append(self)
-        self.loop = asyncio.new_event_loop()
-        self.loop.run_until_complete(self._connect())
+        try:
+            port_file = f'{self.profile}/DevToolsActivePort'
+            for _ in range(200):
+                if os.path.exists(port_file) and open(port_file).read().count('\n') >= 1:
+                    break
+                time.sleep(0.1)
+            self.port = int(open(port_file).read().split('\n')[0])
+            self.loop = asyncio.new_event_loop()
+            self.loop.run_until_complete(self._connect())
+        except BaseException:
+            self.close()
+            raise
 
     async def _connect(self):
         import websockets
@@ -408,13 +435,16 @@ class Chromium:
     def close(self):
         if self not in _live:
             return
-        _live.remove(self)
+        # Taken off _live only once the process is reaped: a TERM during the close leaves it for the
+        # exit handler to find.
         try:
             self.loop.run_until_complete(self.ws.close())
         except Exception:
             pass
         reap(self.proc)
         kill_using(self.profile)
+        if self in _live:
+            _live.remove(self)
         remove_tree(self.profile)
 
 
@@ -450,11 +480,19 @@ class Firefox:
         with open(f'{self.profile}/user.js', 'w') as f:
             f.write('\n'.join(prefs) + '\n')
         self.gport = free_port()
-        # its BiDi websocket port is its own too (the default, 9222, is one for the whole machine)
-        self.gd = subprocess.Popen([GECKODRIVER, '--port', str(self.gport),
-                                    '--websocket-port', str(free_port())],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   start_new_session=True)
+        # its BiDi websocket port is its own too (the default, 9222, is one for the whole machine);
+        # 0 lets the browser pick a free one and report it in the session's webSocketUrl (this needs
+        # a geckodriver that reports the real port there, as 0.37 does): a port
+        # chosen here and bound later can be taken meanwhile (the log named
+        # NS_ERROR_SOCKET_ADDRESS_IN_USE, and the connection then met whoever held it)
+        # geckodriver's (and so the browser's) own messages go to a file in the profile, printed
+        # when the session or its first BiDi call fails
+        self.gd_log = f'{self.profile}/geckodriver.log'
+        with open(self.gd_log, 'w') as log:
+            self.gd = subprocess.Popen([GECKODRIVER, '--port', str(self.gport),
+                                        '--websocket-port', '0'],
+                                       stdout=log, stderr=subprocess.STDOUT,
+                                       start_new_session=True)
         # From here close() can reap geckodriver and the profile's Firefox, so a failure while the
         # session is made (or the BiDi socket opened) leaves nothing behind.
         self.sid = None
@@ -466,15 +504,30 @@ class Firefox:
                 break
             except Exception:
                 time.sleep(0.1)
-        r = self._post('/session', {'capabilities': {'alwaysMatch': {
-            'browserName': 'firefox', 'webSocketUrl': True,
-            'moz:firefoxOptions': {'args': ['-headless', '-profile', self.profile]}}}},
-            session=False)
-        self.sid = r['value']['sessionId']
-        self.bidi_url = r['value']['capabilities']['webSocketUrl']
-        self.size = size
-        self._viewport(*size)
-        self._preload()
+        try:
+            r = self._post('/session', {'capabilities': {'alwaysMatch': {
+                'browserName': 'firefox', 'webSocketUrl': True,
+                'moz:firefoxOptions': {'args': ['-headless', '-profile', self.profile]}}}},
+                session=False)
+            self.sid = r['value']['sessionId']
+            self.bidi_url = r['value']['capabilities']['webSocketUrl']
+            self.size = size
+            self._viewport(*size)
+            self._preload()
+        except Exception:
+            self._report_start_failure()
+            raise
+
+    def _report_start_failure(self):
+        """Print the tail of geckodriver's log and whether the browser is still there."""
+        try:
+            with open(self.gd_log) as f:
+                tail = f.read()[-1500:]
+        except OSError:
+            tail = '(no log)'
+        alive = self.gd.poll() is None
+        print(f'firefox did not start: geckodriver {"running" if alive else "gone"}; its log ended:\n'
+              f'{tail}', file=sys.stderr, flush=True)
 
     def _post(self, path, body=None, session=True, method='POST'):
         url = f'http://127.0.0.1:{self.gport}' + (f'/session/{self.sid}' if session else '') + path
@@ -524,7 +577,7 @@ class Firefox:
                 await ws.send(json.dumps({'id': 1, 'method': 'browsingContext.setViewport',
                                           'params': {'context': ctx,
                                                      'viewport': {'width': w, 'height': h},
-                                                     'devicePixelRatio': 1}}))
+                                                     'devicePixelRatio': self.dpr}}))
                 reply = json.loads(await ws.recv())
                 if reply.get('type') == 'error':
                     raise RuntimeError(reply)
@@ -591,7 +644,6 @@ class Firefox:
     def close(self):
         if self not in _live:
             return
-        _live.remove(self)
         if self.sid is not None:
             try:
                 self._post('', method='DELETE')
@@ -599,6 +651,8 @@ class Firefox:
                 pass
         reap(self.gd)
         kill_using(self.profile)
+        if self in _live:
+            _live.remove(self)
         remove_tree(self.profile)
 
 

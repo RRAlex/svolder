@@ -63,6 +63,12 @@ struct Demo {
 impl Demo {
     /// `None`, with the reason printed, on a machine with no `script(1)` to give a terminal.
     fn start() -> Option<Demo> {
+        Demo::start_with("--demo")
+    }
+
+    /// [`Demo::start`] with `flags` after `tui`. Never `--host`: no case touches the real host.
+    fn start_with(flags: &str) -> Option<Demo> {
+        assert!(!flags.contains("--host"), "no case runs with the host on");
         if matches!(
             Command::new("script").arg("--version").output(),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound
@@ -89,7 +95,7 @@ impl Demo {
             .args([
                 "-qec",
                 &format!(
-                    "stty cols 80 rows 40; exec {} tui --demo",
+                    "stty cols 80 rows 40; exec {} tui {flags}",
                     svolder.display()
                 ),
             ])
@@ -167,7 +173,7 @@ impl Demo {
             let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
             let env = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
             (exe == self.svolder
-                && args.last().is_some_and(|a| a == "--demo")
+                && args.iter().any(|a| a == "--demo")
                 && String::from_utf8_lossy(&env)
                     .split('\0')
                     .any(|e| e == scratch))
@@ -444,4 +450,59 @@ fn a_killed_tui_leaves_no_daemon() {
     assert!(demo.gone(pid, &dir, false), "the daemon outlived its TUI");
     // The next demo removes what this one left; clear it here so the case leaves nothing in /tmp.
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `--web` has the demo daemon serve the web UI: the configuration names a port that is none of
+/// the reserved ones on every interface with token sign-in and writes on, and the page answers
+/// there (the daemon's host is the fake one, as in every case here).
+#[test]
+fn the_web_option_serves_the_page() {
+    let Some(mut demo) = Demo::start_with("--demo --web") else {
+        return;
+    };
+    let (pid, dir) = demo.wait_for_daemon();
+    let config = std::fs::read_to_string(dir.join("config/svolder/config.toml")).expect("a config");
+    let listen = config
+        .lines()
+        .find_map(|l| l.strip_prefix("listen = \"0.0.0.0:"))
+        .and_then(|l| l.strip_suffix('"'))
+        .unwrap_or_else(|| panic!("no web listen in {config}"));
+    let port: u16 = listen.parse().expect("a port");
+    assert!(![8737, 8738, 8741].contains(&port), "{port}");
+    for want in [
+        "[web]",
+        "enabled = true",
+        "auth = \"token\"",
+        "writes = true",
+    ] {
+        assert!(config.contains(want), "{want} in {config}");
+    }
+    let until = Instant::now() + STEP;
+    let answer = loop {
+        if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(STEP));
+            let _ = stream.write_all(
+                format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            );
+            let mut text = Vec::new();
+            let _ = stream.read_to_end(&mut text);
+            break String::from_utf8_lossy(&text).into_owned();
+        }
+        assert!(
+            Instant::now() < until,
+            "the web UI never listened on {port}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(answer.starts_with("HTTP/1.1 200"), "{answer:.200}");
+    assert!(answer.to_lowercase().contains("<html"), "{answer:.200}");
+    demo.wait_for_tui(&dir);
+    demo.type_keys(b"q");
+    assert!(demo.shows("Quit svolder?"));
+    demo.type_keys(b"q");
+    assert!(
+        demo.gone(pid, &dir, true),
+        "the daemon or the directory outlived q"
+    );
 }

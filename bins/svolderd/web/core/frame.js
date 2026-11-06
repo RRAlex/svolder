@@ -3,13 +3,15 @@
 // The frame: what the page draws over every theme and never hands to one. The menu's button (over
 // the slot a theme anchors it to, else at the top right), the menu it opens (menu.js), the picker
 // of themes (picker.js), the popups (toast.js) and the reserved key `T`, which opens the picker
-// whatever the theme does with its keys. The button is dressed from the `--frame-*` tokens the
+// whatever the theme does with its keys, and Space, which plays and pauses the computer's player. The button is dressed from the `--frame-*` tokens the
 // theme sets; frame.css keeps it shown and on top.
 //
 // A theme reaches the frame through `core.frame`:
 //   toast(text, action, options)  a popup;   dismissToast(key)  take one away
-//   anchor(el | null)  put the button over `el` (null: the top right);  realign()  place it
-//                      again and bring the menu's rows up to date (after the theme redraws)
+//   anchor(el | null, { fixed })  put the button over `el` (null: the top right); `fixed` (a
+//                      boolean or a function asked at each placing) places it against the window,
+//                      for a slot pinned at the top that never moves as the page scrolls
+//   realign()          place it again and bring the menu's rows up to date (after a redraw)
 //   fade(on)           the button fades after 2 s without a pointer move, touch or key (a theme
 //                      that fills the screen); any of those brings it back at once
 //   openMenu(), closeMenu(), openPicker(), closePicker()
@@ -40,6 +42,27 @@ export function reservedKey(event) {
   if (event.key !== 't' && event.key !== 'T') return false;
   const target = event.target;
   return !(target?.closest?.(TYPING) ?? target?.matches?.(TYPING));
+}
+
+/** What Space already does when it has the focus: it activates it, or moves it. */
+const SPACE_OWNS = 'button, a[href], summary, select, [role=button], [role=slider], [role=switch], '
+  + '[role=checkbox], [role=tab], [role=option], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=link]';
+
+/** Whether a key press is the frame's Space: the bare key, not a repeat, the focus neither in a field
+ * it would type into nor on anything Space itself activates. */
+export function spaceKey(event) {
+  if (event.key !== ' ' || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.repeat) return false;
+  const target = event.target;
+  if (target?.closest?.(TYPING) ?? target?.matches?.(TYPING)) return false;
+  return !(target?.closest?.(SPACE_OWNS) ?? target?.matches?.(SPACE_OWNS));
+}
+
+/** The transport button Space presses for `page`: `pause` while its player plays, else `play`; `null`
+ * where there is no player with buttons and a track. */
+export function playPauseOf(page) {
+  const p = page?.device?.playing ?? page?.host ?? null;
+  if (!p?.buttons || !p.track) return null;
+  return p.track.status === 'playing' ? 'pause' : 'play';
 }
 
 /**
@@ -77,6 +100,8 @@ export function createFrame({ window, core, pick }) {
 
   // ---- where the button sits ----
   let slot = null;
+  /** Whether the button is placed against the window rather than the page (see `anchor`). */
+  let fixed = false;
   /** The observer of the slot's size, or nothing where the browser has none (or it throws). */
   let watching = null;
   try {
@@ -85,14 +110,17 @@ export function createFrame({ window, core, pick }) {
     // The button is then placed at a resize, at a font's arrival and by `realign`.
   }
 
-  /** Put the button over the slot, in page coordinates, or at the top right. */
+  /** Put the button over the slot, in page coordinates (in the window's while the slot is fixed),
+   * or at the top right. */
   function place() {
     let left;
     let top;
+    const still = Boolean(slot?.isConnected && (typeof fixed === 'function' ? fixed() : fixed));
+    root.classList.toggle('fixed', still);
     if (slot?.isConnected) {
       const box = slot.getBoundingClientRect();
-      left = box.left + window.scrollX;
-      top = box.top + window.scrollY;
+      left = box.left + (still ? 0 : window.scrollX);
+      top = box.top + (still ? 0 : window.scrollY);
     } else {
       left = document.documentElement.clientWidth - button.offsetWidth - INSET;
       top = INSET;
@@ -166,7 +194,18 @@ export function createFrame({ window, core, pick }) {
       else openPicker();
       return;
     }
-    if (picker.opened()) picker.key(event);
+    if (picker.opened()) {
+      picker.key(event);
+      return;
+    }
+    // Space plays and pauses the computer's player, unless a menu or a dialog is open
+    if (spaceKey(event) && !menu.opened() && !document.querySelector('[aria-modal="true"]')) {
+      const button = playPauseOf(core.model.page());
+      if (button) {
+        event.preventDefault();
+        core.actions.press(button).catch(() => {});
+      }
+    }
   }, { capture: true });
 
   const frame = {
@@ -174,8 +213,9 @@ export function createFrame({ window, core, pick }) {
     dismissToast,
     fade,
 
-    /** Put the button over `el`, or at the top right with none. */
-    anchor(el) {
+    /** Put the button over `el`, or at the top right with none; `fixed` as the header says. */
+    anchor(el, { fixed: still = false } = {}) {
+      fixed = still;
       if (slot) watching?.unobserve(slot);
       if (slot?.parentElement) watching?.unobserve(slot.parentElement);
       slot = el ?? null;

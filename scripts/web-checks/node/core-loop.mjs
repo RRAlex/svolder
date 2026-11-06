@@ -2,7 +2,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // Node harness for core/lifecycle.js and core/analysis.js: a canvas loop that runs only while its
 // canvas is on show, follows its size, holds a long gap to a tenth of a second and draws one still
-// frame for reduced motion; and the analysis frames, one stream for every holder, opened by the
+// frame for reduced motion (or, with `reduced: 'theme'`, keeps running), and draws at a pace
+// (a timer for 100 ms or more, `dt` held to twice the pace, one timer or frame outstanding even
+// when the pace changes); and the analysis frames, one stream for every holder, opened by the
 // first and closed by the last, a late holder told what the stream said, a gone stream asked for
 // again with a doubling wait. The browser's frames, observers and streams are fakes.
 // Run: node core-loop.mjs
@@ -42,7 +44,7 @@ const advance = (ms) => {
   now = end;
 };
 
-function loop({ reduced = false, width = 400, height = 100 } = {}) {
+function loop({ reduced = false, width = 400, height = 100, mode, pace } = {}) {
   frames = new Map();
   const canvas = { clientWidth: width, clientHeight: height };
   const log = { draws: [], resizes: [] };
@@ -59,6 +61,8 @@ function loop({ reduced = false, width = 400, height = 100 } = {}) {
     draw: (dt, at) => log.draws.push([dt, at]),
     resize: (w, h, dpr) => log.resizes.push([w, h, dpr]),
     watchVisible: (options) => { watch = options; return { stop() { stops.watch++; } }; },
+    ...(mode === undefined ? {} : { reduced: mode }),
+    ...(pace === undefined ? {} : { pace }),
     matchMedia: (query) => {
       assert.equal(query, '(prefers-reduced-motion: reduce)');
       return motion;
@@ -126,6 +130,159 @@ ok('reduced_motion_draws_one_still_frame_and_runs_no_loop', () => {
   assert.equal(log.draws.length, 3, 'and a still frame again');
   l.stop();
   assert.equal(motion.listeners.size, 0);
+});
+
+ok('reduced_still_is_as_before', () => {
+  const { loop: l, log, watch } = loop({ reduced: true, mode: 'still' });
+  l.start();
+  watch().onVisible(true);
+  assert.equal(l.running, false);
+  assert.equal(log.draws.length, 1, 'one still frame');
+  assert.equal(frames.size, 0);
+  l.stop();
+});
+
+ok('reduced_theme_keeps_the_loop_running_under_reduced_motion', () => {
+  const { loop: l, log, watch, motion } = loop({ reduced: true, mode: 'theme' });
+  assert.equal(l.reduced, true, 'the theme reads it from the loop');
+  l.start();
+  watch().onVisible(true);
+  assert.equal(l.running, true);
+  assert.equal(log.draws.length, 0, 'no still frame: the loop draws');
+  frame(1000);
+  frame(1016);
+  assert.deepEqual(log.draws.map(([dt]) => Math.round(dt * 1000)), [0, 16]);
+  motion.matches = false;
+  for (const fn of motion.listeners) fn();
+  assert.equal(l.running, true, 'and goes on when the setting changes');
+  assert.equal(l.reduced, false);
+  l.stop();
+  assert.equal(l.running, false);
+  assert.equal(frames.size, 0);
+});
+
+/** Frames the browser would give: one after another, 16 ms apart, until `ms` of fake time pass. */
+function run(ms, step = 16) {
+  const end = now + ms;
+  while (now < end) {
+    advance(Math.min(step, end - now));
+    if (frames.size) frame(now);
+  }
+}
+
+ok('a_pace_of_1000_draws_once_a_second', () => {
+  timers = [];
+  now = 0;
+  const { loop: l, log, watch } = loop({ pace: () => 1000 });
+  l.start();
+  watch().onVisible(true);
+  run(5000);
+  assert.ok(Math.abs(log.draws.length - 5) <= 1, `${log.draws.length} draws in 5 s`);
+  l.stop();
+});
+
+ok('a_pace_waits_on_a_timer_not_on_frames', () => {
+  timers = [];
+  now = 0;
+  const { loop: l, log, watch } = loop({ pace: () => 500 });
+  let asked = 0;
+  const ask = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (fn) => { asked++; return ask(fn); };
+  l.start();
+  watch().onVisible(true);
+  assert.equal(asked, 1, 'one frame to begin');
+  frame(now);
+  assert.equal(log.draws.length, 1);
+  asked = 0;
+  assert.equal(frames.size, 0, 'no frame is waiting while the pace waits');
+  advance(499);
+  assert.equal(asked, 0);
+  advance(1);
+  assert.equal(asked, 1, 'the timer asks for one frame');
+  frame(now);
+  assert.equal(log.draws.length, 2);
+  l.stop();
+  assert.equal(timers.length, 0, 'stopping takes the timer back');
+  globalThis.requestAnimationFrame = ask;
+});
+
+ok('a_pace_below_100_ms_draws_at_every_frame', () => {
+  timers = [];
+  now = 0;
+  const { loop: l, log, watch } = loop({ pace: () => 50 });
+  l.start();
+  watch().onVisible(true);
+  frame(1000);
+  frame(1016);
+  frame(1032);
+  assert.equal(log.draws.length, 3);
+  l.stop();
+});
+
+ok('a_pace_holds_dt_to_twice_the_pace', () => {
+  timers = [];
+  now = 0;
+  const { loop: l, log, watch } = loop({ pace: () => 1000 });
+  l.start();
+  watch().onVisible(true);
+  frame(1000);
+  advance(1000);
+  frame(3500);
+  assert.equal(log.draws.at(-1)[0], 2, 'a gap of 2.5 s is held to 2 s');
+  advance(1000);
+  frame(4500);
+  assert.equal(log.draws.at(-1)[0], 1, 'a step of one pace is told whole');
+  l.stop();
+});
+
+ok('a_pace_change_between_draws_leaves_one_handle', () => {
+  timers = [];
+  now = 0;
+  let wait = 1000;
+  const { loop: l, log, watch } = loop({ pace: () => wait });
+  const outstanding = () => timers.length + frames.size;
+  l.start();
+  watch().onVisible(true);
+  frame(now);
+  assert.equal(outstanding(), 1, 'one timer after a draw at 1000');
+  wait = 0;
+  advance(1000);
+  frame(now);
+  assert.equal(outstanding(), 1, 'one frame after the pace went to every frame');
+  assert.equal(timers.length, 0);
+  const drawn = log.draws.length;
+  frame(now + 16);
+  frame(now + 32);
+  assert.equal(log.draws.length, drawn + 2, 'every frame again');
+  assert.equal(outstanding(), 1);
+  wait = 1000;
+  frame(now + 48);
+  assert.equal(outstanding(), 1, 'one timer after the pace went to 1000');
+  assert.equal(frames.size, 0);
+  const before = log.draws.length;
+  advance(999);
+  assert.equal(log.draws.length, before);
+  advance(1);
+  frame(now);
+  assert.equal(log.draws.length, before + 1, 'draws resume at the new rate');
+  l.stop();
+  assert.equal(outstanding(), 0);
+});
+
+ok('a_hidden_canvas_draws_nothing_whatever_the_pace', () => {
+  timers = [];
+  now = 0;
+  const { loop: l, log, watch } = loop({ pace: () => 300 });
+  l.start();
+  watch().onVisible(true);
+  frame(1000);
+  assert.equal(log.draws.length, 1);
+  watch().onVisible(false);
+  assert.equal(timers.length, 0, 'the timer is taken back');
+  advance(5000);
+  assert.equal(frames.size, 0);
+  assert.equal(log.draws.length, 1);
+  l.stop();
 });
 
 ok('stopping_stops_watching', () => {

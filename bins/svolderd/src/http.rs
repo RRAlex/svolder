@@ -132,8 +132,8 @@ pub type Answer<B> = Pin<Box<dyn Future<Output = Response<B>> + Send>>;
 pub type Serve<B> = Arc<dyn Fn(Request<Incoming>) -> Answer<B> + Send + Sync>;
 
 /// Accept connections until `stop`, each served on a task of its own by `serve`. One past
-/// [`MAX_CONNECTIONS`] is closed as soon as it is accepted; dropping the set on the way out aborts
-/// every connection still open. `name` heads the log line of a failed accept.
+/// [`MAX_CONNECTIONS`] is closed as soon as it is accepted; on the way out every connection still open
+/// is aborted and waited for. `name` heads the log line of a failed accept.
 pub async fn accept_loop<B>(
     listener: TcpListener,
     serve: Serve<B>,
@@ -181,6 +181,9 @@ pub async fn accept_loop<B>(
             let _ = served;
         });
     }
+    // Abort every connection still open and wait until each task has ended, so nothing is still
+    // writing to a socket when the caller goes on.
+    connections.shutdown().await;
 }
 
 #[cfg(test)]

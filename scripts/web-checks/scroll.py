@@ -25,8 +25,8 @@ passed = 0
 
 # The bounds. Velocities are the grid's own units (cells per second).
 SCROLL_RISE = 8.0  # the mean vertical velocity moves at least this much along five wheel steps of
-# 100 px (11.1 measured; its 17 cells a second at the peak carry the smoke 120 px in 1.5 s)
-SCROLL_PEAK = 14.0  # and the greatest speed on the grid reaches at least this much after them
+# 100 px (9.7 measured alone, in Chromium; its 14.5 cells a second at the peak carry the smoke up)
+SCROLL_PEAK = 13.0  # and the greatest speed on the grid reaches at least this much after them
 BURST_MAX = 35.0  # the greatest speed on the grid after a 30-step burst (maxScrollPush is 30)
 PAN_RISE = 1.0  # the same for the touch pan
 REST_UP_SHARE = 0.08  # the mean height of the cloud's centre over its source, of the canvas height

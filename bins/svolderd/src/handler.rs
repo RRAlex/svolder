@@ -464,17 +464,19 @@ impl Daemon {
         self.stop.notified().await;
     }
 
-    /// Stop the MQTT bridge, then ask every actor to close its session, so the radio is
-    /// released before the daemon exits.
+    /// Stop the servers, then the computer's player, then the MQTT bridge, then ask every actor
+    /// to close its session, so the radio is released before the daemon exits.
     ///
-    /// The bridge goes first, while every device is still its own, and says `offline` for each
-    /// of them and for itself before disconnecting. Every actor is asked at once, each under
+    /// The servers (MCP, web) go before the player's source, so no open page is told on the
+    /// way down that the computer is no longer watched. The bridge goes before the actors, while
+    /// every device is still its own, and says `offline` for each of them and for itself before
+    /// disconnecting. Every actor is asked at once, each under
     /// its own deadline — asking them one at a time could let an unreachable device delay the
     /// exit past a service manager's SIGKILL, leaving its session open.
     pub async fn shutdown(&self) {
-        self.host.stop();
         self.mcp.stop().await;
         self.web.stop().await;
+        self.host.stop();
         self.stop_bridge().await;
         let devices = self.devices();
         let asks = devices

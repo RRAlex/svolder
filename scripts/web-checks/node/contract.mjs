@@ -239,6 +239,13 @@ await ok('facts_name_what_the_device_section_shows', async () => {
   assert.ok(noted.includes('Passphrase'));
   assert.deepEqual(factsOf(null), []);
   assert.deepEqual(factsOf({}), []);
+  // The cover of the track is a fact when the player has one, and only then.
+  const playing = { track: { cover: 'abc123' } };
+  assert.deepEqual(factsOf({ playing }), ['Cover']);
+  assert.deepEqual(factsOf({ ...byName.dac.page.device, playing }).slice(-1), ['Cover']);
+  assert.equal(factsOf({ playing: { track: { cover: null } } }).includes('Cover'), false);
+  assert.equal(factsOf({ playing: { track: {} } }).includes('Cover'), false);
+  assert.equal(factsOf({ playing: { track: null } }).includes('Cover'), false);
   const guest = factsOf(byName['dac-guest'].page.device);
   assert.equal(guest.includes('Unit'), byName['dac-guest'].page.device.facts.unit !== undefined);
 });

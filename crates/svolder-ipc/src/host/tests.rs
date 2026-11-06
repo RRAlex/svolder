@@ -221,6 +221,40 @@ fn dac_rate_differs_is_named() {
 }
 
 #[test]
+fn a_dac_with_no_read_rate_is_unknown_and_not_changing() {
+    let mut device = dac();
+    device.rate_hz = None;
+    let line = path_line(&clean(), &device);
+    assert!(line.hops[2].unknown, "{line:?}");
+    assert!(!line.hops[2].changes, "{line:?}");
+    // A read rate matching the sink's is neither.
+    let line = path_line(&clean(), &dac());
+    assert!(!line.hops[2].unknown, "{line:?}");
+    assert!(!line.hops[2].changes, "{line:?}");
+}
+
+#[test]
+fn the_player_and_computer_hops_mark_an_unread_fact_unknown() {
+    let line = path_line(&clean(), &dac());
+    assert!(!line.hops[0].unknown && !line.hops[1].unknown, "{line:?}");
+    // The player's rate not read.
+    let mut route = clean();
+    route.player.as_mut().unwrap().rate_hz = None;
+    let line = path_line(&route, &dac());
+    assert!(line.hops[0].unknown && !line.hops[1].unknown, "{line:?}");
+    // The sink's volume not read.
+    let mut route = clean();
+    route.sink.as_mut().unwrap().volume_milli = None;
+    let line = path_line(&route, &dac());
+    assert!(!line.hops[0].unknown && line.hops[1].unknown, "{line:?}");
+    // No player identified.
+    let mut route = clean();
+    route.player_match = PlayerMatch::NoPlayer;
+    let line = path_line(&route, &dac());
+    assert!(line.hops[0].unknown && !line.hops[0].changes, "{line:?}");
+}
+
+#[test]
 fn not_this_dac_gives_no_verdict() {
     let mut route = clean();
     route.sink = Some(SinkFacts {

@@ -249,3 +249,56 @@ async fn a_restart_under_another_token_ends_the_codes() {
     daemon.web_to(&WebConfig::default()).await;
     fake.stop().await;
 }
+
+/// Read what a page's event stream says into `seen`, until the model is in when `until_model`
+/// says so, else until the stream is closed.
+async fn read_stream(
+    stream: &mut TcpStream,
+    until_model: bool,
+    seen: &mut String,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt;
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = stream.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        seen.push_str(&String::from_utf8_lossy(&chunk[..n]));
+        if until_model && seen.contains("event: model") {
+            return Ok(());
+        }
+    }
+}
+
+/// The daemon stops what reads the computer's player (the web UI) before the player's source, so
+/// a page open at shutdown is never told that the computer is no longer watched: it keeps the
+/// last line it heard.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_page_open_at_shutdown_never_hears_the_host_go() {
+    use tokio::io::AsyncWriteExt;
+    for _ in 0..5 {
+        let fake = crate::web::test_support::fake_daemon_playing("gungnir2-v2", "dac").await;
+        let daemon = &fake.daemon;
+        daemon.web_to(&loopback()).await;
+        let addr = listening(daemon).await;
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let request = format!(
+            "GET /api/v1/events?needs=host HTTP/1.1\r\nHost: {addr}\r\nAccept: text/event-stream\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut seen = String::new();
+        read_stream(&mut stream, true, &mut seen).await.unwrap();
+        assert!(seen.contains("event: model"), "{seen}");
+        daemon.shutdown().await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            read_stream(&mut stream, false, &mut seen),
+        )
+        .await;
+        assert!(
+            !seen.contains("event: host\ndata: null"),
+            "the page was told the computer went: {seen}"
+        );
+    }
+}

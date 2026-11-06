@@ -439,8 +439,6 @@ try:
          "document.querySelector('.fxpop').__same = 1; })()")
     open_by_click(b)
     before = rect(b, '.fxbtn')
-    pill_before = rect(b, '#part-link')
-    gap_before = pill_before[0] - before[2]
     gone.drop()
     changed = False
     for _ in range(40):
@@ -452,10 +450,9 @@ try:
     b.sleep(0.5)
     s = state(b)
     after = rect(b, '.fxbtn')
-    pill_after = rect(b, '#part-link')
     same = b.ev("[!!document.querySelector('.fxbtn').__same, "
                 "!!document.querySelector('.fxpop').__same]")
-    check('the pill changed (a link drop)', changed, word)
+    check('the link changed (a link drop)', changed, word)
     check(
         'the button and the open menu are the same nodes after the swap',
         same == [True, True],
@@ -468,11 +465,10 @@ try:
         abs(after[1] - before[1]) < 1,
         (before, after),
     )
-    gap_after = pill_after[0] - after[2]
     check(
-        'the button stays beside the pill (same gap)',
-        abs(gap_after - gap_before) < 1.5,
-        (gap_before, gap_after),
+        'the button stays where it is when the link changes (the word is beside the name)',
+        abs(after[0] - before[0]) < 1.5 and abs(after[1] - before[1]) < 1.5,
+        (before, after),
     )
     popr = rect(b, '.fxpop')
     check('the popover is inside the viewport', popr[0] >= 0 and popr[2] <= 1280, popr)
@@ -518,11 +514,19 @@ try:
     # the Theme row opens the picker with Ember marked
     open_by_click(b)
     click_el(b, '#menu-theme')
+    # each theme's picture is drawn once its module has loaded
+    for _ in range(50):
+        if b.ev("document.querySelectorAll('#picker .tprev svg').length") >= 4:
+            break
+        b.sleep(0.1)
     p = b.ev(PICKER)
     check('the_theme_row_opens_the_picker_with_ember_marked',
           p and p['role'] == 'dialog' and p['modal'] == 'true' and p['title'] == 'Theme'
           and p['cards'] == [['ember', 'true', 'Ember', 'warm, smoke and glow', True],
-                             ['paper', None, 'Paper', 'light, ink and notes', True]]
+                             ['paper', None, 'Paper', 'light, ink and notes', True],
+                             ['signal', None, 'Signal', 'the line the sound takes', True],
+                             ['nightdrive', None, 'Night drive',
+                              'an outrun road that moves with the music', True]]
           and not p['menuOpen'] and p['focus'] == 'ember' and p['inert'] is True, p)
     check('  the sheet says the choice is per browser and how to get back',
           p and p['note'] == "Each browser keeps its own choice. Your sections' order stays with "
@@ -554,6 +558,30 @@ try:
           sent == [] and b.ev(PICKER) is not None, sent)
     b.press('T')
     check('  and T closes it', b.ev(PICKER) is None)
+
+    # the picker's close button: inside the window, 44 x 44, closes it with the focus back on the menu button
+    pb = make()
+    for theme in ('ember', 'paper', 'signal', 'nightdrive'):
+        for w, h in ((1280, 800), (412, 915), (360, 780)):
+            pb.resize(w, h)
+            pb.goto(f'{dac.url}?theme={theme}')
+            open_by_click(pb)
+            click_el(pb, '#menu-theme')
+            box = pb.ev("""(() => { const x = document.querySelector('#picker .pclose');
+              if (!x) return null; const r = x.getBoundingClientRect(); const s = document.querySelector('#picker .picker-sheet').getBoundingClientRect();
+              return { w: r.width, h: r.height, left: r.left, top: r.top, right: r.right, bottom: r.bottom, name: x.getAttribute('aria-label'),
+                svg: !!x.querySelector('svg'), sheet: [s.left, s.top, s.right, s.bottom], vw: innerWidth, vh: innerHeight }; })()""")
+            ok = (box is not None and abs(box['w'] - 44) <= 1 and abs(box['h'] - 44) <= 1
+                  and box['left'] >= 0 and box['top'] >= 0 and box['right'] <= box['vw'] and box['bottom'] <= box['vh']
+                  and box['name'] == 'Close' and box['svg']
+                  and box['right'] <= box['sheet'][2] and box['top'] >= box['sheet'][1])
+            check(f'the_picker_close_button_is_44_px_inside_the_window ({theme} {w}x{h})', ok, box)
+            if box:
+                pb.click(box['left'] + box['w'] / 2, box['top'] + box['h'] / 2)
+            pb.sleep(0.2)
+            check(f'  ({theme} {w}x{h}) a click on it closes the picker, the focus back on the menu button',
+                  pb.ev(PICKER) is None and state(pb)['focus'] == 'fx-button', state(pb))
+    pb.close()
 
     # T and the fade
     b.page(CORE + ".then((core) => core.frame.fade(true))")
@@ -621,7 +649,7 @@ try:
     b.press('T')
     cards = b.ev("[...document.querySelectorAll('#picker .tcard')].map(c => c.dataset.theme)")
     check('the picker has a card for each listed theme, the test ones too',
-          cards == ['ember', 'paper', 'probe', 'second'], cards)
+          cards == ['ember', 'paper', 'signal', 'nightdrive', 'probe', 'second'], cards)
     click_el(b, '#picker .tcard[data-theme=second]')
     b.sleep(1.0)
     on = b.ev("""({ theme: document.documentElement.dataset.theme,
@@ -785,6 +813,138 @@ try:
     errs = errors(b)
     check('no page error on the guest page', errs == [], errs)
     b.close()
+    # a short window: the menu scrolls inside itself and its last row can be reached and pressed
+    for theme in ('nightdrive', 'ember'):
+        b = make(size=(390, 300))
+        b.goto(f'{dac.url}?theme={theme}')
+        b.sleep(1.5)
+        open_by_click(b)
+        geo = b.ev("""(() => { const p = document.querySelector('.fxpop'); const r = p.getBoundingClientRect();
+          return { bottom: r.bottom, h: innerHeight, over: p.scrollHeight > p.clientHeight,
+            maxh: p.style.maxHeight, ov: getComputedStyle(p).overflowY }; })()""")
+        check(f'a short window ({theme}): the menu is taller than its room, scrolls inside itself and ends inside the window',
+              geo['over'] and geo['ov'] == 'auto' and geo['bottom'] <= geo['h'] - 11 and geo['maxh'].endswith('px'), geo)
+        b.press('End')
+        b.sleep(0.3)
+        last = b.ev("""(() => { const el = document.activeElement; const r = el.getBoundingClientRect();
+          const p = document.querySelector('.fxpop').getBoundingClientRect();
+          return { id: el.id || el.dataset.motion || el.dataset.level || el.dataset.switch || el.tagName,
+            inside: r.top >= p.top - 1 && r.bottom <= p.bottom + 1, last: el === [...document.querySelectorAll(
+            '.fxpop [role^=menuitem]')].filter(e => e.getAttribute('aria-disabled') !== 'true' && !e.hidden).pop() }; })()""")
+        check(f'  ({theme}) the End key brings the last item into view', last['inside'] and last['last'], last)
+        inside = """(() => { const el = document.activeElement; const r = el.getBoundingClientRect();
+          const p = document.querySelector('.fxpop').getBoundingClientRect();
+          return r.top >= p.top - 1 && r.bottom <= p.bottom + 1; })()"""
+        b.press('Home')
+        for _ in range(12):
+            b.press('ArrowDown')
+        b.sleep(0.2)
+        check(f'  ({theme}) ArrowDown past the fold keeps the focused row inside the popover', b.ev(inside) is True)
+        b.press('ArrowUp')
+        b.press('ArrowUp')
+        b.sleep(0.2)
+        check(f'  ({theme}) ArrowUp scrolls it back, the row still inside', b.ev(inside) is True)
+        before = b.ev("parseFloat(document.querySelector('.fxpop').style.maxHeight)")
+        b.resize(390, 420)
+        b.sleep(0.4)
+        grown = b.ev("""(() => { const p = document.querySelector('.fxpop'); return [parseFloat(p.style.maxHeight),
+          p.getBoundingClientRect().bottom, innerHeight]; })()""")
+        check(f'  ({theme}) a taller window while open lifts the cap, the popover still ends inside it',
+              grown[0] > before and grown[1] <= grown[2] - 11, [before, grown])
+        click_el(b, '.fxpop [role^=menuitem]:focus')
+        b.sleep(0.5)
+        check(f'  ({theme}) pressing the last item works: the menu closes', state(b)['open'] is False, state(b))
+        b.close()
+    # a phone held sideways: the picker's sheet stays inside the window and its grid scrolls under a finger (a
+    # wheel in Firefox, which has no touch path in these runs) to the last theme's card
+    picker_geo = """(() => { const sheet = document.querySelector('#picker .picker-sheet').getBoundingClientRect();
+      const grid = document.querySelector('#picker .picker-grid'); const g = grid.getBoundingClientRect();
+      const cards = [...grid.querySelectorAll('.tcard')]; const last = cards[cards.length - 1].getBoundingClientRect();
+      return { sheetBottom: sheet.bottom, h: innerHeight, scrolls: grid.scrollHeight > grid.clientHeight,
+        gridTop: g.top, gridBottom: g.bottom, lastTop: last.top, lastBottom: last.bottom, cards: cards.length,
+        scrollTop: grid.scrollTop }; })()"""
+    for theme in ('nightdrive', 'ember'):
+      for size in ((915, 412), (412, 915), (360, 780)):
+        b = make(size=size, dpr=3, touch=True) if browser == 'chromium' else make(size=size, dpr=3)
+        b.goto(f'{dac.url}?theme={theme}')
+        b.sleep(1.5)
+        open_by_click(b)
+        b.ev("document.getElementById('menu-theme').click()")
+        b.sleep(0.6)
+        geo = b.ev(picker_geo)
+        name = f'({theme}, {size[0]}x{size[1]})'
+        check(f'the_picker_reaches_every_theme_on_a_phone {name}: the sheet ends inside the window',
+              geo['sheetBottom'] <= geo['h'], geo)
+        if not geo['scrolls']:
+            check(f'  {name} the grid fits: the last card is inside it', geo['lastBottom'] <= geo['gridBottom'] + 1, geo)
+            b.close()
+            continue
+        # the picker focuses the card in use (scrolling it into view): start from the top, the last card out of sight
+        b.ev("document.querySelector('#picker .picker-grid').scrollTop = 0")
+        b.sleep(0.2)
+        geo = b.ev(picker_geo)
+        check(f'  {name} from the top the last card is below the grid\'s edge', geo['lastBottom'] > geo['gridBottom'], geo)
+        x = size[0] // 2
+        y0, y1 = geo['gridBottom'] - 20, geo['gridTop'] + 20
+        if browser == 'chromium':
+            touches = lambda kind, y: b.send('Input.dispatchTouchEvent', {'type': kind, 'touchPoints': [] if kind == 'touchEnd'
+                                                                           else [{'x': x, 'y': y, 'id': 1}]})
+            touches('touchStart', y0)
+            for i in range(1, 13):
+                touches('touchMove', y0 + (y1 - y0) * i / 12)
+                b.sleep(0.016)
+            touches('touchEnd', y1)
+        else:
+            b._post('/actions', {'actions': [{'type': 'wheel', 'id': 'wheel', 'actions': [
+                {'type': 'scroll', 'x': x, 'y': int(y0), 'deltaX': 0, 'deltaY': 400, 'duration': 0, 'origin': 'viewport'}]}]})
+        b.sleep(0.6)
+        after = b.ev(picker_geo)
+        check(f'  {name} a drag of the grid (a wheel in Firefox) brings the last card fully into view',
+              after['scrollTop'] > 0 and after['lastBottom'] <= after['gridBottom'] + 1 and after['lastTop'] >= after['gridTop'] - 1, after)
+        b.close()
+    # the menu under a finger when the visible part of the window is short (a browser bar over the bottom, here the
+    # page pinched to twice its size: the visual viewport is half the window): the menu ends inside what is seen and a
+    # drag brings its last row into view (Chromium, whose page scale can be set)
+    if browser == 'chromium':
+      for theme in ('nightdrive', 'ember'):
+        b = make(size=(412, 915), dpr=3, touch=True)
+        b.goto(f'{dac.url}?theme={theme}')
+        b.sleep(1.5)
+        b.send('Emulation.setPageScaleFactor', {'pageScaleFactor': 3.0})
+        b.sleep(0.5)
+        x, y = common.center(b, '#fx-button')
+        b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x, 'y': y, 'id': 1}]})
+        b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+        b.sleep(0.6)
+        menu_geo = """(() => { const p = document.querySelector('.fxpop'); const r = p.getBoundingClientRect();
+          const rows = [...p.querySelectorAll('[role^=menuitem]')]; const last = rows[rows.length - 1].getBoundingClientRect();
+          return { open: !p.hidden, bottom: r.bottom, top: r.top, seen: visualViewport.offsetTop + visualViewport.height,
+            scale: visualViewport.scale, over: p.scrollHeight > p.clientHeight, scrollTop: p.scrollTop,
+            lastTop: last.top, lastBottom: last.bottom }; })()"""
+        g = b.ev(menu_geo)
+        check(f'the_menu_ends_inside_what_is_seen ({theme}, 412x915 pinched to 3x): its bottom is inside the visual viewport and it scrolls',
+              g['open'] and g['scale'] == 3 and g['bottom'] <= g['seen'] and g['over'], g)
+        b.close()
+        # and in a window that is short in itself (390x300), a finger's drag of the open menu reaches its last row
+        b = make(size=(390, 300), dpr=3, touch=True)
+        b.goto(f'{dac.url}?theme={theme}')
+        b.sleep(1.5)
+        x, y = common.center(b, '#fx-button')
+        b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x, 'y': y, 'id': 1}]})
+        b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+        b.sleep(0.6)
+        g = b.ev(menu_geo)
+        y0, y1 = g['bottom'] - 20, g['top'] + 20
+        b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x - 60, 'y': y0, 'id': 1}]})
+        for i in range(1, 13):
+            b.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': x - 60, 'y': y0 + (y1 - y0) * i / 12, 'id': 1}]})
+            b.sleep(0.016)
+        b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+        b.sleep(0.6)
+        after = b.ev(menu_geo)
+        check(f'  ({theme}) a touch drag of the open menu brings its last row into view',
+              after['scrollTop'] > 0 and after['lastBottom'] <= after['bottom'] + 1 and after['lastTop'] >= after['top'] - 1, after)
+        b.close()
 finally:
     for d in (dac, amp, gone, host, two, guest):
         if d:

@@ -35,7 +35,7 @@ Each says how a part works now and the principles behind it.
 - [The web page's visualizer](design/web-visualizer.md): the looks, cost, the sink label, timing.
 - [Dragging the curve's points](design/web-curve-dragging.md): the Response graph under a mouse and
   a finger: grab reach, the axis hold, Q by wheel, right drag and pinch, the swap hold.
-- [Web themes](design/web-themes.md), [the frame](design/frame.md), [Paper](design/web-paper.md): the contract.
+- [Web themes](design/web-themes.md), [the frame](design/frame.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md): the contract.
 - [Themes and effects](design/themes-and-effects.md): Ember's effects, the smoke, Arrange mode.
 - [The capture file](design/capture.md): what `svolder capture` records, the scrub, and the daemon
   it stops and brings back.
@@ -279,8 +279,8 @@ and in a few scripts that read tokens (the strip, the dial). To retune the smoke
 - **The gates:** `make check` (format, clippy, safety tests, docs check, licences, headers,
   tests), `make safety-tests`, `make web-checks-quick` after a page change, `make web-checks`
   before one is merged, `make e2e` over two real Bluetooth controllers. `make help` lists the rest.
-- **Without hardware:** `SVOLDER_TRANSPORT=fake` or `make demo` runs a fake device and a throwaway
-  daemon; `make e2e` and `scripts/e2e.sh` drive `svolder-sim` as a peripheral on a second adapter.
+- **Without hardware:** `SVOLDER_TRANSPORT=fake` or `make demo-safe` runs a fake device and a throwaway
+  daemon (`make demo` adds your computer's real audio and the web UI); `make e2e` and `scripts/e2e.sh` drive `svolder-sim` as a peripheral on a second adapter.
 
 ## Read these ten files first
 

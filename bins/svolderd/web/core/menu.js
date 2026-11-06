@@ -155,6 +155,7 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
     }
     pop.replaceChildren(...rows.map((row) => row.el));
     sync();
+    if (opened()) fit();
     (pop.querySelector('[aria-checked=true]') ?? choices()[0])?.focus();
   }
 
@@ -222,6 +223,21 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
     );
   }
 
+  /** Cap the popover's height to the room between its top and the window's bottom (12 px spare),
+   * so a short window scrolls the menu inside itself. */
+  function fit() {
+    // the room is what the person sees: the visual viewport's bottom (a phone's browser bar can hide
+    // the layout viewport's own), never more than the window's
+    const seen = window.visualViewport;
+    const bottom = seen ? Math.min(window.innerHeight, seen.offsetTop + seen.height) : window.innerHeight;
+    const room = bottom - pop.getBoundingClientRect().top - 12;
+    // max-height is the content's: the padding and the border come on top of it.
+    const box = window.getComputedStyle(pop);
+    const frame = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth']
+      .reduce((sum, name) => sum + (parseFloat(box[name]) || 0), 0);
+    pop.style.maxHeight = `${Math.max(room - frame, 60).toFixed(0)}px`;
+  }
+
   /** Open the menu under its button, inside the viewport, with the focus on the checked radio. */
   function open() {
     if (opened()) return;
@@ -239,6 +255,7 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
     const room = document.documentElement.clientWidth - 8 - width;
     const left = Math.max(8, Math.min(right - width, room));
     pop.style.setProperty('left', `${(left - box.left).toFixed(1)}px`);
+    fit();
     (pop.querySelector('[role=menuitemradio][aria-checked=true]') ?? choices()[0])?.focus();
   }
 
@@ -295,6 +312,12 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
   });
   // A step of the history shows another device: the menu closes first.
   window.addEventListener('popstate', () => close(false));
+  window.addEventListener('resize', () => {
+    if (opened()) fit();
+  });
+  window.visualViewport?.addEventListener('resize', () => {
+    if (opened()) fit();
+  });
   // On the window, so the theme's own key listeners on the document see the key first, while the
   // menu still stands (they leave a key that is the menu's alone, see `menuOwns`).
   window.addEventListener('keydown', (event) => {
@@ -331,6 +354,7 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
     if (to) {
       event.preventDefault();
       to.focus();
+      to.scrollIntoView({ block: 'nearest' });
     }
   });
   document.addEventListener('focusout', (event) => {

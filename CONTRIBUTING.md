@@ -38,12 +38,14 @@ first.
 
 ## Try a change without a device
 
-    make demo
+    make demo-safe
 
 builds the workspace and runs `svolder tui --demo`: the TUI on a fake device, on a daemon of its
 own.
 The daemon, its configuration, its state and its socket live in a private directory made for the
-run and removed when it ends, so nothing of yours is read or written.
+run and removed when it ends, so nothing of yours is read or written. `make demo` is not that: it
+adds `--host --web`, so the fake device sits beside your computer's real audio (the real volume,
+media player and computer EQ, which stay changed after it) and the web UI listens on a free port.
 
 The fake is a Gungnir 2. `SVOLDER_FAKE_PROFILE` picks another profile (`fake-amp`, `fake-mono`,
 `fake-five` or any built-in one) and `SVOLDER_FAKE_SIGNAL=1` plays a music-like signal on the
@@ -73,8 +75,8 @@ variable needs `make docs-env`, which regenerates that file's table from the bui
 | `make safety-tests` | after touching a test file the safety list names (`make check` runs it) | nothing |
 | `make docs-check` | after editing any Markdown (`make check` runs it) | `python3` |
 | `make workflow-check` | after editing a workflow (`make check` runs it) | `python3` with PyYAML |
-| `make web-checks-quick` | after a change to the web page, its styles or templates that leaves the smoke alone | node, chromium, firefox and geckodriver, about five minutes |
-| `make web-checks` | before merging any change to the web page, and whenever a smoke file changed | node, both browsers, about 35 minutes |
+| `make web-checks-quick` | after a change to the web page, its styles or templates that leaves the smoke alone | node, chromium, firefox and geckodriver, about 38 minutes (much longer with `WEB_CHECKS_JOBS=1`; `WEB_CHECKS_JOBS` sets how many checks run at once) |
+| `make web-checks` | before merging any change to the web page, and whenever a smoke file changed | node, both browsers, over an hour (six checks at a time, `WEB_CHECKS_JOBS` sets it) |
 | `make e2e` | after a change to the transport, the session, the scanner, the daemon's reconnect or the simulator | two Bluetooth controllers; not part of `make check` |
 | `make docs-check-merge` | before a merge to main | `python3` |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | before a merge, and after editing a doc comment | nothing |

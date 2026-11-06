@@ -84,10 +84,10 @@ def measure(b, script, missing):
 
 
 def bring(b, selector):
-    """Scroll the Tone pane to the top of the window and wait until `selector` is inside it (what
-    sits above the pane settles late on a loaded machine, and a click or a hit test lands where
-    the pane no longer is)."""
-    b.ev("document.getElementById('part-tone').scrollIntoView({ block: 'start' })")
+    """Scroll `selector` to the middle of the window and wait until it is inside it (what sits above
+    the pane settles late on a loaded machine, and a click or a hit test lands where the pane no
+    longer is; the middle keeps it clear of the frame's button, pinned at the top right)."""
+    b.ev(f"document.querySelector({json.dumps(selector)}).scrollIntoView({{ block: 'center' }})")
     waiting(b, f"(() => {{ const r = document.querySelector({json.dumps(selector)})"
             ".getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()", 2.0)
 
@@ -404,7 +404,7 @@ def at_size(w, h, equal):
         b.goto(d.url)
         b.sleep(1.0)
         # the Tone pane may be below the fold: scrolled to once, so the clicks land
-        b.ev("document.getElementById('part-tone').scrollIntoView({ block: 'start' })")
+        b.ev("document.getElementById('part-tone').scrollIntoView({ block: 'center' })")
         b.sleep(0.4)
         base = b.ev(TOPS)
         seen = []
@@ -443,7 +443,7 @@ def held_without_move():
         api_loudness(d, 20)
         b.goto(d.url)
         b.sleep(1.0)
-        b.ev("document.getElementById('part-tone').scrollIntoView({ block: 'start' })")
+        b.ev("document.getElementById('part-tone').scrollIntoView({ block: 'center' })")
         b.sleep(0.4)
         check(f'{tag}: the page has no moveBefore',
               b.ev("typeof Element.prototype.moveBefore") == 'undefined')

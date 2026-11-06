@@ -153,6 +153,8 @@ const SPECTRUM_LIGHTNESS: f32 = 0.55;
 const MUTE_SATURATION: f32 = 0.33;
 /// How much darker [`mute`] leaves the blend, once desaturated.
 const MUTE_DARKEN: f32 = 0.85;
+/// How much of the rainbow's own saturation the Spectrum row keeps against its luma grey: half.
+const SPECTRUM_ROW_SATURATION: f32 = 0.5;
 
 /// Primary text: off-white rather than white, so a full screen of it is not a wall of glare.
 const TEXT: Rgb = (0xf2, 0xf0, 0xea);
@@ -914,7 +916,7 @@ impl Theme {
 
     /// The tone curve's colour `along` the way from its lowest frequency (0) to its highest (1),
     /// carried `drift` degrees round by the rainbow scroll, muted or not, or `None` where this
-    /// theme has no spectrum to draw in at all (see [`Theme::spectrum`]).
+    /// theme has no spectrum to draw in at all.
     ///
     /// On a preset with no curve stops of its own, the curve is [`SPECTRUM_ARC`] of the hue
     /// circle (red at the lowest frequency to violet at the highest), and drift turns the whole
@@ -923,18 +925,7 @@ impl Theme {
     /// one end to the other. Muted desaturates either one toward its own grey and a little
     /// darker ([`mute`]).
     pub fn curve_colour(&self, along: f32, drift: f32, muted: bool) -> Option<Color> {
-        let Some(stops) = self.preset.curve else {
-            let degrees = drift + SPECTRUM_ARC * along;
-            return match muted {
-                true => self.muted_spectrum(degrees),
-                false => self.spectrum(degrees),
-            };
-        };
-        if self.monochrome || matches!(self.depth, ColorDepth::Ansi16 | ColorDepth::Auto) {
-            return None;
-        }
-        let place = f64::from(fold(along + drift / (HUE_CIRCLE / 2.0)));
-        let rgb = blend(stops, place);
+        let rgb = self.curve_rgb(along, drift)?;
         let rgb = match muted {
             true => mute(rgb),
             false => rgb,
@@ -942,37 +933,33 @@ impl Theme {
         Some(quantise(rgb, self.depth))
     }
 
-    /// The colour `degrees` round the hue circle draws in, or `None` where this theme has no
-    /// spectrum to draw in at all.
-    ///
-    /// A spectrum needs more colours than the 16 ANSI slots hold — a hue lands on one of six
-    /// of them, so a curve drawn this way would read as six blocks rather than as a run — and
-    /// monochrome has none, so both answer `None` and the caller keeps the role it would have
-    /// drawn in. At 256 colours the hue comes through the cube, and at true colour exactly.
-    fn spectrum(&self, degrees: f32) -> Option<Color> {
-        match self.depth {
-            _ if self.monochrome => None,
-            ColorDepth::Ansi16 | ColorDepth::Auto => None,
-            depth => Some(quantise(
-                hsl(degrees, SPECTRUM_SATURATION, SPECTRUM_LIGHTNESS),
-                depth,
-            )),
-        }
+    /// The Spectrum row's colour `along` the way from its lowest frequency (0) to its highest
+    /// (1): the tone curve's rainbow at rest ([`Theme::curve_colour`], no drift, not muted)
+    /// blended toward its own luma grey, keeping [`SPECTRUM_ROW_SATURATION`] of the colour and
+    /// not darkened. `None` wherever `curve_colour` has none.
+    pub fn spectrum_row_colour(&self, along: f32) -> Option<Color> {
+        let rgb = self.curve_rgb(along, 0.0)?;
+        Some(quantise(
+            soften(rgb, SPECTRUM_ROW_SATURATION, 1.0),
+            self.depth,
+        ))
     }
 
-    /// [`Theme::spectrum`], muted: the same hue `degrees` round the circle names, desaturated
-    /// toward its own luma grey and a little darker ([`mute`]), for a curve the bands are not
-    /// applying rather than shaping — "less saturated" rather than the flat dim grey a fixed
-    /// colour would draw. `None` wherever `spectrum` has none to draw in either.
-    fn muted_spectrum(&self, degrees: f32) -> Option<Color> {
-        match self.depth {
-            _ if self.monochrome => None,
-            ColorDepth::Ansi16 | ColorDepth::Auto => None,
-            depth => Some(quantise(
-                mute(hsl(degrees, SPECTRUM_SATURATION, SPECTRUM_LIGHTNESS)),
-                depth,
-            )),
+    /// The curve's own colour at `along` and `drift`, before any muting or quantising, or `None`
+    /// where this theme has no spectrum to draw in: monochrome and 16 colours, where a hue
+    /// would land on one of six slots and read as six blocks rather than as a run.
+    fn curve_rgb(&self, along: f32, drift: f32) -> Option<Rgb> {
+        if self.monochrome || matches!(self.depth, ColorDepth::Ansi16 | ColorDepth::Auto) {
+            return None;
         }
+        Some(match self.preset.curve {
+            Some(stops) => blend(stops, f64::from(fold(along + drift / (HUE_CIRCLE / 2.0)))),
+            None => hsl(
+                drift + SPECTRUM_ARC * along,
+                SPECTRUM_SATURATION,
+                SPECTRUM_LIGHTNESS,
+            ),
+        })
     }
 
     /// [`Dim`](Role::Dim) and the roles that hold a reading back: a plain dim attribute at 16
@@ -1026,18 +1013,22 @@ fn luma(rgb: Rgb) -> f32 {
     0.2126 * f32::from(rgb.0) + 0.7152 * f32::from(rgb.1) + 0.0722 * f32::from(rgb.2)
 }
 
-/// `rgb` blended toward its own luma grey and a little darker, for a muted spectrum colour: hue
-/// kept (blended against its own grey, never a fixed one), saturation cut to about a third
-/// (`c' = L + (c - L) × `[`MUTE_SATURATION`]), then darkened by [`MUTE_DARKEN`], where `L` is
-/// the channels' luma, `0.2126 r + 0.7152 g + 0.0722 b`.
-fn mute(rgb: Rgb) -> Rgb {
+/// `rgb` blended toward its own luma grey, keeping `keep` of its colour (`c' = L + (c - L) × keep`)
+/// and scaled by `darken`, where `L` is the channels' luma, `0.2126 r + 0.7152 g + 0.0722 b`:
+/// the hue stays, blended against its own grey and never a fixed one.
+fn soften(rgb: Rgb, keep: f32, darken: f32) -> Rgb {
     let luma = luma(rgb);
     let channel = |c: u8| {
-        ((luma + (f32::from(c) - luma) * MUTE_SATURATION) * MUTE_DARKEN)
+        ((luma + (f32::from(c) - luma) * keep) * darken)
             .round()
             .clamp(0.0, 255.0) as u8
     };
     (channel(rgb.0), channel(rgb.1), channel(rgb.2))
+}
+
+/// `rgb` muted: saturation cut to about a third and a little darker, for a muted spectrum colour.
+fn mute(rgb: Rgb) -> Rgb {
+    soften(rgb, MUTE_SATURATION, MUTE_DARKEN)
 }
 
 /// `rgb` at `depth`: exact at true colour, the nearest 256-colour cube index at 256, and the

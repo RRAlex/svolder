@@ -203,7 +203,8 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Theme**: a whole way to draw and use the page, not a colour scheme: a folder under
   `web/themes/` and one entry in the daemon's list. **Ember** is the one the page ships, the test
   theme, with the effects and Arrange mode; **Paper** is the second, a sheet of squared paper in
-  light and dark. [Web themes](design/web-themes.md) says what a theme is.
+  light and dark; **Signal** is the third, the sound's path drawn as one line; **Night drive** is the fourth, the music
+  drawn as an outrun road. [Web themes](design/web-themes.md) says what a theme is.
 - **Frame** (the page's): what the page draws over every theme and never hands to one: the menu
   button and its menu, the **picker**, the popups, the **reserved key**, the empty root a theme
   draws into. Not the analysis frame above.
@@ -224,6 +225,40 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Paper**: the page's second theme: squared paper, a printed serif, a pencil and blue ink.
   [Paper](design/web-paper.md) describes it. **Dark paper** is its dark scheme, charcoal with chalk
   print, chosen from its menu or with `?theme=paper.dark`.
+- **Signal**: the page's third theme: a dark page whose centre is the signal path as one line, with
+  the chosen hop opened below it. [Signal](design/web-signal.md) describes it. The device facts'
+  *Signal* row is the Bluetooth link's strength, a different thing.
+- **The signal path** (Signal's words): the line itself, from the player through the computer and
+  the DAC to the hops declared after it. A **hop** on it is solid when svolder reads it and a plain
+  ring when the owner declared it. The **chosen hop** is the boxed one; the **slim bar** is the bar
+  that pins at the top with the same hops once the line has scrolled away.
+- **Night drive**: the page's fourth theme: a dark outrun road at dusk that moves with the music.
+  [Night drive](design/web-nightdrive.md) describes it.
+- **The scene** (Night drive's): the two canvases and what is drawn on them, the sky and the sun,
+  the mountains, the floor, the haze, the embers and the bubbles, with the HUD laid over them.
+- **The mountains** (Night drive's): the ridge along the horizon, the live spectrum from 20 Hz at the
+  left to 20 kHz at the right. Moving the pointer over them turns them into the tone curve.
+- **The floor** (Night drive's): the grid in front of the mountains. A row is the 24 column levels
+  of the music at the moment it was born at the horizon, and the rows roll toward you; a loud cell is
+  lifted and hot.
+- **The dash** (Night drive's): the strip along the bottom: `−` `MUTE` `+`, the input, the track, the
+  transport and `DEVICE ▴`.
+- **The neon sheet** (Night drive's): the panel that `DEVICE ▴` or the menu's *Device…* row opens,
+  with the mode, the input, the band table, the presets, a device's slots, controls and meters, and its
+  folded facts.
+- **A bubble** (Night drive's): the round handle of a band on the tone curve over the mountains;
+  dragging it sets the band's frequency and gain. A **diamond** is the handle at each end of the lit
+  band's bell, where its curve is half its gain; dragging it sets the band's Q.
+- **Motion** (Night drive's): the theme's one setting, in the frame's menu: *Full*, *Calm* or
+  *Still*, which set how often the scene is drawn and whether the road and the sky's events move.
+- **The fade** (Night drive's): the top line, the volume and the EQ line going to nothing after 15
+  seconds with no input, and the dash going to a tenth with them (not a phone's upright panel); any
+  input brings them back, and trouble keeps them. The first tap on a faded dash only wakes it.
+- **The frame budget** (Night drive's): the scene's watch on its own cost: when drawing is slow it
+  drops the wet road, then the density, then the rate, and brings them back when drawing is
+  comfortable again. `nd-debug` in the address shows its numbers.
+- **The wet road** (Night drive's): the sky, the sun and the mountains mirrored in the floor, strong in
+  the quiet and the first layer the budget drops.
 - **Written control**: Paper's way to draw a control: as words, where an underlined word acts and
   a sliding level is a printed scale. The **needle** is the pencil mark on the volume's ruler (and
   on a meter's scale): a slider you drag or move with the arrows.

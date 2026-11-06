@@ -276,6 +276,8 @@ pub struct Hop {
     pub detail: String,
     /// Whether this hop alters the signal.
     pub changes: bool,
+    /// Whether something of this hop was not read; its words are in the path's `unknown` list.
+    pub unknown: bool,
 }
 
 /// The path from the player to the DAC, judged.
@@ -473,6 +475,7 @@ fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<S
             label: "player".to_string(),
             detail: "not identified".to_string(),
             changes: false,
+            unknown: true,
         };
     };
     let mut detail = signal_detail(
@@ -481,6 +484,7 @@ fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<S
         stream.volume_milli,
     );
     let before = changes.len();
+    let unknown_before = unknown.len();
     if stream.rate_hz.is_none() {
         unknown.push("player rate not read".to_string());
     }
@@ -495,6 +499,7 @@ fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<S
         label: "player".to_string(),
         detail: detail.join(", "),
         changes: changes.len() > before,
+        unknown: unknown.len() > unknown_before,
     }
 }
 
@@ -518,6 +523,7 @@ fn computer_hop(
     unknown: &mut Vec<String>,
 ) -> Hop {
     let before = changes.len();
+    let unknown_before = unknown.len();
     let detail = signal_detail(sink.rate_hz, sink.format.as_deref(), sink.volume_milli);
     match (
         identified_stream(route).and_then(|stream| stream.rate_hz),
@@ -549,6 +555,7 @@ fn computer_hop(
         label: "computer".to_string(),
         detail: detail.join(", "),
         changes: changes.len() > before,
+        unknown: unknown.len() > unknown_before,
     }
 }
 
@@ -560,6 +567,7 @@ fn dac_hop(
     unknown: &mut Vec<String>,
 ) -> Hop {
     let before = changes.len();
+    let unknown_before = unknown.len();
     let mut detail = Vec::new();
     if let Some(input) = &dac.input {
         detail.push(input.clone());
@@ -584,6 +592,7 @@ fn dac_hop(
         label: "DAC".to_string(),
         detail: detail.join(", "),
         changes: changes.len() > before,
+        unknown: unknown.len() > unknown_before,
     }
 }
 

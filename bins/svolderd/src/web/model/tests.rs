@@ -513,3 +513,142 @@ async fn the_host_model_is_readable_without_a_device() {
     assert_eq!(reply.body, "null");
     quiet.stop().await;
 }
+
+/// A route to the Bifrost's sink, with the computer EQ in the path or not.
+fn bifrost_route(host_eq: bool) -> svolder_host::RouteFacts {
+    svolder_host::RouteFacts {
+        sink: Some(svolder_host::SinkFacts {
+            name: "alsa_output.usb-Schiit".to_string(),
+            description: "Bifrost 3".to_string(),
+            rate_hz: Some(96000),
+            format: Some("S32LE".to_string()),
+            volume_milli: Some(540),
+            muted: false,
+            ..Default::default()
+        }),
+        player: Some(svolder_host::StreamFacts {
+            rate_hz: Some(96000),
+            ..Default::default()
+        }),
+        host_eq,
+        others_mixing: 1,
+        ..Default::default()
+    }
+}
+
+/// A computer EQ state for `target`, on, from AutoEq when `origin` is given.
+fn eq_state(target: &str, on: bool, origin: Option<&str>) -> svolder_host::eq::HostEqState {
+    use svolder_host::eq::{HostEqState, Manager, Route};
+    HostEqState {
+        on,
+        name: "HD 650".to_string(),
+        origin: origin.map(str::to_string),
+        target: target.to_string(),
+        route: Route::Smart,
+        manager: Manager::Systemd,
+        previous_default: None,
+        preamp_db: -3.0,
+        filters: Vec::new(),
+    }
+}
+
+#[test]
+fn the_page_model_carries_the_routes_facts() {
+    let route = json_of(&page::route_model(&bifrost_route(true), None));
+    assert_eq!(route["sink"]["words"], "Bifrost 3");
+    assert_eq!(route["sink"]["rate_hz"], 96000);
+    assert_eq!(route["sink"]["format"], "S32LE");
+    assert_eq!(route["sink"]["volume_pct"], 54);
+    assert_eq!(route["sink"]["muted"], false);
+    assert_eq!(route["host_eq"], true);
+    assert_eq!(route["others_mixing"], 1);
+    assert_eq!(route["player_rate_hz"], 96000);
+}
+
+#[tokio::test]
+async fn a_route_not_read_is_null_in_the_model() {
+    let device = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web_over(&device);
+    let host = json_of(&page::host_model(&web, GUEST).expect("a host"));
+    // The test daemon reads no route (and the card keeps its fields beside it).
+    assert_eq!(host["route"], Json::Null, "{host}");
+    assert!(host["track"].is_object(), "{host}");
+    device.stop().await;
+}
+
+#[test]
+fn a_sink_without_a_description_is_named_by_its_node_name() {
+    let mut route = bifrost_route(false);
+    route.sink.as_mut().unwrap().description.clear();
+    route.sink.as_mut().unwrap().volume_milli = None;
+    let route = json_of(&page::route_model(&route, None));
+    assert_eq!(route["sink"]["words"], "alsa_output.usb-Schiit");
+    assert_eq!(route["sink"]["volume_pct"], Json::Null);
+    let mut none = bifrost_route(false);
+    none.sink = None;
+    assert_eq!(json_of(&page::route_model(&none, None))["sink"], Json::Null);
+}
+
+#[test]
+fn the_applied_presets_name_shows_when_the_route_has_the_host_eq() {
+    let eq = eq_state("alsa_output.usb-Schiit", true, Some("oratory1990"));
+    let route = json_of(&page::route_model(&bifrost_route(true), Some(&eq)));
+    assert_eq!(route["eq_preset"], "HD 650");
+    assert_eq!(route["eq_autoeq"], true);
+}
+
+#[test]
+fn a_host_eq_for_another_sink_gives_no_name() {
+    let other = eq_state("alsa_output.pci-other", true, Some("oratory1990"));
+    let route = json_of(&page::route_model(&bifrost_route(true), Some(&other)));
+    assert_eq!(route["eq_preset"], Json::Null);
+    assert_eq!(route["eq_autoeq"], false);
+    // Off, or not in the route's path, gives none either.
+    let off = eq_state("alsa_output.usb-Schiit", false, Some("x"));
+    let route = json_of(&page::route_model(&bifrost_route(true), Some(&off)));
+    assert_eq!(route["eq_preset"], Json::Null);
+    let on = eq_state("alsa_output.usb-Schiit", true, Some("x"));
+    let route = json_of(&page::route_model(&bifrost_route(false), Some(&on)));
+    assert_eq!(route["eq_preset"], Json::Null);
+}
+
+#[test]
+fn a_host_eq_put_in_by_hand_is_on_without_a_name() {
+    let route = json_of(&page::route_model(&bifrost_route(true), None));
+    assert_eq!(route["host_eq"], true);
+    assert_eq!(route["eq_preset"], Json::Null);
+    assert_eq!(route["eq_autoeq"], false);
+}
+
+#[test]
+fn a_band_preset_names_the_eq_but_is_not_autoeq() {
+    let eq = eq_state("alsa_output.usb-Schiit", true, None);
+    let route = json_of(&page::route_model(&bifrost_route(true), Some(&eq)));
+    assert_eq!(route["eq_preset"], "HD 650");
+    assert_eq!(route["eq_autoeq"], false);
+}
+
+/// A scratch directory that goes when the test ends, however it ends.
+struct Scratch(std::path::PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn an_unreadable_host_eq_file_gives_no_name() {
+    let dir = std::env::temp_dir().join(format!("svolderd-hosteq-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let _scratch = Scratch(dir.clone());
+    let broken = dir.join("host-eq.toml");
+    std::fs::write(&broken, "on = \"not a state").unwrap();
+    assert!(page::host_eq_state(&broken).is_none());
+    assert!(page::host_eq_state(&dir.join("absent.toml")).is_none());
+    // A directory where the file should be is unreadable too.
+    assert!(page::host_eq_state(&dir).is_none());
+    let eq = eq_state("alsa_output.usb-Schiit", true, Some("x"));
+    eq.save(&broken).unwrap();
+    assert_eq!(page::host_eq_state(&broken), Some(eq));
+}

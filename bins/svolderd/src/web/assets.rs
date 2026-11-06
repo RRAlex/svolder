@@ -34,12 +34,18 @@ pub(crate) enum Assets {
 /// and its bytes.
 pub(crate) type Entry = (&'static str, &'static str, &'static [u8]);
 
-/// A font's entry: `name` is under `fonts/`.
+/// A font's entry: `name` is under `fonts/`; a TrueType file is named with `ttf`.
 macro_rules! font {
     ($name:literal) => {
+        font!($name, "font/woff2")
+    };
+    (ttf $name:literal) => {
+        font!($name, "font/ttf")
+    };
+    ($name:literal, $mime:literal) => {
         (
             concat!("fonts/", $name),
-            "font/woff2",
+            $mime,
             include_bytes!(concat!("../../web/fonts/", $name)),
         )
     };
@@ -111,6 +117,21 @@ const FILES: &[Entry] = &[
         "core/analysis.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/analysis.js"),
+    ),
+    (
+        "core/hold.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/hold.js"),
+    ),
+    (
+        "core/viz-model.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/viz-model.js"),
+    ),
+    (
+        "core/title.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/title.js"),
     ),
     (
         "core/registry.js",
@@ -218,6 +239,8 @@ const FILES: &[Entry] = &[
     font!("CrimsonPro-Italic-Latin2.woff2"),
     font!("Caveat-Medium-Latin1.woff2"),
     font!("Caveat-Medium-Latin2.woff2"),
+    font!(ttf "RussoOne-Regular.ttf"),
+    font!(ttf "MrDafoe-Regular.ttf"),
 ];
 
 impl Assets {

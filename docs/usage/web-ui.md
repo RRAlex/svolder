@@ -399,7 +399,9 @@ arrows on a focused control belonging to that control: `←` `→` change the vo
 mutes, `0` centres the balance, `f` sets the tone control to Flat, `p` focuses the preset that is
 on, `v` changes the visualizer's look (a guest has it too; it does nothing with the visualizer
 switched off), `A` arranges the sections (below), `T` opens the theme picker (every theme has it,
-a guest too) and `?` shows and hides the list, which also says how the curve is dragged. A guest,
+a guest too), Space plays and pauses the computer's player (every theme has it; not while the focus
+is on a button, a link, a slider or another control Space itself works, nor while a menu or a dialog
+is open, and nothing where the page has no player) and `?` shows and hides the list, which also says how the curve is dragged. A guest,
 and a page with `[web] writes` off, have `v`, `A`, `T` and `?` only, and `?` lists just those; `v`
 is listed only where the screen has a visualizer card. The footer lists the keys at desktop width.
 The list closes by itself after 6 seconds, and at once on any key, click, scroll, wheel or touch.
@@ -431,48 +433,7 @@ click outside closes it, and a pick of another theme changes the page to it. Eac
 its own choice, and `?theme=ember` in the address always gets Ember back. See [the
 frame](../design/frame.md).
 
-**Paper** is the page's second theme: the same device drawn as a sheet of squared paper, with the
-words in print, the controls written out and a few handwritten notes. Pick it from the menu's
-*Theme* row or with `T`, or open the page with `?theme=paper` (`?theme=paper.light` or
-`?theme=paper.dark` also chooses the paper). Its menu rows, headed *Paper*, are *Auto* (follows the
-system), *Light* and *Dark*; the choice is kept in this browser, and the page opens in the paper
-you chose from the first moment, with no flash of the other one. `?theme=ember` always gets Ember
-back.
-
-- **Written controls.** The volume is a ruler with a pencil needle: drag the needle, tap a place on
-  the ruler, use the arrow keys on it (Page Up and Page Down ten steps, Home the bottom) or tap
-  *− quieter*, *mute* and *louder +* under it. The needle stops at the volume cap. Every other
-  control is a word: *an underlined word acts*. A choice's current value has a red pencil
-  underline and the other values a faint dotted one; a word that opens a list (the tone mode, a
-  preset, the slot to save over) shows a small list of options; a slider is a printed scale you
-  drag or move with the arrows. The EQ's curve has a round point for each band to drag, and a table
-  of every band's frequency, gain and Q with a *−* and a *+* to tap. Saving over a slot on the
-  device, and deleting a preset, ask a question in the page's own words first; the safe answer,
-  *keep*, is the one with the focus.
-- **Notes.** The short lines in blue handwriting say what the numbers mean: what the EQ is doing,
-  the sample rates along the signal path (*rate matches all the way*, or the rates with an arrow
-  between them), the track's time and album, the firmware, the link, an amp's power readings, and
-  the last change. At most one note is red, the most urgent: the device is out of reach or
-  faulted, then a volume risk or cap, then the EQ's clipping peak, a path that changes the sound,
-  the passphrase note. The last change reads like *last change: −23.5 dB to −20 dB, 14:32*, and
-  adds *from this phone* or *from this browser* only for a change this page asked for in the last
-  three seconds. Several fields changed together tell one. On a wide screen the notes sit in a band
-  under the columns. The EQ's note and the red note each have an arrow to their section, and when
-  both are about the tone only the red note's arrow is drawn; the red note is also circled. The
-  volume is above both columns, so a red note about it has its arrow go along the gap under them
-  and up the sheet's margin on the needle's side, then in to the written volume, clear of the tone
-  section and the controls. On a phone each note follows its section.
-- **The device.** Near the foot, *The device* is a heading you tap (or reach with Tab and open
-  with Enter or Space) to unfold the facts table, *All readings* and Identify; they start folded.
-  Open or folded, the choice is kept in this browser, for every device, like the paper's light or
-  dark, and a guest may open it too.
-- **A guest, or a page with writes off,** sees the same words with no underline, and a tap says
-  *Sign in to change this*.
-- **A lost connection** reads *Reconnecting to svolder…* under the name and fades the sheet; a
-  device out of reach is a red note with *try now*.
-
-Paper has no effects, no visualizer and no Arrange mode; it ignores the page's effects setting.
-See [Paper](../design/web-paper.md).
+**Ember's effects** have three levels, chosen in the menu:
 
 - **Smoke** (the default): live smoke behind the whole page, a small fluid simulation drawn on the
   graphics chip (WebGL2). A faint haze fills the window behind everything, denser in the margins
@@ -553,6 +514,175 @@ until you pick a level. The small motions (the dial's glide, the meters' fall, t
 easing, the glow's turn, the title's loop) run whatever it says; the effects menu's Off level stills
 the rest of the page, and the title's loop stops only when the Now playing card opens. It is built
 for Firefox 121 and Chromium 120 or later.
+
+**Paper** is the page's second theme: the same device drawn as a sheet of squared paper, with the
+words in print, the controls written out and a few handwritten notes. Pick it from the menu's
+*Theme* row or with `T`, or open the page with `?theme=paper` (`?theme=paper.light` or
+`?theme=paper.dark` also chooses the paper). Its menu rows, headed *Paper*, are *Auto* (follows the
+system), *Light* and *Dark*; the choice is kept in this browser, and the page opens in the paper
+you chose from the first moment, with no flash of the other one. `?theme=ember` always gets Ember
+back.
+
+- **Written controls.** The volume is a ruler with a pencil needle: drag the needle, tap a place on
+  the ruler, use the arrow keys on it (Page Up and Page Down ten steps, Home the bottom) or tap
+  *− quieter*, *mute* and *louder +* under it. The needle stops at the volume cap. Every other
+  control is a word: *an underlined word acts*. A choice's current value has a red pencil
+  underline and the other values a faint dotted one; a word that opens a list (the tone mode, a
+  preset, the slot to save over) shows a small list of options; a slider is a printed scale you
+  drag or move with the arrows. The EQ's curve has a round point for each band to drag, and a table
+  of every band's frequency, gain and Q with a *−* and a *+* to tap. Saving over a slot on the
+  device, and deleting a preset, ask a question in the page's own words first; the safe answer,
+  *keep*, is the one with the focus.
+- **Notes.** The short lines in blue handwriting say what the numbers mean: what the EQ is doing,
+  the sample rates along the signal path (*rate matches all the way*, or the rates with an arrow
+  between them), the track's time and album, the firmware, the link, an amp's power readings, and
+  the last change. At most one note is red, the most urgent: the device is out of reach or
+  faulted, then a volume risk or cap, then the EQ's clipping peak, a path that changes the sound,
+  the passphrase note. The last change reads like *last change: −23.5 dB to −20 dB, 14:32*, and
+  adds *from this phone* or *from this browser* only for a change this page asked for in the last
+  three seconds. Several fields changed together tell one. On a wide screen the notes sit in a band
+  under the columns. The EQ's note and the red note each have an arrow to their section, and when
+  both are about the tone only the red note's arrow is drawn; the red note is also circled. The
+  volume is above both columns, so a red note about it has its arrow go along the gap under them
+  and up the sheet's margin on the needle's side, then in to the written volume, clear of the tone
+  section and the controls. On a phone each note follows its section.
+- **The device.** Near the foot, *The device* is a heading you tap (or reach with Tab and open
+  with Enter or Space) to unfold the facts table, *All readings* and Identify; they start folded.
+  Open or folded, the choice is kept in this browser, for every device, like the paper's light or
+  dark, and a guest may open it too.
+- **A guest, or a page with writes off,** sees the same words with no underline, and a tap says
+  *Sign in to change this*.
+- **A lost connection** reads *Reconnecting to svolder…* under the name and fades the sheet; a
+  device out of reach is a red note with *try now*.
+
+Paper has no effects, no visualizer and no Arrange mode; it ignores the page's effects setting.
+See [Paper](../design/web-paper.md).
+
+**Signal** is the page's third theme: the sound's way from the player to the ears drawn as one line,
+on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the page with
+`?theme=signal`. It is dark only; the only row it adds to the menu is *Add device…*.
+
+- **The line.** Left to right: the player (green), the computer (yellow), the device svolder shows
+  (amber), then whatever comes after it. A solid dot is something svolder reads, with its live facts
+  under the name; a plain ring with italic words is a hop you declared (with `svolder hops` or the
+  menu's *Add device…*), because svolder cannot see an analogue signal. After the DAC the line runs
+  on thinner and slower. Moving dots show the sound flowing while the player plays; they stop when
+  it pauses, while the page is hidden and always under reduced motion. A stretch that the computer's
+  EQ changes is yellow. The DAC says `arrives as sent` when it reads the rate the computer sends,
+  else `changes the sound`. While the DAC's rate is not read it says neither.
+- **Choosing a hop.** Click or tap it, or use Left and Right (Home and End go to the ends) with the
+  line focused. The chosen hop is boxed and what it offers opens underneath. The shown device is
+  chosen when the page loads. The DAC opens the large volume with *−*, Mute and *+* (hold *−* or *+*
+  to keep stepping; muted reads *−∞ dB*) and the tone curve with a point to drag for each band (on a
+  touch screen a two-finger pinch on the curve sets a band's Q, the wheel does it with a mouse). The
+  input, mode and presets are in the shelf below (the mode is under the curve on a phone). A linked
+  Forkbeard amp opens its power, meters and faults, with *Unlink*; its controls write to the amp,
+  never to the DAC, and the DAC's volume stays in the DAC's label. A declared hop opens its name and
+  note with *Edit*, *Move earlier*, *Move later* and *Remove*, which asks once. The player opens Now
+  playing with its transport and the path in words; the computer opens its sink, rate, volume, mute,
+  the computer EQ and the preset applied, read only.
+- **Add device….** A row of the menu, while a device is shown. It opens the sheet *After the*
+  (device): Amp, Headphones, Speakers or Other, a name and an optional note. A Forkbeard amp the
+  daemon lists that is not yet linked comes first as *name (connected)*, which links it. When you
+  use an AutoEq preset on the computer and no headphones hop is declared, the line ends with a ring
+  named after the preset, *from your AutoEq preset*, for as long as it is applied; it is never
+  saved.
+- **Below the first screen.** In two columns from 900 px wide (one below that; the band table needs
+  the width): the band table with the input under it, beside the mode, the presets and the controls
+  (and a Loki Max's slots and settings), then the device's facts across the full width. While
+  Loudness is on, its chip carries a round *−* and *+* and the strength under its name; hold either,
+  or a band's *−* or *+*, to keep stepping. *Save as*, *Rename* and *Delete* each ask in place; the
+  facts start folded (the choice is kept in this browser). Once the line has scrolled out of view a
+  slim bar pins at the top with the same hops, the chosen one ringed and the device's volume beside
+  its name; a tap on it chooses a hop and goes back to the top. The Now playing bar stays at the
+  bottom except while the player is chosen. On a window taller than 1100 px the page stops growing
+  and its parts stay together as one block, centred in the window, with no gap growing between them.
+- **A phone.** The line is a strip across the top with the chosen hop in the middle; swipe it or tap
+  a neighbour to choose. The strip stays at the top as the page scrolls, and so does the menu
+  button. The shelf opens with the input and the presets, then the band table.
+- **Trouble.** A device out of reach dashes the line into a hollow ring (red for a lost link, amber
+  while it waits or rests), stills what follows, and shows a card with *Try now* and the seconds to
+  the next try; the last heard volume and curve stay in view, dimmed. A lost connection to svolder
+  reads *Reconnecting to svolder…* and greys the page. A guest, or a page with writes off, sees
+  every control drawn but inert, and a tap says why. The browser's tab reads the device and the
+  state, for example *Bifrost 3 · connected — svolder*.
+
+Signal has no effects, no visualizer and no Arrange mode. See [Signal](../design/web-signal.md).
+
+**Night drive** is the page's fourth theme: the music drawn as an outrun road at dusk. Pick it from
+the menu's *Theme* row or with `T`, or open the page with `?theme=nightdrive`. It is dark only, and it
+draws on canvases, so it follows the music only when svolderd can capture the computer's audio (the
+`analysis` feed; the same capture the visualizer uses).
+
+- **The scene.** A striped sun on the horizon, mountains along it that are the live spectrum (20 Hz
+  at the left edge, 20 kHz at the right), and a floor of lit cells rolling toward you, one row of the
+  music at each step. The louder the music is against the loudest of the last minute, the warmer and
+  brighter the night; at a sustained peak embers rise from the floor and the road dries, in the quiet
+  it turns wet and hazy, a drop sends a flare through the sun and one wave down the floor. After a
+  long loud bass the sun throws rays; a sharp rise in the highs sends a shooting star, and held
+  highs a shower of them. These are rare by design, and the same music gives the same events on any
+  screen.
+- **The top line, the volume and the EQ line** are over the scene: the device, its input and rate
+  (and `not connected` beside its name when the link is down), what the computer does to the sound
+  (`host EQ on · changes the sound`, in amber) at the right, the volume as a large neon number (`−∞ dB`
+  when muted) and, under it, the tone control's state (`EQ`, the preset, the gains, or `LOUDNESS` or
+  `FLAT`). After 15 seconds with no input they fade out; a move, a key, a touch or the wheel brings
+  them back at once, a volume changed elsewhere shows for 5 seconds, and trouble keeps them (or brings
+  them back). The mouse cursor hides over the scene after 2 seconds still.
+- **The dash** along the bottom: `−` `MUTE` `+` (hold one and it repeats), the input as chips (a list
+  when there are more than three), the cover and the track with its progress bar, previous, play or
+  pause and next, and `DEVICE ▴`. An amp has its power key and gauges where the input would be.
+  Space plays and pauses the computer's player, as in every theme. On a desktop and on a phone held
+  sideways the dash fades to a tenth with the HUD, and the first tap on a faded dash only wakes it
+  and presses nothing; a key held on it, a list open on it, the keyboard focus on it and a mouse
+  resting over it keep it up. On a phone held upright the dash is a panel under the scene that holds
+  only its own rows, never fades, and leaves the scene about three quarters of the height.
+- **Tuning on the mountains.** Move the pointer over the mountains and they turn into the tone
+  curve with a bubble for each band: drag a bubble for its frequency and gain, drag the diamond at
+  either end of the lit bell for its width (Q), scroll the wheel for the Q of the nearest band, or
+  pinch two fingers. They turn back about a second and a half after you let go. A guest never sees the curve (a tap on the
+  mountains says why it does nothing); a page with writes off and a device with no bands only see it.
+- **The sheet.** `DEVICE ▴`, or *Device…* in the menu, opens everything else about the device on a
+  neon sheet: the mode (Loudness with its `−` and `+` under its name), the input, the band table
+  (typed values, a step a tap), the presets (Save as, Rename and Delete ask in place), a Loki Max's
+  slots, the controls, an amp's meters (their needles move as the readings arrive) and, folded, the device's facts. Close it with ✕, Escape or a
+  tap on the scene. On a phone held upright it slides up from the dash; held sideways it comes in from
+  the right.
+- **Motion** is the theme's menu setting: *Full* draws at the screen's rate; *Calm* about ten a
+  second, with the road and the sky's events stopped; *Still* about one a second. With none chosen,
+  a system set for reduced motion starts on Calm. While the music is silent or the player is not
+  playing, a phone draws only 8 a second.
+- **A slow phone.** The scene watches what it costs. If drawing is slow it gives up the wet road
+  first, then draws at a lower density, then at most 30 a second, and brings them back in the other
+  order once it has been comfortable for 10 seconds. A phone starts at 30 a second, comes up to at
+  most 60, and a canvas never has more than 2.5 million pixels.
+- **Trouble.** A device out of reach turns the scene grey and still and puts a card in the middle
+  with *Try now* and the seconds to the next try. A lost connection to svolder greys the page and says
+  *Reconnecting to svolder…*. With no music analysis the mountains take the shape of the tone curve
+  and the line says why. A guest sees every control drawn, inert, and a tap says why. See
+  [Night drive](../design/web-nightdrive.md).
+
+**Night drive's readout.**
+
+On a slow phone, Night drive can show what it costs. Add `nd-debug` to the address, for example
+`?theme=nightdrive&nd-debug`, and a small box under the device line reads, twice a second: the draws a
+second (measured, not asked for) and the pace asked, the mean and 95th-percentile draw time of the
+last 60 draws, the canvas size in device pixels and the density the screen has and the one it is
+drawn at, how far it has stepped down and whether the wet road is allowed, the Motion level, the long
+tasks of the last 10 seconds (`n/a` where the browser has none), what the music reaches in the sky
+and what the mood hears of it, and the switches in force.
+
+Name layers after it, separated by commas, to turn them off one at a time and find the cost:
+`?theme=nightdrive&nd-debug=noglow,nofloor`. The names are `noglow` (the glow of the sun, the
+mountains and the bubbles, and the page's CSS shadows), `nofloor` (the road's heat grid), `nosky` (the
+sky, the sun and the stars), `noridge` (the mountains), `nodash` (the dash along the bottom), `nohud`
+(the top line, the volume and the EQ line), `nomood` (the night, the sun, the heat and the road's
+speed stay as they were, with no flare and no wave), `nowet` (the wet road), `noembers` (the embers),
+`nohaze` (the haze over the far floor) and `dpr1` (one backing pixel per CSS pixel). A word that is
+not a name is listed as unknown. The parameter goes in the query, not after a `#`, which the page
+drops at once; a step to another device drops it from the address, and the box stays until the page
+is reloaded. Signing in with a link also drops the query (the sign-in page goes on to `./`), so open
+the link once, then the address with the query.
 
 ## web
 

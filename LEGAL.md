@@ -57,13 +57,15 @@ as amended by Bill C-244 (diagnosis, maintenance and repair) and Bill C-294 (int
   The MCP server and the web UI, when you turn them on, answer on the addresses you name and
   fetch nothing from elsewhere: the page's fonts and scripts are served by svolderd itself.
 - **What the web UI carries.** Besides the crates the binaries are built from, `svolderd` serves
-  five sets of third-party files: IBM Plex Sans and IBM Plex Mono, IBM's split WOFF2 files,
+  seven sets of third-party files: IBM Plex Sans and IBM Plex Mono, IBM's split WOFF2 files,
   unmodified, under the SIL Open Font License 1.1 (with "Plex" a Reserved Font Name); Geist
   Medium, the Geist Project Authors' font cut into two Latin subsets (WOFF2, no Reserved Font
   Name), under the same licence; Crimson Pro Regular and Italic, The Crimson Pro Project
   Authors' font, and Caveat Medium, The Caveat Project Authors' font, each cut into two Latin
-  subsets (WOFF2, no Reserved Font Name), under the SIL Open Font License 1.1; and htmx 2.0.11,
-  unmodified, under the BSD Zero Clause License. Their licence texts are in
+  subsets (WOFF2, no Reserved Font Name), under the SIL Open Font License 1.1; Russo One and
+  Mr Dafoe, each its authors' font as its OFL copyright line names them, unmodified (TrueType),
+  under the SIL Open Font License 1.1 (with "Russo" and "Mr Dafoe" Reserved Font Names); and
+  htmx 2.0.11, unmodified, under the BSD Zero Clause License. Their licence texts are in
   `THIRD-PARTY-LICENSES`, which the release packages carry, as the crates' and the static
   build's are.
 

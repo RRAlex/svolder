@@ -13,6 +13,9 @@ test page, so a theme that needs them (Path, Night drive, Paper) finds them work
                                         hidden and starts them again
   ember_unmounts_clean                  a theme switched away from and back leaves one listener per
                                         key, no canvas and no error
+  the_tab_title_follows_on_every_theme  Ember, Paper, Signal and Night drive: the tab reads `<device> ·
+                                        connected — svolder`, `reconnecting` while the daemon is
+                                        gone, `connected` when back, and names a device switched to
   ember_mounted_while_lost_recovers     Ember mounted while the stream is lost greys the smoke and
                                         dims the screen, and both come back with the stream
 Usage: python3 core_rows.py chromium|firefox"""
@@ -283,6 +286,46 @@ def unmounts_clean(b, d):
     check('ember_unmounts_clean: no page error', errors(b) == [], errors(b)[:3])
 
 
+def tab_title(b):
+    return b.page('document.title')
+
+
+def title_follows_on_every_theme(b, d):
+    load(b, d)
+    for theme in ('ember', 'paper', 'signal', 'nightdrive'):
+        b.press('T')
+        b.page(f"document.querySelector('#picker .tcard[data-theme={theme}]').click()")
+        poll(lambda: b.page('__core.theme.id') == theme)
+        name = b.page("__core.model.page().fleet.devices.find((x) => x.url === __core.model.shown()).name")
+        want = f'{name} \u00b7 connected \u2014 svolder'
+        check(f'the_tab_title_follows_on_every_theme: {theme}: connected reads `{want}`',
+              poll(lambda: tab_title(b) == want, 5.0), tab_title(b))
+        d.proc.terminate()
+        d.proc.wait(5)
+        gone = f'{name} \u00b7 reconnecting \u2014 svolder'
+        check(f'the_tab_title_follows_on_every_theme: {theme}: the daemon dropped, reconnecting',
+              poll(lambda: tab_title(b) == gone, 40.0), tab_title(b))
+        d.restart()
+        check(f'the_tab_title_follows_on_every_theme: {theme}: back, connected again',
+              poll(lambda: tab_title(b) == want, 60.0), tab_title(b))
+
+
+def title_names_the_device_switched_to(b, d):
+    load(b, d)
+    for theme in ('ember', 'paper', 'signal', 'nightdrive'):
+        b.press('T')
+        b.page(f"document.querySelector('#picker .tcard[data-theme={theme}]').click()")
+        poll(lambda: b.page('__core.theme.id') == theme)
+        urls = b.page('__core.model.page().fleet.devices.map((x) => x.url)')
+        for url in reversed(urls):
+            b.page(f"__core.actions.showDevice({json.dumps(url)})")
+            name = b.page("__core.model.page().fleet.devices.find((x) => x.url === %s)?.name"
+                          % json.dumps(url))
+            want = f'{name} \u00b7 connected \u2014 svolder'
+            check(f'the_tab_title_follows_on_every_theme: {theme}: a switch to {url} names {name}',
+                  poll(lambda: tab_title(b) == want, 8.0), [name, tab_title(b)])
+
+
 def mounted_while_lost(b, d):
     load(b, d, '?effects=smoke')
     b.page("import(new URL('assets/themes/ember/effects.js', document.baseURI).href)"
@@ -326,6 +369,7 @@ try:
     fleet = common.Daemon('gungnir2-v2', fleet=FLEET, env={'SVOLDER_FAKE_SIGNAL': '1'})
     steps = [(follows_a_second_device, fleet), (hop_reaches_the_fleet, dac), (menu_fades, dac),
              (band_moves, dac), (canvas_loop, dac), (unmounts_clean, dac),
+             (title_follows_on_every_theme, dac), (title_names_the_device_switched_to, fleet),
              (mounted_while_lost, dac)]
     if browser == 'chromium':
         steps.insert(4, (light_and_dark, dac))

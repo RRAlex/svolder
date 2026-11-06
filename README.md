@@ -35,6 +35,61 @@ every first run as a test:
 
 [LEGAL.md](LEGAL.md) says the same, and you use svolder at your own risk.
 
+## Screenshots
+
+### Terminal
+
+<img src="docs/images/dac.webp" width="100%" alt="The device screen of a Gungnir 2: its controls
+with the volume bar's clipping-risk zone, the host's volume, transport and spectrum, the tone
+control, and the status with the link history, the level's source and Now playing So What by Miles
+Davis">
+
+<sub>[Text version](docs/images/dac.txt)</sub>
+
+<img src="docs/images/tone.webp" width="100%" alt="The tone-control screen of a Gungnir 2 with the
+Sennheiser HD 800 S correction from AutoEq, measured by oratory1990, fitted to its five bands: the
+response curve, the correction's target and its filters">
+
+<sub>[Text version](docs/images/tone.txt)</sub>
+
+<img src="docs/images/amp.webp" width="100%" alt="The device screen of an Aegir 2 amplifier,
+powered on: its controls, its L and R meters as bars with a class-A block, the live part filled and
+a percentage beside each, five minutes of their mirrored history, and the host's audio">
+
+<sub>[Text version](docs/images/amp.txt)</sub>
+
+<img src="docs/images/telemetry.webp" width="49%" alt="The Telemetry screen: every reading an Aegir
+2 sends, with its type, value, age, rate and recent history"> <img src="docs/images/devices.webp"
+width="49%" alt="The Devices screen listing a Gungnir and an Aegir 2, both connected">
+
+<sub>Text versions: [telemetry](docs/images/telemetry.txt), [devices](docs/images/devices.txt)</sub>
+
+### Web
+
+<img src="docs/images/web-phone.webp" width="32%" alt="The web UI on a phone, the first screen: the
+svolder wordmark and the connected pill, the folded Now playing line (cover, title and artist, a
+pause button, a next button and a thin progress bar), a Gungnir 2's knob at −24.1 dB with its −,
+Mute and + buttons and the clipping-risk note, the visualizer card with its bars, and the top of its
+controls, Phase invert"> <img src="docs/images/web-desktop.webp" width="66%" alt="The web UI on a
+desktop: the Now playing band across the top, with the cover, the title, the transport, the time and
+the signal path on the left and the visualizer on the right; below it the same Gungnir 2 with the
+knob, its buttons and its controls on the left and the tone control in EQ mode on the right with its
+curve, the band table and the preset list; and under the footer a strip of recent volume bars with
+the marks of a Warm and a Sennheiser HD 800 S recall">
+
+### Web themes on a phone
+
+<img src="docs/images/web-phone-paper.webp" width="32%" alt="Paper on a phone: squared paper with a
+serif Gungnir 2 title, the volume −26.1 dB in red with a ruler, written controls (− quieter, mute,
+louder +), the tone graph with its five bands and the first rows of the band table"> <img
+src="docs/images/web-phone-signal.webp" width="32%" alt="Signal on a phone, scrolled: the signal path as a
+strip along the top with PipeWire, the Gungnir 2 chosen and an amp, then the tone graph, the mode,
+the input and the presets, with the Now playing bar pinned at the bottom"> <img
+src="docs/images/web-phone-nightdrive.webp" width="32%" alt="Night drive on a phone: a striped sun
+over a dusk sky, the live spectrum as cyan mountains and a floor of lit cells rolling toward you, the
+volume −26.1 dB as a large neon number under the device line and the EQ gains, and under the scene
+the strip with − Mute +, the input, the track, the transport and Device">
+
 ## Install
 
 Get the current version from the [release page](https://github.com/RRAlex/svolder/releases/latest),
@@ -67,7 +122,9 @@ To build from source, run `make deps` then `make build` (Rust 1.93 or later);
     svolder daemon install        # keep every device connected for the whole login
 
 No device at hand: `svolder tui --demo` runs the TUI on a fake device and a throwaway daemon, and
-touches nothing of yours.
+touches nothing of yours. `make demo` adds `--host --web`: the same fake device with your computer's
+real audio (volume, player, EQ) and the web UI on a free port, for trying the themes with your own
+music; `make demo-safe` is the plain one.
 
 ### Home Assistant
 
@@ -89,6 +146,12 @@ the MQTT integration on the same broker, each device appears with its controls.
 dashboard to paste in, and [MQTT and Home Assistant](docs/usage/mqtt.md) has every entity and
 topic.
 
+<img src="docs/images/ha-dashboard.webp" width="78%" alt="The svolder dashboard in Home Assistant
+for a Gungnir 2, in the svolder theme: the volume slider, the input with its balance gauge, the tone
+control on the Warm preset, the input readouts and output switches, and the five bands' gain,
+frequency and Q"> <img src="docs/images/ha-phone.webp" width="20%" alt="The same dashboard on a
+phone: the volume, the source, the tone control, the inputs and the output switches in one column">
+
 ### AI assistants (MCP)
 
 The daemon can serve the Model Context Protocol on this machine, read-only unless you allow writes:
@@ -105,48 +168,6 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
 
 [The MCP server](docs/usage/mcp.md) covers other clients, the volume rule and the tools.
 
-<img src="docs/images/dac.webp" width="100%" alt="The device screen of a Gungnir 2: its controls
-with the volume bar's clipping-risk zone, the host's volume, transport and spectrum, the tone
-control, and the status with the link history, the level's source and Now playing So What by Miles
-Davis">
-
-<sub>[Text version](docs/images/dac.txt)</sub>
-
-<img src="docs/images/tone.webp" width="100%" alt="The tone-control screen of a Gungnir 2 with the
-Sennheiser HD 800 S correction from AutoEq, measured by oratory1990, fitted to its five bands: the
-response curve, the correction's target and its filters">
-
-<sub>[Text version](docs/images/tone.txt)</sub>
-
-<img src="docs/images/amp.webp" width="100%" alt="The device screen of an Aegir 2 amplifier,
-powered on: its controls, its L and R meters as bars with a class-A block, the live part filled and
-a percentage beside each, five minutes of their mirrored history, and the host's audio">
-
-<sub>[Text version](docs/images/amp.txt)</sub>
-
-<img src="docs/images/telemetry.webp" width="49%" alt="The Telemetry screen: every reading an Aegir
-2 sends, with its type, value, age, rate and recent history"> <img src="docs/images/devices.webp"
-width="49%" alt="The Devices screen listing a Gungnir and an Aegir 2, both connected">
-
-<sub>Text versions: [telemetry](docs/images/telemetry.txt), [devices](docs/images/devices.txt)</sub>
-
-<img src="docs/images/web-phone.webp" width="32%" alt="The web UI on a phone, the first screen: the
-svolder wordmark and the connected pill, the folded Now playing line (cover, title and artist, a
-pause button, a next button and a thin progress bar), a Gungnir 2's knob at −24.1 dB with its −,
-Mute and + buttons and the clipping-risk note, the visualizer card with its bars, and the top of its
-controls, Phase invert"> <img src="docs/images/web-desktop.webp" width="66%" alt="The web UI on a
-desktop: the Now playing band across the top, with the cover, the title, the transport, the time and
-the signal path on the left and the visualizer on the right; below it the same Gungnir 2 with the
-knob, its buttons and its controls on the left and the tone control in EQ mode on the right with its
-curve, the band table and the preset list; and under the footer a strip of recent volume bars with
-the marks of a Warm and a Sennheiser HD 800 S recall">
-
-<img src="docs/images/ha-dashboard.webp" width="78%" alt="The svolder dashboard in Home Assistant
-for a Gungnir 2, in the svolder theme: the volume slider, the input with its balance gauge, the tone
-control on the Warm preset, the input readouts and output switches, and the five bands' gain,
-frequency and Q"> <img src="docs/images/ha-phone.webp" width="20%" alt="The same dashboard on a
-phone: the volume, the source, the tone control, the inputs and the output switches in one column">
-
 ## Where the details live
 
 - [Usage index](docs/usage/README.md): every page below, with the transports in one paragraph.
@@ -154,7 +175,7 @@ phone: the volume, the source, the tone control, the inputs and the output switc
 - [Device verbs](docs/usage/cli.md) and [Equaliser and presets](docs/usage/eq.md): the CLI.
 - [The terminal UI](docs/usage/tui.md): every screen and key, themes, effects and the mouse.
 - [The web UI](docs/usage/web-ui.md): turning it on, signing in, a phone, its limits, its themes
-  (Ember and Paper), the theme menu and Arrange.
+  (Ember, Paper, Signal and Night drive), the theme menu and Arrange.
 - [MQTT and Home Assistant](docs/usage/mqtt.md) and [The MCP server](docs/usage/mcp.md).
 - [The daemon](docs/usage/daemon.md), [the configuration file](docs/usage/config.md) and
   [Transports and Bluetooth](docs/usage/bluetooth.md): the packages, containers, the simulator.

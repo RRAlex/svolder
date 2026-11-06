@@ -38,6 +38,37 @@ fn paper_is_listed_in_light_and_dark() {
     assert!(paper.scripts.is_empty() && paper.metas.is_empty());
 }
 
+/// Signal is the third theme: dark only, on the warm near-black ground.
+#[test]
+fn signal_is_listed_dark_only() {
+    let signal = theme("signal").expect("Signal is shipped");
+    assert!(std::ptr::eq(signal, &THEMES[2]));
+    assert_eq!(signal.label, "Signal");
+    assert_eq!(signal.module, "themes/signal/signal.js");
+    assert_eq!(signal.styles, ["themes/signal/style.css"]);
+    assert_eq!(signal.schemes, ["dark"]);
+    assert_eq!(signal.color_scheme, "dark");
+    assert_eq!(signal.colour_for(Some("dark")), "#0f0d0b");
+    assert_eq!(signal.colour_for(None), "#0f0d0b");
+    assert!(signal.scripts.is_empty() && signal.metas.is_empty());
+}
+
+/// Night drive is the fourth theme: dark only, on the dusk's near-black.
+#[test]
+fn nightdrive_is_listed_dark_only() {
+    let night = theme("nightdrive").expect("Night drive is shipped");
+    assert!(std::ptr::eq(night, &THEMES[3]));
+    assert_eq!(night.label, "Night drive");
+    assert_eq!(night.blurb, "an outrun road that moves with the music");
+    assert_eq!(night.module, "themes/nightdrive/nightdrive.js");
+    assert_eq!(night.styles, ["themes/nightdrive/style.css"]);
+    assert_eq!(night.schemes, ["dark"]);
+    assert_eq!(night.color_scheme, "dark");
+    assert_eq!(night.colour_for(Some("dark")), "#0a0018");
+    assert_eq!(night.colour_for(None), "#0a0018");
+    assert!(night.scripts.is_empty() && night.metas.is_empty());
+}
+
 /// A theme's module and styles are among its files, every file is served by its name, and no
 /// two themes bring the same name.
 #[test]
@@ -58,6 +89,46 @@ fn a_themes_module_styles_and_files_are_served() {
             let asset = Assets::Embedded.get(name).expect(name);
             assert_eq!(asset.mime, *mime, "{name}");
             assert_eq!(&*asset.bytes, *bytes, "{name}");
+        }
+    }
+}
+
+/// Every script and stylesheet in a theme's folder is in its list: a file added on disk and not listed
+/// would be a 404 in the page.
+#[test]
+fn every_script_and_stylesheet_in_a_themes_folder_is_listed() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("theme folder") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("web/themes");
+    for theme in THEMES {
+        let folder = root.join(theme.id);
+        let mut found = Vec::new();
+        walk(&folder, &mut found);
+        for path in found {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext != "js" && ext != "css" {
+                continue;
+            }
+            let name = format!(
+                "themes/{}/{}",
+                theme.id,
+                path.strip_prefix(&folder)
+                    .expect("inside")
+                    .to_string_lossy()
+            );
+            assert!(
+                theme.files.iter().any(|(listed, ..)| *listed == name),
+                "{name} is on disk but not in the list of {}",
+                theme.id
+            );
         }
     }
 }
@@ -96,6 +167,30 @@ fn the_list_is_the_pickers_and_the_registrys_data() {
             "theme_color": "#f3efe6",
             "theme_color_dark": "#1e1f22",
             "schemes": ["light", "dark"],
+        }, {
+            "id": "signal",
+            "label": "Signal",
+            "blurb": "the line the sound takes",
+            "module": "themes/signal/signal.js",
+            "styles": ["themes/signal/style.css"],
+            "scripts": [],
+            "metas": [],
+            "color_scheme": "dark",
+            "theme_color": "#0f0d0b",
+            "theme_color_dark": null,
+            "schemes": ["dark"],
+        }, {
+            "id": "nightdrive",
+            "label": "Night drive",
+            "blurb": "an outrun road that moves with the music",
+            "module": "themes/nightdrive/nightdrive.js",
+            "styles": ["themes/nightdrive/style.css"],
+            "scripts": [],
+            "metas": [],
+            "color_scheme": "dark",
+            "theme_color": "#0a0018",
+            "theme_color_dark": null,
+            "schemes": ["dark"],
         }])
     );
     assert!(!list_json().contains('<'));

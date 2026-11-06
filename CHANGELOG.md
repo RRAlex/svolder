@@ -8,6 +8,127 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.31.5
+
+The web page gets its fourth theme, Night drive: a synthwave scene that plays your music. 0.31.4
+and 0.31.5 ship as one release.
+
+- **Night drive**: pick it from the menu's Theme row, with `T`, or with `?theme=nightdrive`. It is dark only. A sun sits on the horizon above a road and a
+  night sky of stars; the music drives all of it.
+  - **The mountains are the analyzer and the tone curve.** The ridge is the live spectrum, a
+    smooth line through the levels with a slow swell at silence. Drag a point on it to tune the
+    EQ; the wheel or a two-finger pinch sets a band's Q. The curve rests when nothing tunes, and a
+    lit pink highlight on the curve shows where a dot acts.
+  - **The floor is heat.** Its cells rise into short neon bars with the music and glow on loud
+    ones; the heat's low end is spread over more colours.
+  - **The mood** follows the song: the night and the sun follow the music's own range, and the
+    stars, the sun's rays and the wet road answer the band's envelope.
+  - **Sky events** are rare: shooting stars and showers, rays turning slowly while they show.
+  - **The dash** holds the volume, the input, the mode, the EQ line and Now playing, with a very
+    small cover when there is one. Like the HUD's words it fades after 15 s, to a faint 10 % on
+    a desktop and on a phone held sideways, and wakes on a move or a key; the first tap or click
+    on a faded dash only wakes it, however long it is held.
+  - **The sheet** under the scene carries every control and fact the device has, an amp's
+    meters and faults included, so nothing needs the scene to be reached.
+  - **On a phone** the scene keeps the top, the dash shrinks to its rows at the bottom in
+    portrait, and the sheet follows, with more room for the tuning.
+  - **Motion levels** (Full, Calm, Still) set how much moves. A frame
+    budget watches the draws: a slow screen steps down, a phone draws at most 60 a second in Full
+    and blurs nothing, and the scene returns once the draws measure under budget. A readout names
+    the level in use on a slow phone.
+  - Its fonts, Russo One and Mr Dafoe, are shipped with svolder.
+
+Night drive and Signal's second pass gave every theme these, from the shared core:
+
+- **The tab's title** is the core's and names the device and its state.
+- **Held − and +**: pressing a volume, band or strength − or + keeps stepping, in every theme.
+- **Space plays and pauses** the computer's player.
+- **The theme picker** has a close button, scrolls on a phone, and, with the menu, follows the
+  visible window and scrolls inside a short one.
+- **The menu button** is the same 44 px button in the corner in every theme, on an opaque backdrop.
+- **The device's link** is said in words beside its name in every theme (a green dot while
+  connected, the state's word otherwise). Ember's connected pill is gone from beside the menu.
+- Now playing shows the album cover in Signal and Night drive, and in monochrome in Paper.
+- A muted volume reads −∞ dB in Ember, as in the other themes.
+- Signal's guest check reads the real requests, so a guest is verified to write nothing.
+- A canvas loop may run under reduced motion and at a pace, and the analysis rules (the held
+  bass, the minute's range) are the core's.
+
+Also in this release:
+
+- **The CLI demo**: `svolder tui --demo --host --web` opts the demo into the computer's real
+  audio and the web page; the default demo stays safe. `make demo` uses them, and
+  `make demo-dac` and `make demo-amp` start a DAC or an amp demo.
+- **The TUI's Spectrum row** spans the width of the Controls pane, and its colours are softer.
+- **Fixes in every theme with a volume:** pressing − or + to a step you had asked for a moment
+  before, after another hand set the device back, is written again (Signal, Paper and Night
+  drive dropped it). A change made right after switching to another device can no longer reach
+  the previous one. Space is named in the key lists. On a phone, choosing a hop in Signal scrolls
+  all the way back to the top.
+- **The demo** can no longer hang at exit while it removes the computer EQ it applied.
+- **The web gate** runs its checks in parallel, six at a time by default (`WEB_CHECKS_JOBS`
+  sets it); a failure re-runs alone, and a check that passes only then is reported as flaky.
+  The draw-timing checks run alone in a serial lane, a browser never outlives its check, and
+  Firefox picks its own port for the checks' connection.
+
+## 0.31.4
+
+The web page gets its third theme, Signal: the sound's way from the player to your ears, drawn as
+one line.
+
+- **Signal**: pick it from the menu's Theme row, with `T`, or with `?theme=signal`. It is dark
+  only. Left to right the line runs from the player, through the computer, to the device svolder
+  shows, then on to whatever comes after it. A solid dot is something svolder reads, with its
+  live facts under the name. A plain ring is a hop you declared, because svolder cannot see an
+  analogue signal. Moving dots show the sound flowing while the player plays; they stand still
+  when it pauses, while the page is hidden and under reduced motion.
+- **Choosing a hop** (click, tap, or Left and Right) opens what it offers underneath:
+  - the DAC: the large volume with −, Mute and + (hold − or + to keep stepping; muted reads
+    −∞ dB) and the tone curve to drag (the wheel or a two-finger pinch sets a band's Q). The
+    DAC says `arrives as sent` when it reads the rate the computer sends,
+    `changes the sound` when it does not, and neither while that is not read;
+  - a linked Forkbeard amp: its power, meters and faults, writing to the amp only;
+  - the computer: its sink, rate, volume and the computer EQ, read only;
+  - the player: Now playing.
+  Below the first screen come the band table with the input under it, beside the mode, the
+  presets and the controls, in two columns, then the device's facts. The mode heads the second
+  column; while Loudness is on its button carries a round − and + for the strength, and holding
+  one, or a band's − or +, keeps stepping. Zoomed out on a tall window, the page stays together
+  in the middle. A slim bar keeps the hops in reach once the line has scrolled away.
+- **The tab's title** names the device and how the page stands with it, for example
+  `Bifrost 3 · connected — svolder`, or `reconnecting` while svolder is out of reach.
+- **Declaring hops on the page**: the menu's *Add device…* row adds an amp, headphones, speakers
+  or anything else after the device, and a declared hop can be edited, moved or removed in place.
+  A Forkbeard amp the daemon lists but has not linked is offered first, and choosing it links it.
+  While an AutoEq preset is applied on the computer and no headphones are declared, the line ends
+  with a ring named after the preset.
+- **On a phone** the line is a strip across the top with the chosen hop in the middle. Swipe it
+  or tap a neighbour; it stays at the top, with the menu button, as the page scrolls. The mode
+  sits under the curve, and the shelf opens with the input and the presets, then the band table.
+- **Trouble**: a device out of reach dashes the line into a hollow ring, stills what follows and
+  shows a card with *Try now*. A fault keeps its controls live. A guest sees every control
+  drawn but inert.
+
+Signal found four things the shared core lacked; all are fixed for every theme:
+
+- The page model carries the computer's route (sink, rate, format, volume, mute, the computer
+  EQ), not only its words.
+- The daemon reads the computer EQ's saved state, so a page can name the AutoEq preset that is
+  applied. A newly applied preset shows within a second.
+- On its way down the daemon stopped the computer's player before the web server, so an open
+  page heard the computer go away and dropped its Now playing card. The servers now stop first,
+  and a page keeps the last thing it heard, dimmed, while the connection is lost.
+- A theme can place the menu button against the window instead of the page
+  (`anchor(el, { fixed })`), which a pinned strip needs; Ember and Paper place it as before.
+
+0.31.3 was not released on its own. Its changes ship in this release:
+
+- **Paper**: the red volume note's arrow climbs the margin on the needle's side instead of running
+  over the tone section, and The device starts folded.
+- **Releases**: pushing a version tag starts the release workflow, which also runs the whole test
+  suite on arm64 before anything is published.
+- `svolder-sim --trace` stamps every line with the milliseconds since the simulator started.
+
 ## 0.31.3
 
 Paper's follow-ups, and releases that start themselves.

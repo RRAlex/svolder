@@ -18,9 +18,10 @@ well enough and the page's CSP already allows.
   graph toggle, the delay row, the sink label. It owns the stream, the model and the spectrogram's
   history, not the card's element, so a swap of the screen puts the picture in the new card and the
   stream keeps running.
-- `viz-model.js` and `viz-colour.js` are the rules without a canvas (decoding, smoothing, the
-  max hold, the clock offset and the delay, the beat schedule, the band maps; the base scale and
-  the stereo tint) and are tested in node (`node/viz.mjs`).
+- `core/viz-model.js` (the core's, so any theme may use it) and `viz-colour.js` are the rules
+  without a canvas (decoding, smoothing, the max hold, the clock offset and the delay, the beat
+  schedule, the band maps; the base scale and the stereo tint) and are tested in node
+  (`node/viz.mjs`).
 - `viz-pref.js` is a classic script in the page's head that reads `on` from the same key before the
   first paint and says `data-viz="off"` on the root element, so the style sheet leaves the card out
   of the layout from the first frame (a module would run after it).

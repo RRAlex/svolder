@@ -12,6 +12,8 @@
 //                                       { recall } | { save } | {}
 //   shown(target) -> string | null      the words shown for a control, or for a fact by its label
 //   state() -> { lost, waiting, resting, toasts }
+//   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
+//                                       state (null when none are drawn)
 
 import { ember } from './bind.js';
 
@@ -111,6 +113,9 @@ function factCell(label) {
   return null;
 }
 
+/** The cover of the track, the one fact the Now playing card shows. */
+const COVER = '#part-playing .np-cover img';
+
 /** Whether `label` names a fact, not a target. */
 const isFact = (label) => typeof label === 'string';
 
@@ -171,6 +176,12 @@ async function typeBand(stepper, value) {
 /** Bring `target` (a control or a fact) into view and say whether it is there to be seen: the
  * element is looked for again after the scroll, which a redrawn part may have replaced. */
 async function seen(target) {
+  if (target === 'Cover') {
+    document.querySelector(COVER)?.scrollIntoView({ block: 'center' });
+    await settle();
+    const img = document.querySelector(COVER);
+    return Boolean(img) && taken(img) && onScreen(img);
+  }
   if (isFact(target)) {
     const details = fold();
     if (!details) return false;
@@ -278,7 +289,14 @@ export const driver = {
     await settle();
   },
 
+  linkWords() {
+    const word = document.querySelector('#part-link .lw');
+    if (!word || getComputedStyle(word).display === 'none' || word.getBoundingClientRect().width < 8) return null;
+    return word.textContent.trim();
+  },
+
   shown(target) {
+    if (target === 'Cover') return document.querySelector(COVER)?.getAttribute('src') ?? null;
     if (isFact(target)) return factCell(target)?.textContent ?? null;
     const element = find(target);
     if (!element) return null;

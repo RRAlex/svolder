@@ -110,6 +110,13 @@ function mount(root, core, { signal }) {
     if (!signal.aborted) placeNotes(root, view);
   });
 
+  // A cover the daemon no longer holds is not shown, and leaves no gap; the notes find their places again.
+  root.addEventListener('error', (event) => {
+    if (!event.target.matches?.('.p-cover img')) return;
+    event.target.closest('.p-cover').hidden = true;
+    placeNotes(root, view);
+  }, { capture: true, signal });
+
   // The words that go somewhere without changing the device: another device, the way out.
   root.addEventListener('click', (event) => {
     const word = event.target.closest?.('[data-go]');

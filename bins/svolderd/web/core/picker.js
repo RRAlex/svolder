@@ -2,7 +2,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The picker: a sheet over the page with a card for each theme the page ships, each card's picture
 // drawn by its theme (`theme.preview(box)`), the one in use marked. A pick of another theme goes to
-// `pick(id)`; Escape, a click outside the sheet or a pick closes it. While it stands it is modal:
+// `pick(id)`; Escape, a click outside the sheet, the close button at its top right or a pick closes
+// it. While it stands it is modal:
 // what is under it cannot be reached by the keys or the mouse, and the keys that move in it are
 // the sheet's.
 
@@ -52,6 +53,8 @@ export function createPicker({ document, core, pick, under, button }) {
   }
 
   const cards = () => (sheet ? [...sheet.querySelectorAll('.tcard')] : []);
+  /** What the keys move over: the cards, then the close button. */
+  const reach = () => (sheet ? [...cards(), sheet.querySelector('.pclose')] : []);
   const opened = () => sheet !== null;
 
   function open() {
@@ -67,17 +70,24 @@ export function createPicker({ document, core, pick, under, button }) {
     const title = make('h2', '', 'Theme');
     title.id = 'picker-title';
     const grid = make('div', 'picker-grid');
+    const x = make('button', 'pclose');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Close');
+    x.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">'
+      + '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
     grid.append(...core.registry.list().map((entry) => card(entry, current)));
     const foot = make('p', 'picker-foot');
     const key = make('kbd', '', 'T');
     const address = make('code', '', '?theme=ember');
     foot.append('Press ', key, ' in any theme to open this or add ', address,
       ' to the address');
-    inner.append(title, make('p', 'picker-note', NOTE), grid, foot);
+    inner.append(x, title, make('p', 'picker-note', NOTE), grid, foot);
     sheet.append(inner);
     sheet.addEventListener('click', (event) => {
       const chosen = event.target.closest?.('.tcard');
-      if (chosen) {
+      if (event.target.closest?.('.pclose')) {
+        close();
+      } else if (chosen) {
         close();
         if (chosen.dataset.theme !== core.theme?.id) pick(chosen.dataset.theme);
       } else if (event.target === sheet) {
@@ -103,7 +113,7 @@ export function createPicker({ document, core, pick, under, button }) {
    * between the cards; no other key reaches the page under it. */
   function key(event) {
     if (!sheet) return;
-    const list = cards();
+    const list = reach();
     const at = list.indexOf(document.activeElement);
     const step = (by) => list[(at + by + list.length) % list.length];
     const to = {
@@ -112,7 +122,7 @@ export function createPicker({ document, core, pick, under, button }) {
       ArrowLeft: step(-1),
       ArrowUp: step(-1),
       Home: list[0],
-      End: list[list.length - 1],
+      End: list[list.length - 2],
       Tab: step(event.shiftKey ? -1 : 1),
     }[event.key];
     if (event.key === 'Escape') {

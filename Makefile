@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree third-party-licenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo screenshots web-icons rate-check rate-check-test web-shots web-snippets theme-css-check web-checks web-checks-quick paper-shots e2e docker install install-service uninstall
+.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree third-party-licenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp screenshots web-icons rate-check rate-check-test web-shots web-snippets theme-css-check web-checks web-checks-quick paper-shots signal-shots nightdrive-shots e2e docker install install-service uninstall
 
 help: ## Show available targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
@@ -250,9 +250,24 @@ clean-all: clean ## Remove build output, the `nix build` link and the crates thi
 clean-rust: clean-all ## Everything clean-all removes, and cargo's whole download cache: every Rust project on this machine downloads its crates again
 	@sh scripts/clean-downloads.sh all
 
-demo: deps-build ## Build, then try the TUI on a fake device and a throwaway daemon (touches nothing of yours)
+# PROFILE=<fake profile> and SIGNAL=1 reach the fake device as SVOLDER_FAKE_PROFILE and
+# SVOLDER_FAKE_SIGNAL.
+# A knob not given is cleared from the shell's environment, so the default is the default.
+DEMO_KNOBS = env $(if $(PROFILE),SVOLDER_FAKE_PROFILE=$(PROFILE),-u SVOLDER_FAKE_PROFILE) $(if $(SIGNAL),SVOLDER_FAKE_SIGNAL=$(SIGNAL),-u SVOLDER_FAKE_SIGNAL)
+
+demo: deps-build ## Build, then try the TUI and the web UI on a fake device with YOUR COMPUTER'S REAL AUDIO (volume, player, EQ); PROFILE=fake-amp SIGNAL=1 pick the device
 	$(CARGO) build --workspace
-	target/debug/svolder tui --demo
+	$(DEMO_KNOBS) target/debug/svolder tui --demo --host --web
+
+demo-dac: deps-build ## Like `make demo` on the fake DAC with its tone control (your computer's real audio)
+	@$(MAKE) --no-print-directory demo PROFILE= SIGNAL=
+
+demo-amp: deps-build ## Like `make demo` on the fake amplifier with its meters moving (your computer's real audio)
+	@$(MAKE) --no-print-directory demo PROFILE=fake-amp SIGNAL=1
+
+demo-safe: deps-build ## Build, then try the TUI on a fake device and a throwaway daemon (touches nothing of yours)
+	$(CARGO) build --workspace
+	$(DEMO_KNOBS) target/debug/svolder tui --demo
 
 screenshots: deps-build ## Draw the README's pictures into docs/images from the TUI's own renderer (needs ffmpeg, fonts-ubuntu, fonts-dejavu-core; downloads one AutoEq file once)
 	@bash scripts/screenshots.sh
@@ -277,13 +292,21 @@ paper-shots: deps-build ## Shoot Paper's stills: DAC and amp, desktop and phone,
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/paper_shots.py
 
+signal-shots: deps-build ## Shoot Signal's stills: DAC, amp chosen, declared hop chosen, lost link, + sheet, linked amp shown, tablet, phone, into target/web-shots/signal (Chromium)
+	@$(CARGO) build -q -p svolderd
+	@python3 scripts/web-checks/signal_shots.py
+
+nightdrive-shots: deps-build ## Shoot Night drive's stills: desktop at rest, a bubble held, the sheet, out of reach, no capture, phone upright and sideways, into target/web-shots/nightdrive (Chromium)
+	@$(CARGO) build -q -p svolderd
+	@python3 scripts/web-checks/nightdrive_shots.py
+
 web-snippets: ## Fail if a web mutation runner's snippet does not occur exactly once in its file (needs python3 only)
 	@python3 scripts/web-checks/snippets.py
 
-web-checks: deps-build ## Run the web UI's node harnesses and browser checks in headless Chromium and Firefox (needs node, python3-websockets, python3-numpy, python3-pil, both browsers, geckodriver; never takes a picture of the smoke)
+web-checks: deps-build ## Run the web UI's node harnesses and browser checks in headless Chromium and Firefox (needs node, python3-websockets, python3-numpy, python3-pil, both browsers, geckodriver; never takes a picture of the smoke; over an hour at the default WEB_CHECKS_JOBS=6, a failure re-run alone)
 	@bash scripts/web-checks/run-all.sh
 
-web-checks-quick: deps-build ## Quick web gate: the node harnesses, the browser checks that leave the smoke alone and one short smoke check per browser (4 to 5 minutes); refuses after a smoke file changed, then run web-checks
+web-checks-quick: deps-build ## Quick web gate: the node harnesses, the browser checks that leave the smoke alone and one short smoke check per browser (about 38 minutes at the default WEB_CHECKS_JOBS=6, a failure re-run alone); refuses after a smoke file changed, then run web-checks
 	@bash scripts/web-checks/run-all.sh --quick
 
 e2e: deps-build ## End-to-end test over BlueZ (needs two extended-advertising controllers); not part of check

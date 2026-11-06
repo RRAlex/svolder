@@ -150,6 +150,15 @@ def boxes(b):
     return b.page(BOXES)
 
 
+def same_boxes(a, b, tol=0.5):
+    """Two readings of `boxes` agree within `tol` px (a scrolled page snaps its scroll to whole pixels,
+    so a box at a fractional place reads a tenth apart)."""
+    return a.keys() == b.keys() and all(
+        a[k] == b[k] if not isinstance(a[k], list) or a[k] is None
+        else b[k] is not None and all(abs(x - y) <= tol for x, y in zip(a[k], b[k]))
+        for k in a if a[k] is None or isinstance(a[k], (list, int, float)))
+
+
 def pixels(b):
     return b.page(PIXELS)
 
@@ -419,7 +428,7 @@ try:
     s = settle_running(b)
     check('scrolled into view the stream opens and the card runs',
           s['state'] == 'running' and len(frames_streams(b)) == 1, [s, frames_streams(b)])
-    check('nothing moves when it starts', boxes(b) == m, [m, boxes(b)])
+    check('nothing moves when it starts', same_boxes(boxes(b), m), [m, boxes(b)])
     shoot(b, 'phone-spectrogram')
     for look in LOOKS[1:]:
         tap(b)

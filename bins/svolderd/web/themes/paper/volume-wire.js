@@ -70,9 +70,18 @@ export function wireVolume({ root, core, live, act, view, signal }) {
       view.asked = { raw: landed, at: view.now };
       show();
     }
-    // The device has the step: a reading that differs from it afterwards is another hand's.
-    view.asked.answered = true;
+    // The device has the step: a reading that comes after this and differs from it is another
+    // hand's (`answered`, set by that reading, below).
+    view.asked.acked = true;
   }
+
+  live.onReading('volume', () => {
+    const asked = view.asked;
+    if (asked?.acked && !asked.answered) {
+      asked.answered = true;
+      show();
+    }
+  });
 
   /** Ask for step `raw`: held to the range and the cap, shown at once, and sent. A viewer who may
    * not write is told so by the core and the needle does not move. */
@@ -85,7 +94,10 @@ export function wireVolume({ root, core, live, act, view, signal }) {
       core.actions.setVolume(step, { device });
       return;
     }
-    const same = view.asked?.raw === step || (!view.asked && step === v.raw && !climbing(v));
+    // The step already asked for stands only while it is the one shown: once the device has it and
+    // reads another step, that is another hand's and the same ask is a new one.
+    const same = (view.asked?.raw === step && shownRaw(v, { asked: view.asked, now: Date.now() }) === step)
+      || (!view.asked && step === v.raw && !climbing(v));
     if (same) return;
     view.asked = { raw: step, at: view.now };
     expire();

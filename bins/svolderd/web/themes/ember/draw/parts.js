@@ -25,10 +25,10 @@ const flag = (on) => (on === true ? 'true' : 'false');
 /** Whether the model has no value: a `null` or a missing field. */
 const none = (value) => value == null;
 
-/** The link pill. */
+/** The link: a dot beside the device's name, with the state's word (shown unless connected). */
 function link(device, page, { oob } = {}) {
   const { state, word } = device.link;
-  return `<span id="part-link" class="link ${esc(state)}"${swap(oob)}><i aria-hidden="true"></i>${esc(word)}</span>`;
+  return `<span id="part-link" class="link ${esc(state)}" role="img"${attr('aria-label', word)}${swap(oob)}><i aria-hidden="true"></i><span class="lw">${esc(word)}</span></span>`;
 }
 
 /** The card above the view: the device's, or the page's when it has no device to show. */
@@ -159,11 +159,14 @@ const note = (n) => `<p class="note${n.red ? ' risk hot' : ''}">${esc(n.text)}</
 /** The volume's readout: its number, the minus sign set apart, and its unit. */
 function bigNumber(v) {
   const minus = '−';
-  const digits = v.readout.startsWith(minus)
-    ? `<span class="neg">${minus}</span>${esc(v.readout.slice(1))}`
-    : esc(v.readout);
-  const unit = v.unit == null ? '' : `<span class="unit">${esc(v.unit)}</span>`;
-  return `<p class="big"><span class="num">${digits}</span>${unit}</p>`;
+  // Muted reads `−∞ dB`, as the other themes say it.
+  const readout = v.muted ? `${minus}∞` : v.readout;
+  const digits = readout.startsWith(minus)
+    ? `<span class="neg">${minus}</span>${esc(readout.slice(1))}`
+    : esc(readout);
+  const unit = v.muted ? 'dB' : v.unit;
+  const unitEl = unit == null ? '' : `<span class="unit">${esc(unit)}</span>`;
+  return `<p class="big"><span class="num">${digits}</span>${unitEl}</p>`;
 }
 
 /** The volume: the dial, its readout, the step and mute buttons and the notes. */

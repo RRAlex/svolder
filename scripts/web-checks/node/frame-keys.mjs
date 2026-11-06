@@ -5,7 +5,7 @@
 // field it would type into has the focus or a modifier is held. Fake nodes stand in for the
 // browser's. Run: node frame-keys.mjs
 import assert from 'node:assert/strict';
-import { reservedKey } from '../../../bins/svolderd/web/core/frame.js';
+import { playPauseOf, reservedKey, spaceKey } from '../../../bins/svolderd/web/core/frame.js';
 import { inMenu, menuOwns } from '../../../bins/svolderd/web/core/menu.js';
 
 let n = 0;
@@ -61,6 +61,27 @@ ok('the_menu_owns_the_keys_of_its_open_popover_and_the_four_that_open_it', () =>
   assert.equal(menuOwns(key('m', node('body'))), false);
   assert.equal(inMenu(null), false);
   assert.equal(inMenu({ closest: (sel) => (sel === '.fxmenu' ? {} : null) }), true);
+});
+
+ok('space_plays_and_pauses_unless_the_focus_owns_it', () => {
+  assert.equal(spaceKey(key(' ', node('body'))), true);
+  assert.equal(spaceKey(key(' ', node('div'))), true);
+  for (const tag of ['input', 'textarea', 'select', 'button', 'summary']) assert.equal(spaceKey(key(' ', node(tag))), false, tag);
+  assert.equal(spaceKey(key(' ', node('div', { editable: true }))), false);
+  for (const mods of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }, { repeat: true }]) {
+    assert.equal(spaceKey(key(' ', node('body'), mods)), false, JSON.stringify(mods));
+  }
+  assert.equal(spaceKey(key('t', node('body'))), false);
+});
+
+ok('space_presses_the_button_the_players_state_calls_for_and_nothing_without_a_player', () => {
+  const host = (status, buttons = true) => ({ host: { buttons, track: { status } } });
+  assert.equal(playPauseOf(host('playing')), 'pause');
+  assert.equal(playPauseOf(host('paused')), 'play');
+  assert.equal(playPauseOf(host('playing', false)), null, 'no buttons for a guest');
+  assert.equal(playPauseOf({ host: { buttons: true, track: null } }), null, 'nothing loaded');
+  assert.equal(playPauseOf({ host: null }), null);
+  assert.equal(playPauseOf({ device: { playing: { buttons: true, track: { status: 'paused' } } }, host: { buttons: true, track: { status: 'playing' } } }), 'play', 'the device\'s player first');
 });
 
 console.log(`${n} frame-keys checks passed`);

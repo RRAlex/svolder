@@ -582,7 +582,9 @@ const VALUE_GAP: usize = 2;
 /// plays, in the capture's bands from 40 Hz to 16 kHz, each a block glyph as tall as the band is
 /// loud — every block's bands as it lands, falling back between blocks — while the capture of
 /// the sink's monitor runs; `—`, dim, while none does. A row with room for fewer cells than
-/// there are bands draws as many as it has room for, from the lowest. The keys do not reach it:
+/// there are bands draws as many as it has room for, from the lowest; a wider one lays the bands
+/// on the same log axis across all its room, between neighbours ([`host::spread`]), each cell
+/// coloured along the spectrum, red at the bass to violet at the treble. The keys do not reach it:
 /// it is a reading, as a meter's row is.
 fn spectrum_line(app: &App, theme: &Theme, columns: Columns) -> (Line<'static>, bool) {
     let mut spans = vec![widgets::rows::label(host::SPECTRUM, columns.field())];
@@ -590,21 +592,25 @@ fn spectrum_line(app: &App, theme: &Theme, columns: Columns) -> (Line<'static>, 
         spans.push(Span::raw(MISSING));
         return (Line::from(spans), true);
     }
+    // the row runs from the label to the pane's right edge, as the Volume row's value does
     let room = columns.room().saturating_sub(columns.field());
-    let cells: String = app
-        .host
-        .bands
-        .at(app.now)
-        .into_iter()
-        .take(room)
-        .map(host::glyph)
-        .collect();
+    let bands = app.host.bands.at(app.now);
+    let levels = host::spread(&bands, room);
     // a beat of the daemon's frames makes the bands bold for a moment
-    let style = match app.row_pulse() > 0.0 {
-        true => theme.style(Role::Bar).add_modifier(Modifier::BOLD),
-        false => theme.style(Role::Bar),
+    let pulse = match app.row_pulse() > 0.0 {
+        true => Modifier::BOLD,
+        false => Modifier::empty(),
     };
-    spans.push(Span::styled(cells, style));
+    let own = theme.style(Role::Bar).add_modifier(pulse);
+    let last = levels.len().saturating_sub(1).max(1) as f32;
+    // red at the bass end to violet at the treble, where the theme has a spectrum to draw
+    spans.extend(levels.into_iter().enumerate().map(|(at, level)| {
+        let style = match theme.spectrum_row_colour(at as f32 / last) {
+            Some(colour) => own.fg(colour),
+            None => own,
+        };
+        Span::styled(host::glyph(level).to_string(), style)
+    }));
     (Line::from(spans), false)
 }
 
