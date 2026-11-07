@@ -12,6 +12,7 @@
 // the stream lost, another device shown, no such key left or the 10 s cap.
 
 import { inertOf } from './inert.js';
+import { writeField } from './points-wire.js';
 
 /** The sheet's steppers a long press repeats: a band's value and the loudness strength. */
 const STEPPERS = '[data-act="band"][data-step], [data-act="loudness"][data-step]';
@@ -55,6 +56,11 @@ export function wireBands({
       field.blur();
     } else if (event.key === 'Enter') {
       event.preventDefault();
+      if (field.dataset.point) {
+        writeField(core, field);
+        field.blur();
+        return;
+      }
       const { band, param } = field.dataset;
       core.actions.setBand(Number(band), BAND_PARAM[param], { value: field.value }, { device: store.shown() });
       field.blur();

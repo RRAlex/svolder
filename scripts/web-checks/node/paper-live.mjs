@@ -71,6 +71,7 @@ function rig(name = 'dac') {
   const calls = { realign: 0, anchored: [] };
   const core = {
     model: store,
+    computer: { side: () => 'dac', on: () => () => {} },
     frame: { realign: () => { calls.realign++; }, anchor: (el) => calls.anchored.push(el) },
   };
   const root = fakeRoot();

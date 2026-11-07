@@ -359,6 +359,35 @@ is wider than the other two. Either way it has one width in every mode, so nothi
 mode changes, and the − and + are touch targets as tall as the button and as wide as their ends.
 Nothing below the curve moves in any mode.
 
+**The switch to this computer.** One switch on the page flips the volume and the tone control from
+the device you are looking at to the computer `svolderd` runs on: the volume then sets the computer's
+volume (1 % a press, 0 to 100 %, never a boost) and its mute, and the tone control is the computer
+EQ. It is drawn on every device's page, an amp's too, while the daemon serves the computer; with
+no device shown there is none. Ember puts a pill with the device's name and `This computer` beside
+the name, Paper writes `showing: the DAC · this computer` under the title, Signal makes the
+computer's hop the switch and keeps its facts (format, other sounds, the path verdict) below, and
+Night drive keeps two keys left of the menu button (on a phone one `DAC │ PC` pill in the top left).
+Flipping writes nothing, and the side is yours: it is kept in your browser, other viewers keep theirs,
+and a guest can flip to look but every control stays quiet. Where the computer cannot be used, a
+sentence says why (`computer controls unavailable: no pw-cli on this computer`) in the switch's
+place and the device's side stays.
+
+On the computer side the mode reads `Off | EQ` (no Loudness). The curve is the points, up to 16:
+drag one for its frequency and gain while the sound changes with no gap, turn the wheel or pinch two
+fingers for its Q, tap an empty spot to add a peak there, or use `+ Add point`. Each row of the
+table has a type (`PK`, `LSC`, `HSC`), a frequency, a gain and a Q you can step or type, and `×`. A
+line says `7 of 16 points · preamp −6.0 dB`: the preamp lowers the whole signal so a boost never
+clips, and the line says by how much. Off takes the EQ out of the path and keeps the points; editing
+while Off turns it on. The presets are the same list as the device's, saved ones included, and
+`Save as…` keeps the computer's points under a name. A preset a device's own tone control plays
+too would play twice, so the page asks (`Warm is on the Gungnir 2 too: flatten the Gungnir 2 and apply on the
+computer?`): Yes flattens the device first, No changes nothing.
+
+**This computer's points.** Flipped to this computer, the table lists the points by frequency, and
+the `#` column counts that order. A row never jumps under your finger: the table is put in order
+when you let go of a drag, enter a typed value, add a point or recall a preset. The `×` of the only
+point left sets it to 0 dB and keeps its frequency, type and Q.
+
 **Presets.** The list shows the presets that fit the device, the built-ins first, with a lamp on the
 one that is on and a line above them saying which (`On: NAME`,
 `NAME, edited. Save the bands to keep them.`, `Mode Flat: no preset is on.` or
@@ -632,15 +661,20 @@ draws on canvases, so it follows the music only when svolderd can capture the co
 - **The dash** along the bottom: `−` `MUTE` `+` (hold one and it repeats), the input as chips (a list
   when there are more than three), the cover and the track with its progress bar, previous, play or
   pause and next, and `DEVICE ▴`. An amp has its power key and gauges where the input would be.
-  Space plays and pauses the computer's player, as in every theme. On a desktop and on a phone held
-  sideways the dash fades to a tenth with the HUD, and the first tap on a faded dash only wakes it
-  and presses nothing; a key held on it, a list open on it, the keyboard focus on it and a mouse
-  resting over it keep it up. On a phone held upright the dash is a panel under the scene that holds
-  only its own rows, never fades, and leaves the scene about three quarters of the height.
+  Space plays and pauses the computer's player, as in every theme. The mouse wheel over the big
+  volume number steps the volume (up is louder) and `↑` `↓` do too, when no control has the keyboard
+  focus and no sheet or question is open; a held arrow repeats like a held `+`, and a step is the
+  device's own, or 1 % on the computer. The wheel anywhere else on the scene still sets the Q. On a
+  desktop and on a phone held sideways the dash fades to a fifth with the HUD, and the first tap on a
+  faded dash only wakes it and presses nothing; a key held on it, a list open on it, the keyboard
+  focus on it and a mouse resting over it keep it up. On a phone held upright the dash is a
+  translucent two-row panel over the foot of the scene that never fades and leaves the scene about nine tenths of the height. On a phone the switch is one small pill in the top left corner, across
+  from the menu button: `DAC │ PC` (`AMP │ PC` for an amp), the side shown lit; a desktop keeps two keys left
+  of the menu button.
 - **Tuning on the mountains.** Move the pointer over the mountains and they turn into the tone
   curve with a bubble for each band: drag a bubble for its frequency and gain, drag the diamond at
   either end of the lit bell for its width (Q), scroll the wheel for the Q of the nearest band, or
-  pinch two fingers. They turn back about a second and a half after you let go. A guest never sees the curve (a tap on the
+  pinch two fingers. A touch only counts inside the band the curve is drawn in (+12 dB to -12 dB and a fingertip beyond); above or below it, it is a touch on the scene. They turn back about a second and a half after you let go. A guest never sees the curve (a tap on the
   mountains says why it does nothing); a page with writes off and a device with no bands only see it.
 - **The sheet.** `DEVICE ▴`, or *Device…* in the menu, opens everything else about the device on a
   neon sheet: the mode (Loudness with its `−` and `+` under its name), the input, the band table
@@ -651,7 +685,8 @@ draws on canvases, so it follows the music only when svolderd can capture the co
 - **Motion** is the theme's menu setting: *Full* draws at the screen's rate; *Calm* about ten a
   second, with the road and the sky's events stopped; *Still* about one a second. With none chosen,
   a system set for reduced motion starts on Calm. While the music is silent or the player is not
-  playing, a phone draws only 8 a second.
+  playing, a phone draws at most 30 a second. Choosing Full lifts a phone's 30 a second cap at once and the
+  scene steps down within about a second if the phone cannot keep up.
 - **A slow phone.** The scene watches what it costs. If drawing is slow it gives up the wet road
   first, then draws at a lower density, then at most 30 a second, and brings them back in the other
   order once it has been comfortable for 10 seconds. A phone starts at 30 a second, comes up to at

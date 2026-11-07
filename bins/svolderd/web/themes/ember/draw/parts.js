@@ -11,6 +11,9 @@ import {
   labels, shapes, ticks,
 } from './dial.js';
 import { arch } from './meter-arch.js';
+import {
+  presetsSection, switchPill, toneSection, volumeModel,
+} from './computer.js';
 import { attr, esc } from './html.js';
 
 /** The part's root asks htmx to swap it out of band. */
@@ -160,28 +163,31 @@ const note = (n) => `<p class="note${n.red ? ' risk hot' : ''}">${esc(n.text)}</
 function bigNumber(v) {
   const minus = '−';
   // Muted reads `−∞ dB`, as the other themes say it.
-  const readout = v.muted ? `${minus}∞` : v.readout;
+  const readout = v.muted && !v.computer ? `${minus}∞` : v.readout;
   const digits = readout.startsWith(minus)
     ? `<span class="neg">${minus}</span>${esc(readout.slice(1))}`
     : esc(readout);
-  const unit = v.muted ? 'dB' : v.unit;
+  const unit = v.muted && !v.computer ? 'dB' : v.unit;
   const unitEl = unit == null ? '' : `<span class="unit">${esc(unit)}</span>`;
   return `<p class="big"><span class="num">${digits}</span>${unitEl}</p>`;
 }
 
-/** The volume: the dial, its readout, the step and mute buttons and the notes. */
-function volume(device) {
-  const v = device.volume;
+/** The volume: the dial, its readout, the step and mute buttons and the notes. On the computer's
+ * side it is the same knob over the computer's volume, 0 to 100 %. */
+function volume(device, page, { computer } = {}) {
+  const own = computer?.side === 'computer' && computer.volume ? computer : null;
+  const v = own ? volumeModel(own.volume) : device.volume;
   if (!v) return '<section id="part-volume" hidden></section>';
-  const off = device.inert ? attr('aria-disabled', 'true') : '';
+  const inert = own ? !own.writes : device.inert;
+  const off = inert ? attr('aria-disabled', 'true') : '';
   const climb = v.notes.filter((n) => n.popup).map((n) => n.text).join('');
-  const svg = `<svg class="dial" viewBox="-30 -16 260 220" role="slider" tabindex="0" aria-label="Volume"${attr('aria-valuemin', v.lo)}${attr('aria-valuemax', v.hi)}${none(v.raw) ? '' : attr('aria-valuenow', v.raw)}${attr('aria-valuetext', v.aria)}${device.inert || none(v.raw) ? attr('aria-disabled', 'true') : ''}> ${dial(v)} </svg>`;
+  const svg = `<svg class="dial" viewBox="-30 -16 260 220" role="slider" tabindex="0" aria-label="Volume"${attr('aria-valuemin', v.lo)}${attr('aria-valuemax', v.hi)}${none(v.raw) ? '' : attr('aria-valuenow', v.raw)}${attr('aria-valuetext', v.aria)}${inert || none(v.raw) ? attr('aria-disabled', 'true') : ''}> ${dial(v)} </svg>`;
   const buttons = `<div class="vol-btns"> <button type="button" class="step big" data-step="-1" aria-label="Down"${off}>−</button> <button type="button" class="btn mute"${attr('aria-pressed', flag(v.muted))}${off}>Mute</button> <button type="button" class="step big" data-step="1" aria-label="Up"${off}>+</button> </div>`;
   const slot = v.notes.filter((n) => n.eq).map(note).join('');
   const rest = v.notes.filter((n) => !n.eq && !n.popup).map(note).join('');
   const notes = `<div class="notes${v.room ? ' room' : ''}"> <div class="slot">${slot}</div> <div class="rest">${rest}</div> </div>`;
   const sub = `<p class="sub">${v.sub ? esc(v.sub) : ''}</p>`;
-  const knob = `<sv-knob${attr('data-key', v.key)}${attr('data-lo', v.lo)}${attr('data-hi', v.hi)}${attr('data-raw', none(v.raw) ? '' : v.raw)}${attr('data-target', none(v.target) ? '' : v.target)}${attr('data-muted', flag(v.muted))}${attr('data-silence', flag(v.silence))}${attr('data-risk', none(v.risk) ? '' : v.risk)}${attr('data-cap', none(v.cap) ? '' : v.cap)}${attr('data-climb', climb)}${attr('data-texts', JSON.stringify(v.texts))}${attr('data-db', JSON.stringify(v.db))}${attr('data-mute', v.mute ?? '')}${device.inert ? attr('data-inert', 'true') : ''}${attr('class', v.muted ? 'muted' : '')}> ${svg} ${bigNumber(v)} ${sub} ${buttons} ${notes} </sv-knob>`;
+  const knob = `<sv-knob${attr('data-key', v.key)}${attr('data-lo', v.lo)}${attr('data-hi', v.hi)}${attr('data-raw', none(v.raw) ? '' : v.raw)}${attr('data-target', none(v.target) ? '' : v.target)}${attr('data-muted', flag(v.muted))}${attr('data-silence', flag(v.silence))}${attr('data-risk', none(v.risk) ? '' : v.risk)}${attr('data-cap', none(v.cap) ? '' : v.cap)}${attr('data-climb', climb)}${attr('data-texts', JSON.stringify(v.texts))}${attr('data-db', JSON.stringify(v.db))}${attr('data-mute', v.mute ?? '')}${own ? attr('data-computer', 'true') : ''}${inert ? attr('data-inert', 'true') : ''}${attr('class', v.muted ? 'muted' : '')}> ${svg} ${bigNumber(v)} ${sub} ${buttons} ${notes} </sv-knob>`;
   return `<section id="part-volume" class="p-vol" hx-preserve="true"> <h2>Volume</h2> ${knob} </section>`;
 }
 
@@ -236,7 +242,8 @@ function table(device, b) {
 }
 
 /** The tone control: its modes, its curve and the band table. */
-function tone(device, page, { oob } = {}) {
+function tone(device, page, { oob, computer } = {}) {
+  if (computer?.side === 'computer') return toneSection(computer, { oob });
   const t = device.tone;
   if (!t) return '';
   const rows = t.bands ? table(device, t.bands) : '';
@@ -252,7 +259,8 @@ function bands(device) {
 const icon = (open, label, path, rows) => `<button type="button" class="ico"${open}${attr('aria-label', label)}> <svg viewBox="0 0 24 24" aria-hidden="true">${rows}<path${attr('d', path)}/></svg> </button>`;
 
 /** The tone presets: the status line, a row a preset and, where the viewer may, save, rename and delete. */
-function presets(device, page, { oob } = {}) {
+function presets(device, page, { oob, computer } = {}) {
+  if (computer?.side === 'computer') return presetsSection(computer, { oob });
   const p = device.presets;
   if (!p) return '';
   const { status } = p;
@@ -376,6 +384,7 @@ function visualizer() {
 
 export const PARTS = {
   link,
+  switch: (device, page, { oob, computer } = {}) => switchPill(computer?.sw ?? null, { oob }),
   card,
   controls,
   control: (device, page, { control: c }) => control(c, device),

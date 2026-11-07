@@ -18,6 +18,8 @@ export const HUD = Object.freeze({
   hostEq: 'host EQ on',
   changes: 'changes the sound',
   eq: 'EQ',
+  off: 'OFF',
+  unconfirmed: 'unconfirmed',
   flat: 'FLAT',
   loudness: 'LOUDNESS',
   silence: '−∞',
@@ -25,6 +27,12 @@ export const HUD = Object.freeze({
   noVolume: (dac) => (dac
     ? `This amp has no volume of its own: the ${dac}’s volume is the one that sets the level.`
     : 'This amp has no volume of its own.'),
+});
+
+/** The switch's words: its group's name and why it cannot be used. */
+export const SWITCH = Object.freeze({
+  label: 'Show the controls of',
+  unavailable: (why) => `computer controls unavailable: ${why}`,
 });
 
 /** The dash's fixed words: the keys, the input, the transport and the way to the sheet. */
@@ -73,6 +81,15 @@ export const SHEET = Object.freeze({
   strength: (value) => `strength ${value ?? '—'}`,
   lowerLoudness: 'Lower the loudness',
   raiseLoudness: 'Raise the loudness',
+  points: 'Points',
+  pointHeads: ['#', 'Type', 'Freq', 'Gain', 'Q'],
+  addPoint: '+ Add point',
+  removePoint: (n) => `Remove point ${n}`,
+  pointType: (n) => `Type of point ${n}`,
+  pointField: (n, param) => `${PARAM_WORD[param][0].toUpperCase()}${PARAM_WORD[param].slice(1)} of point ${n}`,
+  moreBelow: (hidden) => (hidden > 0 ? `${hidden} more below ↓` : ''),
+  notNumber: 'Not a number.',
+  unconfirmed: 'not confirmed yet',
   presets: 'Presets',
   saveAs: 'Save as…',
   rename: 'Rename',

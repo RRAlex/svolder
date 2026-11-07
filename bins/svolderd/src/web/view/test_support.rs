@@ -82,6 +82,8 @@ static NO_HOST: HostView = HostView {
     playing: None,
     route: None,
     now_ms: 0,
+    volume: None,
+    eq: None,
 };
 
 /// No reading has a stamp.

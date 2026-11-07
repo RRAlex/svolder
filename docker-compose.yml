@@ -27,6 +27,8 @@ services:
       - ./config:/config
       - ./run:/run/svolder
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
+    # The computer's volume and EQ are opt-in: docker-compose.host-audio.yml, which `make docker`
+    # enables in .env (COMPOSE_FILE) when it finds the host's PipeWire socket.
     # The web UI, when ./config/svolder/config.toml has [web] enabled = true and
     # listen = "0.0.0.0:8738": publish its port to reach it from this computer and your network.
     # ports:

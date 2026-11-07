@@ -86,6 +86,7 @@ fn service(players: &FakePlayers, routes: Option<&Counting>, covers: CoverSource
         covers,
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     service
 }
@@ -380,6 +381,7 @@ async fn an_unreachable_bus_reports_unavailable() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     for _ in 0..5 {
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -491,6 +493,7 @@ async fn a_route_that_cannot_be_read_is_no_route() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     let _watcher = service.watching();
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -664,6 +667,7 @@ async fn the_changed_fake_route_changes_everything() {
     let route = FakeRoute {
         display: "Gungnir 2".to_string(),
         changed: true,
+        computer: None,
     };
     let facts = route.read(Some(track("x", None))).await.expect("a route");
     let dac = svolder_ipc::host::DacFacts {
@@ -684,6 +688,82 @@ async fn the_changed_fake_route_changes_everything() {
             "2 other sounds mixing"
         ]
     );
+}
+
+/// The fake route follows the fake computer's EQ: untouched while the EQ is off or flat, and the
+/// verdict says `host EQ on` once it is on with a point that is not flat.
+#[tokio::test]
+async fn the_fake_route_follows_the_fake_computers_eq() {
+    let parts = Parts::fake(FakeKnobs::default());
+    let routes = parts.routes.expect("a route");
+    let computer = parts.computer.expect("a computer");
+    let dac = svolder_ipc::host::DacFacts {
+        display: "Gungnir 2".to_string(),
+        input: Some("USB".to_string()),
+        rate_hz: Some(FAKE_RATE_HZ),
+        usb_ports: None,
+    };
+    let verdict = || async {
+        let facts = routes.read(Some(track("x", None))).await.expect("a route");
+        svolder_ipc::host::path_line(&facts, &dac)
+    };
+    computer.set_volume(100).await.expect("the volume is full");
+    assert_eq!(
+        verdict().await.verdict,
+        svolder_ipc::host::Verdict::Untouched
+    );
+    let eq = |op| computer.eq_op(op, &[], |_| Vec::new(), |_| async { Ok(()) });
+    eq(HostEqOp::Mode { on: true }).await.expect("on");
+    assert_eq!(
+        verdict().await.verdict,
+        svolder_ipc::host::Verdict::Untouched,
+        "on and flat leaves the sound alone"
+    );
+    eq(HostEqOp::Set {
+        index: 1,
+        slot: None,
+        kind: None,
+        f: None,
+        g: Some(3.0),
+        q: None,
+        done: true,
+    })
+    .await
+    .expect("a point moved");
+    let line = verdict().await;
+    assert_eq!(line.verdict, svolder_ipc::host::Verdict::Changed);
+    assert_eq!(line.words, ["host EQ on"]);
+    eq(HostEqOp::Mode { on: false }).await.expect("off");
+    assert_eq!(
+        verdict().await.verdict,
+        svolder_ipc::host::Verdict::Untouched
+    );
+}
+
+/// The fake route follows the fake computer's volume and mute too: the fake computer starts at
+/// 42 %, which the verdict names, and 100 % unmuted reads untouched.
+#[tokio::test]
+async fn the_fake_route_follows_the_fake_computers_volume() {
+    let parts = Parts::fake(FakeKnobs::default());
+    let routes = parts.routes.expect("a route");
+    let computer = parts.computer.expect("a computer");
+    let dac = svolder_ipc::host::DacFacts {
+        display: "Gungnir 2".to_string(),
+        input: Some("USB".to_string()),
+        rate_hz: Some(FAKE_RATE_HZ),
+        usb_ports: None,
+    };
+    let line = || async {
+        let facts = routes.read(Some(track("x", None))).await.expect("a route");
+        svolder_ipc::host::path_line(&facts, &dac)
+    };
+    let first = line().await;
+    assert_eq!(first.verdict, svolder_ipc::host::Verdict::Changed);
+    assert_eq!(first.words, ["computer volume 42 %"]);
+    computer.set_volume(100).await.expect("volume");
+    assert_eq!(line().await.verdict, svolder_ipc::host::Verdict::Untouched);
+    computer.set_mute(true).await.expect("mute");
+    assert_eq!(line().await.words, ["computer muted"]);
 }
 
 #[test]
@@ -795,6 +875,7 @@ async fn stop_ends_a_route_read_and_the_helper_tasks() {
             std::future::pending::<()>().await;
         })],
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     let _watcher = service.watching();
     settle().await;
@@ -926,6 +1007,7 @@ async fn a_bus_that_goes_away_is_looked_for_again_every_10_s() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     settle().await;
     assert_eq!(title_of(&service), Some("So What".to_string()));
@@ -999,6 +1081,7 @@ async fn a_stopped_host_does_not_look_for_the_lost_bus() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     settle().await;
     lose.send(()).expect("the bus is followed");
@@ -1039,6 +1122,7 @@ async fn a_bus_that_has_not_answered_yet_is_looked_for_again() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     settle().await;
     assert!(!service.view().available, "a silent bus made it available");
@@ -1074,6 +1158,7 @@ async fn a_bus_that_is_not_there_is_not_looked_for_again() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     pass(Duration::from_secs(60)).await;
     assert_eq!(looked.load(Ordering::SeqCst), 1);
@@ -1105,6 +1190,7 @@ async fn a_silent_bus_that_then_looks_absent_is_still_looked_for() {
         covers: covers(),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     for _ in 0..4 {
         pass(Duration::from_secs(11)).await;

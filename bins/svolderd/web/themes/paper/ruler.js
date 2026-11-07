@@ -26,6 +26,37 @@ const WORDED = 8;
 
 const span = (volume) => volume.hi - volume.lo;
 
+/** The computer's ruler reads 0 to 100 %: a label at each of these, a tick every `PERCENT_TICK`. */
+export const PERCENT_LABELS = [0, 25, 50, 75, 100];
+export const PERCENT_TICK = 2;
+
+/**
+ * The computer's volume as the ruler draws a device's: steps 0 to 100, no zones, no cap, no dB
+ * (`percent` makes `marks` and `ticks` read in percent). `read` is the core's `volumeOf`: a
+ * volume not read yet has no step and is `idle`, drawn as `\u2014`; one another program put above
+ * 100 % is shown at the ruler's end with its own number.
+ */
+export function percentVolume(read) {
+  const pct = read.pct;
+  return {
+    percent: true,
+    lo: 0,
+    hi: 100,
+    raw: pct === null ? null : Math.min(100, pct),
+    text: pct === null ? read.text : `${pct} %`,
+    unit: '%',
+    unreadWords: read.text,
+    idle: pct === null,
+    muted: read.muted,
+    mute: 'computer',
+    texts: Array.from({ length: 101 }, (_, i) => `${i} %`),
+    risk: null,
+    cap: null,
+    target: null,
+    boosted: read.boosted,
+  };
+}
+
 /** The place of step `raw` as a fraction of the ruler, held between 0 and 1. */
 export function fractionOf(volume, raw) {
   if (!(span(volume) > 0) || !Number.isFinite(raw)) return 0;
@@ -87,6 +118,7 @@ export function labelGap(widthPx) {
  */
 export function marks(volume, widthPx) {
   if (!(span(volume) > 0)) return [];
+  if (volume.percent) return PERCENT_LABELS.map((n) => ({ at: n / 100, text: String(n) }));
   const list = [{ at: fractionOf(volume, volume.marks?.[0]?.at ?? volume.lo), text: bottomWords(volume) }];
   const gap = labelGap(widthPx);
   const keep = (at, text) => {
@@ -106,6 +138,9 @@ export function marks(volume, widthPx) {
 
 /** The ticks along the ruler, as fractions: each two dB; without dB each step of a short range. */
 export function ticks(volume) {
+  if (volume.percent) {
+    return Array.from({ length: 100 / PERCENT_TICK + 1 }, (_, i) => (i * PERCENT_TICK) / 100);
+  }
   if (hasDb(volume)) return crossings(volume, TICK_DB).map((c) => c.at);
   if (!(span(volume) > 0) || span(volume) > TICKED_STEPS) return [];
   return Array.from({ length: span(volume) + 1 }, (_, i) => i / span(volume));

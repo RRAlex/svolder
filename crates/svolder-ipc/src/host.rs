@@ -50,6 +50,26 @@ pub struct HostView {
     /// counted forward from.
     #[serde(default)]
     pub now_ms: u64,
+    /// The computer's volume, as the last read of its default sink gave it; absent while it has
+    /// not been read, and from a daemon that does not serve it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<HostVolume>,
+    /// The computer's EQ; absent from a daemon that does not serve it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eq: Option<svolder_host::eq::EqView>,
+}
+
+/// The computer's default sink as a front end shows it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostVolume {
+    /// The volume in percent: above 100 when another program boosted the sink, which is shown as
+    /// it is read and never written.
+    pub pct: u16,
+    /// Whether the sink is muted.
+    pub muted: bool,
+    /// What the sink is called for people.
+    #[serde(default)]
+    pub sink: String,
 }
 
 /// The followed player and its track, as a page or a TUI shows it.

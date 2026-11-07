@@ -7,23 +7,20 @@
 use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use futures::future::BoxFuture;
 use ratatui::backend::{ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 use svolder_ipc::{ColorDepth, Config, TuiConfig};
 
 use svolder_autoeq::{Entry, Index, Refresh};
-use svolder_host::eq::{HostEqState, Manager, Route};
 use svolder_host::fake::{FakeCapture, FakePlayers, FakeSink};
 use svolder_host::{Block, NoBus, NowPlaying, Players, SinkState, Status};
 
 use crate::backend::FakeGate;
-use crate::commands::host_eq::ApplyRequest;
 use crate::recovery::Kind;
 use crate::test_support::stub_daemon::stub_daemon;
 use crate::tui::app::{App, Intent};
@@ -310,6 +307,7 @@ pub(super) fn watching(backend: Backend, app: App, device: Option<&str>) -> Watc
         host_refresh: None,
         host: HostLink::none(),
         jobs: super::jobs::Jobs::default(),
+        computer: Box::default(),
     }
 }
 
@@ -582,18 +580,8 @@ pub(super) struct FakeHands {
     pub index_lines: Option<Vec<String>>,
     /// The text `download` answers with, `None` for a failure.
     pub text: Option<String>,
-    /// Why the computer EQ cannot run, `None` where it can.
-    pub off: Option<String>,
-    /// The computer EQ's state file.
-    pub state: Mutex<Option<HostEqState>>,
-    /// When the state file last changed.
-    pub stamp: Mutex<Option<SystemTime>>,
     /// The policies `index` was asked for.
     pub fetched: Mutex<Vec<Refresh>>,
-    /// The names `apply` was asked for.
-    pub applied: Mutex<Vec<String>>,
-    /// How many times `remove` was asked.
-    pub removed: AtomicUsize,
 }
 
 impl Hands for FakeHands {
@@ -611,49 +599,6 @@ impl Hands for FakeHands {
 
     fn download(&self, _: &Entry) -> Result<String, String> {
         self.text.clone().ok_or_else(|| "no network".to_string())
-    }
-
-    fn apply(&self, request: ApplyRequest) -> BoxFuture<'static, Result<HostEqState, Failure>> {
-        self.applied
-            .lock()
-            .expect("the apply log")
-            .push(request.name.clone());
-        let state = HostEqState {
-            on: true,
-            name: request.name,
-            origin: request.origin,
-            target: "alsa_output.test".into(),
-            route: Route::Default,
-            manager: Manager::Process,
-            previous_default: None,
-            preamp_db: request.correction.preamp_db,
-            filters: request.correction.filters,
-        };
-        *self.state.lock().expect("the state") = Some(state.clone());
-        Box::pin(async move { Ok(state) })
-    }
-
-    fn remove(&self) -> BoxFuture<'static, Result<(), Failure>> {
-        self.removed.fetch_add(1, Ordering::SeqCst);
-        if let Some(state) = self.state.lock().expect("the state").as_mut() {
-            state.on = false;
-        }
-        Box::pin(async { Ok(()) })
-    }
-
-    fn state(&self) -> Option<HostEqState> {
-        self.state.lock().expect("the state").clone()
-    }
-
-    fn stamp(&self) -> Option<SystemTime> {
-        *self.stamp.lock().expect("the stamp")
-    }
-
-    fn available(&self) -> Result<(), Failure> {
-        match &self.off {
-            Some(why) => Err(Failure::of(Kind::Usage, why.clone())),
-            None => Ok(()),
-        }
     }
 }
 

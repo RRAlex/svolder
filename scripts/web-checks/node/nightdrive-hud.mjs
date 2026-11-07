@@ -10,6 +10,10 @@ import { drawDash, moveProgress } from '../../../bins/svolderd/web/themes/nightd
 import { inertOf } from '../../../bins/svolderd/web/themes/nightdrive/inert.js';
 import { createFade, fadeAfter, wireHud } from '../../../bins/svolderd/web/themes/nightdrive/hud-wire.js';
 import { REST_MS, createRest } from '../../../bins/svolderd/web/themes/nightdrive/rest.js';
+import { switchKeys } from '../../../bins/svolderd/web/themes/nightdrive/draw/dash.js';
+import { eqMarkup } from '../../../bins/svolderd/web/themes/nightdrive/draw/hud.js';
+import { computerView } from '../../../bins/svolderd/web/themes/nightdrive/computer-view.js';
+import { DAC as RIG_DAC, GUEST, computerRig, modelOf } from './nightdrive-rig.mjs';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -298,6 +302,7 @@ ok('wire_hud_holds_the_fade_for_every_trouble_word', () => {
   const core = {
     prefs: { get: () => 2 },
     model: { on: () => () => {}, shown: () => DAC.url, page: () => page() },
+    computer: { switchOf: () => null, side: () => 'dac' },
   };
   const view = { state: 'open', asked: null };
   const schedule = (fn, ms) => {
@@ -609,6 +614,96 @@ ok('stop_brings_the_cursor_back_and_lets_the_document_go', () => {
   r.rest.stop();
   assert.equal(r.classes.has('nd-rest'), false);
   assert.deepEqual(Object.values(r.listeners).flat(), []);
+});
+
+// ---- the computer's side ----
+const buttonsOf = (html) => [...html.matchAll(/<button[^>]*data-act="side"[^>]*>([^<]*)<\/button>/g)];
+
+ok('two_keys_name_the_device_and_this_computer', () => {
+  const { core } = computerRig({ side: 'dac' });
+  let comp = computerView(core);
+  const html = switchKeys(comp.sw);
+  const keys = buttonsOf(html);
+  assert.deepEqual(keys.map((m) => m[1]), ['Gungnir 2', 'This computer']);
+  assert.ok(/id="nd-side-dac"[^>]*aria-pressed="true"/.test(html) && /id="nd-side-computer"[^>]*aria-pressed="false"/.test(html));
+  core.computer.flip('computer');
+  comp = computerView(core);
+  const flipped = switchKeys(comp.sw);
+  assert.ok(/id="nd-side-computer"[^>]*aria-pressed="true"/.test(flipped) && /id="nd-side-dac"[^>]*aria-pressed="false"/.test(flipped));
+  // a guest may flip: the keys are never drawn inert
+  const guest = computerView(computerRig({ viewer: GUEST }).core);
+  assert.ok(!/quiet|aria-disabled/.test(switchKeys(guest.sw)));
+  // where the computer cannot be used the reason is in the switch's own place and the device's side is shown
+  const away = computerView(computerRig({ computer: modelOf({ unavailable: 'pipewire is not running' }) }).core);
+  assert.equal(away.side, 'dac');
+  assert.ok(/<span class="nd-why" role="status">computer controls unavailable: pipewire is not running<\/span>/.test(switchKeys(away.sw)));
+  assert.equal(switchKeys(null), '');
+  // no computer in the model, no switch
+  assert.equal(computerView(computerRig({ computer: null }).core), null);
+  // a desktop draws them by the menu button, not in the dash
+  const page = computerRig().core.model.page();
+  assert.equal(buttonsOf(drawDash(page, { phone: () => false }, 1000, comp)).length, 0);
+});
+
+ok('the_phone_dash_has_no_switch_and_the_switch_is_drawn_for_the_scene', () => {
+  const { core } = computerRig({ side: 'dac' });
+  const comp = computerView(core);
+  const page = core.model.page();
+  const html = drawDash(page, { phone: () => true }, 1000, comp);
+  assert.ok(!html.includes('data-act="side"') && !html.includes('nd-sw'), 'the dash is its own rows');
+  assert.ok(html.includes('<span class="nd-brk"'), 'and ends its first row where the stylesheet wants one');
+  assert.deepEqual(buttonsOf(switchKeys(comp.sw)).map((m) => m[1]), ['Gungnir 2', 'This computer']);
+  // no computer, no keys
+  assert.equal(switchKeys(null), '');
+});
+
+ok('the_figures_read_percent', () => {
+  const { core } = computerRig();
+  const comp = computerView(core);
+  const page = core.model.page();
+  const v = volumeOf(page, comp);
+  assert.deepEqual([v.figures, v.unit, v.aria, v.muted], ['42', '%', 'Volume 42 %', false]);
+  const svg = outrunVolume(v);
+  assert.ok(svg.includes('>%</text>') && svg.includes('>42</text>'), 'the figure and the unit are drawn');
+  // the DAC's own figure stays in dB
+  assert.equal(volumeOf(page, computerView(computerRig({ side: 'dac' }).core)).unit, 'dB');
+  // muted keeps the number, dimmed
+  const muted = volumeOf(computerRig({ computer: modelOf({ volume: { pct: 42, muted: true } }) }).core.model.page(),
+    computerView(computerRig({ computer: modelOf({ volume: { pct: 42, muted: true } }) }).core));
+  assert.deepEqual([muted.figures, muted.muted, muted.dim], ['42', true, true]);
+  assert.ok(outrunVolume(muted).includes('nd-dim'));
+  // the first paint is a dash, never a live 0 %
+  const unread = computerRig({ computer: modelOf({ volume: null }) });
+  const first = volumeOf(unread.core.model.page(), computerView(unread.core));
+  assert.deepEqual([first.figures, first.unit], ['—', '']);
+  assert.ok(!outrunVolume(first).includes('>0</text>') && !outrunVolume(first).includes('>%</text>'));
+  // the dash's keys step the computer's volume and mute it; unread they are drawn quiet
+  const keys = drawDash(page, { phone: () => false }, 1000, comp);
+  assert.deepEqual(acts(keys).slice(0, 3), ['volume-down', 'mute', 'volume-up']);
+  assert.ok(!/quiet/.test(buttonOf(keys, 'nd-vdown')));
+  const quiet = drawDash(unread.core.model.page(), { phone: () => false }, 1000, computerView(unread.core));
+  assert.ok(/quiet/.test(buttonOf(quiet, 'nd-vdown')) && /quiet/.test(buttonOf(quiet, 'nd-mute')));
+  const mutedKeys = drawDash(page, {}, 1000, computerView(computerRig({ computer: modelOf({ volume: { pct: 42, muted: true } }) }).core));
+  assert.ok(/id="nd-mute"[^>]*aria-pressed="true"/.test(mutedKeys));
+});
+
+ok('the_eq_line_reads_off_or_eq_and_the_preset', () => {
+  const line = (computer, side = 'computer') => {
+    const { core } = computerRig({ computer, side });
+    return eqLine(core.model.page(), computerView(core));
+  };
+  const eq = (over) => modelOf({ eq: { ...modelOf().eq, ...over } });
+  assert.deepEqual(line(eq({})), { lead: '', name: 'EQ', gains: [] });
+  assert.deepEqual(line(eq({ preset: 'Warm' })), { lead: 'EQ', name: 'WARM', gains: [] });
+  assert.deepEqual(line(eq({ on: false })), { lead: '', name: 'OFF', gains: [] });
+  // no gains list: the line is the word and the preset
+  assert.equal(eqMarkup(line(eq({ preset: 'Warm' }))), 'EQ <b>WARM</b>');
+  // a state only a file says is not shown as confirmed
+  assert.deepEqual(line(eq({ running_unknown: true })).gains, ['unconfirmed']);
+  // no EQ model, no line; the DAC side keeps the device's own
+  assert.equal(line(modelOf({ eq: null })), null);
+  const dacSide = computerRig({ side: 'dac', device: { ...RIG_DAC, tone: toneOf() } });
+  assert.deepEqual(eqLine(dacSide.core.model.page(), computerView(dacSide.core)).gains.length, 5);
 });
 
 console.log(`nightdrive-hud.mjs: ${n} passed`);

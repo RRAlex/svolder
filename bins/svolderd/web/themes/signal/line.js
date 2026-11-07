@@ -19,7 +19,8 @@
 import { heldCard } from './draw/card.js';
 import { volumeWords } from './slim.js';
 import {
-  AUTOEQ, CHANGES, STATES, KIND_WORDS, NO_DAC, AS_SENT, ROUTE_NOT_READ, playerName, rateWords, COMPUTER_NAME,
+  AUTOEQ, CHANGES, COMPUTER, COMPUTER_NAME, COMPUTER_SERVER, CONTROLS_BELOW, STATES, KIND_WORDS, NO_DAC, AS_SENT,
+  ROUTE_NOT_READ, UNAVAILABLE, playerName, rateWords,
 } from './words.js';
 
 /** What each kind of hop opens below the line: `(page, hop, view) => html`. Later modules put
@@ -52,35 +53,27 @@ function playerHop(page, path) {
   };
 }
 
-/** The computer: its sink's rate and volume, the host EQ and whether it changes the sound. The
- * path's own flag says so; with no path to the device, the route's host EQ does. */
-function computerHop(page, path, readsRoute) {
+/** The computer: `PipeWire · <rate>`, then `controls below` while it is the hop chosen (or why its
+ * controls cannot be used), and whether it changes the sound. The path's own flag says so; with no
+ * path to the device, the route's host EQ does. */
+function computerHop(page, path, readsRoute, chosen) {
   const { route } = page.host;
+  const unavailable = page.host.computer?.unavailable ?? null;
+  const base = {
+    id: 'computer', kind: 'computer', name: COMPUTER_NAME, live: true, url: null, hopId: null,
+  };
+  // What the hop says after its server: the reason the controls cannot be used, else where they are.
+  const below = unavailable ? UNAVAILABLE(unavailable) : (chosen ? CONTROLS_BELOW : '');
   if (!route) {
     // A page that holds no route (an amp's) says nothing of it.
-    return {
-      id: 'computer', kind: 'computer', name: COMPUTER_NAME, words: readsRoute ? [ROUTE_NOT_READ] : [],
-      live: true, changes: false, url: null, hopId: null,
-    };
+    return { ...base, words: [readsRoute ? ROUTE_NOT_READ : '', below].filter(Boolean), changes: false, unavailable: Boolean(unavailable) };
   }
   const fromPath = path.find((hop) => hop.label === 'computer');
   const changes = fromPath ? fromPath.changes === true : route.host_eq === true;
   const sink = route.sink;
-  const facts = sink
-    ? [rateWords(sink.rate_hz), sink.volume_pct === null || sink.volume_pct === undefined
-      ? '' : `volume ${sink.volume_pct} %`].filter(Boolean).join(' · ')
-    : 'no sound card found';
-  const eq = route.host_eq ? `host EQ on${changes ? ` · ${CHANGES}` : ''}` : '';
-  return {
-    id: 'computer',
-    kind: 'computer',
-    name: COMPUTER_NAME,
-    words: [facts, eq].filter(Boolean),
-    live: true,
-    changes,
-    url: null,
-    hopId: null,
-  };
+  const server = sink ? [COMPUTER_SERVER, rateWords(sink.rate_hz)].filter(Boolean).join(' · ') : COMPUTER.noSink;
+  const said = below || (changes ? CHANGES : '');
+  return { ...base, words: [server, said].filter(Boolean), changes, unavailable: Boolean(unavailable) };
 }
 
 /** Whether a card means the link to the device is down (out of reach, looking, refused) and not a
@@ -159,10 +152,11 @@ const standin = (id, name, words) => ({
 });
 
 /**
- * The hops of the line of the device `shownUrl`, left to right, `state` being the stream's. Nothing
- * for a device the fleet does not list.
+ * The hops of the line of the device `shownUrl`, left to right, `state` being the stream's and
+ * `chosen` the hop id the person has chosen (the computer's hop says its controls are below while
+ * it is). Nothing for a device the fleet does not list.
  */
-export function hopsOf(page, shownUrl, state = 'open') {
+export function hopsOf(page, shownUrl, state = 'open', chosen = null) {
   const entry = (page.fleet?.devices ?? []).find((device) => device.url === shownUrl);
   if (!entry) return [];
   const rows = page.fleet?.hops ?? [];
@@ -174,7 +168,7 @@ export function hopsOf(page, shownUrl, state = 'open') {
   const after = rows.filter((row) => row.after === shownUrl);
   const hops = [];
   if (page.host?.track) hops.push(playerHop(page, path));
-  if (page.host) hops.push(computerHop(page, path, !isAmp));
+  if (page.host) hops.push(computerHop(page, path, !isAmp, chosen === 'computer'));
   if (alone) hops.push(standin('standin-dac', NO_DAC, []));
   else if (dac) hops.push(dacBefore(dac));
   hops.push(shownHop(page, entry, path, !alone, state));
@@ -187,10 +181,18 @@ export function hopsOf(page, shownUrl, state = 'open') {
   return hops;
 }
 
-/** The hop to keep chosen: `chosen` while the line still has it, else `shown` (the shown device's
- * hop), which is also where a person who has not chosen starts. */
-export function keepChoice(chosen, hops, shown) {
-  return chosen && hops.some((hop) => hop.id === chosen) ? chosen : shown;
+/** The side the choice of the hop `id` is: the computer's exactly while its hop is chosen, the
+ * device's for every other hop. */
+export const sideOf = (id) => (id === 'computer' ? 'computer' : 'dac');
+
+/** The hop to keep chosen: `chosen` while the line still has it, else the computer's when the side
+ * kept is the computer's and the line has its hop, usable (a load), else `shown` (the shown device's hop),
+ * which is also where a person who has not chosen starts. */
+export function keepChoice(chosen, hops, shown, side = 'dac') {
+  if (chosen && hops.some((hop) => hop.id === chosen)) return chosen;
+  const computer = hops.find((hop) => hop.id === 'computer');
+  // a computer that cannot be used is not chosen for a person on a load: the device's side shows, and its hop says why
+  return side === 'computer' && computer && !computer.unavailable ? 'computer' : shown;
 }
 
 /** The URLs of the devices the line links after the shown one, which the stream follows for their

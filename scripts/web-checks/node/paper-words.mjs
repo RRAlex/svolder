@@ -6,6 +6,8 @@
 // node paper-words.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { SECTIONS } from '../../../bins/svolderd/web/themes/paper/draw/sheet.js';
+import { computerView, modelOf, pageWith, wordsOf } from './paper-rig.mjs';
 import {
   CHARS, WORDS, dateWords, titleWords,
 } from '../../../bins/svolderd/web/themes/paper/words.js';
@@ -78,6 +80,27 @@ ok('paper_writes_only_the_characters_its_fonts_carry', () => {
   assert.equal(WORDS.reconnecting, 'Reconnecting to svolder…');
   for (const bad of ['→', '✓', '⏮', '⏭', '▾', '\u{1F600}']) {
     assert.doesNotMatch(`a${bad}`, CHARS, `U+${bad.codePointAt(0).toString(16)} is not carried`);
+  }
+});
+
+ok('every_word_passes_papers_chars', () => {
+  // the computer's fixed words, the functions' words for a few values, and every word the
+  // flipped sheet draws (the marks of the table, the line, the notes) in both kinds of device
+  const said = [WORDS.showing, WORDS.theDevice('DAC'), WORDS.theDevice('amp'), WORDS.thisComputer,
+    ...WORDS.pointHeads, WORDS.removeHead, WORDS.addPoint, WORDS.typeOf(3), WORDS.cellOf(3, 'f'),
+    WORDS.cellOf(3, 'g'), WORDS.cellOf(3, 'q'), WORDS.removePoint(4), WORDS.moreBelow(1),
+    WORDS.moreBelow(10), WORDS.typeList, WORDS.notConfirmed, WORDS.isOn, WORDS.noPresetOn, WORDS.byHand];
+  for (const text of said) assert.match(text, CHARS, text);
+  assert.equal(WORDS.addPoint, '+ Add point');
+  assert.equal(WORDS.removePoint(4), 'Remove point 4');
+  for (const name of ['dac', 'amp']) {
+    const page = pageWith(name, modelOf());
+    const { view } = computerView(page, 'computer');
+    for (const section of ['title', 'volume', 'tone', 'presets', 'notes']) {
+      const text = wordsOf(SECTIONS[section](page, page.device, view));
+      // the unavailable sentence is the daemon's own; the others are Paper's
+      assert.match(text.replace(/\s+/g, ' '), CHARS, `${name} ${section}`);
+    }
   }
 });
 

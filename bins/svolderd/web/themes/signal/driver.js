@@ -10,7 +10,7 @@
 //
 //   reach(target) -> boolean            chooses its hop, scrolls to it, says whether it is drawn
 //   operate(target, change) -> void     { step: ±1 } | { raw } | { value } | { on } | { apply } |
-//                                       { recall } | { save } | {}
+//                                       { recall } | { save } | { side } (the line's computer hop) | {}
 //   shown(target) -> string | null      the words shown for a control, or for a fact by its label
 //   state() -> { lost, waiting, resting, toasts }
 //   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
@@ -73,8 +73,36 @@ function holder(target) {
 /** What a control key stands for, in the model of the device that holds it. */
 const controlOf = (key) => controlIn(bound.core.model.device(holder({ control: key })), key);
 
+/** Whether `element` is inside the box of the scrolling points' table it is in (a row under its
+ * fade is not seen), or is in none. */
+function unclipped(element) {
+  const area = element.closest('.sg-pscroll');
+  if (!area) return true;
+  const inside = element.getBoundingClientRect();
+  const frame = area.getBoundingClientRect();
+  return inside.top >= frame.top - 1 && inside.bottom <= frame.bottom + 1;
+}
+
+/** The element a computer target is, as the page draws it, or nothing. The flip is the line's own
+ * hop: the computer's. */
+function findComputer(target) {
+  const row = target.n;
+  switch (target.computer) {
+    case 'flip': return one('#sg-line [data-hop="computer"]');
+    case 'volume': return one('#sg-cvtrack');
+    case 'mute': return one('[data-act="cmute"]');
+    case 'mode': return one('[data-act="cmode"][data-mode="eq"]');
+    case 'add': return one('#sg-cadd');
+    case 'remove': return one(`#sg-crm-${q(row)}`);
+    case 'preset': return one(`[data-act="cpreset"][data-name="${q(target.name)}"]`);
+    case 'point': return one(target.param === 'type' ? `#sg-ct-${q(row)}` : `#sg-cf-${q(row)}${q(target.param)}`);
+    default: return null;
+  }
+}
+
 /** The element a target is, as the page draws it, or nothing. */
 function find(target) {
+  if (typeof target === 'object' && 'computer' in target) return findComputer(target);
   if (target === 'Cover') return one('#sg-now .sg-cover img');
   if (typeof target === 'string') return one(`#sg-facts-body td[data-fact="${q(target)}"]`);
   if ('control' in target) {
@@ -149,8 +177,18 @@ async function toward(target, raw) {
 /** Whether a switch is in the state `on` says. */
 const stands = (element, on) => element.getAttribute('aria-pressed') === String(on);
 
-/** Choose the hop that holds `target`, as a person taps it on the line; nothing when it is chosen. */
+/** Choose the hop that holds `target`, as a person taps it on the line; nothing when it is chosen. The
+ * computer's targets are in its hop's area (the flip is the hop itself, chosen by `operate`). */
 async function choose(target) {
+  if (typeof target === 'object' && 'computer' in target) {
+    const hop = target.computer === 'flip' ? null : one('#sg-line [data-hop="computer"]');
+    if (hop && hop.getAttribute('aria-selected') !== 'true') {
+      tap(hop);
+      await settle();
+      await settle();
+    }
+    return;
+  }
   const url = holder(target);
   const option = one(`#sg-line [data-hop="${q(`device:${url}`)}"]`);
   if (!option || option.getAttribute('aria-selected') === 'true') return;
@@ -174,7 +212,69 @@ async function seen(target) {
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);
-  return Boolean(element) && taken(element) && onScreen(element);
+  return Boolean(element) && taken(element) && onScreen(element) && unclipped(element);
+}
+
+/** The computer's volume now, from the model. */
+const computerPct = () => bound.core.computer.volumeOf(bound.core.model.page())?.pct ?? null;
+
+/** Operate one of the computer's targets as a person does: a tap on a hop or a word, a press on the
+ * level's buttons, or a value typed into a cell. */
+async function operateComputer(target, change) {
+  const { computer } = target;
+  if (computer === 'flip') {
+    const hop = change.side === 'computer' ? one('#sg-line [data-hop="computer"]')
+      : one(`#sg-line [data-hop="${q(`device:${bound.core.model.shown()}`)}"]`);
+    if (!hop) throw new Error('no hop to choose');
+    tap(hop);
+    await settle();
+    await settle();
+    return;
+  }
+  const element = find(target);
+  if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
+  if (computer === 'volume') {
+    const press = (direction) => tap(one(`[data-act="cvol-${direction < 0 ? 'down' : 'up'}"]`));
+    if ('raw' in change) {
+      for (let n = 0; n < 120 && computerPct() !== null && computerPct() !== change.raw; n++) {
+        const before = computerPct();
+        press(change.raw > before ? 1 : -1);
+        for (let wait = 0; wait < 40 && computerPct() === before; wait++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+    } else {
+      press(change.step < 0 ? -1 : 1);
+    }
+  } else if (computer === 'mute') {
+    if (!('on' in change) || !stands(element, change.on)) tap(element);
+  } else if (computer === 'mode') {
+    const want = 'on' in change ? (change.on ? 'eq' : 'off') : 'eq';
+    tap(one(`[data-act="cmode"][data-mode="${want}"]`));
+  } else if (computer === 'point' && element.matches('select')) {
+    element.value = change.value;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (computer === 'point') {
+    if (!('value' in change)) throw new Error('a point is changed by typing a value');
+    element.focus({ preventScroll: true });
+    element.value = change.value;
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  } else {
+    tap(element);
+  }
+  await settle();
+}
+
+/** The words the page shows for one of the computer's targets. */
+function shownComputer(target, element) {
+  switch (target.computer) {
+    case 'flip': return one('#sg-line [aria-selected="true"] b')?.textContent.trim() ?? null;
+    case 'volume': return element.getAttribute('aria-valuetext');
+    case 'mode': return one('[data-act="cmode"][aria-pressed="true"]')?.textContent.trim() ?? null;
+    case 'preset': return element.dataset.name;
+    case 'point': return element.value;
+    default: return element.textContent.trim();
+  }
 }
 
 export const driver = {
@@ -186,6 +286,10 @@ export const driver = {
   },
 
   async operate(target, change = {}) {
+    if (typeof target === 'object' && 'computer' in target) {
+      await operateComputer(target, change);
+      return;
+    }
     const element = find(target);
     if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
     if ('control' in target) {
@@ -229,6 +333,7 @@ export const driver = {
   shown(target) {
     const element = find(target);
     if (!element) return null;
+    if (typeof target === 'object' && 'computer' in target) return shownComputer(target, element);
     if (target === 'Cover') return element.getAttribute('src');
     if (typeof target === 'string') return element.textContent;
     if ('control' in target) {

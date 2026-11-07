@@ -11,8 +11,10 @@ export const MOTIONS = ['full', 'calm', 'still'];
 const BASE_PACE = { full: 0, calm: 100, still: 1000 };
 
 /** The least ms between draws while the music is silent or the player is not playing, on a phone (a coarse
- * pointer): a desktop has no battery to save, and its scene keeps its level's own pace. */
-export const IDLE_PACE = 125;
+ * pointer): a desktop has no battery to save, and its scene keeps its level's own pace. The road, the embers and the
+ * sky go on moving then (Full), so the pace is one a moving scene still looks smooth at, 30 a second; Calm and Still
+ * are slower than that already, and nothing in them rolls. */
+export const IDLE_PACE = 1000 / 30;
 
 /** The time constant of the mountains in Calm, in seconds. */
 export const CALM_RIDGE = 0.6;
@@ -24,7 +26,7 @@ export function motionOf(prefs, reduced) {
   return reduced ? 'calm' : 'full';
 }
 
-/** The least ms between two draws at `motion`; on a `coarse` pointer a silent or paused scene is drawn at 125 at most. */
+/** The least ms between two draws at `motion`; on a `coarse` pointer a silent or paused scene is drawn at 30 a second at most. */
 export function paceOf({
   motion, silent, playing, coarse = false,
 }) {

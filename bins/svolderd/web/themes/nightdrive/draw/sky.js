@@ -41,6 +41,7 @@ function huesOf(mood, flare) {
 /** Draw the sky and the sun of `frame` on `g`. */
 export function drawSky(g, geo, frame) {
   const { w, h, H } = geo;
+  const v = geo.v ?? h;
   const { t, kick, dull } = frame;
   const { mood, flare } = frame.look ?? NEUTRAL;
   const px = unitOf(w);
@@ -68,9 +69,9 @@ export function drawSky(g, geo, frame) {
     g.fillStyle = `rgba(${PALETTE.star}, ${(dull ? 0.18 : (0.25 + 0.35 * twinkle) * shine) * (1 - y / (H * 0.55))})`;
     g.fillRect(x, y, size, size);
   }
-  const r = h * 0.22 * (1 + kick * 0.04 + flare * 0.06);
+  const r = v * 0.22 * (1 + kick * 0.04 + flare * 0.06);
   const cx = w / 2;
-  const cy = H - h * 0.04;
+  const cy = H - v * 0.04;
   g.save();
   g.beginPath();
   g.rect(0, 0, w, H);
@@ -110,7 +111,7 @@ export function drawSky(g, geo, frame) {
   g.arc(cx, cy, r, 0, Math.PI * 2);
   g.clip();
   g.fillStyle = dull ? PALETTE.dullSunStripe : hue.stripe;
-  for (const [above, thick] of stripesOf(h)) g.fillRect(cx - r, H - above - thick, 2 * r, thick);
+  for (const [above, thick] of stripesOf(v)) g.fillRect(cx - r, H - above - thick, 2 * r, thick);
   g.restore();
   if (!dull) {
     drawRays(g, geo, { cx, cy, r }, frame);

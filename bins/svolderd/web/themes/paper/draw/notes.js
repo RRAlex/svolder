@@ -11,6 +11,7 @@
 import { notesOf } from '../notes.js';
 import { ARROW, RATE_MATCHES, WORDS } from '../words.js';
 import { esc } from './esc.js';
+import { onComputer } from './side.js';
 
 /** The hand-drawn arrow: a shaft with a slight bow and an open head, in the colour of the text. */
 const ARROW_SVG = '<svg class="p-arrow" aria-hidden="true" focusable="false" viewBox="0 0 36 14" '
@@ -68,8 +69,12 @@ export function notes(page, device, view) {
   const p = device?.playing ?? page?.host ?? null;
   const now = view.now ?? Date.now();
   const clockNowMs = p ? clockOf(p, now) : undefined;
-  return notesOf(page, device, { change: view.changes?.last() ?? null, coarse: view.coarse, clockNowMs })
-    .filter((n) => n.id !== 'card')
+  // the computer's side flips the volume and the tone: the device's notes about them, and about
+  // its presets, are for the other side
+  const flipped = onComputer(view);
+  const own = notesOf(page, device, { change: view.changes?.last() ?? null, coarse: view.coarse, clockNowMs })
+    .filter((n) => n.id !== 'card' && !(flipped && ['volume', 'tone', 'presets'].includes(n.about)));
+  return own
     .map((n, i) => `<span class="pn t${tiltOf(n.id)}${n.red ? ' red' : ''}" data-note="${esc(n.id)}"`
       + ` data-n="${i}"`
       + ` data-about="${esc(n.about)}"${n.id === 'track' ? trackData(p, p.track, now, n.text) : ''}>`

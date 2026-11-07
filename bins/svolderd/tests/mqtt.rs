@@ -1683,3 +1683,255 @@ async fn a_loki_max_preset_select_over_the_broker_recalls_and_applies() {
     .await
     .expect("test timed out");
 }
+
+/// The environment that gives the daemon the fake computer, which touches no audio.
+const FAKE_COMPUTER: [(&str, &str); 2] = [
+    ("SVOLDER_HOST", "fake"),
+    ("SVOLDER_SYSTEMCTL", "/bin/false"),
+];
+
+fn computer_topic(leaf: &str) -> String {
+    format!("svolder/computer/{leaf}")
+}
+
+/// What the computer's EQ is on the socket: whether it is on, and its preset.
+async fn computer_eq(client: &mut Client) -> (bool, Option<String>) {
+    let Response::Host(view) = client.request(Request::Host).await.expect("an answer") else {
+        panic!("not a host answer");
+    };
+    let eq = view.eq.expect("the fake computer has an EQ");
+    (eq.on, eq.preset)
+}
+
+/// The computer's EQ is one switch and one preset sensor, and the switch turns it on with the
+/// points the daemon keeps and off again, which keeps them.
+#[tokio::test]
+async fn the_computer_switch_follows_the_eq_and_turns_it_on_and_off() {
+    use svolder_ipc::HostEqOp;
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let (_child, mut client) =
+            daemon_on(&bridged(broker.port, "commands = true\n"), &FAKE_COMPUTER).await;
+        let mut first = watch(&broker).await;
+        first
+            .wait_for_each(
+                &[
+                    (&computer_topic("availability"), "online"),
+                    (&computer_topic("computer_eq/state"), "OFF"),
+                ],
+                STEP,
+            )
+            .await;
+        let mut watcher = watch(&broker).await;
+        let all = watcher.collect(Duration::from_secs(1)).await;
+        let config = |component: &str, key: &str| {
+            let topic = computer_config(component, key);
+            let seen = all.iter().find(|s| s.topic == topic);
+            json(seen.unwrap_or_else(|| panic!("no config on {topic}")))
+        };
+        let switch = config("switch", "computer_eq");
+        assert_eq!(switch["command_topic"], computer_topic("computer_eq/set"));
+        assert_eq!(switch["device"]["name"], "This computer");
+        assert_eq!(switch["device"]["identifiers"][0], "svolder_computer");
+        config("sensor", "computer_eq_preset");
+
+        // A recall on the computer turns it on and names the preset.
+        let recall = Request::HostEq {
+            op: HostEqOp::Preset {
+                name: "Warm".into(),
+                device: None,
+                confirm: true,
+            },
+        };
+        assert_eq!(
+            client.request(recall).await.expect("an answer"),
+            Response::Ack
+        );
+        watcher
+            .wait_for(&computer_topic("computer_eq/state"), STEP, |s| {
+                s.payload == "ON"
+            })
+            .await;
+        watcher
+            .wait_for(&computer_topic("computer_eq_preset/state"), STEP, |s| {
+                s.payload == "Warm"
+            })
+            .await;
+
+        watcher
+            .publish(&computer_topic("computer_eq/set"), "OFF")
+            .await;
+        watcher
+            .wait_for(&computer_topic("computer_eq/state"), STEP, |s| {
+                s.payload == "OFF"
+            })
+            .await;
+        assert!(!computer_eq(&mut client).await.0);
+        // The preset leaves the sensor: its retained message is taken off the broker.
+        watcher
+            .wait_for(&computer_topic("computer_eq_preset/state"), STEP, |s| {
+                s.payload.is_empty()
+            })
+            .await;
+
+        watcher
+            .publish(&computer_topic("computer_eq/set"), "ON")
+            .await;
+        watcher
+            .wait_for(&computer_topic("computer_eq/state"), STEP, |s| {
+                s.payload == "ON"
+            })
+            .await;
+        watcher
+            .wait_for(&computer_topic("computer_eq_preset/state"), STEP, |s| {
+                s.payload == "Warm"
+            })
+            .await;
+        assert_eq!(
+            computer_eq(&mut client).await,
+            (true, Some("Warm".to_string()))
+        );
+    })
+    .await
+    .expect("test timed out");
+}
+
+fn computer_config(component: &str, key: &str) -> String {
+    format!("homeassistant/{component}/svolder_computer/{key}/config")
+}
+
+/// ON with no points kept, the state a fresh daemon starts in, leaves the EQ off and says why.
+#[tokio::test]
+async fn on_with_nothing_kept_stays_off_over_the_broker() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let (child, mut client) =
+            daemon_on(&bridged(broker.port, "commands = true\n"), &FAKE_COMPUTER).await;
+        let mut watcher = watch(&broker).await;
+        watcher
+            .wait_for(&computer_topic("computer_eq/state"), STEP, |s| {
+                s.payload == "OFF"
+            })
+            .await;
+        watcher
+            .publish(&computer_topic("computer_eq/set"), "ON")
+            .await;
+        let deadline = tokio::time::Instant::now() + STEP;
+        while !child.said().contains("ON left the EQ off") {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no log line: {}",
+                child.said()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!computer_eq(&mut client).await.0);
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// Read-only, the switch is a binary sensor and a command on its topic moves nothing.
+#[tokio::test]
+async fn read_only_the_computer_switch_is_a_binary_sensor() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let (_child, mut client) = daemon_on(&bridged(broker.port, ""), &FAKE_COMPUTER).await;
+        let mut watcher = watch(&broker).await;
+        let all = watcher.collect(Duration::from_secs(2)).await;
+        let topic = computer_config("binary_sensor", "computer_eq");
+        let sensor = all
+            .iter()
+            .find(|s| s.topic == topic)
+            .unwrap_or_else(|| panic!("no config on {topic}"));
+        assert!(json(sensor).get("command_topic").is_none());
+        watcher
+            .publish(&computer_topic("computer_eq/set"), "ON")
+            .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!computer_eq(&mut client).await.0);
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// A command someone published retained for the computer is never acted on, on the first
+/// connect or after.
+#[tokio::test]
+async fn a_retained_computer_command_is_never_acted_on() {
+    use svolder_ipc::HostEqOp;
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let watcher = watch(&broker).await;
+        watcher
+            .retain(&computer_topic("computer_eq/set"), "ON")
+            .await;
+        let mut own = Watcher::connect(broker.port, &[&computer_topic("computer_eq/set")]).await;
+        own.wait_for(&computer_topic("computer_eq/set"), STEP, |s| s.retained)
+            .await;
+        let (child, mut client) =
+            daemon_on(&bridged(broker.port, "commands = true\n"), &FAKE_COMPUTER).await;
+        // Kept points make an ON that would be acted on, were it not retained.
+        let recall = Request::HostEq {
+            op: HostEqOp::Preset {
+                name: "Warm".into(),
+                device: None,
+                confirm: true,
+            },
+        };
+        assert_eq!(
+            client.request(recall).await.expect("an answer"),
+            Response::Ack
+        );
+        assert_eq!(
+            client
+                .request(Request::HostEq {
+                    op: HostEqOp::Mode { on: false }
+                })
+                .await
+                .expect("an answer"),
+            Response::Ack
+        );
+        let mut seen = watch(&broker).await;
+        seen.wait_for(&computer_topic("computer_eq/state"), STEP, |s| {
+            s.payload == "OFF"
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!computer_eq(&mut client).await.0);
+        let said = child.said();
+        assert_eq!(
+            said.matches("ignored a retained command on svolder/computer/computer_eq/set")
+                .count(),
+            1,
+            "{said}"
+        );
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// A start with the computer not served takes down what an earlier run left retained, so Home
+/// Assistant shows no ghost entities.
+#[tokio::test]
+async fn a_start_with_host_off_clears_the_computers_retained_entities() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let mut watcher = watch(&broker).await;
+        let stale = [
+            computer_config("switch", "computer_eq"),
+            computer_config("sensor", "computer_eq_preset"),
+            computer_topic("availability"),
+            computer_topic("computer_eq/state"),
+            computer_topic("computer_eq_preset/state"),
+        ];
+        for topic in &stale {
+            watcher.retain(topic, "ghost").await;
+        }
+        let (_child, _client) = daemon_on(&bridged(broker.port, "commands = true\n"), &[]).await;
+        let wanted: Vec<(&str, &str)> = stale.iter().map(|t| (t.as_str(), "")).collect();
+        watcher.wait_for_each(&wanted, STEP).await;
+    })
+    .await
+    .expect("test timed out");
+}

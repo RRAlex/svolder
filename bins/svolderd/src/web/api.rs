@@ -166,13 +166,24 @@ async fn fleet(State(web): State<Web>, headers: HeaderMap) -> Response {
     axum::Json(model::fleet_model(&web, &devices(&web).await).await).into_response()
 }
 
-/// The computer's player and route as a model, or `null` while the daemon does not watch it.
-async fn host(State(web): State<Web>, headers: HeaderMap) -> Response {
+/// What `host` takes: the device whose tone control gives the computer's built-in presets.
+#[derive(serde::Deserialize)]
+struct Shown {
+    device: Option<String>,
+}
+
+/// The computer's player, route and controls as a model, or `null` while the daemon does not
+/// watch it. `?device=<url>` names the shown device, whose own built-in presets the computer
+/// lists.
+async fn host(State(web): State<Web>, headers: HeaderMap, Query(shown): Query<Shown>) -> Response {
     let viewer = match reader(&web, &headers) {
         Ok(viewer) => viewer,
         Err(refused) => return refused,
     };
-    let host: Option<HostModel> = model::host_model(&web, access(&web, viewer));
+    let shown = shown
+        .device
+        .and_then(|name| web.fleet.resolve(Some(&name)).ok());
+    let host: Option<HostModel> = model::host_model(&web, access(&web, viewer), shown.as_ref());
     axum::Json(host).into_response()
 }
 

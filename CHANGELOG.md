@@ -8,6 +8,59 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.32.0
+
+The web page, the terminal and Home Assistant can now change the computer's own sound: one switch
+flips the volume and the tone control from your device to the computer, whose EQ you edit point by
+point while the music plays, with no gap, in every theme.
+
+- **The switch**: `DAC │ This computer` flips the volume control and the tone control together, on a
+  DAC's page and an amp's. Flipping writes nothing and the side is kept per viewer; a guest can
+  flip to look but every control stays quiet. Where the computer cannot be used, a sentence says why.
+- **The computer's volume**: the default sink's volume and mute, 0 to 100 % in steps of 1 %, never
+  a boost. The first paint reads `—` rather than a live 0 %.
+- **The live computer EQ**: up to 16 points (peak, low shelf, high shelf), the first always there.
+  Drag one, turn the wheel or pinch for its Q, tap an empty spot or `+ Add point` to add one, type
+  a value, change a type or remove a point; the sound changes with no gap. The table is put in
+  order by frequency when an edit ends, never under a finger, and removing the last point sets it
+  to 0 dB. The preamp follows the curve's peak so the signal never passes unity, and a line says
+  by how much. A sample-rate change that leaves the curve unplayable turns the EQ off and says why,
+  and an EQ chain left by an older svolder is named in the note until the EQ is turned off and on
+  or edited. Off takes the EQ out of the path and keeps the points. The path line says
+  `host EQ on` for a chain in the path, flat or not. On a PipeWire that does not take live
+  changes it applies when the drag ends and says so once.
+- **Shared presets**: the same list on both sides; built-ins of the shown device and saved ones
+  play on the computer as written, and `Save as…` keeps the computer's points. A preset that a
+  device plays too would play twice, so the web page, the TUI and MCP ask first (Yes flattens the
+  device, No changes nothing).
+- **Ember**: a pill beside the device's name; the curve, the points table and the presets are the
+  DAC's own parts.
+- **Paper**: `showing: the DAC · this computer` under the title, the chosen one underlined.
+- **Signal**: choosing the computer's hop is the switch, and its facts (format, other sounds, the
+  path verdict) stay below the controls.
+- **Night drive**: two keys by the menu button, and on a phone one small `DAC │ PC` pill in the top
+  left; the dots sit on the mountains and a drag works only inside the curve's band, so a tap
+  outside it is a tap on the scene. The mouse wheel over the volume number and `↑` `↓` set the
+  volume, a faded dash fades to a fifth rather than a tenth, the phone's panel is two translucent
+  rows over the scene (about nine tenths), and choosing Full measures the phone's speed at once
+  instead of waiting, so the scene settles in about two seconds.
+- **The TUI**: `C` flips the EQ tab (`EQ for ‹ NAME | Computer ›`, mode `Off | EQ`, a Points
+  pane with `a` add, `x` remove, `y` type, Enter or a double-click to type values) and the
+  Controls tab's Volume row. The separate host keys are gone; the computer-side preset list
+  applies on the computer and asks the both-sides question.
+- **MCP**: `get_host`, `set_host_volume`, `host_mute` and `set_host_eq`, with the volume rule's
+  cap and its question for a rise of more than 6 dB.
+- **MQTT and Home Assistant**: one `This computer` device with a computer-EQ switch (ON puts the
+  kept points back, OFF removes the EQ) and a sensor naming the applied preset.
+- **Packages and Docker**: the deb and rpm recommend the PipeWire tools, the AUR lists them with
+  what each is for, and the Nix package puts them on its PATH. The image carries them, and the
+  opt-in `docker-compose.host-audio.yml` mounts the PipeWire socket; `make docker` sets it up.
+- **`make demo-computer`** (and `make demo-computer-amp`) shows the page with a simulated
+  computer, your own audio untouched.
+- **`make host-e2e`** plays a tone through the real daemon and chain on a private PipeWire and
+  WirePlumber with no sound card, drags a point, changes a type and the sample rate, and checks
+  the level at each step. It is not part of `make check`.
+
 ## 0.31.5
 
 The web page gets its fourth theme, Night drive: a synthwave scene that plays your music. 0.31.4

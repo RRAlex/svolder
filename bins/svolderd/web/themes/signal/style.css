@@ -123,6 +123,8 @@
 .sg-hop .sg-warn, .sg-sop .sg-warn { color: var(--sg-computer); }
 .sg-hop .sg-more, .sg-sop .sg-more { color: var(--sg-device); font-size: .8em; }
 .sg-hop .sg-v { color: var(--sg-device); font-variant-numeric: tabular-nums; }
+/* while the computer is the hop chosen the device's own level keeps its value, in the quiet grey */
+.sg-hop .sg-v.sg-vq { color: var(--sg-dim); }
 .sg-hop.sg-cur b, .sg-sop.sg-cur b { color: var(--sg-ink); }
 .sg-hop.sg-decl b, .sg-sop.sg-decl b { color: var(--sg-dim); font-weight: 400; }
 .sg-hop.sg-decl .sg-w, .sg-sop.sg-decl .sg-w { font-style: italic; }
@@ -135,7 +137,7 @@
 }
 /* A DAC's first screen is the volume and the curve; its choices are in the shelf, under the bands. */
 @media (min-width: 1020px) {
-  .sg-open:has(> #sg-tone) { grid-template-columns: 310px minmax(0, 1fr); }
+  .sg-open:has(> :is(#sg-tone, #sg-ctone)) { grid-template-columns: 310px minmax(0, 1fr); }
 }
 .sg-now { flex: none; }
 /* On a tall window (1100 px and more) the page stops stretching: the line, the open area, the shelf
@@ -149,9 +151,9 @@
    curve (and an amp's meters) take a full-width row of their own, under the volume and the choices. */
 @media (min-width: 720px) and (max-width: 1019px) {
   .sg-open { grid-template-columns: 310px minmax(0, 1fr); gap: 28px 40px; padding: 36px 40px 24px; }
-  #sg-volume, #sg-amp-power { order: 1; }
+  #sg-volume, #sg-cvolume, #sg-amp-power { order: 1; }
   #sg-amp-about { order: 2; }
-  #sg-tone, #sg-amp-meters { order: 3; grid-column: 1 / -1; }
+  #sg-tone, #sg-ctone, #sg-amp-meters { order: 3; grid-column: 1 / -1; }
 }
 
 /* ---- the DAC's first screen: volume, curve, choices ---- */
@@ -167,7 +169,8 @@
 .sg-btn.sg-pill[aria-pressed="true"] { color: #1b1206; background: var(--sg-device); border-color: var(--sg-device); }
 .sg-btn.sg-small { width: 34px; height: 34px; font-size: 14px; }
 .sg-ic { display: block; }
-.sg-btn[data-act="volume-down"], .sg-btn[data-act="volume-up"] {
+.sg-btn[data-act="volume-down"], .sg-btn[data-act="volume-up"],
+.sg-btn[data-act="cvol-down"], .sg-btn[data-act="cvol-up"] {
   -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
 }
 .sg-btn.quiet, .sg-chip.quiet { opacity: .55; }
@@ -187,6 +190,7 @@
   position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
   background: var(--sg-ground); border: 2px solid var(--sg-device);
 }
+.sg-big.sg-muted .sg-num { opacity: .45; }
 .sg-vcap { position: absolute; top: -5px; width: 2px; height: 14px; margin-left: -1px; background: var(--sg-bad); }
 
 .sg-tone { min-width: 0; }
@@ -202,6 +206,7 @@
 }
 .sg-pt::before { content: ""; position: absolute; inset: -10px; }
 .sg-pt.quiet { opacity: .6; cursor: default; }
+.sg-pt.on { background: var(--sg-device); }
 .sg-freqs { position: absolute; left: 0; right: 0; bottom: -22px; height: 16px; font-size: 12px; color: var(--sg-faint); }
 .sg-flab { position: absolute; transform: translateX(-50%); }
 .sg-dlab {
@@ -218,7 +223,7 @@
 }
 .sg-chip.on { color: #1b1206; background: var(--sg-device); border-color: var(--sg-device); }
 /* the mode under the curve; Loudness, while on, carries the strength's round − and + over its ends */
-#sg-tone .sg-mode { margin-top: 14px; }
+#sg-tone .sg-mode, #sg-ctone .sg-mode { margin-top: 14px; }
 .sg-loudw { position: relative; display: inline-grid; }
 .sg-chip.sg-loudc { flex-direction: column; gap: 0; padding: 3px 38px; line-height: 1.15; }
 .sg-lv { font-size: 11px; opacity: .85; white-space: nowrap; }
@@ -267,7 +272,7 @@
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 34px 40px;
   padding: 8px 60px 40px; align-items: start;
 }
-.sg-cols #sg-facts { grid-column: 1 / -1; }
+.sg-cols #sg-facts, .sg-cols #sg-cfacts { grid-column: 1 / -1; }
 @media (max-width: 899px) {
   .sg-cols { grid-template-columns: minmax(0, 1fr); padding: 8px 28px 32px; }
 }
@@ -392,6 +397,41 @@
 .sg-mtext { text-align: right; color: var(--sg-mid); font-variant-numeric: tabular-nums; }
 .sg-mstate:empty { display: none; }
 .sg-mstate i { font-style: normal; }
+/* the computer's points: a table of up to sixteen rows that shows six and scrolls */
+.sg-pts { --sg-prow: 39px; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.sg-phead, .sg-prow {
+  display: grid; grid-template-columns: 26px 64px minmax(0, 1fr) minmax(0, 1fr) 58px 34px; align-items: center;
+  column-gap: 6px;
+}
+.sg-phead { padding: 5px 4px; border-bottom: 1px solid rgba(255, 236, 212, .1); }
+.sg-phead span { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--sg-dim); }
+.sg-phead span:nth-child(n+3):nth-child(-n+5) { text-align: right; }
+.sg-pscroll { position: relative; max-height: calc(6 * var(--sg-prow)); overflow-y: auto; scrollbar-width: thin; }
+.sg-pscroll.long:not(.end) { -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
+.sg-prow { height: var(--sg-prow); padding: 0 4px; border-bottom: 1px solid rgba(255, 236, 212, .05); cursor: default; }
+.sg-prow.on { background: rgba(240, 167, 58, .09); }
+.sg-prow.on .sg-pn, .sg-prow.on .sg-ptype { color: var(--sg-device); }
+.sg-pn { color: var(--sg-dim); }
+.sg-ptype, .sg-pval {
+  min-width: 0; padding: 4px 2px; border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--sg-ink); font: inherit; font-variant-numeric: tabular-nums;
+}
+.sg-ptype { color: var(--sg-mid); appearance: none; -webkit-appearance: none; cursor: pointer; }
+.sg-ptype option { background: #1d1913; color: var(--sg-ink); }
+.sg-pval { width: 100%; text-align: right; }
+.sg-pval:hover, .sg-ptype:hover { border-color: rgba(255, 236, 212, .14); }
+.sg-pval:focus, .sg-ptype:focus-visible { outline: 2px solid var(--sg-device); outline-offset: 0; }
+.sg-pval.quiet, .sg-ptype.quiet { opacity: .6; }
+.sg-prm {
+  width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid rgba(255, 236, 212, .22);
+  background: transparent; color: var(--sg-mid); font: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+}
+span.sg-prm { border-color: transparent; cursor: default; }
+.sg-prm.quiet { opacity: .55; }
+.sg-pmore { margin: 6px 0 0; min-height: 1.4em; text-align: center; font-size: 12.5px; color: var(--sg-faint); }
+.sg-unsure { color: var(--sg-computer); }
+.sg-dlab[aria-hidden] { z-index: 2; }
+
 .sg-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
 .sg-facts dd.sg-bad { color: var(--sg-bad); }
 .sg-advice { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.5; color: var(--sg-mid); }
@@ -519,6 +559,8 @@
   .sg-sop b { font-size: 12.5px; color: var(--sg-mid); font-weight: 500; }
   /* a neighbour's words start clear of the strip's soft edge, and end in an ellipsis */
   .sg-sop b, .sg-sop .sg-w { padding: 0 10px; }
+  /* `This computer` is the longest name a hop has: it keeps its whole name on the strip */
+  .sg-sop.sg-k-computer b { padding: 0 3px; }
   .sg-pbox {
     position: absolute; left: 50%; top: 10px; width: 112px; height: 74px; transform: translateX(-50%);
     border: 1px solid var(--sg-device); border-radius: 14px; background: var(--sg-box-fill);
@@ -541,6 +583,9 @@
   .sg-link { min-width: 44px; }
   .sg-input, .sg-val { min-height: 44px; }
   .sg-vtrack { margin: 30px 8px 12px; }
+  .sg-pts { --sg-prow: 46px; }
+  .sg-prm { width: 36px; height: 36px; }
+  .sg-ptype, .sg-pval { min-height: 40px; }
   .sg-vtrack::before { inset: -20px -8px; }
   .sg-scale { margin: 20px 0; }
   .sg-scale::before { inset: -20px -6px; }
@@ -550,6 +595,8 @@
     content: ""; position: absolute; inset: 15px; border-radius: 50%; background: var(--sg-ground);
     border: 2px solid var(--sg-device);
   }
+  .sg-pt.on { background: transparent; }
+  .sg-pt.on::after { background: var(--sg-device); }
 
   /* the band table: each value on a row of its own, so the buttons are 44 px and nothing runs wide */
   .sg-bands thead { display: none; }

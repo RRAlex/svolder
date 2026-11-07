@@ -111,6 +111,12 @@ pub(crate) struct StubDaemon {
     host_presses: Mutex<Vec<String>>,
     /// What a `host_press` request is refused with, when a case sets it.
     host_press_refusal: Mutex<Option<String>>,
+    /// The operation of each `host_eq` request, in the order they arrived.
+    host_eq_ops: Mutex<Vec<svolder_ipc::HostEqOp>>,
+    /// The volume of each `host_volume` request and the state of each `host_mute`, in order.
+    host_volume_ops: Mutex<Vec<String>>,
+    /// What a `host_eq` request is refused with, when a case sets it.
+    host_eq_refusal: Mutex<Option<String>>,
     /// Whether each subscription asked for the host's view, in the order they were made.
     host_asked: Mutex<Vec<bool>>,
     /// How many `host` requests it has answered.
@@ -322,6 +328,27 @@ impl Handler for StubDaemon {
                         code: STUB_PAIR_CODE.to_string(),
                         expires_in_secs: 120,
                     },
+                }
+            }
+            Request::HostVolume { pct } => {
+                self.host_volume_ops
+                    .lock()
+                    .expect("the record")
+                    .push(format!("volume {pct}"));
+                Response::Ack
+            }
+            Request::HostMute { muted } => {
+                self.host_volume_ops
+                    .lock()
+                    .expect("the record")
+                    .push(format!("muted {muted}"));
+                Response::Ack
+            }
+            Request::HostEq { op } => {
+                self.host_eq_ops.lock().expect("the record").push(op);
+                match self.host_eq_refusal.lock().expect("the refusal").clone() {
+                    Some(message) => Response::Error { code: 1, message },
+                    None => Response::Ack,
                 }
             }
             other => Response::Error {
@@ -601,6 +628,25 @@ impl StubServer {
             .clone()
     }
 
+    /// Refuse every `host_eq` request from now on with `message`.
+    pub(crate) fn refuses_eq(&self, message: &str) {
+        *self.handler.host_eq_refusal.lock().expect("the refusal") = Some(message.to_string());
+    }
+
+    /// Every `host_volume` and `host_mute` request, in order, as `volume 40` and `muted true`.
+    pub(crate) fn host_volume_ops(&self) -> Vec<String> {
+        self.handler
+            .host_volume_ops
+            .lock()
+            .expect("the record")
+            .clone()
+    }
+
+    /// The operation of every `host_eq` request, in order.
+    pub(crate) fn host_eq_ops(&self) -> Vec<svolder_ipc::HostEqOp> {
+        self.handler.host_eq_ops.lock().expect("the record").clone()
+    }
+
     /// How many `host` requests the daemon has answered.
     pub(crate) fn host_snapshots(&self) -> usize {
         self.handler
@@ -824,6 +870,9 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         host: Mutex::new(None),
         host_presses: Mutex::default(),
         host_press_refusal: Mutex::new(None),
+        host_eq_ops: Mutex::default(),
+        host_volume_ops: Mutex::default(),
+        host_eq_refusal: Mutex::new(None),
         host_asked: Mutex::default(),
         host_snapshots: std::sync::atomic::AtomicUsize::new(0),
         frames: Mutex::new(None),

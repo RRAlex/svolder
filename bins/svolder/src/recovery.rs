@@ -226,6 +226,17 @@ impl std::fmt::Display for Failure {
     }
 }
 
+impl From<svolder_host::eq::EqFailure> for Failure {
+    /// The computer EQ's refusal, as a failure with code 1.
+    fn from(failure: svolder_host::eq::EqFailure) -> Failure {
+        Failure {
+            code: 1,
+            what: failure.what,
+            next: failure.next,
+        }
+    }
+}
+
 impl Failure {
     /// Whether this is the daemon's answer for a device it has never found: code 3, in words
     /// that end with [`NOT_FOUND_YET`].

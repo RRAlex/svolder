@@ -9,8 +9,14 @@ use svolder_host::Button;
 use svolder_ipc::config::{McpConfig, MqttConfig, RefreshWeeks, WebConfig};
 use svolder_ipc::{ColorDepth, DeviceConfig, EffectsConfig, TuiConfig, TuiSetting, TuiValue};
 use svolder_profiles::Family;
-use svolder_profiles::tone::apo::Correction;
 use svolder_profiles::tone::preset::Preset;
+
+impl Intent {
+    /// A change of the computer EQ.
+    pub(crate) fn eq(op: svolder_ipc::HostEqOp) -> Intent {
+        Intent::HostEq(Box::new(op))
+    }
+}
 
 /// One write a key press asks for.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,20 +88,10 @@ pub enum Intent {
     },
     /// Download this measurement's parametric EQ file.
     AutoEqDownload(Measurement),
-    /// Put this correction on the computer, in front of its default output.
-    HostApply {
-        /// The preset's name.
-        name: String,
-        /// Where the correction came from, if it says.
-        origin: Option<String>,
-        /// What to apply.
-        correction: Correction,
-    },
-    /// Take the computer EQ off, and then load the preset of this name onto the DAC.
-    HostRemove {
-        /// The preset to load once it is off.
-        then_load: Option<String>,
-    },
+    /// Take the computer EQ off, and then load the preset of this name onto the DAC once it is.
+    MoveToDac(String),
+    /// Change the computer EQ: its mode or its points.
+    HostEq(Box<svolder_ipc::HostEqOp>),
     /// Change one `[tui]` setting, which the loop applies and writes to the config file.
     Tui(TuiChange),
     /// Change how often the AutoEq index is fetched again, which the loop writes to `[autoeq]`

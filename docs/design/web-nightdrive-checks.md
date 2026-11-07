@@ -28,9 +28,10 @@ reduced motion and the theme reads `loop.reduced`.
 
 **The idle pace, on a coarse pointer only.** While the music is silent (every column under 0.02 for
 `SILENT_FOR`, 2 s) or the player is not playing, a phone (a coarse pointer) draws no oftener than
-every `IDLE_PACE` (125 ms, 8 a second), because the scene has nothing to show and a battery to save.
-A desktop keeps its level's own pace: nothing in a paused scene moves much, but a screen with no
-battery to save should not look choppy.
+every `IDLE_PACE` (1000 / 30 ms, 30 a second), to save some of the battery. The pace is that high because Full goes on
+moving while the music is silent or paused (the road rolls at its cruise speed, the embers and the sky go on), and a moving
+scene needs 30 draws a second to look smooth (the road rolls 4.2 rows a second, so under 30 draws a second the steps show).
+Calm and Still are slower than that already and nothing in them rolls. A desktop keeps its level's own pace.
 
 ## The frame budget
 
@@ -55,6 +56,13 @@ order (the cap, then the density, then the wet road once its 180 s are over). A 
 draws longer than `gapS` (3 s), a hidden tab for example, restarts the window and the clock of the
 way back, which are not evidence of anything. After the low-rate trigger the way back stays shut
 for `heldS` (60 s), since drawing was not what was slow.
+
+**Finding the limits fast.** Choosing Full from Calm or Still (`probe()`) lifts the cap, unless a step-down on the rate is
+holding it, and measures for `probeS` (2 s, and again after each step it takes) in short spans: after `probeLookS` (0.5 s) of
+draws, a mean over `slowMs` across the last `probeDraws` (8) draws, or fewer draws in that span than the bar above, steps down at
+once, so a phone settles in about a second a step (a 5x CPU slowdown settles in about 2 s). The limits are the ones above; only
+the time to find them out is short. A transient jank in the first 2 s of a probe can keep a lower tier; the ladder walks back up. The tier that held (`{ capped, step }`)
+is kept per browser (the theme's `tier` preference) and is where the next visit starts; the measuring corrects it.
 
 **A phone starts at the cap.** A coarse pointer starts with the cap on (30 a second) and the wet
 road off, and the way back lifts the cap after 10 s under budget to `phoneFps` (60) rather than to the
@@ -156,7 +164,7 @@ link also drops the query, so open the link once, then the address with the quer
   part, a sky drawn twelve times in every draw, a loop each mount starts and nothing ends, and others). The page runner counts a kill only when a check the mutant names fails, so a flake in another check
   cannot pass for a kill; the node runner counts a failure of any of its harnesses.
 - **Stills**: `make nightdrive-shots` draws a DAC on the fake capture at rest, a held bubble with
-  its bell and diamonds, the sheet, a phone upright and sideways, a device out of reach and no capture,
+  its bell and diamonds, the sheet, a phone upright and sideways (each on the device's side and on the computer's), a device out of reach and no capture,
   into PNGs under `target/web-shots/nightdrive`.
 
 ## Known limits

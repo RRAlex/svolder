@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use common::{TempDir, install_script, lines};
 use svolder_host::sink::{Sink, SinkState, Wpctl};
 
-/// A `wpctl` that answers `get-volume`, `inspect`, `set-volume` and `set-mute toggle` on
+/// A `wpctl` that answers `get-volume`, `inspect`, `set-volume` and `set-mute toggle|1|0` on
 /// `@DEFAULT_AUDIO_SINK@` from the files beside it, logs each call's arguments to `calls`,
 /// and fails anything else.
 const FAKE_WPCTL: &str = r#"#!/bin/sh
@@ -30,8 +30,12 @@ get-volume)
 inspect) cat "$here/inspect" ;;
 set-volume) [ $# -eq 3 ] || exit 2; echo "$3" > "$here/volume" ;;
 set-mute)
-    [ "$3" = toggle ] || exit 2
-    if [ -e "$here/muted" ]; then rm "$here/muted"; else : > "$here/muted"; fi
+    case "$3" in
+    toggle) if [ -e "$here/muted" ]; then rm "$here/muted"; else : > "$here/muted"; fi ;;
+    1) : > "$here/muted" ;;
+    0) rm -f "$here/muted" ;;
+    *) exit 2 ;;
+    esac
     ;;
 *) exit 2 ;;
 esac
@@ -223,12 +227,36 @@ async fn a_mute_toggle_mutes_the_default_sink_and_a_second_unmutes_it() {
 }
 
 #[tokio::test]
+async fn set_mute_sends_one_or_zero() {
+    let (dir, wpctl) = fake("sink-set-mute", "0.54");
+    assert!(wpctl.set_mute(true).await);
+    assert_eq!(wpctl.read().await, Some(modi(0.54, true)));
+    assert!(wpctl.set_mute(true).await);
+    assert_eq!(wpctl.read().await, Some(modi(0.54, true)));
+    assert!(wpctl.set_mute(false).await);
+    assert_eq!(wpctl.read().await, Some(modi(0.54, false)));
+    let sets: Vec<String> = lines(&dir.join("calls"))
+        .into_iter()
+        .filter(|call| call.starts_with("set-mute"))
+        .collect();
+    assert_eq!(
+        sets,
+        [
+            "set-mute @DEFAULT_AUDIO_SINK@ 1",
+            "set-mute @DEFAULT_AUDIO_SINK@ 1",
+            "set-mute @DEFAULT_AUDIO_SINK@ 0"
+        ]
+    );
+}
+
+#[tokio::test]
 async fn a_missing_tool_reads_no_sink_and_writes_nothing() {
     let dir = TempDir::new("sink-missing");
     let wpctl = Wpctl::new(dir.join("no-wpctl"));
     assert_eq!(wpctl.read().await, None);
     assert!(!wpctl.set_volume(0.5).await);
     assert!(!wpctl.toggle_mute().await);
+    assert!(!wpctl.set_mute(true).await);
 }
 
 #[tokio::test]

@@ -29,7 +29,7 @@ export function pointsOf(tone) {
 export const curvePath = (response) => linePath(response.map(yOf));
 
 /** The shade between the curve and the 0 dB line, closed along it. */
-function shadePath(response) {
+export function shadePath(response) {
   const zero = yOf(0);
   return `${curvePath(response)}L${VIEW_WIDTH} ${zero}L0 ${zero}Z`;
 }
@@ -75,7 +75,6 @@ export function heldGraph(tone, steps, band, raws) {
 /** The graph: its zero line, the shaded curve, a point for each band (none in Loudness) and the
  * frequencies under it. */
 function graph(tone, device, inert) {
-  const faint = tone.mode === 'flat' ? ' faint' : '';
   const own = tone.mode === 'eq' || tone.mode === 'flat';
   const steps = device.tone_steps;
   const points = own ? pointsOf(tone).map((p) => {
@@ -88,14 +87,20 @@ function graph(tone, device, inert) {
       + `${Number.isInteger(raw) ? ` aria-valuenow="${raw}"` : ''} aria-valuetext="${esc(r.g)}"`
       + `${inert ? ' aria-disabled="true"' : ''}></button>`;
   }).join('') : '';
-  const response = tone.response ?? [];
+  return plot({ id: 'sg-graph', response: tone.response ?? [], faint: tone.mode === 'flat', points });
+}
+
+/** The plot: the zero line, the shaded curve (faint while the curve is not the one playing), the
+ * buttons of `points` over it and the frequencies under it. The computer's graph is drawn by it too. */
+export function plot({ id, response, faint, points }) {
+  const dim = faint ? ' faint' : '';
   const freqs = MARKS.map(([hz, text]) => `<span class="sg-flab" data-at="${(xOf(hz) / VIEW_WIDTH).toFixed(5)}">`
     + `${text}</span>`).join('');
-  return `<div id="sg-graph" class="sg-graph"><svg viewBox="0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}"`
+  return `<div id="${id}" class="sg-graph"><svg viewBox="0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}"`
     + ' preserveAspectRatio="none" aria-hidden="true">'
     + `<path class="sg-zero" d="M0 ${yOf(0)}H${VIEW_WIDTH}"/>`
-    + `<path class="sg-shade${faint}" d="${shadePath(response)}"/>`
-    + `<path class="sg-curve${faint}" d="${curvePath(response)}"/></svg>${points}`
+    + `<path class="sg-shade${dim}" d="${shadePath(response)}"/>`
+    + `<path class="sg-curve${dim}" d="${curvePath(response)}"/></svg>${points}`
     + `<div class="sg-freqs" aria-hidden="true">${freqs}</div></div>`;
 }
 

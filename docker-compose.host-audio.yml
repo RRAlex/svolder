@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Opt-in: the computer's volume and EQ from inside the container. `make docker` turns this on in
+# .env (COMPOSE_FILE) when the host's PipeWire socket exists; by hand, add
+# COMPOSE_FILE=docker-compose.yml:docker-compose.host-audio.yml and HOST_UID / HOST_RUNTIME_DIR
+# (the host's `id -u` and its /run/user/<uid>) to .env, or save this file as
+# docker-compose.override.yml beside docker-compose.yml.
+#
+# The host's whole runtime directory is mounted read-only (connecting to a socket works through
+# a read-only mount, and a PipeWire restart's new socket shows up without restarting the
+# container). That exposes every socket in it to the container, read-only but connectable: the
+# session bus, the audio and agent sockets. A single-socket mount would not, but it goes stale at
+# the first PipeWire restart. The clients reach PipeWire through PIPEWIRE_REMOTE; anything the
+# daemon's own `pipewire` child creates goes in the private tmpfs, never the read-only mount. Docker never creates the path: with no session the container refuses to start
+# instead of leaving a root-owned directory on the host. The runtime directory is 0700 and the
+# host user's, so the container runs as that uid with group 0, which owns what the image writes.
+services:
+  svolder:
+    user: "${HOST_UID:?set HOST_UID in .env or the environment, make docker writes it}:0"
+    volumes:
+      - type: bind
+        source: "${HOST_RUNTIME_DIR:?set HOST_RUNTIME_DIR in .env or the environment, make docker writes it}"
+        target: /run/host-runtime
+        read_only: true
+        bind:
+          create_host_path: false
+    # The container's own runtime directory, for the `pipewire` child the daemon starts.
+    tmpfs:
+      - "/run/user/${HOST_UID}:mode=0700,uid=${HOST_UID},gid=0"
+    environment:
+      PIPEWIRE_REMOTE: /run/host-runtime/pipewire-0
+      PIPEWIRE_RUNTIME_DIR: /run/user/${HOST_UID}
+      XDG_RUNTIME_DIR: /run/user/${HOST_UID}
+      XDG_DATA_HOME: /config/data
+      XDG_STATE_HOME: /config/state

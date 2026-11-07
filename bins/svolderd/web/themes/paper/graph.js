@@ -154,7 +154,7 @@ export function wireGraph({
   box.addEventListener('pointerdown', (event) => {
     if (active || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     const graph = event.target.closest?.('#p-graph');
-    if (!graph || !store.part('tone')?.readings) return;
+    if (!graph || !store.part('tone')?.readings || core.computer.side() === 'computer') return;
     // A touch grabs only from a point's own area (which keeps `touch-action: none`): a touch beside
     // it is the page's scroll, which the browser must not take half-way through a drag.
     if (event.pointerType === 'touch' && !event.target.closest('.pt')) return;
@@ -216,7 +216,7 @@ export function wireGraph({
   box.addEventListener('keydown', (event) => {
     const point = event.target.closest?.('.pt[data-band]');
     const move = STEPS[event.key];
-    if (!point || !move || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (!point || !move || core.computer.side() === 'computer' || event.altKey || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
     if (active) return;
     if (inert()) {

@@ -6,7 +6,7 @@
 // attribute: the labels' places and the box's go through the CSSOM (`place`). The moving dashes
 // are moved by `createFlow`, which only sets `stroke-dashoffset`.
 
-import { LABEL_LIMIT, NOT_WATCHED } from '../words.js';
+import { CONTROLS_BELOW, LABEL_LIMIT, NOT_WATCHED } from '../words.js';
 import { esc } from './esc.js';
 
 /** The band's height and the wire's height in it (px). */
@@ -97,6 +97,7 @@ function wire(hops, shownId, where = DESK) {
 function tone(hop, text, last, shownId) {
   if (hop.trouble && hop.id === shownId) return hop.trouble === 'wait' ? ' sg-wait' : ' sg-bad';
   if (!last || hop.kind === 'declared' || hop.kind === 'standin') return '';
+  if (hop.kind === 'computer' && text === CONTROLS_BELOW) return ' sg-ok';
   if (hop.changes && hop.kind === 'computer') return ' sg-warn';
   if (hop.kind === 'player' && text === 'playing') return ' sg-ok';
   if (hop.id === shownId && hop.words.length > 1) return hop.changes ? ' sg-warn' : ' sg-ok';
@@ -116,7 +117,7 @@ function label(hop, i, n, shownId, chosen, canList, after, strip = false) {
   const spoken = volume ? [...hop.words.slice(0, 1), volume] : hop.words;
   const said = strip ? spoken.slice(0, 1) : spoken;
   const words = !strip && n > LABEL_LIMIT ? '' : said.map((text, k) => {
-    const cls2 = volume && k === said.length - 1 && !strip ? ' sg-v' : tone(hop, text, k === said.length - 1, shownId);
+    const cls2 = volume && k === said.length - 1 && !strip ? ` sg-v${chosen === 'computer' ? ' sg-vq' : ''}` : tone(hop, text, k === said.length - 1, shownId);
     return `<span class="sg-w${cls2}">${esc(text)}</span>`;
   }).join('');
   const where = strip ? `data-i="${i}"` : `data-x="${xOf(i, n).toFixed(2)}"`;

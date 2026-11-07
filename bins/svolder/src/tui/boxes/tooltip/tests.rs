@@ -723,7 +723,7 @@ fn clicked(app: &App, hits: &HitMap, (x, y): (u16, u16)) -> Option<crate::tui::m
 }
 
 #[test]
-fn the_host_volume_bar_claims_no_click_and_says_the_real_step() {
+fn the_computer_volume_bar_claims_no_click_and_says_the_real_step() {
     let mut app = app();
     app.host.linked = true;
     app.host.fold_read(
@@ -735,14 +735,20 @@ fn the_host_volume_bar_claims_no_click_and_says_the_real_step() {
         }),
         true,
     );
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    app.flip_side();
+    let row = crate::tui::test_support::row_of(&app, "volume");
     let hits = hits_of(&app);
-    let row = app.rows().len();
-    let said = text(Hit::Level(row), &app).expect("the host volume tooltip");
+    let label = app.rows()[row].control.label.clone();
+    let said = text(Hit::Level(row), &app).expect("the computer volume tooltip");
     assert_eq!(
         said,
-        lines(&["Host volume", "←→ or the wheel steps it 2 %"])
+        lines(&[&label, "←→ or the wheel steps it 1 %", "Enter mutes it"])
     );
-    // A click on the row only focuses it; the wheel steps the volume by two points.
+    // A click on the row only focuses it; the wheel steps the volume by one point.
     let at = cell_of(&hits, Hit::Level(row));
     assert!(matches!(
         clicked(&app, &hits, at),
@@ -750,7 +756,7 @@ fn the_host_volume_bar_claims_no_click_and_says_the_real_step() {
     ));
     assert_eq!(
         app.nudge_row(row, 1),
-        vec![crate::tui::app::Intent::HostVolume(56)]
+        vec![crate::tui::app::Intent::HostVolume(55)]
     );
 }
 

@@ -12,6 +12,8 @@ pub(in crate::tui) struct Kept {
     pub(super) screen: Screen,
     pub(super) mouse: bool,
     pub(super) host: crate::tui::host::Host,
+    /// Which side the volume and the tone control were shown for.
+    pub(super) side: crate::tui::app::Side,
     /// Whether `[tui] host_audio` was on when the app was replaced: what the session says now,
     /// which the opener's own table, read at the start, may not.
     pub(super) host_audio: bool,
@@ -33,6 +35,7 @@ impl Kept {
             screen: app.screen,
             mouse: app.mouse,
             host: app.host.clone(),
+            side: app.side,
             host_audio: app.tui.host_audio,
             mascot: app.mascot.clone(),
             daemon_version_warned: app.session.daemon_version_warned.clone(),
@@ -150,6 +153,8 @@ pub(in crate::tui) struct Watching {
     /// The slow work the preset list asks for, run off the loop: the AutoEq index and files,
     /// and the computer EQ.
     pub(super) jobs: jobs::Jobs,
+    /// The computer's volume and EQ, which the loop reaches for the whole session.
+    pub(super) computer: Box<computer::ComputerLink>,
 }
 
 impl Watching {
@@ -162,6 +167,21 @@ impl Watching {
         self.app.host.linked = !held_off;
         self.host = HostLink::session(held_off);
         self.jobs = jobs::Jobs::live();
+        let direct = self
+            .backend
+            .as_ref()
+            .is_some_and(|backend| backend.daemon_socket().is_none());
+        *self.computer = match (held_off, direct) {
+            (false, true) => ComputerLink::live(),
+            _ => ComputerLink::none(),
+        };
+        if held_off {
+            self.app.host.computer.why =
+                Some("computer controls unavailable: host audio is off".to_string());
+        } else if direct {
+            self.app.host.computer.eq = self.computer.view().map(Box::new);
+            self.app.host.computer.why = self.computer.why.clone();
+        }
     }
 
     /// Say that the device did not come back: the app's values can no longer be updated, so the

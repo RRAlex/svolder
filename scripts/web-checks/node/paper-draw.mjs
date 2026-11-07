@@ -12,6 +12,10 @@ import { SECTIONS } from '../../../bins/svolderd/web/themes/paper/draw/sheet.js'
 import {
   curvePath, heldGraph, pointsOf,
 } from '../../../bins/svolderd/web/themes/paper/draw/tone.js';
+import { markersOf } from '../../../bins/svolderd/web/core/computer.js';
+import {
+  SEVEN, computerView, modelOf, pageWith, point, wordsOf,
+} from './paper-rig.mjs';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -38,6 +42,7 @@ function tags(html, tag) {
   }
   return out;
 }
+const classesOf = (t) => (t.class ?? '').split(' ');
 const unescape = (text) => text.replace(/&quot;/g, '"').replace(/&#39;/g, '\'').replace(/&lt;/g, '<')
   .replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
@@ -142,7 +147,6 @@ ok('a_held_graph_is_drawn_from_the_held_band', () => {
 });
 
 const CONTROLLED = ['dac', 'lokimax', 'saga', 'phono', 'five', 'mono'];
-const classesOf = (t) => (t.class ?? '').split(' ');
 
 ok('every_control_of_every_fixture_has_its_written_word', () => {
   let checked = 0;
@@ -438,6 +442,168 @@ ok('a_guests_sheet_has_no_underlined_word', () => {
   assert.ok(words > 20, `${words} words checked`);
   const { html } = toneOf('dac-guest');
   assert.ok(html.includes('data-act="mode-list"') && html.includes('data-act="band"'));
+});
+
+// ---- the computer's side ----------------------------------------------------------------------
+
+const sheet = (page, side) => {
+  const { view: v, computer } = computerView(page, side);
+  const html = Object.fromEntries(['title', 'volume', 'tone', 'presets', 'notes']
+    .map((name) => [name, SECTIONS[name](page, page.device, v)]));
+  return { html, computer, view: v };
+};
+
+ok('showing_underlines_the_chosen_side', () => {
+  const page = pageWith('dac', modelOf());
+  for (const side of ['dac', 'computer']) {
+    const { html } = sheet(page, side);
+    assert.match(wordsOf(html.title), /showing: the DAC · this computer/);
+    const words = tags(html.title, 'button').filter((b) => b['data-act'] === 'side');
+    assert.deepEqual(words.map((w) => w['data-side']), ['dac', 'computer']);
+    for (const w of words) {
+      const chosen = w['data-side'] === side;
+      assert.equal((w.class ?? '').split(' ').includes('on'), chosen, `${side}: ${w['data-side']}`);
+      assert.equal(w['aria-pressed'], String(chosen));
+    }
+  }
+  // an amp page has the switch too, in the amp's own kind
+  const amp = pageWith('amp', modelOf());
+  assert.match(wordsOf(sheet(amp, 'dac').html.title), /showing: the amp · this computer/);
+  // no computer, no switch; no device, no switch
+  assert.ok(!sheet(pageWith('dac', null), 'dac').html.title.includes('showing:'));
+  const none = pageWith('no-devices', modelOf());
+  assert.ok(!sheet(none, 'dac').html.title.includes('showing:'));
+  // unavailable: the sentence is in the switch's place and the DAC side is shown
+  const off = pageWith('dac', modelOf({ over: { unavailable: 'computer controls unavailable: no pw-cli on this computer' } }));
+  const unavailable = sheet(off, 'computer');
+  assert.ok(unavailable.html.title.includes('computer controls unavailable: no pw-cli on this computer'));
+  assert.ok(!unavailable.html.title.includes('data-act="side"'));
+  assert.ok(unavailable.html.volume.includes('data-act="volume-down"'), 'the DAC side is drawn');
+  // a guest flips: the switch is not quiet
+  const guest = pageWith('dac-guest', modelOf());
+  const quiet = tags(sheet(guest, 'dac').html.title, 'button').filter((b) => b['data-act'] === 'side');
+  assert.ok(quiet.length === 2 && quiet.every((b) => !(b.class ?? '').includes('quiet')));
+});
+
+ok('tone_writes_off_and_eq_with_the_chosen_underlined', () => {
+  for (const on of [true, false]) {
+    const { html } = sheet(pageWith('dac', modelOf({ on })), 'computer');
+    const heading = /<h2 class="p-label">(.*?)<\/h2>/.exec(html.tone)[1];
+    assert.equal(wordsOf(heading).replace(/\s+/g, ' ').trim(), 'Tone · off · EQ');
+    const modes = tags(html.tone, 'button').filter((b) => b['data-act'] === 'c-mode');
+    assert.deepEqual(modes.map((m) => m.text), ['off', 'EQ']);
+    assert.deepEqual(modes.map((m) => (m.class ?? '').split(' ').includes('on')), [!on, on]);
+    assert.equal(html.tone.includes('p-curve faint'), !on, 'the curve is dashed while the EQ is off');
+  }
+  // an EQ that is only what its file says is never drawn as running
+  const unsure = modelOf();
+  unsure.eq.running_unknown = true;
+  const { html } = sheet(pageWith('dac', unsure), 'computer');
+  assert.ok(html.tone.includes('not confirmed') && html.tone.includes('unsure'));
+});
+
+ok('the_points_table_scrolls_after_six', () => {
+  const many = (count) => Array.from({ length: count }, (_, i) => point('PK', 100 * (i + 1), 0, 1));
+  const box = (count) => {
+    const { html } = sheet(pageWith('dac', modelOf({ points: many(count) })), 'computer');
+    return html.tone;
+  };
+  const seven = box(7);
+  assert.match(seven, /id="p-ptsbox" class="p-ptsbox fade" data-count="7" data-rows="6"/);
+  assert.match(seven, /<p id="p-more" class="p-more">one more below<\/p>/);
+  assert.match(box(16), /10 more below/);
+  assert.ok(/id="p-more" class="p-more" hidden/.test(box(6)), 'six rows are all in view');
+  // the table: a number, the type, three cells, the remove; the heads
+  const { html } = sheet(pageWith('dac', modelOf()), 'computer');
+  assert.deepEqual(tags(html.tone, 'th').map((t) => t.text.trim()).slice(0, 5),
+    ['#', 'type', 'frequency', 'gain', 'Q']);
+  assert.equal(tags(html.tone, 'tr').length, 7 + 1);
+  const row1 = /<tr data-n="1"[^>]*>(.*?)<\/tr>/.exec(html.tone)[1];
+  for (const text of ['LSC', 'value="105 Hz"', 'value="+5.5 dB"', 'value="0.70"']) assert.ok(row1.includes(text), text);
+  assert.ok(html.tone.includes('value="\u22122.1 dB"'), 'a true minus');
+  const removes = tags(html.tone, 'button').filter((b) => b['data-act'] === 'c-remove');
+  assert.equal(removes.length, 7);
+  assert.equal(removes[3]['aria-label'], 'Remove point 4');
+  assert.equal(removes[3].text, '\u00D7');
+  assert.match(html.tone, /<i>7 of 16 points · preamp −6\.0 dB<\/i>/);
+  assert.ok(html.tone.includes('+ Add point'));
+  // `+ Add point` is gone at 16 points; the lone point keeps its remove (it sets the point flat)
+  assert.ok(!box(16).includes('+ Add point'));
+  assert.ok(sheet(pageWith('dac', modelOf({ points: [point('PK', 1000, 0, 1)] })), 'computer')
+    .html.tone.includes('Remove point 1'));
+  // the dragged mark is the one in hand
+  const { view: v } = computerView(pageWith('dac', modelOf()), 'computer');
+  v.point = 4;
+  const hand = SECTIONS.tone(pageWith('dac', modelOf()), pageWith('dac', modelOf()).device, v);
+  assert.match(hand, /<tr data-n="4" class="sel">/);
+  assert.equal(tags(hand, 'button').filter((b) => (b.class ?? '').includes('sel')).length, 1);
+});
+
+ok('nothing_below_the_switch_says_computer', () => {
+  for (const [name, viewer] of [['dac', null], ['dac-guest', null], ['amp', null]]) {
+    for (const eq of [modelOf(), modelOf({ on: false })]) {
+      const { html } = sheet(pageWith(name, eq, viewer), 'computer');
+      for (const section of ['volume', 'tone', 'presets', 'notes']) {
+        const words = wordsOf(html[section]);
+        assert.ok(!/computer/i.test(words), `${name} ${section}: ${words.slice(0, 200)}`);
+      }
+    }
+  }
+  // the flipped side's headings are the DAC's
+  const withNote = pageWith('dac', modelOf());
+  withNote.device.presets.note = 'Presets are read only here.';
+  assert.ok(sheet(withNote, 'dac').html.notes.includes('data-about="presets"'), 'the device side has its note');
+  assert.ok(!sheet(withNote, 'computer').html.notes.includes('data-about="presets"'));
+  const { html } = sheet(pageWith('dac', modelOf()), 'computer');
+  assert.ok(html.presets.includes('>Presets<') && html.tone.startsWith('<h2 class="p-label">Tone &middot; '));
+  // the device's notes about the volume, the tone and its presets are for the other side
+  assert.ok(!/data-about="(volume|tone|presets)"/.test(html.notes), html.notes);
+});
+
+ok('a_guests_computer_words_are_quiet_and_the_cells_cannot_be_typed_in', () => {
+  const { html } = sheet(pageWith('dac-guest', modelOf()), 'computer');
+  for (const section of ['volume', 'tone', 'presets']) {
+    for (const b of tags(html[section], 'button').filter((t) => t['data-act'])) {
+      assert.equal(b['aria-disabled'], 'true', `${section} ${b['data-act']}`);
+    }
+  }
+  assert.ok(tags(html.tone, 'input').every((i) => i['aria-disabled'] === 'true'));
+});
+
+ok('the_first_paint_shows_a_dash_and_an_unconfirmed_volume_is_not_a_live_zero', () => {
+  const { html } = sheet(pageWith('dac', modelOf({ pct: null })), 'computer');
+  assert.match(html.volume, /<span class="p-num">\u2014<\/span>/);
+  assert.ok(!html.volume.includes('aria-valuenow'), 'no value is claimed');
+  assert.ok(html.volume.includes('class="p-needle idle"'));
+});
+
+ok('no_computer_markup_carries_a_style_attribute', () => {
+  const { html } = sheet(pageWith('dac', modelOf()), 'computer');
+  for (const [name, one] of Object.entries(html)) assert.ok(!/\sstyle=/i.test(one), name);
+});
+
+ok('the_switch_words_and_the_crosses_have_stable_ids', () => {
+  const { html } = sheet(pageWith('dac', modelOf()), 'computer');
+  assert.ok(html.title.includes('id="p-side-dac"') && html.title.includes('id="p-side-computer"'));
+  for (let i = 1; i <= 7; i++) assert.ok(html.tone.includes(`id="p-crm-${i}"`), `cross ${i}`);
+});
+
+ok('every_dot_sits_on_the_curve_shelves_included', () => {
+  const page = pageWith('dac', modelOf());
+  const { view: v, computer } = computerView(page, 'computer');
+  const t = computer.toneOf(page);
+  const html = SECTIONS.tone(page, page.device, v);
+  const dots = tags(html, 'button').filter((b) => (b.class ?? '').split(' ').includes('pt'));
+  assert.equal(dots.length, 7);
+  const bands = t.points.map((p) => ({ f0: p.f, gainDb: p.g, q: p.q, type: p.type }));
+  const want = markersOf(t.points);
+  dots.forEach((d, i) => {
+    const on = responseDb(bands, [Math.min(Math.max(t.points[i].f, 20), 20000)])[0];
+    assert.ok(Math.abs(Number(d['data-y']) - yOf(on) / 260) < 1e-4, `dot ${i + 1} on the curve`);
+    assert.ok(Math.abs(Number(d['data-y']) - want[i].y / 260) < 1e-4);
+  });
+  // the LSC at 105 Hz (+5.5 dB) is not at its written gain
+  assert.ok(Math.abs(Number(dots[0]['data-y']) - yOf(5.5) / 260) > 0.005, 'a shelf is drawn on the line');
 });
 
 console.log(`paper-draw: ${n} passed`);

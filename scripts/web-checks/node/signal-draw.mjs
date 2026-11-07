@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { targetsOf } from '../../../bins/svolderd/web/core/contract.js';
-import { yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
+import { responseDb, yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
 import { ampScreen, metersInPlace } from '../../../bins/svolderd/web/themes/signal/draw/amp.js';
 import { declaredScreen, editForm, hopTools, moves, plusSheet, unlinkedAmps } from '../../../bins/svolderd/web/themes/signal/draw/hop.js';
 import { choices, modeRow } from '../../../bins/svolderd/web/themes/signal/draw/choices.js';
@@ -17,7 +17,12 @@ import { createFold } from '../../../bins/svolderd/web/themes/signal/fold.js';
 import { keeper } from '../../../bins/svolderd/web/themes/signal/live.js';
 import { drawSlim, volumeWords } from '../../../bins/svolderd/web/themes/signal/slim.js';
 import { card, stateCard } from '../../../bins/svolderd/web/themes/signal/draw/card.js';
-import { computerScreen } from '../../../bins/svolderd/web/themes/signal/draw/computer.js';
+import {
+  computerFacts, computerMode, computerOpen, computerPoints, computerPresets, computerScreen, computerShelf,
+  computerVolume, fractionOf, plain,
+} from '../../../bins/svolderd/web/themes/signal/draw/computer.js';
+import { createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import { playerScreen } from '../../../bins/svolderd/web/themes/signal/draw/player.js';
 import { drawPlaying, transport } from '../../../bins/svolderd/web/themes/signal/draw/playing.js';
 import { curvePath, heldGraph, pointsOf, toneBox } from '../../../bins/svolderd/web/themes/signal/draw/tone.js';
@@ -823,34 +828,6 @@ ok('the_player_goes_inert_for_a_viewer_who_may_not_write', () => {
   assert.ok(buttons.length === 3 && buttons.every((b) => b['aria-disabled'] === 'true'));
 });
 
-ok('the_computer_opens_the_routes_facts_read_only', () => {
-  const page = hosted();
-  const html = computerScreen(page);
-  const facts = Object.fromEntries([...html.matchAll(/<dt>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map((m) => [m[1], m[2]]));
-  assert.equal(facts['Sound card'], 'Bifrost 3 USB');
-  assert.equal(facts['Rate and format'], '96 kHz S32LE');
-  assert.equal(facts['Volume in PipeWire'], '80 %');
-  assert.equal(facts.Muted, 'yes');
-  assert.equal(facts['Host EQ'], 'on · Harman &lt;b&gt;', 'the preset is named, escaped');
-  assert.equal(facts['Other streams'], '2 other streams mix in');
-  assert.equal(facts['The sound’s way'], 'untouched');
-  assert.ok(!html.includes('<b>'), 'a name is not markup');
-  // read only: nothing acts, nothing takes the focus
-  assert.ok(!/<(button|input|select|textarea|a)[\s>]/.test(html) && !/tabindex|data-act|role="(slider|option)"/.test(html), html);
-  const off = computerScreen(hosted({ ...ROUTE, host_eq: false, eq_preset: null, others_mixing: 0,
-    sink: { ...ROUTE.sink, muted: false, volume_pct: null } }));
-  assert.ok(off.includes('<dt>Host EQ</dt><dd>off</dd>') && off.includes('<dt>Other streams</dt><dd>none</dd>'));
-  assert.ok(off.includes('<dt>Muted</dt><dd>no</dd>') && off.includes('<dt>Volume in PipeWire</dt><dd>—</dd>'));
-  const byHand = computerScreen(hosted({ ...ROUTE, eq_preset: null }));
-  assert.ok(byHand.includes('<dt>Host EQ</dt><dd class="sg-warn">on</dd>'), 'on with no name');
-  assert.ok(computerScreen(hosted({ ...ROUTE, sink: null })).includes('no sound card found'));
-});
-
-ok('the_computer_says_route_not_read_before_the_route_arrives', () => {
-  const html = computerScreen(hosted(null));
-  assert.ok(html.includes('route not read') && !html.includes('<dl'), html);
-});
-
 ok('a_lost_link_breaks_the_line_at_the_dac', () => {
   const page = hosted();
   page.device.card = pageOf('lost').device.card;
@@ -937,7 +914,8 @@ ok('a_fault_on_a_connected_device_keeps_its_controls_live', () => {
 ok('player_and_computer_hops_open_their_areas', () => {
   const page = hosted();
   assert.ok(openers.player(page, { id: 'player' }, { ...view, now: 1 }).includes('id="sg-player"'));
-  assert.ok(openers.computer(page, { id: 'computer' }, view).includes('id="sg-computer"'));
+  // with no computer controls in the model the hop opens the route's facts alone
+  assert.ok(openers.computer(page, { id: 'computer' }, view).includes('id="sg-route"'));
   assert.ok(!/\sstyle=/.test(openers.player(page, {}, view) + openers.computer(page, {}, view)), 'no style attribute');
 });
 
@@ -1039,6 +1017,267 @@ ok('the_menu_row_adds_a_device_while_a_device_is_shown', () => {
     Object.assign(bound, was);
   }
   assert.ok(!theme.menuButton.fixed, 'the theme itself does not name the placing');
+});
+
+// ---- the computer's side: the DAC's screen acting on the computer ----
+
+const memory = () => {
+  const map = new Map();
+  return { getItem: (key) => map.get(key) ?? null, setItem: (key, v) => map.set(key, String(v)), removeItem: (key) => map.delete(key) };
+};
+const pt = (type, f, g, q) => ({ type, f, g, q });
+const SEVEN = [pt('LSC', 105, 5.5, 0.7), pt('PK', 180, -2.1, 0.9), pt('PK', 1200, -1.8, 1.4),
+  pt('PK', 2900, 3.2, 2), pt('PK', 5600, -4, 3.1), pt('PK', 8900, 2.4, 2.5), pt('HSC', 10000, -1.5, 0.7)];
+const computerModel = (points = SEVEN, over = {}) => ({
+  volume: { pct: 42, muted: false, sink: 'Schiit' },
+  eq: {
+    on: true, running_unknown: false, preamp_db: -6, preset: 'Warm', live: true, note: null, max: 16, points, response: [],
+  },
+  presets: [
+    { name: 'Warm', built_in: true, on: true, playable: true, why: null },
+    { name: 'Mine', built_in: false, on: false, playable: true, why: null },
+    { name: 'Huge', built_in: false, on: false, playable: false, why: '17 filters' },
+  ],
+  unavailable: null,
+  ...over,
+});
+/** The computer's side over the `playing` fixture (a DAC): the page, the core's computer and what
+ * the hop draws; `guest` makes the viewer a guest. */
+function side({ computer = computerModel(), guest = false, route = ROUTE, chosen = 'computer' } = {}) {
+  const page = hosted(route);
+  page.host.computer = computer;
+  if (guest) page.viewer = { signed_in: false, guest: true, writes: false, read_only: null };
+  const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
+  const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
+  const core = createComputer({ store, storage: memory(), holds });
+  if (chosen === 'computer') core.flip('computer');
+  const v = { ...view, computer: core, pick: { n: null, device: null }, phone: () => false };
+  const hop = { id: 'computer', kind: 'computer' };
+  const parts = { volume: core.volumeOf(page), tone: core.toneOf(page) };
+  return {
+    page, core, view: v, parts, open: openers.computer(page, hop, v), shelf: shelves.computer(page, hop, v),
+    inert: guest,
+  };
+}
+const words = (markup) => markup.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+ok('the_volume_reads_percent_with_no_cap_tick', () => {
+  const on = side();
+  assert.ok(on.open.includes('id="sg-cvolume"') && on.open.includes('id="sg-ctone"'), on.open);
+  assert.match(on.open, /<span class="sg-num">42<\/span><small>%<\/small>/);
+  assert.ok(!on.open.includes('sg-vcap') && !on.open.includes('cap'), 'no cap tick');
+  const track = tags(on.open, 'div').find((d) => d.id === 'sg-cvtrack');
+  assert.equal(track['aria-valuemin'], '0');
+  assert.equal(track['aria-valuemax'], '100');
+  assert.equal(track['aria-valuenow'], '42');
+  assert.equal(track['aria-valuetext'], '42 %');
+  // the first paint is a dash, never a live 0 %; the controls are not live
+  const unread = side({ computer: computerModel(SEVEN, { volume: null }) });
+  assert.match(unread.open, /<span class="sg-num">—<\/span><small><\/small>/);
+  assert.equal(tags(unread.open, 'div').find((d) => d.id === 'sg-cvtrack')['aria-valuenow'], undefined, 'no value for a level not read');
+  assert.ok(tags(unread.open, 'div').find((d) => d.id === 'sg-cvtrack')['aria-disabled'] === 'true');
+  assert.ok(tags(unread.open, 'button').every((b) => b['aria-disabled'] === 'true' || b['data-act'] === undefined || b.id.startsWith('sg-cpt')), 'steps are not live');
+  // a level another program put above 100 % is shown as read, the knob at the end, with its note
+  const boosted = side({ computer: computerModel(SEVEN, { volume: { pct: 130, muted: false } }) });
+  assert.match(boosted.open, /<span class="sg-num">130<\/span>/);
+  assert.ok(boosted.open.includes('data-at="1.00000"') && boosted.open.includes('Set above 100 % elsewhere'));
+  // muted keeps the number and says Unmute
+  const muted = side({ computer: computerModel(SEVEN, { volume: { pct: 42, muted: true } }) });
+  assert.match(muted.open, /<span class="sg-num">42<\/span>/);
+  assert.ok(muted.open.includes('>Unmute</button>') && muted.open.includes('aria-pressed="true"'));
+  assert.ok(computerVolume(on.parts.volume, false).includes('data-act="cvol-up"'));
+});
+
+ok('mode_chips_are_off_and_eq', () => {
+  const on = side();
+  const chips = tags(computerMode(on.parts.tone, false), 'button');
+  assert.deepEqual(chips.map((c) => c.text), ['Off', 'EQ']);
+  assert.deepEqual(chips.map((c) => c['aria-pressed']), ['false', 'true']);
+  assert.ok(chips.every((c) => classes(c).includes('sg-chip')), 'drawn as the DAC draws its mode');
+  const off = side({ computer: computerModel(SEVEN, { eq: { ...computerModel().eq, on: false } }) });
+  assert.deepEqual(tags(computerMode(off.parts.tone, false), 'button').map((c) => c['aria-pressed']), ['true', 'false']);
+  assert.ok(tags(off.open, 'path').some((p) => classes(p).includes('faint')), 'the curve is faint while the EQ is off');
+  // on a desktop the mode heads the shelf's presets, on a phone it ends the first screen
+  assert.ok(!on.open.includes('id="sg-cmode"') && on.shelf.includes('id="sg-cmode"'));
+  const phone = { ...on.view, phone: () => true };
+  const hop = { id: 'computer', kind: 'computer' };
+  assert.ok(openers.computer(on.page, hop, phone).includes('id="sg-cmode"') && !shelves.computer(on.page, hop, phone).includes('id="sg-cmode"'));
+});
+
+ok('the_points_table_has_type_and_remove', () => {
+  const on = side();
+  const rows = on.shelf.split('class="sg-prow').slice(1);
+  assert.equal(rows.length, 7);
+  const selects = tags(on.shelf, 'select');
+  assert.deepEqual(selects.map((s) => s['aria-label']), SEVEN.map((_, i) => `Type of point ${i + 1}`));
+  assert.ok(on.shelf.includes('<option selected>LSC</option>') && on.shelf.includes('<option selected>HSC</option>'));
+  assert.deepEqual([...on.shelf.matchAll(/<option(?: selected)?>(\w+)<\/option>/g)].slice(0, 3).map((m) => m[1]), ['PK', 'LSC', 'HSC']);
+  const removes = tags(on.shelf, 'button').filter((b) => b['data-act'] === 'cremove');
+  assert.deepEqual(removes.map((b) => b['aria-label']), SEVEN.map((_, i) => `Remove point ${i + 1}`));
+  assert.ok(removes.every((b) => b.text === '×'));
+  assert.ok(on.shelf.includes('105 Hz') && on.shelf.includes('+5.5 dB') && on.shelf.includes('−2.1 dB') && on.shelf.includes('0.70'));
+  assert.ok(words(on.shelf).includes('7 of 16 points · preamp −6.0 dB'), words(on.shelf));
+  assert.ok(on.shelf.includes('>+ Add point</button>'));
+  // a table of six or fewer rows has no more-line; seven say one more below
+  assert.ok(on.shelf.includes('one more below ↓'));
+  assert.ok(!side({ computer: computerModel(SEVEN.slice(0, 6)) }).shelf.includes('more below'));
+  // point 1 is always there, and its remove sets it flat while it is alone; a flat list is that one point
+  const flat = side({ computer: computerModel([]) });
+  assert.equal(tags(flat.shelf, 'select').length, 1);
+  assert.deepEqual(tags(flat.shelf, 'button').filter((b) => b['data-act'] === 'cremove').map((b) => b['aria-label']), ['Remove point 1']);
+  assert.ok(words(flat.shelf).includes('1 of 16 points · preamp −6.0 dB'));
+  // sixteen points: the table is as tall as with seven (it scrolls), and adding is refused
+  const full = side({ computer: computerModel(Array.from({ length: 16 }, (_, i) => pt('PK', 100 * (i + 1), 0, 1))) });
+  assert.equal(full.shelf.split('class="sg-prow').length - 1, 16);
+  assert.ok(full.shelf.includes('data-rows="6"') && full.shelf.includes('10 more below ↓'));
+  assert.equal(tags(full.shelf, 'button').find((b) => b.id === 'sg-cadd')['aria-disabled'], 'true');
+  assert.ok(!on.shelf.includes('id="sg-cadd" aria-disabled'));
+  // a state only the file says is not drawn as verified
+  const unsure = side({ computer: computerModel(SEVEN, { eq: { ...computerModel().eq, running_unknown: true } }) });
+  assert.ok(words(unsure.shelf).includes('not confirmed yet') && !words(on.shelf).includes('not confirmed yet'));
+});
+
+ok('every_dot_sits_on_the_curve_at_the_summed_response', () => {
+  const on = side();
+  const dots = on.parts.tone.markers.map(fractionOf);
+  assert.equal(dots.length, 7);
+  const bands = SEVEN.map((p) => ({ f0: p.f, gainDb: p.g, q: p.q, type: p.type }));
+  for (const [i, dot] of dots.entries()) {
+    const want = yOf(responseDb(bands, [SEVEN[i].f])[0]) / 260;
+    assert.ok(Math.abs(dot.y - want) < 1e-9, `dot ${i + 1}: ${dot.y} vs ${want}`);
+  }
+  // the shelves' own dots are not at their full gain: the low shelf's is where the curve is at 105 Hz
+  assert.ok(Math.abs(dots[0].y - yOf(5.5) / 260) > 0.005, 'a shelf is not drawn at its full gain');
+  assert.ok(Math.abs(dots[6].y - yOf(-1.5) / 260) > 0.005);
+  // and against the drawn curve itself: the dot is within a pixel of the polyline at its x
+  const path = tags(on.open, 'path').find((p) => classes(p).includes('sg-curve')).d;
+  const pts = [...path.matchAll(/[ML]([\d.]+) ([\d.-]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  for (const dot of dots) {
+    const x = dot.x * 1000;
+    const k = pts.findIndex(([px]) => px >= x);
+    const [x0, y0] = pts[Math.max(k - 1, 0)];
+    const [x1, y1] = pts[k];
+    const y = x1 === x0 ? y1 : y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+    assert.ok(Math.abs(y / 260 - dot.y) < 0.004, `a dot is on the curve: ${y / 260} vs ${dot.y}`);
+  }
+  // a point beyond the hand ranges sits at the curve's edge
+  const edge = side({ computer: computerModel([pt('PK', 30000, 20, 1), pt('PK', 5, -20, 1)]) });
+  for (const dot of edge.parts.tone.markers.map(fractionOf)) assert.ok(dot.x >= 0 && dot.x <= 1 && dot.y >= 0 && dot.y <= 1);
+  // the dots are drawn at those places, one per point, as sliders
+  const drawn = tags(on.open, 'button').filter((b) => classes(b).includes('sg-pt'));
+  assert.equal(drawn.length, 7);
+  assert.equal(drawn[0]['data-y'], dots[0].y.toFixed(5));
+  assert.equal(drawn[0].role, 'slider');
+});
+
+ok('the_computer_keeps_its_facts_under_the_controls', () => {
+  const on = side();
+  const facts = Object.fromEntries([...on.shelf.matchAll(/<dt>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map((m) => [m[1], m[2]]));
+  assert.deepEqual(Object.keys(facts), ['Sound card', 'Rate and format', 'Other streams', 'The sound’s way']);
+  assert.equal(facts['Sound card'], 'Bifrost 3 USB');
+  assert.equal(facts['Rate and format'], '96 kHz S32LE');
+  assert.equal(facts['Other streams'], '2 other streams mix in');
+  assert.equal(facts['The sound’s way'], 'untouched');
+  // volume, mute and the EQ are controls now: no rows for them
+  assert.ok(!/Volume in PipeWire|Muted|Host EQ/.test(on.shelf));
+  const alone = side({ route: { ...ROUTE, others_mixing: 0 } });
+  assert.ok(alone.shelf.includes('<dt>Other streams</dt><dd>alone</dd>'));
+  assert.ok(side({ route: { ...ROUTE, others_mixing: 1 } }).shelf.includes('1 other stream mixes in'));
+  assert.ok(side({ route: { ...ROUTE, sink: null } }).shelf.includes('no sound card found'));
+  assert.ok(computerFacts(hosted(null)).includes('route not read') && !computerFacts(hosted(null)).includes('<dl'));
+  // read only: nothing acts, nothing takes the focus
+  const read = computerScreen(hosted());
+  assert.ok(!/<(button|input|select|textarea|a)[\s>]/.test(read) && !/tabindex|data-act|role="(slider|option)"/.test(read), read);
+  assert.ok(!read.includes('<b>'), 'a name is not markup');
+  // where the controls are not drawn (unavailable) the hop opens the facts alone
+  const gone = side({ computer: computerModel(SEVEN, { unavailable: 'pw-dump is missing' }) });
+  assert.ok(gone.open.includes('id="sg-route"') && gone.open.includes('Bifrost 3 USB') && gone.shelf === '');
+});
+
+ok('the_verdict_names_pipewire_never_the_computer', () => {
+  assert.equal(plain('computer volume 54 %'), 'PipeWire volume 54 %');
+  assert.equal(plain('computer muted'), 'PipeWire muted');
+  assert.equal(plain("the computer's sink was not read"), "PipeWire's sink was not read");
+  assert.equal(plain('the computer plays to Speakers'), 'PipeWire plays to Speakers');
+  assert.equal(plain('the computer is on USB 2'), 'PipeWire is on USB 2');
+  assert.equal(plain('computer rate not read, computer volume not read'), 'PipeWire rate not read, PipeWire volume not read');
+  // the real strings of the daemon in the facts block, in every state of the route
+  for (const words of ['computer volume 54 %, computer muted', "the computer's sink was not read", 'the computer is on USB 2', 'the computer plays to X']) {
+    const page = hosted();
+    page.device.playing.path = { class: 'warn', words, hops: [] };
+    const on = side({ route: { ...ROUTE, host_eq: true, others_mixing: 2 } });
+    on.page.device.playing.path = page.device.playing.path;
+    const html = computerFacts(on.page) + shelves.computer(on.page, { id: 'computer', kind: 'computer' }, on.view);
+    assert.ok(!/computer/i.test(html), html.match(/.{0,40}computer.{0,40}/i)?.[0]);
+    assert.ok(html.includes('PipeWire') && html.includes('sg-warn'), words);
+  }
+  for (const route of [ROUTE, { ...ROUTE, sink: null }, null, { ...ROUTE, host_eq: false, others_mixing: 0 }]) {
+    assert.ok(!/computer/i.test(computerFacts(hosted(route))));
+  }
+});
+
+ok('nothing_below_the_line_says_computer', () => {
+  const variants = [side(), side({ guest: true }), side({ computer: computerModel([]) }),
+    side({ computer: computerModel(SEVEN, { volume: null }) }), side({ computer: computerModel(SEVEN, { unavailable: 'x' }) }),
+    side({ computer: computerModel(SEVEN, { eq: { ...computerModel().eq, running_unknown: true, note: 'from the state file' } }) })];
+  for (const v of variants) {
+    const phone = { ...v.view, phone: () => true };
+    const hop = { id: 'computer', kind: 'computer' };
+    for (const html of [v.open, v.shelf, openers.computer(v.page, hop, phone), shelves.computer(v.page, hop, phone)]) {
+      // not in the words, an attribute or a label (the line's hop is the only place that names it)
+      assert.ok(!/computer/i.test(html), html.match(/.{0,40}computer.{0,40}/i)?.[0]);
+    }
+  }
+});
+
+ok('the_computers_presets_save_rename_and_delete_as_the_dacs_do', () => {
+  const on = side();
+  const chips = tags(on.shelf, 'button').filter((b) => b['data-act'] === 'cpreset');
+  assert.deepEqual(chips.map((c) => c['data-name']), ['Warm', 'Mine', 'Huge']);
+  assert.equal(chips[0]['aria-pressed'], 'true');
+  assert.equal(chips[2]['aria-disabled'], 'true', 'a preset it cannot play is quiet');
+  assert.equal(chips[2].title, '17 filters');
+  assert.ok(classes(chips[1]).includes('own'));
+  const acts = tags(on.shelf, 'button').map((b) => b['data-act']);
+  for (const name of ['cpreset-save', 'cpreset-rename', 'cpreset-delete', 'cadd']) assert.ok(acts.includes(name), name);
+  assert.ok(words(on.shelf).includes('Warm is on.'));
+  assert.ok(on.shelf.includes('class="sg-ask"'), 'a place for the name form and the question');
+  // no rename or delete while there is no preset of the person's own
+  const builtIn = side({ computer: computerModel(SEVEN, { presets: [{ name: 'Warm', built_in: true, on: true, playable: true, why: null }] }) });
+  const names = tags(builtIn.shelf, 'button').map((b) => b['data-act']);
+  assert.ok(names.includes('cpreset-save') && !names.includes('cpreset-rename') && !names.includes('cpreset-delete'));
+  assert.ok(computerPresets(side({ computer: computerModel(SEVEN, { eq: { ...computerModel().eq, preset: null } }) }).parts.tone, { inert: false }).includes('No preset is on.'));
+});
+
+ok('a_guest_sees_the_computer_inert', () => {
+  const guest = side({ guest: true });
+  const everyAct = [...tags(guest.open, 'button'), ...tags(guest.shelf, 'button')].filter((b) => b['data-act']);
+  assert.ok(everyAct.length > 10);
+  assert.deepEqual(everyAct.filter((b) => b['aria-disabled'] !== 'true').map((b) => b['data-act']), [],
+    'every control is drawn inert');
+  assert.ok(tags(guest.shelf, 'input').length === 21 && tags(guest.shelf, 'input').every((i) => 'readonly' in i || 'aria-disabled' in i));
+  assert.ok(tags(guest.shelf, 'select').every((s) => s['aria-disabled'] === 'true'));
+  assert.ok(!guest.shelf.includes('cpreset-save') && !guest.shelf.includes('cpreset-rename'));
+});
+
+ok('the_dac_keeps_its_value_in_the_quiet_grey_while_the_computer_is_chosen', () => {
+  const hops = [{ id: 'computer', kind: 'computer', name: 'This computer', words: ['PipeWire · 48 kHz'], live: true },
+    { id: 'device:x', kind: 'device', name: 'Gungnir 2', words: ['USB 1', '−26.1 dB'], live: true, volume: '−26.1 dB' }];
+  const chosenComputer = line(hops, 'device:x', 'computer');
+  assert.ok(chosenComputer.includes('sg-v sg-vq') && chosenComputer.includes('−26.1 dB'));
+  assert.ok(!line(hops, 'device:x', 'player').includes('sg-vq') && line(hops, 'device:x', 'player').includes('sg-v'));
+});
+
+ok('the_dacs_page_without_a_computer_is_untouched', () => {
+  // a page whose host holds no computer model draws the DAC's screen and no computer controls
+  const page = hosted();
+  const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
+  const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
+  core.flip('computer');
+  const v = { ...view, computer: core, pick: { n: null, device: null }, phone: () => false };
+  assert.equal(core.side(), 'dac');
+  assert.ok(openers.computer(page, { id: 'computer' }, v).includes('id="sg-route"'));
+  assert.equal(shelves.computer(page, { id: 'computer' }, v), '');
 });
 
 console.log(`signal-draw.mjs: ${n} passed`);

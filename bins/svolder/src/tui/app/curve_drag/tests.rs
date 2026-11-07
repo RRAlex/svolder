@@ -144,6 +144,7 @@ fn a_grab_focuses_its_band() {
             row: Some(6),
             held: [None; 3],
             moved: false,
+            point: None,
         })
     );
 }
@@ -578,4 +579,187 @@ fn esc_a_box_and_a_screen_change_drop_the_drag() {
         app.pointer.curve_drag, None,
         "a screen change kept the drag"
     );
+}
+
+/// [`tone_app`] on the computer's side, with two points.
+fn computer_tone_app() -> App {
+    let mut app = tone_app(2);
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        true,
+        &[("PK", 1000.0, 3.0, 1.4), ("LSC", 100.0, -4.0, 0.7)],
+    ));
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    assert!(app.on_computer());
+    app
+}
+
+/// A drag on the computer's curve moves the grabbed point where the pointer is, drawn at once,
+/// sends a live value at most every 50 ms and the last one, `done`, at the release.
+#[test]
+fn a_curve_drag_moves_a_point_and_sends_done_at_release() {
+    let mut app = computer_tone_app();
+    let curve = tone::computer_curve_area(Rect::new(0, 0, 80, 24));
+    let (x, y) = tone::points(&app, curve)
+        .into_iter()
+        .find(|(point, _)| *point == 0)
+        .map(|(_, cell)| cell)
+        .expect("the first point is drawn");
+    assert_eq!(grab(&app, curve, (x, y), Gesture::Move), Some(0));
+    start(&mut app, 0, Gesture::Move, (x, y));
+    assert_eq!(app.tone.row, ToneRow::Point(0));
+    let now = Instant::now();
+    app.now = now;
+    let first = to(&mut app, curve, (x + 6, y + 2));
+    let [Intent::HostEq(op)] = first.as_slice() else {
+        panic!("a live value was expected: {first:?}");
+    };
+    let svolder_ipc::HostEqOp::Set {
+        index: 1,
+        f: Some(f),
+        g: Some(g),
+        q: Some(q),
+        done: false,
+        ..
+    } = &**op
+    else {
+        panic!("a live value was expected: {first:?}");
+    };
+    assert!(
+        *f > 1000.0 && *g < 3.0,
+        "the point moved right and down: {f} {g}"
+    );
+    assert_eq!(*q, 1.4, "the Q stays");
+    let drawn = app.computer_points();
+    assert_eq!(
+        (drawn[0].f, drawn[0].g),
+        (*f, *g),
+        "drawn where the pointer put it"
+    );
+    assert!(
+        to(&mut app, curve, (x + 8, y + 2)).is_empty(),
+        "no second live value inside 50 ms"
+    );
+    app.now = now + std::time::Duration::from_millis(60);
+    assert_eq!(to(&mut app, curve, (x + 10, y + 3)).len(), 1);
+    let last = release(&mut app, Some((curve, (x + 12, y + 3))));
+    let [Intent::HostEq(op)] = last.as_slice() else {
+        panic!("the release sends the last value: {last:?}");
+    };
+    let svolder_ipc::HostEqOp::Set {
+        index: 1,
+        done: true,
+        f: Some(end),
+        ..
+    } = &**op
+    else {
+        panic!("the release sends the last value: {last:?}");
+    };
+    assert!(*end > *f);
+    assert!(app.pointer.curve_drag.is_none());
+}
+
+/// Another front end's edit re-sorts the table while a point is held: the drag goes on with its
+/// own point (found by its slot), and the live values and the release land on it, not on the
+/// neighbour that now has its number. A point another front end removed ends the drag with no
+/// write.
+#[test]
+fn a_drag_follows_its_point_when_another_front_end_re_sorts_the_table() {
+    let mut app = computer_tone_app();
+    let curve = tone::computer_curve_area(Rect::new(0, 0, 80, 24));
+    let (x, y) = tone::points(&app, curve)
+        .into_iter()
+        .find(|(point, _)| *point == 0)
+        .map(|(_, cell)| cell)
+        .expect("the first point is drawn");
+    start(&mut app, 0, Gesture::Move, (x, y));
+    let now = Instant::now();
+    app.now = now;
+    assert_eq!(to(&mut app, curve, (x + 6, y + 2)).len(), 1);
+    // the held point (slot 1) is listed second now
+    let mut eq = app.host.computer.eq.clone().expect("an eq");
+    eq.points.swap(0, 1);
+    app.host.computer.eq = Some(eq.clone());
+    app.now = now + std::time::Duration::from_millis(60);
+    let next = to(&mut app, curve, (x + 10, y + 3));
+    let [Intent::HostEq(op)] = next.as_slice() else {
+        panic!("a live value was expected: {next:?}");
+    };
+    let svolder_ipc::HostEqOp::Set { index, done, .. } = &**op else {
+        panic!("a live value was expected: {next:?}");
+    };
+    assert_eq!((*index, *done), (2, false), "it goes to the held point");
+    let drawn = app.computer_points();
+    assert_eq!(drawn[1].slot, 1);
+    assert!(
+        drawn[1].f > 1000.0 && drawn[0].f == 100.0,
+        "drawn on its own row"
+    );
+    let last = release(&mut app, Some((curve, (x + 12, y + 3))));
+    let [Intent::HostEq(op)] = last.as_slice() else {
+        panic!("the release sends the last value: {last:?}");
+    };
+    let svolder_ipc::HostEqOp::Set { index, done, .. } = &**op else {
+        panic!("the release sends the last value: {last:?}");
+    };
+    assert_eq!((*index, *done), (2, true));
+    // a point that is gone: the drag ends and writes nothing
+    start(&mut app, 1, Gesture::Move, (x, y));
+    eq.points.retain(|point| point.slot != 1);
+    app.host.computer.eq = Some(eq);
+    app.now = now + std::time::Duration::from_millis(200);
+    assert!(to(&mut app, curve, (x + 6, y + 2)).is_empty());
+    assert!(app.pointer.curve_drag.is_none());
+}
+
+/// A flip to the other side in the middle of a drag sends the one `done` for the value the point
+/// already plays, so the daemon keeps the points; a flip with no drag, or a drag that never moved,
+/// sends nothing.
+#[test]
+fn a_flip_in_the_middle_of_a_drag_sends_the_last_value_done() {
+    let mut app = computer_tone_app();
+    let curve = tone::computer_curve_area(Rect::new(0, 0, 80, 24));
+    let (x, y) = tone::points(&app, curve)
+        .into_iter()
+        .find(|(point, _)| *point == 0)
+        .map(|(_, cell)| cell)
+        .expect("the first point is drawn");
+    assert!(app.flip_side().is_empty(), "no drag: nothing is sent");
+    app.flip_side();
+    start(&mut app, 0, Gesture::Move, (x, y));
+    assert!(
+        app.flip_side().is_empty(),
+        "a drag that never moved sends nothing"
+    );
+    app.flip_side();
+    assert!(app.on_computer());
+    start(&mut app, 0, Gesture::Move, (x, y));
+    let now = Instant::now();
+    app.now = now;
+    let live = to(&mut app, curve, (x + 6, y + 2));
+    let [Intent::HostEq(first)] = live.as_slice() else {
+        panic!("a live value was expected: {live:?}");
+    };
+    let svolder_ipc::HostEqOp::Set {
+        f: Some(played), ..
+    } = &**first
+    else {
+        panic!("a live value was expected: {live:?}");
+    };
+    let sent = app.flip_side();
+    let [Intent::HostEq(op)] = sent.as_slice() else {
+        panic!("the flip sends the last value: {sent:?}");
+    };
+    let svolder_ipc::HostEqOp::Set {
+        index: 1,
+        slot: Some(1),
+        f: Some(f),
+        done: true,
+        ..
+    } = &**op
+    else {
+        panic!("the flip sends the last value: {sent:?}");
+    };
+    assert_eq!(f, played);
+    assert!(app.pointer.curve_drag.is_none());
+    assert!(!app.on_computer());
 }

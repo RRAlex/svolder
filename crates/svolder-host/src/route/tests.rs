@@ -10,6 +10,7 @@ const ONE_STREAM: &str = include_str!("../../tests/fixtures/pw-dump/one-stream.j
 const TWO_STREAMS: &str = include_str!("../../tests/fixtures/pw-dump/two-streams.json");
 const HOST_EQ: &str = include_str!("../../tests/fixtures/pw-dump/host-eq.json");
 const HOST_EQ_DEFAULT: &str = include_str!("../../tests/fixtures/pw-dump/host-eq-default.json");
+const LIVE_CHAIN: &str = include_str!("../../tests/fixtures/pw-dump/live-chain.json");
 const SWITCHED: &str = include_str!("../../tests/fixtures/pw-dump/sink-switched.json");
 const ELSEWHERE: &str = include_str!("../../tests/fixtures/pw-dump/stream-elsewhere.json");
 const SCHIIT: &str = include_str!("../../tests/fixtures/pw-dump/schiit-sink.json");
@@ -152,6 +153,24 @@ fn the_host_eq_node_in_the_path_is_seen() {
         // The sink is the real one behind the filter, whichever of them is the default.
         assert_eq!(found.sink.expect("a sink").name, HDMI);
     }
+}
+
+/// The live chain `render_live_conf` makes, as a real PipeWire printed it: the filter's sink and
+/// its output stream carry the names the reader looks for, the player's stream goes into the
+/// filter and the filter's output feeds the real sink.
+#[test]
+fn the_live_chain_in_a_real_dump_is_seen() {
+    let found = facts(LIVE_CHAIN, None, "pw-cat");
+    assert!(found.host_eq, "the player plays through the filter chain");
+    assert_eq!(found.player_match, PlayerMatch::Name);
+    assert!(found.player.is_some());
+    assert_eq!(found.sink.expect("a sink").name, "svolder_e2e_sink");
+    assert_eq!(found.others_mixing, 0);
+    // Without the chain's output stream there is nothing feeding the sink: not in the path.
+    let mut objects: Vec<serde_json::Value> = serde_json::from_str(LIVE_CHAIN).unwrap();
+    objects.retain(|object| object["info"]["props"]["node.name"] != "svolder_eq.output");
+    let found = facts(&serde_json::to_string(&objects).unwrap(), None, "pw-cat");
+    assert!(!found.host_eq);
 }
 
 /// The computer volume is the sink's times the filter node's: 0.24 of the sink and 0.5 of the

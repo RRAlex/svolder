@@ -9,7 +9,7 @@
 //
 //   reach(target) -> boolean            shows it, opening a fold or scrolling as a person would
 //   operate(target, change) -> void     { step: ±1 } | { raw } | { value } | { on } | { apply } |
-//                                       { recall } | { save } | {}
+//                                       { recall } | { save } | { side } (the switch) | {}
 //   shown(target) -> string | null      the words shown for a control, or for a fact by its label
 //   state() -> { lost, waiting, resting, toasts }
 //   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
@@ -36,6 +36,16 @@ function taken(element) {
   return box.width > 0 && box.height > 0;
 }
 
+/** Whether `element` is inside the box of the scrolling table it is in (a row under its fade is
+ * not seen), or is in none. */
+function unclipped(element) {
+  const box = element.closest('.pscroll');
+  if (!box) return true;
+  const inside = element.getBoundingClientRect();
+  const frame = box.getBoundingClientRect();
+  return inside.top >= frame.top - 1 && inside.bottom <= frame.bottom + 1;
+}
+
 /** Whether `element` is on the screen now (at least a part of it is in the window). */
 function onScreen(element) {
   const box = element.getBoundingClientRect();
@@ -57,8 +67,27 @@ function controlOf(key) {
   return found ? { kind: found.kind, control: found } : null;
 }
 
+/** The element a computer target is, as the page draws it, or nothing. */
+function findComputer(target) {
+  const row = () => `#part-tone .pt[data-n="${q(target.n)}"]`;
+  switch (target.computer) {
+    case 'flip': return document.querySelector('#part-switch .opt[data-side="computer"]');
+    case 'volume': return document.querySelector('sv-knob[data-computer] svg.dial');
+    case 'mute': return document.querySelector('sv-knob[data-computer] .mute');
+    case 'mode': return document.querySelector('#part-tone .opt[data-comp="mode"][data-mode="eq"]');
+    case 'add': return document.querySelector('#part-tone [data-comp="add"]');
+    case 'remove': return document.querySelector(`${row()} [data-comp="remove"]`);
+    case 'preset': return document.querySelector(`#part-presets .pre[data-name="${q(target.name)}"]`);
+    case 'point': return document.querySelector(target.param === 'type'
+      ? `${row()} select[data-comp="type"]`
+      : `${row()} .cell[data-param="${q(target.param)}"]`);
+    default: return null;
+  }
+}
+
 /** The element a target is, as the page draws it (before any fold is opened), or nothing. */
 function find(target) {
+  if ('computer' in target) return findComputer(target);
   const dev = device();
   if ('control' in target) {
     const key = target.control;
@@ -212,11 +241,78 @@ async function seen(target) {
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);
-  return Boolean(element) && taken(element) && onScreen(element);
+  return Boolean(element) && taken(element) && onScreen(element) && unclipped(element);
 }
 
 /** The words that say a loudness stepper's direction. */
 const LOUDNESS = { '-1': 'Lower the loudness', 1: 'Raise the loudness' };
+
+/** The computer's volume now, from the model. */
+const computerPct = () => ember.core.computer.volumeOf(ember.core.model.page())?.pct ?? null;
+
+/** Operate one of the computer's targets as a person does: a press, or a value typed into a cell. */
+async function operateComputer(target, change) {
+  const { computer } = target;
+  if (computer === 'flip') {
+    const button = document.querySelector(`#part-switch .opt[data-side="${q(change.side)}"]`);
+    if (!button) throw new Error('no switch');
+    press(button);
+    await settle();
+    return;
+  }
+  const element = find(target);
+  if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
+  if (computer === 'volume') {
+    if ('raw' in change) {
+      for (let n = 0; n < 120 && computerPct() !== null && computerPct() !== change.raw; n++) {
+        const before = computerPct();
+        press(document.querySelector(`sv-knob[data-computer] .step[data-step="${change.raw > before ? 1 : -1}"]`));
+        for (let wait = 0; wait < 40 && computerPct() === before; wait++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+    } else {
+      const direction = change.step < 0 ? -1 : 1;
+      press(document.querySelector(`sv-knob[data-computer] .step[data-step="${direction}"]`));
+    }
+  } else if (computer === 'mute') {
+    if (!('on' in change) || element.getAttribute('aria-pressed') !== String(change.on)) press(element);
+  } else if (computer === 'mode') {
+    const want = 'on' in change ? (change.on ? 'eq' : 'off') : 'eq';
+    press(document.querySelector(`#part-tone .opt[data-comp="mode"][data-mode="${want}"]`));
+  } else if (computer === 'point' && element.matches('select')) {
+    element.value = change.value;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (computer === 'point') {
+    if (!('value' in change)) throw new Error('a point is changed by typing a value');
+    press(element);
+    await settle();
+    const input = element.querySelector('input');
+    input.value = change.value;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  } else {
+    press(element);
+  }
+  await settle();
+}
+
+/** The words the page shows for one of the computer's targets. */
+function shownComputer(target, element) {
+  switch (target.computer) {
+    case 'flip': return element.parentElement.querySelector('[aria-pressed="true"]')?.textContent ?? null;
+    case 'volume': {
+      const knob = element.closest('sv-knob');
+      const num = knob.querySelector('.big .num')?.textContent ?? '';
+      const unit = knob.querySelector('.big .unit')?.textContent;
+      return unit ? [num, unit].join(' ') : num;
+    }
+    case 'mute': return element.textContent.trim();
+    case 'mode': return element.parentElement.parentElement.querySelector('[aria-pressed="true"]')?.textContent ?? null;
+    case 'add': case 'remove': return element.textContent.trim();
+    case 'preset': return element.dataset.name;
+    default: return element.matches('select') ? element.value : element.textContent.trim();
+  }
+}
 
 export const driver = {
   async reach(target) {
@@ -228,7 +324,9 @@ export const driver = {
   },
 
   async operate(target, change = {}) {
-    if ('control' in target) {
+    if ('computer' in target) {
+      await operateComputer(target, change);
+    } else if ('control' in target) {
       const kind = controlOf(target.control)?.kind;
       const element = find(target);
       if (!element) throw new Error(`no control ${target.control}`);
@@ -300,6 +398,7 @@ export const driver = {
     if (isFact(target)) return factCell(target)?.textContent ?? null;
     const element = find(target);
     if (!element) return null;
+    if ('computer' in target) return shownComputer(target, element);
     if ('control' in target) {
       const kind = controlOf(target.control)?.kind;
       if (kind === 'volume') {

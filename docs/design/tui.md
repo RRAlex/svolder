@@ -37,8 +37,8 @@ Three layers, from the plain to the dirty:
 A device is opened through the same `Backend` every verb uses (the map says how), and a device
 switch closes it and opens another through `Opener::reopen`, the path a start takes, so starting
 on a device and switching to one cannot drift apart. The loop never prints: the alternate screen is
-up, so anything an open has to say becomes a toast. A joined TUI reads the player and the path
-from the daemon, and falls back to its own watcher: [host-audio.md](host-audio.md#a-joined-tui).
+up, so anything an open has to say becomes a toast. A joined TUI reads the player, the path and the
+computer's controls from the daemon, else its own: [host-audio.md](host-audio.md#a-joined-tui), [host-control.md](host-control.md#the-tui).
 
 ### The TUI always starts
 

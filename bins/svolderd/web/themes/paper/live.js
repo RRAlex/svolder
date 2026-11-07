@@ -47,6 +47,13 @@ function focusOf(box) {
   return active.dataset?.act ? `[data-act="${active.dataset.act}"]` : null;
 }
 
+/** The id of the element of point `to` that stands where the one with `id` stood for point `from`
+ * (its mark, its cell, its type word, its cross); nothing when `id` is none of those. */
+function renumbered(id, from, to) {
+  const found = /^(p-pt-|p-crm-|p-ct|p-c)(\d+)(.*)$/.exec(id ?? '');
+  return found && Number(found[2]) === from ? `${found[1]}${to}${found[3]}` : null;
+}
+
 /** A counted hold of the section `name`, for gestures and open lists that may overlap: it is held
  * from the first `take()` and let go at the `drop()` that matches the last. `around(fn)` runs `fn`
  * with a hold taken and gives it back if `fn` throws. `reset()` lets go of every hold at once (the
@@ -145,7 +152,11 @@ export function createLive({ core, root, signal, view }) {
     // The notes a phone moved after their sections go with the band's own.
     if (name === 'notes') clearMoved(root);
     const focused = focusOf(box);
+    // the computer's table keeps its place in the list when it is drawn again
+    const scrolled = box.querySelector('#p-ptsbox')?.scrollTop ?? 0;
     box.innerHTML = SECTIONS[name]?.(store.page(), store.device(), view) ?? '';
+    const scroller = box.querySelector('#p-ptsbox');
+    if (scroller && scrolled > 0) scroller.scrollTop = scrolled;
     if (focused) box.querySelector(focused)?.focus();
     // The slot the frame's button sits over is part of the title, which was just drawn again.
     if (name === 'title') core.frame.anchor(box.querySelector('.paper-slot'), { fixed: true });
@@ -213,13 +224,42 @@ export function createLive({ core, root, signal, view }) {
       if (parts === '*' || parts.includes(name)) draw(section);
     }
   });
+  // The sections the computer's side flips with the device's: the volume, the tone, its presets.
+  const FLIPPED = ['volume', 'tone', 'presets'];
+  /** The side drawn when the sections last looked: a host read that makes the computer unusable
+   * (or usable again) takes the side with it. */
+  let side = core.computer.side();
   for (const event of ['host', 'fleet']) {
     listen(event, () => {
+      const now = core.computer.side();
+      if (now === 'computer' || now !== side) FLIPPED.forEach(draw);
+      side = now;
       draw('playing');
       draw('title');
       draw('notes');
     });
   }
+  // The person flipped the side: whatever was open or in hand on the other side ends (as for
+  // another device shown), then the sheet is drawn for the side. What this viewer changed on the
+  // computer and the daemon has taken is drawn again once the model has been read.
+  // An edit that ended moved a point in the table's frequency order: the point in hand and the
+  // focus on its mark follow it.
+  let refocus = null;
+  off.push(core.computer.on(({ type, from, to }) => {
+    if (type === 'flip') {
+      side = core.computer.side();
+      for (const fn of switchers) fn();
+      drawAll();
+    } else if (type === 'moved') {
+      if (view.point === from) view.point = to;
+      refocus = renumbered(globalThis.document?.activeElement?.id, from, to);
+    } else if (type === 'settled' && side === 'computer') {
+      FLIPPED.forEach(draw);
+      draw('notes');
+      if (refocus !== null) globalThis.document?.getElementById(refocus)?.focus({ preventScroll: true });
+      refocus = null;
+    }
+  }));
   // A reading of the meters moves their needles in place.
   listen('meters', (data) => {
     if ((data?.device ?? store.shown()) === store.shown()) draw('meters');

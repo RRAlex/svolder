@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The Host group: now-playing, the host volume, the spectrum and the transport row.
+//! The Host group: now-playing, the spectrum and the transport row, and the Volume row's computer
+//! side.
 
 use super::*;
 
@@ -25,9 +26,9 @@ fn the_device_screen_draws_the_host_group_and_now_playing() {
             "│   Balance      L ────┃───── R  0   ││   3    632 Hz    +0.0 dB   4.3         │",
             "│                                    ││   4   2515 Hz   +1.45 dB   1.0         │",
             "│   Host                             ││   5  10000 Hz    +0.0 dB   4.3         │",
-            "│   Host volume  ███54%░░░░  Gungni… ││                                        │",
             "│   Transport    ◀◀  ▶  ▮▮  ▶▶       ││                                        │",
-            "│   Host EQ      off                 ││                                        │",
+            "│                                    ││                                        │",
+            "│                                    ││                                        │",
             "│                                    ││                                        │",
             "└────────────────────────────────────┘└────────────────────────────────────────┘",
             "┌ Status ────────────────────────────────────────────────────────────── advice ┐",
@@ -183,8 +184,9 @@ fn the_now_playing_row_measures_wide_characters_in_cells() {
 /// pane's border.
 #[test]
 fn a_wide_sink_name_is_cut_to_the_rows_cells() {
-    let buffer = screen(&sinking(0.54, false, "オーディオ出力"));
-    let symbol = |x: u16| buffer.cell((x, 13)).expect("a cell").symbol().to_string();
+    let buffer = screen(&on_the_computer(0.54, false, "オーディオ出力"));
+    let y = u16::try_from(volume_row(&text(&buffer))).expect("a row");
+    let symbol = |x: u16| buffer.cell((x, y)).expect("a cell").symbol().to_string();
     assert_eq!(symbol(29), "オ");
     assert_eq!(symbol(31), "ー");
     assert_eq!(symbol(33), "デ");
@@ -324,8 +326,7 @@ fn the_level_from_row_says_where_the_level_comes_from() {
 }
 
 /// The Host group sits right under the device's own rows at 80×24, under a heading of its
-/// own: the sink's volume as a bar from 0 to 100 % with the volume inside it, and the
-/// sink's name dim after it, cut to what the row leaves.
+/// own, and holds the transport.
 #[test]
 fn the_host_group_sits_under_the_devices_rows_at_80x24() {
     let theme = Theme::new(false);
@@ -338,65 +339,93 @@ fn the_host_group_sits_under_the_devices_rows_at_80x24() {
             "│   Balance      L ────┃───── R  0   │",
             "│                                    │",
             "│   Host                             │",
-            "│   Host volume  ███54%░░░░  USB DAC │",
+            "│   Transport    ◀◀  ▶  ▮▮  ▶▶       │",
         ]
     );
     let dim = theme.style(Role::Dim);
-    for (x, y, what) in [(4, 12, "the heading"), (30, 13, "the sink's name")] {
-        let cell = buffer.cell((x, y)).expect("a cell");
-        assert!(
-            cell.modifier.contains(dim.add_modifier) && dim.fg.is_none_or(|fg| cell.fg == fg),
-            "{what} is not dim: {cell:?}"
-        );
-    }
-
-    let short = text(&screen(&sinking(0.54, false, "HDMI")));
-    assert_eq!(pane(&short[13]), "│   Host volume  ███54%░░░░  HDMI    │");
+    let cell = buffer.cell((4, 12)).expect("a cell");
+    assert!(
+        cell.modifier.contains(dim.add_modifier) && dim.fg.is_none_or(|fg| cell.fg == fg),
+        "the heading is not dim: {cell:?}"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| !row.contains("Host volume") && !row.contains("Host EQ")),
+        "the Host group keeps the transport only: {rows:#?}"
+    );
 }
 
-/// A muted sink says so after its bar, in the warn role, before its name, which gives way
-/// where the row has no room left for it; a sink something else boosted past 100 % fills
-/// the bar and says the volume it reads.
+/// [`sinking`] with the computer's controls there and its side shown.
+fn on_the_computer(volume: f32, muted: bool, name: &str) -> App {
+    let mut app = sinking(volume, muted, name);
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    app.flip_side();
+    assert!(app.on_computer());
+    app
+}
+
+/// The row the volume's bar is on, of the frame `rows`: under the switch's line.
+fn volume_row(rows: &[String]) -> usize {
+    rows.iter()
+        .position(|row| row.contains("| Computer"))
+        .expect("the switch's line")
+        + 1
+}
+
+/// On the computer's side the Volume row is the computer's: a bar from 0 to 100 % with the volume
+/// inside it, `muted` in the warn role while the sink is, its name dim after them where the row has
+/// room, and a sink something else boosted past 100 % fills the bar and says the volume it reads.
 #[test]
-fn the_host_volume_row_says_muted_and_a_boost() {
+fn the_computer_volume_row_says_muted_and_a_boost() {
     let theme = Theme::new(false);
-    let buffer = frame_with_theme(&sinking(0.54, true, "USB DAC"), 80, 24, &theme);
-    let row: String = text(&buffer)[13].chars().take(38).collect();
-    assert_eq!(row, "│   Host volume  ███54%░░░░  muted   │");
-    let muted = buffer.cell((29, 13)).expect("the word");
+    let buffer = frame_with_theme(&on_the_computer(0.54, true, "USB DAC"), 80, 24, &theme);
+    let rows = text(&buffer);
+    let y = volume_row(&rows);
+    let row: String = rows[y].chars().take(38).collect();
+    assert_eq!(row, "│                ███54%░░░░  muted   │");
+    let muted = buffer.cell((29, y as u16)).expect("the word");
     assert_eq!(muted.symbol(), "m");
     assert_eq!(
         muted.fg,
         theme.style(Role::Warn).fg.expect("the warn colour")
     );
 
-    let wide: Vec<String> = text(&frame(&sinking(0.54, true, "USB DAC"), 130, 30));
+    let wide: Vec<String> = text(&frame(&on_the_computer(0.54, true, "USB DAC"), 130, 30));
     assert!(
         wide.iter()
             .any(|row| row.contains("█54%░") && row.contains("muted")),
         "{wide:#?}"
     );
-    let boosted = text(&screen(&sinking(1.2, false, "USB DAC")));
+    let boosted = text(&screen(&on_the_computer(1.2, false, "USB DAC")));
+    let y = volume_row(&boosted);
     assert_eq!(
-        boosted[13].chars().take(38).collect::<String>(),
-        "│   Host volume  ███120%███  USB DAC │"
+        boosted[y].chars().take(38).collect::<String>(),
+        "│                ███120%███  USB DAC │"
     );
 }
 
-/// Before the sink has read, and on a host with no sink to read, the row reads `—`, dim.
+/// Before the computer's volume has been read, the row reads `—`, dim, and never a live 0 %.
 #[test]
-fn without_a_sink_the_host_volume_row_reads_a_dash_dim() {
+fn without_a_reading_the_computer_volume_row_reads_a_dash_dim() {
     let theme = Theme::new(false);
-    let buffer = frame_with_theme(&hearing(None), 80, 24, &theme);
-    let row: String = text(&buffer)[13].chars().take(38).collect();
-    assert_eq!(row, "│   Host volume  —                   │");
-    let dash = buffer.cell((17, 13)).expect("the dash");
+    let mut app = on_the_computer(0.54, false, "USB DAC");
+    app.host.sink = None;
+    let buffer = frame_with_theme(&app, 80, 24, &theme);
+    let rows = text(&buffer);
+    let y = volume_row(&rows);
+    let row: String = rows[y].chars().take(38).collect();
+    assert_eq!(row, "│                —                   │");
+    let dash = buffer.cell((17, y as u16)).expect("the dash");
     assert_eq!(dash.symbol(), "—");
-    let stale = theme.style(Role::Stale);
+    let dim = theme.style(Role::Dim);
     assert!(
-        dash.modifier.contains(stale.add_modifier) && stale.fg.is_none_or(|fg| dash.fg == fg),
+        dash.modifier.contains(dim.add_modifier) && dim.fg.is_none_or(|fg| dash.fg == fg),
         "the row is not dim: {dash:?}"
     );
+    assert!(!row.contains('%'), "a live 0 % was drawn");
 }
 
 /// The tall tier keeps the Host group under the device's rows, and with host audio off, or
@@ -412,7 +441,7 @@ fn the_host_group_shows_in_the_tall_tier_and_goes_with_host_audio() {
         tall[heading - 1].starts_with("│                  "),
         "{tall:#?}"
     );
-    assert!(tall[heading + 1].contains("Host volume  ███"), "{tall:#?}");
+    assert!(tall[heading + 1].contains("Transport"), "{tall:#?}");
 
     let mut off = sinking(0.54, false, "USB DAC");
     off.tui.host_audio = false;
@@ -422,11 +451,11 @@ fn the_host_group_shows_in_the_tall_tier_and_goes_with_host_audio() {
     }
 }
 
-/// A click on the Host volume row focuses it under the index the keys reach it by, after
-/// the device's own rows, and the wheel over its bar steps it.
+/// On the computer's side a click on the Volume row focuses it and the wheel over its bar steps the
+/// computer's volume one percent; the bar claims no press of its own.
 #[test]
-fn the_host_volume_row_takes_a_click_and_the_wheel() {
-    let app = sinking(0.54, false, "USB DAC");
+fn the_computer_volume_row_takes_a_click_and_the_wheel() {
+    let app = on_the_computer(0.54, false, "USB DAC");
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("a test terminal opens");
     let mut hits = HitMap::default();
     terminal
@@ -439,15 +468,20 @@ fn the_host_volume_row_takes_a_click_and_the_wheel() {
     use crate::tui::app::Intent;
     use crate::tui::mouse::{self, MouseAction};
 
+    let y = u16::try_from(volume_row(&text(terminal.backend().buffer()))).expect("a row");
     let at = |kind, column| MouseEvent {
         kind,
         column,
-        row: 13,
+        row: y,
         modifiers: KeyModifiers::NONE,
     };
     let click = MouseEventKind::Down(MouseButton::Left);
-    let own = app.rows().len();
-    let focus = Some(MouseAction::Focus(Pane::Controls, own));
+    let volume = app
+        .rows()
+        .iter()
+        .position(|row| row.control.key == "volume")
+        .expect("a volume row");
+    let focus = Some(MouseAction::Focus(Pane::Controls, volume));
     assert_eq!(
         mouse::resolve(&hits, at(click, 4), &app),
         focus,
@@ -456,20 +490,11 @@ fn the_host_volume_row_takes_a_click_and_the_wheel() {
     assert_eq!(mouse::resolve(&hits, at(click, 20), &app), focus, "the bar");
     assert_eq!(
         mouse::resolve(&hits, at(MouseEventKind::ScrollUp, 20), &app),
-        Some(MouseAction::Intent(Intent::HostVolume(56)))
+        Some(MouseAction::Intent(Intent::HostVolume(55)))
     );
     assert_eq!(
         mouse::resolve(&hits, at(MouseEventKind::ScrollDown, 20), &app),
-        Some(MouseAction::Intent(Intent::HostVolume(52)))
-    );
-    let heading = MouseEvent {
-        row: 12,
-        ..at(click, 4)
-    };
-    assert_eq!(
-        mouse::resolve(&hits, heading, &app),
-        None,
-        "the heading is a row a click focuses"
+        Some(MouseAction::Intent(Intent::HostVolume(53)))
     );
 }
 
@@ -493,7 +518,6 @@ fn the_host_group_fits_the_busiest_profile_at_80x24() {
     let rows = text(&screen(&app));
     for wanted in [
         "Meter 5",
-        "Host volume",
         "Transport",
         "Faults:",
         "Level from: —",
@@ -535,7 +559,7 @@ fn spectrum_of(app: &App, width: u16, height: u16) -> (Vec<String>, Option<Rect>
     (text(terminal.backend().buffer()), areas.spectrum)
 }
 
-/// The Spectrum row is the Host group's last, under Host EQ, in the wide and the tall
+/// The Spectrum row is the Host group's last, under the transport, in the wide and the tall
 /// tiers: a block glyph a band, as tall as the band is loud, from the lowest band on the
 /// left. The 80×24 layout leaves it out, and so does the visualizer switched off; with no
 /// capture running it reads `—`, dim. Each frame that draws it says where it landed.
@@ -550,7 +574,7 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
         tall[at].chars().take(38).collect::<String>(),
         "│   Spectrum     ▁▂▃▄▄▅▆▇███████████ │"
     );
-    assert!(tall[at - 1].contains("Host EQ"), "{tall:#?}");
+    assert!(tall[at - 1].contains("Transport"), "{tall:#?}");
     assert_eq!(landed.map(|row| row.y), u16::try_from(at).ok());
 
     let (wide, landed) = spectrum_of(&spectral(), 130, 30);
@@ -754,7 +778,7 @@ fn a_spectrum_row_out_of_sight_is_not_on_the_screen() {
 
     // Kraken with two toggles more, the busiest pane the built-in profiles could grow to.
     let mut busy = profile_named("kraken");
-    for (n, key) in ["extra_1", "extra_2"].into_iter().enumerate() {
+    for (n, key) in ["extra_1", "extra_2", "extra_3"].into_iter().enumerate() {
         let mut extra = busy
             .control_by_key("power")
             .expect("kraken has power")
@@ -814,7 +838,7 @@ fn every_host_row_fits_the_busiest_profile_under_the_wordmark_header() {
                 .and_then(|row| row.strip_suffix('│'))
                 .map(|inner| inner.trim().to_string())
         };
-        for label in ["Host", "Host volume", "Transport"] {
+        for label in ["Host", "Transport"] {
             let at = rows
                 .iter()
                 .position(|row| {
@@ -859,10 +883,10 @@ fn the_transport_row_lights_the_button_the_player_is_on() {
         (svolder_host::Status::Paused, 24),
     ] {
         let buffer = frame_with_theme(&transporting(status), 80, 24, &theme);
-        let row: String = text(&buffer)[14].chars().take(38).collect();
+        let row: String = text(&buffer)[13].chars().take(38).collect();
         assert_eq!(row, "│   Transport    ◀◀  ▶  ▮▮  ▶▶       │");
         for x in [17, 21, 24, 28] {
-            let cell = buffer.cell((x, 14)).expect("a button");
+            let cell = buffer.cell((x, 13)).expect("a button");
             let on = cell.fg == accent && cell.modifier.contains(Modifier::BOLD);
             assert_eq!(on, x == lit, "{status:?}: the button at {x} is lit {on}");
         }
@@ -870,7 +894,7 @@ fn the_transport_row_lights_the_button_the_player_is_on() {
     let stopped = frame_with_theme(&transporting(svolder_host::Status::Stopped), 80, 24, &theme);
     for x in [17, 21, 24, 28] {
         assert_ne!(
-            stopped.cell((x, 14)).expect("a button").fg,
+            stopped.cell((x, 13)).expect("a button").fg,
             accent,
             "lit while stopped"
         );
@@ -883,13 +907,13 @@ fn the_transport_row_lights_the_button_the_player_is_on() {
 fn the_transport_rows_cursor_stands_out_and_no_player_dims_it() {
     let theme = Theme::new(false);
     let mut app = transporting(svolder_host::Status::Playing);
-    app.selected = app.rows().len() + 1;
+    app.selected = app.rows().len();
     app.host.button = 3;
     let buffer = frame_with_theme(&app, 80, 24, &theme);
-    assert!(text(&buffer)[14].starts_with("│ ▶ Transport    ◀◀  ▶  ▮▮  ▶▶"));
+    assert!(text(&buffer)[13].starts_with("│ ▶ Transport    ◀◀  ▶  ▮▮  ▶▶"));
     let reversed = |x: u16| {
         buffer
-            .cell((x, 14))
+            .cell((x, 13))
             .expect("a button")
             .modifier
             .contains(Modifier::REVERSED)
@@ -904,7 +928,7 @@ fn the_transport_rows_cursor_stands_out_and_no_player_dims_it() {
     none.host.found_bus(None, none.now);
     let buffer = frame_with_theme(&none, 80, 24, &theme);
     let stale = theme.style(Role::Stale);
-    let glyph = buffer.cell((17, 14)).expect("a button");
+    let glyph = buffer.cell((17, 13)).expect("a button");
     assert!(
         glyph.modifier.contains(stale.add_modifier) && stale.fg.is_none_or(|fg| glyph.fg == fg),
         "the row is not dim with no player: {glyph:?}"
@@ -937,14 +961,14 @@ fn a_click_on_a_transport_button_lands_on_it() {
         (29, 3),
     ] {
         assert_eq!(
-            hits.hit_at(x, 14),
+            hits.hit_at(x, 13),
             Some(&Hit::Transport(button)),
             "column {x}"
         );
     }
     assert_eq!(
-        hits.hit_at(5, 14),
-        Some(&Hit::Row(Pane::Controls, app.rows().len() + 1)),
+        hits.hit_at(5, 13),
+        Some(&Hit::Row(Pane::Controls, app.rows().len())),
         "the row's own label focuses it"
     );
 }
@@ -991,6 +1015,8 @@ fn daemon_hosting(route: svolder_host::RouteFacts) -> App {
     );
     app.host.fold_daemon(
         svolder_ipc::host::HostView {
+            volume: None,
+            eq: None,
             available: true,
             playing: Some(svolder_ipc::host::PlayingView {
                 title: "So What".into(),
@@ -1015,21 +1041,17 @@ fn the_path_row_sits_under_the_transport_with_the_verdict_first() {
         route.host_eq = true
     }))));
     assert_eq!(
-        rows[14],
+        rows[13],
         "│   Transport    ◀◀  ▶  ▮▮  ▶▶       ││                                        │"
     );
     assert_eq!(
-        rows[15],
+        rows[14],
         "│   Path         host EQ on · playe… ││                                        │"
-    );
-    assert_eq!(
-        rows[16],
-        "│   Host EQ      off                 ││                                        │"
     );
 
     let rows = text(&screen(&daemon_hosting(gungnir_route(|_| {}))));
     assert_eq!(
-        rows[15],
+        rows[14],
         "│   Path         untouched · player… ││                                        │"
     );
 }
@@ -1047,7 +1069,7 @@ fn the_path_row_says_when_the_dac_listens_elsewhere() {
     assert_eq!(line.words_line(), "the DAC listens to Optical");
     assert!(line.hops.is_empty());
     let rows = text(&screen(&app));
-    assert!(rows[15].contains("the DAC listens to"), "{}", rows[15]);
+    assert!(rows[14].contains("the DAC listens to"), "{}", rows[14]);
 }
 
 /// A DAC on a USB port the computer is not on has no verdict on the computer's stream, and one
@@ -1109,6 +1131,8 @@ fn the_path_row_of_a_dac_with_no_input_control_reads_untouched() {
     route.sink.as_mut().expect("a sink").usb_product = Some("Eitr 2".into());
     app.host.fold_daemon(
         svolder_ipc::host::HostView {
+            volume: None,
+            eq: None,
             available: true,
             playing: Some(svolder_ipc::host::PlayingView {
                 title: "So What".into(),
@@ -1246,5 +1270,43 @@ fn the_spectrum_rows_colour_runs_end_to_end() {
         distinct.len() > 16,
         "a run of colours, not blocks: {}",
         distinct.len()
+    );
+}
+
+/// A device with no volume control of its own still has the computer's volume: the Host group
+/// carries the switch and, on the computer's side, the bar under it.
+#[test]
+fn a_device_with_no_volume_still_has_the_computer_volume_row() {
+    let mut app = app_on(profile_named("kraken"));
+    assert!(app.volume().is_none(), "the fixture has no volume control");
+    app.host.linked = true;
+    app.host.fold_read(
+        Some(svolder_host::SinkState {
+            volume: 0.54,
+            muted: false,
+            name: "USB DAC".into(),
+            target: None,
+        }),
+        true,
+    );
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    let rows = text(&frame(&app, 130, 50));
+    assert!(
+        rows.iter().any(|row| row.contains("| Computer ›")),
+        "{rows:#?}"
+    );
+    app.flip_side();
+    let rows = text(&frame(&app, 130, 50));
+    assert!(rows.iter().any(|row| row.contains("█54%")), "{rows:#?}");
+    app.selected = app.rows().len();
+    assert_eq!(app.host_row(), Some(crate::tui::host::HostRow::Volume));
+    assert_eq!(
+        app.key(crossterm::event::KeyEvent::from(
+            crossterm::event::KeyCode::Right
+        )),
+        [crate::tui::app::Intent::HostVolume(55)]
     );
 }

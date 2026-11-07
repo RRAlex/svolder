@@ -132,7 +132,10 @@ impl App {
             // The daemon's view of the host, which `[tui] host_audio = false` overrules.
             Update::Host(view) => {
                 if self.host_shown() {
+                    let before = self.computer_points();
                     self.host.fold_daemon(*view, now);
+                    self.follow_point(&before);
+                    self.note_computer_view();
                 }
             }
         }

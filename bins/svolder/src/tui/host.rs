@@ -11,22 +11,23 @@
 
 use std::time::{Duration, Instant};
 
+use svolder_host::eq::EqView;
 use svolder_host::fft::BANDS;
 use svolder_host::{Button, NowPlaying, RouteFacts, SinkState, Status};
-use svolder_ipc::host::{HostView, PlayingView};
+use svolder_ipc::host::{HostView, HostVolume, PlayingView};
 
 use super::widgets::marquee::Marquee;
 
 /// What joins a track's title to its artist on the `Now playing` row.
 const BY: &str = " — ";
-/// How far one press of `←→` on the Host volume row moves the sink's volume, in percent.
-pub const VOLUME_STEP: u8 = 2;
+/// How far one press of `←→` on the computer's volume moves it, in percent.
+pub const VOLUME_STEP: u8 = 1;
 /// The loudest the keys take the sink: 100 %, never a boost.
 pub const VOLUME_MAX: u8 = 100;
+/// What the switch's place says while the joined daemon has no host side.
+const DAEMON_HOST_OFF: &str = "computer controls unavailable: host audio is off";
 /// What the Host group's heading says.
 pub const HEADING: &str = "Host";
-/// What the Host volume row is called.
-pub const VOLUME: &str = "Host volume";
 /// What the Transport row is called.
 pub const TRANSPORT: &str = "Transport";
 /// What the Path row is called.
@@ -38,12 +39,6 @@ pub const NO_PLAYER: &str = "no player";
 pub const GLYPHS: [&str; 4] = ["◀◀", "▶", "▮▮", "▶▶"];
 /// Columns between two of the Transport row's buttons.
 pub const BUTTON_GAP: usize = 2;
-/// What the Host EQ row is called.
-pub const HOST_EQ: &str = "Host EQ";
-/// What the Host EQ row reads while the computer EQ is off.
-pub const HOST_EQ_OFF: &str = "off";
-/// What a press on the Host EQ row says when there is no computer EQ to put back.
-pub const HOST_EQ_HINT: &str = "p then h on a preset";
 /// What the Spectrum row is called.
 pub const SPECTRUM: &str = "Spectrum";
 /// The glyphs the Spectrum row draws a band in, from silence to the top of the scale.
@@ -58,24 +53,18 @@ pub const BEAT_PULSE: Duration = Duration::from_millis(200);
 /// One row of the device screen's Host group, in the order it draws them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostRow {
-    /// The sink's volume and mute.
+    /// The computer's volume, on a device with no volume control of its own to carry the switch.
     Volume,
     /// The followed player's four transport buttons.
     Transport,
-    /// The computer EQ: its preset's name while it is on, else `off`.
-    HostEq,
 }
-
-/// The Host group's rows, in the order the Controls pane draws them under the device's own.
-pub const ROWS: [HostRow; 3] = [HostRow::Volume, HostRow::Transport, HostRow::HostEq];
 
 impl HostRow {
     /// What the row is called.
     pub fn label(self) -> &'static str {
         match self {
-            HostRow::Volume => VOLUME,
+            HostRow::Volume => "Volume",
             HostRow::Transport => TRANSPORT,
-            HostRow::HostEq => HOST_EQ,
         }
     }
 }
@@ -88,6 +77,36 @@ pub struct FromDaemon {
     /// The route as the daemon last read it; `None` before its first read of the graph. Boxed:
     /// the host's state is carried by every wait of the loop, and the route is large.
     pub route: Option<Box<RouteFacts>>,
+}
+
+/// What the TUI knows of the computer's own controls: its EQ as the daemon's view or the loop's
+/// own controller last said it, the volume as it last read, and why the controls cannot be used
+/// where the loop knows.
+#[derive(Debug, Clone, Default)]
+pub struct Computer {
+    /// The computer EQ, `None` before it has been heard of.
+    pub eq: Option<Box<EqView>>,
+    /// The volume of the computer's default sink as the daemon last said it, `None` until it
+    /// is first read, which the row draws as `—` and never as a live 0 %.
+    pub volume: Option<HostVolume>,
+    /// Why the controls cannot be used, where the loop knows without the controller saying so:
+    /// the whole sentence, `computer controls unavailable: …`.
+    pub why: Option<String>,
+}
+
+impl Computer {
+    /// Why the computer's controls cannot be used, as the sentence the switch's place says.
+    pub fn unavailable(&self) -> Option<&str> {
+        self.eq
+            .as_deref()
+            .and_then(|eq| eq.unavailable.as_deref())
+            .or(self.why.as_deref())
+    }
+
+    /// Whether the computer's controls are there to flip to, or say why they are not.
+    pub fn offered(&self) -> bool {
+        self.eq.is_some() || self.why.is_some()
+    }
 }
 
 /// What the TUI knows of the host's own audio.
@@ -140,6 +159,8 @@ pub struct Host {
     /// pane, which a short terminal can leave it no room in, and under no box. The loop sets
     /// this from what each frame reports.
     pub spectrum_on_screen: bool,
+    /// The computer's own controls, which the daemon's view or the loop's own controller fill.
+    pub computer: Box<Computer>,
 }
 
 impl Host {
@@ -162,6 +183,7 @@ impl Host {
             bands: Bands::default(),
             beat: None,
             spectrum_on_screen: false,
+            computer: Box::default(),
         }
     }
 
@@ -229,7 +251,20 @@ impl Host {
     pub fn planned(&self) -> Option<u16> {
         self.asked
             .map(u16::from)
-            .or_else(|| self.sink.as_ref().map(|sink| percent(sink.volume)))
+            .or_else(|| self.volume().map(|volume| volume.pct))
+    }
+
+    /// The computer's volume as it shows: the joined daemon's reading, else the loop's own read
+    /// of the sink; `None` until it is first read.
+    pub fn volume(&self) -> Option<HostVolume> {
+        match self.daemon {
+            Some(_) => self.computer.volume.clone(),
+            None => self.sink.as_ref().map(|sink| HostVolume {
+                pct: percent(sink.volume),
+                muted: sink.muted,
+                sink: sink.name.clone(),
+            }),
+        }
     }
 
     /// The volume one step of `dir` (up for positive) asks for, in percent: [`VOLUME_STEP`]
@@ -267,8 +302,23 @@ impl Host {
             if self.daemon.take().is_some() {
                 self.lost_bus();
             }
+            *self.computer = Computer {
+                why: Some(DAEMON_HOST_OFF.to_string()),
+                ..Computer::default()
+            };
             return;
         }
+        // The volume asked for last has landed once the daemon says it, and stands no longer.
+        if let Some(volume) = view.volume.as_ref()
+            && self.asked == Some(u8::try_from(volume.pct).unwrap_or(u8::MAX))
+        {
+            self.asked = None;
+        }
+        *self.computer = Computer {
+            eq: view.eq.map(Box::new),
+            volume: view.volume,
+            why: None,
+        };
         self.daemon = Some(FromDaemon {
             route: view.route.map(Box::new),
         });
@@ -448,16 +498,16 @@ mod tests {
         host
     }
 
-    /// A step is 2 %, capped at 100 % — never a boost — and at 0 %; a sink something else
+    /// A step is 1 %, capped at 100 % — never a boost — and at 0 %; a sink something else
     /// boosted comes down to 100 % and goes no higher.
     #[test]
-    fn a_step_is_two_percent_and_never_past_a_hundred() {
+    fn a_step_is_one_percent_and_never_past_a_hundred() {
         for (volume, up, down) in [
-            (0.54, Some(56), Some(52)),
-            (0.99, Some(100), Some(97)),
-            (1.0, None, Some(98)),
-            (0.01, Some(3), Some(0)),
-            (0.0, Some(2), None),
+            (0.54, Some(55), Some(53)),
+            (0.99, Some(100), Some(98)),
+            (1.0, None, Some(99)),
+            (0.01, Some(2), Some(0)),
+            (0.0, Some(1), None),
             (1.2, None, Some(100)),
         ] {
             let host = reading(volume);
@@ -477,19 +527,64 @@ mod tests {
     fn a_step_follows_on_from_the_one_asked_for_until_the_sink_answers() {
         let mut host = reading(0.54);
         host.asked = Some(56);
-        assert_eq!(host.stepped(1), Some(58));
+        assert_eq!(host.stepped(1), Some(57));
         host.fold_read(host.sink.clone(), false);
         assert_eq!(
             host.stepped(1),
-            Some(58),
+            Some(57),
             "an answer before the last forgot the ask"
         );
         host.fold_read(host.sink.clone(), true);
         assert_eq!(
             host.stepped(1),
-            Some(56),
+            Some(55),
             "the ask outlived the answer to it"
         );
+    }
+
+    /// Joined to a daemon, the volume is the daemon's reading, `None` until it is first read and
+    /// then what it says, and the volume asked for stands only until the daemon says it.
+    #[test]
+    fn a_joined_volume_is_the_daemons_reading_and_dashes_until_it_is_read() {
+        let mut host = reading(0.2);
+        host.fold_daemon(
+            HostView {
+                available: true,
+                ..HostView::default()
+            },
+            Instant::now(),
+        );
+        assert_eq!(host.volume(), None, "the daemon has not read it yet");
+        assert_eq!(host.stepped(1), None, "so a key steps nothing");
+        host.asked = Some(41);
+        host.fold_daemon(
+            HostView {
+                available: true,
+                volume: Some(HostVolume {
+                    pct: 40,
+                    muted: false,
+                    sink: "Schiit".into(),
+                }),
+                ..HostView::default()
+            },
+            Instant::now(),
+        );
+        assert_eq!(host.volume().map(|volume| volume.pct), Some(40));
+        assert_eq!(host.asked, Some(41), "the daemon has not said the ask yet");
+        host.fold_daemon(
+            HostView {
+                available: true,
+                volume: Some(HostVolume {
+                    pct: 41,
+                    muted: false,
+                    sink: "Schiit".into(),
+                }),
+                ..HostView::default()
+            },
+            Instant::now(),
+        );
+        assert_eq!(host.asked, None);
+        assert_eq!(host.stepped(1), Some(42));
     }
 
     /// The Transport row's cursor moves a button at a time and stops at either end.

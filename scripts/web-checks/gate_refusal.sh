@@ -9,7 +9,7 @@ set -uo pipefail
 here=$(dirname "$(readlink -f "$0")")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/scripts/web-checks/node" "$tmp/bins/svolderd/web/themes/ember"
+mkdir -p "$tmp/scripts/web-checks/node/fixtures" "$tmp/bins/svolderd/web/themes/ember"
 cp "$here/run-all.sh" "$tmp/scripts/web-checks/run-all.sh"
 for f in scripts/web-checks/tone_note.py scripts/web-checks/effects_menu.py \
     scripts/web-checks/notes.py scripts/web-checks/node/director.mjs \
@@ -44,7 +44,8 @@ expect ALLOWED scripts/web-checks/new_menu_check.py
 expect ALLOWED bins/svolderd/web/themes/ember/ember.js
 expect REFUSED scripts/web-checks/notes.py
 expect REFUSED scripts/web-checks/node/director.mjs
-expect REFUSED scripts/web-checks/node/new.mjs
+expect ALLOWED scripts/web-checks/node/new.mjs
+expect ALLOWED scripts/web-checks/node/fixtures/new.json
 expect REFUSED bins/svolderd/web/themes/ember/smoke-engine.js
 expect REFUSED bins/svolderd/web/themes/ember/effects.js
 [ "$failed" -eq 0 ] && echo "gate_refusal: all cases as expected"

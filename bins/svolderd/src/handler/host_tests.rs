@@ -4,7 +4,9 @@
 //! The daemon's answers about the host: its view, the presses and the events on a subscription,
 //! over the fake host so no session bus or player is ever reached.
 
+use svolder_ipc::HostEqOp;
 use svolder_ipc::host::{CaptureKind, HostView};
+use svolder_profiles::tone::preset;
 
 use super::tests::{amp_entry, daemon, daemon_over};
 use super::*;
@@ -113,6 +115,309 @@ async fn host_off_answers_unavailable() {
         panic!("a press with no host is refused");
     };
     assert!(message.contains("not available"), "{message}");
+
+    // Nor does it serve the computer's controls, and it says why in words.
+    let view = view_of(daemon.handle(Request::Host).await);
+    assert!(view.volume.is_none() && view.eq.is_none());
+    let unavailable = "computer controls unavailable: host audio is off";
+    for request in [
+        Request::HostVolume { pct: 10 },
+        Request::HostMute { muted: true },
+        eq_request(HostEqOp::Mode { on: true }),
+    ] {
+        let answered = daemon.handle(request).await;
+        assert!(
+            matches!(&answered, Response::Error { code, .. } if *code == svolder_ipc::CODE_COMPUTER_UNAVAILABLE),
+            "{answered:?}"
+        );
+        assert_eq!(error_of(answered), unavailable);
+    }
+}
+
+fn eq_request(op: HostEqOp) -> Request {
+    Request::HostEq { op }
+}
+
+fn error_of(response: Response) -> String {
+    match response {
+        Response::Error { message, .. } => message,
+        other => panic!("not an error: {other:?}"),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_computer_is_in_the_socket_view_and_takes_volume_and_mute() {
+    let daemon = fake_host_daemon();
+    settle().await;
+    let view = view_of(daemon.handle(Request::Host).await);
+    let volume = view.volume.expect("the fake sink's volume");
+    assert_eq!((volume.pct, volume.muted), (42, false));
+    assert_eq!(view.eq.expect("the EQ").points.len(), 1);
+
+    assert_eq!(
+        daemon.handle(Request::HostVolume { pct: 65 }).await,
+        Response::Ack
+    );
+    assert_eq!(
+        daemon.handle(Request::HostMute { muted: true }).await,
+        Response::Ack
+    );
+    let volume = view_of(daemon.handle(Request::Host).await).volume.unwrap();
+    assert_eq!((volume.pct, volume.muted), (65, true));
+    assert_eq!(
+        error_of(daemon.handle(Request::HostVolume { pct: 101 }).await),
+        "the computer's volume goes up to 100 %"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn every_eq_op_answers_ack_or_its_words() {
+    let daemon = fake_host_daemon();
+    settle().await;
+    let ask = |op| daemon.handle(eq_request(op));
+    let set = |index, kind: Option<&str>, g| HostEqOp::Set {
+        index,
+        slot: None,
+        kind: kind.map(str::to_string),
+        f: None,
+        g,
+        q: None,
+        done: true,
+    };
+
+    assert_eq!(ask(HostEqOp::Mode { on: true }).await, Response::Ack);
+    assert_eq!(
+        ask(HostEqOp::Add {
+            kind: "LSC".into(),
+            f: 120.0,
+            g: 3.0,
+            q: 0.7
+        })
+        .await,
+        Response::Ack
+    );
+    assert_eq!(ask(set(2, Some("hsc"), Some(-2.5))).await, Response::Ack);
+    settle().await;
+    let eq = view_of(daemon.handle(Request::Host).await).eq.unwrap();
+    assert!(eq.on);
+    assert_eq!(eq.points.len(), 2);
+    assert_eq!((eq.points[1].kind.as_str(), eq.points[1].g), ("HSC", -2.5));
+
+    assert!(error_of(ask(set(0, None, Some(1.0))).await).contains("count from 1"));
+    assert!(error_of(ask(set(1, Some("XX"), None)).await).contains("not a filter type"));
+    assert!(!error_of(ask(set(9, None, Some(1.0))).await).is_empty());
+    assert!(
+        !error_of(
+            ask(HostEqOp::Remove {
+                index: 0,
+                slot: None
+            })
+            .await
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        ask(HostEqOp::Remove {
+            index: 2,
+            slot: None
+        })
+        .await,
+        Response::Ack
+    );
+    let correction = svolder_profiles::tone::apo::Correction {
+        preamp_db: -1.0,
+        filters: vec![svolder_profiles::tone::apo::SourceFilter {
+            kind: svolder_profiles::tone::apo::FilterKind::Peaking,
+            f: 1000.0,
+            g: 1.0,
+            q: 1.0,
+        }],
+    };
+    let apply = |sink| HostEqOp::Apply {
+        name: "File".into(),
+        origin: None,
+        correction: correction.clone(),
+        sink,
+    };
+    assert_eq!(ask(apply(None)).await, Response::Ack);
+    assert!(error_of(ask(apply(Some("other".into()))).await).contains("default sink"));
+    settle().await;
+    let eq = view_of(daemon.handle(Request::Host).await).eq.unwrap();
+    assert_eq!(eq.preset.as_deref(), Some("File"));
+
+    // No configuration file: the built-ins of the default tone control are there, nothing else,
+    // and there is nowhere to save a preset.
+    let preset = |name: &str| HostEqOp::Preset {
+        name: name.into(),
+        device: None,
+        confirm: false,
+    };
+    assert!(error_of(ask(preset("Nonesuch")).await).contains("no preset named"));
+    assert_eq!(ask(preset("Warm")).await, Response::Ack);
+    assert!(
+        !error_of(
+            ask(HostEqOp::SaveAs {
+                name: "Mine".into()
+            })
+            .await
+        )
+        .is_empty()
+    );
+    assert_eq!(ask(HostEqOp::Mode { on: false }).await, Response::Ack);
+}
+
+/// A daemon over the fake host and a configuration file of its own, with one Gungnir 2 reading
+/// its tone control, and the preset `name` played on it.
+async fn daemon_with_the_dac_on(name: &str) -> (Daemon, std::path::PathBuf) {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "svolderd-bothsides-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let config = dir.join("config.toml");
+    std::fs::write(&config, "schema = 1\n").expect("a configuration");
+    let daemon = daemon_over(config, dir.join("profiles")).with_host_mode(HostMode::Fake);
+    daemon.host_to(&HostConfig::default());
+    let devices = Config {
+        devices: vec![amp_entry("0102030405060708")],
+        ..Config::default()
+    };
+    daemon.reconcile(&devices).await;
+    for _ in 0..100 {
+        settle().await;
+        let handle = daemon.devices().first().cloned();
+        if handle.is_some_and(|h| h.feed.borrow().connected && !h.feed.borrow().readings.is_empty())
+        {
+            break;
+        }
+        tokio::time::advance(Duration::from_millis(100)).await;
+    }
+    let device = daemon.devices().first().cloned().expect("the device");
+    let (profile, readings) = {
+        let feed = device.feed.borrow();
+        (
+            feed.profile.clone().expect("a profile"),
+            feed.readings.clone(),
+        )
+    };
+    let fitting = preset::builtins(profile.eq.as_ref().expect("a tone control"));
+    let recalled = crate::recall::plan("amp", &profile, &fitting, name, |id| {
+        readings
+            .iter()
+            .find(|m| m.id == id)
+            .and_then(|m| m.value.as_i64())
+    })
+    .expect("the preset fits");
+    for command in &recalled.recall.commands {
+        let done = daemon
+            .write(Origin::Socket, Some("amp"), crate::recall::command(command))
+            .await;
+        assert!(!matches!(done, Response::Error { .. }), "{done:?}");
+    }
+    settle().await;
+    (daemon, dir)
+}
+
+fn warm(confirm: bool) -> Request {
+    eq_request(HostEqOp::Preset {
+        name: "Warm".into(),
+        device: None,
+        confirm,
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_same_preset_on_the_dac_is_refused_unless_confirmed() {
+    let (daemon, dir) = daemon_with_the_dac_on("Warm").await;
+    let playing = |daemon: &Daemon| {
+        let eq = daemon.devices()[0]
+            .feed
+            .borrow()
+            .profile
+            .clone()
+            .unwrap()
+            .eq
+            .clone()
+            .unwrap();
+        let readings = daemon.devices()[0].feed.borrow().readings.clone();
+        let warm = preset::builtins(&eq)
+            .into_iter()
+            .find(|p| p.name == "Warm")
+            .unwrap();
+        preset::matches(
+            &eq,
+            |id| {
+                readings
+                    .iter()
+                    .find(|m| m.id == id)
+                    .and_then(|m| m.value.as_i64())
+            },
+            &warm,
+        )
+    };
+    assert!(playing(&daemon), "the DAC plays Warm");
+
+    assert_eq!(
+        daemon.handle(warm(false)).await,
+        Response::Ask {
+            message: "Warm is on the amp too: the correction would play twice".into(),
+            name: "Warm".into(),
+            devices: vec!["amp".into()],
+        }
+    );
+    assert!(playing(&daemon), "a refusal changes nothing on the DAC");
+    let eq = view_of(daemon.handle(Request::Host).await).eq.unwrap();
+    assert!(!eq.on && eq.preset.is_none(), "or on the computer");
+
+    // A curve that is not on the DAC is free; a neutral one never asks.
+    let flat = eq_request(HostEqOp::Preset {
+        name: "Flat".into(),
+        device: None,
+        confirm: false,
+    });
+    assert!(
+        !matches!(daemon.handle(flat).await, Response::Error { ref message, .. } if message.contains("twice"))
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(start_paused = true)]
+async fn confirm_flattens_the_dac_then_applies() {
+    let (daemon, dir) = daemon_with_the_dac_on("Warm").await;
+    assert_eq!(daemon.handle(warm(true)).await, Response::Ack);
+    settle().await;
+
+    let eq = view_of(daemon.handle(Request::Host).await).eq.unwrap();
+    assert!(eq.on);
+    assert_eq!(eq.preset.as_deref(), Some("Warm"));
+    let device = daemon.devices()[0].clone();
+    let (profile, readings) = {
+        let feed = device.feed.borrow();
+        (feed.profile.clone().unwrap(), feed.readings.clone())
+    };
+    let tone = profile.eq.clone().unwrap();
+    let raw = |id| {
+        readings
+            .iter()
+            .find(|m| m.id == id)
+            .and_then(|m| m.value.as_i64())
+    };
+    let still_warm = preset::builtins(&tone)
+        .into_iter()
+        .find(|p| p.name == "Warm")
+        .unwrap();
+    assert!(
+        !preset::matches(&tone, raw, &still_warm),
+        "the DAC was flattened first"
+    );
+    assert!(
+        preset::flatten(&tone, raw).writes.is_empty(),
+        "every band of the DAC reads flat"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[tokio::test(start_paused = true)]
@@ -154,6 +459,7 @@ fn daemon_over_nothing() -> Daemon {
         covers: Arc::new(|_| None),
         helpers: Vec::new(),
         frames: Err("no capture in this test".to_string()),
+        computer: None,
     });
     daemon
 }
@@ -382,4 +688,50 @@ async fn host_frames_with_no_host_is_an_error() {
         panic!("host_frames is not a request/response verb");
     };
     assert!(message.contains("host_frames"), "{message}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_computer_curve_is_saved_as_a_preset_of_the_user() {
+    let (daemon, dir) = daemon_with_the_dac_on("Warm").await;
+    let add = eq_request(HostEqOp::Add {
+        kind: "PK".into(),
+        f: 3000.0,
+        g: -2.0,
+        q: 2.0,
+    });
+    assert_eq!(daemon.handle(add).await, Response::Ack);
+    let save = |name: &str| eq_request(HostEqOp::SaveAs { name: name.into() });
+    assert_eq!(daemon.handle(save("My Curve")).await, Response::Ack);
+
+    let config = Config::load_from(&dir.join("config.toml")).expect("the configuration reads");
+    let saved = config.preset("my curve").expect("the preset is saved");
+    let correction = preset::host_correction(saved).expect("it applies to the computer");
+    assert_eq!(correction.filters.len(), 2);
+    assert_eq!(correction.filters[1].f, 3000.0);
+    assert!(
+        error_of(daemon.handle(save("My Curve")).await).contains("already"),
+        "a taken name is never overwritten"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_named_device_that_is_not_there_is_an_error_not_a_fallback() {
+    let (daemon, dir) = daemon_with_the_dac_on("Warm").await;
+    let ask = |device: &str| {
+        eq_request(HostEqOp::Preset {
+            name: "Warm".into(),
+            device: Some(device.into()),
+            confirm: false,
+        })
+    };
+    let message = error_of(daemon.handle(ask("no such device")).await);
+    assert!(!message.contains("twice"), "{message}");
+    assert!(message.contains("no such device"), "{message}");
+    // The device that is there resolves.
+    assert!(matches!(
+        daemon.handle(ask("amp")).await,
+        Response::Ask { ref devices, .. } if devices == &["amp".to_string()]
+    ));
+    let _ = std::fs::remove_dir_all(dir);
 }

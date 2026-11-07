@@ -1,7 +1,8 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The dash drawn from the model and the hands on it: `−` and `+` (a press steps once and a held one
-// repeats through the core's hold), `MUTE`, the input's chips and list, the transport and `DEVICE ▴`.
+// repeats through the core's hold; the wheel and `↑` `↓` do the same from the scene, volume-keys.js), `MUTE`,
+// the input's chips and list, the transport and `DEVICE ▴`.
 // Every write goes through `core.actions` (the cap, the pacing, the refusals and the glide stay
 // where they are) and is logged by `act`. A viewer who may not write taps the same keys and the
 // core says why nothing happens.
@@ -10,10 +11,19 @@
 // is not taken for another hand's (hud-wire.js); a raise starts from the step asked while it is
 // fresh. The dash is held (`live.hold`) while a key is pressed or a list is open, so a reading
 // never replaces the key under the finger; what came meanwhile is drawn when the hand lets go.
+//
+// With the computer as the side shown (the switch: two keys by the menu button on a desktop, in the scene's top column
+// on a phone) the volume keys step and mute the computer through `core.actions.computer`; a flip of the side ends
+// a key held down.
 
-import { drawDash, moveProgress, placeFills } from './draw/dash.js';
+import { computerView } from './computer-view.js';
+import { entryOf } from './hud.js';
+import {
+  drawDash, moveProgress, placeFills, switchKeys,
+} from './draw/dash.js';
 import { inertOf } from './inert.js';
 import { closeList, closeOf, openList } from './lists.js';
+import { wireVolumeKeys } from './volume-keys.js';
 
 const STEPS = '[data-act="volume-down"], [data-act="volume-up"]';
 
@@ -31,6 +41,8 @@ export function wireDash({
   root, core, live, act, view, signal,
 }) {
   const dash = root.querySelector('#nd-dash');
+  const switchBox = root.querySelector('#nd-switch');
+  const page = root.querySelector('#nightdrive');
   const store = core.model;
   const now = () => globalThis.performance.now();
   let drawn = { sig: null, at: Date.now() };
@@ -48,14 +60,39 @@ export function wireDash({
   /** The markup with the moving parts (the fill and the time) left out: what a redraw compares. */
   const sigOf = (html) => html.replace(/ data-at="[^"]*"/, '').replace(/<span class="nd-time">[^<]*<\/span>/, '');
 
-  function draw(page) {
+  /** The switch's two keys (by the menu button on a desktop, in the scene's top column on a phone), the focus kept on
+   * the key it was on, and the page told where they stand and whether they say why the computer cannot be used. */
+  let switchSig = null;
+  /** The top line keeps clear of the keys: their width is the page's `--nd-switch`. */
+  const reach = () => page.style.setProperty('--nd-switch', `${switchSig ? switchBox.getBoundingClientRect().width : 0}px`);
+  if (typeof globalThis.ResizeObserver === 'function') {
+    const watching = new globalThis.ResizeObserver(reach);
+    watching.observe(switchBox);
+    signal.addEventListener('abort', () => watching.disconnect(), { once: true });
+  }
+  function drawSwitch(comp) {
+    const html = comp ? switchKeys(comp.sw, entryOf(store.page())?.family === 'amp') : '';
+    page.classList.toggle('nd-has-switch', html !== '' && !view.phone());
+    page.classList.toggle('nd-sw-why', Boolean(comp?.sw.unavailable) && html !== '');
+    page.classList.toggle('nd-sw-hud', html !== '' && view.phone());
+    if (html === switchSig) return;
+    switchSig = html;
+    const focus = switchBox.contains(document.activeElement) ? document.activeElement.id : '';
+    switchBox.innerHTML = html;
+    reach();
+    if (focus) switchBox.querySelector(`#${CSS.escape(focus)}`)?.focus({ preventScroll: true });
+  }
+
+  function draw(model) {
     const at = Date.now();
-    const html = drawDash(page, view, at);
+    const comp = computerView(core);
+    drawSwitch(comp);
+    const html = drawDash(model, view, at, comp);
     const sig = sigOf(html);
     if (sig === drawn.sig) {
       // the same keys: only the progress moves, in place
       drawn.at = at;
-      moveProgress(dash, page, at, at, true);
+      moveProgress(dash, model, at, at, true);
       return;
     }
     const focus = dash.contains(document.activeElement) ? document.activeElement.id : '';
@@ -125,7 +162,14 @@ export function wireDash({
     send(step, target).catch(() => {});
   }
 
+  /** The computer is the side shown: the keys are its volume's. */
+  const onComputer = () => core.computer.side() === 'computer';
+
   const nudge = (delta, target) => {
+    if (onComputer()) {
+      core.actions.computer.step(delta).catch(() => {});
+      return;
+    }
     const v = volume();
     // A viewer who may not write is told so even where the device has no volume reading (the core
     // turns the call away before it looks at the step).
@@ -136,6 +180,11 @@ export function wireDash({
     }
     if (v && v.raw !== null && v.raw !== undefined) ask(base(v, delta) + delta, target);
   };
+
+  // The same steps from the scene: the wheel over the big number, and `↑` `↓` when nothing has the focus.
+  const volumeKeys = wireVolumeKeys({
+    page, nudge, writable, wheelSteps: core.drag.wheelSteps, signal,
+  });
 
   // A reading that is not the answer to the step asked is another hand's: the next step starts from it.
   const offVolume = store.on('volume', (data) => {
@@ -152,6 +201,7 @@ export function wireDash({
     shown = store.shown();
     view.asked = null;
     hold?.end();
+    volumeKeys.end();
     closeList();
   });
   signal.addEventListener('abort', offModel, { once: true });
@@ -218,6 +268,15 @@ export function wireDash({
       if (event.detail === 0) nudge(what === 'volume-up' ? 1 : -1);
       return;
     }
+    if (what === 'side') {
+      core.computer.flip(el.dataset.side);
+      return;
+    }
+    if (what === 'mute' && onComputer()) {
+      const mine = core.computer.volumeOf(store.page());
+      if (!mine.inert) write('mute', !mine.muted, (a) => a.computer.setMute(!mine.muted));
+      return;
+    }
     const v = volume();
     const d = device();
     if (what === 'mute' && v) {
@@ -259,8 +318,26 @@ export function wireDash({
     }
   }, { signal });
 
+  const offFlip = core.computer.on((event) => {
+    if (event.type === 'flip') {
+      hold?.end();
+      volumeKeys.end();
+    }
+  });
+  signal.addEventListener('abort', offFlip, { once: true });
+
+  // The switch by the menu button is not in the dash: its keys flip the side the same way.
+  switchBox.addEventListener('click', (event) => {
+    const el = event.target.closest?.('[data-side]');
+    if (el) core.computer.flip(el.dataset.side);
+  }, { signal });
+
+  // Across the width where the switch moves between the menu button's side and the panel's top row.
+  doc.defaultView.addEventListener('resize', () => live.draw('dash'), { signal });
+
   signal.addEventListener('abort', () => {
     hold?.end();
+    volumeKeys.end();
     closeList();
   }, { once: true });
 

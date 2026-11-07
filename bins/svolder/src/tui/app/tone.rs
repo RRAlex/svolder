@@ -33,6 +33,8 @@ pub enum ToneRow {
     /// The band [`ToneEdit::band`](super::ToneEdit::band) has focused, which is also the band the
     /// tone-control screen's own keys act on.
     Band,
+    /// A point of the computer's table, 0-based, on the computer side.
+    Point(usize),
 }
 
 impl App {
@@ -44,6 +46,9 @@ impl App {
     /// quick second `f` toggles back before the device has answered the first. Asks for nothing
     /// on a device with no tone control.
     pub(super) fn flat(&mut self) -> Vec<Intent> {
+        if self.on_computer() {
+            return self.computer_mode(None);
+        }
         if self.profile.eq.is_none() {
             return Vec::new();
         }
@@ -64,7 +69,7 @@ impl App {
     /// from its last reading, so a quick second click toggles back before the device has
     /// answered the first. Asks for nothing on a device with no tone control.
     pub(super) fn loudness(&mut self) -> Vec<Intent> {
-        if self.profile.eq.is_none() {
+        if self.profile.eq.is_none() || self.on_computer() {
             return Vec::new();
         }
         let mode = match self.planned_mode() {
@@ -84,6 +89,14 @@ impl App {
     /// flatten made while a recall or a band key is still being answered flattens what they
     /// asked for. Asks for nothing on a device with no tone control.
     pub(crate) fn flatten(&mut self) -> Vec<Intent> {
+        match self.on_computer() {
+            true => self.flatten_computer(),
+            false => self.flatten_dac(),
+        }
+    }
+
+    /// [`App::flatten`] for the device's own tone control, whichever side is shown.
+    pub(crate) fn flatten_dac(&mut self) -> Vec<Intent> {
         let Some(eq) = self.profile.eq.as_ref() else {
             return Vec::new();
         };
@@ -96,10 +109,22 @@ impl App {
     /// band, in the order the pane draws them. Landing on the mode or the loudness notes which
     /// of the two it is, for `Tab` to come back to on the tone screen.
     pub(super) fn move_tone_row(&mut self, delta: isize) {
+        if self.on_computer() {
+            // The mode, then a row per point.
+            let at = match self.tone.row {
+                ToneRow::Point(point) => 1 + point,
+                _ => 0,
+            };
+            match stepped(at, delta, 1 + self.computer_points().len()) {
+                0 => self.tone.row = ToneRow::Mode,
+                row => self.focus_point(row - 1),
+            }
+            return;
+        }
         let at = match self.tone.row {
             ToneRow::Mode => 0,
             ToneRow::Loudness => 1,
-            ToneRow::Band => 2 + self.tone.band,
+            ToneRow::Band | ToneRow::Point(_) => 2 + self.tone.band,
         };
         match stepped(at, delta, 2 + self.bands()) {
             0 => self.tone.row = ToneRow::Mode,
@@ -118,7 +143,7 @@ impl App {
         match row {
             ToneRow::Mode => self.tone.header_loudness = false,
             ToneRow::Loudness => self.tone.header_loudness = true,
-            ToneRow::Band => {}
+            ToneRow::Band | ToneRow::Point(_) => {}
         }
     }
 
@@ -131,6 +156,12 @@ impl App {
     /// has, its loudness one step, and a band's row by the gain its own bar shows — the same
     /// step the wheel over that row takes, and a band edit like it.
     pub(super) fn step_tone(&mut self, dir: i64) -> Vec<Intent> {
+        if self.on_computer() {
+            return match self.tone.row {
+                ToneRow::Point(at) => self.nudge_point_gain(at, dir),
+                _ => self.step_computer_mode(dir),
+            };
+        }
         let Some(mode_id) = self.profile.eq.as_ref().map(EqSpec::mode_id) else {
             return Vec::new();
         };
@@ -144,7 +175,7 @@ impl App {
                 }
                 writes
             }
-            ToneRow::Band => {
+            ToneRow::Band | ToneRow::Point(_) => {
                 let writes = self.nudge_band(self.tone.band, dir);
                 self.band_edit(writes)
             }
@@ -155,6 +186,9 @@ impl App {
     /// 0`) or `›` (`dir > 0`) does, like every select's arrows. Asks for nothing on
     /// a device with no tone control.
     pub(crate) fn step_tone_mode(&mut self, dir: i64) -> Vec<Intent> {
+        if self.on_computer() {
+            return self.step_computer_mode(dir);
+        }
         let Some(mode_id) = self.profile.eq.as_ref().map(EqSpec::mode_id) else {
             return Vec::new();
         };
@@ -171,6 +205,14 @@ impl App {
     /// the focused band's values are typed into, `0` puts every band back on its centre at 0 dB,
     /// `f` toggles the whole tone control's flat mode on and off and `p` opens the preset list.
     pub(super) fn tone_key(&mut self, code: KeyCode) -> Vec<Intent> {
+        if code == KeyCode::Char('C') {
+            return self.flip_side();
+        }
+        if self.on_computer()
+            && let Some(intents) = self.computer_tone_key(code)
+        {
+            return intents;
+        }
         match code {
             KeyCode::Enter => return edit_line::open(self),
             KeyCode::Char('f') => return self.flat(),
@@ -240,6 +282,9 @@ impl App {
     /// tone control, before `band`'s gain has a reading to step from, or at either end of the
     /// gain's steps.
     pub(crate) fn nudge_band(&self, band: usize, dir: i64) -> Vec<Intent> {
+        if self.on_computer() {
+            return self.nudge_point_gain(band, dir);
+        }
         self.nudge_step(band, EqParam::Gain, dir)
     }
 
@@ -248,6 +293,9 @@ impl App {
     /// that step stands for. Asks for nothing without a tone control, before `band`'s Q has a
     /// reading to step from, or at either end of the Q's steps.
     pub(crate) fn nudge_q(&self, band: usize, dir: i64) -> Vec<Intent> {
+        if self.on_computer() {
+            return self.step_point_q(band, Self::q_factor(dir > 0));
+        }
         self.nudge_step(band, EqParam::Q, dir)
     }
 

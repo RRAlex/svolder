@@ -25,8 +25,10 @@ Two canvases fill the window under the HUD. The sky canvas carries the gradient,
 sun (striped, with a halo) and the wet road's reflection. The road canvas carries the mountains, the
 floor, the haze, the embers and the tuning bubbles. The camera is one projection
 (`camera.js`, `CAMERA`): the floor is seen from high, `z` is 1 at the bottom row and 0 at the horizon,
-`K` is 8 and `spread` 0.24. The horizon stands at 0.56 of the scene's height, and at 0.62 on a phone
-held upright (`horizonOf`). The plain grid beside the spectrum's columns runs out to 30 and is
+`K` is 8 and `spread` 0.24. The horizon stands at 0.56 of the height the picture is composed in (`horizonOf`): the scene's,
+less what the panel covers of its foot on a phone held upright (`geo.v`, read when the panel or the
+window changes; the sun, the mountains and the tuning map are measured in it, the floor and the
+canvases run the whole height). The plain grid beside the spectrum's columns runs out to 30 and is
 drawn faint.
 
 **One frequency axis.** The screen's `x` is `w * ln(hz / 20) / ln(1000)`, 20 Hz at the left edge and
@@ -161,7 +163,7 @@ the fade off**: a status word but `connected`, a card, the quiet line. Trouble t
 HUD is faded brings the top line back with its words and keeps it for as long as the trouble lasts.
 On a phone held upright the volume is in the scene with the rest of the HUD, and fades with it.
 
-**The dash fades with it** (`dash-fade.js`). When the HUD has faded, the dash goes to 10 % opacity
+**The dash fades with it** (`dash-fade.js`). When the HUD has faded, the dash goes to 20 % opacity
 (the root carries `nd-dash-dim`; opacity only, over 2.5 s, none under reduced motion) on a desktop and
 on a phone held sideways. The panel of a phone held upright never fades. The dash stays up while a
 key of it is held or a list is open, while it has the keyboard focus (`:focus-visible`) and while a
@@ -190,8 +192,12 @@ drive binds nothing for it. The dash's play button posts the same press.
 
 ## Tuning on the mountains
 
-The pointer over the band of the scene around the horizon (`BAND`: 0.32 of the height above it and
-0.10 below, `tune.js`) turns the mountains into the tone curve with a bubble for each band; they
+The pointer over the band of the scene around the horizon (`BAND`, `tune.js`: the window the curve is drawn in,
++12 dB at 0.22 of the picture's height above the horizon and -12 dB at 0.06 below it, and 26 px beyond each edge so a
+bubble at the edge is grabbed whole; one mapping, `mountainMap`, for the tap, the curve and the grab, on a phone upright
+or sideways and on a desktop) turns the mountains into the tone curve with a bubble for each band; a bubble and the curve are drawn inside that window (points
+of one frequency add up beyond 12 dB and are drawn at its edge), so a point is always grabbable where it is drawn, and a
+touch outside the band does what a touch on the scene does and makes no point; they
 turn back after `GRACE_MS` (1.5 s) with no drag, wheel notch or lifted finger. The morph eases at
 `KEEP` (0.88) of the gap each frame at 60 a second. Bubbles are drawn above a morph of 0.02 and are
 grabbed from 0.5, so a touch on the mountains that has not yet turned them only shows the curve. The
@@ -220,6 +226,11 @@ used: the bilinear curve's half-gain points drift from it by up to 6 dB above 4 
 A device switch while a drag is held ends the drag with `cancel('switch')`: nothing is written to
 the device now shown. `onSwitch` does it (`live.js`).
 
+With the computer as the side shown the bubbles are the computer's points, each on the summed curve at its
+frequency, a shelf's too (`computerTone`, `tune.js`); a drag, the wheel and two fingers write them through
+`actions.computer` and a flip of the side ends them (`computer.track`). The computer's side is in
+[host-control.md](host-control.md#night-drive).
+
 ## The sheet
 
 `DEVICE ▴` or the menu's `Device…` row opens the sheet, a dialog over the scene. While it stands the
@@ -239,9 +250,26 @@ and the ✕ button, Escape or a tap on the scene closes it and gives the focus b
 - **On a phone held sideways** (under 500 px high) it slides in from the right, `min(420px, 60vw)`
   wide, the same column.
 
-The dash on a phone held upright is a panel under the scene that holds only its own rows, and the
-scene takes the rest of the height, about 75 % of it. The volume figure is in the scene,
-`min(60vw, 20dvh)` wide, and the EQ line shows its values there.
+The dash on a phone held upright is a translucent panel over the foot of the scene (`rgba(8,3,16,.7)`;
+the road shows through, and its text keeps 4.5:1 over the brightest of what is behind it) in two
+rows: `−` `MUTE` `+` and the transport on one, then the track with the input and `DEVICE ▴`. Its keys
+are 36 px tall with a 46 px hit area. At 360 by 780 the panel is 111 px, 14 % of the
+window, and the scene above it 86 %; the checks hold it under 30 %. The scene runs behind the panel
+the whole height. The volume figure is in the scene, `min(60vw, 20dvh)` wide, under the device line and the EQ line,
+which shows its values there. The switch is one pill in the scene's top left corner, mirroring the menu button at the top
+right: `DAC │ PC` (an amp's `AMP │ PC`), 36 px tall in the button's 44 px row, each segment 44 px to the hand, the side shown
+lit; each segment keeps its whole name (the device's, `This computer`) as its accessible name, and the keys, the arrows and
+the core's `switchOf` are the desktop's. The device line starts to its right (at 360 px: the pill 8 to 103, the line
+111 to 296, the button from 308); a verdict (`computer controls unavailable: …`) stands under the pill and the HUD makes room
+for it. Held sideways the strip is one row, under 25 % of the height, and the pill is in the same corner with the device
+line to its right. A desktop keeps its two keys left of the menu button, with the device's whole name and `This computer`.
+
+**The volume from the scene** (`volume-keys.js`). The wheel over the big number steps the volume as
+`+` and `−` do (the device's own step, 1 % on the computer side; up is louder); anywhere else on the
+scene the wheel is the mountains' (the Q), and the first wheel over a number that has faded only
+wakes the HUD. `↑` and `↓` step it when nothing has the keyboard focus and no sheet, question or
+menu is open; held, they repeat after the core's pause at its pace, and they wake a faded dash like
+any key. `←` and `→` are not read.
 
 The presets are what the model offers: a preset made by AutoEq is one of the chips. There is no
 AutoEq picker in this theme; adding one is a new feature for every front end.
@@ -346,8 +374,9 @@ daemon captures the computer's audio only for a page that is looked at.
 | `scene-wire.js` | the loop: reads the analysis, rolls the floor, makes the mood and draws the frame |
 | `draw/` | the canvases' drawing (`sky.js`, `road.js`, `heat.js`, `mood.js`, `events.js`, `tune.js`, `esc.js`, `palette.js`) and the markup of the HUD, the volume, the dash, the sheet's sections, the card (`hud.js`, `volume.js`, `dash.js`, `sheet.js`, `modes.js`, `bands.js`, `presets.js`, `slots.js`, `controls.js`, `facts.js`, `meters.js`, `gauges.js`, `card.js`) |
 | `tune.js`, `tune-wire.js` | the tone control on the mountains as numbers, and the hands on it |
+| `computer-view.js`, `points.js`, `points-wire.js` | the computer's side: what the drawing reads of the core, the points' words and ranges, the points' table's hands |
 | `hud.js`, `hud-wire.js`, `dash-fade.js`, `rest.js` | the HUD's words, its fade, the dash's fade, the resting cursor |
-| `dash-wire.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `gestures.js`, `lists.js`, `ask.js`, `fold.js`, `act.js`, `inert.js`, `place.js` | the hands: what a tap, a hold, a drag, a key, a list or a question does, and the log of what this page asked |
+| `dash-wire.js`, `volume-keys.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `gestures.js`, `lists.js`, `ask.js`, `fold.js`, `act.js`, `inert.js`, `place.js` | the hands: what a tap, a hold, a drag, a key, a list or a question does, and the log of what this page asked |
 | `states.js`, `words.js` | how the page stands and the quiet line's words; the fixed words |
 | `live.js` | the store's events on the page: which sections are drawn again, which are held |
 | `debug.js`, `debug-wire.js`, `stats.js` | the readout and the switches, the draws' times |

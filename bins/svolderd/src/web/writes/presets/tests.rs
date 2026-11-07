@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use svolder_ipc::{Request, Response};
 
-use crate::web::test_support::{Code, FakeDaemon, call, fake_daemon, open, post, web};
+use crate::web::test_support::{
+    Code, FakeDaemon, call, fake_daemon, fake_daemon_playing, open, post, web,
+};
 use crate::writer::Origin;
 
 /// The fake's configuration file as it stands.
@@ -184,5 +186,54 @@ async fn a_read_only_config_refuses_a_save_with_why() {
     assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
     assert!(reply.body.contains("read-only (0444)"), "{}", reply.body);
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    dac.stop().await;
+}
+
+/// `"from": "computer"` saves every point of the computer EQ, as an imported preset of the
+/// user's: a curve of more than the DAC's bands is kept whole.
+#[tokio::test]
+async fn save_as_from_the_computer_keeps_every_point() {
+    let dac = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    for (kind, f) in [
+        ("LSC", 90),
+        ("PK", 1000),
+        ("PK", 2500),
+        ("HSC", 9000),
+        ("PK", 400),
+        ("PK", 700),
+    ] {
+        let body = format!(r#"{{"type":"{kind}","f":{f},"g":2.5,"q":0.8}}"#);
+        let reply = call(&web, post("/api/v1/host/eq/points", &body)).await;
+        assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    }
+    let save = post(
+        "/api/v1/devices/dac/presets",
+        r#"{"name":"From PC","from":"computer"}"#,
+    );
+    let reply = call(&web, save).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(said["name"], "From PC", "{said}");
+    let saved = svolder_ipc::Config::load_from(&dac.dir.join("config.toml")).unwrap();
+    let preset = saved.preset("From PC").expect("the preset is saved");
+    let filters = &preset
+        .source
+        .as_ref()
+        .expect("an imported preset")
+        .correction
+        .filters;
+    assert_eq!(filters.len(), 7, "one point was there, six were added");
+    let frequencies: Vec<f64> = filters.iter().map(|filter| filter.f).collect();
+    assert_eq!(
+        frequencies,
+        vec![90.0, 400.0, 700.0, 1000.0, 1000.0, 2500.0, 9000.0],
+        "the points are saved in the order the table lists them"
+    );
+    let bad = post(
+        "/api/v1/devices/dac/presets",
+        r#"{"name":"X","from":"moon"}"#,
+    );
+    assert_eq!(call(&web, bad).await.status, Code::UNPROCESSABLE_ENTITY);
     dac.stop().await;
 }

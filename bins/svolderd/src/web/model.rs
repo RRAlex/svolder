@@ -8,8 +8,10 @@
 //!
 //! - `device`: a device's parts: the volume, the controls, the meters, the tone control, the
 //!   presets, the facts and the Now playing card.
+//! - `computer`: the computer's volume, live EQ and presets.
 //! - `page`: the page: the viewer, the fleet with its hops, the host, and the first snapshot.
 
+mod computer;
 mod device;
 mod page;
 
@@ -17,6 +19,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::view::{REST_GLOW, Screen};
+pub(crate) use computer::{ComputerModel, SavedPresets};
 pub(crate) use device::{CardModel, LinkModel, PlayingModel};
 use device::{
     ControlModel, DevicePresetsModel, FactsModel, MetersModel, PowerModel, PresetsModel, ToneModel,
@@ -25,7 +28,8 @@ use device::{
 #[cfg(test)]
 pub(crate) use page::route_model;
 pub(crate) use page::{
-    HostModel, PageModel, RouteModel, fleet_model, host_model, host_parts, page_model,
+    HostModel, PageModel, RouteModel, fleet_model, host_computer, host_model, host_parts,
+    page_model,
 };
 
 /// One of the parts a device's model is made of, as the stream sends them: each part is sent

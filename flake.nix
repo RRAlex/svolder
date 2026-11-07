@@ -22,7 +22,7 @@
           inherit version;
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.pkg-config ];
+          nativeBuildInputs = [ pkgs.pkg-config pkgs.makeWrapper ];
           buildInputs = [ pkgs.dbus ];
           # The suites spawn the binaries with private homes and a fake transport; `make check`
           # runs them, and the sandbox has no session for the ones that ask the system bus.
@@ -36,6 +36,12 @@
             cp README.md LEGAL.md AUTHORS LICENSE $out/share/doc/svolder/
             mkdir -p $out/share/doc/svolder/usage
             cp docs/usage/*.md $out/share/doc/svolder/usage/
+            # The computer's volume and EQ spawn the PipeWire tools; a user unit's PATH on NixOS
+            # holds none of them, so both binaries carry theirs after whatever PATH they get.
+            for bin in svolderd svolder; do
+              wrapProgram $out/bin/$bin \
+                --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.pipewire pkgs.wireplumber ]}
+            done
           '';
           meta = {
             description = "Control Schiit Forkbeard devices over Bluetooth LE";

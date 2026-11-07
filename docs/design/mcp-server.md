@@ -45,11 +45,18 @@ a secret the owner has replaced.
 
 ## The tools
 
-`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers eight, listed in `TOOLS`: `list_devices`,
-`get_state`, `get_link_history` and `list_presets` read; `set_control`, `load_preset`, `mute` and
-`identify` write. The write tools are not listed while `[mcp] writes` is off, and a call to one is
-refused naming the setting, because a client may hold an older list. A device refusal is a tool
-error the model reads; only a tool that does not exist is a protocol error.
+`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers twelve, listed in `TOOLS`: `list_devices`,
+`get_state`, `get_link_history`, `list_presets` and `get_host` read; `set_control`, `load_preset`,
+`mute`, `identify`, `set_host_volume`, `host_mute` and `set_host_eq` write. `get_host`,
+`set_host_volume`, `host_mute` and `set_host_eq` are the computer's
+(`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to 100 becomes dB as
+`60 * log10(percent / 100)`, the floors hold it under `host:volume`, and a rise past `MAX_RISE_DB`
+asks as the device's does; a volume not read yet counts as 1 %. An unmute always asks, as the
+device's does. `max_volume_db` does not cover the computer, whose cap is 100 %. The floors see
+only this server's own computer writes and reads. A preset another device plays too asks, and
+repeats with `confirm`. The write tools are not listed while `[mcp] writes` is off, and a call to
+one is refused naming the setting, because a client may hold an older list. A device refusal is a
+tool error the model reads; only a tool that does not exist is a protocol error.
 
 Every tool goes through `Fleet`, the same request path the socket's clients use
 (`bins/svolderd/src/fleet.rs`), so a value is validated and refused exactly as `svolder set` refuses

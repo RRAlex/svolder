@@ -920,3 +920,168 @@ fn p_on_a_loki_max_opens_its_preset_list_with_three_slots_and_five_builtins() {
     assert!(press(&mut app, KeyCode::Esc).is_empty());
     assert!(!app.modal_open());
 }
+
+/// On the computer's side `a` adds a point after the last and `x` removes the focused one; the
+/// only point is set flat, and 16 is the most.
+#[test]
+fn a_adds_and_x_removes_and_the_lone_point_is_set_flat() {
+    use crate::tui::test_support::computer_eq;
+    use svolder_ipc::HostEqOp;
+    let mut app = app();
+    app.host.computer.eq = Some(computer_eq(true, &[("PK", 1000.0, 0.0, 1.0)]));
+    app.show(Screen::Tone);
+    assert!(
+        ch(&mut app, 'a').is_empty(),
+        "on the device's side `a` is the advice key"
+    );
+    ch(&mut app, 'C');
+    assert_eq!(
+        ch(&mut app, 'a'),
+        vec![Intent::eq(HostEqOp::Add {
+            kind: "PK".into(),
+            f: 1000.0,
+            g: 0.0,
+            q: 1.0
+        })]
+    );
+    assert_eq!(
+        ch(&mut app, 'x'),
+        vec![Intent::eq(HostEqOp::Remove {
+            index: 1,
+            slot: Some(1)
+        })],
+        "the lone point's remove goes to the daemon, which sets it flat"
+    );
+    assert_eq!(app.focused_point(), 0, "and the point stays in hand");
+    app.host.computer.eq = Some(computer_eq(
+        true,
+        &[("PK", 1000.0, 0.0, 1.0), ("LSC", 100.0, 1.0, 1.0)],
+    ));
+    app.focus_point(1);
+    assert_eq!(
+        ch(&mut app, 'x'),
+        vec![Intent::eq(HostEqOp::Remove {
+            index: 2,
+            slot: Some(2)
+        })]
+    );
+    let sixteen: Vec<(&str, f64, f64, f64)> = vec![("PK", 1000.0, 0.0, 1.0); 16];
+    app.host.computer.eq = Some(computer_eq(true, &sixteen));
+    assert!(ch(&mut app, 'a').is_empty(), "16 is the most");
+}
+
+/// `y` cycles the focused point's type PK, LSC, HSC and round, as a live `Set { kind }`.
+#[test]
+fn y_cycles_the_focused_points_type() {
+    use crate::tui::test_support::computer_eq;
+    use svolder_ipc::HostEqOp;
+    let mut app = app();
+    app.host.computer.eq = Some(computer_eq(
+        true,
+        &[("PK", 1000.0, 0.0, 1.0), ("HSC", 8000.0, 1.0, 0.7)],
+    ));
+    app.show(Screen::Tone);
+    ch(&mut app, 'C');
+    let kind = |kind: &str, index| {
+        vec![Intent::eq(HostEqOp::Set {
+            index,
+            slot: Some(index),
+            kind: Some(kind.into()),
+            f: None,
+            g: None,
+            q: None,
+            done: true,
+        })]
+    };
+    assert_eq!(ch(&mut app, 'y'), kind("LSC", 1));
+    app.focus_point(1);
+    assert_eq!(ch(&mut app, 'y'), kind("PK", 2), "HSC goes round to PK");
+}
+
+/// `Enter` on a point opens the edit line; the fields typed go out as one `Set`, each held to the
+/// hand range on its own, and the fields not touched are not sent.
+#[test]
+fn a_point_is_typed_into_the_edit_line_and_only_the_edited_field_is_clamped() {
+    use crate::tui::test_support::computer_eq;
+    use svolder_ipc::HostEqOp;
+    let mut app = app();
+    app.host.computer.eq = Some(computer_eq(true, &[("PK", 1000.0, 3.0, 1.4)]));
+    app.show(Screen::Tone);
+    ch(&mut app, 'C');
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
+    assert!(app.tone.point_line.is_some());
+    // Frequency is focused: 99999 lands on 20 kHz; Tab to the gain, which is left as it was.
+    for letter in "99999".chars() {
+        ch(&mut app, letter);
+    }
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    for letter in "50".chars() {
+        ch(&mut app, letter);
+    }
+    ch(&mut app, 'x');
+    assert!(
+        app.tone.point_line.is_some(),
+        "a letter is refused, the line stays"
+    );
+    let sent = press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        sent,
+        vec![Intent::eq(HostEqOp::Set {
+            index: 1,
+            slot: Some(1),
+            kind: None,
+            f: Some(20_000.0),
+            g: None,
+            q: Some(10.0),
+            done: true,
+        })]
+    );
+    assert!(app.tone.point_line.is_none());
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Esc);
+    assert!(app.tone.point_line.is_none(), "Esc closes it");
+}
+
+/// Where the computer's controls are not there at all, because `[tui] host_audio` is off, no switch
+/// is offered.
+#[test]
+fn host_audio_off_offers_no_switch() {
+    let mut app = app();
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        true,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    assert!(app.computer_offered());
+    app.tui.host_audio = false;
+    assert!(!app.computer_offered());
+}
+
+/// Every change of a point names the slot the table lists it with, so a re-sort by another front
+/// end between the key and the daemon cannot move the change onto a neighbour.
+#[test]
+fn a_points_changes_carry_its_slot_not_only_its_place() {
+    use crate::tui::test_support::computer_eq;
+    use svolder_ipc::HostEqOp;
+    let mut app = app();
+    let mut eq = computer_eq(true, &[("PK", 100.0, 1.0, 1.0), ("PK", 1000.0, 0.0, 1.0)]);
+    eq.points[0].slot = 7;
+    eq.points[1].slot = 3;
+    app.host.computer.eq = Some(eq);
+    app.show(Screen::Tone);
+    ch(&mut app, 'C');
+    app.focus_point(1);
+    assert_eq!(
+        ch(&mut app, 'x'),
+        vec![Intent::eq(HostEqOp::Remove {
+            index: 2,
+            slot: Some(3)
+        })]
+    );
+    app.focus_point(0);
+    let sent = ch(&mut app, 'y');
+    assert!(
+        matches!(&sent[..], [Intent::HostEq(op)] if matches!(&**op, HostEqOp::Set { index: 1, slot: Some(7), .. })),
+        "{sent:?}"
+    );
+}

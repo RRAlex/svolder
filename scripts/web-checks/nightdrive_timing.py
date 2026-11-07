@@ -7,12 +7,16 @@ nightdrive_theme.py; what both share is in nightdrive_base.py.
   no_frame_while_hidden                             no draw while the page is hidden, draws again once shown
   reduced_motion_starts_on_calm_and_full_can_be_picked   draws keep coming under Full while reduced
   a_paused_player_on_a_desktop_keeps_its_levels_own_pace   draws go on at their rate when the player pauses
+  what_a_draw_costs_on_the_computer_side            the same median with eight points shown, the curve up and a bell lit (4.5 ms, Chromium)
   what_a_draw_costs                                 drawMs p95; a draw with every cell lit at 4.5 ms or less (median of 5, Chromium)
   a desktop starts with the wet road allowed by the budget   the budget's answer to the real draws: the wet road is allowed
   the_road_cruises_with_the_song_and_keeps_the_tempo   floor rows a second, loud, silent and with the mood off
   a_slow_page_steps_down_on_the_rate                a page that draws fast and seldom steps down; left alone it keeps its density and rate
   a_phone_starts_at_30_a_second                     Chromium: a coarse pointer begins capped, the draws keep to 21 to 34 a second
   the_readout_rate_is_the_loops_own                 the readout's draws a second within 10 of the loop's own count
+  choosing_full_on_a_phone_lifts_the_cap_at_once    Chromium: a phone in Calm, still capped, then Full: the cap is off within 1.5 s and the draws a second
+                                                    are over 45; under a 5x CPU slowdown the scene steps down within 2.5 s, then draws 25 or more a second, and has settled by 3.5 s
+  a_paused_phone_keeps_the_road_smooth              Chromium: paused, the draws are 25 to 34 a second (the road still rolls)
 Usage: python3 nightdrive_timing.py chromium|firefox"""
 import nightdrive_base as base
 from nightdrive_base import *  # noqa: F401,F403 (the shared helpers, by their own names)
@@ -148,6 +152,41 @@ def what_a_draw_costs(b, d):
               median(five['ms']) <= 4.5, [median(five['ms']), five])
 
 
+def what_a_draw_costs_on_the_computer_side(b, d):
+    """The same every-cell-lit median with the computer shown: eight points (the flat one and seven, shelves among them), the curve up and a point's
+    bell lit all along (a pointer moved over its bubble every 0.3 s from the page); held to the same limit on Chromium."""
+    forget(b, d)
+    load(b, d)
+    poll(lambda: b.page(DRAWS) > 3)
+    poll(lambda: b.page('!!__core.model.page().host?.computer?.eq'))
+    b.page('__core.computer.flip("computer")')
+    plan = [('LSC', 105, 5.5, 0.7), ('PK', 180, -2.1, 0.9), ('PK', 1200, -1.8, 1.4), ('PK', 2900, 3.2, 2.0),
+            ('PK', 5600, -4.0, 3.1), ('PK', 8900, 2.4, 2.5), ('HSC', 10000, -1.5, 0.7)]
+    for kind, f, g, q in plan:
+        b.page(f"__core.actions.computer.addPoint({{ type: {json.dumps(kind)}, f: {f}, g: {g}, q: {q} }}).then(() => 1)")
+        time.sleep(0.2)
+    time.sleep(1.0)
+    b.page("""(() => { const scene = document.querySelector('.nd-scene'); const d = __core.theme.driver;
+      window.__hover = setInterval(() => { const t = d.tune(); const bub = t.bubbles[3] || { x: t.w / 2, y: t.H - 0.08 * t.h };
+        scene.dispatchEvent(new PointerEvent('pointermove', { clientX: bub.x, clientY: bub.y, pointerType: 'mouse', isPrimary: true, bubbles: true })); }, 300); return 1; })()""")
+    b.page('__core.theme.driver.forceDrawMs(2)')
+    b.page(f'({FLOOR_AT})(0.9)')
+    time.sleep(2.0)
+    tuned = b.page('__core.theme.driver.tune()')
+    full = b.page(SAMPLE)
+    five = b.page(FIVE)
+    b.page('clearInterval(window.__hover)')
+    print(f'INFO  {browser} 1280x800 dpr 1, computer side, curve up, every cell lit: drawMs p95 {p95(full):.2f} ms, max {max(full):.2f}, '
+          f'median of 5 {median(five["ms"]):.2f} ms {[round(x, 2) for x in five["ms"]]}')
+    check('what_a_draw_costs_on_the_computer_side: the computer is shown with its eight points (the flat one and seven) as bubbles and the curve up',
+          b.page('__core.computer.side()') == 'computer' and len(tuned['bubbles']) == 8 and tuned['m'] >= 0.5 and tuned['lit'] is not None,
+          [tuned['m'], len(tuned['bubbles']), tuned['lit']])
+    if browser == 'chromium':
+        check('  the draws went on between the five readings', min(five['draws'][i + 1] - five['draws'][i] for i in range(4)) >= 25, five['draws'])
+        check('  a draw with every cell lit takes 4.5 ms or less on the computer side too (the median of 5 readings, each the mean of 60 draws)',
+              median(five['ms']) <= 4.5, [median(five['ms']), five])
+
+
 def the_cruise(b, d):
     """The road's speed is the tempo's rate times the song's cruise factor, never in its place: loud music
     (long near 1, a factor of 1.4) rolls the floor faster than the silence (0.6), with the mood off (a factor of 1)
@@ -238,11 +277,76 @@ def the_phone_cap(d):
             b.close()
 
 
+def the_full_switch(d):
+    """Chromium, a phone: Calm for a while (the rate's cap still on), then Full."""
+    for slow in (1, 5):
+        b = common.Chromium(size=(390, 844), dpr=3, touch=True)
+        try:
+            forget(b, d)
+            load(b, d)
+            time.sleep(0.5)
+            b.page(DRIVER + ".then((m) => { m.bound.view.motion = 'calm'; return 1; })")
+            time.sleep(4.0)
+            before = b.page(PERF)
+            if slow > 1:
+                b.send('Emulation.setCPUThrottlingRate', {'rate': slow})
+            b.page(DRIVER + ".then((m) => { m.bound.view.motion = 'full'; return 1; })")
+            began = time.time()
+            if slow == 1:
+                lifted = poll(lambda: b.page(PERF)['capped'] is False, 1.5)
+                lag = time.time() - began
+                time.sleep(1.0)
+                got = rate(b, 2.0) / 2.0
+                check('choosing_full_on_a_phone_lifts_the_cap_at_once: in Calm the cap is still on, and within 1.5 s of Full it is off '
+                      'and the draws are over 45 a second', before['capped'] is True and lifted and got > 45, [before['capped'], lifted, round(lag, 2), got])
+            else:
+                stepped = poll(lambda: b.page(PERF)['step'] >= 1, 2.5)
+                at = time.time() - began
+                got = rate(b, 2.0) / 2.0
+                time.sleep(max(0.0, 3.5 - (time.time() - began)))
+                one = b.page(PERF)
+                steps = (one['step'], one['capped'])
+                time.sleep(1.0)
+                two = b.page(PERF)
+                check('  under a 5x CPU slowdown the scene steps down within 2.5 s of Full and then draws 25 or more a second',
+                      stepped and got >= 25, [stepped, round(at, 2), got])
+                check('  under a 5x CPU slowdown the scene has settled within 3.5 s (no further step in the next second)',
+                      (two['step'], two['capped']) == steps, [one, two])
+            check('  no page error', errors(b) == [], errors(b)[:3])
+        finally:
+            try:
+                forget(b, d)
+            finally:
+                b.close()
+
+
+def the_paused_phone(d):
+    b = common.Chromium(size=(390, 844), dpr=3, touch=True)
+    try:
+        forget(b, d)
+        load(b, d)
+        time.sleep(3.0)
+        b.page(PAUSE)
+        poll(lambda: b.page("__core.model.page().host?.track?.status") == 'paused', 4.0)
+        time.sleep(2.5)
+        got = rate(b, 3.0) / 3.0
+        check('a_paused_phone_keeps_the_road_smooth: paused, the draws are 25 to 34 a second (the road goes on rolling)',
+              25 <= got <= 34 and b.page(PERF)['pace'] < 40, [got, b.page(PERF)['pace']])
+        check('  no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        try:
+            forget(b, d)
+        finally:
+            b.close()
+
+
 d = common.Daemon('gungnir2-v2', host='fake')
 # the cases that make a browser of their own run first, with no other page drawing beside them
 the_readout_rate(d)
 if browser == 'chromium':
     the_phone_cap(d)
+    the_full_switch(d)
+    the_paused_phone(d)
 b = make()
 try:
     hidden(b, d)
@@ -253,6 +357,7 @@ try:
     the_rate_trigger(d)
     b.resize(1280, 800)
     what_a_draw_costs(b, d)
+    what_a_draw_costs_on_the_computer_side(b, d)
     check('no page error in the whole run', errors(b) == [], errors(b)[:3])
 finally:
     try:

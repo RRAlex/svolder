@@ -85,7 +85,7 @@ Maintainer: the svolder authors
 Homepage: $homepage
 Installed-Size: $size
 Depends: bluez, dbus
-Suggests: pipewire-bin, wireplumber
+Recommends: pipewire-bin, wireplumber
 Section: sound
 Priority: optional
 Description: $summary
@@ -131,7 +131,7 @@ BuildArch: x86_64
 # The binaries are static: there is no shared library for rpm to find a dependency in.
 AutoReqProv: no
 Requires: bluez, dbus
-Suggests: pipewire-utils, wireplumber
+Recommends: pipewire-utils, wireplumber
 
 %description
 svolder controls Schiit Audio components that carry the Forkbeard Bluetooth LE

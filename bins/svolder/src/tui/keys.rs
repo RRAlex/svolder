@@ -72,6 +72,10 @@ pub enum When {
     HasToggle,
     /// Only on a device whose profile offers the identify cue.
     CanIdentify,
+    /// Only where the computer's controls are there to flip to.
+    HasComputer,
+    /// Only while the computer's side is shown.
+    OnComputer,
     /// Only on a wizard step that offers choices.
     Choosing,
     /// Only on a wizard step that takes a typed line.
@@ -102,6 +106,10 @@ pub struct Scene {
     pub has_nos: bool,
     /// Whether it has a balance the keys can centre.
     pub has_balance: bool,
+    /// Whether the computer's controls are there to flip to.
+    pub has_computer: bool,
+    /// Whether the computer's side is shown.
+    pub on_computer: bool,
     /// Whether it has no volume for the keys to move: a flag that reads false by default, so a
     /// screen that says nothing of it leaves the key worth pressing.
     pub no_volume: bool,
@@ -140,6 +148,8 @@ impl Scene {
             has_phase: app.flips("phase"),
             has_nos: app.flips("nos"),
             has_balance: app.balance().is_some(),
+            has_computer: app.computer_offered(),
+            on_computer: app.on_computer(),
             no_volume: app.volume().is_none(),
             no_toggle: !app.has_toggle_or_host_rows(),
             no_identify: !app.identify_offered(),
@@ -187,7 +197,7 @@ const PRESETS: &str = "presets";
 
 /// What the help overlay says `p` does where the list is the tone control's, whose own keys it
 /// names.
-const PRESETS_LONG: &str = "presets (a i h inside)";
+const PRESETS_LONG: &str = "presets (a i inside)";
 
 /// What the table says `q` does, which [`KeyHint::does_in`] writes as [`QUIT_ASKS`] where the
 /// settings have it ask first.
@@ -487,6 +497,37 @@ static HINTS: &[KeyHint] = &[
         toggles: None,
         long: Some(PRESETS_LONG),
     },
+    // The computer's table of points, on the tone-control screen's computer side.
+    KeyHint {
+        code: KeyCode::Char('a'),
+        label: "a",
+        does: "add point",
+        screens: &[Screen::Tone],
+        when: When::OnComputer,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Char('y'),
+        label: "y",
+        does: "point type",
+        screens: &[Screen::Tone],
+        when: When::OnComputer,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Char('x'),
+        label: "x",
+        does: "remove point",
+        screens: &[Screen::Tone],
+        when: When::OnComputer,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
     KeyHint {
         code: KeyCode::Enter,
         label: ENTER,
@@ -753,6 +794,17 @@ static HINTS: &[KeyHint] = &[
         toggles: Some(Setting::SpectrumDrift),
         long: None,
     },
+    // The switch between the device's volume and tone control and the computer's.
+    KeyHint {
+        code: KeyCode::Char('C'),
+        label: "C",
+        does: "toggle computer",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasComputer,
+        group: GLOBAL,
+        toggles: None,
+        long: None,
+    },
     KeyHint {
         code: KeyCode::Char('F'),
         label: "F",
@@ -888,7 +940,12 @@ fn shared_key(hint: &KeyHint) -> bool {
 /// for a control a device either has or never will (phase, NOS) are not listed where it has
 /// none, where the keys that merely depend on the screen's state stay listed, dimmed.
 pub fn hidden_in(hint: &KeyHint, scene: Scene) -> bool {
-    matches!(hint.when, When::HasPhase | When::HasNos) && !available_in(hint, scene)
+    match hint.when {
+        When::HasPhase | When::HasNos => !available_in(hint, scene),
+        // The computer's keys are not listed where its controls are not there at all.
+        When::HasComputer | When::OnComputer => !scene.has_computer,
+        _ => false,
+    }
 }
 
 /// Whether `hint` is worth pressing on `app` now. A hint that answers `false` still lists in
@@ -912,6 +969,8 @@ pub fn available_in(hint: &KeyHint, scene: Scene) -> bool {
         When::HasVolume => !scene.no_volume,
         When::HasToggle => !scene.no_toggle,
         When::CanIdentify => !scene.no_identify,
+        When::HasComputer => scene.has_computer,
+        When::OnComputer => scene.on_computer,
         When::Choosing => !scene.typing,
         When::Typing => scene.typing,
         When::Backable => scene.can_go_back,

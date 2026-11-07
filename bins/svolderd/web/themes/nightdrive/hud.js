@@ -8,7 +8,7 @@ import { TITLE, statusOf } from '../../core/title.js';
 import { HUD } from './words.js';
 
 /** The shown device's entry in the fleet's list, or `null`. */
-const entryOf = (page) => (page?.fleet?.devices ?? []).find((d) => d.url === page.shown) ?? null;
+export const entryOf = (page) => (page?.fleet?.devices ?? []).find((d) => d.url === page.shown) ?? null;
 
 /** The device's input (its chosen option's label) and rate (the readout's text), where it has them. */
 function inputAndRate(device) {
@@ -61,12 +61,26 @@ export function gainWords(text) {
   return `${db < 0 ? '−' : '+'}${tenths.toFixed(1)}`;
 }
 
+/** The EQ line of the computer's tone (core `toneOf`): `OFF`, or `EQ` with the preset's name when one is on;
+ * no gains, and a word of it while the EQ's state is only what its file says. `null` with no tone. */
+function computerEqLine(tone) {
+  if (!tone) return null;
+  const on = tone.modes.find((m) => m.name === 'eq')?.on === true;
+  const gains = tone.verified ? [] : [HUD.unconfirmed];
+  if (!on) return { lead: '', name: HUD.off, gains };
+  return tone.preset
+    ? { lead: HUD.eq, name: String(tone.preset).toUpperCase(), gains }
+    : { lead: '', name: HUD.eq, gains };
+}
+
 /**
  * The EQ line: `{ lead, name, gains }`, `name` the bright part. In EQ it is `EQ` then the preset's
  * name when one is on (`lead: 'EQ'`, `name: 'WARM'`, else `lead: ''`, `name: 'EQ'`) and the
- * bands' gains; Loudness `LOUDNESS 3` and Flat `FLAT` have none. `null` for a device with no tone.
+ * bands' gains; Loudness `LOUDNESS 3` and Flat `FLAT` have none. `null` for a device with no tone. With the
+ * computer as the side shown (`comp`, ./computer-view.js) it is the computer's: `OFF` or `EQ` and the preset.
  */
-export function eqLine(page) {
+export function eqLine(page, comp = null) {
+  if (comp?.side === 'computer') return computerEqLine(comp.tone);
   const device = page?.device;
   const tone = device?.tone;
   if (!tone) return null;
@@ -91,9 +105,16 @@ function dacOf(page) {
 /**
  * The volume: `figures` (`−23.5`, `−∞` while muted, with U+2212), its `unit`, whether it is
  * `muted`, the `aria` words, and `none`, the words that stand in the figures' place for an amp
- * with no volume of its own (else `null`).
+ * with no volume of its own (else `null`). With the computer as the side shown it is the computer's: `42`
+ * and `%`, the figure kept (and dimmed) while muted, `—` and no unit before the first read.
  */
-export function volumeOf(page) {
+export function volumeOf(page, comp = null) {
+  if (comp?.side === 'computer') {
+    const c = comp.volume;
+    return {
+      figures: c.text, unit: c.pct === null ? '' : c.unit, muted: c.muted, dim: c.muted, aria: c.aria, none: null,
+    };
+  }
   const v = page?.device?.volume;
   if (!v) {
     const amp = entryOf(page)?.family === 'amp';

@@ -1,9 +1,10 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The core a theme is given: the model of the page, the actions that change a device, the
-// preferences of the theme mounted, light or dark, the lifecycle of a canvas, the host's analysis,
-// the tone curve's maths and gestures, the words and the clock, the frame (the menu's button, its
-// menu, the picker of themes and the popups) and the registry of themes. `createCore` makes every
+// The core a theme is given: the model of the page, the actions that change a device or the
+// computer, the side of the page this viewer looks at (the device or the computer), the question a
+// theme can ask, the preferences of the theme mounted, light or dark, the lifecycle of a canvas,
+// the host's analysis, the tone curve's maths and gestures, the words and the clock, the frame
+// (the menu's button, its menu, the picker of themes and the popups) and the registry of themes. `createCore` makes every
 // module and joins what they leave to it: the store's state and events go to the climb's popup and
 // the tone mode's note, and a step of the browser's history shows the device it names.
 //
@@ -13,8 +14,10 @@
 
 import { post, signedOut } from './api.js';
 import { createActions } from './actions.js';
+import { createAsk } from './ask.js';
 import { createAnalysis } from './analysis.js';
 import { createClimb } from './climb.js';
+import { createComputer, createHolds } from './computer.js';
 import { createFrame } from './frame.js';
 import { HOLD_AFTER_MS, HOLD_EVERY_MS, holdRepeat } from './hold.js';
 import { bootScheme, createPrefs, storageOf, writeChoice } from './prefs.js';
@@ -65,9 +68,12 @@ export function createCore({
   const storage = storageOf(window);
 
   const store = createStore(page, { fetch: fetchNow, signedOut });
+  const holds = createHolds({ store, fetch: fetchNow });
+  const ask = createAsk({ document });
   const actions = createActions({
-    store, post, toast, history: window.history, location: window.location,
+    store, post, toast, history: window.history, location: window.location, holds, ask,
   });
+  const computer = createComputer({ store, storage, holds });
   const climb = createClimb({ toast, dismissToast, body: document.body });
   const toneNote = createToneNote({ toast, now: () => window.performance.now() });
   const analysis = createAnalysis({ EventSource: window.EventSource });
@@ -87,6 +93,8 @@ export function createCore({
   const core = {
     model: store,
     actions,
+    computer,
+    ask,
     prefs: null,
     scheme: null,
     theme: null,

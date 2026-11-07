@@ -68,7 +68,7 @@ impl Gesture {
 }
 
 /// A band's point held by a press on the curve, until its button is let go.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CurveDrag {
     /// The band grabbed, 0-based.
     pub band: usize,
@@ -96,6 +96,23 @@ pub struct CurveDrag {
     /// Whether the pointer has been dragged since the press: a press let go where it landed
     /// with no drag between writes nothing.
     pub moved: bool,
+    /// On the computer side: what the drag holds of the point.
+    pub point: Option<Box<PointDrag>>,
+}
+
+/// What a drag of one of the computer's points holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointDrag {
+    /// The slot the point sits in, which is its own for as long as it exists: the drag finds
+    /// its point by it whatever place the table lists it in (0: none was given, the index holds).
+    pub slot: u8,
+    /// The point's `[f, g, q]` as the press found them.
+    pub start: [f64; 3],
+    /// Where the pointer has put it, drawn in place of the daemon's values until the button is
+    /// let go.
+    pub shown: Option<[f64; 3]>,
+    /// When a live value was last sent, which holds the rest to 20 a second.
+    pub sent_at: Option<std::time::Instant>,
 }
 
 /// The band a press at `at` on `curve` grabs for `gesture`, or `None` for a press that grabs
@@ -145,6 +162,9 @@ impl CurveDrag {
 
 /// Hold `band` for `gesture` from a press at `at`, focusing it as a click on its row does.
 pub(in crate::tui) fn start(app: &mut App, band: usize, gesture: Gesture, at: (u16, u16)) {
+    if app.on_computer() {
+        return start_point(app, band, gesture, at);
+    }
     let step = |param| {
         app.profile
             .eq
@@ -166,6 +186,7 @@ pub(in crate::tui) fn start(app: &mut App, band: usize, gesture: Gesture, at: (u
         row: Some(at.1),
         held: [None; 3],
         moved: false,
+        point: None,
     };
     app.focus_band(drag.band);
     app.pointer.curve_drag = Some(drag);
@@ -177,6 +198,9 @@ pub(in crate::tui) fn start(app: &mut App, band: usize, gesture: Gesture, at: (u
 /// unanswered for is not written now: its step is held instead, in place of any held before it,
 /// for [`confirmed`] or [`release`] to send. Nothing without a drag held.
 pub(in crate::tui) fn to(app: &mut App, curve: Rect, at: (u16, u16)) -> Vec<Intent> {
+    if app.on_computer() {
+        return point_to(app, curve, at, false);
+    }
     let (Some(mut drag), Some(eq)) = (app.pointer.curve_drag.clone(), app.profile.eq.clone())
     else {
         return Vec::new();
@@ -208,6 +232,9 @@ pub(in crate::tui) fn to(app: &mut App, curve: Rect, at: (u16, u16)) -> Vec<Inte
 /// run out ([`App::tick`]) — written now, and nothing else: what the loop sends after every
 /// reading and every tick while a drag is held.
 pub(in crate::tui) fn confirmed(app: &mut App) -> Vec<Intent> {
+    if app.on_computer() {
+        return Vec::new();
+    }
     let (Some(drag), Some(eq)) = (app.pointer.curve_drag.clone(), app.profile.eq.clone()) else {
         return Vec::new();
     };
@@ -239,6 +266,9 @@ pub(in crate::tui) fn confirmed(app: &mut App) -> Vec<Intent> {
 /// already, and the held ones are written now. A press let go where it landed, with no drag
 /// between, writes nothing.
 pub(in crate::tui) fn release(app: &mut App, end: Option<(Rect, (u16, u16))>) -> Vec<Intent> {
+    if app.on_computer() {
+        return release_point(app, end);
+    }
     let (Some(mut drag), Some(eq)) = (app.pointer.curve_drag.take(), app.profile.eq.clone()) else {
         return Vec::new();
     };
@@ -370,6 +400,140 @@ fn gain_step(eq: &EqSpec, db: f64) -> u8 {
         drawn if drawn < tone::GAIN_FLOOR_DB => raw.saturating_add(1).min(EqSpec::STEP_MAX),
         drawn if drawn > tone::GAIN_CEILING_DB => raw.saturating_sub(1),
         _ => raw,
+    }
+}
+
+/// The least time between two live values sent for a point: 20 a second.
+const LIVE_EVERY: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Hold the computer's point `index` for `gesture` from a press at `at`.
+fn start_point(app: &mut App, index: usize, gesture: Gesture, at: (u16, u16)) {
+    let start = app.computer_points().get(index).map(|point| {
+        Box::new(PointDrag {
+            slot: point.slot,
+            start: [point.f, point.g, point.q],
+            shown: None,
+            sent_at: None,
+        })
+    });
+    app.focus_point(index);
+    app.pointer.curve_drag = Some(CurveDrag {
+        band: index,
+        gesture,
+        from: at,
+        start: [None; 3],
+        column: Some(at.0),
+        row: Some(at.1),
+        held: [None; 3],
+        moved: false,
+        point: start,
+    });
+}
+
+/// Where the held point is listed now: found by its slot, so another front end's re-sort does
+/// not move the drag onto a neighbour. `None` when the point is gone.
+pub(super) fn point_index(
+    points: &[svolder_host::eq::PointView],
+    drag: &CurveDrag,
+) -> Option<usize> {
+    match drag.point.as_deref().map(|held| held.slot) {
+        Some(slot) if slot != 0 => points.iter().position(|point| point.slot == slot),
+        _ => (drag.band < points.len()).then_some(drag.band),
+    }
+}
+
+/// Where a drag to `at` puts its point: the values it holds now.
+fn point_values(drag: &CurveDrag, curve: Rect, at: (u16, u16)) -> Option<[f64; 3]> {
+    use super::side::{F_RANGE, G_RANGE, Q_FACTOR, Q_RANGE};
+    let held = drag.point.as_deref()?;
+    let (start, mut now) = (held.start, held.shown.unwrap_or(held.start));
+    match drag.gesture {
+        Gesture::Move => {
+            if drag.column.is_none() {
+                now[0] = tone::frequency_at(curve, at.0).clamp(F_RANGE.0, F_RANGE.1);
+            }
+            if drag.row.is_none() {
+                let g = tone::gain_at(curve, at.1).clamp(G_RANGE.0, G_RANGE.1);
+                now[1] = (g * 10.0).round() / 10.0;
+            }
+        }
+        Gesture::Width => {
+            let right = f64::from(at.0) - f64::from(drag.from.0);
+            now[2] = (start[2] * Q_FACTOR.powf(-right)).clamp(Q_RANGE.0, Q_RANGE.1);
+        }
+    }
+    Some(now)
+}
+
+/// The computer point's `Set`, every field at the values `v`.
+fn point_set(index: usize, slot: u8, v: [f64; 3], done: bool) -> Intent {
+    super::side::set_point(index, slot, v.map(Some), done)
+}
+
+/// Drag the held computer point to `at`: its new values drawn at once, and sent at most 20 a
+/// second, the last one always at the release.
+fn point_to(app: &mut App, curve: Rect, at: (u16, u16), _release: bool) -> Vec<Intent> {
+    let Some(mut drag) = app.pointer.curve_drag.clone() else {
+        return Vec::new();
+    };
+    // Its point may have been moved by another front end, or removed: the drag follows it, and
+    // ends quietly, writing nothing, when it is gone.
+    let Some(index) = point_index(&app.computer_points(), &drag) else {
+        app.pointer.curve_drag = None;
+        return Vec::new();
+    };
+    drag.band = index;
+    drag.pointer_at(at);
+    let Some(values) = point_values(&drag, curve, at) else {
+        return Vec::new();
+    };
+    let Some(held) = drag.point.as_mut() else {
+        return Vec::new();
+    };
+    held.shown = Some(values);
+    let slot = held.slot;
+    drag.moved = true;
+    let due = held
+        .sent_at
+        .is_none_or(|sent| app.now.saturating_duration_since(sent) >= LIVE_EVERY);
+    let intents = match due {
+        true => {
+            held.sent_at = Some(app.now);
+            vec![point_set(drag.band, slot, values, false)]
+        }
+        false => Vec::new(),
+    };
+    app.pointer.curve_drag = Some(drag);
+    intents
+}
+
+/// Let go of the computer point: where the pointer let go, sent as the last value.
+pub(super) fn release_point(app: &mut App, end: Option<(Rect, (u16, u16))>) -> Vec<Intent> {
+    let Some(mut drag) = app.pointer.curve_drag.take() else {
+        return Vec::new();
+    };
+    let Some(index) = point_index(&app.computer_points(), &drag) else {
+        return Vec::new();
+    };
+    drag.band = index;
+    let slot = drag.point.as_deref().map_or(0, |held| held.slot);
+    if let Some((curve, at)) = end
+        && (drag.moved || at != drag.from)
+    {
+        drag.pointer_at(at);
+        if let Some(values) = point_values(&drag, curve, at)
+            && let Some(held) = drag.point.as_mut()
+        {
+            held.shown = Some(values);
+            drag.moved = true;
+        }
+    }
+    match (
+        drag.moved,
+        drag.point.as_deref().and_then(|held| held.shown),
+    ) {
+        (true, Some(values)) => vec![point_set(drag.band, slot, values, true)],
+        _ => Vec::new(),
     }
 }
 

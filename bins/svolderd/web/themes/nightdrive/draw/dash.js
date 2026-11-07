@@ -9,7 +9,7 @@
 // Pure but for `moveProgress`, which sets what the markup names.
 
 import { elapsedUs, fraction, timeWords } from '../../../core/clock.js';
-import { DASH } from '../words.js';
+import { DASH, SWITCH } from '../words.js';
 import { esc } from './esc.js';
 import { inertOf } from '../inert.js';
 import { drawGauges } from './gauges.js';
@@ -33,12 +33,15 @@ function key(act, text, { inert, attrs = '', cls = '', markup = false }) {
     + `${inert ? ' aria-disabled="true"' : ''}>${markup ? text : esc(text)}</button>`;
 }
 
-/** The volume keys: `−`, `MUTE`, `+`, in that order; nothing for a device with no volume. */
+/** The volume keys: `−`, `MUTE`, `+`, in that order; nothing for a device with no volume. `v.mute` is the
+ * mute control's key (the computer's has none: `true`). */
 function volumeKeys(v, inert) {
   if (!v) return '';
   const mute = v.mute
     ? key('mute', DASH.mute, {
-      inert, cls: `cy${v.muted ? ' on' : ''}`, attrs: ` id="nd-mute" data-key="${esc(v.mute)}" aria-pressed="${Boolean(v.muted)}"`,
+      inert,
+      cls: `cy${v.muted ? ' on' : ''}`,
+      attrs: ` id="nd-mute"${typeof v.mute === 'string' ? ` data-key="${esc(v.mute)}"` : ''} aria-pressed="${Boolean(v.muted)}"`,
     }) : '';
   return key('volume-down', '−', { inert, attrs: ` id="nd-vdown" aria-label="${DASH.quieter}"` })
     + mute
@@ -71,6 +74,24 @@ function ampGauges(device, inert) {
     inert, cls: `cy${p.on === true ? ' on' : ''}`, attrs: ` id="nd-power" data-key="${esc(p.key)}" aria-label="${DASH.power}: ${esc(said)}"`,
   });
   return power + drawGauges(device);
+}
+
+/**
+ * The switch, two keys (a phone draws them as one pill, `DAC │ PC`, an amp's `AMP │ PC`): the shown device's name and `This computer`, the side shown pressed. Where the
+ * computer cannot be used, the reason stands in the switch's own place. `sw` is the core's `switchOf`;
+ * nothing for a page with none. The ids are the keys' own, so the focus stays on the key a keyboard
+ * flip chose.
+ */
+export function switchKeys(sw, amp = false) {
+  if (!sw) return '';
+  // a phone shows the keys as `DAC │ PC` (`short`, drawn by the style from `data-short`); each keeps its whole name
+  const short = { dac: amp ? 'AMP' : 'DAC', computer: 'PC' };
+  const side = (name, label) => key('side', label, {
+    inert: false, cls: `cy${sw.side === name ? ' on' : ''}`,
+    attrs: ` id="nd-side-${name}" data-side="${name}" data-short="${short[name]}" aria-label="${esc(label)}" aria-pressed="${sw.side === name}"`,
+  });
+  const why = sw.unavailable ? `<span class="nd-why" role="status">${esc(SWITCH.unavailable(sw.unavailable))}</span>` : '';
+  return `<span class="nd-swkeys" role="group" aria-label="${SWITCH.label}">${side('dac', sw.dac)}${side('computer', sw.computer)}</span>${why}`;
 }
 
 /** The track's progress at the browser's `localMs`, the part having been drawn at `drawnMs`:
@@ -125,19 +146,25 @@ function transport(status, inert) {
 }
 
 /**
- * The dash for `page` at the browser's `localMs`. The sheet's key is always there; the player's
+ * The dash for `page` at the browser's `localMs`. With the computer as the side shown (`comp`, ../computer-view.js) its
+ * volume keys stand where the device's would. The sheet's key is always there; the player's
  * transport only when the player has buttons to give (a guest is not given them).
  */
-export function drawDash(page, view, localMs = Date.now()) {
+export function drawDash(page, view, localMs = Date.now(), comp = null) {
   const device = page?.device ?? null;
   const inert = inertOf(page);
+  const onComputer = comp?.side === 'computer';
   const amp = (page?.fleet?.devices ?? []).find((d) => d.url === page?.shown)?.family === 'amp';
   const p = device?.playing ?? page?.host ?? null;
-  const left = volumeKeys(device?.volume, inert) + (amp ? ampGauges(device, inert) : inputChips(device, inert));
+  const volume = onComputer ? { mute: true, muted: comp.volume.muted } : device?.volume;
+  const left = volumeKeys(volume, inert || (onComputer && comp.volume.inert))
+    + (amp ? ampGauges(device, inert) : inputChips(device, inert));
   const right = (p?.buttons ? transport(p.track?.status, inert) : '')
     + key('sheet', DASH.device, { inert: false, cls: 'cy', attrs: ` id="nd-sheet" aria-haspopup="dialog" aria-label="${DASH.deviceLabel}"` });
+  // the switch is not in the dash: by the menu button on a desktop, in the scene's top column on a phone (dash-wire.js);
+  // `nd-brk` ends the panel's first row where the phone's stylesheet wants one
   return `<div class="nd-grp nd-keys">${left}</div><div class="nd-now">${coverMarkup(p?.track)}${trackMarkup(p, localMs)}</div>`
-    + `<div class="nd-grp nd-tr">${right}</div>`;
+    + `<div class="nd-grp nd-tr">${right}</div><span class="nd-brk" aria-hidden="true"></span>`;
 }
 
 /** Put the track's progress where `localMs` says: the fill and the time, from the player of `page`

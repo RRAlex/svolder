@@ -12,6 +12,9 @@ import { PALETTE } from './palette.js';
 export const RADIUS = 7;
 export const RADIUS_HELD = 9;
 
+/** The share of its strength the curve, the bubbles and the diamonds keep while the computer's EQ is off. */
+export const GHOST = 0.45;
+
 /** The morph above which the bubbles are drawn. */
 const SHOWN = 0.02;
 
@@ -19,7 +22,7 @@ const SHOWN = 0.02;
 export function drawBubbles(g, geo, tune) {
   if (!tune || tune.m <= SHOWN) return;
   g.save();
-  g.globalAlpha = Math.min(1, tune.m * 1.4);
+  g.globalAlpha = Math.min(1, tune.m * 1.4) * (tune.ghost ? GHOST : 1);
   const alpha = g.globalAlpha;
   for (const b of tune.bubbles) {
     const on = tune.held === b.band;
@@ -53,7 +56,7 @@ export function drawDiamonds(g, geo, tune) {
   const bell = tune?.bell;
   if (!bell || tune.m <= SHOWN || bell.diamonds.length === 0) return;
   g.save();
-  g.globalAlpha = Math.min(1, tune.m * 1.4);
+  g.globalAlpha = Math.min(1, tune.m * 1.4) * (tune.ghost ? GHOST : 1);
   const alpha = g.globalAlpha;
   for (const d of bell.diamonds) {
     g.save();

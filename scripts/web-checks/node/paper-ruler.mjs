@@ -8,8 +8,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SECTIONS } from '../../../bins/svolderd/web/themes/paper/draw/sheet.js';
 import { ASK_MS, shownRaw } from '../../../bins/svolderd/web/themes/paper/draw/volume.js';
+import { computerView, modelOf, pageWith } from './paper-rig.mjs';
 import {
-  LABEL_DB, LABEL_GAP, NARROW_LABEL_DB, NARROW_PX, fractionOf, marks, rawAt, ticks, zones,
+  LABEL_DB, LABEL_GAP, NARROW_LABEL_DB, NARROW_PX, fractionOf, marks, percentVolume, rawAt, ticks, zones,
 } from '../../../bins/svolderd/web/themes/paper/ruler.js';
 
 let n = 0;
@@ -145,6 +146,40 @@ ok('the_volume_says_its_words_and_the_mute_word_follows_the_state', () => {
     'a device with no mute key has no mute word');
   const unread = pageOf('dac-unread');
   assert.ok(SECTIONS.volume(unread, unread.device, view).includes('not read yet'));
+});
+
+ok('the_ruler_reads_0_to_100_percent', () => {
+  const read = { pct: 42, muted: false, text: '42', unit: '%', inert: false, boosted: false };
+  const v = percentVolume(read);
+  assert.deepEqual(marks(v, 1000).map((m) => [m.at, m.text]),
+    [[0, '0'], [0.25, '25'], [0.5, '50'], [0.75, '75'], [1, '100']]);
+  assert.deepEqual(marks(v, 300).map((m) => m.text), ['0', '25', '50', '75', '100'], 'the same on a phone');
+  const at = ticks(v);
+  assert.equal(at.length, 51);
+  assert.ok(at.every((t, i) => Math.abs(t - i / 50) < 1e-9));
+  assert.deepEqual(zones(v), { risk: null, cap: null });
+  assert.equal(fractionOf(v, 42), 0.42);
+  assert.equal(rawAt(v, 0.424), 42);
+  assert.equal(rawAt(v, 1.2), 100);
+  // drawn: the number, the percent, no zone, the needle at 42 %
+  const { view } = computerView(pageWith('dac', modelOf({ pct: 42 })), 'computer');
+  const page = pageWith('dac', modelOf({ pct: 42 }));
+  const html = SECTIONS.volume(page, page.device, view);
+  assert.match(html, /<span class="p-num">42<\/span><small>%<\/small>/);
+  assert.match(html, /id="p-volume-text"[^>]*>42 %<\/span>/);
+  assert.ok(!html.includes('p-zone'), 'no red zone, no cap');
+  assert.match(html, /id="p-needle"[^>]*aria-valuemin="0" aria-valuemax="100" aria-valuenow="42"[^>]*data-at="0\.42000"/);
+  assert.deepEqual([...html.matchAll(/<span class="p-mark" data-at="[\d.]+">([^<]*)<\/span>/g)].map((m) => m[1]),
+    ['0', '25', '50', '75', '100']);
+  // a sink another program put above 100 % is read as it is, at the ruler's end
+  const loud = pageWith('dac', modelOf({ pct: 130 }));
+  const boosted = SECTIONS.volume(loud, loud.device, computerView(loud, 'computer').view);
+  assert.match(boosted, /<span class="p-num">130<\/span>/);
+  assert.match(boosted, /aria-valuenow="100"[^>]*data-at="1\.00000"/);
+  // the written words are the computer's own, and mute follows the state
+  assert.ok(boosted.includes('data-act="c-down"') && boosted.includes('data-act="c-up"')
+    && boosted.includes('data-act="c-mute"'));
+  assert.ok(!boosted.includes('data-act="volume-up"'));
 });
 
 ok('a_guests_words_are_quiet_and_the_cap_and_risk_are_drawn', () => {

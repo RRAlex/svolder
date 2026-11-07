@@ -354,6 +354,23 @@ about neither, as it asks about no band write. A command of `custom`, of a slot 
 have, or of a save is logged and dropped, and so is a command on the topic of `recall` or `save`:
 saving to a slot is not offered. A retained command is never acted on.
 
+### The computer's EQ
+
+One more Home Assistant device, `This computer`, carries the computer's EQ and nothing else of the
+computer: no volume, no mute and no points.
+
+| Entity | Topics | What |
+|---|---|---|
+| `switch.this_computer_eq` | `B/computer/computer_eq/state` (`ON`/`OFF`) and `.../set` | the EQ on or off; a `binary_sensor` while `commands` is off |
+| `sensor.this_computer_eq_preset` | `B/computer/computer_eq_preset/state` | the preset the points came from, `custom` after a hand edit, empty while the EQ is off |
+
+`ON` turns the EQ on with the points the daemon keeps; `OFF` removes it and keeps them. With no
+points kept yet (nothing applied or edited since the daemon first ran), `ON` leaves the EQ off and
+logs a line. A retained command is never acted on. The entities appear while the daemon serves the
+computer's controls; when it cannot (for example no `pw-cli`), they say unavailable, and with host
+audio off nothing is announced. When the daemon cannot tell whether the chain runs, the switch
+reports the state the daemon saved, which is what it last applied.
+
 ### The connection
 
 The daemon connects when it starts and whenever the connection drops, waiting 2 s after a failure

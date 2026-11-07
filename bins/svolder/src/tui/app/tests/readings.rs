@@ -349,6 +349,6 @@ fn the_control_row_count_matches_the_rows_the_screen_lists() {
     assert!(rows > 0);
     assert_eq!(
         app.controls_len(),
-        rows + usize::from(app.host_shown()) * host::ROWS.len()
+        rows + usize::from(app.host_shown()) * app.host_rows().len()
     );
 }

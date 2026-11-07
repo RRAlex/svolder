@@ -32,13 +32,33 @@ live" lists where each module's tests are.
 - **`make e2e`**: the daemon, the CLI and a web write against a simulator over real Bluetooth. Run
   it after a change to the transport, the session, the scanner, the daemon's reconnect or the
   simulator; it is not part of `make check`.
+- **`make host-e2e`**: the computer EQ end to end, through the real daemon, on a private PipeWire
+  server with its own WirePlumber and a null sink (no sound card), started by
+  `scripts/host-e2e/private-pipewire.sh`. A 1 kHz tone at -20 dBFS plays into the null sink and a
+  recorder linked by hand to the sink's own monitor hears it after the filter chain.
+  `scripts/host-e2e/run.sh` runs `svolderd` (the repo-built one, a child chain, no `systemctl`, a
+  fake device) and `scripts/host-e2e/analyse.py` drives it over the socket: the EQ on (with the
+  Off to EQ gap), a drag of one point to +6 dB at 20 updates a second, with the peak off the tone so
+  a bypass cannot pass for a boost (no gap, no click, the preamp at or under unity), a move, a
+  live type change from a peak to a low shelf, a forced sample-rate change followed by the
+  controller sending every slot again, Off, the volume and mute, and the daemon ending with its
+  chain. It prints `host-e2e: PASS`. Run it after a change to the computer
+  EQ, its chain or the daemon's computer side; it is opt-in and not part of `make check`.
+- **`make preamp-lab`**: the computer EQ's preamp lab, the long run (`SEED` is the first seed and
+  `RUNS` how many; 5000 by default, about a minute and a half). The controller is driven through
+  seeded random sequences of hand edits, preset loads, command-line applies, node restarts, rate
+  changes, `pw-cli` deaths and the rest, against a model of what PipeWire plays, and after every
+  event and tick the curve played times the preamp played must not pass unity. A failing seed
+  prints the shrunk sequence. Run it after any change to the controller, the session or the chain's
+  config; a short run of 300 seeds is part of `make check`. How the model works is in
+  [host-control-preamp.md](host-control-preamp.md#the-preamp-lab).
 - **The soak**: a long run of the smoke's frame rate, haze density and fluid size. Run it before a
   merge that touches a smoke file; it is part of neither web gate.
 
-`make check` does not run the web checks, `make e2e` or the soak: they need browsers, two
-controllers or an hour, and a machine without them must still be able to run the ordinary
-gate. The quick web gate refuses (exit 1, naming the file) when a smoke file or one of the smoke's
-checks changed since `main`, so it cannot stand in for the full one; the lists and the reasoning
+`make check` does not run the web checks, `make e2e`, `make host-e2e`, the long preamp lab or the
+soak: they need browsers, two controllers, a PipeWire install or an hour, and a machine without
+them must still be able to run the ordinary gate. The quick web gate refuses (exit 1, naming the file) when a smoke
+file or one of the smoke's checks changed since `main`, so it cannot stand in for the full one; the lists and the reasoning
 are in [scripts/web-checks/README.md](../../scripts/web-checks/README.md).
 
 ### What `make test` does
@@ -261,6 +281,15 @@ daemon, TUI and web behaviour are proved in the ordinary gate on any machine; th
 needs a radio says so and stays out of `make check`. A test that needs hardware cannot run in CI or
 on a laptop without it.
 
+**No check plays sound or touches the user's PipeWire session.** `make host-e2e` is the only one
+that plays anything, and it does so on a private server: its own run directory as
+`XDG_RUNTIME_DIR` and `PIPEWIRE_REMOTE`, its own WirePlumber, a null sink and no session bus. Every
+PipeWire tool and the daemon run in that environment, `private-pipewire.sh proof` must pass before
+the tone starts, the script exits 2 without the environment, a trap ends what it started, and it
+lists your own PipeWire and WirePlumber processes before and after and fails if they differ (so
+leave your session's audio alone while it runs, about a minute). It never runs `systemctl --user`
+and never an installed svolder binary.
+
 **A test never reaches the user's files.** `make test` runs in scratch homes and fails on a
 leftover; a binary run by hand is given temporary XDG homes and `SVOLDER_TRANSPORT=fake`, never the
 installed one. A test that wrote to a real configuration would change a person's setup.
@@ -297,11 +326,16 @@ compared with what the binary draws and prints; a doc that drifts fails a test.
 ## Where the code and tests live
 
 - The gates: `Makefile` (`check`, `test`, `safety-tests`, `docs-check`, `web-checks`,
-  `web-checks-quick`, `e2e`, `demo`).
+  `web-checks-quick`, `e2e`, `host-e2e`, `demo`).
 - The fake device and signal: `crates/svolder-fake/src/device.rs`, `signal.rs`; the fake transport:
   `crates/svolder-ble/src/fake.rs`; the simulator: `bins/svolder-sim/src/main.rs`, `peripheral.rs`.
 - The end-to-end script: `scripts/e2e.sh`, with the live tests in
   `crates/svolder-ble/tests/bluez_e2e.rs`.
+- The computer EQ's end-to-end check: `scripts/host-e2e/` (`private-pipewire.sh`, `run.sh`,
+  `analyse.py`).
+- The preamp lab: `crates/svolder-host/src/eq/lab.rs` (the model, the events, the driver) and
+  `crates/svolder-host/src/eq/lab/tests.rs` (the short run, the long run, the trace, the
+  regression sequences).
 - The safety list: `scripts/safety-tests.list`; the documentation check: `scripts/docs-check.py`.
 - The web checks: `scripts/web-checks/`.
 - The programs' tests that run built binaries against the fake: `bins/svolder/tests/` and

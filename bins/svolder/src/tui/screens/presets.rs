@@ -29,8 +29,8 @@ use super::devices::boxed;
 
 /// The keys that act on the list as a whole, and on the focused preset whatever it is.
 const LIST_KEYS: [(&str, &str); 3] = [("Enter", "loads"), ("n", "saves new"), ("Esc", "closes")];
-/// The keys that bring a preset in or put it on the computer.
-const ADD_KEYS: [(&str, &str); 3] = [("a", "AutoEq"), ("i", "from file"), ("h", "computer")];
+/// The keys that bring a preset in.
+const ADD_KEYS: [(&str, &str); 2] = [("a", "AutoEq"), ("i", "from file")];
 /// The keys that change the focused preset, which a built-in refuses.
 const EDIT_KEYS: [(&str, &str); 3] = [("u", "updates"), ("c", "renames"), ("x", "deletes")];
 /// Why the keys that change a preset are dimmed while a built-in is focused.
@@ -139,10 +139,8 @@ impl Tags {
                 .filter(|_| !eq.bands.is_empty())
                 .map(|source| format!("fit {:.1} dB", preset::fit_for(eq, source).rms_db)),
             computer: app
-                .presets
-                .computer
-                .as_deref()
-                .is_some_and(|name| preset::same_name(name, &entry.preset.name)),
+                .computer_preset()
+                .is_some_and(|name| preset::same_name(&name, &entry.preset.name)),
         }
     }
 }

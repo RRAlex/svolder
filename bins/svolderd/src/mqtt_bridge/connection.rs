@@ -69,6 +69,7 @@ impl BridgeTask {
             self.client
                 .retain(topics::device_availability(base, unit), payload::OFFLINE);
         }
+        self.computer_farewell();
         let address = address(self.host(), self.config.port);
         self.client.stop(STOP_WITHIN).await;
         log::info(&format!("mqtt: disconnected from {address}"));

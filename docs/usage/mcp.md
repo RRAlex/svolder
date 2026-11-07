@@ -69,8 +69,9 @@ config error.
 
 ### Writes and the volume rule
 
-With `writes = false` the server offers four read tools and nothing can change. `writes = true` adds
-four more: three that change a device, and `identify`, which only asks the unit to show itself. The
+With `writes = false` the server offers five read tools (`get_host` reads the computer) and nothing
+can change. `writes = true` adds seven more: three that change a device, `identify`, which only asks
+the unit to show itself, and three for the computer's volume and EQ. The
 rule below stands between a model and your amplifier. Set `max_volume_db` too:
 `svolder doctor` warns when writes are on without it.
 
@@ -207,6 +208,24 @@ when one device is configured. Results are structured JSON.
   that is not connected is an error in the daemon's words, with the wait to its next attempt where
   there is one. It changes nothing on the device, and the tool is listed only with `writes = true`
   like the others, so a client with an older list that calls it is refused naming the setting.
+- `get_host` — no arguments; answers `{"volume": {percent, muted, sink} | null, "eq": {on, preset,
+  preamp_db, points: [{type, frequency_hz, gain_db, q}]} | null, "player": {title, artist, album,
+  status} | null}`. Each is read on its own: `volume` and `player` are null while there is nothing to
+  read, and `eq` is null with `unavailable` saying why when the computer EQ cannot be used. An EQ whose state the daemon could not verify carries `"unverified":
+  true`: `on` is then only what the saved state says.
+- `set_host_volume` (writes) — `percent`, a whole number from 0 to 100, optional `confirm`. Above
+  100 is refused whatever is answered. The rise rule is the one above, on the computer's own scale
+  (the cube of the percent, `60 * log10(percent / 100)` dB): a rise of more than 6 dB over the lowest
+  level of the last minute asks, and lowering never does. A volume not read yet counts as 1 %, so a
+  rise from it asks. `max_volume_db` belongs to the devices and does not cover the computer, whose
+  cap is 100 %.
+- `host_mute` (writes) — `muted`, optional `confirm`; mutes or unmutes the computer's output.
+  Unmuting always asks, as the device's `mute` does; muting never does.
+- `set_host_eq` (writes) — exactly one of `preset` (a name from `list_presets`) and `off: true`,
+  optional `device`, optional `confirm`. A built-in preset is shaped to a device's tone control, so
+  it needs one: the named device, or the only one. A preset a connected device plays too asks, since
+  the correction would play twice; repeat with `"confirm": true` once the user agreed, which
+  flattens that device first.
 
 ## mcp
 

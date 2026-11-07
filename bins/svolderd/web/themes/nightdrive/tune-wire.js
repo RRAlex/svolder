@@ -10,18 +10,32 @@
 // Every write goes through `core.actions`; a viewer who may not write taps the mountains and the
 // core says why nothing happens.
 //
+// With the computer as the side shown (core.computer) the bubbles are its EQ's points, each on the curve the
+// points sum to, whatever their type: a press grabs one and a drag moves its frequency and gain, the wheel and
+// two fingers set its Q, and a tap on an empty spot adds a PK there. They are written as live updates through
+// `core.actions.computer`, the last value at the release; a flip of the side ends a drag or a wheel burst and
+// writes only that last value. The lit point has the bell's diamonds, a drag of one setting its Q.
+//
 // While a drag is on, and until its writes are answered, the curve and the bubbles are drawn from
 // the tone as it stood at the press with the values the drag asks for, so a reading that comes
 // meanwhile never moves a bubble under the hand; it is drawn from the model afterwards.
 
+import { labelOf as pointLabel } from './points.js';
 import {
-  bandsOf, bubblesOf, createMorph, curveAt, diamondsOf, gMaxOf, heldTone, inBand, labelOf,
-  mountainMap, qAtDiamond, tunable,
+  bandsOf, bubblesOf, computerTone, createMorph, curveAt, diamondsOf, gMaxOf, heldTone, inBand, labelOf,
+  mountainMap, qAtDiamond, tunable, tunableComputer,
 } from './tune.js';
 
 /** How near a bubble the pointer lights its bell, CSS px: farther than a press grabs (REACH 12) so
  * a hand drifting toward a diamond keeps the bell, which then stays lit until the curve goes. */
 const HOVER_PX = 24;
+
+/** A press that moves less than this (CSS px) and lets go within this long (ms) is a tap. */
+const TAP_PX = 6;
+const TAP_MS = 600;
+
+/** A burst of wheel notches ends, and its last Q is written as the final value, after this long (ms). */
+const WHEEL_END_MS = 300;
 
 /**
  * Wire the mountains of the scene in `root` (its `.nd-scene`) to `core` until `signal` aborts.
@@ -37,7 +51,7 @@ export function wireTune({
   const scene = root.querySelector('.nd-scene');
   const store = core.model;
   const {
-    BAND_PARAM, REACH, bandSteps, bandWriter, createDrag, grab, labelAt, wheelSteps,
+    BAND_PARAM, REACH, bandSteps, bandWriter, computerSteps, createDrag, grab, labelAt, pointWriter, startOf, wheelSteps,
   } = core.drag;
   const morph = createMorph();
   const now = () => globalThis.performance.now();
@@ -56,11 +70,35 @@ export function wireTune({
   let lit = null;
   let rest = 0;
   let label = null;
+  /** The computer's drags begun and not finished (their last writes are waited for), a press that may turn into
+   * a tap `{ id, at, time }`, and the wheel's burst on a point `{ n, idx, timer, untrack }`. */
+  const points = new Set();
+  let tap = null;
+  let wheel = null;
 
   const steps = () => store.device()?.tone_steps;
+  /** Whether the computer is the side shown: the points are its EQ's. */
+  const onComputer = () => core.computer.side() === 'computer';
+
+  /** The computer's tone as the mountains draw it, worked out again only after the model or a held value changed. */
+  let computerCache = null;
+  /** A drag of one of the computer's points that began with the EQ off has moved it: the daemon turns the EQ on
+   * with the point, so the curve stops being dim from the first move, not at the next reading of the model. */
+  let turnedOn = false;
+  const forget = () => {
+    computerCache = null;
+    if (!active) turnedOn = false;
+  };
+  for (const event of ['model', 'device', 'host', 'fleet']) live.onReading(event, forget);
+  const offComputer = core.computer.on(forget);
+  signal.addEventListener('abort', offComputer, { once: true });
+  const computerNow = () => {
+    computerCache ??= computerTone(core.computer.toneOf(store.page()));
+    return computerCache;
+  };
 
   /** The map of the scene as it is now (the scene may have been resized since the press). */
-  const mapNow = () => mountainMap({ ...geometry(), gMax: gMaxOf(steps()) });
+  const mapNow = () => mountainMap({ ...geometry(), gMax: gMaxOf(onComputer() ? null : steps()) });
   const lazyMap = {
     hzAt: (x) => mapNow().hzAt(x),
     dbAt: (y) => mapNow().dbAt(y),
@@ -70,8 +108,24 @@ export function wireTune({
   /** The curve of `tone` as `x => y` in CSS px, null while it has none. */
   const curveOf = (tone) => (tone?.response?.length ? curveAt(tone.response, mapNow(), geometry().w) : null);
 
-  /** The tone the scene draws: the model's, or the held one while a drag has not settled. */
-  const toneNow = () => (snap ? heldTone(snap.tone, snap.steps, heldRaws) : store.part('tone'));
+  /** The tone the scene draws: the computer's, or the device's (the model's, or the held one while a drag has not
+   * settled). */
+  const toneNow = () => {
+    if (onComputer()) return computerNow();
+    return snap ? heldTone(snap.tone, snap.steps, heldRaws) : store.part('tone');
+  };
+
+  /** Whether the curve is drawn dim: the computer's EQ is off, unless a drag of a point has turned it on. */
+  const ghosted = (tone) => onComputer() && tone?.mode === 'off' && !turnedOn;
+
+  /** Whether the side shown has a tone with points to turn the mountains into. */
+  const toned = () => (onComputer() ? Boolean(computerNow()?.markers.length) : Boolean(store.part('tone')?.markers?.length));
+
+  /** Tell a viewer who may not write, through the core: the mode asked is the one it is in. */
+  const turnAway = () => {
+    if (onComputer()) core.actions.computer.setMode(computerNow()?.mode === 'eq' ? 'eq' : 'off');
+    else core.actions.setMode(store.part('tone')?.mode);
+  };
 
   /** The viewer may not write (a guest, a page whose writes are off): the core says why. */
   const mayNot = () => {
@@ -82,7 +136,8 @@ export function wireTune({
   /** Whether the mountains may turn into the curve now: tunable, the stream open, no card. */
   function allowed() {
     const page = store.page();
-    return tunable(page) && store.state() === 'open' && !(page.device?.card ?? page.card);
+    const tunes = onComputer() ? tunableComputer(page, computerNow()) : tunable(page);
+    return tunes && store.state() === 'open' && !(page.device?.card ?? page.card);
   }
 
   /** The scene's `data-tune`, `on` while the target is the curve. */
@@ -103,7 +158,7 @@ export function wireTune({
   };
 
   // ---- the label above the held bubble ----
-  function say(band, raws) {
+  function say(band, words) {
     const place = geometry();
     const spot = bubblesOf(toneNow(), mapNow(), place.w).find((b) => b.band === band);
     if (!spot) return;
@@ -113,7 +168,7 @@ export function wireTune({
       label.setAttribute('aria-hidden', 'true');
       scene.append(label);
     }
-    label.textContent = labelOf(snap.steps, band, raws);
+    label.textContent = words;
     const size = { width: label.offsetWidth, height: label.offsetHeight };
     const where = labelAt(spot, { width: place.w, height: place.h }, size);
     label.style.left = `${where.x.toFixed(1)}px`;
@@ -126,12 +181,22 @@ export function wireTune({
   }
 
   // ---- a drag ----
-  function begin(band, { gesture = 'move', press, pointer, side = null }) {
+  function begin(band, {
+    gesture = 'move', press, pointer, side = null,
+  }) {
+    if (onComputer()) {
+      beginPoint(band, {
+        gesture, press, pointer, side,
+      });
+      return;
+    }
     const tone = store.part('tone');
     const device = store.shown();
     const read = tone.readings.bands[band - 1];
     const raws = heldRaws.get(band) ?? { f: read[0], g: read[1], q: read[2] };
-    const entry = { band, drag: null, pointer, side };
+    const entry = {
+      band, drag: null, pointer, side, untrack: () => {},
+    };
     if (pending.length === 0) snap = { tone: structuredClone(tone), steps: structuredClone(steps()) };
     const place = geometry();
     entry.drag = createDrag({
@@ -152,12 +217,13 @@ export function wireTune({
       on: {
         held: (held) => {
           heldRaws.set(band, held);
-          say(band, held);
+          say(band, labelOf(snap.steps, band, held));
         },
         answer: () => {},
         toast: (words) => core.frame.toast(words),
         ended: () => {
           if (active === entry) active = null;
+          entry.untrack();
           try {
             if (pointer !== null) scene.releasePointerCapture(pointer);
           } catch {
@@ -186,6 +252,8 @@ export function wireTune({
       const index = qAtDiamond(tables.q, shape, side, lazyMap.hzAt(pointer.x));
       entry.drag.spread(tables.q[raws.q] / tables.q[index]);
     };
+    // a flip of the side lets go of the drag: what it asked of the device stays
+    entry.untrack = core.computer.track({ cancel: (why) => entry.drag.cancel(why) });
     pending.push(entry);
     active = entry;
     lit = band;
@@ -198,7 +266,125 @@ export function wireTune({
     }
   }
 
+  // ---- a drag of one of the computer's points ----
+  /** Begin the gesture `gesture` of point `n` of the computer's EQ: its values go out as live updates and, once the
+   * drag has ended and every one is answered, the last as the final value. A flip of the side ends it. */
+  function beginPoint(n, {
+    gesture = 'move', press, pointer, side = null,
+  }) {
+    const point = computerNow()?.points[n - 1];
+    if (!point) return;
+    const tables = computerSteps();
+    const place = geometry();
+    const entry = {
+      band: n, drag: null, pointer, side, write: pointWriter({ actions: core.actions, n }), wrote: false, untrack: () => {},
+    };
+    entry.drag = createDrag({
+      band: n,
+      gesture,
+      start: startOf(tables, point),
+      press,
+      plot: { width: place.w, height: place.h },
+      steps: tables,
+      map: lazyMap,
+      write: entry.write,
+      on: {
+        held: (raws) => {
+          if (!entry.wrote && computerNow()?.mode === 'off') turnedOn = true;
+          entry.wrote = true;
+          say(n, pointLabel({ f: tables.f[raws.f], g: tables.g[raws.g], q: tables.q[raws.q] }));
+        },
+        answer: () => {},
+        toast: (words) => core.frame.toast(words),
+        ended: async () => {
+          if (active === entry) active = null;
+          try {
+            if (pointer !== null) scene.releasePointerCapture(pointer);
+          } catch {
+            // already let go
+          }
+          unsay();
+          morph.held(false, now());
+          mark();
+          await entry.drag.settled;
+          if (entry.wrote) await entry.write.release();
+          if (!active) turnedOn = false;
+          entry.untrack();
+          points.delete(entry);
+        },
+      },
+    });
+    entry.untrack = core.computer.track({ cancel: (why) => entry.drag.cancel(why) });
+    // a diamond's drag asks the Q of the step whose half point is under the pointer, as the device's does
+    const shape = parsedPoint(n);
+    const q0 = startOf(tables, point).q;
+    entry.move = side === null ? (spot) => entry.drag.move(spot) : (spot) => {
+      const index = qAtDiamond(tables.q, shape, side, lazyMap.hzAt(spot.x));
+      entry.drag.spread(tables.q[q0] / tables.q[index]);
+    };
+    points.add(entry);
+    active = entry;
+    lit = n;
+    morph.held(true, now());
+    mark();
+    try {
+      scene.setPointerCapture(pointer);
+    } catch {
+      // without capture the drag still ends on the cancel
+    }
+  }
+
+  /** Point `n` of the computer's EQ as `{ band, f0, gainDb, q, type }`, null when it is not there. */
+  function parsedPoint(n) {
+    const p = computerNow()?.points[n - 1];
+    return p ? {
+      band: n, f0: p.f, gainDb: p.g, q: p.q, type: p.type,
+    } : null;
+  }
+
+  /** The wheel's burst on point `n` ends: the Q it reached is written as the final value. */
+  function endWheel() {
+    const w = wheel;
+    wheel = null;
+    if (!w) return;
+    clearTimeout(w.timer);
+    w.untrack();
+    core.actions.computer.setPoint(w.n, {}, { done: true });
+  }
+
+  /** `steps` notches of the wheel over point `n`: its Q a step further (up narrows), as live updates. */
+  function wheelPoint(n, notches) {
+    const point = computerNow()?.points[n - 1];
+    if (!point) return;
+    const tables = computerSteps();
+    if (!wheel || wheel.n !== n) {
+      endWheel();
+      wheel = {
+        n, idx: startOf(tables, point).q, timer: 0, untrack: core.computer.track({ end: endWheel }),
+      };
+    }
+    clearTimeout(wheel.timer);
+    wheel.timer = setTimeout(endWheel, WHEEL_END_MS);
+    const idx = Math.min(tables.q.length - 1, Math.max(0, wheel.idx + notches));
+    if (idx === wheel.idx) return;
+    wheel.idx = idx;
+    core.actions.computer.setPoint(n, { q: tables.q[idx] }, { done: false });
+  }
+
+  /** A press let go of where it began, soon enough, on an empty spot: a PK is added there. */
+  function endTap(event) {
+    const t = tap;
+    tap = null;
+    if (!t || event.pointerId !== t.id || now() - t.time > TAP_MS) return;
+    const spot = at(event);
+    if (Math.hypot(spot.x - t.at.x, spot.y - t.at.y) > TAP_PX || !onComputer() || !allowed()) return;
+    const map = mapNow();
+    const point = core.computer.addAt(map.hzAt(t.at.x), map.dbAt(t.at.y));
+    if (point) core.actions.computer.addPoint(point);
+  }
+
   scene.addEventListener('pointerdown', (event) => {
+    tap = null;
     if (active || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     const press = at(event);
     const place = geometry();
@@ -207,9 +393,7 @@ export function wireTune({
     mark();
     if (!allowed()) {
       // the core turns a viewer who may not write away, with its words
-      if (mayNot() && store.part('tone')?.markers?.length) {
-        core.actions.setMode(store.part('tone')?.mode);
-      }
+      if (mayNot() && toned()) turnAway();
       return;
     }
     morph.at(now());
@@ -226,7 +410,7 @@ export function wireTune({
     // taken, a bubble before a diamond at the same distance
     const bubbles = bubblesOf(toneNow(), mapNow(), place.w);
     const bell = litParsed();
-    const qRead = Number.isInteger(store.part('tone').readings?.bands?.[bell?.band - 1]?.[2]);
+    const qRead = onComputer() || Number.isInteger(store.part('tone')?.readings?.bands?.[bell?.band - 1]?.[2]);
     const diamonds = bell && qRead ? diamondsOf(bell, mapNow(), place.w, curveOf(toneNow())) : [];
     const away = (p) => Math.hypot(p.x - press.x, p.y - press.y);
     const bubbleBand = grab(bubbles, press, { reach });
@@ -242,7 +426,13 @@ export function wireTune({
     const band = bubbleBand;
     if (band === null) {
       if (touch) morph.touch(now());
+      if (onComputer()) tap = { id: event.pointerId, at: press, time: now() };
       mark();
+      return;
+    }
+    if (onComputer()) {
+      event.preventDefault();
+      beginPoint(band, { press, pointer: event.pointerId });
       return;
     }
     const read = store.part('tone').readings?.bands?.[band - 1];
@@ -252,6 +442,10 @@ export function wireTune({
   }, { signal });
 
   scene.addEventListener('pointermove', (event) => {
+    if (tap && event.pointerId === tap.id) {
+      const spot = at(event);
+      if (Math.hypot(spot.x - tap.at.x, spot.y - tap.at.y) > TAP_PX) tap = null;
+    }
     if (active) {
       if (event.pointerId === active.pointer) {
         const spot = at(event);
@@ -285,8 +479,15 @@ export function wireTune({
     active.drag.release();
     if (event.pointerType === 'touch') morph.touch(now());
   };
-  scene.addEventListener('pointerup', finish(false), { signal });
-  scene.addEventListener('pointercancel', finish(true), { signal });
+  const lifted = finish(false);
+  scene.addEventListener('pointerup', (event) => {
+    endTap(event);
+    lifted(event);
+  }, { signal });
+  scene.addEventListener('pointercancel', (event) => {
+    tap = null;
+    finish(true)(event);
+  }, { signal });
   scene.addEventListener('lostpointercapture', finish(true), { signal });
 
   // A pinch: two fingers on the mountains set the Q of the band nearest their middle, apart to
@@ -296,7 +497,9 @@ export function wireTune({
   const spacing = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   const touchOf = (list, id) => [...list].find((t) => t.identifier === id) ?? null;
   scene.addEventListener('touchstart', (event) => {
-    if (event.touches.length !== 2 || !store.part('tone')?.readings) return;
+    // a second finger makes it no tap (the touch events follow the first finger's pointer events)
+    if (event.touches.length > 1) tap = null;
+    if (event.touches.length !== 2 || !(onComputer() ? computerNow() : store.part('tone')?.readings)) return;
     const [a, b] = event.touches;
     if (!scene.contains(a.target) || !scene.contains(b.target)) return;
     if (fingers) {
@@ -311,9 +514,7 @@ export function wireTune({
     if (!inBand(place, middle.y)) return;
     mark();
     if (!allowed()) {
-      if (mayNot() && store.part('tone')?.markers?.length) {
-        core.actions.setMode(store.part('tone')?.mode);
-      }
+      if (mayNot() && toned()) turnAway();
       return;
     }
     const old = active;
@@ -321,6 +522,12 @@ export function wireTune({
       : grab(bubblesOf(toneNow(), mapNow(), place.w), middle, { reach: REACH.touch, wide: true });
     if (band === null) return;
     if (event.cancelable) event.preventDefault();
+    if (onComputer()) {
+      old?.drag.release();
+      beginPoint(band, { gesture: 'pinch', press: { distance: spacing(a, b) }, pointer: null });
+      fingers = { ids: [a.identifier, b.identifier], entry: active };
+      return;
+    }
     const read = store.part('tone').readings.bands[band - 1];
     if (!heldRaws.has(band) && !(read ?? []).every(Number.isInteger)) return;
     // the finger that grabbed the bubble is let go of as a drag, and the two make a pinch of its band
@@ -347,6 +554,7 @@ export function wireTune({
   // The wheel over the mountains steps the Q of the band nearest in x: up narrows the bell. Each
   // notch keeps the curve for the grace. Elsewhere the wheel is the page's.
   scene.addEventListener('wheel', (event) => {
+    if (event.defaultPrevented) return;
     const spot = at(event);
     const place = geometry();
     if (active || !inBand(place, spot.y) || !allowed()) return;
@@ -359,13 +567,18 @@ export function wireTune({
     const got = wheelSteps(rest, event.deltaY, event.deltaMode);
     rest = got.rest;
     if (got.steps === 0) return;
-    core.actions.setBand(band, BAND_PARAM.q, { step: got.steps > 0 ? 1 : -1 }, { device: store.shown() });
+    if (onComputer()) wheelPoint(band, got.steps > 0 ? 1 : -1);
+    else core.actions.setBand(band, BAND_PARAM.q, { step: got.steps > 0 ? 1 : -1 }, { device: store.shown() });
   }, { signal, passive: false });
 
   // Another device is shown: the drag ends where it is and writes nothing more to this one, the
   // curve is drawn from the device now shown.
   live.onSwitch(() => {
     const ending = pending.splice(0);
+    for (const entry of points) entry.drag.cancel('switch');
+    endWheel();
+    tap = null;
+    turnedOn = false;
     heldRaws.clear();
     snap = null;
     active = null;
@@ -390,15 +603,23 @@ export function wireTune({
   live.onReading('state', (state) => {
     if (state !== 'lost') return;
     for (const entry of pending) entry.drag.cancel('lost');
+    for (const entry of points) entry.drag.cancel('lost');
   });
 
-  signal.addEventListener('abort', unsay, { once: true });
+  signal.addEventListener('abort', () => {
+    unsay();
+    endWheel();
+  }, { once: true });
 
   /** The band whose bell is lit now: the one held, else the last hovered. */
   const litBand = () => active?.band ?? lit;
 
   /** The lit band as `{ band, f0, gainDb, q }`, null when none is lit or it is not read in full. */
   function litParsed() {
+    if (onComputer()) {
+      const lit = litBand();
+      return lit === null ? null : parsedPoint(lit);
+    }
     const band = litBand();
     const parsed = band === null ? null : bandsOf(toneNow(), snap?.steps ?? steps(), heldRaws)?.[band - 1];
     return parsed ? { band, ...parsed } : null;
@@ -434,6 +655,7 @@ export function wireTune({
       const map = mapNow();
       return {
         m: morph.m,
+        ghost: ghosted(tone),
         curve: curveOf(tone),
         bubbles: bubblesOf(tone, map, place.w),
         held: active?.band ?? null,
@@ -459,9 +681,11 @@ export function wireTune({
       return {
         w: place.w,
         h: place.h,
+        v: place.v,
         H: place.H,
-        gMax: gMaxOf(steps()),
+        gMax: gMaxOf(onComputer() ? null : steps()),
         m: morph.m,
+        ghost: ghosted(tone),
         target: morph.target,
         allowed: allowed(),
         held: active?.band ?? null,

@@ -24,10 +24,22 @@ impl BridgeTask {
     /// Mark one device changed, and have it published within [`STATE_EVERY`] of the last
     /// publish.
     pub(super) fn changed(&mut self, unit: &str) {
+        if unit == svolder_mqtt::computer::UNIT {
+            if let Some(computer) = self.computer.as_mut() {
+                computer.dirty = true;
+                self.schedule_flush();
+            }
+            return;
+        }
         let Some(published) = self.devices.get_mut(unit) else {
             return;
         };
         published.dirty = true;
+        self.schedule_flush();
+    }
+
+    /// Have the flush run within [`STATE_EVERY`] of the last one.
+    fn schedule_flush(&mut self) {
         let now = Instant::now();
         let due = self
             .last_flush
@@ -53,6 +65,7 @@ impl BridgeTask {
                 self.flush_at = Some(self.flush_at.map_or(owed, |at| at.min(owed)));
             }
         }
+        self.publish_computer();
     }
 
     /// Publish what changed for one device: its availability, its discovery configs, its

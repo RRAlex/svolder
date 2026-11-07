@@ -510,6 +510,16 @@ async fn a_guest_is_refused_on_every_write_route() {
         ("/api/v1/hops/edit", r#"{"id":"Amp","note":"x"}"#),
         ("/api/v1/hops/remove", r#"{"id":"Amp"}"#),
         ("/api/v1/hops/move", r#"{"id":"Amp","to":0}"#),
+        ("/api/v1/host/volume", r#"{"pct":50}"#),
+        ("/api/v1/host/mute", r#"{"muted":true}"#),
+        ("/api/v1/host/eq", r#"{"on":true}"#),
+        ("/api/v1/host/eq/preset", r#"{"name":"Warm"}"#),
+        (
+            "/api/v1/host/eq/points",
+            r#"{"type":"PK","f":1000,"g":3,"q":1}"#,
+        ),
+        ("/api/v1/host/eq/points/1", r#"{"g":2,"done":true}"#),
+        ("/api/v1/host/eq/points/1/remove", "{}"),
     ] {
         let reply = call(&guests, post(path, body)).await;
         assert_eq!(reply.status, Code::UNAUTHORIZED, "{path}: {}", reply.body);

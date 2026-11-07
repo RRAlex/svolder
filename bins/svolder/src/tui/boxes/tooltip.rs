@@ -21,7 +21,7 @@ use svolder_host::Button;
 use svolder_profiles::{Control, ControlKind};
 
 use crate::tui::app::{App, Pane, Screen};
-use crate::tui::host::{self, HostRow};
+use crate::tui::host::HostRow;
 use crate::tui::keys;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::screens::telemetry;
@@ -252,6 +252,16 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
             &format!("Band {}", band + 1),
             "double-click a value to edit it",
         ]),
+        Hit::Side(_) => lines(&[
+            "Side",
+            "a click or C switches between the device and the computer",
+        ]),
+        Hit::PointField(point, 0) => {
+            lines(&[&format!("Point {}", point + 1), "a click cycles its type"])
+        }
+        Hit::PointField(point, _) | Hit::Point(point) => {
+            lines(&[&format!("Point {}", point + 1), "the wheel steps the gain"])
+        }
         Hit::Curve => lines(&["Response curve", "drag · right-drag widens · wheel sets Q"]),
         Hit::Transport(button) => {
             let name = Button::ALL.get(button)?.method();
@@ -313,18 +323,21 @@ fn key_word(code: KeyCode, app: &App) -> Option<Vec<String>> {
 fn control_row(app: &App, row: usize) -> Option<Vec<String>> {
     let rows = app.rows();
     if let Some(row) = rows.get(row) {
+        if app.is_computer_volume(row.control) {
+            return lines(&[
+                &row.control.label,
+                "←→ or the wheel steps it 1 %",
+                "Enter mutes it",
+            ]);
+        }
         return control(row.control);
     }
     if !app.host_shown() {
         return None;
     }
-    match host::ROWS.get(row - rows.len())? {
-        HostRow::Volume => lines(&[host::VOLUME, "←→ or the wheel steps it 2 %"]),
+    match app.host_rows().get(row - rows.len())? {
+        HostRow::Volume => lines(&["Volume", "←→ or the wheel steps it 1 % · Enter mutes"]),
         HostRow::Transport => None,
-        HostRow::HostEq => lines(&[
-            host::HOST_EQ,
-            "Enter or Space puts the computer EQ on or off",
-        ]),
     }
 }
 

@@ -3,7 +3,7 @@
 """Night drive's stills (`make nightdrive-shots`), taken in Chromium on the fake device with the fake
 capture's music: a desktop (1280 by 800) at rest, with a bubble held (its bell and its diamonds lit), with
 the sheet open, with the device out of reach and with no capture, and a phone (390 by 844, touch) upright
-and sideways (844 by 390). Seven pictures in `target/web-shots/nightdrive/`, their paths printed. No check:
+and sideways (844 by 390), each on the device's side and on the computer's. Nine pictures in `target/web-shots/nightdrive/`, their paths printed. No check:
 the pictures are for looking. Daemons are throwaway fakes under target/web-checks; nothing here touches the
 installed binaries or ports 8737/8738. Usage: python3 nightdrive_shots.py"""
 import os
@@ -99,6 +99,10 @@ def phone(size, name):
             base.reset_bands(d, over={3: (6, 1)})
             start(b, d)
             shoot(b, name)
+            # the computer side: the switch's second key, the figure in %, the tone's own EQ line
+            b.page("__core.computer.flip('computer')")
+            time.sleep(1.5)
+            shoot(b, f'{name}-computer')
         finally:
             d.stop()
     finally:
@@ -110,4 +114,4 @@ desktop()
 phone((390, 844), 'phone-portrait')
 phone((844, 390), 'phone-landscape')
 print('\n'.join(written))
-sys.exit(0 if len(written) == 7 else 1)
+sys.exit(0 if len(written) == 9 else 1)

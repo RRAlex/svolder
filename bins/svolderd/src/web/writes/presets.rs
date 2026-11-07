@@ -52,9 +52,12 @@ fn refused_name(why: impl std::fmt::Display) -> Response {
 #[derive(Deserialize)]
 struct SaveWrite {
     name: String,
+    /// `"computer"` saves the computer EQ's points instead of the device's bands.
+    from: Option<String>,
 }
 
-/// Save the device's bands, mode and loudness as a new preset.
+/// Save the device's bands, mode and loudness as a new preset, or, with `"from": "computer"`,
+/// every point of the computer EQ (as the core's imported preset, [`preset::from_computer`]).
 async fn save(
     State(web): State<Web>,
     headers: HeaderMap,
@@ -69,9 +72,15 @@ async fn save(
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    let (_, eq) = match eq_of(&device) {
-        Ok(found) => found,
-        Err(refused) => return refused,
+    let from_computer = match asked.from.as_deref() {
+        None | Some("device") => false,
+        Some("computer") => true,
+        Some(other) => {
+            return error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("cannot save from {other:?}; use device or computer"),
+            );
+        }
     };
     let (path, config) = match config_file(&web, "presets") {
         Ok(found) => found,
@@ -81,6 +90,20 @@ async fn save(
     let wanted = match preset::new_name(&asked.name, names, None) {
         Ok(wanted) => wanted.to_string(),
         Err(why) => return refused_name(why),
+    };
+    if from_computer {
+        let op = svolder_ipc::HostEqOp::SaveAs {
+            name: wanted.clone(),
+        };
+        return match web.fleet.request(svolder_ipc::Request::HostEq { op }).await {
+            svolder_ipc::Response::Ack => answer(&web, &name, &wanted),
+            svolder_ipc::Response::Error { message, .. } => error(StatusCode::CONFLICT, message),
+            _ => error(StatusCode::BAD_GATEWAY, "the daemon gave no answer"),
+        };
+    }
+    let (_, eq) = match eq_of(&device) {
+        Ok(found) => found,
+        Err(refused) => return refused,
     };
     let Some(saved) = preset::from_readings(&eq, |id| raw_of(&device, id), wanted.clone()) else {
         return error(

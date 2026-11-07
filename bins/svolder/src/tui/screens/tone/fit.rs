@@ -169,5 +169,44 @@ pub(super) fn draw_side(
     frame.render_widget(Paragraph::new(lines), text);
 }
 
+/// The Correction pane on the computer: the preset the points came from and the preamp, and that
+/// nothing is fitted there.
+pub(super) fn draw_computer_side(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let block = Block::bordered()
+        .border_style(device::contour(
+            app,
+            theme,
+            false,
+            device::border_style(app, theme),
+        ))
+        .title(Span::styled(SIDE_TITLE, device::pane_title(theme, false)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let width = usize::from(inner.width).saturating_sub(2);
+    let mut lines = Vec::new();
+    if let Some(eq) = app.computer_eq() {
+        let name = eq.preset.clone().unwrap_or_else(|| "custom".to_string());
+        lines.push(Line::from(Span::styled(
+            widgets::text::cut_to_cells(&name, width),
+            theme.style(Role::Text),
+        )));
+        let preamp = super::points::preamp_text(eq.preamp_db);
+        lines.push(Line::raw(widgets::text::cut_to_cells(&preamp, width)));
+        lines.push(Line::default());
+    }
+    let dim = theme.style(Role::Dim);
+    lines.extend(
+        widgets::text::wrap(super::points::NOTHING_FITTED, width)
+            .into_iter()
+            .map(|line| Line::from(Span::styled(line, dim))),
+    );
+    let text = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(2),
+        ..inner
+    };
+    frame.render_widget(Paragraph::new(lines), text);
+}
+
 #[cfg(test)]
 mod tests;

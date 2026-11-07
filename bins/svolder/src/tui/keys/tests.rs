@@ -129,7 +129,7 @@ fn the_toggle_and_volume_hints_are_dimmed_on_a_device_without_those_controls() {
 }
 
 /// `p` is lit where there is a list to open — a tone control's, or the device's own — and dimmed
-/// where there is neither; the help overlay promises `a i h` only inside the tone control's list.
+/// where there is neither; the help overlay promises `a i` only inside the tone control's list.
 #[test]
 fn the_p_hint_is_lit_on_a_loki_max_and_dimmed_on_a_device_with_neither() {
     let hint = hints_for(Screen::Device)
@@ -148,7 +148,7 @@ fn the_p_hint_is_lit_on_a_loki_max_and_dimmed_on_a_device_with_neither() {
     assert_eq!(hint.long_in(Scene::of(&loki)), "presets");
     assert_eq!(
         hint.long_in(Scene::of(&app_with_profile("gungnir2-v2"))),
-        "presets (a i h inside)"
+        "presets (a i inside)"
     );
 
     let mut lyr = lyr;
@@ -182,6 +182,15 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     masked: "••••••3fQ".into(),
                     source: svolder_ipc::token::TokenSource::Generated("/x".into()),
                 };
+            }
+            if matches!(hint.when, When::HasComputer | When::OnComputer) {
+                app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+                    true,
+                    &[("PK", 1000.0, 0.0, 1.0), ("LSC", 100.0, 1.0, 1.0)],
+                ));
+                if hint.when == When::OnComputer {
+                    app.flip_side();
+                }
             }
             let before = app.snapshot_for_test();
             let intents = app.key(KeyEvent::from(hint.code));

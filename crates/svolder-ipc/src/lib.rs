@@ -37,16 +37,16 @@ pub use config::{
 };
 pub use error::{ConfigError, IpcError};
 pub use host::{
-    CaptureKind, CaptureView, DacFacts, FrameView, Hop, HostView, PathLine, PlayingView, Verdict,
-    path_line, sink_is_dac,
+    CaptureKind, CaptureView, DacFacts, FrameView, Hop, HostView, HostVolume, PathLine,
+    PlayingView, Verdict, path_line, sink_is_dac,
 };
 pub use passphrase_note::{PassphraseNote, passphrase_verdict};
 pub use socket::client::{Client, is_running};
 pub use socket::protocol::{
-    DeviceInfo, Event, LinkChange, MAX_SCAN_WINDOW, McpStatus, MqttStatus, NO_DEVICES_CONFIGURED,
-    NOT_CONNECTED, NOT_FOUND_YET, READINGS_SPAN_SECS, RecallOut, Reply, Request, RequestLine,
-    Response, ScanEntry, SeriesOut, TokenInfo, TokenKind, ValueObject, WEB_OFF, WebStatus,
-    not_found_yet, raw_json, to_line,
+    CODE_COMPUTER_UNAVAILABLE, DeviceInfo, Event, HostEqOp, LinkChange, MAX_SCAN_WINDOW, McpStatus,
+    MqttStatus, NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, READINGS_SPAN_SECS, RecallOut,
+    Reply, Request, RequestLine, Response, ScanEntry, SeriesOut, TokenInfo, TokenKind, ValueObject,
+    WEB_OFF, WebStatus, not_found_yet, raw_json, to_line,
 };
 pub use socket::server::{Bound, Handler, bind, listen_fds, serve, serve_bound, serve_on};
 pub use socket::signal::{

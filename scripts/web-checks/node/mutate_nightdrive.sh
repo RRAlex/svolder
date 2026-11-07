@@ -48,6 +48,19 @@ the near edge's lift does not fade|draw/road.js|const fade = GY[k] <= geo.h ? 1 
 the wet road's slices sway each by their own phase|draw/mood.js|const wob = sway * w|const wob = Math.sin(t * 1.6 + k * 0.8) * w
 the fade waits a minute|hud-wire.js|FADE_AFTER_S = 15;|FADE_AFTER_S = 60;
 the ridge is smoothed over 0.6 of a band|ridge.js|sigma: 0.87,|sigma: 0.6,
+a tap adds below half a morph|tune-wire.js|if (morph.m < 0.5) {|if (morph.m < -1) {
+the computer's EQ off is not dimmed|tune-wire.js|const ghosted = (tone) => onComputer() && tone?.mode === 'off' && !turnedOn;|const ghosted = () => false;
+a host event leaves the cached computer tone|tune-wire.js|for (const event of ['model', 'device', 'host', 'fleet']) live.onReading(event, forget);|
+a drag with the EQ off keeps the dim|tune-wire.js|if (!entry.wrote && computerNow()?.mode === 'off') turnedOn = true;|
+a probe does not lift the cap|budget.js|if (liftCap && capped|if (false && capped
+a probe misses slow draws|budget.js|recent.length >= BUDGET.probeDraws &&|false &&
+a probe misses seldom draws|budget.js|const seldom = inSpan <|const seldom = false && inSpan <
+the kept tier is ignored|budget.js|let step = start?.step ?? 0;|let step = 0;
+the kept cap is ignored|budget.js|let capped = start ? Boolean(start.capped) : coarse;|let capped = coarse;
+the touch band is taller than the curve window|tune.js|const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 26 };|const BAND = { up: 0.32, down: 0.1, margin: 26 };
+the touch band has no margin|tune.js|const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 26 };|const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 0 };
+a gain beyond the window is drawn beyond it|tune.js|base - (Math.max(-gMax, Math.min(gMax, db)) * span) / gMax|base - (db * span) / gMax
+the lone point loses its remove|draw/bands.js|  const remove = button('point-remove'|  const remove = n > 1 && button('point-remove'
 LIST
 total=${#names[@]}
 # the copy itself must pass, or a failure below proves nothing

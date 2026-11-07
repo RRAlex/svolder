@@ -31,6 +31,10 @@ pub struct ToneEdit {
     pub band: usize,
     /// Which row of the device screen's Tone pane the keys act on.
     pub row: ToneRow,
+    /// The focused point of the computer's table, 0-based.
+    pub point: usize,
+    /// The line the computer's point is typed into, while it is open.
+    pub point_line: Option<super::PointLine>,
     /// Which half of the tone screen's header the cursor was last on: `Loudness` when set, else
     /// `Mode` (where the header opens). `Tab` reads this to return the cursor to the half it
     /// left rather than always opening on Mode; [`App::move_tone_row`] and a click on either

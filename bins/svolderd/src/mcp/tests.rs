@@ -171,7 +171,8 @@ async fn the_right_token_gets_the_tool_list() {
             "list_devices",
             "get_state",
             "get_link_history",
-            "list_presets"
+            "list_presets",
+            "get_host"
         ],
         "{json}"
     );

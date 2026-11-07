@@ -29,6 +29,7 @@
 //! - [`mod@pointer`]: what the mouse is doing: its drags, its climb, its last press, the tooltip.
 //! - [`readings`]: the readings the app has heard, and the faults standing.
 //! - [`session`]: who the session is talking to and how it stands.
+//! - [`side`]: the device's side or the computer's, and the computer's points.
 //! - [`tone`]: the tone control's keys, on the Tone pane and on the tone-control screen.
 //! - [`tone_state`]: what the tone control is on its way to: steps asked for and not yet answered.
 //!
@@ -38,7 +39,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use svolder_host::eq::HostEqState;
 use svolder_ipc::config::RefreshWeeks;
 use svolder_ipc::{Config, EffectsConfig, TuiConfig};
 use svolder_profiles::Profile;
@@ -72,9 +72,11 @@ mod mascot;
 mod meters;
 mod notices;
 mod overlays;
+mod point_line;
 mod pointer;
 mod readings;
 mod session;
+mod side;
 mod tone;
 mod tone_state;
 
@@ -85,10 +87,16 @@ pub use intent::{ConnChange, EffectSwitch, Intent, TuiChange};
 pub(crate) use meters::{METER_PERIOD, Meters};
 pub(crate) use notices::Notices;
 pub(crate) use overlays::Overlays;
+pub use point_line::PointLine;
 pub(crate) use pointer::Pointer;
 pub use readings::Reading;
 pub(crate) use readings::Readings;
 pub(crate) use session::Session;
+/// What the computer's edit line calls its fields.
+pub(crate) fn point_line_names() -> [(&'static str, &'static str); 3] {
+    point_line::NAMES
+}
+pub use side::Side;
 pub use tone::{LOUDNESS_MAX, ToneRow};
 pub use tone_state::Pending;
 pub(crate) use tone_state::{TargetCache, TargetView, ToneEdit};
@@ -192,6 +200,8 @@ pub(crate) struct Moved {
     pub(crate) tone_row: ToneRow,
     /// The pane with the focus.
     pub(crate) pane: Pane,
+    /// The side shown.
+    pub(crate) side: Side,
     /// Whether a fault's advice is being shown.
     pub(crate) advice: bool,
     /// How many idle advice toasts `a` has posted.
@@ -235,6 +245,8 @@ pub struct App {
     pub screen: Screen,
     /// The focused pane of the device screen.
     pub pane: Pane,
+    /// Whether the volume and the tone control shown are the device's or the computer's.
+    pub side: Side,
     /// The focused row of the focused list.
     pub selected: usize,
     /// The rows the screens not being shown were left on.
@@ -324,6 +336,7 @@ impl App {
             },
             screen: Screen::Device,
             pane: Pane::Controls,
+            side: Side::Dac,
             selected: 0,
             focus_memory: FocusMemory::default(),
             size: DEFAULT_SIZE,
@@ -359,15 +372,13 @@ impl App {
                 autoeq: None,
                 autoeq_weeks: RefreshWeeks::default(),
                 loaded_preset: None,
-                computer: None,
-                computer_off: None,
-                computer_busy: false,
-                computer_flattened: false,
-                host_eq: None,
+                computer_flattened: None,
             },
             tone: ToneEdit {
                 band: 0,
                 row: ToneRow::Band,
+                point: 0,
+                point_line: None,
                 header_loudness: false,
                 mode_before_flat: None,
                 mode_before_loudness: None,
@@ -527,16 +538,6 @@ impl App {
         self.presets.autoeq_weeks = config.autoeq.refresh_weeks;
     }
 
-    /// Take in the computer EQ's saved state as the loop just read it: what the Host EQ row and
-    /// the headers say, and which preset the lists mark as on the computer.
-    pub(crate) fn take_host_eq(&mut self, state: Option<HostEqState>) {
-        self.presets.computer = state
-            .as_ref()
-            .filter(|state| state.on)
-            .map(|state| state.name.clone());
-        self.presets.host_eq = state;
-    }
-
     /// The four animations this app draws itself: each of them on where `effects` switches it
     /// on, the layer as a whole is on, and the terminal can show any of it (`capable`).
     ///
@@ -648,6 +649,7 @@ impl App {
             band: self.tone.band,
             tone_row: self.tone.row,
             pane: self.pane,
+            side: self.side,
             advice: self.notices.show_advice,
             advised: self.notices.advice_presses,
             mouse: self.mouse,

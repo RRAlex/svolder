@@ -26,13 +26,31 @@ export function logFreqs(n) {
   return Array.from({ length: n }, (_, i) => F_MIN * 10 ** (decades * i / (n - 1)));
 }
 
-// One band's peaking biquad, as the device's DSP runs it. A Q that is not above 0 changes nothing.
-function biquad({ f0, gainDb, q }) {
+// One band's biquad, as the device's DSP runs it: a peak, or with `type` `LSC` or `HSC` the
+// cookbook's low or high shelf (its Q the cookbook's). A Q that is not above 0 changes nothing.
+function biquad({ f0, gainDb, q, type }) {
   if (!(q > 0)) return { b: [1, 0, 0], a: [1, 0, 0] };
   const amplitude = 10 ** (gainDb / 40);
   const w0 = 2 * Math.PI * f0 / SAMPLE_RATE_HZ;
-  const alpha = Math.sin(w0) / (2 * q);
   const cos = Math.cos(w0);
+  if (type === 'LSC' || type === 'HSC') {
+    const beta = 2 * Math.sqrt(amplitude) * (Math.sin(w0) / (2 * q));
+    const plus = amplitude + 1;
+    const minus = amplitude - 1;
+    if (type === 'LSC') {
+      return {
+        b: [amplitude * (plus - minus * cos + beta), 2 * amplitude * (minus - plus * cos),
+          amplitude * (plus - minus * cos - beta)],
+        a: [plus + minus * cos + beta, -2 * (minus + plus * cos), plus + minus * cos - beta],
+      };
+    }
+    return {
+      b: [amplitude * (plus + minus * cos + beta), -2 * amplitude * (minus + plus * cos),
+        amplitude * (plus + minus * cos - beta)],
+      a: [plus - minus * cos + beta, 2 * (minus - plus * cos), plus - minus * cos - beta],
+    };
+  }
+  const alpha = Math.sin(w0) / (2 * q);
   return {
     b: [1 + alpha * amplitude, -2 * cos, 1 - alpha * amplitude],
     a: [1 + alpha / amplitude, -2 * cos, 1 - alpha / amplitude],
@@ -57,7 +75,8 @@ function summedDb(biquads, hz) {
   return sum;
 }
 
-// Summed magnitude response in dB of the bands `[{ f0, gainDb, q }]` at `freqs`.
+// Summed magnitude response in dB of the bands `[{ f0, gainDb, q, type? }]` at `freqs`: a band's
+// `type` is `PK` (the default), `LSC` or `HSC`.
 export function responseDb(bands, freqs) {
   const biquads = bands.map(biquad);
   return freqs.map((hz) => summedDb(biquads, hz));

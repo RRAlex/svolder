@@ -502,6 +502,10 @@ impl Sink for SlowSink {
     async fn toggle_mute(&self) -> bool {
         true
     }
+
+    async fn set_mute(&self, _muted: bool) -> bool {
+        true
+    }
 }
 
 /// A read that takes its time holds up no frame and no key, and no read is asked for
@@ -558,7 +562,7 @@ fn pressed_after(
     )
 }
 
-/// `→` twice and `Space` on Host volume reach the sink as two steps of 2 % and a mute, in
+/// `→` twice and `Space` on the computer's volume reach the sink as two steps of 1 % and a mute, in
 /// the order they were pressed: the second step follows on from the first even before the
 /// sink has answered it.
 #[tokio::test(start_paused = true)]
@@ -567,38 +571,37 @@ async fn the_keys_on_host_volume_reach_the_sink_in_order() {
     use svolder_host::fake::SinkWrite;
 
     let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
-    let own = app.rows().len();
     let sink = FakeSink::new(Some(sink_state(0.54, false)));
     let mut watching = watching(backend, app, None);
     host_on(&mut watching, &sink, no_bus());
-    let mut keys: Vec<_> = (0..own).map(|_| press(KeyCode::Down)).collect();
-    keys.extend([
+    on_the_computer_side(&mut watching);
+    let keys = vec![
         press(KeyCode::Right),
         press(KeyCode::Right),
         press(KeyCode::Char(' ')),
-    ]);
+    ];
 
     let end = run(watching, pressed_after(Duration::from_millis(500), keys)).await;
 
     assert_eq!(
         sink.writes(),
         [
+            SinkWrite::Volume(0.55),
             SinkWrite::Volume(0.56),
-            SinkWrite::Volume(0.58),
             SinkWrite::ToggleMute
         ]
     );
     let host = &end.watching.app.host;
     assert_eq!(
         host.sink,
-        Some(sink_state(0.58, true)),
+        Some(sink_state(0.56, true)),
         "the answers were not read"
     );
     assert_eq!(host.asked, None, "the ask outlived its answer");
     end.watching.close().await;
 }
 
-/// `→` on Host volume reaches the sink and `Enter` on `▶▶` reaches the followed player,
+/// `→` on the computer's volume reaches the sink and `Enter` on `▶▶` reaches the followed player,
 /// and a click on `▶` presses it too; nothing else reaches either — every write and press
 /// is one a key or a click asked for.
 #[tokio::test(start_paused = true)]
@@ -614,9 +617,9 @@ async fn a_key_on_host_volume_reaches_the_sink_and_a_press_on_next_the_player() 
     let players = FakePlayers::new(Some(track("So What", Status::Playing)));
     let mut watching = watching(backend, app, None);
     host_on(&mut watching, &sink, finds(players.clone()));
-    let mut keys: Vec<_> = (0..own).map(|_| press(KeyCode::Down)).collect();
-    keys.push(press(KeyCode::Right));
-    keys.push(press(KeyCode::Down));
+    let volume = on_the_computer_side(&mut watching);
+    let mut keys = vec![press(KeyCode::Right)];
+    keys.extend((volume..own).map(|_| press(KeyCode::Down)));
     keys.extend((0..3).map(|_| press(KeyCode::Right)));
     keys.push(press(KeyCode::Enter));
     // `▶`, the Transport row's second button on the 80×24 frame, at column 21.
@@ -629,7 +632,7 @@ async fn a_key_on_host_volume_reaches_the_sink_and_a_press_on_next_the_player() 
 
     let end = run(watching, pressed_after(Duration::from_millis(500), keys)).await;
 
-    assert_eq!(sink.writes(), [SinkWrite::Volume(0.56)]);
+    assert_eq!(sink.writes(), [SinkWrite::Volume(0.55)]);
     assert_eq!(players.presses(), [Button::Next, Button::Play]);
     assert_eq!(
         end.watching.app.toast().map(|toast| toast.text.clone()),
@@ -1394,4 +1397,22 @@ async fn a_bar_for_a_time_survives_the_frames_not_being_wanted() {
     link.barred = frames::Barred::Until(until);
     link.steer_frames(&mut app, None);
     assert_eq!(link.barred, frames::Barred::Until(until));
+}
+
+/// Show the computer's side with the cursor on the Volume row, as a session with no daemon does
+/// once its controller has been heard: the row index of the volume.
+fn on_the_computer_side(watching: &mut Watching) -> usize {
+    watching.app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    watching.app.flip_side();
+    let volume = watching
+        .app
+        .rows()
+        .iter()
+        .position(|row| row.control.key == "volume")
+        .expect("a volume row");
+    watching.app.selected = volume;
+    volume
 }

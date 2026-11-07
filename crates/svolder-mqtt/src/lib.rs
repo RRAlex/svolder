@@ -11,6 +11,7 @@
 //!
 //! - [`client`]: the connection to the broker.
 //! - [`command`]: turning one MQTT command payload into the message the set path sends.
+//! - [`computer`]: the computer's EQ switch and preset sensor.
 //! - [`device_presets`]: the preset select of a device with slots and built-in settings.
 //! - [`discovery`]: Home Assistant discovery: one retained config per exposed control.
 //! - [`eq`]: the tone control over MQTT beyond its mode.
@@ -21,6 +22,7 @@
 
 pub mod client;
 pub mod command;
+pub mod computer;
 pub mod device_presets;
 pub mod discovery;
 pub mod eq;

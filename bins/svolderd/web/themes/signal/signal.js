@@ -12,8 +12,10 @@
 //   draw/        the DAC's first screen (volume, tone, choices), an amp's open area, the shelf below
 //                it (band table, presets, controls, the device's own presets, the facts) and the Now
 //                playing bar
-//   draw/player.js, draw/computer.js, draw/card.js   what the player's and the computer's hops open
-//                and the card of a device in trouble; card-wire.js its Try now and its seconds
+//   draw/player.js, draw/card.js   what the player's hop opens and the card of a device in trouble;
+//                card-wire.js its Try now and its seconds
+//   draw/computer.js, computer-wire.js   what the computer's hop opens: choosing it is the flip, and
+//                the DAC's screen then acts on the computer (volume, curve, points, presets, facts)
 //   draw/hop.js  the `+` sheet and the open area of a hop the person declared
 //   volume-wire.js, tone-wire.js, controls-wire.js, presets-wire.js, facts-wire.js, playing-wire.js,
 //                amp-wire.js, hops-wire.js, device-list.js, lists.js, ask.js   the hands on them
@@ -29,7 +31,7 @@ import { createAct } from './act.js';
 import { ampScreen, viaScreen } from './draw/amp.js';
 import { declaredScreen, hopTools } from './draw/hop.js';
 import { card, heldCard, stateCard } from './draw/card.js';
-import { computerScreen } from './draw/computer.js';
+import { computerOpen, computerScreen, computerShelf } from './draw/computer.js';
 import { playerScreen } from './draw/player.js';
 import { createFlow } from './draw/line.js';
 import { drawShelf } from './draw/shelf.js';
@@ -39,6 +41,7 @@ import { volumeBox } from './draw/volume.js';
 import { inertPage } from './draw/word.js';
 import { wireAmp } from './amp-wire.js';
 import { wireCard } from './card-wire.js';
+import { wireComputer } from './computer-wire.js';
 import { openDevices } from './device-list.js';
 import { wireControls } from './controls-wire.js';
 import { wireFacts } from './facts-wire.js';
@@ -46,7 +49,9 @@ import { wireHops } from './hops-wire.js';
 import { bound, driver } from './driver.js';
 import { createFold } from './fold.js';
 import { createLive, keeper } from './live.js';
-import { deviceOf, followedUrls, hopsOf, openers, shelves, shownHopId } from './line.js';
+import {
+  deviceOf, followedUrls, hopsOf, openers, shelves, shownHopId, sideOf,
+} from './line.js';
 import { HOPS } from './words.js';
 import { wirePlaying } from './playing-wire.js';
 import { wirePresets } from './presets-wire.js';
@@ -112,8 +117,25 @@ openers.device = (page, hop, view) => {
 /** What the player opens: Now playing grown, the transport and the path in words (P4). */
 openers.player = (page, _hop, view) => playerScreen(page, view.now);
 
-/** What the computer opens: the route's facts, read only (P5). */
-openers.computer = (page) => computerScreen(page);
+/** The parts of the computer side (the volume and the tone control the core reads out of the page's
+ * host), or nothing while the computer's controls are not what is shown (not served, unavailable). */
+function computerParts(page, view) {
+  const computer = view.computer;
+  if (computer?.side() !== 'computer') return null;
+  return {
+    volume: computer.volumeOf(page),
+    tone: computer.toneOf(page),
+    picked: view.pick?.device === page.shown ? view.pick.n : null,
+  };
+}
+
+/** What the computer opens: choosing its hop is the flip, so the DAC's first screen, drawn for the
+ * computer (the volume and the curve); the route's facts alone where its controls are not shown. */
+openers.computer = (page, _hop, view) => {
+  const parts = computerParts(page, view);
+  return parts ? computerOpen(parts, { phone: view.phone(), inert: inertPage(page), picked: parts.picked })
+    : computerScreen(page);
+};
 
 /** What a page with no hop to open says: the card of the page, when it has one. */
 openers.none = (page, _hop, view) => {
@@ -123,6 +145,13 @@ openers.none = (page, _hop, view) => {
 
 /** What a declared hop opens: its own words and the buttons that change them (P3). */
 openers.declared = (page, hop) => declaredScreen(page, hop, inertPage(page));
+
+/** The shelf of the computer's hop: the points, the mode and the presets, then the route's facts. */
+shelves.computer = (page, _hop, view) => {
+  const parts = computerParts(page, view);
+  return parts ? computerShelf(page, parts, { phone: view.phone(), inert: inertPage(page), picked: parts.picked })
+    : '';
+};
 
 /** The shelf of a device hop: the rest of what the model has of the device. An amp's power and
  * Identify are in its area. */
@@ -167,8 +196,16 @@ function mount(root, core, { signal }) {
     phone: () => narrow.matches,
     state: core.model.state(),
     /** The hop chosen (a `Hop.id`): the shown device's until the person chooses another. */
-    chosen: core.model.shown() ? shownHopId(core.model.shown()) : null,
-    hops: () => hopsOf(core.model.page(), core.model.shown(), view.state),
+    chosen: core.computer.kept() === 'computer' ? null
+      : (core.model.shown() ? shownHopId(core.model.shown()) : null),
+    hops: () => hopsOf(core.model.page(), core.model.shown(), view.state, view.chosen),
+    /** The core's computer side (the flip is this page's choice of the computer's hop), and the
+     * point picked in the table. */
+    computer: core.computer,
+    /** Whether the person has chosen a hop (else the shown device's, or the computer's when that is
+     * the side kept, is the one chosen). */
+    byHand: false,
+    pick: { n: null, device: null },
     /** The device the controls below the line act on: the hop chosen when it is a device (a linked
      * amp is not the device shown), else the shown one. */
     target() {
@@ -197,6 +234,10 @@ function mount(root, core, { signal }) {
       if (!hop) return;
       if (id !== view.chosen) live.choosing();
       view.chosen = id;
+      view.byHand = true;
+      // The side is the computer's exactly while its hop is chosen; flipping writes nothing.
+      const side = sideOf(id);
+      if (core.computer.kept() !== side) core.computer.flip(side);
       // The line is drawn again too: the shown device writes its volume under its name while
       // another hop is chosen.
       live.draw('line');
@@ -285,6 +326,7 @@ function mount(root, core, { signal }) {
   bound.canAdd = hops.canAdd;
   wireControls({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wirePresets({ root, core, live, act, view, keep: shelfKeep, release, signal });
+  wireComputer({ root, core, live, act, view, keep, shelfKeep, release, signal });
   wireFacts({ root, core, live, view, signal });
   wireStrip({ band, hops: view.hops, chosen: () => view.chosen, choose: view.choose, signal });
   wireSlim({ bar: root.querySelector('#sg-slim'), band: root.querySelector('.sg-bandwrap'),

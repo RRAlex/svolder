@@ -96,3 +96,95 @@ async fn an_off_host_is_unavailable() {
     .await
     .expect("test timed out");
 }
+
+/// The computer's volume and EQ over a real socket: in the view, in the subscription (a drag
+/// reaches a watcher as its last value), and the fake knob that takes `pw-cli` away.
+#[tokio::test]
+async fn the_fake_computer_answers_over_the_socket() {
+    use svolder_ipc::HostEqOp;
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (mut guard, socket) = spawn_daemon_with_env(CONFIG, &[("SVOLDER_HOST", "fake")]);
+        let mut client = connect(&mut guard, &socket).await;
+        let Response::Host(view) = client.request(Request::Host).await.expect("an answer") else {
+            panic!("not a host answer");
+        };
+        assert_eq!(view.volume.as_ref().map(|v| v.pct), Some(42));
+        assert!(view.eq.is_some_and(|eq| !eq.on && eq.points.len() == 1));
+
+        let mut events = Client::connect(&socket)
+            .await
+            .expect("a second connection")
+            .subscribe_with_host(None)
+            .await
+            .expect("a subscription");
+        assert_eq!(
+            client
+                .request(Request::HostVolume { pct: 70 })
+                .await
+                .expect("an answer"),
+            Response::Ack
+        );
+        next_host(&mut events, |view| {
+            view.volume.as_ref().is_some_and(|v| v.pct == 70)
+        })
+        .await;
+
+        let on = Request::HostEq {
+            op: HostEqOp::Mode { on: true },
+        };
+        assert_eq!(client.request(on).await.expect("an answer"), Response::Ack);
+        let drag = |g, done| Request::HostEq {
+            op: HostEqOp::Set {
+                index: 1,
+                slot: None,
+                kind: None,
+                f: None,
+                g: Some(g),
+                q: None,
+                done,
+            },
+        };
+        for g in [1.0, 2.0, 3.0] {
+            client.request(drag(g, false)).await.expect("an answer");
+        }
+        client.request(drag(4.0, true)).await.expect("an answer");
+        let ended = next_host(&mut events, |view| {
+            view.eq
+                .as_ref()
+                .is_some_and(|eq| eq.on && eq.points.first().is_some_and(|p| p.g == 4.0))
+        })
+        .await;
+        assert!(ended.eq.is_some());
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// A fake computer with no `pw-cli` says what is missing, and takes no EQ change.
+#[tokio::test]
+async fn a_fake_computer_without_pw_cli_is_unavailable() {
+    use svolder_ipc::HostEqOp;
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (mut guard, socket) = spawn_daemon_with_env(
+            CONFIG,
+            &[("SVOLDER_HOST", "fake"), ("SVOLDER_FAKE_HOST_EQ", "off")],
+        );
+        let mut client = connect(&mut guard, &socket).await;
+        let Response::Host(view) = client.request(Request::Host).await.expect("an answer") else {
+            panic!("not a host answer");
+        };
+        assert_eq!(
+            view.eq.and_then(|eq| eq.unavailable).as_deref(),
+            Some("computer controls unavailable: no pw-cli on this computer")
+        );
+        let on = Request::HostEq {
+            op: HostEqOp::Mode { on: true },
+        };
+        assert!(matches!(
+            client.request(on).await.expect("an answer"),
+            Response::Error { .. }
+        ));
+    })
+    .await
+    .expect("test timed out");
+}

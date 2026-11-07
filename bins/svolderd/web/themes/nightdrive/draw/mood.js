@@ -33,7 +33,7 @@ export function drawWet(g, source, geo, wet, t) {
 /** The haze of thickness `haze` (0 to 1), tinted with the `mood`. */
 export function drawHaze(g, geo, haze, mood) {
   const { w, h, H } = geo;
-  const top = H - h * 0.09;
+  const top = H - (geo.v ?? h) * 0.09;
   const bottom = H + (h - H) * 0.45;
   const colour = mixRgb([120, 60, 150], [200, 90, 160], mood);
   const fog = g.createLinearGradient(0, top, 0, bottom);

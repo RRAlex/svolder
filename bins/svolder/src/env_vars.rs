@@ -198,6 +198,23 @@ const ENV_VARS: &[EnvVar] = &[
                default: the fake host captures synthetic music while a page or a TUI watches.",
     },
     EnvVar {
+        name: "SVOLDER_FAKE_HOST_EQ",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "With `SVOLDER_HOST=fake`, `release` gives the fake computer EQ a chain whose live \
+               changes never read back, so a drag is applied when it ends and the view says so; \
+               `off` takes `pw-cli` away, so the computer's controls report themselves \
+               unavailable. Unset by default: the fake EQ takes live changes.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_COMPUTER_VOLUME",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "With `SVOLDER_HOST=fake`, the fake computer's volume at the start, in percent \
+               (0 to 100). The signal path reads it, so anything but 100 shows as `computer \
+               volume N %`. Unset by default: 42.",
+    },
+    EnvVar {
         name: "SVOLDER_FAKE_TITLE",
         read_by: "svolderd",
         dev_only: true,
@@ -307,9 +324,10 @@ const ENV_VARS: &[EnvVar] = &[
         name: "SVOLDER_HOST_EQ_MANAGER",
         read_by: "svolder",
         dev_only: true,
-        what: "What keeps the computer EQ running: `systemd` (a user unit) or `process` (a \
-               detached `pipewire` and an autostart entry). Default `systemd` when the user \
-               manager answers, else `process`.",
+        what: "What keeps the computer EQ running: `systemd` (a user unit), `process` (a \
+               detached `pipewire` and an autostart entry) or `child` (a `pipewire` that ends \
+               with the program that started it). Default `child` in a container, else \
+               `systemd` when the user manager answers, else `process`.",
     },
     EnvVar {
         name: "SVOLDER_PW_RECORD",
@@ -331,6 +349,14 @@ const ENV_VARS: &[EnvVar] = &[
                once at once and then every two seconds. Default `pw-dump` on `PATH`.",
     },
     EnvVar {
+        name: "SVOLDER_PW_CLI",
+        read_by: "svolder, svolderd",
+        dev_only: true,
+        what: "The `pw-cli` binary that carries the live computer EQ's `set-param` updates, one \
+               process held open while the EQ is on; it is only ever given `set-param` lines \
+               for the EQ's own node. Default `pw-cli` on `PATH`.",
+    },
+    EnvVar {
         name: "SVOLDER_UNITDIR",
         read_by: "svolder, make",
         dev_only: true,
@@ -344,6 +370,20 @@ const ENV_VARS: &[EnvVar] = &[
         what: "`1` tells the daemon-spawning test helper that `make test`/`make check` already \
                built every workspace binary, so it runs the one on disk. Unset, the helper builds \
                the daemon into `target/test-daemon`, apart from `target/debug`.",
+    },
+    EnvVar {
+        name: "SVOLDER_LAB_SEED",
+        read_by: "svolder-host test suite, make",
+        dev_only: true,
+        what: "The first seed of `make preamp-lab`, the long run of the computer EQ's preamp lab. \
+               Default 1000 (`SEED=` on the make line).",
+    },
+    EnvVar {
+        name: "SVOLDER_LAB_RUNS",
+        read_by: "svolder-host test suite, make",
+        dev_only: true,
+        what: "How many sequences `make preamp-lab` runs, from `SVOLDER_LAB_SEED` on. Default \
+               5000 (`RUNS=` on the make line).",
     },
     EnvVar {
         name: "SVOLDER_WRITE_FIXTURES",

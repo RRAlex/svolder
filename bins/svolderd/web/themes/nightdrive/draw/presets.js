@@ -2,7 +2,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The tone presets of the sheet: a chip for each (the person's own in italics), what is on, and the
 // ways to save, rename or delete, which ask in a place the section keeps (ask.js). Presets made by
-// AutoEq are chips like the others. Pure: the model in, markup out.
+// AutoEq are chips like the others; one the computer's EQ cannot play is quiet, with its reason as its title. Pure: the model in, markup out.
 
 import { SHEET } from '../words.js';
 import { button, chip } from './modes.js';
@@ -16,8 +16,8 @@ export function presetBox(device, inert = false) {
   const { status } = p;
   const name = status?.name === null || status?.name === undefined ? '' : `<i>${esc(status.name)}</i>`;
   const rows = p.rows ?? [];
-  const chips = rows.map((r, i) => button('preset', r.name, quiet,
-    ` id="nd-pr-${i}" data-name="${esc(r.name)}" aria-pressed="${r.on === true}"`,
+  const chips = rows.map((r, i) => button('preset', r.name, quiet || r.playable === false,
+    ` id="nd-pr-${i}" data-name="${esc(r.name)}" aria-pressed="${r.on === true}"${r.why ? ` title="${esc(r.why)}"` : ''}`,
     `nd-chip${r.on ? ' on' : ''}${r.built_in ? '' : ' own'}`)).join('');
   const own = rows.some((r) => !r.built_in);
   const writes = p.editable && !inert

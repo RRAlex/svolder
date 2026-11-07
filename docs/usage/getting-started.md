@@ -22,6 +22,12 @@ and arm64 with its checksum in `SHA256SUMS`. Pick the one for the machine:
 | Any Linux | `svolder-<version>-x86_64-linux.tar.gz` or `-aarch64-linux.tar.gz` | unpack; static binaries, BlueZ only |
 | Container | | `docker pull ghcr.io/rralex/svolder:<version>`; see [Running in a container](daemon.md#running-in-a-container) |
 
+The computer's volume and live EQ use the PipeWire tools, which the packages recommend rather than
+require (`SVOLDER_HOST=off` runs without them): `pipewire-bin` and `wireplumber` on Debian and Ubuntu,
+`pipewire-utils` and `wireplumber` on Fedora, `pipewire` and `wireplumber` on Arch (optional
+dependencies). From a tarball, install the same tools yourself: `pw-cli`, `pw-dump`, `pw-record`,
+`pipewire` and `wpctl`. The Nix package puts them on its binaries' `PATH`.
+
 A package enables nothing. Each user turns the daemon on with
 `systemctl --user enable --now svolderd.socket svolderd.service` (from a tarball: put the binaries
 on `PATH` and run `svolder daemon install`), then runs `svolder`. On a machine nobody logs in to,

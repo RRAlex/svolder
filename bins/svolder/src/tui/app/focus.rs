@@ -70,8 +70,8 @@ impl App {
             | Intent::ReadPresets
             | Intent::AutoEqIndex { .. }
             | Intent::AutoEqDownload(_)
-            | Intent::HostApply { .. }
-            | Intent::HostRemove { .. }
+            | Intent::HostEq(_)
+            | Intent::MoveToDac(_)
             | Intent::Tui(_)
             | Intent::AutoEqRefresh(_)
             | Intent::Connection(_)
@@ -103,6 +103,7 @@ impl App {
                 ToneRow::Mode => self.profile.eq.as_ref().map(EqSpec::mode_id),
                 ToneRow::Loudness => self.profile.eq.as_ref().map(EqSpec::loudness_id),
                 ToneRow::Band => self.band_cursor(),
+                ToneRow::Point(_) => None,
             },
             (Screen::Device, Pane::Status) => None,
             (Screen::Telemetry | Screen::Devices | Screen::Settings | Screen::Setup, _) => None,
@@ -134,6 +135,10 @@ impl App {
     /// and loudness rows above it: the arrows then step the band that was clicked. On the
     /// device screen it takes the keys to the Tone pane as well ([`App::focus_tone_pane`]).
     pub(crate) fn focus_band(&mut self, band: usize) {
+        if self.on_computer() {
+            self.focus_point(band);
+            return;
+        }
         let from = self.cursor_id();
         self.focus_tone_pane();
         self.tone.band = band;
@@ -177,7 +182,7 @@ impl App {
         match row {
             ToneRow::Mode => self.flat(),
             ToneRow::Loudness => self.loudness(),
-            ToneRow::Band => Vec::new(),
+            ToneRow::Band | ToneRow::Point(_) => Vec::new(),
         }
     }
 
@@ -207,7 +212,11 @@ impl App {
                     true => ToneRow::Loudness,
                     false => ToneRow::Mode,
                 },
-                ToneRow::Mode | ToneRow::Loudness => ToneRow::Band,
+                ToneRow::Mode | ToneRow::Loudness => match self.on_computer() {
+                    true => ToneRow::Point(self.tone.point),
+                    false => ToneRow::Band,
+                },
+                ToneRow::Point(_) => ToneRow::Mode,
             };
             self.frame_flags.pane_changed = true;
             return Vec::new();

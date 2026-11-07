@@ -166,9 +166,11 @@ and writes to nothing that is gone.
   and kind are the device's.
 - **The player.** Now playing grown: title, artist, album, progress, the transport and the path in
   words with its verdict.
-- **The computer.** Read only: the sink and its rate and format, PipeWire's volume as a
-  percentage, whether it is muted, the host EQ on or off with the applied preset's name, the other
-  streams mixing, and the path's verdict. Signal writes nothing to PipeWire.
+- **The computer.** Its hop is the flip (see `host-control.md`): chosen, the area is the DAC's
+  screen acting on the computer (the level in %, the curve with its points, Off | EQ, the points'
+  table, the presets), with the route's facts that are not controls under it: the sound card and its
+  format, the other streams and the path's verdict. Where the controls are not drawn (not served,
+  unavailable) the hop opens those facts alone. Choosing the hop writes nothing.
 
 **The Add device… sheet.** The frame's menu has Signal's row, `Add device…`, offered while a device
 is shown; it opens a sheet that asks what comes after the device: Amp, Headphones, Speakers or

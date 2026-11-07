@@ -24,8 +24,9 @@
 //! - `fleet`: the devices' links or families, the list, or the hops changed;
 //! - `host` (with `needs=host`): the computer's player changed, with or without a device.
 //!
-//! A keep-alive comment goes out every 15 s. While the stream lives, with `needs=host` and a DAC
-//! shown, it holds the host's route reads on. A rotated token ends the stream.
+//! A keep-alive comment goes out every 15 s. While the stream lives, with `needs=host` and a device
+//! shown, it holds the host's reads on (the route, and the computer's volume). A rotated token ends
+//! the stream.
 //!
 //! - `device`: the task that follows one device.
 //! - `page`: the task that follows the fleet and the host.
@@ -44,7 +45,6 @@ use futures::StreamExt;
 use hyper::{HeaderMap, StatusCode};
 use serde::Serialize;
 use svolder_ipc::DeviceInfo;
-use svolder_profiles::Family;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
@@ -152,6 +152,8 @@ pub(super) struct Context {
     pub(super) viewer: Viewer,
     pub(super) access: Access,
     pub(super) needs: Needs,
+    /// The shown device, whose tone control gives the computer its built-in presets.
+    pub(super) shown: Option<DeviceInfo>,
     /// The followed devices' names.
     pub(super) followed: Vec<String>,
 }
@@ -186,17 +188,14 @@ async fn events(State(web): State<Web>, headers: HeaderMap, RawQuery(query): Raw
             followed.push(tracked);
         }
     }
-    // Only a DAC's page draws the path line, so no one else needs the route read.
-    let route = asked.needs.host
-        && shown.as_ref().is_some_and(|t| {
-            web.fleet
-                .profile(&t.info)
-                .is_none_or(|profile| profile.family == Family::Dac)
-        });
+    // The computer's controls sit on every shown device's page, a DAC's and an amp's, and the
+    // daemon reads the computer's volume only while someone holds it.
+    let route = asked.needs.host && shown.is_some();
     let cx = Arc::new(Context {
         access: access(&web, viewer),
         viewer,
         needs: asked.needs,
+        shown: shown.as_ref().map(|t| t.info.clone()),
         followed: followed.iter().map(|t| t.info.name.clone()).collect(),
         web,
     });

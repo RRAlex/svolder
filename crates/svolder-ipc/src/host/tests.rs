@@ -604,6 +604,8 @@ fn a_view_round_trips() {
         }),
         route: Some(clean()),
         now_ms: 1_700_000_000_000,
+        volume: None,
+        eq: None,
     };
     let back: HostView = serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
     assert_eq!(back, view);

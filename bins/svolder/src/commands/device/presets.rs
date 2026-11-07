@@ -368,7 +368,7 @@ pub async fn eq_load(g: &Globals<'_>, name: &str, yes: bool) -> Result<ExitCode,
         Ok(backend) => backend,
         Err(code) => return Ok(code),
     };
-    let outcome = do_load(&mut backend, name, yes).await;
+    let outcome = do_load(g, &mut backend, name, yes).await;
     backend.close().await;
     outcome
 }
@@ -376,7 +376,12 @@ pub async fn eq_load(g: &Globals<'_>, name: &str, yes: bool) -> Result<ExitCode,
 /// [`eq_load`]'s body, once a backend is open. The device is reached and the preset found
 /// before the computer EQ is asked about or removed, so a missing DAC or an unknown name never
 /// leaves the preset on neither.
-async fn do_load(backend: &mut Backend, name: &str, yes: bool) -> Result<ExitCode, String> {
+async fn do_load(
+    g: &Globals<'_>,
+    backend: &mut Backend,
+    name: &str,
+    yes: bool,
+) -> Result<ExitCode, String> {
     let values = match backend.state().await {
         Ok(values) => values,
         Err(failure) => return Ok(failure.report()),
@@ -403,7 +408,7 @@ async fn do_load(backend: &mut Backend, name: &str, yes: bool) -> Result<ExitCod
         Err(e) => return Ok(Failure::of(Kind::Usage, e.to_string()).report()),
     };
     // Only a recall that can be sent takes the preset off the computer.
-    match crate::commands::host_eq::move_to_dac(&preset.name, yes).await {
+    match crate::commands::host_eq::move_to_dac(g, &preset, yes).await {
         Ok(true) => {}
         Ok(false) => return Ok(super::nothing_changed()),
         Err(code) => return Ok(code),

@@ -11,7 +11,7 @@
 //
 //   reach(target) -> boolean            puts the sheet as the target needs it, scrolls to it, says whether it is drawn
 //   operate(target, change) -> void     { step: ±1 } | { raw } | { value } | { on } | { apply } |
-//                                       { recall } | { save } | {}
+//                                       { recall } | { save } | { side } (the switch) | {}
 //   shown(target) -> string | null      the words shown for a control, or for a fact by its label
 //   state() -> { lost, waiting, resting, toasts }
 //   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
@@ -27,7 +27,7 @@
 //                                       ear }`, the `Rel`s against the last minute's loudest and `ear` the mood's
 //                                       `{ level, peak, rel, med, long, balance, peakHeld, embers }`
 //   look() -> { mood, wet, haze, x, cruise, flare, wave, since, embers }   what the mood has made of the music now
-//   tune() -> { w, h, H, gMax, m, target, allowed, held, heldSide, lit, diamonds, label, bubbles, curveY }
+//   tune() -> { w, h, v, H, gMax, m, target, allowed, held, heldSide, lit, diamonds, label, bubbles, curveY }
 //                                       the mountains' tuning now: the scene's size in CSS px, the morph, the band
 //                                       held (and the diamond's side when it is Q that is held) and its label, the
 //                                       band whose bell is lit with its two diamonds `[{ side, x, y }]`, the bubbles
@@ -59,6 +59,17 @@ function taken(element) {
   return box.width > 0 && box.height > 0;
 }
 
+/** Whether `element` is inside the box of the scrolling table it is in (a row under the header or past the edge is
+ * not seen), or is in none. */
+function unclipped(element) {
+  const box = element.closest('.nd-pscroll');
+  if (!box) return true;
+  const inside = element.getBoundingClientRect();
+  const frame = box.getBoundingClientRect();
+  const head = box.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+  return inside.top >= frame.top + head - 1 && inside.bottom <= frame.bottom + 1;
+}
+
 /** Whether `element` is on the screen now (at least a part of it is in the window). */
 function onScreen(element) {
   const box = element.getBoundingClientRect();
@@ -80,6 +91,7 @@ function controlOf(key) {
 function onDash(target) {
   if (target === 'Cover') return true;
   if (typeof target === 'string') return false;
+  if ('computer' in target) return ['flip', 'volume', 'mute'].includes(target.computer);
   if ('transport' in target) return true;
   if (!('control' in target)) return false;
   const kind = controlOf(target.control)?.kind;
@@ -88,8 +100,25 @@ function onDash(target) {
   return kind === 'choice' && target.control === 'input';
 }
 
+/** The element a computer target is, as the page draws it, or nothing. */
+function findComputer(target) {
+  const byId = (id) => document.getElementById(id);
+  switch (target.computer) {
+    case 'flip': return byId('nd-side-computer');
+    case 'volume': return one('#nd-dash [data-act="volume-up"]');
+    case 'mute': return one('#nd-dash [data-act="mute"]');
+    case 'mode': return one('#nd-mode [data-act="mode"][data-mode="eq"]');
+    case 'add': return byId('nd-point-add');
+    case 'remove': return byId(`nd-px-${target.n}`);
+    case 'point': return byId(target.param === 'type' ? `nd-p${target.n}t` : `nd-p${target.n}${target.param}`);
+    case 'preset': return one(`#nd-presets [data-act="preset"][data-name="${q(target.name)}"]`);
+    default: return null;
+  }
+}
+
 /** The element a target is, as the page draws it, or nothing. */
 function find(target) {
+  if (typeof target === 'object' && 'computer' in target) return findComputer(target);
   if (target === 'Cover') return one('#nd-dash .nd-cover img');
   if (typeof target === 'string') return one(`#nd-facts-body td[data-fact="${q(target)}"]`);
   if ('control' in target) {
@@ -171,7 +200,7 @@ async function seen(target) {
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);
-  return Boolean(element) && taken(element) && onScreen(element);
+  return Boolean(element) && taken(element) && onScreen(element) && unclipped(element);
 }
 
 /** Step the volume to `raw` by taps on its keys, each waiting for the model to show the one before. */
@@ -206,6 +235,63 @@ const stands = (element, on) => element.getAttribute('aria-pressed') === String(
 
 /** The volume's words as the daemon writes them, from the figures' reading (`minus 23.5 dB`). */
 const volumeWords = (aria) => aria.replace(/^minus /, '−');
+/** The computer's volume now, from the model. */
+const computerPct = () => bound.core.computer.volumeOf(bound.core.model.page())?.pct ?? null;
+
+/** Operate one of the computer's targets as a person does: a tap, or a value typed into a field. */
+async function operateComputer(target, change) {
+  const { computer } = target;
+  if (computer === 'flip') {
+    const key = document.getElementById(`nd-side-${change.side}`);
+    if (!key) throw new Error('no switch');
+    tap(key);
+    await settle();
+    return;
+  }
+  const element = find(target);
+  if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
+  if (computer === 'volume') {
+    if ('raw' in change) {
+      for (let n = 0; n < 120 && computerPct() !== null && computerPct() !== change.raw; n++) {
+        const before = computerPct();
+        tap(one(`#nd-dash [data-act="volume-${change.raw > before ? 'up' : 'down'}"]`));
+        for (let wait = 0; wait < 40 && computerPct() === before; wait++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+    } else tap(one(`#nd-dash [data-act="volume-${change.step < 0 ? 'down' : 'up'}"]`));
+  } else if (computer === 'mute') {
+    if (!('on' in change) || !stands(element, change.on)) tap(element);
+  } else if (computer === 'mode') {
+    tap(one(`#nd-mode [data-mode="${'on' in change && !change.on ? 'off' : 'eq'}"]`));
+  } else if (computer === 'point' && element.matches('select')) {
+    element.value = change.value;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (computer === 'point') {
+    if (!('value' in change)) throw new Error('a point is changed by typing a value');
+    element.focus({ preventScroll: true });
+    element.value = change.value;
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  } else tap(element);
+  await settle();
+}
+
+/** The words the page shows for one of the computer's targets. */
+function shownComputer(target, element) {
+  switch (target.computer) {
+    case 'flip': return one('#nd-switch [aria-pressed="true"]')?.textContent ?? null;
+    case 'volume': {
+      const aria = one('.nd-vol svg')?.getAttribute('aria-label');
+      if (aria === undefined || aria === null) return null;
+      return /not read/.test(aria) ? '—' : aria.replace(/^Volume ?/, '');
+    }
+    case 'mode': return one('#nd-mode [aria-pressed="true"]')?.textContent ?? null;
+    case 'preset': return element.dataset.name;
+    case 'point': return element.value;
+    default: return element.textContent.trim();
+  }
+}
+
 /** The test driver. */
 export const driver = {
   async reach(target) {
@@ -216,6 +302,10 @@ export const driver = {
   },
 
   async operate(target, change = {}) {
+    if (typeof target === 'object' && 'computer' in target) {
+      await operateComputer(target, change);
+      return;
+    }
     const element = find(target);
     if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
     if (typeof target === 'object' && 'control' in target) {
@@ -260,6 +350,7 @@ export const driver = {
   shown(target) {
     const element = find(target);
     if (!element) return null;
+    if (typeof target === 'object' && 'computer' in target) return shownComputer(target, element);
     if (target === 'Cover') return element.getAttribute('src');
     if (typeof target === 'string') return element.textContent;
     if ('control' in target) {

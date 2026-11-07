@@ -424,10 +424,11 @@ async fn a_hop_written_into_the_file_is_found_on_the_seconds_turn() {
     dac.stop().await;
 }
 
-/// The route reads are held for a DAC page that needs the host and for no other: not a page
-/// that does not ask, not an amp's. A stream on a daemon without a host carries no card.
+/// The host's reads are held for a page that shows a device and needs the host, a DAC's or an
+/// amp's (the computer's volume is read only while held), and for no other: not a page that does
+/// not ask. A stream on a daemon without a host carries no card.
 #[tokio::test]
-async fn host_reads_are_held_only_for_a_dac_page_that_needs_host() {
+async fn host_reads_are_held_for_a_shown_device_that_needs_host() {
     let dac = fake_daemon_playing("gungnir2-v2", "dac").await;
     assert_eq!(dac.daemon.host().watcher_count(), 0);
     let plain = open_stream(Arc::clone(&dac.fleet), "/api/v1/events?device=dac").await;
@@ -509,7 +510,11 @@ async fn host_reads_are_held_only_for_a_dac_page_that_needs_host() {
         data(&seen, "model")["device"]["playing"].is_object(),
         "the amp has the card: {seen:?}"
     );
-    assert_eq!(amp.daemon.host().watcher_count(), 0, "no path, no hold");
+    assert_eq!(
+        amp.daemon.host().watcher_count(),
+        1,
+        "an amp page shows the computer's volume too, which is read only while held"
+    );
     amp.stop().await;
 
     let quiet = fake_daemon("gungnir2-v2", "dac").await;
@@ -823,6 +828,7 @@ async fn a_change_between_the_snapshot_and_the_task_start_still_reaches_the_stre
         access: api::access(&web, Viewer::Signed),
         viewer: Viewer::Signed,
         needs: super::Needs::default(),
+        shown: None,
         followed: Vec::new(),
         web: web.clone(),
     });
@@ -1452,16 +1458,16 @@ fn the_host_key_changes_with_the_route_and_not_without() {
             None,
         )
     };
-    let key = HostKey::new(&card, Some(route(540)));
+    let key = HostKey::new(&card, Some(route(540)), None);
     assert_eq!(
         key,
-        HostKey::new(&card, Some(route(540))),
+        HostKey::new(&card, Some(route(540)), None),
         "same route, same key"
     );
     assert_ne!(
         key,
-        HostKey::new(&card, Some(route(550))),
+        HostKey::new(&card, Some(route(550)), None),
         "a changed route sends"
     );
-    assert_ne!(key, HostKey::new(&card, None), "a lost route sends");
+    assert_ne!(key, HostKey::new(&card, None, None), "a lost route sends");
 }

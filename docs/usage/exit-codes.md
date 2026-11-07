@@ -17,6 +17,7 @@ What each verb returns to the shell. Back to the [usage index](README.md).
 | 3 | Connection failed |
 | 4 | Device did not confirm the command within the timeout |
 | 5 | An active fault was reported by the device |
+| 6 | The computer's controls are unavailable (PipeWire tools or socket missing, or host audio off) |
 | 130 | `watch` was told not to wait for the release (Ctrl-C during it); `capture` was ended by Ctrl-C before its frame window |
 
 With no `-d` and several devices in range, the candidates are listed on stderr and the command exits

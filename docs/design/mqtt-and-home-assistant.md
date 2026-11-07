@@ -159,6 +159,17 @@ topic would be replayed on every subscribe, so a volume set once would be set ag
 reconnect and every daemon restart. A command is acted on only as it is published, and a retained
 one is logged once and ignored.
 
+## The computer's EQ
+
+A bridge-level unit, `computer`, in place of a unit id: `svolder_mqtt::computer` builds one switch
+and one preset sensor under the Home Assistant device `This computer` (identifiers
+`svolder_computer`), and `mqtt_bridge/computer.rs` follows the host's view
+(`ComputerLink`), announces them while the view carries an EQ, and publishes `ON`/`OFF` and the
+preset name. The preset topic is cleared, not retained empty, while the EQ is off. A command goes
+through the host's own `Mode` request, never through a device's writer. ON with a flat, never
+edited curve (`computer::nothing_kept`) is not sent. A retained command is never acted on, as for
+devices. No volume, mute or point entity exists on purpose.
+
 ## Principles
 
 **Off, then read-only, then control.** Without `[mqtt] enabled` the daemon opens no socket to any
@@ -202,6 +213,8 @@ client.
 - Topics, payloads, discovery, commands, tone-control entities: `crates/svolder-mqtt/src/topics.rs`,
   `payload.rs`, `discovery.rs`, `command.rs`, `eq.rs`; tests beside them (`discovery/tests.rs`,
   `eq/tests.rs`) and in `crates/svolder-mqtt/tests/discovery_goldens.rs`.
+- The computer's EQ: `crates/svolder-mqtt/src/computer.rs` (tests in `computer/tests.rs`, goldens
+  `computer-commands.json` and `computer-read-only.json`) and `bins/svolderd/src/mqtt_bridge/computer.rs`.
 - The connection: `crates/svolder-mqtt/src/client.rs`, tests in `client/tests.rs` and
   `crates/svolder-mqtt/tests/client.rs`.
 - The bridge: `bins/svolderd/src/mqtt_bridge.rs` and its children in `mqtt_bridge/`, tests in

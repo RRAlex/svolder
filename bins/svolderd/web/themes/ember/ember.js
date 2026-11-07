@@ -29,6 +29,9 @@ import './meters.js';
 import { registerTheme } from '../../core/registry.js';
 import { ember, mine, orderOf, shown } from './bind.js';
 import { screen } from './draw/screen.js';
+import { effective } from './draw/computer.js';
+import { computerView } from './computer-view.js';
+import { installComputer, syncComputer } from './computer.js';
 import { shell } from './draw/shell.js';
 import { SECTIONS, canArrange, endArrange, openArrange } from './arrange.js';
 import { installLive, reconnectedLately } from './live.js';
@@ -98,6 +101,7 @@ function follow() {
   effectsFor();
   countdowns();
   syncEditor();
+  syncComputer();
   syncFacts();
   syncPlaying();
   syncVisualizer();
@@ -126,8 +130,12 @@ function mount(root, core, { signal }) {
   ember.core = core;
   ember.signal = signal;
   const page = core.model.page();
-  root.innerHTML = shell(page, document.getElementById('svolder-wordmark')?.innerHTML ?? '');
-  document.getElementById('screen').innerHTML = screen(page, orderOf(page.device));
+  const view = computerView(core);
+  root.innerHTML = shell(page, document.getElementById('svolder-wordmark')?.innerHTML ?? '',
+    view ?? { sw: null });
+  document.getElementById('screen').innerHTML = screen(
+    page, orderOf(effective(page.device, view)), view,
+  );
   stripOf = null;
 
   const live = installLive(core, { beforeScreen: dropPreserved, screenIn: follow }, signal);
@@ -142,6 +150,7 @@ function mount(root, core, { signal }) {
   installPress({ readWaiting: live.readWaiting });
   installToneEditor({ readWaiting: live.readWaiting });
   installToneGraph({ readWaiting: live.readWaiting });
+  installComputer({ readWaiting: live.readWaiting });
   installKeys();
   installFacts();
   installPlaying();

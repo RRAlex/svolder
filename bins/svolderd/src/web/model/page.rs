@@ -15,6 +15,7 @@ use svolder_ipc::config::{HopKind, HopWhat};
 use svolder_profiles::Family;
 use svolder_profiles::tone::preset::same_name;
 
+use super::computer::{ComputerModel, computer_model};
 use super::{CardModel, DeviceModel, LinkModel, PlayingModel, device_model};
 use crate::web::api::{self, Loaded};
 use crate::web::view::{self, Access};
@@ -168,6 +169,8 @@ pub(crate) struct HostModel {
     /// What the last read of the audio graph says of the route to the sink; `None` while it is
     /// not read.
     pub(crate) route: Option<RouteModel>,
+    /// The computer's own volume and EQ; `None` while the daemon does not serve them.
+    pub(crate) computer: Option<ComputerModel>,
 }
 
 /// The route from the player to the computer's sink.
@@ -266,20 +269,36 @@ pub(crate) fn host_parts(web: &Web, access: Access) -> Option<(view::Playing, Op
 }
 
 impl HostModel {
-    /// The model of `card` and `route`, as [`host_parts`] has them.
-    pub(crate) fn new(card: &view::Playing, route: Option<RouteModel>) -> HostModel {
+    /// The model of `card`, `route` and `computer`, as [`host_parts`] and [`host_computer`] have
+    /// them.
+    pub(crate) fn new(
+        card: &view::Playing,
+        route: Option<RouteModel>,
+        computer: Option<ComputerModel>,
+    ) -> HostModel {
         HostModel {
             playing: card.into(),
             route,
+            computer,
         }
     }
 }
 
-/// The computer's player and route as `web`'s daemon has them, for a viewer with `access`, with
-/// no device to judge the path against; `None` while the host is not watched.
-pub(crate) fn host_model(web: &Web, access: Access) -> Option<HostModel> {
+/// The computer's controls as `web`'s daemon has them, for a page showing `shown`.
+pub(crate) fn host_computer(web: &Web, shown: Option<&DeviceInfo>) -> Option<ComputerModel> {
+    computer_model(web, &web.fleet.host_view(), shown)
+}
+
+/// The computer's player, route and controls as `web`'s daemon has them, for a viewer with
+/// `access` on a page showing `shown`, with no device to judge the path against; `None` while
+/// the host is not watched.
+pub(crate) fn host_model(
+    web: &Web,
+    access: Access,
+    shown: Option<&DeviceInfo>,
+) -> Option<HostModel> {
     let (card, route) = host_parts(web, access)?;
-    Some(HostModel::new(&card, route))
+    Some(HostModel::new(&card, route, host_computer(web, shown)))
 }
 
 /// The page for `viewer` showing `shown`, read as `loaded`: the first snapshot, with the strip
@@ -307,7 +326,7 @@ pub(crate) async fn page_model(
         device,
         followed: BTreeMap::new(),
         card: card.as_ref().map(Into::into),
-        host: host_model(web, access),
+        host: host_model(web, access, shown),
         strip,
     }
 }

@@ -13,12 +13,13 @@
 // newest model afterwards. Another device shown redraws it for that device and closes what was open
 // for the old one.
 
+import { computerView } from './computer-view.js';
 import { drawSheet, sheetFrame } from './draw/sheet.js';
 import { inertOf } from './inert.js';
 import { closeAsk } from './ask.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { createRelease, keeper } from './live.js';
-import { placeSheet } from './place.js';
+import { placeMore, placeSheet } from './place.js';
 import { SHEET } from './words.js';
 
 /** What the sheet puts out of reach and dims while it stands. */
@@ -54,9 +55,16 @@ export function wireSheet({
       return;
     }
     const focus = body.contains(root.ownerDocument.activeElement) ? root.ownerDocument.activeElement.id : '';
-    body.innerHTML = drawSheet(model, view);
+    const scrolled = body.querySelector('#nd-pscroll')?.scrollTop ?? 0;
+    body.innerHTML = drawSheet(model, view, computerView(core));
     placeSheet(body);
-    if (focus) body.querySelector(`#${CSS.escape(focus)}`)?.focus({ preventScroll: true });
+    const table = body.querySelector('#nd-pscroll');
+    if (table) table.scrollTop = scrolled;
+    placeMore(body);
+    if (focus) {
+      // a row removed takes its `×` with it: the focus stays in the dialog
+      (body.querySelector(`#${CSS.escape(focus)}`) ?? dialog).focus({ preventScroll: true });
+    }
   }
 
   // ---- opening and closing ----
@@ -105,6 +113,9 @@ export function wireSheet({
   // ✕, and a tap on the scene (a press that began and ended on the backdrop: not a drag that left the sheet)
   let downOnBackdrop = false;
   wrap.addEventListener('pointerdown', (event) => { downOnBackdrop = event.target === wrap; }, { signal });
+  wrap.addEventListener('scroll', (event) => {
+    if (event.target.id === 'nd-pscroll') placeMore(body);
+  }, { signal, capture: true, passive: true });
   wrap.addEventListener('click', (event) => {
     if (event.target.closest?.('[data-act="sheet-close"]')) close();
     else if (event.target === wrap && downOnBackdrop) close();
@@ -118,7 +129,7 @@ export function wireSheet({
     }
     if (event.key !== 'Tab') return;
     // the focus stays in the dialog
-    const order = [...wrap.querySelectorAll('button:not([disabled]), input:not([disabled])')];
+    const order = [...wrap.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled])')];
     if (order.length === 0) {
       event.preventDefault();
       return;
@@ -153,6 +164,11 @@ export function wireSheet({
     const device = store.device();
     if (!device) return;
     const what = el.dataset.act;
+    if (what === 'mode' && core.computer.side() === 'computer') {
+      // Off or EQ on the computer's EQ; a viewer who may not write is told so by the core
+      act.act('mode', el.dataset.mode, (a) => a.computer.setMode(el.dataset.mode)).catch(() => {});
+      return;
+    }
     if (what === 'mode') {
       if (inert()) {
         // the core turns the tap away and says why; the mode asked is the one it is already in

@@ -1,6 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The dash fades to a tenth with the HUD, when it is over the scene (a desktop, a phone held sideways; the
+// The dash fades to a fifth with the HUD, when it is over the scene (a desktop, a phone held sideways; the
 // panel of a phone held upright is under the scene and stays). The root carries `nd-dash-dim` while it is
 // faded; the stylesheet does the rest (opacity only, no transition under reduced motion). It stays as it is
 // while a key is held or a list is open (the dash is held), while it has the keyboard focus and while a mouse

@@ -1906,7 +1906,7 @@ def alone():
           grey: document.querySelectorAll('#sg-line .sg-grey-dot').length,
           flow: document.querySelectorAll('[data-flow=before]').length,
           greyLine: document.querySelectorAll('#sg-line .sg-grey').length })""")
-        # the daemon reads no route for an amp's page: the computer stays, greyed, with no facts
+        # the computer stays, greyed, whatever the daemon reads for the amp's page
         check('an_amp_no_hop_links_stands_alone: the player and the computer greyed, the ring, then the amp',
               got['hops'] == ['player', 'computer', 'standin-dac', 'device:Amp']
               and got['chosen'] == 'device:Amp' and got['ring'] == 'a DAC svolder does not drive'
@@ -1940,7 +1940,9 @@ def linked_amp_alone():
         check('  the way in to the DAC is grey and does not flow, the thin stretch runs from the DAC to the amp',
               got['greyLine'] == 1 and got['greyDots'] == 2 and got['before'] == 0 and got['after'] == 1
               and got['dacDot'] == 2, got)
-        check('  the computer says nothing of a route on a page that holds none', got['words'] == 0, got)
+        # an amp's page holds the host's reads too (the computer's volume is read for it), so the
+        # route arrives and the computer's hop says its one word, as a DAC's page's does
+        check("  the computer's hop says the route's one word: the amp's page holds the host's reads", got['words'] == 1, got)
         b.page("document.querySelector('#sg-line [data-hop=\"' + " + repr(AMP_HOP) + " + '\"]').focus()")
         b.press('ArrowLeft')
         got = b.page("({ shown: __core.model.shown(), chosen: " + CHOSEN + ", focus: document.activeElement.dataset.hop, "
@@ -2501,26 +2503,25 @@ def the_computer(b, d):
     load(b, d, route=True)
     b.page(POSTS)
     hop_click_chosen(b, 'computer')
-    check('the_computer_hop_has_no_control: the computer opens its facts',
-          poll(lambda: b.page("!!document.getElementById('sg-computer')")) and b.page(CHOSEN) == 'computer')
+    check('the_computer_hop_keeps_its_facts: the computer\'s hop opens its controls with the facts under them',
+          poll(lambda: b.page("!!document.getElementById('sg-cfacts')")) and b.page(CHOSEN) == 'computer')
     got = b.page("""(() => { const r = __core.model.page().host.route;
-      const rows = Object.fromEntries([...document.querySelectorAll('#sg-computer dt')].map((t) => [t.textContent, t.nextElementSibling.textContent]));
-      return { rows, sink: r.sink.words, pct: r.sink.volume_pct, eq: r.host_eq, mixing: r.others_mixing }; })()""")
+      const rows = Object.fromEntries([...document.querySelectorAll('#sg-cfacts dt')].map((t) => [t.textContent, t.nextElementSibling.textContent]));
+      return { rows, sink: r.sink.words, mixing: r.others_mixing }; })()""")
     rows = got['rows']
-    check('  the sink, its rate and format, PipeWire\'s volume, mute, the host EQ and the other streams are read from the route',
-          rows.get('Sound card') == got['sink'] and rows.get('Volume in PipeWire') == f"{got['pct']} %"
-          and 'kHz' in rows.get('Rate and format', '') and rows.get('Muted') in ('yes', 'no')
-          and rows.get('Host EQ', '').startswith('on' if got['eq'] else 'off') and 'Other streams' in rows
-          and 'The sound’s way' in rows, got)
+    check('  the sink, its rate and format and the other streams are read from the route; nothing for what is a control now',
+          rows.get('Sound card') == got['sink'] and 'kHz' in rows.get('Rate and format', '')
+          and 'Other streams' in rows and 'The sound’s way' in rows
+          and not {'Volume in PipeWire', 'Muted', 'Host EQ'} & set(rows), got)
     check('  the bottom bar stays', b.page(NOW_HIDDEN) is False)
-    acting = b.page("""[...document.querySelectorAll('#sg-open *')].filter((e) => e.matches(
+    acting = b.page("""[...document.querySelectorAll('#sg-cfacts *')].filter((e) => e.matches(
       'button, input, select, textarea, a, [tabindex], [role=slider], [data-act]') || e.tabIndex >= 0).length""")
-    check('  nothing in it can be focused or acts', acting == 0, acting)
-    click_el(b, '#sg-computer dl')
+    check('  nothing in the facts can be focused or acts', acting == 0, acting)
+    click_el(b, '#sg-cfacts dl')
     b.press('Enter')
     time.sleep(0.3)
     writes = [p for p in b.page('window.__posts') if not p[0].endswith(('/model', '/stream'))]
-    check('  a click or a key on it sends nothing', writes == [], writes[:3])
+    check('  a click or a key on them sends nothing', writes == [], writes[:3])
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 

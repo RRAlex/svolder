@@ -22,7 +22,9 @@ facts and the order in which the daemon shuts the web server and the host servic
 drive** is the music drawn as an outrun road, dark only, with the volume as a large neon number and
 the rest of the device on a sheet ([web-nightdrive.md](web-nightdrive.md)); it found gaps in the
 canvas loop, the analysis rules, the menu and the picker, and in the reserved keys, which that page
-lists.
+lists. Its computer side is two keys by the menu button (the panel's top row on a phone) that turn the volume
+figure, the dash's keys and the curve on the mountains into the computer's
+([host-control.md](host-control.md#night-drive)).
 
 ## Who owns what
 

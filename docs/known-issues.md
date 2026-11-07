@@ -256,6 +256,12 @@ that branch rather than listed here.
   track's picture for the whole session. The common players change the address per track or per
   album; keying the cache on the track as well would cost one local read per track
   (`bins/svolderd/src/host.rs`).
+- [limit, 0.32.0] **Low, sharp filters play with f32 noise.** PipeWire's biquads run in f32 (and
+  with fused multiply-adds on arm64), so a filter below about 40 Hz with a high Q plays with
+  rounding noise 40 to 55 dB under the music at 48 kHz and more, worse as the rate rises, and its
+  response can differ from the curve drawn. The computer EQ refuses only a filter that is not
+  stable in those coefficients, never one that is merely noisy
+  (`crates/svolder-host/src/eq/manage.rs`).
 
 ### CLI
 
@@ -263,7 +269,7 @@ that branch rather than listed here.
   tries the runtime directory before anything of the chain that is on is touched, but the pid it
   keeps there is only known once the new chain starts; a runtime directory that fills up between
   the two fails the apply with the old chain already stopped
-  (`bins/svolder/src/commands/host_eq.rs`, `start_process`).
+  (`crates/svolder-host/src/eq/manage.rs`, `start_process`).
 - [limit] **`doctor` grades adapters against a held device.** `doctor`'s Adapter grade row, shown
   when there are two or more adapters, grades each against the first configured device, which a
   running daemon may be holding, and a held device stops advertising: on such a host the grades
@@ -301,7 +307,7 @@ that branch rather than listed here.
   finishes the install (`bins/svolder/src/commands/daemon/install.rs`, with the wait in
   `bins/svolder/src/commands/daemon/lifecycle.rs`).
 - [trade-off] **Move to computer flattens the DAC first.** Putting the preset that is on the DAC
-  on the computer, with `svolder host eq apply NAME` or `h` in the presets box, asks first and on
+  on the computer, with `svolder host eq apply NAME` or `Enter` in the presets box on the computer's side, asks first and on
   yes flattens the DAC before the apply, so the correction is never on both; a failed apply leaves
   the DAC flat, and the message says how to put the curve back (`svolder eq load NAME`, or `Enter`
   on it in the presets box) (`bins/svolder/src/commands/host_eq/verbs.rs`,
@@ -361,6 +367,10 @@ that branch rather than listed here.
   are sent in order without waiting for the device's answer, and `take_intents` goes on past a
   write that failed, so a mid-plan failure is noticed (`App::write_failed`) but does not hold back
   the writes behind it (`bins/svolder/src/tui/run/input.rs`, `bins/svolder/src/tui/run/events.rs`).
+- [trade-off] **A preset saved from the computer's points shows in the list when it is next
+  opened.** Joined to a daemon, `n` on the computer's side sends the save and the list on screen
+  does not refresh; closing and opening it (`p`) shows the new name
+  (`bins/svolder/src/tui/run/computer.rs`).
 
 ### Web UI
 
@@ -484,17 +494,23 @@ that branch rather than listed here.
   the background-process manager (only the process's cgroup would tell them apart, and svolder
   does not read it); while the unit is active, a process-manager chain started by hand with the
   same command line is left running, so two could stack. svolder's own apply and remove never
-  produce this (`bins/svolder/src/commands/host_eq.rs`).
+  produce this (`crates/svolder-host/src/eq/manage.rs`).
 - [limit] **The computer EQ's chain can be signalled by pid.** On a kernel without `pidfd_open`
   (before Linux 5.3), or where it is refused for a reason other than "no such process", the
   chain is signalled by pid after its command line is checked, which leaves the short window in
-  which that pid could be given to another process (`bins/svolder/src/commands/host_eq/process.rs`).
-- [trade-off] **The computer EQ's saved state is re-applied as written.** `Enter` on the device
-  screen's Host EQ row, while the computer EQ is off, puts the last one back from what
+  which that pid could be given to another process (`crates/svolder-host/src/eq/process.rs`).
+- [trade-off] **The computer EQ's saved state is re-applied as written.** Turning the computer EQ
+  on again (Mode `EQ`, on the computer's side), while it is off, puts the last one back from what
   `host-eq.toml` kept: its filters are validated and a preamp that is not a number or is above
   +30 dB is refused, but a hand-edited preamp far below the safe value applies as written, only
-  quieter (`bins/svolder/src/commands/host_eq.rs`,
+  quieter (`crates/svolder-host/src/eq/manage.rs`,
   `bins/svolder/src/tui/boxes/presets/computer.rs`).
+- [trade-off] **The computer EQ reads PipeWire's graph once a second while it is on.** The
+  controller runs one `pw-dump` every 20 ticks for as long as the chain is on and live, whether
+  or not anyone watches: it is how a change of the sink's rate or a restart of the chain is seen
+  within about a second and every slot sent again at the new rate. On a graph with many nodes the
+  dump is large. A narrower read (a dump on the sink's format change only) would need a PipeWire
+  subscription the code does not have (`crates/svolder-host/src/eq/control.rs`).
 - [trade-off] **The status line hardcodes the word "Status".** `format.rs`'s status line hardcodes
   the word "Status", dropping the wire's Command/Status distinction; harmless today because
   `ValueObject`, the only thing this renders, represents a device's reported readings and never
@@ -680,3 +696,14 @@ that branch rather than listed here.
 - [test] **The happy path of `tui::run` and `tui::wizard::setup` through a real terminal is
   untested.** The refusals and the choice of front end are tested over a `Claim` seam; a real
   `Guard` cannot be built in a unit test (`bins/svolder/src/tui/terminal.rs`).
+- [test] **No loop-level test moves a preset from the DAC to the computer and back.** The guard that
+  turns the computer EQ off before a DAC load has a unit test, but nothing runs the whole `Intent`
+  from the preset list through the loop to the DAC's writes (`bins/svolder/src/tui/run/computer.rs`).
+- [test] **The joined write queue's bound of 64 is untested.** The TUI's queue of computer edits
+  keeps the newest live value per point and every `done`, and caps at 64 by dropping only the
+  oldest live values; `Other` and `Last` items are never dropped. Each joined request times out,
+  so the queue drains even behind a daemon that does not answer, and a test can fill it with a
+  never-ending first item (`bins/svolder/src/tui/run/computer.rs`).
+- [test] **Night drive's mouse hover over the tone band has no browser check.** The touch band of
+  the curve (±12 dB and a fingertip) is checked for touch and tap; the hover cursor that follows the
+  same band is not (`bins/svolderd/web/themes/nightdrive/`).

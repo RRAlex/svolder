@@ -48,6 +48,8 @@ class Knob extends HTMLElement {
     this.svg = this.querySelector('svg.dial');
     // Drawn inert for a guest or a read-only page, whatever the reading.
     this.locked = d.inert === 'true';
+    // The computer's volume: 0 to 100 %, written through the computer's own actions.
+    this.computer = d.computer === 'true';
     // The step the user has asked for and the device has not yet echoed: what the knob shows.
     this.asked = null;
     this.askedAt = 0;
@@ -86,7 +88,8 @@ class Knob extends HTMLElement {
    * below every step): that step is the one asked, unless a newer ask has replaced it. */
   async write(step) {
     const { core, signal } = ember;
-    const answer = await core.actions.setVolume(step);
+    const answer = this.computer ? await core.actions.computer.setVolume(step)
+      : await core.actions.setVolume(step);
     if (signal.aborted || answer.queued || answer.dropped) return;
     if (!answer.ok) {
       this.asked = null;
@@ -167,15 +170,15 @@ class Knob extends HTMLElement {
   show() {
     const asked = this.asked;
     // Muted reads `−∞ dB`, as the other themes say it.
-    if (this.classList.contains('muted')) return this.readout('−∞ dB');
+    if (this.classList.contains('muted') && !this.computer) return this.readout('−∞ dB');
     if (asked === null) return this.readout(this.words);
     this.readout(this.texts[asked - this.lo] ?? this.words);
   }
 
   /** Put `text` in the big number and its unit. */
   readout(text) {
-    const dB = text.endsWith(' dB');
-    const [num, unit] = dB ? [text.slice(0, -3), 'dB'] : [text, ''];
+    const [, number, word] = /^(.*) (dB|%)$/.exec(text) ?? [];
+    const [num, unit] = word ? [number, word] : [text, ''];
     const numEl = this.querySelector('.big .num');
     if (numEl) {
       // The minus hangs left of the digits, so they stay centred whatever the sign.
@@ -261,6 +264,10 @@ class Knob extends HTMLElement {
   async mute() {
     const key = this.dataset.mute;
     if (this.locked || !key) return;
+    if (this.computer) {
+      if (this.live()) await ember.core.actions.computer.setMute(!this.classList.contains('muted'));
+      return;
+    }
     const stops = this.climbing() && !this.classList.contains('muted');
     const { core, signal } = ember;
     const answer = await core.actions.setControl(key,

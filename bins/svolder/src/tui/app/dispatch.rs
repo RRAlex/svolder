@@ -112,6 +112,9 @@ impl App {
         if self.tone.edit_line.is_some() {
             return edit_line::key(self, key.code);
         }
+        if self.tone.point_line.is_some() {
+            return self.point_line_key(key.code);
+        }
         // `Esc` lets go of a point being dragged on the tone curve, and does nothing else then.
         if key.code == KeyCode::Esc && self.pointer.curve_drag.take().is_some() {
             return Vec::new();
@@ -320,6 +323,7 @@ impl App {
             KeyCode::Char('m') => self.mute(),
             KeyCode::Char('i') => self.flip_key("phase"),
             KeyCode::Char('o') => self.flip_key("nos"),
+            KeyCode::Char('a') if self.screen == Screen::Tone && self.on_computer() => return None,
             KeyCode::Char('a') => {
                 self.advise_key();
                 Vec::new()
@@ -485,6 +489,7 @@ impl App {
             || self.presets.preset_list.is_some()
             || self.presets.device_list.is_some()
             || self.tone.edit_line.is_some()
+            || self.tone.point_line.is_some()
             || self.overlays.quitting
     }
 }

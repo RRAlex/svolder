@@ -194,6 +194,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/contract.js"),
     ),
     (
+        "core/computer.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/computer.js"),
+    ),
+    (
+        "core/ask.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/ask.js"),
+    ),
+    (
         "core/visible.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/visible.js"),

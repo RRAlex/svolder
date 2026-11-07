@@ -135,7 +135,7 @@ pub fn uninstall() -> Result<(), Failure> {
 
 /// The environment variable that names where the unit files go, which is what lets `make
 /// install-service UNITDIR=<dir>` and this verb write the same one pair of files.
-const UNITDIR_ENV: &str = "SVOLDER_UNITDIR";
+use svolder_ipc::config::UNITDIR_ENV;
 
 /// What a machine makes of a background service, and so what the daemon can be offered.
 ///
@@ -500,13 +500,6 @@ fn unit_dir_named(root: bool, named: Option<std::ffi::OsString>) -> PathBuf {
             true => PathBuf::from(SYSTEM_WIDE_UNIT_DIR),
             false => config_home().join("systemd").join("user"),
         })
-}
-
-/// The directory a user's own units go in: `$SVOLDER_UNITDIR` when something says so, else
-/// the one systemd reads a user's units from, whoever runs this. It is never the system-wide
-/// directory [`unit_dir`] gives root, since a unit written there starts for every user.
-pub(crate) fn user_unit_dir() -> PathBuf {
-    unit_dir_named(false, std::env::var_os(UNITDIR_ENV))
 }
 
 /// `$XDG_CONFIG_HOME`, or `~/.config` (the account's home when `$HOME` is unset): the directory systemd reads a user's own units from.

@@ -64,6 +64,9 @@ pub trait Sink: Send + Sync {
 
     /// Mute the sink when it plays and unmute it when it is muted. Whether the sink took it.
     async fn toggle_mute(&self) -> bool;
+
+    /// Mute the sink (`true`) or unmute it (`false`), whatever it was. Whether the sink took it.
+    async fn set_mute(&self, muted: bool) -> bool;
 }
 
 /// The default sink through `wpctl`.
@@ -273,6 +276,11 @@ impl Sink for Wpctl {
         self.run(&["set-mute", DEFAULT_SINK, "toggle"])
             .await
             .is_some()
+    }
+
+    async fn set_mute(&self, muted: bool) -> bool {
+        let muted = if muted { "1" } else { "0" };
+        self.run(&["set-mute", DEFAULT_SINK, muted]).await.is_some()
     }
 }
 

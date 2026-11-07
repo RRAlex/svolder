@@ -7,8 +7,8 @@
 //!
 //! The built-ins come first, built for this tone control from its own profile, then the user's
 //! own in the order the file has them, those with this tone control's band count and every
-//! imported one. `a` searches AutoEq's headphones ([`search`]), `i` imports a file ([`prompt`]),
-//! and `h` puts the focused preset on the computer ([`computer`]). Nothing
+//! imported one. `a` searches AutoEq's headphones ([`search`]) and `i` imports a file ([`prompt`]);
+//! on the computer's side `Enter` puts the focused preset on the computer ([`computer`]). Nothing
 //! here writes: a load answers with the writes the recall plan asks for, which the loop sends
 //! without waiting as it sends every key's, and a change to the library answers with the
 //! [`Intent`]s the loop carries out through the configuration writers. What the list refuses is
@@ -23,17 +23,14 @@ use std::time::Instant;
 
 use crossterm::event::KeyCode;
 use svolder_autoeq::{Entry as Measurement, Index};
-use svolder_host::eq::HostEqState;
 use svolder_ipc::config::RefreshWeeks;
 use svolder_profiles::EqSpec;
-use svolder_profiles::tone::preset::{self, EqCommand, Plan, Preset};
+use svolder_profiles::tone::preset::{self, BothSides, EqCommand, Plan, Preset};
 use svolder_proto::FunctionId;
 
-use crate::recovery::Failure;
 use crate::tui::app::{ANSWER_LIFETIME, App, Intent, stepped};
 
-mod computer;
-pub(crate) use computer::toggle as toggle_computer;
+pub(crate) mod computer;
 mod import;
 pub(crate) mod prompt;
 pub(crate) mod search;
@@ -85,18 +82,9 @@ pub struct PresetsBox {
     /// screen's header names with a `*` once the curve has moved away from it. Kept for the
     /// session only and written nowhere.
     pub loaded_preset: Option<String>,
-    /// The name of the preset on the computer while the computer EQ is on, as the loop last
-    /// read it.
-    pub computer: Option<String>,
-    /// Why the computer EQ cannot run here, as the loop last checked: `None` where it can.
-    pub computer_off: Option<String>,
-    /// Whether an apply or a removal of the computer EQ is still running.
-    pub computer_busy: bool,
-    /// Whether the DAC was flattened for the apply in flight: a failed apply then says so.
-    pub computer_flattened: bool,
-    /// The computer EQ's saved state as the loop last read it, on or off: what the Host EQ row
-    /// says and re-applies, and the header names while it is on.
-    pub host_eq: Option<HostEqState>,
+    /// The preset the DAC was flattened for, while the apply that follows has not ended: a refusal
+    /// of that apply says the DAC was flattened.
+    pub computer_flattened: Option<String>,
 }
 
 /// The preset list, while it is open.
@@ -170,15 +158,6 @@ pub enum Done {
     Index(Result<Index, String>),
     /// One measurement's correction text, or why it could not be had.
     Download(Measurement, Result<String, String>),
-    /// The computer EQ applied for the preset of this name, which stated this preamp in dB.
-    Applied(String, f64, Result<HostEqState, Failure>),
-    /// The computer EQ removed, with the preset to load onto the DAC once it is.
-    Removed {
-        /// The preset to load next.
-        then_load: Option<String>,
-        /// How the removal went.
-        result: Result<(), Failure>,
-    },
 }
 
 /// Fold what a job ended with into the app, and answer with the writes it asks for.
@@ -189,8 +168,6 @@ pub(crate) fn done(app: &mut App, done: Done) -> Vec<Intent> {
             Vec::new()
         }
         Done::Download(entry, result) => import::downloaded(app, &entry, result),
-        Done::Applied(name, stated, result) => computer::applied(app, &name, stated, result),
-        Done::Removed { then_load, result } => computer::removed(app, then_load, result),
     }
 }
 
@@ -329,7 +306,7 @@ pub fn standing(app: &App) -> Option<Standing> {
 /// front end or `svolder eq` has written since; nothing at all on a device with no tone
 /// control.
 pub(in crate::tui) fn open(app: &mut App) -> Vec<Intent> {
-    if app.profile.eq.is_none() {
+    if app.preset_spec().is_none() {
         return Vec::new();
     }
     app.presets.preset_list = Some(PresetList {
@@ -346,7 +323,7 @@ pub(crate) fn reread(app: &mut App, presets: Vec<Preset>) {
     app.presets.saved = presets;
     app.tone.target_cache.clear();
     // Each imported preset's fit is worked out here, once per opening, so no frame fits.
-    if let Some(eq) = app.profile.eq.as_ref() {
+    if let Some(eq) = app.preset_spec().as_ref() {
         for source in app
             .presets
             .saved
@@ -368,11 +345,11 @@ pub(crate) fn reread(app: &mut App, presets: Vec<Preset>) {
 
 /// The row of the preset that is on, or the first row where none is.
 fn on_row(app: &App) -> usize {
-    let Some(eq) = app.profile.eq.as_ref() else {
+    let Some(eq) = app.preset_spec() else {
         return 0;
     };
-    let entries = entries(app, eq);
-    on(app, eq, &entries)
+    let entries = entries(app, &eq);
+    on(app, &eq, &entries)
         .and_then(|name| entries.iter().position(|entry| entry.preset.name == name))
         .unwrap_or(0)
 }
@@ -413,11 +390,11 @@ pub(in crate::tui) fn key(app: &mut App, code: KeyCode) -> Vec<Intent> {
 /// The list's own keys: `↑↓` move, `Enter` loads the focused preset and closes the list (after
 /// asking, for the one on the computer), `n` asks for a name to save the device's curve under,
 /// `u` and `x` ask before they update or delete the focused preset, `c` asks for its new name,
-/// `a` opens the AutoEq search, `i` the file prompt, `h` the computer EQ, and `Esc` closes the
+/// `a` opens the AutoEq search, `i` the file prompt, and `Esc` closes the
 /// list. `u`, `c` and `x` refuse a built-in, saying why, and `n` and `u` refuse while a load is
 /// still being confirmed, since each would save the curve from before it.
 fn choose(app: &mut App, code: KeyCode) -> Vec<Intent> {
-    let Some(eq) = app.profile.eq.clone() else {
+    let Some(eq) = app.preset_spec() else {
         app.presets.preset_list = None;
         return Vec::new();
     };
@@ -438,7 +415,11 @@ fn choose(app: &mut App, code: KeyCode) -> Vec<Intent> {
             let Some(entry) = focused else {
                 return Vec::new();
             };
-            if computer::on_computer(app, &entry.preset.name) {
+            if app.on_computer() {
+                return computer::recall(app, &entry);
+            }
+            let there = app.computer_preset();
+            if preset::both_sides(&entry.preset, there.as_deref()) != BothSides::Free {
                 computer::ask(app, Question::MoveToDac(entry.preset.name));
                 return Vec::new();
             }
@@ -448,12 +429,6 @@ fn choose(app: &mut App, code: KeyCode) -> Vec<Intent> {
         KeyCode::Char('i') => {
             prompt::open(app);
             return Vec::new();
-        }
-        KeyCode::Char('h') => {
-            let Some(entry) = focused else {
-                return Vec::new();
-            };
-            return computer::key(app, &entry);
         }
         KeyCode::Char('n') => {
             if still_loading(app) {
@@ -470,6 +445,10 @@ fn choose(app: &mut App, code: KeyCode) -> Vec<Intent> {
             let name = entry.preset.name;
             if entry.builtin {
                 app.warn(read_only(&name));
+                return Vec::new();
+            }
+            if letter == 'u' && app.on_computer() {
+                app.warn("on the computer n saves its points as a new preset");
                 return Vec::new();
             }
             if letter == 'u' && imported {
@@ -646,6 +625,19 @@ fn named(app: &mut App) -> Vec<Intent> {
                 app.presets.loaded_preset = Some(name.clone());
             }
             vec![Intent::RenamePreset(old, name)]
+        }
+        None if app.on_computer() => {
+            let intent = match app.host.daemon_owns() {
+                true => Intent::eq(svolder_ipc::HostEqOp::SaveAs { name: name.clone() }),
+                false => {
+                    let Some(correction) = app.computer_correction() else {
+                        app.warn(NOT_READ);
+                        return Vec::new();
+                    };
+                    Intent::SavePreset(preset::from_computer(&name, correction))
+                }
+            };
+            vec![intent]
         }
         None => {
             let Some(eq) = app.profile.eq.clone() else {

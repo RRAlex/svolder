@@ -283,3 +283,63 @@ export function bandWriter({ actions, band, device, before = () => [], aborted =
     return { text: answer.text, modeSetToEq: answer.mode_set_to_eq };
   };
 }
+
+const round = (value, places) => Math.round(value * 10 ** places) / 10 ** places;
+
+let computerTables = null;
+
+/**
+ * The steps of a point of the computer's EQ, in `bandSteps`' shape (`{ f, g, q }`, each a table of
+ * values a raw step indexes): the frequency on a 1/24-octave grid from 20 Hz to 20 kHz (the last
+ * step is 20 kHz itself), the gain every 0.1 dB from −12 to +12, the Q on a 1/24-decade grid from
+ * 0.1 to 10. These are the hand's ranges: a value a preset holds outside them is played as written
+ * and sits at the nearest step until a hand moves that field.
+ */
+export function computerSteps() {
+  if (computerTables) return computerTables;
+  const f = Array.from({ length: 240 }, (_, k) => round(20 * 2 ** (k / 24), 3));
+  if (f.at(-1) < 20000) f.push(20000);
+  const g = Array.from({ length: 241 }, (_, i) => (i - 120) / 10);
+  const q = Array.from({ length: 49 }, (_, k) => round(0.1 * 10 ** (k / 24), 3));
+  computerTables = { f, g, q };
+  return computerTables;
+}
+
+/** The raw steps of `tables` nearest the point `{ f, g, q }`: where a drag of it starts. */
+export function startOf(tables, point) {
+  const near = (table, value, distance) => {
+    let best = 0;
+    let least = Infinity;
+    table.forEach((entry, i) => {
+      const d = distance(entry, value);
+      if (d < least) {
+        best = i;
+        least = d;
+      }
+    });
+    return best;
+  };
+  return {
+    f: near(tables.f, point.f, byLogDistance),
+    g: near(tables.g, point.g, byDistance),
+    q: near(tables.q, point.q, byDistance),
+  };
+}
+
+/**
+ * The `write(param, raw)` of a drag of point `n` (1-based) of the computer's EQ, over `actions`:
+ * the raw step is turned into the value of `steps` (the computer's by default) and sent as a live
+ * update (`done: false`); the writer's `release()` sends what was moved once more, as the last
+ * value. A point that was only tapped has moved nothing and sends nothing. Answers what createDrag
+ * asks of a write: `{ refused }` with the words of a refusal, or `{}`.
+ */
+export function pointWriter({ actions, n, steps = computerSteps() }) {
+  const write = async (param, raw) => {
+    const value = steps[param][raw];
+    if (value === undefined) return {};
+    const answer = await actions.computer.setPoint(n, { [param]: value }, { done: false });
+    return answer.ok || answer.queued ? {} : { refused: answer.error };
+  };
+  write.release = () => actions.computer.setPoint(n, {}, { done: true });
+  return write;
+}

@@ -374,4 +374,73 @@ ok('the_wet_road_stays_off_for_3_minutes_after_a_step_down_dropped_it', () => {
   assert.equal(BUDGET.wetHeldS, 180);
 });
 
+ok('a_probe_lifts_the_cap_and_a_slow_scene_is_stepped_down_within_a_second_each_step', () => {
+  const b = createBudget({ coarse: true });
+  b.size(390, 844, 3);
+  assert.equal(b.capped, true);
+  b.probe();
+  // draws of 16 ms at 60 a second under no cap: the cap is lifted and nothing is lowered
+  let at = feed(b, 120, 3, 100, 1 / 60, true).at;
+  assert.equal(b.capped, false);
+  assert.equal(b.step, 0);
+  // the scene turns slow (30 ms a draw, 20 a second): a step within 0.5 s of draws and then the next
+  b.probe();
+  const began = at;
+  for (let i = 0; i < 400 && b.step < 2; i++) {
+    at += 1 / 20;
+    b.sample(30, at, true);
+  }
+  assert.ok(b.step >= 1, 'stepped');
+  assert.ok(at - began < 3, `settled in ${(at - began).toFixed(2)} s`);
+});
+
+ok('a_probe_holds_the_limits_a_good_scene_stays_where_it_is_and_a_held_cap_stays', () => {
+  const good = createBudget({ coarse: true });
+  good.size(390, 844, 3);
+  good.probe();
+  feed(good, 240, 4, 0, 1 / 60, true);
+  assert.deepEqual([good.capped, good.step, good.wet], [false, 0, false]);
+  // a step-down on the rate holds the way back shut: a probe afterwards does not lift the cap
+  const slow = createBudget({ coarse: true });
+  slow.size(390, 844, 3);
+  slow.probe();
+  let at = 0;
+  for (let i = 0; i < 400; i++) { at += 1 / 20; slow.sample(3, at, true); }
+  assert.equal(slow.capped, true);
+  slow.probe();
+  feed(slow, 30, 3, at, 1 / 60, true);
+  assert.equal(slow.capped, true, 'held');
+});
+
+ok('a_probe_steps_down_on_slow_draws_alone_and_on_few_draws_alone', () => {
+  // 20 ms draws at 60 a second: slow, though often
+  const slow = createBudget({ coarse: false });
+  slow.size(390, 844, 3);
+  slow.probe();
+  let at = 0;
+  for (let i = 0; i < 60 && slow.wet; i++) { at += 1 / 60; slow.sample(20, at, true); }
+  assert.equal(slow.wet, false, 'the wet road is dropped within a second');
+  assert.ok(at < 0.8, `${at}`);
+  // 3 ms draws at 15 a second: quick, but seldom
+  const seldom = createBudget({ coarse: false });
+  seldom.size(390, 844, 3);
+  seldom.probe();
+  at = 0;
+  for (let i = 0; i < 60 && seldom.wet; i++) { at += 1 / 15; seldom.sample(3, at, true); }
+  assert.equal(seldom.wet, false, 'the wet road is dropped within a second or so');
+  assert.ok(at < 1.5, `${at}`);
+});
+
+ok('a_start_from_a_kept_tier_begins_there_and_is_corrected_by_the_measuring', () => {
+  const b = createBudget({ coarse: true, start: { capped: false, step: 1 } });
+  b.size(390, 844, 3);
+  assert.equal(b.capped, false);
+  assert.equal(b.step, 1);
+  assert.deepEqual(b.tier, { capped: false, step: 1 });
+  let at = 0;
+  for (let i = 0; i < 400 && b.step < 2; i++) { at += 1 / 20; b.sample(30, at, true); }
+  assert.ok(b.step >= 2 || b.capped, 'corrected at once, not after a window');
+  assert.ok(at < 4, `${at} s`);
+});
+
 console.log(`${n} budget checks passed`);

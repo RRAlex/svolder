@@ -986,6 +986,254 @@ ok('the_keys_are_offered_to_a_viewer_who_may_write', () => {
   }
 });
 
+// ------------------------------------------------------------------------ the computer's side
+
+const COMPUTER_VIEW = '../../../bins/svolderd/web/themes/ember/computer-view.js';
+const { computerView } = await import(COMPUTER_VIEW);
+const { createComputer, createHolds } = await import('../../../bins/svolderd/web/core/computer.js');
+const { createStore } = await import('../../../bins/svolderd/web/core/store.js');
+const { switchPill, ROWS_SHOWN } = await import('../../../bins/svolderd/web/themes/ember/draw/computer.js');
+
+const memory = () => {
+  const map = new Map();
+  return {
+    getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+};
+const pt = (type, f, g, q) => ({ type, f, g, q });
+const SEVEN = [pt('LSC', 105, 5.5, 0.7), pt('PK', 180, -2.1, 0.9), pt('PK', 1200, -1.8, 1.4),
+  pt('PK', 2900, 3.2, 2), pt('PK', 5600, -4, 3.1), pt('PK', 8900, 2.4, 2.5), pt('HSC', 10000, -1.5, 0.7)];
+const computerModel = (points = SEVEN, over = {}) => ({
+  volume: { pct: 42, muted: false, sink: 'Schiit' },
+  eq: {
+    on: true, running_unknown: false, preamp_db: -6, preset: 'Warm', live: true, note: null, max: 16,
+    points, response: [],
+  },
+  presets: [
+    { name: 'Warm', built_in: true, on: true, playable: true, why: null },
+    { name: 'Mine', built_in: false, on: false, playable: true, why: null },
+    { name: 'Huge', built_in: false, on: false, playable: false, why: '17 filters' },
+  ],
+  unavailable: null,
+  ...over,
+});
+
+/** The computer's view over the fixture case `name`, as Ember's drawing is given it: `side` is the
+ * one kept, `computer` the host's model (`null`: the page has none). */
+function viewOf(name, { side = 'computer', computer = computerModel(), guest = false } = {}) {
+  const base = guest ? fixture.cases.find((c) => c.page.viewer.guest && c.page.device)
+    : fixture.cases.find((c) => c.name === name);
+  const page = { ...base.page, host: computer === null ? null : { track: null, route: null, computer } };
+  const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
+  const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
+  const core = createComputer({ store, storage: memory(), holds });
+  core.flip(side);
+  return { page, view: computerView({ model: store, computer: core }), core, store };
+}
+const html = ({ page, view }, part, oob = false) => PARTS[part](page.device, page, { oob, computer: view });
+const words = (markup) => markup.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+ok('the_pill_names_the_device_and_this_computer', () => {
+  const c = viewOf('dac');
+  const bar = shell(c.page, '', c.view);
+  const pill = /<span id="part-switch" class="sideseg"><span class="seg"[^>]*>(.*?)<\/span><\/span>/.exec(bar);
+  assert.ok(pill, bar);
+  const names = [...pill[1].matchAll(/<button[^>]*>(.*?)<\/button>/g)].map((m) => m[1]);
+  assert.deepEqual(names, [c.page.device.name, 'This computer']);
+  assert.match(pill[1], /aria-pressed="true" id="side-computer" data-side="computer"/);
+  const dac = viewOf('dac', { side: 'dac' });
+  assert.match(shell(dac.page, '', dac.view), /aria-pressed="true" id="side-dac" data-side="dac"/);
+  // the pill is a part of its own, swapped out of band
+  assert.match(html(c, 'switch', true), /^<span id="part-switch" class="sideseg" hx-swap-oob="true">/);
+  // where the computer cannot be used the switch says why, in its own place
+  const gone = viewOf('dac', { computer: computerModel(SEVEN, { unavailable: 'pw-dump is missing' }) });
+  assert.match(html(gone, 'switch'), /computer controls unavailable: pw-dump is missing<\/span><\/span>$/);
+  assert.equal(gone.view.side, 'dac');
+});
+
+ok('no_pill_without_a_dac_or_the_computer', () => {
+  const none = viewOf('dac', { computer: null });
+  assert.equal(none.view, null);
+  const bar = shell(none.page, '', { sw: null });
+  assert.doesNotMatch(bar, /This computer/);
+  assert.match(bar, /<span id="part-switch" class="sideseg" hidden><\/span>/);
+  assert.doesNotMatch(shell(none.page), /part-switch/);
+  assert.equal(switchPill(null), '<span id="part-switch" class="sideseg" hidden></span>');
+  const noDevice = fixture.cases.find((c) => !c.page.device);
+  const store = createStore({ ...noDevice.page, host: { track: null, route: null, computer: computerModel() } },
+    { signedOut: () => {}, fetch: async () => ({}) });
+  const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({}) }) });
+  assert.equal(computerView({ model: store, computer: core }), null);
+});
+
+ok('the_dial_reads_percent_with_ticks_0_25_50_75_100', () => {
+  const c = viewOf('dac');
+  const dial = html(c, 'volume');
+  assert.match(dial, /<span class="num">42<\/span><span class="unit">%<\/span>/);
+  const marks = [...dial.matchAll(/<text class="lbl"[^>]*>(.*?)<\/text>/g)].map((m) => m[1]);
+  assert.deepEqual(marks, ['0', '25', '50', '75', '100']);
+  assert.match(dial, /data-lo="0" data-hi="100" data-raw="42"/);
+  assert.match(dial, /data-computer="true"/);
+  assert.doesNotMatch(dial, /class="zone"|class="ctick"|class="ltick red"|class="lbl red"/);
+  assert.equal(JSON.parse(/data-texts="([^"]*)"/.exec(dial)[1].replace(/&quot;/g, '"'))[42], '42 %');
+  // boosted by another program: read as it is, the dial at its end
+  const boosted = viewOf('dac', { computer: computerModel(SEVEN, { volume: { pct: 130, muted: false } }) });
+  const loud = html(boosted, 'volume');
+  assert.match(loud, /<span class="num">130<\/span>/);
+  assert.match(loud, /data-raw="100"/);
+});
+
+ok('a_first_paint_reads_a_dash_never_a_live_zero_and_a_muted_one_keeps_its_number', () => {
+  const unread = viewOf('dac', { computer: computerModel(SEVEN, { volume: null }) });
+  const dial = html(unread, 'volume');
+  assert.match(dial, /<span class="num">—<\/span>/);
+  assert.doesNotMatch(dial, /<span class="num">0<\/span>|class="unit"/);
+  assert.match(dial, /data-raw=""/);
+  assert.doesNotMatch(dial, /class="handle"/);
+  const muted = viewOf('dac', { computer: computerModel(SEVEN, { volume: { pct: 42, muted: true } }) });
+  assert.match(html(muted, 'volume'), /<span class="num">42<\/span><span class="unit">%<\/span>/);
+  assert.match(html(muted, 'volume'), /<p class="sub">muted<\/p>/);
+});
+
+ok('the_tone_mode_is_off_eq_in_the_seg_style', () => {
+  const tone = html(viewOf('dac'), 'tone');
+  const track = /<div class="seg" role="group" aria-label="Tone control mode">(.*?)<\/div>/.exec(tone)[1];
+  const options = [...track.matchAll(/<button type="button" class="opt" aria-pressed="(\w+)"[^>]*>(.*?)<\/button>/g)]
+    .map((m) => [m[2], m[1]]);
+  assert.deepEqual(options, [['Off', 'false'], ['EQ', 'true']]);
+  assert.doesNotMatch(tone, /Loudness|loudness|class="rb"/);
+  const off = viewOf('dac', { computer: computerModel(SEVEN, { eq: { ...computerModel().eq, on: false } }) });
+  assert.match(html(off, 'tone'), /aria-pressed="true"[^>]*data-mode="off"/);
+  // a shelf and a peak are drawn: the curve is a path of the 181 frequencies
+  assert.match(tone, /<path class="line" d="M[^"]+"/);
+  // a point's marker is drawn in the graph, a ghost while off
+  assert.equal((tone.match(/class="mk"/g) ?? []).length, 7);
+});
+
+ok('the_table_has_type_frequency_gain_q_and_remove', () => {
+  const tone = html(viewOf('dac'), 'tone');
+  assert.match(tone, /<div class="ph" aria-hidden="true"><span>#<\/span><span>Type<\/span><span>Frequency<\/span><span>Gain<\/span><span>Q<\/span>/);
+  const rows = [...tone.matchAll(/<div class="pt[^"]*" role="group" aria-label="Point \d+" data-n="(\d+)">(.*?)<\/div>/g)];
+  assert.equal(rows.length, 7);
+  const [, , fourth] = rows.slice(3)[0];
+  assert.match(fourth, /<option selected>PK<\/option>/);
+  const cells = (row) => [...row.matchAll(/class="cell"[^>]*>(.*?)<\/button>/g)].map((m) => m[1]);
+  assert.deepEqual(cells(rows[0][2]), ['105 Hz', '+5.5 dB', '0.70']);
+  assert.deepEqual(cells(rows[1][2]), ['180 Hz', '−2.1 dB', '0.90']);
+  assert.deepEqual(cells(rows[3][2]), ['2900 Hz', '+3.2 dB', '2.00']);
+  assert.match(rows[0][2], /<option selected>LSC<\/option>/);
+  assert.match(rows[6][2], /<option selected>HSC<\/option>/);
+  for (const [, n, row] of rows) {
+    assert.match(row, new RegExp(`aria-label="Remove point ${n}"[^>]*>×</button>`));
+  }
+  assert.match(tone, /data-comp="add"[^>]*>\+ Add point<\/button>/);
+  assert.match(tone, /<p class="pline">7 of 16 points · preamp −6\.0 dB<\/p>/);
+  // the one point of a flat curve: 0.0 dB
+  const flat = viewOf('dac', { computer: computerModel([]) });
+  assert.match(html(flat, 'tone'), /<p class="pline">1 of 16 points · preamp −6\.0 dB<\/p>/);
+  // the point's row is lit when it is picked
+  const lit = viewOf('dac');
+  lit.view.picked = 4;
+  assert.match(html(lit, 'tone'), /<div class="pt on" role="group" aria-label="Point 4" data-n="4">/);
+});
+
+ok('the_table_shows_six_rows_and_scrolls', () => {
+  assert.equal(ROWS_SHOWN, 6);
+  const seven = html(viewOf('dac'), 'tone');
+  assert.match(seven, /<div class="pscroll long" data-rows="6">/);
+  assert.match(seven, /<p class="more">1 more ↓ scroll<\/p>/);
+  const many = Array.from({ length: 16 }, (_, i) => pt('PK', 100 * (i + 1), 0, 1));
+  const sixteen = html(viewOf('dac', { computer: computerModel(many) }), 'tone');
+  assert.equal((sixteen.match(/class="pt[ "]/g) ?? []).length, 16);
+  assert.match(sixteen, /10 more ↓ scroll/);
+  assert.match(sixteen, /16 of 16 points/);
+  assert.match(sixteen, /data-comp="add" aria-disabled="true"/);
+  // up to six rows nothing scrolls and nothing is said
+  const six = html(viewOf('dac', { computer: computerModel(SEVEN.slice(0, 6)) }), 'tone');
+  assert.match(six, /<div class="pscroll" data-rows="6"/);
+  assert.match(six, /<p class="more"><\/p>/);
+});
+
+ok('the_lone_point_keeps_its_remove', () => {
+  const one = html(viewOf('dac', { computer: computerModel([pt('PK', 1000, 0, 1)]) }), 'tone');
+  assert.match(one, /aria-label="Remove point 1"[^>]*>×<\/button>/);
+  assert.match(html(viewOf('dac', { computer: computerModel([]) }), 'tone'), /class="pt" role="group" aria-label="Point 1" data-n="1"><span class="pn">1<\/span>/);
+  assert.match(html(viewOf('dac', { computer: computerModel([]) }), 'tone'), /Remove point 1/);
+});
+
+ok('the_presets_are_shared_and_an_unplayable_one_is_disabled_with_its_reason', () => {
+  const list = html(viewOf('dac'), 'presets');
+  assert.match(list, /<p class="pstat"><strong>Warm<\/strong> is on\.<\/p>/);
+  assert.match(list, /aria-pressed="true" data-comp="preset" data-name="Warm"[^>]*><i class="lamp"><\/i><span>Warm<\/span><small>built in<\/small>/);
+  assert.match(list, /data-name="Mine"><i class="lamp"><\/i><span>Mine<\/span><small>yours<\/small>/);
+  assert.match(list, /data-name="Huge" aria-disabled="true" title="17 filters"><i class="lamp"><\/i><span>Huge<\/span><small>17 filters<\/small>/);
+});
+
+ok('the_presets_offer_save_as_and_rename_and_delete_for_a_writer_only', () => {
+  const list = html(viewOf('dac'), 'presets');
+  assert.match(list, /<button type="button" class="btn" data-open>Save as preset<\/button> <form class="pform" data-form="save" data-comp="form" hidden>/);
+  // only a viewer's own preset can be renamed or deleted
+  assert.match(list, /aria-label="Rename Mine"/);
+  assert.match(list, /aria-label="Delete Mine"/);
+  assert.doesNotMatch(list, /aria-label="(Rename|Delete) Warm"/);
+  assert.match(list, /<form class="pform" data-form="rename" data-comp="form" hidden data-from="Mine">/);
+  const guest = html(viewOf('dac', { guest: true }), 'presets');
+  assert.doesNotMatch(guest, /Save as preset|aria-label="(Rename|Delete)|<form/);
+});
+
+ok('nothing_below_the_switch_says_computer', () => {
+  const c = viewOf('dac', { computer: computerModel(SEVEN, { eq: { ...computerModel().eq, running_unknown: true } }) });
+  for (const part of ['volume', 'tone', 'presets']) {
+    assert.doesNotMatch(words(html(c, part)), /computer/i, part);
+  }
+  const amp = viewOf('amp');
+  const screenText = words(screen(amp.page, undefined, amp.view));
+  assert.doesNotMatch(screenText, /computer/i);
+  assert.match(screenText, /Volume/);
+  assert.match(screenText, /Tone control/);
+});
+
+ok('no_style_attribute', () => {
+  const c = viewOf('dac');
+  for (const part of ['volume', 'tone', 'presets', 'switch']) {
+    assert.doesNotMatch(html(c, part), /\sstyle=/, part);
+  }
+  assert.doesNotMatch(screen(c.page, undefined, c.view), /\sstyle=/);
+});
+
+ok('a_guest_sees_the_computer_inert_but_may_flip', () => {
+  const g = viewOf('dac', { guest: true });
+  assert.equal(g.view.writes, false);
+  const tone = html(g, 'tone');
+  assert.match(tone, /data-inert/);
+  for (const control of tone.match(/<(button|select)[^>]*data-comp="(mode|cell|type|remove|add)"[^>]*>/g)) {
+    assert.match(control, /aria-disabled="true"/, control);
+  }
+  assert.match(html(g, 'volume'), /data-inert="true"/);
+  assert.match(html(g, 'presets'), /data-comp="preset" data-name="Warm" aria-disabled="true"/);
+  assert.doesNotMatch(html(g, 'switch'), /aria-disabled/);
+});
+
+ok('the_amp_page_draws_the_dac_pages_parts_on_the_computer_side', () => {
+  const amp = viewOf('amp');
+  const dac = viewOf('dac');
+  const own = screen(amp.page, undefined, amp.view);
+  assert.match(own, /class="view dac" data-side="computer"/);
+  const ids = [...own.matchAll(/<section id="(part-[a-z-]+)"/g)].map((m) => m[1]);
+  for (const id of ['part-volume', 'part-tone', 'part-presets']) assert.ok(ids.includes(id), ids.join());
+  // the same knob and tone section as the DAC page's computer side
+  const strip = (x) => x.replace(/data-device="[^"]*"|data-name="[^"]*"|aria-label="[^"]*, [^"]*"/g, '');
+  assert.equal(strip(/<section id="part-volume".*?<\/section>/s.exec(own)[0]),
+    strip(/<section id="part-volume".*?<\/section>/s.exec(screen(dac.page, undefined, dac.view))[0]));
+  assert.equal(/<section id="part-tone".*?<\/section>/s.exec(own)[0],
+    /<section id="part-tone".*?<\/section>/s.exec(screen(dac.page, undefined, dac.view))[0]);
+  // the DAC side of the amp is the amp's own
+  const away = viewOf('amp', { side: 'dac' });
+  assert.match(screen(away.page, undefined, away.view), /class="view amp/);
+  assert.equal(away.view.volume, null);
+});
+
 if (failed > 0) {
   console.log(`FAIL ${failed} of ${n} ember-parts checks failed`);
   process.exit(1);

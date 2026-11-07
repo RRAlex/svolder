@@ -14,7 +14,7 @@ use tokio::time::Instant;
 
 use super::{Context, host_changed, send_json};
 use crate::fleet::HostWatch;
-use crate::web::model::{self, HostModel, PageModel, RouteModel};
+use crate::web::model::{self, ComputerModel, HostModel, PageModel, RouteModel};
 use crate::web::router::devices;
 use crate::web::view::{self, Playing};
 
@@ -55,7 +55,8 @@ impl Task {
         }
         let mut fleet_changed = cx.web.fleet_changed.subscribe();
         fleet_changed.borrow_and_update();
-        let host_key = host_parts(&cx).map(|(card, route)| HostKey::new(&card, route));
+        let host_key =
+            host_parts(&cx).map(|(card, route)| HostKey::new(&card, route, host_computer(&cx)));
         Task {
             host,
             host_key,
@@ -175,31 +176,38 @@ impl Task {
     async fn host_turn(&mut self, tx: &mpsc::Sender<Event>) -> bool {
         // One read of the route (and of the state file behind it): the key and the event say the same.
         let parts = host_parts(&self.cx);
+        let computer = host_computer(&self.cx);
         let key = parts
             .as_ref()
-            .map(|(card, route)| HostKey::new(card, route.clone()));
+            .map(|(card, route)| HostKey::new(card, route.clone(), computer.clone()));
         if key == self.host_key {
             return true;
         }
         self.host_key = key;
-        let host = parts.map(|(card, route)| HostModel::new(&card, route));
+        let host = parts.map(|(card, route)| HostModel::new(&card, route, computer));
         send_json(tx, "host", &host).await.is_ok()
     }
 }
 
-/// What the `host` event says, to tell whether it changed: the card's key (`Playing::key`) and
-/// the route's model.
+/// What the `host` event says, to tell whether it changed: the card's key (`Playing::key`), the
+/// route's model and the computer's controls.
 #[derive(Debug, PartialEq)]
 pub(super) struct HostKey {
     card: String,
     route: Option<RouteModel>,
+    computer: Option<ComputerModel>,
 }
 
 impl HostKey {
-    pub(super) fn new(card: &Playing, route: Option<RouteModel>) -> HostKey {
+    pub(super) fn new(
+        card: &Playing,
+        route: Option<RouteModel>,
+        computer: Option<ComputerModel>,
+    ) -> HostKey {
         HostKey {
             card: card.key(),
             route,
+            computer,
         }
     }
 }
@@ -207,6 +215,11 @@ impl HostKey {
 /// What the computer's player and route say now: the card and the route's model.
 fn host_parts(cx: &Context) -> Option<(Playing, Option<RouteModel>)> {
     model::host_parts(&cx.web, cx.access)
+}
+
+/// The computer's controls for the page's shown device.
+fn host_computer(cx: &Context) -> Option<ComputerModel> {
+    model::host_computer(&cx.web, cx.shown.as_ref())
 }
 
 /// When the computer EQ's state file last changed; `None` while there is none.

@@ -5,9 +5,19 @@
 //! computer plays, the systemd unit and the autostart entry that keep it running, and the
 //! state file that remembers what is applied.
 //!
-//! Everything here is pure except [`HostEqState::load`] and [`HostEqState::save`]: no program
-//! is run and nothing is written beside the state file. `svolder host eq` (in the `svolder`
-//! binary) decides what to do with the text.
+//! The text is pure: [`render_conf`], [`render_unit`] and [`render_desktop`] run no program and
+//! write nothing, and [`HostEqState::load`] and [`HostEqState::save`] touch only the state
+//! file. [`Host`] is what decides what to do with the text: it writes the
+//! files, runs the programs and keeps the chain running.
+//!
+//! - `manage`: [`Host`], the manager of the chain, with [`ApplyRequest`] and [`Status`].
+//! - `process`: the process manager's plumbing: finding, starting and stopping the chain.
+//! - `systemd`: [`UserSystemd`], `systemctl --user`.
+//! - `paths`: [`EqPaths`], and the lookup of the programs the manager runs.
+//! - `points`: [`Points`], the filters the live chain holds and the slots they sit in.
+//! - `live`: the live chain's config, and the parameters that set it while it plays.
+//! - `control`: [`EqControl`], the one controller of the computer EQ for the daemon and the TUI.
+//! - `session`: [`PwCliSession`], the one `pw-cli` that sends those parameters.
 //!
 //! The config follows what a live check on PipeWire 1.6 with WirePlumber 0.5 confirmed.
 //!
@@ -64,6 +74,9 @@ pub enum Manager {
     Systemd,
     /// A detached `pipewire` process and an autostart entry.
     Process,
+    /// A `pipewire` child of the program that applied the chain, which ends with it: what runs
+    /// in a container, where there is no systemd and no login to start an entry.
+    Child,
 }
 
 impl Manager {
@@ -72,6 +85,7 @@ impl Manager {
         match self {
             Manager::Systemd => "systemd",
             Manager::Process => "process",
+            Manager::Child => "child",
         }
     }
 
@@ -80,6 +94,7 @@ impl Manager {
         match word.trim().to_ascii_lowercase().as_str() {
             "systemd" => Some(Manager::Systemd),
             "process" => Some(Manager::Process),
+            "child" => Some(Manager::Child),
             _ => None,
         }
     }
@@ -173,6 +188,29 @@ pub fn render_conf(c: &Correction, target: &str, route: Route) -> String {
             num(filter.q)
         );
     }
+    let graph = format!(
+        "                nodes = [\n\
+         \x20                   {{\n\
+         \x20                       type  = builtin\n\
+         \x20                       name  = eq\n\
+         \x20                       label = param_eq\n\
+         \x20                       config = {{\n\
+         \x20                           filters = [\n\
+         {filters}\
+         \x20                           ]\n\
+         \x20                       }}\n\
+         \x20                   }}\n\
+         \x20               ]\n\
+         \x20               inputs  = [ \"eq:In 1\" \"eq:In 2\" ]\n\
+         \x20               outputs = [ \"eq:Out 1\" \"eq:Out 2\" ]\n"
+    );
+    conf_frame(&graph, target, route)
+}
+
+/// The config round `graph` (the lines inside `filter.graph = { }`, already indented): the
+/// modules, the capture side as the sink the streams play into and the playback side into
+/// `target`, for `route`.
+fn conf_frame(graph: &str, target: &str, route: Route) -> String {
     let target = quoted(target);
     // The lines that differ by route: the capture side's smart-filter properties, and the
     // playback side's `target.object` before `stream.dont-remix` or its `node.dont-fallback`
@@ -220,20 +258,7 @@ pub fn render_conf(c: &Correction, target: &str, route: Route) -> String {
          \x20           node.description = \"svolder EQ\"\n\
          \x20           media.name       = \"svolder EQ\"\n\
          \x20           filter.graph = {{\n\
-         \x20               nodes = [\n\
-         \x20                   {{\n\
-         \x20                       type  = builtin\n\
-         \x20                       name  = eq\n\
-         \x20                       label = param_eq\n\
-         \x20                       config = {{\n\
-         \x20                           filters = [\n\
-         {filters}\
-         \x20                           ]\n\
-         \x20                       }}\n\
-         \x20                   }}\n\
-         \x20               ]\n\
-         \x20               inputs  = [ \"eq:In 1\" \"eq:In 2\" ]\n\
-         \x20               outputs = [ \"eq:Out 1\" \"eq:Out 2\" ]\n\
+         {graph}\
          \x20           }}\n\
          \x20           audio.channels = 2\n\
          \x20           audio.position = [ FL FR ]\n\
@@ -385,6 +410,10 @@ pub struct HostEqState {
     /// The filters, in order.
     #[serde(default)]
     pub filters: Vec<SourceFilter>,
+    /// The slot of the live chain (1 to 16) each filter sits in, in the filters' order. Empty
+    /// in a state saved before the live chain: the filters then sit in slots 1 to n.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<u8>,
 }
 
 impl HostEqState {
@@ -472,6 +501,29 @@ impl Drop for Staged {
         }
     }
 }
+
+mod control;
+#[cfg(test)]
+mod lab;
+pub mod live;
+mod manage;
+pub mod paths;
+pub mod points;
+mod process;
+mod pty;
+pub mod session;
+mod systemd;
+
+pub use control::{CUSTOM, Edit, EqControl, EqView, Keep, LIVE_NOTE, PointView};
+pub use live::{LiveNode, PREAMP, PreampCarrier, SHAPE, SlotShape};
+pub use manage::{
+    ApplyRequest, Chain, EqFailure, Host, Status, UNIT, check_playable, lowered_note,
+    played_preamp, safe_preamp,
+};
+pub use paths::EqPaths;
+pub use points::{Change, HAND, HandRanges, Points};
+pub use session::{Params, PwCliSession};
+pub use systemd::UserSystemd;
 
 #[cfg(test)]
 mod tests;

@@ -869,6 +869,11 @@ fn sample_requests() -> Vec<Request> {
         Request::HostPress {
             button: "pause".into(),
         },
+        Request::HostVolume { pct: 40 },
+        Request::HostMute { muted: true },
+        Request::HostEq {
+            op: HostEqOp::Mode { on: true },
+        },
         Request::HostFrames,
     ]
 }
@@ -1327,6 +1332,8 @@ fn sample_host_view() -> crate::host::HostView {
         }),
         route: Some(svolder_host::RouteFacts::default()),
         now_ms: 1_700_000_000_000,
+        volume: None,
+        eq: None,
     }
 }
 
@@ -1485,4 +1492,138 @@ fn an_old_client_decodes_the_frames_events_as_unknown() {
             OldEvent::Unknown
         );
     }
+}
+
+/// The computer's volume, mute and EQ go over the wire in the words the pages send, a `set`
+/// that does not say it goes on is the last of its drag, and a view from a daemon without the
+/// new fields reads them as absent, as a view with them reads on an older peer.
+#[test]
+fn an_older_peer_reads_the_view_without_the_new_fields() {
+    for (line, request) in [
+        (
+            r#"{"cmd":"host_volume","pct":40}"#,
+            Request::HostVolume { pct: 40 },
+        ),
+        (
+            r#"{"cmd":"host_mute","muted":true}"#,
+            Request::HostMute { muted: true },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"mode","on":false}}"#,
+            Request::HostEq {
+                op: HostEqOp::Mode { on: false },
+            },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"preset","name":"Warm","confirm":true}}"#,
+            Request::HostEq {
+                op: HostEqOp::Preset {
+                    name: "Warm".into(),
+                    device: None,
+                    confirm: true,
+                },
+            },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"set","index":2,"g":3.5,"done":false}}"#,
+            Request::HostEq {
+                op: HostEqOp::Set {
+                    index: 2,
+                    slot: None,
+                    kind: None,
+                    f: None,
+                    g: Some(3.5),
+                    q: None,
+                    done: false,
+                },
+            },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"add","kind":"PK","f":1000.0,"g":0.0,"q":1.0}}"#,
+            Request::HostEq {
+                op: HostEqOp::Add {
+                    kind: "PK".into(),
+                    f: 1000.0,
+                    g: 0.0,
+                    q: 1.0,
+                },
+            },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"remove","index":3}}"#,
+            Request::HostEq {
+                op: HostEqOp::Remove {
+                    index: 3,
+                    slot: None,
+                },
+            },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"save_as","name":"Mine"}}"#,
+            Request::HostEq {
+                op: HostEqOp::SaveAs {
+                    name: "Mine".into(),
+                },
+            },
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&request).unwrap(), line);
+        assert_eq!(serde_json::from_str::<Request>(line).unwrap(), request);
+    }
+    let set: Request =
+        serde_json::from_str(r#"{"cmd":"host_eq","op":{"op":"set","index":1,"g":1.0}}"#).unwrap();
+    assert!(matches!(
+        set,
+        Request::HostEq {
+            op: HostEqOp::Set { done: true, .. }
+        }
+    ));
+
+    let old = r#"{"available":true,"now_ms":5}"#;
+    let view: crate::host::HostView = serde_json::from_str(old).unwrap();
+    assert!(view.volume.is_none() && view.eq.is_none());
+
+    let mut full = sample_host_view();
+    full.volume = Some(crate::host::HostVolume {
+        pct: 42,
+        muted: false,
+        sink: "Schiit Gungnir 2".into(),
+    });
+    full.eq = Some(svolder_host::eq::EqView::default());
+    let line = serde_json::to_string(&full).unwrap();
+    assert_eq!(
+        serde_json::from_str::<crate::host::HostView>(&line).unwrap(),
+        full
+    );
+    // A peer from before the fields ignores them: its own struct has no such keys.
+    #[derive(Debug, Deserialize)]
+    struct OldView {
+        available: bool,
+        now_ms: u64,
+    }
+    let old: OldView = serde_json::from_str(&line).unwrap();
+    assert!(old.available && old.now_ms > 0);
+}
+
+/// The question a recall on the computer may be answered with, and the code of an unavailable
+/// computer, as they are on the wire.
+#[test]
+fn the_both_sides_question_has_its_own_reply() {
+    let ask = Response::Ask {
+        message: "Warm is on the cat and the hat too: the correction would play twice".into(),
+        name: "Warm".into(),
+        devices: vec!["cat and the hat".into()],
+    };
+    let line = serde_json::to_value(&ask).unwrap();
+    assert_eq!(
+        line,
+        serde_json::json!({
+            "result": "ask",
+            "message": "Warm is on the cat and the hat too: the correction would play twice",
+            "name": "Warm",
+            "devices": ["cat and the hat"],
+        })
+    );
+    assert_eq!(serde_json::from_value::<Response>(line).unwrap(), ask);
+    assert_eq!(crate::CODE_COMPUTER_UNAVAILABLE, 6);
 }

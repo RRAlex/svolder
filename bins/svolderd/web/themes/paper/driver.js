@@ -9,7 +9,7 @@
 //
 //   reach(target) -> boolean            scrolls to it and says whether it is drawn
 //   operate(target, change) -> void     { step: ±1 } | { raw } | { value } | { on } | { apply } |
-//                                       { recall } | { save } | {}
+//                                       { recall } | { save } | { side } (the switch) | {}
 //   shown(target) -> string | null      the words shown for a control, or for a fact by its label
 //   state() -> { lost, waiting, resting, toasts }
 //   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
@@ -57,10 +57,29 @@ function controlOf(key) {
   return found ? { kind: found.kind, control: found } : null;
 }
 
+/** The element a target of the computer's side is, as the sheet draws it, or nothing. */
+function findComputer(target) {
+  const n = q(target.n);
+  switch (target.computer) {
+    case 'flip': return one(`[data-act="side"][data-side="${bound.core.computer.kept() === 'computer' ? 'dac' : 'computer'}"]`)
+      ?? one('[data-act="side"]');
+    case 'volume': return one('#p-needle');
+    case 'mute': return one('[data-act="c-mute"]');
+    case 'mode': return one('[data-act="c-mode"][aria-pressed="true"]') ?? one('[data-act="c-mode"]');
+    case 'add': return one('[data-act="c-add"]');
+    case 'point': return target.param === 'type' ? one(`[data-act="c-type"][data-n="${n}"]`)
+      : one(`.p-cell[data-n="${n}"][data-param="${q(target.param)}"]`);
+    case 'remove': return one(`[data-act="c-remove"][data-n="${n}"]`);
+    case 'preset': return one(`[data-act="c-preset"][data-name="${q(target.name)}"]`);
+    default: return null;
+  }
+}
+
 /** The element a target is, as the sheet draws it, or nothing. */
 function find(target) {
   if (target === 'Cover') return one('#p-playing .p-cover img');
   if (typeof target === 'string') return one(`td[data-fact="${q(target)}"]`);
+  if ('computer' in target) return findComputer(target);
   if ('control' in target) {
     const key = q(target.control);
     switch (controlOf(target.control)?.kind) {
@@ -148,6 +167,45 @@ async function seen(target) {
   return Boolean(element) && taken(element) && onScreen(element);
 }
 
+/** Operate a target of the computer's side as a hand does. A cell is typed into (`value`) or
+ * stepped (`step`); the type is chosen from its list; the volume is moved by the keys on its
+ * needle or by its written words. */
+async function operateComputer(target, change) {
+  const core = bound.core;
+  if (target.computer === 'flip') {
+    const side = change.side === 'dac' ? 'dac' : 'computer';
+    tap(one(`[data-act="side"][data-side="${side}"]`));
+    await settle();
+    return;
+  }
+  const element = find(target);
+  if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
+  if (target.computer === 'volume') {
+    if ('raw' in change) await toward(target, change.raw);
+    else tap(one(change.step < 0 ? '#p-cdown' : '#p-cup'));
+  } else if (target.computer === 'mute') {
+    const muted = Boolean(core.computer.volumeOf(core.model.page())?.muted);
+    if (!('on' in change) || muted !== change.on) tap(element);
+  } else if (target.computer === 'mode') {
+    const mode = change.mode ?? (change.on === false ? 'off' : 'eq');
+    tap(one(`[data-act="c-mode"][data-mode="${q(mode)}"]`));
+  } else if (target.computer === 'point' && target.param === 'type') {
+    await pick(element, change.value);
+  } else if (target.computer === 'point') {
+    element.focus({ preventScroll: true });
+    if ('value' in change) {
+      element.value = String(change.value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      key(element, change.step < 0 ? 'ArrowDown' : 'ArrowUp');
+    }
+  } else {
+    tap(element);
+  }
+  await settle();
+}
+
 export const driver = {
   async reach(target) {
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -157,6 +215,10 @@ export const driver = {
   },
 
   async operate(target, change = {}) {
+    if ('computer' in target) {
+      await operateComputer(target, change);
+      return;
+    }
     const element = find(target);
     if (!element) throw new Error(`nothing to operate for ${JSON.stringify(target)}`);
     if ('control' in target) {
@@ -205,6 +267,11 @@ export const driver = {
     if (!element) return null;
     if (target === 'Cover') return element.getAttribute('src');
     if (typeof target === 'string') return element.textContent;
+    if ('computer' in target) {
+      if (target.computer === 'volume') return one('#p-volume-text')?.textContent || one('.p-num')?.textContent || null;
+      if (target.computer === 'point' && target.param !== 'type') return element.value;
+      return element.textContent.trim();
+    }
     if ('control' in target) {
       const kind = controlOf(target.control)?.kind;
       if (kind === 'volume') return one('#p-volume-text')?.textContent ?? null;

@@ -5,15 +5,17 @@
 // Run: node nightdrive-tune.mjs
 import assert from 'node:assert/strict';
 import {
-  GRACE_MS, bandsOf, bubblesOf, createMorph, curveAt, diamondsOf, gMaxOf, halfPoints, heldTone,
-  inBand, labelOf, mountainMap, qAtDiamond, tunable,
+  GRACE_MS, bandsOf, bubblesOf, computerTone, createMorph, curveAt, diamondsOf, gMaxOf, halfPoints, heldTone,
+  inBand, labelOf, mountainMap, qAtDiamond, tunable, tunableComputer,
 } from '../../../bins/svolderd/web/themes/nightdrive/tune.js';
+import { wireTune } from '../../../bins/svolderd/web/themes/nightdrive/tune-wire.js';
+import { GUEST, computerRig, point } from './nightdrive-rig.mjs';
 import { axisX } from '../../../bins/svolderd/web/themes/nightdrive/axis.js';
 import { responseDb } from '../../../bins/svolderd/web/core/tone-curve.js';
 import { createDrag, bandSteps } from '../../../bins/svolderd/web/core/tone-drag.js';
 
 let n = 0;
-const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
+const ok = async (name, fn) => { await fn(); n++; console.log('ok', name); };
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} is not ${b}`);
 
 const W = 1200;
@@ -51,6 +53,21 @@ ok('the_map_puts_0_db_at_the_baseline_and_the_range_inside_the_mountains', () =>
   near(map.hzAt(0), 20);
   near(map.hzAt(W), 20000, 1e-6);
   near(map.hzAt(W / 2), 20 * 1000 ** 0.5, 1e-9);
+});
+
+ok('the_band_that_takes_a_touch_is_the_curves_window_and_a_hands_reach_and_a_bubble_never_leaves_it', () => {
+  const place = { h: H, H: HORIZON };
+  const top = map.yOfDb(12);
+  const bottom = map.yOfDb(-12);
+  // a bubble at +12 or -12 is grabbed from anywhere within the touch reach (24 px), all of which is inside the band
+  for (const y of [top - 24, top, bottom, bottom + 24]) assert.ok(inBand(place, y), `${y}`);
+  // above it, or below, a touch is on the scene and makes no point
+  assert.ok(!inBand(place, top - 40) && !inBand(place, bottom + 40));
+  // points that add up beyond 12 dB are drawn at the window's edge, where they can be grabbed
+  assert.equal(map.yOfDb(30), top);
+  assert.equal(map.yOfDb(-30), bottom);
+  const stacked = bubblesOf({ mode: 'eq', markers: [{ band: 1, hz: 1000, db: 24 }] }, map, W);
+  assert.ok(inBand(place, stacked[0].y) && stacked[0].y === top);
 });
 
 ok('the_map_round_trips_hz_and_db', () => {
@@ -375,6 +392,238 @@ ok('a_diamond_drag_lands_on_the_step_it_names', () => {
       assert.equal(at, target);
     }
   }
+});
+
+// ---- the computer's side ----
+const flush = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r)); };
+
+await ok('computer_points_are_bubbles', () => {
+  const rig = computerRig();
+  const read = () => computerTone(rig.core.computer.toneOf(rig.core.model.page()));
+  const tone = read();
+  assert.equal(tone.mode, 'eq');
+  assert.equal(tone.markers.length, 7);
+  const bubbles = bubblesOf(tone, map, W);
+  assert.equal(bubbles.length, 7);
+  const curve = curveAt(tone.response, map, W);
+  // every bubble stands at its point's frequency, on the curve the points sum to: a shelf's too
+  for (const [i, b] of bubbles.entries()) {
+    near(b.x, axisX(tone.markers[i].hz, W), 1e-9);
+    near(b.y, curve(b.x), 1e-9);
+    assert.equal(b.band, i + 1);
+  }
+  const shelf = bubbles[0];
+  assert.ok(Math.abs(shelf.y - map.yOfDb(5.5)) > 1, 'the low shelf is not drawn at its written gain');
+  // a point beyond the axis sits at the edge, a flat curve has its one point on the line
+  const wide = computerRig({ computer: { ...rig.core.model.page().host.computer, eq: { ...rig.core.model.page().host.computer.eq, points: [point('PK', 10, 3, 1), point('PK', 30000, -3, 1)] } } });
+  const edge = bubblesOf(computerTone(wide.core.computer.toneOf(wide.core.model.page())), map, W);
+  near(edge[0].x, 0, 1e-9);
+  near(edge[1].x, W, 1e-6);
+  // the dot of a point held by a drag is on the curve the held values make
+  rig.core.actions.computer.setPoint(4, { g: -5, f: 2000 }, { done: false });
+  const held = read();
+  const after = bubblesOf(held, map, W);
+  const heldCurve = curveAt(held.response, map, W);
+  near(after[3].x, axisX(2000, W), 1e-9);
+  near(after[3].y, heldCurve(after[3].x), 1e-9);
+  assert.ok(after[3].y > bubbles[3].y, 'it moved down with its gain');
+  // a lit point has its diamonds on the curve too; a shelf's bell reaches the axis's end
+  const lsc = { f0: 105, gainDb: 5.5, q: 0.7, type: 'LSC' };
+  const half = halfPoints(lsc);
+  assert.equal(half.lo, 20);
+  assert.ok(half.hi > 60 && half.hi < 400, `the shelf's half point is at ${half.hi}`);
+  for (const d of diamondsOf(lsc, map, W, curve)) near(d.y, curve(d.x), 1e-9);
+  assert.ok(halfPoints({ ...lsc, type: 'PK' }).lo > 20, 'a peak of the same numbers does not');
+  // no tone, no bubbles; a guest or a tone with no points cannot tune
+  assert.equal(computerTone(null), null);
+  assert.equal(tunableComputer(rig.core.model.page(), tone), true);
+  assert.equal(tunableComputer(computerRig({ viewer: GUEST }).core.model.page(), tone), false);
+  assert.equal(tunableComputer(rig.core.model.page(), { ...tone, markers: [] }), false);
+});
+
+/** A scene to wire a tuner to: an event target with the few members the wiring reads. */
+function fakeScene() {
+  const scene = new EventTarget();
+  scene.dataset = {};
+  scene.getBoundingClientRect = () => ({ left: 0, top: 0, width: W, height: H });
+  scene.setPointerCapture = () => {};
+  scene.releasePointerCapture = () => {};
+  scene.contains = () => true;
+  scene.append = () => {};
+  scene.ownerDocument = { createElement: () => ({ style: {}, setAttribute() {}, remove() {}, offsetWidth: 80, offsetHeight: 20 }) };
+  return scene;
+}
+const pointerEvent = (type, x, y, more = {}) => Object.assign(new Event(type), {
+  clientX: x, clientY: y, isPrimary: true, pointerType: 'mouse', button: 0, buttons: 1, pointerId: 1, preventDefault() {}, ...more,
+});
+
+await ok('a_tap_on_the_mountains_adds_a_pk_only_when_morphed', async () => {
+  const run = async (rig) => {
+    const scene = fakeScene();
+    const abort = new AbortController();
+    const tune = wireTune({
+      root: { querySelector: () => scene },
+      core: rig.core,
+      live: { onSwitch() {}, onReading() {} },
+      geometry: () => ({ w: W, h: H, H: HORIZON }),
+      signal: abort.signal,
+    });
+    return { scene, tune, abort };
+  };
+  const rig = computerRig();
+  const { scene, tune, abort } = await run(rig);
+  const spot = { x: 640, y: map.yOfDb(9) };
+  const tap = () => {
+    scene.dispatchEvent(pointerEvent('pointerdown', spot.x, spot.y));
+    scene.dispatchEvent(pointerEvent('pointerup', spot.x, spot.y, { buttons: 0 }));
+  };
+  const added = () => rig.posts.filter(([path]) => path === 'api/v1/host/eq/points');
+  // the mountains are still the music: the tap shows the curve and adds nothing
+  tap();
+  await flush();
+  assert.equal(added().length, 0, 'not before the morph is half done');
+  assert.ok(tune.read().m < 0.5);
+  // the curve is up (the pointer rested over the band, the morph has run): a tap adds a PK there
+  scene.dispatchEvent(pointerEvent('pointermove', spot.x, spot.y));
+  for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  assert.ok(tune.read().m >= 0.5, `the morph is ${tune.read().m}`);
+  tap();
+  await flush();
+  assert.equal(added().length, 1);
+  const body = added()[0][1];
+  assert.equal(body.type, 'PK');
+  assert.equal(body.q, 1);
+  near(body.f, map.hzAt(spot.x), 0.01);
+  near(body.g, 9, 0.1);
+  // a press that moves off its place before it is let go is not a tap
+  scene.dispatchEvent(pointerEvent('pointerdown', spot.x, spot.y));
+  scene.dispatchEvent(pointerEvent('pointermove', spot.x + 30, spot.y));
+  scene.dispatchEvent(pointerEvent('pointerup', spot.x + 30, spot.y, { buttons: 0 }));
+  await flush();
+  assert.equal(added().length, 1);
+  // a press on a bubble grabs it and adds nothing
+  const bubble = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointerdown', bubble.x, bubble.y));
+  scene.dispatchEvent(pointerEvent('pointerup', bubble.x, bubble.y, { buttons: 0 }));
+  await flush();
+  assert.equal(added().length, 1);
+  abort.abort();
+  // the device's side: the mountains do not add a computer point
+  const dac = computerRig({ side: 'dac' });
+  const device = await run(dac);
+  device.scene.dispatchEvent(pointerEvent('pointermove', spot.x, spot.y));
+  for (let i = 0; i < 40; i++) device.tune.step(0.05, performance.now());
+  device.scene.dispatchEvent(pointerEvent('pointerdown', spot.x, spot.y));
+  device.scene.dispatchEvent(pointerEvent('pointerup', spot.x, spot.y, { buttons: 0 }));
+  await flush();
+  assert.equal(dac.posts.length, 0);
+  device.abort.abort();
+  // a guest may tap: the core turns it away, nothing is sent
+  const guest = computerRig({ viewer: GUEST });
+  const seen = await run(guest);
+  seen.scene.dispatchEvent(pointerEvent('pointerdown', spot.x, spot.y));
+  await flush();
+  assert.equal(guest.posts.length, 0);
+  assert.equal(guest.toasts.length, 1, JSON.stringify(guest.toasts));
+  seen.abort.abort();
+});
+
+await ok('the_curve_is_ghosted_while_the_computer_eq_is_off', async () => {
+  const frameOf = async (on) => {
+    const base = computerRig().core.model.page().host.computer;
+    const rig = computerRig({ computer: { ...base, eq: { ...base.eq, on } } });
+    const scene = fakeScene();
+    const abort = new AbortController();
+    const tune = wireTune({
+      root: { querySelector: () => scene }, core: rig.core, live: { onSwitch() {}, onReading() {} },
+      geometry: () => ({ w: W, h: H, H: HORIZON }), signal: abort.signal,
+    });
+    scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+    for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+    const frame = tune.frame();
+    abort.abort();
+    return frame;
+  };
+  const eqOn = await frameOf(true);
+  const eqOff = await frameOf(false);
+  assert.equal(eqOn.ghost, false);
+  assert.equal(eqOff.ghost, true);
+  assert.equal(eqOff.bubbles.length, 7, 'the points are still there to be moved');
+});
+
+await ok('the_computers_tone_is_worked_out_once_per_change_not_per_frame', async () => {
+  const rig = computerRig();
+  let calls = 0;
+  const real = rig.core.computer.toneOf;
+  rig.core.computer.toneOf = (page) => { calls++; return real(page); };
+  const scene = fakeScene();
+  const abort = new AbortController();
+  const tune = wireTune({
+    root: { querySelector: () => scene }, core: rig.core, live: { onSwitch() {}, onReading() {} },
+    geometry: () => ({ w: W, h: H, H: HORIZON }), signal: abort.signal,
+  });
+  scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+  for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  const bubble = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointermove', bubble.x, bubble.y));
+  const before = calls;
+  for (let i = 0; i < 30; i++) {
+    tune.step(0.016, performance.now());
+    tune.frame();
+    tune.read();
+  }
+  assert.equal(calls - before, 0, `${calls - before} reads of the core's tone over 30 frames`);
+  abort.abort();
+});
+
+await ok('a_host_event_with_a_changed_point_drops_the_cached_tone', async () => {
+  const rig = computerRig();
+  const scene = fakeScene();
+  const abort = new AbortController();
+  // the page's live: its readings are the store's own events, as in the page
+  const live = { onSwitch() {}, onReading: (event, fn) => abort.signal.addEventListener('abort', rig.store.on(event, fn), { once: true }) };
+  const tune = wireTune({
+    root: { querySelector: () => scene }, core: rig.core, live, geometry: () => ({ w: W, h: H, H: HORIZON }), signal: abort.signal,
+  });
+  scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+  for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  const gains = () => tune.read().bubbles.map((b) => b.y);
+  const before = gains();
+  assert.equal(before.length, 7);
+  // the host reports the fourth point with a higher gain: the bubble and the curve move with it, not at the next model
+  const host = rig.store.page().host;
+  const eq = host.computer.eq;
+  const points = eq.points.map((p, i) => (i === 3 ? { ...p, g: p.g + 4 } : p));
+  rig.store.emit('host', { ...host, computer: { ...host.computer, eq: { ...eq, points } } });
+  const after = gains();
+  assert.ok(after[3] < before[3], `the fourth bubble is higher: ${before[3]} then ${after[3]}`);
+  const moved = after.map((y, i) => Math.abs(y - before[i]));
+  assert.equal(moved.indexOf(Math.max(...moved)), 3, `the fourth moved most: ${moved}`);
+  abort.abort();
+});
+
+await ok('the_curve_stops_being_dim_when_a_drag_begins_with_the_eq_off', async () => {
+  const base = computerRig().core.model.page().host.computer;
+  const rig = computerRig({ computer: { ...base, eq: { ...base.eq, on: false } } });
+  const scene = fakeScene();
+  const abort = new AbortController();
+  const tune = wireTune({
+    root: { querySelector: () => scene }, core: rig.core, live: { onSwitch() {}, onReading: (event, fn) => rig.store.on(event, fn) },
+    geometry: () => ({ w: W, h: H, H: HORIZON }), signal: abort.signal,
+  });
+  scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+  for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  assert.equal(tune.frame().ghost, true, 'dim while the EQ is off');
+  const bubble = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointerdown', bubble.x, bubble.y));
+  assert.equal(tune.frame().ghost, true, 'a press that has not moved leaves it dim');
+  scene.dispatchEvent(pointerEvent('pointermove', bubble.x, bubble.y - 40));
+  assert.equal(tune.frame().ghost, false, 'the first move lifts the dim, before the model says so');
+  assert.equal(tune.read().ghost, false);
+  scene.dispatchEvent(pointerEvent('pointerup', bubble.x, bubble.y - 40, { buttons: 0 }));
+  await flush();
+  assert.equal(tune.frame().ghost, true, 'the drag over and the model still off: dim again');
+  abort.abort();
 });
 
 console.log(`nightdrive-tune.mjs: ${n} passed`);

@@ -39,16 +39,20 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use ring::digest;
 use svolder_host::cover::{self, Cover, CoverPlaces};
+use svolder_host::eq::{EqControl, Keep};
 use svolder_host::fake::FakePlayers;
-use svolder_host::fake::FakeSink;
+use svolder_host::fake::{FakeChain, FakeParams, FakeSink};
 use svolder_host::route::{PlayerMatch, PwDump, SinkFacts, StreamFacts, route};
 use svolder_host::{
     Button, Frame, FrameCapture, Mpris, NoBus, NowPlaying, Players, Progress, PwFrames, RouteFacts,
     Sink, SinkState, Status, Wpctl, unix_ms,
 };
-use svolder_ipc::Event;
 use svolder_ipc::config::HostConfig;
-use svolder_ipc::host::{CaptureKind, CaptureView, HostView, PlayingView, SCHIIT_VENDOR_ID};
+use svolder_ipc::host::{
+    CaptureKind, CaptureView, HostView, HostVolume, PlayingView, SCHIIT_VENDOR_ID,
+};
+use svolder_ipc::{Event, HostEqOp};
+use svolder_profiles::tone::preset::Preset;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -57,7 +61,10 @@ use tokio_stream::wrappers::WatchStream;
 use crate::locks::locked;
 
 mod capture;
+mod computer;
 mod synthetic;
+
+pub(crate) use computer::{Computer, EqRefusal, is_unavailable};
 
 /// How long after the bus went away it is looked for again, and after each look that found
 /// none.
@@ -161,6 +168,8 @@ pub(crate) struct Parts {
     pub(crate) helpers: Vec<JoinHandle<()>>,
     /// What the capture of the sink is made of, or why there is none.
     pub(crate) frames: Result<Frames, String>,
+    /// The computer's volume and EQ; `None` serves neither.
+    pub(crate) computer: Option<Arc<Computer>>,
 }
 
 /// What a capture of the default sink is made of: the capture itself, and the sink it follows.
@@ -250,6 +259,22 @@ pub(crate) struct FakeKnobs {
     pub(crate) capture_off: bool,
     /// The fake track's title in place of the fixed one, for a card whose title is cut.
     pub(crate) title: Option<String>,
+    /// How the fake computer EQ behaves.
+    pub(crate) eq: FakeEq,
+    /// The fake computer's volume at the start, in percent.
+    pub(crate) computer_volume: u8,
+}
+
+/// How the fake computer EQ behaves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FakeEq {
+    /// A chain that takes live changes.
+    #[default]
+    Live,
+    /// A chain whose live changes never read back, so a drag is applied when it ends.
+    Release,
+    /// No `pw-cli` on this computer.
+    Off,
 }
 
 impl Default for FakeKnobs {
@@ -263,6 +288,8 @@ impl Default for FakeKnobs {
             route_changed: false,
             capture_off: false,
             title: None,
+            eq: FakeEq::Live,
+            computer_volume: 42,
         }
     }
 }
@@ -279,7 +306,8 @@ impl FakeKnobs {
     /// empty),
     /// `SVOLDER_FAKE_ROUTE=changed` for the route that alters the signal,
     /// `SVOLDER_FAKE_CAPTURE=off` for a host with no capture, `SVOLDER_FAKE_TITLE` for the
-    /// fake track's title (unset when empty), and the display name of the profile
+    /// fake track's title (unset when empty), `SVOLDER_FAKE_HOST_EQ` as `release` for an EQ whose
+    /// live changes never read back or `off` for a computer with no `pw-cli`, and the display name of the profile
     /// `SVOLDER_FAKE_PROFILE` names for the fake device.
     pub(crate) fn from_knobs(knob: impl Fn(&str) -> Option<String>) -> Self {
         let millis = |name: &str| {
@@ -304,6 +332,17 @@ impl FakeKnobs {
             title: knob("SVOLDER_FAKE_TITLE")
                 .map(|title| title.trim().to_string())
                 .filter(|title| !title.is_empty()),
+            computer_volume: knob("SVOLDER_FAKE_COMPUTER_VOLUME")
+                .and_then(|pct| pct.trim().parse::<u8>().ok())
+                .map_or(42, |pct| pct.min(100)),
+            eq: match knob("SVOLDER_FAKE_HOST_EQ")
+                .map(|word| word.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("release") => FakeEq::Release,
+                Some("off") => FakeEq::Off,
+                _ => FakeEq::Live,
+            },
             ..FakeKnobs::default()
         };
         if let Some(name) = knob("SVOLDER_FAKE_PROFILE")
@@ -381,11 +420,17 @@ impl Parts {
                 }))),
             }),
         };
+        let computer = Arc::new(fake_computer(
+            &knobs.display,
+            knobs.eq,
+            knobs.computer_volume,
+        ));
         Parts {
             connect: found(Arc::new(players)),
             routes: Some(Arc::new(FakeRoute {
                 display: knobs.display,
                 changed: knobs.route_changed,
+                computer: Some(Arc::clone(&computer)),
             })),
             covers: Arc::new(|url| {
                 (url == FAKE_ART_URL).then(|| Cover {
@@ -395,6 +440,7 @@ impl Parts {
             }),
             helpers,
             frames,
+            computer: Some(computer),
         }
     }
 
@@ -419,8 +465,33 @@ impl Parts {
                 }),
                 _ => Err("this host has no capture tool".to_string()),
             },
+            computer: Some(Arc::new(Computer::real())),
         }
     }
+}
+
+/// The fake computer: a sink at 42 % named for the fake device, and an EQ over a chain and a
+/// `pw-cli` that live in memory and keep their points there.
+fn fake_computer(display: &str, eq: FakeEq, volume_pct: u8) -> Computer {
+    let sink: Arc<dyn Sink> = Arc::new(FakeSink::new(Some(SinkState {
+        volume: f32::from(volume_pct) / 100.0,
+        muted: false,
+        name: format!("Schiit {display}"),
+        target: Some(FAKE_SINK_NODE.to_string()),
+    })));
+    let controller = match eq {
+        FakeEq::Off => Err("no pw-cli on this computer".to_string()),
+        _ => {
+            let params = FakeParams::new();
+            params.holds(eq == FakeEq::Live);
+            Ok(EqControl::new(
+                Arc::new(FakeChain::new()),
+                Box::new(params),
+                Keep::Memory,
+            ))
+        }
+    };
+    Computer::new(Ok(sink), controller)
 }
 
 /// The fake players: one track playing from now, which answers presses. `title` replaces the
@@ -465,24 +536,46 @@ impl Routes for PwRoutes {
 /// The fake route: a Schiit sink named for the fake device, the player's stream at the same
 /// rate and nothing else in the way, so the path reads untouched; or, when asked, a route that
 /// alters the signal in every way: the player at 91 % and 44.1 kHz into a sink at 48 kHz and
-/// 54 %, the host EQ on and two other sounds mixing.
+/// 54 %, the host EQ on and two other sounds mixing. The fake computer's EQ is part of the route:
+/// on with a curve that is not flat, it is in the path as the real chain would be.
 struct FakeRoute {
     display: String,
     /// Whether the route changes the signal (see [`FakeKnobs::route_changed`]).
     changed: bool,
+    /// The fake computer, whose EQ the route follows.
+    computer: Option<Arc<Computer>>,
+}
+
+impl FakeRoute {
+    /// Whether the fake computer's EQ is on with a curve that changes the sound.
+    fn eq_changes_the_sound(&self) -> bool {
+        self.computer.as_ref().is_some_and(|computer| {
+            let eq = computer.eq_view();
+            eq.on && eq.points.iter().any(|point| point.g != 0.0)
+        })
+    }
 }
 
 #[async_trait]
 impl Routes for FakeRoute {
     async fn read(&self, player: Option<NowPlaying>) -> Option<RouteFacts> {
         let product = format!("Schiit {}", self.display);
+        // The fake computer's own volume and mute are the sink's, as the real route reads them.
+        let (volume_milli, muted) = match (&self.computer, self.changed) {
+            (Some(computer), false) => match computer.read_volume().await {
+                Some(volume) => (u32::from(volume.pct) * 10, volume.muted),
+                None => (1000, false),
+            },
+            (_, true) => (540, false),
+            _ => (1000, false),
+        };
         let sink = SinkFacts {
             name: FAKE_SINK_NODE.to_string(),
             description: product.clone(),
             rate_hz: Some(FAKE_RATE_HZ),
             format: Some("S32LE".to_string()),
-            volume_milli: Some(if self.changed { 540 } else { 1000 }),
-            muted: false,
+            volume_milli: Some(volume_milli),
+            muted,
             usb_vendor_id: Some(SCHIIT_VENDOR_ID),
             usb_product: Some(product),
         };
@@ -502,7 +595,7 @@ impl Routes for FakeRoute {
                 PlayerMatch::NoPlayer
             },
             others_mixing: if self.changed { 2 } else { 0 },
-            host_eq: self.changed,
+            host_eq: self.changed || self.eq_changes_the_sound(),
         })
     }
 }
@@ -524,6 +617,8 @@ struct Shared {
     capturing: AtomicBool,
     /// The players presses go to, while there is a bus.
     players: Mutex<Option<Arc<dyn Players>>>,
+    /// The computer's volume and EQ, while a run has them.
+    computer: Mutex<Option<Arc<Computer>>>,
     /// The current cover and its hash.
     cover: Mutex<Option<(String, Cover)>>,
     /// Which run is the current one. Halting moves it on, and a task of an earlier run, which
@@ -541,6 +636,14 @@ impl Shared {
     }
 }
 
+/// What the task that follows the players is made of.
+#[derive(Clone)]
+struct Follows {
+    connect: Connector,
+    routes: Option<Arc<dyn Routes>>,
+    covers: CoverSource,
+}
+
 /// What is running behind the service.
 #[derive(Default)]
 struct Running {
@@ -548,6 +651,9 @@ struct Running {
     task: Option<JoinHandle<()>>,
     /// The tasks that run beside it.
     helpers: Vec<JoinHandle<()>>,
+    /// What the following task is made of, kept so one that finished (a bus that never answered)
+    /// can be started again without stopping the computer's controls.
+    follows: Option<Follows>,
     /// What [`HostService::reconfigure`] last started: whether `[host]` was enabled and the mode.
     wanted: Option<(bool, HostMode)>,
     /// Whether the daemon's stop has begun, after which nothing is started.
@@ -558,6 +664,35 @@ struct Running {
 pub(crate) struct HostService {
     shared: Arc<Shared>,
     running: Mutex<Running>,
+}
+
+/// What turns the computer EQ on and off for a front end that holds no controller of its own: the
+/// MQTT bridge.
+#[async_trait::async_trait]
+pub(crate) trait EqSwitch: Send + Sync {
+    /// Turn the EQ on with the points kept, or off, which keeps them.
+    async fn set_on(&self, on: bool) -> Result<(), String>;
+}
+
+/// The computer's controller as the service holds it, reached when a switch is turned.
+struct SharedSwitch(Arc<Shared>);
+
+#[async_trait::async_trait]
+impl EqSwitch for SharedSwitch {
+    async fn set_on(&self, on: bool) -> Result<(), String> {
+        let computer = locked(&self.0.computer)
+            .clone()
+            .ok_or_else(|| "computer controls unavailable: host audio is off".to_string())?;
+        computer
+            .eq_op(
+                HostEqOp::Mode { on },
+                &[],
+                |_| Vec::new(),
+                |_| async { Ok(()) },
+            )
+            .await
+            .map_err(|refusal| refusal.to_string())
+    }
 }
 
 /// A hold on the route reads: while one exists the route is read and kept up to date. Dropping
@@ -645,6 +780,7 @@ impl HostService {
                 capture: watch::channel(CaptureState::off()).0,
                 capturing: AtomicBool::new(false),
                 players: Mutex::new(None),
+                computer: Mutex::new(None),
                 cover: Mutex::new(None),
                 generation: Mutex::new(0),
             }),
@@ -679,6 +815,15 @@ impl HostService {
         if running.wanted == Some(wanted) && (off || alive) {
             return;
         }
+        // The same host whose following task has finished (no bus answered) is tried again; the
+        // computer's controls keep running, so a reload never takes the chain away.
+        if running.wanted == Some(wanted)
+            && let Some(follows) = running.follows.clone()
+        {
+            let generation = *locked(&self.shared.generation);
+            running.task = Some(spawn_follow(&self.shared, generation, follows));
+            return;
+        }
         halt(&mut running, &self.shared);
         running.wanted = Some(wanted);
         if off {
@@ -688,15 +833,26 @@ impl HostService {
             HostMode::Fake => Parts::fake(FakeKnobs::from_env()),
             _ => Parts::real(),
         };
-        launch(&mut running, &self.shared, parts);
+        launch(
+            &mut running,
+            &self.shared,
+            parts,
+            svolder_ipc::checks::live::in_container(),
+        );
     }
 
     /// Run `parts` in place of whatever runs, for tests. Needs a tokio runtime.
     #[cfg(test)]
     pub(crate) fn run_with(&self, parts: Parts) {
+        self.run_with_in(parts, false);
+    }
+
+    /// [`HostService::run_with`] as a daemon that runs in a container (or not) starts it.
+    #[cfg(test)]
+    pub(crate) fn run_with_in(&self, parts: Parts, container: bool) {
         let mut running = locked(&self.running);
         halt(&mut running, &self.shared);
-        launch(&mut running, &self.shared, parts);
+        launch(&mut running, &self.shared, parts, container);
     }
 
     /// End the host for good: what runs stops, the view goes unavailable, and no later
@@ -710,6 +866,76 @@ impl HostService {
     /// The host as it stands, stamped with the daemon's clock.
     pub(crate) fn view(&self) -> HostView {
         stamped(self.shared.view.borrow().clone())
+    }
+
+    /// The host as it stands, with the computer's EQ as it is this moment and its volume read now
+    /// when nobody watches and so none is kept, for a one-shot `host` request.
+    pub(crate) async fn view_now(&self) -> HostView {
+        let mut view = self.view();
+        let Some(computer) = locked(&self.shared.computer).clone() else {
+            return view;
+        };
+        // The controller's own newest view, not the one the throttle last let through.
+        view.eq = Some(computer.eq_view());
+        if view.volume.is_none() {
+            view.volume = computer.read_volume().await;
+        }
+        view
+    }
+
+    /// The computer's controls, or the sentence that says why there are none.
+    pub(crate) fn computer(&self) -> Result<Arc<Computer>, String> {
+        locked(&self.shared.computer)
+            .clone()
+            .ok_or_else(|| "computer controls unavailable: host audio is off".to_string())
+    }
+
+    /// Keep what a write read back in the view, while someone watches (nothing is kept for
+    /// nobody).
+    fn keep_volume(&self, volume: &HostVolume) {
+        if *self.shared.watchers.borrow() > 0 {
+            computer::put_volume(&self.shared, Some(volume.clone()));
+        }
+    }
+
+    /// Set the computer's volume to `pct` percent, 0 to 100, and read it back.
+    pub(crate) async fn host_volume(&self, pct: u8) -> Result<HostVolume, String> {
+        let computer = self.computer()?;
+        // The write runs on a task of its own: a requester that goes away does not take the
+        // newest value with it.
+        let volume = tokio::spawn(async move { computer.set_volume(pct).await })
+            .await
+            .map_err(|_| "the computer's volume write was cut short".to_string())??;
+        self.keep_volume(&volume);
+        Ok(volume)
+    }
+
+    /// Mute or unmute the computer's sink and read it back.
+    pub(crate) async fn host_mute(&self, muted: bool) -> Result<HostVolume, String> {
+        let volume = self.computer()?.set_mute(muted).await?;
+        self.keep_volume(&volume);
+        Ok(volume)
+    }
+
+    /// Change the computer's EQ (see [`Computer::eq_op`]).
+    pub(crate) async fn host_eq<F, Fut>(
+        &self,
+        op: HostEqOp,
+        presets: &[Preset],
+        holders: impl Fn(&str) -> Vec<String>,
+        flatten: F,
+    ) -> Result<(), EqRefusal>
+    where
+        F: FnOnce(Vec<String>) -> Fut,
+        Fut: std::future::Future<Output = Result<(), String>>,
+    {
+        self.computer()?.eq_op(op, presets, holders, flatten).await
+    }
+
+    /// The switch of the computer EQ, which follows the controller the service holds when it is
+    /// turned, whatever reloads happened since it was handed out.
+    pub(crate) fn eq_switch(&self) -> Arc<dyn EqSwitch> {
+        Arc::new(SharedSwitch(Arc::clone(&self.shared)))
     }
 
     /// A receiver that hears each change of the view. Its stamp is the time of the change.
@@ -788,6 +1014,7 @@ impl HostService {
 /// End what runs and leave the view unavailable and empty, and every task of this run unable
 /// to change that.
 fn halt(running: &mut Running, shared: &Shared) {
+    running.follows = None;
     if let Some(task) = running.task.take() {
         task.abort();
     }
@@ -797,23 +1024,38 @@ fn halt(running: &mut Running, shared: &Shared) {
     let mut gate = locked(&shared.generation);
     *gate += 1;
     *locked(&shared.players) = None;
+    *locked(&shared.computer) = None;
     *locked(&shared.cover) = None;
     shared.capturing.store(false, Ordering::SeqCst);
     shared.capture.send_replace(CaptureState::off());
-    publish(shared, HostView::default());
+    shared.view.send_if_modified(|current| {
+        let cleared = *current == HostView::default();
+        *current = HostView::default();
+        !cleared
+    });
 }
 
 /// Start the task that runs `parts`.
-fn launch(running: &mut Running, shared: &Arc<Shared>, parts: Parts) {
+fn launch(running: &mut Running, shared: &Arc<Shared>, parts: Parts, container: bool) {
     let Parts {
         connect,
         routes,
         covers,
         helpers,
         frames,
+        computer,
     } = parts;
     running.helpers = helpers;
     let generation = *locked(&shared.generation);
+    if let Some(computer) = computer {
+        *locked(&shared.computer) = Some(Arc::clone(&computer));
+        running.helpers.push(tokio::spawn(computer::run(
+            Arc::clone(shared),
+            generation,
+            computer,
+            container,
+        )));
+    }
     shared.capturing.store(true, Ordering::SeqCst);
     match frames {
         Ok(frames) => {
@@ -830,13 +1072,29 @@ fn launch(running: &mut Running, shared: &Arc<Shared>, parts: Parts) {
                 .send_replace(CaptureState::Unavailable { why });
         }
     }
-    running.task = Some(tokio::spawn(follow(
+    let follows = Follows {
+        connect,
+        routes,
+        covers,
+    };
+    running.follows = Some(follows.clone());
+    running.task = Some(spawn_follow(shared, generation, follows));
+}
+
+/// Start the task that follows the players.
+fn spawn_follow(shared: &Arc<Shared>, generation: u64, follows: Follows) -> JoinHandle<()> {
+    let Follows {
+        connect,
+        routes,
+        covers,
+    } = follows;
+    tokio::spawn(follow(
         Arc::clone(shared),
         generation,
         connect,
         routes,
         covers,
-    )));
+    ))
 }
 
 /// What the task knows.
@@ -960,6 +1218,8 @@ impl State {
             playing: self.now.as_ref().map(|now| playing_of(now, cover)),
             route: self.route.clone(),
             now_ms: unix_ms(),
+            volume: None,
+            eq: None,
         }
     }
 }
@@ -992,9 +1252,15 @@ fn playing_of(now: &NowPlaying, cover: Option<String>) -> PlayingView {
     }
 }
 
-/// Make `view` the one everyone reads, unless it differs from it by nothing but the clock.
+/// Make `view` the one everyone reads, unless it differs from it by nothing but the clock. The
+/// computer's volume and EQ are not the player's to change: they stay as they are.
 fn publish(shared: &Shared, view: HostView) {
     shared.view.send_if_modified(|current| {
+        let view = HostView {
+            volume: current.volume.clone(),
+            eq: current.eq.clone(),
+            ..view
+        };
         let same = HostView {
             now_ms: current.now_ms,
             ..view.clone()

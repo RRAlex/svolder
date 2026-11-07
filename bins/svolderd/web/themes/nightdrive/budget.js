@@ -18,7 +18,11 @@
  * draws a second than this, for this long, while the scene asks for every frame, steps down as a slow
  * mean does (at the cap, under 0.7 of the cap's own rate). `heldS`: how long after that the way back up stays shut, since drawing was not what was slow.
  * `wetHeldS`: how long the wet road, the costliest layer, stays off once a step-down has dropped it, so that
- * it does not come and go with every minute of good draws. While the scene is idle (silent or
+ * it does not come and go with every minute of good draws. A probe (`probe()`: the scene starts drawing every frame, as when
+ * Full is chosen) lifts the rate's cap unless a step-down is holding it, and for the next `probeS` seconds (and each time
+ * it steps down) judges after `probeLookS` of draws instead of a whole window: a mean over `slowMs` across the last `probeDraws`
+ * draws, or too few draws in that span by the same rates, steps down at once, so a phone settles in about a second.
+ * The limits are the same; only the time taken to find them out is shorter. While the scene is idle (silent or
  * paused: `setIdle`) the wet road comes back as soon as the draws measure under `calmMs`, with no wait, unless it
  * was dropped while idle too; if it pushes the draws over `slowMs` a step-down drops it again, as at any other time. */
 export const BUDGET = Object.freeze({
@@ -36,6 +40,11 @@ export const BUDGET = Object.freeze({
   lowForS: 3,
   heldS: 60,
   wetHeldS: 180,
+  probeS: 2,
+  probeLookS: 0.5,
+  probeDraws: 8,
+  /** The most steps down a kept tier may name (a kept tier beyond it is not a start). */
+  maxStep: 8,
 });
 
 /** The least ms between draws: `asked`, held to the cap's pace while `capped` and, for a `coarse` pointer
@@ -59,11 +68,14 @@ export function baseScale(width, height, density) {
  * true when the scale changed, and the caller sizes the canvases again. `coarse` (a finger for a
  * pointer: a phone) starts at the rate's cap, which the way back up lifts after 10 s under budget.
  */
-export function createBudget({ coarse = false } = {}) {
+export function createBudget({ coarse = false, start = null } = {}) {
   let base = 1;
-  let step = 0;
-  let capped = coarse;
+  let step = start?.step ?? 0;
+  let capped = start ? Boolean(start.capped) : coarse;
   let wet = !coarse;
+  let probing = start !== null;
+  let probeEnd = null;
+  let liftCap = false;
   let wetHeldUntil = -Infinity;
   let times = [];
   let stamps = [];
@@ -89,6 +101,7 @@ export function createBudget({ coarse = false } = {}) {
     times = [];
     stamps = [];
     freshAt = seconds;
+    if (probing) probeEnd = seconds + BUDGET.probeS;
     if (wet) {
       wet = false;
       droppedIdle = idle;
@@ -112,6 +125,20 @@ export function createBudget({ coarse = false } = {}) {
     get capped() { return capped; },
     get step() { return step; },
     get wet() { return wet; },
+    /** The tier now, `{ capped, step }`: what a viewer's next visit starts from (it is only a start: the probe corrects it). */
+    get tier() { return { capped, step }; },
+
+    /** The scene is about to draw every frame (Full is chosen): measure fast, from the rate's cap lifted. */
+    probe() {
+      probing = true;
+      liftCap = true;
+      probeEnd = null;
+      times = [];
+      stamps = [];
+      calmSince = null;
+      lowSince = null;
+      freshAt = null;
+    },
 
     /** Whether the scene is idle (silent or paused) now. A change starts the measuring again, so the draws it
      * measures are the idle ones. */
@@ -135,6 +162,24 @@ export function createBudget({ coarse = false } = {}) {
       stamps.push(seconds);
       while (stamps.length && stamps[0] < seconds - 1) stamps.shift();
       times.push(ms);
+      if (probing) {
+        if (probeEnd === null) {
+          probeEnd = seconds + BUDGET.probeS;
+          if (liftCap && capped && seconds >= heldUntil) capped = false;
+          liftCap = false;
+        }
+        if (seconds > probeEnd) probing = false;
+        else if (full && seconds - freshAt >= BUDGET.probeLookS) {
+          const recent = times.slice(-BUDGET.probeDraws);
+          const slowDraws = recent.length >= BUDGET.probeDraws && recent.reduce((a, b) => a + b, 0) / recent.length > BUDGET.slowMs;
+          const inSpan = stamps.filter((at) => at > seconds - BUDGET.probeLookS).length;
+          const seldom = inSpan < (capped ? 0.7 * BUDGET.fps : BUDGET.minFps) * BUDGET.probeLookS;
+          if (slowDraws || seldom) {
+            if (seldom) heldUntil = seconds + BUDGET.heldS;
+            return lower(seconds);
+          }
+        }
+      }
       // too few draws a second for long enough, while every frame is asked for
       if (full && seconds - freshAt >= 1 && stamps.length < (capped ? 0.7 * BUDGET.fps : BUDGET.minFps)) lowSince ??= seconds;
       else lowSince = null;

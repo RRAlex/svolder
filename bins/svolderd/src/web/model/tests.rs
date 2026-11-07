@@ -549,6 +549,7 @@ fn eq_state(target: &str, on: bool, origin: Option<&str>) -> svolder_host::eq::H
         previous_default: None,
         preamp_db: -3.0,
         filters: Vec::new(),
+        slots: Vec::new(),
     }
 }
 
@@ -569,7 +570,7 @@ fn the_page_model_carries_the_routes_facts() {
 async fn a_route_not_read_is_null_in_the_model() {
     let device = fake_daemon_playing("gungnir2-v2", "dac").await;
     let web = web_over(&device);
-    let host = json_of(&page::host_model(&web, GUEST).expect("a host"));
+    let host = json_of(&page::host_model(&web, GUEST, None).expect("a host"));
     // The test daemon reads no route (and the card keeps its fields beside it).
     assert_eq!(host["route"], Json::Null, "{host}");
     assert!(host["track"].is_object(), "{host}");

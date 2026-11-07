@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The theme Night drive on a phone, in a browser: held upright the scene is the top half and the dash a
-panel under it (the volume large, `-` `MUTE` `+`, the track, the transport, `DEVICE`); held sideways the
+panel over its foot (the volume large in the scene, the switch as a `DAC | PC` pill in the top left corner, `-` `MUTE` `+` and the transport on one row, the track with the input and `DEVICE`); held sideways the
 scene is the whole window with the slim dash; the neon sheet comes up from the bottom or in from the
 right and survives a turn; every touch target is 44 px; the menu button is pinned to the window; the
 mountains tune from a touch; nothing scrolls sideways with long names; a tall window keeps the scene whole.
-  portrait_puts_the_scene_above_the_dash_panel        412x915 and 360x780: the panel is its own rows (under 30 %), the scene ends where it begins, the volume is in the scene above the sun
-  landscape_shows_the_scene_full_with_a_slim_dash     844x390 and 667x375: the scene is the window, the dash is a slim strip
+  portrait_puts_the_scene_above_the_dash_panel        412x915 and 360x780: the panel is two rows (under 30 %, over 77 % of the window left to the scene), the scene runs behind it, the switch pill is in the scene's top left corner, the volume is in the scene above the sun, the panel lets the road show through and keeps 4.5:1
+  landscape_shows_the_scene_full_with_a_slim_dash     844x390 and 667x375: the scene is the window, the dash is one slim row (under 25 %), the switch's pill is in the top left corner
   the_menu_button_is_fixed_on_a_phone                 44 px at 8 px from the top and right, position fixed, in both turns
   the_sheet_slides_up_in_portrait_and_in_from_the_right_in_landscape   the rects, and the keyframes named
   turning_the_phone_keeps_an_open_sheet_open          open in portrait, turned: still open, the same control focused, and back
@@ -25,6 +25,7 @@ GEO = """(() => { const r = (sel) => { const e = document.querySelector(sel); if
   return { w: innerWidth, h: innerHeight, scene: r('.nd-scene'), canvas: r('#nd-road'), dash: r('#nd-dash'),
     vol: r('.nd-vol svg'), down: r('#nd-vdown'), mute: r('#nd-mute'), up: r('#nd-vup'), track: r('#nd-track'),
     prev: r('#nd-tr-0'), play: r('#nd-tr-1'), next: r('#nd-tr-2'), sheet: r('#nd-sheet'), button: r('#fx-button'),
+    side: r('#nd-side-dac'), computer: r('#nd-side-computer'), input: r('#nd-dash [data-act=input]'), now: r('.nd-now'),
     pos: getComputedStyle(document.getElementById('frame')).position, top: r('.nd-top'), eq: r('.nd-eq'),
     scrollW: document.documentElement.scrollWidth, scrollH: document.documentElement.scrollHeight,
     bodyW: document.body.scrollWidth,
@@ -39,6 +40,8 @@ DIALOG = """(() => { const e = document.getElementById('nd-dialog'); if (!e) ret
     shut: document.getElementById('nightdrive').dataset.sheet || '',
     focus: document.activeElement ? document.activeElement.id : '',
     inside: e.contains(document.activeElement) }; })()"""
+SHORT = "[...document.querySelectorAll('#nd-switch .nd-k')].map((k) => getComputedStyle(k, '::before').content.replace(/\"/g, ''))"
+NAMES = "[...document.querySelectorAll('#nd-switch .nd-k')].map((k) => k.getAttribute('aria-label'))"
 TUNE = '__core.theme.driver.tune()'
 TUNE_ON = "document.querySelector('.nd-scene').dataset.tune === 'on'"
 SCENE_BOX = """(() => { const r = document.querySelector('.nd-scene').getBoundingClientRect();
@@ -73,10 +76,55 @@ def inside(a, outer, slack=1.0):
     return a is not None and a[0] >= outer[0] - slack and a[1] >= outer[1] - slack and a[2] <= outer[2] + slack and a[3] <= outer[3] + slack
 
 
+# the bound on the panel's text: each text colour against the panel's colour over the brightest thing that can be drawn
+# behind it. The floor's cells run from hsl(300 100 % 55 %) to hsl(180 100 % 65 %), the last the brightest, rgb(89, 255, 255),
+# drawn opaque (the cells are the bound: an ember or a shooting star can add warm light over one for a moment). Run as a
+# function of the selectors it must find: one with no element on the page is `missing`, and the check fails on it.
+CONTRAST = """((want) => { const dash = document.getElementById('nd-dash');
+  const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const lum = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const bg = getComputedStyle(dash).backgroundColor.match(/[\\d.]+/g).map(Number);
+  const a = bg.length > 3 ? bg[3] : 1;
+  const behind = [89, 255, 255];
+  const under = lum(...[0, 1, 2].map((n) => bg[n] * a + behind[n] * (1 - a)));
+  const missing = want.filter((sel) => ![...dash.querySelectorAll(sel)].some((e) => e.textContent.trim() !== ''));
+  const texts = [...dash.querySelectorAll(want.join(', '))].filter((e) => e.textContent.trim() !== '').map((e) => {
+    const col = getComputedStyle(e).color.match(/[\\d.]+/g).map(Number);
+    const l = lum(col[0], col[1], col[2]);
+    return { what: e.className + ' ' + e.textContent.slice(0, 12), ratio: (Math.max(l, under) + 0.05) / (Math.min(l, under) + 0.05) };
+  });
+  return { alpha: a, texts, worst: Math.min(...texts.map((t) => t.ratio)), count: texts.length, under, missing }; })"""
+
+
+DAC_TEXTS = '[".nd-k", ".nd-title", ".nd-sub", ".nd-time"]'
+AMP_TEXTS = '[".nd-k", ".nd-gauge", ".nd-gauge i"]'
+
+
+def the_amp_panel_contrast():
+    """An amp's page on a phone held upright (360x780; the fake Aegir 2): its power key, gauges and their labels are in
+    the panel, and every text in it keeps 4.5:1 over the brightest cell that can be behind it; the check names the
+    selectors it must find."""
+    d = common.Daemon('aegir2', host='fake')
+    try:
+        b = page_at(d, (360, 780))
+        try:
+            seen = b.page(f'({CONTRAST})({AMP_TEXTS})')
+            check('the_amp_panel_text_keeps_contrast: the power key and the gauges with their labels are in the panel',
+                  not seen['missing'], seen['missing'])
+            check('  every text in it keeps 4.5:1 over the brightest cell that can be behind it',
+                  seen['alpha'] < 0.85 and seen['worst'] >= 4.5, [seen['alpha'], round(seen['worst'], 2), seen['texts']])
+        finally:
+            b.close()
+    finally:
+        d.stop()
+
+
 def the_portrait_panel(d):
-    """412x915 and 360x780: the panel is only its own rows (under 30 % of the window) and the scene ends where it
-    begins; the volume is in the scene under the device line and the EQ line (with its gains), above the sun;
-    in the panel `-` `MUTE` `+` in that order, the track, then the transport with `DEVICE`; no scroll."""
+    """412x915 and 360x780: the panel is two rows (under 30 % of the window, so over 70 % is the scene) and the scene
+    runs behind it; the switch is a pill (`DAC | PC`) in the scene's top left corner,
+    36 px tall with a 44 px hit area; the volume is in the scene under the EQ line, above the sun; in the panel `-` `MUTE`
+    `+` and the transport are one row, then the track with the input and `DEVICE`; the panel is translucent and its text
+    keeps 4.5:1 over the brightest of what is behind it; no scroll."""
     reset_bands(d)
     for size in [(412, 915), (360, 780)]:
         b = page_at(d, size)
@@ -84,28 +132,51 @@ def the_portrait_panel(d):
             g = b.page(GEO)
             w, h = g['w'], g['h']
             panel = g['dash']
+            share = (panel[3] - panel[1]) / h
+            print(f'  measured {w}x{h}: panel {panel[3] - panel[1]:.0f} px = {100 * share:.1f} %, the scene above it {100 * panel[1] / h:.1f} %')
             check(f'portrait_puts_the_scene_above_the_dash_panel: {w}x{h}: the panel is its own rows, under 30 % of the window, '
                   f'to the bottom and edge to edge',
-                  (panel[3] - panel[1]) < 0.30 * h and panel[3] >= h - 1 and panel[0] <= 1 and panel[2] >= w - 1, [panel, h])
-            check('  the scene ends where the panel begins (2 px either way) and the canvas fills it',
-                  abs(g['scene'][3] - panel[1]) <= 2 and g['canvas'][3] - g['canvas'][1] >= g['scene'][3] - g['scene'][1] - 1,
+                  share < 0.30 and panel[3] >= h - 1 and panel[0] <= 1 and panel[2] >= w - 1, [panel, h])
+            check('  the scene above it is over 77 % of the window',
+                  panel[1] / h > 0.77, [panel, h])
+            check('  the scene runs behind the panel (the window, top to bottom) and the canvas fills it',
+                  all(abs(a - e) <= 1 for a, e in zip(g['scene'], [0, 0, w, h])) and g['canvas'][3] - g['canvas'][1] >= h - 1,
                   [g['scene'], g['canvas'], panel])
             check('  the volume is in the scene, centred under the device line and the EQ line, above the sun',
-                  g['vol'] is not None and inside(g['vol'], g['scene'], 1.0) and g['vol'][1] >= g['eq'][3] - 1
+                  g['vol'] is not None and g['vol'][3] <= panel[1] and g['vol'][1] >= g['eq'][3] - 1
                   and abs((g['vol'][0] + g['vol'][2]) / 2 - w / 2) <= 2 and g['vol'][3] <= g['sunTop'], [g['vol'], g['eq'], g['sunTop']])
             keys = [g['down'], g['mute'], g['up']]
-            check('  in the panel `-` `MUTE` `+` in that order on one row',
-                  all(inside(k, panel) for k in keys)
-                  and g['down'][2] <= g['mute'][0] and g['mute'][2] <= g['up'][0]
-                  and abs(g['down'][1] - g['up'][1]) <= 1, [keys, panel])
-            check('  then the track, then the transport and `DEVICE` on one row, all in the panel',
-                  inside(g['track'], panel) and keys[0][3] <= g['track'][1] + 1
-                  and g['track'][3] <= g['prev'][1] + 1
-                  and all(inside(k, panel) for k in (g['prev'], g['play'], g['next'], g['sheet']))
-                  and g['prev'][2] <= g['play'][0] and g['play'][2] <= g['next'][0] and g['next'][2] <= g['sheet'][0]
-                  and abs(g['prev'][1] - g['sheet'][1]) <= 1, g)
+            sw = [g['side'], g['computer']]
+            check('  the switch is one pill `DAC | PC` in the scene\'s top left corner, 8 px from the left, level with the menu button, '
+                  'touching its two segments, not in the panel',
+                  all(k is not None for k in sw) and abs(g['side'][0] - 8) <= 1 and abs((g['side'][1] + g['side'][3]) / 2 - (g['button'][1] + g['button'][3]) / 2) <= 1
+                  and abs(g['side'][1] - g['computer'][1]) <= 1 and 0 <= g['side'][2] - g['computer'][0] <= 2 and g['computer'][3] <= panel[1]
+                  and not b.page("!!document.querySelector('#nd-dash #nd-side-dac')"), [g['side'], g['computer'], g['button']])
+            check('  the pill clears the menu button and the device line (the line starts right of it) and the pill stays in the window',
+                  g['computer'][2] < g['top'][0] and g['top'][2] < g['button'][0] and g['computer'][2] < g['button'][0] and inside(g['computer'], [0, 0, w, h]), [g['computer'], g['top'], g['button']])
+            check('  the segments read `DAC` and `PC` (an amp `AMP`), each keeps its whole name as its accessible name',
+                  b.page(SHORT) == ['DAC', 'PC'] and b.page(NAMES) == [b.page("__core.model.page().device.name"), 'This computer'], [b.page(SHORT), b.page(NAMES)])
+            check('  the pill\'s segments are 36 px tall (the panel\'s keys too) and every key 44 px to the hand',
+                  all(35.5 <= k[3] - k[1] <= 36.5 for k in sw + keys + [g['prev'], g['play'], g['next'], g['sheet']])
+                  and all(t['wide'] and t['tall'] for t in b.page(f'({TARGETS})("#nd-switch .nd-k, #nd-dash .nd-k")')),
+                  b.page(f'({TARGETS})("#nd-switch .nd-k, #nd-dash .nd-k")'))
+            check('  in the panel `-` `MUTE` `+` in that order and the transport on ONE row, all in the panel',
+                  all(inside(k, panel) for k in keys + [g['prev'], g['play'], g['next']])
+                  and g['down'][2] <= g['mute'][0] and g['mute'][2] <= g['up'][0] and g['up'][2] <= g['prev'][0]
+                  and g['prev'][2] <= g['play'][0] and g['play'][2] <= g['next'][0]
+                  and all(abs(k[1] - g['down'][1]) <= 1 for k in keys + [g['prev'], g['play'], g['next']]),
+                  [keys, g['prev'], g['play'], g['next'], panel])
+            check('  then the track, the input and `DEVICE` on the Now-playing line below, all in the panel',
+                  inside(g['track'], panel) and g['down'][3] <= g['track'][1] + 1 and g['now'][1] >= g['down'][3] - 1
+                  and g['input'] is not None and inside(g['input'], panel) and inside(g['sheet'], panel)
+                  and g['track'][2] <= g['input'][0] and g['input'][2] <= g['sheet'][0]
+                  and g['down'][3] <= g['input'][1] and g['down'][3] <= g['sheet'][1] and abs(g['input'][1] - g['sheet'][1]) <= 1,
+                  [g['track'], g['input'], g['sheet'], g['now']])
             check('  the device line and the EQ line stay in the scene and the EQ line holds the gains; the page does not scroll',
-                  g['top'][3] <= g['scene'][3] and g['eq'][3] <= g['scene'][3] and g['eqGains'] and g['scrollH'] <= h and g['scrollW'] <= w, g)
+                  g['top'][3] <= panel[1] and g['eq'][3] <= panel[1] and g['eqGains'] and g['scrollH'] <= h and g['scrollW'] <= w, g)
+            seen = b.page(f'({CONTRAST})({DAC_TEXTS})')
+            check('  the panel is translucent (under 85 % opaque) and every text in it keeps 4.5:1 over the brightest thing that can be behind it',
+                  seen['alpha'] < 0.85 and not seen['missing'] and seen['worst'] >= 4.5, [seen['alpha'], round(seen['worst'], 2), seen['count'], seen['texts']])
             check('  no page error', errors(b) == [], errors(b)[:3])
         finally:
             b.close()
@@ -126,21 +197,36 @@ def the_portrait_volume_fades(d):
 
 
 def the_landscape_scene(d):
-    """844x390 and 667x375: the scene is the whole window and the dash a slim strip along the bottom (under a
-    quarter of the height) with every key in the window, the volume above it in the scene."""
+    """844x390 and 667x375: the scene is the whole window and the dash one slim row along the bottom (under 25 % of the
+    height, one row) with every key in the window and the switch's pill in the top left corner,
+    at the left, clear of the volume figure."""
     for size in [(844, 390), (667, 375)]:
         b = page_at(d, size)
         try:
             g = b.page(GEO)
             w, h = g['w'], g['h']
             dash = g['dash']
+            print(f'  measured {w}x{h}: strip {dash[3] - dash[1]:.0f} px = {100 * (dash[3] - dash[1]) / h:.1f} %')
             check(f'landscape_shows_the_scene_full_with_a_slim_dash: {w}x{h}: the scene and its canvas are the whole window',
                   all(abs(a - e) <= 1 for a, e in zip(g['scene'], [0, 0, w, h])) and all(abs(a - e) <= 1 for a, e in zip(g['canvas'], [0, 0, w, h])), g)
-            keys = [g['down'], g['mute'], g['up'], g['prev'], g['play'], g['next'], g['sheet']]
-            check('  the dash is a slim strip along the bottom, every key inside the window',
-                  dash[3] <= h and (dash[3] - dash[1]) <= 0.25 * h and all(inside(k, [0, 0, w, h]) for k in keys), [dash, keys])
+            keys = [g['down'], g['mute'], g['up'], g['input'], g['prev'], g['play'], g['next'], g['sheet']]
+            check('  the dash is one slim row along the bottom (under 25 %), every key inside the window and on the one row',
+                  dash[3] <= h and (dash[3] - dash[1]) < 0.25 * h and all(inside(k, [0, 0, w, h]) for k in keys)
+                  and all(abs((k[1] + k[3]) / 2 - (keys[0][1] + keys[0][3]) / 2) <= 1 for k in keys), [dash, keys])
+            sw = [g['side'], g['computer']]
+            check('  the switch is the same pill in the top left corner, level with the menu button, left of the device line and clear of the volume',
+                  all(k is not None and inside(k, [0, 0, w, h]) for k in sw) and abs(g['side'][0] - 8) <= 1
+                  and abs((g['side'][1] + g['side'][3]) / 2 - (g['button'][1] + g['button'][3]) / 2) <= 1
+                  and g['side'][0] < g['computer'][0] and g['computer'][2] < g['top'][0] and g['computer'][2] <= g['vol'][0]
+                  and g['top'][2] < g['button'][0] and not b.page("!!document.querySelector('#nd-dash #nd-side-dac')"), [g['top'], sw, g['vol'], g['button']])
             check('  the volume is in the scene, above the dash', g['vol'] is not None and g['vol'][3] <= dash[1], [g['vol'], dash])
             check('  the page does not scroll', g['scrollH'] <= h and g['scrollW'] <= w, g)
+            # no switch shown (a device with no computer side): the device line keeps the scene's edge inset
+            got = b.page("""(() => { const page = document.getElementById('nightdrive'); page.classList.remove('nd-sw-hud', 'nd-has-switch');
+                const probe = document.createElement('div'); probe.style.width = 'var(--nd-edge)'; page.appendChild(probe);
+                const edge = probe.getBoundingClientRect().width; probe.remove();
+                return { left: parseFloat(getComputedStyle(document.querySelector('.nd-top')).left), edge }; })()""")
+            check('  with no switch shown the device line keeps the scene\'s edge inset', abs(got['left'] - got['edge']) <= 0.5, got)
         finally:
             b.close()
 
@@ -397,6 +483,7 @@ def the_tall_window(d):
 d = common.Daemon('gungnir2-v2', host='fake')
 try:
     the_portrait_panel(d)
+    the_amp_panel_contrast()
     the_portrait_volume_fades(d)
     the_landscape_scene(d)
     the_menu_button(d)

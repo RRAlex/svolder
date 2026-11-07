@@ -9,10 +9,12 @@
 import { WORDS, dateWords, titleWords } from '../words.js';
 import { meters, metersInPlace, power } from './amp.js';
 import { controls } from './controls.js';
+import { computerPresets, computerTone, showing } from './computer.js';
 import { card, device } from './device.js';
 import { esc } from './esc.js';
 import { notes } from './notes.js';
 import { playing } from './playing.js';
+import { onComputer } from './side.js';
 import { devicePresets, presets } from './presets.js';
 import { tone } from './tone.js';
 import { volume, volumeInPlace } from './volume.js';
@@ -48,13 +50,14 @@ function title(page, device, view) {
   const said = { lost: WORDS.reconnecting, waiting: WORDS.waiting }[view.state];
   const line = said ?? sub;
   const others = (page.fleet?.devices ?? []).filter((d) => d.url !== page.shown);
+  const switchLine = showing(page, device, view);
   const also = others.length > 0
     ? `<p class="p-also">${esc(WORDS.also)} ${others.map((d) => go('device', d.name,
       ` data-device="${esc(d.url)}"`)).join(' &middot; ')}</p>`
     : '';
   return `<h1>${esc(name)}</h1>${line
     ? `<small class="p-sub${view.state === 'lost' ? ' lost' : ''}">${esc(line)}</small>` : ''}`
-    + `${also}<span class="paper-slot"></span>`;
+    + `${switchLine}${also}<span class="paper-slot"></span>`;
 }
 
 /** The footer: the program, its version and the date; the key that opens the themes; the way out
@@ -76,8 +79,20 @@ function foot(page, device, view) {
 
 /** The sections drawn so far, by name; the others draw nothing. */
 export const SECTIONS = {
-  title, card, volume, tone, power, meters, controls, playing, presets,
-  'device-presets': devicePresets, device, notes, foot,
+  title,
+  card,
+  volume,
+  tone: (page, device, view) => (onComputer(view) ? computerTone(page, view) : tone(page, device, view)),
+  power,
+  meters,
+  controls,
+  playing,
+  presets: (page, device, view) => (onComputer(view)
+    ? computerPresets(page, view) : presets(page, device, view)),
+  'device-presets': devicePresets,
+  device,
+  notes,
+  foot,
 };
 
 /** The sections that can put a change in place without being drawn again, by name:

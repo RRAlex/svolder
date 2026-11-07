@@ -145,12 +145,16 @@ export function createLive({ core, root, signal, view }) {
   /** The device the page showed when it last looked: a change of it is a switch. */
   let seen = store.shown();
 
-  /** The hop to keep chosen, now: kept while the line has it, else the shown device's. A choice
-   * that was lost (the amp left, the hop was removed) closes what was open for it. */
+  /** The hop to keep chosen, now: kept while the line has it, else the shown device's, or the
+   * computer's when this viewer's side is the computer's and the person has not chosen a hop by
+   * hand (a load, a device shown). A choice that was lost (the amp left, the hop was removed)
+   * closes what was open for it. With no line there is nothing to choose among yet. */
   function reconcile() {
+    const hops = view.hops();
+    if (hops.length === 0) return;
     const shown = store.shown() ? shownHopId(store.shown()) : null;
     const before = view.chosen;
-    view.chosen = keepChoice(before, view.hops(), shown);
+    view.chosen = keepChoice(view.byHand ? before : null, hops, shown, core.computer.kept());
     if (view.chosen !== before) for (const fn of choosers) fn();
   }
 
@@ -206,6 +210,8 @@ export function createLive({ core, root, signal, view }) {
       const focused = focusId(shelf);
       shelf.innerHTML = hop ? (shelves[hop.kind]?.(page, hop, view) ?? '') : '';
       placeOpen(shelf);
+      // The points' table keeps its scroll across the draw (the computer's shelf).
+      view.shelfDrawn?.(shelf);
       if (focused) shelf.querySelector(focused)?.focus({ preventScroll: true });
     },
     slim(page) {
@@ -274,7 +280,9 @@ export function createLive({ core, root, signal, view }) {
   function switched() {
     if (store.shown() === seen) return;
     seen = store.shown();
-    view.chosen = store.shown() ? shownHopId(store.shown()) : null;
+    // Nothing is chosen by hand on the new device: its own hop, or the computer's while that is the side.
+    view.byHand = false;
+    view.chosen = core.computer.kept() === 'computer' ? null : (store.shown() ? shownHopId(store.shown()) : null);
     for (const fn of switchers) fn();
   }
 

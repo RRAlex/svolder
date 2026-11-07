@@ -472,3 +472,64 @@ fn the_passphrase_row_says_what_the_note_says() {
         assert!(!row.chars().any(|c| c.is_ascii_digit()), "{row}");
     }
 }
+
+/// The Volume row carries the switch between the device's volume and the computer's on a line of
+/// its own over the bar, where the pane has room; a click on either name shows that side, and the
+/// row is the device's own where the computer's controls are not there.
+#[test]
+fn the_volume_row_carries_the_switch() {
+    let mut app = mockup_app();
+    let wide = |app: &App| text(&frame(app, 130, 30));
+    assert!(
+        wide(&app).iter().all(|row| !row.contains("Computer")),
+        "no switch yet"
+    );
+
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    let name = app.session.product.clone();
+    let switch = format!("Volume       ‹ {name} | Computer ›");
+    let rows = wide(&app);
+    let at = rows
+        .iter()
+        .position(|row| row.contains(&switch))
+        .unwrap_or_else(|| panic!("{switch}: {rows:#?}"));
+    assert!(
+        rows[at + 1].contains("█109/127"),
+        "the bar is under it: {:?}",
+        rows[at + 1]
+    );
+    assert!(
+        text(&screen(&app))
+            .iter()
+            .any(|row| row.contains("| Computer ›")),
+        "the device's name gives way to it at 80 columns"
+    );
+
+    let mut terminal = Terminal::new(TestBackend::new(130, 30)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    terminal
+        .draw(|f| {
+            render::draw(f, &app, &Theme::new(false), &mut hits);
+        })
+        .expect("the frame draws");
+    let rows = text(terminal.backend().buffer());
+    let y = rows
+        .iter()
+        .position(|row| row.contains("| Computer"))
+        .expect("a row");
+    let byte = rows[y].find("Computer").expect("the switch");
+    let x = u16::try_from(rows[y][..byte].chars().count()).unwrap();
+    assert_eq!(
+        hits.hit_at(x, u16::try_from(y).unwrap()),
+        Some(&Hit::Side(crate::tui::app::Side::Computer))
+    );
+
+    app.flip_side();
+    assert!(
+        wide(&app).iter().any(|row| row.contains(&switch)),
+        "the switch stays on the other side"
+    );
+}

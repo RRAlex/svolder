@@ -140,12 +140,6 @@ impl Ctl {
         }
     }
 
-    /// Whether the systemd user manager answers: `systemctl --user` can be run and reads the
-    /// units, which is the test `daemon install` applies before it enables anything.
-    pub(crate) fn user_manager_answers(&self) -> bool {
-        self.asked_units().1
-    }
-
     /// What `systemctl --user <args>` printed, or `None` when it could not be run, failed, or
     /// took longer than [`TIMEOUT`].
     pub(crate) fn show(&self, args: &[&str]) -> Option<String> {

@@ -17,9 +17,11 @@ export const GRACE_MS = 1500;
 /** The share of the gap to the target the morph keeps each frame at 60 a second. */
 const KEEP = 0.88;
 
-/** The band of the scene the pointer turns the mountains into the curve in, as fractions of the
- * scene's height above (`up`) and below (`down`) the horizon. */
-const BAND = { up: 0.32, down: 0.1 };
+/** The band of the scene the pointer turns the mountains into the curve in: the window the curve is drawn in (`gMax` dB
+ * above the 0 dB line at `up` of the picture's height above the horizon, `gMax` dB below it at `down` below it: the
+ * map's own) and `margin` CSS px beyond each edge, so a bubble at the edge of the window is grabbed whole. */
+const WINDOW = { base: 0.08, span: 0.14 };
+const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 26 };
 
 /** The gain range the map shows when the device lists none, dB. */
 const GAIN_FALLBACK = 12;
@@ -32,23 +34,25 @@ export function gMaxOf(steps) {
 }
 
 /**
- * The map of a scene `w` by `h` with its horizon at `H`: the frequency at an x, the gain at a y
- * and the y of a gain, 0 dB at `H - 0.08h` and `gMax` dB `0.14h` above and below it.
+ * The map of a scene `w` by `h` with its horizon at `H` (`v`, the height the picture is composed in where the panel
+ * covers its foot, is `h` unless said): the frequency at an x, the gain at a y
+ * and the y of a gain, 0 dB at `H - 0.08h` and `gMax` dB `0.14h` above and below it. The y of a gain is held to that
+ * window (two points on one frequency add up beyond it), which is also the band that takes a touch (`inBand`).
  */
 export function mountainMap({
-  w, h, H, gMax,
+  w, h, v = h, H, gMax,
 }) {
-  const base = H - 0.08 * h;
-  const span = 0.14 * h;
+  const base = H - WINDOW.base * v;
+  const span = WINDOW.span * v;
   return {
     hzAt: (x) => axisHz(x, w),
     dbAt: (y) => ((base - y) * gMax) / span,
-    yOfDb: (db) => base - (db * span) / gMax,
+    yOfDb: (db) => base - (Math.max(-gMax, Math.min(gMax, db)) * span) / gMax,
   };
 }
 
 /** Whether `y` is in the band of the scene that turns the mountains into the curve. */
-export const inBand = ({ h, H }, y) => y > H - BAND.up * h && y < H + BAND.down * h;
+export const inBand = ({ h, v = h, H }, y) => y > H - BAND.up * v - BAND.margin && y < H + BAND.down * v + BAND.margin;
 
 /** Whether the page can be tuned from the mountains: the viewer may write and the shown device
  * has a tone curve with bands. */
@@ -78,6 +82,37 @@ export function curveAt(response, map, w) {
 }
 
 const FREQS = logFreqs(POINTS);
+
+/** The dB of `response` (the core's 181 log-spaced values) at `hz`, read as the drawn curve is: between the two
+ * values either side of it, so a point put there sits on that curve to the pixel. */
+function responseAt(response, hz) {
+  const last = response.length - 1;
+  const at = Math.min(last, Math.max(0, (Math.log(hz / F_MIN) / Math.log(F_MAX / F_MIN)) * last));
+  const i = Math.floor(at);
+  const j = Math.min(last, i + 1);
+  return response[i] + (response[j] - response[i]) * (at - i);
+}
+
+/**
+ * The computer's tone (the core's `toneOf`) as the mountains draw a tone: `{ mode, markers, response }`, the
+ * markers one per point, each at its own frequency (held to the axis) and on the curve, whatever the point's
+ * type, and the points themselves (`points`, the core's, held values laid over them). `null` for no tone.
+ */
+export function computerTone(tone) {
+  if (!tone) return null;
+  return {
+    mode: tone.modes.find((m) => m.on)?.name ?? 'off',
+    response: tone.response,
+    points: tone.points,
+    markers: tone.points.map((p) => {
+      const hz = Math.min(F_MAX, Math.max(F_MIN, p.f));
+      return { band: p.n, hz, db: responseAt(tone.response, hz) };
+    }),
+  };
+}
+
+/** Whether the computer's EQ can be tuned from the mountains: the viewer may write and its tone has points. */
+export const tunableComputer = (page, tone) => !inertOf(page) && Boolean(tone?.markers?.length && tone.response?.length);
 
 /** The value of step `raw` in `rows` (`[[value, words], …]`), or null for one that is not a number. */
 function entry(rows, raw) {
@@ -134,16 +169,21 @@ const BISECT = 48;
 /**
  * Where the bell of one band `{ f0, gainDb, q }` is at half its gain: `{ lo, hi }`, the frequencies
  * below and above `f0` where the core's response of that band alone crosses `gainDb / 2` (an end of
- * the axis, 20 Hz or 20 kHz, where it never does). A band under 0.05 dB has the analog width.
+ * the axis, 20 Hz or 20 kHz, where it never does). A band under 0.05 dB has the analog width. A computer's
+ * point has a `type` (PK, LSC, HSC), which its response follows.
  */
-export function halfPoints({ f0, gainDb, q }) {
+export function halfPoints({
+  f0, gainDb, q, type,
+}) {
   if (Math.abs(gainDb) < FLAT_DB) {
     const octaves = Math.asinh(1 / (2 * q)) / Math.LN2;
     return { lo: f0 * 2 ** -octaves, hi: f0 * 2 ** octaves };
   }
   const half = Math.abs(gainDb) / 2;
   // inside the bell: at least half the gain, on the gain's side
-  const inside = (hz) => Math.sign(gainDb) * responseDb([{ f0, gainDb, q }], [hz])[0] >= half;
+  const inside = (hz) => Math.sign(gainDb) * responseDb([{
+    f0, gainDb, q, type,
+  }], [hz])[0] >= half;
   const find = (end) => {
     if (inside(end)) return end;
     let [out, within] = [end, f0];

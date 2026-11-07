@@ -20,6 +20,8 @@
 
 /** The parameters of a band, as the band writes name them. */
 const PARAMS = ['f', 'g', 'q'];
+/** The fields of a point of the computer's EQ, as the points' writes name them. */
+const POINT_PARAMS = ['type', 'f', 'g', 'q'];
 
 /**
  * Every control and action `device` (a device's model) offers, in the order the model lists
@@ -57,6 +59,37 @@ export function targetsOf(device) {
     for (const button of ['previous', playing ? 'pause' : 'play', 'next']) {
       targets.push({ transport: button });
     }
+  }
+  return targets;
+}
+
+/**
+ * Every control and action the computer's side offers on `page` (the page's model, whose
+ * `host.computer` holds it), in the order they are listed: the switch (`flip`), then, while the
+ * computer can be used, its volume, mute and mode, `add` while the table has room, each point's
+ * `type`, `f`, `g` and `q`, `remove` for each point (the lone point is set flat), and every preset
+ * the computer can play. `[]` where the page has no switch (no device shown, or no computer).
+ *
+ *   { computer: 'flip' | 'volume' | 'mute' | 'mode' | 'add' }
+ *   { computer: 'point', n, param }     n is 1-based; param is `type`, `f`, `g` or `q`
+ *   { computer: 'remove', n }
+ *   { computer: 'preset', name }
+ */
+export function computerTargetsOf(page) {
+  const model = page?.host?.computer;
+  const targets = [];
+  if (!model || !page?.device) return targets;
+  targets.push({ computer: 'flip' });
+  if (model.unavailable) return targets;
+  for (const control of ['volume', 'mute', 'mode']) targets.push({ computer: control });
+  const count = Math.max(model.eq?.points?.length ?? 0, 1);
+  if (count < (model.eq?.max ?? 16)) targets.push({ computer: 'add' });
+  for (let n = 1; n <= count; n++) {
+    for (const param of POINT_PARAMS) targets.push({ computer: 'point', n, param });
+  }
+  for (let n = 1; n <= count; n++) targets.push({ computer: 'remove', n });
+  for (const preset of model.presets ?? []) {
+    if (preset.playable) targets.push({ computer: 'preset', name: preset.name });
   }
   return targets;
 }

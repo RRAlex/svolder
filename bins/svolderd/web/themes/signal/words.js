@@ -16,8 +16,12 @@ export const AUTOEQ = 'from your AutoEq preset';
 export const CHANGES = 'changes the sound';
 export const AS_SENT = 'arrives as sent';
 
-/** The computer's hop on the line is its audio server. */
-export const COMPUTER_NAME = 'PipeWire';
+/** The computer's hop on the line: its name, its audio server, and what it says while chosen. */
+export const COMPUTER_NAME = 'This computer';
+export const COMPUTER_SERVER = 'PipeWire';
+export const CONTROLS_BELOW = 'controls below';
+/** What the hop says where the computer's controls cannot be used. */
+export const UNAVAILABLE = (why) => `computer controls unavailable: ${why}`;
 
 /** The player's name when the track says none. */
 export const PLAYER_NAME = 'Player';
@@ -174,24 +178,38 @@ export const PLAYER = {
   noTrack: 'Nothing is playing.',
 };
 
+/** The facts of the route that are not controls, shown under the computer's controls. */
 export const COMPUTER = {
-  title: 'The computer',
+  title: 'PipeWire',
   sink: 'Sound card',
   format: 'Rate and format',
-  volume: 'Volume in PipeWire',
-  muted: 'Muted',
-  hostEq: 'Host EQ',
   others: 'Other streams',
   path: 'The sound’s way',
-  yes: 'yes',
-  no: 'no',
-  eqOff: 'off',
-  eqOn: 'on',
   mixing: (n) => (n === 1 ? '1 other stream mixes in' : `${n} other streams mix in`),
-  alone: 'none',
+  alone: 'alone',
   noSink: 'no sound card found',
   unread: ROUTE_NOT_READ,
-  note: 'Read only: this is what the computer does to the sound before it reaches the DAC.',
+  note: 'Read only: what happens to the sound before it reaches the DAC.',
+};
+
+/** The computer's volume, tone and points, in the words the DAC's screen uses where there are any. */
+export const POINTS = {
+  title: 'Points',
+  heads: ['#', 'Type', 'Frequency', 'Gain', 'Q'],
+  types: ['PK', 'LSC', 'HSC'],
+  add: '+ Add point',
+  remove: (n) => `Remove point ${n}`,
+  field: (n, param) => `${{ f: 'Frequency', g: 'Gain', q: 'Q' }[param]} of point ${n}`,
+  type: (n) => `Type of point ${n}`,
+  point: (n, f, g) => `Point ${n}: ${f}, ${g}`,
+  more: (n) => (n === 1 ? 'one more below ↓' : `${n} more below ↓`),
+  unconfirmed: 'not confirmed yet',
+  noPreset: 'No preset is on.',
+  presetOn: ' is on.',
+  presetWhy: (why) => why ?? 'cannot play',
+  boosted: 'Set above 100 % elsewhere',
+  off: 'Off',
+  eq: 'EQ',
 };
 
 /** The page's states: the stream lost, the page waiting or resting, a device's card. */

@@ -364,22 +364,22 @@ fn the_overlay_on_an_80_by_24_terminal() {
         "│ Uppercase letters toggle a TUI mode and save it to the config.             │",
         "│ Symbols and navigation keys are the same on every screen.                  │",
         "│                                                                            │",
-        "│ Everywhere                        Controls                                 │",
-        "│ ↑↓        move                    ␣/Enter   toggle/press                   │",
-        "│ ←→        change                  +/=/-     volume                         │",
-        "│ m         mute                    0         centre balance                 │",
-        "│ i         phase                   a         advice, or all clear           │",
+        "│ Everywhere                      Controls                                   │",
+        "│ ↑↓        move                  ␣/Enter   toggle/press                     │",
+        "│ ←→        change                +/=/-     volume                           │",
+        "│ m         mute                  0         centre balance                   │",
+        "│ i         phase                 a         advice, or all clear             │",
         "│ o         NOS                                                              │",
-        "│ Tab/⇧Tab  pane                    EQ                                       │",
-        "│ f         flat on/off             1-5       band                           │",
-        "│ p         presets (a i h inside)  , . ⇧←→   frequency                      │",
-        "│ b         identify                [ ] ⇧↑↓   Q                              │",
-        "│ r         refresh                 Enter     edit band                      │",
-        "│ Esc       back, or the menu       0         flatten                        │",
-        "│ c         controls                L-drag    point freq/gain                │",
-        "│ e         tone                    R-drag    Q, right widens                │",
-        "│ t         telemetry               wheel     Q on the curve                 │",
-        "│ d         devices                 2×click   edit band value                │",
+        "│ Tab/⇧Tab  pane                  EQ                                         │",
+        "│ f         flat on/off           1-5       band                             │",
+        "│ p         presets (a i inside)  , . ⇧←→   frequency                        │",
+        "│ b         identify              [ ] ⇧↑↓   Q                                │",
+        "│ r         refresh               Enter     edit band                        │",
+        "│ Esc       back, or the menu     0         flatten                          │",
+        "│ c         controls              L-drag    point freq/gain                  │",
+        "│ e         tone                  R-drag    Q, right widens                  │",
+        "│ t         telemetry             wheel     Q on the curve                   │",
+        "│ d         devices               2×click   edit band value                  │",
         "└──────────────────────────────────────────────────────────────────── more ↓ ┘",
     ];
     assert_eq!(boxed, wanted);
@@ -893,4 +893,35 @@ fn an_entrys_width_counts_display_cells() {
     assert_eq!(key.label_width(), 2);
     assert_eq!(key.width(2), 2 + LABEL_GAP + 4);
     assert_eq!(Entry::Heading("世界").width(0), 4);
+}
+
+/// The help overlay lists `C`, and `a` and `x` on the computer's side, and the preset list's keys
+/// do not include `h`.
+#[test]
+fn the_help_lists_c_a_x_and_no_h() {
+    let mut app = app_showing(Screen::Tone);
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        true,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    app.flip_side();
+    app.overlays.help_open = true;
+    let help = text(&frame(&app, 126, 70)).join("\n");
+    for wanted in [
+        "toggle computer",
+        "add point",
+        "remove point",
+        "presets (a i inside)",
+    ] {
+        assert!(help.contains(wanted), "{wanted}: {help}");
+    }
+    assert!(!help.contains("a i h"), "{help}");
+    // Without the computer's controls the keys are not listed at all.
+    let mut bare = app_showing(Screen::Tone);
+    bare.overlays.help_open = true;
+    let bare = text(&frame(&bare, 126, 70)).join("\n");
+    assert!(
+        !bare.contains("toggle computer") && !bare.contains("add point"),
+        "{bare}"
+    );
 }

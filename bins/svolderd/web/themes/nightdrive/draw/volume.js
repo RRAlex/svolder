@@ -32,11 +32,11 @@ const STROKE = 'paint-order="stroke" stroke-linejoin="round"';
 const FIGURE = `fill="url(#nd-stars)" stroke="url(#nd-chrome)" stroke-width="12" ${STROKE}`;
 const SHEEN = 'fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.6"';
 
-/** The figures cut into runs: a minus, an infinity, or text. */
+/** The figures cut into runs: a minus (the dash of a level not read yet is the same bar), an infinity, or text. */
 function runsOf(figures) {
   const runs = [];
   for (const ch of figures) {
-    if (ch === '−') runs.push({ kind: 'minus', w: MINUS_SLOT });
+    if (ch === '−' || ch === '—') runs.push({ kind: 'minus', w: MINUS_SLOT });
     else if (ch === '∞') runs.push({ kind: 'infinity', w: INFINITY_SLOT });
     else if (runs.at(-1)?.kind === 'text') {
       runs.at(-1).text += ch;
@@ -83,7 +83,7 @@ const DEFS = '<defs>'
   + '<feComposite in2="b" operator="in"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>'
   + '</filter></defs>';
 
-/** The outrun volume for `v` (`volumeOf`'s `{ figures, unit, aria }`) as an SVG, viewBox 640 by 170. */
+/** The outrun volume for `v` (`volumeOf`'s `{ figures, unit, aria, dim }`) as an SVG, viewBox 640 by 170. */
 export function outrunVolume(v) {
   const runs = runsOf(v.figures);
   const total = runs.reduce((sum, run) => sum + run.w, 0);
@@ -101,7 +101,7 @@ export function outrunVolume(v) {
     x += run.w;
   }
   const ux = Math.round(start + total - 23);
-  return `<svg class="nd-odb" viewBox="0 0 640 170" overflow="visible" role="img" aria-label="${esc(v.aria)}">`
+  return `<svg class="nd-odb${v.dim ? ' nd-dim' : ''}" viewBox="0 0 640 170" overflow="visible" role="img" aria-label="${esc(v.aria)}">`
     + `${DEFS}<g filter="url(#nd-glow)" transform="skewX(-8)">${drawn}</g>`
     + `<g filter="url(#nd-glow)"><text x="${ux}" y="158" text-anchor="middle" font-family="'Mr Dafoe', cursive" `
     + `font-size="64" fill="#ff3cc8" transform="rotate(-6 ${ux} 150)">${esc(v.unit)}</text>`

@@ -1196,6 +1196,29 @@ pub fn host_eq_state_path() -> PathBuf {
     state_home().join("svolder").join("host-eq.toml")
 }
 
+/// The environment variable that names where systemd unit files go.
+pub const UNITDIR_ENV: &str = "SVOLDER_UNITDIR";
+
+/// Where this machine's computer EQ keeps its files: the filter chain's config and the state file
+/// beside the configuration, the user's unit directory (`$SVOLDER_UNITDIR`, else where systemd
+/// reads a user's own units from), the autostart directory and the process manager's pid file in
+/// the private runtime directory.
+pub fn host_eq_paths() -> svolder_host::eq::EqPaths {
+    let unit_dir = std::env::var_os(UNITDIR_ENV)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| config_home().join("systemd").join("user"));
+    svolder_host::eq::EqPaths {
+        conf: config_home().join("svolder").join("host-eq.conf"),
+        state: host_eq_state_path(),
+        unit_dir,
+        autostart_dir: config_home().join("autostart"),
+        pid_file: crate::socket::path::private_dir()
+            .ok()
+            .map(|dir| dir.join("svolder-host-eq.pid")),
+    }
+}
+
 /// `$XDG_CACHE_HOME`, or `~/.cache`: where svolder keeps what it can fetch again, in a
 /// `svolder` directory of its own.
 pub fn cache_home() -> PathBuf {

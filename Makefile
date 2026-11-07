@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree third-party-licenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp screenshots web-icons rate-check rate-check-test web-shots web-snippets theme-css-check web-checks web-checks-quick paper-shots signal-shots nightdrive-shots e2e docker install install-service uninstall
+.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree third-party-licenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots web-icons rate-check rate-check-test web-shots web-snippets theme-css-check web-checks web-checks-quick paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab docker install install-service uninstall
 
 help: ## Show available targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
@@ -265,6 +265,13 @@ demo-dac: deps-build ## Like `make demo` on the fake DAC with its tone control (
 demo-amp: deps-build ## Like `make demo` on the fake amplifier with its meters moving (your computer's real audio)
 	@$(MAKE) --no-print-directory demo PROFILE=fake-amp SIGNAL=1
 
+demo-computer: deps-build ## Like `make demo-dac`, with a simulated computer side: your real audio is not touched (flip a page to the computer: volume, EQ points, presets)
+	$(CARGO) build --workspace
+	$(DEMO_KNOBS) target/debug/svolder tui --demo --web
+
+demo-computer-amp: deps-build ## Like `make demo-computer` on the fake amplifier with its meters moving: a simulated computer side, your real audio is not touched
+	@$(MAKE) --no-print-directory demo-computer PROFILE=fake-amp SIGNAL=1
+
 demo-safe: deps-build ## Build, then try the TUI on a fake device and a throwaway daemon (touches nothing of yours)
 	$(CARGO) build --workspace
 	$(DEMO_KNOBS) target/debug/svolder tui --demo
@@ -296,7 +303,7 @@ signal-shots: deps-build ## Shoot Signal's stills: DAC, amp chosen, declared hop
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/signal_shots.py
 
-nightdrive-shots: deps-build ## Shoot Night drive's stills: desktop at rest, a bubble held, the sheet, out of reach, no capture, phone upright and sideways, into target/web-shots/nightdrive (Chromium)
+nightdrive-shots: deps-build ## Shoot Night drive's stills: desktop at rest, a bubble held, the sheet, out of reach, no capture, phone upright and sideways (DAC and computer side), into target/web-shots/nightdrive (Chromium)
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/nightdrive_shots.py
 
@@ -311,6 +318,16 @@ web-checks-quick: deps-build ## Quick web gate: the node harnesses, the browser 
 
 e2e: deps-build ## End-to-end test over BlueZ (needs two extended-advertising controllers); not part of check
 	@bash scripts/e2e.sh
+
+host-e2e: deps-build ## End-to-end check of the computer EQ on a private PipeWire and WirePlumber (no sound card; never touches your session); not part of check
+	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolderd
+	@bash scripts/host-e2e/run.sh
+
+preamp-lab: deps-build ## Long run of the computer EQ's preamp lab: random event sequences against a model of PipeWire (SEED=first seed, RUNS=how many; default 1000 and 5000); not part of check
+	@scratch=$$(mktemp -d /tmp/sv.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$scratch"' EXIT; \
+	SVOLDER_LAB_SEED="$(or $(SEED),1000)" SVOLDER_LAB_RUNS="$(or $(RUNS),5000)" TMPDIR="$$scratch" \
+	  $(CARGO) test --release -p svolder-host --lib -- --ignored --nocapture the_lab_finds_nothing_in_a_long_run
 
 docker: ## Build the container image (skips without Docker)
 	@VERSION=$(VERSION) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) ALLOW_DIRTY=$(ALLOW_DIRTY) sh scripts/docker.sh

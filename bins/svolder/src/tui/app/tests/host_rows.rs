@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The Host group's rows: the host volume, the transport buttons, their clicks and the player's
-//! absence.
+//! The Host group's row, the transport buttons, their clicks and the player's absence, and the
+//! Volume row on the computer's side.
 
 use super::*;
 
@@ -33,7 +33,7 @@ fn host_press(app: &mut App, code: KeyCode) -> Vec<Intent> {
 fn host_audio_off_brings_a_cursor_on_a_host_row_back_to_the_last_row() {
     let mut app = hosted(0.54);
     let own = app.rows().len();
-    app.selected = own + 1;
+    app.selected = own;
     assert_eq!(app.host_row(), Some(HostRow::Transport));
     let mut tui = app.tui.clone();
     tui.host_audio = false;
@@ -48,17 +48,16 @@ fn host_audio_off_brings_a_cursor_on_a_host_row_back_to_the_last_row() {
 /// `↓` past the device's own rows reaches the Host group's and goes no further; with host
 /// audio off the device's own last row is as far as it goes.
 #[test]
-fn the_arrows_reach_the_host_group_under_the_devices_rows() {
+fn the_host_group_keeps_transport_only() {
+    assert_eq!(hosted(0.54).host_rows(), [HostRow::Transport]);
     let mut app = hosted(0.54);
     let own = app.rows().len();
     for _ in 0..own + 3 {
         host_press(&mut app, KeyCode::Down);
     }
-    assert_eq!(app.selected, own + host::ROWS.len() - 1);
-    assert_eq!(app.host_row(), host::ROWS.last().copied());
+    assert_eq!(app.selected, own);
+    assert_eq!(app.host_row(), Some(HostRow::Transport));
     assert_eq!(app.selected_control(), None, "a device row is selected too");
-    app.selected = own;
-    assert_eq!(app.host_row(), Some(HostRow::Volume));
 
     let mut off = hosted(0.54);
     off.tui.host_audio = false;
@@ -73,47 +72,78 @@ fn the_arrows_reach_the_host_group_under_the_devices_rows() {
     assert_eq!(off.host_row(), None);
 }
 
-/// `←→` on Host volume step the sink 2 % down and up, as the wheel over its bar does;
-/// neither reaches it from another pane, nor before the sink has read.
+/// [`hosted`] with the computer's controls there and its side shown, the cursor on Volume.
+fn on_the_computer(volume: f32) -> App {
+    let mut app = hosted(volume);
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    app.flip_side();
+    assert!(app.on_computer());
+    app.selected = row_of(&app, "volume");
+    app
+}
+
+/// On the computer's side `←→`, `+` and `-` and the wheel on the Volume row step the computer's
+/// volume one percent, never above 100 and nothing before it has been read; on the device's side
+/// they step the device's.
 #[test]
-fn the_arrows_on_host_volume_step_the_sink_two_percent() {
-    let mut app = hosted(0.54);
-    let volume = app.rows().len();
-    app.selected = volume;
+fn the_computer_volume_steps_one_percent_and_never_above_100() {
+    let mut app = on_the_computer(0.54);
+    let volume = app.selected;
     assert_eq!(
         host_press(&mut app, KeyCode::Right),
-        [Intent::HostVolume(56)]
+        [Intent::HostVolume(55)]
     );
     assert_eq!(
         host_press(&mut app, KeyCode::Left),
-        [Intent::HostVolume(52)]
+        [Intent::HostVolume(53)]
     );
-    assert_eq!(app.nudge_row(volume, 1), [Intent::HostVolume(56)]);
-    assert_eq!(app.nudge_row(volume, -1), [Intent::HostVolume(52)]);
-
-    app.pane = Pane::Status;
-    assert_eq!(host_press(&mut app, KeyCode::Right), []);
-    app.pane = Pane::Controls;
-    app.host.sink = None;
-    assert_eq!(host_press(&mut app, KeyCode::Right), []);
-    assert_eq!(app.nudge_row(volume, 1), []);
-    app.host.sink = hosted(0.54).host.sink;
-    app.tui.host_audio = false;
     assert_eq!(
-        app.nudge_row(volume, 1),
-        [],
-        "the wheel reached a row not drawn"
+        host_press(&mut app, KeyCode::Char('+')),
+        [Intent::HostVolume(55)]
     );
+    assert_eq!(
+        host_press(&mut app, KeyCode::Char('-')),
+        [Intent::HostVolume(53)]
+    );
+    assert_eq!(app.nudge_row(volume, 1), [Intent::HostVolume(55)]);
+    assert_eq!(app.nudge_row(volume, -1), [Intent::HostVolume(53)]);
+
+    let mut full = on_the_computer(1.0);
+    assert_eq!(host_press(&mut full, KeyCode::Right), [], "never above 100");
+    assert_eq!(
+        host_press(&mut full, KeyCode::Left),
+        [Intent::HostVolume(99)]
+    );
+    let mut boosted = on_the_computer(1.2);
+    assert_eq!(host_press(&mut boosted, KeyCode::Right), []);
+    assert_eq!(
+        host_press(&mut boosted, KeyCode::Left),
+        [Intent::HostVolume(100)]
+    );
+
+    app.host.sink = None;
+    assert_eq!(host_press(&mut app, KeyCode::Right), [], "not read yet");
+    assert_eq!(app.nudge_row(volume, 1), []);
+
+    let mut dac = hosted(0.54);
+    dac.host.computer.eq = app.host.computer.eq.clone();
+    dac.selected = row_of(&dac, "volume");
+    assert_eq!(host_press(&mut dac, KeyCode::Right), [set("volume", "up")]);
 }
 
-/// `Space` on Host volume turns the sink's mute the other way, once the sink has read.
+/// `Space` and `m` on the computer's side turn the computer's mute the other way, once its volume
+/// has been read; on the device's side `m` is the device's.
 #[test]
-fn space_on_host_volume_turns_the_sinks_mute() {
-    let mut app = hosted(0.54);
-    app.selected = app.rows().len();
+fn space_and_m_on_the_computer_volume_turn_its_mute() {
+    let mut app = on_the_computer(0.54);
     assert_eq!(host_press(&mut app, KeyCode::Char(' ')), [Intent::HostMute]);
+    assert_eq!(host_press(&mut app, KeyCode::Char('m')), [Intent::HostMute]);
     app.host.sink = None;
     assert_eq!(host_press(&mut app, KeyCode::Char(' ')), []);
+    assert_eq!(host_press(&mut app, KeyCode::Char('m')), []);
 }
 
 /// What a player plays: So What, in `status`.
@@ -135,7 +165,7 @@ fn the_transport_rows_keys_move_between_the_buttons_and_press_one() {
     let mut app = hosted(0.54);
     app.host
         .found_bus(Some(so_what(svolder_host::Status::Playing)), app.now);
-    app.selected = app.rows().len() + 1;
+    app.selected = app.rows().len();
     assert_eq!(app.host_row(), Some(HostRow::Transport));
     for _ in 0..3 {
         assert_eq!(host_press(&mut app, KeyCode::Right), []);
@@ -157,7 +187,7 @@ fn the_transport_rows_keys_move_between_the_buttons_and_press_one() {
 fn a_press_with_no_player_sends_nothing_and_says_so() {
     let mut app = hosted(0.54);
     app.host.found_bus(None, app.now);
-    app.selected = app.rows().len() + 1;
+    app.selected = app.rows().len();
     assert_eq!(host_press(&mut app, KeyCode::Enter), []);
     assert_eq!(
         app.toast().map(|toast| toast.text.as_str()),

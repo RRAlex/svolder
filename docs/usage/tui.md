@@ -67,13 +67,15 @@ demo removes any such directory that is over a minute old and has no daemon hold
 `--host` and `--web` are opt-in extras of `--demo` and are refused without it (`make demo` runs
 `svolder tui --demo --host --web`; `make demo-dac` and `make demo-amp` pick the fake DAC or the fake
 amplifier with its meters moving; `PROFILE=<fake profile>` and `SIGNAL=1` reach the fake device as
-`SVOLDER_FAKE_PROFILE` and `SVOLDER_FAKE_SIGNAL`). The fake device list has one device per run, so
+`SVOLDER_FAKE_PROFILE` and `SVOLDER_FAKE_SIGNAL`; `make demo-computer` and `make demo-computer-amp` run
+`svolder tui --demo --web` instead, whose web page has a simulated computer side: your real audio is not
+touched). The fake device list has one device per run, so
 there is no DAC-with-an-amplifier demo.
 
 `--host` leaves the host on for the daemon and the TUI, so the fake device sits beside your computer's
 real audio: the spectrum and meters follow the default sink, the Now playing card and its transport
-drive your real media player, the Host volume row turns your real sink, and `h` in the preset list
-puts the computer EQ on. These are your real ones: a volume or player change made in the demo stays
+drive your real media player, the Volume row on the computer's side (`C`) turns your real sink, and
+`Enter` in the preset list on that side puts the computer EQ on. These are your real ones: a volume or player change made in the demo stays
 after it. The demo says so once on standard error before the TUI opens and once in the TUI,
 `demo: fake devices, your computer's real audio (volume, player, EQ)`. The private directory stays the
 runtime directory, since the computer EQ's pid file goes in the runtime directory and must not sit
@@ -86,7 +88,7 @@ kept by the `process` manager (`SVOLDER_HOST_EQ_MANAGER=process`), never a syste
 reaches your unit directory; its configuration, state, pid file and autostart entry are all in the
 private directory. A computer EQ the demo applied is removed when the demo ends (`q`, an error, a
 panic or a signal); one of yours that was already on is left as it was, since the demo reads and
-writes only its own state file, so turn yours off before trying `h` (two chains would stack). A TUI
+writes only its own state file, so turn yours off before putting a preset on the computer (two chains would stack). A TUI
 killed outright cannot remove its chain: `pkill -f '^[^ ]*pipewire -c /[^ ]*/sd-[0-9a-f]{6}/config/svolder/host-eq\.conf$'` stops the demo's, and only the demo's. MQTT stays off, and the
 daemon's `systemctl` and unit directory stay out as before.
 
@@ -240,9 +242,9 @@ sink:
 │   Balance      L ────┃───── R  0   ││   3    632 Hz    +0.0 dB   4.3         │
 │                                    ││   4   2515 Hz   +1.45 dB   1.0         │
 │   Host                             ││   5  10000 Hz    +0.0 dB   4.3         │
-│   Host volume  ███54%░░░░  Gungni… ││                                        │
 │   Transport    ◀◀  ▶  ▮▮  ▶▶       ││                                        │
-│   Host EQ      off                 ││                                        │
+│                                    ││                                        │
+│                                    ││                                        │
 │                                    ││                                        │
 └────────────────────────────────────┘└────────────────────────────────────────┘
 ┌ Status ────────────────────────────────────────────────────────────── advice ┐
@@ -564,24 +566,14 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
   audio** row does so at once: off, the TUI stops asking the daemon for the host (which then stops
   reading the computer's audio graph for it); on, it asks again and shows the daemon's view as it
   stands then. When the daemon goes away the TUI's own watcher takes over until a daemon that
-  speaks for the host is back. The host volume, the computer EQ and the capture are always the
-  TUI's own, on the computer it runs on.
-- **The Host group**, at the bottom of the Controls pane under a `Host` heading of its own, three
-  rows the Controls pane's cursor reaches under the device's own, and rows it does not reach (the
-  Spectrum row in the wide and tall tiers, the Path row on a DAC joined to a daemon):
-  - `Host volume`: the host's default sink, whichever device that is, as a bar from 0 to 100 % with
-    the volume written inside it, `muted` while it is, and the sink's own name (its
-    `node.description`) dim after them, cut to what the row leaves — so a default sink other than
-    the DAC is named, and the row says which one it changes. `←→`, and the wheel over the bar, step
-    it 2 %, never past 100 %: a sink something else boosted comes down to 100 % on a step down and
-    goes no higher. `␣`/`Enter` turn its mute.
-
-    The sink is read with `wpctl get-volume @DEFAULT_AUDIO_SINK@` once a second while the device
-    screen shows, and at once after every change, and named with `wpctl inspect` only when it may
-    have changed: on the first read, after a read that failed, when its volume or its mute moved,
-    and once the name it holds is five seconds old, which catches a new default sink at the same
-    volume; each call is given a second before it is given up on, and none of them holds up a frame
-    or a key. Before the first read, and on a host with no `wpctl`, the row reads `—`, dim.
+  speaks for the host is back. With no daemon the computer's volume, its EQ and the capture are the
+  TUI's own, on the computer it runs on; joined to a daemon that speaks for the host, the computer's
+  volume and EQ are the daemon's, and every change of them is a request to it.
+- **The Host group**, at the bottom of the Controls pane under a `Host` heading of its own, one row
+  the Controls pane's cursor reaches under the device's own, and rows it does not reach (the
+  Spectrum row in the wide and tall tiers, the Path row on a DAC joined to a daemon). The
+  computer's volume is not a row of the group: it is the Volume row, flipped by `C` (see "The
+  computer's side" below):
   - `Transport`: `◀◀  ▶  ▮▮  ▶▶` — previous, play, pause and next. `←→` move between the four,
     `␣`/`Enter` press the one under the cursor, which the focused row draws out of its highlight,
     and a click presses the one clicked. `▶` is drawn in the accent, bold, while the player plays,
@@ -606,18 +598,6 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     first. svolder cannot see the bits, so it never says more than the rates, volumes, mixing and
     EQ show. An amp or a preamp has no row. The daemon reads the route (`pw-dump`, every 2 s) only
     while a TUI or a web page that shows it is joined.
-  - `Host EQ`: the computer EQ that `h` in the preset list and `svolder host eq apply` put in front
-    of the host's default sink (see "The preset list" below). It reads `NAME · on` while the
-    computer EQ is on, with the preset's name cut to the row, and `off`, dim, while it is not.
-    `␣`/`Enter` take it off when it is on; when it is off they put the last one back, built from the
-    filters its state file kept, so no preset needs to be in the list, and with none to put back
-    they say `p then h on a preset` in a toast.
-
-    They run off the UI loop as `h` does, so a second press while one is still changing says
-    `the computer EQ is still changing`; a computer where the EQ cannot run says why instead. The
-    TUI looks at the state file's modification time once a second, so an apply or a remove from the
-    CLI shows without a key. In the wide tier the header also names it while it is on, as
-    `Host EQ NAME`.
   - `Spectrum`, in the wide and tall tiers only and while `visualizer` is on: what the default sink
     plays, in its sixteen bands from 40 Hz to 16 kHz spread over the pane's width to the edge the
     Volume row reaches (between neighbouring bands, on the same log axis; a pane with no more room
@@ -820,6 +800,41 @@ drag of a band's point on the curve (see "Mouse" below) — also writes the mode
 band, so the change is heard, and a toast says `switched to EQ`. In Loudness mode a band edit leaves
 the mode alone, until it is known whether the bands apply there. A preset's recall writes its own
 mode instead.
+
+#### The computer's side (`C`)
+
+Where the computer's controls are there, the top line of the tone-control screen reads `EQ for ‹ NAME |
+Computer ›`, NAME being the device shown. `C`, or a click on either name, flips the screen to the
+computer: nothing is written by the flip, and the mode, the curve and the points are the computer's
+until it is flipped back. Where the computer's controls cannot be used, the reason stands in the
+switch's place: `computer controls unavailable: no pw-cli on this computer`.
+
+On the computer the mode reads `Mode ‹ Off | EQ ›`, with no Loudness, and `←→` or a click on it
+turns the computer EQ on or off. Under the curve the Points pane lists the points, `#  Type  Freq
+Gain  Q`, the type `PK`, `LSC` or `HSC`, up to 16 rows. The pane keeps one height, so it scrolls with
+`↓ more` and `↑ more` on its bottom border, which also says the preamp, and its title says `7 of 16`.
+The keys are the band keys' own on the focused point: `↑↓` move, `←→` step the gain by half a dB, `,`
+and `.` move the frequency a semitone, `[` and `]` the Q, `1`-`9` pick a point, `0` puts every point at
+0 dB, `a` adds a peaking point at 1 kHz, `x` removes the focused one (the only point left is set to 0 dB
+and stays, with its frequency, type and Q), `y` cycles its type PK, LSC, HSC, and `Enter` (or a double-click on a value) opens the edit
+line: frequency, gain and Q typed as numbers, `Tab` between them, `Enter` writes the ones changed,
+each held to the hand range on its own, `Esc` cancels. A click on a Type cell cycles it. In the
+preset list on this side `n` saves the computer's points as a new preset (not the device's curve) and
+`u` does nothing. If the chain's state could not be looked at, the mode reads as the state file says
+with `not verified` after it. A drag on the curve moves a point as it does a band: left for the frequency and gain, right for
+the Q, sent as it moves (at most 20 times a second) and at the release. Hand values stay inside 20 Hz
+to 20 kHz, plus or minus 12 dB and Q 0.1 to 10. The Correction pane, in the wide tier, says that on
+the computer nothing is fitted: every filter plays as written.
+
+The Controls pane has the same switch on a line of its own over the Volume row's bar, `Volume ‹ NAME |
+Computer ›`, the device's name cut where the pane is narrow (`C` works wherever the switch is not
+drawn). On the computer's side the row is the
+computer's default sink: a bar from 0 to 100 % with the volume written inside it, `muted` while it
+is, and the sink's own name dim after them; before it has been read it reads `—`, never a live 0 %.
+`←→`, `+`, `-` and the wheel step it 1 %, never above 100 % (a sink something else boosted comes
+down to 100 % on a step down and goes no higher), `␣`/`Enter` and `m` turn its mute. Joined to a
+daemon every one of these is a request to it; with no daemon the TUI reads and sets the sink itself,
+and runs the computer EQ's controller of its own.
 
 #### What the graph draws
 
@@ -1089,7 +1104,7 @@ configuration file holds one preset, `HD650 warm`:
 │    └──│                                                             │────────│
 │    20 │ Enter loads · n saves new · Esc closes                      │     20k│
 └───────│ u updates · c renames · x deletes · built-ins are read-only │────────┘
-┌ Bands │ a AutoEq · i from file · h computer                         │flatten ┐
+┌ Bands │ a AutoEq · i from file                                      │flatten ┐
 │   #   └─────────────────────────────────────────────────────────────┘        │
 │ ▶ 1   40.0 Hz    +0.0 dB    4.30      64 / 98 / 64                           │
 │   2    160 Hz    +0.0 dB    4.30      64 / 98 / 64                           │
@@ -1116,11 +1131,10 @@ configuration file holds one preset, `HD650 warm`:
 - `x` delete the focused preset, after asking `Delete NAME from the configuration? [y/N]`
 - `a` search AutoEq's headphones and import one (below)
 - `i` import a parametric EQ file (below)
-- `h` put the focused preset on the computer, or take it off when it is the one there; a built-in is
-  refused, `NAME is built in: save a curve as a new preset to put it on the computer`, and where the
-  computer EQ cannot run — host audio off, a container, no PipeWire — the box says why and does
-  nothing. The preset on the computer is marked `computer` in the accent, beside the `●` of the one
-  on the device
+- on the computer's side (`C`), `Enter` puts the focused preset on the computer instead of the
+  device; where the computer's controls cannot be used — host audio off, no PipeWire — the toast says
+  why and nothing is sent. The preset on the computer is marked `computer` in the accent, beside the
+  `●` of the one on the device
 - `Esc` close the list
 
 An imported preset's row says `imported` and, where the box is wide enough, how well the tone
@@ -1128,8 +1142,8 @@ control fits it, `fit 0.9 dB`; the fit is worked out the first time a screen dra
 opens (on the screen's own thread, so ten or more imports pause it for a moment once), then kept.
 After an import the new row is focused and nothing is loaded.
 
-The same preset is never left on both the device and the computer. `h` on the preset that is on the
-device asks `NAME is on the DAC. Move it to the computer? [y/N]`, and `y` flattens the device (every
+The same preset is never left on both the device and the computer. `Enter` on the computer's side, on
+the preset that is on the device, asks `NAME is on the DAC. Move it to the computer? [y/N]`, and `y` flattens the device (every
 band back on 0 dB at its centre) and then applies it (if the apply fails, the message says the DAC
 was flattened and that `Enter` on the preset in this box, or `svolder eq load NAME`, puts the curve
 back); `Enter` on the preset that is on the computer asks
@@ -1468,7 +1482,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.31.5 │
+│                          v0.32.0 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -2120,7 +2134,7 @@ the tone-control screen, which has no clock. With capture on:
 - the wheel over a level (volume, balance), the loudness bar, or a band's row nudges it one step
   (above 75 % of the Volume's range no faster than the glide, as the keys) — a band's gain one of
   the device's own steps, as `←→` do, and in Flat mode switching the tone control to EQ, as the keys
-  do; the wheel over the Host volume bar steps the host's volume 2 %, as `←→` there do
+  do; on the computer's side the wheel over the Volume row steps the computer's volume 1 %, as `←→` there do
 - on the device screen's Transport row, click a button — its glyphs or the cell either side of them
   — to press it on the host's player, focusing the row on it, as `Enter` there would
 - the device editor, a removal question, the preset list, a band's edit line and the quit question
@@ -2261,22 +2275,22 @@ one-word description in full where the key row abbreviates it (`volume`, `freque
 │ Uppercase letters toggle a TUI mode and save it to the config.             │
 │ Symbols and navigation keys are the same on every screen.                  │
 │                                                                            │
-│ Everywhere                        Controls                                 │
-│ ↑↓        move                    ␣/Enter   toggle/press                   │
-│ ←→        change                  +/=/-     volume                         │
-│ m         mute                    0         centre balance                 │
-│ i         phase                   a         advice, or all clear           │
+│ Everywhere                      Controls                                   │
+│ ↑↓        move                  ␣/Enter   toggle/press                     │
+│ ←→        change                +/=/-     volume                           │
+│ m         mute                  0         centre balance                   │
+│ i         phase                 a         advice, or all clear             │
 │ o         NOS                                                              │
-│ Tab/⇧Tab  pane                    EQ                                       │
-│ f         flat on/off             1-5       band                           │
-│ p         presets (a i h inside)  , . ⇧←→   frequency                      │
-│ b         identify                [ ] ⇧↑↓   Q                              │
-│ r         refresh                 Enter     edit band                      │
-│ Esc       back, or the menu       0         flatten                        │
-│ c         controls                L-drag    point freq/gain                │
-│ e         tone                    R-drag    Q, right widens                │
-│ t         telemetry               wheel     Q on the curve                 │
-│ d         devices                 2×click   edit band value                │
+│ Tab/⇧Tab  pane                  EQ                                         │
+│ f         flat on/off           1-5       band                             │
+│ p         presets (a i inside)  , . ⇧←→   frequency                        │
+│ b         identify              [ ] ⇧↑↓   Q                                │
+│ r         refresh               Enter     edit band                        │
+│ Esc       back, or the menu     0         flatten                          │
+│ c         controls              L-drag    point freq/gain                  │
+│ e         tone                  R-drag    Q, right widens                  │
+│ t         telemetry             wheel     Q on the curve                   │
+│ d         devices               2×click   edit band value                  │
 └──────────────────────────────────────────────────────────────────── more ↓ ┘
 ```
 

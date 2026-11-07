@@ -19,7 +19,8 @@
 //! - [`cover`]: the followed player's cover, read from a local file or Spotify's own cache.
 //! - [`mod@route`]: the default sink, the player's stream and what sits between, from `pw-dump`.
 //! - [`fft`]: the transform and the scales the captured blocks are drawn on.
-//! - [`eq`]: the computer EQ's PipeWire config, unit, autostart entry and state file, as text.
+//! - [`eq`]: the computer EQ: its PipeWire config, unit, autostart entry and state file, as text,
+//!   and the manager that applies it and keeps the chain running.
 //! - [`fake`]: stand-ins for the sources, for tests.
 //!
 //! Nothing here links PipeWire: the sink and the capture run PipeWire's own command-line

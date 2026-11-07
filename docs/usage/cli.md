@@ -1092,7 +1092,10 @@ between 20 Hz and 20 kHz, rounded up to 0.1 dB. When that lowers it, the verb sa
 `preamp lowered from -2.0 dB to -6.4 dB so the correction never clips`. A band preset the DAC keeps
 flat or in loudness mode has no curve to put on the computer and is refused, with the reason.
 
-The built-in presets are the DAC's own and are refused. The sink is `--sink`, a `node.name` or a
+A built-in preset goes as its bands, like a band preset. This command has no device to ask, so it
+shapes the built-ins on the five-band tone control of the Gungnir 2 (their frequencies are fixed). A
+preset of more than 16 filters is refused (`17 filters; the computer EQ holds 16`), never cut. The
+sink is `--sink`, a `node.name` or a
 wpctl id (read through `wpctl inspect`), else the default output at the moment of the apply.
 Applying while a computer EQ is on replaces it; the correction is checked first (every filter's
 frequency, gain and Q, `filter 2: Q 0 is outside 0 (excluded) to 20`), and a request that cannot be
@@ -1162,10 +1165,12 @@ What keeps the chain running is the **manager**, found by asking the systemd use
   `apply` and stopped by `remove`; a process is signalled only when its command line is that, so a
   pid that is gone, or that another program has since been given, is never signalled.
 
-`SVOLDER_HOST_EQ_MANAGER=systemd|process` forces one. An unrecognised value of
-`SVOLDER_HOST_EQ_MANAGER` is refused, naming the two. It refuses in a container
-(`host EQ is not available in a container`, with
-`run svolder host eq on the machine that plays the sound`) and with `SVOLDER_HOST=off`. The
+`SVOLDER_HOST_EQ_MANAGER=systemd|process|child` forces one. An unrecognised value of
+`SVOLDER_HOST_EQ_MANAGER` is refused, naming the three. In a container the chain is a `child`: a
+`pipewire` started by the program that applied it, which ends with that program and writes no unit,
+autostart entry or pid file. So `svolder host eq apply` and `remove` refuse there (`in a container
+the computer EQ runs with the daemon`, `start svolderd, then try again`) and write nothing; the TUI
+keeps the chain it starts until it quits. The computer EQ refuses with `SVOLDER_HOST=off`. The
 `pipewire` program is `SVOLDER_PIPEWIRE`, else `pipewire` on `PATH`; the WirePlumber version is read
 from `SVOLDER_WIREPLUMBER`, else `wireplumber` on `PATH`, as `wireplumber --version`.
 
@@ -1319,7 +1324,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.31.5
+svolder 0.32.0
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

@@ -80,6 +80,10 @@ writable entities are read-only sensors instead.
 A stop of the daemon marks every entity unavailable. Taking a device out of `config.toml` and
 reloading the daemon removes its entities from Home Assistant.
 
+The computer's EQ is a second device, `This computer`, with `switch.this_computer_eq` (a
+`binary_sensor` while `commands` is off) and `sensor.this_computer_eq_preset`; nothing else of the
+computer is exposed.
+
 ## 4. The theme
 
 `themes/svolder.yaml` is a dark theme in the colours of the TUI's `red` palette: off-white on

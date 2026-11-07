@@ -6,6 +6,7 @@
 // empty `main#screen` the screen is drawn into, the history canvas, the footer and the list of
 // keys. The server's frame carries the model's data block and the `<head>`. Pure, with no DOM.
 
+import { switchPill } from './computer.js';
 import { attr, esc } from './html.js';
 
 /** The place the frame draws its menu button over, at the header's right: empty, of the button's
@@ -38,9 +39,10 @@ const pill = (link) => `<span id="part-link" class="link ${esc(link.state)}" rol
 
 /**
  * The body of the page of `page` around its screen. `wordmark` is the wordmark's SVG, which the
- * page holds as markup of its own.
+ * page holds as markup of its own. `computer` is the computer's view: its switch stands beside
+ * the shown device's name, where there is one.
  */
-export function shell(page, wordmark = '') {
+export function shell(page, wordmark = '', computer = null) {
   const { viewer } = page;
   const devices = page.fleet.devices;
   const link = page.device ? page.device.link : null;
@@ -48,7 +50,8 @@ export function shell(page, wordmark = '') {
   // Each device is a row of its own, so the link's dot stays with the name it follows.
   const switcher = devices.map((d) => `<span class="devrow">${entry(d, page.shown, devices.length === 1)}`
     + `${link && d.url === page.shown ? pill(link) : ''}</span>`).join('')
-    + (link && !shown ? pill(link) : '');
+    + (link && !shown ? pill(link) : '')
+    + (computer ? switchPill(computer.sw) : '');
   const side = viewer.guest ? '<a class="pill" href="./?sign-in">Sign in</a>' : '';
   const version = viewer.version ? `svolder ${esc(viewer.version)} web UI` : 'svolder web UI';
   const signOut = viewer.sign_out && viewer.version

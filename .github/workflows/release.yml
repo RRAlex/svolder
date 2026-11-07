@@ -269,6 +269,7 @@ jobs:
           set -euo pipefail
           make -C src release-files
           sh src/packaging/release-compose.sh "$VERSION" src/target/dist/docker-compose.yml
+          cp src/docker-compose.host-audio.yml src/target/dist/docker-compose.host-audio.yml
           # The notes end with the Docker lines.
           {
             echo
@@ -284,9 +285,9 @@ jobs:
           id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f "tag_name=v$VERSION" \
             -f "target_commitish=$GITHUB_SHA" -f "name=svolder $VERSION" -F draft=true --jq .id)
           echo "id=$id" >> "$GITHUB_OUTPUT"
-          # SHA256SUMS lists every asset but itself: upload the list's files, it and the compose file.
+          # SHA256SUMS lists every asset but itself: upload the list's files, it and the two compose files.
           files=$(awk '{print $2}' SHA256SUMS | tr -d '*')
-          bash ../../packaging/release-ci.sh upload "$id" $files SHA256SUMS docker-compose.yml
+          bash ../../packaging/release-ci.sh upload "$id" $files SHA256SUMS docker-compose.yml docker-compose.host-audio.yml
           bash ../../packaging/release-ci.sh download "$id" ../../../check
           (cd ../../../check && sha256sum -c SHA256SUMS)
       - name: Publish

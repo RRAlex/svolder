@@ -27,6 +27,8 @@ pub(super) const LOUDNESS_BAR_AT: usize = CURSOR_WIDTH + TONE_FIELD;
 /// Columns the loudness's value takes after its bar at the most: a space and three digits.
 const LOUDNESS_VALUE: usize = 4;
 
+/// The computer's point table's column titles.
+const POINT_TITLES: &str = " #  Type  Freq     Gain     Q";
 /// The band table's column titles.
 const BAND_TITLES: &str = " Band   Freq      Gain      Q";
 /// What a band table says under its rows while the tone control is in a mode its bands do not
@@ -63,6 +65,9 @@ pub(super) fn tone_lines(
     max_width: usize,
     bar: usize,
 ) -> TonePane {
+    if app.on_computer() {
+        return computer_lines(app, theme, max_width);
+    }
     let mode_raw = mode_spans(app, eq, theme, TONE_FIELD);
     let mode_width: usize = mode_raw.iter().map(Span::width).sum();
     let mode = tone_row(
@@ -110,6 +115,115 @@ pub(super) fn tone_lines(
         fields,
         loudness_bar,
     }
+}
+
+/// The Tone pane on the computer side: the mode as `‹ Off | EQ ›`, the preset the points came
+/// from, and a row per point.
+fn computer_lines(app: &App, theme: &Theme, max_width: usize) -> TonePane {
+    let mode_raw = computer_mode_spans(app, theme, TONE_FIELD);
+    let mode_width: usize = mode_raw.iter().map(Span::width).sum();
+    let mode = tone_row(
+        mode_raw,
+        app.tone.row == ToneRow::Mode,
+        app,
+        theme,
+        max_width,
+    );
+    let preset = app
+        .computer_eq()
+        .and_then(|eq| eq.preset.clone())
+        .unwrap_or_default();
+    let room = max_width.saturating_sub(CURSOR_WIDTH + TONE_FIELD);
+    let preset = tone_row(
+        vec![
+            widgets::rows::label("Preset", TONE_FIELD),
+            Span::raw(widgets::text::cut_to_cells(&preset, room)),
+        ],
+        false,
+        app,
+        theme,
+        max_width,
+    );
+    let mut lines = vec![
+        mode,
+        preset,
+        Line::default(),
+        Line::from(Span::styled(POINT_TITLES, theme.style(Role::Dim))),
+    ];
+    let mut bands = Vec::new();
+    for (at, point) in app.computer_points().iter().enumerate() {
+        bands.push(u16::try_from(lines.len()).unwrap_or(u16::MAX));
+        let text = format!(
+            "{}  {:<4} {:>5} Hz {:>5} dB {:>4}",
+            at + 1,
+            point.kind,
+            frequency_text(point.f),
+            gain_text(point.g),
+            format!("{:.1}", point.q)
+        );
+        let focused = app.tone.row == ToneRow::Point(at);
+        let on = app.computer_eq().is_some_and(|eq| eq.on);
+        let line = widgets::rows::with_cursor(Line::raw(text), focused, theme);
+        lines.push(row_style(
+            line,
+            focused,
+            !app.session.connected || (!on && !focused),
+            theme,
+            max_width,
+        ));
+    }
+    TonePane {
+        lines,
+        mode_arrows: (CURSOR_WIDTH + TONE_FIELD, CURSOR_WIDTH + mode_width - 1),
+        fields: vec![[(0, 0); 3]; bands.len()],
+        bands,
+        loudness_bar: 0,
+    }
+}
+
+/// The computer's mode as a select with both its names: `‹ Off | EQ ›`, the one in force standing
+/// out, in a label column `field` cells wide.
+fn computer_mode_spans(app: &App, theme: &Theme, field: usize) -> Vec<Span<'static>> {
+    let on = app.computer_eq().is_some_and(|eq| eq.on);
+    let (lit, other) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let arrow = theme.style(Role::ModeArrow);
+    let mut spans = vec![
+        widgets::rows::label("Mode", field),
+        Span::styled("‹ ", arrow),
+        Span::styled("Off", if on { other } else { lit }),
+        Span::styled(" | ", arrow),
+        Span::styled("EQ", if on { lit } else { other }),
+        Span::styled(" ›", arrow),
+    ];
+    // What the state file says, where the chain could not be looked at: never drawn as verified.
+    if app.computer_eq().is_some_and(|eq| eq.running_unknown) {
+        spans.push(Span::styled(" not verified", other));
+    }
+    spans
+}
+
+/// The mode line of the computer side: no loudness.
+fn computer_mode_line(
+    app: &App,
+    theme: &Theme,
+    field: usize,
+    max_width: usize,
+) -> (Line<'static>, ModeHalves) {
+    let raw = computer_mode_spans(app, theme, field);
+    let width: usize = raw.iter().map(Span::width).sum();
+    let focused = app.tone.row == ToneRow::Mode;
+    let spare = usize::from(1 + width < max_width);
+    let mut spans = vec![Span::raw(" ")];
+    spans.extend(standing_out(raw, focused, theme, width + spare));
+    let end: usize = spans.iter().map(Span::width).sum();
+    let line = Line::from(spans);
+    let halves = ModeHalves {
+        mode: (1, end - 1),
+        loudness: (end, 0),
+        loudness_bar: end,
+        mode_arrows: (1 + field, width),
+    };
+    (line, halves)
 }
 
 /// The Tone pane's Preset line: the preset the tone control is on, as the tone-control screen's
@@ -181,6 +295,9 @@ pub(in crate::tui::screens) fn mode_line(
     field: usize,
     max_width: usize,
 ) -> (Line<'static>, ModeHalves) {
+    if app.on_computer() {
+        return computer_mode_line(app, theme, field, max_width);
+    }
     let mode_raw = mode_spans(app, eq, theme, field);
     let mode_focused = app.tone.row == ToneRow::Mode;
     let loudness_focused = app.tone.row == ToneRow::Loudness;

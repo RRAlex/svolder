@@ -43,22 +43,23 @@ export function drawRays(g, geo, sun, frame) {
 
 /** Draw the shooting stars `frame.stars` (the scheduler's, `t0` in the frame's seconds). */
 export function drawStars(g, geo, frame) {
-  const { w, h, H } = geo;
+  const { w, H } = geo;
+  const v = geo.v ?? geo.h;
   const px = unitOf(w);
   for (const star of frame.stars) {
     const p = (frame.t - star.t0) / SKY.starLife;
     if (p < 0 || p >= 1) continue;
     const dx = star.dx * w;
     const x = star.x * w + dx * p;
-    const y = star.y * H + h * 0.12 * p;
-    const tail = g.createLinearGradient(x, y, x - dx * 0.18, y - h * 0.03);
+    const y = star.y * H + v * 0.12 * p;
+    const tail = g.createLinearGradient(x, y, x - dx * 0.18, y - v * 0.03);
     tail.addColorStop(0, `rgba(255,255,255,${1 - p})`);
     tail.addColorStop(1, PALETTE.starTail);
     g.strokeStyle = tail;
     g.lineWidth = 2 * px;
     g.beginPath();
     g.moveTo(x, y);
-    g.lineTo(x - dx * 0.18, y - h * 0.03);
+    g.lineTo(x - dx * 0.18, y - v * 0.03);
     g.stroke();
   }
 }

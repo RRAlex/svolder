@@ -9,10 +9,11 @@
 
 import { place } from '../place.js';
 import {
-  NARROW_PX, fractionOf, labelGap, marks, ticks, zones,
+  NARROW_PX, fractionOf, labelGap, marks, percentVolume, ticks, zones,
 } from '../ruler.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
+import { onComputer, viewerQuiet } from './side.js';
 import { word } from './word.js';
 
 /** How long a step asked for stays the one shown while the device has not reported it (ms). */
@@ -49,7 +50,10 @@ export function shownRaw(volume, view) {
 /** What the volume says at the step `raw`: the words (`-26.1 dB`), the number alone and its unit,
  * from the device's report when `raw` is its reading and from its table of steps otherwise. */
 function say(volume, raw) {
-  if (raw === null || raw === undefined) return { words: WORDS.unread, num: WORDS.unread, unit: '' };
+  if (raw === null || raw === undefined) {
+    const unread = volume.unreadWords ?? WORDS.unread;
+    return { words: unread, num: unread, unit: '' };
+  }
   const words = raw === volume.raw ? volume.text : (volume.texts?.[raw - volume.lo] ?? '');
   const unit = volume.unit ? ` ${volume.unit}` : '';
   const cut = unit && words.endsWith(unit);
@@ -58,7 +62,8 @@ function say(volume, raw) {
 
 /** The moving things of the volume, worked out: where the needle stands, what is written. */
 function moving(volume, view) {
-  const raw = shownRaw(volume, view);
+  // the computer's volume is what the core draws (held values included): no step is asked for here
+  const raw = volume.percent ? volume.raw : shownRaw(volume, view);
   const said = say(volume, raw);
   const muted = Boolean(volume.muted);
   const at = raw === null ? 0 : fractionOf(volume, raw);
@@ -80,7 +85,8 @@ function signature(volume, device, view) {
   const table = volume.db ?? [];
   return JSON.stringify([volume.lo, volume.hi, volume.risk, volume.cap, volume.mute, volume.unit,
     volume.silence, table.length, table.find(Number.isFinite), table.at(-1),
-    (volume.marks ?? []).length, Boolean(device?.inert), widthOf(view) < NARROW_PX,
+    (volume.marks ?? []).length, Boolean(volume.percent), Boolean(volume.idle), Boolean(device?.inert),
+    widthOf(view) < NARROW_PX,
     Number(labelGap(widthOf(view)).toFixed(4))]);
 }
 
@@ -93,34 +99,53 @@ function tickPaths(volume, levels) {
     + `<path class="major" d="${stroke(all.filter(major), MAJOR)}"/>`;
 }
 
-/** The volume section for the shown device; nothing for a device without a volume. */
-export function volume(_page, device, view) {
-  const v = device?.volume;
+/** What the volume section draws and whether it is out of reach: the computer's volume as a
+ * 0 to 100 % ruler while the computer's side is shown, else the device's own. */
+function sideOf(page, device, view) {
+  if (onComputer(view)) {
+    const read = view.computer.volumeOf(page);
+    if (read) return { v: percentVolume(read), inert: viewerQuiet(page) || read.inert, computer: true };
+  }
+  return { v: device?.volume, inert: Boolean(device?.inert), computer: false };
+}
+
+/** The ids of the written words, by side. */
+const ACTS = {
+  device: { down: 'volume-down', up: 'volume-up', mute: 'mute' },
+  computer: { down: 'c-down', up: 'c-up', mute: 'c-mute' },
+};
+
+/** The volume section for the shown device, or for the computer; nothing for a device without a
+ * volume. */
+export function volume(page, device, view) {
+  const { v, inert, computer } = sideOf(page, device, view);
   if (!v) return '';
   const now = moving(v, view);
+  const acts = computer ? ACTS.computer : ACTS.device;
   const labels = marks(v, widthOf(view));
   const { risk, cap } = zones(v);
   const zone = (name, at, text) => (at === null ? ''
     : `<div class="p-zone ${name}${at > ZONE_FLIP ? ' flip' : ''}" data-at="${at.toFixed(5)}"><span>${esc(text)}</span></div>`);
-  const written = [word('volume-down', WORDS.quieter, device?.inert)];
+  const written = [word(acts.down, WORDS.quieter, inert, computer ? ' id="p-cdown"' : '')];
   if (v.mute) {
-    written.push(word('mute', now.muted ? WORDS.unmute : WORDS.mute, device?.inert,
-      ` data-key="${esc(v.mute)}"`));
+    written.push(word(acts.mute, now.muted ? WORDS.unmute : WORDS.mute, inert,
+      computer ? ' id="p-cmute"' : ` data-key="${esc(v.mute)}"`));
   }
-  written.push(word('volume-up', WORDS.louder, device?.inert));
+  written.push(word(acts.up, WORDS.louder, inert, computer ? ' id="p-cup"' : ''));
+  const idle = v.idle ? ' idle' : '';
   return `<div id="p-big" class="p-big"><span class="p-num">${esc(now.num)}</span>`
     + `<small>${esc(now.unit)}</small></div>`
-    + `<div id="p-ruler" class="p-ruler" data-sig="${esc(signature(v, device, view))}">`
+    + `<div id="p-ruler" class="p-ruler${computer ? ' pct' : ''}" data-sig="${esc(signature(v, { inert }, view))}">`
     + `<svg class="p-ticks" viewBox="0 0 ${TICK_BOX} 20" preserveAspectRatio="none" aria-hidden="true">`
     + `${tickPaths(v, labels)}</svg>`
     + labels.map((m) => `<span class="p-mark" data-at="${m.at.toFixed(5)}">${esc(m.text)}</span>`).join('')
     + zone('risk', risk, WORDS.risk) + zone('cap', cap, WORDS.cap)
     + `<span class="p-target" data-at="${(now.target ?? 0).toFixed(5)}"${now.target === null ? ' hidden' : ''}></span>`
-    + '<div id="p-needle" class="p-needle" role="slider" tabindex="0" aria-label="Volume"'
+    + `<div id="p-needle" class="p-needle${idle}" role="slider" tabindex="0" aria-label="Volume"`
     + ` aria-valuemin="${esc(v.lo)}" aria-valuemax="${esc(v.hi)}"`
     + `${now.raw === null ? '' : ` aria-valuenow="${esc(now.raw)}"`}`
     + ` aria-valuetext="${esc(now.words)}" data-at="${now.at.toFixed(5)}"></div>`
-    + `<span id="p-volume-text"${now.flip ? ' class="flip"' : ''} data-at="${now.at.toFixed(5)}">${esc(now.words)}</span>`
+    + `<span id="p-volume-text"${now.flip ? ' class="flip"' : ''}${idle ? ' hidden' : ''} data-at="${now.at.toFixed(5)}">${esc(now.words)}</span>`
     + `</div><p class="p-written">${written.join(' &middot; ')}</p>`;
 }
 
@@ -140,7 +165,7 @@ export function showVolume(box, v, view) {
   const big = box.querySelector('#p-big');
   big.querySelector('.p-num').textContent = now.num;
   big.querySelector('small').textContent = now.unit;
-  const mute = box.querySelector('[data-act="mute"]');
+  const mute = box.querySelector('[data-act="mute"], [data-act="c-mute"]');
   if (mute) mute.textContent = now.muted ? WORDS.unmute : WORDS.mute;
   const target = box.querySelector('.p-target');
   target.hidden = now.target === null;
@@ -150,10 +175,10 @@ export function showVolume(box, v, view) {
 
 /** A reading of the volume put in place when the drawn ruler still fits it: says whether it did
  * (otherwise nothing was changed and the section must be drawn again). */
-export function volumeInPlace(box, _page, device, view) {
-  const v = device?.volume;
+export function volumeInPlace(box, page, device, view) {
+  const { v, inert } = sideOf(page, device, view);
   const ruler = box.querySelector?.('#p-ruler');
-  if (!v || !ruler || ruler.dataset.sig !== signature(v, device, view)) return false;
+  if (!v || !ruler || ruler.dataset.sig !== signature(v, { inert }, view)) return false;
   showVolume(box, v, view);
   return true;
 }

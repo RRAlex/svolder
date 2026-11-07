@@ -34,7 +34,7 @@ checks here.
   the_transport_plays_and_pauses                    three svg keys; pause posts its press and the key becomes play
   a_guests_tap_posts_nothing                        a guest's dash is inert; a tap posts nothing and the core's words show
   a_press_on_the_dash_while_faded_acts_and_wakes    a press on `+` while faded posts the volume and shows the top again
-  the_dash_fades_to_a_tenth_with_the_hud            the dash at 0.1 with the HUD (desktop, 915x412); a move wakes it; the waking tap writes nothing
+  the_dash_fades_to_a_fifth_with_the_hud            the dash at 0.2 with the HUD (desktop, 915x412); a move wakes it; the waking tap writes nothing
   the_dash_stays_while_its_input_list_is_open       the HUD faded, the dash at 1; the upright panel never fades
   hovering_the_mountains_shows_the_curve_and_leaving_lets_it_go   data-tune on over the mountains, off in the sky; a bubble per band
   a_bubble_drag_sets_frequency_and_gain             the last writes are the steps nearest the drop, to that band of that device
@@ -1193,19 +1193,19 @@ def dash_alpha(b):
 
 
 def dash_fades(b, d, label, corner):
-    """The dash fades to a tenth with the HUD, a move wakes it, the press that wakes it writes nothing and the
+    """The dash fades to a fifth with the HUD, a move wakes it, the press that wakes it writes nothing and the
     next one does, and it stays while a list of its own is open."""
     load_fading(b, d)
     lo = volume(d)['lo']
     start_at(b, d, lo + 20)
     b.page(REC)
-    check(f'the_dash_fades_to_a_tenth_with_the_hud: {label}: shown at first', dash_alpha(b) == 1 and not b.page(FADED), dash_alpha(b))
-    got = poll(lambda: dash_alpha(b) == 0.1 and b.page(f'{OPACITY}(".nd-top")') == 0, 12.0)
-    check('  after the idle time it is at 0.1, the HUD faded with it', got and b.page(FADED),
+    check(f'the_dash_fades_to_a_fifth_with_the_hud: {label}: shown at first', dash_alpha(b) == 1 and not b.page(FADED), dash_alpha(b))
+    got = poll(lambda: dash_alpha(b) == 0.2 and b.page(f'{OPACITY}(".nd-top")') == 0, 12.0)
+    check('  after the idle time it is at 0.2, the HUD faded with it', got and b.page(FADED),
           [dash_alpha(b), b.page(FADED), b.page(f'{OPACITY}(".nd-top")')])
     b.click(*corner)
     check('a_move_wakes_the_dash_at_once: the HUD and the dash are back', dash_alpha(b) == 1 and not b.page(FADED), [dash_alpha(b), b.page(FADED)])
-    poll(lambda: dash_alpha(b) == 0.1, 12.0)
+    poll(lambda: dash_alpha(b) == 0.2, 12.0)
     b.page('window.__posts.length = 0')
     synth(b, '#nd-vup', 'pointerdown')
     synth(b, '#nd-vup', 'pointerup', buttons=0)
@@ -1215,7 +1215,7 @@ def dash_fades(b, d, label, corner):
     synth(b, '#nd-vup', 'pointerdown')
     synth(b, '#nd-vup', 'pointerup', buttons=0)
     check('  the next tap writes', poll(lambda: len(volume_posts(b)) == 1, 5.0) and settled(d, lo + 21), [volume_posts(b), volume(d)['raw']])
-    poll(lambda: dash_alpha(b) == 0.1, 12.0)
+    poll(lambda: dash_alpha(b) == 0.2, 12.0)
     synth(b, '#nd-tr-1', 'pointerdown')
     synth(b, '#nd-tr-1', 'pointerup', buttons=0)
     synth(b, '#nd-tr-1', 'click')
@@ -1223,7 +1223,7 @@ def dash_fades(b, d, label, corner):
     check('  the click of the tap that woke it presses no transport key', not any(u.endswith('/press') or '/press' in u for u, _, _ in b.page('window.__posts')),
           b.page('window.__posts'))
     # a press that woke the dash and is held a long time still presses nothing when it is let go
-    poll(lambda: dash_alpha(b) == 0.1, 12.0)
+    poll(lambda: dash_alpha(b) == 0.2, 12.0)
     b.page('window.__posts.length = 0')
     synth(b, '#nd-tr-1', 'pointerdown')
     time.sleep(1.5)
@@ -1236,7 +1236,7 @@ def dash_fades(b, d, label, corner):
     synth(b, '#nd-tr-1', 'pointerup', buttons=0)
     synth(b, '#nd-tr-1', 'click')
     check('  the next press does', poll(lambda: any('/press' in u for u, _, _ in b.page('window.__posts')), 4.0), b.page('window.__posts'))
-    poll(lambda: dash_alpha(b) == 0.1, 12.0)
+    poll(lambda: dash_alpha(b) == 0.2, 12.0)
     # a list of the dash's own keeps it up while the HUD fades
     time.sleep(0.8)
     b.page("document.activeElement && document.activeElement.blur()")
@@ -1247,7 +1247,7 @@ def dash_fades(b, d, label, corner):
           opened and b.page(FADED) and dash_alpha(b) == 1, [opened, b.page(FADED), dash_alpha(b)])
     b.press('Escape')
     b.page("document.activeElement && document.activeElement.blur()")
-    check('  once the list is closed (and the keyboard focus left) the dash fades again', poll(lambda: dash_alpha(b) == 0.1, 14.0), dash_alpha(b))
+    check('  once the list is closed (and the keyboard focus left) the dash fades again', poll(lambda: dash_alpha(b) == 0.2, 14.0), dash_alpha(b))
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
@@ -1283,7 +1283,7 @@ def the_dash_press_while_faded(b, d):
     lo = volume(d)['lo']
     start_at(b, d, lo + 20)
     b.page(REC)
-    poll(lambda: dash_alpha(b) == 0.1, 12.0)
+    poll(lambda: dash_alpha(b) == 0.2, 12.0)
     b.page('window.__posts.length = 0')
     click_el(b, '#nd-vup')
     woke = [b.page(FADED), b.page(f'{OPACITY}(".nd-top")'), dash_alpha(b)]

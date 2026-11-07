@@ -295,6 +295,16 @@ impl Home {
 
     /// A `svolderd` over the fake transport on this home's configuration, with one device.
     async fn start_daemon(&mut self, svolderd: &Path) {
+        self.start_daemon_on(svolderd, "off").await;
+    }
+
+    /// [`Home::start_daemon`] with the host `SVOLDER_HOST` names: `fake` serves a fake computer.
+    async fn start_daemon_on(&mut self, svolderd: &Path, host: &str) {
+        self.start_daemon_env(svolderd, host, &[]).await;
+    }
+
+    /// [`Home::start_daemon_on`] with `env` set on the daemon.
+    async fn start_daemon_env(&mut self, svolderd: &Path, host: &str, env: &[(&str, &str)]) {
         self.write_config("schema = 1\n[[device]]\nname = \"fake\"\nudid = \"0102030405060708\"\n");
         let socket = self.path().join("svolder.sock");
         let mut command = Command::new(svolderd);
@@ -308,10 +318,13 @@ impl Home {
             command.env_remove(key);
         }
         let child = command
-            .env("SVOLDER_HOST", "off")
+            .env("SVOLDER_HOST", host)
+            .envs(env.iter().copied())
             .env("SVOLDER_ADAPTER", "hci-none")
             .env("SVOLDER_TRANSPORT", "fake")
             .env("XDG_CACHE_HOME", self.path())
+            .env("XDG_CONFIG_HOME", self.path())
+            .env("XDG_DATA_HOME", self.path())
             .env("XDG_RUNTIME_DIR", self.path())
             .env("XDG_STATE_HOME", self.path())
             .env_remove("SVOLDER_SOCKET")
@@ -394,18 +407,24 @@ fn applying_an_imported_preset_writes_the_conf_and_the_unit_and_says_what_is_on(
         "{err}"
     );
     let conf = home.read("svolder/host-eq.conf");
+    // The live chain: a preamp at the lowered gain (10^(-6.4/20)) and sixteen raw slots a side.
     assert!(
-        conf.contains("{ type = bq_highshelf freq = 0 gain = -6.4 q = 1.0 }"),
+        conf.contains("name = lpre label = linear control = { Mult = 0.4786"),
         "{conf}"
     );
-    assert!(
-        conf.contains("{ type = bq_lowshelf freq = 105 gain = 6.4 q = 0.7 }"),
-        "{conf}"
-    );
-    assert!(
-        conf.contains("{ type = bq_peaking freq = 8800 gain = 5.1 q = 1.42 }"),
-        "{conf}"
-    );
+    assert_eq!(conf.matches("label = bq_raw").count(), 32, "{conf}");
+    let state = home.read("svolder/host-eq.toml");
+    let slots = state
+        .split("slots = [")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next());
+    let slots: Vec<&str> = slots
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .collect();
+    assert_eq!(slots, ["1", "2"], "{state}");
     assert!(
         conf.contains("filter.smart.target = { node.name = \"dac\" }"),
         "{conf}"
@@ -452,14 +471,15 @@ fn a_band_preset_applies_its_bands_as_peaking_filters_with_the_preamp_its_peak_n
     let (code, _out, err) = home.run(&["host", "eq", "apply", "mine"]);
     assert_eq!(code, 0, "{err}");
     let conf = home.read("svolder/host-eq.conf");
-    assert_eq!(conf.matches("bq_peaking").count(), 3, "{conf}");
-    let preamp: f64 = conf
+    assert_eq!(conf.matches("label = bq_raw").count(), 32, "{conf}");
+    let mult: f64 = conf
         .lines()
-        .find(|line| line.contains("freq = 0 "))
-        .and_then(|line| line.split("gain = ").nth(1))
+        .find(|line| line.contains("name = lpre "))
+        .and_then(|line| line.split("Mult = ").nth(1))
         .and_then(|rest| rest.split_whitespace().next())
         .and_then(|number| number.parse().ok())
         .expect("a preamp line");
+    let preamp = 20.0 * mult.log10();
     assert!((-4.6..=-3.9).contains(&preamp), "{preamp}");
     assert!(
         home.read("svolder/host-eq.toml")
@@ -550,6 +570,129 @@ fn status_with_nothing_applied_says_off() {
     assert_eq!(out, "{\"on\":false,\"running\":null}\n");
 }
 
+/// A built-in goes to the computer as its bands, like a saved curve of bands.
+#[test]
+fn a_built_in_goes_to_the_computer_as_its_bands() {
+    let home = Home::new();
+    let (code, _out, err) = home.run(&["host", "eq", "apply", "Warm"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("host EQ: Warm"), "{err}");
+    assert!(home.exists("svolder/host-eq.conf"));
+}
+
+/// An Equalizer APO file of `count` peaking filters.
+fn peq_of(count: usize) -> String {
+    (1..=count).fold("Preamp: -3.0 dB\r\n".to_string(), |text, n| {
+        format!(
+            "{text}Filter {n}: ON PK Fc {} Hz Gain 1.0 dB Q 1.00\r\n",
+            100 * n
+        )
+    })
+}
+
+/// More than 16 filters are refused by name, from a file and from a saved preset, and
+/// nothing is written; 16 are applied.
+#[test]
+fn seventeen_filters_are_refused_by_name_and_sixteen_are_applied() {
+    let home = Home::new();
+    let long = home.path().join("Long.txt");
+    std::fs::write(&long, peq_of(17)).unwrap();
+    let (code, _out, err) = home.run(&["host", "eq", "apply", long.to_str().unwrap()]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("17 filters; the computer EQ holds 16"),
+        "{err}"
+    );
+    let (code, _out, err) = home.run(&[
+        "eq",
+        "import",
+        long.to_str().unwrap(),
+        "--name",
+        "Long preset",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _out, err) = home.run(&["host", "eq", "apply", "Long preset"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("17 filters; the computer EQ holds 16"),
+        "{err}"
+    );
+    assert!(!home.exists("svolder/host-eq.conf"));
+    assert!(!home.exists("svolder/host-eq.toml"));
+
+    let sixteen = home.path().join("Sixteen.txt");
+    std::fs::write(&sixteen, peq_of(16)).unwrap();
+    let (code, _out, err) = home.run(&["host", "eq", "apply", sixteen.to_str().unwrap()]);
+    assert_eq!(code, 0, "{err}");
+}
+
+/// A built-in on the DAC is asked about like a saved preset: refused without an answer, flattened
+/// on a yes.
+#[tokio::test]
+async fn a_built_in_on_the_dac_is_moved_to_the_computer_only_when_the_user_says_yes() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon(&svolderd).await;
+        let (code, _out, err) = home.run(&["eq", "load", "Warm"]);
+        assert_eq!(code, 0, "{err}");
+
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "Warm"]);
+        assert_eq!(code, 1, "{err}");
+        assert!(err.contains("--yes"), "{err}");
+        assert!(!home.exists("svolder/host-eq.conf"));
+
+        let (code, _out, err) = home.run_on_terminal(&["host", "eq", "apply", "Warm"], "y\n");
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            err.contains("Warm is on the DAC. Move it to the computer? [y/N]"),
+            "{err}"
+        );
+        assert!(home.exists("svolder/host-eq.conf"));
+        let (_code, out, _err) = home.run(&["eq", "show"]);
+        assert!(out.contains("preset Flat"), "the DAC is flat: {out}");
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// A curve that changes nothing cannot play twice: with the DAC on Flat, `Flat` goes to the
+/// computer with no question.
+#[tokio::test]
+async fn flat_goes_to_the_computer_with_no_question_while_the_dac_is_flat() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon(&svolderd).await;
+        let (code, _out, err) = home.run(&["eq", "load", "Flat"]);
+        assert_eq!(code, 0, "{err}");
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "Flat"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(!err.contains("[y/N]"), "{err}");
+        assert!(home.exists("svolder/host-eq.conf"));
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// The other direction: `eq load Flat` while the computer is on Flat asks nothing and loads.
+#[tokio::test]
+async fn flat_goes_to_the_dac_with_no_question_while_the_computer_is_flat() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon(&svolderd).await;
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "Flat"]);
+        assert_eq!(code, 0, "{err}");
+        let (code, _out, err) = home.run(&["eq", "load", "Flat"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(!err.contains("[y/N]"), "{err}");
+        assert!(err.contains("loaded Flat"), "{err}");
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
 #[test]
 fn refusals_name_what_is_wrong_and_write_nothing() {
     let home = Home::new();
@@ -557,9 +700,6 @@ fn refusals_name_what_is_wrong_and_write_nothing() {
     let (code, _out, err) = home.run(&["host", "eq", "apply", "nosuch"]);
     assert_eq!(code, 1);
     assert!(err.contains("no preset named"), "{err}");
-    let (code, _out, err) = home.run(&["host", "eq", "apply", "Warm"]);
-    assert_eq!(code, 1);
-    assert!(err.contains("built-in"), "{err}");
     let (code, _out, err) = home.run_with(
         &["host", "eq", "apply", "My Phones"],
         &[("SVOLDER_HOST", "off")],
@@ -617,6 +757,110 @@ fn a_process_is_started_detached_with_an_autostart_entry_and_stopped_by_remove()
 }
 
 // ---- the questions ----
+
+/// The computer EQ the daemon on this home shows.
+async fn daemon_eq(home: &Home) -> svolder_host::eq::EqView {
+    let mut client = Client::connect(&home.path().join("svolder.sock"))
+        .await
+        .expect("the daemon answers");
+    match client.request(Request::Host).await.expect("an answer") {
+        Response::Host(view) => view.eq.expect("the daemon serves the computer EQ"),
+        other => panic!("not a host answer: {other:?}"),
+    }
+}
+
+/// With a daemon that serves the computer, apply and remove go to it: the command writes no
+/// config, unit or state of its own, and runs nothing.
+#[tokio::test]
+async fn host_eq_apply_goes_through_a_running_daemon() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon_on(&svolderd, "fake").await;
+        import(&home, "My Phones");
+
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("My Phones"), "{err}");
+        let eq = daemon_eq(&home).await;
+        assert!(eq.on, "the daemon applied it");
+        assert_eq!(eq.preset.as_deref(), Some("My Phones"));
+        assert_eq!(eq.points.len(), 2);
+        assert!(
+            !home.exists("svolder/host-eq.conf") && !home.exists("units"),
+            "the command wrote nothing of its own"
+        );
+        assert!(systemctl_writes(&home).is_empty());
+        assert!(home.read("pipewire.log").is_empty(), "and ran no chain");
+
+        let (code, _out, err) = home.run(&["host", "eq", "remove"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("host EQ removed"), "{err}");
+        let eq = daemon_eq(&home).await;
+        assert!(!eq.on);
+        assert_eq!(eq.points.len(), 2, "off keeps the points");
+        assert!(!home.exists("svolder/host-eq.conf"));
+
+        // A refusal is the daemon's, in its words, with the exit code of a failure.
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "No Such Preset"]);
+        assert_eq!(code, 1, "{err}");
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// A daemon that shows the computer but cannot control it (no `pw-cli`) answers with the code of
+/// an unavailable computer, and the command leaves with it.
+#[tokio::test]
+async fn an_unavailable_computer_exits_6() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon_env(&svolderd, "fake", &[("SVOLDER_FAKE_HOST_EQ", "off")])
+            .await;
+        let (code, _out, err) = home.run(&["host", "eq", "remove"]);
+        assert_eq!(code, 6, "{err}");
+        assert!(
+            err.contains("computer controls unavailable: no pw-cli"),
+            "{err}"
+        );
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// A built-in is shaped to the shown device's own tone control when a daemon answers, and goes
+/// to the daemon like any other curve.
+#[tokio::test]
+async fn a_built_in_goes_to_the_daemon_shaped_to_the_shown_device() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut home = Home::new();
+        home.start_daemon_on(&svolderd, "fake").await;
+        let (code, _out, err) = home.run(&["host", "eq", "apply", "Warm"]);
+        assert_eq!(code, 0, "{err}");
+        let eq = daemon_eq(&home).await;
+        assert!(eq.on);
+        assert_eq!(eq.preset.as_deref(), Some("Warm"));
+        assert!(!home.exists("svolder/host-eq.conf"));
+    })
+    .await
+    .expect("the case finishes in time");
+}
+
+/// With no daemon the command applies it itself, as it always did.
+#[test]
+fn with_no_daemon_it_applies_itself() {
+    let home = Home::new();
+    import(&home, "My Phones");
+    let (code, _out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(home.exists("svolder/host-eq.conf"));
+    assert!(home.exists("svolder/host-eq.toml"));
+    let (code, _out, err) = home.run(&["host", "eq", "remove"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("host EQ removed"), "{err}");
+}
 
 #[test]
 fn with_no_daemon_applying_asks_nothing() {

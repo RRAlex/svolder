@@ -225,7 +225,7 @@ PATH_ALLOW = {
     ("docs/usage/web-ui.md", "api/v1/devices/DEVICE/"): "a URL path of the web API",
     ("bins/svolderd/src/web/api.rs", "api/v1/"): "a URL path of the web API",
     ("docs/design/host-audio.md", "svolder/host-eq.toml"): "a file under the user's config folder",
-    ("bins/svolder/src/commands/host_eq.rs", "svolder/host-eq.toml"): "a file under the user's config folder",
+    ("crates/svolder-host/src/eq/manage.rs", "svolder/host-eq.toml"): "a file under the user's config folder",
     ("docs/design/tone-control-and-presets.md", "results/INDEX.md"): "a file of the AutoEq repository, not of this one",
     ("docs/usage/eq.md", "results/INDEX.md"): "a file of the AutoEq repository, not of this one",
     ("crates/svolder-autoeq/src/index.rs", "results/INDEX.md"): "a file of the AutoEq repository, not of this one",

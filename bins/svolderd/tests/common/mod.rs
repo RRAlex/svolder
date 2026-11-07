@@ -315,6 +315,7 @@ fn daemon_command(dir: &Path, stderr: Option<Stdio>) -> Command {
         .env_remove("SVOLDER_FAKE_PLAYER_GONE_AFTER_MS")
         .env_remove("SVOLDER_FAKE_ROUTE")
         .env_remove("SVOLDER_FAKE_CAPTURE")
+        .env_remove("SVOLDER_FAKE_HOST_EQ")
         .env_remove("SVOLDER_FAKE_TITLE")
         .env_remove("LISTEN_FDS")
         .env_remove("LISTEN_PID")

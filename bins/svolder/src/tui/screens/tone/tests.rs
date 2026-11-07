@@ -15,7 +15,7 @@ use svolder_proto::FunctionId;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::tui::app::{App, Screen, ToneRow};
+use crate::tui::app::{App, Intent, Screen, ToneRow};
 use crate::tui::boxes::toast::ToastKind;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::render;
@@ -1748,30 +1748,21 @@ fn the_curve_is_narrower_beside_the_side_pane() {
 #[test]
 fn the_wide_header_names_the_computer_eq_while_it_is_on() {
     let mut app = flat_app();
-    app.presets.host_eq = Some(host_eq_state(true));
-    let wide = header_row(&app, 126, 40);
+    app.host.computer.eq = Some(host_eq_view(true));
+    let wide = header_row(&app, 170, 40);
     assert!(wide.contains("Host EQ Phones"), "|{wide}|");
     let narrow = header_row(&app, 80, 24);
     assert!(!narrow.contains("Host EQ"), "|{narrow}|");
-    app.presets.host_eq = Some(host_eq_state(false));
-    let off = header_row(&app, 126, 40);
+    app.host.computer.eq = Some(host_eq_view(false));
+    let off = header_row(&app, 170, 40);
     assert!(!off.contains("Host EQ"), "|{off}|");
 }
 
-/// What the computer EQ's state file holds for `Phones`.
-fn host_eq_state(on: bool) -> svolder_host::eq::HostEqState {
-    use svolder_host::eq::{HostEqState, Manager, Route};
-    HostEqState {
-        on,
-        name: "Phones".into(),
-        origin: None,
-        target: "alsa_output.test".into(),
-        route: Route::Default,
-        manager: Manager::Process,
-        previous_default: None,
-        preamp_db: -3.0,
-        filters: Vec::new(),
-    }
+/// What the computer EQ's view holds for `Phones`.
+fn host_eq_view(on: bool) -> Box<svolder_host::eq::EqView> {
+    let mut eq = crate::tui::test_support::computer_eq(on, &[("PK", 1000.0, 2.0, 1.0)]);
+    eq.preset = Some("Phones".into());
+    eq
 }
 
 /// The imported preset's view is worked out once and kept: the same one comes back until the
@@ -1944,5 +1935,200 @@ fn a_wide_preset_name_is_cut_to_the_cells_the_header_has() {
     assert_eq!(
         super::preset_text(Some(&standing), 10).as_deref(),
         Some("  世界世…*")
+    );
+}
+
+/// [`flat_app`] with the computer's controls there to flip to: three points, on.
+fn computer_app() -> App {
+    let mut app = flat_app();
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        true,
+        &[
+            ("PK", 1000.0, 3.0, 1.4),
+            ("LSC", 100.0, -4.0, 0.7),
+            ("HSC", 8000.0, 5.0, 0.7),
+        ],
+    ));
+    app
+}
+
+/// One frame of `app`, as rows of text.
+fn rows_of(app: &App, width: u16, height: u16) -> Vec<String> {
+    text(&frame_with_theme(app, width, height, &Theme::new(false)))
+}
+
+/// Whether any row of `rows` holds `needle`.
+fn holds(rows: &[String], needle: &str) -> bool {
+    rows.iter().any(|row| row.contains(needle))
+}
+
+/// The top line names the shown device's own name and the computer, whichever side is shown, and
+/// reads as the DAC's own line where the computer's controls are not there.
+#[test]
+fn the_eq_tab_reads_eq_for_the_device_or_computer() {
+    let mut app = computer_app();
+    let name = app.session.product.clone();
+    let line = format!("EQ for ‹ {name} | Computer ›");
+    assert!(holds(&rows_of(&app, 120, 30), &line), "{line}");
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    assert!(app.on_computer());
+    assert!(holds(&rows_of(&app, 120, 30), &line));
+    let bare = flat_app();
+    assert!(!holds(&rows_of(&bare, 120, 30), "EQ for"));
+}
+
+/// `C` flips the side and writes nothing, and a click on either name of the switch shows that
+/// side.
+#[test]
+fn c_and_a_click_flip_the_side() {
+    let mut app = computer_app();
+    assert!(app.key(KeyEvent::from(KeyCode::Char('C'))).is_empty());
+    assert!(app.on_computer());
+    assert!(app.key(KeyEvent::from(KeyCode::Char('C'))).is_empty());
+    assert!(!app.on_computer());
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    terminal
+        .draw(|f| {
+            render::draw(f, &app, &Theme::new(false), &mut hits);
+        })
+        .expect("the frame draws");
+    let (y, row) = text(terminal.backend().buffer())
+        .into_iter()
+        .enumerate()
+        .find(|(_, row)| row.contains("EQ for"))
+        .expect("the switch is drawn");
+    let y = u16::try_from(y).unwrap();
+    let byte = row.find("Computer").expect("the switch is drawn");
+    let at = u16::try_from(row[..byte].chars().count()).unwrap();
+    assert_eq!(
+        hits.hit_at(at, y),
+        Some(&Hit::Side(crate::tui::app::Side::Computer))
+    );
+    let click = crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: at,
+        row: y,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    };
+    assert!(matches!(
+        crate::tui::mouse::resolve(&hits, click, &app),
+        Some(crate::tui::mouse::MouseAction::Key(KeyCode::Char('C')))
+    ));
+}
+
+/// On the computer the mode is written `‹ Off | EQ ›` and there is no Loudness.
+#[test]
+fn the_computer_mode_reads_off_or_eq_with_no_loudness() {
+    let mut app = computer_app();
+    assert!(holds(&rows_of(&app, 120, 30), "Loudness"));
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    let rows = rows_of(&app, 120, 30);
+    assert!(holds(&rows, "Mode ‹ Off | EQ ›"), "{rows:?}");
+    assert!(!holds(&rows, "Loudness"));
+}
+
+/// The Points pane has the columns, a row per point in its type, and its title carries the count.
+#[test]
+fn the_points_pane_has_type_freq_gain_q() {
+    let mut app = computer_app();
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    let rows = rows_of(&app, 120, 30);
+    for word in ["Points · computer", "3 of 16", "#  Type  Freq", "Gain", "Q"] {
+        assert!(holds(&rows, word), "{word}: {rows:?}");
+    }
+    for kind in ["PK", "LSC", "HSC"] {
+        assert!(holds(&rows, &format!("  {kind} ")), "{kind}");
+    }
+    assert!(holds(&rows, "preamp \u{2212}6.0 dB"));
+}
+
+/// Sixteen points do not grow the table: it scrolls, keeping the focused row in view, with a mark
+/// for the rows out of sight.
+#[test]
+fn sixteen_points_scroll_with_the_selection_in_view() {
+    let mut app = computer_app();
+    let sixteen: Vec<(&str, f64, f64, f64)> = (0..16)
+        .map(|n| ("PK", 100.0 * f64::from(n + 1), 1.0, 1.0))
+        .collect();
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(true, &sixteen));
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    let top = rows_of(&app, 120, 30);
+    assert!(holds(&top, "↓ more") && !holds(&top, "↑ more"), "{top:?}");
+    assert!(holds(&top, "16 of 16"));
+    app.focus_point(15);
+    let bottom = rows_of(&app, 120, 30);
+    assert!(holds(&bottom, "↑ more") && !holds(&bottom, "↓ more"));
+    assert!(
+        bottom
+            .iter()
+            .any(|row| row.contains("▶") && row.contains("1600 Hz")),
+        "the last point is in view and marked: {bottom:?}"
+    );
+    assert_eq!(
+        rows_of(&app, 120, 30).len(),
+        top.len(),
+        "the frame keeps its size"
+    );
+}
+
+/// The Correction pane says nothing is fitted on the computer, in the wide tier.
+#[test]
+fn the_correction_pane_says_nothing_is_fitted_on_the_computer() {
+    let mut app = computer_app();
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    let rows = rows_of(&app, 140, 40);
+    assert!(holds(&rows, "Correction"), "{rows:?}");
+    let joined = rows.join(" ");
+    let joined: Vec<&str> = joined.split_whitespace().collect();
+    let said = "on the computer nothing is fitted: every filter plays as written";
+    for word in said.split_whitespace() {
+        assert!(joined.contains(&word), "{word}");
+    }
+}
+
+/// A chain whose running could not be told is shown as the state file says and marked not
+/// verified; a verified one carries no mark.
+#[test]
+fn an_unknown_chain_is_marked_not_verified() {
+    let mut app = computer_app();
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    assert!(!holds(&rows_of(&app, 120, 30), "not verified"));
+    app.host
+        .computer
+        .eq
+        .as_mut()
+        .expect("an eq")
+        .running_unknown = true;
+    let rows = rows_of(&app, 120, 30);
+    assert!(holds(&rows, "Mode ‹ Off | EQ › not verified"), "{rows:?}");
+}
+
+/// A click on a point's type cell cycles it, one on a value focuses the point; the cells are hits.
+#[test]
+fn a_point_s_cells_are_clickable() {
+    let mut app = computer_app();
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    terminal
+        .draw(|f| {
+            render::draw(f, &app, &Theme::new(false), &mut hits);
+        })
+        .expect("the frame draws");
+    let rows = text(terminal.backend().buffer());
+    let y = rows
+        .iter()
+        .position(|row| row.contains(" LSC "))
+        .expect("the LSC row");
+    let byte = rows[y].find("LSC").expect("its type");
+    let x = u16::try_from(rows[y][..byte].chars().count()).unwrap();
+    assert_eq!(
+        hits.hit_at(x, u16::try_from(y).unwrap()),
+        Some(&Hit::PointField(1, 0))
+    );
+    let intents = app.click_point_field(1, 0);
+    assert!(
+        matches!(&intents[..], [Intent::HostEq(op)] if matches!(&**op, svolder_ipc::HostEqOp::Set { index: 2, kind: Some(k), .. } if k == "HSC"))
     );
 }

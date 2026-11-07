@@ -76,6 +76,8 @@ export function createLive({ core, signal, view, sections }) {
     if ((data.device ?? store.shown()) === store.shown()) drawParts('volume');
   });
   for (const event of ['host', 'fleet']) listen(event, drawAll);
+  // the side flipped, or a value of the computer is held or settled
+  off.push(core.computer.on(drawAll));
   listen('state', (state) => {
     view.state = state;
     drawAll();

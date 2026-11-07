@@ -60,6 +60,8 @@ fn host(playing: Option<PlayingView>, route: Option<RouteFacts>) -> HostView {
         playing,
         route,
         now_ms: 1_700_000_003_000,
+        volume: None,
+        eq: None,
     }
 }
 

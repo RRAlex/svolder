@@ -429,7 +429,7 @@ and 10 kHz, so a correction with more filters than the tone control has bands is
 file's preamp (within ±30 dB, or the file is refused) is kept in the preset, and the volume is never
 lowered for you. To hear the correction exactly instead, put it on the computer with
 `svolder host eq apply` (see ["host"](cli.md#host)); the TUI's preset list does both (`a` to search,
-`i` to import a file, `h` to apply on the computer).
+`i` to import a file, and `Enter` on the computer's side to apply on the computer).
 
 #### What the DAC can and cannot do
 
@@ -437,7 +437,8 @@ The tone control has 3 or 5 peaking bands, each free only inside its own window 
 gains of −20 to +6 dB in steps of about 0.2 dB and a Q of 0.5 to 8 in steps of about 0.06. It has no
 shelf filters and no preamp. A correction with more filters than the DAC has bands, or with shelves,
 is therefore approximated, and `eq import` says how well in its fit line; on the computer
-(`host eq`) every filter and the preamp apply exactly.
+(`host eq`) every filter and the preamp apply exactly, up to 16 of them (a longer correction is
+refused there with its count).
 
 | Tone control | Band windows (Hz) |
 |---|---|
@@ -717,8 +718,18 @@ help text and examples.
 
 The TUI reaches the same library through `p`, on the tone-control screen and on the device screen's
 Tone pane; ["The preset list (`p`)"](tui.md#the-preset-list-p) covers its keys (`↑↓` `Enter` `n`
-`u` `c` `x` `a` `i` `h` `Esc`), the name prompt and the `[y/N]` questions it shares in wording with
+`u` `c` `x` `a` `i` `Esc`), the name prompt and the `[y/N]` questions it shares in wording with
 `eq delete`.
+
+**The computer's side.** The web page and the TUI flip the tone control to the computer with one
+switch; there the same presets, built-ins of the shown device and saved ones, play on the computer
+EQ as written, the computer being able to hold any of them that has 16 filters or fewer. A preset
+that was saved from the computer's points loads on a device by being fitted to its bands, as an
+import is, and the fit line says how well. A preset that a device plays too is never put on both:
+the TUI and the web page ask (`NAME is on the <device> too: flatten the <device> and apply on the computer?`)
+and MCP asks for `confirm`; the CLI's `host eq apply` asks the same way. The points, the preamp and
+the live editing are in ["The computer's side"](tui.md#the-computers-side-c) of the TUI reference and
+["The switch to this computer"](web-ui.md#the-page) of the web page.
 
 Loading a preset, from either front end, sends the same sequence: the gains that go down first, then
 every frequency and Q change, then the gains that go up, and the mode last when it becomes EQ — so

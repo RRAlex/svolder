@@ -81,7 +81,7 @@ fn the_list_over_the_tone_screen_at_80_by_24() {
             "│    └──│                                                             │────────│",
             "│    20 │ Enter loads · n saves new · Esc closes                      │     20k│",
             "└───────│ u updates · c renames · x deletes · built-ins are read-only │────────┘",
-            "┌ Bands │ a AutoEq · i from file · h computer                         │flatten ┐",
+            "┌ Bands │ a AutoEq · i from file                                      │flatten ┐",
             "│   #   └─────────────────────────────────────────────────────────────┘        │",
             "│ ▶ 1   40.0 Hz    +0.0 dB    4.30      64 / 98 / 64                           │",
             "│   2    160 Hz    +0.0 dB    4.30      64 / 98 / 64                           │",
@@ -507,7 +507,9 @@ fn row_with<'a>(rows: &'a [String], what: &str) -> &'a str {
 #[test]
 fn imported_and_computer_rows_carry_their_tags() {
     let mut app = with_imports("Phones");
-    app.presets.computer = Some("phones".into());
+    let mut eq = crate::tui::test_support::computer_eq(true, &[("PK", 1000.0, 2.0, 1.0)]);
+    eq.preset = Some("phones".into());
+    app.host.computer.eq = Some(eq);
     let eq = app.profile.eq.clone().expect("a tone control");
     let source = app.presets.saved[1].source.clone().expect("imported");
     let fit = format!(
@@ -558,13 +560,13 @@ fn imported_and_computer_rows_carry_their_tags() {
     );
 }
 
-/// The box's key row and the help overlay name `a`, `i` and `h`.
+/// The box's key row and the help overlay name `a` and `i`.
 #[test]
 fn the_key_row_and_the_help_overlay_name_the_new_keys() {
     let (buffer, areas) = frame(&listing(), (80, 24), &Theme::new(false));
     let rows = boxed_rows(&buffer, areas.modal.expect("the list is a modal box"));
     assert!(
-        row_with(&rows, "a AutoEq").contains("a AutoEq · i from file · h computer"),
+        row_with(&rows, "a AutoEq").contains("a AutoEq · i from file"),
         "{rows:#?}"
     );
 
@@ -573,7 +575,7 @@ fn the_key_row_and_the_help_overlay_name_the_new_keys() {
     app.overlays.help_open = true;
     let (buffer, _) = frame(&app, (126, 62), &Theme::new(false));
     let help = text(&buffer).join("\n");
-    assert!(help.contains("presets (a i h inside)"), "{help}");
+    assert!(help.contains("presets (a i inside)"), "{help}");
 }
 
 /// The search box at 80×24, with the index held, a query typed and the focus on the second

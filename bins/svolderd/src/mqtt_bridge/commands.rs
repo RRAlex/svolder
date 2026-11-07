@@ -44,6 +44,9 @@ impl BridgeTask {
             }
             Some((unit, key)) if self.config.commands => {
                 let (unit, key) = (unit.to_string(), key.to_string());
+                if unit == svolder_mqtt::computer::UNIT {
+                    return self.computer_command(&key, body);
+                }
                 self.command(&unit, &key, body);
             }
             _ => self.leftover(topic, body),
@@ -308,6 +311,7 @@ impl BridgeTask {
                 ));
             }
             WriteOutcome::Replaced => {}
+            WriteOutcome::Computer(on, result) => self.computer_written(on, result),
             WriteOutcome::Written(control, outcome) => self.written(&control, outcome),
         }
     }

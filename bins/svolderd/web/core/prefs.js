@@ -8,6 +8,8 @@
 
 /** The storage key of the theme chosen. */
 export const CHOICE_KEY = 'svolder.theme';
+/** The storage key of the side a viewer looks at: the device (`dac`) or the computer. */
+export const SIDE_KEY = 'svolder.side';
 /** The cookie the server reads the choice from. */
 export const COOKIE = 'svolder_theme';
 
@@ -106,4 +108,14 @@ export function writeChoice({ id, scheme }, { storage, document, path }) {
   } catch {
     // The page works without it.
   }
+}
+
+/** The side this browser looks at, `'dac'` or `'computer'`: `'dac'` for anything else. */
+export function readSide(storage) {
+  return guarded(storage).read(SIDE_KEY) === 'computer' ? 'computer' : 'dac';
+}
+
+/** Keep the side (`'dac'` or `'computer'`); whether storage took it. */
+export function writeSide(side, storage) {
+  return guarded(storage).write(SIDE_KEY, side === 'computer' ? 'computer' : 'dac');
 }

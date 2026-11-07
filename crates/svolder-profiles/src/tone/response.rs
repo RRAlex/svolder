@@ -55,25 +55,56 @@ pub fn response_db(bands: &[BandParams], freqs: &[f64]) -> Vec<f64> {
 /// Summed magnitude response in dB of a correction's filters, peaking and shelves, at 48 kHz,
 /// evaluated at `freqs`. The preamp is not part of the shape and is left out.
 pub fn correction_db(correction: &Correction, freqs: &[f64]) -> Vec<f64> {
-    let biquads = correction_biquads(correction);
+    let biquads = correction_biquads(correction, SAMPLE_RATE_HZ);
     freqs.iter().map(|&f| summed_db(&biquads, f)).collect()
 }
 
-/// The biquad of each of a correction's filters.
-fn correction_biquads(correction: &Correction) -> Vec<Biquad> {
+/// The biquad of each of a correction's filters, worked out for a stream of `rate` Hz.
+fn correction_biquads(correction: &Correction, rate: f64) -> Vec<Biquad> {
     correction
         .filters
         .iter()
         .map(|filter| match filter.kind {
-            FilterKind::Peaking => Biquad::peaking(&BandParams {
-                f0: filter.f,
-                gain_db: filter.g,
-                q: filter.q,
-            }),
-            FilterKind::LowShelf => Biquad::low_shelf(filter.f, filter.g, filter.q),
-            FilterKind::HighShelf => Biquad::high_shelf(filter.f, filter.g, filter.q),
+            FilterKind::Peaking => Biquad::peaking_at(
+                &BandParams {
+                    f0: filter.f,
+                    gain_db: filter.g,
+                    q: filter.q,
+                },
+                rate,
+            ),
+            FilterKind::LowShelf => Biquad::low_shelf_at(filter.f, filter.g, filter.q, rate),
+            FilterKind::HighShelf => Biquad::high_shelf_at(filter.f, filter.g, filter.q, rate),
         })
         .collect()
+}
+
+/// The cookbook coefficients `[b0, b1, b2, a1, a2]` of one filter for a stream of `rate_hz`,
+/// divided by `a0`, which is 1 after it. The frequency is held below the Nyquist limit, where
+/// the cookbook's filters stop being filters; a Q that is not above 0 gives the identity.
+pub fn coefficients(kind: FilterKind, f: f64, g: f64, q: f64, rate_hz: u32) -> [f64; 5] {
+    let rate = f64::from(rate_hz.max(1));
+    let f = f.min(rate * 0.499);
+    let biquad = match kind {
+        FilterKind::Peaking => Biquad::peaking_at(
+            &BandParams {
+                f0: f,
+                gain_db: g,
+                q,
+            },
+            rate,
+        ),
+        FilterKind::LowShelf => Biquad::low_shelf_at(f, g, q, rate),
+        FilterKind::HighShelf => Biquad::high_shelf_at(f, g, q, rate),
+    };
+    let a0 = biquad.a[0];
+    [
+        biquad.b[0] / a0,
+        biquad.b[1] / a0,
+        biquad.b[2] / a0,
+        biquad.a[1] / a0,
+        biquad.a[2] / a0,
+    ]
 }
 
 /// `n` log-spaced frequencies from 20 Hz to 20 kHz.
@@ -97,22 +128,130 @@ pub fn log_freqs(n: usize) -> Vec<f64> {
 /// rather than where a sample happens to fall.
 pub fn peak_db(bands: &[BandParams]) -> f64 {
     let biquads: Vec<Biquad> = bands.iter().map(Biquad::peaking).collect();
-    refined_peak(&biquads, bands.iter().map(|band| band.f0))
+    refined_peak(&biquads, bands.iter().map(|band| band.f0), SAMPLE_RATE_HZ)
 }
 
 /// The highest a correction's filters (peaking and shelves, without the preamp) rise between
 /// 20 Hz and 20 kHz, in dB, found the way [`peak_db`] finds it: a narrow boost between two
 /// samples is measured at its true height. 0.0 or below for a flat or cut-only correction.
 pub fn correction_peak_db(correction: &Correction) -> f64 {
-    let biquads = correction_biquads(correction);
-    refined_peak(&biquads, correction.filters.iter().map(|filter| filter.f))
+    correction_peak_db_at(correction, SAMPLE_RATE_HZ as u32)
+}
+
+/// [`correction_peak_db`] for a stream of `rate_hz`: the filters are worked out, and the curve
+/// is read, at that rate, so a shelf near Nyquist is measured where it plays.
+pub fn correction_peak_db_at(correction: &Correction, rate_hz: u32) -> f64 {
+    let rate = f64::from(rate_hz.max(1));
+    let biquads = correction_biquads(correction, rate);
+    refined_peak(
+        &biquads,
+        correction.filters.iter().map(|filter| filter.f),
+        rate,
+    )
+}
+
+/// The lowest frequency the played band is sampled from, in Hz: under the 1 Hz the host holds
+/// a filter's frequency to, so the bump a high-Q low shelf makes below its corner is inside.
+const PLAYED_LOW_HZ: f64 = 0.1;
+/// How close to Nyquist the played band's sampled grid ends, as a fraction of the rate; the
+/// curve is read at Nyquist itself exactly as well.
+const PLAYED_HIGH_OF_RATE: f64 = 0.4999;
+/// Log-spaced samples over the played band: about 650 a decade.
+const PLAYED_SAMPLES: usize = 4096;
+/// Samples spaced logarithmically by their distance from Nyquist, from `pi * 1e-7` to `pi / 2`
+/// radians: a peaking filter near Nyquist is only a few hertz wide, so the grid must be dense
+/// there in distance, not in frequency.
+const PLAYED_NYQUIST_SAMPLES: usize = 2048;
+
+/// The highest a correction's filters rise anywhere the chain plays, in dB, with every
+/// coefficient as the f64 cookbook gives it. See [`played_peak_db_of`].
+pub fn correction_played_peak_db(correction: &Correction, rate_hz: u32) -> f64 {
+    let sets: Vec<[f64; 5]> = correction
+        .filters
+        .iter()
+        .map(|f| coefficients(f.kind, f.f, f.g, f.q, rate_hz))
+        .collect();
+    let centres: Vec<f64> = correction.filters.iter().map(|f| f.f).collect();
+    played_peak_db_of(&sets, &centres, rate_hz)
+}
+
+/// The highest the filters whose coefficients are `sets` (`[b0, b1, b2, a1, a2]`, `a0` being 1)
+/// rise anywhere the chain plays, in dB: from 0.1 Hz to just under Nyquist at `rate_hz`, with DC
+/// and Nyquist read exactly, since a shelf's asymptotes and a resonant shelf's bump sit outside
+/// 20 Hz to 20 kHz. The samples are a dense log grid in frequency, a second grid log-spaced in
+/// the distance from Nyquist, and each filter's own centre in `centres_hz`; every local maximum
+/// of them is refined by a golden-section search between its neighbours, so a narrow peak
+/// between two samples is measured at its true height. Below 0.0 only for a cut-only set; 0.0
+/// for none.
+///
+/// This is what the computer EQ's preamp covers. The DAC's displayed boost
+/// ([`correction_peak_db_at`]) stays the 20 Hz to 20 kHz window the official app draws.
+pub fn played_peak_db_of(sets: &[[f64; 5]], centres_hz: &[f64], rate_hz: u32) -> f64 {
+    use std::f64::consts::PI;
+    let rate = f64::from(rate_hz.max(1));
+    let at = |w: f64| played_db(sets, w);
+    let mut ws: Vec<f64> = vec![0.0, PI];
+    let (low, high) = (PLAYED_LOW_HZ.log10(), (rate * PLAYED_HIGH_OF_RATE).log10());
+    let last = (PLAYED_SAMPLES - 1) as f64;
+    ws.extend(
+        (0..PLAYED_SAMPLES)
+            .map(|i| 2.0 * PI * 10f64.powf(low + (high - low) * i as f64 / last) / rate),
+    );
+    let (near, far) = ((PI * 1e-7).log10(), (PI / 2.0).log10());
+    let last = (PLAYED_NYQUIST_SAMPLES - 1) as f64;
+    ws.extend(
+        (0..PLAYED_NYQUIST_SAMPLES).map(|i| PI - 10f64.powf(near + (far - near) * i as f64 / last)),
+    );
+    ws.extend(
+        centres_hz
+            .iter()
+            .filter(|f| f.is_finite() && **f > 0.0)
+            .map(|f| (2.0 * PI * f / rate).min(PI)),
+    );
+    ws.sort_by(f64::total_cmp);
+    ws.dedup();
+    let db: Vec<f64> = ws.iter().map(|&w| at(w)).collect();
+    let mut peak = db.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let last = ws.len() - 1;
+    for i in 0..=last {
+        let rises = i == 0 || db[i] > db[i - 1];
+        if rises && (i == last || db[i] >= db[i + 1]) {
+            let (from, to) = (ws[i.saturating_sub(1)], ws[(i + 1).min(last)]);
+            if from < to {
+                peak = peak.max(golden_max(at, from, to));
+            }
+        }
+    }
+    peak
+}
+
+/// The summed response of `sets` at angular frequency `w`, in dB, worked out in `sin^2(w/2)`
+/// below a quarter of the rate and in `cos^2(w/2)` above, so a response near DC or Nyquist is
+/// not lost to cancellation.
+fn played_db(sets: &[[f64; 5]], w: f64) -> f64 {
+    let half = w / 2.0;
+    let (sign, x) = match half <= std::f64::consts::FRAC_PI_4 {
+        true => (1.0, half.sin().powi(2)),
+        false => (-1.0, half.cos().powi(2)),
+    };
+    let power = |p0: f64, p1: f64, p2: f64| {
+        let sum = p0 + p1 + p2;
+        sum * sum - 4.0 * (p0 * p1 + 4.0 * p0 * p2 + p1 * p2) * x + 16.0 * p0 * p2 * x * x
+    };
+    sets.iter()
+        .map(|c| {
+            let numerator = power(c[0], sign * c[1], c[2]);
+            let denominator = power(1.0, sign * c[3], c[4]);
+            10.0 * (numerator / denominator).log10()
+        })
+        .sum()
 }
 
 /// The peak of the summed `biquads`: the highest of 1024 log-spaced samples, refined by a
 /// golden-section search in the two sample intervals either side of it and in a half-octave
 /// window round each of `centres`.
-fn refined_peak(biquads: &[Biquad], centres: impl Iterator<Item = f64>) -> f64 {
-    let at = |log_hz: f64| summed_db(biquads, 10f64.powf(log_hz));
+fn refined_peak(biquads: &[Biquad], centres: impl Iterator<Item = f64>, rate: f64) -> f64 {
+    let at = |log_hz: f64| summed_db_at(biquads, 10f64.powf(log_hz), rate);
     let grid: Vec<f64> = log_freqs(PEAK_SAMPLES)
         .into_iter()
         .map(f64::log10)
@@ -226,7 +365,12 @@ fn golden_max(f: impl Fn(f64) -> f64, mut from: f64, mut to: f64) -> f64 {
 
 /// The sum of every biquad's lift or cut at `hz`, in dB.
 fn summed_db(biquads: &[Biquad], hz: f64) -> f64 {
-    let w = 2.0 * std::f64::consts::PI * hz / SAMPLE_RATE_HZ;
+    summed_db_at(biquads, hz, SAMPLE_RATE_HZ)
+}
+
+/// The same for a stream of `rate` Hz.
+fn summed_db_at(biquads: &[Biquad], hz: f64, rate: f64) -> f64 {
+    let w = 2.0 * std::f64::consts::PI * hz / rate;
     biquads.iter().map(|biquad| biquad.magnitude_db(w)).sum()
 }
 
@@ -251,11 +395,16 @@ impl Biquad {
 
     /// The peaking filter one band describes.
     fn peaking(band: &BandParams) -> Biquad {
+        Biquad::peaking_at(band, SAMPLE_RATE_HZ)
+    }
+
+    /// The peaking filter one band describes, worked out for a stream of `rate` Hz.
+    fn peaking_at(band: &BandParams, rate: f64) -> Biquad {
         if !usable_q(band.q) {
             return Biquad::identity();
         }
         let amplitude = 10f64.powf(band.gain_db / 40.0);
-        let w0 = 2.0 * std::f64::consts::PI * band.f0 / SAMPLE_RATE_HZ;
+        let w0 = 2.0 * std::f64::consts::PI * band.f0 / rate;
         let alpha = w0.sin() / (2.0 * band.q);
         let cos_w0 = w0.cos();
         Biquad {
@@ -272,13 +421,13 @@ impl Biquad {
         }
     }
 
-    /// The cookbook's low shelf, its Q the cookbook's Q.
-    fn low_shelf(f0: f64, gain_db: f64, q: f64) -> Biquad {
+    /// The cookbook's low shelf for a stream of `rate` Hz, its Q the cookbook's Q.
+    fn low_shelf_at(f0: f64, gain_db: f64, q: f64, rate: f64) -> Biquad {
         if !usable_q(q) {
             return Biquad::identity();
         }
         let a = 10f64.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f64::consts::PI * f0 / SAMPLE_RATE_HZ;
+        let w0 = 2.0 * std::f64::consts::PI * f0 / rate;
         let cos_w0 = w0.cos();
         let beta = 2.0 * a.sqrt() * (w0.sin() / (2.0 * q));
         Biquad {
@@ -295,13 +444,13 @@ impl Biquad {
         }
     }
 
-    /// The cookbook's high shelf, its Q the cookbook's Q.
-    fn high_shelf(f0: f64, gain_db: f64, q: f64) -> Biquad {
+    /// The cookbook's high shelf for a stream of `rate` Hz, its Q the cookbook's Q.
+    fn high_shelf_at(f0: f64, gain_db: f64, q: f64, rate: f64) -> Biquad {
         if !usable_q(q) {
             return Biquad::identity();
         }
         let a = 10f64.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f64::consts::PI * f0 / SAMPLE_RATE_HZ;
+        let w0 = 2.0 * std::f64::consts::PI * f0 / rate;
         let cos_w0 = w0.cos();
         let beta = 2.0 * a.sqrt() * (w0.sin() / (2.0 * q));
         Biquad {
@@ -796,5 +945,58 @@ mod tests {
                 assert!(correction_db(&c, &freqs).iter().all(|db| *db == 0.0));
             }
         }
+    }
+
+    #[test]
+    fn coefficients_follow_the_rate_and_stay_below_nyquist() {
+        let [b0, b1, b2, a1, a2] = coefficients(FilterKind::Peaking, 1000.0, 6.0, 1.0, 48_000);
+        assert!((b0 - 1.043953).abs() < 1e-6 && (a1 - b1).abs() < 1e-12);
+        assert!((b2 - 0.867722).abs() < 1e-6 && (a2 - 0.911675).abs() < 1e-6);
+        let slower = coefficients(FilterKind::Peaking, 1000.0, 6.0, 1.0, 44_100);
+        assert!((slower[0] - b0).abs() > 1e-4);
+        // A frequency past Nyquist still gives a stable filter: both roots inside the circle.
+        let [_, _, _, a1, a2] = coefficients(FilterKind::HighShelf, 30_000.0, 3.0, 1.0, 44_100);
+        assert!(a2.abs() < 1.0 && a1.abs() < 1.0 + a2);
+        assert_eq!(
+            coefficients(FilterKind::Peaking, 1000.0, 6.0, 0.0, 48_000),
+            [1.0, 0.0, 0.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn a_shelf_near_nyquist_is_measured_at_the_rate_it_plays_at() {
+        use crate::tone::apo::SourceFilter;
+        let shelf = Correction {
+            preamp_db: 0.0,
+            filters: vec![SourceFilter {
+                kind: FilterKind::HighShelf,
+                f: 21_000.0,
+                g: 12.0,
+                q: 0.7,
+            }],
+        };
+        let at_48k = correction_peak_db_at(&shelf, 48_000);
+        let at_44k = correction_peak_db_at(&shelf, 44_100);
+        assert_eq!(at_48k, correction_peak_db(&shelf));
+        assert!(
+            (at_48k - at_44k).abs() > 0.05,
+            "{at_48k} dB at 48 kHz against {at_44k} dB at 44.1 kHz"
+        );
+    }
+
+    #[test]
+    fn a_narrow_peak_just_under_nyquist_is_measured_at_its_height() {
+        let at_48k = correction(vec![
+            source(FilterKind::Peaking, 23_890.0, 27.0, 20.0),
+            source(FilterKind::HighShelf, 21_810.0, 30.0, 0.06),
+        ]);
+        let peak = correction_played_peak_db(&at_48k, 48_000);
+        assert!((peak - 50.63).abs() < 0.05, "{peak} dB, true 50.63");
+        let at_44k = correction(vec![
+            source(FilterKind::LowShelf, 23_746.0, 5.0, 0.82),
+            source(FilterKind::Peaking, 22_005.9, 22.0, 20.0),
+        ]);
+        let peak = correction_played_peak_db(&at_44k, 44_100);
+        assert!((peak - 24.5).abs() < 0.05, "{peak} dB, true 24.5");
     }
 }

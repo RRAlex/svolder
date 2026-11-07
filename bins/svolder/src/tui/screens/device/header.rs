@@ -363,10 +363,10 @@ const HOST_EQ_NAME_MAX: usize = 24;
 /// What the wide tier's headers say while the computer EQ is on — `Host EQ NAME`, the name cut
 /// to [`HOST_EQ_NAME_MAX`] cells — or `None` below the wide tier and while it is off.
 pub(in crate::tui::screens) fn host_eq_words(app: &App, area: Rect) -> Option<String> {
-    let state = app.presets.host_eq.as_ref().filter(|state| state.on)?;
+    let name = app.computer_preset()?;
     Tier::of(area)
         .wide
-        .then(|| format!("Host EQ {}", cut_cells(&state.name, HOST_EQ_NAME_MAX)))
+        .then(|| format!("Host EQ {}", cut_cells(&name, HOST_EQ_NAME_MAX)))
 }
 
 /// The mouse-capture indicator every header shows, dim: `mouse:on` with capture on, else

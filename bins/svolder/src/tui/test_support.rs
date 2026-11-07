@@ -678,3 +678,32 @@ pub(super) fn true_colour_background(background: bool) -> Theme {
 pub(super) fn host_hearing_one() -> FakeEffects {
     FakeEffects::healthy().with_scan(vec![seen_product("0102030405060708", "Bifrost 3", -47)])
 }
+
+/// A computer EQ as a daemon's view says it: `points` as (type, Hz, dB, Q), on or off, the
+/// most it holds 16.
+pub(crate) fn computer_eq(
+    on: bool,
+    points: &[(&str, f64, f64, f64)],
+) -> Box<svolder_host::eq::EqView> {
+    Box::new(svolder_host::eq::EqView {
+        on,
+        points: points
+            .iter()
+            .enumerate()
+            .map(|(at, &(kind, f, g, q))| svolder_host::eq::PointView {
+                slot: u8::try_from(at + 1).unwrap_or(u8::MAX),
+                kind: kind.to_string(),
+                f,
+                g,
+                q,
+            })
+            .collect(),
+        preamp_db: -6.0,
+        preset: Some("custom".to_string()),
+        live: true,
+        note: None,
+        unavailable: None,
+        max: 16,
+        running_unknown: false,
+    })
+}

@@ -282,6 +282,7 @@ fn state() -> HostEqState {
         previous_default: Some("alsa_output.pci-speakers".into()),
         preamp_db: c.preamp_db,
         filters: c.filters,
+        slots: Vec::new(),
     }
 }
 

@@ -73,14 +73,14 @@ def sun_pixel(b):
     """The sun's middle, a little under its top: [r, g, b, a] on the sky canvas, and the scene's size."""
     g = b.page(GEO)
     w, h = g['w'], g['h']
-    H = h * (0.62 if w < 720 and h > w else 0.56)
+    H = h * 0.56
     return b.page(f'({PIXEL})("nd-sky", {w / 2}, {H - h * 0.04 - h * 0.12})'), g
 
 
 def lowest_edge(b, g):
     """The highest the mountains reach (the smallest y of their edge) over a handful of columns."""
     w, h = g['w'], g['h']
-    H = h * (0.62 if w < 720 and h > w else 0.56)
+    H = h * 0.56
     ys = [b.page(f'({EDGE})({w * f}, {H - 0.3 * h}, {H + 2})') for f in (0.06, 0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)]
     return min(y for y in ys if y is not None) if any(y is not None for y in ys) else None, H
 

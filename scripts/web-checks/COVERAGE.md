@@ -711,6 +711,92 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   newest waiting, held to the cap, a raise dropped while the stream is lost or waking and a
   lowering always sent; a device that cannot be shown stays and says so; the address is pushed.
   Proved by `node/core-actions.mjs`.
+- The computer's side, for every theme (`core.computer`, `actions.computer`): the side is kept per viewer
+  in `svolder.side` and defaults to the DAC; the switch is drawn for any shown device (an amp too) while
+  the model holds the computer, never without a device or without it, and a computer that is unavailable
+  shows the DAC side with the sentence in the switch's place; a flip writes nothing (nor does a load with
+  the side kept) and ends what a theme tracked; the volume reads `—` and is inert until its first read,
+  never goes above 100 (a boosted sink is shown as read, `+` does nothing and `−` writes 100) and goes
+  one request at a time with the newest waiting; the curve reads the shelves (the fixture of the daemon's
+  own maths within 0.01 dB); the steps span the hand ranges (f 20 Hz to 20 kHz on 1/24 octave, g ±12 by
+  0.1, Q 0.1 to 10 on 1/24 decade); a tap makes a PK clamped to them, `+ Add point` goes to the widest
+  gap, the lone point has no remove, the line reads `7 of 16 points · preamp −6.0 dB`; a drag posts at
+  most 20 a second per point and the release always; the dragged value stays while a host update moves
+  the rest, and goes once the model is read after the release; a tap on a point beyond the hand ranges
+  writes nothing, and a hand moves only the field it moves; a guest flips and writes nothing; every
+  action posts its route with its one-based point; a refusal is toasted with the daemon's words and the
+  computer read again; the same preset on both sides asks and yes repeats with `confirm`. Proved by
+  `node/core-computer.mjs` (`the_side_is_kept_per_viewer_and_defaults_to_the_dac`,
+  `no_switch_without_a_dac_or_without_the_computer`, `flipping_writes_nothing`, `the_curve_reads_shelves`,
+  `the_steps_span_the_hand_ranges`, `a_tap_adds_a_pk_at_the_spot_clamped`, `add_point_goes_to_the_widest_gap`,
+  `the_lone_point_keeps_its_remove`, `a_point_edit_that_ends_follows_the_points_to_their_sorted_place`,
+  `a_released_hold_goes_when_the_point_is_listed_elsewhere`, `the_preamp_line_reads_points_and_preamp`,
+  `a_drag_posts_at_most_twenty_a_second_and_the_release_always`, `a_host_update_mid_drag_keeps_the_dragged_value`,
+  `a_tap_on_a_point_beyond_the_hand_range_writes_nothing`, `a_guest_flips_and_writes_nothing`,
+  `each_action_reaches_its_route_with_one_based_points`, `the_volume_is_capped_stepped_and_inert_before_its_first_read`,
+  `the_volume_goes_one_at_a_time_with_the_newest_waiting`, `a_refusal_toasts_the_daemons_words_and_reads_again`,
+  `the_same_preset_on_both_asks_and_yes_flattens_the_dac`, `the_contract_lists_the_computers_targets`,
+  `every_point_set_and_remove_names_the_point_by_its_slot`, `a_re_sort_the_page_has_not_read_yet_still_lands_on_the_point_that_was_dragged`,
+  `a_409_for_a_point_that_moved_ends_the_drag_toasts_once_and_sends_nothing_more`).
+- The computer in a real page (`computer_core.py`, both browsers, `SVOLDER_HOST=fake`):
+  `the_host_event_carries_the_computer` (a DAC's page and an amp's), `each_action_reaches_its_route` (the
+  request log and the model read back), `a_refusal_toasts_and_rereads`,
+  `the_side_is_kept_and_a_flip_writes_nothing` (a reload with the side kept posts nothing),
+  `every_point_write_carries_its_slot` and `a_stale_place_still_lands_on_the_point_dragged` (another viewer's add moves the places: the write lands on the point dragged and its neighbour is untouched; a point that is gone is one 409, one toast and no more writes),
+  `unavailable_hides_nothing_but_says_why` (`SVOLDER_FAKE_HOST_EQ=off`), `the_question_is_asked_with_keys_and_buttons`
+  (`core.ask`: Yes and No at 44 px, the focus on No, Escape and `n` say No, `y` and a click say Yes) and
+  `the_same_preset_on_both_asks_and_yes_flattens_the_dac` (no sends nothing, yes repeats with `confirm` and
+  the DAC is flat). The theme contract and completeness checks list `computerTargetsOf` on every device and
+  drive them for every theme.
+- Night drive's computer side (`node/nightdrive-hud.mjs`, `nightdrive-draw.mjs`, `nightdrive-tune.mjs` over
+  `node/nightdrive-rig.mjs`, `computer_nightdrive.py`, both browsers, `SVOLDER_HOST=fake`): the markup
+  (`two_keys_name_the_device_and_this_computer`, `the_phone_dash_has_no_switch_and_the_switch_is_drawn_for_the_scene`, `the_figures_read_percent`,
+  `the_eq_line_reads_off_or_eq_and_the_preset`, `the_sheet_runs_mode_then_points`,
+  `the_lone_point_keeps_its_remove_and_a_full_table_no_add`, `nothing_below_the_switch_says_computer`,
+  `the_amp_page_takes_the_computers_parts_in_the_dash_and_the_sheet`), the mountains (`computer_points_are_bubbles`,
+  `a_tap_on_the_mountains_adds_a_pk_only_when_morphed`) and the page (`the_two_keys_flip_volume_and_tone_together`,
+  `minus_plus_mute_set_the_computer_volume`, `a_point_drag_posts_live_and_done_at_release`, `every_dot_is_on_the_curve`,
+  `a_tap_adds_a_point_and_x_removes_it`, `the_points_are_listed_by_frequency`, `the_mode_the_type_a_typed_value_and_the_presets_write`, `the_wheel_sets_the_q`,
+  `sixteen_points_keep_the_layout`, `a_flip_mid_drag_writes_nothing`, `a_guest_sees_the_computer_inert`,
+  `the_side_survives_a_reload` (no paint of the figure says 0 %), `the_keys_keep_the_focus_across_a_keyboard_flip`,
+  `presets_save_rename_delete_from_the_computer_side`, `the_same_preset_on_both_asks_and_yes_flattens_the_dac`,
+  `the_amp_page_flips_to_the_computer_with_the_dac_parts`, `the_fade_keeps_the_switch_keys_as_the_menu_button`,
+  `the_right_column_runs_keys_then_words_then_the_eq_line`, `the_phone_panel_starts_with_the_switch` (the pill `DAC | PC` in the scene's top left corner, level with the menu button, 36 px tall, clear of the device line, the scene over 77 %),
+  `the_wheel_and_the_arrows_step_the_volume` (a notch over the big number and `↑` `↓` step the device by its own step and
+  the computer by 1 %; not the wheel elsewhere, not `←` `→`; the arrows not with a control focused or a sheet, question or menu open, the wheel still with a control focused; the first wheel over a faded number only
+  wakes the HUD; a held
+  arrow repeats; an arrow wakes a faded dash and steps), `the_switch_keys_never_ellipsize_this_computer` (600 to 1000 px
+  wide, upright and sideways; a regression guard: it cannot fail on a cap wider than 20vw), `a_host_event_with_a_changed_point_drops_the_cached_tone` and
+  `the_curve_stops_being_dim_when_a_drag_begins_with_the_eq_off` (node), `a_finger_adds_drags_and_pinches`).
+- Ember's computer side (`node/ember-parts.mjs`, `computer_ember.py`, both browsers, `SVOLDER_HOST=fake`):
+  the markup (`the_pill_names_the_device_and_this_computer`, `no_pill_without_a_dac_or_the_computer`,
+  `the_dial_reads_percent_with_ticks_0_25_50_75_100`, `the_tone_mode_is_off_eq_in_the_seg_style`,
+  `the_table_has_type_frequency_gain_q_and_remove`, `the_table_shows_six_rows_and_scrolls`,
+  `the_lone_point_keeps_its_remove`, `nothing_below_the_switch_says_computer`, `no_style_attribute`, an amp
+  page drawn with the DAC page's parts) and the page (`the_pill_flips_volume_and_tone_together`,
+  `minus_plus_mute_set_the_computer_volume`, `a_point_drag_posts_live_and_done_at_release` with the row lit and
+  scrolled into view, `a_tap_adds_a_point_and_x_removes_it`, `the_points_are_listed_by_frequency_and_the_selection_follows`, `the_mode_the_type_a_typed_value_and_the_presets_write`,
+  `the_wheel_and_a_right_drag_set_the_q`, `sixteen_points_keep_the_layout`, `a_flip_mid_drag_writes_nothing`,
+  `a_guest_sees_the_computer_inert`, `the_side_survives_a_reload`,
+  `the_same_preset_on_both_asks_and_yes_flattens_the_dac`, `the_amp_page_flips_to_the_computer_with_the_dac_parts`,
+  `the_pill_keeps_the_focus_across_a_keyboard_flip`, `presets_save_rename_delete_from_the_computer_side`, and in Chromium under touch emulation `a_finger_adds_drags_and_pinches`). Its driver is held by the contract and
+  completeness checks.
+- Signal's computer side (`node/signal-line.mjs`, `node/signal-draw.mjs`, `computer_signal.py`, both browsers,
+  `SVOLDER_HOST=fake`): the hop and the choice (`the_computer_hop_is_called_this_computer`,
+  `choosing_it_is_the_flip_and_another_hop_flips_back`, `a_kept_computer_side_chooses_the_hop_on_load`), the
+  markup (`the_volume_reads_percent_with_no_cap_tick`, `mode_chips_are_off_and_eq`,
+  `the_points_table_has_type_and_remove`, `every_dot_sits_on_the_curve_at_the_summed_response`,
+  `the_computer_keeps_its_facts_under_the_controls`, `nothing_below_the_line_says_computer`, `the_verdict_names_pipewire_never_the_computer`, `the_dac_keeps_its_value_in_the_quiet_grey_while_the_computer_is_chosen`, `a_computer_that_cannot_be_used_is_not_chosen_on_a_load`,
+  `the_computers_presets_save_rename_and_delete_as_the_dacs_do`, `a_guest_sees_the_computer_inert`) and the page
+  (`the_hop_flips_volume_and_tone_together`, `a_keyboard_flip_puts_the_focus_on_the_chosen_hop`,
+  `minus_plus_mute_set_the_computer_volume`, `a_point_drag_posts_live_and_done_at_release` with every dot on the
+  curve, `a_tap_adds_a_point_and_x_removes_it`, `the_points_are_listed_by_frequency_and_the_selection_follows`, `the_mode_the_type_a_typed_value_and_the_presets_write`,
+  `presets_save_rename_and_delete_on_the_computer_side`, `the_wheel_sets_the_q`, `sixteen_points_keep_the_layout`,
+  `a_flip_mid_drag_ends_it_with_one_final_value`, `a_guest_sees_the_computer_inert`, `the_side_survives_a_reload` with a first
+  paint never a live 0 %, `the_same_preset_on_both_asks_and_yes_flattens_the_dac`,
+  `the_amp_page_flips_to_the_computer_with_the_dac_parts`, `a_load_with_the_computer_kept_but_unavailable_shows_the_dac`, `the_wire_still_shows_the_eq_changing_the_sound`, and
+  in Chromium under touch emulation `a_finger_adds_drags_and_pinches`). Its driver is held by the contract and
+  completeness checks.
 - Preferences under a theme's own key, storage that refuses read as nothing, the choice written to
   storage and cookie together, light or dark following the system until a person overrides it and
   ignoring it for a theme with one scheme: `node/core-prefs.mjs`. A theme that throws on mount or
@@ -1303,7 +1389,7 @@ later tasks through `openers`.
   `style` attribute); `node/signal-line.mjs` `the_player_quitting_while_chosen_gives_the_box_back_to_the_dac` and
   `a_device_card_or_a_waiting_page_marks_the_shown_hop_in_trouble`. In the browser (`signal_theme.py`, both browsers):
   `the_player_transport_works_when_chosen` (the bottom bar hides and returns, previous / pause / next post the host's press,
-  the dots move and stop with the player, the time in the area moves), `the_computer_hop_has_no_control` (the facts from
+  the dots move and stop with the player, the time in the area moves), `the_computer_hop_keeps_its_facts` (the facts under the controls, from
   the route, nothing focusable, a click or Enter sends nothing), `a_lost_device_shows_try_now_and_the_seconds` (the card in
   the open area, the seconds counting down, the red ring, the stillness and dimming after it, the player's dots still
   moving, the last heard volume and curve dimmed and inert, Try now posts connect, the device back clears it),
@@ -1490,7 +1576,7 @@ dash and the sheet come with the later tasks.
   `the_transport_plays_and_pauses` (pause posts the host's press and the key turns to play; the time and
   the fill move on), `a_guests_tap_posts_nothing` (a real guest: only the sheet's key is live; a tap on
   `+`, `−`, MUTE and the input posts nothing and the core says to sign in),
-  `the_dash_fades_to_a_tenth_with_the_hud` (1280x900 and 915x412: the dash at 0.1 with the HUD after the idle time),
+  `the_dash_fades_to_a_fifth_with_the_hud` (1280x900 and 915x412: the dash at 0.2 with the HUD after the idle time),
   `a_move_wakes_the_dash_at_once`, `a_tap_on_a_faded_key_only_wakes_the_dash` (nothing posted, the next tap writes, the
   click of the waking tap presses no transport key), `the_dash_stays_while_its_input_list_is_open` (the HUD faded, the
   dash at 1; it fades again once the list is closed), `the_portrait_panel_never_fades` (412x915) and
@@ -1692,8 +1778,8 @@ dash and the sheet come with the later tasks.
   on: a needle changes at least twice in 3 s with the sheet left open, the same element), `every_control_writes` (a toggle, a scale by key and by the
   centre tap and a press along it, the amp's power key and switch), `identify_says_the_daemons_words`.
 
-- The phone (`nightdrive_phone.py`, both browsers): `portrait_puts_the_scene_above_the_dash_panel` (412x915 and 360x780: the panel is its own rows, under 30 % of the window, to the window's bottom and edges; the scene's bottom is the panel's top within 2 px and the canvas fills it; the volume is in the scene, centred, under the device line and the EQ line and above the sun at rest; `−` `MUTE` `+` in that order on one row, the track, the transport and `DEVICE ▴` on one row in the panel; the EQ line holds the gains; no scroll), `the_portrait_volume_fades_with_the_hud` (upright, the volume, the device line and the EQ line reach opacity 0 and the panel stays at 1), `landscape_shows_the_scene_full_with_a_slim_dash` (844x390 and 667x375: the scene and
-  its canvas are the window, the dash under a quarter of the height with every key inside, the volume above it),
+- The phone (`nightdrive_phone.py`, both browsers): `portrait_puts_the_scene_above_the_dash_panel` (412x915 and 360x780: the panel is two rows, under 30 % of the window (the scene above it over 77 %), to the window's bottom and edges, translucent (alpha .7) with every text in it at 4.5:1 or more over the brightest cell the floor can draw behind it (the DAC's page and, as `the_amp_panel_text_keeps_contrast`, an amp's with its gauges; a named selector with no element fails); the scene runs behind it; the switch is one pill `DAC | PC` in the scene's top left corner (an amp `AMP | PC`; each segment keeps its whole name as its accessible name), 36 px tall with a 44 px hit area, clear of the menu button and the device line; the volume is in the scene, centred, under the EQ line and above the sun at rest; `−` `MUTE` `+` and the transport on ONE row, the track with the input and `DEVICE ▴` on the Now-playing line below; the EQ line holds the gains; no scroll), `the_portrait_volume_fades_with_the_hud` (upright, the volume, the device line and the EQ line reach opacity 0 and the panel stays at 1), `landscape_shows_the_scene_full_with_a_slim_dash` (844x390 and 667x375: the scene and
+  its canvas are the window, the dash one row under a quarter of the height with every key inside, the switch's pill in the top left corner, left of the device line and clear of the volume, the volume above the dash),
   `the_menu_button_is_fixed_on_a_phone` (44 px, 8 px from the top and the right, the frame fixed, in both turns),
   `the_sheet_slides_up_in_portrait_and_in_from_the_right_in_landscape` (30 % from the top and the full width with the `nd-sheet-up`
   keyframes; `min(420px, 60vw)` against the right edge with `nd-sheet-side`), `turning_the_phone_keeps_an_open_sheet_open` (the sheet
@@ -1894,3 +1980,19 @@ unit of halo weight inside a wide band (-0.6 to -0.02), which a fit near zero ca
   "a_hold_taken_around_a_call_is_given_back_if_it_throws",
   "another_device_shown_tells_the_switchers_once_and_lets_a_reset_release_the_holds"). Mutants (run
   by hand): the generation check removed, and the switchers not called, each killed.
+- Paper's computer side (`node/paper-draw.mjs`, `node/paper-ruler.mjs`, `node/paper-words.mjs` over `node/paper-rig.mjs`;
+  `computer_paper.py`, both browsers, `SVOLDER_HOST=fake`). Node: `showing_underlines_the_chosen_side`
+  (the switch by the title, the side shown underlined, `the amp` on an amp, none without a device or the
+  computer, the unavailable sentence in its place), `the_ruler_reads_0_to_100_percent` (the labels, the
+  ticks, no zone, a sink above 100 % read as it is), `tone_writes_off_and_eq_with_the_chosen_underlined`
+  (and an EQ only the state file vouches for is never drawn as running), `the_points_table_scrolls_after_six`
+  (the hint, `+ Add point` gone at 16, the lone point with no remove, `Remove point N`, the line),
+  `nothing_below_the_switch_says_computer`, `every_word_passes_papers_chars`, a guest's words quiet, the
+  first paint's dash. Browser: `the_switch_flips_volume_and_tone_together`,
+  `minus_plus_mute_set_the_computer_volume`, `a_point_drag_posts_live_and_done_at_release`,
+  `a_tap_adds_a_point_and_x_removes_it`, `sixteen_points_keep_the_layout` (the tone section and the page as
+  tall with 16 as with 7), `a_flip_mid_drag_writes_nothing` (Chromium), `a_guest_sees_the_computer_inert`,
+  `the_side_survives_a_reload`, `the_same_preset_on_both_asks_and_yes_flattens_the_dac`,
+  `the_amp_page_flips_to_the_computer_with_the_dac_parts`, `the_computer_side_fits_a_phone` (no sideways
+  scroll at 390; the stills `target/web-shots/paper/computer-{desktop,phone}.png`). `contract.py` and
+  `completeness.py` drive Paper's computer targets (every theme has a computer driver).

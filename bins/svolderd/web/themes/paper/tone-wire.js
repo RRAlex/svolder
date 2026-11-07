@@ -46,7 +46,7 @@ export function wireTone({
 
   box.addEventListener('click', (event) => {
     const el = event.target.closest?.('[data-act]');
-    if (!el) return;
+    if (!el || core.computer.side() === 'computer') return;
     const device = store.device();
     const tone = store.part('tone');
     if (!tone || !device) return;

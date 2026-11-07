@@ -19,6 +19,9 @@
 //                them, fold.js keeps the facts' fold; draw/gauges.js an amp's gauges in the dash
 //   tune.js      the tone control on the mountains as numbers (the map, the bubbles, the morph);
 //                tune-wire.js the hands on it, draw/tune.js the bubbles
+//   computer-view.js, points.js, points-wire.js   the computer's side (the switch by the menu button or in the panel's
+//                top row, its volume in the HUD and on the dash's keys, its points as bubbles on the mountains and a
+//                table on the sheet): what the drawing reads of the core, the points' words, the table's hands
 //   sky.js       the sky's rare events, by the clock; motion.js the Full, Calm and Still levels
 //   rest.js      the cursor over the scene hiding after 2 s without a move
 //   states.js    how the page stands (ok, out of reach, lost, reading again, no analysis) and the quiet line's words;
@@ -50,6 +53,7 @@ import { createFold } from './fold.js';
 import { wireHud } from './hud-wire.js';
 import { PARTS_OF, createLive } from './live.js';
 import { MOTIONS, motionOf } from './motion.js';
+import { wirePoints } from './points-wire.js';
 import { wirePresets } from './presets-wire.js';
 import { createRest } from './rest.js';
 import { preview } from './preview.js';
@@ -61,6 +65,7 @@ const SKELETON = `<div id="nightdrive" class="nd"><div class="nd-scene" role="im
   + '<canvas id="nd-sky" class="nd-canvas"></canvas><canvas id="nd-road" class="nd-canvas"></canvas></div>'
   + '<div id="nd-layer" class="nd-layer"><span id="nd-slot" class="nd-slot"></span><div class="nd-hud">'
   + '<div class="nd-top"><span class="nd-left"></span><span class="nd-right" aria-live="polite"></span></div>'
+  + '<span id="nd-switch" class="nd-switch"></span>'
   + '<div class="nd-vol"></div><div class="nd-eq" hidden></div><div class="nd-quiet" role="status" hidden></div></div>'
   + '<div id="nd-dash" class="nd-dash"></div><div id="nd-cardbox" class="nd-cardbox" hidden></div></div>'
   + '<div id="nd-sheet-wrap" class="nd-sheet-wrap" hidden></div></div>';
@@ -128,6 +133,9 @@ function mount(root, core, { signal }) {
   wirePresets({
     core, act, sheet, signal,
   });
+  wirePoints({
+    core, act, sheet, signal,
+  });
   wireControls({
     core, live, act, sheet, signal,
   });
@@ -152,7 +160,7 @@ function mount(root, core, { signal }) {
   core.frame.anchor(root.querySelector('#nd-slot'), { fixed: true });
   const rest = createRest({
     root: page, doc: root.ownerDocument, fine: !globalThis.matchMedia('(pointer: coarse)').matches,
-    keepOut: () => [...root.querySelectorAll('.nd-left, .nd-right, .nd-eq, .nd-odb, .nd-novol, .nd-quiet')],
+    keepOut: () => [...root.querySelectorAll('.nd-left, .nd-right, .nd-eq, .nd-odb, .nd-novol, .nd-quiet, .nd-swkeys')],
   });
   live.drawAll();
   return function unmount() {

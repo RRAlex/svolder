@@ -61,6 +61,7 @@ use super::render::FrameAreas;
 use super::terminal::{MouseCapture, SyncEdge};
 use super::widgets::hyperlink;
 
+mod computer;
 mod connect;
 mod devices;
 mod events;
@@ -77,6 +78,7 @@ mod web_box;
 
 pub(in crate::tui) use connect::TokenSite;
 // A re-export only the tests use is its own `#[cfg(test)]` line, so the others stay unconditional.
+use computer::ComputerLink;
 #[cfg(test)]
 use connect::daemon_answered;
 use connect::{Reconnect, daemon_answers_within, daemon_back, recv_reconnect, recv_version};
@@ -132,8 +134,6 @@ pub(super) const INPUT_ENDED: &str = "the terminal input ended";
 
 /// How often the daemon is asked how its servers stand while the Connect category shows.
 const CONNECT_POLL: Duration = Duration::from_secs(2);
-/// How often the computer EQ's state file is looked at.
-const HOST_EQ_POLL: Duration = Duration::from_secs(1);
 
 /// Whether the Settings box is open on the Connect category.
 fn connect_shown(app: &App) -> bool {
@@ -219,8 +219,6 @@ struct Timers {
     relist: tokio::time::Interval,
     /// Asks the daemon how its servers stand while the Connect category shows.
     conn_poll: tokio::time::Interval,
-    /// Looks at the computer EQ's state file.
-    host_eq_poll: tokio::time::Interval,
     /// Asks the daemon whether the link the Web UI box shows is still open.
     web_poll: tokio::time::Interval,
 }
@@ -239,8 +237,6 @@ impl Timers {
         // While the Connect category shows, the daemon is asked how its servers stand on its own
         // clock, and the category is read afresh each time it comes on screen.
         let conn_poll = delayed(CONNECT_POLL);
-        // The computer EQ's state file is looked at once a second, so a change from the CLI shows.
-        let host_eq_poll = delayed(HOST_EQ_POLL);
         // While the Web UI box shows a link, the daemon is asked each second whether a browser
         // has used it.
         let web_poll = delayed(web_box::CHECK_PERIOD);
@@ -249,7 +245,6 @@ impl Timers {
             ticks,
             relist,
             conn_poll,
-            host_eq_poll,
             web_poll,
         }
     }
@@ -643,8 +638,22 @@ where
             _ = turns.timers.conn_poll.tick(), if connect_shown(&watching.app) && watching.daemon_version.is_none() => {
                 watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
             }
-            _ = turns.timers.host_eq_poll.tick() => {
-                turns.quiet = on_host_eq_poll(&mut watching);
+            answer = computer::answered(&mut watching.computer.answers),
+                if watching.computer.answers.is_some() =>
+            {
+                watching = match on_computer_answer(*answer, &mut seams, watching, &mut look, &mut turns).await {
+                    Ok(next) => next,
+                    Err(end) => return end,
+                };
+            }
+            view = computer::next_view(&mut watching.computer.views),
+                if watching.computer.views.is_some() =>
+            {
+                turns.quiet = watching.app.host.computer.eq.as_deref() == Some(&*view);
+                let before = watching.app.computer_points();
+                watching.app.host.computer.eq = Some(view);
+                watching.app.follow_point(&before);
+                watching.app.note_computer_view();
             }
             done = jobs::next(&mut watching.jobs.ended) => {
                 watching = match on_job_done(done, &mut seams, watching, &mut look, &mut turns).await {
@@ -877,15 +886,49 @@ where
     }
 }
 
-/// Looks at the computer EQ's state file, and says whether the turn is quiet: a tick that finds
-/// the file as it was asks for no frame.
-fn on_host_eq_poll(watching: &mut Watching) -> bool {
-    let changed = watching.jobs.host_eq_changed();
-    let quiet = changed.is_none();
-    if let Some(state) = changed {
-        watching.app.take_host_eq(state);
-    }
-    quiet
+/// Tells the user what a change of the computer's controls ended with, and carries out what it
+/// asks next: the question of a preset a device plays too, or the DAC's load of a preset the
+/// computer has let go of.
+#[allow(
+    clippy::result_large_err,
+    reason = "the end carries what the loop was watching, once per run"
+)]
+async fn on_computer_answer<O, B, S, M>(
+    answer: computer::Answer,
+    seams: &mut Seams<'_, O, B, S, M>,
+    mut watching: Watching,
+    look: &mut Look,
+    turns: &mut Turns,
+) -> Result<Watching, LoopEnd>
+where
+    O: Open,
+    B: ratatui::backend::Backend,
+    S: Stream<Item = std::io::Result<Event>> + Unpin,
+    M: MouseCapture,
+{
+    let intents = match answer {
+        computer::Answer::Said(why) => {
+            // A volume the daemon would not take stands no longer.
+            watching.app.host.asked = None;
+            let flattened = watching.app.presets.computer_flattened.take();
+            match flattened {
+                Some(name) => watching.app.warn(format!(
+                    "{why} The DAC was flattened; put the curve back with Enter on {name} in \
+                     the presets box, or `svolder eq load {name}`."
+                )),
+                None => watching.app.warn(why),
+            }
+            Vec::new()
+        }
+        computer::Answer::Asked { name, .. } => {
+            presets::computer::asked(&mut watching.app, &name);
+            Vec::new()
+        }
+        computer::Answer::Moved(name) => presets::computer::moved(&mut watching.app, &name),
+    };
+    let (mut screen, opener, mouse) = seams.split(&mut turns.hits);
+    let flow = take_intents(intents, opener, watching, mouse, look, &mut screen).await;
+    carried(flow, &mut turns.adding)
 }
 
 /// Carries out what a finished job asks of the loop.

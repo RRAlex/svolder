@@ -146,6 +146,7 @@ impl<O: Open> Opener<O> {
             // The host is the session's, not the device's, so its state carries over too. What
             // a daemon said of it is asked again of this backend's own daemon below.
             app.host = keep.host;
+            app.side = keep.side;
             app.host.daemon = None;
             app.mascot = keep.mascot.reopened();
             app.session.daemon_version_warned = keep.daemon_version_warned;
@@ -208,6 +209,7 @@ impl<O: Open> Opener<O> {
             host_refresh: None,
             host: HostLink::none(),
             jobs: jobs::Jobs::default(),
+            computer: Box::default(),
         })
     }
 }
@@ -378,6 +380,7 @@ impl<O: Open> Opener<O> {
         if let Some(keep) = keep {
             app.mouse = keep.mouse;
             app.host = keep.host;
+            app.side = keep.side;
             app.host.daemon = None;
             app.mascot = keep.mascot.reopened();
             app.session.daemon_version_warned = keep.daemon_version_warned;
@@ -405,6 +408,7 @@ impl<O: Open> Opener<O> {
             host_refresh: None,
             host: HostLink::none(),
             jobs: jobs::Jobs::default(),
+            computer: Box::default(),
         }
     }
 }

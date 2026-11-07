@@ -245,7 +245,17 @@ impl Daemon {
         if slot.stopping {
             return;
         }
-        slot.running = Bridge::start(mqtt, devices, presets.to_vec(), &self.socket);
+        let computer = crate::mqtt_bridge::ComputerLink {
+            view: self.host.changes(),
+            switch: self.host.eq_switch(),
+        };
+        slot.running = Bridge::start(
+            mqtt,
+            devices,
+            presets.to_vec(),
+            Some(computer),
+            &self.socket,
+        );
     }
 
     /// Stop the MQTT bridge, if one runs, with `offline` for every device and for itself.
@@ -819,8 +829,11 @@ impl Daemon {
                 self.stop.notify_one();
                 Response::Stopping
             }
-            Request::Host => Response::Host(self.host.view()),
+            Request::Host => Response::Host(self.host.view_now().await),
             Request::HostPress { button } => self.host_press(&button).await,
+            Request::HostVolume { pct } => self.host_volume(pct).await,
+            Request::HostMute { muted } => self.host_mute(muted).await,
+            Request::HostEq { op } => self.host_eq(origin, op).await,
             // The server answers `Subscribe` through `subscribe`, never here.
             Request::Subscribe { .. } => Response::Error {
                 code: 1,
@@ -990,6 +1003,8 @@ pub(crate) fn silence(name: &str) -> String {
         other => format!("{other:?}"),
     }
 }
+
+mod computer;
 
 #[cfg(test)]
 mod host_tests;

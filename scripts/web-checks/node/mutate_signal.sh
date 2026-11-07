@@ -23,9 +23,17 @@ while IFS='|' read -r name file from to; do
 done <<'LIST'
 the line drops the hops after the DAC|line.js|  hops.push(...after.map(afterHop));|  void after.map(afterHop);
 a declared hop is drawn live|line.js|live: linked === true,|live: true,
-a hop that disappears stays chosen|line.js|return chosen && hops.some((hop) => hop.id === chosen) ? chosen : shown;|return chosen ? chosen : shown;
+a hop that disappears stays chosen|line.js|if (chosen && hops.some((hop) => hop.id === chosen)) return chosen;|if (chosen) return chosen;
 the facts start open|fold.js|get('facts', 'closed') === 'open'|get('facts', 'open') === 'open'
-the computer's hop gains a write|draw/computer.js|const head = `<h2>${esc(COMPUTER.title)}</h2>`;|const head = `<h2>${esc(COMPUTER.title)}</h2><button type="button" data-act="mute">x</button>`;
+the computer's facts gain a write|draw/computer.js|const head = `<h2 class="sg-lbl">${esc(COMPUTER.title)}</h2>`;|const head = `<h2 class="sg-lbl">${esc(COMPUTER.title)}</h2><button type="button" data-act="mute">x</button>`;
+a point's dot stands off the curve|draw/computer.js|  const dots = tone.markers.map(fractionOf);|  const dots = tone.points.map((p) => ({ n: p.n, x: 0.5, y: 0.1 }));
+the lone point loses its remove|draw/computer.js|  const remove = `<button type="button" class="sg-prm|  const remove = point.n > 1 && `<button type="button" class="sg-prm
+a kept computer side does not choose its hop on load|line.js|  return side === 'computer' && computer && !computer.unavailable ? 'computer' : shown;|  return shown;
+a computer that cannot be used is chosen on a load|line.js|  return side === 'computer' && computer && !computer.unavailable ? 'computer' : shown;|  return side === 'computer' && computer ? 'computer' : shown;
+the verdict says computer|draw/computer.js|  return fact(COMPUTER.path, plain(path.words),|  return fact(COMPUTER.path, path.words,
+the DAC's value keeps its accent beside the computer|draw/line.js|` sg-v${chosen === 'computer' ? ' sg-vq' : ''}`|` sg-v`
+another hop does not flip back|line.js|export const sideOf = (id) => (id === 'computer' ? 'computer' : 'dac');|export const sideOf = (id) => (id ? 'computer' : 'dac');
+the hop does not say its controls are below|line.js|const below = unavailable ? UNAVAILABLE(unavailable) : (chosen ? CONTROLS_BELOW : '');|const below = unavailable ? UNAVAILABLE(unavailable) : '';
 the strip does not centre the chosen hop|draw/line.js|translateX(${drag - at * HOP_PX}px)|translateX(${drag}px)
 a linked amp shown alone loses its DAC|line.js|  else if (dac) hops.push(dacBefore(dac));|  else if (dac) void dacBefore;
 an amp's faults are picked by their words|draw/amp.js|filter((r) => /^230\./.test(r.id));|filter((r) => /^over-/i.test(r.label));

@@ -19,8 +19,9 @@ use svolder_proto::FunctionId;
 use crate::convert::{EqMode, EqParam, frequency_text, gain_text};
 use crate::error::ProfileError;
 use crate::model::{EqSpec, Profile};
-use crate::tone::apo::Correction;
+use crate::tone::apo::{Correction, FilterKind, SourceFilter};
 use crate::tone::fit::{self, Fit};
+use crate::tone::response::{self, BandParams};
 
 /// The strongest loudness setting a tone control takes.
 pub const LOUDNESS_MAX: u8 = 127;
@@ -94,7 +95,8 @@ impl Preset {
     }
 
     /// The preset to recall or compare on a device whose tone control is `eq`: for an imported
-    /// preset, the bands [`fit_for`] gives, in EQ mode with loudness 0 and the same name; any
+    /// preset, its own filters when [`as_bands`] says they fit the tone control as they are,
+    /// else the bands [`fit_for`] gives, in EQ mode with loudness 0 and the same name; any
     /// other preset as it is. An imported preset stays as it is for a tone control with no
     /// bands, which nothing fits.
     pub fn for_device(&self, eq: &EqSpec) -> Cow<'_, Preset> {
@@ -109,10 +111,174 @@ impl Preset {
             bands,
             mode: EqMode::Eq,
             loudness: 0,
-            band: fit_for(eq, source).bands.clone(),
+            band: as_bands(eq, &source.correction)
+                .unwrap_or_else(|| fit_for(eq, source).bands.clone()),
             source: None,
         })
     }
+}
+
+/// The most filters the computer EQ holds.
+pub const COMPUTER_POINTS: usize = 16;
+
+/// Why `preset` cannot be put on the computer for its filter count: `17 filters; the computer
+/// EQ holds 16`. `None` for a preset the computer holds; a count is never cut down.
+/// [`host_correction`] says it too, so no path to the computer has to ask first.
+pub fn computer_refusal(preset: &Preset) -> Option<String> {
+    let count = match &preset.source {
+        Some(source) => source.correction.filters.len(),
+        None => preset.band.len(),
+    };
+    (count > COMPUTER_POINTS)
+        .then(|| format!("{count} filters; the computer EQ holds {COMPUTER_POINTS}"))
+}
+
+/// Whether `preset` changes nothing: every band or filter at 0 dB. Such a curve cannot play on
+/// the DAC and the computer at once, so it is never moved between them.
+pub fn is_neutral(preset: &Preset) -> bool {
+    match &preset.source {
+        Some(source) => source.correction.filters.iter().all(|f| f.g == 0.0),
+        None => preset.band.iter().all(|band| band.g == 0.0),
+    }
+}
+
+/// What moving a preset to the other side (the DAC or the computer) asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BothSides {
+    /// Nothing: the preset is not on the other side, or changes nothing.
+    Free,
+    /// The preset is already on the other side: the move asks first, so one correction is
+    /// never left playing on both.
+    Ask {
+        /// The preset being moved.
+        name: String,
+        /// The preset that is on the other side, as that side calls it.
+        other: String,
+    },
+}
+
+/// Whether putting `preset` on one side while `other_side` (the name of what is on the other
+/// side, if anything) is the same preset needs the question. The one decision every front end
+/// and both directions make: a neutral curve ([`is_neutral`]) is free, since it cannot play twice.
+pub fn both_sides(preset: &Preset, other_side: Option<&str>) -> BothSides {
+    match other_side {
+        Some(other) if same_name(&preset.name, other) && !is_neutral(preset) => BothSides::Ask {
+            name: preset.name.clone(),
+            other: other.to_string(),
+        },
+        _ => BothSides::Free,
+    }
+}
+
+/// A computer curve as the bands of the tone control `eq`, when it fits as it is: exactly one
+/// peaking filter per band, and each one's frequency, gain and Q inside the band's own step
+/// table, from its first step to its last (the table a write converts through). The filters are matched to the bands in order of
+/// frequency, and keep their values.
+pub fn as_bands(eq: &EqSpec, correction: &Correction) -> Option<Vec<PresetBand>> {
+    if eq.bands.is_empty()
+        || correction.filters.len() != eq.bands.len()
+        || correction
+            .filters
+            .iter()
+            .any(|filter| filter.kind != FilterKind::Peaking)
+    {
+        return None;
+    }
+    let mut sorted = correction.filters.clone();
+    sorted.sort_by(|a, b| a.f.total_cmp(&b.f));
+    let between = |value: f64, a: f64, b: f64| value >= a.min(b) && value <= a.max(b);
+    let (gain_low, gain_high) = (eq.gain_db(0), eq.gain_db(EqSpec::STEP_MAX));
+    let (q_low, q_high) = (eq.q(0), eq.q(EqSpec::STEP_MAX));
+    sorted
+        .iter()
+        .enumerate()
+        .all(|(index, filter)| {
+            let (Some(low), Some(high)) = (
+                eq.frequency(index, 0),
+                eq.frequency(index, EqSpec::STEP_MAX),
+            ) else {
+                return false;
+            };
+            between(filter.f, low, high)
+                && between(filter.g, gain_low, gain_high)
+                && between(filter.q, q_low, q_high)
+        })
+        .then(|| {
+            sorted
+                .iter()
+                .map(|filter| PresetBand {
+                    f: filter.f,
+                    g: filter.g,
+                    q: filter.q,
+                })
+                .collect()
+        })
+}
+
+/// The preset a computer curve is saved as: an imported one called `name` with no origin, which
+/// every device fits as [`Preset::for_device`] says.
+pub fn from_computer(name: &str, correction: Correction) -> Preset {
+    Preset::imported(
+        name,
+        Imported {
+            origin: None,
+            correction,
+        },
+    )
+}
+
+/// The correction a preset applies to the computer: an imported preset's filters and stated
+/// preamp, a band preset's bands as peaking filters with a preamp of minus the curve's peak,
+/// rounded up to 0.1 dB, so the correction never clips. A built-in is a band preset.
+///
+/// A band preset the DAC keeps flat or in loudness mode has no curve of its own to play, and
+/// is refused with the reason, and so is a preset of more filters than the computer holds
+/// ([`computer_refusal`]). The numbers are not checked here.
+pub fn host_correction(preset: &Preset) -> Result<Correction, String> {
+    if let Some(why) = computer_refusal(preset) {
+        return Err(why);
+    }
+    if let Some(imported) = &preset.source {
+        return Ok(imported.correction.clone());
+    }
+    if preset.mode != EqMode::Eq {
+        let mode = match preset.mode {
+            EqMode::Flat => "flat",
+            _ => "loudness",
+        };
+        return Err(format!(
+            "{} is a {mode} setting of the DAC's tone control, with no curve to put on the computer",
+            preset.name
+        ));
+    }
+    let bands: Vec<BandParams> = preset
+        .band
+        .iter()
+        .map(|band| BandParams {
+            f0: band.f,
+            gain_db: band.g,
+            q: band.q,
+        })
+        .collect();
+    let peak = response::peak_db(&bands);
+    // The nudge keeps a peak that is a whole step plus rounding noise from rounding up again.
+    let preamp_db = match peak > 1e-9 {
+        true => -((peak * 10.0 - 1e-9).ceil() / 10.0),
+        false => 0.0,
+    };
+    Ok(Correction {
+        preamp_db,
+        filters: preset
+            .band
+            .iter()
+            .map(|band| SourceFilter {
+                kind: FilterKind::Peaking,
+                f: band.f,
+                g: band.g,
+                q: band.q,
+            })
+            .collect(),
+    })
 }
 
 /// What updating an imported preset with the device's curve is refused with: the curve would

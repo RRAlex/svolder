@@ -105,13 +105,22 @@ fn dechunk(mut rest: &str) -> String {
     out
 }
 
-const READ_TOOLS: [&str; 4] = [
+const READ_TOOLS: [&str; 5] = [
     "list_devices",
     "get_state",
     "get_link_history",
     "list_presets",
+    "get_host",
 ];
-const WRITE_TOOLS: [&str; 4] = ["set_control", "load_preset", "mute", "identify"];
+const WRITE_TOOLS: [&str; 7] = [
+    "set_control",
+    "load_preset",
+    "mute",
+    "identify",
+    "set_host_volume",
+    "host_mute",
+    "set_host_eq",
+];
 
 #[tokio::test]
 async fn the_documented_flow_lists_the_tools_and_reads_the_state() {

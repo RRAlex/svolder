@@ -34,15 +34,22 @@
 //! fit the device, which the daemon hands over at start and again on every reload; recalling
 //! one sends the writes [`crate::recall`] plans, in order, as one write under the select's key.
 //!
-//! The task's work is written in four children, each an `impl BridgeTask` block; this file holds
+//! The computer's EQ is a bridge-level unit of its own, `computer`: one switch and one preset
+//! sensor ([`svolder_mqtt::computer`]), published while the host reports an EQ and followed
+//! through its view ([`ComputerLink`]). Its command is never acted on when retained, and an ON
+//! with nothing kept to apply leaves the EQ off and says why in the log.
+//!
+//! The task's work is written in five children, each an `impl BridgeTask` block; this file holds
 //! the handle ([`Bridge`]) and the types they share:
 //! - [`commands`]: a message from the broker, parsed into a write, and the end of that write.
+//! - [`computer`]: the computer's EQ switch and sensor.
 //! - [`connection`]: the task's loop and its farewell.
 //! - [`discovery`]: following the devices and presets, subscriptions, clearing a device.
 //! - [`state`]: marking devices changed and publishing availability, configs, state, meters and
 //!   diagnostics.
 
 mod commands;
+mod computer;
 mod connection;
 mod discovery;
 mod state;
@@ -62,6 +69,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::Instant;
 
 use crate::device::{DeviceHandle, Feed};
+use crate::host::EqSwitch;
 use crate::log;
 use crate::writer::{Outcome, Planned, Writer};
 
@@ -77,6 +85,16 @@ const METERS_EVERY: Duration = Duration::from_secs(1);
 /// The longest a stop waits for the broker to take the last words before it disconnects
 /// regardless.
 const STOP_WITHIN: Duration = Duration::from_secs(3);
+
+/// What the bridge reaches the computer's EQ through: the host's view as it changes, and the
+/// switch that turns the EQ on and off.
+#[derive(Clone)]
+pub struct ComputerLink {
+    /// The host's view.
+    pub view: watch::Receiver<svolder_ipc::host::HostView>,
+    /// Turns the EQ on or off.
+    pub switch: Arc<dyn EqSwitch>,
+}
 
 /// The daemon's end of a running bridge.
 pub struct Bridge {
@@ -110,6 +128,7 @@ impl Bridge {
         config: &MqttConfig,
         devices: Vec<Arc<DeviceHandle>>,
         presets: Vec<Preset>,
+        computer: Option<ComputerLink>,
         socket: &std::path::Path,
     ) -> Option<Bridge> {
         if !config.enabled {
@@ -143,7 +162,7 @@ impl Bridge {
         let link = client.watch_link();
         let (ops, ops_rx) = mpsc::unbounded_channel();
         let (changes_tx, changes) = mpsc::unbounded_channel();
-        let task = BridgeTask {
+        let mut task = BridgeTask {
             config: config.clone(),
             client,
             devices: BTreeMap::new(),
@@ -154,7 +173,11 @@ impl Bridge {
             last_lost: None,
             retained_commands: BTreeSet::new(),
             presets,
+            computer: None,
         };
+        if let Some(link) = computer {
+            task.follow_computer(link);
+        }
         let task = tokio::spawn(task.run(events, ops_rx, changes));
         let bridge = Bridge {
             config: config.clone(),
@@ -267,6 +290,8 @@ struct BridgeTask {
     retained_commands: BTreeSet<String>,
     /// The user's presets, from which each device's fitting ones are chosen.
     presets: Vec<Preset>,
+    /// The computer's EQ, when the daemon hands the bridge one.
+    computer: Option<computer::Published>,
 }
 
 /// What a write handed to a device's writer comes back as.
@@ -281,6 +306,8 @@ enum WriteOutcome {
     Written(Control, Outcome),
     /// A recall a later pick replaced before it started.
     Replaced,
+    /// The computer EQ's switch was turned: whether it was asked on, and how it ended.
+    Computer(bool, Result<(), String>),
 }
 
 /// One control of one device: its unit id and its profile key.

@@ -2,31 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crossterm::event::KeyCode;
-use svolder_host::eq::{HostEqState, Manager, Route};
 use svolder_profiles::EqMode;
+use svolder_profiles::tone::preset::host_correction;
 
-use crate::commands::host_eq::host_correction;
-use crate::recovery::Kind;
-use crate::tui::boxes::presets::{Done, done};
+use crate::tui::boxes::presets::PresetList;
+use crate::tui::host::FromDaemon;
 use crate::tui::test_support::presets::{band_params, carried_out, focus, imported, resting, step};
-use crate::tui::test_support::press_from as press;
+use crate::tui::test_support::{computer_eq, press_from as press};
 
 use super::*;
-
-/// What the computer EQ's state file holds after `name` was applied.
-fn state(name: &str) -> HostEqState {
-    HostEqState {
-        on: true,
-        name: name.to_string(),
-        origin: None,
-        target: "alsa_output.test".into(),
-        route: Route::Default,
-        manager: Manager::Process,
-        previous_default: None,
-        preamp_db: -3.0,
-        filters: Vec::new(),
-    }
-}
 
 /// A Gungnir 2 flat in EQ mode with the imported preset `Phones` in the file, the list open.
 fn listing() -> App {
@@ -36,115 +20,93 @@ fn listing() -> App {
     app
 }
 
-/// `h` applies the focused preset in front of the computer's output, with the correction the
-/// computer takes, and the answer puts it on the computer; the row says so afterwards.
-#[test]
-fn h_applies_the_focused_preset_on_the_computer() {
+/// [`listing`] with the computer's controls there, its EQ off.
+fn offered() -> App {
     let mut app = listing();
-    let intents = press(&mut app, KeyCode::Char('h'));
-    let [
-        Intent::HostApply {
-            name,
-            origin,
-            correction,
-        },
-    ] = intents.as_slice()
-    else {
-        panic!("expected one apply, got {intents:?}");
-    };
-    assert_eq!(name, "Phones");
-    assert_eq!(origin, &None);
-    assert_eq!(correction, &host_correction(&app.presets.saved[0]).unwrap());
-    assert!(app.presets.computer_busy);
-    assert!(
-        press(&mut app, KeyCode::Char('h')).is_empty(),
-        "a second apply started"
-    );
-    assert!(
-        app.toast()
-            .is_some_and(|t| t.text.contains("still changing"))
-    );
-
-    assert!(
-        done(
-            &mut app,
-            Done::Applied("Phones".into(), -3.0, Ok(state("Phones")))
-        )
-        .is_empty()
-    );
-    assert!(!app.presets.computer_busy);
-    assert_eq!(app.presets.computer.as_deref(), Some("Phones"));
-    assert_eq!(
-        app.toast().map(|t| t.text.clone()),
-        Some("Phones is on the computer".to_string())
-    );
-    assert_eq!(step(&app), Some(&Step::Choosing), "the box closed");
+    app.host.computer.eq = Some(computer_eq(false, &[("PK", 1000.0, 0.0, 1.0)]));
+    app
 }
 
-/// `h` on the preset that is on the computer takes it off.
+/// [`offered`] on the computer's side, the list still open.
+fn on_the_computer() -> App {
+    let mut app = offered();
+    app.flip_side();
+    assert!(app.on_computer());
+    app
+}
+
+/// `Phones` as the computer's EQ holds it, on.
+fn phones_on_the_computer(app: &mut App) {
+    let mut eq = computer_eq(true, &[("PK", 1000.0, 2.0, 1.0)]);
+    eq.preset = Some("Phones".into());
+    app.host.computer.eq = Some(eq);
+}
+
+/// `h` is not a key of the list: the computer is the side switch's, and a preset goes there with
+/// `Enter` on that side.
 #[test]
-fn h_removes_the_preset_that_is_on_the_computer() {
-    let mut app = listing();
-    app.presets.computer = Some("phones".into());
+fn h_does_nothing_in_the_preset_list() {
+    let mut app = offered();
+    let before = app.snapshot_for_test();
+    assert!(press(&mut app, KeyCode::Char('h')).is_empty());
+    assert!(app.snapshot_for_test() == before, "`h` moved something");
+    assert_eq!(step(&app), Some(&Step::Choosing));
+}
+
+/// On the computer's side `Enter` puts the focused preset on the computer with the correction the
+/// computer takes, closes the list, and leaves the DAC alone.
+#[test]
+fn enter_on_the_computer_side_recalls_on_the_computer() {
+    let mut app = on_the_computer();
+    let intents = press(&mut app, KeyCode::Enter);
+    let preset = imported("Phones");
     assert_eq!(
-        press(&mut app, KeyCode::Char('h')),
-        [Intent::HostRemove { then_load: None }]
+        intents,
+        [Intent::eq(HostEqOp::Apply {
+            name: "Phones".into(),
+            origin: preset
+                .source
+                .as_ref()
+                .and_then(|source| source.origin.clone()),
+            correction: host_correction(&preset).expect("an import has a correction"),
+            sink: None,
+        })]
     );
-    done(
-        &mut app,
-        Done::Removed {
-            then_load: None,
-            result: Ok(()),
-        },
-    );
-    assert_eq!(app.presets.computer, None);
-    assert_eq!(
-        app.toast().map(|t| t.text.clone()),
-        Some("computer EQ removed".to_string())
+    assert!(app.presets.preset_list.is_none(), "the list closed");
+    assert!(
+        band_params(&intents).is_empty(),
+        "nothing was written to the DAC"
     );
 }
 
-/// Where the computer EQ cannot run, and on a built-in, `h` warns with the reason and asks for
-/// nothing; a failed apply is the failure's own words.
+/// A computer where the controls cannot be used says why and sends nothing.
 #[test]
-fn h_warns_where_the_computer_eq_cannot_run_or_the_preset_is_built_in() {
-    let mut app = listing();
-    app.presets.computer_off = Some("host EQ is off: SVOLDER_HOST=off".into());
-    assert!(press(&mut app, KeyCode::Char('h')).is_empty());
+fn a_computer_that_cannot_be_used_says_why() {
+    let mut app = on_the_computer();
+    app.host.computer.eq.as_mut().expect("an eq").unavailable =
+        Some("computer controls unavailable: no pw-cli on this computer".into());
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
     assert_eq!(
         app.toast().map(|t| t.text.clone()),
-        Some("host EQ is off: SVOLDER_HOST=off".to_string())
-    );
-    assert!(!app.presets.computer_busy);
-
-    app.presets.computer_off = None;
-    focus(&mut app, "Flat");
-    assert!(press(&mut app, KeyCode::Char('h')).is_empty());
-    let said = app.toast().map(|t| t.text.clone()).unwrap_or_default();
-    assert!(said.starts_with("Flat is built in"), "{said}");
-
-    focus(&mut app, "Phones");
-    press(&mut app, KeyCode::Char('h'));
-    let failure = Failure::of(Kind::Usage, "PipeWire is not installed".to_string());
-    done(&mut app, Done::Applied("Phones".into(), 0.0, Err(failure)));
-    assert!(!app.presets.computer_busy);
-    assert_eq!(app.presets.computer, None);
-    assert_eq!(
-        app.toast().map(|t| t.text.clone()),
-        Some("PipeWire is not installed".to_string())
+        Some("computer controls unavailable: no pw-cli on this computer".to_string())
     );
 }
 
 /// The preset on the DAC asks before it goes to the computer; `n`, `Enter` and `Esc` change
 /// nothing, and `y` flattens the DAC and then applies.
 #[test]
-fn the_preset_on_the_dac_asks_before_it_moves_to_the_computer() {
+fn the_same_preset_on_the_dac_asks_then_confirms() {
     for answer in [KeyCode::Char('n'), KeyCode::Enter, KeyCode::Esc] {
-        let mut app = listing();
+        let mut app = offered();
         let loaded = press(&mut app, KeyCode::Enter);
         carried_out(&mut app, &loaded);
+        app.flip_side();
+        app.presets.preset_list = Some(PresetList {
+            row: 0,
+            step: Step::Choosing,
+        });
         focus(&mut app, "Phones");
-        assert!(press(&mut app, KeyCode::Char('h')).is_empty());
+        assert!(press(&mut app, KeyCode::Enter).is_empty());
         assert_eq!(
             step(&app),
             Some(&Step::Asking(Question::MoveToComputer("Phones".into())))
@@ -154,39 +116,82 @@ fn the_preset_on_the_dac_asks_before_it_moves_to_the_computer() {
             "{answer:?} asked for something"
         );
         assert_eq!(step(&app), Some(&Step::Choosing));
-        assert!(!app.presets.computer_busy);
     }
 
-    let mut app = listing();
+    let mut app = offered();
     let loaded = press(&mut app, KeyCode::Enter);
     carried_out(&mut app, &loaded);
+    app.flip_side();
+    app.presets.preset_list = Some(PresetList {
+        row: 0,
+        step: Step::Choosing,
+    });
     focus(&mut app, "Phones");
-    press(&mut app, KeyCode::Char('h'));
+    press(&mut app, KeyCode::Enter);
     let intents = press(&mut app, KeyCode::Char('y'));
     let (flatten, apply) = intents.split_at(intents.len() - 1);
     assert!(
         !band_params(flatten).is_empty(),
         "the DAC was not flattened: {intents:?}"
     );
-    assert!(
-        flatten
-            .iter()
-            .all(|i| matches!(i, Intent::EqSet { param, .. } if ["g", "f", "q"].contains(&param.as_str()))),
-        "{flatten:?}"
-    );
-    assert!(matches!(apply, [Intent::HostApply { name, .. }] if name == "Phones"));
+    assert!(matches!(
+        apply,
+        [Intent::HostEq(op)] if matches!(&**op, HostEqOp::Apply { name, .. } if name == "Phones")
+    ));
     // The DAC is left on Flat's values: every band centred at 0 dB, so nothing more to flatten.
     carried_out(&mut app, flatten);
     assert!(app.flatten().is_empty(), "the DAC is not centred");
 }
 
-/// The preset on the computer asks before it goes to the DAC; `y` takes it off the computer
-/// and, once that is done, loads it; a failed removal loads nothing.
+/// Joined to a daemon, the recall is a request by the preset's name; the daemon's question opens
+/// the list on it, and `y` repeats the request with the yes, `n` sends nothing.
+#[test]
+fn a_joined_recall_goes_by_name_and_the_daemons_question_is_asked_here() {
+    let mut app = on_the_computer();
+    app.host.daemon = Some(FromDaemon { route: None });
+    let intents = press(&mut app, KeyCode::Enter);
+    let device = app.session.device_name.clone();
+    assert_eq!(
+        intents,
+        [Intent::eq(HostEqOp::Preset {
+            name: "Phones".into(),
+            device: Some(device.clone()),
+            confirm: false,
+        })]
+    );
+    assert!(app.presets.preset_list.is_none());
+
+    // The daemon answers that a device plays it too.
+    asked(&mut app, "Phones");
+    assert_eq!(
+        step(&app),
+        Some(&Step::Asking(Question::MoveToComputer("Phones".into())))
+    );
+    assert!(press(&mut app, KeyCode::Char('n')).is_empty());
+    asked(&mut app, "Phones");
+    assert_eq!(
+        press(&mut app, KeyCode::Char('y')),
+        [Intent::eq(HostEqOp::Preset {
+            name: "Phones".into(),
+            device: Some(device),
+            confirm: true,
+        })]
+    );
+    assert!(app.presets.preset_list.is_none());
+}
+
+/// The preset on the computer asks before it goes to the DAC; `y` turns the computer EQ off and
+/// loads it on the DAC.
 #[test]
 fn the_preset_on_the_computer_asks_before_it_moves_to_the_dac() {
     for answer in [KeyCode::Char('n'), KeyCode::Enter, KeyCode::Esc] {
-        let mut app = listing();
-        app.presets.computer = Some("Phones".into());
+        let mut app = offered();
+        phones_on_the_computer(&mut app);
+        app.presets.preset_list = Some(PresetList {
+            row: 0,
+            step: Step::Choosing,
+        });
+        focus(&mut app, "Phones");
         assert!(press(&mut app, KeyCode::Enter).is_empty());
         assert_eq!(
             step(&app),
@@ -194,279 +199,213 @@ fn the_preset_on_the_computer_asks_before_it_moves_to_the_dac() {
         );
         assert!(press(&mut app, answer).is_empty());
         assert_eq!(step(&app), Some(&Step::Choosing));
-        assert_eq!(
-            app.presets.computer.as_deref(),
-            Some("Phones"),
-            "{answer:?} changed the computer"
-        );
-        assert!(!app.presets.computer_busy);
+        assert!(app.computer_preset().is_some(), "{answer:?} changed it");
     }
 
-    let mut app = listing();
-    app.presets.computer = Some("Phones".into());
+    let mut app = offered();
+    phones_on_the_computer(&mut app);
+    app.presets.preset_list = Some(PresetList {
+        row: 0,
+        step: Step::Choosing,
+    });
+    focus(&mut app, "Phones");
     press(&mut app, KeyCode::Enter);
     let intents = press(&mut app, KeyCode::Char('y'));
-    assert_eq!(
-        intents,
-        [Intent::HostRemove {
-            then_load: Some("Phones".into())
-        }]
-    );
+    assert_eq!(intents, [Intent::MoveToDac("Phones".into())]);
     assert!(
         app.presets.loaded_preset.is_none(),
-        "it was loaded before the computer let go"
+        "nothing is loaded before the computer EQ is off"
     );
-
-    let intents = done(
-        &mut app,
-        Done::Removed {
-            then_load: Some("Phones".into()),
-            result: Ok(()),
-        },
-    );
-    assert!(
-        !band_params(&intents).is_empty(),
-        "the preset was not loaded: {intents:?}"
-    );
-    assert_eq!(app.presets.computer, None);
+    // Once the computer says it is off, the DAC's load goes out.
+    let loads = moved(&mut app, "Phones");
+    assert!(!band_params(&loads).is_empty(), "{loads:?}");
     assert_eq!(app.presets.loaded_preset.as_deref(), Some("Phones"));
+}
 
-    let mut app = listing();
-    app.presets.computer = Some("Phones".into());
-    let failure = Failure::of(Kind::Usage, "the unit would not stop".to_string());
-    let intents = done(
-        &mut app,
-        Done::Removed {
-            then_load: Some("Phones".into()),
-            result: Err(failure),
+/// More than 16 filters are refused with the count, on the computer's side and by the move from
+/// the DAC, and the DAC is not touched.
+#[test]
+fn seventeen_filters_are_refused_by_name_before_the_dac_is_touched() {
+    use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
+    let mut app = on_the_computer();
+    let filter = SourceFilter {
+        kind: FilterKind::Peaking,
+        f: 1000.0,
+        g: 1.0,
+        q: 1.0,
+    };
+    app.presets.saved = vec![preset::from_computer(
+        "Long",
+        Correction {
+            preamp_db: 0.0,
+            filters: vec![filter; 17],
         },
-    );
-    assert!(intents.is_empty());
-    assert_eq!(app.presets.computer.as_deref(), Some("Phones"));
+    )];
+    focus(&mut app, "Long");
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
     assert_eq!(
         app.toast().map(|t| t.text.clone()),
-        Some("the unit would not stop".to_string())
+        Some("17 filters; the computer EQ holds 16".to_string())
     );
+    assert!(move_to_computer(&mut app, "Long").is_empty());
+    assert_eq!(app.presets.computer_flattened, None);
 }
 
-/// An app on the device screen with the Host group shown and its cursor on the Host EQ row.
-fn on_the_host_eq_row() -> App {
-    let mut app = resting("gungnir2-v2", EqMode::Eq);
-    app.presets.preset_list = None;
-    app.screen = crate::tui::app::Screen::Device;
-    app.host.linked = true;
-    app.tui.host_audio = true;
-    let at = app.rows().len()
-        + crate::tui::host::ROWS
-            .iter()
-            .position(|row| *row == crate::tui::host::HostRow::HostEq)
-            .expect("the Host EQ row");
-    app.focus(crate::tui::app::Pane::Controls, at);
-    app
-}
-
-/// `Enter` and `Space` on the Host EQ row take the computer EQ off while it is on.
+/// Flat changes nothing, so it is put on the computer with no question while the DAC is flat.
 #[test]
-fn enter_and_space_on_the_host_eq_row_remove_it_while_on() {
-    for key in [KeyCode::Enter, KeyCode::Char(' ')] {
-        let mut app = on_the_host_eq_row();
-        app.take_host_eq(Some(state("Phones")));
-        let intents = press(&mut app, key);
-        assert!(
-            matches!(intents.as_slice(), [Intent::HostRemove { then_load: None }]),
-            "{key:?}: {intents:?}"
-        );
-        assert!(app.presets.computer_busy);
-    }
-}
-
-/// With it off, the last one goes back on, built from the filters its state kept: the name, the
-/// origin and the correction, with no preset in the list to take them from.
-#[test]
-fn the_host_eq_row_puts_the_last_one_back_from_its_state() {
-    use svolder_profiles::tone::apo::{FilterKind, SourceFilter};
-    let mut app = on_the_host_eq_row();
-    let mut last = state("Phones");
-    last.on = false;
-    last.origin = Some("oratory1990".into());
-    last.filters = vec![SourceFilter {
-        kind: FilterKind::Peaking,
-        f: 3000.0,
-        g: -3.0,
-        q: 2.0,
-    }];
-    app.take_host_eq(Some(last.clone()));
-    assert_eq!(
-        app.presets.computer, None,
-        "off, so no preset is on the computer"
-    );
+fn flat_is_put_on_the_computer_with_no_question_while_the_dac_is_flat() {
+    let mut app = on_the_computer();
+    focus(&mut app, "Flat");
     let intents = press(&mut app, KeyCode::Enter);
-    let [
-        Intent::HostApply {
-            name,
-            origin,
-            correction,
-        },
-    ] = intents.as_slice()
-    else {
-        panic!("expected one apply, got {intents:?}");
-    };
-    assert_eq!(name, "Phones");
-    assert_eq!(origin.as_deref(), Some("oratory1990"));
-    assert_eq!(correction, &last.correction());
-    assert!(app.presets.computer_busy);
-}
-
-/// With none to put back the row hints how to make one, and asks for nothing.
-#[test]
-fn the_host_eq_row_hints_when_there_is_none() {
-    let mut app = on_the_host_eq_row();
-    assert!(press(&mut app, KeyCode::Enter).is_empty());
-    assert_eq!(
-        app.toast().map(|toast| toast.text.clone()),
-        Some("p then h on a preset".to_string())
-    );
-    assert!(!app.presets.computer_busy);
-}
-
-/// A computer where the EQ cannot run says why, and one still changing says so, each without
-/// asking for anything.
-#[test]
-fn the_host_eq_row_says_why_it_cannot() {
-    let mut app = on_the_host_eq_row();
-    app.take_host_eq(Some(state("Phones")));
-    app.presets.computer_off = Some("host EQ is off: SVOLDER_HOST=off".into());
-    assert!(press(&mut app, KeyCode::Enter).is_empty());
-    assert_eq!(
-        app.toast().map(|toast| toast.text.clone()),
-        Some("host EQ is off: SVOLDER_HOST=off".to_string())
-    );
-    app.presets.computer_off = None;
-    app.presets.computer_busy = true;
-    app.dismiss_toast();
-    assert!(press(&mut app, KeyCode::Enter).is_empty());
-    assert_eq!(
-        app.toast().map(|toast| toast.text.clone()),
-        Some(BUSY.to_string())
-    );
-}
-
-/// The row reads `NAME · on` while the computer EQ is, and `off` otherwise.
-#[test]
-fn the_host_eq_row_reads_the_name_and_on_or_off() {
-    let row = |app: &App| -> String {
-        crate::tui::test_support::text(&crate::tui::test_support::frame(app, 80, 24))
-            .into_iter()
-            .find(|row| row.contains("Host EQ"))
-            .expect("the Host EQ row")
-    };
-    let mut app = on_the_host_eq_row();
-    assert!(row(&app).contains("Host EQ      off"), "{}", row(&app));
-    app.take_host_eq(Some(state("Phones")));
     assert!(
-        row(&app).contains("Host EQ      Phones · on"),
-        "{}",
-        row(&app)
-    );
-    let mut last = state("Phones");
-    last.on = false;
-    app.take_host_eq(Some(last));
-    assert!(row(&app).contains("Host EQ      off"), "{}", row(&app));
-}
-
-/// An apply's answer and a removal's keep the row in step without waiting for the file to be
-/// read again.
-#[test]
-fn an_answer_updates_the_row_at_once() {
-    let mut app = on_the_host_eq_row();
-    applied(&mut app, "Phones", 0.0, Ok(state("Phones")));
-    assert_eq!(
-        app.presets
-            .host_eq
-            .as_ref()
-            .map(|state| (state.on, state.name.as_str())),
-        Some((true, "Phones"))
-    );
-    assert_eq!(app.presets.computer.as_deref(), Some("Phones"));
-    removed(&mut app, None, Ok(()));
-    assert_eq!(
-        app.presets.host_eq.as_ref().map(|state| state.on),
-        Some(false)
-    );
-    assert_eq!(app.presets.computer, None);
-}
-
-/// `h` on the preset marked `computer` removes it even when the host became unavailable.
-#[test]
-fn h_removes_the_preset_on_the_computer_even_when_the_host_is_gone() {
-    let mut app = listing();
-    app.presets.computer = Some("Phones".into());
-    app.presets.computer_off = Some("host EQ is off: SVOLDER_HOST=off".into());
-    assert_eq!(
-        press(&mut app, KeyCode::Char('h')),
-        [Intent::HostRemove { then_load: None }]
+        matches!(&intents[..], [Intent::HostEq(op)] if matches!(&**op, HostEqOp::Apply { name, .. } if name == "Flat")),
+        "{intents:?}"
     );
 }
 
-/// A band preset the DAC keeps flat or in loudness has no curve for the computer.
+/// Flat on the computer changes nothing, so Enter loads it on the DAC with no question; a real
+/// preset on both asks (the test above).
 #[test]
-fn h_refuses_a_band_preset_with_no_curve_of_its_own() {
-    let mut app = resting("gungnir2-v2", EqMode::Eq);
-    let mut own = crate::tui::test_support::presets::own("Loud", 5, 1.0);
-    own.mode = EqMode::Loudness;
-    app.presets.saved = vec![own];
-    focus(&mut app, "Loud");
-    assert!(press(&mut app, KeyCode::Char('h')).is_empty());
-    let said = app.toast().map(|t| t.text.clone()).unwrap_or_default();
-    assert!(said.contains("no curve"), "{said}");
-    assert!(!app.presets.computer_busy);
+fn flat_on_the_computer_goes_to_the_dac_with_no_question() {
+    let mut app = offered();
+    let mut eq = computer_eq(true, &[("PK", 1000.0, 0.0, 1.0)]);
+    eq.preset = Some("Flat".into());
+    app.host.computer.eq = Some(eq);
+    focus(&mut app, "Flat");
+    press(&mut app, KeyCode::Enter);
+    assert_ne!(
+        step(&app),
+        Some(&Step::Asking(Question::MoveToDac("Flat".into())))
+    );
 }
 
-/// An apply that lowers the preamp says so in its toast.
+/// On the computer's side `n` saves the computer's points, never the DAC's curve: with no daemon as
+/// a preset built from them, joined as the daemon's `SaveAs`; `u` is inert there with a hint.
 #[test]
-fn a_lowered_preamp_is_said_in_the_toast() {
-    let mut app = listing();
-    let mut applied = state("Phones");
-    applied.preamp_db = -6.4;
-    done(&mut app, Done::Applied("Phones".into(), -2.0, Ok(applied)));
-    let said = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+fn n_on_the_computer_saves_its_points_and_u_does_nothing() {
+    let mut app = on_the_computer();
+    let mut eq = computer_eq(true, &[("LSC", 100.0, 2.0, 0.7), ("PK", 1000.0, -3.0, 1.4)]);
+    eq.preamp_db = -3.0;
+    app.host.computer.eq = Some(eq);
+    press(&mut app, KeyCode::Char('n'));
+    for _ in 0..12 {
+        press(&mut app, KeyCode::Backspace);
+    }
+    for letter in "Mine".chars() {
+        press(&mut app, KeyCode::Char(letter));
+    }
+    let intents = press(&mut app, KeyCode::Enter);
+    let [Intent::SavePreset(saved)] = intents.as_slice() else {
+        panic!("a preset of the computer's points was expected: {intents:?}");
+    };
+    assert_eq!(saved.name, "Mine");
+    let correction = host_correction(saved).expect("it plays on the computer");
+    assert_eq!(correction.filters.len(), 2);
+    assert_eq!(correction.filters[1].g, -3.0);
     assert!(
-        said.contains("preamp lowered from -2.0 dB to -6.4 dB so the correction never clips"),
-        "{said}"
+        band_params(&intents).is_empty(),
+        "the DAC's curve was not saved"
     );
-}
 
-/// A move to the computer whose apply fails says the DAC was flattened and how to put the
-/// curve back.
-#[test]
-fn a_failed_move_to_the_computer_says_the_dac_was_flattened() {
-    let mut app = listing();
-    let loaded = press(&mut app, KeyCode::Enter);
-    carried_out(&mut app, &loaded);
+    // `u` writes nothing and says where the save is.
+    let mut app = on_the_computer();
     focus(&mut app, "Phones");
-    press(&mut app, KeyCode::Char('h'));
-    press(&mut app, KeyCode::Char('y'));
-    let failure = Failure::of(Kind::Usage, "PipeWire is not installed".to_string());
-    done(&mut app, Done::Applied("Phones".into(), 0.0, Err(failure)));
-    let advice = app.notices.advice.clone().unwrap_or_default();
+    app.presets.saved = vec![preset::from_computer(
+        "Mine",
+        host_correction(&imported("Phones")).unwrap(),
+    )];
+    focus(&mut app, "Mine");
+    assert!(press(&mut app, KeyCode::Char('u')).is_empty());
+    assert_eq!(step(&app), Some(&Step::Choosing));
+    assert!(app.toast().is_some());
+
+    // Joined, the daemon saves.
+    let mut app = on_the_computer();
+    app.host.daemon = Some(FromDaemon { route: None });
+    press(&mut app, KeyCode::Char('n'));
+    for _ in 0..12 {
+        press(&mut app, KeyCode::Backspace);
+    }
+    for letter in "Mine".chars() {
+        press(&mut app, KeyCode::Char(letter));
+    }
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        [Intent::eq(HostEqOp::SaveAs {
+            name: "Mine".into()
+        })]
+    );
+}
+
+/// The DAC was flattened for a move: the advice goes once the computer shows the preset, and with
+/// any other computer change, so a later refusal does not carry it.
+#[test]
+fn the_flattened_advice_ends_with_the_move() {
+    let mut app = offered();
+    app.presets.computer_flattened = Some("Phones".into());
+    phones_on_the_computer(&mut app);
+    app.note_computer_view();
+    assert_eq!(app.presets.computer_flattened, None);
+
+    let mut other = offered();
+    other.presets.computer_flattened = Some("Phones".into());
+    other.note_computer_view();
+    assert_eq!(
+        other.presets.computer_flattened.as_deref(),
+        Some("Phones"),
+        "not yet on the computer"
+    );
+}
+
+/// On a device with no tone control of its own (a Loki Max) `p` on the computer's side opens the
+/// shared preset list, never the device's own, and nothing in it writes to the device.
+#[test]
+fn p_on_the_computer_side_of_a_loki_max_opens_the_shared_list() {
+    use crate::tui::app::Screen;
+    let mut app = crate::tui::test_support::app_showing_on("lokimax", Screen::Device);
+    assert!(app.profile.eq.is_none());
+    app.host.computer.eq = Some(computer_eq(false, &[("PK", 1000.0, 0.0, 1.0)]));
+    app.presets.saved = vec![imported("Phones")];
+    // On the device's side `p` is the device's own list.
+    press(&mut app, KeyCode::Char('p'));
+    assert!(app.presets.device_list.is_some() && app.presets.preset_list.is_none());
+    press(&mut app, KeyCode::Esc);
+    app.flip_side();
+    assert!(app.on_computer());
+    press(&mut app, KeyCode::Char('p'));
     assert!(
-        advice.contains("DAC was flattened") && advice.contains("svolder eq load Phones"),
-        "{advice}"
+        app.presets.device_list.is_none(),
+        "the device's list stays shut"
     );
-    // A plain failure says nothing of the kind.
-    let mut plain = listing();
-    press(&mut plain, KeyCode::Char('h'));
-    let failure = Failure::of(Kind::Usage, "PipeWire is not installed".to_string());
-    done(
-        &mut plain,
-        Done::Applied("Phones".into(), 0.0, Err(failure)),
-    );
+    assert!(app.presets.preset_list.is_some(), "the shared list is open");
+    let spec = app.preset_spec().expect("the shared list's spec");
+    let row = entries(&app, &spec)
+        .iter()
+        .position(|entry| entry.preset.name == "Phones")
+        .expect("Phones is listed");
+    app.presets.preset_list = Some(PresetList {
+        row,
+        step: Step::Choosing,
+    });
+    let intents = press(&mut app, KeyCode::Enter);
     assert!(
-        !plain
-            .notices
-            .advice
-            .clone()
-            .unwrap_or_default()
-            .contains("flattened")
+        matches!(&intents[..], [Intent::HostEq(op)] if matches!(&**op, HostEqOp::Apply { name, .. } if name == "Phones")),
+        "{intents:?}"
     );
+    // The keys that would change the device are inert or the computer's.
+    let mut again = crate::tui::test_support::app_showing_on("lokimax", Screen::Device);
+    again.host.computer.eq = app.host.computer.eq.clone();
+    again.presets.saved = vec![imported("Phones")];
+    again.flip_side();
+    press(&mut again, KeyCode::Char('p'));
+    for key in ['n', 'u'] {
+        let sent = press(&mut again, KeyCode::Char(key));
+        assert!(
+            sent.iter().all(|i| !matches!(
+                i,
+                Intent::Set { .. } | Intent::Raw { .. } | Intent::EqSet { .. } | Intent::EqMode(_)
+            )),
+            "{key}: {sent:?}"
+        );
+    }
 }

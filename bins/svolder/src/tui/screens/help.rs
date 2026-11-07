@@ -553,6 +553,8 @@ fn reason(hint: &KeyHint, app: &App) -> Option<&'static str> {
         When::HasVolume => "needs a volume",
         When::HasToggle => "needs a toggle",
         When::CanIdentify => "this device offers no identify",
+        When::HasComputer => "needs the computer's controls",
+        When::OnComputer => "on the computer side only",
         When::Choosing => "not while typing",
         When::Typing => "only while typing",
         When::Backable => "nothing to go back to",

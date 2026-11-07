@@ -58,6 +58,22 @@ export const WORDS = {
   raise: (band, param) => `Raise the ${PARAM_WORD[param]} of band ${band}`,
   /** A band's point on the graph: its number, frequency and gain as the device words them. */
   point: (band, f, g) => `Band ${band}: ${f}, ${g}`,
+  /** The switch by the title, the computer's table and its words. */
+  showing: 'showing:',
+  theDevice: (family) => `the ${family ?? 'device'}`,
+  thisComputer: 'this computer',
+  pointHeads: ['#', 'type', 'frequency', 'gain', 'Q'],
+  removeHead: 'remove',
+  addPoint: '+ Add point',
+  typeOf: (n) => `Type of point ${n}`,
+  cellOf: (n, param) => `${{ f: 'Frequency', g: 'Gain', q: 'Q' }[param]} of point ${n}`,
+  removePoint: (n) => `Remove point ${n}`,
+  moreBelow: (n) => (n === 1 ? 'one more below' : `${n} more below`),
+  typeList: 'Point type',
+  notConfirmed: 'state from the last run, not confirmed',
+  isOn: 'is on.',
+  noPresetOn: 'no preset is on.',
+  byHand: 'the points are set by hand.',
   /** The controls: a toggle's three states, a list's name, and the readout's and scale's words. */
   onWord: 'on',
   offWord: 'off',
@@ -78,7 +94,7 @@ export const WORDS = {
   presetName: 'Preset name',
   newName: 'New name',
   answers: {
-    save: 'save', rename: 'rename', cancel: 'cancel', delete: 'delete', keep: 'keep',
+    save: 'save', rename: 'rename', cancel: 'cancel', delete: 'delete', keep: 'keep', apply: 'apply',
   },
   askDelete: (name) => `Delete \u201C${name}\u201D? The bands on the device stay as they are.`,
   askSlot: (slot) => `Save the bands to ${slot}? What the device holds there is replaced.`,

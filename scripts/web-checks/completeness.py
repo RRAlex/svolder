@@ -356,7 +356,32 @@ def one_device(b, d, name, theme):
             DO[kind_of(target)](run, target, run.model())
         except Exception as error:  # a driver that throws fails the target, the run goes on
             check(f'{run.label(target)}: operated', False, str(error)[:300])
+    computer_targets(run)
     facts(run, run.model())
+
+
+def computer_targets(run):
+    """The computer's side on this device (any kind, an amp too): the page lists the same targets
+    on every theme (they are the core's data), and a theme with a driver for them reaches each."""
+    b = run.b
+    expr = ("import(new URL('assets/core/contract.js', document.baseURI))"
+            ".then((c) => c.computerTargetsOf(__core.model.page()))")
+    targets = poll(lambda: b.page(expr), 6.0)
+    check(f'{run.theme} / {run.name}: the computer\'s side lists its targets, the switch first',
+          bool(targets) and targets[0] == {'computer': 'flip'} and len(targets) > 5, targets)
+    b.page('__driver.operate({computer: "flip"}, {side: "computer"})')
+    # the list is read again before each target: a remove or a preset changes what follows it
+    done = []
+    while True:
+        target = next((t for t in b.page(expr) if t not in done), None)
+        if target is None:
+            break
+        done.append(target)
+        reached = run.reach(target)
+        check(f'{run.theme} / {run.name}: computer {json.dumps(target)} is reached', reached is True, reached)
+        # a preset that two sides would play twice asks: the driver's answer here is No
+        b.page("document.querySelector('.ask .ask-no')?.click() ?? null")
+    b.page('__driver.operate({computer: "flip"}, {side: "dac"})')
 
 
 d = common.Daemon('gungnir2-v2', host='fake', fleet=FLEET, env={'SVOLDER_FAKE_SIGNAL': '1'})

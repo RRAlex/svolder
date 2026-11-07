@@ -308,8 +308,8 @@ pub(super) async fn execute(
         | Intent::ReadPresets
         | Intent::AutoEqIndex { .. }
         | Intent::AutoEqDownload(_)
-        | Intent::HostApply { .. }
-        | Intent::HostRemove { .. }
+        | Intent::HostEq(_)
+        | Intent::MoveToDac(_)
         | Intent::Tui(_)
         | Intent::AutoEqRefresh(_)
         | Intent::Connection(_)

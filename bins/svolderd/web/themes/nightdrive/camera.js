@@ -19,8 +19,6 @@ export function project(w, h, H, x, z) {
   return [w / 2 + (x * w * CAMERA.spread) / d, H + (h - H) / d];
 }
 
-/** The horizon, as a fraction of the scene's height: lower on a phone held upright, whose scene is
- * the top half of the page, so the sun and the mountains have room above the road. */
-export function horizonOf({ phone = false, portrait = false } = {}) {
-  return phone && portrait ? 0.62 : 0.56;
-}
+/** The horizon, as a fraction of the height the picture is composed in (the scene's, less what a phone's panel
+ * covers of its foot). */
+export const horizonOf = () => 0.56;

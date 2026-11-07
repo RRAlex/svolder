@@ -24,6 +24,8 @@ export function wireVolume({ root, core, live, act, view, signal }) {
 
   const volume = () => store.part('volume');
   const inert = () => Boolean(store.device()?.inert);
+  /** The computer's side is drawn: the ruler and the words are its own (computer-wire.js). */
+  const flipped = () => core.computer.side() === 'computer';
   const climbing = (v) => v.target !== null && v.target !== undefined && v.raw !== null
     && v.target > v.raw;
 
@@ -106,7 +108,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
   }
 
   const nudge = (delta) => {
-    const v = volume();
+    const v = flipped() ? null : volume();
     if (v && v.raw !== null && v.raw !== undefined) ask(base(v, delta) + delta);
   };
 
@@ -117,7 +119,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
   let device = null;
   dragAlong(box, {
     signal,
-    pick: (event) => event.target.closest?.('#p-ruler'),
+    pick: (event) => (flipped() ? null : event.target.closest?.('#p-ruler')),
     onStart(at, event) {
       const v = volume();
       gripped = false;
@@ -162,14 +164,14 @@ export function wireVolume({ root, core, live, act, view, signal }) {
     match: KEY_MATCH,
     step: (delta) => nudge(delta),
     home() {
-      const v = volume();
+      const v = flipped() ? null : volume();
       if (v) ask(v.lo);
     },
   });
 
   box.addEventListener('click', (event) => {
     const word = event.target.closest?.('[data-act]');
-    if (!word) return;
+    if (!word || flipped()) return;
     const v = volume();
     if (word.dataset.act === 'volume-down') nudge(-1);
     else if (word.dataset.act === 'volume-up') nudge(1);

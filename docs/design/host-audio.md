@@ -7,8 +7,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 A DAC is fed by a computer, and the computer has audio of its own: a volume, a media player, a
 signal that is about to play. svolder reaches that side too: the TUI shows and sets the default
 sink's volume, follows the media player that is playing, draws a spectrum and a level of what the
-sink plays, and the `host eq` verbs put a parametric correction (a headphone's AutoEq curve, say) in
-front of the sink. This page is how that is built and what it promises to leave alone. The crate is
+sink plays, and puts a parametric correction (a headphone's AutoEq curve, say) in front of the sink,
+live. This page is how that is built and what it promises to leave alone. The crate is
 `svolder-host`, placed in [the map](../architecture.md#the-crates); the TUI and `svolder host eq`
 use it, and so does `svolderd`, whose host service follows the player, reads its cover and reads the
 route for every front end ([below](#the-daemons-host-service)). The parametric maths and the presets
@@ -19,15 +19,15 @@ reference](../usage/tui.md).
 ## No PipeWire library
 
 Nothing here links PipeWire. The sink runs `wpctl`, the route runs `pw-dump`, the capture runs
-`pw-record`, the EQ runs `pipewire` and `systemctl`, and MPRIS goes over the session bus through the
+`pw-record`, the EQ runs `pipewire`, `pw-cli` and `systemctl`, and MPRIS goes over the session bus through the
 D-Bus bindings the workspace already links for BlueZ. A distribution package therefore carries no
 new native dependency, and a machine without any of them still runs svolder. Each part goes on
 quietly without its source: a missing tool, a missing bus, a player that went away, a call that
 times out reads as an absent answer (`None`), never an error to handle or a wait. `SVOLDER_HOST=off`
 turns every part off for a process (`host_off`, `crates/svolder-host/src/lib.rs`), and the program
 names (`SVOLDER_WPCTL`, `SVOLDER_PW_DUMP`, `SVOLDER_PW_RECORD`, `SVOLDER_PIPEWIRE`,
-`SVOLDER_WIREPLUMBER`, `SVOLDER_SYSTEMCTL`) can be pointed at fakes. Tests that could reach the
-user's session set the first or do the second.
+`SVOLDER_WIREPLUMBER`, `SVOLDER_PW_CLI`, `SVOLDER_SYSTEMCTL`) can be pointed at fakes. Tests that
+could reach the user's session set the first or do the second.
 
 ## The sink
 
@@ -239,14 +239,14 @@ another terminal see the same computer, and a second watcher is never needed for
 `[host] enabled` is on by default; a daemon that runs somewhere with no session bus or none of the
 tools (a container, a service started outside the session) reports `available = false`, says so
 plainly, and every front end goes on as it did without it. The computer's volume and the computer EQ
-stay with the TUI and the CLI: the web page shows the player and the path and presses the transport,
-and sets neither. The systemd unit carries no sandbox that would hide the home directory, since the
+are the daemon's too, for the web page, the TUI, MCP and MQTT ([host-control.md](host-control.md)).
+The systemd unit carries no sandbox that would hide the home directory, since the
 covers and Spotify's cache live there; a unit that is ever hardened has to keep the cover roots and
 the cache directories readable.
 
 **What it leaves out, and what comes later.** No audio travels over the network, nothing seeks,
-lists or looks up lyrics, no cover is looked up anywhere, and the host is not offered to Home
-Assistant, MQTT or MCP. The TUI's direct mode still captures for itself.
+lists or looks up lyrics, no cover is looked up anywhere, and Home Assistant gets the computer EQ's
+switch and preset only. The TUI's direct mode still captures for itself.
 
 ## A joined TUI
 
@@ -289,16 +289,15 @@ player would, which the daemon's fake host and its tests use.
 
 ## The computer EQ
 
-`svolder host eq` (`bins/svolder/src/commands/host_eq.rs`, verbs in `host_eq/verbs.rs`) puts a
-correction in front of the sink as a PipeWire filter chain. `apply` writes the chain's config and
-starts it; `remove` stops it and deletes what `apply` wrote; `status` reads the state file and
-checks that the chain runs.
+The computer EQ (the manager in `crates/svolder-host/src/eq/manage.rs`) puts a correction in front
+of the sink as a PipeWire filter chain; its live controls and front ends are in
+[host-control.md](host-control.md). `apply` writes the chain's config and starts it; `remove` stops
+it and deletes what `apply` wrote; `status` reads the state file and checks that the chain runs.
 
-**The config.** `render_conf` (`crates/svolder-host/src/eq.rs`) renders a complete standalone
-PipeWire config for `pipewire -c <file>`: one builtin `param_eq` node whose first filter is the
-preamp (a high shelf at 0 Hz), then the correction's filters in order, with the FL and FR ports
-named. It differs by `Route`, chosen from the WirePlumber version (`wireplumber_version`,
-`Route::for_wireplumber`):
+**The config.** `render_live_conf` (`crates/svolder-host/src/eq/live.rs`) renders a complete
+standalone PipeWire config for `pipewire -c <file>`: a preamp and sixteen biquad slots per channel
+(see host-control.md), with the FL and FR ports named. It differs by `Route`, chosen from the
+WirePlumber version (`wireplumber_version`, `Route::for_wireplumber`):
 
 - **Smart** (WirePlumber 0.5 and newer): the chain is a smart filter targeting the sink. WirePlumber
   links every stream to the filter and the filter to the sink, and again when the sink goes away and
@@ -341,8 +340,8 @@ cannot be written, leaves a computer EQ that is on exactly as it was.
 player, a timeout. A feature that threw would make a laptop without PipeWire unusable for everything
 else svolder does.
 
-**Explicit control, never on its own.** The host's volume, mute and a player's transport change only
-on a key, a click or a wheel the user makes there; nothing is sent on start, on focus or on a timer.
+**Explicit control, never on its own.** The host's volume, mute, EQ and a player's transport change
+only on a key, a click, a drag or a wheel the user makes in a front end, or an MCP or MQTT command; nothing is sent on start, on focus or on a timer.
 A program that moved the system volume by itself would surprise the person whose speakers those are.
 
 **One daemon speaks for the computer.** A front end that has a daemon asks it; a second watcher
@@ -366,8 +365,8 @@ asked, and sent a press the user made.
 reachable, and samples never leave memory. This is a privacy promise a user can read in one
 function.
 
-**One transport rule for the volume.** The host volume is capped at 100 %, never a boost, for the
-same reason the DAC's volume has a rule.
+**One transport rule for the volume.** The host volume is capped at 100 %, never a boost, on the web
+page, in the TUI, MCP and the CLI alike, for the same reason the DAC's volume has a rule.
 
 **Leave the user's audio configuration alone.** The computer EQ writes four named files and removes
 exactly them. It never edits PipeWire's or WirePlumber's own configuration, so removing svolder
@@ -391,8 +390,8 @@ developer's own session is never run; the traits and the environment variables a
   `crates/svolder-host/src/route/tests.rs` and `crates/svolder-host/tests/` (`sink.rs`,
   `players.rs`, `capture.rs`, `route.rs`), which run against fake `wpctl`, `pw-dump` and
   `pw-record` scripts and a private session bus.
-- The computer EQ's verbs: `bins/svolder/src/commands/host_eq.rs`, `host_eq/verbs.rs`,
-  `host_eq/process.rs`; tests in `bins/svolder/src/commands/host_eq/tests.rs`.
+- The computer EQ: the manager in `crates/svolder-host/src/eq/` (`manage.rs`, `process.rs`, tests
+  in `manage/tests.rs`), the verbs in `bins/svolder/src/commands/host_eq.rs`.
 - The daemon's host service: `bins/svolderd/src/host.rs`; tests in
   `bins/svolderd/src/host/tests.rs`, `bins/svolderd/src/handler/host_tests.rs` and
   `bins/svolderd/tests/host.rs`.

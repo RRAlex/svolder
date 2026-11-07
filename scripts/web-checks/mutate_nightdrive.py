@@ -103,8 +103,8 @@ MUTATIONS = {
     'a guest\'s tap on the mountains morphs': ([
         (THEME, ['the_tuning', 'the_tuning_guest'], ['a_guest_tap_on_the_mountains_says_why']),
     ], [
-        (N + 'tune-wire.js', "tunable(page) && store.state() === 'open' && !(page.device?.card ?? page.card);",
-         "tunable(page) && store.state() === 'open' && !(page.device?.card ?? page.card) || mayNot();"),
+        (N + 'tune-wire.js', "tunes && store.state() === 'open' && !(page.device?.card ?? page.card);",
+         "tunes && store.state() === 'open' && !(page.device?.card ?? page.card) || mayNot();"),
     ]),
     'a first touch grabs at once': ([
         (THEME, ['the_tuning', 'the_q_pinch'], ['a_first_touch_shows_the_curve_and_a_second_grabs']),
@@ -202,6 +202,101 @@ MUTATIONS = {
         ('space_key.py', None, ['(nightdrive) with the menu open and the focus on the page space presses nothing']),
     ], [
         ('core/frame.js', "if (spaceKey(event) && !menu.opened() &&", "if (spaceKey(event) &&"),
+    ]),
+    'the faded dash rests at a tenth': ([
+        (THEME, ['the_dash_fade'], ['the_dash_fades_to_a_fifth_with_the_hud']),
+    ], [
+        (N + 'style.css', ".nd-dash-dim .nd-dash { opacity: .2;", ".nd-dash-dim .nd-dash { opacity: .1;"),
+    ]),
+    'the phone\'s volume keys leave the first row': ([
+        (PHONE, ['the_portrait_panel'], ['  in the panel `-` `MUTE` `+` in that order and the transport on ONE row']),
+    ], [
+        (N + 'style.css', "  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup) { order: 1; }", "  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup) { order: 6; }"),
+    ]),
+    'the scene stops at the phone\'s panel': ([
+        (PHONE, ['the_portrait_panel'], ['  the scene runs behind the panel']),
+    ], [
+        (N + 'style.css', "  .nd-scene { grid-area: 1 / 1 / 3 / 2; }", "  .nd-scene { grid-area: 1 / 1 / 2 / 2; }"),
+    ]),
+    'the phone\'s panel is opaque': ([
+        (PHONE, ['the_portrait_panel'], ['  the panel is translucent']),
+    ], [
+        (N + 'style.css', "    background: var(--nd-panel-phone); box-shadow: none;", "    background: #07040d; box-shadow: none;"),
+    ]),
+    'the phone\'s keys are 44 px tall': ([
+        (PHONE, ['the_portrait_panel'], ['  the keys are 36 px tall']),
+    ], [
+        (N + 'style.css', "  .nd-dash .nd-k { min-width: 36px; height: 36px;", "  .nd-dash .nd-k { min-width: 36px; height: 44px;"),
+    ]),
+    'the device line is inset for a switch that is not shown': ([
+        (PHONE, ['the_landscape_scene'], ['  with no switch shown the device line keeps the scene\'s edge inset']),
+    ], [
+        (N + 'style.css', "  .nd-sw-hud .nd-top { left: calc(max(8px,", "  .nd-top { left: calc(max(8px,"),
+    ]),
+    'the pill\'s segments lose their hit area': ([
+        (PHONE, ['the_portrait_panel'], ['  the pill\'s segments are 36 px tall']),
+    ], [
+        (N + 'style.css', '.nd-swkeys .nd-k::after { content: ""; position: absolute; inset: -5px 0; }', '.nd-swkeys .nd-k::after { content: ""; position: absolute; inset: 0; }'),
+    ]),
+    'the switch pill is not in the corner upright': ([
+        (PHONE, ['the_portrait_panel'], ['  the switch is one pill']),
+    ], [
+        (N + 'style.css', "  .nd-hud > .nd-switch { position: fixed; }", "  .nd-hud > .nd-switch { position: static; }"),
+    ]),
+    'the pill says the whole names': ([
+        (PHONE, ['the_portrait_panel'], ['  the segments read `DAC` and `PC`']),
+    ], [
+        (N + 'draw/dash.js', "const short = { dac: amp ? 'AMP' : 'DAC', computer: 'PC' };", "const short = { dac: 'DAC', computer: 'This computer' };"),
+    ]),
+    'choosing Full on a phone does not probe': ([
+        (TIMING, ['the_full_switch'], ['choosing_full_on_a_phone_lifts_the_cap_at_once']),
+    ], [
+        (N + 'scene-wire.js', "if (view.motion === 'full' && motionWas !== 'full') budget.probe();", ""),
+    ]),
+    'a paused phone is drawn every 125 ms': ([
+        (TIMING, ['the_paused_phone'], ['a_paused_phone_keeps_the_road_smooth']),
+    ], [
+        (N + 'motion.js', "export const IDLE_PACE = 1000 / 30;", "export const IDLE_PACE = 125;"),
+    ]),
+    'the touch band is taller than the curve window': ([
+        ('computer_nightdrive.py', None, ['a tap 6 px above the band makes no point']),
+    ], [
+        (N + 'tune.js', "const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 26 };", "const BAND = { up: 0.32, down: 0.1, margin: 26 };"),
+    ]),
+    'a stacked point is drawn above the band': ([
+        ('computer_nightdrive.py', None, ['every bubble is drawn inside the band']),
+    ], [
+        (N + 'tune.js', "yOfDb: (db) => base - (Math.max(-gMax, Math.min(gMax, db)) * span) / gMax,", "yOfDb: (db) => base - (db * span) / gMax,"),
+    ]),
+    'the wheel over the volume steps the wrong way': ([
+        ('computer_nightdrive.py', None, ['the_wheel_and_the_arrows_step_the_volume: a notch up over the number']),
+    ], [
+        (N + 'volume-keys.js', "if (got.steps !== 0) nudge(got.steps > 0 ? 1 : -1);", "if (got.steps !== 0) nudge(got.steps > 0 ? -1 : 1);"),
+    ]),
+    'the arrows step with a control focused': ([
+        ('computer_nightdrive.py', None, ['the_wheel_and_the_arrows_step_the_volume: a control with the focus keeps the key']),
+    ], [
+        (N + 'volume-keys.js', "    if (at && at !== doc.body && at !== doc.documentElement) return true;", "    if (false) return true;"),
+    ]),
+    'the wheel over the number is stopped before the wake': ([
+        ('computer_nightdrive.py', None, ['the_wheel_and_the_arrows_step_the_volume: the first wheel over a faded number only wakes the HUD']),
+    ], [
+        (N + 'volume-keys.js', "    event.preventDefault();\n    if (page.classList.contains('nd-faded')) return;", "    event.preventDefault();\n    event.stopImmediatePropagation();\n    if (page.classList.contains('nd-faded')) return;"),
+    ]),
+    'the wheel over the number needs the focus free': ([
+        ('computer_nightdrive.py', None, ['the_wheel_and_the_arrows_step_the_volume: and the wheel over the number still steps the volume']),
+    ], [
+        (N + 'volume-keys.js', "if (!figure || event.ctrlKey || covered()) return;", "if (!figure || event.ctrlKey || busy()) return;"),
+    ]),
+    'the amp\'s gauge labels are dim again': ([
+        (PHONE, ['the_amp_panel_contrast'], ['  every text in it keeps 4.5:1']),
+    ], [
+        (N + 'style.css', ".nd-gauge i { font-style: normal; color: var(--nd-track-sub);", ".nd-gauge i { font-style: normal; color: var(--nd-mid);"),
+    ]),
+    'This computer is capped in width': ([
+        ('computer_nightdrive.py', None, ['the_switch_keys_never_ellipsize_this_computer']),
+    ], [
+        (N + 'style.css', ".nd-swkeys #nd-side-computer { flex: none; }", ".nd-swkeys #nd-side-computer { flex: none; max-width: 90px; overflow: hidden; }"),
     ]),
     'the picker\'s close button is under 44 px': ([
         ('effects_menu.py', None, ['the_picker_close_button_is_44_px_inside_the_window (nightdrive']),

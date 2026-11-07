@@ -17,7 +17,7 @@ import { PALETTE } from './draw/palette.js';
 import { drawSky } from './draw/sky.js';
 import { createEmbers } from './embers.js';
 import { createFloor } from './floor.js';
-import { createBudget, paceUnder } from './budget.js';
+import { BUDGET, createBudget, paceUnder } from './budget.js';
 import { CAMERA, horizonOf } from './camera.js';
 import { createLook } from './look.js';
 import { createEar } from './mood.js';
@@ -29,6 +29,9 @@ import { inertOf } from './inert.js';
 import { dullMood, flatMood, moodOf } from './states.js';
 import { createStats } from './stats.js';
 import { wireTune } from './tune-wire.js';
+
+/** The windows where the dash is a panel over the foot of the scene (the stylesheet's phone held upright). */
+const UPRIGHT = '(max-width: 719px) and (min-height: 500px)';
 
 /** How long the sun's pulse lasts after a beat, ms. */
 const KICK_MS = 150;
@@ -73,7 +76,25 @@ export function wireScene({
   let drawnAt = 0;
   let offeredAt = 0;
   let swell = 0;
-  const geo = { w: 1, h: 1, H: 1, dpr: 1 };
+  const geo = { w: 1, h: 1, v: 1, H: 1, dpr: 1 };
+  // A phone held upright has the dash panel over the foot of the scene: the horizon is placed in the part it leaves
+  // uncovered. The panel's height is read when it or the window changes, not at every frame.
+  let covered = 0;
+  const dashBox = root.querySelector('#nd-dash');
+  const readCovered = () => {
+    const win = root.ownerDocument.defaultView;
+    const over = dashBox && win?.matchMedia?.(UPRIGHT).matches;
+    covered = over ? Math.max(0, win.innerHeight - dashBox.getBoundingClientRect().top) : 0;
+  };
+  if (dashBox && typeof globalThis.ResizeObserver === 'function') {
+    const watching = new globalThis.ResizeObserver(readCovered);
+    watching.observe(dashBox);
+    // the window's own height moves without a resize event too (a phone's address bar, a keyboard)
+    watching.observe(root.ownerDocument.documentElement);
+    signal.addEventListener('abort', () => watching.disconnect(), { once: true });
+  }
+  root.ownerDocument.defaultView?.addEventListener('resize', readCovered, { signal });
+  readCovered();
   const tune = wireTune({
     root, core, live, signal, geometry: () => geo,
   });
@@ -81,7 +102,14 @@ export function wireScene({
   const stats = createStats();
   // a finger for a pointer is a phone: it starts at the rate's cap
   const coarse = Boolean(globalThis.matchMedia?.('(pointer: coarse)').matches);
-  const budget = createBudget({ coarse });
+  // the tier that held on this device last time is where the budget starts; it measures and corrects from there
+  const kept = core.prefs?.get('tier', null);
+  const keptOk = Number.isInteger(kept?.step) && kept.step >= 0 && kept.step < BUDGET.maxStep && typeof kept.capped === 'boolean';
+  const start = keptOk ? kept : null;
+  const budget = createBudget({ coarse, start });
+  let keptStep = budget.step;
+  let keptCapped = budget.capped;
+  let motionWas = view.motion;
   let owed = 0;
   let css = { width: 1, height: 1, density: 1 };
   let capture = null;
@@ -228,7 +256,8 @@ export function wireScene({
     const period = model.beats.period;
     const live = period && ms - model.beats.seenAt <= 1000;
     floor.advance(dt, rowRate(live ? 60000 / period : null) * mood.cruise, cols, view.motion === 'full' && !dull);
-    geo.H = geo.h * horizonOf({ phone: view.phone(), portrait: view.portrait() });
+    geo.v = geo.h - covered;
+    geo.H = geo.v * horizonOf();
     embers.step(dt, {
       strength: dull ? 0 : mood.embers, crossings, w: geo.w, h: geo.h, H: geo.H,
     });
@@ -254,14 +283,20 @@ export function wireScene({
     perf.draws++;
     const took = clock() - began;
     stats.add(took, clock());
-    if (budget.sample(perf.forcedMs ?? took, seconds, perf.asked === 0)) {
+    const changed = budget.sample(perf.forcedMs ?? took, seconds, perf.asked === 0);
+    if (budget.step !== keptStep || budget.capped !== keptCapped) {
+      keptStep = budget.step;
+      keptCapped = budget.capped;
+      core.prefs?.set('tier', budget.tier);
+    }
+    if (changed) {
       // resizing blanks the canvases: paint again at once, not at the next draw
       fit();
       paint(frame);
     }
   }
 
-  /** The least ms between draws now: the level's, and 125 or more while silent or not playing. */
+  /** The least ms between draws now: the level's, and 30 a second at most while silent or not playing. */
   function pace() {
     const playing = core.model.page().host?.track?.status === 'playing';
     const idle = quietSince !== null && drawnAt - quietSince >= SILENT_FOR;
@@ -272,6 +307,9 @@ export function wireScene({
     // a scene that is slow at the least size is drawn at 30 a second at most, whatever is asked
     perf.asked = asked;
     budget.setIdle(idle || !playing);
+    // choosing Full from a slower level: the scene's cost is found out in about a second, from the cap lifted
+    if (view.motion === 'full' && motionWas !== 'full') budget.probe();
+    motionWas = view.motion;
     perf.pace = paceUnder({ asked, capped: budget.capped, coarse });
     return perf.pace;
   }

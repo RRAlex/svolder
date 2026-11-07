@@ -57,6 +57,8 @@ fn view(title: &str, status: &str) -> HostView {
         playing: Some(playing(title, status)),
         route: None,
         now_ms: 1,
+        volume: None,
+        eq: None,
     }
 }
 

@@ -19,6 +19,14 @@ LABEL org.opencontainers.image.title="svolder" \
       org.opencontainers.image.vendor="the svolder authors"
 RUN taken=$(getent passwd ${UID} | cut -d: -f1) && { [ -z "$taken" ] || userdel -r "$taken"; } \
  && useradd --uid ${UID} --create-home svolder && mkdir -p /config /run/svolder && chown svolder /config /run/svolder
+# Group 0 may write what the user may, so the same image runs as any uid in group 0 (the host-audio
+# override runs as the host's uid, whatever it is).
+RUN chgrp 0 /config /run/svolder && chmod g=u /config /run/svolder
+# The PipeWire clients the computer's volume and EQ spawn (pw-cli, pw-dump, pw-record, pipewire,
+# wpctl); no PipeWire daemon runs here, the host's runtime directory is mounted in
+# (docker-compose.host-audio.yml).
+RUN apt-get update && apt-get install -y --no-install-recommends pipewire-bin wireplumber \
+ && rm -rf /var/lib/apt/lists/*
 COPY target/dist/svolder target/dist/svolderd /usr/local/bin/
 COPY LICENSE target/dist/THIRD-PARTY-LICENSES /usr/share/licenses/svolder/
 USER svolder

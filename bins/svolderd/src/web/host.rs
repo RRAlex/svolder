@@ -8,7 +8,7 @@
 //! `{"button": "previous|play|pause|next"}`) is a write like any other: a guest is refused 401
 //! and a page with `[web] writes` off 403; the daemon takes it from there. The frames stream
 //! (`GET api/v1/host/frames`, see [`frames`]) carries what the computer plays, analysed, to the
-//! page's visualizer.
+//! page's visualizer. The computer's volume, mute and live EQ are written through [`computer`].
 
 use axum::Router;
 use axum::body::Body;
@@ -25,6 +25,7 @@ use super::api::reader;
 use super::router::{bare, error, parse};
 use super::writes::writer;
 
+mod computer;
 mod frames;
 
 /// The buttons a press names.
@@ -36,6 +37,7 @@ pub(crate) fn routes() -> Router<Web> {
         .route("/api/v1/host/cover", get(cover))
         .route("/api/v1/host/press", post(press))
         .route("/api/v1/host/frames", get(frames::frames))
+        .merge(computer::routes())
 }
 
 /// What `cover` takes: the hash the card names.

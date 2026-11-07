@@ -1,119 +1,78 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The preset list's keys for the computer EQ: `h` puts the focused preset on the computer, or
-//! takes it off when it is the one there, and `Enter` on the preset that is on the computer asks
-//! before it moves it to the DAC.
+//! The preset list's keys for the computer: `Enter` on the computer's side puts the focused
+//! preset on the computer, and `Enter` on the device's side, on the preset that is on the
+//! computer, asks before it moves it to the DAC.
 //!
 //! The same preset is never left on both, as `svolder host eq apply` and `svolder eq load` keep
 //! it: putting the preset that is on the DAC on the computer asks, and flattens the DAC when the
-//! answer is yes; loading the one on the computer asks, and takes it off the computer first. The
-//! work itself is the loop's, off the UI thread, and its answer comes back as a
-//! [`Done`](super::Done).
+//! answer is yes; loading the one on the computer asks, and takes it off the computer first.
+//! Joined to a daemon the computer's recall is a request to it by the preset's name: the daemon
+//! says if a connected device plays it too, and the question is asked then; with no daemon the
+//! loop's own controller takes the correction, and the DAC is looked at here.
 
-use svolder_host::eq::HostEqState;
-use svolder_profiles::tone::preset::{self, Preset};
+use svolder_ipc::HostEqOp;
+use svolder_profiles::tone::preset::{self, BothSides, Preset, host_correction};
 
-use crate::commands::host_eq::{host_correction, lowered_note};
-use crate::recovery::Failure;
 use crate::tui::app::{App, Intent};
 
 use super::{Entry, Question, Step, entries, load, on};
 
-/// What `h` on a preset that is still being changed on the computer is answered with.
-const BUSY: &str = "the computer EQ is still changing";
-
-/// What `h` on a built-in is answered with: its bands are shaped on a device's tone control.
-fn built_in(name: &str) -> String {
-    format!("{name} is built in: save a curve as a new preset to put it on the computer")
-}
-
-/// Whether the preset `name` is the one on the computer.
-pub(super) fn on_computer(app: &App, name: &str) -> bool {
-    app.presets
-        .computer
-        .as_deref()
-        .is_some_and(|there| preset::same_name(there, name))
-}
-
-/// `h` on `entry`: take it off the computer when it is there, ask first when it is on the DAC,
-/// else put it on the computer. A built-in is refused, and so is a computer where the EQ cannot
-/// run, saying why.
-pub(super) fn key(app: &mut App, entry: &Entry) -> Vec<Intent> {
-    let name = entry.preset.name.clone();
-    if entry.builtin {
-        app.warn(built_in(&name));
-        return Vec::new();
-    }
-    if app.presets.computer_busy {
-        app.warn(BUSY);
-        return Vec::new();
-    }
-    if on_computer(app, &name) {
-        app.presets.computer_busy = true;
-        return vec![Intent::HostRemove { then_load: None }];
-    }
-    if let Some(why) = app.presets.computer_off.clone() {
+/// `Enter` on the computer's side: put `entry` on the computer. A preset with no curve for the
+/// computer is refused, saying why; one the DAC plays too asks first.
+pub(super) fn recall(app: &mut App, entry: &Entry) -> Vec<Intent> {
+    if let Err(why) = host_correction(&entry.preset) {
         app.warn(why);
         return Vec::new();
     }
-    let on_dac = app.profile.eq.as_ref().is_some_and(|eq| {
-        let all = entries(app, eq);
-        on(app, eq, &all).is_some_and(|there| preset::same_name(&there, &name))
-    });
-    if on_dac {
-        ask(app, Question::MoveToComputer(name));
+    if let Some(why) = app.host.computer.unavailable().map(str::to_string) {
+        app.warn(why);
         return Vec::new();
     }
+    if app.host.daemon_owns() {
+        app.presets.preset_list = None;
+        return vec![by_name(app, &entry.preset.name, false)];
+    }
+    let on_dac = app.profile.eq.clone().and_then(|eq| {
+        let all = entries(app, &eq);
+        on(app, &eq, &all)
+    });
+    if preset::both_sides(&entry.preset, on_dac.as_deref()) != BothSides::Free {
+        ask(app, Question::MoveToComputer(entry.preset.name.clone()));
+        return Vec::new();
+    }
+    app.presets.preset_list = None;
     apply(app, &entry.preset)
 }
 
-/// `Enter` or `Space` on the device screen's Host EQ row: take the computer EQ off while it is
-/// on; when off, put the last one back, built from the filters its state kept, and with none to
-/// put back, say how to make one. A computer where the EQ cannot run says why, and so does one
-/// still changing.
-pub(crate) fn toggle(app: &mut App) -> Vec<Intent> {
-    if let Some(why) = app.presets.computer_off.clone() {
-        app.warn(why);
-        return Vec::new();
-    }
-    if app.presets.computer_busy {
-        app.warn(BUSY);
-        return Vec::new();
-    }
-    let Some(state) = app.presets.host_eq.clone() else {
-        app.notify(crate::tui::host::HOST_EQ_HINT);
-        return Vec::new();
-    };
-    app.presets.computer_busy = true;
-    match state.on {
-        true => vec![Intent::HostRemove { then_load: None }],
-        false => vec![Intent::HostApply {
-            correction: state.correction(),
-            name: state.name,
-            origin: state.origin,
-        }],
-    }
+/// The daemon's request to put the preset `name` on the computer, `confirm` once the question
+/// has been answered yes.
+fn by_name(app: &App, name: &str, confirm: bool) -> Intent {
+    Intent::eq(HostEqOp::Preset {
+        name: name.to_string(),
+        device: Some(app.session.device_name.clone()),
+        confirm,
+    })
 }
 
 /// Put `preset` on the computer.
 fn apply(app: &mut App, preset: &Preset) -> Vec<Intent> {
-    let correction = match host_correction(preset) {
-        Ok(correction) => correction,
+    match host_correction(preset) {
+        Ok(correction) => vec![Intent::eq(HostEqOp::Apply {
+            name: preset.name.clone(),
+            origin: preset
+                .source
+                .as_ref()
+                .and_then(|source| source.origin.clone()),
+            correction,
+            sink: None,
+        })],
         Err(why) => {
             app.warn(why);
-            return Vec::new();
+            Vec::new()
         }
-    };
-    app.presets.computer_busy = true;
-    vec![Intent::HostApply {
-        name: preset.name.clone(),
-        origin: preset
-            .source
-            .as_ref()
-            .and_then(|source| source.origin.clone()),
-        correction,
-    }]
+    }
 }
 
 /// Ask `question` in the box.
@@ -123,9 +82,31 @@ pub(super) fn ask(app: &mut App, question: Question) {
     }
 }
 
-/// `y` to the DAC's move to the computer: flatten the DAC, then apply.
+/// The daemon says a connected device plays the preset `name` too: the list opens on it with the
+/// question, whether the list was closed since the request or not.
+pub(crate) fn asked(app: &mut App, name: &str) {
+    let row = app
+        .preset_spec()
+        .and_then(|eq| {
+            entries(app, &eq)
+                .iter()
+                .position(|entry| preset::same_name(&entry.preset.name, name))
+        })
+        .unwrap_or(0);
+    app.presets.preset_list = Some(super::PresetList {
+        row,
+        step: Step::Asking(Question::MoveToComputer(name.to_string())),
+    });
+}
+
+/// `y` to the DAC's move to the computer: flatten the DAC, then apply; joined, the daemon
+/// flattens the devices that play it, on a request that says yes.
 pub(super) fn move_to_computer(app: &mut App, name: &str) -> Vec<Intent> {
-    let Some(eq) = app.profile.eq.clone() else {
+    if app.host.daemon_owns() {
+        app.presets.preset_list = None;
+        return vec![by_name(app, name, true)];
+    }
+    let Some(eq) = app.preset_spec() else {
         return Vec::new();
     };
     let Some(entry) = entries(app, &eq)
@@ -139,72 +120,22 @@ pub(super) fn move_to_computer(app: &mut App, name: &str) -> Vec<Intent> {
         app.warn(why);
         return Vec::new();
     }
-    let mut intents = app.flatten();
-    app.presets.computer_flattened = !intents.is_empty();
+    app.presets.preset_list = None;
+    let mut intents = app.flatten_dac();
+    app.presets.computer_flattened = (!intents.is_empty()).then(|| name.to_string());
     intents.extend(apply(app, &entry.preset));
     intents
 }
 
-/// `y` to the computer's move to the DAC: take it off the computer, then load it.
+/// `y` to the computer's move to the DAC: take it off the computer first; the DAC's load goes
+/// out once that has succeeded ([`moved`]), so a refused removal leaves the preset where it was.
 pub(super) fn move_to_dac(app: &mut App, name: &str) -> Vec<Intent> {
-    app.presets.computer_busy = true;
-    vec![Intent::HostRemove {
-        then_load: Some(name.to_string()),
-    }]
+    app.presets.preset_list = None;
+    vec![Intent::MoveToDac(name.to_string())]
 }
 
-/// The computer EQ was applied, or could not be.
-pub(crate) fn applied(
-    app: &mut App,
-    name: &str,
-    stated: f64,
-    result: Result<HostEqState, Failure>,
-) -> Vec<Intent> {
-    app.presets.computer_busy = false;
-    let flattened = std::mem::take(&mut app.presets.computer_flattened);
-    match result {
-        Ok(state) => {
-            let lowered = lowered_note(stated, state.preamp_db);
-            app.take_host_eq(Some(state));
-            match lowered {
-                Some(note) => app.notify(format!("{name} is on the computer; {note}")),
-                None => app.notify(format!("{name} is on the computer")),
-            }
-        }
-        Err(mut failure) => {
-            if flattened {
-                failure.next = format!(
-                    "The DAC was flattened; put the curve back with Enter on {name} in the \
-                     presets box, or `svolder eq load {name}`. {}",
-                    failure.next
-                );
-            }
-            app.notify_failure(&failure);
-        }
-    }
-    Vec::new()
-}
-
-/// The computer EQ was removed, or could not be; with `then_load`, the preset of that name is
-/// loaded onto the DAC once it is.
-pub(crate) fn removed(
-    app: &mut App,
-    then_load: Option<String>,
-    result: Result<(), Failure>,
-) -> Vec<Intent> {
-    app.presets.computer_busy = false;
-    if let Err(failure) = result {
-        app.notify_failure(&failure);
-        return Vec::new();
-    }
-    app.presets.computer = None;
-    if let Some(state) = app.presets.host_eq.as_mut() {
-        state.on = false;
-    }
-    let Some(name) = then_load else {
-        app.notify("computer EQ removed");
-        return Vec::new();
-    };
+/// The computer EQ is off: load the preset `name` onto the DAC.
+pub(crate) fn moved(app: &mut App, name: &str) -> Vec<Intent> {
     let Some(eq) = app.profile.eq.clone() else {
         return Vec::new();
     };

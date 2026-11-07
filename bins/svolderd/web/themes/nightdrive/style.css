@@ -16,7 +16,7 @@
   --nd-pink: #ff3cc8;
   --nd-pink-ink: #ffb3ec;
   --nd-track: #ff9ae6;
-  --nd-track-sub: #b388c9;
+  --nd-track-sub: #d6b4e8;
   --nd-cyan: #22d3ee;
   --nd-cyan-ink: #7ff3ff;
   --nd-cyan-key: #b5f7ff;
@@ -24,6 +24,7 @@
   --nd-bad: #ff5a6e;
   --nd-hair: rgba(243, 233, 255, .10);
   --nd-panel: rgba(10, 0, 24, .62);
+  --nd-panel-phone: rgba(8, 3, 16, .7);
   --nd-sheet: rgba(12, 6, 24, .9);
   /* the outrun volume's height over its width (its viewBox is 640 by 170) */
   --nd-vaspect: .2656;
@@ -103,6 +104,40 @@
   top: max(8px, env(safe-area-inset-top, 0px)); width: 44px; height: 44px; pointer-events: none;
 }
 
+/* the switch (the shown device's name, `This computer`): two keys left of the menu button on a desktop, the
+   panel's top row on a phone (`.nd-sw`, below); they are not part of the dash and do not fade with it */
+.nd-switch {
+  position: fixed; right: calc(max(8px, env(safe-area-inset-right, 0px)) + 44px + 10px);
+  top: max(8px, env(safe-area-inset-top, 0px)); height: 44px; display: flex; flex-direction: column; align-items: flex-end;
+  justify-content: center;
+}
+.nd-swkeys { display: inline-flex; align-items: center; gap: 8px; }
+.nd-swkeys .nd-k {
+  display: inline-block; height: 32px; line-height: 30px; text-align: center; min-width: 0; padding: 0 12px;
+  text-transform: uppercase; overflow: hidden; text-overflow: ellipsis;
+}
+/* only the device's name gives way to a long one; `This computer` is always whole */
+.nd-swkeys #nd-side-dac { max-width: 20vw; }
+.nd-swkeys #nd-side-computer { flex: none; }
+.nd-hud > .nd-switch { pointer-events: auto; }
+.nd-why {
+  display: block; margin-top: 2px; color: var(--nd-warn); font: 500 calc(var(--nd-hud) * .9)/1.3 var(--nd-mono);
+  letter-spacing: .06em; text-align: right; max-width: 52vw;
+}
+.nd-switch .nd-why { position: absolute; top: 100%; right: 0; margin-top: 0; width: max-content; }
+/* with the keys by the menu button the right column runs down from them: the keys, the verdict, the EQ line */
+.nd-has-switch { --nd-sw-stack: calc(max(8px, env(safe-area-inset-top, 0px)) + 44px + 4px); }
+.nd-has-switch.nd-sw-why { --nd-sw-stack: calc(max(8px, env(safe-area-inset-top, 0px)) + 44px + 24px); }
+.nd-has-switch .nd-top { right: calc(var(--nd-clear) + var(--nd-switch, 0px) + 12px); }
+.nd-has-switch .nd-right {
+  position: absolute; right: calc(-1 * (var(--nd-switch, 0px) + 12px)); top: calc(var(--nd-sw-stack) - var(--nd-top));
+  max-width: 40vw;
+}
+.nd-has-switch .nd-eq { top: var(--nd-sw-stack); }
+.nd-has-switch.nd-verdict .nd-eq { top: calc(var(--nd-sw-stack) + var(--nd-hud) * 1.3 + 4px); }
+/* a computer's volume that is muted keeps its figure, dimmed */
+.nd-odb.nd-dim { opacity: .45; }
+
 /* ---- the top line, the outrun volume and the EQ line ---- */
 
 .nd-layer > .nd-hud, .nd-hud > * { pointer-events: none; }
@@ -141,14 +176,14 @@
 /* ---- the fade: opacity only, so the HUD stays in the tab order and the accessibility tree ---- */
 
 .nd-faded :is(.nd-top, .nd-vol, .nd-eq) { opacity: 0; transition: opacity 2.5s ease; }
-.nd-dash-dim .nd-dash { opacity: .1; transition: opacity 2.5s ease; }
+.nd-dash-dim .nd-dash { opacity: .2; transition: opacity 2.5s ease; }
 @media (prefers-reduced-motion: reduce) {
   .nd-faded :is(.nd-top, .nd-vol, .nd-eq), .nd-dash-dim .nd-dash { transition: none; }
 }
 .nd-faded.nd-vol-on .nd-vol { opacity: 1; transition: opacity .3s ease; }
 .nd-faded.nd-vol-back .nd-vol { transition-duration: .8s; }
 
-/* ---- the dash: the strip along the bottom; it fades to a tenth with the HUD (dash-fade.js) ---- */
+/* ---- the dash: the strip along the bottom; it fades to a fifth with the HUD (dash-fade.js) ---- */
 
 .nd-dash {
   position: absolute; left: var(--nd-edge); right: var(--nd-edge);
@@ -158,6 +193,7 @@
   box-shadow: 0 0 18px rgba(255, 60, 200, .25), inset 0 0 12px rgba(34, 211, 238, .12);
 }
 .nd-grp { display: flex; align-items: center; gap: 8px; flex: none; }
+.nd-brk { display: none; }
 
 .nd-k {
   display: inline-flex; align-items: center; justify-content: center; position: relative;
@@ -179,7 +215,7 @@
 .nd-ic { width: 16px; height: 16px; fill: currentColor; display: block; }
 
 .nd-gauge { font: 500 var(--nd-hud)/1.2 var(--nd-mono); color: var(--nd-cyan-ink); letter-spacing: .08em; white-space: nowrap; }
-.nd-gauge i { font-style: normal; color: var(--nd-mid); text-transform: uppercase; }
+.nd-gauge i { font-style: normal; color: var(--nd-track-sub); text-transform: uppercase; }
 .nd-gauge[data-gauge] { display: inline-flex; align-items: center; gap: 6px; }
 .nd-arc { width: 32px; height: 20px; flex: none; overflow: visible; }
 .nd-arc path { stroke-width: 3; stroke-linecap: round; }
@@ -314,6 +350,36 @@
 .nd-v:focus { border-color: var(--nd-cyan); background: rgba(34, 211, 238, .08); outline: none; }
 .nd-v.quiet { color: var(--nd-mid); }
 
+/* the computer's points: a table of six rows that scrolls, its type, three fields and a `×` */
+.nd-pscroll { --nd-prow: 30px; max-height: calc(var(--nd-prow) * 6 + 28px); overflow-y: auto; overscroll-behavior: contain; }
+.nd-ptable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.nd-ptable thead th { position: sticky; top: 0; z-index: 1; background: var(--nd-sheet); }
+.nd-ptable th { color: var(--nd-dim); font-weight: 400; text-align: right; padding: 3px 4px; white-space: nowrap; }
+.nd-ptable th:nth-child(-n + 2) { text-align: left; }
+.nd-ptable tbody th { color: var(--nd-mid); text-align: left; }
+.nd-ptable td { padding: 1px 4px; white-space: nowrap; height: var(--nd-prow); text-align: right; }
+.nd-ptable td:nth-child(2) { text-align: left; }
+.nd-ptable tbody tr:focus-within, .nd-ptable tbody tr:hover { background: rgba(255, 60, 200, .1); }
+.nd-ptable tbody tr:focus-within .nd-v { border-color: rgba(255, 60, 200, .6); }
+.nd-ptable .nd-v { width: 100%; max-width: 7.6em; text-align: right; }
+.nd-ptype {
+  height: 24px; padding: 0 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--nd-mid);
+  font: 400 13px/1 var(--nd-mono); appearance: none; -webkit-appearance: none; cursor: pointer;
+}
+.nd-ptype option { background: var(--nd-night); color: var(--nd-ink); }
+.nd-ptype:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 1px; }
+.nd-pxc { width: 1%; }
+.nd-px {
+  display: inline-flex; width: 24px; height: 24px; padding: 0; align-items: center; justify-content: center; border-radius: 6px;
+  border: 1px solid rgba(34, 211, 238, .45); background: transparent; color: var(--nd-cyan-key); font: 500 15px/1 var(--nd-mono);
+  cursor: pointer; touch-action: manipulation;
+}
+.nd-px:hover { border-color: var(--nd-cyan-key); }
+.nd-px:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
+.nd-px.quiet { opacity: .5; }
+.nd-more { min-height: 1.4em; margin: 4px 0 8px; color: var(--nd-dim); font: 400 12px/1.4 var(--nd-sans); text-align: center; }
+.nd-unsure { color: var(--nd-warn); }
+
 .nd-note { margin: 8px 0 0; color: var(--nd-dim); font: 400 12px/1.4 var(--nd-sans); }
 .nd-status { margin: 8px 0; color: var(--nd-mid); font: 400 12px/1.4 var(--nd-sans); }
 .nd-status i { color: var(--nd-ink); font-style: normal; font-weight: 600; }
@@ -398,6 +464,32 @@
   .nd-dash { flex-wrap: wrap; gap: 8px 12px; }
   .nd-k { min-width: 44px; height: 44px; }
   .nd-opt { min-height: 44px; }
+  /* the switch is one pill in the scene's top left corner, as the menu button is at the top right: `DAC │ PC` (an
+     amp's `AMP │ PC`, drawn from each key's `data-short`; the key's own text is its whole name and stays its accessible
+     name). The pill is 36 px tall in a 44 px row, each segment 44 px to the hand and the two touching without overlap */
+  .nd-switch {
+    position: fixed; left: max(8px, env(safe-area-inset-left, 0px)); right: auto;
+    top: max(8px, env(safe-area-inset-top, 0px)); height: 44px; align-items: flex-start; justify-content: center;
+  }
+  .nd-swkeys { gap: 0; }
+  .nd-swkeys .nd-k {
+    position: relative; height: 36px; min-width: 44px; padding: 0 12px; font-size: 0; line-height: 34px; overflow: visible;
+  }
+  .nd-swkeys .nd-k::before {
+    content: attr(data-short); font: 600 12px/34px var(--nd-mono); letter-spacing: .12em; text-indent: .12em;
+  }
+  .nd-swkeys .nd-k::after { content: ""; position: absolute; inset: -5px 0; }
+  .nd-swkeys .nd-k:first-child { border-radius: 18px 0 0 18px; }
+  .nd-swkeys .nd-k:last-child { border-radius: 0 18px 18px 0; margin-left: -1px; }
+  /* the verdict stands under the pill, as wide as the window leaves it */
+  .nd-switch .nd-why {
+    position: absolute; top: 100%; left: 0; margin: 0; width: max-content; max-width: calc(100vw - 16px - var(--nd-clear));
+    text-align: left;
+  }
+  .nd-pscroll { --nd-prow: 44px; max-height: calc(var(--nd-prow) * 5.5 + 28px); }
+  .nd-px { width: 44px; height: 44px; }
+  .nd-ptype { height: 44px; font-size: 15px; }
+  .nd-ptable .nd-v { max-width: 6.4em; }
 }
 /* the sheet on a phone held upright: it slides up from the dash to 30 % from the top, one column */
 @media (max-width: 719px) and (min-height: 500px) {
@@ -412,6 +504,8 @@
 }
 /* held sideways (a short window): from the right, the same column */
 @media (max-height: 499px) {
+  /* held sideways the keys stand under the device line, at the left; the strip along the bottom is one row */
+  .nd-sw-hud .nd-top { left: calc(max(8px, env(safe-area-inset-left, 0px)) + var(--nd-switch, 0px) + 12px); }
   .nd-sheet {
     left: auto; right: 0; top: 0; bottom: 0; width: min(420px, 60vw); max-height: none; transform: none;
     border-radius: 14px 0 0 14px; padding: 16px 14px; border-right: 0;
@@ -507,21 +601,27 @@
 .nd-noglow * { box-shadow: none !important; text-shadow: none !important; }
 .nd-noglow .nd-odb :is(g, text) { }
 
-/* a phone held upright: the scene is the window down to the dash panel, which is only its own rows (`−` `MUTE` `+` and
-   the input, the track, the transport and `DEVICE ▴`) pinned to the bottom. The scene holds, from the top, the device
-   line, the verdict, the EQ line (with its values) and the volume, each in its own space and clear of the menu button's
-   corner; all of it is the HUD and fades with it. The panel is drawn once and never repainted by the frame: no blur, no
-   moving shadow. The grid's two rows make the scene end where the panel begins, whatever the panel's content. */
+/* a phone held upright: the scene is the whole window and the dash panel lies over its foot, two rows pinned to the
+   bottom (`−` `MUTE` `+` and the transport; the track with the input and `DEVICE ▴`). The panel is translucent, so the road
+   shows through it; the horizon is placed in the part it leaves uncovered (scene-wire.js). The scene holds, from the top,
+   the device line, the switch's two keys, the verdict, the EQ line (with its values) and the volume, each in its own
+   space and clear of the menu button's corner; all of it but the keys is the HUD and fades with it. The panel is drawn
+   once and never repainted by the frame: no blur, no moving shadow. The grid's second row is the panel's own height. */
 @media (max-width: 719px) and (min-height: 500px) {
   .nd { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .nd-layer { display: contents; }
-  .nd-scene { grid-area: 1 / 1 / 2 / 2; }
+  .nd-scene { grid-area: 1 / 1 / 3 / 2; }
   .nd-hud {
     grid-area: 1 / 1; position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
     min-height: 0; overflow: hidden; padding: 14px var(--nd-clear) 0;
   }
   .nd-hud > * { position: static; }
-  .nd-top { flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+  .nd-hud > .nd-switch { position: fixed; }
+  .nd-top {
+    flex-direction: column; align-items: center; gap: 2px; text-align: center;
+    margin-left: max(0px, calc(var(--nd-switch, 0px) + max(8px, env(safe-area-inset-left, 0px)) + 8px - var(--nd-clear)));
+  }
+  .nd-sw-why .nd-hud { padding-top: calc(14px + 4.2em); }
   .nd-right { text-align: center; }
   .nd-left { overflow-wrap: anywhere; }
   .nd-eq { white-space: normal; text-align: center; font-size: calc(var(--nd-hud) * .92); letter-spacing: .1em; }
@@ -537,14 +637,22 @@
   .nd[data-sheet] :is(.nd-hud, .nd-dash, .nd-cardbox) { filter: var(--nd-dim-scene); }
   .nd-dash {
     grid-area: 2 / 1; position: relative; left: auto; right: auto; bottom: auto; border-radius: 0; border-width: 1px 0 0;
-    padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px))
+    padding: 8px max(16px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px))
       max(16px, env(safe-area-inset-left, 0px));
-    align-content: flex-start; justify-content: center; gap: 14px 12px; overscroll-behavior: contain;
-    background: linear-gradient(180deg, rgba(20, 8, 34, .96), #07040d); box-shadow: none;
+    align-content: flex-start; align-items: center; justify-content: flex-start; gap: 10px; overscroll-behavior: contain;
+    background: var(--nd-panel-phone); box-shadow: none;
   }
-  .nd-keys, .nd-tr { width: 100%; justify-content: center; flex-wrap: wrap; }
-  .nd-keys { order: 1; }
-  .nd-now { order: 2; flex: 0 0 100%; justify-content: center; }
-  .nd-tr { order: 3; }
-  .nd-track { flex: 0 1 auto; text-align: center; }
+  /* row one: `−` `MUTE` `+` at the left, the transport at the right; row two: the track, the input, `DEVICE ▴`
+     (the groups give their keys to the panel's own flow, and `nd-brk` ends the first row) */
+  .nd-grp { display: contents; }
+  .nd-dash .nd-k { min-width: 36px; height: 36px; padding: 0 10px; border-radius: 6px; }
+  .nd-dash .nd-k::after { content: ""; position: absolute; inset: -5px; }
+  .nd-keys > * { order: 5; }
+  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup) { order: 1; }
+  .nd-tr > * { order: 2; }
+  .nd-tr > [data-act="prev"] { margin-left: auto; }
+  .nd-tr > #nd-sheet { order: 6; margin-left: 0; }
+  .nd-brk { display: block; order: 3; flex: 0 0 100%; height: 0; margin: -5px 0; }
+  .nd-now { order: 4; flex: 1 1 8em; min-width: 0; gap: 8px; }
+  .nd-track { flex: 1 1 0; text-align: left; }
 }

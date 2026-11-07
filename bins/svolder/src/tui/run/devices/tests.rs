@@ -1882,8 +1882,8 @@ async fn carried_all<O: Open>(
     watching
 }
 
-/// The preset list's AutoEq search and `h` through the loop with a fake network and a fake
-/// host: the intents start jobs, the jobs' ends come back the way the loop's own arm takes them,
+/// The preset list's AutoEq search and the computer's recall through the loop with a fake
+/// network and a fake host: the intents start jobs, the jobs' ends come back the way the loop's own arm takes them,
 /// and the import lands in the configuration file as an imported preset, unloaded.
 #[tokio::test]
 async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through_the_loop() {
@@ -1944,18 +1944,41 @@ async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through
         "the import was loaded"
     );
 
-    // `h` on it starts the apply job, whose end names it as the one on the computer.
-    watching = press(watching, KeyCode::Char('h')).await;
-    let done = next(&mut watching.jobs.ended).await;
-    let intents = presets::done(&mut watching.app, done);
-    assert!(intents.is_empty());
-    assert_eq!(
-        watching.app.presets.computer.as_deref(),
-        Some("Sennheiser HD 650")
-    );
-    assert_eq!(
-        *hands.applied.lock().expect("the apply log"),
-        ["Sennheiser HD 650"]
+    // On the computer's side `Enter` on it sends it to the loop's own controller, whose view
+    // names it as the one on the computer.
+    let chain = Arc::new(svolder_host::fake::FakeChain::new());
+    watching.computer = Box::new(crate::tui::run::computer::ComputerLink::over(
+        svolder_host::eq::EqControl::new(
+            chain.clone(),
+            Box::new(svolder_host::fake::FakeParams::new()),
+            svolder_host::eq::Keep::Memory,
+        ),
+    ));
+    watching.app.host.computer.eq = watching.computer.view().map(Box::new);
+    watching = press(watching, KeyCode::Esc).await;
+    watching = press(watching, KeyCode::Char('C')).await;
+    assert!(watching.app.on_computer());
+    watching = press(watching, KeyCode::Char('p')).await;
+    for _ in 0..20 {
+        watching = press(watching, KeyCode::Down).await;
+    }
+    watching = press(watching, KeyCode::Enter).await;
+    let seen = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let view = crate::tui::run::computer::next_view(&mut watching.computer.views).await;
+            if view.on {
+                return view;
+            }
+        }
+    })
+    .await
+    .expect("the controller applied it");
+    assert_eq!(seen.preset.as_deref(), Some("Sennheiser HD 650"));
+    assert!(
+        chain
+            .calls()
+            .iter()
+            .any(|call| matches!(call, svolder_host::fake::ChainCall::Apply(_)))
     );
     watching.close().await;
 }

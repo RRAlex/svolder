@@ -257,11 +257,121 @@ pub enum Request {
         /// `previous`, `play`, `pause` or `next`; any other word is the daemon's error to give
         button: String,
     },
+    /// Set the computer's volume, 0 to 100 percent; answered with an acknowledgement once the
+    /// sink took it, and the new level arrives with the host's view
+    HostVolume {
+        /// the volume in percent, never above 100
+        pct: u8,
+    },
+    /// Mute or unmute the computer's sink; answered with an acknowledgement once the sink took
+    /// it
+    HostMute {
+        /// whether the sink is muted
+        muted: bool,
+    },
+    /// Change the computer's EQ; answered with an acknowledgement or an error with the reason.
+    /// The point indexes it carries count from 1, as the bands do
+    HostEq {
+        /// what to do
+        op: HostEqOp,
+    },
     /// Turn the connection into a stream of the daemon's analysed audio frames
     /// (`Event::HostCapture` once and on each change of the capture, `Event::HostFrame` while it
     /// runs), holding the daemon's capture of the default sink for as long as the connection
     /// lives. A daemon from before it, or one with no host audio, answers an error instead.
     HostFrames,
+}
+
+/// One change of the computer's EQ, as a `host_eq` request carries it. Point indexes count from
+/// 1, as the bands of a tone control do.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum HostEqOp {
+    /// Turn the EQ on or off; off keeps the points
+    Mode {
+        /// whether the EQ is on
+        on: bool,
+    },
+    /// Recall a preset by name: a saved one, or a built-in of the shown device
+    Preset {
+        /// the preset's name
+        name: String,
+        /// the shown device, whose own built-ins the name is looked up in
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device: Option<String>,
+        /// yes to the question a preset that a device plays too asks: that device is flattened
+        /// first
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        confirm: bool,
+    },
+    /// Put a correction the caller read on the computer, under a name
+    Apply {
+        /// the name it is shown under
+        name: String,
+        /// where it came from, when it came from a catalogue
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<String>,
+        /// the preamp and the filters
+        correction: svolder_profiles::tone::apo::Correction,
+        /// the sink to put it in front of, when not the default one
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sink: Option<String>,
+    },
+    /// Change one point; `done` is false while a drag goes on and true on its last value
+    Set {
+        /// the point, from 1; not looked at when `slot` is given
+        index: u8,
+        /// the slot (1 to 16) the sender holds for the point, as the host view lists it. When
+        /// given, the daemon changes the point in that slot, whatever place the table lists it
+        /// in now, and refuses the request when no point holds the slot; absent means the
+        /// point is the one at `index`
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<u8>,
+        /// `PK`, `LSC` or `HSC`
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        /// frequency in Hz
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        f: Option<f64>,
+        /// gain in dB
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        g: Option<f64>,
+        /// Q
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        q: Option<f64>,
+        /// whether this is the last value of the drag; absent means it is
+        #[serde(default = "done_by_default")]
+        done: bool,
+    },
+    /// Add a point
+    Add {
+        /// `PK`, `LSC` or `HSC`
+        kind: String,
+        /// frequency in Hz
+        f: f64,
+        /// gain in dB
+        g: f64,
+        /// Q
+        q: f64,
+    },
+    /// Remove a point
+    Remove {
+        /// the point, from 1; not looked at when `slot` is given
+        index: u8,
+        /// the slot (1 to 16) the sender holds for the point; as for `Set`
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<u8>,
+    },
+    /// Save the points as a preset of the user's, under a name
+    SaveAs {
+        /// the new preset's name
+        name: String,
+    },
+}
+
+/// A `set` that does not say it goes on is the last of its drag.
+fn done_by_default() -> bool {
+    true
 }
 
 /// The longest window a daemon listens for on a `scan` request. A longer one asked for is
@@ -285,6 +395,10 @@ pub fn not_found_yet(device: &str) -> String {
     format!("{device}{NOT_FOUND_YET}")
 }
 
+/// The code of the [`Response::Error`] a daemon answers a computer request with while the
+/// computer's controls cannot be used: its message is `computer controls unavailable: <why>`.
+pub const CODE_COMPUTER_UNAVAILABLE: u8 = 6;
+
 /// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no
 /// link to the device. A front end that reads exactly these words knows the device is away, and
 /// adds when the daemon tries it again.
@@ -297,6 +411,10 @@ pub const WEB_OFF: &str = "the web UI is off: turn it on in the TUI's Settings, 
 /// Response to a request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the host view is the one big answer, built and matched by value by every front end"
+)]
 pub enum Response {
     /// The readings a `state` or `eq_show` request returns.
     Values {
@@ -418,6 +536,18 @@ pub enum Response {
         code: u8,
         /// error message
         message: String,
+    },
+    /// The reply to a `host_eq` preset recall that is asked about, not refused: the preset is
+    /// also played by connected devices, and would play twice. Nothing was changed. Yes sends
+    /// the same request again with `confirm`, which flattens `devices` first; no sends nothing.
+    Ask {
+        /// the question's facts in the daemon's words (`<name> is on the <device> too: the
+        /// correction would play twice`), for a client that does not read the fields
+        message: String,
+        /// the preset's name
+        name: String,
+        /// the configured names of the devices that play it, each whole
+        devices: Vec<String>,
     },
     /// A kind this build does not know, from a peer newer than it.
     #[serde(other)]
@@ -651,6 +781,10 @@ impl WebStatus {
 /// An event pushed to a subscriber.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the host view is the one big event, built and matched by value by every front end"
+)]
 pub enum Event {
     /// One reading the device reported
     Status {

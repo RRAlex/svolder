@@ -12,6 +12,8 @@
 //   act.js       the log of what this page asked of the device
 //   ruler.js     the volume's ruler as numbers; volume-wire.js the hands on it (gestures.js)
 //   tone-wire.js the hands on the tone's words and table; graph.js on the EQ graph's points;
+//   computer-wire.js the hands on the computer's side: the switch by the title, its volume, its
+//                table and its graph (draw/computer.js draws them)
 //                lists.js the paper list a written word opens
 //   controls-wire.js the hands on the controls (draw/controls.js), scales included;
 //                presets-wire.js on the presets and the device's, with ask.js's forms and questions
@@ -27,6 +29,7 @@ import { registerTheme } from '../../core/registry.js';
 import { createAct } from './act.js';
 import { createChanges } from './changes.js';
 import { createFold } from './fold.js';
+import { wireComputer } from './computer-wire.js';
 import { wireControls } from './controls-wire.js';
 import { wireDevice } from './device-wire.js';
 import { PHONE_MAX_PX, sheet } from './draw/sheet.js';
@@ -65,6 +68,10 @@ function mount(root, core, { signal }) {
     coarse: touch.matches,
     state: core.model.state(),
     keys: core.keys,
+    /** The core's computer: which side is drawn, and what the computer's controls read. */
+    computer: core.computer,
+    /** The point of the computer's EQ the hand is on (its row and its mark are drawn selected). */
+    point: null,
     /** The step the person last asked of the volume, until the device reports it. */
     asked: null,
     /** `The device`'s fold: open or folded, in memory and in this browser; folded until chosen. */
@@ -129,6 +136,9 @@ function mount(root, core, { signal }) {
   live.drawAll();
   wireVolume({ root, core, live, act, view, signal });
   wireTone({ root, core, live, act, signal });
+  wireComputer({
+    root, core, live, act, view, signal,
+  });
   wireControls({ root, core, live, act, signal });
   wirePresets({ root, core, live, act, signal });
   wireDevice({ root, core, live, view, act, signal });

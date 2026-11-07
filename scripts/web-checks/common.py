@@ -135,6 +135,10 @@ class Daemon:
             'XDG_RUNTIME_DIR': f'{home}/run', 'SVOLDER_TRANSPORT': 'fake',
             'SVOLDER_FAKE_PROFILE': profile, 'SVOLDER_HOST': host,
         }
+        if host == 'fake':
+            # the fake computer starts at full volume, so the signal path reads untouched (a check of the
+            # computer's own volume starts it lower by setting the variable before it makes a daemon)
+            environ['SVOLDER_FAKE_COMPUTER_VOLUME'] = os.environ.get('SVOLDER_FAKE_COMPUTER_VOLUME', '100')
         if LIVE_ASSETS:
             environ['SVOLDER_WEB_ASSETS'] = WEB
         if fleet:

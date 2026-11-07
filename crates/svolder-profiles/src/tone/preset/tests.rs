@@ -1439,3 +1439,246 @@ fn a_preset_is_recalled_by_its_name_in_any_case_and_an_unknown_one_lists_the_oth
         other => panic!("{other:?}"),
     }
 }
+
+// ---- one list for the DAC and the computer ----
+
+use crate::tone::apo::{FilterKind, SourceFilter};
+
+fn filter(kind: FilterKind, f: f64, g: f64, q: f64) -> SourceFilter {
+    SourceFilter { kind, f, g, q }
+}
+
+/// Five peaking points, one on each band's centre of `eq`, at 3 dB and the centre Q.
+fn on_the_centres(eq: &EqSpec) -> Correction {
+    Correction {
+        preamp_db: -3.0,
+        filters: eq
+            .bands
+            .iter()
+            .map(|band| filter(FilterKind::Peaking, band.center, 3.0, eq.q_center))
+            .collect(),
+    }
+}
+
+/// A band preset of `count` peaking bands, 100 Hz, 1 dB, Q 1.
+fn flat_bands(count: usize) -> Preset {
+    Preset {
+        name: "Mine".into(),
+        bands: count as u8,
+        mode: EqMode::Eq,
+        loudness: 0,
+        band: vec![
+            PresetBand {
+                f: 100.0,
+                g: 1.0,
+                q: 1.0
+            };
+            count
+        ],
+        source: None,
+    }
+}
+
+#[test]
+fn a_computer_curve_that_fits_the_dac_loads_as_is() {
+    let eq = tone("mesh-eq-5");
+    let mut correction = on_the_centres(&eq);
+    // Out of order: the bands take them by frequency.
+    correction.filters.reverse();
+    let preset = from_computer("Desk", correction.clone());
+    let loaded = preset.for_device(&eq);
+    let wanted: Vec<PresetBand> = eq
+        .bands
+        .iter()
+        .map(|band| PresetBand {
+            f: band.center,
+            g: 3.0,
+            q: eq.q_center,
+        })
+        .collect();
+    assert_eq!(loaded.band, wanted);
+    assert_eq!(as_bands(&eq, &correction), Some(wanted));
+    assert_ne!(
+        loaded.band,
+        fit_for(&eq, preset.source.as_ref().unwrap()).bands
+    );
+    assert_eq!(
+        (loaded.mode, loaded.loudness, loaded.is_imported()),
+        (EqMode::Eq, 0, false)
+    );
+}
+
+#[test]
+fn a_shelf_or_a_sixth_point_is_fitted() {
+    let eq = tone("mesh-eq-5");
+    let fit_of = |preset: &Preset| fit_for(&eq, preset.source.as_ref().unwrap()).bands.clone();
+
+    let mut shelf = on_the_centres(&eq);
+    shelf.filters[0].kind = FilterKind::LowShelf;
+    let preset = from_computer("Shelf", shelf.clone());
+    assert_eq!(as_bands(&eq, &shelf), None);
+    assert_eq!(preset.for_device(&eq).band, fit_of(&preset));
+
+    let mut six = on_the_centres(&eq);
+    six.filters
+        .push(filter(FilterKind::Peaking, 1000.0, 1.0, 1.0));
+    let preset = from_computer("Six", six);
+    assert_eq!(preset.for_device(&eq).band, fit_of(&preset));
+
+    let mut outside = on_the_centres(&eq);
+    outside.filters[2].g = eq.gain_range.1 + 1.0;
+    assert_eq!(as_bands(&eq, &outside), None);
+}
+
+#[test]
+fn the_original_keeps_its_full_filter_list() {
+    let eq = tone("mesh-eq-5");
+    let mut six = on_the_centres(&eq);
+    six.filters
+        .push(filter(FilterKind::HighShelf, 9000.0, -2.0, 0.7));
+    let preset = from_computer("Six", six.clone());
+    let _ = preset.for_device(&eq);
+    assert_eq!(preset.source.as_ref().unwrap().correction, six);
+    assert_eq!(preset.source.as_ref().unwrap().origin, None);
+}
+
+#[test]
+fn a_built_in_goes_to_the_computer_as_its_bands() {
+    let eq = tone("mesh-eq-5");
+    let warm = builtins(&eq)
+        .into_iter()
+        .find(|preset| preset.name == "Warm")
+        .unwrap();
+    let correction = host_correction(&warm).unwrap();
+    assert_eq!(correction.filters.len(), 5);
+    assert!(
+        correction
+            .filters
+            .iter()
+            .all(|f| f.kind == FilterKind::Peaking)
+    );
+    for (filter, band) in correction.filters.iter().zip(&warm.band) {
+        assert_eq!((filter.f, filter.g, filter.q), (band.f, band.g, band.q));
+    }
+    assert!(correction.preamp_db <= 0.0);
+    let flat = builtins(&eq).into_iter().next().unwrap();
+    assert_eq!(host_correction(&flat).unwrap().preamp_db, 0.0);
+}
+
+#[test]
+fn a_flat_or_loudness_preset_is_refused_with_the_reason() {
+    for (mode, word) in [(EqMode::Flat, "flat"), (EqMode::Loudness, "loudness")] {
+        let mut preset = flat_bands(1);
+        preset.mode = mode;
+        assert_eq!(
+            host_correction(&preset).unwrap_err(),
+            format!(
+                "Mine is a {word} setting of the DAC's tone control, with no curve to put on the computer"
+            )
+        );
+    }
+}
+
+#[test]
+fn a_band_preset_gets_a_preamp_of_minus_its_peak_rounded_up() {
+    let preset = Preset {
+        band: vec![
+            PresetBand {
+                f: 100.0,
+                g: 3.0,
+                q: 1.0,
+            },
+            PresetBand {
+                f: 4000.0,
+                g: -2.0,
+                q: 2.0,
+            },
+        ],
+        ..flat_bands(2)
+    };
+    let correction = host_correction(&preset).unwrap();
+    let tenths = correction.preamp_db * 10.0;
+    assert!(
+        (tenths - tenths.round()).abs() < 1e-9,
+        "{}",
+        correction.preamp_db
+    );
+    assert!(
+        (-3.1..=-2.9).contains(&correction.preamp_db),
+        "{}",
+        correction.preamp_db
+    );
+    let cut = Preset {
+        band: vec![PresetBand {
+            f: 100.0,
+            g: -3.0,
+            q: 1.0,
+        }],
+        ..flat_bands(1)
+    };
+    assert_eq!(host_correction(&cut).unwrap().preamp_db, 0.0);
+}
+
+#[test]
+fn an_imported_preset_applies_exactly_what_it_holds() {
+    let preset = imported();
+    assert_eq!(host_correction(&preset).unwrap(), correction());
+}
+
+#[test]
+fn seventeen_filters_are_refused_by_name() {
+    assert_eq!(
+        computer_refusal(&flat_bands(17)),
+        Some("17 filters; the computer EQ holds 16".to_string())
+    );
+    let long = Correction {
+        preamp_db: 0.0,
+        filters: vec![filter(FilterKind::Peaking, 100.0, 1.0, 1.0); 17],
+    };
+    assert_eq!(
+        computer_refusal(&from_computer("Long", long)),
+        Some("17 filters; the computer EQ holds 16".to_string())
+    );
+}
+
+#[test]
+fn sixteen_are_playable() {
+    assert_eq!(COMPUTER_POINTS, 16);
+    assert_eq!(computer_refusal(&flat_bands(16)), None);
+    assert_eq!(computer_refusal(&flat_bands(0)), None);
+    let sixteen = Correction {
+        preamp_db: 0.0,
+        filters: vec![filter(FilterKind::Peaking, 100.0, 1.0, 1.0); 16],
+    };
+    assert_eq!(computer_refusal(&from_computer("Sixteen", sixteen)), None);
+}
+
+#[test]
+fn both_sides_asks_for_a_real_preset_and_frees_a_neutral_one() {
+    let real = flat_bands(2);
+    assert_eq!(
+        both_sides(&real, Some("mine")),
+        BothSides::Ask {
+            name: "Mine".into(),
+            other: "mine".into()
+        }
+    );
+    assert_eq!(both_sides(&real, Some("Other")), BothSides::Free);
+    assert_eq!(both_sides(&real, None), BothSides::Free);
+    let flat = builtins(&tone("mesh-eq-5")).remove(0);
+    assert!(is_neutral(&flat));
+    assert_eq!(both_sides(&flat, Some("Flat")), BothSides::Free);
+    assert_eq!(
+        both_sides(
+            &from_computer(
+                "Zero",
+                Correction {
+                    preamp_db: -2.0,
+                    filters: vec![]
+                }
+            ),
+            Some("Zero")
+        ),
+        BothSides::Free
+    );
+}

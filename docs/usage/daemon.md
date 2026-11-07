@@ -580,11 +580,35 @@ above.) The TUI runs the same way, inside the container:
 docker exec -it svolder svolder tui
 ```
 
-The container has no session bus and no PipeWire, so its daemon has no host side (`available` is
-`false` in `host`): the web page draws no Now playing card and no path line. A TUI on the host that
-joins the daemon through the socket then follows the host's own player and volume with a watcher of
-its own, as it does with no daemon at all; a TUI run inside the container has no host audio, and
-the web page's visualizer says it has nothing to show.
+The image carries the PipeWire client tools (`pw-cli`, `pw-dump`, `pw-record`, `pipewire`, `wpctl`)
+but no PipeWire daemon and no session bus. The computer's volume and EQ are opt-in, through
+`docker-compose.host-audio.yml`, so a Bluetooth-only start with no user session is unaffected.
+`make docker` writes three more keys to `.env`, each only when missing (a line already there is
+never rewritten): `HOST_UID` (your `id -u`), `HOST_RUNTIME_DIR` (`$XDG_RUNTIME_DIR`, else
+`/run/user/<uid>`) and, when the host's `pipewire-0` socket exists there (or `DOCKER_HOST_AUDIO=1`
+asks: `DOCKER_HOST_AUDIO=1 make docker`), `COMPOSE_FILE=docker-compose.yml:docker-compose.host-audio.yml`. The override mounts the
+host's runtime directory read-only at `/run/host-runtime` with `create_host_path: false` (Docker
+creates nothing on the host: with no session the container refuses to start), sets
+`PIPEWIRE_REMOTE=/run/host-runtime/pipewire-0` (a restarted PipeWire's new socket is seen without
+restarting the container; the daemon's own `pipewire` child keeps its files in the private tmpfs), gives the container a private 0700 tmpfs as `XDG_RUNTIME_DIR`, and runs
+as `HOST_UID` with group 0, since the host's runtime directory is 0700 and its user's. The image
+makes `/config` and `/run/svolder` group-0 writable, so any uid works. Files the daemon creates in those
+bind mounts then carry group 0 on the host. Mounting the whole runtime directory exposes every
+socket in it (the session bus, the audio and agent sockets) to the container, read-only but
+connectable, which a single-socket mount would not; it is the price of the socket staying fresh
+after a PipeWire restart. To turn it off, set `COMPOSE_FILE=docker-compose.yml` in `.env` (a line already there is kept, so
+`make docker` does not switch it on again, which deleting the line would let it do while PipeWire
+runs on the host; a `COMPOSE_FILE` exported in your shell beats `.env`), then `docker compose up -d`. For the published image, put
+the override's contents in `docker-compose.override.yml` beside `docker-compose.yml`, or copy
+`docker-compose.host-audio.yml` there and set `COMPOSE_FILE` and the two keys in `.env` by hand.
+Through the socket the daemon reads and sets the computer's volume and carries the computer EQ as a
+`pipewire` child of the daemon inside the container, which ends with it; it is applied again at the
+daemon's start when `host-eq.toml` says it was on. A one-shot
+`svolder host eq` in the container refuses, printing `in a container the computer EQ runs with the
+daemon. start svolderd, then try again`. Without the override the daemon has no host side
+(`available` is `false` in `host`), the web page draws no Now playing card and no path line, and a
+TUI on the host that joins the daemon follows the host's own player and volume with a watcher of its
+own, as it does with no daemon at all.
 
 The daemon captures what the computer plays only while a page's visualizer or a joined TUI asks
 for it, and stops 2 s after the last one stops asking; with nobody looking it reads and analyses
@@ -797,7 +821,9 @@ thousandths (1000 is the normal rate), `read_at_ms` and `now_ms` in unix millise
 daemon's clock, and a volume in thousandths on `wpctl`'s scale (1000 is 100 %). `host_press`
 (`{"cmd":"host_press","button":"next"}`, `button` being `previous`, `play`, `pause` or `next`)
 presses that button on the followed player and answers `{"result":"ack"}`, or an error when the word
-is no button, the host side is off, there is no player or the player refused. A `subscribe` that
+is no button, the host side is off, there is no player or the player refused. The computer's own
+volume is `{"cmd":"host_volume","pct":40}`, a whole percent from 0 to 100 on the wire (more is refused; a boosted
+sink is shown as read, above 100, and never written), and `host_mute` takes `muted`. A `subscribe` that
 carries `"host":true` (`{"cmd":"subscribe","device":null,"host":true}`; without it, as before, no
 host events and no route reads) also gets the view as a `{"event":"host",…}` event, whatever device
 it names (a selector that names no device gets its error and the stream ends), once after the
@@ -932,7 +958,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.31.5 on /run/user/1000/svolder.sock
+daemon: 0.32.0 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)

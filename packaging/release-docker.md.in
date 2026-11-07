@@ -6,14 +6,28 @@ SPDX-License-Identifier: GPL-3.0-or-later
 **Docker**
 
 The image runs as uid 1000, so create its two folders owned by that uid first. Then pull and start it
-with the attached `docker-compose.yml`, setting `BLUETOOTH_GID` in `.env`
-(`getent group bluetooth | cut -d: -f3`):
+with the attached `docker-compose.yml`, setting `BLUETOOTH_GID` in `.env`:
 
 ```
+printf 'BLUETOOTH_GID=%s\n' "$(getent group bluetooth | cut -d: -f3)" >> .env
 mkdir -p config run && sudo chown 1000:1000 config run
 docker pull ghcr.io/rralex/svolder:@VERSION@
 docker compose up -d
 ```
 
-To update, `docker compose pull` and then `docker compose up -d`. The image is built for x86_64 and arm64. The attached `docker-compose.yml` is the one file here
+The computer's volume and EQ are opt-in. Save the attached `docker-compose.host-audio.yml` as
+`docker-compose.override.yml` beside `docker-compose.yml` and append your user id and runtime
+directory to `.env` (`>>`, never `>`):
+
+```
+printf 'HOST_UID=%s\nHOST_RUNTIME_DIR=%s\n' "$(id -u)" "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" >> .env
+```
+
+The override mounts your whole runtime directory (`/run/user/<uid>`) read-only: the container can
+connect to every socket in it, the session bus and agent sockets included, which a single-socket
+mount would avoid but which goes stale when PipeWire restarts. With it, the container runs as your
+user id, so create `config` and `run` owned by you (`sudo chown $(id -u) config run`) instead of
+1000, and files it writes there carry group 0 on the host. To turn it off, delete the override file.
+
+To update, `docker compose pull` and then `docker compose up -d`. The image is built for x86_64 and arm64. The attached `docker-compose.yml` and `docker-compose.host-audio.yml` are the two files here
 `SHA256SUMS` does not list.

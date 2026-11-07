@@ -17,6 +17,8 @@ async-trait.workspace = true
 dbus = { workspace = true, features = ["futures"] }
 dbus-tokio.workspace = true
 futures.workspace = true
+# The process manager signals the chain through a pidfd and starts it in a session of its own.
+libc.workspace = true
 # SHA-1 names Spotify's cache files (a name, not a security check).
 ring.workspace = true
 # The computer EQ's state file is TOML, and its filters are a correction from the profiles crate.

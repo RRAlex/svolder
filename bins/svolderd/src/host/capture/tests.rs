@@ -71,6 +71,7 @@ fn parts(frames: Result<Frames, String>) -> Parts {
         covers: Arc::new(|_| None),
         helpers: Vec::new(),
         frames,
+        computer: None,
     }
 }
 

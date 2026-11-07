@@ -53,6 +53,7 @@ esac
 # listed: they belong to the quick gate.
 w=bins/svolderd/web/themes/ember
 c=scripts/web-checks
+n=$c/node
 smoke_files=(
     $w/smoke.js $w/smoke-model.js $w/smoke-director.js $w/smoke-engine.js $w/smoke-notes.js
     $w/effects.js
@@ -60,7 +61,9 @@ smoke_files=(
     $c/notes_tune.py $c/haze.py $c/scroll.py $c/sources.py $c/sweep.py $c/touch.py
     $c/effects_cycle.py $c/tune.py $c/common.py $c/run-all.sh $c/COVERAGE.md $c/soak.py
     $c/mutate_smoke.py $c/mutate_notes.py $c/mutate_haze.py $c/mutate_scroll.py
-    $c/mutate_sources.py $c/mutate_effects.py $c/mutate_registry.py $c/node
+    $c/mutate_sources.py $c/mutate_effects.py $c/mutate_registry.py
+    $n/director.mjs $n/effects.mjs $n/look-values.mjs $n/model.mjs $n/notes.mjs $n/sources.mjs
+    $n/mutate_director.sh $n/mutate_model.sh $n/mutate_notes.sh $n/mutate_sources.sh
 )
 
 # refuse_if_smoke_changed: the quick gate says the full gate is needed and exits 1 when a smoke
@@ -221,9 +224,10 @@ declare -A weight=(
     [nightdrive_theme]=570 [signal_theme]=450 [paper]=300 [visualizer]=240 [effects_menu]=160
     [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15
     [completeness]=100 [playing]=140 [tone_note]=120 [contract]=150 [frame_button]=140
-    [nightdrive_sheet]=175 [arrange]=110 [tone_drag]=80 [core_rows]=75 [sweep]=300
+    [nightdrive_sheet]=175 [arrange]=110 [tone_drag]=80 [core_rows]=75 [computer_core]=45 [computer_ember]=170 [computer_paper]=150 [computer_signal]=170 [sweep]=300
     [notes]=300 [effects_cycle]=200 [scroll]=200 [sources]=150 [smoke_page]=200
     [smoke_core]=200 [haze]=300 [touch]=100 [tone_touch]=100
+    [computer_nightdrive]=200
 )
 by_weight() {
     local e script
@@ -238,7 +242,7 @@ by_weight() {
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
 for name in effects facts model sources notes director keep tone-curve tone-drag playing viz \
-    core-store core-stream core-actions core-prefs core-registry core-climb core-loop core-title core-hold ember-parts \
+    core-store core-stream core-actions core-computer core-prefs core-registry core-climb core-loop core-title core-hold ember-parts \
     level-write toast frame-keys switch ember-order contract \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes paper-fold \
     signal-line signal-draw nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls signal-controls; do
@@ -255,11 +259,13 @@ serial_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick nigh
 
 if [ "$quick" -eq 1 ]; then
     browser_checks=(effects_menu effects_layout tone_note knob_click tone_drag playing \
-        device_presets reduced_motion visualizer arrange contract frame_button space_key ember_link core_rows paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick)
+        device_presets reduced_motion visualizer arrange contract frame_button space_key ember_link core_rows computer_core computer_ember computer_paper computer_signal paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
+        computer_nightdrive)
 else
     browser_checks=(smoke_core smoke_page effects_menu effects_layout sources notes sweep haze \
         scroll tone_note knob_click tone_drag playing device_presets reduced_motion visualizer \
-        arrange contract frame_button space_key ember_link core_rows paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle)
+        arrange contract frame_button space_key ember_link core_rows computer_core computer_ember computer_paper computer_signal paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
+        computer_nightdrive)
 fi
 entries=()
 serial_entries=()

@@ -51,6 +51,7 @@ impl App {
             KeyCode::Left => self.step_focused(-1),
             KeyCode::Right => self.step_focused(1),
             KeyCode::Char(' ') | KeyCode::Enter => match self.focused_control() {
+                Some(control) if self.is_computer_volume(control) => self.computer_mute(),
                 Some(control) => self.flip(control),
                 None => match self.focused_host_row() {
                     Some(row) => self.act_on_host(row),
@@ -58,10 +59,13 @@ impl App {
                 },
             },
             // `=` is the unshifted `+` on most layouts, so it raises the volume too.
+            KeyCode::Char('+' | '=') if self.on_computer() => self.step_host_volume(1),
+            KeyCode::Char('-') if self.on_computer() => self.step_host_volume(-1),
             KeyCode::Char('+' | '=') => self.nudge("volume", 1),
             KeyCode::Char('-') => self.nudge("volume", -1),
             KeyCode::Char('0') => self.centre_balance(),
             KeyCode::Char('f') => self.flat(),
+            KeyCode::Char('C') => self.flip_side(),
             KeyCode::Char('p') => self.open_presets(),
             _ => Vec::new(),
         }
@@ -70,7 +74,7 @@ impl App {
     /// Open the preset list: the tone control's on a device that has one, the device's own on
     /// a device that keeps presets itself, and nothing on any other.
     pub(super) fn open_presets(&mut self) -> Vec<Intent> {
-        match self.profile.eq.is_some() {
+        match self.profile.eq.is_some() || self.on_computer() {
             true => presets::open(self),
             false => device_presets::open(self),
         }
@@ -100,7 +104,24 @@ impl App {
     /// reaches on every screen, since a room that has to go quiet cannot wait for the screen
     /// that draws the row.
     pub(super) fn mute(&self) -> Vec<Intent> {
-        self.flip_key("mute")
+        match self.on_computer() {
+            true => self.computer_mute(),
+            false => self.flip_key("mute"),
+        }
+    }
+
+    /// Whether `control` is the volume row, which shows the computer's volume while the computer's
+    /// side is shown.
+    pub(crate) fn is_computer_volume(&self, control: &Control) -> bool {
+        self.on_computer() && self.volume().is_some_and(|volume| volume.id == control.id)
+    }
+
+    /// Mute the computer's default sink, or unmute it, once its volume has been read.
+    fn computer_mute(&self) -> Vec<Intent> {
+        match self.host.volume() {
+            Some(_) => vec![Intent::HostMute],
+            None => Vec::new(),
+        }
     }
 
     /// Turn the toggle the profile names `key` the other way, or nothing where it has none.
@@ -159,7 +180,7 @@ impl App {
     /// them the Host group's while host audio shows.
     pub(crate) fn controls_len(&self) -> usize {
         let host = match self.host_shown() {
-            true => host::ROWS.len(),
+            true => self.host_rows().len(),
             false => 0,
         };
         self.row_count() + host
@@ -198,6 +219,18 @@ impl App {
         })
     }
 
+    /// The Host group's rows, in the order the Controls pane draws them under the device's own:
+    /// the computer's volume where the device has no volume control to carry the switch, then the
+    /// transport.
+    pub(crate) fn host_rows(&self) -> Vec<HostRow> {
+        let mut rows = Vec::new();
+        if self.computer_offered() && self.volume().is_none() {
+            rows.push(HostRow::Volume);
+        }
+        rows.push(HostRow::Transport);
+        rows
+    }
+
     /// The Host group's row the Controls pane has selected, whichever pane the keys are going
     /// to, or `None` while it has one of the device's own selected or host audio is not shown.
     pub(crate) fn host_row(&self) -> Option<HostRow> {
@@ -205,7 +238,7 @@ impl App {
             return None;
         }
         let at = self.selected.checked_sub(self.row_count())?;
-        host::ROWS.get(at).copied()
+        self.host_rows().get(at).copied()
     }
 
     /// The Host group's row the keys act on: the one the Controls pane has selected, while the
@@ -216,21 +249,20 @@ impl App {
             .flatten()
     }
 
-    /// Step the Host group's row `row` one value: the sink's volume [`host::VOLUME_STEP`] up
-    /// or down, or the Transport row's cursor a button along.
+    /// Step the Host group's row `row` one value: the Transport row's cursor a button along.
     fn step_host(&mut self, row: HostRow, dir: i64) -> Vec<Intent> {
         match row {
-            HostRow::Volume => self.step_host_volume(dir),
+            HostRow::Volume if self.on_computer() => self.step_host_volume(dir),
+            HostRow::Volume => Vec::new(),
             HostRow::Transport => {
                 self.host.move_button(dir);
                 Vec::new()
             }
-            HostRow::HostEq => Vec::new(),
         }
     }
 
-    /// The sink's volume [`host::VOLUME_STEP`] up or down, once the sink has read.
-    fn step_host_volume(&self, dir: i64) -> Vec<Intent> {
+    /// The computer's volume [`host::VOLUME_STEP`] up or down, once it has been read.
+    pub(crate) fn step_host_volume(&self, dir: i64) -> Vec<Intent> {
         self.host
             .stepped(dir)
             .map(Intent::HostVolume)
@@ -238,13 +270,11 @@ impl App {
             .collect()
     }
 
-    /// What `Space` and `Enter` do on the Host group's row `row`: the sink's mute turned the
-    /// other way, once there is a sink that has read, or the button under the Transport row's
-    /// cursor pressed — which, with no player to take it, a toast says rather than sends — or
-    /// the computer EQ put on or off ([`presets::toggle_computer`]).
+    /// What `Space` and `Enter` do on the Host group's row `row`: the button under the Transport
+    /// row's cursor pressed — which, with no player to take it, a toast says rather than sends.
     fn act_on_host(&mut self, row: HostRow) -> Vec<Intent> {
         match row {
-            HostRow::Volume if self.host.sink.is_some() => vec![Intent::HostMute],
+            HostRow::Volume if self.on_computer() => self.computer_mute(),
             HostRow::Volume => Vec::new(),
             HostRow::Transport if self.host.playing.is_some() => {
                 vec![Intent::HostPress(self.host.button())]
@@ -253,7 +283,6 @@ impl App {
                 self.notify(host::NO_PLAYER);
                 Vec::new()
             }
-            HostRow::HostEq => presets::toggle_computer(self),
         }
     }
 
@@ -261,7 +290,11 @@ impl App {
     /// does: the Transport row focused with its cursor on the button, and the button pressed as
     /// `Enter` presses it. Asks for nothing while host audio is not shown.
     pub(crate) fn click_transport(&mut self, button: usize) -> Vec<Intent> {
-        let Some(at) = host::ROWS.iter().position(|row| *row == HostRow::Transport) else {
+        let Some(at) = self
+            .host_rows()
+            .iter()
+            .position(|row| *row == HostRow::Transport)
+        else {
             return Vec::new();
         };
         if !self.host_shown() || button >= Button::ALL.len() {
@@ -286,11 +319,15 @@ impl App {
     }
 
     /// Step the focused control one value: a select through the values the profile names, a
-    /// level by one step, a toggle the other way.
+    /// level by one step, a toggle the other way. The volume steps the computer's while the
+    /// computer's side is shown.
     fn step_selected(&self, dir: i64) -> Vec<Intent> {
         let Some(control) = self.focused_control() else {
             return Vec::new();
         };
+        if self.is_computer_volume(control) {
+            return self.step_host_volume(dir);
+        }
         match control.kind {
             ControlKind::Select => self.step_select(control, dir),
             ControlKind::Level => self.step_level(control, dir),
@@ -362,16 +399,19 @@ impl App {
     }
 
     /// Nudge control row `i`'s level one step, the way the wheel over its bar does, or the
-    /// host's volume for the Host volume row under them. Asks for nothing for a row that is not
+    /// computer's volume for the volume row while the computer's side is shown. Asks for nothing for a row that is not
     /// a level — which a balance control is too.
     pub(crate) fn nudge_row(&self, i: usize, dir: i64) -> Vec<Intent> {
         let rows = self.rows();
         match rows.get(i) {
+            Some(row) if self.is_computer_volume(row.control) => self.step_host_volume(dir),
             Some(row) => self.step_level(row.control, dir),
-            None if !self.host_shown() => Vec::new(),
-            None => match i.checked_sub(rows.len()).and_then(|at| host::ROWS.get(at)) {
-                Some(HostRow::Volume) => self.step_host_volume(dir),
-                Some(HostRow::Transport | HostRow::HostEq) | None => Vec::new(),
+            None => match i
+                .checked_sub(rows.len())
+                .and_then(|at| self.host_rows().get(at).copied())
+            {
+                Some(HostRow::Volume) if self.on_computer() => self.step_host_volume(dir),
+                _ => Vec::new(),
             },
         }
     }

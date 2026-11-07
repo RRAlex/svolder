@@ -24,6 +24,7 @@
 //! boosts, it says there how far down the volume has to stay to keep clear of clipping.
 //!
 //! - [`fit`]: what the screen adds for an imported preset: the target curve and a side pane.
+//! - [`mod@points`]: the computer's side: its curve and the Points table.
 
 use std::sync::Arc;
 
@@ -39,7 +40,7 @@ use svolder_profiles::{EqMode, EqParam, EqSpec};
 use svolder_proto::FunctionId;
 
 use crate::tui::app::curve_drag;
-use crate::tui::app::{App, Screen, TargetView, ToneRow};
+use crate::tui::app::{App, Screen, Side, TargetView, ToneRow};
 use crate::tui::boxes::edit_line::{self, EditLine};
 use crate::tui::boxes::presets::{self, Standing};
 use crate::tui::keys::Scene;
@@ -178,6 +179,9 @@ impl Graph {
     /// What the graph draws for `app`'s tone control. A mode the device has not reported yet
     /// is taken as EQ, the curve its bands describe.
     fn of(app: &App, eq: &EqSpec) -> Graph {
+        if app.on_computer() {
+            return points::graph(app);
+        }
         match app.eq_mode() {
             Some(EqMode::Flat) => Graph::FlatMode,
             Some(EqMode::Loudness) => Graph::Loudness,
@@ -204,12 +208,15 @@ pub fn draw(
     let Some(eq) = app.profile.eq.as_ref() else {
         return Vec::new();
     };
-    let (tier, [header, response, bands]) = rows(area, eq.bands.len());
-    let standing = presets::standing(app);
+    let (tier, [header, response, bands]) = rows(area, table_rows(app, eq));
+    let standing = match app.on_computer() {
+        true => computer_standing(app),
+        false => presets::standing(app),
+    };
     let target = target_of(app, standing.as_ref());
 
     let text = device::header_text(header);
-    let (line, halves) = header_line(
+    let (line, halves, switch) = header_line(
         app,
         eq,
         theme,
@@ -245,10 +252,16 @@ pub fn draw(
         }
         .intersection(header)
     };
-    let mut header_rows = vec![
-        (eq.mode_id(), half(halves.mode)),
-        (eq.loudness_id(), half(halves.loudness)),
-    ];
+    let mut header_rows = vec![(eq.mode_id(), half(halves.mode))];
+    if let Some(switch) = switch {
+        for (side, (at, width)) in switch {
+            hits.push(half((at, width)), Hit::Side(side));
+        }
+    }
+    let computer = app.on_computer();
+    if !computer {
+        header_rows.push((eq.loudness_id(), half(halves.loudness)));
+    }
     // A click anywhere on the Mode half but its own `‹ ›` toggles the flat mode; a click on
     // either arrow still steps the select, like every select's, so the narrower
     // hits are pushed after the half they sit inside of and win there. A click anywhere on the
@@ -257,10 +270,12 @@ pub fn draw(
     hits.push(half(halves.mode), Hit::Mode);
     hits.push(half((halves.mode_arrows.0, 1)), Hit::ModePrev);
     hits.push(half((halves.mode_arrows.1, 1)), Hit::ModeNext);
-    hits.push(half(halves.loudness), Hit::Loudness);
     // The bar inside the half sets the strength under a press and a drag, over the half's
     // toggle ([`Hit::LoudnessBar`]).
-    if app.raw_of(eq.loudness_id()).is_some() {
+    if !computer {
+        hits.push(half(halves.loudness), Hit::Loudness);
+    }
+    if !computer && app.raw_of(eq.loudness_id()).is_some() {
         let bar = Rect {
             x: text.x + u16::try_from(halves.loudness_bar).unwrap_or(0),
             y: text.y,
@@ -269,22 +284,50 @@ pub fn draw(
         };
         hits.push_bar(bar.intersection(header), bar, Hit::LoudnessBar);
     }
-    let (chart, side) = split_response(response, tier, target.is_some());
-    app.tone.target_cache.set_target(target.is_some());
+    let has_side = target.is_some() || computer;
+    let (chart, side) = split_response(response, tier, has_side);
+    app.tone.target_cache.set_target(has_side);
     draw_response(
         frame,
         chart,
-        curve_area_in(area, eq.bands.len(), target.is_some()),
+        curve_area_in(area, table_rows(app, eq), has_side),
         app,
         eq,
         (theme, tier, target.as_deref()),
         hits,
     );
-    if let (Some(side), Some(view)) = (side, target.as_deref()) {
-        fit::draw_side(frame, side, view, app, theme);
+    match (side, target.as_deref()) {
+        (Some(side), _) if computer => fit::draw_computer_side(frame, side, app, theme),
+        (Some(side), Some(view)) => fit::draw_side(frame, side, view, app, theme),
+        _ => {}
+    }
+    if computer {
+        points::draw_points(frame, bands, app, (theme, tier), hits);
+        return header_rows;
     }
     header_rows.extend(draw_bands(frame, bands, app, eq, (theme, tier), hits));
     header_rows
+}
+
+/// How many rows the table under the curve has: a row per band, or the computer's fixed
+/// height, so a point added never moves the curve.
+fn table_rows(app: &App, eq: &EqSpec) -> usize {
+    match app.on_computer() {
+        true => points::POINT_ROWS,
+        false => eq.bands.len(),
+    }
+}
+
+/// What the header says of the preset on the computer: the one its points came from, `custom`
+/// once a hand changed them.
+fn computer_standing(app: &App) -> Option<Standing> {
+    let name = app.computer_eq()?.preset.clone()?;
+    Some(Standing {
+        lead: "Preset ",
+        name,
+        mark: "",
+        preset: false,
+    })
 }
 
 /// The imported preset the screen draws against the device, from what the header says is on it
@@ -334,7 +377,7 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
     let Some(eq) = app.profile.eq.as_ref() else {
         return Vec::new();
     };
-    let (tier, [_, response, bands]) = rows(area, eq.bands.len());
+    let (tier, [_, response, bands]) = rows(area, table_rows(app, eq));
     let (chart, _) = split_response(response, tier, app.tone.target_cache.target());
     vec![(FrameId::Response, chart), (FrameId::Bands, bands)]
 }
@@ -349,7 +392,7 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
 pub(crate) fn curve_of(area: Rect, app: &App) -> Option<Rect> {
     let eq = app.profile.eq.as_ref()?;
     (Graph::of(app, eq) != Graph::Loudness)
-        .then(|| curve_area_in(area, eq.bands.len(), app.tone.target_cache.target()))
+        .then(|| curve_area_in(area, table_rows(app, eq), app.tone.target_cache.target()))
 }
 
 /// Whether the curve [`curve_of`] answers for is muted: a flat curve in EQ mode or Flat mode,
@@ -371,6 +414,12 @@ pub(crate) fn curve_muted(app: &App) -> bool {
 #[cfg(test)]
 pub(crate) fn curve_area(area: Rect, bands: usize) -> Rect {
     curve_area_in(area, bands, false)
+}
+
+/// The cells the computer side's curve is drawn in over `area`.
+#[cfg(test)]
+pub(crate) fn computer_curve_area(area: Rect) -> Rect {
+    curve_area_in(area, points::POINT_ROWS, true)
 }
 
 /// The cells the response curve is drawn in, for a frame that does, or does not, have the side
@@ -404,7 +453,7 @@ fn header_line(
     theme: &Theme,
     area: Rect,
     (standing, target): (Option<&Standing>, Option<&TargetView>),
-) -> (Line<'static>, ModeHalves) {
+) -> (Line<'static>, ModeHalves, Option<Switch>) {
     let width = device::header_text(area).width;
     let lead = match device::marked(area.width) {
         true => "",
@@ -422,10 +471,20 @@ fn header_line(
     if !lead.is_empty() {
         spans.push(Span::styled(lead, theme.style(Role::Header)));
     }
-    spans.push(Span::styled(
-        device::cut_cells(&app.session.product, name_room),
-        theme.style(Role::Header),
-    ));
+    let mut switch = None;
+    match side_spans(app, theme) {
+        Some((words, cells)) if widgets::text::cells(lead) + cells.0 <= usize::from(width) => {
+            let at = spans.iter().map(Span::width).sum::<usize>();
+            switch = cells.1.map(|[(a, wa), (b, wb)]| {
+                [(Side::Dac, (at + a, wa)), (Side::Computer, (at + b, wb))]
+            });
+            spans.extend(words);
+        }
+        _ => spans.push(Span::styled(
+            device::cut_cells(&app.session.product, name_room),
+            theme.style(Role::Header),
+        )),
+    }
     let mut line = Line::from(spans);
     let room =
         usize::from(width).saturating_sub(line.width() + natural + 2 + mouse.width() + PRESET_GAP);
@@ -469,8 +528,61 @@ fn header_line(
             mode_start + halves.mode_arrows.1,
         ),
     };
-    (line, halves)
+    (line, halves, switch)
 }
+
+/// Where the two halves of the side switch lie in the header, each as a first cell and a width.
+type Switch = [(Side, (usize, usize)); 2];
+
+/// The side switch, `EQ for ‹ Gungnir 2 | Computer ›`, with the side shown standing out, its width
+/// and where its two names lie in it; where the computer's controls cannot be used, the device's
+/// name and the reason in the switch's place. `None` where the computer is not offered.
+#[allow(clippy::type_complexity, reason = "one private pair of answers")]
+fn side_spans(
+    app: &App,
+    theme: &Theme,
+) -> Option<(Vec<Span<'static>>, (usize, Option<[(usize, usize); 2]>))> {
+    if !app.computer_offered() {
+        return None;
+    }
+    let head = theme.style(Role::Header);
+    let mut spans = vec![Span::styled("EQ for ", head)];
+    if let Some(why) = app.host.computer.unavailable() {
+        spans.push(Span::styled(app.session.product.clone(), head));
+        spans.push(Span::styled(format!("  {why}"), theme.style(Role::Dim)));
+        let width = spans.iter().map(Span::width).sum();
+        return Some((spans, (width, None)));
+    }
+    let (on, off) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let arrow = theme.style(Role::ModeArrow);
+    let (dac, computer) = match app.on_computer() {
+        true => (off, on),
+        false => (on, off),
+    };
+    spans.push(Span::styled("‹ ", arrow));
+    let first = spans.iter().map(Span::width).sum::<usize>();
+    let name = app.session.product.clone();
+    let name_width = widgets::text::cells(&name);
+    spans.push(Span::styled(name, dac));
+    spans.push(Span::styled(" | ", arrow));
+    let second = first + name_width + 3;
+    spans.push(Span::styled(COMPUTER, computer));
+    spans.push(Span::styled(" ›", arrow));
+    let width = spans.iter().map(Span::width).sum();
+    Some((
+        spans,
+        (
+            width,
+            Some([
+                (first, name_width),
+                (second, widgets::text::cells(COMPUTER)),
+            ]),
+        ),
+    ))
+}
+
+/// What the switch calls the computer.
+const COMPUTER: &str = "Computer";
 
 /// What the header says about the presets in `room` cells — `Preset NAME`, `Preset NAME*`,
 /// `Preset custom` or `loading NAME`, after [`PRESET_OPEN`] — with the name cut short to fit, or
@@ -546,6 +658,9 @@ fn response_series(
     curve: Rect,
 ) -> ResponseSeries {
     // Braille draws two dots across a cell, so the curve is sampled twice per column.
+    if app.on_computer() {
+        return points::series(app, curve);
+    }
     let freqs = response::log_freqs(2 * usize::from(curve.width));
     let plot = plot(app, eq);
     let graph = Graph::of(app, eq);
@@ -728,8 +843,11 @@ pub(crate) fn points(app: &App, curve: Rect) -> Vec<(usize, (u16, u16))> {
     if Graph::of(app, eq) == Graph::Loudness {
         return Vec::new();
     }
-    plot(app, eq)
-        .centres
+    let centres = match app.on_computer() {
+        true => points::centres(app),
+        false => plot(app, eq).centres,
+    };
+    centres
         .iter()
         .filter_map(|&(band, [(log_hz, db)])| {
             Some((band, (column_at(curve, log_hz)?, row_at(curve, db)?)))
@@ -746,7 +864,11 @@ pub(crate) fn nearest_centre(app: &App, curve: Rect, x: u16) -> Option<usize> {
     }
     let x = f64::from(x.saturating_sub(curve.x));
     let mut nearest: Option<(usize, f64)> = None;
-    for &(band, [(log_hz, _)]) in &plot(app, eq).centres {
+    let centres = match app.on_computer() {
+        true => points::centres(app),
+        false => plot(app, eq).centres,
+    };
+    for &(band, [(log_hz, _)]) in &centres {
         let off = (along(curve, log_hz) - x).abs();
         if nearest.is_none_or(|(_, best)| off < best) {
             nearest = Some((band, off));
@@ -1029,7 +1151,7 @@ pub(crate) fn draw_edit_line(
 ) -> Option<Rect> {
     let line = app.tone.edit_line.as_ref()?;
     let eq = app.profile.eq.as_ref()?;
-    let (tier, [_, _, bands]) = rows(area, eq.bands.len());
+    let (tier, [_, _, bands]) = rows(area, table_rows(app, eq));
     let row = band_area(tier.block().inner(bands), line.band);
     let (text, caret) = edit_line_text(line, usize::from(row.width), theme);
     widgets::surfaces::modal_ground(frame, row, theme);
@@ -1199,6 +1321,7 @@ fn band_text(app: &App, eq: &EqSpec, band: usize) -> (String, [(usize, usize); 3
 }
 
 mod fit;
+mod points;
 
 #[cfg(test)]
 mod tests;

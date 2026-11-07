@@ -340,4 +340,12 @@ fixed in the core, in their own commits, before Paper's sections used them:
 Building the rest of Paper (the ruler, the notes, the controls, the checks) found no further gap
 in the core.
 
+## The computer's side
+
+A line by the title, `showing: the DAC · this computer`, flips the ruler and the tone to the
+computer: the ruler reads 0 to 100 %, the tone is written `TONE · off · EQ` and has a curve with a
+pencil point per point, a scrolling table with `×` and `+ Add point`, and the line that counts the
+points and the preamp. The drawing is `draw/computer.js`, the hands `computer-wire.js`; the design
+is in [host control](host-control.md#paper).
+
 [Back to web themes](web-themes.md).

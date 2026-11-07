@@ -92,6 +92,8 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "themes/ember/smoke-notes.js",
         "core/visible.js",
         "core/contract.js",
+        "core/computer.js",
+        "core/ask.js",
         "themes/ember/visualizer.js",
         "themes/ember/viz-colour.js",
         "themes/ember/viz-pref.js",

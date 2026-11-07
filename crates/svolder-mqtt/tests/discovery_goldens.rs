@@ -121,3 +121,44 @@ fn lokimax_with_commands() {
     );
     assert_golden(sorted_json(entries), "lokimax-commands.json");
 }
+
+#[test]
+fn the_computer_has_one_switch_and_one_sensor() {
+    assert_golden(
+        sorted_json(svolder_mqtt::computer::entries(
+            "svolder",
+            "homeassistant",
+            true,
+        )),
+        "computer-commands.json",
+    );
+    assert_golden(
+        sorted_json(svolder_mqtt::computer::entries(
+            "svolder",
+            "homeassistant",
+            false,
+        )),
+        "computer-read-only.json",
+    );
+}
+
+/// The computer's entities are not part of any device's configs: a device's discovery says what
+/// it said before the computer existed.
+#[test]
+fn the_device_goldens_are_unchanged() {
+    let profile = profile("gungnir2-v2");
+    let entries = configs(
+        "svolder",
+        "homeassistant",
+        &profile,
+        &device(),
+        true,
+        &preset_names(&profile),
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|e| !e.topic.contains("svolder_computer"))
+    );
+    assert_golden(sorted_json(entries), "gungnir2-v2-commands.json");
+}

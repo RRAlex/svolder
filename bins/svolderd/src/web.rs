@@ -158,6 +158,8 @@ pub(crate) struct Shared {
     /// Bumped when the fleet changed in a way its devices' own rows do not say (the hops after
     /// them): an open event stream sends the fleet again.
     pub(crate) fleet_changed: watch::Sender<u64>,
+    /// The saved presets as the configuration file last read, for the computer's model.
+    pub(crate) saved_presets: model::SavedPresets,
 }
 
 /// The router's state: one server's [`Shared`], cheap to clone.
@@ -207,6 +209,7 @@ impl Web {
             codes,
             signed_out: watch::channel(0).0,
             fleet_changed: watch::channel(0).0,
+            saved_presets: model::SavedPresets::default(),
         }))
     }
 

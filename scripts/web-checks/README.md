@@ -72,7 +72,7 @@ exit 1, when a file of the smoke or one of its own checks changed against `main`
 (`WEB_CHECKS_BASE` names another base) in the commits, the working tree or the untracked files. The
 list is `smoke_files` in `run-all.sh`: the smoke's scripts under `bins/svolderd/web/themes/ember/`,
 `effects.js` (it starts and stops the smoke, and the quick gate does not cycle effects), the
-smoke's checks and tools here, `COVERAGE.md` and `node/`. `gate_refusal.sh` proves the refusal on a throwaway
+smoke's checks and tools here, `COVERAGE.md` and the node harnesses of the smoke (`director`, `effects`, `look-values`, `model`, `notes`, `sources` and their `mutate_*.sh`; the other harnesses and the fixtures belong to the quick gate). `gate_refusal.sh` proves the refusal on a throwaway
 repository. Outside a git checkout the gate runs and says it could not tell.
 
 ## What is here
@@ -205,11 +205,37 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `ember_link.py`: Ember's connection state as a dot after the shown device's name (an image named by
   the state's words, not a tab stop): every state's word (`not connected`, `connecting…`, connected),
   its place after a switch of two devices, a long name, and the muted volume reading `−∞ dB`.
-- `completeness.py`: every target and fact of `core/contract.js` on a Gungnir 2 with a player, an
+- `completeness.py`: every target and fact of `core/contract.js` (and the computer's `computerTargetsOf`, reached by every theme) on a Gungnir 2 with a player, an
   amp with a signal, a five-meter amp, a mono amp and a Loki Max (one daemon,
   `Daemon(fleet=[(profile, name, udid)])`), in Chromium, for each theme the page lists: reached,
   operated, and the change read back from the model route; every fact shown with the model's words (the
   track's cover is one: shown by every theme as the picture asked for by its version).
+- `node/core-computer.mjs`: the core's computer side on fakes for the post, the read, the clock and the
+  question: the side kept per viewer, the switch, a flip that writes nothing, the shelves of the curve,
+  the steps, the point a tap or `+ Add point` makes, a drag's pace and its release, the value held while
+  a host update arrives, a guest, every route, the volume's cap and first paint, the both-sides question.
+- `computer_core.py`: the computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
+  the host event, every action's request and read-back, a refusal, the side kept across a reload with no
+  write, a point write's slot (and a stale table, and a 409 for a point that moved), an unavailable computer
+  (`SVOLDER_FAKE_HOST_EQ=off`), the question card's keys and buttons, and the same preset on both sides with
+  its yes. Each theme's check also proves that Enter on an untouched cell writes nothing.
+- `computer_ember.py`: Ember's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
+  the switch, the knob in %, the points' table, the curve under the mouse (tap, drag, wheel, right drag), a
+  flip mid-drag, a guest, the side kept, the both-sides question, an amp page; a finger and a pinch in Chromium.
+  It saves the computer side, desktop and phone, in Ember's folder of the web-shots pictures.
+- `computer_signal.py`: Signal's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
+  the line's computer hop as the flip (and another hop flipping back, by tap and by keys with the focus on the
+  chosen hop), the level in %, the points' table, the curve (a dot on it for each point; tap, drag, wheel), Save as,
+  Rename and Delete of the presets, a flip mid-drag, a guest, the hop kept across a reload, the both-sides question,
+  an amp page, a route that changes the sound; a finger and a pinch in Chromium. It saves the computer side
+  (desktop, phone, the phone's table) in Signal's folder of the web-shots pictures.
+- `computer_nightdrive.py`: Night drive's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
+  the two keys by the menu button, the volume figure and the dash's keys in %, the EQ line (OFF | EQ, no gains), the
+  bubbles on the mountains (every dot on the curve, a drag, a tap on an empty spot, the wheel), the sheet's points
+  table, a flip mid-drag, a guest, the side kept, the focus kept across a keyboard flip, the presets' actions, the
+  both-sides question, an amp page, the fade; the phone's keys in the scene; the wheel and the arrows for the volume;
+  `This computer` whole from 600 px up; a finger and a pinch in Chromium. It saves the
+  computer side, desktop and phone, the sheet shut and open, in the web-shots folder `nightdrive`.
 - `core_rows.py`: the core's rows Ember does not use, from a test page: a second device followed
   over one stream, a hop added, the menu's fade, a band moved by `core.drag` from plain
   coordinates, light and dark following the system (Chromium), a canvas loop that pauses while the
@@ -291,7 +317,7 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   at rest and scrolled with the strip pinned, into `target/web-shots/signal`; no check, only pictures.
 - `nightdrive_shots.py` (`make nightdrive-shots`, Chromium): Night drive's stills on the fake capture's
   music, a desktop at rest, with a bubble held, with the sheet open, with the device out of reach and with no
-  capture, and a phone upright and sideways, into `target/web-shots/nightdrive`; no check, only pictures.
+  capture, and a phone upright and sideways (each on the device's side and the computer's), into `target/web-shots/nightdrive`; no check, only pictures.
 - `node/nightdrive-scene.mjs`: the theme Night drive's scene maths (`themes/nightdrive/`): the camera
   (the nearest row at the bottom, the far rows wider than F6's), the one frequency axis and the 24
   columns the 240 bands go to, the music's levels (the ridge's unit, a column's mean, the bass and the
@@ -472,6 +498,7 @@ and are optional: the gates do not run them.
   `mutate_sources.sh`, `mutate_paper.sh` (thirteen mutants of Paper's ruler, notes, changes,
   log and words, run against a copy of the web dir by `node/paper-*.mjs`) and `mutate_signal.sh`
   (thirteen mutants of Signal's line, fold, computer hop, strip, linked amp and faults, volume and transport icons, the mode's place, the Loudness chip and the menu row, run by `node/signal-*.mjs`)
+  `mutate_computer.sh` (six mutants of the core's point writes: the slot dropped from a set or a remove, sent as the place, a 409 that does not end the drag or says the daemon's words, run by `node/core-computer.mjs`),
   and `mutate_nightdrive.sh` (twenty-two mutants (a minute's fade and a ridge smoothed over 0.6 of a band among them, the wet road's slices swaying each by their own phase among them) of Night drive's camera, axis, levels, tempo, sky, ear, look, budget, floor drawing, tuning, words and dash, run by `node/nightdrive-*.mjs`);
 - browser: `python3 scripts/web-checks/mutate_smoke.py [name ...]`, and the same for
   `mutate_notes.py`, `mutate_haze.py`, `mutate_scroll.py`, `mutate_sources.py`,
@@ -512,3 +539,8 @@ Not checks; run by hand when retuning the look.
   (and `firefox`) records it again; do that only to move the reference on purpose.
   `soak-baseline.json` is the output file of a `soak.py` run (its fourth argument) kept as the
   reference.
+- `computer_paper.py`: the theme Paper's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no
+  PipeWire): the switch by the title and the ruler and tone it flips, one percent a tap, a point dragged,
+  tapped in and removed, sixteen points in the same height, a flip mid drag (Chromium), a guest, the side kept
+  across a reload, the same preset on both sides asked and answered, an amp's page, a phone. It writes the
+  stills `target/web-shots/paper/computer-desktop.png` and `computer-phone.png`.

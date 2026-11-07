@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use svolder_ipc::Config;
-use svolder_profiles::tone::preset;
+use svolder_profiles::tone::preset::{self, Preset};
 
 use crate::backend::{ASK_WAIT, Backend, Globals, asks_a_daemon, launch};
 use crate::recovery::{Failure, Kind};
@@ -61,14 +61,10 @@ pub(crate) fn nothing_changed() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The devices of the running daemon that have the preset `name` on, which is to say the
-/// device's mode and bands read what the preset gives. Empty without a daemon, for a name
-/// that is no preset of the configuration, and for a device that is not connected or does not
-/// answer in time.
-pub(crate) async fn holders(g: &Globals<'_>, config: &Config, name: &str) -> Vec<Holder> {
-    let Some(preset) = config.preset(name) else {
-        return Vec::new();
-    };
+/// The devices of the running daemon that have `preset`, built-in or saved, on, which is to say
+/// the device's mode and bands read what the preset gives. Empty without a daemon, and for a
+/// device that is not connected or does not answer in time.
+pub(crate) async fn holders(g: &Globals<'_>, config: &Config, preset: &Preset) -> Vec<Holder> {
     if !asks_a_daemon(g.transport) {
         return Vec::new();
     }

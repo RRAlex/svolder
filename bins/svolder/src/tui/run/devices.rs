@@ -644,7 +644,7 @@ fn take_over(watching: &mut Watching, mut fresh: Watching, look: &Look) {
     fresh.app.mascot.capable = look.mascot_capable();
     fresh.host = std::mem::take(&mut watching.host);
     fresh.jobs = std::mem::take(&mut watching.jobs);
-    fresh.jobs.look_again();
+    fresh.computer = std::mem::take(&mut watching.computer);
     *watching = fresh;
 }
 

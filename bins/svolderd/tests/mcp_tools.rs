@@ -241,13 +241,22 @@ fn error_text(reply: &Value) -> String {
         .to_string()
 }
 
-const READ_TOOLS: [&str; 4] = [
+const READ_TOOLS: [&str; 5] = [
     "list_devices",
     "get_state",
     "get_link_history",
     "list_presets",
+    "get_host",
 ];
-const WRITE_TOOLS: [&str; 4] = ["set_control", "load_preset", "mute", "identify"];
+const WRITE_TOOLS: [&str; 7] = [
+    "set_control",
+    "load_preset",
+    "mute",
+    "identify",
+    "set_host_volume",
+    "host_mute",
+    "set_host_eq",
+];
 
 #[tokio::test]
 async fn the_read_tools_answer_with_device_data() {
@@ -362,6 +371,9 @@ async fn without_writes_the_write_tools_are_hidden_and_refused() {
             ("load_preset", json!({"name": "Warm"})),
             ("mute", json!({"on": true})),
             ("identify", json!({})),
+            ("set_host_volume", json!({"percent": 10})),
+            ("host_mute", json!({"muted": true})),
+            ("set_host_eq", json!({"off": true})),
         ];
         for (tool, arguments) in calls {
             for kind in [Kind::Newer, Kind::Older] {
@@ -1042,6 +1054,42 @@ async fn load_preset_bass_boost_over_http_asks_then_applies() {
             )
             .await;
         assert_eq!(ok(&recalled)["slot"], json!(1), "{recalled:#}");
+    })
+    .await
+    .expect("test timed out");
+}
+
+#[tokio::test]
+async fn the_computer_tools_read_and_change_the_fake_host() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let rig = rig_on("writes = true\n", &[("SVOLDER_HOST", "fake")]).await;
+        let host = rig.call(Kind::Newer, "get_host", json!({})).await;
+        assert_eq!(ok(&host)["volume"]["percent"], json!(42), "{host:#}");
+        assert_eq!(ok(&host)["eq"]["on"], json!(false), "{host:#}");
+
+        let lowered = rig
+            .call(Kind::Newer, "set_host_volume", json!({"percent": 30}))
+            .await;
+        assert_eq!(ok(&lowered)["volume"]["percent"], json!(30), "{lowered:#}");
+        let raised = rig
+            .call(Kind::Older, "set_host_volume", json!({"percent": 90}))
+            .await;
+        assert!(error_text(&raised).contains("confirm"), "{raised:#}");
+        let above = rig
+            .call(Kind::Newer, "set_host_volume", json!({"percent": 101}))
+            .await;
+        assert!(error_text(&above).contains("100 %"), "{above:#}");
+        let muted = rig
+            .call(Kind::Newer, "host_mute", json!({"muted": true}))
+            .await;
+        assert_eq!(ok(&muted)["volume"]["muted"], json!(true), "{muted:#}");
+        let after = rig.call(Kind::Newer, "get_host", json!({})).await;
+        assert_eq!(ok(&after)["volume"]["percent"], json!(30), "{after:#}");
+        assert_eq!(ok(&after)["volume"]["muted"], json!(true), "{after:#}");
+        let off = rig
+            .call(Kind::Newer, "set_host_eq", json!({"off": true}))
+            .await;
+        assert_eq!(ok(&off)["eq"]["on"], json!(false), "{off:#}");
     })
     .await
     .expect("test timed out");

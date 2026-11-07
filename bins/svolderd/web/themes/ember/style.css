@@ -374,6 +374,58 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
   .wm { width: 108px; }
 }
 
+/* the computer's side: the switch beside the device's name, in the mode track's style, and the
+   tone control's points: a table of six rows that scrolls, the picked row lit */
+.sideseg { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; align-self: center; }
+.sideseg[hidden] { display: none; }
+.sideseg .seg {
+  display: grid; grid-auto-flow: column; grid-auto-columns: auto; gap: 2px; padding: 3px;
+  border-radius: 999px; background: var(--card); border: 1px solid var(--hair);
+}
+.sideseg .opt { padding: 0 18px; white-space: nowrap; }
+.sideseg .why { font: 500 var(--t-xs)/1.3 var(--f-ui); color: var(--faint); }
+.tone.comp > .seg { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.eqg.pts .plot.hot { cursor: grab; }
+.pts-table { --prow: 42px; display: grid; font-variant-numeric: tabular-nums; }
+.ph, .pt {
+  display: grid; grid-template-columns: 1.6em 4.2em minmax(0, 1.2fr) minmax(0, 1.15fr) minmax(0, .7fr) 2.2em;
+  gap: 6px; align-items: center;
+}
+.ph { padding: 0 8px 6px; font: 500 12.5px/1.3 var(--f-ui); color: var(--faint); }
+.ph span:nth-child(n+3):not(:last-child), .pt .cell { text-align: right; }
+.pscroll { overflow-y: auto; overscroll-behavior: contain; }
+.pscroll.long { max-height: calc(var(--prow) * 6.7); }
+.pscroll.long:not(.end) {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 26px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 26px), transparent);
+}
+.pt {
+  min-height: var(--prow); padding: 0 8px; border-radius: 12px; color: var(--dim);
+  font: 400 14.5px var(--f-num); transition: color .15s, background .15s;
+}
+.pt:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.pt.on { color: var(--ink); background: color-mix(in srgb, var(--acc) 12%, transparent); }
+.pt .pn { font: 500 var(--t-xs) var(--f-ui); color: var(--faint); }
+.pt.on .pn, .pt.on .ptype { color: var(--acc); }
+.ptype {
+  appearance: none; background: transparent; border: 0; padding: 0; color: inherit;
+  font: 500 var(--t-xs) var(--f-ui); min-height: var(--tap); cursor: pointer;
+}
+.ptype option { background: var(--card); color: var(--ink); }
+.pt .cell { min-height: var(--tap); padding: 0; color: inherit; font: inherit; }
+.pt .cell input {
+  width: 100%; min-height: var(--tap); text-align: right; background: transparent; color: var(--ink);
+  border: 0; border-bottom: 1px solid var(--acc); font: inherit;
+}
+.pt .px { min-height: var(--tap); color: var(--faint); font: 400 17px/1 var(--f-ui); text-align: center; }
+.pt button.px:hover { color: var(--ink); }
+.pts-table .more { min-height: 1.4em; margin-top: 6px; text-align: center; font: 500 var(--t-xs)/1.4 var(--f-ui); color: var(--faint); }
+.pfoot { display: grid; gap: 10px; justify-items: start; padding: 4px 4px 0; }
+.pline { font-size: var(--t-s); color: var(--faint); }
+.pnote { color: var(--warn); }
+.pt [aria-disabled=true], .pfoot [aria-disabled=true] { cursor: default; }
+.pfoot .btn[aria-disabled=true] { opacity: .5; }
+
 /* the device switcher and the link's dot */
 .devs { display: flex; gap: 28px; align-items: end; flex-wrap: wrap; }
 .dev {

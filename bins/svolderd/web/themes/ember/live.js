@@ -15,6 +15,8 @@
 import * as effects from './effects.js';
 import { PARTS } from './draw/parts.js';
 import { screen as drawScreen } from './draw/screen.js';
+import { effective } from './draw/computer.js';
+import { computerView } from './computer-view.js';
 import {
   clear, drawNewest, holds, refocus, release, remember, requested,
 } from './keep.js';
@@ -26,6 +28,9 @@ import { mine, orderOf, shown } from './bind.js';
  * volume and the meters are components, kept in place and read by their events). */
 const SWAPPED = ['link', 'card', 'controls', 'power', 'tone', 'presets', 'device_presets', 'facts',
   'playing'];
+
+/** The parts the computer's side draws from its own model, not the device's. */
+const COMPUTER_PARTS = ['tone', 'presets'];
 
 /** The preset lists, whose swap waits while one of their forms is open. */
 const PRESET_LISTS = ['part-presets', 'part-device-presets'];
@@ -54,6 +59,10 @@ function ownHold(id) {
   if (PRESET_LISTS.includes(id)
     && document.getElementById(id)?.querySelector('.pform:not([hidden]):not([data-sending])')) {
     return true;
+  }
+  // a value typed or a type being chosen in the computer's table is not swapped away
+  if (id === 'part-tone') {
+    return Boolean(document.querySelector('#part-tone.comp .pts-table :is(input, select):focus'));
   }
   return id === 'part-device-presets' && requested(id);
 }
@@ -84,9 +93,10 @@ function partsHtml(core, names, given = {}) {
   const page = core.model.page();
   if (!page.device) return '';
   const device = { ...page.device, ...given };
+  const computer = computerView(core);
   return names
     .filter((name) => document.getElementById(idOf(name)))
-    .map((name) => PARTS[idOf(name).slice(5)]?.(device, page, { oob: true }) ?? '')
+    .map((name) => PARTS[idOf(name).slice(5)]?.(device, page, { oob: true, computer }) ?? '')
     .join('');
 }
 
@@ -136,15 +146,21 @@ export function installLive(core, hooks, signal) {
   }
   note(SWAPPED);
 
+  /** Whether the computer is the side shown. */
+  const onComputer = () => computerView(core)?.side === 'computer';
+
   /** Draw the screen anew. */
   function swapScreen() {
     hooks.beforeScreen();
     const lost = lostLink();
     const page = store.page();
-    htmx().swap(screenEl(), drawScreen(page, orderOf(page.device)), { swapStyle: 'innerHTML' });
-    // The link lives in the header, outside the screen: it is drawn again with it.
-    swapParts(core, ['link']);
+    const view = computerView(core);
+    htmx().swap(screenEl(), drawScreen(page, orderOf(effective(page.device, view)), view),
+      { swapStyle: 'innerHTML' });
+    // The link and the switch live in the header, outside the screen: they are drawn again with it.
+    swapParts(core, ['link', 'switch']);
     note(SWAPPED);
+    noteComputer();
     linkBack(core, lost);
     hooks.screenIn();
   }
@@ -171,10 +187,62 @@ export function installLive(core, hooks, signal) {
     const view = document.querySelector('#screen .view');
     const device = page.device;
     const same = view && device && view.dataset.device === page.shown
-      && view.dataset.shape === device.shape;
-    if (same) swap(SWAPPED, true);
-    else swapScreen();
+      && view.dataset.shape === device.shape
+      && (view.dataset.side === 'computer') === onComputer();
+    if (same) {
+      swap(onComputer() ? SWAPPED.filter((name) => !COMPUTER_PARTS.includes(name)) : SWAPPED, true);
+      computerChanged();
+    } else swapScreen();
     paintLost();
+  }
+
+  /** What the computer's parts said when they were last drawn. */
+  let drawnComputer = '';
+  const computerState = () => {
+    const view = computerView(core);
+    return stable(view ? { sw: view.sw, tone: view.tone, picked: view.picked, writes: view.writes }
+      : null);
+  };
+  const noteComputer = () => {
+    drawnComputer = computerState();
+  };
+
+  /** The computer's side changed (a host reading, a value held or settled, a flip): the screen is
+   * drawn anew where the side changed, else the knob reads the volume and the parts that say
+   * something else are drawn again. */
+  function computerChanged() {
+    const view = computerView(core);
+    const shownView = document.querySelector('#screen .view');
+    if (!shownView || !store.page().device) return;
+    if ((shownView.dataset.side === 'computer') !== (view?.side === 'computer')) {
+      swapScreen();
+      return;
+    }
+    const now = computerState();
+    if (now !== drawnComputer) {
+      drawnComputer = now;
+      swapParts(core, view?.side === 'computer' ? ['switch', 'tone', 'presets'] : ['switch']);
+    }
+    if (view?.side === 'computer' && view.volume) computerVolume(view.volume);
+  }
+
+  /** The knob reads the computer's volume. */
+  function computerVolume(volume) {
+    const knob = document.querySelector('sv-knob[data-computer]');
+    if (!knob) return;
+    const data = {
+      raw: volume.pct === null ? null : Math.min(volume.pct, 100),
+      target: null,
+      risk: null,
+      cap: null,
+      text: volume.pct === null ? '—' : `${volume.pct} %`,
+      muted: volume.muted,
+      aria: volume.aria,
+      unread: volume.pct === null,
+      notes: volume.boosted ? [{ text: 'Set above 100 % elsewhere', red: false }] : [],
+    };
+    knob.update(data);
+    effects.level(data.raw === null || data.muted ? 0.06 : knob.fraction(data.raw));
   }
 
   /** The stream's state: lost or waiting is dimmed and inert; a lost link says so and greys the
@@ -195,6 +263,7 @@ export function installLive(core, hooks, signal) {
   /** A part of the shown device changed. */
   function partChanged({ device, name }) {
     if (device !== shown()) return;
+    if (COMPUTER_PARTS.includes(name) && onComputer()) return;
     swap([name]);
     if (name === 'link') paintLost();
   }
@@ -202,7 +271,7 @@ export function installLive(core, hooks, signal) {
   /** A volume reading of the shown device: the knob repaints; a change between two readings is a
    * step, from any front end, and the effects hear it. */
   function volumeRead(data) {
-    if ((data.device ?? shown()) !== shown()) return;
+    if ((data.device ?? shown()) !== shown() || onComputer()) return;
     const knob = document.querySelector('sv-knob');
     if (!knob) return;
     knob.update(data);
@@ -241,6 +310,7 @@ export function installLive(core, hooks, signal) {
     if ((data.device ?? shown()) === shown()) strip.add(data);
   }
 
+  noteComputer();
   stateChanged(store.state());
 
   const off = [
@@ -252,6 +322,8 @@ export function installLive(core, hooks, signal) {
     store.on('level', levelRead),
     store.on('meters', metersRead),
     store.on('strip', stripRead),
+    store.on('host', () => computerChanged()),
+    core.computer.on(() => computerChanged()),
   ];
 
   // --------------------------------------------------------------------- what a swap keeps

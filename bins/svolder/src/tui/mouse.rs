@@ -16,7 +16,7 @@ use ratatui::layout::{Position, Rect};
 
 use super::app::curve_drag::{self, Gesture};
 use super::app::glide::Bar;
-use super::app::{App, Intent, Pane, Screen, SettingsBox, ToneRow};
+use super::app::{App, Intent, Pane, Screen, SettingsBox, Side, ToneRow};
 
 /// The longest two left presses on the same cell can be apart and still make a double-click:
 /// crossterm reports every press alone, so [`note_press`] tells a double-click by the time
@@ -57,6 +57,13 @@ pub enum Hit {
     PaneHeader(Pane),
     /// Focus this band, 0-based.
     Band(usize),
+    /// Show this side of the switch between the device's volume and tone control and the
+    /// computer's.
+    Side(Side),
+    /// Focus this point of the computer's table, 0-based.
+    Point(usize),
+    /// One cell of a point's row: its type (`0`), frequency, gain or Q.
+    PointField(usize, usize),
     /// One value of band `0`'s row — field `1` of the edit line, an index into
     /// [`PARAMS`](super::boxes::edit_line::PARAMS) — which a click focuses the band from, as
     /// anywhere on the row, and a double-click opens the edit line on.
@@ -260,6 +267,13 @@ pub enum MouseAction {
     /// Focus this half of the tone control's header or Tone pane rows — Mode or Loudness — and
     /// toggle it, finished the way [`App::click_tone_row`] finishes it.
     ToggleTone(ToneRow),
+    /// Click one cell of a computer point's row.
+    PointField {
+        /// The point, 0-based.
+        point: usize,
+        /// Its cell: type, frequency, gain, Q.
+        field: usize,
+    },
     /// Step the tone control's mode this way, the way a click on the Mode select's `‹` or `›`
     /// does: finished the way [`App::step_tone_mode`] finishes it, with no change of focus.
     StepMode(i64),
@@ -568,7 +582,10 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::SelectPrev(i) => intent(app.step_row(i, -1)),
         Hit::SelectNext(i) => intent(app.step_row(i, 1)),
         Hit::PaneHeader(pane) => Some(MouseAction::Focus(pane, app.selected)),
-        Hit::Band(i) => Some(MouseAction::Band(i)),
+        Hit::Band(i) | Hit::Point(i) => Some(MouseAction::Band(i)),
+        Hit::PointField(point, field) => Some(MouseAction::PointField { point, field }),
+        Hit::Side(side) => ((side == Side::Computer) != app.on_computer())
+            .then_some(MouseAction::Key(KeyCode::Char('C'))),
         // The edit line is drawn over the tone-control screen only, so on the device screen's
         // Tone pane a double-click selects the band and goes no further.
         Hit::BandField(band, field) => Some(
@@ -622,7 +639,9 @@ fn resolve_wheel(hits: &HitMap, x: u16, y: u16, app: &App, dir: i64) -> Option<M
     let edit = |writes: Vec<Intent>| (!writes.is_empty()).then_some(MouseAction::BandEdit(writes));
     match *hits.hit_at(x, y)? {
         Hit::Level(i) | Hit::LevelBar(i) => intent(app.nudge_row(i, dir)),
-        Hit::Band(i) | Hit::BandField(i, _) => edit(app.nudge_band(i, dir)),
+        Hit::Band(i) | Hit::BandField(i, _) | Hit::Point(i) | Hit::PointField(i, _) => {
+            edit(app.nudge_band(i, dir))
+        }
         Hit::Loudness | Hit::LoudnessBar => intent(app.step_loudness(dir)),
         Hit::Curve => {
             let curve = hits.area_of(Hit::Curve)?;

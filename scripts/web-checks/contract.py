@@ -42,9 +42,11 @@ ONLY = set(filter(None, os.environ.get('WEB_CHECK_THEMES', '').split(',')))
 FLEET = [('fake-amp', 'Amp', '1112131415161718'), ('fake-five', 'Five', '2122232425262728'),
          ('fake-mono', 'Mono', '3132333435363738'), ('lokimax', 'Loki Max', '4142434445464748')]
 # the members of `core`, which every theme may rely on and none may find missing
-CORE = ['actions', 'analysis', 'climb', 'clock', 'curve', 'drag', 'frame', 'hold', 'keys',
-        'lifecycle', 'model', 'prefs', 'registry', 'scheme', 'stream', 'theme', 'title', 'toneNote',
-        'words']
+CORE = ['actions', 'analysis', 'ask', 'climb', 'clock', 'computer', 'curve', 'drag', 'frame', 'hold',
+        'keys', 'lifecycle', 'model', 'prefs', 'registry', 'scheme', 'stream', 'theme', 'title',
+        'toneNote', 'words']
+COMPUTER_TARGETS = ("import(new URL('assets/core/contract.js', document.baseURI))"
+                    ".then((c) => c.computerTargetsOf(__core.model.page()))")
 HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {"
         " if (a[1] && a[1].method === 'POST') window.__posts.push([String(a[0]), a[1].body]);"
         " return f(...a); };")
@@ -217,6 +219,31 @@ def resting_and_waking(p):
           [p.shown({'control': 'volume'}), p.model()['volume']['text'], time.time() - woke])
     check(p.tag('resting_and_waking: and the page is no longer resting'),
           poll(lambda: not p.state()['resting']) and not p.state()['waiting'], p.state())
+
+
+def computer_pass(p):
+    """The computer's side, through the driver only: every target of `computerTargetsOf` is reached
+    (the switch first, then the side flipped to the computer so the rest can be), and a flip writes
+    nothing."""
+    targets = poll(lambda: p.b.page(COMPUTER_TARGETS))
+    check(p.tag('the computer targets are listed (the switch, the volume, the tone)'),
+          bool(targets) and targets[0] == {'computer': 'flip'} and len(targets) > 5, targets)
+    posts = p.posts()
+    p.operate({'computer': 'flip'}, {'side': 'computer'})
+    time.sleep(0.4)
+    check(p.tag('a flip posts nothing'), p.posts() == posts, p.posts())
+    # the list is read again before each target: a remove or a preset changes what follows it
+    done = []
+    while True:
+        target = next((t for t in p.b.page(COMPUTER_TARGETS) if t not in done), None)
+        if target is None:
+            break
+        done.append(target)
+        check(p.tag(f'computer {json.dumps(target)}: reached'), p.reach(target) is True)
+        # a preset that two sides would play twice asks: the driver's answer here is No
+        p.b.page("document.querySelector('.ask .ask-no')?.click() ?? null")
+    p.operate({'computer': 'flip'}, {'side': 'dac'})
+    check(p.tag('and flipping back posts nothing either'), p.posts() == posts, p.posts())
 
 
 def menu_and_picker(p):
@@ -406,6 +433,7 @@ try:
                      "(name) => typeof __driver[name] === 'function')") is True)
         volume_and_mute(p)
         tone(p)
+        computer_pass(p)
         menu_and_picker(p)
         button_everywhere(b, fleet, theme)
         start(b, fleet, theme)

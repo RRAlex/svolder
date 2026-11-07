@@ -115,7 +115,7 @@ function pressed(event) {
 /** A form of the presets' lists is sent. */
 function submitted(event) {
   const form = event.target.closest?.('form.pform');
-  if (!form) return;
+  if (!form || form.dataset.comp) return;
   event.preventDefault();
   const body = bodyOf(form);
   const value = (name) => form.elements[name]?.value ?? '';

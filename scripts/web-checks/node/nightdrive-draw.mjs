@@ -17,10 +17,17 @@ import { drawMeters } from '../../../bins/svolderd/web/themes/nightdrive/draw/me
 import { drawSlots } from '../../../bins/svolderd/web/themes/nightdrive/draw/slots.js';
 import { tunable } from '../../../bins/svolderd/web/themes/nightdrive/tune.js';
 import { topLine } from '../../../bins/svolderd/web/themes/nightdrive/hud.js';
-import { drawDash } from '../../../bins/svolderd/web/themes/nightdrive/draw/dash.js';
+import { drawDash, switchKeys } from '../../../bins/svolderd/web/themes/nightdrive/draw/dash.js';
 import { presetBox } from '../../../bins/svolderd/web/themes/nightdrive/draw/presets.js';
 import { PALETTE } from '../../../bins/svolderd/web/themes/nightdrive/draw/palette.js';
 import { preview } from '../../../bins/svolderd/web/themes/nightdrive/preview.js';
+import { computerView } from '../../../bins/svolderd/web/themes/nightdrive/computer-view.js';
+import { eqLine, volumeOf } from '../../../bins/svolderd/web/themes/nightdrive/hud.js';
+import { eqMarkup } from '../../../bins/svolderd/web/themes/nightdrive/draw/hud.js';
+import { outrunVolume } from '../../../bins/svolderd/web/themes/nightdrive/draw/volume.js';
+import {
+  AMP, GUEST, computerRig, modelOf, point,
+} from './nightdrive-rig.mjs';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -279,6 +286,108 @@ ok('the_thumbnails_sun_stripes_show_at_the_menus_size_in_the_palettes_colour', (
     assert.ok(Number(height) * (32 / 160) >= 1.5, `a stripe ${height} units tall is ${(Number(height) * 32 / 160).toFixed(2)} px in the menu`);
     assert.equal(fill, PALETTE.sunStripe);
   }
+});
+
+// ---- the computer's side ----
+const idsOf = (html, tag) => tags(html, tag).map((t) => t.id);
+
+ok('the_sheet_runs_mode_then_points', () => {
+  const { core } = computerRig();
+  const page = core.model.page();
+  const html = drawSheet(page, view, computerView(core));
+  const at = (id) => html.indexOf(`id="${id}"`);
+  assert.ok(at('nd-mode') >= 0 && at('nd-mode') < at('nd-bands'), 'the mode, then the points');
+  assert.ok(at('nd-bands') < at('nd-presets'), 'the points sit where the band table does, before the presets');
+  assert.deepEqual(tags(html, 'button').filter((b) => b['data-act'] === 'mode').map((b) => b.text), ['Off', 'EQ']);
+  assert.ok(/id="nd-mode-eq"[^>]*aria-pressed="true"/.test(html), 'EQ is on');
+  assert.ok(html.includes('<h2 class="nd-lbl">Points</h2>') && !html.includes('nd-bands-table'));
+  // a row for each of the seven points: a type, three fields, a `×`
+  assert.equal(tags(html, 'tr').filter((r) => r['data-point']).length, 7);
+  assert.deepEqual(tags(html, 'select').map((s) => s['aria-label']).slice(0, 2), ['Type of point 1', 'Type of point 2']);
+  const field = (id) => tags(html, 'input').find((i) => i.id === id);
+  assert.equal(field('nd-p4f').value, '2900 Hz');
+  assert.equal(field('nd-p4g').value, '+3.2 dB');
+  assert.equal(field('nd-p4q').value, '2.00');
+  assert.equal(field('nd-p2g').value, '−2.1 dB');
+  assert.equal(field('nd-p4f')['aria-label'], 'Frequency of point 4');
+  assert.deepEqual(tags(html, 'button').filter((b) => b['data-act'] === 'point-remove').map((b) => b['aria-label']),
+    [1, 2, 3, 4, 5, 6, 7].map((i) => `Remove point ${i}`));
+  assert.equal(tags(html, 'button').find((b) => b['data-act'] === 'point-add').text, '+ Add point');
+  assert.ok(html.includes('7 of 16 points · preamp −6.0 dB'), 'the line counts them');
+  // the table shows six rows and says so for the rest
+  assert.ok(html.includes('1 more below ↓') && html.includes('class="nd-pscroll long"'));
+  // the presets are the computer's, one the EQ cannot play quiet with its reason
+  const huge = tags(html, 'button').find((b) => b['data-name'] === 'Huge');
+  assert.ok(huge['aria-disabled'] === 'true' && huge.title === '17 filters', JSON.stringify(huge));
+  assert.deepEqual(tags(html, 'button').filter((b) => b['data-act'] === 'preset-save').length, 1);
+  assert.ok(!/style=/.test(html), 'no style attribute');
+  // the DAC side draws the device's own
+  const dac = computerRig({ side: 'dac' });
+  assert.ok(!drawSheet(dac.core.model.page(), view, computerView(dac.core)).includes('nd-points-table'));
+});
+
+ok('the_lone_point_keeps_its_remove_and_a_full_table_no_add', () => {
+  const lone = computerRig({ computer: modelOf({ eq: { ...modelOf().eq, points: [point('PK', 1000, 0, 1)] } }) });
+  const html = drawSheet(lone.core.model.page(), view, computerView(lone.core));
+  const removes = tags(html, 'button').filter((b) => b['data-act'] === 'point-remove');
+  assert.deepEqual(removes.map((b) => b['aria-label']), ['Remove point 1']);
+  assert.ok(html.includes('1 of 16 points · preamp −6.0 dB'));
+  assert.ok(!html.includes('more below') || html.includes('<p id="nd-more" class="nd-more"></p>'));
+  const sixteen = Array.from({ length: 16 }, (_, i) => point('PK', 100 + i * 100, 1, 1));
+  const full = computerRig({ computer: modelOf({ eq: { ...modelOf().eq, points: sixteen } }) });
+  const fullHtml = drawSheet(full.core.model.page(), view, computerView(full.core));
+  const add = tags(fullHtml, 'button').find((b) => b['data-act'] === 'point-add');
+  assert.equal(add['aria-disabled'], 'true');
+  assert.ok(fullHtml.includes('10 more below ↓'));
+  // a guest sees the same table drawn inert
+  const guest = computerRig({ viewer: GUEST });
+  const inert = drawSheet(guest.core.model.page(), view, computerView(guest.core));
+  assert.ok(tags(inert, 'input').filter((i) => i['data-point']).every((i) => i['aria-disabled'] === 'true'));
+  assert.ok(inert.includes(' readonly '), 'the fields cannot be typed in');
+  assert.ok(tags(inert, 'button').filter((b) => b['data-act'] === 'point-remove').every((b) => b['aria-disabled'] === 'true'));
+  assert.ok(tags(inert, 'select').every((s) => s['aria-disabled'] === 'true'));
+});
+
+ok('nothing_below_the_switch_says_computer', () => {
+  const words = (html) => html.replace(/<[^>]*>/g, ' ').replace(/(?:aria-label|title)="[^"]*"/g, ' ');
+  const labels = (html) => [...html.matchAll(/(?:aria-label|title)="([^"]*)"/g)].map((m) => m[1]).join(' ');
+  for (const device of [undefined, AMP]) {
+    const rig = computerRig(device ? { device } : {});
+    const page = rig.core.model.page();
+    const comp = computerView(rig.core);
+    const sheet = drawSheet(page, view, comp);
+    const dash = drawDash(page, { phone: () => false }, 1000, comp);
+    const line = eqMarkup(eqLine(page, comp));
+    const figure = outrunVolume(volumeOf(page, comp));
+    for (const [name, html] of [['the sheet', sheet], ['the dash', dash], ['the EQ line', line], ['the volume', figure]]) {
+      assert.ok(!/computer/i.test(words(html)) && !/computer/i.test(labels(html)), `${name} says computer`);
+    }
+    // only the switch names it, and the sentence that stands in its place: the dash of a phone has none of it
+    const keys = drawDash(page, { phone: () => true }, 1000, comp);
+    assert.ok(!/computer/i.test(keys), 'the dash does not name it');
+    assert.ok(/computer/i.test(switchKeys(comp.sw)), 'the switch does');
+  }
+  const away = computerRig({ computer: modelOf({ unavailable: 'no sink' }) });
+  const html = switchKeys(computerView(away.core).sw);
+  assert.ok(html.includes('computer controls unavailable: no sink'));
+  assert.ok(!/computer/i.test(drawSheet(away.core.model.page(), view, computerView(away.core)).replace(/<[^>]*>/g, ' ')));
+});
+
+ok('the_amp_page_takes_the_computers_parts_in_the_dash_and_the_sheet', () => {
+  const rig = computerRig({ device: { ...AMP, power: null } });
+  const page = rig.core.model.page();
+  const comp = computerView(rig.core);
+  const dash = drawDash(page, { phone: () => false }, 1000, comp);
+  assert.deepEqual([...dash.matchAll(/data-act="([^"]+)"/g)].map((m) => m[1]).slice(0, 3), ['volume-down', 'mute', 'volume-up']);
+  const sheet = drawSheet(page, view, comp);
+  assert.ok(sheet.includes('nd-points-table') && /id="nd-mode-eq"/.test(sheet) && sheet.includes('id="nd-presets"'));
+  // the amp's own power key stays where the input would be, beside the computer's volume keys
+  const powered = computerRig({ device: { ...AMP, power: { key: 'power', on: true, word: 'On' } } });
+  const powerDash = drawDash(powered.core.model.page(), { phone: () => false }, 1000, computerView(powered.core));
+  assert.ok(powerDash.includes('data-act="power"') && powerDash.includes('data-act="volume-down"'), 'the power key and the computer\'s volume keys');
+  // back on the amp's own side it has no volume keys
+  rig.core.computer.flip('dac');
+  assert.ok(!drawDash(page, { phone: () => false }, 1000, computerView(rig.core)).includes('volume-down'));
 });
 
 console.log(`nightdrive-draw.mjs: ${n} passed`);

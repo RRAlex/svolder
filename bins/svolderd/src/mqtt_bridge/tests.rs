@@ -12,6 +12,11 @@ use svolder_ipc::Response;
 use svolder_profiles::{EqMode, tone::preset};
 use svolder_proto::Value;
 
+/// A broker in this process and a client that watches it, for the tests that look at what the
+/// bridge's client sends rather than at what the task holds.
+#[path = "../../../../crates/svolder-mqtt/tests/support/broker.rs"]
+mod broker;
+
 #[test]
 fn a_discovery_topic_names_the_unit_it_is_under() {
     assert_eq!(
@@ -266,10 +271,15 @@ async fn published_stand() -> (BridgeTask, Stand) {
 
 /// A task with one device of the built-in profile `profile_name` behind a [`Stand`].
 async fn published_stand_on(profile_name: &str) -> (BridgeTask, Stand) {
+    published_stand_at(profile_name, 1).await
+}
+
+/// [`published_stand_on`] with its client connecting to the broker on `port`.
+async fn published_stand_at(profile_name: &str, port: u16) -> (BridgeTask, Stand) {
     let (settings, _) = (
         Settings {
             host: "127.0.0.1".into(),
-            port: 1,
+            port,
             client_id: "test".into(),
             username: None,
             password: None,
@@ -290,6 +300,7 @@ async fn published_stand_on(profile_name: &str) -> (BridgeTask, Stand) {
         last_lost: None,
         retained_commands: BTreeSet::new(),
         presets: Vec::new(),
+        computer: None,
     };
     let (handle, stand) = stand_device_on(profile_name, UNIT, "fake");
     task.track(UNIT.into(), &handle);
@@ -1379,4 +1390,292 @@ async fn a_retained_preset_command_is_not_acted_on() {
     task.message(&topic("eq_preset/set"), b"Preset 2", false);
     settle(&mut task).await;
     assert!(stand.log.lock().expect("the log").is_empty());
+}
+
+/// A switch that records what it was told and answers as `answer` says.
+struct RecordingSwitch {
+    calls: std::sync::Mutex<Vec<bool>>,
+    answer: Result<(), String>,
+}
+
+#[async_trait::async_trait]
+impl crate::host::EqSwitch for RecordingSwitch {
+    async fn set_on(&self, on: bool) -> Result<(), String> {
+        self.calls.lock().unwrap().push(on);
+        self.answer.clone()
+    }
+}
+
+fn computer_view(on: bool, preset: Option<&str>, gain: f64) -> svolder_ipc::host::HostView {
+    svolder_ipc::host::HostView {
+        available: true,
+        eq: Some(svolder_host::eq::EqView {
+            on,
+            points: vec![svolder_host::eq::PointView {
+                slot: 0,
+                kind: "PK".into(),
+                f: 1000.0,
+                g: gain,
+                q: 1.0,
+            }],
+            preset: preset.map(str::to_string),
+            max: 16,
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// A task that follows a computer whose view is `view`, with commands on.
+async fn with_computer(
+    view: svolder_ipc::host::HostView,
+    answer: Result<(), String>,
+) -> (
+    BridgeTask,
+    watch::Sender<svolder_ipc::host::HostView>,
+    Arc<RecordingSwitch>,
+) {
+    with_computer_at(1, view, answer).await
+}
+
+/// [`with_computer`] with the task's client connecting to the broker on `port`.
+async fn with_computer_at(
+    port: u16,
+    view: svolder_ipc::host::HostView,
+    answer: Result<(), String>,
+) -> (
+    BridgeTask,
+    watch::Sender<svolder_ipc::host::HostView>,
+    Arc<RecordingSwitch>,
+) {
+    let (mut task, _stand) = published_stand_at("gungnir2-v2", port).await;
+    task.config.commands = true;
+    let (tx, rx) = watch::channel(view);
+    let switch = Arc::new(RecordingSwitch {
+        calls: std::sync::Mutex::new(Vec::new()),
+        answer,
+    });
+    task.follow_computer(ComputerLink {
+        view: rx,
+        switch: switch.clone(),
+    });
+    (task, tx, switch)
+}
+
+fn computer_calls(switch: &RecordingSwitch) -> Vec<bool> {
+    switch.calls.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn on_applies_the_kept_points_and_off_removes() {
+    let (mut task, _tx, switch) =
+        with_computer(computer_view(false, Some("Warm"), -3.0), Ok(())).await;
+    task.message("svolder/computer/computer_eq/set", b"ON", false);
+    settle(&mut task).await;
+    assert_eq!(computer_calls(&switch), [true]);
+    task.message("svolder/computer/computer_eq/set", b" off ", false);
+    settle(&mut task).await;
+    assert_eq!(computer_calls(&switch), [true, false]);
+    // Anything else, and any other key, is dropped.
+    task.message("svolder/computer/computer_eq/set", b"toggle", false);
+    task.message("svolder/computer/computer_eq/set", &[0xff], false);
+    task.message("svolder/computer/volume/set", b"50", false);
+    task.message("svolder/computer/computer_eq_preset/set", b"Warm", false);
+    settle(&mut task).await;
+    assert_eq!(computer_calls(&switch), [true, false]);
+}
+
+#[tokio::test]
+async fn on_with_nothing_kept_stays_off() {
+    let (mut task, _tx, switch) = with_computer(computer_view(false, None, 0.0), Ok(())).await;
+    task.message("svolder/computer/computer_eq/set", b"ON", false);
+    settle(&mut task).await;
+    assert!(computer_calls(&switch).is_empty());
+    // OFF is still sent: it removes a chain the view does not know of.
+    task.message("svolder/computer/computer_eq/set", b"OFF", false);
+    settle(&mut task).await;
+    assert_eq!(computer_calls(&switch), [false]);
+}
+
+#[tokio::test]
+async fn a_command_with_the_computer_unavailable_or_without_commands_does_nothing() {
+    let mut view = computer_view(false, Some("Warm"), -3.0);
+    view.eq.as_mut().unwrap().unavailable =
+        Some("computer controls unavailable: no pw-cli on this computer".into());
+    let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
+    task.message("svolder/computer/computer_eq/set", b"ON", false);
+    let (mut off, _tx2, switch2) =
+        with_computer(computer_view(false, Some("Warm"), -3.0), Ok(())).await;
+    off.config.commands = false;
+    off.message("svolder/computer/computer_eq/set", b"ON", false);
+    settle(&mut task).await;
+    settle(&mut off).await;
+    assert!(computer_calls(&switch).is_empty());
+    assert!(computer_calls(&switch2).is_empty());
+}
+
+#[tokio::test]
+async fn a_retained_computer_command_is_not_acted_on() {
+    let (mut task, _tx, switch) =
+        with_computer(computer_view(false, Some("Warm"), -3.0), Ok(())).await;
+    task.message("svolder/computer/computer_eq/set", b"ON", true);
+    settle(&mut task).await;
+    assert!(computer_calls(&switch).is_empty());
+    assert!(
+        task.retained_commands
+            .contains("svolder/computer/computer_eq/set")
+    );
+}
+
+#[tokio::test]
+async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
+    let (mut task, tx, _switch) =
+        with_computer(computer_view(true, Some("Warm"), -3.0), Ok(())).await;
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.state, Some(("ON", "Warm".to_string())));
+    assert_eq!(published.available, Some(true));
+    assert_eq!(published.configs.len(), 2);
+
+    tx.send_replace(computer_view(true, Some("custom"), -3.0));
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(
+        task.computer.as_ref().unwrap().state,
+        Some(("ON", "custom".to_string()))
+    );
+
+    tx.send_replace(computer_view(false, Some("custom"), -3.0));
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(
+        task.computer.as_ref().unwrap().state,
+        Some(("OFF", String::new()))
+    );
+
+    // Unavailable: the entities stay, offline.
+    let mut view = computer_view(false, None, 0.0);
+    view.eq.as_mut().unwrap().unavailable = Some("computer controls unavailable: x".into());
+    tx.send_replace(view);
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.available, Some(false));
+    assert_eq!(published.configs.len(), 2);
+
+    // Host off: everything is taken down.
+    tx.send_replace(svolder_ipc::host::HostView::default());
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert!(published.configs.is_empty() && published.available.is_none());
+}
+
+/// The retained configs an earlier run left under the computer, which Home Assistant would
+/// remove and add again if they were cleared before being announced.
+fn left_over() -> [String; 3] {
+    [
+        "homeassistant/switch/svolder_computer/computer_eq/config".to_string(),
+        "homeassistant/sensor/svolder_computer/computer_eq_preset/config".to_string(),
+        // Announced only by a bridge that does not take commands: this one clears it.
+        "homeassistant/binary_sensor/svolder_computer/computer_eq/config".to_string(),
+    ]
+}
+
+/// A start whose host view has not yet reported the computer clears nothing before it does:
+/// the entities about to be announced are never cleared first, and the ones it will not serve
+/// are cleared once it has.
+#[tokio::test]
+async fn a_computer_not_yet_reported_is_not_swept_before_it_is() {
+    let broker = broker::TestBroker::start();
+    let mut watcher = broker::Watcher::connect(broker.port, &["homeassistant/#"]).await;
+    for topic in left_over() {
+        watcher.retain(&topic, "{\"name\":\"left over\"}").await;
+    }
+    let (mut task, tx, _switch) =
+        with_computer_at(broker.port, svolder_ipc::host::HostView::default(), Ok(())).await;
+    task.publish_computer();
+    assert!(!task.computer.as_ref().unwrap().swept);
+    let held = watcher.collect(Duration::from_millis(700)).await;
+    let cleared: Vec<_> = held.iter().filter(|s| s.payload.is_empty()).collect();
+    assert!(
+        cleared.is_empty(),
+        "cleared before it reported: {cleared:#?}"
+    );
+
+    tx.send_replace(computer_view(true, Some("Warm"), -3.0));
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert!(published.swept);
+    assert_eq!(published.configs.len(), 2);
+    let [switch, preset, binary] = left_over();
+    let seen = watcher.collect(Duration::from_millis(700)).await;
+    assert!(
+        seen.iter()
+            .any(|s| s.topic == binary && s.payload.is_empty()),
+        "the config this bridge will not serve is cleared: {seen:#?}"
+    );
+    assert!(
+        seen.iter()
+            .all(|s| !(s.topic == switch || s.topic == preset) || !s.payload.is_empty()),
+        "an entity about to be announced is cleared: {seen:#?}"
+    );
+}
+
+/// A computer that never reports one (host audio off) is swept once the start has had its
+/// time: nothing is cleared before, and every retained config is after.
+#[tokio::test]
+async fn a_computer_that_stays_unreported_is_swept_after_the_start_settles() {
+    let broker = broker::TestBroker::start();
+    let mut watcher = broker::Watcher::connect(broker.port, &["homeassistant/#"]).await;
+    for topic in left_over() {
+        watcher.retain(&topic, "{\"name\":\"left over\"}").await;
+    }
+    let (mut task, _tx, _switch) =
+        with_computer_at(broker.port, svolder_ipc::host::HostView::default(), Ok(())).await;
+    task.publish_computer();
+    assert!(!task.computer.as_ref().unwrap().swept);
+    assert!(task.flush_at.is_some(), "a flush is owed at the deadline");
+    let held = watcher.collect(Duration::from_millis(700)).await;
+    assert!(
+        held.iter().all(|s| !s.payload.is_empty()),
+        "cleared early: {held:#?}"
+    );
+
+    tokio::time::sleep(super::computer::START_SETTLES).await;
+    task.flush();
+    assert!(task.computer.as_ref().unwrap().swept);
+    let cleared = watcher
+        .wait_for_each(
+            &left_over().each_ref().map(|t| (t.as_str(), "")),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert_eq!(cleared.len(), 3);
+}
+
+#[tokio::test]
+async fn read_only_the_computer_announces_a_binary_sensor_and_subscribes_to_nothing() {
+    let (mut task, _tx, _switch) =
+        with_computer(computer_view(true, Some("Warm"), -3.0), Ok(())).await;
+    task.config.commands = false;
+    task.config.discovery_prefix = "homeassistant".into();
+    task.changed("computer");
+    task.publish_computer();
+    let topics: Vec<String> = task
+        .computer
+        .as_ref()
+        .unwrap()
+        .configs
+        .keys()
+        .cloned()
+        .collect();
+    assert!(
+        topics
+            .iter()
+            .any(|t| t.contains("/binary_sensor/svolder_computer/")),
+        "{topics:?}"
+    );
+    assert!(topics.iter().all(|t| !t.contains("/switch/")));
 }

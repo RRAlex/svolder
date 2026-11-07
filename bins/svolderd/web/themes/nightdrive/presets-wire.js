@@ -5,11 +5,16 @@
 // sent before the answer. Every write goes through `core.actions`. A viewer who may not write taps
 // the same words and the core says why nothing happens.
 //
+// The computer's presets are the same list (the person's own renamed, deleted and saved the same way); a preset
+// recalled there that a connected device plays too is the core's question (core.ask), whose card is dressed by
+// Night drive's frame tokens.
+//
 // The sheet is held while a form, a question or a list is open, so a change from elsewhere does not
 // take the words from under it; it is drawn from the newest model when the last one closes. What is
 // asked is asked of the device that was shown when it opened.
 
 import { askForm, askQuestion } from './ask.js';
+import { presetsOf } from './draw/sheet.js';
 import { inertOf } from './inert.js';
 import { closeOf, openList } from './lists.js';
 import { SHEET } from './words.js';
@@ -27,6 +32,20 @@ export function wirePresets({
 }) {
   const store = core.model;
   const { keep, release, wrap } = sheet;
+  const onComputer = () => core.computer.side() === 'computer';
+
+  /** What holds the presets of the side shown: the device, or the computer's tone shaped like one. */
+  const holder = (device) => {
+    if (!onComputer()) return device;
+    const tone = core.computer.toneOf(store.page());
+    return tone ? { ...device, presets: presetsOf(tone) } : device;
+  };
+
+  /** The computer's list is read again once a write of it is answered ok (a name changed it). */
+  const reread = async (answer) => {
+    if (answer?.ok === true && onComputer()) await core.computer.resync();
+    return answer;
+  };
 
   /** The place a form or a question opens in: the ask of the section the word is in, found now (the
    * sheet may have been drawn again since the word was). */
@@ -47,7 +66,7 @@ export function wirePresets({
   function rename(el, from, opened) {
     ask((onClose) => askForm({
       within: within(el), kind: 'rename', value: from, signal, opener: el, onClose,
-      submit: (text) => act.act('preset', text, (a) => a.renamePreset(from, text, opened)),
+      submit: (text) => act.act('preset', text, (a) => a.renamePreset(from, text, opened)).then(reread),
     }));
   }
 
@@ -56,7 +75,7 @@ export function wirePresets({
     ask((onClose) => askQuestion({
       within: within(el), words: SHEET.askDelete(from), yes: 'delete', no: 'keep',
       signal, opener: el, onClose,
-      go: () => act.act('preset', from, (a) => a.deletePreset(from, opened)),
+      go: () => act.act('preset', from, (a) => a.deletePreset(from, opened)).then(reread),
     }));
   }
 
@@ -83,16 +102,24 @@ export function wirePresets({
     if (el.getAttribute('aria-disabled') === 'true' && !inertOf(store.page())) return;
     const opened = { device: store.shown() };
     if (what === 'preset') {
-      act.act('preset', el.dataset.name, (a) => a.recallPreset(el.dataset.name, opened)).catch(() => {});
+      const { name } = el.dataset;
+      const chip = el.id;
+      act.act('preset', name, (a) => (onComputer() ? a.computer.recallPreset(name) : a.recallPreset(name, opened)))
+        .catch(() => {})
+        .then(() => {
+          // the question card gave the focus back to a chip the sheet may have drawn again meanwhile
+          const doc = wrap.ownerDocument;
+          if (chip && (!doc.activeElement || doc.activeElement === doc.body)) doc.getElementById(chip)?.focus({ preventScroll: true });
+        });
     } else if (what === 'preset-save') {
       ask((onClose) => askForm({
         within: within(el), kind: 'save', value: '', signal, opener: el, onClose,
-        submit: (text) => act.act('preset', text, (a) => a.savePreset(text, opened)),
+        submit: (text) => act.act('preset', text, (a) => (onComputer() ? a.computer.savePreset(text) : a.savePreset(text, opened))),
       }));
     } else if (what === 'preset-rename') {
-      ownPreset(el, device, SHEET.whichRename, (name) => rename(el, name, opened));
+      ownPreset(el, holder(device), SHEET.whichRename, (name) => rename(el, name, opened));
     } else if (what === 'preset-delete') {
-      ownPreset(el, device, SHEET.whichDelete, (name) => remove(el, name, opened));
+      ownPreset(el, holder(device), SHEET.whichDelete, (name) => remove(el, name, opened));
     }
   }, { signal });
 }

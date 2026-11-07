@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The tools the MCP server offers: four that read a device and, with `[mcp] writes`, four
-//! that act on one: three that change it and `identify`, which asks it to show itself.
+//! The tools the MCP server offers: five that read (four a device, `get_host` the computer) and,
+//! with `[mcp] writes`, seven that act: three that change a device, `identify`, which asks it to
+//! show itself, and three for the computer (see [`host`]).
 //!
 //! Every tool goes through the daemon's own request path ([`Fleet`]), the one the socket's
 //! clients use, so a value is validated and refused exactly as `svolder set` does. Results
@@ -60,6 +61,8 @@ use svolder_profiles::{Control, ControlKind, Profile, convert, intent};
 use svolder_proto::{FunctionClass, FunctionId};
 
 pub use svolder_profiles::safety::MAX_RISE_DB;
+
+mod host;
 
 /// The longest span `get_link_history` answers for, in hours: what the daemon keeps.
 const MAX_HISTORY_HOURS: f64 = 24.0;
@@ -213,15 +216,19 @@ impl From<String> for Stop {
 type Done = Result<Value, Stop>;
 
 /// The tool names, each with whether it changes a device.
-const TOOLS: [(&str, bool); 8] = [
+const TOOLS: [(&str, bool); 12] = [
     ("list_devices", false),
     ("get_state", false),
     ("get_link_history", false),
     ("list_presets", false),
+    ("get_host", false),
     ("set_control", true),
     ("load_preset", true),
     ("mute", true),
     ("identify", true),
+    ("set_host_volume", true),
+    ("host_mute", true),
+    ("set_host_eq", true),
 ];
 
 impl Tools {
@@ -298,6 +305,10 @@ impl Tools {
             "set_control" => self.set_control(&request, caller).await,
             "load_preset" => self.load_preset(&request, caller).await,
             "identify" => self.identify(&request).await,
+            "get_host" => self.get_host(&request).await,
+            "set_host_volume" => self.set_host_volume(&request, caller).await,
+            "host_mute" => self.host_mute(&request, caller).await,
+            "set_host_eq" => self.set_host_eq(&request, caller).await,
             _ => self.mute(&request, caller).await,
         };
         Ok(match outcome {
@@ -1704,6 +1715,37 @@ fn definition(name: &'static str, write: bool) -> Tool {
                 "confirm": { "type": "boolean", "description": "Only for a Loki Max, only after the user agreed to the question the call raised, and only for a client that cannot ask the user itself; ignored when it can" }
             }),
             &["name"],
+        ),
+        "get_host" => (
+            "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q) and the player (title, artist, album, status); each is null while it is not available, and `unavailable` says why.",
+            json!({}),
+            &[],
+        ),
+        "set_host_volume" => (
+            "Set the computer's volume in whole percent, 0 to 100 (never above 100); a rise of more than 6 dB over its lowest level in the last minute, on the scale the computer's mixer uses (the cube of the percent), asks the user first; lowering never asks.",
+            json!({
+                "percent": { "type": "integer", "minimum": 0, "maximum": 100, "description": "The new volume in percent, 0 to 100" },
+                "confirm": { "type": "boolean", "description": "Only after the user agreed to the rise, and only for a client that cannot ask the user itself; ignored when it can" }
+            }),
+            &["percent"],
+        ),
+        "host_mute" => (
+            "Mute or unmute the computer's output; unmuting asks the user first.",
+            json!({
+                "muted": { "type": "boolean", "description": "true to mute, false to unmute; unmuting asks the user first" },
+                "confirm": { "type": "boolean", "description": "Only after the user agreed to unmute, and only for a client that cannot ask the user itself; ignored when it can" }
+            }),
+            &["muted"],
+        ),
+        "set_host_eq" => (
+            "Recall a preset on the computer's EQ (`preset`, a saved preset or a built-in one, which is shaped to a device's tone control: name that device in `device`, or leave it out when there is one) or turn the EQ off (`off`: true); give exactly one of them. A preset a connected device plays too asks the user first, since the correction would play twice.",
+            json!({
+                "preset": { "type": "string", "description": "The preset's name from list_presets" },
+                "off": { "type": "boolean", "description": "true to turn the computer's EQ off" },
+                "device": device,
+                "confirm": { "type": "boolean", "description": "Only after the user agreed to the question the call raised, and only for a client that cannot ask the user itself; ignored when it can" }
+            }),
+            &[],
         ),
         "identify" => (
             "Ask a device to show itself, so it can be told apart from the others; it changes nothing on the device, and a second call within two seconds of one that went out sends nothing and answers sent false.",

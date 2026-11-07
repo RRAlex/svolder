@@ -175,17 +175,10 @@ fn a_wide_glyph_name_is_elided_by_cells() {
 /// as `Host EQ NAME`; the 80×24 header does not, and neither does an off one.
 #[test]
 fn the_wide_device_header_names_the_computer_eq_while_it_is_on() {
-    use svolder_host::eq::{HostEqState, Manager, Route};
-    let state = |on| HostEqState {
-        on,
-        name: "Phones".into(),
-        origin: None,
-        target: "alsa_output.test".into(),
-        route: Route::Default,
-        manager: Manager::Process,
-        previous_default: None,
-        preamp_db: 0.0,
-        filters: Vec::new(),
+    let state = |on| {
+        let mut eq = crate::tui::test_support::computer_eq(on, &[("PK", 1000.0, 2.0, 1.0)]);
+        eq.preset = Some("Phones".into());
+        Some(eq)
     };
     let header = |app: &App, width, height| {
         text(&frame_with_theme(app, width, height, &Theme::new(false)))
@@ -194,14 +187,14 @@ fn the_wide_device_header_names_the_computer_eq_while_it_is_on() {
             .expect("the header row")
     };
     let mut app = mockup_app();
-    app.presets.host_eq = Some(state(true));
+    app.host.computer.eq = state(true);
     assert!(
         header(&app, 126, 30).contains("Host EQ Phones"),
         "{}",
         header(&app, 126, 30)
     );
     assert!(!header(&app, 80, 24).contains("Host EQ"));
-    app.presets.host_eq = Some(state(false));
+    app.host.computer.eq = state(false);
     assert!(!header(&app, 126, 30).contains("Host EQ"));
 }
 

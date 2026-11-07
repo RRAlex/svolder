@@ -121,7 +121,8 @@ pub(crate) static THEMES: &[Theme] = &[
             js "effects.js", js "smoke.js", js "smoke-model.js", js "smoke-director.js",
             js "smoke-engine.js", js "smoke-notes.js",
             js "draw/html.js", js "draw/parts.js", js "draw/meter-arch.js", js "draw/dial.js",
-            js "draw/curve.js", js "draw/screen.js", js "draw/shell.js"
+            js "draw/curve.js", js "draw/screen.js", js "draw/shell.js",
+            js "computer.js", js "computer-view.js", js "draw/computer.js"
         ]
     },
     theme! {
@@ -144,6 +145,7 @@ pub(crate) static THEMES: &[Theme] = &[
             js "draw/presets.js", js "ask.js", js "controls-wire.js", js "presets-wire.js",
             js "draw/playing.js", js "draw/amp.js", js "draw/device.js", js "device-wire.js",
             js "changes.js", js "fold.js", js "notes.js", js "draw/notes.js", js "marks.js",
+            js "draw/side.js", js "draw/computer.js", js "computer-wire.js",
             js "driver.js"
         ]
     },
@@ -168,7 +170,7 @@ pub(crate) static THEMES: &[Theme] = &[
             js "presets-wire.js", js "facts-wire.js", js "ask.js", js "slim.js", js "fold.js", js "strip-wire.js",
             js "press.js", js "draw/amp.js", js "amp-wire.js", js "device-list.js", js "draw/hop.js",
             js "hops-wire.js", js "draw/player.js", js "draw/computer.js", js "draw/card.js",
-            js "card-wire.js", js "driver.js", js "morph.js"
+            js "card-wire.js", js "driver.js", js "morph.js", js "computer-wire.js"
         ]
     },
     theme! {
@@ -188,14 +190,15 @@ pub(crate) static THEMES: &[Theme] = &[
             js "music.js", js "floor.js", js "live.js", js "scene-wire.js", js "driver.js",
             js "sky.js", js "motion.js", js "draw/palette.js", js "draw/sky.js", js "draw/events.js",
             js "draw/road.js", js "ridge.js", js "budget.js", js "draw/esc.js", js "hud.js", js "hud-wire.js", js "draw/hud.js",
-            js "draw/volume.js", js "draw/dash.js", js "dash-wire.js", js "dash-fade.js", js "lists.js", js "act.js",
+            js "draw/volume.js", js "draw/dash.js", js "dash-wire.js", js "dash-fade.js", js "volume-keys.js", js "lists.js", js "act.js",
             js "tune.js", js "tune-wire.js", js "draw/tune.js", js "inert.js",
             js "draw/sheet.js", js "draw/modes.js", js "draw/bands.js", js "draw/presets.js", js "ask.js",
             js "sheet-wire.js", js "bands-wire.js", js "presets-wire.js", js "stats.js", js "debug.js", js "debug-wire.js", js "rest.js",
             js "mood.js", js "look.js", js "embers.js", js "draw/heat.js", js "draw/mood.js",
             js "draw/slots.js", js "draw/controls.js", js "draw/facts.js", js "draw/gauges.js", js "controls-wire.js",
             js "facts-wire.js", js "fold.js", js "gestures.js", js "place.js", js "draw/meters.js",
-            js "states.js", js "card-wire.js", js "draw/card.js"
+            js "states.js", js "card-wire.js", js "draw/card.js",
+            js "computer-view.js", js "points.js", js "points-wire.js"
         ]
     },
 ];

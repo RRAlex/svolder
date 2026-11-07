@@ -444,8 +444,8 @@ ok('the_pace_of_each_level_and_of_silence_and_the_idle_pace_is_the_phones_alone'
     for (const motion of MOTIONS) {
       for (const [name, state] of [['playing', { silent: false, playing: true }], ['paused', { silent: false, playing: false }], ['silent', { silent: true, playing: true }]]) {
         const got = paceOf({ motion, coarse, ...state });
-        // a phone draws a silent or paused scene at 125 ms at least; a desktop keeps the level's own pace
-        const want = coarse && name !== 'playing' ? Math.max(base[motion], 125) : base[motion];
+        // a phone draws a silent or paused scene at 1000 / 30 ms at least; a desktop keeps the level's own pace
+        const want = coarse && name !== 'playing' ? Math.max(base[motion], 1000 / 30) : base[motion];
         assert.equal(got, want, `${coarse ? 'coarse' : 'fine'} ${motion} ${name}`);
       }
     }

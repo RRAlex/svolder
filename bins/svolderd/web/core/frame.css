@@ -531,6 +531,23 @@
   border-radius: 999px; border: 1px solid var(--frame-line); color: var(--frame-ink);
   font: 500 12px/1.2 var(--frame-font); text-decoration: none;
 }
+/* a question: the words, and Yes and No at a thumb's size */
+.ask {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 80;
+  bottom: calc(var(--frame-toast-lift) + 12px + env(safe-area-inset-bottom, 0px));
+  width: min(92vw, 420px); box-sizing: border-box; padding: 14px 18px; border-radius: 18px;
+  background: var(--frame-surface); border: 1px solid var(--frame-line-strong);
+  color: var(--frame-ink); box-shadow: var(--frame-toast-shadow);
+}
+.ask .ask-words { margin: 0 0 12px; font: 500 14px/1.4 var(--frame-font); text-wrap: balance; }
+.ask .ask-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+.ask .ask-button {
+  min-height: var(--frame-tap); min-width: 80px; padding: 0 18px; border-radius: 999px;
+  border: 1px solid var(--frame-line-strong); background: transparent; color: var(--frame-ink);
+  font: 500 14px var(--frame-font); cursor: pointer;
+}
+.ask .ask-yes { background: var(--frame-accent); border-color: var(--frame-accent); color: var(--frame-on-accent); }
+.ask .ask-button:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
 /* centred on a phone */
 @media (max-width: 600px) {
   .toasts { left: 50%; right: auto; transform: translateX(-50%); align-items: center; }

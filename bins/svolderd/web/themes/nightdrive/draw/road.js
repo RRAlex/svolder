@@ -10,6 +10,7 @@ import { BANDS } from '../../../core/viz-model.js';
 import { COLUMNS } from '../axis.js';
 import { CAMERA } from '../camera.js';
 import { PALETTE, cellColour, unitOf } from './palette.js';
+import { GHOST } from './tune.js';
 import { heatColours, heatIndex } from './heat.js';
 import { NEUTRAL } from '../look.js';
 import { RIDGE, ridgeHeights, smoothUnits } from '../ridge.js';
@@ -115,7 +116,7 @@ function lifts(geo, floor) {
   const stride = COLUMNS + 1;
   for (let k = 0; k < EDGES; k++) {
     const row = floor.row(k);
-    const scale = (FLOOR.height * geo.h) / depth((k + floor.frac) / rows);
+    const scale = (FLOOR.height * (geo.v ?? geo.h)) / depth((k + floor.frac) / rows);
     // an edge below the bottom of the scene gives up its lift over one row spacing (at the bottom), so the
     // floor reaches the bottom whatever the level and no edge jumps as the rows roll
     const fade = GY[k] <= geo.h ? 1 : Math.max(0, 1 - (GY[k] - geo.h) / span);
@@ -241,19 +242,20 @@ export const NOCAP = Object.freeze({ rate: 0.8, amp: 0.006 });
  * curve's y at x. */
 export function drawRidge(g, geo, ridge, frame) {
   const { w, h, H } = geo;
+  const v = geo.v ?? h;
   const dull = Boolean(frame.dull);
   const px = unitOf(w);
   const tune = frame.tune?.curve && !frame.flat ? frame.tune : null;
   const nocap = frame.nocap ?? null;
-  const breath = nocap ? Math.sin(frame.t * NOCAP.rate) * h * NOCAP.amp * nocap.breath : 0;
+  const breath = nocap ? Math.sin(frame.t * NOCAP.rate) * v * NOCAP.amp * nocap.breath : 0;
   smoothUnits(ridge, SOFT);
   const need = Math.ceil(w / RIDGE.step) + 1;
   if (HEIGHTS.length < need) HEIGHTS = new Float32Array(need);
-  const n = ridgeHeights({ soft: SOFT, w, h, phase: frame.swell ?? 0 }, HEIGHTS);
+  const n = ridgeHeights({ soft: SOFT, w, h: v, phase: frame.swell ?? 0 }, HEIGHTS);
   const edge = (i) => {
     const x = Math.min(w, i * RIDGE.step);
-    if (frame.flat) return H - h * 0.03 - Math.sin((x / w) * 9) * h * 0.008;
-    if (nocap) return (nocap.curve?.(x) ?? H - h * 0.08) + breath;
+    if (frame.flat) return H - v * 0.03 - Math.sin((x / w) * 9) * v * 0.008;
+    if (nocap) return (nocap.curve?.(x) ?? H - v * 0.08) + breath;
     const music = H - HEIGHTS[i];
     return tune ? music * (1 - tune.m) + tune.curve(x) * tune.m : music;
   };
@@ -274,20 +276,25 @@ export function drawRidge(g, geo, ridge, frame) {
   g.fillStyle = dull ? PALETTE.dullRidgeFill : PALETTE.ridgeFill;
   g.fill();
   g.strokeStyle = dull ? PALETTE.dullRidgeEdge : PALETTE.ridgeEdge;
+  // the computer's EQ off: its curve is drawn, dimmed, as the points it would play
+  const keep = tune?.ghost ? 1 - (1 - GHOST) * tune.m : 1;
   if (!dull && geo.glow !== false) {
     // the glow is the edge drawn wider and fainter under itself, more of it while the mountains are tuned
     const spread = 8 * px * Math.max(tune?.m ?? 0, 0.35);
     g.save();
-    g.globalAlpha = 0.1;
+    g.globalAlpha = 0.1 * keep;
     g.lineWidth = 2 * px + spread * 1.6;
     g.stroke();
-    g.globalAlpha = 0.2;
+    g.globalAlpha = 0.2 * keep;
     g.lineWidth = 2 * px + spread * 0.8;
     g.stroke();
     g.restore();
   }
   g.lineWidth = 2 * px;
+  g.save();
+  g.globalAlpha = keep;
   g.stroke();
+  g.restore();
   if (tune && !dull) highlight(g, geo, tune, edge, n);
 }
 
@@ -311,7 +318,7 @@ function highlight(g, geo, tune, edge, n) {
   fill.addColorStop(1 - fade, PALETTE.highlight);
   fill.addColorStop(1, PALETTE.highlightClear);
   g.save();
-  g.globalAlpha = Math.min(1, tune.m * 1.4);
+  g.globalAlpha = Math.min(1, tune.m * 1.4) * (tune.ghost ? GHOST : 1);
   g.beginPath();
   const first = Math.max(0, Math.floor(lo / RIDGE.step) - 1);
   const last = Math.min(n - 1, Math.ceil(hi / RIDGE.step) + 1);

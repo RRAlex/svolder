@@ -14,6 +14,11 @@ use tokio::sync::{Notify, watch};
 
 use crate::analysis::Frame;
 use crate::capture::{Block, Capture, FrameCapture};
+use crate::eq::live::set_param_line;
+use crate::eq::{
+    ApplyRequest, Chain, EqFailure, HostEqState, LiveNode, Manager, Params, Route,
+    Status as EqStatus, check_playable, played_preamp,
+};
 use crate::players::{Button, Changes, NowPlaying, Players, Status};
 use crate::sink::{Sink, SinkState};
 
@@ -24,6 +29,8 @@ pub enum SinkWrite {
     Volume(f32),
     /// [`Sink::toggle_mute`].
     ToggleMute,
+    /// [`Sink::set_mute`], with the mute asked for.
+    Mute(bool),
 }
 
 /// A sink that reads what the test set and takes the writes it is asked for.
@@ -99,6 +106,18 @@ impl Sink for FakeSink {
         match inner.state.as_mut() {
             Some(state) => {
                 state.muted = !state.muted;
+                true
+            }
+            None => false,
+        }
+    }
+
+    async fn set_mute(&self, muted: bool) -> bool {
+        let mut inner = self.lock();
+        inner.writes.push(SinkWrite::Mute(muted));
+        match inner.state.as_mut() {
+            Some(state) => {
+                state.muted = muted;
                 true
             }
             None => false,
@@ -488,6 +507,140 @@ impl FrameCapture for FakeFrames {
     }
 }
 
+/// A call a [`FakeChain`] was asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChainCall {
+    /// [`Chain::apply`], with the request.
+    Apply(ApplyRequest),
+    /// [`Chain::remove`].
+    Remove,
+    /// [`Chain::keep_conf`], with the request.
+    KeepConf(ApplyRequest),
+}
+
+/// A computer EQ that holds its state in memory: it records the calls it is asked for and
+/// answers as a manager would, without a file, a program or a process.
+#[derive(Debug, Clone, Default)]
+pub struct FakeChain {
+    inner: Arc<Mutex<ChainInner>>,
+}
+
+#[derive(Debug, Default)]
+struct ChainInner {
+    state: Option<HostEqState>,
+    calls: Vec<ChainCall>,
+    refusing: Option<EqFailure>,
+    unknown: bool,
+}
+
+impl FakeChain {
+    /// A chain that already holds `state`, as a state file left by an earlier run would say.
+    pub fn with_state(state: HostEqState) -> Self {
+        let chain = Self::default();
+        chain.lock().state = Some(state);
+        chain
+    }
+
+    /// Whether the chain cannot tell if it runs: its status then has no `running` answer.
+    pub fn cannot_tell(&self, unknown: bool) {
+        self.lock().unknown = unknown;
+    }
+
+    /// A chain with nothing applied.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Refuse every call from now on with `failure`, `None` to take calls again.
+    pub fn refuse(&self, failure: Option<EqFailure>) {
+        self.lock().refusing = failure;
+    }
+
+    /// The calls made so far, in order.
+    pub fn calls(&self) -> Vec<ChainCall> {
+        self.lock().calls.clone()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ChainInner> {
+        crate::locked(&self.inner)
+    }
+}
+
+#[async_trait]
+impl Chain for FakeChain {
+    async fn apply(&self, request: ApplyRequest) -> Result<HostEqState, EqFailure> {
+        let mut inner = self.lock();
+        inner.calls.push(ChainCall::Apply(request.clone()));
+        if let Some(failure) = inner.refusing.clone() {
+            return Err(failure);
+        }
+        // The real host refuses a curve its chain cannot play; so does this one.
+        check_playable(
+            &request.correction,
+            request.rate_hz.unwrap_or(crate::eq::live::CONFIG_RATE_HZ),
+        )?;
+        let state = HostEqState {
+            on: true,
+            name: request.name,
+            origin: request.origin,
+            target: request.sink.unwrap_or_else(|| "fake_sink".to_string()),
+            route: Route::Smart,
+            manager: Manager::Child,
+            previous_default: None,
+            preamp_db: played_preamp(
+                &request.correction,
+                request.rate_hz.unwrap_or(crate::eq::live::CONFIG_RATE_HZ),
+            ),
+            filters: request.correction.filters,
+            slots: request.slots,
+        };
+        inner.state = Some(state.clone());
+        Ok(state)
+    }
+
+    async fn remove(&self) -> Result<(), EqFailure> {
+        let mut inner = self.lock();
+        inner.calls.push(ChainCall::Remove);
+        if let Some(failure) = inner.refusing.clone() {
+            return Err(failure);
+        }
+        if let Some(state) = inner.state.as_mut() {
+            state.on = false;
+        }
+        Ok(())
+    }
+
+    async fn keep_conf(&self, request: ApplyRequest) -> Result<(), EqFailure> {
+        let mut inner = self.lock();
+        inner.calls.push(ChainCall::KeepConf(request));
+        match inner.refusing.clone() {
+            Some(failure) => Err(failure),
+            None => Ok(()),
+        }
+    }
+
+    async fn status(&self) -> EqStatus {
+        let (state, unknown) = {
+            let inner = self.lock();
+            (inner.state.clone(), inner.unknown)
+        };
+        let running = state.as_ref().map(|state| state.on).filter(|_| !unknown);
+        EqStatus {
+            state,
+            running,
+            unreadable: None,
+        }
+    }
+
+    fn unavailable(&self) -> Option<EqFailure> {
+        self.lock().refusing.clone()
+    }
+
+    fn state(&self) -> Option<HostEqState> {
+        self.lock().state.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -797,5 +950,182 @@ mod tests {
             held.calls(),
             [CaptureCall::Start("alsa_output.usb-dac".to_string())]
         );
+    }
+
+    #[tokio::test]
+    async fn the_fake_chain_keeps_its_state_records_its_calls_and_refuses_when_told_to() {
+        use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
+        let chain = FakeChain::new();
+        let request = ApplyRequest {
+            name: "Phones".into(),
+            origin: None,
+            correction: Correction {
+                preamp_db: 3.0,
+                filters: vec![SourceFilter {
+                    kind: FilterKind::Peaking,
+                    f: 1000.0,
+                    g: 4.0,
+                    q: 1.0,
+                }],
+            },
+            sink: None,
+            slots: Vec::new(),
+            rate_hz: None,
+        };
+        assert_eq!(chain.state(), None);
+        let state = chain.apply(request.clone()).await.expect("applies");
+        assert!(state.on && state.preamp_db <= -4.0 + 1e-9, "{state:?}");
+        assert_eq!(chain.state(), Some(state));
+        assert_eq!(chain.status().await.running, Some(true));
+        chain.remove().await.expect("removes");
+        assert_eq!(chain.status().await.running, Some(false));
+        let failure = EqFailure {
+            what: "no".into(),
+            next: "later".into(),
+        };
+        chain.refuse(Some(failure.clone()));
+        assert_eq!(chain.unavailable(), Some(failure.clone()));
+        assert_eq!(chain.apply(request.clone()).await, Err(failure));
+        chain.refuse(None);
+        assert_eq!(chain.unavailable(), None);
+        assert_eq!(
+            chain.calls(),
+            [
+                ChainCall::Apply(request.clone()),
+                ChainCall::Remove,
+                ChainCall::Apply(request)
+            ]
+        );
+    }
+}
+
+/// Live-chain parameters that go nowhere: a [`Params`] that records every send as the line
+/// `pw-cli` would have been given, and answers from what the test set.
+#[derive(Debug, Clone)]
+pub struct FakeParams {
+    inner: Arc<Mutex<ParamsInner>>,
+}
+
+#[derive(Debug)]
+struct ParamsInner {
+    node: Option<LiveNode>,
+    takes: bool,
+    lines: Vec<String>,
+    sent: Vec<Vec<(String, f64)>>,
+    forgotten: usize,
+    holds: bool,
+    /// The node id kept since the last look, as the real session keeps it until it is told to
+    /// look again.
+    kept: Option<u32>,
+}
+
+impl Default for FakeParams {
+    /// A fake with a node (id 1, 48 kHz, holding nothing) that takes every send.
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(ParamsInner {
+                node: Some(LiveNode {
+                    id: 1,
+                    rate_hz: Some(48_000),
+                    // A current chain lists its preamp control before any set.
+                    params: crate::eq::live::preamp_params(0.0)
+                        .into_iter()
+                        .map(|(name, _)| (name, 0.0))
+                        .collect(),
+                }),
+                takes: true,
+                lines: Vec::new(),
+                sent: Vec::new(),
+                forgotten: 0,
+                holds: true,
+                kept: None,
+            })),
+        }
+    }
+}
+
+impl FakeParams {
+    /// A fake with a node that takes every send.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether sends are taken from now on; a send that is not taken is not recorded.
+    pub fn takes(&self, takes: bool) {
+        self.lock().takes = takes;
+    }
+
+    /// Whether the node holds what a taken send set, so a read back finds it (the default);
+    /// a node that does not takes the send and reads back what it held before.
+    pub fn holds(&self, holds: bool) {
+        self.lock().holds = holds;
+    }
+
+    /// The node the fake reports from now on, `None` for a chain that is not in the graph.
+    pub fn set_node(&self, node: Option<LiveNode>) {
+        self.lock().node = node;
+    }
+
+    /// The lines sent so far, as `pw-cli` would be given them.
+    pub fn lines(&self) -> Vec<String> {
+        self.lock().lines.clone()
+    }
+
+    /// The parameters of every send so far, in order.
+    pub fn sent(&self) -> Vec<Vec<(String, f64)>> {
+        self.lock().sent.clone()
+    }
+
+    /// How many times the node was forgotten.
+    pub fn forgotten(&self) -> usize {
+        self.lock().forgotten
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ParamsInner> {
+        crate::locked(&self.inner)
+    }
+}
+
+#[async_trait]
+impl Params for FakeParams {
+    async fn node(&mut self) -> Option<LiveNode> {
+        let mut inner = self.lock();
+        inner.kept = inner.node.as_ref().map(|node| node.id);
+        inner.node.clone()
+    }
+
+    async fn sink_rate(&mut self) -> Option<u32> {
+        self.lock().node.as_ref().and_then(|node| node.rate_hz)
+    }
+
+    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
+        let mut inner = self.lock();
+        let Some(current) = inner.node.as_ref().map(|node| node.id) else {
+            return false;
+        };
+        let id = inner.kept.unwrap_or(current);
+        inner.kept = Some(id);
+        if id != node {
+            return false;
+        }
+        if !inner.takes {
+            return false;
+        }
+        inner.lines.push(set_param_line(id, params));
+        inner.sent.push(params.to_vec());
+        if inner.holds
+            && let Some(node) = inner.node.as_mut()
+        {
+            for (name, value) in params {
+                node.params.insert(name.clone(), *value);
+            }
+        }
+        true
+    }
+
+    fn forget_node(&mut self) {
+        let mut inner = self.lock();
+        inner.forgotten += 1;
+        inner.kept = None;
     }
 }

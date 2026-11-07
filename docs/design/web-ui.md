@@ -146,9 +146,9 @@ A write answers with the parts it changed (`parts`) and the words of its toast (
 A page hidden for 2 s (`GRACE_MS`) closes the stream and opens it when it is shown, so a background
 tab costs the daemon nothing and its next snapshot catches the page up. A rest is not a lost link,
 but the woken screen is dimmed and inert until that reading (a volume step is absolute). A page
-loaded hidden opens it when shown. While a DAC page's stream lives it holds the host's route reads
-on (a `HostWatch`), so the daemon reads PipeWire for a page that is open and shows a path, and for
-nobody else; an amp's or a preamp's stream holds nothing. A rotated token ends the stream. The page's first answer is a frame carrying the first snapshot of the model (the
+loaded hidden opens it when shown. While a page's stream lives and shows a device it holds the host's
+reads on (a `HostWatch`), so the daemon reads PipeWire for a page that is open, and for nobody
+else. A rotated token ends the stream. The page's first answer is a frame carrying the first snapshot of the model (the
 strip's bars included) in a `<script type="application/json" id="svolder-page">` block, which the
 CSP does not execute; the theme draws the page from it before the stream opens. A lost stream dims
 the controls and the link's dot beside the device's name says so until it returns.
@@ -216,7 +216,7 @@ reads a directory on every request instead, so styles and scripts can be edited 
 ## Now playing
 
 The card is the page's one view of the computer. `svolderd` follows the player and reads the route
-once for every front end (`host.rs`, [host-audio.md](host-audio.md)); the page asks the host through
+once for every front end (`host.rs`, [host-audio.md](host-audio.md); its controls: [host-control.md](host-control.md)); the page asks the host through
 three methods of `Fleet` (`host_view`, `host_watch`, `host_cover`; a press goes as the socket's
 `HostPress`), so the web code never holds the host service itself. `view::host` turns the host's
 view and the device's own readings into a `Playing`: the track (title, artist, `album · player`,

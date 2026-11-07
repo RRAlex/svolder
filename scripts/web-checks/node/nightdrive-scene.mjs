@@ -29,10 +29,7 @@ ok('the_nearest_row_is_at_the_bottom_and_the_far_row_near_the_horizon', () => {
   const [mid] = project(W, H, HOR, 0, 0.5);
   near(mid, W / 2);
   assert.deepEqual(CAMERA, { K: 8, spread: 0.24, rows: 22, half: 6, side: 30, sideStep: 0.5 });
-  assert.equal(horizonOf({ phone: false, portrait: false }), 0.56);
-  assert.equal(horizonOf({ phone: true, portrait: false }), 0.56);
-  assert.equal(horizonOf({ phone: true, portrait: true }), 0.62);
-  assert.equal(horizonOf({ phone: false, portrait: true }), 0.56);
+  assert.equal(horizonOf(), 0.56);
 });
 
 ok('the_far_rows_are_wider_than_f6s', () => {

@@ -9,6 +9,7 @@
 import { TITLE, statusOf } from '../../core/title.js';
 import { eqMarkup, noVolumeMarkup } from './draw/hud.js';
 import { outrunVolume } from './draw/volume.js';
+import { computerView } from './computer-view.js';
 import { eqLine, topLine, volumeOf } from './hud.js';
 
 /** The input that wakes the HUD. */
@@ -168,6 +169,14 @@ export function wireHud({
   });
   let drawn = { volume: null, eq: null };
   let seen = null;
+  let seenComputer = null;
+
+  /** What stands for a reading of the computer's volume while it is the side shown, else nothing. */
+  const computerKey = () => {
+    if (core.computer.side() !== 'computer') return '';
+    const v = core.computer.volumeOf(core.model.page());
+    return `${v.pct}|${v.muted}`;
+  };
 
   const put = (el, name, html) => {
     if (drawn[name] === html) return;
@@ -180,13 +189,18 @@ export function wireHud({
     left.textContent = top.left;
     right.textContent = top.right;
     right.className = `nd-right${top.tone ? ` ${top.tone}` : ''}`;
-    const line = eqLine(model);
+    // the verdict's line pushes the EQ line down where the keys stand by the menu button (style.css)
+    if (top.right) page.classList.add('nd-verdict');
+    else page.classList.remove('nd-verdict');
+    const comp = computerView(core);
+    const line = eqLine(model, comp);
     put(eq, 'eq', eqMarkup(line));
     eq.hidden = !line;
-    const v = volumeOf(model);
+    const v = volumeOf(model, comp);
     if (v.none) put(volume, 'volume', noVolumeMarkup(v.none));
     else put(volume, 'volume', v.figures ? outrunVolume(v) : '');
     seen ??= keyOf(model.device?.volume);
+    seenComputer ??= computerKey();
     fade.hold(statusOf(model, view.state) !== TITLE.connected);
   }
 
@@ -201,11 +215,21 @@ export function wireHud({
     fade.showVolume(SHOW_VOLUME_MS);
   });
 
+  // The computer's volume moved by another hand shows the volume again, as the device's does.
+  const offHost = core.model.on('host', () => {
+    const key = computerKey();
+    if (key === seenComputer) return;
+    const first = seenComputer === null;
+    seenComputer = key;
+    if (!first && key !== '') fade.showVolume(SHOW_VOLUME_MS);
+  });
+
   return {
     draw,
     fade,
     stop() {
       off();
+      offHost();
       fade.stop();
     },
   };

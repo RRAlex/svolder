@@ -22,6 +22,16 @@ fn press_through_daemon(watching: &mut Watching, button: svolder_host::Button) {
     }
 }
 
+/// Read the presets from the configuration file again, for the list that has just opened.
+fn read_presets<O: Open>(opener: &Opener<O>, watching: &mut Watching) {
+    match Config::load_from(&opener.path) {
+        Ok(config) => presets::reread(&mut watching.app, config.presets),
+        Err(e) => watching
+            .app
+            .notify_failure(&Failure::of(Kind::ConfigUnreadable, e.to_string())),
+    }
+}
+
 /// Carry out one intent exactly as the key that means it would, whichever asked for it: a key
 /// press, or mouse support reading a click or the wheel back into the same intent.
 ///
@@ -60,7 +70,13 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
         // The refresh applies whether or not it can be saved, as a `[tui]` change does.
         Intent::AutoEqRefresh(weeks) => look.change_autoeq(weeks, &mut watching.app),
         Intent::Connection(change) => {
-            connect::changed(opener, &mut watching, &look.token_site, &change).await;
+            Box::pin(connect::changed(
+                opener,
+                &mut watching,
+                &look.token_site,
+                &change,
+            ))
+            .await;
         }
         Intent::RevealToken => connect::reveal(&mut watching, &look.token_site),
         Intent::CopyToken => {
@@ -73,19 +89,29 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
         Intent::OpenWebLink => web_box::open(&mut watching, look),
         Intent::RotateWebToken => connect::rotate_web(&mut watching, &look.token_site).await,
         Intent::SwitchDevice(name) => {
-            if switch_device(opener, &mut watching, &name, look, screen).await == Switched::GaveUp {
+            if Box::pin(switch_device(opener, &mut watching, &name, look, screen)).await
+                == Switched::GaveUp
+            {
                 return gave_up(watching);
             }
         }
         Intent::NewDevice => return Flow::Adding(watching),
         Intent::UpdateDevice(name, device) => {
-            let switched = update_device(opener, &mut watching, &name, &device, look, screen).await;
+            let switched = Box::pin(update_device(
+                opener,
+                &mut watching,
+                &name,
+                &device,
+                look,
+                screen,
+            ))
+            .await;
             if switched == Switched::GaveUp {
                 return gave_up(watching);
             }
         }
         Intent::RemoveDevice(name) => {
-            match remove_device(opener, &mut watching, &name, look, screen).await {
+            match Box::pin(remove_device(opener, &mut watching, &name, look, screen)).await {
                 Removed::Kept => {}
                 Removed::Empty => return Flow::Adding(watching),
                 Removed::GaveUp => return gave_up(watching),
@@ -118,21 +144,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             written_preset(opener, &mut watching, wrote).await;
         }
         // The list shows the file as it stands when it opens, whatever wrote it since.
-        Intent::ReadPresets => {
-            match Config::load_from(&opener.path) {
-                Ok(config) => presets::reread(&mut watching.app, config.presets),
-                Err(e) => watching
-                    .app
-                    .notify_failure(&Failure::of(Kind::ConfigUnreadable, e.to_string())),
-            }
-            (
-                watching.app.presets.computer,
-                watching.app.presets.computer_off,
-            ) = watching.jobs.computer();
-            if let Some(state) = watching.jobs.host_eq_changed() {
-                watching.app.take_host_eq(state);
-            }
-        }
+        Intent::ReadPresets => read_presets(opener, &mut watching),
         Intent::AutoEqIndex { refresh } => {
             let weeks = Config::load_from(&opener.path)
                 .map(|config| config.autoeq.refresh_weeks)
@@ -140,27 +152,14 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             watching.jobs.index(jobs::policy(refresh, weeks));
         }
         Intent::AutoEqDownload(entry) => watching.jobs.download(entry),
-        Intent::HostApply {
-            name,
-            origin,
-            correction,
-        } => watching.jobs.apply(crate::commands::host_eq::ApplyRequest {
-            name,
-            origin,
-            correction,
-            sink: None,
-        }),
-        Intent::HostRemove { then_load } => watching.jobs.remove(then_load),
-        // The host's own audio is the loop's to reach, never the device's: nothing of it is asked
-        // while host audio is not shown.
+        Intent::HostEq(op) => computer::eq(&mut watching, *op),
+        Intent::MoveToDac(name) => computer::move_to_dac(&mut watching, name),
+        // The computer's volume and mute: a request to the daemon when joined to one, else the
+        // loop's own sink. Nothing of it is asked while host audio is not shown.
         Intent::HostVolume(percent) if watching.app.host_shown() => {
-            if watching.host.send(host::SinkOp::Volume(percent)) {
-                watching.app.host.asked = Some(percent);
-            }
+            computer::volume(&mut watching, percent);
         }
-        Intent::HostMute if watching.app.host_shown() => {
-            watching.host.send(host::SinkOp::ToggleMute);
-        }
+        Intent::HostMute if watching.app.host_shown() => computer::mute(&mut watching),
         Intent::HostPress(button) if watching.app.host_shown() => {
             if watching.app.host.daemon_owns() {
                 press_through_daemon(&mut watching, button);
@@ -176,7 +175,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             // Whatever a wait for the daemon would find, this open looks at it first.
             watching.reconnect = None;
             let landing = matches!(watching.app.session.holding, Some(Holding::Nothing { .. }));
-            match switch(opener, &mut watching, None, look, screen).await {
+            match Box::pin(switch(opener, &mut watching, None, look, screen)).await {
                 Switched::GaveUp => return gave_up(watching),
                 // A retry of a start that opened nothing is a start: it lands on the device
                 // screen, the way a switch from the list does, not on the list it was asked from.
@@ -288,6 +287,17 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
         }
         MouseAction::ToggleTone(row) => {
             let intents = watching.app.click_tone_row(row);
+            watching.app.touched(&intents);
+            for intent in intents {
+                match take_intent(intent, opener, watching, mouse, look, screen).await {
+                    Flow::Continue(next) => watching = next,
+                    ended => return ended,
+                }
+            }
+            Flow::Continue(watching)
+        }
+        MouseAction::PointField { point, field } => {
+            let intents = watching.app.click_point_field(point, field);
             watching.app.touched(&intents);
             for intent in intents {
                 match take_intent(intent, opener, watching, mouse, look, screen).await {

@@ -5,7 +5,11 @@
 // the stand-ins (an amp no hop links, the AutoEq headphones) and the choice that falls back to the
 // shown device when its hop goes. Run: node signal-line.mjs
 import assert from 'node:assert/strict';
-import { followedUrls, hopsOf, keepChoice, shownHopId } from '../../../bins/svolderd/web/themes/signal/line.js';
+import { createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { createStore } from '../../../bins/svolderd/web/core/store.js';
+import {
+  followedUrls, hopsOf, keepChoice, shownHopId, sideOf,
+} from '../../../bins/svolderd/web/themes/signal/line.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -274,6 +278,88 @@ ok('the_dac_says_neither_while_its_rate_is_not_read', () => {
   assert.deepEqual(words(pathOf(false, false, true)), ['USB 1, 96 kHz']);
   assert.deepEqual(words(pathOf(false, false, false)), ['USB 1, 96 kHz', 'arrives as sent']);
   assert.deepEqual(words(pathOf(false, true, false)), ['USB 1, 96 kHz', 'changes the sound']);
+});
+
+// ---- the computer's hop is the flip (design: the computer flip) ----
+
+const computerOf = (list) => list.find((h) => h.kind === 'computer');
+const memory = () => {
+  const map = new Map();
+  return {
+    getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, String(v)), removeItem: (k) => map.delete(k),
+  };
+};
+
+ok('the_computer_hop_is_called_this_computer', () => {
+  const computer = computerOf(hopsOf(page(), DAC.url));
+  assert.equal(computer.name, 'This computer');
+  // its words: the audio server and the rate; nothing about controls until the hop is chosen
+  assert.deepEqual(computer.words, ['PipeWire · 96 kHz']);
+  const chosen = computerOf(hopsOf(page(), DAC.url, 'open', 'computer'));
+  assert.deepEqual(chosen.words, ['PipeWire · 96 kHz', 'controls below']);
+  assert.equal(computerOf(hopsOf(page(), DAC.url, 'open', shownHopId(DAC.url))).words.length, 1);
+  // where the computer cannot be used, its hop says why and does not say its controls are below
+  const gone = host({ computer: { unavailable: 'pw-dump is missing' } });
+  const why = computerOf(hopsOf(page({ withHost: gone }), DAC.url, 'open', 'computer'));
+  assert.deepEqual(why.words, ['PipeWire · 96 kHz', 'computer controls unavailable: pw-dump is missing']);
+  // a host EQ that changes the sound is still said while the hop is not chosen
+  const eq = host({ route: route({ host_eq: true }) });
+  assert.deepEqual(computerOf(hopsOf(page({ withHost: eq }), DAC.url)).words, ['PipeWire · 96 kHz', 'changes the sound']);
+  // an amp's page has the hop too, while the computer is served
+  const amp = computerOf(hopsOf(page({ devices: [AMP], shown: AMP.url }), AMP.url));
+  assert.equal(amp.name, 'This computer');
+  // and it says where its controls are, as on a DAC's page, though the amp's page holds no route
+  const ampPage = (withHost, chosen) => computerOf(hopsOf(page({ devices: [AMP], shown: AMP.url, withHost }), AMP.url, 'open', chosen));
+  const noRoute = host({ route: null });
+  assert.deepEqual(ampPage(noRoute, 'computer').words, ['controls below']);
+  assert.deepEqual(ampPage(noRoute, null).words, []);
+  const down = host({ route: null, computer: { unavailable: 'pw-dump is missing' } });
+  assert.deepEqual(ampPage(down, 'computer').words, ['computer controls unavailable: pw-dump is missing']);
+});
+
+ok('a_computer_that_cannot_be_used_is_not_chosen_on_a_load', () => {
+  const shown = shownHopId(DAC.url);
+  const down = hopsOf(page({ withHost: host({ computer: { unavailable: 'no tool' } }) }), DAC.url);
+  assert.equal(computerOf(down).unavailable, true);
+  assert.equal(keepChoice(null, down, shown, 'computer'), shown, 'the device side shows, the hop says why');
+  assert.equal(computerOf(hopsOf(page(), DAC.url)).unavailable, false);
+});
+
+ok('choosing_it_is_the_flip_and_another_hop_flips_back', () => {
+  assert.equal(sideOf('computer'), 'computer');
+  for (const id of ['player', shownHopId(DAC.url), 'hop:HD 650', 'standin-dac']) assert.equal(sideOf(id), 'dac', id);
+  // the core's side follows the hop, and flipping writes nothing
+  const posts = [];
+  const device = { name: DAC.name, url: DAC.url, volume: null, tone: null };
+  const withComputer = {
+    v: 1, viewer: { signed_in: true, guest: false, writes: true, read_only: null },
+    fleet: { devices: [DAC], hops: [] }, shown: DAC.url, device, followed: {}, card: null, strip: null,
+    host: host({ computer: { volume: { pct: 42, muted: false }, eq: null, presets: [], unavailable: null } }),
+  };
+  const store = createStore(withComputer, { signedOut: () => {}, fetch: async (...a) => { posts.push(a); return { status: 200, json: async () => ({}) }; } });
+  const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
+  assert.equal(core.side(), 'dac');
+  core.flip(sideOf('computer'));
+  assert.equal(core.side(), 'computer');
+  core.flip(sideOf(shownHopId(DAC.url)));
+  assert.equal(core.side(), 'dac');
+  assert.deepEqual(posts, [], 'a flip posts nothing');
+});
+
+ok('a_kept_computer_side_chooses_the_hop_on_load', () => {
+  const shown = shownHopId(DAC.url);
+  const list = hopsOf(page(), DAC.url);
+  // a load: nothing chosen yet, the side kept is the computer's
+  assert.equal(keepChoice(null, list, shown, 'computer'), 'computer');
+  assert.equal(keepChoice(null, list, shown, 'dac'), shown);
+  assert.equal(keepChoice(null, list, shown), shown, 'the side defaults to the device');
+  // a hop chosen stays chosen whatever the side kept says
+  assert.equal(keepChoice(shown, list, shown, 'computer'), shown);
+  // no computer on the line (not watched): the shown device's hop, whatever was kept
+  assert.equal(keepChoice(null, hopsOf(page({ withHost: null }), DAC.url), shown, 'computer'), shown);
+  // on an amp's page too
+  const amp = hopsOf(page({ devices: [AMP], shown: AMP.url }), AMP.url);
+  assert.equal(keepChoice(null, amp, shownHopId(AMP.url), 'computer'), 'computer');
 });
 
 console.log(`signal-line: ${n} passed`);

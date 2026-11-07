@@ -306,6 +306,13 @@ fn draw_tone(
     };
     hits.push(arrow(tone.mode_arrows.0).intersection(inner), Hit::ModePrev);
     hits.push(arrow(tone.mode_arrows.1).intersection(inner), Hit::ModeNext);
+    if app.on_computer() {
+        rows.push((eq.mode_id(), mode_row));
+        for (point, top) in tone.bands.iter().enumerate() {
+            hits.push(pane_row(inner, *top), Hit::Point(point));
+        }
+        return rows;
+    }
     let loudness_row = pane_row(inner, LOUDNESS_ROW);
     hits.push(loudness_row, Hit::Loudness);
     // The bar inside the row sets the strength under a press and a drag.

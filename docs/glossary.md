@@ -119,7 +119,9 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
   level sets).
 - **Flatten**: set every band's gain to zero.
 - **Point**: a band's marker on the Response graph, at the band's own frequency and gain (at 0 dB
-  in Loudness); the web page lets it be dragged.
+  in Loudness); the web page lets it be dragged. On the computer side a point is one filter of the
+  **Computer EQ**, a peak (`PK`) or a low or high shelf (`LSC`, `HSC`), at most 16, the first always
+  present.
 - **Preset**: a named tone curve, built in or saved in the configuration.
 - **Device slot**: one of the places a Loki Max itself keeps a set of bands (three, "Preset 1" to
   "Preset 3"). A recall sets the bands from it and a save writes the current bands over it; the
@@ -135,14 +137,24 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 
 - **MPRIS**: the session-bus interface the host's media players speak; the TUI follows one and
   shows what it plays.
-- **Host EQ**: a tone curve applied on the computer, as a PipeWire filter chain before the sink.
+- **Computer EQ** (formerly **Host EQ**): a parametric correction applied on the computer as a
+  PipeWire filter chain before the sink, with up to 16 **Points** that change while the sound plays.
+  The words `host eq` stay in the CLI's verbs and in the path line's `host EQ on`.
+- **Slot**: one of the 16 biquads of the Computer EQ's chain. A point keeps its slot for its life,
+  and the daemon sends each point's slot with it. Not the daemon's **Slot** nor a Loki Max's
+  **Device slot**.
+- **Preamp**: the Computer EQ's gain stage in front of the slots, set automatically to minus the
+  curve's peak so the signal never passes unity.
+- **The flip** / **side**: the one switch a front end has between the shown device (the **DAC** side)
+  and **This computer** (the computer side); it flips the volume control and the tone control
+  together, is the viewer's own and writes nothing.
 - **Sink**: the audio output the computer plays to; its **monitor** is what it plays, captured
   for the spectrum.
 - **Host view**: what the daemon says of the computer: whether it watches the host at all, the
   followed player's track (title, artist, album, status, length, progress, cover) and the route.
   Front ends read it with `Host` and hear changes on a `Subscribe` that asked for the host.
 - **Route**: where the followed player's sound goes, read from `pw-dump`: the default sink, the
-  player's stream, what else mixes into the sink and whether the host EQ is in front of it.
+  player's stream, what else mixes into the sink and whether the Computer EQ is in front of it.
 - **Path line**: the route and the DAC's own readings turned into one line from the player to the
   DAC: its hops and a verdict, `untouched` or the hop that changes the signal, or no verdict when
   the computer plays elsewhere. Never worded "bit-perfect".
@@ -252,7 +264,7 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Motion** (Night drive's): the theme's one setting, in the frame's menu: *Full*, *Calm* or
   *Still*, which set how often the scene is drawn and whether the road and the sky's events move.
 - **The fade** (Night drive's): the top line, the volume and the EQ line going to nothing after 15
-  seconds with no input, and the dash going to a tenth with them (not a phone's upright panel); any
+  seconds with no input, and the dash going to a fifth with them (not a phone's upright panel); any
   input brings them back, and trouble keeps them. The first tap on a faded dash only wakes it.
 - **The frame budget** (Night drive's): the scene's watch on its own cost: when drawing is slow it
   drops the wet road, then the density, then the rate, and brings them back when drawing is
