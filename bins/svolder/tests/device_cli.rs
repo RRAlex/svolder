@@ -504,6 +504,10 @@ fn a_missing_adapter_names_the_next_step() {
             ("SVOLDER_AUTOEQ_URL", "http://127.0.0.1:9/"),
         ],
     );
+    if common::bluez_absent(&err) {
+        eprintln!("skipped: the system D-Bus has no BlueZ, so the transport words its own failure");
+        return;
+    }
     assert_eq!(code, 3, "err={err}");
     assert!(
         err.contains("Run `svolder doctor`"),

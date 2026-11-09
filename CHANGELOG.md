@@ -32,6 +32,9 @@ Fixes from a first user's Raspberry Pi 4 and Docker set-up.
 - For contributors: `make sim-app` starts the simulator for the Schiit phone app, after checking
   BlueZ's flags and printing the drop-in when they are missing; the release workflow check now
   requires every Dockerfile `COPY` source to be staged into the image's build context.
+- For contributors: `make check` also runs the tests on a system bus with no BlueZ, as GitHub's
+  runners have (`make check-no-bluez`), and a check workflow runs `make check` on every push to
+  main, so a release's own test step holds no surprise.
 
 ## 0.32.4
 

@@ -7,8 +7,9 @@
 #   - a file is not valid YAML or has no jobs;
 #   - its triggers are anything but `workflow_dispatch` and `push` of the tags `v*` and nothing
 #     else (no branches, no paths, no pull_request: only a version tag or a person starts it);
+#     check.yml alone also takes `workflow_call` and `push` of `branches: [main]`;
 #   - an action (`uses:`) is not `owner/repo@<40 hex commit SHA>` followed by a `# vX` comment
-#     naming its version;
+#     naming its version (a `./.github/workflows/X.yml` workflow of this repository must exist);
 #   - there is no top-level `permissions: {}`, or a job holds a write scope outside its allowance
 #     (`release`: contents; `image` and `manifest`: packages; any other job: none), including
 #     `write-all`;
@@ -38,7 +39,7 @@ WRITE_ALLOWED = {"release": {"contents"}, "image": {"packages"}, "manifest": {"p
 TOKEN = re.compile(r"github\.token|secrets\.|github\s*\[\s*['\"]token['\"]\s*\]|secrets\s*\[")
 
 
-def trigger_errors(doc):
+def trigger_errors(doc, name=""):
     on = doc.get(True, doc.get("on"))
     if isinstance(on, str):
         on = {on: None}
@@ -46,10 +47,15 @@ def trigger_errors(doc):
         on = {name: None for name in on}
     on = on or {}
     errors = []
-    for name in sorted(set(on) - {"workflow_dispatch", "push"}, key=str):
-        errors.append(f"trigger `{name}` is not allowed; only workflow_dispatch and push of tags v*")
-    if "push" in on and on["push"] != {"tags": ["v*"]}:
-        errors.append("`push` must be exactly `tags: ['v*']`, with no branches, paths or other filter")
+    # check.yml also runs on a push to main and when release.yml calls it.
+    checker = name == "check.yml"
+    allowed = {"workflow_dispatch", "push"} | ({"workflow_call"} if checker else set())
+    want = {"branches": ["main"]} if checker else {"tags": ["v*"]}
+    for trigger in sorted(set(on) - allowed, key=str):
+        errors.append(f"trigger `{trigger}` is not allowed; only workflow_dispatch and push of tags v*")
+    if "push" in on and on["push"] != want:
+        shown = "branches: [main]" if checker else "tags: ['v*']"
+        errors.append(f"`push` must be exactly `{shown}`, with no other filter")
     return errors
 
 
@@ -105,13 +111,17 @@ def check(path, targets):
     if not isinstance(doc, dict) or not doc.get("jobs"):
         return ["no jobs"]
 
-    errors += trigger_errors(doc)
+    errors += trigger_errors(doc, os.path.basename(path))
 
     for n, line in enumerate(text.splitlines(), 1):
         m = USES.match(line)
         if not m:
             continue
-        if not PINNED.match(m.group(1)) or not m.group(2):
+        local = re.fullmatch(r"\./\.github/workflows/[\w.-]+\.ya?ml", m.group(1))
+        if local:
+            if not os.path.exists(os.path.join(ROOT, m.group(1))):
+                errors.append(f"line {n}: `{m.group(1)}` does not exist")
+        elif not PINNED.match(m.group(1)) or not m.group(2):
             errors.append(f"line {n}: `{m.group(1)}` is not owner/repo@<40-hex commit SHA> with a '# vX' comment")
 
     if "permissions" not in doc or doc["permissions"] != {}:
@@ -183,6 +193,18 @@ def self_test():
         ("on:\n  push:\n    tags: ['v*']\n  schedule:\n    - cron: '0 0 * * *'\n", False),
     ]
     bad = 0
+    check_cases = [
+        ("on:\n  push:\n    branches: [main]\n  workflow_dispatch:\n  workflow_call:\n", "check.yml", True),
+        ("on:\n  push:\n    branches: [main]\n", "release.yml", False),
+        ("on:\n  workflow_call:\n", "release.yml", False),
+        ("on:\n  push:\n    tags: ['v*']\n", "check.yml", False),
+        ("on:\n  push:\n    branches: [main, x]\n", "check.yml", False),
+        ("on:\n  pull_request:\n", "check.yml", False),
+    ]
+    for text, name, ok in check_cases:
+        if (not trigger_errors(yaml.safe_load(text), name)) != ok:
+            print(f"workflow-check: self-test: {name} {text!r} should {'pass' if ok else 'fail'}")
+            bad += 1
     dockerfile = "COPY target/dist/a target/dist/b /x/\nCOPY --from=b /y /z\nCOPY LICENSE /l\nCOPY packaging/e.sh /bin/e\n"
     stage = "mkdir -p ctx/target/dist\ncp t/a t/b ctx/target/dist/\ncp t/LICENSE ctx/\n"
     build = "docker build -f src/Dockerfile -t i ctx\n"

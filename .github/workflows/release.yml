@@ -7,7 +7,9 @@
 #
 # It builds the release on GitHub's own runners, one native build per architecture (no
 # emulation), and publishes it:
-#   test      `make check` on an arm64 runner (the x86_64 suite runs before the tag is pushed)
+#   test      check.yml: `make check` on an arm64 runner (the x86_64 suite runs before the tag is
+#             pushed); the same workflow runs on every push to main, so what this runner needs is
+#             proven before a tag
 #   build     `make packages ARCH=...` on x86_64 and on arm64; contents: read, no token while
 #             it builds
 #   image     the Docker image on each architecture, from that build's tarball (packages: write)
@@ -46,42 +48,9 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04-arm
+    uses: ./.github/workflows/check.yml
     permissions:
       contents: read
-    steps:
-      - name: Work out the version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            VERSION=$INPUT_VERSION
-          else
-            VERSION=${GITHUB_REF_NAME#v}
-          fi
-          case $VERSION in ''|*[!0-9.]*) echo "bad version: $VERSION"; exit 1;; esac
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-      - name: Check out the commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
-            clone -q "https://github.com/$GITHUB_REPOSITORY" src
-          git -C src checkout -q "$GITHUB_SHA"
-      - name: Install what make check needs
-        run: |
-          set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends build-essential pkg-config libdbus-1-dev python3-yaml
-          # The same compiler as the release container (packaging/Dockerfile.build).
-          rustup toolchain install 1.93.1 --profile minimal --component rustfmt --component clippy
-          rustup default 1.93.1
-      - name: Run the test suite
-        run: |
-          set -euo pipefail
-          make -C src check
 
   build:
     strategy:

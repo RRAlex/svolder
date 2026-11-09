@@ -16,6 +16,20 @@ mod script;
 )]
 pub use script::install_script;
 
+/// Whether `stderr` says the system bus has no BlueZ to answer: the bus replies that the name
+/// `org.bluez` has no service behind it, which is what a machine with a system D-Bus and no
+/// BlueZ (a CI runner) says to every adapter lookup. A case that needs BlueZ's own answer
+/// skips on this, printing why, and keeps its full assertions where BlueZ is there.
+pub fn bluez_absent(stderr: &str) -> bool {
+    [
+        "was not provided by any .service files",
+        "NameHasNoOwner",
+        "ServiceUnknown",
+    ]
+    .iter()
+    .any(|said| stderr.contains(said))
+}
+
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};

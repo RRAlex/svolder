@@ -136,7 +136,7 @@ docs-env: deps-build ## Rewrite docs/usage/environment.md's variable table
 #: Format check, lints, safety tripwire, docs check, licence check, SPDX header check, workflow
 #: check, web mutation snippets, theme CSS check, rate-check parser self-test, build-deps self-test, sim-app preflight self-test,
 #: tests and this help's own check.
-check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check workflow-check web-snippets theme-css-check rate-check-test release-notes-test deps-test sim-app-test help-check test ## Everything a commit must pass (make help T=check)
+check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check workflow-check web-snippets theme-css-check rate-check-test release-notes-test deps-test sim-app-test help-check test check-no-bluez ## Everything a commit must pass (make help T=check)
 
 license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-later
 	CARGO=$(CARGO) python3 scripts/check-licenses.py --self-test
@@ -251,6 +251,20 @@ test: deps-build ## Run all tests
 	  echo "$$left" | sed 's/^/  /' >&2; \
 	  exit 1; \
 	fi
+
+##@ Check
+#: make check's tests on a private system bus with no BlueZ, as the release runner has. Starts a
+#: private D-Bus daemon with no BlueZ on it, points DBUS_SYSTEM_BUS_ADDRESS at it and
+#: runs `make test`, so a test that assumes BlueZ answers fails here as it does on the release
+#: runner, which has a system bus and no BlueZ. Needs dbus-daemon.
+check-no-bluez: ## make test on a system bus with no BlueZ, as CI has
+	@command -v dbus-daemon >/dev/null || { echo 'make check-no-bluez: dbus-daemon is not installed' >&2; exit 1; }; \
+	bus=$$(mktemp -d /tmp/sv-bus.XXXXXX) || exit 1; \
+	trap 'kill $$pid 2>/dev/null; rm -rf "$$bus"' EXIT; \
+	dbus-daemon --session --nofork --address="unix:path=$$bus/bus" & pid=$$!; \
+	i=0; while [ ! -S "$$bus/bus" ] && [ $$i -lt 50 ]; do i=$$((i+1)); sleep 0.1; done; \
+	[ -S "$$bus/bus" ] || { echo 'make check-no-bluez: the private bus did not start' >&2; exit 1; }; \
+	DBUS_SYSTEM_BUS_ADDRESS="unix:path=$$bus/bus" $(MAKE) --no-print-directory test
 
 ##@ Check
 #: The volume's glide, the firmware-update and passphrase refusals (profile loader and the layers

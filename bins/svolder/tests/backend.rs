@@ -176,6 +176,10 @@ fn the_chain_prints_nothing_of_its_own_when_a_daemon_will_not_come_up() {
         .output()
         .expect("the binary runs");
     let err = String::from_utf8_lossy(&out.stderr);
+    if common::bluez_absent(&err) {
+        eprintln!("skipped: the system D-Bus has no BlueZ to say the adapter does not exist");
+        return;
+    }
     assert_eq!(out.status.code(), Some(3), "err={err}");
     assert_eq!(
         err.matches("using a direct session").count(),
