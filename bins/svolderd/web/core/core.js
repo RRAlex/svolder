@@ -17,14 +17,18 @@ import { createActions } from './actions.js';
 import { createAsk } from './ask.js';
 import { createAnalysis } from './analysis.js';
 import { createClimb } from './climb.js';
-import { createComputer, createHolds } from './computer.js';
+import { createComputer, createHolds, POINT_TYPES } from './computer.js';
 import { createFrame } from './frame.js';
 import { HOLD_AFTER_MS, HOLD_EVERY_MS, holdRepeat } from './hold.js';
+import {
+  labelWords, markersIn, pointDrag, pointValues, POINT_KEYS, touchWatch,
+} from './point-drag.js';
 import { bootScheme, createPrefs, storageOf, writeChoice } from './prefs.js';
 import { createRegistry } from './registry.js';
 import { createScheme, paintChrome } from './scheme.js';
 import { createStore } from './store.js';
 import { createStream } from './stream.js';
+import { createTable, editCell, isLong } from './table.js';
 import { createTitle } from './title.js';
 import { createToneNote } from './tone-note.js';
 import { dismissToast, toast } from './toast.js';
@@ -70,10 +74,10 @@ export function createCore({
   const store = createStore(page, { fetch: fetchNow, signedOut });
   const holds = createHolds({ store, fetch: fetchNow });
   const ask = createAsk({ document });
-  const actions = createActions({
-    store, post, toast, history: window.history, location: window.location, holds, ask,
-  });
   const computer = createComputer({ store, storage, holds });
+  const actions = createActions({
+    store, post, toast, history: window.history, location: window.location, holds, ask, computer,
+  });
   const climb = createClimb({ toast, dismissToast, body: document.body });
   const toneNote = createToneNote({ toast, now: () => window.performance.now() });
   const analysis = createAnalysis({ EventSource: window.EventSource });
@@ -103,7 +107,23 @@ export function createCore({
     title: null,
     hold: { repeat: holdRepeat, AFTER_MS: HOLD_AFTER_MS, EVERY_MS: HOLD_EVERY_MS },
     curve,
-    drag,
+    drag: {
+      ...drag,
+      // the hand on the computer's curve and its table (point-drag.js, table.js), over this core's
+      // actions and computer
+      pointDrag: (options) => pointDrag({
+        actions, computer, toast: (text) => core.frame.toast(text), ...options,
+      }),
+      labelWords,
+      pointValues,
+      markersIn,
+      POINT_KEYS,
+      POINT_TYPES,
+      touchWatch,
+      table: (options) => createTable({ computer, ...options }),
+      editCell,
+      isLong,
+    },
     words,
     clock,
     frame: null,

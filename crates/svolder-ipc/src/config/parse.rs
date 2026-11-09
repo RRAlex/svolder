@@ -382,7 +382,7 @@ impl Default for RawMqtt {
 }
 
 /// The on-disk shape of the `[mcp]` table, before validation. `listen` stays text so a bad
-/// address reaches `mcp`'s own message naming `mcp.listen`.
+/// address reaches `mcp`'s own message naming `mcp.listen`; blank means the key is absent.
 #[derive(serde::Deserialize)]
 #[serde(default)]
 struct RawMcp {
@@ -402,7 +402,7 @@ impl Default for RawMcp {
         let d = McpConfig::default();
         RawMcp {
             enabled: d.enabled,
-            listen: d.listen.to_string(),
+            listen: String::new(),
             auth: d.auth,
             writes: d.writes,
             max_volume_db: d.max_volume_db,
@@ -435,7 +435,7 @@ impl Default for RawWeb {
         let d = WebConfig::default();
         RawWeb {
             enabled: d.enabled,
-            listen: d.listen.to_string(),
+            listen: String::new(),
             auth: d.auth,
             writes: d.writes,
             max_volume_db: d.max_volume_db,
@@ -462,14 +462,109 @@ fn is_named(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
+/// The addresses `[web]` and `[mcp]` listen on when the file has no `listen` key, in place of
+/// loopback: `SVOLDER_WEB_LISTEN` and `SVOLDER_MCP_LISTEN`, which the container image sets so a
+/// published port reaches the server. A blank value counts as unset.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListenDefaults {
+    /// The web UI's default address.
+    pub web: Option<String>,
+    /// The MCP server's default address.
+    pub mcp: Option<String>,
+    /// The web UI's default `url` (`SVOLDER_WEB_URL`), the address links and QR codes carry.
+    pub web_url: Option<String>,
+}
+
+impl ListenDefaults {
+    /// Read the two variables.
+    pub fn from_env() -> ListenDefaults {
+        let read = |name: &str| std::env::var(name).ok().filter(|v| is_named(v));
+        ListenDefaults {
+            web: read("SVOLDER_WEB_LISTEN"),
+            mcp: read("SVOLDER_MCP_LISTEN"),
+            web_url: read("SVOLDER_WEB_URL"),
+        }
+    }
+}
+
+/// The address a table listens on: its own `listen` key, else the environment's default, else
+/// `builtin`; and whether it came from the environment.
+fn listen_address(
+    own: &str,
+    env_default: Option<&str>,
+    env_name: &str,
+    table: &str,
+    builtin: std::net::SocketAddr,
+) -> Result<(std::net::SocketAddr, bool), ConfigError> {
+    let (text, label, from_env) = if is_named(own) {
+        (own, format!("{table}.listen"), false)
+    } else if let Some(text) = env_default {
+        (text, env_name.to_string(), true)
+    } else {
+        return Ok((builtin, false));
+    };
+    let address = text.trim().parse().map_err(|_| {
+        ConfigError::Parse(format!(
+            "{label} {text:?} must be an address and port, such as \"{builtin}\""
+        ))
+    })?;
+    Ok((address, from_env))
+}
+
+/// The refusal of `auth = "none"` on an address that is not loopback, or `Ok`. An address the
+/// environment supplied is refused only for a table that is enabled, and the refusal names the
+/// variable, since the file has no `listen` to point at.
+fn refuse_open_auth(
+    table: &str,
+    env_name: &str,
+    listen: std::net::SocketAddr,
+    from_env: bool,
+    enabled: bool,
+) -> Result<(), ConfigError> {
+    if listen.ip().is_loopback() || (from_env && !enabled) {
+        return Ok(());
+    }
+    Err(ConfigError::Parse(if from_env {
+        format!(
+            "{table}.auth = \"none\" needs a loopback listen address, and {env_name} gives \
+             {listen}: write a loopback `listen` in the [{table}] table, or unset {env_name}"
+        )
+    } else {
+        format!("{table}.auth = \"none\" needs a loopback listen address")
+    }))
+}
+
 impl Config {
-    /// Parse from text (the seam every test uses).
+    /// Parse from text (the seam every test uses), with the listen defaults the environment
+    /// names.
     pub fn parse(text: &str) -> Result<Config, ConfigError> {
+        Self::parse_with_listen_defaults(text, &ListenDefaults::from_env())
+    }
+
+    /// [`Config::parse`] with the listen defaults given rather than read from the environment.
+    pub fn parse_with_listen_defaults(
+        text: &str,
+        listen: &ListenDefaults,
+    ) -> Result<Config, ConfigError> {
+        Self::parse_as(text, false, listen)
+    }
+
+    /// [`Config::parse`] that also refuses what the daemon only warns about: two `[[device]]`
+    /// blocks for one unit. The writers check what they are about to write with this, so a
+    /// file never grows a duplicate.
+    pub fn parse_strict(text: &str) -> Result<Config, ConfigError> {
+        Self::parse_as(text, true, &ListenDefaults::from_env())
+    }
+
+    /// The parse, strict about a unit configured twice or not: a lenient one keeps the first
+    /// block for the unit, leaves the later ones out of [`Config::devices`] and says so in
+    /// [`Config::warnings`], so a file written before the rule existed still starts the daemon.
+    fn parse_as(text: &str, strict: bool, listen: &ListenDefaults) -> Result<Config, ConfigError> {
         let raw: RawConfig = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
         if raw.schema != 1 {
             return Err(ConfigError::Schema(raw.schema));
         }
-        let devices = devices(raw.devices)?;
+        let (devices, dropped_duplicates) = devices(raw.devices, strict)?;
         let presets = presets(&raw.presets)?;
         let hops = hops(&raw.hops)?;
         // A blank value overrides nothing: every optional key means "as if the key were
@@ -480,8 +575,8 @@ impl Config {
         let socket = raw.socket.filter(|value| is_named(value));
         let tui = tui(raw.tui)?;
         let mqtt = mqtt(raw.mqtt)?;
-        let mcp = mcp(raw.mcp)?;
-        let web = web(raw.web)?;
+        let mcp = mcp(raw.mcp, listen.mcp.as_deref())?;
+        let web = web(raw.web, listen.web.as_deref(), listen.web_url.as_deref())?;
         let autoeq = AutoEqConfig {
             refresh_weeks: parse_refresh_weeks(raw.autoeq.refresh_weeks.as_ref())?,
         };
@@ -494,6 +589,7 @@ impl Config {
             devices,
             presets,
             hops,
+            dropped_duplicates,
             daemon: raw.daemon,
             tui,
             mqtt,
@@ -505,13 +601,32 @@ impl Config {
 }
 
 /// The `[[device]]` entries: each udid, passphrase and input key checked.
-fn devices(raw: Vec<RawDevice>) -> Result<Vec<DeviceConfig>, ConfigError> {
+///
+/// A unit another block already has is refused when `strict`; otherwise the later block is left
+/// out and the words that say so come back beside the devices.
+fn devices(
+    raw: Vec<RawDevice>,
+    strict: bool,
+) -> Result<(Vec<DeviceConfig>, Vec<String>), ConfigError> {
     let mut devices = Vec::with_capacity(raw.len());
+    let mut dropped = Vec::new();
     for d in raw {
-        // Validate the udid is a parseable 8-byte unit id.
-        d.udid
+        // Validate the udid is a parseable 8-byte unit id, and that no earlier block has it.
+        let unit = d
+            .udid
             .parse::<svolder_proto::UnitId>()
             .map_err(|_| ConfigError::Parse(format!("device {}: bad udid {:?}", d.name, d.udid)))?;
+        if let Some(first) = Config::device_for_unit_in(&devices, &unit) {
+            if strict {
+                return Err(ConfigError::Parse(unit_twice(
+                    &first.name,
+                    &d.name,
+                    &d.udid,
+                )));
+            }
+            dropped.push(unit_dropped(&first.name, &d.name, &d.udid));
+            continue;
+        }
         validate_passphrase(&d.name, &d.passphrase)?;
         let mut inputs = BTreeMap::new();
         for (raw_key, value) in d.inputs {
@@ -531,7 +646,25 @@ fn devices(raw: Vec<RawDevice>) -> Result<Vec<DeviceConfig>, ConfigError> {
             inputs,
         });
     }
-    Ok(devices)
+    Ok((devices, dropped))
+}
+
+/// Why a file with two `[[device]]` blocks for one unit is refused: a unit is configured once,
+/// since a second block would be a second actor on the same device.
+fn unit_twice(first: &str, second: &str, udid: &str) -> String {
+    format!(
+        "devices {first:?} and {second:?} are both configured for unit {udid}; \
+         a unit is configured once, so remove one of the two blocks"
+    )
+}
+
+/// What the daemon and the commands warn with when they load a file that has a unit twice.
+fn unit_dropped(first: &str, second: &str, udid: &str) -> String {
+    format!(
+        "devices {first:?} and {second:?} are both configured for unit {udid}; \
+         {second:?} is left out and {first:?} is used. Run `svolder remove {second}` or edit \
+         the file to take one of the two blocks out"
+    )
 }
 
 /// The `[[hop]]` blocks: each one checked, and no two sharing an id.
@@ -681,17 +814,16 @@ fn mqtt(raw: RawMqtt) -> Result<MqttConfig, ConfigError> {
 }
 
 /// The `[mcp]` table: the listen address, its auth, the volume cap, origins and hosts.
-fn mcp(raw: RawMcp) -> Result<McpConfig, ConfigError> {
-    let listen: std::net::SocketAddr = raw.listen.trim().parse().map_err(|_| {
-        ConfigError::Parse(format!(
-            "mcp.listen {:?} must be an address and port, such as \"127.0.0.1:8737\"",
-            raw.listen
-        ))
-    })?;
-    if raw.auth == McpAuth::None && !listen.ip().is_loopback() {
-        return Err(ConfigError::Parse(
-            "mcp.auth = \"none\" needs a loopback listen address".to_string(),
-        ));
+fn mcp(raw: RawMcp, env_listen: Option<&str>) -> Result<McpConfig, ConfigError> {
+    let (listen, from_env) = listen_address(
+        &raw.listen,
+        env_listen,
+        "SVOLDER_MCP_LISTEN",
+        "mcp",
+        McpConfig::default().listen,
+    )?;
+    if raw.auth == McpAuth::None {
+        refuse_open_auth("mcp", "SVOLDER_MCP_LISTEN", listen, from_env, raw.enabled)?;
     }
     if let Some(cap) = raw.max_volume_db
         && !cap.is_finite()
@@ -726,17 +858,20 @@ fn mcp(raw: RawMcp) -> Result<McpConfig, ConfigError> {
 
 /// The `[web]` table: the listen address, its auth, the guest level, the volume cap, the
 /// public URL, hosts and origins.
-fn web(raw: RawWeb) -> Result<WebConfig, ConfigError> {
-    let listen: std::net::SocketAddr = raw.listen.trim().parse().map_err(|_| {
-        ConfigError::Parse(format!(
-            "web.listen {:?} must be an address and port, such as \"127.0.0.1:8738\"",
-            raw.listen
-        ))
-    })?;
-    if raw.auth == WebAuth::None && !listen.ip().is_loopback() {
-        return Err(ConfigError::Parse(
-            "web.auth = \"none\" needs a loopback listen address".to_string(),
-        ));
+fn web(
+    raw: RawWeb,
+    env_listen: Option<&str>,
+    env_url: Option<&str>,
+) -> Result<WebConfig, ConfigError> {
+    let (listen, from_env) = listen_address(
+        &raw.listen,
+        env_listen,
+        "SVOLDER_WEB_LISTEN",
+        "web",
+        WebConfig::default().listen,
+    )?;
+    if raw.auth == WebAuth::None {
+        refuse_open_auth("web", "SVOLDER_WEB_LISTEN", listen, from_env, raw.enabled)?;
     }
     let guest = match raw.guest.trim().to_ascii_lowercase().as_str() {
         "none" => WebGuest::None,
@@ -755,7 +890,10 @@ fn web(raw: RawWeb) -> Result<WebConfig, ConfigError> {
             "web.max_volume_db must be a finite number".to_string(),
         ));
     }
-    let url = web_url(&raw.url)?;
+    let url = match (is_named(&raw.url), env_url) {
+        (false, Some(env)) => web_url(env, "SVOLDER_WEB_URL")?,
+        _ => web_url(&raw.url, "web.url")?,
+    };
     let hosts = raw
         .hosts
         .iter()
@@ -834,14 +972,14 @@ fn mcp_host(host: &str) -> Result<String, ConfigError> {
 
 /// `[web] url`, or `None` while it is blank: an `http://` or `https://` address with a host, no
 /// query and no fragment, ending in `/` (one is added).
-fn web_url(url: &str) -> Result<Option<String>, ConfigError> {
+fn web_url(url: &str, label: &str) -> Result<Option<String>, ConfigError> {
     let url = url.trim();
     if url.is_empty() {
         return Ok(None);
     }
     let refused = || {
         ConfigError::Parse(format!(
-            "web.url {url:?} must be an http:// or https:// address with no query or fragment, \
+            "{label} {url:?} must be an http:// or https:// address with no query or fragment, \
              such as \"https://svolder.home.lan/\""
         ))
     };

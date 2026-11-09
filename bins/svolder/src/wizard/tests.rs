@@ -938,3 +938,69 @@ fn daemon_lines_in_a_container_say_the_shared_container_sentence() {
         "{lines:?}"
     );
 }
+
+/// A unit that is already configured is left out of the scan's list, with a line saying so; one
+/// that is not is still offered.
+#[tokio::test]
+async fn the_scan_list_leaves_out_a_configured_unit() {
+    let fx = FakeEffects::healthy()
+        .with_scan(vec![seen("0102030405060708"), seen("1112131415161718")])
+        .with_taken_units([("amp", "0102030405060708")]);
+    let mut wizard = Wizard::new(fx);
+    walk_to(&mut wizard, Step::Pick).await;
+    let pick = wizard.prompt().await.unwrap();
+    assert_eq!(pick.choices.len(), 1, "{pick:?}");
+    assert!(pick.choices[0].contains("1112131415161718"), "{pick:?}");
+    assert!(
+        pick.body
+            .iter()
+            .any(|line| line.contains("Left out, already configured")
+                && line.contains("amp (0102030405060708)")),
+        "{pick:?}"
+    );
+}
+
+/// When every unit heard is configured already, the scan reads as a quiet one, with the line
+/// that says which were left out.
+#[tokio::test]
+async fn a_scan_that_hears_only_configured_units_offers_nothing() {
+    let fx = FakeEffects::healthy()
+        .with_scan(vec![seen("0102030405060708")])
+        .with_taken_units([("amp", "0102030405060708")]);
+    let mut wizard = Wizard::new(fx);
+    walk_to(&mut wizard, Step::Scan).await;
+    wizard.answer(0, None).await.unwrap();
+    let scan = wizard.prompt().await.unwrap();
+    assert_eq!(scan.step, Step::Scan, "{scan:?}");
+    assert!(
+        scan.body
+            .iter()
+            .any(|line| line.contains("Left out, already configured")),
+        "{scan:?}"
+    );
+}
+
+/// A unit configured after the scan (so still in the list) is refused by the writer the wizard
+/// writes through, naming both devices, and nothing is written.
+#[tokio::test]
+async fn the_wizard_path_is_refused_by_the_writer_for_a_configured_unit() {
+    let dir = crate::test_support::temp_dir("wizard-dup");
+    let path = dir.join("config.toml");
+    let original = "[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+    std::fs::write(&path, original).unwrap();
+    let fx = FakeEffects::healthy()
+        .with_scan(vec![seen("0102030405060708")])
+        .writing_into(path.clone());
+    let mut wizard = Wizard::new(fx.clone());
+    walk_to(&mut wizard, Step::Name).await;
+    let refused = wizard.answer(0, Some("dac".into())).await.unwrap_err();
+    let words = refused.to_string();
+    assert!(
+        words.contains("\"amp\"")
+            && words.contains("\"dac\"")
+            && words.contains("a unit is configured once"),
+        "{words}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert!(fx.written_device().is_none());
+}

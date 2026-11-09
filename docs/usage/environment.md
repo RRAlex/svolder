@@ -35,6 +35,9 @@ fails naming that target when the two have drifted.
 | `SVOLDER_MQTT_PASSWORD` | svolderd | The MQTT broker's password, in place of `[mqtt] password`, so the password need not sit in the config file. Unset by default; an empty value counts as unset. |
 | `SVOLDER_MCP_TOKEN` | svolder, svolderd | The MCP server's bearer token, outranking `[mcp] token_file` and the generated token file; with it set svolder generates nothing and `svolder mcp token --rotate` refuses. Unset by default; an empty value counts as unset. |
 | `SVOLDER_WEB_TOKEN` | svolder, svolderd | The web UI's token, outranking `[web] token_file` and the generated token file; with it set svolder generates nothing and `svolder web token --rotate` refuses. Unset by default; an empty value counts as unset. |
+| `SVOLDER_WEB_LISTEN` | svolder, svolderd | The address `[web]` listens on when `config.toml` has no `listen` key (a `listen` in the file wins), such as `0.0.0.0:8738`. The container image sets it so the page is reached on the host's network. Unset by default, which is loopback; an empty value counts as unset. |
+| `SVOLDER_WEB_URL` | svolder, svolderd | The address links and QR codes carry when `config.toml` has no `[web] url` (a `url` in the file wins), such as `http://192.168.1.10:8738`. Only a container without host networking, or behind a reverse proxy, needs it. Unset by default; an empty value counts as unset, and a value that is not an http:// or https:// address is refused by name. |
+| `SVOLDER_MCP_LISTEN` | svolder, svolderd | The address `[mcp]` listens on when `config.toml` has no `listen` key (a `listen` in the file wins), such as `0.0.0.0:8737`. The container image sets it so the server is reached on the host's network. Unset by default, which is loopback; an empty value counts as unset. |
 
 **For tests and development:**
 

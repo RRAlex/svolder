@@ -24,6 +24,8 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
   const storage = storageOf(window);
   let current = null;
   let busy = false;
+  /** Whether no theme could start, so that a pick in the picker tries one again. */
+  let failed = false;
 
   /** The light or dark to keep with theme `id`, if it has both and the person chose one: the
    * theme bound's own, else what its preferences hold. */
@@ -149,6 +151,7 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
     current = await mountTheme({
       registry: core.registry, id, root, core, toast: core.frame.toast, prepare: load,
     });
+    failed = false;
     announce(current.id);
     dropFiles(current.id);
     settle();
@@ -156,13 +159,22 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
     return current;
   }
 
+  /** The popup `fail` puts up; a later pick that mounts a theme takes it away. */
+  const FAILED_TOAST = 'svolder could not draw the page.';
+
   /** Not even the fallback could start: the page says so, with a way to try again. */
   function fail(error) {
     console.warn('svolder: no theme could start', error);
     root.replaceChildren();
     current = null;
-    core.frame.toast('svolder could not draw the page.',
-      { label: 'Reload', href: window.location.href }, { ms: 0 });
+    // The menu and the picker read core.theme: the failed theme's rows are not offered, and its
+    // preferences and scheme are let go with it.
+    core.scheme?.stop();
+    core.theme = null;
+    core.prefs = null;
+    core.scheme = null;
+    failed = true;
+    core.frame.toast(FAILED_TOAST, { label: 'Reload', href: window.location.href }, { ms: 0 });
   }
 
   return {
@@ -194,24 +206,29 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
       return current;
     },
 
-    /** The person picked the theme `id` in the picker. Nothing happens before the first mount. */
+    /** The person picked the theme `id` in the picker. Nothing happens before the first mount;
+     * after no theme could start, a pick tries that theme. */
     async to(id) {
       const entry = core.registry.get(id);
-      if (!entry || !current || id === current.id || busy) return;
+      if (!entry || (!current && !failed) || id === current?.id || busy) return;
       busy = true;
       try {
         const before = current;
         keep(id);
         if (!(await load(entry))) {
-          dropFiles(before.id);
-          keep(before.id);
-          core.frame.toast(`${entry.label} could not start here; showing ${core.theme.label}`);
+          if (before) {
+            dropFiles(before.id);
+            keep(before.id);
+          }
+          core.frame.toast(before
+            ? `${entry.label} could not start here; showing ${core.theme.label}`
+            : `${entry.label} could not start here.`);
           return;
         }
         core.frame.closeMenu(false);
         core.frame.closePicker();
         try {
-          await before.unmount();
+          await before?.unmount();
         } catch (error) {
           console.warn('svolder: the theme did not unmount cleanly', error);
         }
@@ -225,6 +242,7 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
           fail(error);
           return;
         }
+        core.frame.dismissToast(FAILED_TOAST);
         if (current.id !== id) keep(current.id);
         document.getElementById('fx-button')?.focus();
       } finally {

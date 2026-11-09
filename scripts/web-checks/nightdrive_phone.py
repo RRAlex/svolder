@@ -12,6 +12,7 @@ mountains tune from a touch; nothing scrolls sideways with long names; a tall wi
   turning_the_phone_keeps_an_open_sheet_open          open in portrait, turned: still open, the same control focused, and back
   touch_targets_are_44_px                             every button and field of the dash and the sheet, the Loudness round keys by their hit area
   touching_the_mountains_tunes_on_a_phone             the scene's top half: a touch shows the curve (a pointer hovers on Firefox), a second grabs a bubble and writes
+  the_band_edge_on_a_phone                            the mouse just inside the tuning band's top (and bottom) edge shows the curve, just outside lets it go
   no_sideways_scroll_with_long_names                  a 40-character device name, track and preset at 390, 844 and 1100 px wide
   a_tall_window_keeps_the_scene_whole                 1280x1600 and 2560x1440: the dash on screen, the volume above the sun
 Usage: python3 nightdrive_phone.py chromium|firefox"""
@@ -391,6 +392,47 @@ def the_mountains_on_a_phone(d):
         reset_bands(d)
 
 
+def the_band_edge_on_a_phone(d):
+    """The mouse over the mountains (a pointer in both browsers): just inside the band that turns the mountains into
+    the curve shows it, just outside lets it go, at the band's top edge and at its bottom edge (where the panel does not
+    cover it)."""
+    reset_bands(d)
+    b = make(size=(390, 844), dpr=2)
+    try:
+        forget(b, d)
+        load(b, d)
+        time.sleep(0.8)
+        b.page(REC)
+        left, top = b.page(SCENE_BOX)
+        t = b.page(TUNE)
+        spot = next(p for p in t['bubbles'] if p['band'] == 3)
+        sx = left + spot['x']
+        # the band's edges (tune.js `inBand`: 0.22 v above the horizon and 0.06 v below it, 26 px more each way):
+        # a pointer just inside shows the curve, just outside lets it go
+        edges = {'top': t['H'] - 0.22 * t['v'] - 26, 'bottom': t['H'] + 0.06 * t['v'] + 26}
+        for name, edge in edges.items():
+            for side, dy in (('inside', 4), ('outside', -4)):
+                y = edge + (dy if name == 'top' else -dy)
+                mouse_to(b, 200, 700)
+                poll(lambda: b.page(TUNE_ON) is False, 3.0)
+                at = b.page(f"document.elementFromPoint({sx}, {top + y})?.closest('.nd-scene') !== null")
+                if not at:
+                    check(f'the_band_edge_on_a_phone: the band\'s {name} edge is under the panel here: not hovered', True)
+                    continue
+                mouse_to(b, sx, top + y)
+                want = side == 'inside'
+                got = poll(lambda: b.page(TUNE_ON) is want, 3.0)
+                check(f'the_band_edge_on_a_phone: the pointer just {side} the band\'s {name} edge {"shows" if want else "does not show"} the curve',
+                      got, [y, edge, b.page(TUNE_ON)])
+        check('the_band_edge_on_a_phone: no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        try:
+            forget(b, d)
+        finally:
+            b.close()
+        reset_bands(d)
+
+
 def mouse_to(b, x, y):
     if browser == 'chromium':
         b.send('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': x, 'y': y})
@@ -491,6 +533,7 @@ try:
     turning_keeps_the_sheet(d)
     the_touch_targets(d)
     the_mountains_on_a_phone(d)
+    the_band_edge_on_a_phone(d)
     the_tall_window(d)
 finally:
     d.stop()

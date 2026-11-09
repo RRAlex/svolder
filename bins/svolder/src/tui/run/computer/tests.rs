@@ -181,6 +181,46 @@ async fn a_hung_daemon_never_holds_a_backlog_in_front_of_the_last_value() {
     assert_eq!(*log.lock().unwrap(), [1000, 2000, 3000]);
 }
 
+/// Behind a first change that never ends, the queue holds at most `QUEUE_MAX`: it drops the
+/// oldest live values and never a last value or any other change.
+#[tokio::test]
+async fn the_queue_bound_drops_only_the_oldest_live_values() {
+    let mut link = ComputerLink::none();
+    link.queue(Box::pin(std::future::pending()), Tag::Other);
+    // The worker takes the first change, which stays in flight, out of the queue.
+    tokio::task::yield_now().await;
+    let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+    link.queue(recording(&log, 0), Tag::Last(Named::Index(100)));
+    link.queue(recording(&log, 0), Tag::Last(Named::Index(101)));
+    for point in 1..=70u8 {
+        link.queue(recording(&log, 0), Tag::Live(Named::Index(point)));
+    }
+    link.queue(recording(&log, 0), Tag::Other);
+    let kept: Vec<Tag> = link
+        .queue
+        .as_ref()
+        .expect("a queue")
+        .items
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(tag, _)| *tag)
+        .collect();
+    assert_eq!(kept.len(), QUEUE_MAX);
+    for last in [100, 101] {
+        assert!(kept.contains(&Tag::Last(Named::Index(last))), "{kept:?}");
+    }
+    assert!(kept.contains(&Tag::Other), "{kept:?}");
+    let live: Vec<u8> = kept
+        .iter()
+        .filter_map(|tag| match tag {
+            Tag::Live(Named::Index(point)) => Some(*point),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(live, (10..=70).collect::<Vec<u8>>());
+}
+
 /// The DAC's load of a moved preset waits for the computer EQ to be off: a removal that is refused
 /// answers in words and sends no load, one that succeeds says `Moved`.
 #[tokio::test]

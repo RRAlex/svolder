@@ -4,6 +4,7 @@
 // guest, a page whose writes are off) it is drawn `quiet` with `aria-disabled`; a tap on it still
 // reaches the core, which says why nothing happens. Pure: strings in, markup out.
 
+import { mayWrite } from '../../../core/actions.js';
 import { esc } from './esc.js';
 
 /** The markup of a button that does `act`: `inert` for a viewer who may not write, `attrs` the rest
@@ -15,7 +16,4 @@ export function button(act, text, inert, attrs = '', cls = '', markup = false) {
 }
 
 /** Whether the page's viewer may not change anything: a guest, or a page whose writes are off. */
-export function inertPage(page) {
-  const viewer = page.viewer ?? {};
-  return viewer.guest === true || viewer.writes === false;
-}
+export const inertPage = (page) => !mayWrite(page);

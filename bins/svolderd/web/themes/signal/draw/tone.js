@@ -6,13 +6,12 @@
 // buttons the drag grabs. Pure: the model in, markup and numbers out.
 
 import {
-  POINTS, linePath, logFreqs, markerPoint, responseDb, xOf, yOf,
+  POINTS, VIEW_HEIGHT, VIEW_WIDTH, linePath, logFreqs, markerPoint, responseDb, xOf, yOf,
 } from '../../../core/tone-curve.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
 
-export const VIEW_WIDTH = 1000;
-export const VIEW_HEIGHT = 260;
+export { VIEW_HEIGHT, VIEW_WIDTH };
 const FREQS = logFreqs(POINTS);
 /** The frequencies written under the curve (Hz) and how they read. */
 const MARKS = [[60, '60'], [250, '250'], [1000, '1k'], [4000, '4k'], [12000, '12k']];

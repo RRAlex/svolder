@@ -28,7 +28,8 @@ import { once, settle } from './tone-motion.js';
 import {
   POINTS, clippingPeak, linePath, logFreqs, markerPoint, peakWords, responseDb, yOf,
 } from '../../core/tone-curve.js';
-import { LABEL_GAP_PX, REACH, createDrag, grab, labelAt, wheelSteps } from '../../core/tone-drag.js';
+import { fixedEven } from '../../core/words.js';
+import { BAND_PARAM, LABEL_GAP_PX, REACH, createDrag, grab, labelAt, wheelSteps } from '../../core/tone-drag.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const VIEW_WIDTH = 1000;
@@ -36,7 +37,6 @@ const VIEW_HEIGHT = 260;
 const STEP_MAX = 127;
 // The band table's column of each parameter (the band's number is column 0).
 const COLUMN = { f: 1, g: 2, q: 3 };
-const PARAM = { f: 'frequency', g: 'gain', q: 'q' };
 const FREQS = logFreqs(POINTS);
 // A wheel burst goes on from the last Q it sent while notches keep coming within this many ms.
 const WHEEL_BURST_MS = 700;
@@ -198,14 +198,14 @@ function draw(s, raws) {
   const svg = s.plot.querySelector('svg');
   const pathLine = svg.querySelector('.line');
   pathLine?.setAttribute('d', line);
-  if (pathLine) pathLine.dataset.y = ys.map((y) => y.toFixed(1)).join(',');
+  if (pathLine) pathLine.dataset.y = ys.map((y) => fixedEven(y, 1)).join(',');
   svg.querySelector('.area')?.setAttribute('d', `${line}L1000.0 130.0L0.0 130.0Z`);
   svg.querySelector('.ghost')?.remove();
   const own = parsed[s.band - 1];
   if (own && s.marker) {
     const at = markerPoint('eq', own);
-    s.marker.setAttribute('cx', at.x.toFixed(1));
-    s.marker.setAttribute('cy', at.y.toFixed(1));
+    s.marker.setAttribute('cx', fixedEven(at.x, 1));
+    s.marker.setAttribute('cy', fixedEven(at.y, 1));
   }
   const peak = complete ? clippingPeak('eq', parsed) : null;
   drawPeak(s, peak);
@@ -222,7 +222,7 @@ function drawPeak(s, peak) {
     words?.remove();
     return;
   }
-  const y = yOf(peak).toFixed(1);
+  const y = fixedEven(yOf(peak), 1);
   if (!line) {
     line = document.createElementNS(SVG, 'line');
     line.setAttribute('class', 'peak');
@@ -273,7 +273,7 @@ function writeOf(s) {
     // this one's); an earlier drag never waits for a later one, so this cannot wait forever
     await Promise.all(earlier(s).flatMap((o) => o.drags.map((drag) => drag.settled)));
     if (s.lost || signal.aborted) return {};
-    const answer = await core.actions.setBand(s.band, PARAM[param], { raw },
+    const answer = await core.actions.setBand(s.band, BAND_PARAM[param], { raw },
       { device: s.device });
     if (signal.aborted) return {};
     if (!answer.ok) {

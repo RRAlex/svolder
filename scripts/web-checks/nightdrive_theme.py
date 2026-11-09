@@ -56,7 +56,10 @@ checks here.
   the_wheel_and_the_pinch_keep_the_curve_1_5_s      on at 1.0 s, off by 2.6 s after a notch or lifted fingers
 The timing cases (a draw's cost, draws and rows a second) are in nightdrive_timing.py, run in the gate's serial lane.
 The neon sheet's cases are in nightdrive_sheet.py; what both share is in nightdrive_base.py.
-Usage: python3 nightdrive_theme.py chromium|firefox"""
+Usage: python3 nightdrive_theme.py chromium|firefox   (ND_ONLY=wet_road: only the wet-road cases)"""
+import os
+
+import fakeclock
 import nightdrive_base as base
 from nightdrive_base import *  # noqa: F401,F403 (the shared helpers, by their own names)
 
@@ -360,15 +363,41 @@ def the_calm_road(b, d):
     check('  Full rolls it again', three and three[0] > two[0], [two[0], three and three[0]])
 
 
-def the_still_frame(b, d):
-    forget(b, d)
-    load(b, d)
-    poll(lambda: b.page(DRAWS) > 3)
-    pick(b, 'still')
-    time.sleep(1.0)
-    got = rate(b, 5.0)
-    check('still_draws_about_one_frame_a_second: 3 to 7 draws in 5 s', 3 <= got <= 7, got)
-    check('  its pace is 1000', b.page(PERF)['pace'] == 1000, b.page(PERF))
+def the_pace_on_a_fake_clock(d):
+    """The page's own pace, counted on a clock the check moves (fakeclock.py) so a loaded machine cannot
+    change the count: Still draws about one frame a second, and the readout's box is written twice a second.
+    A browser of its own: the clock's wrapped timers are in every page it loads."""
+    b = make()
+    try:
+        fakeclock.install(b)
+        forget(b, d)
+        load(b, d)
+        poll(lambda: b.page(DRAWS) > 3)
+        pick(b, 'still')
+        fakeclock.take(b)
+        fakeclock.advance(b, 1000)
+        one = b.page(DRAWS)
+        fakeclock.advance(b, 5000)
+        got = b.page(DRAWS) - one
+        print(f"INFO  still draws in 5 s: {got}")
+        check('still_draws_about_one_frame_a_second: 3 to 7 draws in 5 s', 3 <= got <= 7, got)
+        check('  its pace is 1000', b.page(PERF)['pace'] == 1000, b.page(PERF))
+        load(b, d, '?theme=nightdrive&nd-debug')
+        poll(lambda: b.page("document.querySelector('.nd-debug') !== null"))
+        b.page("""(() => { window.__writes = 0; const e = document.querySelector('.nd-debug');
+          new MutationObserver((l) => { window.__writes += l.length; }).observe(e, { childList: true, characterData: true, subtree: true });
+          return 1; })()""")
+        fakeclock.take(b)
+        fakeclock.advance(b, 3000)
+        writes = b.page('window.__writes')
+        print(f'INFO  readout writes in 3 s: {writes}')
+        check('the_readout_box_is_drawn_twice_a_second, never more: 4 to 8 times in 3 s', 4 <= writes <= 8, writes)
+        check('  no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        try:
+            forget(b, d)
+        finally:
+            b.close()
 
 
 
@@ -480,17 +509,47 @@ def the_quiet_night(b, d):
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
-def the_wet_road(b, d):
-    """The reflection is made at every draw (a fine pointer): in the quiet, with the wet road drawn, the copies
-    of the sky the road is drawn from keep step with the scene's own draws."""
+def the_wet_road_hysteresis(b, d):
+    """The budget keeps the wet road off while the draws mean between `calmMs` (6) and `slowMs` (12): a page
+    that starts slowly (a loaded machine) legitimately has it off in the quiet. So a check of the drawn wet
+    road pins the measured draw time first. This case is that ladder, deterministic: dropped, a measured
+    8 ms keeps it off in the quiet; a measured 2 ms brings it back."""
     forget(b, d)
     load(b, d)
     poll(lambda: b.page(DRAWS) > 3)
     b.page(f'({HOLD})(0, 120)')
+    b.page('__core.theme.driver.forceStepDown()')
+    b.page('__core.theme.driver.forceDrawMs(8)')
+    time.sleep(4.0)
+    held = b.page(PERF)['wet']
+    b.page('__core.theme.driver.forceDrawMs(2)')
+    back = poll(lambda: b.page(PERF)['wet'] is True, 12.0)
+    b.page('__core.theme.driver.forceDrawMs(null)')
+    check('the_wet_road_stays_off_between_calm_and_slow_draws_and_returns_under_calm: '
+          'dropped, a measured 8 ms keeps it off in the quiet; 2 ms brings it back within 12 s',
+          held is False and back is True, [held, back, b.page(PERF)])
+
+
+def the_wet_road(b, d, pin=True):
+    """The reflection is made at every draw (a fine pointer): in the quiet, with the wet road drawn, the copies
+    of the sky the road is drawn from keep step with the scene's own draws. The measured draw time is pinned
+    at 2 ms (what the budget sees, not what the browser takes) and the wet road waited for, so a slow start
+    on a loaded machine, which the budget rightly answers by dropping it, does not decide the case."""
+    forget(b, d)
+    load(b, d)
+    poll(lambda: b.page(DRAWS) > 3)
+    b.page(f'({HOLD})(0, 120)')
+    if pin:
+        b.page('__core.theme.driver.forceDrawMs(2)')
+        poll(lambda: b.page(PERF)['wet'] is True, 12.0)
+    else:
+        b.page('__core.theme.driver.forceStepDown()')
+        b.page('__core.theme.driver.forceDrawMs(8)')
     time.sleep(1.5)
     look, was = b.page(LOOK), b.page(PERF)
     time.sleep(1.5)
     now = b.page(PERF)
+    b.page('__core.theme.driver.forceDrawMs(null)')
     draws, copies = now['draws'] - was['draws'], now['mirrored'] - was['mirrored']
     check('the_wet_roads_mirror_is_never_older_than_one_draw: in the quiet the wet road is drawn',
           look['wet'] > 0.5 and now['wet'] is True, [look, now])
@@ -2172,12 +2231,6 @@ def the_readout(d):
         check('the_readout_shows_the_numbers_and_hides_from_the_tree_and_the_query_stays',
               bool(box) and box[1] == 'true' and box[2] == 'absolute' and box[3] == '?theme=nightdrive&nd-debug'
               and all(w in box[0] for w in ('draws/s', 'ms mean', 'p95', 'canvas ', 'scale ', 'capped ', 'motion full', 'long tasks 10 s:', 'bass ')), box)
-        b.page("""(() => { window.__writes = 0; const e = document.querySelector('.nd-debug');
-          new MutationObserver((l) => { window.__writes += l.length; }).observe(e, { childList: true, characterData: true, subtree: true });
-          return 1; })()""")
-        time.sleep(3.0)
-        writes = b.page('window.__writes')
-        check('  the box is drawn twice a second, never more: 4 to 8 times in 3 s', 4 <= writes <= 8, writes)
         load(b, d, '?theme=nightdrive&nd-debug=nosky,nodash,nohud,noglow')
         time.sleep(1.0)
         got = b.page(f"""(() => ({{ sky: ({PIXEL})('nd-sky', 206, 40)[3], dash: getComputedStyle(document.getElementById('nd-dash')).display,
@@ -2403,60 +2456,6 @@ def the_phone_top_link():
         g.stop()
 
 
-def the_phone_budget(d):
-    """Chromium, a phone at density 3 with the CPU slowed: the canvases are held to a density of 2 and
-    drawn at 30 a second from the first frame (a finger is a coarse pointer), the scale steps down on slow
-    draws without touching the Motion choice. The tap on the frame's button is a
-    smoke test at 6x (the menu opens within a second): at that load a draw is about 4 ms, under the
-    budget, so it does not test the step-down; at 30x, where the budget acts, the throttled main thread
-    alone takes 1.2 to 1.7 s to open the menu, so no second-long bound holds there."""
-    b = common.Chromium(size=(390, 844), dpr=3, touch=True)
-    try:
-        forget(b, d)
-        load(b, d)
-        time.sleep(1.5)
-        dims = b.page("""(() => { const c = document.getElementById('nd-road');
-          return [c.width, c.clientWidth, c.height, c.clientHeight]; })()""")
-        first = b.page(PERF)
-        check('a_phone_stays_usable: at density 3 the canvases are held to a backing density of 2',
-              dims[0] == 2 * dims[1] and dims[2] == 2 * dims[3] and first['scale'] == 2
-              and first['step'] == 0, [dims, first])
-        check('a_phone_starts_without_the_wet_road: the budget does not allow it at first', first['wet'] is False, first)
-        b.send('Emulation.setCPUThrottlingRate', {'rate': 6})
-        time.sleep(4.0)
-        six = b.page(PERF)
-        print(f'INFO  chromium 390x844 dpr 3, CPU 6x slower: drawMs {six["drawMs"]:.1f} ms, scale {six["scale"]}')
-        b.send('Emulation.setCPUThrottlingRate', {'rate': 30})
-        stepped = poll(lambda: b.page(PERF)['scale'] < 2, 15.0)
-        slow = b.page(PERF)
-        print(f'INFO  chromium 390x844 dpr 3, CPU 30x slower: drawMs {slow["drawMs"]:.1f} ms, scale {slow["scale"]}, '
-              f'step {slow["step"]}, capped {slow["capped"]}')
-        after = b.page("""(() => { const c = document.getElementById('nd-road');
-          return [c.width, c.clientWidth, document.getElementById('fx-button') !== null,
-            localStorage.getItem('svolder.theme.nightdrive.motion')]; })()""")
-        motion = b.page("""import(new URL('assets/themes/nightdrive/driver.js', document.baseURI)).then((m) => m.bound.view.motion)""")
-        check('  slow draws step the scale down, the CSS size is the same and the Motion choice is untouched',
-              stepped and slow['scale'] < 2 and slow['scale'] >= 1 and after[0] == round(after[1] * slow['scale'])
-              and after[3] is None and motion == 'full', [slow, after, motion])
-        b.send('Emulation.setCPUThrottlingRate', {'rate': 6})
-        time.sleep(1.0)
-        x, y = common.center(b, '#fx-button')
-        t0 = time.time()
-        touch_send(b, 'touchStart', [(1, x, y)])
-        touch_send(b, 'touchEnd', [])
-        opened = poll(lambda: b.page("!!document.querySelector('[data-motion]')"), 3.0)
-        took = time.time() - t0
-        check('  a_tap_opens_the_menu_with_the_cpu_slowed: with the CPU 6x slower, a tap on the frame\'s button opens the menu '
-              'within a second', opened and took < 1.0, [opened, round(took, 2), b.page(PERF)])
-        check('  no page error', errors(b) == [], errors(b)[:3])
-        b.send('Emulation.setCPUThrottlingRate', {'rate': 1})
-    finally:
-        try:
-            forget(b, d)
-        finally:
-            b.close()
-
-
 def the_tuning():
     d = common.Daemon('gungnir2-v2', host='fake')
     b = make()
@@ -2472,8 +2471,6 @@ def the_tuning():
         the_q_wheel_grace(b, d)
         the_sun_reaches_the_horizon(d)
         the_tuning_range(d)
-        if browser == 'chromium':
-            the_phone_budget(d)
         if browser == 'chromium':
             the_q_hold(b, d)
             the_q_beside(b, d)
@@ -2495,14 +2492,27 @@ def the_tuning():
 
 
 
+# ND_ONLY=pace runs only the fake-clock pace cases (seconds); ND_ONLY=wet_road runs only the quiet-scene wet-road cases (seconds); ND_ONLY=wet_road_unpinned is the
+# reproduction of the old race (the budget has dropped the wet road and measures 8 ms); unset runs everything
+ONLY = os.environ.get('ND_ONLY')
 d = common.Daemon('gungnir2-v2', host='fake')
 b = make()
 try:
+    if ONLY == 'pace':
+        the_pace_on_a_fake_clock(d)
+        base.finish('nightdrive_theme.py')
+        raise SystemExit(0)
+    if ONLY in ('wet_road', 'wet_road_unpinned'):
+        the_wet_road_hysteresis(b, d)
+        the_wet_road(b, d, pin=ONLY == 'wet_road')
+        base.finish('nightdrive_theme.py')
+        raise SystemExit(0)
     the_mount(b, d)
     the_scene(b, d)
     the_floor(b, d)
     the_heat(b, d)
     the_quiet_night(b, d)
+    the_wet_road_hysteresis(b, d)
     the_wet_road(b, d)
     the_moment(b, d)
     the_analysis(b, d)
@@ -2511,7 +2521,7 @@ try:
     contrast(b, d)
     the_motion_menu(b, d)
     the_calm_road(b, d)
-    the_still_frame(b, d)
+    the_pace_on_a_fake_clock(d)
     the_hud_text(b, d)
     the_fade(b, d)
     the_tab_order(b, d)

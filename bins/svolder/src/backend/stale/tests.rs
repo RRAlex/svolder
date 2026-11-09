@@ -15,7 +15,10 @@ fn config_naming(names: &[&str]) -> (crate::test_support::TempDir, PathBuf, Conf
     let path = dir.0.join("config.toml");
     let text: String = names
         .iter()
-        .map(|name| format!("[[device]]\nname = \"{name}\"\nudid = \"0102030405060708\"\n"))
+        .enumerate()
+        .map(|(at, name)| {
+            format!("[[device]]\nname = \"{name}\"\nudid = \"010203040506070{at}\"\n")
+        })
         .collect();
     std::fs::write(&path, text).expect("the configuration is written");
     let config = Config::load_from(&path).expect("a valid configuration");

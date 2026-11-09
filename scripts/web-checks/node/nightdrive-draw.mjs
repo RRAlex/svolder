@@ -21,7 +21,6 @@ import { drawDash, switchKeys } from '../../../bins/svolderd/web/themes/nightdri
 import { presetBox } from '../../../bins/svolderd/web/themes/nightdrive/draw/presets.js';
 import { PALETTE } from '../../../bins/svolderd/web/themes/nightdrive/draw/palette.js';
 import { preview } from '../../../bins/svolderd/web/themes/nightdrive/preview.js';
-import { computerView } from '../../../bins/svolderd/web/themes/nightdrive/computer-view.js';
 import { eqLine, volumeOf } from '../../../bins/svolderd/web/themes/nightdrive/hud.js';
 import { eqMarkup } from '../../../bins/svolderd/web/themes/nightdrive/draw/hud.js';
 import { outrunVolume } from '../../../bins/svolderd/web/themes/nightdrive/draw/volume.js';
@@ -294,7 +293,7 @@ const idsOf = (html, tag) => tags(html, tag).map((t) => t.id);
 ok('the_sheet_runs_mode_then_points', () => {
   const { core } = computerRig();
   const page = core.model.page();
-  const html = drawSheet(page, view, computerView(core));
+  const html = drawSheet(page, view, core.computer.view());
   const at = (id) => html.indexOf(`id="${id}"`);
   assert.ok(at('nd-mode') >= 0 && at('nd-mode') < at('nd-bands'), 'the mode, then the points');
   assert.ok(at('nd-bands') < at('nd-presets'), 'the points sit where the band table does, before the presets');
@@ -313,6 +312,12 @@ ok('the_sheet_runs_mode_then_points', () => {
   assert.deepEqual(tags(html, 'button').filter((b) => b['data-act'] === 'point-remove').map((b) => b['aria-label']),
     [1, 2, 3, 4, 5, 6, 7].map((i) => `Remove point ${i}`));
   assert.equal(tags(html, 'button').find((b) => b['data-act'] === 'point-add').text, '+ Add point');
+  // each value stands between a `−` and a `+` that step it (a hold repeats them), named for the point
+  const steps = tags(html, 'button').filter((b) => b['data-act'] === 'point-step');
+  assert.equal(steps.length, 7 * 3 * 2);
+  const raise = steps.find((b) => b.id === 'nd-p4qp');
+  assert.deepEqual([raise['data-step'], raise['data-point'], raise['data-param'], raise['aria-label']], ['1', '4', 'q', 'Raise the Q of point 4']);
+  assert.equal(steps.find((b) => b.id === 'nd-p2fm')['aria-label'], 'Lower the frequency of point 2');
   assert.ok(html.includes('7 of 16 points · preamp −6.0 dB'), 'the line counts them');
   // the table shows six rows and says so for the rest
   assert.ok(html.includes('1 more below ↓') && html.includes('class="nd-pscroll long"'));
@@ -323,25 +328,25 @@ ok('the_sheet_runs_mode_then_points', () => {
   assert.ok(!/style=/.test(html), 'no style attribute');
   // the DAC side draws the device's own
   const dac = computerRig({ side: 'dac' });
-  assert.ok(!drawSheet(dac.core.model.page(), view, computerView(dac.core)).includes('nd-points-table'));
+  assert.ok(!drawSheet(dac.core.model.page(), view, dac.core.computer.view()).includes('nd-points-table'));
 });
 
 ok('the_lone_point_keeps_its_remove_and_a_full_table_no_add', () => {
   const lone = computerRig({ computer: modelOf({ eq: { ...modelOf().eq, points: [point('PK', 1000, 0, 1)] } }) });
-  const html = drawSheet(lone.core.model.page(), view, computerView(lone.core));
+  const html = drawSheet(lone.core.model.page(), view, lone.core.computer.view());
   const removes = tags(html, 'button').filter((b) => b['data-act'] === 'point-remove');
   assert.deepEqual(removes.map((b) => b['aria-label']), ['Remove point 1']);
   assert.ok(html.includes('1 of 16 points · preamp −6.0 dB'));
   assert.ok(!html.includes('more below') || html.includes('<p id="nd-more" class="nd-more"></p>'));
   const sixteen = Array.from({ length: 16 }, (_, i) => point('PK', 100 + i * 100, 1, 1));
   const full = computerRig({ computer: modelOf({ eq: { ...modelOf().eq, points: sixteen } }) });
-  const fullHtml = drawSheet(full.core.model.page(), view, computerView(full.core));
+  const fullHtml = drawSheet(full.core.model.page(), view, full.core.computer.view());
   const add = tags(fullHtml, 'button').find((b) => b['data-act'] === 'point-add');
   assert.equal(add['aria-disabled'], 'true');
   assert.ok(fullHtml.includes('10 more below ↓'));
   // a guest sees the same table drawn inert
   const guest = computerRig({ viewer: GUEST });
-  const inert = drawSheet(guest.core.model.page(), view, computerView(guest.core));
+  const inert = drawSheet(guest.core.model.page(), view, guest.core.computer.view());
   assert.ok(tags(inert, 'input').filter((i) => i['data-point']).every((i) => i['aria-disabled'] === 'true'));
   assert.ok(inert.includes(' readonly '), 'the fields cannot be typed in');
   assert.ok(tags(inert, 'button').filter((b) => b['data-act'] === 'point-remove').every((b) => b['aria-disabled'] === 'true'));
@@ -354,7 +359,7 @@ ok('nothing_below_the_switch_says_computer', () => {
   for (const device of [undefined, AMP]) {
     const rig = computerRig(device ? { device } : {});
     const page = rig.core.model.page();
-    const comp = computerView(rig.core);
+    const comp = rig.core.computer.view();
     const sheet = drawSheet(page, view, comp);
     const dash = drawDash(page, { phone: () => false }, 1000, comp);
     const line = eqMarkup(eqLine(page, comp));
@@ -368,26 +373,26 @@ ok('nothing_below_the_switch_says_computer', () => {
     assert.ok(/computer/i.test(switchKeys(comp.sw)), 'the switch does');
   }
   const away = computerRig({ computer: modelOf({ unavailable: 'no sink' }) });
-  const html = switchKeys(computerView(away.core).sw);
+  const html = switchKeys(away.core.computer.view().sw);
   assert.ok(html.includes('computer controls unavailable: no sink'));
-  assert.ok(!/computer/i.test(drawSheet(away.core.model.page(), view, computerView(away.core)).replace(/<[^>]*>/g, ' ')));
+  assert.ok(!/computer/i.test(drawSheet(away.core.model.page(), view, away.core.computer.view()).replace(/<[^>]*>/g, ' ')));
 });
 
 ok('the_amp_page_takes_the_computers_parts_in_the_dash_and_the_sheet', () => {
   const rig = computerRig({ device: { ...AMP, power: null } });
   const page = rig.core.model.page();
-  const comp = computerView(rig.core);
+  const comp = rig.core.computer.view();
   const dash = drawDash(page, { phone: () => false }, 1000, comp);
   assert.deepEqual([...dash.matchAll(/data-act="([^"]+)"/g)].map((m) => m[1]).slice(0, 3), ['volume-down', 'mute', 'volume-up']);
   const sheet = drawSheet(page, view, comp);
   assert.ok(sheet.includes('nd-points-table') && /id="nd-mode-eq"/.test(sheet) && sheet.includes('id="nd-presets"'));
   // the amp's own power key stays where the input would be, beside the computer's volume keys
   const powered = computerRig({ device: { ...AMP, power: { key: 'power', on: true, word: 'On' } } });
-  const powerDash = drawDash(powered.core.model.page(), { phone: () => false }, 1000, computerView(powered.core));
+  const powerDash = drawDash(powered.core.model.page(), { phone: () => false }, 1000, powered.core.computer.view());
   assert.ok(powerDash.includes('data-act="power"') && powerDash.includes('data-act="volume-down"'), 'the power key and the computer\'s volume keys');
   // back on the amp's own side it has no volume keys
   rig.core.computer.flip('dac');
-  assert.ok(!drawDash(page, { phone: () => false }, 1000, computerView(rig.core)).includes('volume-down'));
+  assert.ok(!drawDash(page, { phone: () => false }, 1000, rig.core.computer.view()).includes('volume-down'));
 });
 
 console.log(`nightdrive-draw.mjs: ${n} passed`);

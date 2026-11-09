@@ -137,6 +137,12 @@ fn daemon_status_without_systemd_reports_the_socket_and_the_log() {
     );
 }
 
+/// Whether this runs inside a container: `daemon install` refuses to write user units there and
+/// there is no system D-Bus to ask.
+fn in_container() -> bool {
+    Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists()
+}
+
 /// The launcher chain says nothing of its own: a daemon it could not start is handed back to
 /// the verb, which says it where the verb's own messages go.
 ///
@@ -149,6 +155,10 @@ fn daemon_status_without_systemd_reports_the_socket_and_the_log() {
 /// anything.
 #[test]
 fn the_chain_prints_nothing_of_its_own_when_a_daemon_will_not_come_up() {
+    if in_container() {
+        eprintln!("skipped: no system D-Bus to answer for the missing adapter in a container");
+        return;
+    }
     let home = config_home("schema = 1\n");
     let log = home.0.join("svolder").join("svolderd.log");
     let out = Command::new(env!("CARGO_BIN_EXE_svolder"))
@@ -190,6 +200,10 @@ fn the_chain_prints_nothing_of_its_own_when_a_daemon_will_not_come_up() {
 /// UNITDIR=<tmp>` a dry run that touches nothing of this machine's.
 #[test]
 fn daemon_install_writes_where_it_is_told_and_runs_the_systemctl_it_is_given() {
+    if in_container() {
+        eprintln!("skipped: `daemon install` refuses to write user units in a container");
+        return;
+    }
     let home = config_home("schema = 1\n");
     let units = home.0.join("units");
     let record = home.0.join("systemctl.log");

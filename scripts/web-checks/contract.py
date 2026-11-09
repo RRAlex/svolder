@@ -45,6 +45,51 @@ FLEET = [('fake-amp', 'Amp', '1112131415161718'), ('fake-five', 'Five', '2122232
 CORE = ['actions', 'analysis', 'ask', 'climb', 'clock', 'computer', 'curve', 'drag', 'frame', 'hold',
         'keys', 'lifecycle', 'model', 'prefs', 'registry', 'scheme', 'stream', 'theme', 'title',
         'toneNote', 'words']
+# the members of the parts of `core` a theme builds on, pinned like the core's own: the drag's
+# helpers and the hand's makers, the computer's side, the actions and the computer's actions
+CORE_DRAG = ['AXIS_HOLD_PX', 'BAND_PARAM', 'LABEL_GAP_PX', 'POINT_KEYS', 'POINT_TYPES', 'Q_HALVES_PX',
+             'REACH', 'WHEEL_STEP_PX', 'ZERO_HOLD_PX', 'bandSteps', 'bandWriter', 'computerSteps',
+             'createDrag', 'editCell', 'grab', 'isLong', 'labelAt', 'labelWords', 'markersIn',
+             'plotMap', 'pointDrag', 'pointValues', 'pointWriter', 'startOf', 'stepAgainst', 'table',
+             'touchWatch', 'wheelSteps']
+CORE_CURVE = ['F_MAX', 'F_MIN', 'PEAK_SHOWN_DB', 'POINTS', 'RANGE_DB', 'VIEW_HEIGHT', 'VIEW_WIDTH',
+              'clippingPeak', 'dbAt', 'hzAt', 'linePath', 'logFreqs', 'markerPoint', 'peakDb',
+              'peakWords', 'responseDb', 'xOf', 'yOf']
+CORE_COMPUTER = ['addAt', 'drawable', 'eqOf', 'flip', 'kept', 'nextFree', 'on', 'pick', 'picked',
+                 'repick', 'resync', 'side', 'switchOf', 'tone', 'toneOf', 'track', 'view',
+                 'volumeOf']
+CORE_ACTIONS = ['applySetting', 'canWrite', 'computer', 'connect', 'deletePreset', 'hops',
+                'identify', 'press', 'recallPreset', 'recallSlot', 'refuse', 'renamePreset',
+                'savePreset', 'saveSlot', 'setBand', 'setControl', 'setLoudness', 'setMode',
+                'setVolume', 'showDevice', 'signInPrompt', 'signOut', 'stopClimb']
+CORE_ACTIONS_COMPUTER = ['addNext', 'addPoint', 'cell', 'current', 'deletePreset', 'nudge',
+                         'recallPreset', 'removePoint', 'renamePreset', 'savePreset', 'setMode',
+                         'setMute', 'setPoint', 'setVolume', 'step', 'stepPoint', 'toggleMute']
+# the hand `core.drag.pointDrag` makes, the table `core.drag.table` makes, the flow of a typed cell and
+# the computer's view of a page that has the computer's side
+CORE_HAND = ['active', 'begin', 'blur', 'burst', 'canGrab', 'cancel', 'destroy', 'down', 'dropTap',
+             'escape', 'finishBurst', 'key', 'lost', 'move', 'session', 'step', 'switched',
+             'touchEnd', 'touchMove', 'touchStart', 'up', 'watchTouch', 'wheel']
+CORE_TABLE = ['keep', 'pick', 'reset', 'restore', 'reveal', 'scrolled', 'updateMore']
+CORE_VIEW = ['eq', 'picked', 'side', 'sw', 'tone', 'volume', 'writes']
+PAGE_KEYS = {
+    'core.drag': 'Object.keys(__core.drag)',
+    'core.curve': 'Object.keys(__core.curve)',
+    'core.computer': 'Object.keys(__core.computer)',
+    'core.actions': 'Object.keys(__core.actions)',
+    'core.actions.computer': 'Object.keys(__core.actions.computer)',
+    'the hand of core.drag.pointDrag': (
+        "(() => { const h = __core.drag.pointDrag({ points: () => [] }); const k = Object.keys(h);"
+        " h.destroy(); return k; })()"),
+    'the table of core.drag.table': (
+        "Object.keys(__core.drag.table({ box: () => null, note: () => null, row: () => null,"
+        " moreWords: String }))"),
+}
+EXPECTED_KEYS = {
+    'core.drag': CORE_DRAG, 'core.curve': CORE_CURVE, 'core.computer': CORE_COMPUTER,
+    'core.actions': CORE_ACTIONS, 'core.actions.computer': CORE_ACTIONS_COMPUTER,
+    'the hand of core.drag.pointDrag': CORE_HAND, 'the table of core.drag.table': CORE_TABLE,
+}
 COMPUTER_TARGETS = ("import(new URL('assets/core/contract.js', document.baseURI))"
                     ".then((c) => c.computerTargetsOf(__core.model.page()))")
 HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {"
@@ -232,6 +277,8 @@ def computer_pass(p):
     p.operate({'computer': 'flip'}, {'side': 'computer'})
     time.sleep(0.4)
     check(p.tag('a flip posts nothing'), p.posts() == posts, p.posts())
+    view = sorted(p.b.page("Object.keys(__core.computer.view(__core.model.page()) ?? {})"))
+    check(p.tag('the computer\'s view has these members and no others'), view == CORE_VIEW, view)
     # the list is read again before each target: a remove or a preset changes what follows it
     done = []
     while True:
@@ -424,6 +471,13 @@ try:
     check('the page lists a theme', len(themes) > 0, themes)
     members = sorted(b.page('Object.keys(__core)'))
     check('the core has these members and no others', members == CORE, members)
+    for name, expression in PAGE_KEYS.items():
+        keys = sorted(b.page(expression))
+        check(f'{name} has these members and no others', keys == EXPECTED_KEYS[name],
+              sorted(set(keys) ^ set(EXPECTED_KEYS[name])))
+    check('the point types and the graph viewBox are the core\'s constants',
+          b.page("JSON.stringify([__core.drag.POINT_TYPES, __core.curve.VIEW_WIDTH,"
+                 " __core.curve.VIEW_HEIGHT])") == '[["PK","LSC","HSC"],1000,260]')
     for theme in themes:
         began = time.time()
         start(b, fleet, theme)

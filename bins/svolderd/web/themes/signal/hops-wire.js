@@ -56,10 +56,7 @@ export function wireHops({
   let sheet = null;
   let edit = null;
 
-  const inert = () => {
-    const viewer = store.page().viewer ?? {};
-    return viewer.guest === true || viewer.writes === false;
-  };
+  const inert = () => !core.actions.canWrite();
   const rowOf = (id) => (store.page().fleet?.hops ?? []).find((row) => row.id === id);
   const dacName = () => (store.page().fleet?.devices ?? []).find((d) => d.url === store.shown())?.name ?? null;
 

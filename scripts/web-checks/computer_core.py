@@ -5,6 +5,8 @@ on a fake host (`SVOLDER_HOST=fake`, whose EQ and sink live in memory: no PipeWi
   the_host_event_carries_the_computer   the page's host holds the computer's volume, EQ points,
                                         presets and the curve, for a DAC's page and an amp's page,
                                         and `computer.switchOf` names the shown device
+  the_hand_is_wired_into_the_core       `core.drag.pointDrag` and `core.drag.table` are built in a real
+                                        page over the core's own actions and computer
   each_action_reaches_its_route         every `actions.computer` call posts its route with its
                                         body (the request log) and the model shows the change
   a_refusal_toasts_and_rereads          a refused write is toasted with the daemon's words and the
@@ -117,6 +119,40 @@ def host_event(b, d):
     check('the_host_event_carries_the_computer: an amp page has the computer side, and no built-ins',
           amp['drawable'] is True and amp['name'] == 'Amp' and amp['volume'] not in (None, '—')
           and amp['presets'] == 0, amp)
+
+
+def hand_is_wired(b, d):
+    """`core.drag` carries the hand on the computer's curve and its table, over this core's own
+    actions and computer: built once in a real page, a press on nothing is no grab."""
+    load(b, d)
+    got = b.page("(() => { const d = __core.drag;"
+                 " const hand = d.pointDrag({ points: () => [], rectOf: () => ({ left: 0, top: 0, width: 10, height: 10 }) });"
+                 " const table = d.table({ box: () => null, note: () => null, row: () => null, moreWords: String });"
+                 " const out = { hand: ['down', 'move', 'up', 'wheel', 'key', 'touchStart', 'escape', 'destroy']"
+                 ".every((n) => typeof hand[n] === 'function'),"
+                 " table: ['updateMore', 'reveal', 'pick', 'restore'].every((n) => typeof table[n] === 'function'),"
+                 " idle: hand.active === false && hand.session === null, words: d.labelWords({ f: 1000, g: 3, q: 1 }),"
+                 " keys: Object.keys(d.POINT_KEYS).length, edit: typeof d.editCell, long: d.isLong(7) };"
+                 " hand.destroy(); return out; })()")
+    check('the_hand_is_wired_into_the_core: pointDrag and table are built over the core',
+          got == {'hand': True, 'table': True, 'idle': True, 'words': '1000 Hz · +3.0 dB · 1.00',
+                  'keys': 4, 'edit': 'function', 'long': True}, got)
+    # the pieces a theme calls instead of a copy: the touch listeners come off again in a real
+    # DOM, the point in hand goes with a remove, the EQ is read light, the page says whether it may write
+    got = b.page("(() => { const d = __core.drag; const hand = d.pointDrag({ points: () => [] });"
+                 " const el = document.createElement('div'); document.body.append(el); let n = 0;"
+                 " const watch = d.touchWatch({ move: () => { n++; }, end: () => { n++; } });"
+                 " watch(el, true); for (const t of ['touchmove', 'touchend', 'touchcancel']) el.dispatchEvent(new Event(t));"
+                 " const on = n; watch(el, false);"
+                 " for (const t of ['touchmove', 'touchend', 'touchcancel']) el.dispatchEvent(new Event(t));"
+                 " const off = n; const page = __core.model.page(); hand.watchTouch(el, true); hand.destroy(); el.remove();"
+                 " return { on, off, can: __core.actions.canWrite(), types: d.POINT_TYPES.join(),"
+                 " eq: Object.keys(__core.computer.eqOf(page) ?? {}).join(), step: typeof hand.step, begin: typeof hand.begin,"
+                 " values: Object.keys(d.pointValues({ f: 0, g: 0, q: 0 })).join(),"
+                 " words: d.labelWords({ f: 1000, g: 3, q: 1 }, { qPrefix: 'Q ' }) }; })()")
+    check('the_hand_is_wired_into_the_core: the touch watch, canWrite, eqOf, step and the words',
+          got == {'on': 3, 'off': 3, 'can': True, 'types': 'PK,LSC,HSC', 'eq': 'on,preset,verified',
+                  'step': 'function', 'begin': 'function', 'values': 'f,g,q', 'words': '1000 Hz · +3.0 dB · Q 1.00'}, got)
 
 
 def posted(b):
@@ -379,6 +415,7 @@ def one(name, fn, env=None, fleet=FLEET):
 
 
 one('the_host_event_carries_the_computer', host_event)
+one('the_hand_is_wired_into_the_core', hand_is_wired)
 one('each_action_reaches_its_route', actions)
 one('a_stale_place_still_lands_on_the_point_dragged', slots)
 one('a_refusal_toasts_and_rereads', refusal)

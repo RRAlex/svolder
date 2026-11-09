@@ -204,6 +204,14 @@ impl Files for LiveEffects {
             .map(|device| device.name.clone())
             .collect()
     }
+
+    fn taken_units(&self) -> Vec<(String, String)> {
+        self.config
+            .devices
+            .iter()
+            .map(|device| (device.name.clone(), device.udid.clone()))
+            .collect()
+    }
 }
 
 #[cfg(test)]

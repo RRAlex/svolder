@@ -159,4 +159,15 @@ ok('linePath: 181 points over the log frequencies', () => {
   assert.ok(flat.startsWith('M0.0 130.0L5.6 130.0L'), flat.slice(0, 30));
 });
 
+ok('peakWords and linePath round a tie to the even digit, as the daemon\'s {:.1} does', () => {
+  assert.equal(peakWords(0.25), 'peak +0.2 dB');
+  assert.equal(peakWords(0.75), 'peak +0.8 dB');
+  assert.equal(peakWords(-0.25), 'peak −0.2 dB');
+  const ys = new Array(POINTS).fill(130);
+  ys[1] = 0.25;
+  ys[2] = 0.75;
+  const path = linePath(ys);
+  assert.ok(path.includes(' 0.2L') && path.includes(' 0.8L'), path.slice(0, 60));
+});
+
 console.log(`tone-curve.mjs: ${n} checks passed`);

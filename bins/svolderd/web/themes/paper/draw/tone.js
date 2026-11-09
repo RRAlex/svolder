@@ -7,15 +7,13 @@
 // frequency and a gain with the core's own maps. Pure: the model in, markup and numbers out.
 
 import {
-  POINTS, linePath, logFreqs, markerPoint, responseDb, xOf, yOf,
+  POINTS, VIEW_HEIGHT, VIEW_WIDTH, linePath, logFreqs, markerPoint, responseDb, xOf, yOf,
 } from '../../../core/tone-curve.js';
 import { presetName, presetOf } from '../notes.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
 import { word } from './word.js';
 
-const VIEW_WIDTH = 1000;
-const VIEW_HEIGHT = 260;
 const FREQS = logFreqs(POINTS);
 const PARAMS = ['f', 'g', 'q'];
 

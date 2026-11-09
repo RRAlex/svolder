@@ -128,6 +128,24 @@ pub(crate) fn load(web: &Web, name: &str) -> Result<Loaded, Response> {
     Ok(device)
 }
 
+/// [`load`] on a blocking thread: it reads the configuration file, which a slow file system
+/// must not make an async worker wait for.
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
+pub(crate) async fn load_off_thread(web: &Web, name: &str) -> Result<Loaded, Response> {
+    let web = web.clone();
+    let name = name.to_string();
+    match tokio::task::spawn_blocking(move || load(&web, &name)).await {
+        Ok(loaded) => loaded,
+        Err(_) => Err(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the device could not be read",
+        )),
+    }
+}
+
 /// What `device_model` takes.
 #[derive(serde::Deserialize)]
 struct Asked {
@@ -146,7 +164,7 @@ async fn device_model(
         Ok(viewer) => viewer,
         Err(refused) => return refused,
     };
-    let device = match load(&web, &name) {
+    let device = match load_off_thread(&web, &name).await {
         Ok(device) => device,
         Err(refused) => return refused,
     };
@@ -183,7 +201,8 @@ async fn host(State(web): State<Web>, headers: HeaderMap, Query(shown): Query<Sh
     let shown = shown
         .device
         .and_then(|name| web.fleet.resolve(Some(&name)).ok());
-    let host: Option<HostModel> = model::host_model(&web, access(&web, viewer), shown.as_ref());
+    let host: Option<HostModel> =
+        model::host_model(&web, access(&web, viewer), shown.as_ref()).await;
     axum::Json(host).into_response()
 }
 

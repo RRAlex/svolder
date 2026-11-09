@@ -14,14 +14,29 @@
 // side in storage.
 
 import { readSide, writeSide } from './prefs.js';
+import { dbText } from './words.js';
 import { F_MAX, F_MIN, logFreqs, POINTS, responseDb, xOf, yOf } from './tone-curve.js';
 
 /** The most points the computer's EQ holds, when the model says nothing else. */
-export const POINTS_MAX = 16;
+const POINTS_MAX = 16;
 /** What the switch calls the computer. */
 export const THIS_COMPUTER = 'This computer';
+/** The ranges of a hand by field, `[low, high, places]`: what the daemon holds a typed or dragged
+ * value to (`HAND` in crates/svolder-host/src/eq/points.rs, pinned by core-computer.mjs), and the
+ * decimal places a typed value is rounded to before it is written. */
+export const HAND = { f: [F_MIN, F_MAX, 2], g: [-12, 12, 1], q: [0.1, 10, 2] };
+/** The types a point of the computer's EQ can have, as the daemon names them: peaking, low shelf,
+ * high shelf (`kind_word` in crates/svolder-host/src/eq/control.rs, pinned by core-computer.mjs). */
+export const POINT_TYPES = ['PK', 'LSC', 'HSC'];
+/** A press that moves less than this (CSS px) and lets go within `TAP_MS` is a tap. */
+export const TAP_PX = 6;
+export const TAP_MS = 600;
+/** A wheel burst ends, and its last value is written as the final one, after this long. */
+export const WHEEL_END_MS = 300;
+/** The rows of the points' table shown before it scrolls. */
+export const ROWS_SHOWN = 6;
 /** The one point a flat curve is: what the daemon holds for it, and what an empty list stands for. */
-const FLAT_POINT = { type: 'PK', f: 1000, g: 0, q: 1 };
+export const FLAT_POINT = { type: 'PK', f: 1000, g: 0, q: 1 };
 
 const FREQS = logFreqs(POINTS);
 
@@ -36,7 +51,7 @@ export function markersOf(points) {
 
 /** The id a point is held by: its slot, which is its own for as long as it exists whatever place
  * the table lists it in; a model that gives none (an older daemon) has the point's number. */
-export const pointId = (point, index) => point.slot ?? index + 1;
+const pointId = (point, index) => point.slot ?? index + 1;
 
 /** The id of point `n` (1-based) of `points`; `n` itself for a point the list does not have. */
 export function idAt(points, n) {
@@ -59,16 +74,45 @@ export function addedAt(points, f) {
 const round = (value, places) => Math.round(value * 10 ** places) / 10 ** places;
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 
-/** dB with one decimal and a true minus; no sign on zero. */
-function dbWords(db) {
-  const text = Math.abs(db).toFixed(1);
-  return db < 0 && text !== '0.0' ? `−${text}` : text;
+/** The most points the computer's EQ holds, from its model (`eq`). */
+export const maxPoints = (eq) => eq?.max ?? POINTS_MAX;
+
+/** What a table that is full answers to an add: nothing is added, and the words say why. */
+export const fullAnswer = (max) => ({
+  ok: false, status: 0, full: true, max, error: `${max} is the most`,
+});
+
+/** The point a tap at `hz` and `db` makes: a PK held to the hand ranges, Q 1.0. */
+export function pointAt(hz, db) {
+  return {
+    type: 'PK',
+    f: round(clamp(Number.isFinite(hz) ? hz : FLAT_POINT.f, HAND.f[0], HAND.f[1]), HAND.f[2]),
+    g: round(clamp(Number.isFinite(db) ? db : 0, HAND.g[0], HAND.g[1]), HAND.g[2]),
+    q: 1,
+  };
+}
+
+/** The frequency `+ Add point` uses: the log-middle of the widest gap between 20 Hz, the points'
+ * frequencies and 20 kHz (the lowest gap on a tie). */
+export function nextFree(points) {
+  const edges = [F_MIN, ...points.map((p) => clamp(p.f, F_MIN, F_MAX)).sort((a, b) => a - b), F_MAX];
+  let best = 0;
+  let width = -1;
+  for (let i = 0; i + 1 < edges.length; i++) {
+    const gap = Math.log(edges[i + 1] / edges[i]);
+    if (gap > width) {
+      width = gap;
+      best = i;
+    }
+  }
+  return round(Math.sqrt(edges[best] * edges[best + 1]), 2);
 }
 
 /**
- * The values this viewer is changing, by key (`volume`, `mute`, `mode`, `point:<id>`, the id being the point's slot), until the
- * daemon's own model has been read after them. `fetch` reads (the page's); `listen(fn)` hears
- * `'held'` when a value is held and `'settled'` when held values went.
+ * The values this viewer is changing, by key (`volume`, `mute`, `mode`, `point:<id>`, the id being
+ * the point's slot), until the daemon's own model has been read after them. `fetch` reads (the
+ * page's); `listen(fn)` hears `'held'` when a value is held and `'settled'` when held values
+ * went.
  */
 export function createHolds({ store, fetch }) {
   const held = new Map();
@@ -138,6 +182,12 @@ export function createHolds({ store, fetch }) {
         continue;
       }
       const now = listedAt(key, host?.computer);
+      // the point is gone from the list (another front end removed it): whoever follows it is told
+      if (hold.at && !now && host?.computer?.eq && !hold.gone) {
+        hold.gone = true;
+        notify('gone', { n: hold.at });
+        continue;
+      }
       if (hold.at && now && now !== hold.at) {
         const from = hold.at;
         hold.at = now;
@@ -255,7 +305,14 @@ export function createComputer({ store, storage, holds }) {
     return kept === 'computer' && drawable(page) && !model.unavailable ? 'computer' : 'dac';
   };
 
-  holds.listen((type, extra) => notify(type, extra));
+  // The point in hand in the table (1-based) and the device it was picked on: a page's own, which
+  // goes with the side or the device and follows a point the daemon lists elsewhere.
+  const picked = { n: null, device: null };
+
+  holds.listen((type, extra) => {
+    if (type === 'moved' && picked.n === extra.from) picked.n = extra.to;
+    notify(type, extra);
+  });
   // a whole page read afresh (the stream opened again) keeps what a drag of this device is
   // holding; another device shown has none of it
   let shownBefore = store.shown();
@@ -269,6 +326,28 @@ export function createComputer({ store, storage, holds }) {
     /** The side shown now: the kept one, unless the computer cannot be drawn or is unavailable
      * (the device's side then, and the switch's place says why). */
     side: () => effective(),
+    /** The point in hand (1-based), or `null`: it goes when the device shown changes or the side
+     * flips, and it follows a point that an edit moved in the table's order. */
+    picked(page = store.page()) {
+      const shown = store.shown();
+      if (picked.device !== shown || effective(page) !== 'computer') {
+        picked.n = null;
+        picked.device = shown;
+      }
+      return picked.n;
+    },
+    /** Put point `n` (1-based, or `null` for none) in hand. */
+    pick(n) {
+      picked.n = n;
+      picked.device = store.shown();
+    },
+    /** Put point `n` (or `null`) in hand because of what the core itself did (a point removed
+     * renumbered the rest), and say so: the listeners hear `'picked'` with `n`. A pick the page
+     * makes is `pick`, which says nothing. */
+    repick(n) {
+      computer.pick(n);
+      notify('picked', { n });
+    },
     /** Read the computer's model again (a preset renamed or deleted changed its list). */
     resync: () => holds.resync(),
     /** The side this viewer chose, whether or not it can be shown. */
@@ -286,13 +365,17 @@ export function createComputer({ store, storage, holds }) {
       }
       open.clear();
       kept = side;
+      computer.pick(null);
       writeSide(side, storage);
       notify('flip');
     },
-    /** `fn({ type: 'flip' | 'held' | 'settled' | 'moved', side })` hears what the core changes
-     * itself (`'moved'` also carries `from` and `to`, 1-based: an edit that ended moved a point in
-     * the table's frequency order, and a theme holding a point's number follows it); the
-     * host events themselves come through `model.on('host')`. Returns the way to stop. */
+    /** `fn({ type: 'flip' | 'held' | 'settled' | 'moved' | 'picked' | 'gone', side })` hears what
+     * the core changes itself; every event carries `side`. `'moved'` also carries `from` and `to`
+     * (1-based): an edit that ended moved a point in the table's frequency order, and a theme
+     * holding a point's number follows it. `'picked'` carries `n`: the point in hand the core put
+     * there (or took out of hand, `null`) after a remove. `'gone'` carries `n`: a point held at
+     * that place was removed. The host events themselves come through `model.on('host')`. Returns
+     * the way to stop. */
     on(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -318,6 +401,35 @@ export function createComputer({ store, storage, holds }) {
       };
     },
 
+    /**
+     * What a page's drawing needs of the computer, or `null` where there is no switch (no device
+     * shown, or no computer in the model): `{ side, sw, writes, picked, volume, tone, eq }`. `volume`
+     * and `tone` are made when first read, and only on the computer side (`null` on the device's);
+     * so is `eq`, the light read of the EQ's state (`eqOf`) for a part that needs no curve.
+     */
+    view(page = store.page()) {
+      const sw = computer.switchOf(page);
+      if (!sw) return null;
+      const on = effective(page) === 'computer';
+      const point = computer.picked(page);
+      const lazy = (make) => {
+        let made;
+        return () => (made ??= { value: make() }).value;
+      };
+      const volume = lazy(() => (on ? computer.volumeOf(page) : null));
+      const tone = lazy(() => (on ? computer.toneOf(page) : null));
+      const eq = lazy(() => (on ? computer.eqOf(page) : null));
+      return {
+        side: effective(page),
+        sw,
+        writes: Boolean(page.viewer?.writes),
+        picked: point,
+        get volume() { return volume(); },
+        get tone() { return tone(); },
+        get eq() { return eq(); },
+      };
+    },
+
     /** The volume as drawn: `pct` is `null` until the first read (then `text` is `—` and the
      * control is `inert`), `boosted` when another program put the sink above 100 %. */
     volumeOf(page) {
@@ -338,12 +450,32 @@ export function createComputer({ store, storage, holds }) {
       };
     },
 
+    /**
+     * The state of the computer's EQ with no curve worked out: `{ on, preset, verified }`, or
+     * `null` with no EQ (or no computer). `on` has the mode this viewer is changing laid over it,
+     * `preset` is the name of the preset that is on (or `null`), `verified` is false while the
+     * EQ's state is only what its state file says. `toneOf` says the same of these three.
+     */
+    eqOf(page) {
+      if (!drawable(page)) return null;
+      const eq = modelOf(page).eq;
+      if (!eq) return null;
+      return {
+        on: holds.get('mode')?.value ?? eq.on,
+        preset: eq.preset ?? null,
+        verified: !eq.running_unknown,
+      };
+    },
+
+    /** The tone control of the page now (`toneOf` of the store's page). */
+    tone: () => computer.toneOf(store.page()),
+
     /** The tone control as drawn, or `null`: the mode (Off, EQ), the points with the values this
      * viewer is changing laid over them, the curve at the 181 log frequencies (the points' own
      * types, shelves included), a marker for each point in the graph's viewBox (a point beyond the
-     * hand ranges at the curve's edge), the line that counts them, whether a point can be added,
-     * and the presets. `verified` is false while the EQ's state is only what its state file
-     * says. */
+     * hand ranges at the curve's edge), the line that counts them, the most points (`max`), whether
+     * a point can be added, and the presets. `verified` is false while the EQ's state is only what
+     * its state file says. */
     toneOf(page) {
       if (!drawable(page)) return null;
       const model = modelOf(page);
@@ -353,8 +485,8 @@ export function createComputer({ store, storage, holds }) {
         type: point.type, f: point.f, g: point.g, q: point.q, ...holds.get(`point:${pointId(point, i)}`)?.value,
       }));
       const points = listed.map((point, i) => ({ n: i + 1, ...point }));
-      const on = holds.get('mode')?.value ?? eq.on;
-      const max = eq.max ?? POINTS_MAX;
+      const { on, preset, verified } = computer.eqOf(page);
+      const max = maxPoints(eq);
       return {
         modes: [
           { name: 'off', label: 'Off', on: !on },
@@ -366,11 +498,12 @@ export function createComputer({ store, storage, holds }) {
           FREQS,
         ),
         markers: markersOf(points),
-        line: `${points.length} of ${max} points · preamp ${dbWords(eq.preamp_db ?? 0)} dB`,
+        line: `${points.length} of ${max} points · preamp ${dbText(eq.preamp_db ?? 0)} dB`,
+        max,
         canAdd: points.length < max,
         presets: (model.presets ?? []).map((preset) => ({ ...preset })),
-        preset: eq.preset ?? null,
-        verified: !eq.running_unknown,
+        preset,
+        verified,
         live: eq.live !== false,
         note: eq.note ?? null,
       };
@@ -380,31 +513,11 @@ export function createComputer({ store, storage, holds }) {
      * 1.0; `null` when the table is full or there is no computer EQ. */
     addAt(hz, db) {
       const tone = computer.toneOf(store.page());
-      if (!tone?.canAdd) return null;
-      return {
-        type: 'PK',
-        f: round(clamp(Number.isFinite(hz) ? hz : FLAT_POINT.f, F_MIN, F_MAX), 2),
-        g: round(clamp(Number.isFinite(db) ? db : 0, -12, 12), 1),
-        q: 1,
-      };
+      return tone?.canAdd ? pointAt(hz, db) : null;
     },
 
-    /** The frequency `+ Add point` uses: the log-middle of the widest gap between 20 Hz, the
-     * points' frequencies and 20 kHz (the lowest gap on a tie). */
-    nextFree(points) {
-      const edges = [F_MIN, ...points.map((p) => clamp(p.f, F_MIN, F_MAX)).sort((a, b) => a - b),
-        F_MAX];
-      let best = 0;
-      let width = -1;
-      for (let i = 0; i + 1 < edges.length; i++) {
-        const gap = Math.log(edges[i + 1] / edges[i]);
-        if (gap > width) {
-          width = gap;
-          best = i;
-        }
-      }
-      return round(Math.sqrt(edges[best] * edges[best + 1]), 2);
-    },
+    /** The frequency `+ Add point` uses (`nextFree`). */
+    nextFree,
   };
   return computer;
 }

@@ -36,7 +36,7 @@ use svolder_profiles::safety::{self, Rules, Situation};
 use svolder_profiles::units::{self, Outside, Refusal};
 use svolder_profiles::{Control, ControlKind, roles};
 
-use super::api::{Loaded, access, load, load_live};
+use super::api::{Loaded, access, load_live, load_off_thread};
 use super::model::{self, Part};
 use super::router::{bare, error, parse};
 use super::view::{self, minus};
@@ -151,6 +151,7 @@ async fn control(
         &[Part::Controls, Part::Power],
         |value| echo(&control, value),
     )
+    .await
 }
 
 /// The value a `set` carries for `asked` on `control`, or a 422 saying why there is none.
@@ -417,7 +418,7 @@ pub(super) fn refused(answer: Answer) -> Response {
 /// How a write ended, as the page is answered: what `json` makes of the device's echo for a
 /// component, with the parts `parts` as they stand now; 204 for a write a newer one replaced; 409
 /// with the words of a refusal.
-pub(crate) fn outcome(
+pub(crate) async fn outcome(
     web: &Web,
     name: &str,
     ended: Outcome,
@@ -432,7 +433,7 @@ pub(crate) fn outcome(
     let Answer::Value(value) = answer else {
         return refused(answer);
     };
-    with_parts(web, name, json(&value), parts)
+    with_parts(web, name, json(&value), parts).await
 }
 
 /// `json` with the parts `parts` of device `name` as they stand now under `parts`, for the
@@ -440,14 +441,14 @@ pub(crate) fn outcome(
 /// so are all of them where the device cannot be read again (the write was made, and the stream
 /// carries what it changed). The presets part reads the configuration once, any other part not
 /// at all.
-pub(super) fn with_parts(
+pub(super) async fn with_parts(
     web: &Web,
     name: &str,
     mut json: serde_json::Value,
     parts: &[Part],
 ) -> Response {
     let loaded = match parts.contains(&Part::Presets) {
-        true => load(web, name),
+        true => load_off_thread(web, name).await,
         false => load_live(web, name),
     };
     if let (Ok(device), Some(object)) = (loaded, json.as_object_mut()) {

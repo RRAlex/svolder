@@ -44,6 +44,15 @@ mcp: listening on 127.0.0.1:8737 (token, read-only)
 bound reads `mcp: cannot listen on ADDR: WHY`; the daemon keeps its socket and its devices either
 way. `svolder doctor` has an "MCP server" row for the same state.
 
+### In Docker
+
+The compose file gives the container the host's network, and the image listens on every interface
+by default (`SVOLDER_MCP_LISTEN=0.0.0.0:8737`), so the only steps are `enabled = true` under `[mcp]`
+in `config.toml` under `config/svolder`, then `docker compose restart svolder`, and the token,
+`docker exec svolder svolder mcp token`. A native `svolderd` on the same machine must not serve
+8737 too. A `listen` in the file still wins. See ["The MCP server in the container"](daemon.md#the-mcp-server-in-the-container)
+under "The daemon".
+
 ### The token
 
 Every request carries `Authorization: Bearer <token>`, from this machine too: any program on it, and

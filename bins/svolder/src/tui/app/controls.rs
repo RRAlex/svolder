@@ -14,7 +14,7 @@ use crate::tui::boxes::{device_presets, presets};
 use crate::tui::host::{self, HostRow};
 
 use super::intent::{set, updown};
-use super::{App, Intent, Pane, Reading, Screen};
+use super::{App, Intent, Pane, Reading, Screen, Side};
 
 /// What the Path row says with no player to follow.
 const NOTHING_PLAYING: &str = "nothing playing";
@@ -45,9 +45,20 @@ impl App {
     /// — and, from wherever it is, the volume, the balance's centre, the tone control's flat
     /// mode and the preset list.
     pub(super) fn device_key(&mut self, code: KeyCode) -> Vec<Intent> {
+        self.settle_switch();
+        if let Some(intents) = self.switch_key(code) {
+            return intents;
+        }
         match code {
+            KeyCode::Up if self.move_onto_switch(-1) => Vec::new(),
+            KeyCode::Down if self.move_onto_switch(1) => Vec::new(),
             KeyCode::Up => self.move_selection(-1),
-            KeyCode::Down => self.move_selection(1),
+            KeyCode::Down => {
+                let from = self.selected;
+                let intents = self.move_selection(1);
+                self.land_on_switch(from);
+                intents
+            }
             KeyCode::Left => self.step_focused(-1),
             KeyCode::Right => self.step_focused(1),
             KeyCode::Char(' ') | KeyCode::Enter => match self.focused_control() {
@@ -104,6 +115,9 @@ impl App {
     /// reaches on every screen, since a room that has to go quiet cannot wait for the screen
     /// that draws the row.
     pub(super) fn mute(&self) -> Vec<Intent> {
+        if self.switch_focused() {
+            return Vec::new();
+        }
         match self.on_computer() {
             true => self.computer_mute(),
             false => self.flip_key("mute"),
@@ -253,7 +267,11 @@ impl App {
     fn step_host(&mut self, row: HostRow, dir: i64) -> Vec<Intent> {
         match row {
             HostRow::Volume if self.on_computer() => self.step_host_volume(dir),
-            HostRow::Volume => Vec::new(),
+            // The row is the switch itself on the device's side: `←` the device, `→` the computer.
+            HostRow::Volume => self.pick_side(match dir > 0 {
+                true => Side::Computer,
+                false => Side::Dac,
+            }),
             HostRow::Transport => {
                 self.host.move_button(dir);
                 Vec::new()
@@ -275,7 +293,7 @@ impl App {
     fn act_on_host(&mut self, row: HostRow) -> Vec<Intent> {
         match row {
             HostRow::Volume if self.on_computer() => self.computer_mute(),
-            HostRow::Volume => Vec::new(),
+            HostRow::Volume => self.flip_side(),
             HostRow::Transport if self.host.playing.is_some() => {
                 vec![Intent::HostPress(self.host.button())]
             }

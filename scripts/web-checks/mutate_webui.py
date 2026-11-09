@@ -4,14 +4,12 @@
 menu's q key (effects_menu.py), the volume knob's ring click (knob_click.py), the folded Now playing
 line and its title's loop (playing.py) and what ignores reduced motion (reduced_motion.py): each
 mutation edits a copy of the page's web dir (never the repo), runs the check that must see it
-(Chromium) and must make at least one check FAIL. Slow: run by hand, one worker.
+(Chromium) and must make at least one check FAIL. Slow: run by hand. Env: MUT_WORKERS (default from the cores and the CPU pressure; mutpool.py's pool).
 Usage: python3 mutate_webui.py [name ...]   (default: all)"""
 import os
-import shutil
-import subprocess
 import sys
 
-import common
+import mutpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ST = 'core/tone-note.js'
@@ -217,34 +215,11 @@ MUTATIONS = {
 
 def run(name):
     script, edits = MUTATIONS[name]
-    web = common.scratch('mut-web-')
-    shutil.copytree(common.WEB, web + '/w')
-    for f, old, new in edits:
-        p = f'{web}/w/{f}'
-        s = open(p).read()
-        assert old in s, f'{name}: {old[:50]!r} not in {f}'
-        open(p, 'w').write(s.replace(old, new, 1))
-    env = dict(os.environ, SMOKE_WEB=web + '/w')
-    r = subprocess.run([sys.executable, f'{HERE}/{script}', 'chromium'], env=env,
-                       capture_output=True, text=True, timeout=900)
-    shutil.rmtree(web, ignore_errors=True)
-    fails = [x for x in r.stdout.splitlines() if x.startswith('FAIL')]
-    if not fails and r.returncode:
-        # no FAIL line: an infrastructure crash is an error, never a kill
-        tail = (r.stderr.strip().splitlines() or ['no output'])[-1][:200]
-        return name, None, '(error, not a kill) ' + tail
-    return name, fails, ''
+    return mutpool.run_script(name, script, edits)
 
 
-names = sys.argv[1:] or list(MUTATIONS)
-bad = 0
-for name in names:
-    name, fails, err = run(name)
-    print('ERROR   ' if fails is None else 'KILLED  ' if fails else 'SURVIVED', name, flush=True)
-    for f in (fails or [])[:3]:
-        print('    ', f[:160])
-    if err:
-        print('    ', err)
-    bad += not fails
-print(f'{len(names) - bad} of {len(names)} mutations killed')
-sys.exit(1 if bad else 0)
+def attempt(name):
+    return mutpool.timed_call(run, name)
+
+
+sys.exit(mutpool.run_names(sys.argv[1:] or list(MUTATIONS), attempt))

@@ -84,24 +84,27 @@ fn command_of(action: &Action, asked: i64) -> Result<(Command, u8), Response> {
 /// How a slot's write ended, as the page is answered: `{"slot","name"}` with a toast saying what
 /// was sent and the device presets part; 204 for a write a newer one replaced; 409 with the
 /// words of a refusal.
-fn slot_answer(web: &Web, device: &str, ended: Outcome, slot: u8, toast: &str) -> Response {
+async fn slot_answer(web: &Web, device: &str, ended: Outcome, slot: u8, toast: &str) -> Response {
     match ended {
         Outcome::Superseded => bare(StatusCode::NO_CONTENT),
         Outcome::Cancelled(why) => error(StatusCode::CONFLICT, why),
         Outcome::Done(answer @ Answer::Error { .. }) => refused(answer),
-        Outcome::Done(_) => sent(
-            web,
-            device,
-            toast,
-            serde_json::json!({ "slot": slot, "name": device_presets::slot_name(slot) }),
-        ),
+        Outcome::Done(_) => {
+            sent(
+                web,
+                device,
+                toast,
+                serde_json::json!({ "slot": slot, "name": device_presets::slot_name(slot) }),
+            )
+            .await
+        }
     }
 }
 
 /// `json` with the toast and the device presets part.
-fn sent(web: &Web, device: &str, toast: &str, mut json: serde_json::Value) -> Response {
+async fn sent(web: &Web, device: &str, toast: &str, mut json: serde_json::Value) -> Response {
     json["toast"] = toast.into();
-    with_parts(web, device, json, &[Part::DevicePresets])
+    with_parts(web, device, json, &[Part::DevicePresets]).await
 }
 
 /// What `device-presets/recall` takes.
@@ -144,7 +147,7 @@ async fn recall(
         .submit(&device.info, command, Options::from(Mode::Ordered))
         .await;
     let toast = format!("Recalled {}", device_presets::slot_name(slot));
-    slot_answer(&web, &name, ended, slot, &toast)
+    slot_answer(&web, &name, ended, slot, &toast).await
 }
 
 /// What `device-presets/save` takes: the slot and the page's confirmation, which is `true` and
@@ -195,7 +198,7 @@ async fn save(
         .submit(&device.info, command, Options::from(Mode::Ordered))
         .await;
     let toast = format!("Saved to {}", device_presets::slot_name(slot));
-    slot_answer(&web, &name, ended, slot, &toast)
+    slot_answer(&web, &name, ended, slot, &toast).await
 }
 
 /// What `device-presets/apply` takes.
@@ -232,7 +235,7 @@ async fn apply(
                 false => format!("{} on", applied.name),
             };
             let json = serde_json::json!({ "name": applied.name, "writes": applied.writes.len() });
-            sent(&web, &name, &toast, json)
+            sent(&web, &name, &toast, json).await
         }
     }
 }

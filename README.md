@@ -103,6 +103,9 @@ for x86_64 and arm64, each file listed in `SHA256SUMS`:
 - Any Linux: the `x86_64-linux` or `aarch64-linux` tarball; static binaries, BlueZ only
 - Container: `docker pull ghcr.io/rralex/svolder:<version>`
 
+On a Raspberry Pi whose Bluetooth is blocked or whose service is stopped, `svolder doctor` names the
+fix; see [Raspberry Pi](docs/usage/bluetooth.md#raspberry-pi).
+
 A package enables nothing: turn the daemon on with
 `systemctl --user enable --now svolderd.socket svolderd.service` (from a tarball:
 `svolder daemon install`). [Getting started](docs/usage/getting-started.md) and

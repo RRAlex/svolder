@@ -6,6 +6,7 @@
 
 import { fraction } from '../../../core/clock.js';
 import { PLAYER } from '../words.js';
+import { plain } from './computer.js';
 import { esc } from './esc.js';
 import { coverMarkup, progressOf, timeWordsOf, transport } from './playing.js';
 import { inertPage } from './word.js';
@@ -14,10 +15,10 @@ import { inertPage } from './word.js';
 function pathLines(path) {
   if (!path) return `<p class="sg-detail">${esc(PLAYER.noPath)}</p>`;
   const hops = (path.hops ?? []).map((hop) => `<li class="${hop.changes ? 'sg-warn' : ''}"><b>${esc(hop.label)}</b> `
-    + `${esc(hop.detail ?? '')}</li>`).join('');
+    + `${esc(plain(hop.detail ?? ''))}</li>`).join('');
   const cls = path.class === 'ok' ? 'sg-ok' : 'sg-warn';
   return `<ul class="sg-pathlist">${hops}</ul>`
-    + `${path.words ? `<p class="sg-verdict ${cls}">${esc(path.words)}</p>` : ''}`;
+    + `${path.words ? `<p class="sg-verdict ${cls}">${esc(plain(path.words))}</p>` : ''}`;
 }
 
 /** The open area of the player hop for `page` at the browser's `localMs`. */

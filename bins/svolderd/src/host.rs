@@ -978,6 +978,17 @@ impl HostService {
         *self.shared.watchers.borrow()
     }
 
+    /// Wait until no [`Watcher`] is held, or `limit` passes: whether none is. A task that lets go
+    /// of its hold only when it next looks at the channel it answers on, which a loaded machine
+    /// can put off for longer than any sleep loop guesses.
+    #[cfg(test)]
+    pub(crate) async fn watchers_gone(&self, limit: std::time::Duration) -> bool {
+        let mut count = self.shared.watchers.subscribe();
+        tokio::time::timeout(limit, count.wait_for(|held| *held == 0))
+            .await
+            .is_ok_and(|seen| seen.is_ok())
+    }
+
     /// How many [`FramesHold`]s are held now.
     #[cfg(test)]
     pub(crate) fn frame_holds(&self) -> usize {

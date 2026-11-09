@@ -21,9 +21,10 @@
 
 import { NO_ANSWER, newest, refusal } from './api.js';
 import {
-  addedAt, createHolds, idAt, indexOfId,
+  addedAt, createHolds, FLAT_POINT, fullAnswer, HAND, idAt, indexOfId, maxPoints, nextFree, pointAt,
 } from './computer.js';
-import { identifyWords } from './words.js';
+import { computerSteps, stepAgainst } from './tone-drag.js';
+import { identifyWords, parse, thousandsReading } from './words.js';
 
 /** The words a guest's call is turned back with, and where its button leads. */
 const SIGN_IN_WORDS = 'Sign in to change this';
@@ -33,18 +34,44 @@ const READ_ONLY_WORDS = 'Read-only: [web] writes is off';
 /** The words of a refused write that gave none: the page's own writes, and the ones posted by hand. */
 const NOT_MADE = 'The change was not made.';
 const REFUSED = 'Refused.';
+const NOT_A_NUMBER = 'Not a number.';
+
+/** What a cell's text means for a field held to `[low, high]`: a number, `null` for none, or `{ error }` when a comma
+ * could be a decimal mark or a thousands separator and the range does not tell which (`1,000` in a frequency is 1000,
+ * `20,500` is 20.5; `20,000` and `2,000` as a gain are asked again; when neither is in range the decimal one
+ * is returned and held to the range like any number out of it). */
+function readTyped(typed, low, high) {
+  const decimal = parse(typed);
+  const thousands = thousandsReading(typed);
+  if (decimal === null || thousands === null) return decimal;
+  const inside = (x) => x >= low && x <= high;
+  if (inside(decimal) !== inside(thousands)) return inside(decimal) ? decimal : thousands;
+  if (!inside(decimal)) return decimal;
+  const kilo = thousands % 1000 === 0 ? `${thousands / 1000}k` : String(thousands);
+  return { error: `Write ${decimal} or ${kilo}.` };
+}
 /** What a write to a point that moved or is gone says; the page reads the points again. The daemon
  * words that refusal "the point in slot N has moved or is gone" (`locate` in
  * crates/svolder-host/src/eq/control.rs, pinned by a test there); `movedPoint` matches it. */
 const POINT_MOVED = 'That point moved. Try again.';
 const movedPoint = (answer) => answer.status === 409 && /moved or is gone/.test(answer.error ?? '');
+const round = (value, places) => Math.round(value * 10 ** places) / 10 ** places;
 const NO_DEVICE = 'No device is shown.';
 const NOT_SHOWN = 'That device could not be shown.';
 
+/** Whether `page`'s viewer may write: false for a guest and for a page whose writes are off. Pure:
+ * a theme's drawing asks it (`actions.canWrite` is it over the store's page). */
+export function mayWrite(page) {
+  const viewer = page?.viewer;
+  if (viewer?.guest) return false;
+  return viewer?.writes !== false;
+}
+
 /** The actions over `store`, writing with `post` (api.js's), saying things with `toast`, moving the
- * address with `history` and loading pages with `location`. */
+ * address with `history` and loading pages with `location`. `computer` (the core's, optional) keeps
+ * the point in hand, which a removal of that point clears. */
 export function createActions({
-  store, post, toast, history, location, holds = null, ask = null, timing = {},
+  store, post, toast, history, location, holds = null, ask = null, timing = {}, computer = null,
 }) {
   const held = holds ?? createHolds({ store, fetch: async () => ({ status: 0 }) });
   const clock = {
@@ -116,7 +143,10 @@ export function createActions({
       // lowering of a device the page still reads always goes.
       const live = store.state() === 'open' && store.device(url) !== null;
       if (!live && (held?.raw === null || held?.raw === undefined || raw > held.raw)) {
-        state.last = { ok: false, status: 0, dropped: true, raw };
+        // A refusal of this run stays the run's answer; the dropped raise says nothing over it.
+        if (state.last?.ok !== false || state.last.dropped) {
+          state.last = { ok: false, status: 0, dropped: true, raw };
+        }
         return null;
       }
       const answer = await post(`api/v1/devices/${url}/volume`, { raw });
@@ -215,6 +245,11 @@ export function createActions({
   });
 
   const modelPoints = () => store.page().host?.computer?.eq?.points ?? [];
+  /** Point `n` (1-based) as this viewer sees it: the model's, the values being changed laid over. */
+  const currentOf = (n) => ({
+    ...(modelPoints()[n - 1] ?? FLAT_POINT),
+    ...held.get(`point:${idAt(modelPoints(), n)}`)?.value,
+  });
 
   function pointOf(n) {
     if (!points.has(n)) {
@@ -312,7 +347,18 @@ export function createActions({
     }
   }
 
+  /** A preset of the shown device's list was changed: a success has the computer read its list
+   * again. */
+  function presetChanged(answer) {
+    if (answer.ok) held.resync();
+    return answer;
+  }
+
   const computerActions = {
+    /** Point `n` (1-based) as this viewer sees it: the model's, or the flat point when the list
+     * has none, with the values being changed laid over. */
+    current: (n) => currentOf(n),
+
     /** Ask for the volume `pct`: rounded, held to 0 to 100 (never a boost), one request at a time
      * with the newest waiting. */
     setVolume(pct) {
@@ -336,7 +382,31 @@ export function createActions({
       return computerActions.setVolume(next);
     },
 
+    /** A step of `delta` from the volume as drawn: one step (`+1`, `-1`) is `step`'s; a larger one
+     * (a page key) is the volume as drawn plus it, held to 0 to 100. Nothing is written before the
+     * first read. */
+    async nudge(delta) {
+      if (Math.abs(delta) === 1) return computerActions.step(delta);
+      const away = turnedAway();
+      if (away) return away;
+      const at = held.get('volume')?.value ?? store.page().host?.computer?.volume?.pct ?? null;
+      if (!Number.isFinite(delta)) return { ok: false, status: 0, error: REFUSED };
+      if (at === null) return { ok: false, status: 0, inert: true };
+      return computerActions.setVolume(at + delta);
+    },
+
     setMute: (muted) => muteLane(Boolean(muted)),
+
+    /** Mute, or unmute when it is muted as drawn. A guest or a read-only page is turned away with
+     * its words; nothing is written before the volume's first read. */
+    async toggleMute() {
+      const away = turnedAway();
+      if (away) return away;
+      const read = store.page().host?.computer?.volume;
+      if (!read && held.get('volume') === null) return { ok: false, status: 0, inert: true };
+      const muted = held.get('mute')?.value ?? read?.muted ?? false;
+      return muteLane(!muted);
+    },
     setMode: (mode) => modeLane(mode === 'eq'),
 
     /** Recall the preset `name` on the computer. When a connected device plays it too the daemon
@@ -371,6 +441,16 @@ export function createActions({
       return structural(answer);
     },
 
+    /** Rename the preset `from` of the shown device's list; the computer's list is read again. */
+    async renamePreset(from, to, options) {
+      return presetChanged(await write('presets/rename', { from, to }, options, REFUSED));
+    },
+
+    /** Delete the preset `name` of the shown device's list; the computer's list is read again. */
+    async deletePreset(name, options) {
+      return presetChanged(await write('presets/delete', { name }, options, REFUSED));
+    },
+
     /** Save the computer's EQ as a preset of the shown device's list (`from: computer`). */
     async savePreset(name) {
       const away = turnedAway();
@@ -396,14 +476,82 @@ export function createActions({
       return answer.ok ? { ...answer, n: addedAt(points, Number(body.f)) } : answer;
     },
 
-    /** Remove point `n` (1-based). */
+    /** `+ Add point`: a PK of Q 1 and 0 dB in the widest gap between the points. A full table adds
+     * nothing and says so (`full: true`, the `max`, the words "N is the most"); a computer with
+     * no EQ adds nothing. */
+    async addNext() {
+      const away = turnedAway();
+      if (away) return away;
+      const eq = store.page().host?.computer?.eq;
+      if (!eq) return { ok: false, status: 0, error: REFUSED, none: true };
+      const count = Math.max(eq.points?.length ?? 0, 1);
+      const max = maxPoints(eq);
+      if (count >= max) return fullAnswer(max);
+      const listed = Array.from({ length: count }, (_, i) => currentOf(i + 1));
+      return computerActions.addPoint(pointAt(nextFree(listed), 0));
+    },
+
+    /** Remove point `n` (1-based). Once it is removed, when it was the point in hand none is, and a
+     * point in hand listed after it is the one before (`computer.repick` says so). */
     async removePoint(n) {
       const away = turnedAway();
       if (away) return away;
       if (!Number.isInteger(n) || n < 1) return { ok: false, status: 0, error: REFUSED };
       const slot = modelPoints()[n - 1]?.slot;
       const answer = await post(`api/v1/host/eq/points/${n}/remove`, slot === undefined ? {} : { slot });
-      return structural(movedPoint(answer) ? { ...answer, error: POINT_MOVED } : answer);
+      const result = structural(movedPoint(answer) ? { ...answer, error: POINT_MOVED, moved: true } : answer);
+      // the point in hand goes with it, and one listed after it is listed one place higher
+      const at = result.ok ? computer?.picked() ?? null : null;
+      if (at === n) computer.repick(null);
+      else if (at !== null && at > n) computer.repick(at - 1);
+      return result;
+    },
+
+    /**
+     * What was typed in the cell of point `n`'s `param` (`typed`; `shown` is the text the cell
+     * showed before it was edited). Not a number is toasted and writes nothing; so does a value
+     * equal to the cell's own text or to the point's current value before it is held to the hand
+     * range (a point beyond the range is not moved by retyping its number); the value is first
+     * rounded to the places `HAND` gives its field. Otherwise it, held to the hand range, is
+     * written as a last value.
+     */
+    async cell(n, param, typed, shown) {
+      const away = turnedAway();
+      if (away) return away;
+      if (!Number.isInteger(n) || n < 1 || !HAND[param]) return { ok: false, status: 0, error: REFUSED };
+      const [low, high, places] = HAND[param];
+      const value = readTyped(typed, low, high);
+      if (value === null) {
+        toast(NOT_A_NUMBER);
+        return { ok: false, status: 0, error: NOT_A_NUMBER, invalid: true };
+      }
+      if (typeof value === 'object') {
+        toast(value.error);
+        return { ok: false, status: 0, error: value.error, invalid: true };
+      }
+      const typedValue = round(value, places);
+      const current = currentOf(n)[param];
+      if (typedValue === parse(shown ?? '') || typedValue === current) {
+        return { ok: true, status: 0, nothing: true };
+      }
+      return computerActions.setPoint(n, { [param]: Math.min(high, Math.max(low, typedValue)) },
+        { done: true });
+    },
+
+    /**
+     * One step of the hand's grid on point `n`'s `param`, up (`delta` 1) or down (`-1`), written as
+     * a last value. A step never goes against its key: a point beyond the hand range stays where
+     * it is (`nothing: true`).
+     */
+    stepPoint(n, param, delta) {
+      const away = turnedAway();
+      if (away) return Promise.resolve(away);
+      if (!Number.isInteger(n) || n < 1 || !HAND[param]) {
+        return Promise.resolve({ ok: false, status: 0, error: REFUSED });
+      }
+      const next = stepAgainst(computerSteps(), currentOf(n), param, delta);
+      if (next === null) return Promise.resolve({ ok: true, status: 0, nothing: true });
+      return computerActions.setPoint(n, { [param]: next }, { done: true });
     },
 
     /**
@@ -445,6 +593,15 @@ export function createActions({
 
   const actions = {
     computer: computerActions,
+
+    /** A tap that cannot write: a guest's or a read-only page's is turned away and says why (the
+     * answer it would be given); `null` when the page may write, and nothing is said. */
+    refuse: () => turnedAway(),
+
+    /** Whether the page may write: false for a guest and for a page whose writes are off. Pure:
+     * nothing is said and nothing is sent (a theme draws its controls inert from it; `refuse`
+     * says why when one is pressed anyway). */
+    canWrite: (page = store.page()) => mayWrite(page),
 
     /** Ask for volume step `raw`: rounded, held to the device's range and cap, written one at a
      * time with the newest waiting. The call that starts a run resolves with the last write's

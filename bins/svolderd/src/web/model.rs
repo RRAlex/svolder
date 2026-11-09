@@ -28,8 +28,8 @@ use device::{
 #[cfg(test)]
 pub(crate) use page::route_model;
 pub(crate) use page::{
-    HostModel, PageModel, RouteModel, fleet_model, host_computer, host_model, host_parts,
-    page_model,
+    HostModel, PageModel, RouteModel, fleet_model, fleet_model_of, host_computer, host_model,
+    host_parts, page_model,
 };
 
 /// One of the parts a device's model is made of, as the stream sends them: each part is sent

@@ -59,6 +59,11 @@ impl FakeDevice {
         for control in &profile.controls {
             state.insert(control.id, default_value(control));
         }
+        for control in &profile.controls {
+            if sends_flag_as_u8(profile, control) {
+                state.insert(control.id, Value::U8(0));
+            }
+        }
         if let Some(eq) = &profile.eq {
             for (id, value) in tone_control_at_rest(eq) {
                 state.insert(id, value);
@@ -304,6 +309,62 @@ impl FakeDevice {
         !self.meters.is_empty()
     }
 
+    /// Set a readout flag (`usb_connected`, `spdif_locked`) as the device would when the thing it
+    /// reads changes, and give back the Status frame it pushes for it: `None` when the flag
+    /// already holds the value, as a device reports a change only.
+    ///
+    /// The frame carries the wire type the profile gives the readout. An error names the key
+    /// when the profile has no flag readout by that key.
+    pub fn set_flag(&mut self, key: &str, on: bool) -> Result<Option<Vec<u8>>, String> {
+        let control = self
+            .profile
+            .control_by_key(key)
+            .filter(|c| c.kind == ControlKind::Readout && c.values.is_empty())
+            .ok_or_else(|| format!("profile {} has no flag readout {key}", self.profile.name))?;
+        let value = if sends_flag_as_u8(&self.profile, control) {
+            Value::U8(u8::from(on))
+        } else {
+            typed(control.value_type, i64::from(on))
+        };
+        let id = control.id;
+        Ok(self.report_reading(id, value))
+    }
+
+    /// Set the sample rate the device reads, in hertz, and give back the Status frame it pushes:
+    /// `None` when it already reads that rate. The rate must be one the profile's `sample_rate`
+    /// readout has a code for, found by its kilohertz label (`44.1 kHz`); an error lists them.
+    pub fn set_sample_rate(&mut self, hz: u32) -> Result<Option<Vec<u8>>, String> {
+        let control = self
+            .profile
+            .control_by_key("sample_rate")
+            .filter(|c| c.kind == ControlKind::Readout)
+            .ok_or_else(|| format!("profile {} has no sample_rate readout", self.profile.name))?;
+        let rates: Vec<(u32, u8)> = control
+            .values
+            .iter()
+            .filter_map(|(raw, name)| Some((parse_khz(name)?, *raw)))
+            .collect();
+        let Some(&(_, raw)) = rates.iter().find(|(rate, _)| *rate == hz) else {
+            let list: Vec<String> = rates.iter().map(|(rate, _)| rate.to_string()).collect();
+            return Err(format!(
+                "no sample rate {hz} on profile {}; it reads {}",
+                self.profile.name,
+                list.join(", ")
+            ));
+        };
+        let (id, value) = (control.id, typed(control.value_type, i64::from(raw)));
+        Ok(self.report_reading(id, value))
+    }
+
+    /// Store a reading the device itself changed and frame its Status; `None` if unchanged.
+    fn report_reading(&mut self, id: FunctionId, value: Value) -> Option<Vec<u8>> {
+        if self.state.get(&id) == Some(&value) {
+            return None;
+        }
+        self.state.insert(id, value.clone());
+        Some(frame(&[Message::status(self.reported_id(id), value)]))
+    }
+
     fn refresh_notification(&self) -> Vec<u8> {
         let msgs: Vec<Message> = self
             .state
@@ -386,6 +447,19 @@ fn rate_value(control: &Control) -> Option<u8> {
         .iter()
         .find(|(_, name)| *name == label)
         .map(|(raw, _)| *raw)
+}
+
+/// Whether the unit sends this flag as a UInt8, 1 while set, rather than a Boolean: the S/PDIF
+/// lock reading (`8`) of a Bifrost 3, as the protocol notes describe that screen's `8`. The
+/// profile keeps it a bool readout, which reads a 1 as true, so every front end shows it the same.
+fn sends_flag_as_u8(profile: &Profile, control: &Control) -> bool {
+    profile.name == "bifrost3" && control.key == "spdif_locked"
+}
+
+/// A label such as `44.1 kHz` as hertz; `None` for any other label (the `—` of no signal).
+fn parse_khz(label: &str) -> Option<u32> {
+    let khz: f64 = label.strip_suffix(" kHz")?.parse().ok()?;
+    Some((khz * 1000.0).round() as u32)
 }
 
 /// A seeded default for one control.
@@ -519,6 +593,102 @@ mod tests {
                 "band {band} Q at its centre"
             );
         }
+    }
+
+    /// A fake of the named profile, no passphrase.
+    fn fake_of(name: &str) -> FakeDevice {
+        let profile = Registry::builtin().unwrap().get(name).unwrap().clone();
+        FakeDevice::from_profile(
+            &profile,
+            "0102030405060708".parse().unwrap(),
+            3,
+            Passphrase::NONE,
+        )
+    }
+
+    /// Setting a readout flag changes what a refresh reports and gives back one Status frame for
+    /// it; setting what it already holds gives back nothing, as a device reports changes only.
+    #[test]
+    fn a_flag_readout_changes_and_reports_once() {
+        let mut d = fake_of("bifrost3");
+        let id = FunctionId::one(7);
+        let frame = d
+            .set_flag("usb_connected", true)
+            .unwrap()
+            .expect("a change");
+        let n = decode_notification(&frame).unwrap();
+        assert_eq!(n.messages.len(), 1);
+        assert_eq!(n.messages[0].id, id);
+        assert_eq!(n.messages[0].value, Value::Bool(true));
+        assert_eq!(d.set_flag("usb_connected", true).unwrap(), None);
+        let frame = d.set_flag("spdif_locked", true).unwrap().expect("a change");
+        assert_eq!(
+            decode_notification(&frame).unwrap().messages[0].id,
+            FunctionId::one(8)
+        );
+        assert_eq!(d.state.get(&id), Some(&Value::Bool(true)));
+    }
+
+    /// A Bifrost 3 sends reading 8 as a UInt8, 1 while locked, from the start and on a change; a
+    /// Gungnir 2 keeps the Boolean.
+    #[test]
+    fn the_bifrost_3_lock_reading_is_a_uint8() {
+        let mut d = fake_of("bifrost3");
+        assert_eq!(d.state.get(&FunctionId::one(8)), Some(&Value::U8(0)));
+        let frame = d.set_flag("spdif_locked", true).unwrap().unwrap();
+        assert_eq!(
+            decode_notification(&frame).unwrap().messages[0].value,
+            Value::U8(1)
+        );
+        let frame = d.set_flag("spdif_locked", false).unwrap().unwrap();
+        assert_eq!(
+            decode_notification(&frame).unwrap().messages[0].value,
+            Value::U8(0)
+        );
+        let mut g = fake_of("gungnir2-v2");
+        assert_eq!(g.state.get(&FunctionId::one(8)), Some(&Value::Bool(false)));
+        let frame = g.set_flag("spdif_locked", true).unwrap().unwrap();
+        assert_eq!(
+            decode_notification(&frame).unwrap().messages[0].value,
+            Value::Bool(true)
+        );
+    }
+
+    /// A profile without the readout refuses, naming it; so does a key that is not a flag.
+    #[test]
+    fn a_flag_the_profile_lacks_is_refused() {
+        let mut d = fake_of("gungnir2-v2");
+        let err = d.set_flag("usb_connected", true).unwrap_err();
+        assert!(err.contains("usb_connected"), "{err}");
+        let err = fake_of("bifrost3").set_flag("input", true).unwrap_err();
+        assert!(err.contains("input"), "{err}");
+    }
+
+    /// A sample rate lands on the raw value the profile labels with it, and is reported.
+    #[test]
+    fn a_sample_rate_is_reported_on_the_profiles_own_code() {
+        let mut d = fake_of("bifrost3");
+        let frame = d.set_sample_rate(44_100).unwrap().expect("a change");
+        let n = decode_notification(&frame).unwrap();
+        assert_eq!(n.messages[0].id, FunctionId::one(6));
+        assert_eq!(n.messages[0].value, Value::U8(1));
+        assert_eq!(d.set_sample_rate(44_100).unwrap(), None);
+        let frame = d.set_sample_rate(384_000).unwrap().unwrap();
+        assert_eq!(
+            decode_notification(&frame).unwrap().messages[0].value,
+            Value::U8(8)
+        );
+    }
+
+    /// A rate the profile has no code for is refused with the rates it has.
+    #[test]
+    fn a_sample_rate_the_profile_lacks_is_refused() {
+        let mut d = fake_of("bifrost3");
+        let err = d.set_sample_rate(50_000).unwrap_err();
+        assert!(err.contains("50000"), "{err}");
+        assert!(err.contains("44100") && err.contains("384000"), "{err}");
+        let err = fake_of("aegir2").set_sample_rate(48_000).unwrap_err();
+        assert!(err.contains("sample_rate"), "{err}");
     }
 
     /// The fake amplifier, whose meters read on the Aegir 2's scale (zero 160, full scale 350).

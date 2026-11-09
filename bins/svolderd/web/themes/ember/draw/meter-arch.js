@@ -2,6 +2,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The meters' arches: the segments of one meter's arch, in the box its figure's viewBox shows.
 
+import { fixedEven } from '../../../core/words.js';
+
 /** Segments in an arch. */
 export const SEGMENTS = 32;
 /** The arch's sweep, in degrees. */
@@ -20,8 +22,8 @@ export function arch(meter) {
   return Array.from({ length: SEGMENTS }, (_, i) => {
     const angle = ((-SWEEP / 2 + (SWEEP * (i + 0.5)) / SEGMENTS) * Math.PI) / 180;
     const end = (r) => [
-      (100 + r * Math.sin(angle)).toFixed(2),
-      (100 - r * Math.cos(angle)).toFixed(2),
+      fixedEven(100 + r * Math.sin(angle), 2),
+      fixedEven(100 - r * Math.cos(angle), 2),
     ];
     const [x1, y1] = end(85);
     const [x2, y2] = end(98);

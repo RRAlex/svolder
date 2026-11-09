@@ -23,6 +23,7 @@ use crate::tui::widgets::rows::Columns;
 use crate::tui::widgets::{self, CURSOR_WIDTH, MISSING};
 
 use super::{cut_cells, row_style};
+use crate::tui::screens::switch;
 
 /// One row of the Controls pane: what it draws, and how it draws it.
 struct Row<'a> {
@@ -52,6 +53,9 @@ pub(super) struct Controls {
     pub(super) host: Vec<u16>,
     /// The interior line the Host group's Spectrum row landed on, on a pane that draws it.
     pub(super) spectrum: Option<u16>,
+    /// The interior line the switch is drawn on, over the Volume row's bar or as the Host
+    /// group's Volume row, where there is one.
+    pub(super) switch: Option<u16>,
     /// Cells a level's bar is drawn across, which the Tone pane's loudness bar matches.
     pub(super) bar: usize,
 }
@@ -86,6 +90,7 @@ fn spacing_group(control: &Control) -> (u8, bool) {
 
 /// The Controls pane's lines, its groups a blank line apart where `spaced`.
 fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: bool) -> Controls {
+    app.drawn.controls_pending.set(false);
     let rows = pane_rows(app);
     let spectrum = app.spectrum_drawn_in(tier);
     let mut host_labels: Vec<&str> = match app.host_shown() {
@@ -106,6 +111,7 @@ fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: boo
         extras: Vec::new(),
         host: Vec::new(),
         spectrum: None,
+        switch: None,
         bar: columns.bar(),
     };
     // The row index a `Row`, `ToggleOf`, `Select…` or `Level` hit is keyed by: the position
@@ -130,12 +136,24 @@ fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: boo
             &mut pane.extras,
         );
         let height = u16::try_from(lines.len()).unwrap_or(1);
+        // A Volume row that carries the switch has it on its first line, a row of its own.
+        let switch = lines.len() == 2
+            && app.computer_offered()
+            && app.volume().is_some_and(|volume| volume.id == control.id);
         for (n, line) in lines.into_iter().enumerate() {
-            let line = widgets::rows::with_cursor(line, row.focused && n == 0, theme);
-            pane.lines
-                .push(band(line, row.focused, row.stale, theme, room));
+            let focused = match switch {
+                true if n == 0 => app.switch_focused(),
+                _ => row.focused,
+            };
+            let line = widgets::rows::with_cursor(line, focused && (n == 0 || switch), theme);
+            // The switch line is not banded: the side shown is the box that stands out on it.
+            let banded = focused && !(switch && n == 0);
+            pane.lines.push(band(line, banded, row.stale, theme, room));
         }
         // Only the rows a user can set are rows a click can focus; the meters are a readout.
+        if switch {
+            pane.switch = Some(top);
+        }
         if control.kind.writable() {
             pane.rows.push((control.id, top, height));
             index += 1;
@@ -158,6 +176,9 @@ fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: boo
             host_graph(app, theme, room, &mut pane);
         }
     }
+    app.drawn
+        .controls_switch
+        .set(app.drawn.controls_pending.get());
     pane
 }
 
@@ -265,7 +286,7 @@ fn row_lines(
                 .as_ref()
                 .filter(|climb| climb.id() == control.id)
                 .map(|climb| climb.target());
-            let mut line = match on_computer {
+            let line = match on_computer {
                 true => computer_volume_line(app, theme, columns, (&control.label, row.focused)),
                 false => widgets::rows::level_line(
                     control,
@@ -278,20 +299,21 @@ fn row_lines(
                 ),
             };
             // The switch between the device's volume and the computer's, on a line of its own over
-            // the bar's, which then has no label.
+            // the bar's.
             if volume
                 && app.computer_offered()
-                && let Some((switch, names)) = switch_line(app, theme, columns, &control.label)
+                && let Some((switch, names)) = switch_line(app, theme, columns)
             {
-                line.spans[0] = widgets::rows::label("", columns.field());
+                if let Some([_, (at, width, _)]) = names {
+                    extras.push((top, CURSOR_OFFSET, at + width, Hit::Target));
+                }
                 for (at, width, side) in names.into_iter().flatten() {
                     extras.push((top, CURSOR_OFFSET + at, width, Hit::Side(side)));
                 }
                 // The bar's hits are on the second line.
-                for extra in extras
-                    .iter_mut()
-                    .filter(|extra| extra.0 == top && !matches!(extra.3, Hit::Side(_)))
-                {
+                for extra in extras.iter_mut().filter(|extra| {
+                    extra.0 == top && !matches!(extra.3, Hit::Side(_) | Hit::Target)
+                }) {
                     extra.0 += 1;
                 }
                 return vec![switch, line];
@@ -450,27 +472,32 @@ fn host_group(
     ]));
     for row in &app.host_rows() {
         let top = u16::try_from(pane.lines.len()).unwrap_or(u16::MAX);
-        let focused = app.host_row() == Some(*row);
+        let on_switch = *row == HostRow::Volume && app.switch_focused();
+        let focused = app.host_row() == Some(*row) && !on_switch;
         let (line, dim) = match row {
             HostRow::Volume => {
                 // The device has no volume of its own: the row is the switch, and on the computer's
                 // side the bar under it.
-                let (switch, names) =
-                    switch_line(app, theme, columns, row.label()).unwrap_or_else(|| {
-                        (
-                            Line::from(widgets::rows::label(row.label(), columns.field())),
-                            None,
-                        )
-                    });
+                let (switch, names) = switch_line(app, theme, columns).unwrap_or_else(|| {
+                    (
+                        Line::from(widgets::rows::label(row.label(), columns.field())),
+                        None,
+                    )
+                });
+                if names.is_some() {
+                    pane.switch = Some(top);
+                }
+                if let Some([_, (at, width, _)]) = names {
+                    pane.extras
+                        .push((top, CURSOR_OFFSET, at + width, Hit::Target));
+                }
                 for (at, width, side) in names.into_iter().flatten() {
                     pane.extras
                         .push((top, CURSOR_OFFSET + at, width, Hit::Side(side)));
                 }
                 if app.on_computer() {
-                    let focused = app.host_row() == Some(*row);
-                    let mut bar = computer_volume_line(app, theme, columns, (row.label(), focused));
-                    bar.spans[0] = widgets::rows::label("", columns.field());
-                    let line = widgets::rows::with_cursor(switch, false, theme);
+                    let bar = computer_volume_line(app, theme, columns, (row.label(), focused));
+                    let line = widgets::rows::with_cursor(switch, on_switch, theme);
                     pane.lines
                         .push(band(line, false, false, theme, columns.room()));
                     pane.extras.push((
@@ -493,7 +520,9 @@ fn host_group(
                 (line, app.host.playing.is_none())
             }
         };
-        let line = widgets::rows::with_cursor(line, focused, theme);
+        // On the device's side the Volume row is the switch line itself: it wears the cursor.
+        let marked = focused || (on_switch && !app.on_computer());
+        let line = widgets::rows::with_cursor(line, marked, theme);
         pane.lines
             .push(band(line, focused, dim, theme, columns.room()));
         pane.host.push(top);
@@ -598,11 +627,8 @@ fn computer_volume_line(
     Line::from(spans)
 }
 
-/// The fewest cells of the device's name the switch is drawn with.
-const MIN_NAME: usize = 3;
-
-/// The switch line over the Volume row's bar: the row's label and `‹ NAME | Computer ›`, the side
-/// shown standing out, with where its two names lie from the row's start (a column, a width and the
+/// The switch line over the Volume row's bar: `Target ‹ NAME | Computer ›`, the side shown
+/// standing out, with where its two names lie from the row's start (a column, a width and the
 /// side each shows); where the computer's controls cannot be used, the reason, dim, in its place.
 /// Nothing where the row has no room for the switch.
 #[allow(clippy::type_complexity, reason = "one private pair of answers")]
@@ -610,44 +636,20 @@ fn switch_line(
     app: &App,
     theme: &Theme,
     columns: Columns,
-    label: &str,
 ) -> Option<(Line<'static>, Option<[(u16, u16, Side); 2]>)> {
-    let mut spans = vec![widgets::rows::label(label, columns.field())];
+    let head = Style::default();
     if let Some(why) = app.host.computer.unavailable() {
-        let room = columns.room().saturating_sub(columns.field());
-        spans.push(Span::styled(cut_cells(why, room), theme.style(Role::Dim)));
+        let spans = switch::unavailable(theme, columns.room(), head, why);
         return Some((Line::from(spans), None));
     }
-    let computer = "Computer";
-    // The device's name gives way to the rest of the switch, and the switch to nothing where the
-    // row has no room for three cells of it (`C` still flips).
-    let fixed = 2 + 3 + widgets::text::cells(computer) + 2;
-    let left = columns.room().saturating_sub(columns.field() + fixed);
-    if left < MIN_NAME {
-        return None;
-    }
-    let name = cut_cells(&app.session.product, left);
-    let (lit, off) = (theme.style(Role::SelectName), theme.style(Role::Dim));
-    let arrow = theme.style(Role::ModeArrow);
-    let (dac, comp) = match app.on_computer() {
-        true => (off, lit),
-        false => (lit, off),
-    };
-    let first = columns.field() + 2;
-    let (name_w, computer_w) = (widgets::text::cells(&name), widgets::text::cells(computer));
-    let second = first + name_w + 3;
-    spans.extend([
-        Span::styled("‹ ", arrow),
-        Span::styled(name, dac),
-        Span::styled(" | ", arrow),
-        Span::styled(computer, comp),
-        Span::styled(" ›", arrow),
-    ]);
+    let drawn = switch::draw(app, theme, columns.room(), head, app.switch_focused())?;
+    app.drawn.controls_pending.set(true);
     let cells = |at: usize, width: usize, side| {
         Some((u16::try_from(at).ok()?, u16::try_from(width).ok()?, side))
     };
-    let names = cells(first, name_w, Side::Dac).zip(cells(second, computer_w, Side::Computer));
-    Some((Line::from(spans), names.map(|(a, b)| [a, b])))
+    let [(a, wa, sa), (b, wb, sb)] = drawn.names;
+    let names = cells(a, wa, sa).zip(cells(b, wb, sb));
+    Some((Line::from(drawn.spans), names.map(|(a, b)| [a, b])))
 }
 
 /// Columns between a row's bar and what follows it.
@@ -746,7 +748,11 @@ fn has_bar(control: &Control, reading: Option<&Reading>) -> bool {
 /// Every row the Controls pane draws: the controls a user can set in the order
 /// [`App::rows`] lists them, then the meters the device streams.
 fn pane_rows(app: &App) -> Vec<Row<'_>> {
-    let focused = app.selected_control().map(|control| control.id);
+    // With the keys on the switch row over it, the Volume row is not the focused one.
+    let focused = app
+        .selected_control()
+        .map(|control| control.id)
+        .filter(|_| !app.switch_focused());
     let mut rows: Vec<Row<'_>> = app
         .rows()
         .into_iter()

@@ -744,7 +744,8 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   `the_side_is_kept_and_a_flip_writes_nothing` (a reload with the side kept posts nothing),
   `every_point_write_carries_its_slot` and `a_stale_place_still_lands_on_the_point_dragged` (another viewer's add moves the places: the write lands on the point dragged and its neighbour is untouched; a point that is gone is one 409, one toast and no more writes),
   `unavailable_hides_nothing_but_says_why` (`SVOLDER_FAKE_HOST_EQ=off`), `the_question_is_asked_with_keys_and_buttons`
-  (`core.ask`: Yes and No at 44 px, the focus on No, Escape and `n` say No, `y` and a click say Yes) and
+  (`core.ask`: Yes and No at 44 px, the focus on No, Escape and `n` say No, `y` and a click say Yes),
+  `the_open_question_owns_the_keyboard` (no arrow, `m`, `0`, `f` or other document key writes behind the open card; Tab and Escape still act) and
   `the_same_preset_on_both_asks_and_yes_flattens_the_dac` (no sends nothing, yes repeats with `confirm` and
   the DAC is flat). The theme contract and completeness checks list `computerTargetsOf` on every device and
   drive them for every theme.
@@ -836,6 +837,30 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   at 1280x800, 412x915 and 360x780 in all four themes, and a click on it closes the picker with the focus back on the
   menu button.
 
+### The core's computer hand, table and typed words
+
+- `node/core-point-drag.mjs` (the hand over the curve: a press, a drag, the wheel, keys, a stepper's burst,
+  a tap's limits and a second finger dropping it, a full table's answer, the touch watch, the viewBox
+  constants), `node/core-table.mjs` (the points table: rows shown, the typed cell read before the theme puts
+  the old text back), `node/core-words.mjs` (a typed number: `2.9k`, a comma as the decimal mark, and the
+  thousands reading `1,000` that the field's range chooses between) and `node/core-computer.mjs` (the writes, the
+  hand ranges, the cell's guards; `1,000` Hz writes 1000, `20,500` Hz writes 20.5, `1,414` as a Q writes 1.41, and a
+  comma the range cannot settle, `20,000` Hz, is refused with `Write 20 or 20k.` and writes nothing; a group
+  starting with 0 is never thousands, `0,500` Hz is 0.5; a comma out of range both ways, `-1,000` Hz, is held to
+  the range like any number, with no hint).
+- Mutants: `node/mutate_computer.sh` (140; each is killed by one of those four harnesses). Browser mutants of the
+  hand's wiring live with each theme's own mutant script: `mutate_ember.py` (29, among them a second finger off the
+  graph leaving the tap and a tap on a full table saying nothing), `mutate_signal.py` (the same two) and
+  `mutate_paper.py` (its ten computer mutants run `computer_paper.py`; `snippets.py` checks them too).
+- Browser cases of the second finger and the full table: `a_second_finger_off_the_graph_makes_the_tap_no_tap`
+  (Ember and Signal, `computer_ember.py`, `computer_signal.py`; Paper has it as
+  `a_second_finger_makes_the_tap_no_tap`) and `a_tap_on_a_full_table_says_so` (Ember, Signal, Night drive; Paper's
+  is `a_full_table_says_so`): sixteen points, a tap on empty ground adds nothing and the toast reads
+  `16 is the most`.
+- Night drive's point steppers take no step while the stream is waiting or lost, so a burst never opens that its
+  hold cannot end: `nightdrive-tune.mjs` "a_point_stepper_pressed_while_the_stream_is_waiting_or_lost_steps_nothing_and_leaves_no_burst_open",
+  killed by `a point stepper steps while the stream is waiting or lost` in `node/mutate_nightdrive.sh`.
+
 ## Ember's drawing
 
 Ember (`bins/svolderd/web/themes/ember/draw/`) draws the page's parts from the JSON model in the
@@ -876,8 +901,8 @@ read the same DOM.
   fold-out full and one with a live signal, no Identify and a token; an amp whose passphrase was
   refused; two devices, one named with a space and a slash; no device; a device that cannot be
   read) are held to the golden copy of the askama templates' DOM for the same models, compared tag
-  by tag: a changed attribute or text, a missing space between two tags, a number off by more than
-  0.011 where the drawing computes geometry, or a missing or extra attribute is a difference. A
+  by tag: a changed attribute or text, a missing space between two tags, a number off in its last
+  digit (ties rounded to the even digit as the daemon's formatter does), or a missing or extra attribute is a difference. A
   page with no device draws its card as the screen holds it. Proved by `node/ember-parts.mjs`
   against `node/fixtures/ember-parts.json`, that golden copy (no test writes it; it is not
   rewritten); the harness first checks its comparison
@@ -897,10 +922,11 @@ read the same DOM.
   `a_kept_order_goes_first_and_what_it_misses_goes_back_to_its_zone`,
   `a_screen_drawn_in_a_kept_order_holds_the_same_parts_in_it`,
   `every_screen_draws_the_sections_of_its_default_order_in_order`,
-  `an_order_that_names_what_ember_lacks_or_is_not_a_list_cannot_break_the_screen`). Hand-run mutants, each killed:
-  a changed heading, the space before Power's word removed, an arch's centre moved by 1, the space
-  before a preset's button closes removed, the strength's span renamed, the guest's round - and +
-  left enabled, the mute's empty fallback dropped, the notes' room always on.
+  `an_order_that_names_what_ember_lacks_or_is_not_a_list_cannot_break_the_screen`). Mutants, each killed by
+  `node/mutate_ember_parts.sh` (8, `make web-snippets` checks their texts): a changed heading, the
+  space before Power's word removed, an arch's centre moved by 1, the space before a preset's
+  button closes removed, the strength's span renamed, the guest's round - and + left enabled, the
+  mute's empty fallback dropped, the notes' room always on.
 
 ## Arrange mode (Ember)
 
@@ -1102,7 +1128,7 @@ proved by node harnesses; its light and dark and its first frame by `paper.py` i
   `node/paper-draw.mjs` ("a_lost_link_draws_the_card_as_the_red_note_with_try_now",
   "faults_are_listed_under_the_red_note", "no_device_draws_only_the_card") and `paper.py`
   ("the_states_in_papers_words": a device taken off the air, `try now` posts connect, the daemon
-  stopped and restarted, hidden 3 s then shown; the red note reads at AA in both papers).
+  stopped (the sheet inert, an open form keeping its text, usable again on wake), and restarted, hidden 3 s then shown; the red note reads at AA in both papers).
 - Another device is one tap away: `also here: Amp` shows the amp at `?device=Amp`. Proved by `paper.py`
   "a_second_device_is_one_tap_away".
 - Review Focus 4, long words at 390 px: a DAC with nine presets (one 40 characters unbroken), a
@@ -1161,7 +1187,7 @@ proved by node harnesses; its light and dark and its first frame by `paper.py` i
   ("the_path_note_names_the_one_hop_that_changes"), the EQ's words smallest first
   ("the_eq_is_said_in_words_for_each_mode"), a rate losing its decimals and a retry at nought seconds
   waiting (`paper-words.mjs` "a_rate_keeps_its_decimals_and_a_retry_at_nought_says_now").
-- Mutants of Paper's page, run by hand with `mutate_paper.py` (one worker, `paper.py` in Chromium):
+- Mutants of Paper's page, run by hand with `mutate_paper.py` (one worker, `paper.py` in Chromium, `computer_paper.py` for the ten computer mutants):
   `place` setting nothing (killed by "the_needle_sits_at_its_value"), the system's dark overriding a
   person's Light (the dark block's `:not([data-scheme="light"])` dropped; killed by "auto_follows_the_system:
   a person's Light beats a dark system", Chromium's emulated dark system), a held section drawn anyway
@@ -1520,7 +1546,7 @@ dash and the sheet come with the later tasks.
   coarse pointer only, silent or paused at least 125; fine and coarse across the three levels and playing, paused and silent). In a browser (`nightdrive_theme.py`, both): `the_menu_has_motion_full_calm_still` (three
   radios, Full checked), `motion_is_kept_per_browser` (Calm under `svolder.theme.nightdrive.motion`,
   still Calm after a load), `calm_stops_the_road` (no new floor row in 2 s, draws go on, Full rolls
-  it again), `still_draws_about_one_frame_a_second` (3 to 7 draws in 5 s),
+  it again), `still_draws_about_one_frame_a_second` (3 to 7 draws in 5 s, counted on a fake clock),
   The timing cases, in `nightdrive_timing.py` (both browsers, the gate's serial lane),
   are `a_paused_player_on_a_desktop_keeps_its_levels_own_pace` (the draws go on at the rate they had, the asked pace under 125 ms), `a desktop starts with the wet road allowed by the budget` (the budget, fed the real draws, allows the wet road at the start), `reduced_motion_starts_on_calm_and_full_can_be_picked` (the system asks for less: pace 100, Full
   picked: draws keep coming) and `what_a_draw_costs` (below).
@@ -1627,7 +1653,7 @@ dash and the sheet come with the later tasks.
   and the wet road (`the_wet_road_is_the_first_thing_a_slow_mean_drops_before_the_scale_and_then_the_rate`,
   `too_few_draws_a_second_drops_the_wet_road_first_too`, `a_phone_starts_without_the_wet_road_and_it_comes_last_after_the_cap_and_the_scale`,
   `the_wet_road_stays_off_for_3_minutes_after_a_step_down_dropped_it`; in the browser `a_phone_starts_without_the_wet_road`);
-  in Chromium `a_phone_stays_usable` (density 3 held to 2; with the CPU 30x slower the scale steps down with the CSS size
+  in Chromium `a_phone_stays_usable`, in `nightdrive_timing.py` (real draw cost and wall time; density 3 held to 2; with the CPU 30x slower the scale steps down with the CSS size
   and the Motion choice untouched; with it 6x slower a tap on the frame's button opens the menu within a second);
   the rate as a second trigger (`node/nightdrive-budget.mjs`:
   `too_few_draws_a_second_for_3_s_steps_down_while_every_frame_is_asked_for_though_each_draw_is_fast`,
@@ -1644,7 +1670,7 @@ dash and the sheet come with the later tasks.
   `the_box_says_each_number_and_n_a_where_the_browser_has_none`, `the_new_switches_are_named_and_obeyed`, `the_box_without_an_ear_says_so`;
   `nightdrive_theme.py`, both browsers):
   `the_readout_is_not_made_without_the_parameter`, `the_readout_shows_the_numbers_and_hides_from_the_tree_and_the_query_stays`
-  (aria-hidden, the query kept, the draws a second within 10 of the loop's own count, drawn twice a second and no more),
+  (aria-hidden, the query kept, the draws a second within 10 of the loop's own count, drawn twice a second and no more, the last counted on a fake clock),
   `nosky_nodash_nohud_and_noglow_turn_off_what_they_name`, `nofloor_noridge_nohaze_and_noembers_leave_the_road_canvas_empty` and, in Chromium,
   `dpr1_draws_at_one_backing_pixel_per_css_pixel`. Firefox's checks now set the density they are asked for.
 - The glow is drawn, never blurred (`node/nightdrive-glow.mjs`): `nothing_in_the_scene_is_blurred` (no `shadowBlur` or
@@ -1788,7 +1814,7 @@ dash and the sheet come with the later tasks.
   lands on it; the round Loudness keys are 32 px to the eye and 44 px to the hand), `touching_the_mountains_tunes_on_a_phone` (the mountains
   lie in the window's top half; Chromium: a touch in the panel shows no curve, a first touch on the mountains shows it and grabs nothing, a second
   grabs the bubble and a move writes that band of this device; Firefox: the pointer over the mountains shows the curve, over the panel it does
-  not), `no_sideways_scroll_with_long_names` (a 40-character device name with no break, a long track and a long preset: the page no wider than the
+  not), `the_band_edge_on_a_phone` (the mouse, both browsers: just inside the tuning band's top edge, and its bottom edge where the panel does not cover it, shows the curve, just outside lets it go), `no_sideways_scroll_with_long_names` (a 40-character device name with no break, a long track and a long preset: the page no wider than the
   window and no part of the HUD, the dash or the sheet past its edge at 390, 844 and 1100 px) and `a_tall_window_keeps_the_scene_whole`
   (1280x1600 and 2560x1440: the sun whole, the dash on screen along the bottom, the volume above the sun, no scroll). Each is red against a
   broken stylesheet (the scene's share, the volume's width, a 40 px key, a 4 px hit area, the sheet at 40 %, a window-wide volume, a name that does not

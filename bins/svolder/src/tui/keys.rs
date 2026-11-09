@@ -794,7 +794,28 @@ static HINTS: &[KeyHint] = &[
         toggles: Some(Setting::SpectrumDrift),
         long: None,
     },
-    // The switch between the device's volume and tone control and the computer's.
+    // The switch between the device's volume and tone control and the computer's: its own row,
+    // `Target`, whose arrows pick the side.
+    KeyHint {
+        code: KeyCode::Right,
+        label: "←→ on Target",
+        does: "device / computer",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasComputer,
+        group: GLOBAL,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Char(' '),
+        label: "␣/Enter on Target",
+        does: "the other side",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasComputer,
+        group: GLOBAL,
+        toggles: None,
+        long: None,
+    },
     KeyHint {
         code: KeyCode::Char('C'),
         label: "C",

@@ -13,13 +13,12 @@
 // newest model afterwards. Another device shown redraws it for that device and closes what was open
 // for the old one.
 
-import { computerView } from './computer-view.js';
 import { drawSheet, sheetFrame } from './draw/sheet.js';
 import { inertOf } from './inert.js';
 import { closeAsk } from './ask.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { createRelease, keeper } from './live.js';
-import { placeMore, placeSheet } from './place.js';
+import { placeSheet } from './place.js';
 import { SHEET } from './words.js';
 
 /** What the sheet puts out of reach and dims while it stands. */
@@ -47,6 +46,16 @@ export function wireSheet({
   const inert = () => inertOf(store.page());
   const controlOf = (key) => (store.device()?.controls ?? []).find((c) => c.key === key);
 
+  /** The points' table of the computer's EQ: the rows out of view counted under it, its scroll kept across a draw
+   * (its rows are not lit or scrolled to: the table is short of a point in hand). */
+  const table = core.drag.table({
+    box: () => body?.querySelector('#nd-pscroll'),
+    note: () => body?.querySelector('#nd-more'),
+    row: () => null,
+    moreWords: SHEET.moreBelow,
+    rows: (area) => area.querySelectorAll('tbody tr'),
+  });
+
   // ---- drawing ----
   function draw(model) {
     if (!dialog) return;
@@ -55,12 +64,10 @@ export function wireSheet({
       return;
     }
     const focus = body.contains(root.ownerDocument.activeElement) ? root.ownerDocument.activeElement.id : '';
-    const scrolled = body.querySelector('#nd-pscroll')?.scrollTop ?? 0;
-    body.innerHTML = drawSheet(model, view, computerView(core));
+    table.keep();
+    body.innerHTML = drawSheet(model, view, core.computer.view());
     placeSheet(body);
-    const table = body.querySelector('#nd-pscroll');
-    if (table) table.scrollTop = scrolled;
-    placeMore(body);
+    table.restore();
     if (focus) {
       // a row removed takes its `×` with it: the focus stays in the dialog
       (body.querySelector(`#${CSS.escape(focus)}`) ?? dialog).focus({ preventScroll: true });
@@ -114,7 +121,7 @@ export function wireSheet({
   let downOnBackdrop = false;
   wrap.addEventListener('pointerdown', (event) => { downOnBackdrop = event.target === wrap; }, { signal });
   wrap.addEventListener('scroll', (event) => {
-    if (event.target.id === 'nd-pscroll') placeMore(body);
+    if (event.target.id === 'nd-pscroll') table.scrolled();
   }, { signal, capture: true, passive: true });
   wrap.addEventListener('click', (event) => {
     if (event.target.closest?.('[data-act="sheet-close"]')) close();

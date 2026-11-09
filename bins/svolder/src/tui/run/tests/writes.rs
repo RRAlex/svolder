@@ -371,3 +371,73 @@ async fn a_direct_session_refuses_to_identify_another_device() {
     .await;
     assert!(refused.is_err());
 }
+
+/// The computer's EQ and the DAC never play the same correction: a computer EQ that stops
+/// answers and a preset that goes to the DAC after it. Refused, the EQ stays on and the DAC is
+/// not written; once off, the loop loads the preset on the DAC.
+#[tokio::test(start_paused = true)]
+async fn a_move_to_the_dac_loads_it_only_once_the_computer_eq_is_off() {
+    use std::sync::Arc;
+    use svolder_host::eq::{EqControl, EqFailure, Keep};
+    use svolder_host::fake::{FakeChain, FakeParams};
+    use svolder_profiles::tone::preset;
+
+    for refused in [true, false] {
+        let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
+        app.show(crate::tui::app::Screen::Tone);
+        let eq = app.profile.eq.clone().expect("the fake has a tone control");
+        let bass = preset::builtins(&eq)
+            .into_iter()
+            .find(|preset| preset.name == "Bass")
+            .expect("a built-in");
+        assert!(!preset::matches(&eq, |id| raw_of(&app, id), &bass));
+
+        let chain = Arc::new(FakeChain::new());
+        let mut control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory);
+        control.set_on(true).await.expect("the chain starts");
+        let mut watched = watching(backend, app, None);
+        watched.computer = Box::new(crate::tui::run::computer::ComputerLink::over(control));
+        if refused {
+            chain.refuse(Some(EqFailure {
+                what: "the unit would not stop".into(),
+                next: "Try again".into(),
+            }));
+        }
+        watched
+            .computer
+            .move_off("Bass".into(), None)
+            .expect("a controller");
+
+        let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+        let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+        let mut mouse = SpyMouse::default();
+        let end = event_loop(LoopParts {
+            opener: &opener_over(never_opens()),
+            adder: &nothing_to_add(),
+            watching: watched,
+            terminal: &mut terminal,
+            events: quit_after(Duration::from_millis(600)),
+            mouse: &mut mouse,
+            title: &mut title(),
+            look: look(),
+        })
+        .await;
+
+        let on = end
+            .watching
+            .computer
+            .view()
+            .map(|view| view.on)
+            .expect("a view");
+        let on_the_dac = preset::matches(&eq, |id| raw_of(&end.watching.app, id), &bass);
+        assert_eq!(
+            on, refused,
+            "refused: {refused}, the computer EQ is on: {on}"
+        );
+        assert_eq!(
+            on_the_dac, !refused,
+            "refused: {refused}, Bass is on the DAC: {on_the_dac}"
+        );
+        end.watching.release().await;
+    }
+}

@@ -18,7 +18,7 @@ use futures::FutureExt;
 use svolder_fake::{FakeDevice, SIGNAL_PERIOD, Signal};
 use svolder_proto::ADVERT_COMPANY_ID;
 
-use crate::{Args, Layout, legacy_adv};
+use crate::{Args, Layout, controls, legacy_adv};
 
 /// The Forkbeard GATT service this peripheral serves.
 const SERVICE_UUID: bluer::Uuid = bluer::Uuid::from_u128(svolder_proto::FORKBEARD_SERVICE_UUID);
@@ -64,7 +64,8 @@ pub(super) async fn run(
     let app = gatt_application(device.clone(), notifier.clone(), args.trace);
     let _app_handle = adapter.serve_gatt_application(app).await?;
 
-    let signal_task = start_signal(args.signal, device, notifier);
+    let signal_task = start_signal(args.signal, device.clone(), notifier.clone());
+    let controls_task = start_controls(device, notifier, args.trace);
 
     let stops = Stops::register()?;
     eprintln!("svolder-sim: ready; Ctrl-C to stop");
@@ -103,6 +104,7 @@ pub(super) async fn run(
     if let Some(task) = signal_task {
         task.abort();
     }
+    controls_task.abort();
     // A device being switched off drops the links it holds. One bluetoothd serves both
     // sides of the e2e rig, so giving up this process's GATT application and advertisement
     // is not by itself the end of a central's link: take the links down here, while the
@@ -392,6 +394,87 @@ fn start_signal(
     })
 }
 
+/// Start the stdin controls: each line is a change to a reading (`usb 1`, `spdif 0`,
+/// `rate 44100`), made on the device and pushed on RX as the Status the device sends when the
+/// thing it reads changes. A bad line is one line on stderr and the next is read; the end of
+/// stdin ends the reading and nothing else.
+///
+/// Stdin is read on a thread of its own, which a stop does not wait for: a read blocked on a
+/// terminal cannot be cancelled, and would hold the process open.
+fn start_controls(
+    device: Arc<Mutex<FakeDevice>>,
+    notifier: Arc<tokio::sync::Mutex<Option<CharacteristicNotifier>>>,
+    trace: bool,
+) -> tokio::task::JoinHandle<()> {
+    let (lines, mut incoming) = tokio::sync::mpsc::unbounded_channel::<String>();
+    std::thread::spawn(move || read_lines(std::io::stdin().lock(), &lines));
+    tokio::spawn(async move {
+        while let Some(line) = incoming.recv().await {
+            let frame = match handle_line(&device, &line) {
+                Outcome::Skip => continue,
+                Outcome::Said(note) => {
+                    eprintln!("svolder-sim: {note}");
+                    continue;
+                }
+                Outcome::Push(frame) => frame,
+            };
+            eprintln!("svolder-sim: {}", line.trim());
+            let mut guard = notifier.lock().await;
+            if trace {
+                eprintln!("{}svolder-sim: {}", trace_stamp(), describe_rx(&frame));
+            }
+            match guard.as_mut() {
+                Some(n) => {
+                    let _ = n.notify(frame).await;
+                }
+                None => eprintln!(
+                    "svolder-sim: no central is subscribed; it reads the change at its next refresh"
+                ),
+            }
+        }
+    })
+}
+
+/// Send each line of `reader` on `lines` until its end, a read error or a closed channel: the end
+/// of stdin ends the reading and nothing else.
+fn read_lines(reader: impl std::io::BufRead, lines: &tokio::sync::mpsc::UnboundedSender<String>) {
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if lines.send(line).is_err() {
+            break;
+        }
+    }
+}
+
+/// What one stdin line comes to.
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    /// Nothing to do: a blank line or a comment.
+    Skip,
+    /// One line for stderr: a bad line or a reading that already holds the value.
+    Said(String),
+    /// The Status frame to push to the central.
+    Push(Vec<u8>),
+}
+
+/// Parse `line` and make its change on the device.
+fn handle_line(device: &Mutex<FakeDevice>, line: &str) -> Outcome {
+    let knob = match controls::parse_line(line) {
+        Ok(Some(knob)) => knob,
+        Ok(None) => return Outcome::Skip,
+        Err(e) => return Outcome::Said(e),
+    };
+    let applied = {
+        let mut d = device.lock().expect("device mutex");
+        controls::apply(&mut d, knob)
+    };
+    match applied {
+        Err(e) => Outcome::Said(e),
+        Ok(None) => Outcome::Said(format!("{} already", line.trim())),
+        Ok(Some(frame)) => Outcome::Push(frame),
+    }
+}
+
 /// The extended layout's advertisement: the Forkbeard service and `manufacturer_bytes` under
 /// the Forkbeard company id in one extended advertising PDU, discoverable, under the
 /// simulator's name.
@@ -525,6 +608,57 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), stops.wait())
             .await
             .expect("the TERM sent before the wait is caught");
+    }
+
+    /// A Bifrost 3 fake, as the sim builds it.
+    fn bifrost3() -> Mutex<FakeDevice> {
+        let profile = svolder_profiles::Registry::builtin()
+            .expect("the built-in profiles")
+            .get("bifrost3")
+            .expect("the Bifrost 3")
+            .clone();
+        Mutex::new(FakeDevice::from_profile(
+            &profile,
+            "0102030405060708".parse().expect("a unit id"),
+            3,
+            svolder_proto::Passphrase::NONE,
+        ))
+    }
+
+    /// A bad line is said and skipped, a blank one is skipped, a change pushes a frame, and the
+    /// same value again pushes nothing.
+    #[test]
+    fn a_stdin_line_pushes_a_frame_only_for_a_change() {
+        let device = bifrost3();
+        assert_eq!(handle_line(&device, ""), Outcome::Skip);
+        assert!(matches!(
+            handle_line(&device, "usb maybe"),
+            Outcome::Said(_)
+        ));
+        assert!(matches!(
+            handle_line(&device, "rate 50000"),
+            Outcome::Said(_)
+        ));
+        assert!(matches!(handle_line(&device, "usb 1"), Outcome::Push(_)));
+        assert!(matches!(handle_line(&device, "usb 1"), Outcome::Said(s) if s == "usb 1 already"));
+        assert!(matches!(handle_line(&device, "usb 0"), Outcome::Push(_)));
+    }
+
+    /// The reader passes every line on and ends at the end of its input, after a bad line too;
+    /// a closed channel ends it.
+    #[test]
+    fn the_reader_ends_at_eof_and_not_at_a_bad_line() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        read_lines(std::io::Cursor::new("usb 1\nnonsense\nspdif 0\n"), &tx);
+        drop(tx);
+        let mut got = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            got.push(line);
+        }
+        assert_eq!(got, ["usb 1", "nonsense", "spdif 0"]);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(rx);
+        read_lines(std::io::Cursor::new("a\nb\n"), &tx);
     }
 
     /// A link closing is noticed once, when the count falls, and a link opening is not one.

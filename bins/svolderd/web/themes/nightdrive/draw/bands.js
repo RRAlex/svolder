@@ -5,12 +5,17 @@
 // not focusable); and, for the computer's EQ, its points: a type, a frequency, a gain and a Q each in a
 // field, a `×` to remove it, `+ Add point` and the line that counts them. Pure: the model in, markup out.
 
-import { TYPES, WORDS } from '../points.js';
+import { POINT_TYPES, ROWS_SHOWN } from '../../../core/computer.js';
+import { isLong } from '../../../core/table.js';
+import { gainText, hzText, qText } from '../../../core/words.js';
 import { SHEET } from '../words.js';
 import { button, chip } from './modes.js';
 import { esc } from './esc.js';
 
 const PARAMS = ['f', 'g', 'q'];
+
+/** The words of one parameter of a point, as the table writes it. */
+export const WORDS = { f: hzText, g: gainText, q: qText };
 
 /** One value between its steppers. */
 function cell(inert, r, param) {
@@ -40,19 +45,24 @@ export function bandTable(device, inert = false) {
     + `<p class="nd-note">${esc(SHEET.bandNote)}</p>`;
 }
 
-/** The rows of the points' table in view before it scrolls. */
-export const ROWS_SHOWN = 6;
-
 /** One row of the points' table: its type, its three values as fields, and the `×` that removes it. */
 function pointRow(point, inert) {
   const n = point.n;
-  const options = TYPES.map((t) => `<option${t === point.type ? ' selected' : ''}>${t}</option>`).join('');
+  const options = POINT_TYPES.map((t) => `<option${t === point.type ? ' selected' : ''}>${t}</option>`).join('');
   const type = `<select id="nd-p${n}t" class="nd-ptype" data-act="point-type" data-point="${n}" aria-label="${esc(SHEET.pointType(n))}"`
     + `${inert ? ' disabled aria-disabled="true"' : ''}>${options}</select>`;
-  const value = (param) => `<td data-head="${esc(SHEET.pointHeads[2 + ['f', 'g', 'q'].indexOf(param)])}">`
-    + `<input id="nd-p${n}${param}" class="nd-v nd-pv${inert ? ' quiet' : ''}" type="text" inputmode="decimal" autocomplete="off" `
-    + `data-act="point-field" data-point="${n}" data-param="${param}" value="${esc(WORDS[param](point[param]))}" `
-    + `aria-label="${esc(SHEET.pointField(n, param))}"${inert ? ' readonly aria-disabled="true"' : ''}></td>`;
+  const value = (param) => {
+    const at = `data-point="${n}" data-param="${param}"`;
+    const id = `nd-p${n}${param}`;
+    const step = (delta, sign, words) => button('point-step', sign, inert,
+      ` id="${id}${delta < 0 ? 'm' : 'p'}" data-step="${delta}" ${at} aria-label="${esc(words)}"`, 'nd-st');
+    return `<td data-head="${esc(SHEET.pointHeads[2 + PARAMS.indexOf(param)])}"><span class="nd-stepper">`
+      + `${step(-1, SHEET.minus, SHEET.lowerPoint(n, param))}`
+      + `<input id="${id}" class="nd-v nd-pv${inert ? ' quiet' : ''}" type="text" inputmode="decimal" autocomplete="off" `
+      + `data-act="point-field" ${at} value="${esc(WORDS[param](point[param]))}" `
+      + `aria-label="${esc(SHEET.pointField(n, param))}"${inert ? ' readonly aria-disabled="true"' : ''}>`
+      + `${step(1, SHEET.plus, SHEET.raisePoint(n, param))}</span></td>`;
+  };
   const remove = button('point-remove', '×', inert, ` id="nd-px-${n}" data-point="${n}" aria-label="${esc(SHEET.removePoint(n))}"`, 'nd-px');
   return `<tr data-point="${n}"><th scope="row">${n}</th><td data-head="${esc(SHEET.pointHeads[1])}">${type}</td>`
     + `${value('f')}${value('g')}${value('q')}<td class="nd-pxc">${remove}</td></tr>`;
@@ -64,7 +74,7 @@ export function pointsTable(tone, inert = false) {
   if (!tone) return '';
   const heads = SHEET.pointHeads.map((h) => `<th scope="col">${esc(h)}</th>`).join('');
   const rows = tone.points.map((p) => pointRow(p, inert)).join('');
-  const long = tone.points.length > ROWS_SHOWN;
+  const long = isLong(tone.points.length);
   const add = chip('point-add', SHEET.addPoint, inert || !tone.canAdd, ' id="nd-point-add"');
   const unconfirmed = tone.verified ? '' : ` <span class="nd-unsure">${esc(SHEET.unconfirmed)}</span>`;
   return `<h2 class="nd-lbl">${esc(SHEET.points)}</h2>`

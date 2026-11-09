@@ -532,8 +532,8 @@ ok('the_points_table_scrolls_after_six', () => {
   assert.ok(sheet(pageWith('dac', modelOf({ points: [point('PK', 1000, 0, 1)] })), 'computer')
     .html.tone.includes('Remove point 1'));
   // the dragged mark is the one in hand
-  const { view: v } = computerView(pageWith('dac', modelOf()), 'computer');
-  v.point = 4;
+  const { view: v, computer } = computerView(pageWith('dac', modelOf()), 'computer');
+  computer.pick(4);
   const hand = SECTIONS.tone(pageWith('dac', modelOf()), pageWith('dac', modelOf()).device, v);
   assert.match(hand, /<tr data-n="4" class="sel">/);
   assert.equal(tags(hand, 'button').filter((b) => (b.class ?? '').includes('sel')).length, 1);

@@ -25,6 +25,7 @@ failed=0
 # expect REFUSED|ALLOWED FILE: edits FILE (or creates it), runs the refusal, restores the tree.
 expect() {
     local want=$1 f=$2 code
+    mkdir -p "$(dirname "$tmp/$f")"
     echo "// edit" >>"$tmp/$f"
     WEB_CHECKS_BASE=main bash "$tmp/scripts/web-checks/run-all.sh" --refusal-only >/dev/null 2>&1
     code=$?
@@ -46,6 +47,8 @@ expect REFUSED scripts/web-checks/notes.py
 expect REFUSED scripts/web-checks/node/director.mjs
 expect ALLOWED scripts/web-checks/node/new.mjs
 expect ALLOWED scripts/web-checks/node/fixtures/new.json
+expect REFUSED scripts/web-checks/fingerprint.py
+expect REFUSED scripts/web-checks/gate_cache.sh
 expect REFUSED bins/svolderd/web/themes/ember/smoke-engine.js
 expect REFUSED bins/svolderd/web/themes/ember/effects.js
 [ "$failed" -eq 0 ] && echo "gate_refusal: all cases as expected"

@@ -1,20 +1,19 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The theme Ember's computer side, drawn as strings from the core's view of it (`computerView`,
-// ../computer-view.js): the switch beside the device's name, the volume as the dial's model, the
+// The theme Ember's computer side, drawn as strings from the core's view of it (`core.computer.view`):
+// the switch beside the device's name, the volume as the dial's model, the
 // tone control with its points and the shared presets. Pure, with no DOM. Nothing below the
 // switch says whose controls these are; its own words are the device's name and `This computer`.
 // A control the viewer may not use is drawn inert (`aria-disabled`), so a guest touching it is told
 // to sign in; the elements carry `data-comp` and no `data-json`, so only computer.js acts on them.
 
+import { POINT_TYPES, ROWS_SHOWN } from '../../../core/computer.js';
+import {
+  fixedEven, gainText, hzText, qText,
+} from '../../../core/words.js';
 import { curve } from './curve.js';
 import { attr, esc } from './html.js';
 
-/** The rows of the points' table in view before it scrolls. */
-export const ROWS_SHOWN = 6;
-
-/** The point types a person may pick. */
-const TYPES = ['PK', 'LSC', 'HSC'];
 const MINUS = '−';
 
 /** The part's root asks htmx to swap it out of band. */
@@ -26,18 +25,10 @@ export function effective(device, view) {
   return view?.side === 'computer' && device ? { ...device, layout: 'dac', lone: false } : device;
 }
 
-/** dB with one decimal and a true minus; no sign on zero. */
-function dbText(db) {
-  const text = Math.abs(db).toFixed(1);
-  return db < 0 && text !== '0.0' ? `${MINUS}${text}` : text;
-}
-
-/** A frequency in Hz: whole above 100, one decimal below, no trailing zero. */
-export const hzText = (f) => `${Number(f.toFixed(f < 100 ? 1 : 0))} Hz`;
-/** A gain with its sign. */
-export const gainText = (g) => `${g > 0 && g.toFixed(1) !== '0.0' ? '+' : ''}${dbText(g)} dB`;
-/** A Q with two decimals. */
-export const qText = (q) => q.toFixed(2);
+/** The three values of a point as the table and the editor say them. */
+export const pointWords = (point) => ({
+  f: hzText(point.f), g: gainText(point.g), q: qText(point.q),
+});
 
 /**
  * The switch: the device's name and `This computer` in the mode track's style, and where the
@@ -83,12 +74,32 @@ export function volumeModel(volume) {
 /** One row of the points' table. */
 function row(point, { picked, inert }) {
   const off = inert ? attr('aria-disabled', 'true') : '';
-  const cell = (param, text, word) => `<button type="button" class="cell"${attr('data-comp', 'cell')}${attr('data-n', point.n)}${attr('data-param', param)}${attr('aria-label', `${word} of point ${point.n}`)}${off}>${esc(text)}</button>`;
-  const options = TYPES.map((t) => `<option${t === point.type ? ' selected' : ''}>${t}</option>`).join('');
+  const words = pointWords(point);
+  const cell = (param, word) => `<button type="button" class="cell"${attr('data-comp', 'cell')}${attr('data-n', point.n)}${attr('data-param', param)}${attr('aria-label', `${word} of point ${point.n}`)}${off}>${esc(words[param])}</button>`;
+  const options = POINT_TYPES.map((t) => `<option${t === point.type ? ' selected' : ''}>${t}</option>`).join('');
   const type = `<select class="ptype"${attr('data-comp', 'type')}${attr('data-n', point.n)}${attr('aria-label', `Type of point ${point.n}`)}${inert ? ' disabled aria-disabled="true"' : ''}>${options}</select>`;
   const remove = `<button type="button" class="px"${attr('data-comp', 'remove')}${attr('data-n', point.n)}${attr('aria-label', `Remove point ${point.n}`)}${off}>×</button>`;
-  return `<div class="pt${picked === point.n ? ' on' : ''}" role="group"${attr('aria-label', `Point ${point.n}`)}${attr('data-n', point.n)}><span class="pn">${point.n}</span>${type}${cell('f', hzText(point.f), 'Frequency')}${cell('g', gainText(point.g), 'Gain')}${cell('q', qText(point.q), 'Q')}${remove}</div>`;
+  return `<div class="pt${picked === point.n ? ' on' : ''}" role="group"${attr('aria-label', `Point ${point.n}`)}${attr('data-n', point.n)}><span class="pn">${point.n}</span>${type}${cell('f', 'Frequency')}${cell('g', 'Gain')}${cell('q', 'Q')}${remove}</div>`;
 }
+
+const STEPPERS = [['f', 'Frequency'], ['g', 'Gain'], ['q', 'Q']];
+
+/** The editor under the table: the point in hand's three values, each with a - and a + (the DAC
+ * table's steppers, `.stp`). The number between them is a plain span here, where the DAC's is a
+ * button that types a value (tone-editor.js, scoped to `#part-bands`): on the computer a value is
+ * typed in the table's cells. `.stp .v` styles both alike (the span is a grid item). */
+export function editorBody(point, inert) {
+  const words = pointWords(point);
+  const off = inert ? attr('aria-disabled', 'true') : '';
+  const button = (param, label, dir) => `<button type="button" class="btn sm"${attr('data-comp', 'step')}${attr('data-param', param)}${attr('data-dir', dir)}${attr('aria-label', `${dir < 0 ? 'Lower' : 'Raise'} the ${label.toLowerCase()}`)}${off}>${dir < 0 ? MINUS : '+'}</button>`;
+  const stepper = ([param, label]) => `<div class="stp"${attr('data-param', param)}><span class="lbl">${label}</span>${button(param, label, -1)}<span class="v">${esc(words[param])}</span>${button(param, label, 1)}</div>`;
+  return `<h4>Point ${point.n}</h4>${STEPPERS.map(stepper).join('')}`;
+}
+
+/** The editor's box: hidden and empty while no point is in hand. */
+const editor = (point, inert) => (point
+  ? `<div class="bedit"${attr('data-n', point.n)}>${editorBody(point, inert)}</div>`
+  : '<div class="bedit" hidden></div>');
 
 /** What the table says of the rows beyond the ones in view. */
 export const moreWords = (hidden) => (hidden > 0 ? `${hidden} more ↓ scroll` : '');
@@ -104,7 +115,7 @@ function graph(tone) {
   const c = curveOf(tone);
   const gradient = '<defs> <linearGradient id="eqfill" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="260"> <stop offset="0" class="eqs0"/><stop offset=".5" class="eqs1"/> <stop offset="1" class="eqs2"/> </linearGradient> </defs>';
   const grid = 'M132.6 0V260M233 0V260M333.3 0V260M466 0V260M566.3 0V260M666.7 0V260M799.3 0V260M899.7 0V260M0 10H1000M0 70H1000M0 190H1000M0 250H1000';
-  const marks = tone.markers.map((m) => `<circle class="mk"${attr('data-n', m.n)}${attr('cx', m.x.toFixed(1))}${attr('cy', m.y.toFixed(1))} r="4.5"/>`).join('');
+  const marks = tone.markers.map((m) => `<circle class="mk"${attr('data-n', m.n)}${attr('cx', fixedEven(m.x, 1))}${attr('cy', fixedEven(m.y, 1))} r="4.5"/>`).join('');
   const ghost = c.ghost === null ? '' : `<path class="ghost"${attr('d', c.ghost)}/>`;
   const svg = `${gradient} <path class="gl"${attr('d', grid)}/> <path class="g0" d="M0 130H1000"/> ${ghost} <path class="area"${attr('d', c.area)}/> <path class="line"${attr('d', c.line)}${attr('data-y', c.ys)}/> ${marks}`;
   const axes = '<span class="gx x0">20 Hz</span><span class="gx x100">100</span> <span class="gx x1k">1k</span><span class="gx x10k">10k</span> <span class="gy y12">+12</span><span class="gy y6">+6</span><span class="gy y0">0</span> <span class="gy ym6">−6</span><span class="gy ym12">−12</span>';
@@ -113,8 +124,8 @@ function graph(tone) {
 
 /**
  * The tone control: the mode track (Off, EQ), the curve, the points' table that shows six rows and
- * scrolls, `+ Add point` and the line that counts the points and the preamp. `view` is
- * `computerView`.
+ * scrolls, the editor of the point in hand, `+ Add point` and the line that counts the points and the
+ * preamp. `view` is `core.computer.view`.
  */
 export function toneSection(view, { oob = false } = {}) {
   const tone = view.tone;
@@ -126,7 +137,7 @@ export function toneSection(view, { oob = false } = {}) {
   const head = '<div class="ph" aria-hidden="true"><span>#</span><span>Type</span><span>Frequency</span><span>Gain</span><span>Q</span><span></span></div>';
   const add = `<button type="button" class="btn sm"${attr('data-comp', 'add')}${tone.canAdd && !inert ? '' : attr('aria-disabled', 'true')}>+ Add point</button>`;
   const unverified = tone.verified ? '' : ' <span class="pnote">not confirmed yet</span>';
-  return `<section id="part-tone" class="tone comp"${inert ? attr('data-inert', true) : ''}${swap(oob)}> <h2>Tone control</h2> <div class="seg" role="group" aria-label="Tone control mode">${track} </div> ${graph(tone)} <div class="pts-table"> ${head} <div class="pscroll${tone.points.length > ROWS_SHOWN ? ' long' : ''}"${attr('data-rows', ROWS_SHOWN)}>${rows}</div> <p class="more">${esc(moreWords(tone.points.length - ROWS_SHOWN))}</p> <div class="pfoot">${add}<p class="pline">${esc(tone.line)}${unverified}</p></div> </div> </section>`;
+  return `<section id="part-tone" class="tone comp"${inert ? attr('data-inert', true) : ''}${swap(oob)}> <h2>Tone control</h2> <div class="seg" role="group" aria-label="Tone control mode">${track} </div> ${graph(tone)} <div class="pts-table"> ${head} <div class="pscroll${tone.points.length > ROWS_SHOWN ? ' long' : ''}"${attr('data-rows', ROWS_SHOWN)}>${rows}</div> <p class="more">${esc(moreWords(tone.points.length - ROWS_SHOWN))}</p> ${editor(tone.points[view.picked - 1], inert)} <div class="pfoot">${add}<p class="pline">${esc(tone.line)}${unverified}</p></div> </div> </section>`;
 }
 
 /** A rename or delete icon button. */
@@ -144,7 +155,7 @@ export function presetsSection(view, { oob = false } = {}) {
   const name = tone.preset === null ? '' : `<strong>${esc(tone.preset)}</strong>`;
   const status = tone.preset === null ? 'No preset is on.' : ' is on.';
   const inert = !view.writes;
-  const rows = tone.presets.map((p) => {
+  const rows = tone.presets.map((p, index) => {
     const disabled = inert || !p.playable;
     const label = p.playable ? (p.built_in ? 'built in' : 'yours') : (p.why ?? 'cannot play');
     const on = p.on === true || p.name === tone.preset;
@@ -152,7 +163,7 @@ export function presetsSection(view, { oob = false } = {}) {
     const buttons = mine
       ? ` ${icon(`Rename ${p.name}`, 'M4 20h4L19 9l-4-4L4 16zM13 7l4 4', '')} ${icon(`Delete ${p.name}`, 'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13', ' ')}`
       : '';
-    const row = ` <div class="prow${p.built_in ? '' : ' user'}"><button type="button" class="pre"${attr('aria-pressed', on ? 'true' : 'false')}${attr('data-comp', 'preset')}${attr('data-name', p.name)}${disabled ? attr('aria-disabled', 'true') : ''}${p.playable ? '' : attr('title', label)}><i class="lamp"></i><span>${esc(p.name)}</span><small>${esc(label)}</small> </button>${buttons}</div>`;
+    const row = ` <div class="prow${p.built_in ? '' : ' user'}"><button type="button" class="pre"${attr('id', `pre-${index}`)}${attr('aria-pressed', on ? 'true' : 'false')}${attr('data-comp', 'preset')}${attr('data-name', p.name)}${disabled ? attr('aria-disabled', 'true') : ''}${p.playable ? '' : attr('title', label)}><i class="lamp"></i><span>${esc(p.name)}</span><small>${esc(label)}</small> </button>${buttons}</div>`;
     const forms = mine
       ? ` <form class="pform" data-form="rename" data-comp="form" hidden${attr('data-from', p.name)}> <input name="to"${attr('value', p.name)} maxlength="40" required aria-label="New name"> <button class="btn sm primary">Rename</button> <button type="button" class="btn sm" data-close>Cancel</button> </form> <form class="pform" data-form="delete" data-comp="form" hidden${attr('data-from', p.name)}> <p>Delete “${esc(p.name)}”? The points on the EQ stay as they are.</p> <button class="btn sm danger">Delete</button> <button type="button" class="btn sm" data-close>Keep</button> </form>`
       : '';

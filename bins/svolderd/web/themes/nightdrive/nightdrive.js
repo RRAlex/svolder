@@ -19,9 +19,9 @@
 //                them, fold.js keeps the facts' fold; draw/gauges.js an amp's gauges in the dash
 //   tune.js      the tone control on the mountains as numbers (the map, the bubbles, the morph);
 //                tune-wire.js the hands on it, draw/tune.js the bubbles
-//   computer-view.js, points.js, points-wire.js   the computer's side (the switch by the menu button or in the panel's
-//                top row, its volume in the HUD and on the dash's keys, its points as bubbles on the mountains and a
-//                table on the sheet): what the drawing reads of the core, the points' words, the table's hands
+//   points-wire.js   the computer's side (the switch by the menu button or in the panel's top row, its volume in the
+//                HUD and on the dash's keys, its points as bubbles on the mountains and a table on the sheet): the
+//                table's hands; what the drawing reads of it is the core's `computer.view()`
 //   sky.js       the sky's rare events, by the clock; motion.js the Full, Calm and Still levels
 //   rest.js      the cursor over the scene hiding after 2 s without a move
 //   states.js    how the page stands (ok, out of reach, lost, reading again, no analysis) and the quiet line's words;

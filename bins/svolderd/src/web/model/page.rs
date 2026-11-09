@@ -10,8 +10,8 @@ use std::path::Path;
 use serde::Serialize;
 use svolder_host::eq::HostEqState;
 use svolder_host::{RouteFacts, SinkFacts};
-use svolder_ipc::DeviceInfo;
 use svolder_ipc::config::{HopKind, HopWhat};
+use svolder_ipc::{Config, DeviceInfo};
 use svolder_profiles::Family;
 use svolder_profiles::tone::preset::same_name;
 
@@ -104,12 +104,26 @@ pub(crate) struct HopRow {
     pub(crate) live: bool,
 }
 
+/// The configuration as the fleet reads it, on a blocking thread; the default one when it cannot
+/// be read.
+pub(crate) async fn config_off_thread(web: &Web) -> svolder_ipc::Config {
+    let web = web.clone();
+    tokio::task::spawn_blocking(move || web.fleet.config().unwrap_or_default())
+        .await
+        .unwrap_or_default()
+}
+
 /// The fleet of `devices` and the hops `web`'s configuration declares, in file order.
 pub(crate) async fn fleet_model(web: &Web, devices: &[DeviceInfo]) -> FleetModel {
+    // A configuration that cannot be read declares no hops.
+    let config = config_off_thread(web).await;
+    fleet_model_of(web, devices, &config)
+}
+
+/// [`fleet_model`] with the hops of `config`, the file as a writer just left it.
+pub(crate) fn fleet_model_of(web: &Web, devices: &[DeviceInfo], config: &Config) -> FleetModel {
     let listed = |name: &str| devices.iter().find(|d| same_name(&d.name, name));
     let default = web.fleet.resolve(None).ok();
-    // A configuration that cannot be read declares no hops.
-    let config = web.fleet.config().unwrap_or_default();
     let hops = config
         .hops
         .iter()
@@ -285,20 +299,24 @@ impl HostModel {
 }
 
 /// The computer's controls as `web`'s daemon has them, for a page showing `shown`.
-pub(crate) fn host_computer(web: &Web, shown: Option<&DeviceInfo>) -> Option<ComputerModel> {
-    computer_model(web, &web.fleet.host_view(), shown)
+pub(crate) async fn host_computer(web: &Web, shown: Option<&DeviceInfo>) -> Option<ComputerModel> {
+    computer_model(web, &web.fleet.host_view(), shown).await
 }
 
 /// The computer's player, route and controls as `web`'s daemon has them, for a viewer with
 /// `access` on a page showing `shown`, with no device to judge the path against; `None` while
 /// the host is not watched.
-pub(crate) fn host_model(
+pub(crate) async fn host_model(
     web: &Web,
     access: Access,
     shown: Option<&DeviceInfo>,
 ) -> Option<HostModel> {
     let (card, route) = host_parts(web, access)?;
-    Some(HostModel::new(&card, route, host_computer(web, shown)))
+    Some(HostModel::new(
+        &card,
+        route,
+        host_computer(web, shown).await,
+    ))
 }
 
 /// The page for `viewer` showing `shown`, read as `loaded`: the first snapshot, with the strip
@@ -326,7 +344,7 @@ pub(crate) async fn page_model(
         device,
         followed: BTreeMap::new(),
         card: card.as_ref().map(Into::into),
-        host: host_model(web, access, shown),
+        host: host_model(web, access, shown).await,
         strip,
     }
 }

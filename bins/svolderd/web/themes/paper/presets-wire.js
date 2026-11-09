@@ -36,12 +36,12 @@ export function wirePresets({
       list(opener, label, options, then) {
         if (closeOf(opener)) return;
         keep.around(() => openList({
-          opener, label, options, choose: then, signal, onClose: () => keep.drop(),
+          opener, label, options, choose: then, signal, onClose: () => keep.release(),
         }));
       },
       /** Hold the section while an ask is open; the ask's `onClose` gives the hold back. */
       ask(open) {
-        keep.around(() => open(() => keep.drop()));
+        keep.around(() => open(() => keep.release()));
       },
     };
     // Another device is shown: what is open for the old one is closed.

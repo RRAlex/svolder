@@ -169,6 +169,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/tone-drag.js"),
     ),
     (
+        "core/point-drag.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/point-drag.js"),
+    ),
+    (
+        "core/table.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/table.js"),
+    ),
+    (
         "core/frame.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/frame.js"),

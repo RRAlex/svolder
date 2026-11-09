@@ -293,3 +293,23 @@ fn template_has_the_host_table() {
         "usage/daemon.md's sample lacks [host]"
     );
 }
+
+/// The device block `docs/usage/config.md` shows is the one the template writes, line for line.
+#[test]
+fn the_docs_device_block_is_the_templates() {
+    let template = Config::template();
+    let start = template
+        .find("# [[device]]\n")
+        .expect("the template has a device block");
+    let end = template[start..]
+        .find("\n\n")
+        .expect("a blank line ends it")
+        + start;
+    let block = &template[start..end];
+    let docs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/usage");
+    let usage = std::fs::read_to_string(docs.join("config.md")).expect("usage/config.md reads");
+    assert!(
+        usage.contains(block),
+        "usage/config.md's device block differs from the template's:\n{block}"
+    );
+}

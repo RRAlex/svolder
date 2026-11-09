@@ -373,3 +373,73 @@ fn config_show_prints_the_web_table_when_it_is_set() {
         ]
     );
 }
+
+/// A file that configures one unit twice (written before the rule) is read with the later block
+/// left out and a warning; `remove` takes either block out, and the file then parses strictly.
+#[test]
+fn remove_works_on_a_file_that_configures_one_unit_twice() {
+    let home = config_home();
+    let dir = home.0.join("svolder");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        "schema = 1\n\n[[device]]\nname = \"dac\"\nudid = \"0102030405060708\"\n\n\
+         [[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n",
+    )
+    .unwrap();
+    let (code, out, err) = svolder(&["config", "show", "--json"], &home.0);
+    assert_eq!(code, Some(0), "out={out} err={err}");
+    assert!(err.contains("\"amp\" is left out"), "{err}");
+    let v: serde_json::Value = serde_json::from_str(out.trim()).expect("one JSON object");
+    assert_eq!(v["devices"].as_array().map(Vec::len), Some(1), "{out}");
+
+    let (code, _out, err) = svolder(&["remove", "amp"], &home.0);
+    assert_eq!(code, Some(0), "{err}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let config = svolder_ipc::Config::parse_strict(&text).expect("one block is left");
+    assert_eq!(config.devices.len(), 1);
+    assert_eq!(config.devices[0].name, "dac");
+}
+
+/// A 0.32.2 file with two blocks for one unit, whose `default_device` names the later one.
+const TWICE_DEFAULT_AMP: &str = "schema = 1\ndefault_device = \"amp\"\n\n[[device]]\nname = \"dac\"\nudid = \"0102030405060708\"\n\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+
+/// A default naming the block that was left out as a duplicate says so, with the cure, rather
+/// than that the device is not configured.
+#[test]
+fn a_default_naming_a_left_out_duplicate_says_so_and_the_cure() {
+    let home = config_home();
+    write_config(&home.0, TWICE_DEFAULT_AMP);
+    let (code, out, err) = svolder(&["status"], &home.0);
+    assert_eq!(code, Some(1), "out={out} err={err}");
+    assert!(err.contains("\"amp\" is left out"), "{err}");
+    assert!(err.contains("svolder remove amp"), "{err}");
+    assert!(err.contains("default_device"), "{err}");
+}
+
+/// An unrelated device write on a file that already configures one unit twice is refused with
+/// the file's own fault and its cure, not with a bare clash message.
+#[test]
+fn an_unrelated_add_on_a_file_with_a_unit_twice_names_the_file_and_the_cure() {
+    let home = config_home();
+    write_config(&home.0, TWICE_DEFAULT_AMP);
+    let (code, out, err) = svolder(&["add", "1112131415161718", "--name", "other"], &home.0);
+    assert_eq!(code, Some(1), "out={out} err={err}");
+    assert!(err.contains("already configures"), "{err}");
+    assert!(err.contains("\"dac\" and \"amp\""), "{err}");
+    assert!(err.contains("svolder remove amp"), "{err}");
+}
+
+/// The default is matched to a block without regard to case, so the cure is found the same way.
+#[test]
+fn a_default_spelled_in_another_case_still_gets_the_cure() {
+    let home = config_home();
+    write_config(
+        &home.0,
+        &TWICE_DEFAULT_AMP.replace("default_device = \"amp\"", "default_device = \"Amp\""),
+    );
+    let (code, out, err) = svolder(&["status"], &home.0);
+    assert_eq!(code, Some(1), "out={out} err={err}");
+    assert!(err.contains("svolder remove amp"), "{err}");
+}

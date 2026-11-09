@@ -126,7 +126,7 @@ unless told otherwise: on an arm64 host, `make static ARCH=aarch64`; `make docke
 ```
 make static                 # svolder, svolderd, svolder-sim: x86_64, static, libdbus built in
 make static ARCH=aarch64    # the same for arm64, into target/dist/aarch64
-make third-party-licenses   # THIRD-PARTY-LICENSES: every crate's licence, then libdbus's, musl's,
+make 3rdpartylicenses       # THIRD-PARTY-LICENSES: every crate's licence, then libdbus's, musl's,
                             # IBM Plex's, Geist's, Crimson Pro's, Caveat's, Russo One's, Mr Dafoe's and htmx's
 make packages               # both architectures, then PKGBUILD, SHA256SUMS and RELEASE-NOTES.md
 make packages ARCH=x86_64   # one architecture's packages (ARCH=aarch64 the other's); no combining
@@ -186,9 +186,9 @@ svolder-<version>-1.x86_64.rpm   svolder-<version>-source.tar.gz          SHA256
 `SHA256SUMS` lists the other eight files and is written last; `sha256sum -c SHA256SUMS` in
 `target/dist` checks them. `RELEASE-NOTES.md` is the release page's text and not an asset: a
 Beta paragraph (what has and has not been tested, and to start with the volume low), the
-version's section of `CHANGELOG.md` (a version without one, or one still the placeholder, stops
+version's section of `CHANGELOG.md` followed by each older section down to the first version with a tag, under `### Also in this release` (a version without one, or one still the placeholder, stops
 `make release-files`), then the install lines, a line per file and the check
-(`packaging/release-notes.md.in`, filled in by `packaging/release-files.sh`, which puts the section at the template's `@CHANGELOG@`
+(`packaging/release-notes.md.in`, filled in by `packaging/release-files.sh` with `packaging/release-notes.sh`, which put the sections at the template's `@CHANGELOG@`
 line). The bare arm64
 binaries are in `target/dist/aarch64`, which is not an asset either.
 
@@ -530,10 +530,15 @@ manager with no path takes no lock.
 ### Running in a container
 
 `Dockerfile` builds the runtime image from the static `svolder` and `svolderd` that `make static`
-builds in the build container (the same binaries the packages carry), running as a non-root
-`svolder` user whose uid is a build argument (`--build-arg UID=$(id -u)`, so files written under the
-bind-mounted volumes stay writable by the host user that runs `make docker`). `svolderd` is the
-container's own process — its entrypoint, supervised by Docker's restart policy rather than a
+builds in the build container (the same binaries the packages carry). The image starts as root only
+to run its entrypoint (a small shell script), which hands `/config` and `/run/svolder`
+to `PUID:PGID` (default 1000:1000; compose passes `HOST_UID` and `HOST_GID` from `.env`) when Docker
+created them root-owned, because `./config` or `./run` did not exist, and then drops to that user,
+keeping the groups compose's `group_add` gives (the bluetooth group) but not root's group 0. A folder owned by anyone else is never re-owned. The
+entrypoint does nothing of this when the container does not start as root (a compose `user:` of your
+own) or when it runs under rootless Docker or Podman, where the container's
+root is already your user; `docker exec svolder svolder ...` runs the CLI as the same user. `svolderd`
+is the container's own process, supervised by Docker's restart policy rather than a
 systemd user unit — so `svolder daemon install` run inside a container detects it (`/.dockerenv` or
 `/run/.containerenv`) and installs nothing, saying so instead.
 
@@ -546,8 +551,10 @@ when Docker is not installed or this user cannot reach its daemon (for example, 
 Run `make docker` first: the compose file runs the image it builds (`svolder:local`) and builds none
 of its own. The first time, `make docker` also writes a `.env` next to `docker-compose.yml` with
 `BLUETOOTH_GID` (the host's `bluetooth` group, from `getent group bluetooth`), the value the compose
-file cannot guess and refuses to run without, and creates `./config` and `./run` so they belong to
-you rather than to root. Then, and again after each update:
+file cannot guess and refuses to run without, `HOST_UID` and `HOST_GID` (your `id -u` and `id -g`),
+and creates `./config` and `./run` so they belong to you rather than to root. Starting the compose
+file without `make docker` is fine too: with those keys in `.env` (or none, for 1000:1000) the
+first start creates and repairs the folders. Then, and again after each update:
 
 ```
 make docker
@@ -583,17 +590,18 @@ docker exec -it svolder svolder tui
 The image carries the PipeWire client tools (`pw-cli`, `pw-dump`, `pw-record`, `pipewire`, `wpctl`)
 but no PipeWire daemon and no session bus. The computer's volume and EQ are opt-in, through
 `docker-compose.host-audio.yml`, so a Bluetooth-only start with no user session is unaffected.
-`make docker` writes three more keys to `.env`, each only when missing (a line already there is
-never rewritten): `HOST_UID` (your `id -u`), `HOST_RUNTIME_DIR` (`$XDG_RUNTIME_DIR`, else
+`make docker` writes more keys to `.env`, each only when missing (a line already there is
+never rewritten): `HOST_UID` (your `id -u`), `HOST_GID`, `HOST_RUNTIME_DIR` (`$XDG_RUNTIME_DIR`, else
 `/run/user/<uid>`) and, when the host's `pipewire-0` socket exists there (or `DOCKER_HOST_AUDIO=1`
 asks: `DOCKER_HOST_AUDIO=1 make docker`), `COMPOSE_FILE=docker-compose.yml:docker-compose.host-audio.yml`. The override mounts the
 host's runtime directory read-only at `/run/host-runtime` with `create_host_path: false` (Docker
 creates nothing on the host: with no session the container refuses to start), sets
 `PIPEWIRE_REMOTE=/run/host-runtime/pipewire-0` (a restarted PipeWire's new socket is seen without
-restarting the container; the daemon's own `pipewire` child keeps its files in the private tmpfs), gives the container a private 0700 tmpfs as `XDG_RUNTIME_DIR`, and runs
-as `HOST_UID` with group 0, since the host's runtime directory is 0700 and its user's. The image
-makes `/config` and `/run/svolder` group-0 writable, so any uid works. Files the daemon creates in those
-bind mounts then carry group 0 on the host. Mounting the whole runtime directory exposes every
+restarting the container; the daemon's own `pipewire` child keeps its files in the private tmpfs), gives the container a private 0700 tmpfs as `XDG_RUNTIME_DIR`, and, since the host's runtime
+directory is 0700 and its user's, needs the daemon to run as `HOST_UID`, which the entrypoint's drop
+already does (`HOST_UID:HOST_GID`), so the first start still repairs root-owned folders and the
+files the daemon creates in those bind mounts are yours on the host. The entrypoint names a folder
+owned by a different uid on stderr (`docker logs svolder`), with the `.env` line that fixes it. Mounting the whole runtime directory exposes every
 socket in it (the session bus, the audio and agent sockets) to the container, read-only but
 connectable, which a single-socket mount would not; it is the price of the socket staying fresh
 after a PipeWire restart. To turn it off, set `COMPOSE_FILE=docker-compose.yml` in `.env` (a line already there is kept, so
@@ -617,18 +625,22 @@ sink's volume or mute. Without `pw-record` the visualizer reports that it cannot
 
 #### The MCP server in the container
 
-The compose file puts the container on Docker's default bridge network (it does not use
-`network_mode: host`), so a server listening on the container's `127.0.0.1` cannot be reached from
-the host. Listen on every interface inside the container and publish the port on the host's loopback
-only. `docker-compose.override.yml` beside `docker-compose.yml` is merged into it, so the tracked
-file stays as it is:
+The compose file gives the container the host's network (`network_mode: host`), so the server is
+reached at the host's own address and needs no published port. The image sets
+`SVOLDER_MCP_LISTEN=0.0.0.0:8737` (and `SVOLDER_WEB_LISTEN` for the web page), which changes only
+the default address: the server listens on every interface of the host, and the token (asked for by
+default) is the check. Nothing answers until `[mcp]` (or `[web]`) has `enabled = true` in
+`./config/svolder/config.toml`. A `listen` in that file still wins. The ports are the host's: a
+`svolderd` running natively on the same machine must not have web or MCP enabled on 8737 or 8738 at
+once; the listener that finds the port taken reports `cannot listen on ADDR: WHY` in
+`svolder daemon status` and the daemon keeps its socket and its devices. To keep the server on the
+host's loopback only, write `listen = "127.0.0.1:8737"` in the file.
 
-```yaml
-services:
-  svolder:
-    ports:
-      - "127.0.0.1:8737:8737"
-```
+Without host networking (a `ports:` list in place of `network_mode: host`, on a host such as Docker
+Desktop, or rootless Docker, where the host network is a private one of its own and does not reach
+the LAN), publish `8737:8737` and `8738:8738`; the container's
+address is then its own bridge one, so set `[web] url` to the address your phone reaches (see
+below).
 
 A generated token would live in the container's own writable layer and change on every recreate
 (`make docker`, then `docker compose up -d`), breaking every client, so keep the token under the
@@ -642,25 +654,24 @@ mkdir -p config
 ```
 
 Then `config/svolder/config.toml` (the file the container reads at `/config/svolder/config.toml`)
-names it and the address:
+names it:
 
 ```toml
 [mcp]
 enabled = true
-listen = "0.0.0.0:8737"
 token_file = "/config/mcp-token"
 hosts = ["localhost", "127.0.0.1"]
 ```
 
-`docker compose up -d --force-recreate` starts the container with the section. A wildcard `listen`
-names no host, so with no `hosts` every `Host` header is let through and the token is the only
+`docker compose up -d --force-recreate` starts the container with the section. The wildcard
+address names no host, so with no `hosts` every `Host` header is let through and the token is the only
 check. `hosts` turns that into a list, and the two names above keep a page that a DNS-rebinding
-trick points at the published port from being served: a client on the host uses
+trick points at the server's port from being served: a client on the host uses
 `http://127.0.0.1:8737/mcp` as in ["Connecting Claude Code"](mcp.md#connecting-claude-code) and is
 accepted, any other name is refused.
 
 A client that reaches the container through another name, such as a reverse proxy's, must be added
-to `hosts`. The published port is bound to the host's loopback as well. An `SVOLDER_MCP_TOKEN` in
+to `hosts`. An `SVOLDER_MCP_TOKEN` in
 `.env` would not do on its own: compose reads `.env` to fill in the file's own `${...}` references
 and passes nothing into the container unless the service lists it under `environment:`. The token
 for the client is the container's, so ask the container:
@@ -671,23 +682,22 @@ docker exec svolder svolder mcp token
 
 #### The web UI in the container
 
-The page is reached the same way as the MCP server: inside the container it must listen on every
-interface, and the compose file publishes the port. Name `[web] listen = "0.0.0.0:8738"` in
-`config/svolder/config.toml` (the file the container reads at `/config/svolder/config.toml`), and
-uncomment the compose file's `ports:` line, `- "8738:8738"`, to reach it from this computer and your
-network, or merge `127.0.0.1:8738:8738` through `docker-compose.override.yml` as above to keep it on
-this computer's loopback.
+The page is reached the same way as the MCP server: the container shares the host's network and
+listens on every interface by default (`SVOLDER_WEB_LISTEN`), so the only steps are `enabled = true`
+under `[web]` in `config/svolder/config.toml` (the file the container reads at
+`/config/svolder/config.toml`) and the sign-in, `docker exec svolder svolder web token`. The page is
+then reached from this computer and your network, and `svolder web --qr` and `web pair` carry the
+host's LAN address, as a native install's do; `listen = "127.0.0.1:8738"` keeps it on the host's loopback.
 
 A generated token would live in the container's own writable layer and change on every recreate,
 signing every browser out, so keep it under the mounted `./config`, where the host can read it too:
 make the file with the MCP token's two commands, `config/web-token` in place of `config/mcp-token`,
-and name it in `config/svolder/config.toml` together with the address links and QR codes carry,
-since the container cannot know the address a phone reaches it by:
+and name it in `config/svolder/config.toml`. `url`, the address links and QR codes carry, is needed
+only without host networking, where the container cannot know the address a phone reaches it by:
 
 ```toml
 [web]
 enabled = true
-listen = "0.0.0.0:8738"
 token_file = "/config/web-token"
 url = "http://192.0.2.10:8738/"
 ```
@@ -958,7 +968,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.32.0 on /run/user/1000/svolder.sock
+daemon: 0.32.5 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)

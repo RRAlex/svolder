@@ -146,7 +146,7 @@ function transport(status, inert) {
 }
 
 /**
- * The dash for `page` at the browser's `localMs`. With the computer as the side shown (`comp`, ../computer-view.js) its
+ * The dash for `page` at the browser's `localMs`. With the computer as the side shown (`comp`, the core's `computer.view()`) its
  * volume keys stand where the device's would. The sheet's key is always there; the player's
  * transport only when the player has buttons to give (a guest is not given them).
  */

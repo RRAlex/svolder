@@ -21,6 +21,19 @@ fn the_lab_finds_nothing_in_a_short_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
+/// The short run of the targeted profile ([`generate_targeted`]): nearly half of its events are a
+/// command-line apply, a node that starts again, a refusal read late, a write that fails once or
+/// a drag, and it catches a send to a node other than the one looked at about twice as often as
+/// the ordinary mix.
+const TARGETED_FIRST: u64 = 1;
+const TARGETED_RUNS: u64 = 300;
+
+#[test]
+fn the_lab_finds_nothing_in_a_short_targeted_run() {
+    let failures = run_targeted_seeds(TARGETED_FIRST, TARGETED_RUNS);
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
 /// The long run: `make preamp-lab`, with `SVOLDER_LAB_SEED` (the first seed) and
 /// `SVOLDER_LAB_RUNS` (how many) from the environment.
 #[test]
@@ -29,9 +42,10 @@ fn the_lab_finds_nothing_in_a_long_run() {
     let first = from_env("SVOLDER_LAB_SEED", 1_000);
     let runs = from_env("SVOLDER_LAB_RUNS", 5_000);
     let started = std::time::Instant::now();
-    let failures = run_seeds(first, runs);
+    let mut failures = run_seeds(first, runs);
+    failures.extend(run_targeted_seeds(first, runs));
     eprintln!(
-        "preamp lab: seeds {first}..{} ({runs} runs) in {:.0?}, {} failed",
+        "preamp lab: seeds {first}..{} ({runs} runs of each profile) in {:.0?}, {} failed",
         first + runs,
         started.elapsed(),
         failures.len()
@@ -102,6 +116,37 @@ fn the_evaluator_sees_a_peak_over_unity() {
     assert!((peak - 6.0).abs() < 0.01, "{peak}");
     let flat = dense_peak(&[[1.0, 0.0, 0.0, 0.0, 0.0]], 48_000);
     assert!(flat.abs() < 1e-9, "{flat}");
+}
+
+/// The evaluator's `|H|^2`, written for accuracy at the ends of the band, against `H(e^jw)` worked
+/// out directly with complex numbers.
+#[test]
+fn the_evaluator_agrees_with_the_transfer_function_at_complex_values() {
+    use svolder_profiles::tone::response::coefficients;
+    let sets = [
+        coefficients(FilterKind::Peaking, 1000.0, 6.0, 1.0, 48_000),
+        coefficients(FilterKind::LowShelf, 120.0, -7.5, 0.7, 48_000),
+        coefficients(FilterKind::HighShelf, 9000.0, 4.0, 2.5, 48_000),
+    ];
+    let direct = |w: f64| -> f64 {
+        sets.iter()
+            .map(|c| {
+                let z1 = (w.cos(), -w.sin());
+                let z2 = ((2.0 * w).cos(), -(2.0 * w).sin());
+                let num = (c[0] + c[1] * z1.0 + c[2] * z2.0, c[1] * z1.1 + c[2] * z2.1);
+                let den = (1.0 + c[3] * z1.0 + c[4] * z2.0, c[3] * z1.1 + c[4] * z2.1);
+                10.0 * ((num.0 * num.0 + num.1 * num.1) / (den.0 * den.0 + den.1 * den.1)).log10()
+            })
+            .sum()
+    };
+    for step in 1..200 {
+        let w = std::f64::consts::PI * f64::from(step) / 200.0;
+        let (ours, complex) = (summed_db(&sets, w), direct(w));
+        assert!(
+            (ours - complex).abs() < 1e-9,
+            "w {w}: {ours} against {complex}"
+        );
+    }
 }
 
 #[test]
@@ -184,6 +229,27 @@ fn a_line_that_carries_one_slot_leaves_the_rest_as_a_rate_change_put_them() {
                 steps: 4,
                 gap_ticks: 0,
             },
+        ],
+    );
+}
+
+/// The liveness rule's second half: a curve the sink's new rate cannot play turns the EQ off, and
+/// once the sink is back at a rate that plays it, the EQ turns on when asked.
+#[test]
+fn an_eq_turned_off_by_a_rate_it_cannot_play_turns_on_at_a_rate_it_can() {
+    holds(
+        48_000,
+        &[
+            Event::Load {
+                filters: vec![point(FilterKind::HighShelf, 1000.0, 14.5, 0.707)],
+                stated: 0.0,
+            },
+            Event::Ticks(45),
+            Event::Rate(192_000),
+            Event::Ticks(45),
+            Event::Rate(48_000),
+            Event::Ticks(45),
+            Event::Ticks(45),
         ],
     );
 }
@@ -288,13 +354,24 @@ fn a_new_chain_does_not_inherit_what_was_sent_to_the_old_one_after_a_pw_cli_deat
     );
 }
 
+/// The sequence of `seed` from the profile it fails in: the ordinary mix, else the targeted one,
+/// else (it passes in both) the ordinary mix.
+fn chosen_sequence(seed: u64) -> (u32, Vec<Event>) {
+    let targeted = sequence_of_targeted(seed);
+    let ordinary = sequence_of(seed);
+    match run_sequence(ordinary.0, &ordinary.1).is_err() {
+        false if run_sequence(targeted.0, &targeted.1).is_err() => targeted,
+        _ => ordinary,
+    }
+}
+
 /// The trace of one seed's shrunk failure, or of its whole sequence when it passes:
 /// `SVOLDER_LAB_SEED=17 cargo test -p svolder-host --lib lab_trace -- --ignored --nocapture`.
 #[test]
 #[ignore = "a debugging aid"]
 fn lab_trace() {
     let seed = from_env("SVOLDER_LAB_SEED", 1);
-    let (rate, events) = sequence_of(seed);
+    let (rate, events) = chosen_sequence(seed);
     let events = shrink(rate, &events);
     let trace = Mutex::new(Vec::new());
     let result = run_traced(rate, &events, Some(&trace));
@@ -325,6 +402,43 @@ fn holds(rate: u32, events: &[Event]) {
     if let Err(failure) = run_sequence(rate, events) {
         panic!("{} (event {})", failure.what, failure.event + 1);
     }
+}
+
+/// Seed 4965, shrunk: a drag, then a command-line apply the controller does not read before its
+/// own turn-off saves the state file over it, and the remove fails. Without the resend a save
+/// over a foreign file makes (the chain's own points sent again at the next look), the chain
+/// plays the command line's curve while the view says live with other points.
+#[test]
+fn a_turn_off_that_fails_over_a_command_line_apply_still_sends_the_points() {
+    holds(
+        192_000,
+        &[
+            Event::RefuseSends { ms: 1500 },
+            Event::Drag {
+                pick: 11,
+                kind: None,
+                f: None,
+                g: Some(4.381),
+                q: None,
+                steps: 4,
+                gap_ticks: 2,
+            },
+            Event::Fail { kind: 1 },
+            Event::Cli {
+                filters: vec![
+                    point(FilterKind::HighShelf, 3992.71, -2.809, 0.565),
+                    point(FilterKind::Peaking, 1200.53, 13.158, 0.135),
+                    point(FilterKind::HighShelf, 3207.55, 1.416, 0.58),
+                    point(FilterKind::LowShelf, 6497.35, -1.972, 0.087),
+                    point(FilterKind::LowShelf, 50.229, 6.15, 0.367),
+                    point(FilterKind::HighShelf, 22.238, -5.395, 0.258),
+                ],
+                stated: 0.0,
+                gap_ticks: 8,
+            },
+            Event::Toggle(false),
+        ],
+    );
 }
 
 #[test]
@@ -483,7 +597,7 @@ fn a_write_that_fails_once_does_not_land_the_daemons_line_on_a_chain_it_did_not_
 #[ignore = "a debugging aid"]
 fn lab_code() {
     let seed = from_env("SVOLDER_LAB_SEED", 1);
-    let (rate, events) = sequence_of(seed);
+    let (rate, events) = chosen_sequence(seed);
     let events = shrink(rate, &events);
     eprintln!(
         "// sink starts at {rate} Hz: {:?}",

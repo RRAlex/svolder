@@ -182,6 +182,7 @@ impl Watching {
             self.app.host.computer.eq = self.computer.view().map(Box::new);
             self.app.host.computer.why = self.computer.why.clone();
         }
+        self.app.settle_switch();
     }
 
     /// Say that the device did not come back: the app's values can no longer be updated, so the

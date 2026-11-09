@@ -361,7 +361,8 @@
 .nd-ptable td:nth-child(2) { text-align: left; }
 .nd-ptable tbody tr:focus-within, .nd-ptable tbody tr:hover { background: rgba(255, 60, 200, .1); }
 .nd-ptable tbody tr:focus-within .nd-v { border-color: rgba(255, 60, 200, .6); }
-.nd-ptable .nd-v { width: 100%; max-width: 7.6em; text-align: right; }
+.nd-ptable .nd-stepper { display: flex; justify-content: flex-end; }
+.nd-ptable .nd-v { width: 5.6em; max-width: 7.6em; text-align: right; }
 .nd-ptype {
   height: 24px; padding: 0 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--nd-mid);
   font: 400 13px/1 var(--nd-mono); appearance: none; -webkit-appearance: none; cursor: pointer;
@@ -489,7 +490,7 @@
   .nd-pscroll { --nd-prow: 44px; max-height: calc(var(--nd-prow) * 5.5 + 28px); }
   .nd-px { width: 44px; height: 44px; }
   .nd-ptype { height: 44px; font-size: 15px; }
-  .nd-ptable .nd-v { max-width: 6.4em; }
+  .nd-ptable .nd-v { width: 6em; max-width: 6.4em; }
 }
 /* the sheet on a phone held upright: it slides up from the dash to 30 % from the top, one column */
 @media (max-width: 719px) and (min-height: 500px) {
@@ -549,6 +550,17 @@
   .nd-bandtable tbody th::before { content: "Band "; }
   .nd-bandtable td { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; }
   .nd-bandtable td::before { content: attr(data-head); color: var(--nd-dim); }
+  /* a point is a block too: its type, its three values between their steppers, each named, and its remove */
+  .nd-pscroll { max-height: min(60vh, 460px); }
+  .nd-ptable, .nd-ptable tbody { display: block; }
+  .nd-ptable thead { display: none; }
+  .nd-ptable tr { display: block; padding: 6px 0; border-top: 1px solid var(--nd-hair); }
+  .nd-ptable tbody th { display: block; padding: 2px 4px; }
+  .nd-ptable tbody th::before { content: "Point "; }
+  .nd-ptable td { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; height: auto; min-height: var(--nd-prow); }
+  .nd-ptable td::before { content: attr(data-head); color: var(--nd-dim); }
+  .nd-ptable td.nd-pxc { width: auto; justify-content: flex-end; }
+  .nd-ptable td.nd-pxc::before { content: none; }
 }
 
 /* ---- the states: out of reach, lost, reading again, no analysis; every look is opacity or a static colour,

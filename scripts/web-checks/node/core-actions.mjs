@@ -208,6 +208,29 @@ await ok('a_raise_queued_for_a_device_no_longer_shown_is_not_sent', async () => 
   assert.equal(answer.dropped, true);
 });
 
+await ok('a_raise_the_sender_drops_after_a_refusal_does_not_replace_the_refusal', async () => {
+  const gates = [];
+  let r = null;
+  // The refusal is heard (the model is read again) while the link is lost, and a raise is asked
+  // for then: the sender takes it next and drops it, the run's answer stays the refusal.
+  r = rig({
+    reply: () => new Promise((resolve) => gates.push(resolve)),
+    model: () => {
+      r.store.setState('lost');
+      r.actions.setVolume(60);
+      return { status: 200, body: { device: dac(), strip: null } };
+    },
+  });
+  const first = r.actions.setVolume(25);
+  await flush();
+  gates[0]({ status: 409, error: 'Refused: loud' });
+  const answer = await first;
+  assert.equal(r.posts.length, 1, 'the raise was not sent');
+  assert.equal(answer.ok, false);
+  assert.equal(answer.dropped, undefined, 'the answer is the refusal, not the dropped raise');
+  assert.equal(answer.error, 'Refused: loud');
+});
+
 await ok('a_refusal_with_no_words_says_the_words_it_always_did', async () => {
   const bare = () => ({ status: 409 });
   const said = async (run) => {

@@ -1224,3 +1224,28 @@ async fn identify_on_a_refused_but_held_link_answers_sent_and_reaches_the_device
         .count();
     assert_eq!(identifies, 1, "function 200 reached the device once");
 }
+
+/// A file that configures one unit twice (written before the rule) starts and reloads with one
+/// actor for the unit, the first block's, and says so in its warnings.
+#[tokio::test]
+async fn a_unit_configured_twice_gets_one_actor_at_start_and_at_reload() {
+    let dir = std::env::temp_dir().join(format!("svolderd-dupunit-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("profiles")).unwrap();
+    let config = dir.join("config.toml");
+    std::fs::write(
+        &config,
+        "[[device]]\nname = \"dac\"\nudid = \"0102030405060708\"\n\n\
+         [[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n",
+    )
+    .unwrap();
+    let loaded = Config::load_from(&config).expect("the file starts the daemon");
+    assert_eq!(loaded.warnings().len(), 1, "{:?}", loaded.warnings());
+    let daemon = daemon_over(config.clone(), dir.join("profiles")).shared();
+    daemon.reconcile(&loaded).await;
+    assert_eq!(daemon.devices().len(), 1);
+    daemon.reload_all().await.expect("the reload goes through");
+    let names: Vec<String> = daemon.devices().iter().map(|d| d.name.clone()).collect();
+    assert_eq!(names, ["dac"]);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

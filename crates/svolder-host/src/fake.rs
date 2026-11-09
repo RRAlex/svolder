@@ -17,7 +17,7 @@ use crate::capture::{Block, Capture, FrameCapture};
 use crate::eq::live::set_param_line;
 use crate::eq::{
     ApplyRequest, Chain, EqFailure, HostEqState, LiveNode, Manager, Params, Route,
-    Status as EqStatus, check_playable, played_preamp,
+    Status as EqStatus, played_preamp,
 };
 use crate::players::{Button, Changes, NowPlaying, Players, Status};
 use crate::sink::{Sink, SinkState};
@@ -574,11 +574,10 @@ impl Chain for FakeChain {
         if let Some(failure) = inner.refusing.clone() {
             return Err(failure);
         }
-        // The real host refuses a curve its chain cannot play; so does this one.
-        check_playable(
-            &request.correction,
-            request.rate_hz.unwrap_or(crate::eq::live::CONFIG_RATE_HZ),
-        )?;
+        // The real host's checks, the same ones: what it refuses, this refuses.
+        let mut request = request;
+        let held = crate::eq::checked_request(&mut request, Manager::Child)?;
+        let rate = request.rate_hz.unwrap_or(crate::eq::live::CONFIG_RATE_HZ);
         let state = HostEqState {
             on: true,
             name: request.name,
@@ -587,12 +586,9 @@ impl Chain for FakeChain {
             route: Route::Smart,
             manager: Manager::Child,
             previous_default: None,
-            preamp_db: played_preamp(
-                &request.correction,
-                request.rate_hz.unwrap_or(crate::eq::live::CONFIG_RATE_HZ),
-            ),
-            filters: request.correction.filters,
-            slots: request.slots,
+            preamp_db: played_preamp(&request.correction, rate),
+            filters: held.filters,
+            slots: held.slots,
         };
         inner.state = Some(state.clone());
         Ok(state)
@@ -997,6 +993,43 @@ mod tests {
             ]
         );
     }
+
+    fn request(filters: usize, preamp_db: f64) -> crate::eq::ApplyRequest {
+        use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
+        crate::eq::ApplyRequest {
+            name: "Test".into(),
+            origin: None,
+            correction: Correction {
+                preamp_db,
+                filters: (0..filters)
+                    .map(|i| SourceFilter {
+                        kind: FilterKind::Peaking,
+                        f: 100.0 + 50.0 * i as f64,
+                        g: 0.5,
+                        q: 1.0,
+                    })
+                    .collect(),
+            },
+            sink: None,
+            slots: Vec::new(),
+            rate_hz: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_fake_chain_refuses_what_the_real_path_refuses() {
+        let chain = FakeChain::new();
+        // More than 16 filters, and a preamp past +30 dB, are refused by `checked_request`.
+        assert!(chain.apply(request(17, 0.0)).await.is_err());
+        assert!(chain.apply(request(1, 31.0)).await.is_err());
+        assert!(
+            chain.lock().state.is_none(),
+            "a refused request leaves no state"
+        );
+        // What the real path takes, it takes, with the slots filled in.
+        let state = chain.apply(request(16, -3.0)).await.unwrap();
+        assert_eq!(state.slots.len(), 16);
+    }
 }
 
 /// Live-chain parameters that go nowhere: a [`Params`] that records every send as the line
@@ -1020,7 +1053,8 @@ struct ParamsInner {
 }
 
 impl Default for FakeParams {
-    /// A fake with a node (id 1, 48 kHz, holding nothing) that takes every send.
+    /// A fake with a node (id 1, 48 kHz) that takes every send, whose preamp ports hold +60 dB,
+    /// which bounds no preamp a controller sends.
     fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(ParamsInner {
@@ -1028,10 +1062,7 @@ impl Default for FakeParams {
                     id: 1,
                     rate_hz: Some(48_000),
                     // A current chain lists its preamp control before any set.
-                    params: crate::eq::live::preamp_params(0.0)
-                        .into_iter()
-                        .map(|(name, _)| (name, 0.0))
-                        .collect(),
+                    params: crate::eq::live::preamp_params(60.0).into_iter().collect(),
                 }),
                 takes: true,
                 lines: Vec::new(),
@@ -1104,10 +1135,10 @@ impl Params for FakeParams {
             return false;
         };
         let id = inner.kept.unwrap_or(current);
-        inner.kept = Some(id);
         if id != node {
             return false;
         }
+        inner.kept = Some(id);
         if !inner.takes {
             return false;
         }

@@ -419,6 +419,8 @@ impl App {
         self.enter(screen);
         self.focus_memory = FocusMemory::default();
         self.selected = 0;
+        self.switch_focus = false;
+        self.leave_target();
         self.frame_flags.navigated = false;
     }
 
@@ -468,11 +470,21 @@ impl App {
             Screen::Tone | Screen::Settings | Screen::Setup => (0, 1),
         };
         self.selected = row.min(len.saturating_sub(1));
+        self.switch_focus = false;
+        self.leave_target();
+    }
+
+    /// The switch is a row of the tone screen only: a cursor left on it goes back to Mode.
+    fn leave_target(&mut self) {
+        if self.tone.row == crate::tui::app::ToneRow::Target {
+            self.tone.row = crate::tui::app::ToneRow::Mode;
+        }
     }
 
     /// Move the focused row of a list `len` long, and ask for nothing.
     pub(super) fn move_row(&mut self, delta: isize, len: usize) -> Vec<Intent> {
         self.selected = stepped(self.selected, delta, len);
+        self.switch_focus = false;
         Vec::new()
     }
 

@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 import common
+import mutpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 S = HERE + '/'
@@ -640,12 +641,16 @@ def run(name, f, old, new, cmd):
 
 only = sys.argv[1:]
 bad = 0
+ran = 0
 for name, f, old, new, cmd in M:
     if only and not any(o in name for o in only):
         continue
-    killed, detail = run(name, f, old, new, cmd)
+    with mutpool.gate(False):
+        killed, detail = run(name, f, old, new, cmd)
+    ran += 1
     label = 'ERROR   ' if killed is None else 'killed  ' if killed else 'SURVIVED'
     print(label, name, '|', detail)
     bad += 0 if killed else 1
 print('survivors/errors:', bad)
+print(f'{ran - bad} of {ran} mutations killed')
 sys.exit(1 if bad else 0)

@@ -16,7 +16,6 @@
 // on a phone) the volume keys step and mute the computer through `core.actions.computer`; a flip of the side ends
 // a key held down.
 
-import { computerView } from './computer-view.js';
 import { entryOf } from './hud.js';
 import {
   drawDash, moveProgress, placeFills, switchKeys,
@@ -85,7 +84,7 @@ export function wireDash({
 
   function draw(model) {
     const at = Date.now();
-    const comp = computerView(core);
+    const comp = core.computer.view();
     drawSwitch(comp);
     const html = drawDash(model, view, at, comp);
     const sig = sigOf(html);
@@ -173,8 +172,7 @@ export function wireDash({
     const v = volume();
     // A viewer who may not write is told so even where the device has no volume reading (the core
     // turns the call away before it looks at the step).
-    const viewer = store.page().viewer ?? {};
-    if (viewer.guest === true || viewer.writes === false) {
+    if (!core.actions.canWrite()) {
       core.actions.setVolume(0, { device: target });
       return;
     }

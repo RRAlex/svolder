@@ -6,8 +6,7 @@
 // the same words and the core says why nothing happens.
 //
 // The computer's presets are the same list (the person's own renamed, deleted and saved the same way); a preset
-// recalled there that a connected device plays too is the core's question (core.ask), whose card is dressed by
-// Night drive's frame tokens.
+// recalled there that a connected device plays too is asked the same way as a delete, in the section's own place.
 //
 // The sheet is held while a form, a question or a list is open, so a change from elsewhere does not
 // take the words from under it; it is drawn from the newest model when the last one closes. What is
@@ -41,18 +40,29 @@ export function wirePresets({
     return tone ? { ...device, presets: presetsOf(tone) } : device;
   };
 
-  /** The computer's list is read again once a write of it is answered ok (a name changed it). */
-  const reread = async (answer) => {
-    if (answer?.ok === true && onComputer()) await core.computer.resync();
-    return answer;
-  };
-
   /** The place a form or a question opens in: the ask of the section the word is in, found now (the
    * sheet may have been drawn again since the word was). */
   const within = (el) => el.closest('.nd-sec')?.querySelector('.nd-ask') ?? wrap.querySelector('.nd-ask');
 
   /** Hold the sheet while an ask is open; the ask's `onClose` gives the hold back. */
   const ask = (open) => keep.around(() => open(() => keep.dropLater()));
+
+  /** The question the daemon hands back for a preset that the computer and a connected device would both play: it
+   * resolves true on `apply`, false on `keep` or Escape. The sheet is held while it is open. */
+  const bothSides = (el) => (words) => new Promise((resolve) => {
+    let said = false;
+    ask((onClose) => askQuestion({
+      within: within(el), words, yes: 'apply', no: 'keep', signal, opener: el,
+      onClose: () => {
+        onClose();
+        resolve(said);
+      },
+      go: async () => {
+        said = true;
+        return { ok: true };
+      },
+    }));
+  });
 
   /** Open `options` as a list under `opener`, holding the sheet; `then` hears the value chosen. */
   function pick(opener, label, options, then) {
@@ -66,7 +76,8 @@ export function wirePresets({
   function rename(el, from, opened) {
     ask((onClose) => askForm({
       within: within(el), kind: 'rename', value: from, signal, opener: el, onClose,
-      submit: (text) => act.act('preset', text, (a) => a.renamePreset(from, text, opened)).then(reread),
+      submit: (text) => act.act('preset', text, (a) => (onComputer() ? a.computer.renamePreset(from, text, opened)
+        : a.renamePreset(from, text, opened))),
     }));
   }
 
@@ -75,7 +86,8 @@ export function wirePresets({
     ask((onClose) => askQuestion({
       within: within(el), words: SHEET.askDelete(from), yes: 'delete', no: 'keep',
       signal, opener: el, onClose,
-      go: () => act.act('preset', from, (a) => a.deletePreset(from, opened)).then(reread),
+      go: () => act.act('preset', from, (a) => (onComputer() ? a.computer.deletePreset(from, opened)
+        : a.deletePreset(from, opened))),
     }));
   }
 
@@ -103,14 +115,8 @@ export function wirePresets({
     const opened = { device: store.shown() };
     if (what === 'preset') {
       const { name } = el.dataset;
-      const chip = el.id;
-      act.act('preset', name, (a) => (onComputer() ? a.computer.recallPreset(name) : a.recallPreset(name, opened)))
-        .catch(() => {})
-        .then(() => {
-          // the question card gave the focus back to a chip the sheet may have drawn again meanwhile
-          const doc = wrap.ownerDocument;
-          if (chip && (!doc.activeElement || doc.activeElement === doc.body)) doc.getElementById(chip)?.focus({ preventScroll: true });
-        });
+      act.act('preset', name, (a) => (onComputer() ? a.computer.recallPreset(name, { asker: bothSides(el) })
+        : a.recallPreset(name, opened))).catch(() => {});
     } else if (what === 'preset-save') {
       ask((onClose) => askForm({
         within: within(el), kind: 'save', value: '', signal, opener: el, onClose,

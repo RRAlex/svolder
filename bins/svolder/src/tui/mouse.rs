@@ -60,6 +60,8 @@ pub enum Hit {
     /// Show this side of the switch between the device's volume and tone control and the
     /// computer's.
     Side(Side),
+    /// The switch line outside its two names: focuses the switch row.
+    Target,
     /// Focus this point of the computer's table, 0-based.
     Point(usize),
     /// One cell of a point's row: its type (`0`), frequency, gain or Q.
@@ -277,6 +279,8 @@ pub enum MouseAction {
     /// Step the tone control's mode this way, the way a click on the Mode select's `‹` or `›`
     /// does: finished the way [`App::step_tone_mode`] finishes it, with no change of focus.
     StepMode(i64),
+    /// A click on the switch: focus its row, and on a name show that side.
+    Target(Option<Side>),
     /// Press this key, which is what a click on a word of a border asks for.
     Key(KeyCode),
     /// Hold this band's point for this gesture, focusing the band: a press on the curve that
@@ -584,8 +588,8 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::PaneHeader(pane) => Some(MouseAction::Focus(pane, app.selected)),
         Hit::Band(i) | Hit::Point(i) => Some(MouseAction::Band(i)),
         Hit::PointField(point, field) => Some(MouseAction::PointField { point, field }),
-        Hit::Side(side) => ((side == Side::Computer) != app.on_computer())
-            .then_some(MouseAction::Key(KeyCode::Char('C'))),
+        Hit::Side(side) => Some(MouseAction::Target(Some(side))),
+        Hit::Target => Some(MouseAction::Target(None)),
         // The edit line is drawn over the tone-control screen only, so on the device screen's
         // Tone pane a double-click selects the band and goes no further.
         Hit::BandField(band, field) => Some(

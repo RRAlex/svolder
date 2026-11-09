@@ -1265,9 +1265,7 @@ fn dangling_default_failure(config: &Config, selector: Option<&str>) -> Option<F
     if selector.is_some() {
         return None;
     }
-    config
-        .dangling_default()
-        .map(|name| config_error(svolder_ipc::config::dangling_default_message(name)))
+    config.dangling_default_failure().map(config_error)
 }
 
 /// Say under `-v` which daemon a verb is talking to.

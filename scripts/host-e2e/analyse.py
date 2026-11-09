@@ -637,12 +637,17 @@ def main():
     # E2. After a live softening, a forced rate change never plays over unity. The graph goes back
     # to the config's coefficients (the hot curve the chain was applied with, a +6 dB peak on the
     # tone); the preamp does not, so it must never have risen past what that curve needs.
+    old_id = node(CHAIN)['id']
     conn.eq({'op': 'mode', 'on': False})
     wait_until('the view to say off', lambda: conn.view()['eq']['on'] is False, 5)
     wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
     conn.eq({'op': 'set', 'index': 1, 'kind': 'PK', 'f': 1000.0, 'g': 6.0, 'q': 1.0, 'done': True})
     wait_until('the view to say on', lambda: conn.view()['eq']['on'] is True, 10)
     wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    new_id = node(CHAIN)['id']
+    say('E2 the chain\'s node id: %d before the chain was taken away, %d after it started again' % (old_id, new_id))
+    check(old_id != new_id,
+          'a chain started again is a node under a new id (%d, then %d): the controller tells a restart by its id' % (old_id, new_id))
     applied = conn.view()
     ok, _, lv_hot = wait_level(base, expected_db(applied, RATE), 0.15, 15)
     check(ok, 'the +6 dB peak on the tone, applied, plays as the model says (%+.3f dB)' % (lv_hot or 0))
@@ -678,6 +683,40 @@ def main():
     check(softened['eq']['preamp_db'] <= applied['eq']['preamp_db'] + 0.05,
           'the preamp stayed at the applied curve\'s %+.1f dB after the live softening (%+.1f dB)'
           % (applied['eq']['preamp_db'], softened['eq']['preamp_db']))
+
+    # E3. 16 points: a live update carries every slot (about 5 KB a line). The drag of one point
+    # reaches the chain whole and the chain is not restarted.
+    for i in range(15):
+        conn.eq({'op': 'add', 'kind': 'PK', 'f': 120.0 * 1.4 ** i, 'g': 0.5 if i % 2 else -0.5, 'q': 1.0})
+    wait_until('16 points', lambda: len(conn.view()['eq']['points']) == 16, 5)
+    chain16 = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    # The drag moves the point under the tone (1 kHz), by -3 dB: that is a 3 dB change at the tone,
+    # ten times the tolerance, and a cut leaves the preamp where E2 capped it. The level is
+    # read before the drag and after it: a line that is cut or refused leaves the chain at the
+    # first level, and the step fails, where the model alone (which follows the view) would not.
+    tone_at = min(range(len(conn.view()['eq']['points'])),
+                  key=lambda k: abs(conn.view()['eq']['points'][k]['f'] - TONE_HZ)) + 1
+    g0 = conn.view()['eq']['points'][tone_at - 1]['g']
+    ok0, _, lv_before = wait_level(base, expected_db(conn.view(), RATE), 0.15, 15)
+    check(ok0, 'with 16 points the chain plays as the model says before the drag (%+.3f dB)' % (lv_before or 0))
+    for i in range(1, 41):
+        conn.eq({'op': 'set', 'index': tone_at, 'g': g0 - 3.0 * i / 40, 'done': False})
+        time.sleep(0.05)
+    conn.eq({'op': 'set', 'index': tone_at, 'g': g0 - 3.0, 'done': True})
+    wait_until('-3 dB in the view', lambda: abs(conn.view()['eq']['points'][tone_at - 1]['g'] - (g0 - 3.0)) < 0.01, 5)
+    full = conn.view()
+    ok, _, lv16 = wait_level(base, expected_db(full, RATE), 0.15, 15)
+    moved = (lv16 or 0) - (lv_before or 0)
+    check(ok and full['eq']['live'] is True and abs(moved + 3.0) <= 0.3,
+          'with 16 points the drag lands as the model says (%+.3f dB, model %+.3f), the level moved %+.3f dB '
+          '(about -3) and the view says live' % (lv16 or 0, expected_db(full, RATE), moved))
+    after16 = node(CHAIN)
+    check(after16 is not None and (after16['id'], _private_pids('host-eq.conf')) == chain16,
+          'the chain was not restarted during the 16-point drag')
+    for _ in range(15):
+        conn.eq({'op': 'remove', 'index': 2})
+    wait_until('one point again', lambda: len(conn.view()['eq']['points']) == 1, 5)
+    conn.eq({'op': 'set', 'index': 1, 'g': 0.0, 'done': True})
 
     # F. Off: the chain goes, the level returns
     rec = Recording()

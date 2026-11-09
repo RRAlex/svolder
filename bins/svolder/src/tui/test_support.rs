@@ -707,3 +707,30 @@ pub(crate) fn computer_eq(
         running_unknown: false,
     })
 }
+
+/// The Target line of a frame: its text, and the modifiers and foreground of the first cell of
+/// the device's `name` and of `Computer`, for the tests of which side the line makes stand out.
+#[cfg(test)]
+pub(crate) fn target_sides(
+    buffer: &Buffer,
+    name: &str,
+) -> (String, (Modifier, Color), (Modifier, Color)) {
+    let area = buffer.area;
+    for y in 0..area.height {
+        let row: Vec<&str> = (0..area.width)
+            .map(|x| buffer.cell((x, y)).map_or(" ", |cell| cell.symbol()))
+            .collect();
+        let line = row.concat();
+        if !line.contains("Target ‹ ") {
+            continue;
+        }
+        let at = |word: &str| {
+            let byte = line.find(word).expect("a side on the Target line");
+            let x = u16::try_from(line[..byte].chars().count()).expect("a column");
+            let cell = buffer.cell((x, y)).expect("a cell");
+            (cell.modifier, cell.fg)
+        };
+        return (line.trim_end().to_string(), at(name), at("Computer"));
+    }
+    panic!("no Target line in the frame");
+}

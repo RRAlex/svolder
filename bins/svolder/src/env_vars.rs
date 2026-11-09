@@ -264,6 +264,34 @@ const ENV_VARS: &[EnvVar] = &[
                Unset by default; an empty value counts as unset.",
     },
     EnvVar {
+        name: "SVOLDER_WEB_LISTEN",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "The address `[web]` listens on when `config.toml` has no `listen` key (a `listen` in \
+               the file wins), such as `0.0.0.0:8738`. The container image sets it so the page \
+               is reached on the host's network. Unset by default, which is loopback; an empty value counts as \
+               unset.",
+    },
+    EnvVar {
+        name: "SVOLDER_WEB_URL",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "The address links and QR codes carry when `config.toml` has no `[web] url` (a `url` in \
+               the file wins), such as `http://192.168.1.10:8738`. Only a container without host \
+               networking, or behind a reverse proxy, needs it. Unset by default; an empty value \
+               counts as unset, and a value that is not an http:// or https:// address is refused \
+               by name.",
+    },
+    EnvVar {
+        name: "SVOLDER_MCP_LISTEN",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "The address `[mcp]` listens on when `config.toml` has no `listen` key (a `listen` in \
+               the file wins), such as `0.0.0.0:8737`. The container image sets it so the server \
+               is reached on the host's network. Unset by default, which is loopback; an empty value counts \
+               as unset.",
+    },
+    EnvVar {
         name: "SVOLDER_WEB_ASSETS",
         read_by: "svolderd",
         dev_only: true,

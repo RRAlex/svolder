@@ -18,7 +18,10 @@
 // whose write was refused, which writes nothing more.
 
 import { MODE_SET_WORDS, newest } from './api.js';
-import { dbAt, hzAt, yOf } from './tone-curve.js';
+import { HAND } from './computer.js';
+import {
+  VIEW_HEIGHT, VIEW_WIDTH, dbAt, hzAt, yOf,
+} from './tone-curve.js';
 
 // How far from a band's point a press grabs it, in CSS px; the wheel starts a burst from further,
 // as a hand rolling a wheel is not as steady as one holding a button.
@@ -33,9 +36,6 @@ export const Q_HALVES_PX = 120;
 export const WHEEL_STEP_PX = 40;
 // The gap between the dragged point and its label, in CSS px.
 export const LABEL_GAP_PX = 10;
-
-const VIEW_WIDTH = 1000;
-const VIEW_HEIGHT = 260;
 
 // The curve's plot as a map from the pointer's place (CSS px within `plot`, { width, height }) to
 // values: the frequency at an x, the gain at a y, and the y of a gain.
@@ -297,10 +297,16 @@ let computerTables = null;
  */
 export function computerSteps() {
   if (computerTables) return computerTables;
-  const f = Array.from({ length: 240 }, (_, k) => round(20 * 2 ** (k / 24), 3));
-  if (f.at(-1) < 20000) f.push(20000);
-  const g = Array.from({ length: 241 }, (_, i) => (i - 120) / 10);
-  const q = Array.from({ length: 49 }, (_, k) => round(0.1 * 10 ** (k / 24), 3));
+  const [fLow, fHigh] = HAND.f;
+  const [gLow, gHigh] = HAND.g;
+  const [qLow, qHigh] = HAND.q;
+  const f = Array.from({ length: Math.ceil(Math.log2(fHigh / fLow) * 24) },
+    (_, k) => round(fLow * 2 ** (k / 24), 3));
+  if (f.at(-1) < fHigh) f.push(fHigh);
+  const g = Array.from({ length: Math.round((gHigh - gLow) * 10) + 1 },
+    (_, i) => (Math.round(gLow * 10) + i) / 10);
+  const q = Array.from({ length: Math.round(Math.log10(qHigh / qLow) * 24) + 1 },
+    (_, k) => round(qLow * 10 ** (k / 24), 3));
   computerTables = { f, g, q };
   return computerTables;
 }
@@ -324,6 +330,17 @@ export function startOf(tables, point) {
     g: near(tables.g, point.g, byDistance),
     q: near(tables.q, point.q, byDistance),
   };
+}
+
+/**
+ * The value one step of `steps` from `point`'s `param` towards `delta` (`1` or `-1`), or `null`:
+ * a step never goes against its key, so a point beyond the hand range, or at the end of the
+ * table, stays where it is.
+ */
+export function stepAgainst(steps, point, param, delta) {
+  const table = steps[param];
+  const at = Math.min(table.length - 1, Math.max(0, startOf(steps, point)[param] + delta));
+  return Math.sign(table[at] - point[param]) === delta ? table[at] : null;
 }
 
 /**

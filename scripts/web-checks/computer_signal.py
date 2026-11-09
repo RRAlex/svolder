@@ -18,6 +18,8 @@ on the computer:
   the_mode_the_type_a_typed_value_and_the_presets_write   Off | EQ, the type choice, a value typed into
                                         a field, a preset recalled
   presets_save_rename_and_delete_on_the_computer_side   Save as, Rename and Delete work as on the DAC
+  a_typed_value_is_rounded_to_its_places   a value typed is rounded to f 2, g 1, q 2 places; one equal to the point's own writes nothing
+  a_flip_mid_hold_ends_the_repeat       a keyboard flip while + is held ends the repeat for good
   the_wheel_sets_the_q                  a notch over a dot steps its Q, away from one it is the page's
   sixteen_points_keep_the_layout        the table is as tall with 16 points as with 7
   a_flip_mid_drag_ends_it_with_one_final_value   live posts before the flip, then a flip ends the drag and exactly
@@ -25,8 +27,9 @@ on the computer:
   a_guest_sees_the_computer_inert       a guest may flip and every computer control is inert
   the_side_survives_a_reload            the hop chosen is the computer's after a load, the first paint
                                         never a live 0 %, and the load writes nothing
-  the_same_preset_on_both_asks_and_yes_flattens_the_dac   the question card; no sends nothing, yes
-                                        confirms and the DAC is flat
+  the_same_preset_on_both_asks_and_yes_flattens_the_dac   the shelf's own question; keep sends nothing, apply
+                                        confirms and the DAC is flat, the focus back on the chip
+  a_question_opens_after_the_shelf_was_drawn_again   the shelf drawn again while the recall is on its way: the question still shows
   the_amp_page_flips_to_the_computer_with_the_dac_parts   the fake amp's line has the hop and, chosen,
                                         the DAC page's level, curve and points
   a_load_with_the_computer_kept_but_unavailable_shows_the_dac   the DAC's screen is drawn and the hop says why
@@ -80,11 +83,28 @@ HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {
         " const n = document.querySelector('#sg-cbig .sg-num');"
         " if (n && window.__nums[window.__nums.length - 1] !== n.textContent) window.__nums.push(n.textContent); })"
         ".observe(document, { subtree: true, childList: true, characterData: true });")
+# the touch listeners now registered on the computer's graph (a pinch adds and removes its own)
+LISTENERS = """(() => { const add = EventTarget.prototype.addEventListener;
+  const rm = EventTarget.prototype.removeEventListener; const held = new WeakMap();
+  EventTarget.prototype.addEventListener = function (type, fn, opts) {
+    if (String(type).startsWith('touch') && this.id === 'sg-cgraph') {
+      const all = held.get(this) || []; const cap = typeof opts === 'object' ? !!opts.capture : !!opts;
+      if (!all.some((e) => e[0] === type && e[1] === fn && e[2] === cap)) all.push([type, fn, cap]);
+      held.set(this, all);
+    }
+    return add.call(this, type, fn, opts); };
+  EventTarget.prototype.removeEventListener = function (type, fn, opts) {
+    const all = held.get(this); const cap = typeof opts === 'object' ? !!opts.capture : !!opts;
+    if (all) held.set(this, all.filter((e) => !(e[0] === type && e[1] === fn && e[2] === cap)));
+    return rm.call(this, type, fn, opts); };
+  window.__touchListeners = () => (held.get(document.querySelector('#sg-cgraph')) || []).length; })();"""
 BOOT = """import(new URL('assets/core/boot.js', document.baseURI)).then(async (m) => {
   await m.mounted; window.__core = m.core; return m.core.theme.id; })"""
 COMPUTER = '__core.model.page().host?.computer'
 POINTS = f'{COMPUTER}.eq.points'
 CARD = "document.querySelector('.ask')"
+ASK_BOX = '#sg-cpresets .sg-askbox'
+ASK = f"document.querySelector('{ASK_BOX}')"
 HOP = '#sg-line [data-hop="computer"]'
 DEVICE_HOP = '#sg-line [data-hop="device:Gungnir%202"]'
 
@@ -470,8 +490,10 @@ def drag(b, d):
     b.press('ArrowRight')
     time.sleep(0.8)
     got = posts(b, 'api/v1/host/eq/points/2')
-    check('a_point_drag_posts_live_and_done_at_release: an arrow on a focused dot steps its frequency, done',
-          len(got) == 1 and got[0][1].get('done') is True and got[0][1]['f'] > f0, [f0, got])
+    check('a_point_drag_posts_live_and_done_at_release: an arrow on a focused dot steps its frequency: one live post, '
+          'then one done with the same value',
+          len(got) == 2 and [p[1].get('done') for p in got] == [False, True] and got[0][1]['f'] > f0
+          and got[1][1].get('f', got[0][1]['f']) == got[0][1]['f'], [f0, got])
 
 
 def add_remove(b, d):
@@ -540,6 +562,66 @@ def add_remove(b, d):
           [got, b.page(POINTS)])
 
 
+def second_finger(b, d):
+    """Finger 1 down on empty graph ground, finger 2 down off the graph, finger 1 up at once: two fingers were
+    down, so no point is added; one finger alone still adds one."""
+    name = 'a_second_finger_off_the_graph_makes_the_tap_no_tap'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 3)
+    s = state(b)
+    px, py, pw, ph = s['plot']
+    spot = None
+    for fx in (0.12, 0.3, 0.45, 0.62, 0.78, 0.9):
+        for fy in (0.12, 0.88, 0.25, 0.75):
+            x, y = px + fx * pw, py + fy * ph
+            if all(math.hypot(x - mx, y - my) > 40 for mx, my in s['marks'].values()):
+                spot = (x, y)
+                break
+        if spot:
+            break
+    x, y = spot
+    n = b.page(f'{POINTS}.length')
+    log = len(posts(b, 'api/v1/host/eq/points'))
+    graph = "document.querySelector('#sg-cgraph')"
+    touch = ("(type, el, x, y, id, primary) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true,"
+             " pointerId: id, pointerType: 'touch', isPrimary: primary, button: 0, buttons: type === 'pointerup' ? 0 : 1,"
+             " clientX: x, clientY: y }))")
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 3, true);"
+           f" t('pointerdown', document.body, 5, 5, 4, false); t('pointerup', {graph}, {x}, {y}, 3, true); return 1; }})()")
+    time.sleep(0.9)
+    check(f'{name}: no point is added', b.page(f'{POINTS}.length') == n
+          and len(posts(b, 'api/v1/host/eq/points')) == log, [n, b.page(f'{POINTS}.length')])
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 5, true); t('pointerup', {graph}, {x}, {y}, 5, true); return 1; }})()")
+    check(f'{name}: one finger alone still adds one', poll(lambda: b.page(f'{POINTS}.length') == n + 1) is True,
+          b.page(f'{POINTS}.length'))
+
+
+def full_table(b, d):
+    """With sixteen points a tap on empty ground adds nothing and says how many the EQ holds at most."""
+    name = 'a_tap_on_a_full_table_says_so'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 16)
+    s = state(b)
+    px, py, pw, ph = s['plot']
+    spot = None
+    for fx in (0.05, 0.12, 0.3, 0.45, 0.62, 0.78, 0.9, 0.97):
+        for fy in (0.06, 0.94, 0.12, 0.88, 0.25, 0.75):
+            x, y = px + fx * pw, py + fy * ph
+            if all(math.hypot(x - mx, y - my) > 20 for mx, my in s['marks'].values()):
+                spot = (x, y)
+                break
+        if spot:
+            break
+    most = b.page(f'{COMPUTER}.eq.max')
+    forget(b)
+    b.click(*spot)
+    said = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)") or None)
+    check(f'{name}: a tap says the most the daemon holds', said == [f'{most} is the most'] and most is not None, [said, most])
+    check(f'{name}: and writes nothing', posts(b, 'api/v1/host/eq/points') == [], posts(b))
+
+
 def sorted_points(b, d):
     name = 'the_points_are_listed_by_frequency_and_the_selection_follows'
     load(b, d)
@@ -595,6 +677,10 @@ def untouched(b, d):
     time.sleep(0.6)
     check('an_untouched_cell_writes_nothing: Enter on a +14 dB field as it was posts nothing (it is not pulled in to +12)',
           editing is True and posts(b) == [], (editing, b.page(held), posts(b)))
+    # the page is read again after the Enter: the field and the model both still say +14
+    again = b.page(held)
+    check('an_untouched_cell_writes_nothing: after the Enter the field and the model still say +14',
+          '14.0' in (again or '') and b.page(f'{POINTS}[2].g') == 14, (again, b.page(f'{POINTS}[2]')))
     at_fourteen(b, '#sg-cf-3g')
     type_into(b, '#sg-cf-3g', '14')
     time.sleep(0.6)
@@ -605,6 +691,74 @@ def untouched(b, d):
     time.sleep(0.5)
     check('a_step_against_its_key_does_nothing: ArrowUp on a +14 dB point posts nothing',
           posts(b) == [], posts(b))
+
+
+def typed_places(b, d):
+    """A typed value is rounded to the places the daemon holds (f 2, g 1, q 2) before it is compared and written;
+    one equal to the point's own value, or to the text the field showed, writes nothing."""
+    name = 'a_typed_value_is_rounded_to_its_places'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    forget(b)
+    type_into(b, '#sg-cf-4g', '3.14159')
+    got = poll(lambda: posts(b, 'api/v1/host/eq/points/4'))
+    check(f'{name}: 3.14159 dB is written as 3.1', bool(got) and bare(got[-1][1]) == {'g': 3.1, 'done': True}, got)
+    time.sleep(0.8)
+    forget(b)
+    type_into(b, '#sg-cf-4q', '1.23456')
+    got = poll(lambda: posts(b, 'api/v1/host/eq/points/4'))
+    check(f'{name}: Q 1.23456 is written as 1.23', bool(got) and bare(got[-1][1]) == {'q': 1.23, 'done': True}, got)
+    time.sleep(0.8)
+    forget(b)
+    type_into(b, '#sg-cf-4q', '1.2304')
+    time.sleep(0.6)
+    check(f'{name}: a Q that rounds to the point\'s own writes nothing', posts(b) == [], posts(b))
+    type_into(b, '#sg-cf-4f', '2500.567')
+    got = poll(lambda: posts(b, 'api/v1/host/eq/points/4'))
+    check(f'{name}: 2500.567 Hz is written as 2500.57', bool(got) and bare(got[-1][1]) == {'f': 2500.57, 'done': True}, got)
+    time.sleep(0.8)
+    forget(b)
+    type_into(b, '#sg-cf-4f', '2500.57')
+    time.sleep(0.6)
+    check(f'{name}: the point\'s own frequency, whole above 100 Hz in the field, writes nothing (it is not '
+          'the field\'s shown text)', posts(b) == [], posts(b))
+
+
+def hold_then_flip(b, d):
+    """A + held down repeats; a keyboard flip to the DAC mid-hold ends the repeat for good."""
+    name = 'a_flip_mid_hold_ends_the_repeat'
+    load(b, d)
+    flip(b, 'computer')
+    forget(b)
+    x, y = common.center(b, '#sg-cvup')
+    if browser == 'chromium':
+        press(b, x, y)
+    else:
+        b._post('/actions', {'actions': [{'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'}, 'actions': [
+            {'type': 'pointerMove', 'duration': 0, 'origin': 'viewport', 'x': int(x), 'y': int(y)},
+            {'type': 'pointerDown', 'button': 0}]}]})
+    b.sleep(1.0)
+    held = len(posts(b, 'api/v1/host/volume'))
+    b.page(f"document.querySelector('{HOP}').focus()")
+    b.press('ArrowRight')
+    b.sleep(0.6)
+    at_flip = len(posts(b, 'api/v1/host/volume'))
+    side = b.page('__core.computer.side()')
+    b.sleep(1.2)
+    later = len(posts(b, 'api/v1/host/volume'))
+    if browser == 'chromium':
+        release(b, x, y)
+    else:
+        b._post('/actions', {'actions': [{'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'}, 'actions': [
+            {'type': 'pointerUp', 'button': 0}]}]})
+    b.sleep(0.8)
+    check(f'{name}: the held + repeated before the flip', held >= 3, held)
+    check(f'{name}: the keyboard flip showed the DAC', side == 'dac', side)
+    check(f'{name}: no step is written once flipped, held or let go', later == at_flip
+          and len(posts(b, 'api/v1/host/volume')) == at_flip, [held, at_flip, later])
+    check(f'{name}: the DAC side is drawn and the area is not held on',
+          b.page("!!document.querySelector('#sg-vtrack') && !document.querySelector('#sg-cvtrack')") is True)
 
 
 def unread_volume(b, d):
@@ -868,26 +1022,62 @@ def both_sides(b, d):
     flip(b, 'computer')
     forget(b)
     tap(b, '[data-act="cpreset"][data-name="Warm"]')
-    card = poll(lambda: b.page(f'!!{CARD}'))
-    words = b.page(f'{CARD}?.querySelector(".ask-words").textContent') or ''
-    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: it asks, with the device named',
-          card is True and 'flatten' in words and 'Gungnir 2' in words, words)
-    b.page(f'{CARD}.querySelector(".ask-no").click()')
+    card = poll(lambda: b.page(f'!!{ASK}'))
+    words = b.page(f'{ASK}?.querySelector(".sg-question").textContent') or ''
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: it asks, in the shelf\'s own question under the '
+          'chip (not the core card), with the device named, Keep having the focus',
+          card is True and 'flatten' in words and 'Gungnir 2' in words and b.page(f'!{CARD}')
+          and b.page(f'{ASK}.closest("#sg-cpresets") !== null')
+          and b.page("document.activeElement.dataset.answer") == 'keep', words)
+    tap(b, f'{ASK_BOX} [data-answer="keep"]')
     time.sleep(0.8)
     log = posts(b)
-    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: no sends nothing more and says nothing',
-          len(log) == 1 and log[0][2] == 409 and b.page(f'!{CARD}')
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: keep sends nothing more and says nothing',
+          len(log) == 1 and log[0][2] == 409 and b.page(f'!{ASK}')
           and b.page("document.querySelectorAll('#toasts .toast').length") == 0, log)
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: and the focus is back on the preset chip',
+          b.page("document.activeElement.matches('[data-act=cpreset][data-name=Warm]')") is True,
+          b.page("document.activeElement.outerHTML.slice(0, 90)"))
     tap(b, '[data-act="cpreset"][data-name="Warm"]')
-    poll(lambda: b.page(f'!!{CARD}'))
-    b.page(f'{CARD}.querySelector(".ask-yes").click()')
+    poll(lambda: b.page(f'!!{ASK}'))
+    tap(b, f'{ASK_BOX} [data-answer="apply"]')
     time.sleep(1.2)
     log = posts(b)
-    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: yes repeats with confirm and lands',
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: apply repeats with confirm and lands',
           len(log) == 3 and log[2][1].get('confirm') is True and log[2][2] == 200, log)
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: the focus is on the chip drawn again after the answer',
+          b.page("document.activeElement.matches('[data-act=cpreset][data-name=Warm]')") is True
+          and b.page('!document.querySelector("#sg-cpresets .sg-askbox")') is True,
+          b.page("document.activeElement.outerHTML.slice(0, 90)"))
     flat = poll(lambda: 'Warm' not in (playing() or '') and b.page(f'{COMPUTER}.eq.preset') == 'Warm')
     check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: the DAC is flat, the computer plays it',
           flat is True, [playing(), b.page(f'{COMPUTER}.eq.preset')])
+
+
+def question_after_redraw(b, d):
+    """The shelf is drawn again while the preset's POST is on its way: the question still shows, under
+    the chip drawn then, and answers."""
+    name = 'a_question_opens_after_the_shelf_was_drawn_again'
+    load(b, d)
+    status, _ = d.post('Gungnir 2', 'presets/recall', {'name': 'Warm'})
+    time.sleep(1.0)
+    flip(b, 'computer')
+    forget(b)
+    b.page("(() => { const f = window.fetch; window.fetch = (...a) => (String(a[0]).includes('host/eq/preset')"
+           " && a[1] && a[1].method === 'POST' ? new Promise((r) => setTimeout(r, 1200)).then(() => f(...a)) : f(...a)); })()")
+    tap(b, '[data-act="cpreset"][data-name="Warm"]')
+    # the answer is still on its way: the model comes again and the shelf is drawn from it
+    b.page("(() => { const h = __core.model.page().host; window.__before = document.querySelector('#sg-cpresets');"
+           " __core.model.emit('host', { ...h }); })()")
+    time.sleep(0.3)
+    redrawn = b.page("document.querySelector('#sg-cpresets') !== window.__before")
+    asked = poll(lambda: b.page(f'!!{ASK}'), 8)
+    check(f'{name}: the shelf was drawn again and the question still shows in the page',
+          redrawn is True and asked is True, [redrawn, asked])
+    tap(b, f'{ASK_BOX} [data-answer="keep"]')
+    time.sleep(0.6)
+    check(f'{name}: it answers: keep closes it and sends nothing more',
+          b.page(f'!{ASK}') and len(posts(b)) == 1, posts(b))
 
 
 def amp(b, d):
@@ -962,6 +1152,7 @@ def touch():
     d = common.Daemon('gungnir2-v2', host='fake', env={})
     b = common.Chromium(size=(390, 844), dpr=2, touch=True)
     b.preload(HOOK)
+    b.preload(LISTENERS)
     try:
         load(b, d)
         flip(b, 'computer')
@@ -1018,6 +1209,16 @@ def touch():
         q1 = b.page(f'{POINTS}[1].q')
         check('a_finger_adds_drags_and_pinches: two fingers twice as far apart halve the Q',
               abs(q1 - q0 / 2) <= q0 / 2 * 0.2, [q0, q1])
+        # two pinches that write nothing (the graph is not drawn again): none of their listeners stays
+        s = state(b)
+        x, y = s['marks']['2']
+        for _ in range(2):
+            b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': fingers([(x - 40, y), (x + 40, y)])})
+            b.sleep(0.2)
+            b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+            b.sleep(0.5)
+        left = b.page('window.__touchListeners()')
+        check('a_finger_adds_drags_and_pinches: a pinch takes its touch listeners off the graph again', left == 0, left)
         check('a_finger_adds_drags_and_pinches: the phone\'s mode ends the first screen, the table is under the curve',
               b.page("!!document.querySelector('#sg-open #sg-cmode') && !document.querySelector('#sg-shelf #sg-cmode')") is True)
         check('a_finger_adds_drags_and_pinches: no page error', errors(b) == [], errors(b)[:3])
@@ -1074,8 +1275,12 @@ one('a_keyboard_flip_puts_the_focus_on_the_chosen_hop', keyboard)
 one('minus_plus_mute_set_the_computer_volume', volume)
 one('a_point_drag_posts_live_and_done_at_release', drag)
 one('a_tap_adds_a_point_and_x_removes_it', add_remove)
+one('a_tap_on_a_full_table_says_so', full_table)
+one('a_second_finger_off_the_graph_makes_the_tap_no_tap', second_finger)
 one('the_mode_the_type_a_typed_value_and_the_presets_write', controls)
 one('an_untouched_cell_writes_nothing', untouched)
+one('a_typed_value_is_rounded_to_its_places', typed_places)
+one('a_flip_mid_hold_ends_the_repeat', hold_then_flip)
 one('an_unread_volume_writes_nothing', unread_volume)
 one('the_points_are_listed_by_frequency_and_the_selection_follows', sorted_points)
 one('presets_save_rename_and_delete_on_the_computer_side', preset_edits)
@@ -1086,6 +1291,7 @@ if browser == 'chromium':
 one('a_guest_sees_the_computer_inert', guest, web='guest = "read"')
 one('the_side_survives_a_reload', kept)
 one('the_same_preset_on_both_asks_and_yes_flattens_the_dac', both_sides)
+one('a_question_opens_after_the_shelf_was_drawn_again', question_after_redraw)
 one('the_amp_page_flips_to_the_computer_with_the_dac_parts', amp)
 one('a_load_with_the_computer_kept_but_unavailable_shows_the_dac', unavailable, env={'SVOLDER_FAKE_HOST_EQ': 'off'})
 one('the_wire_still_shows_the_eq_changing_the_sound', wire, env={'SVOLDER_FAKE_ROUTE': 'changed'})

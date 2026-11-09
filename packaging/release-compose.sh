@@ -22,9 +22,9 @@ mkdir -p "$(dirname "$out")"
 # The comment runs from its first line to the line before `image:`.
 awk -v image="ghcr.io/rralex/svolder:$version" '
   /^    # The image `make docker` builds/ {
-    print "    # The published image, running as uid 1000: create the two bind-mounted directories"
-    print "    # owned by that uid first (`mkdir -p config run && sudo chown 1000:1000 config run`),"
-    print "    # then `docker compose up -d`. To update: `docker compose pull`, then `docker compose up -d`."
+    print "    # The published image, running as PUID:PGID (HOST_UID and HOST_GID in .env, else 1000:1000):"
+    print "    # the first start creates ./config and ./run if missing and hands them to that user."
+    print "    # To update: `docker compose pull`, then `docker compose up -d`."
     skip = 1; next
   }
   /^    image: svolder:local$/ { print "    image: " image; skip = 0; next }

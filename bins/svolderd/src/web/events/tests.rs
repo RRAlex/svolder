@@ -477,24 +477,23 @@ async fn host_reads_are_held_for_a_shown_device_that_needs_host() {
         })
         .await;
     assert!(matches!(answer, svolder_ipc::Response::Ack), "{answer:?}");
+    // Read until what is asserted below has arrived: on a busy machine a first host or part
+    // frame can come before the pause reaches them.
     let later = read_until(&|text| {
         let sent = &text[before..];
-        sent.contains("event: host") && sent.contains("event: part")
+        sent.contains("\"status\":\"paused\"") && sent.contains("\"name\":\"playing\"")
     })
     .await;
     let sent = &later[before..];
     assert!(sent.contains("\"status\":\"paused\""), "{sent}");
     assert!(sent.contains("\"name\":\"playing\""), "{sent}");
     drop(frames);
-    for _ in 0..100 {
-        if dac.daemon.host().watcher_count() == 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    assert_eq!(
-        dac.daemon.host().watcher_count(),
-        0,
+    // The stream's task lets go when it next sees its receiver gone, which a busy machine delays.
+    assert!(
+        dac.daemon
+            .host()
+            .watchers_gone(Duration::from_secs(60))
+            .await,
         "let go with the stream"
     );
     dac.stop().await;
@@ -833,7 +832,7 @@ async fn a_change_between_the_snapshot_and_the_task_start_still_reaches_the_stre
         web: web.clone(),
     });
     // The snapshot the page was sent, then a change it does not have.
-    let snapshot = Read::of(&cx, "dac").expect("the device reads");
+    let snapshot = Read::of(&cx, "dac").await.expect("the device reads");
     stub.set_retry(Some(7));
     // The task starts from what the device holds now, as `run` marks it, and nothing more happens.
     let mut tracked = super::track(&web, "dac").expect("tracked");

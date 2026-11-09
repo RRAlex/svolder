@@ -30,7 +30,10 @@ impl Config {
         let effects = tui.effects;
         let mut out = String::from(
             "# The svolder configuration. Every key below is commented out at the value svolder\n\
-             # uses while the key is absent, so uncommenting a line on its own changes nothing.\n\
+             # uses while the key is absent, so uncommenting a line on its own changes nothing. (In the\n\
+             # container image the defaults of `listen` and `url` come from SVOLDER_WEB_LISTEN,\n\
+             # SVOLDER_MCP_LISTEN and SVOLDER_WEB_URL; a `listen` written here wins over them, so\n\
+             # a loopback one makes the server unreachable from outside the container.)\n\
              \n\
              schema = 1\n",
         );
@@ -130,7 +133,7 @@ impl Config {
         );
         commented(
             &mut out,
-            "The address it listens on; the default is loopback only.",
+            "The address it listens on; the default is loopback only (0.0.0.0 in the container image, from SVOLDER_MCP_LISTEN).",
             "listen",
             config.mcp.listen.to_string().as_str(),
         );
@@ -183,7 +186,7 @@ impl Config {
         );
         commented(
             &mut out,
-            "The address it listens on; the default is this computer only.",
+            "The address it listens on; the default is this computer only (0.0.0.0 in the container image, from SVOLDER_WEB_LISTEN).",
             "listen",
             config.web.listen.to_string().as_str(),
         );
@@ -240,7 +243,9 @@ impl Config {
              # [[device]]\n\
              # The name the front ends pick this device out by.\n\
              # name = \"bifrost\"\n\
-             # The device's 8-byte unit id, as sixteen hex characters.\n\
+             # The device's 8-byte unit id, as sixteen hex characters. A unit is configured once: svolder's\n\
+             # writers refuse a second block for it, and a file that has one anyway starts with the first\n\
+             # block, a warning, and the later block left out (`svolder remove <name>` takes one out).\n\
              # udid = \"1A2B3C4D5E6F7A8B\"\n\
              # The profile to drive it with, when it differs from the one svolder detects.\n\
              # profile = \"bifrost3\"\n\

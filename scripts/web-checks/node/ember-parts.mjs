@@ -5,8 +5,7 @@
 // the golden copy of the DOM the server's askama templates drew for the same models,
 // fixtures/ember-parts.json (frozen: no test writes it), compared as the browser would
 // read the two (html-same.mjs). The harness checks its own comparison first: it must
-// see a changed attribute, a missing space between tags and a number off by more than its
-// tolerance, and pass reordered attributes and the attributes htmx reads. Run: node ember-parts.mjs
+// see a changed attribute, a missing space between tags and a number off by the last digit, and pass reordered attributes and the attributes htmx reads. Run: node ember-parts.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PARTS } from '../../../bins/svolderd/web/themes/ember/draw/parts.js';
@@ -68,15 +67,14 @@ ok('the_comparison_catches_a_missing_space_between_tags', () => {
   same('<a>1</a>\n  \n<b>2</b>', '<a>1</a> <b>2</b>');
 });
 
-ok('the_comparison_catches_a_number_off_by_0_02', () => {
-  differs('<line x1="1.00" y1="2.00"/>', '<line x1="1.02" y1="2.00"/>');
-  differs('<line x2="50.00%"/>', '<line x2="50.02%"/>');
-  differs('<path d="M 1.00 2.00 L 3.00 4.00"/>', '<path d="M 1.00 2.00 L 3.02 4.00"/>');
-  same('<line x1="1.00" y1="2.00"/>', '<line x1="1.005" y1="1.995"/>');
-  // a number elsewhere is not one the tolerance covers
+ok('the_comparison_catches_a_number_off_by_the_last_digit', () => {
+  differs('<line x1="1.00" y1="2.00"/>', '<line x1="1.01" y1="2.00"/>');
+  differs('<line x2="50.00%"/>', '<line x2="50.01%"/>');
+  differs('<path d="M 1.00 2.00 L 3.00 4.00"/>', '<path d="M 1.00 2.00 L 3.01 4.00"/>');
+  // no tolerance: a tie rounded up is a difference from the daemon's even digit
+  differs('<line x1="0.12" y1="2.00"/>', '<line x1="0.13" y1="2.00"/>');
   differs('<i data-value="1.00"></i>', '<i data-value="1.005"></i>');
-  // the shape around the numbers must match
-  differs('<line x2="50.00%"/>', '<line x2="50.00"/>');
+  same('<line x1="1.00" y1="2.00"/>', '<line  y1="2.00" x1="1.00"/>');
 });
 
 ok('the_comparison_reads_a_data_block_as_json', () => {
@@ -988,11 +986,9 @@ ok('the_keys_are_offered_to_a_viewer_who_may_write', () => {
 
 // ------------------------------------------------------------------------ the computer's side
 
-const COMPUTER_VIEW = '../../../bins/svolderd/web/themes/ember/computer-view.js';
-const { computerView } = await import(COMPUTER_VIEW);
-const { createComputer, createHolds } = await import('../../../bins/svolderd/web/core/computer.js');
+const { ROWS_SHOWN, createComputer, createHolds } = await import('../../../bins/svolderd/web/core/computer.js');
 const { createStore } = await import('../../../bins/svolderd/web/core/store.js');
-const { switchPill, ROWS_SHOWN } = await import('../../../bins/svolderd/web/themes/ember/draw/computer.js');
+const { switchPill, pointWords } = await import('../../../bins/svolderd/web/themes/ember/draw/computer.js');
 
 const memory = () => {
   const map = new Map();
@@ -1029,7 +1025,7 @@ function viewOf(name, { side = 'computer', computer = computerModel(), guest = f
   const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
   const core = createComputer({ store, storage: memory(), holds });
   core.flip(side);
-  return { page, view: computerView({ model: store, computer: core }), core, store };
+  return { page, view: core.view(), core, store };
 }
 const html = ({ page, view }, part, oob = false) => PARTS[part](page.device, page, { oob, computer: view });
 const words = (markup) => markup.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1064,7 +1060,7 @@ ok('no_pill_without_a_dac_or_the_computer', () => {
   const store = createStore({ ...noDevice.page, host: { track: null, route: null, computer: computerModel() } },
     { signedOut: () => {}, fetch: async () => ({}) });
   const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({}) }) });
-  assert.equal(computerView({ model: store, computer: core }), null);
+  assert.equal(core.view(), null);
 });
 
 ok('the_dial_reads_percent_with_ticks_0_25_50_75_100', () => {
@@ -1153,6 +1149,40 @@ ok('the_table_shows_six_rows_and_scrolls', () => {
   const six = html(viewOf('dac', { computer: computerModel(SEVEN.slice(0, 6)) }), 'tone');
   assert.match(six, /<div class="pscroll" data-rows="6"/);
   assert.match(six, /<p class="more"><\/p>/);
+});
+
+ok('the_editor_steps_the_point_in_hand_like_the_dac_table_does', () => {
+  // no point in hand: an empty hidden editor
+  assert.match(html(viewOf('dac'), 'tone'), /<div class="bedit" hidden><\/div> <div class="pfoot">/);
+  const c = viewOf('dac');
+  c.view.picked = 4;
+  const editor = /<div class="bedit" data-n="4">(.*?)<\/div> <div class="pfoot">/s.exec(html(c, 'tone'));
+  assert.ok(editor, 'the picked point has its editor');
+  const box = editor[1];
+  assert.match(box, /^<h4>Point 4<\/h4>/);
+  const steppers = [...box.matchAll(/<div class="stp" data-param="(\w)"><span class="lbl">(.*?)<\/span>(.*?)<span class="v">(.*?)<\/span>(.*?)<\/div>/g)];
+  assert.deepEqual(steppers.map((m) => [m[1], m[2], m[4]]),
+    [['f', 'Frequency', '2900 Hz'], ['g', 'Gain', '+3.2 dB'], ['q', 'Q', '2.00']]);
+  const buttons = [...box.matchAll(/<button type="button" class="btn sm" data-comp="step" data-param="(\w)" data-dir="(-?1)" aria-label="([^"]*)">(.*?)<\/button>/g)]
+    .map((m) => m.slice(1));
+  assert.deepEqual(buttons, [
+    ['f', '-1', 'Lower the frequency', '−'], ['f', '1', 'Raise the frequency', '+'],
+    ['g', '-1', 'Lower the gain', '−'], ['g', '1', 'Raise the gain', '+'],
+    ['q', '-1', 'Lower the q', '−'], ['q', '1', 'Raise the q', '+'],
+  ]);
+  // the editor says what the table's cells say
+  const words = pointWords({ f: 180, g: -2.1, q: 0.9 });
+  assert.deepEqual(words, { f: '180 Hz', g: '−2.1 dB', q: '0.90' });
+  // a number that is no point of the table has no editor
+  const far = viewOf('dac');
+  far.view.picked = 40;
+  assert.match(html(far, 'tone'), /<div class="bedit" hidden><\/div>/);
+  // a viewer who may not write has the steppers inert
+  const guest = viewOf('dac', { guest: true });
+  guest.view.picked = 2;
+  const inert = html(guest, 'tone').match(/<button[^>]*data-comp="step"[^>]*>/g);
+  assert.equal(inert.length, 6);
+  for (const button of inert) assert.match(button, /aria-disabled="true"/, button);
 });
 
 ok('the_lone_point_keeps_its_remove', () => {

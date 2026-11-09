@@ -209,3 +209,70 @@ fn renaming_and_removing_a_device_carry_the_default_along() {
     assert_eq!(config.default_device, None);
     assert_eq!(config.devices.len(), 1);
 }
+
+/// The writers refuse a second block for a unit a device already carries, naming both devices,
+/// and leave the file as it was: `add_device`, and `update_device` that moves a device onto
+/// another's unit.
+#[test]
+fn a_unit_another_device_carries_is_refused_by_the_writers() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    let original = "[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n\n[[device]]\nname = \"dac\"\nudid = \"1112131415161718\"\n";
+    std::fs::write(&path, original).unwrap();
+    let twin = DeviceConfig {
+        name: "twin".into(),
+        udid: "0102030405060708".into(),
+        profile: None,
+        passphrase: String::new(),
+        inputs: BTreeMap::new(),
+    };
+    let err = Config::add_device(&path, &twin).unwrap_err().to_string();
+    assert!(
+        err.contains("\"amp\"") && err.contains("\"twin\"") && err.contains("0102030405060708"),
+        "{err}"
+    );
+    let moved = DeviceConfig {
+        name: "dac".into(),
+        ..twin
+    };
+    let err = Config::update_device(&path, "dac", &moved)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("\"amp\"") && err.contains("\"dac\""), "{err}");
+    assert!(!err.contains("already configures"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    let unit: svolder_proto::UnitId = "0102030405060708".parse().unwrap();
+    let config = Config::load_from(&path).unwrap();
+    assert_eq!(config.device_for_unit(&unit).unwrap().name, "amp");
+}
+
+/// An edit that leaves the file with no unit twice is accepted even when the file started with
+/// one: moving `dac` off the unit it shares with `amp` cures the file. An edit that leaves the
+/// pair in place is still refused.
+#[test]
+fn an_edit_that_cures_a_duplicate_unit_is_accepted() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    let shared = "[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n\n[[device]]\nname = \"dac\"\nudid = \"0102030405060708\"\n";
+    std::fs::write(&path, shared).unwrap();
+    let kept = DeviceConfig {
+        name: "dac".into(),
+        udid: "0102030405060708".into(),
+        profile: None,
+        passphrase: String::new(),
+        inputs: BTreeMap::new(),
+    };
+    let err = Config::update_device(&path, "dac", &kept)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("svolder remove"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), shared);
+    let cured = DeviceConfig {
+        udid: "1112131415161718".into(),
+        ..kept
+    };
+    Config::update_device(&path, "dac", &cured).unwrap();
+    let after = Config::parse_strict(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(after.dropped_duplicates.is_empty());
+    assert_eq!(after.devices.len(), 2);
+}

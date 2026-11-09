@@ -161,6 +161,9 @@ crates/svolder-host/src/eq/control/tests.rs|a_restarted_chain_is_capped_by_the_p
 crates/svolder-host/src/eq/control/tests.rs|a_chain_started_by_the_command_line_is_checked_and_sent_again_at_any_rate
 crates/svolder-host/tests/session.rs|a_new_chain_does_not_inherit_the_values_sent_to_the_old_one
 crates/svolder-host/src/eq/lab/tests.rs|the_lab_finds_nothing_in_a_short_run
+crates/svolder-host/src/eq/lab/tests.rs|the_lab_finds_nothing_in_a_short_targeted_run
+crates/svolder-host/src/eq/lab/tests.rs|a_turn_off_that_fails_over_a_command_line_apply_still_sends_the_points
+crates/svolder-host/src/eq/pty.rs|the_childs_end_is_raw_without_echo
 crates/svolder-host/src/eq/lab/tests.rs|a_line_that_carries_one_slot_leaves_the_rest_as_a_rate_change_put_them
 crates/svolder-host/src/eq/lab/tests.rs|nothing_is_sent_to_a_chain_before_it_is_looked_at
 crates/svolder-host/src/eq/lab/tests.rs|an_edit_right_after_a_command_line_apply_goes_to_a_chain_that_was_looked_at

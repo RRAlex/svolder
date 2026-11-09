@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Mutates a copy of the theme Signal's sources (line.js, fold.js, draw/line.js, draw/computer.js, draw/volume.js, draw/playing.js);
+# Mutates a copy of the theme Signal's sources (line.js, fold.js, words.js, draw/line.js, draw/computer.js, draw/player.js, draw/volume.js, draw/playing.js);
 # Signal's node harnesses (signal-*.mjs, run from the copy's own tree, so they import the mutated
 # files) must fail each time (a harness that fails on the mutated copy while the unmutated copy passes
 # is a kill: the harnesses are deterministic, with no browser and no timing). Run by hand, slow: bash scripts/web-checks/node/mutate_signal.sh
@@ -42,6 +42,11 @@ a transport icon is not hidden from the readers|draw/playing.js|fill="currentCol
 the mode stays on a desktop's first screen|signal.js|${view.phone() ? modeRow(device) : ''}|${modeRow(device)}
 the loudness chip loses its round buttons|draw/choices.js|'sg-st sg-rb'|'sg-st'
 the menu row is offered when the sheet cannot open|signal.js|available: () => Boolean(bound.add && bound.canAdd?.() && bound.core?.model.shown()),|available: () => Boolean(bound.add && bound.core?.model.shown()),
+a guest's buttons are not quiet|draw/word.js|export const inertPage = (page) => !mayWrite(page);|export const inertPage = () => false;
+the player's verdict names the computer|draw/player.js|esc(plain(path.words))|esc(path.words)
+the player's path names the computer|draw/player.js|esc(plain(hop.detail ?? ''))|esc(hop.detail ?? '')
+the table is long from five rows|draw/computer.js|const long = isLong(tone.points.length);|const long = tone.points.length > 5;
+the hop's name is its own copy|words.js|export { THIS_COMPUTER as COMPUTER_NAME } from '../../core/computer.js';|export const COMPUTER_NAME = 'Computer';
 LIST
 total=${#names[@]}
 # the copy itself must pass, or a failure below proves nothing

@@ -51,7 +51,7 @@ the ridge is smoothed over 0.6 of a band|ridge.js|sigma: 0.87,|sigma: 0.6,
 a tap adds below half a morph|tune-wire.js|if (morph.m < 0.5) {|if (morph.m < -1) {
 the computer's EQ off is not dimmed|tune-wire.js|const ghosted = (tone) => onComputer() && tone?.mode === 'off' && !turnedOn;|const ghosted = () => false;
 a host event leaves the cached computer tone|tune-wire.js|for (const event of ['model', 'device', 'host', 'fleet']) live.onReading(event, forget);|
-a drag with the EQ off keeps the dim|tune-wire.js|if (!entry.wrote && computerNow()?.mode === 'off') turnedOn = true;|
+a drag with the EQ off keeps the dim|tune-wire.js|if (computerNow()?.mode === 'off') turnedOn = true;|
 a probe does not lift the cap|budget.js|if (liftCap && capped|if (false && capped
 a probe misses slow draws|budget.js|recent.length >= BUDGET.probeDraws &&|false &&
 a probe misses seldom draws|budget.js|const seldom = inSpan <|const seldom = false && inSpan <
@@ -61,6 +61,33 @@ the touch band is taller than the curve window|tune.js|const BAND = { up: WINDOW
 the touch band has no margin|tune.js|const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 26 };|const BAND = { up: WINDOW.base + WINDOW.span, down: WINDOW.span - WINDOW.base, margin: 0 };
 a gain beyond the window is drawn beyond it|tune.js|base - (Math.max(-gMax, Math.min(gMax, db)) * span) / gMax|base - (db * span) / gMax
 the lone point loses its remove|draw/bands.js|  const remove = button('point-remove'|  const remove = n > 1 && button('point-remove'
+a re-sort leaves the lit point where it was|tune-wire.js|if (lit === from) lit = to;|
+a re-sort leaves the diamond's drag on its old number|../../core/point-drag.js|    if (session?.n === from) session.n = to;|    void from;
+the wheel takes only a bubble in reach|tune-wire.js|if (!ph.wheel(event, scene, { wide: true })) return;|if (!ph.wheel(event, scene)) return;
+the curve is built again for every ask|tune-wire.js|if (c && c.response === tone.response && c.map === map && c.w === w) return c.curve;|
+the map is built again for every ask|tune-wire.js|if (c && c.w === place.w && c.h === place.h && c.v === place.v && c.H === place.H && c.gMax === gMax) return c.map;|
+the hand's plot is not the curve's window|tune-wire.js|return { top: map.yOfDb(0) - range * perDb, height: 2 * range * perDb };|return { top: map.yOfDb(0) - range * perDb + 10, height: 2 * range * perDb };
+a finger on a point is left to its pointer|tune-wire.js|ph.touchStart(event, scene, { single: true });|void 0;
+a single finger lets go of a diamond|tune-wire.js|const pair = event.touches.length === 2;|const pair = true;
+a finger on a diamond starts a second drag|tune-wire.js|    if (!pair && (active || ph.active)) return;|
+a second finger leaves the tap|tune-wire.js|    if (event.touches.length > 1) ph.dropTap();|
+the memo of the map ignores the horizon|tune-wire.js|c.H === place.H && ||
+the memo of the map ignores the panel's height|tune-wire.js|c.v === place.v && ||
+the memo of the map ignores the scene's height|tune-wire.js|c.h === place.h && ||
+the memo of the map ignores the width|tune-wire.js|c.w === place.w && ||
+the memo of the map ignores the gain range|tune-wire.js|c.H === place.H && c.gMax === gMax)|c.H === place.H)
+a diamond drag with the EQ off keeps the dim|tune-wire.js|if (computerNow()?.mode === 'off') turnedOn = true;|
+a held point stepper steps the neighbour after a re-sort|../../core/point-drag.js|    if (burst?.n === from) burst.n = to;|    void from;
+a held point stepper takes the number it was drawn with|bands-wire.js|const n = held && stepper.burst ? stepper.burst.n : Number(el.dataset.point);|const n = Number(el.dataset.point);
+a held point stepper writes no final value|bands-wire.js|        stepper.finishBurst();|        void stepper;
+the computer's EQ line forgets it is unconfirmed|hud.js|const gains = eq.verified ? [] : [HUD.unconfirmed];|const gains = [];
+a diamond's label has no Q word|tune-wire.js|labelWords(s.values(), { qPrefix: 'Q ' })|labelWords(s.values())
+a diamond drag does not follow the pointer|tune-wire.js|else if (ph.session?.diamond && !ph.session.over) spreadDiamond(ph.session, spot);|
+a diamond drag ignores where the pointer let go|tune-wire.js|if (s?.diamond && !s.over && event.pointerId === s.pointerId) spreadDiamond(s, at(event));|
+a held point stepper goes on when its point is removed|bands-wire.js|    if (type === 'gone') hold?.end();|    void hold;
+a held point stepper steps once its hold is over|bands-wire.js|      step: (el) => holding && stepOnce(el, target, true),|      step: (el) => stepOnce(el, target, true),
+a point stepper steps while the stream is waiting or lost|bands-wire.js|usable: () => canStep() }|usable: () => !inert() }
+a flip leaves the point lit|tune-wire.js|if (type === 'flip') lit = null;|
 LIST
 total=${#names[@]}
 # the copy itself must pass, or a failure below proves nothing

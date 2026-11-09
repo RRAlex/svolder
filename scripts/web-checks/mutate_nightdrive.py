@@ -11,16 +11,22 @@ names (substrings of a check's line, or of the check an indented line belongs to
 FAIL. Before a mutant is run, the unmutated copy runs the same cases once and the named checks must
 exist and pass, so a name that no longer exists or a case that cannot run alone is an error, not a kill.
 
-Usage: python3 mutate_nightdrive.py [name ...]   (default: all). One worker, by hand, slow."""
+Usage: python3 mutate_nightdrive.py [name ...]   (default: all). By hand, slow. Env: MUT_WORKERS (default from the cores and the CPU pressure).
+With more workers the mutants run in a pool, each in its own scratch web copy with its own daemon and
+browser (nothing is shared but the unmutated baselines, which run once each under a lock). A mutant that
+uses the timing check (nightdrive_timing.py) never runs in the pool: those run alone after it, and so does
+every mutant that was not KILLED in the pool: only the alone result counts, and both are printed. The
+summary lists the mutants in the order of MUTATIONS. The pool is mutpool.py's. A baseline that failed is not kept:
+the mutant's alone run makes it again."""
 import os
 import re
 import shutil
-import signal
-import subprocess
 import sys
+import threading
 import time
 
 import common
+import mutpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 N = 'themes/nightdrive/'
@@ -63,7 +69,7 @@ MUTATIONS = {
         (N + 'motion.js', "return reduced ? 'calm' : 'full';", "return 'full';"),
     ]),
     'Still draws at the screen\'s rate': ([
-        (THEME, ['the_still_frame'], ['still_draws_about_one_frame_a_second']),
+        (THEME, ['the_pace_on_a_fake_clock'], ['still_draws_about_one_frame_a_second']),
     ], [
         (N + 'motion.js', "still: 1000 }", "still: 0 }"),
     ]),
@@ -75,8 +81,8 @@ MUTATIONS = {
     'a diamond drag writes nothing': ([
         (THEME, ['the_tuning', 'the_q_drag'], ['dragging_a_diamond_sets_q']),
     ], [
-        (N + 'tune-wire.js', "      begin(bell.band, {\n        gesture: 'pinch', press: { distance: 1 }, pointer: event.pointerId, side: nearDiamond.side,\n      });\n      return;",
-         "      return;"),
+        (N + 'tune-wire.js', "        begin(bell.band, {\n          gesture: 'pinch', press: { distance: 1 }, pointer: event.pointerId, side: nearDiamond.side,\n        });",
+         "        void 0;"),
     ]),
     'a pinch takes band 1': ([
         (THEME, ['the_tuning', 'the_q_pinch'], ['a_pinch_sets_the_q_of_the_band_nearest_the_fingers']),
@@ -104,13 +110,18 @@ MUTATIONS = {
         (THEME, ['the_tuning', 'the_tuning_guest'], ['a_guest_tap_on_the_mountains_says_why']),
     ], [
         (N + 'tune-wire.js', "tunes && store.state() === 'open' && !(page.device?.card ?? page.card);",
-         "tunes && store.state() === 'open' && !(page.device?.card ?? page.card) || mayNot();"),
+         "tunes && store.state() === 'open' && !(page.device?.card ?? page.card) || store.page().viewer?.guest === true;"),
     ]),
     'a first touch grabs at once': ([
         (THEME, ['the_tuning', 'the_q_pinch'], ['a_first_touch_shows_the_curve_and_a_second_grabs']),
         (PHONE, ['the_mountains_on_a_phone'], ['touching_the_mountains_tunes_on_a_phone']),
     ], [
         (N + 'tune-wire.js', "    if (morph.m < 0.5) {\n      if (touch) morph.touch(now());", "    if (morph.m < 0) {\n      if (touch) morph.touch(now());"),
+    ]),
+    'the tuning band loses its margin above': ([
+        (PHONE, ['the_band_edge_on_a_phone'], ["the_band_edge_on_a_phone: the pointer just inside the band's top edge shows the curve"]),
+    ], [
+        (N + 'tune.js', "y > H - BAND.up * v - BAND.margin &&", "y > H - BAND.up * v + BAND.margin &&"),
     ]),
     'the sheet does not give the focus back': ([
         (SHEET, ['the_sheet', 'the_sheet_closes'], ['close_by_x_escape_or_a_tap_on_the_scene_and_focus_returns']),
@@ -224,7 +235,7 @@ MUTATIONS = {
         (N + 'style.css', "    background: var(--nd-panel-phone); box-shadow: none;", "    background: #07040d; box-shadow: none;"),
     ]),
     'the phone\'s keys are 44 px tall': ([
-        (PHONE, ['the_portrait_panel'], ['  the keys are 36 px tall']),
+        (PHONE, ['the_portrait_panel'], ["  the pill's segments are 36 px tall (the panel's keys too)"]),
     ], [
         (N + 'style.css', "  .nd-dash .nd-k { min-width: 36px; height: 36px;", "  .nd-dash .nd-k { min-width: 36px; height: 44px;"),
     ]),
@@ -257,6 +268,44 @@ MUTATIONS = {
         (TIMING, ['the_paused_phone'], ['a_paused_phone_keeps_the_road_smooth']),
     ], [
         (N + 'motion.js', "export const IDLE_PACE = 1000 / 30;", "export const IDLE_PACE = 125;"),
+    ]),
+    'the recalled preset\'s question is not asked in the sheet': ([
+        ('computer_nightdrive.py', None, ['the_same_preset_on_both_asks_and_yes_flattens_the_dac: it asks in the sheet']),
+    ], [
+        (N + 'presets-wire.js', "recallPreset(name, { asker: bothSides(el) })", "recallPreset(name)"),
+    ]),
+    'a point\'s stepper steps the wrong way': ([
+        ('computer_nightdrive.py', None, ['the_points_table_has_steppers_that_step_and_repeat: + steps the gain one tenth']),
+    ], [
+        (N + 'bands-wire.js', "el.dataset.param, Number(el.dataset.step), { hold: held });", "el.dataset.param, -Number(el.dataset.step), { hold: held });"),
+    ]),
+    'the points\' table counts its rows by its children': ([
+        ('computer_nightdrive.py', None, ['sixteen_points_keep_the_layout']),
+    ], [
+        (N + 'sheet-wire.js', "    rows: (area) => area.querySelectorAll('tbody tr'),\n", ""),
+    ]),
+    'a tap on a full table says nothing': ([
+        ('computer_nightdrive.py', None, ['a_tap_on_a_full_table_says_so: a tap says the most the daemon holds']),
+    ], [
+        (N + 'tune-wire.js', "if (answer?.full) core.frame.toast(answer.error);", "void answer;"),
+    ]),
+    'a held stepper steps the neighbour after a re-sort': ([
+        ('computer_nightdrive.py', None, ['a_held_stepper_follows_its_point_through_a_re_sort: every step went to the same point']),
+    ], [
+        (N + 'bands-wire.js', "stepper.step(n, el.dataset.param, Number(el.dataset.step), { hold: held });",
+         "core.actions.computer.stepPoint(Number(el.dataset.point), el.dataset.param, Number(el.dataset.step));"),
+    ]),
+    'a finger on a shelf\'s diamond drags the point instead of the Q': ([
+        ('computer_nightdrive.py', None, ["one finger on a shelf's diamond moves its Q and neither its frequency nor its gain",
+                                          'one finger on a diamond drags its Q, one done at the lift']),
+    ], [
+        (N + 'tune-wire.js', "if (onComputer()) beginDiamond(bell.band, { pointer: event.pointerId, side: nearDiamond.side });",
+         "if (onComputer()) void 0;"),
+    ]),
+    'a finger on a diamond lets it go': ([
+        ('computer_nightdrive.py', None, ['one finger on a diamond drags its Q, one done at the lift']),
+    ], [
+        (N + 'tune-wire.js', "    const pair = event.touches.length === 2;", "    const pair = true;"),
     ]),
     'the touch band is taller than the curve window': ([
         ('computer_nightdrive.py', None, ['a tap 6 px above the band makes no point']),
@@ -336,34 +385,6 @@ def gated_copy(script, into):
     return path
 
 
-def run_group(cmd, env, secs):
-    """Run `cmd` in a session of its own; past `secs` end the whole group (a TERM first, so the check
-    closes its browsers and stops its daemon, then a KILL), so nothing it started outlives it. A
-    timeout is a failed run with no check output, not an error that ends the mutation run."""
-    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                            cwd=HERE, start_new_session=True)
-    try:
-        out, err = proc.communicate(timeout=secs)
-    except BaseException as e:
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except OSError:
-            pass
-        try:
-            out, err = proc.communicate(timeout=30)
-        except subprocess.TimeoutExpired:
-            out, err = '', ''
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        proc.wait()
-        if not isinstance(e, subprocess.TimeoutExpired):
-            raise
-        err = f'timed out after {secs} s\n{err or ""}'
-    return subprocess.CompletedProcess(cmd, proc.returncode, out or '', err or '')
-
-
 def run_script(web, script, cases):
     """Run `script` (Chromium) against the web dir `web` with only `cases`; the (check, line) pairs
     of its output and the return code. A check's own line names it; the indented lines after it are
@@ -376,17 +397,10 @@ def run_script(web, script, cases):
         else:
             path = gated_copy(script, work)
             env['ND_CASES'] = ','.join(cases)
-        r = run_group([sys.executable, path, 'chromium'], env, 1800)
+        r = mutpool.launch([sys.executable, path, 'chromium'], env, 1800)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    lines, current = [], ''
-    for line in r.stdout.splitlines():
-        if not line.startswith(('ok  ', 'FAIL')):
-            continue
-        text = line[5:]
-        if not text.startswith('  '):
-            current = text
-        lines.append((current, line))
+    lines = mutpool.checks(r.stdout)
     return lines, r.returncode, r.stderr
 
 
@@ -405,12 +419,22 @@ def web_copy(edits):
     return web
 
 
-BASELINE = {}
+BASELINE = {}  # the keys of the baselines that passed
+# one lock for the table of locks, and one lock per baseline: each baseline runs once, whichever thread asks first
+_LOCKS = {}
+_LOCKS_GUARD = threading.Lock()
 
 
 def baseline(script, cases, names):
     """The unmutated copy's run of the same cases: every name must exist and pass. Kept per run."""
     key = (script, tuple(cases or ()), tuple(names))
+    with _LOCKS_GUARD:
+        lock = _LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        return _baseline(key, script, cases, names)
+
+
+def _baseline(key, script, cases, names):
     if key not in BASELINE:
         web = web_copy([])
         try:
@@ -424,7 +448,11 @@ def baseline(script, cases, names):
                 bad.append(f'{n!r} does not exist in this run')
             elif any(line.startswith('FAIL') for _, line in mine):
                 bad.append(f'{n!r} fails unmutated')
-        BASELINE[key] = '; '.join(bad) or None
+        problem = '; '.join(bad) or None
+        # only a passing baseline is kept: one that flaked under load must be run again, not repeated
+        if problem:
+            return problem
+        BASELINE[key] = None
     return BASELINE[key]
 
 
@@ -435,10 +463,13 @@ def run(name):
         if problem:
             return None, f'(error, not a kill) {script}: {problem}'
     web = web_copy(edits)
-    killed, other = [], []
+    killed, other, missing = [], [], []
     try:
         for script, cases, names in runs:
             lines, code, err = run_script(web + '/w', script, cases)
+            # a named check that printed no line did not run (it skipped, or the run died): not a survivor
+            if not any(n in c or n in line for n in names for c, line in lines):
+                missing.append(f'{script}: none of {names} ran')
             for current, line in lines:
                 if not line.startswith('FAIL'):
                     continue
@@ -450,23 +481,24 @@ def run(name):
                 other.append('(no check output) ' + (err.strip().splitlines() or ['no output'])[-1][:160])
     finally:
         shutil.rmtree(web, ignore_errors=True)
+    if missing and not killed:
+        return None, '(error, not a kill) the named check did not run: ' + '; '.join(missing)[:200]
     note = ''
     if other and not killed:
         note = '(failed only other checks, not a kill) ' + other[0][:140]
     return killed, note
 
 
-names = sys.argv[1:] or list(MUTATIONS)
-bad = 0
-for name in names:
+def attempt(name):
     began = time.time()
     killed, note = run(name)
-    print('ERROR   ' if killed is None else 'KILLED  ' if killed else 'SURVIVED', name, f'({time.time() - began:.0f} s)',
-          flush=True)
-    for f in (killed or [])[:3]:
-        print('    ', f[:170])
-    if note:
-        print('    ', note)
-    bad += not killed
-print(f'{len(names) - bad} of {len(names)} mutations killed')
-sys.exit(1 if bad else 0)
+    return killed, note, time.time() - began
+
+
+def main():
+    names = sys.argv[1:] or list(MUTATIONS)
+    timed = [n for n in names if any(script == TIMING for script, _, _ in MUTATIONS[n][0])]
+    return mutpool.run_names(names, attempt, timed)
+
+
+sys.exit(main())

@@ -8,18 +8,15 @@
 // core's `view.computer` holds what is drawn (core/computer.js); this is markup only. Pure.
 
 import {
-  POINTS, linePath, logFreqs, responseDb, yOf,
+  POINTS, VIEW_HEIGHT, VIEW_WIDTH, linePath, logFreqs, responseDb, yOf,
 } from '../../../core/tone-curve.js';
+import { ROWS_SHOWN } from '../../../core/computer.js';
+import { gainText, hzText, qText } from '../../../core/words.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
 import { viewerQuiet } from './side.js';
 import { word } from './word.js';
 
-const VIEW_WIDTH = 1000;
-const VIEW_HEIGHT = 260;
-/** The rows the table shows before it scrolls. */
-export const ROWS_SHOWN = 6;
-const MINUS = '−';
 /** What the daemon calls a curve no preset holds (the points were set by hand). */
 const CUSTOM = 'custom';
 
@@ -35,24 +32,11 @@ export function showing(page, device, view) {
     + `${side('dac', WORDS.theDevice(device?.family_word))} &middot; ${side('computer', WORDS.thisComputer)}</p>`;
 }
 
-/** A frequency as the table writes it: `105 Hz`, `1200 Hz`, one decimal under 100 Hz at most. */
-export function hzWords(f) {
-  const text = f < 100 ? String(Math.round(f * 10) / 10) : String(Math.round(f));
-  return `${text} Hz`;
-}
-
-/** A gain as the table writes it: a sign, one decimal, a true minus. */
-export function dbWords(g) {
-  const text = Math.abs(g).toFixed(1);
-  if (text === '0.0') return '0.0 dB';
-  return `${g < 0 ? MINUS : '+'}${text} dB`;
-}
-
 /** A point's three values as the table writes them. */
-export const valueWords = { f: hzWords, g: dbWords, q: (q) => q.toFixed(2) };
+export const valueWords = { f: hzText, g: gainText, q: qText };
 
 /** The words of a point on the graph and in its row. */
-const pointWords = (p) => `Point ${p.n}: ${p.type} ${hzWords(p.f)}, ${dbWords(p.g)}, Q ${p.q.toFixed(2)}`;
+const pointWords = (p) => `Point ${p.n}: ${p.type} ${hzText(p.f)}, ${gainText(p.g)}, Q ${qText(p.q)}`;
 
 /** The curve's path in the plot's own box. */
 export const curvePath = (response) => linePath(response.map(yOf));
@@ -78,7 +62,7 @@ function graph(t, quiet, selected) {
     return `<button type="button" id="p-pt-${m.n}" class="pt${quiet ? ' quiet' : ''}${selected === m.n ? ' sel' : ''}"`
       + ` data-n="${m.n}" data-x="${(m.x / VIEW_WIDTH).toFixed(5)}" data-y="${(m.y / VIEW_HEIGHT).toFixed(5)}"`
       + ` role="slider" aria-label="${esc(pointWords(p))}" aria-valuemin="-12" aria-valuemax="12"`
-      + ` aria-valuenow="${p.g}" aria-valuetext="${esc(dbWords(p.g))}"${quiet ? ' aria-disabled="true"' : ''}></button>`;
+      + ` aria-valuenow="${p.g}" aria-valuetext="${esc(gainText(p.g))}"${quiet ? ' aria-disabled="true"' : ''}></button>`;
   }).join('');
   const on = t.modes.find((m) => m.on)?.name === 'eq';
   return `<div id="p-graph" class="p-graph"><svg viewBox="0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}"`
@@ -101,7 +85,7 @@ export function computerTone(page, view) {
   const t = view.computer.toneOf(page);
   if (!t) return '';
   const quiet = viewerQuiet(page);
-  const selected = view.point ?? null;
+  const selected = view.computer.picked(page);
   const modes = t.modes.map((m) => word('c-mode', m.name === 'eq' ? m.label : m.label.toLowerCase(), quiet,
     ` id="p-cm-${m.name}" data-mode="${m.name}" aria-pressed="${m.on}"`, `${m.on ? 'on' : ''}${m.on && !t.verified ? ' unsure' : ''}`.trim()));
   const heads = WORDS.pointHeads.map((h) => `<th scope="col">${esc(h)}</th>`).join('')

@@ -821,6 +821,21 @@ ok('the_player_opens_the_track_and_the_verdict', () => {
   assert.deepEqual(tags(playerScreen(paused, 1), 'button').map((b) => b['data-button']), ['previous', 'play', 'next']);
 });
 
+ok('the_players_path_names_the_computer_by_its_audio_server', () => {
+  const page = hosted();
+  page.device.playing.path = { ...page.device.playing.path,
+    hops: [{ label: 'Volume', detail: 'computer volume 54 %', changes: false },
+      { label: 'Output', detail: 'computer muted', changes: false }] };
+  const html = playerScreen(page, 1_700_000_100_000);
+  assert.ok(html.includes('PipeWire volume 54 %') && html.includes('PipeWire muted'), html);
+  assert.ok(!/computer/i.test(html.slice(html.indexOf('sg-pathlist'), html.indexOf('</ul>'))), 'no hop says computer');
+  // the verdict under the hops says it the same way
+  page.device.playing.path = { ...page.device.playing.path, words: 'the computer resamples; the computer is untouched' };
+  const verdict = playerScreen(page, 1_700_000_100_000);
+  assert.ok(verdict.includes('PipeWire resamples; PipeWire is untouched'), verdict);
+  assert.ok(!/computer/i.test(verdict.slice(verdict.indexOf('sg-verdict'))), 'the verdict does not say computer');
+});
+
 ok('the_player_goes_inert_for_a_viewer_who_may_not_write', () => {
   const page = hosted();
   page.viewer.guest = true;
@@ -1051,7 +1066,7 @@ function side({ computer = computerModel(), guest = false, route = ROUTE, chosen
   const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
   const core = createComputer({ store, storage: memory(), holds });
   if (chosen === 'computer') core.flip('computer');
-  const v = { ...view, computer: core, pick: { n: null, device: null }, phone: () => false };
+  const v = { ...view, computer: core, phone: () => false };
   const hop = { id: 'computer', kind: 'computer' };
   const parts = { volume: core.volumeOf(page), tone: core.toneOf(page) };
   return {
@@ -1274,7 +1289,7 @@ ok('the_dacs_page_without_a_computer_is_untouched', () => {
   const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
   const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
   core.flip('computer');
-  const v = { ...view, computer: core, pick: { n: null, device: null }, phone: () => false };
+  const v = { ...view, computer: core, phone: () => false };
   assert.equal(core.side(), 'dac');
   assert.ok(openers.computer(page, { id: 'computer' }, v).includes('id="sg-route"'));
   assert.equal(shelves.computer(page, { id: 'computer' }, v), '');

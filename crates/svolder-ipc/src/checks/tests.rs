@@ -19,6 +19,7 @@ struct FakeProbes {
     env: EnvFacts,
     config: Option<Result<String, String>>,
     daemons: Vec<RunningDaemon>,
+    rfkill: Vec<RfkillFacts>,
 }
 
 impl Probes for FakeProbes {
@@ -36,6 +37,9 @@ impl Probes for FakeProbes {
     }
     fn daemons(&self) -> Vec<RunningDaemon> {
         self.daemons.clone()
+    }
+    fn rfkill(&self) -> Vec<RfkillFacts> {
+        self.rfkill.clone()
     }
 }
 
@@ -102,7 +106,19 @@ fn healthy() -> FakeProbes {
         },
         config: Some(Ok(CONFIG_TEXT.into())),
         daemons: Vec::new(),
+        rfkill: Vec::new(),
     }
+}
+
+fn blocked(soft: bool, hard: bool) -> Vec<RfkillFacts> {
+    ["hci0", "hci1"]
+        .iter()
+        .map(|name| RfkillFacts {
+            name: (*name).into(),
+            soft,
+            hard,
+        })
+        .collect()
 }
 
 /// The one outcome named `check`, or a panic naming what was produced instead.
@@ -137,7 +153,7 @@ fn no_bluez_fails_with_the_systemctl_fix_and_no_adapter_fails_too() {
             .as_ref()
             .unwrap()
             .command
-            .contains("sudo systemctl enable --now bluetooth")
+            .contains("sudo systemctl unmask bluetooth && sudo systemctl enable --now bluetooth")
     );
     assert!(matches!(named(out.clone(), "Adapters").state, State::Fail));
     assert_eq!(exit_code(&out), 2);
@@ -531,6 +547,27 @@ fn a_device_naming_a_profile_that_does_not_exist_fails() {
     assert!(config.reason.contains("no-such-profile"), "{config:?}");
 }
 
+/// A file that configures one unit twice warns, but a device in it naming a missing profile is
+/// still a failure: the worst result wins.
+#[test]
+fn a_duplicate_does_not_hide_a_missing_profile() {
+    let mut p = healthy();
+    p.config = Some(Ok(format!(
+        "{}\n[[device]]\nname = \"amp\"\nudid = \"0011223344556677\"\n",
+        CONFIG_TEXT.replace("bifrost3", "no-such-profile")
+    )));
+    let config = named(run(&p, sock(), false), CONFIG);
+    assert!(matches!(config.state, State::Fail), "{config:?}");
+    assert!(config.reason.contains("no-such-profile"), "{config:?}");
+
+    p.config = Some(Ok(format!(
+        "{CONFIG_TEXT}\n[[device]]\nname = \"amp\"\nudid = \"0011223344556677\"\n"
+    )));
+    let config = named(run(&p, sock(), false), CONFIG);
+    assert!(matches!(config.state, State::Warn), "{config:?}");
+    assert!(config.reason.contains("\"amp\" is left out"), "{config:?}");
+}
+
 #[test]
 fn an_unreadable_config_fails_with_what_the_reader_said() {
     let mut p = healthy();
@@ -622,4 +659,173 @@ fn the_checks_come_out_in_the_order_they_are_read() {
             WIREPLUMBER,
         ]
     );
+}
+
+/// A config that configures one unit twice reads, and the config check warns with the words
+/// that name both devices and the cure, instead of failing.
+#[test]
+fn a_unit_configured_twice_warns_the_config_check() {
+    let mut p = healthy();
+    p.config = Some(Ok(
+        "schema = 1\n\n[[device]]\nname = \"dac\"\nudid = \"0011223344556677\"\n\n\
+                        [[device]]\nname = \"amp\"\nudid = \"0011223344556677\"\n"
+            .into(),
+    ));
+    let config = named(run(&p, sock(), false), CONFIG);
+    assert_eq!(config.state, State::Warn, "{config:?}");
+    assert!(
+        config.reason.contains("\"dac\"") && config.reason.contains("svolder remove amp"),
+        "{config:?}"
+    );
+}
+
+#[test]
+fn a_soft_blocked_adapter_names_rfkill_not_bluetoothctl() {
+    let mut p = healthy();
+    p.bluez.adapters[0].powered = false;
+    p.bluez.adapters[1].powered = false;
+    p.rfkill = blocked(true, false);
+    let off = named(run(&p, sock(), false), ADAPTERS);
+    assert!(matches!(off.state, State::Warn), "{off:?}");
+    assert!(off.reason.contains("rfkill"), "{off:?}");
+    assert_eq!(off.fix.unwrap().command, "sudo rfkill unblock bluetooth");
+
+    // A named adapter that is off and blocked gets the same fix.
+    let mut p = healthy();
+    p.config = Some(Ok(
+        CONFIG_TEXT.replace("schema = 1", "schema = 1\nadapter = \"hci0\"")
+    ));
+    p.bluez.adapters[0].powered = false;
+    p.rfkill = blocked(true, false);
+    let named_off = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(
+        named_off.fix.unwrap().command,
+        "sudo rfkill unblock bluetooth"
+    );
+
+    // No adapter listed stays a failure, whatever rfkill says.
+    let mut p = healthy();
+    p.bluez.adapters.clear();
+    p.rfkill = blocked(true, false);
+    let none = named(run(&p, sock(), false), ADAPTERS);
+    assert!(matches!(none.state, State::Fail), "{none:?}");
+}
+
+#[test]
+fn a_hard_blocked_adapter_has_no_command() {
+    let mut p = healthy();
+    p.bluez.adapters[0].powered = false;
+    p.bluez.adapters[1].powered = false;
+    p.rfkill = blocked(true, true);
+    let off = named(run(&p, sock(), false), ADAPTERS);
+    assert!(matches!(off.state, State::Warn), "{off:?}");
+    assert!(off.reason.contains("hard-blocked"), "{off:?}");
+    assert!(off.reason.contains("switch"), "{off:?}");
+    assert!(off.fix.is_none(), "{off:?}");
+}
+
+#[test]
+fn an_unblocked_radio_keeps_the_power_on_fix_and_a_working_one_is_left_alone() {
+    let mut p = healthy();
+    p.bluez.adapters[0].powered = false;
+    p.bluez.adapters[1].powered = false;
+    p.rfkill = blocked(false, false);
+    let off = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(off.fix.unwrap().command, "bluetoothctl power on");
+
+    let mut p = healthy();
+    p.rfkill = blocked(true, false);
+    let on = named(run(&p, sock(), false), ADAPTERS);
+    assert!(matches!(on.state, State::Pass), "{on:?}");
+}
+
+#[test]
+fn bluez_missing_from_the_bus_names_the_service_fix() {
+    // The shapes the probe produces: the D-Bus error's name, then its message.
+    for why in [
+        "org.freedesktop.DBus.Error.ServiceUnknown: The name org.bluez was not provided by any \
+         .service files",
+        "org.freedesktop.DBus.Error.NameHasNoOwner: Could not get owner of name 'org.bluez'",
+        "org.freedesktop.systemd1.NoSuchUnit: Unit dbus-org.bluez.service not found.",
+        "org.freedesktop.systemd1.UnitMasked: Unit bluetooth.service is masked.",
+    ] {
+        let mut p = healthy();
+        p.bluez.reachable = Err(why.into());
+        p.bluez.adapters.clear();
+        let service = named(run(&p, sock(), false), BLUETOOTH_SERVICE);
+        assert!(matches!(service.state, State::Fail), "{service:?}");
+        assert!(
+            service.reason.contains("not on the system bus"),
+            "{service:?}"
+        );
+        assert!(service.reason.contains("install bluez"), "{service:?}");
+        assert_eq!(
+            service.fix.unwrap().command,
+            "sudo systemctl unmask bluetooth && sudo systemctl enable --now bluetooth",
+            "{why}"
+        );
+    }
+
+    // Message text alone is not a name: it keeps the group advice.
+    let mut p = healthy();
+    p.bluez.reachable = Err("something was not provided by any .service files".into());
+    p.bluez.adapters.clear();
+    let text_only = named(run(&p, sock(), false), BLUETOOTH_SERVICE);
+    assert!(text_only.fix.unwrap().command.contains("bluetooth group"));
+
+    // A refusal is not an absence: it keeps the group advice.
+    let mut p = healthy();
+    p.bluez.reachable = Err("org.freedesktop.DBus.Error.AccessDenied: rejected".into());
+    p.bluez.adapters.clear();
+    let denied = named(run(&p, sock(), false), BLUETOOTH_SERVICE);
+    assert!(denied.fix.unwrap().command.contains("bluetooth group"));
+}
+
+fn switch(name: &str, soft: bool, hard: bool) -> RfkillFacts {
+    RfkillFacts {
+        name: name.into(),
+        soft,
+        hard,
+    }
+}
+
+#[test]
+fn rfkill_is_judged_per_adapter() {
+    // The onboard radio (hci0) is blocked on purpose; the dongle (hci1) is wanted and just off.
+    let mut p = healthy();
+    p.config = Some(Ok(
+        CONFIG_TEXT.replace("schema = 1", "schema = 1\nadapter = \"hci1\"")
+    ));
+    p.bluez.adapters[0].powered = false;
+    p.bluez.adapters[1].powered = false;
+    p.rfkill = vec![switch("hci0", true, false), switch("hci1", false, false)];
+    let off = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(off.fix.unwrap().command, "bluetoothctl power on");
+
+    // A hard block on hci0 does not take hci1's fix away.
+    p.rfkill = vec![switch("hci0", true, true), switch("hci1", false, false)];
+    let off = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(off.fix.unwrap().command, "bluetoothctl power on");
+
+    // The wanted adapter's own soft block gets the unblock; its own hard block no command.
+    p.rfkill = vec![switch("hci0", false, false), switch("hci1", true, false)];
+    let soft = named(run(&p, sock(), false), ADAPTERS);
+    assert!(soft.reason.contains("hci1"), "{soft:?}");
+    assert_eq!(soft.fix.unwrap().command, "sudo rfkill unblock bluetooth");
+    p.rfkill = vec![switch("hci0", false, false), switch("hci1", false, true)];
+    let hard = named(run(&p, sock(), false), ADAPTERS);
+    assert!(hard.fix.is_none(), "{hard:?}");
+
+    // No adapter named: any off adapter that is not blocked can be powered on.
+    p.config = Some(Ok(CONFIG_TEXT.into()));
+    p.rfkill = vec![switch("hci0", true, true), switch("hci1", false, false)];
+    let any = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(any.fix.unwrap().command, "bluetoothctl power on");
+    // All blocked: soft ones get the unblock, all hard ones none.
+    p.rfkill = vec![switch("hci0", true, true), switch("hci1", true, false)];
+    let some = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(some.fix.unwrap().command, "sudo rfkill unblock bluetooth");
+    p.rfkill = vec![switch("hci0", true, true), switch("hci1", false, true)];
+    let all = named(run(&p, sock(), false), ADAPTERS);
+    assert!(all.fix.is_none(), "{all:?}");
 }

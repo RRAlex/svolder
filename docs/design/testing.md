@@ -22,13 +22,15 @@ live" lists where each module's tests are.
   listed test file; it is part of `make check`.
 - **`make docs-check`**: links, anchors, process tags, code spans that name repo paths and page
   sizes (below). Run it after editing any Markdown; it is part of `make check`.
+- **`make web-checks-task`**: the quick gate with the logic-only checks in Chromium only; the
+  rung for a task or a lane end (the ladder is in the web checks' README).
 - **`make web-checks-quick`**: the node harnesses, the browser checks that leave the smoke alone
   and one short smoke check per browser. Run it after a change to the page, its styles or its
-  templates that does not touch the smoke; it takes about 38 minutes with the default six checks at a time (much longer with
-  `WEB_CHECKS_JOBS=1`, one by one).
+  templates that does not touch the smoke; it takes about 38 minutes with the default number of
+  checks at a time, about six on 24 cores, and much longer with `WEB_CHECKS_JOBS=1`, one by one.
 - **`make web-checks`**: everything the quick gate runs plus every smoke check, in headless
   Chromium and Firefox. Run it before merging any change to the web page and whenever a smoke file
-  changed; it takes over an hour with six checks at a time.
+  changed; it takes over an hour at about six checks at a time (24 cores).
 - **`make e2e`**: the daemon, the CLI and a web write against a simulator over real Bluetooth. Run
   it after a change to the transport, the session, the scanner, the daemon's reconnect or the
   simulator; it is not part of `make check`.
@@ -45,13 +47,13 @@ live" lists where each module's tests are.
   chain. It prints `host-e2e: PASS`. Run it after a change to the computer
   EQ, its chain or the daemon's computer side; it is opt-in and not part of `make check`.
 - **`make preamp-lab`**: the computer EQ's preamp lab, the long run (`SEED` is the first seed and
-  `RUNS` how many; 5000 by default, about a minute and a half). The controller is driven through
+  `RUNS` how many of each profile; 5000 by default). The controller is driven through
   seeded random sequences of hand edits, preset loads, command-line applies, node restarts, rate
   changes, `pw-cli` deaths and the rest, against a model of what PipeWire plays, and after every
   event and tick the curve played times the preamp played must not pass unity. A failing seed
   prints the shrunk sequence. Run it after any change to the controller, the session or the chain's
-  config; a short run of 300 seeds is part of `make check`. How the model works is in
-  [host-control-preamp.md](host-control-preamp.md#the-preamp-lab).
+  config; a short run of 300 seeds of each profile is part of `make check`. How the model works is
+  in [host-control-preamp.md](host-control-preamp.md#the-preamp-lab).
 - **The soak**: a long run of the smoke's frame rate, haze density and fluid size. Run it before a
   merge that touches a smoke file; it is part of neither web gate.
 
@@ -119,7 +121,8 @@ driven over a radio with no hardware. Its flags choose the device (`--profile`, 
 `--firmware`, `--passphrase`), seed faults (`--faults`), play a signal (`--signal`, for a profile
 whose meters have a scale such as `fake-amp`), report a Loki Max's bands on the short id form
 (`--loki-reports short`) or not at all after a recall (`--silent-recall`), report a change only
-(`--quiet-same`), print every decoded
+(`--quiet-same`), start with USB, S/PDIF lock and a sample rate of its own and change them from stdin
+(`--usb`, `--spdif-locked`, `--sample-rate`; `usb 1`, `spdif 0`, `rate 44100`), print every decoded
 frame (`--trace`), lay the
 advertisement out as an older device does (`--layout legacy`) and answer pairing
 (`--accept-pairing`, which must never run on a host that also has a Bluetooth central of its own on
@@ -326,7 +329,7 @@ compared with what the binary draws and prints; a doc that drifts fails a test.
 ## Where the code and tests live
 
 - The gates: `Makefile` (`check`, `test`, `safety-tests`, `docs-check`, `web-checks`,
-  `web-checks-quick`, `e2e`, `host-e2e`, `demo`).
+  `web-checks-quick`, `web-checks-task`, `e2e`, `host-e2e`, `demo`).
 - The fake device and signal: `crates/svolder-fake/src/device.rs`, `signal.rs`; the fake transport:
   `crates/svolder-ble/src/fake.rs`; the simulator: `bins/svolder-sim/src/main.rs`, `peripheral.rs`.
 - The end-to-end script: `scripts/e2e.sh`, with the live tests in

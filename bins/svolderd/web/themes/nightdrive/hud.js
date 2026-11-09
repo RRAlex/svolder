@@ -61,15 +61,14 @@ export function gainWords(text) {
   return `${db < 0 ? '−' : '+'}${tenths.toFixed(1)}`;
 }
 
-/** The EQ line of the computer's tone (core `toneOf`): `OFF`, or `EQ` with the preset's name when one is on;
- * no gains, and a word of it while the EQ's state is only what its file says. `null` with no tone. */
-function computerEqLine(tone) {
-  if (!tone) return null;
-  const on = tone.modes.find((m) => m.name === 'eq')?.on === true;
-  const gains = tone.verified ? [] : [HUD.unconfirmed];
-  if (!on) return { lead: '', name: HUD.off, gains };
-  return tone.preset
-    ? { lead: HUD.eq, name: String(tone.preset).toUpperCase(), gains }
+/** The EQ line of the computer's EQ state (core `eqOf`, `comp.eq`): `OFF`, or `EQ` with the preset's name when one is
+ * on; no gains, and a word of it while the EQ's state is only what its file says. `null` with no EQ. */
+function computerEqLine(eq) {
+  if (!eq) return null;
+  const gains = eq.verified ? [] : [HUD.unconfirmed];
+  if (!eq.on) return { lead: '', name: HUD.off, gains };
+  return eq.preset
+    ? { lead: HUD.eq, name: String(eq.preset).toUpperCase(), gains }
     : { lead: '', name: HUD.eq, gains };
 }
 
@@ -77,10 +76,10 @@ function computerEqLine(tone) {
  * The EQ line: `{ lead, name, gains }`, `name` the bright part. In EQ it is `EQ` then the preset's
  * name when one is on (`lead: 'EQ'`, `name: 'WARM'`, else `lead: ''`, `name: 'EQ'`) and the
  * bands' gains; Loudness `LOUDNESS 3` and Flat `FLAT` have none. `null` for a device with no tone. With the
- * computer as the side shown (`comp`, ./computer-view.js) it is the computer's: `OFF` or `EQ` and the preset.
+ * computer as the side shown (`comp`, the core's `computer.view()`) it is the computer's: `OFF` or `EQ` and the preset.
  */
 export function eqLine(page, comp = null) {
-  if (comp?.side === 'computer') return computerEqLine(comp.tone);
+  if (comp?.side === 'computer') return computerEqLine(comp.eq);
   const device = page?.device;
   const tone = device?.tone;
   if (!tone) return null;

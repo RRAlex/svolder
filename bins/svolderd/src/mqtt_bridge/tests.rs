@@ -422,12 +422,22 @@ async fn a_band_command_during_a_recall_is_sent_after_it() {
 async fn a_mode_command_during_a_recall_wins_and_held_commands_keep_their_arrival_order() {
     let (mut task, stand) = published_stand().await;
     let recall_len = recall_log(&stand, "Warm").len();
+    // The gate holds every write at the stand until the whole burst is in: a recall that ended
+    // before the later commands came would leave them after it, which is another case.
+    stand.gate.forget_permits(1000);
     task.enqueue(
         control("eq_preset"),
         WriteRequest::Preset {
             name: "Warm".into(),
         },
     );
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !view(&task).await.recall_running {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the recall never started");
     task.enqueue(
         control("eq_mode"),
         WriteRequest::EqMode {
@@ -442,6 +452,7 @@ async fn a_mode_command_during_a_recall_wins_and_held_commands_keep_their_arriva
             mode: "flat".into(),
         },
     );
+    stand.gate.add_permits(1000);
     settle(&mut task).await;
     let log = stand.log.lock().expect("the log").clone();
     let after = &log[recall_len..];

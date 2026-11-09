@@ -153,6 +153,36 @@ impl Config {
         })
     }
 
+    /// Change the hop whose id is `id` in the file at `path`: `change` gets the hop as the file
+    /// holds it once the file's lock is taken, and returns the hop to write over it, as
+    /// [`Config::update_hop`] takes it. A change made from a hop read before the lock would
+    /// write back what another writer changed in between; this one cannot. An id no block
+    /// carries is refused, and so is what `change` refuses.
+    pub fn edit_hop(
+        path: &Path,
+        id: &str,
+        change: impl FnOnce(&Hop) -> Result<Hop, ConfigError>,
+    ) -> Result<(), ConfigError> {
+        edit_file(path, |doc| {
+            let held = Config::parse(&doc.to_string())?;
+            let old = held
+                .hop(id)
+                .ok_or_else(|| ConfigError::Parse(format!("no hop named {id:?} is configured")))?;
+            let hop = written(&change(old)?)?;
+            let at = hop_at(doc, id)?;
+            if let Some((clash_at, clash)) = hop_named(doc, hop.id())
+                && clash_at != at
+            {
+                return Err(hop_taken(&clash));
+            }
+            let table = hops_mut(doc)?
+                .get_mut(at)
+                .ok_or_else(|| ConfigError::Parse(format!("hop {id:?} went missing")))?;
+            write_hop(table, &hop);
+            Ok(())
+        })
+    }
+
     /// Take the `[[hop]]` block whose id is `id` out of the file at `path`.
     ///
     /// The comments written right above the block go with it, and comments a blank line sets

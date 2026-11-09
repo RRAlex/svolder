@@ -92,6 +92,7 @@ pub(crate) use pointer::Pointer;
 pub use readings::Reading;
 pub(crate) use readings::Readings;
 pub(crate) use session::Session;
+pub(crate) use side::SWITCH_ROW;
 /// What the computer's edit line calls its fields.
 pub(crate) fn point_line_names() -> [(&'static str, &'static str); 3] {
     point_line::NAMES
@@ -186,6 +187,29 @@ pub struct SettingsBox {
     pub row: usize,
 }
 
+/// Whether the last frame drew the switch, per screen: a frame too narrow for it has no switch
+/// row for a key to be on. True until a frame says otherwise.
+#[derive(Debug, Clone)]
+pub struct Drawn {
+    /// The Controls pane's switch line.
+    pub controls_switch: std::cell::Cell<bool>,
+    /// Whether the frame being drawn has drawn the Controls pane's switch so far; it becomes
+    /// [`Drawn::controls_switch`] when the pane is done, so the rows read the last frame's answer.
+    pub controls_pending: std::cell::Cell<bool>,
+    /// The tone screen's switch row.
+    pub tone_switch: std::cell::Cell<bool>,
+}
+
+impl Default for Drawn {
+    fn default() -> Self {
+        Drawn {
+            controls_switch: std::cell::Cell::new(true),
+            controls_pending: std::cell::Cell::new(false),
+            tone_switch: std::cell::Cell::new(true),
+        }
+    }
+}
+
 /// Everything one key press can move, for the cases that press a key and ask what changed.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +271,11 @@ pub struct App {
     pub pane: Pane,
     /// Whether the volume and the tone control shown are the device's or the computer's.
     pub side: Side,
+    /// Whether the keys are on the Controls pane's switch line, which sits over the row
+    /// `selected` names (the volume). On the tone screen the switch is [`ToneRow::Target`].
+    pub switch_focus: bool,
+    /// What the last frame drew, for keys to know which rows exist.
+    pub drawn: Drawn,
     /// The focused row of the focused list.
     pub selected: usize,
     /// The rows the screens not being shown were left on.
@@ -337,6 +366,8 @@ impl App {
             screen: Screen::Device,
             pane: Pane::Controls,
             side: Side::Dac,
+            switch_focus: false,
+            drawn: Drawn::default(),
             selected: 0,
             focus_memory: FocusMemory::default(),
             size: DEFAULT_SIZE,
@@ -528,6 +559,7 @@ impl App {
         // of them comes back to the last row there still is.
         if self.screen == Screen::Device {
             self.selected = self.selected.min(self.controls_len().saturating_sub(1));
+            self.switch_focus = false;
         }
     }
 

@@ -137,7 +137,7 @@ function mount(root, core, { signal }) {
   wireVolume({ root, core, live, act, view, signal });
   wireTone({ root, core, live, act, signal });
   wireComputer({
-    root, core, live, act, view, signal,
+    root, core, live, signal,
   });
   wireControls({ root, core, live, act, signal });
   wirePresets({ root, core, live, act, signal });

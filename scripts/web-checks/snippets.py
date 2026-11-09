@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Snippet check for the mutation runners (mutate_*.py): every mutation's `old` text must occur
+"""Snippet check for the mutation runners (mutate_*.py and the node runners named in SHELL_RUNNERS): every mutation's `old` text must occur
 exactly once in the file it names under bins/svolderd/web/. A runner whose snippet has moved or
 changed fails with a traceback or a NO-MATCH line only when someone runs it by hand (they are
 slow), so a stale entry can rot unseen; this finds it in a second, with no browser and no build.
@@ -25,6 +25,8 @@ import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(os.path.dirname(os.path.dirname(HERE)), 'bins', 'svolderd', 'web')
+# The node runners whose LIST files are named from the web dir (computer and signal name theirs from a subdirectory).
+SHELL_RUNNERS = ('ember_parts', 'paper')
 KEEP = (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.FunctionDef)
 
 
@@ -59,11 +61,25 @@ def entries(space):
         raise SystemExit('no MUTATIONS dict or M list')
 
 
+def shell_entries(path):
+    """`(mutant name, file, from)` for every `name|file|from|to` line of a node runner's LIST heredoc."""
+    inside = False
+    for line in open(path).read().splitlines():
+        if line.startswith("done <<'LIST'"):
+            inside = True
+        elif line == 'LIST':
+            inside = False
+        elif inside:
+            name, file, old, _new = line.split('|', 3)
+            yield name, file, old
+
+
 def main():
     total, failures = 0, []
-    for path in sorted(glob.glob(os.path.join(HERE, 'mutate_*.py'))):
+    runners = glob.glob(os.path.join(HERE, 'mutate_*.py')) + [os.path.join(HERE, 'node', f'mutate_{n}.sh') for n in SHELL_RUNNERS]
+    for path in sorted(runners):
         runner = os.path.basename(path)
-        found = list(entries(load(path)))
+        found = list(shell_entries(path) if path.endswith('.sh') else entries(load(path)))
         if not found:
             failures.append((runner, '(table)', '-', 0))
         for name, file, old in found:

@@ -16,9 +16,13 @@ use common::TempPath;
 /// Run the script's env part in a fresh directory holding `env` as its `.env` (none when
 /// `None`), with `runtime` as the caller's runtime directory; returns the file afterwards.
 fn run_env_part(env: Option<&str>, runtime: &Path, extra: &[(&str, &str)]) -> String {
+    // The tests of this file run side by side in one process: a counter keeps two of them out of
+    // the same directory, and the clock a recycled pid out of a killed run's leftover.
+    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = TempPath(std::env::temp_dir().join(format!(
-        "svolder-docker-env-test-{}-{}",
+        "svolder-docker-env-test-{}-{}-{}",
         std::process::id(),
+        RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("a clock after 1970")
@@ -49,12 +53,12 @@ fn a_last_line_with_no_newline_keeps_its_value() {
     assert_eq!(lines[0], "BLUETOOTH_GID=77", "{out}");
     assert!(lines.contains(&"HOST_RUNTIME_DIR=/nonexistent"), "{out}");
     assert!(lines.iter().any(|l| l.starts_with("HOST_UID=")), "{out}");
+    assert!(lines.iter().any(|l| l.starts_with("HOST_GID=")), "{out}");
 }
 
 #[test]
 fn existing_lines_are_never_rewritten_and_nothing_is_added_twice() {
-    let before =
-        "BLUETOOTH_GID=5\nHOST_UID=9\nHOST_RUNTIME_DIR=/x\nCOMPOSE_FILE=docker-compose.yml\n";
+    let before = "BLUETOOTH_GID=5\nHOST_UID=9\nHOST_GID=9\nHOST_RUNTIME_DIR=/x\nCOMPOSE_FILE=docker-compose.yml\n";
     let out = run_env_part(
         Some(before),
         Path::new("/nonexistent"),

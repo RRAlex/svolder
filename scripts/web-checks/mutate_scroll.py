@@ -2,14 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Mutation checks for the scroll stir and the smoke's lost upward push: each mutation edits a copy
 of the page's web dir (never the repo), runs the sections of scroll.py (Chromium) that must see it,
-and must make at least one check FAIL. Slow: run by hand, one worker.
+and must make at least one check FAIL. Slow: run by hand. Every mutant runs alone, one at a time (the bounds depend on the frame rate).
 Usage: python3 mutate_scroll.py [name ...]   (default: all)"""
 import os
-import shutil
-import subprocess
 import sys
 
-import common
+import mutpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 M = 'themes/ember/smoke-model.js'
@@ -58,34 +56,13 @@ MUTATIONS = {
 
 def run(name):
     sections, edits = MUTATIONS[name]
-    web = common.scratch('mut-web-')
-    shutil.copytree(common.WEB, web + '/w')
-    for f, old, new in edits:
-        p = f'{web}/w/{f}'
-        s = open(p).read()
-        assert old in s, f'{name}: {old[:50]!r} not in {f}'
-        open(p, 'w').write(s.replace(old, new, 1))
-    env = dict(os.environ, SMOKE_WEB=web + '/w', SCROLL_SECTIONS=sections)
-    r = subprocess.run([sys.executable, f'{HERE}/scroll.py', 'chromium'], env=env,
-                       capture_output=True, text=True, timeout=600)
-    shutil.rmtree(web, ignore_errors=True)
-    fails = [x for x in r.stdout.splitlines() if x.startswith('FAIL')]
-    if not fails and r.returncode:
-        # no FAIL line: an infrastructure crash is an error, never a kill
-        tail = (r.stderr.strip().splitlines() or ['no output'])[-1][:200]
-        return name, None, '(error, not a kill) ' + tail
-    return name, fails, ''
+    return mutpool.run_script(name, 'scroll.py', edits, {'SCROLL_SECTIONS': sections}, secs=600)
+
+
+def attempt(name):
+    return mutpool.timed_call(run, name)
 
 
 names = sys.argv[1:] or list(MUTATIONS)
-bad = 0
-for name in names:
-    name, fails, err = run(name)
-    print('ERROR   ' if fails is None else 'KILLED  ' if fails else 'SURVIVED', name, flush=True)
-    for f in (fails or [])[:3]:
-        print('    ', f[:160])
-    if err:
-        print('    ', err)
-    bad += not fails
-print(f'{len(names) - bad} of {len(names)} mutations killed')
-sys.exit(1 if bad else 0)
+# the stir's bounds depend on the frame rate: every mutant runs alone, one at a time
+sys.exit(mutpool.run_names(names, attempt, names))

@@ -522,7 +522,7 @@ fn json_output() {
     let v: serde_json::Value = serde_json::from_str(&run.stdout).unwrap();
     assert_eq!(v["messages"][0]["id"], "210.2.1");
     assert_eq!(v["messages"][0]["raw"], 3);
-    assert_eq!(v["messages"][0]["label"], "?");
+    assert_eq!(v["messages"][0]["label"], "Firmware");
 
     // Status u8 109 on function 10, the Gungnir 2 volume, with its trailing checksum.
     let run = svolder(&[

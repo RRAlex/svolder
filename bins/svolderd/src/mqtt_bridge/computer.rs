@@ -106,6 +106,7 @@ impl BridgeTask {
             let due = published.since + START_SETTLES;
             if Instant::now() < due {
                 published.dirty = true;
+                // `flush_at` is an absolute time, so the earlier of two owed flushes is kept.
                 self.flush_at = Some(self.flush_at.map_or(due, |at| at.min(due)));
                 return;
             }

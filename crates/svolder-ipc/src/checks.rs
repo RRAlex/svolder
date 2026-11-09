@@ -144,6 +144,11 @@ pub trait Probes {
     fn daemons(&self) -> Vec<RunningDaemon> {
         Vec::new()
     }
+
+    /// The host's Bluetooth rfkill switches, empty when none exist or none could be read.
+    fn rfkill(&self) -> Vec<RfkillFacts> {
+        Vec::new()
+    }
 }
 
 /// What BlueZ says over the system bus.
@@ -171,6 +176,37 @@ pub struct AdapterFacts {
     /// The longest advertisement it accepts, `None` when it does not say. A controller with
     /// extended advertising reports far more than the legacy 31 bytes.
     pub max_adv_len: Option<u8>,
+}
+
+/// One kernel rfkill switch of type `bluetooth`, from `/sys/class/rfkill`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RfkillFacts {
+    /// The adapter the switch belongs to, as the switch's `name` file says it: `hci0`.
+    pub name: String,
+    /// Blocked by software: `rfkill block`, or a desktop's airplane mode. `rfkill unblock` lifts it.
+    pub soft: bool,
+    /// Blocked by a hardware switch or the firmware, which no command lifts.
+    pub hard: bool,
+}
+
+/// How a blocked radio is blocked; a hard block outranks a soft one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Block {
+    Soft,
+    Hard,
+}
+
+/// The block on the radio of adapter `name`, `None` when its switch is not blocked or it has
+/// none; a hard block outranks a soft one.
+fn block_of(rfkill: &[RfkillFacts], name: &str) -> Option<Block> {
+    let mine = || rfkill.iter().filter(|r| r.name == name);
+    if mine().any(|r| r.hard) {
+        Some(Block::Hard)
+    } else if mine().any(|r| r.soft) {
+        Some(Block::Soft)
+    } else {
+        None
+    }
 }
 
 /// What systemd says about the units this project installs and about bluetoothd.
@@ -250,7 +286,7 @@ pub fn run(probes: &dyn Probes, socket: &Path, dev: bool) -> Vec<Outcome> {
 
     let mut outcomes = vec![
         bluetooth_service(&bluez),
-        adapters(&bluez, config.as_ref()),
+        adapters(&bluez, config.as_ref(), &probes.rfkill()),
         runtime(&env, socket),
         daemon(&systemd, socket),
     ];
@@ -291,6 +327,18 @@ fn bluetooth_service(bluez: &BluezFacts) -> Outcome {
     }
     match &bluez.reachable {
         Ok(()) => pass(BLUETOOTH_SERVICE, "org.bluez answers on the system bus"),
+        Err(why) if not_on_the_bus(why) => Outcome {
+            check: BLUETOOTH_SERVICE,
+            state: State::Fail,
+            reason:
+                "BlueZ is not on the system bus: the bluetooth service is not running, or bluez is \
+                     not installed (install bluez, then start the service)"
+                    .into(),
+            fix: Some(Fix {
+                command: "sudo systemctl unmask bluetooth && sudo systemctl enable --now bluetooth".into(),
+                applies_itself: false,
+            }),
+        },
         Err(why) => Outcome {
             check: BLUETOOTH_SERVICE,
             state: State::Fail,
@@ -299,7 +347,7 @@ fn bluetooth_service(bluez: &BluezFacts) -> Outcome {
                  or this user may not talk to it"
             ),
             fix: Some(Fix {
-                command: "sudo systemctl enable --now bluetooth — or add the user to the \
+                command: "sudo systemctl unmask bluetooth && sudo systemctl enable --now bluetooth — or add the user to the \
                           bluetooth group and log in again"
                     .into(),
                 applies_itself: false,
@@ -308,8 +356,52 @@ fn bluetooth_service(bluez: &BluezFacts) -> Outcome {
     }
 }
 
+/// The D-Bus error names that say nobody owns `org.bluez` and the bus could not start it: no
+/// owner, no service file, or systemd has no (or a masked) unit to activate.
+const NOT_ON_THE_BUS: [&str; 4] = [
+    "org.freedesktop.DBus.Error.ServiceUnknown",
+    "org.freedesktop.DBus.Error.NameHasNoOwner",
+    "org.freedesktop.systemd1.NoSuchUnit",
+    "org.freedesktop.systemd1.UnitMasked",
+];
+
+/// Whether the bus error, written `<error name>: <message>` by the probe, is one of
+/// [`NOT_ON_THE_BUS`]: the name decides, never the message's words.
+fn not_on_the_bus(why: &str) -> bool {
+    let name = why.split_once(": ").map_or(why, |(name, _)| name);
+    NOT_ON_THE_BUS.contains(&name)
+}
+
+/// The outcome for adapters `names` that are off while their radio is blocked.
+fn blocked_adapters(block: Block, names: &str, present: &str) -> Outcome {
+    let (what, fix) = match block {
+        Block::Soft => (
+            "blocked by rfkill (soft)",
+            Some(Fix {
+                command: "sudo rfkill unblock bluetooth".into(),
+                applies_itself: false,
+            }),
+        ),
+        Block::Hard => (
+            "hard-blocked by rfkill: a hardware switch or the firmware blocks it, and no \
+             command lifts it",
+            None,
+        ),
+    };
+    Outcome {
+        check: ADAPTERS,
+        state: State::Warn,
+        reason: format!("{names} is {what} ({present})"),
+        fix,
+    }
+}
+
 /// Which adapters BlueZ reports, and whether the one the config asks for is among them and on.
-fn adapters(bluez: &BluezFacts, config: Option<&Result<Config, String>>) -> Outcome {
+fn adapters(
+    bluez: &BluezFacts,
+    config: Option<&Result<Config, String>>,
+    rfkill: &[RfkillFacts],
+) -> Outcome {
     if let Some(why) = bluez.unreadable.as_deref() {
         return Outcome {
             check: ADAPTERS,
@@ -350,6 +442,33 @@ fn adapters(bluez: &BluezFacts, config: Option<&Result<Config, String>>) -> Outc
             applies_itself: false,
         })
     };
+    // What stands between the powered-off adapters in `off` and being on: nothing, so BlueZ is
+    // asked (`bluetoothctl power on`), else the software blocks of their own switches, else only
+    // hardware blocks. A block on another adapter's switch is none of this one's business.
+    let power_fix = |off: &[&AdapterFacts]| -> Outcome {
+        let blocks: Vec<Option<Block>> = off.iter().map(|a| block_of(rfkill, &a.name)).collect();
+        let names = off
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if blocks.iter().any(Option::is_none) {
+            Outcome {
+                check: ADAPTERS,
+                state: State::Warn,
+                reason: if wanted.is_some() {
+                    format!("{names} is present but powered off ({present})")
+                } else {
+                    format!("no adapter is powered on (present: {present})")
+                },
+                fix: power_on(),
+            }
+        } else if blocks.contains(&Some(Block::Soft)) {
+            blocked_adapters(Block::Soft, &names, &present)
+        } else {
+            blocked_adapters(Block::Hard, &names, &present)
+        }
+    };
     match wanted {
         Some(name) => match bluez.adapters.iter().find(|a| a.name == name) {
             None => Outcome {
@@ -367,12 +486,7 @@ fn adapters(bluez: &BluezFacts, config: Option<&Result<Config, String>>) -> Outc
                     applies_itself: false,
                 }),
             },
-            Some(adapter) if !adapter.powered => Outcome {
-                check: ADAPTERS,
-                state: State::Warn,
-                reason: format!("{name} is present but powered off ({present})"),
-                fix: power_on(),
-            },
+            Some(adapter) if !adapter.powered => power_fix(&[adapter]),
             Some(adapter) => pass(
                 ADAPTERS,
                 format!(
@@ -381,12 +495,9 @@ fn adapters(bluez: &BluezFacts, config: Option<&Result<Config, String>>) -> Outc
                 ),
             ),
         },
-        None if !bluez.adapters.iter().any(|a| a.powered) => Outcome {
-            check: ADAPTERS,
-            state: State::Warn,
-            reason: format!("no adapter is powered on (present: {present})"),
-            fix: power_on(),
-        },
+        None if !bluez.adapters.iter().any(|a| a.powered) => {
+            power_fix(&bluez.adapters.iter().collect::<Vec<_>>())
+        }
         None => pass(ADAPTERS, format!("present: {present}")),
     }
 }
@@ -629,6 +740,14 @@ fn config(
             check: CONFIG,
             state: State::Fail,
             reason: format!("the profiles could not be loaded from {}", first_line(why)),
+            fix: None,
+        };
+    }
+    if let Some(duplicate) = config.dropped_duplicates.first() {
+        return Outcome {
+            check: CONFIG,
+            state: State::Warn,
+            reason: duplicate.clone(),
             fix: None,
         };
     }

@@ -49,6 +49,18 @@ from Settings, Connect, Web UI (see ["Connect"](tui.md#connect) under "Settings 
 a box that turns the page on and off, moves it between this computer and your network, and makes the
 link, the pairing code and the new token below.
 
+### In Docker
+
+The compose file gives the container the host's network, and the image listens on every interface
+by default (`SVOLDER_WEB_LISTEN=0.0.0.0:8738`), so the only steps are `enabled = true` under `[web]`
+in `config.toml` under `config/svolder`, then `docker compose restart svolder`, and the sign-in,
+`docker exec svolder svolder web token`. `svolder web --qr` and `web pair` carry the host's LAN
+address. Only a container on a bridge network (no `network_mode: host`) needs `url` in the file, or
+`SVOLDER_WEB_URL` in the container's environment, the address your phone reaches, e.g.
+`http://<host-ip>:8738`, and says so when it is missing. A
+`listen` in the file still wins. See ["The web UI in the container"](daemon.md#the-web-ui-in-the-container) under
+"The daemon".
+
 ### Signing in
 
 With `auth = "token"` a browser signs in before it sees anything (unless `guest = "read"`, see

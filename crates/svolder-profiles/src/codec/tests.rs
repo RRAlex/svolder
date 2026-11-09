@@ -83,6 +83,40 @@ fn status(id: FunctionId, value: Value) -> Message {
     Message::status(id, value)
 }
 
+/// A firmware build the device reports on `210.2.<subsystem>` is named, not `?`.
+#[test]
+fn a_firmware_version_reading_is_named() {
+    let p = dac();
+    let label = |sub| describe(&p, &status(FunctionId::three(210, 2, sub), Value::U16(7))).label;
+    assert_eq!(label(1), "Firmware");
+    assert_eq!(label(2), "DSP firmware");
+    assert_eq!(label(3), "?");
+    assert_eq!(
+        describe(&p, &status(FunctionId::three(210, 2, 1), Value::U16(7))).display,
+        "7"
+    );
+    assert_eq!(
+        describe(&p, &status(FunctionId::three(210, 3, 1), Value::U16(7))).label,
+        "?"
+    );
+}
+
+/// The Bifrost 3 sends reading 8 as a UInt8, 1 while locked; it reads in the same words as the
+/// Boolean the Yggdrasil and Gungnir send.
+#[test]
+fn a_uint8_lock_reading_reads_like_the_boolean() {
+    let reg = Registry::builtin().unwrap();
+    let p = reg.get("bifrost3").unwrap();
+    let id = FunctionId::one(8);
+    for (raw, boolean) in [(Value::U8(1), true), (Value::U8(0), false)] {
+        let a = describe(p, &status(id, raw));
+        let b = describe(p, &status(id, Value::Bool(boolean)));
+        assert_eq!(a.display, b.display);
+        assert_eq!(a.label, b.label);
+        assert_eq!(a.display, boolean.to_string());
+    }
+}
+
 #[test]
 fn describes_each_kind() {
     let p = dac();

@@ -186,6 +186,8 @@ export function createFrame({ window, core, pick }) {
 
   // ---- the reserved key ----
   window.addEventListener('keydown', (event) => {
+    // an open question owns the keyboard (ask.js stops these keys): nothing opens behind it
+    if (core.ask?.opened()) return;
     if (reservedKey(event)) {
       event.preventDefault();
       event.stopImmediatePropagation();

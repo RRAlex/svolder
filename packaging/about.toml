@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# cargo-about's settings for THIRD-PARTY-LICENSES (`make third-party-licenses`): the licence
+# cargo-about's settings for THIRD-PARTY-LICENSES (`make 3rdpartylicenses`): the licence
 # texts of every crate the shipped binaries are built from. Dev and build dependencies never
 # reach a binary, and the workspace's own crates (`publish = false`) are svolder itself, under
 # LICENSE. Both release architectures are listed, so a crate only one of them builds is covered.

@@ -16,20 +16,40 @@ use super::template::UNSET;
 use super::{Config, ConfigError, DeviceConfig};
 
 impl Config {
+    /// The configured device whose unit id is `unit`, spelled however its block spells it.
+    pub fn device_for_unit(&self, unit: &svolder_proto::UnitId) -> Option<&DeviceConfig> {
+        Self::device_for_unit_in(&self.devices, unit)
+    }
+
+    /// [`Config::device_for_unit`] over `devices`; what [`Config::parse`] checks each block
+    /// against, so a file never holds one unit twice.
+    pub(super) fn device_for_unit_in<'a>(
+        devices: &'a [DeviceConfig],
+        unit: &svolder_proto::UnitId,
+    ) -> Option<&'a DeviceConfig> {
+        devices
+            .iter()
+            .find(|device| device.udid.parse::<svolder_proto::UnitId>().as_ref() == Ok(unit))
+    }
+
     /// Append `device` to the file at `path` as a new `[[device]]` block.
     ///
     /// Only the four keys a device is configured by are written, and `profile` and
     /// `passphrase` only where they say something: a device's input names are left to a hand
     /// edit. A name another device already carries is refused, so the file never grows two
-    /// blocks a selector cannot tell apart.
+    /// blocks a selector cannot tell apart, and so is a unit id another device already carries
+    /// (the writer's strict parse names both devices): a second block for one unit would be a second
+    /// actor on the same device.
     pub fn add_device(path: &Path, device: &DeviceConfig) -> Result<(), ConfigError> {
         edit_file(path, |doc| {
+            refuse_a_unit_twice(doc)?;
             if let Some((_, clash)) = named(doc, &device.name) {
                 return Err(taken(&clash));
             }
             let mut table = Table::new();
             write_device(&mut table, device);
-            push_block(doc, DEVICE, table)
+            push_block(doc, DEVICE, table)?;
+            Config::parse_strict(&doc.to_string()).map(drop)
         })
     }
 
@@ -68,6 +88,11 @@ impl Config {
     /// already carries (the file never grows two blocks a selector cannot tell apart);
     /// renaming a block to the name it has, or to another spelling of it, is no collision.
     ///
+    /// The edit is judged by the file it leaves: one that leaves a unit on two devices is
+    /// refused, and one that takes a device off a unit it shared is accepted. A file that
+    /// carried a duplicate and still does is refused with the writers' words for it; an edit
+    /// that makes the duplicate is refused by the strict parse.
+    ///
     /// A `default_device` naming this very device is renamed with it, in the same edit —
     /// otherwise the file would name a default it no longer configures, which
     /// [`Config::parse`] refuses to load.
@@ -77,6 +102,7 @@ impl Config {
         device: &DeviceConfig,
     ) -> Result<(), ConfigError> {
         edit_file(path, |doc| {
+            let before = refuse_a_unit_twice(doc);
             let at = device_at(doc, name)?;
             if let Some((clash_at, clash)) = named(doc, &device.name)
                 && clash_at != at
@@ -88,6 +114,10 @@ impl Config {
                 .get_mut(at)
                 .ok_or_else(|| ConfigError::Parse(format!("device {name:?} went missing")))?;
             write_device(table, device);
+            // On a file that had a unit twice, refuse with the pair the edit leaves, if any.
+            if before.is_err() {
+                refuse_a_unit_twice(doc)?;
+            }
             if renamed {
                 set_key_at(
                     doc,
@@ -96,7 +126,7 @@ impl Config {
                     Value::from(device.name.as_str()),
                 )?;
             }
-            Ok(())
+            Config::parse_strict(&doc.to_string()).map(drop)
         })
     }
 
@@ -160,6 +190,19 @@ fn device_at(doc: &DocumentMut, name: &str) -> Result<usize, ConfigError> {
     named(doc, name)
         .map(|(at, _)| at)
         .ok_or_else(|| ConfigError::Parse(format!("no device named {name:?} is configured")))
+}
+
+/// Refuse a device write on a file that already configures one unit twice (written before the
+/// rule), in words that name the file's own fault and its cure rather than the strict parse's
+/// bare clash: the write is about another device, and says nothing of the pair.
+fn refuse_a_unit_twice(doc: &DocumentMut) -> Result<(), ConfigError> {
+    match Config::parse(&doc.to_string())?.dropped_duplicates.first() {
+        Some(line) => Err(ConfigError::Parse(format!(
+            "this file already configures one unit twice, so no device is added or changed \
+             until that is fixed: {line}"
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// What a writer refuses a name another block already carries with.

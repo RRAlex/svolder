@@ -5,6 +5,7 @@
 // order names that Ember does not have is left out. A page with no device to show draws its card
 // alone. Pure, with no DOM.
 
+import { fixedEven } from '../../../core/words.js';
 import { attr } from './html.js';
 import { PARTS } from './parts.js';
 import { effective } from './computer.js';
@@ -74,7 +75,7 @@ const kind = (device, order, computer) => {
 /**
  * The `#screen` of `page`: the shown device's view, the strip's data and the tone's steps,
  * `order` setting where each section stands (the default order where it is not given).
- * `computer` is the computer's view (../computer-view.js): on its side the volume, the tone control
+ * `computer` is the computer's view (`core.computer.view`): on its side the volume, the tone control
  * and the presets are the computer's, on the DAC page's layout whatever the device.
  */
 export function screen(page, order, computer = null) {
@@ -84,7 +85,7 @@ export function screen(page, order, computer = null) {
   const inert = device.locked ? ' inert' : '';
   const column = (zone) => `<div class="col"${inert}>${sections(drawnIn(zone, device, computer), device, page, computer)}</div>`;
   const card = device.card ? included(PARTS.card(device, page, { oob: false })) : '';
-  const view = `<div role="group"${attr('aria-label', `${device.name}, ${device.family_word}`)} class="view ${kind(device, order, computer)}${device.away ? ' away' : ''}"${computer ? attr('data-side', computer.side) : ''}${attr('data-device', device.url)}${attr('data-name', device.name)}${attr('data-family', device.family)}${attr('data-glow', device.glow.toFixed(2))}${attr('data-shape', device.shape)}> ${card} ${band(zones.band, device, page, computer)} ${column(zones.left)} ${column(zones.right)} ${included(PARTS.facts(device, page, { oob: false }))} </div>`;
+  const view = `<div role="group"${attr('aria-label', `${device.name}, ${device.family_word}`)} class="view ${kind(device, order, computer)}${device.away ? ' away' : ''}"${computer ? attr('data-side', computer.side) : ''}${attr('data-device', device.url)}${attr('data-name', device.name)}${attr('data-family', device.family)}${attr('data-glow', fixedEven(device.glow, 2))}${attr('data-shape', device.shape)}> ${card} ${band(zones.band, device, page, computer)} ${column(zones.left)} ${column(zones.right)} ${included(PARTS.facts(device, page, { oob: false }))} </div>`;
   const strip = `<script type="application/json" id="strip">${block(page.strip ?? {})}</script>`;
   const steps = device.tone_steps != null
     ? ` <script type="application/json" id="tone-steps">${block(device.tone_steps)}</script>`

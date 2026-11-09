@@ -34,13 +34,14 @@ pub(super) fn routes() -> Router<Web> {
 }
 
 /// `{"name"}` with the presets part.
-fn answer(web: &Web, device: &str, name: &str) -> Response {
+async fn answer(web: &Web, device: &str, name: &str) -> Response {
     with_parts(
         web,
         device,
         serde_json::json!({ "name": name }),
         &[Part::Presets],
     )
+    .await
 }
 
 /// A name the core refuses, as a 422 in its words.
@@ -82,7 +83,7 @@ async fn save(
             );
         }
     };
-    let (path, config) = match config_file(&web, "presets") {
+    let (path, config) = match config_file(&web, "presets").await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -96,7 +97,7 @@ async fn save(
             name: wanted.clone(),
         };
         return match web.fleet.request(svolder_ipc::Request::HostEq { op }).await {
-            svolder_ipc::Response::Ack => answer(&web, &name, &wanted),
+            svolder_ipc::Response::Ack => answer(&web, &name, &wanted).await,
             svolder_ipc::Response::Error { message, .. } => error(StatusCode::CONFLICT, message),
             _ => error(StatusCode::BAD_GATEWAY, "the daemon gave no answer"),
         };
@@ -115,7 +116,7 @@ async fn save(
     if let Err(refused) = edit_then_reload(&web, path, conflict, edit).await {
         return refused;
     }
-    answer(&web, &name, &wanted)
+    answer(&web, &name, &wanted).await
 }
 
 /// What `presets/rename` takes.
@@ -148,7 +149,7 @@ async fn rename(
             ),
         );
     }
-    let (path, config) = match config_file(&web, "presets") {
+    let (path, config) = match config_file(&web, "presets").await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -168,7 +169,7 @@ async fn rename(
     if let Err(refused) = edit_then_reload(&web, path, conflict, edit).await {
         return refused;
     }
-    answer(&web, &name, &new)
+    answer(&web, &name, &new).await
 }
 
 /// What `presets/delete` takes.
@@ -200,7 +201,7 @@ async fn delete(
             ),
         );
     }
-    let (path, config) = match config_file(&web, "presets") {
+    let (path, config) = match config_file(&web, "presets").await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -215,7 +216,7 @@ async fn delete(
     if let Err(refused) = edit_then_reload(&web, path, conflict, edit).await {
         return refused;
     }
-    answer(&web, &name, &gone)
+    answer(&web, &name, &gone).await
 }
 
 #[cfg(test)]

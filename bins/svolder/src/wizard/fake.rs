@@ -60,6 +60,7 @@ pub(crate) struct FakeEffects {
     accepts: Option<String>,
     /// The names the configuration already carries.
     taken: Vec<String>,
+    taken_units: Vec<(String, String)>,
     /// What this machine makes of a background service.
     platform: Platform,
     /// Whether writing the device, the adapter or the units works on this machine.
@@ -101,6 +102,7 @@ impl FakeEffects {
             grades: Vec::new(),
             accepts: None,
             taken: Vec::new(),
+            taken_units: Vec::new(),
             platform: Platform {
                 systemd: true,
                 nixos: false,
@@ -186,6 +188,18 @@ impl FakeEffects {
     /// The same host, with these device names already configured.
     pub(crate) fn with_taken<const N: usize>(mut self, names: [&str; N]) -> FakeEffects {
         self.taken = names.iter().map(|name| (*name).to_string()).collect();
+        self
+    }
+
+    /// The same host, with these (device name, unit id) pairs already configured.
+    pub(crate) fn with_taken_units<const N: usize>(
+        mut self,
+        units: [(&str, &str); N],
+    ) -> FakeEffects {
+        self.taken_units = units
+            .iter()
+            .map(|(name, unit)| ((*name).to_string(), (*unit).to_string()))
+            .collect();
         self
     }
 
@@ -367,6 +381,10 @@ impl Files for FakeEffects {
 
     fn taken_names(&self) -> Vec<String> {
         self.taken.clone()
+    }
+
+    fn taken_units(&self) -> Vec<(String, String)> {
+        self.taken_units.clone()
     }
 }
 

@@ -8,6 +8,14 @@ tone written `TONE . off . EQ`, the points table, all through the page's own han
   minus_plus_mute_set_the_computer_volume   one percent a tap, mute and unmute, the request log
   a_point_drag_posts_live_and_done_at_release   a point dragged: live updates, the last one done
   a_tap_adds_a_point_and_x_removes_it   a tap on an empty spot adds a PK at Q 1.0, its x removes it
+  a_tap_is_short_and_still              a press held past the core's limit, or let go 7 px away, adds nothing
+  a_full_table_says_so                  a tap on 16 points says how many the daemon holds at most
+  typed_words_read_k_and_a_comma        `2.9k` is 2900 Hz, `+3,2` is 3.2 dB
+  wheel_and_arrow_bursts_end_in_one_done   ten notches and five arrow keys: live updates and one done
+  a_flip_mid_hold_stops_the_steps       a held `+` stops with a keyboard flip
+  a_drag_ended_by_a_flip_leaves_later_holds_alone   a cell typed in after a flip back keeps its hold
+  a_drag_is_drawn_on_the_point_held     point 2 dragged: its mark, cell and label change, point 1's do not
+  a_guest_tap_on_a_full_table_is_told_to_sign_in   the sign-in words, not "16 is the most"
   the_points_are_listed_by_frequency_and_the_selection_follows   a drag never re-sorts, the release does, the point in hand follows
   sixteen_points_keep_the_layout        the tone section and the page are as tall with 16 as with 7,
                                        the table scrolls and counts what is below
@@ -35,10 +43,13 @@ import common
 os.environ.setdefault('SVOLDER_FAKE_COMPUTER_VOLUME', '42')
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
+# the cases to run (their `one(...)` names), after the browser's; none runs them all (mutate_paper.py's)
+ONLY = set(sys.argv[2:])
 fails = []
 passed = 0
 t0 = time.time()
 SHOTS = f'{common.REPO}/target/web-shots/paper'
+os.makedirs(SHOTS, exist_ok=True)
 
 
 def check(name, cond, detail=''):
@@ -153,6 +164,8 @@ def drag_xy(b, x0, y0, x1, y1, hold=False):
 
 
 def one(name, fn, fleet=(), web='auth = "none"', env=None):
+    if ONLY and name not in ONLY:
+        return
     d = common.Daemon('gungnir2-v2', host='fake', fleet=list(fleet), web=web, env=env or {})
     b = make()
     try:
@@ -333,6 +346,249 @@ def a_tap(b, d):
     click(b, '#p-add')
     check(f'{name}: + Add point adds a PK at 0 dB', add == '+ Add point' and poll(lambda: count(b) == n + 1) is True
           and b.page(f'{COMPUTER}.eq.points.some((p) => p.g === 0 && p.q === 1 && p.type === "PK")') is True, [add, count(b)])
+
+def empty_spot(b):
+    """A spot of the graph far from every point."""
+    graph = rect(b, '#p-graph')
+    spots = [(graph['l'] + graph['w'] * fx, graph['t'] + graph['h'] * fy) for fx, fy in
+             [(0.33, 0.85), (0.5, 0.9), (0.66, 0.1), (0.4, 0.12), (0.8, 0.8), (0.2, 0.15)]]
+    marks = points_of(b)
+    return max(spots, key=lambda s: min(math.hypot(s[0] - m['x'], s[1] - m['y']) for m in marks))
+
+
+def toasts(b):
+    return b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)") or []
+
+
+def a_tap_is_short_and_still(b, d):
+    """A tap has the core's limits: it moves less than TAP_PX and lets go within TAP_MS."""
+    name = 'a_tap_is_short_and_still'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    n = count(b)
+    x, y = empty_spot(b)
+    graph = "document.querySelector('#p-graph')"
+    log = len(posts(b))
+    # held for longer than the limit, let go in place: no point
+    b.page(f"(() => {{ __ptr('pointerdown', {graph}, {x}, {y}, 1); return 1; }})()")
+    time.sleep(0.8)
+    b.page(f"(() => {{ __ptr('pointerup', {graph}, {x}, {y}, 0); return 1; }})()")
+    time.sleep(0.6)
+    check(f'{name}: a press held past the limit adds nothing', count(b) == n and posts(b)[log:] == [], posts(b)[log:])
+    # let go 7 px away, which is beyond the limit: no point
+    b.page(f"(() => {{ __ptr('pointerdown', {graph}, {x}, {y}, 1); __ptr('pointermove', {graph}, {x + 7}, {y}, 1);"
+           f" __ptr('pointerup', {graph}, {x + 7}, {y}, 0); return 1; }})()")
+    time.sleep(0.6)
+    check(f'{name}: a press let go 7 px away adds nothing', count(b) == n and posts(b)[log:] == [], posts(b)[log:])
+    # quick and 4 px: a tap
+    b.page(f"(() => {{ __ptr('pointerdown', {graph}, {x}, {y}, 1); __ptr('pointermove', {graph}, {x + 4}, {y}, 1);"
+           f" __ptr('pointerup', {graph}, {x + 4}, {y}, 0); return 1; }})()")
+    check(f'{name}: a quick press let go 4 px away adds a point', poll(lambda: count(b) == n + 1) is True, [n, count(b)])
+
+
+def a_second_finger_makes_the_tap_no_tap(b, d):
+    """Finger 1 down on empty ground, finger 2 down, finger 1 up at once: two fingers were down, so no point."""
+    name = 'a_second_finger_makes_the_tap_no_tap'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    n = count(b)
+    x, y = empty_spot(b)
+    graph = "document.querySelector('#p-graph')"
+    log = len(posts(b))
+    touch = ("(type, el, x, y, id, primary) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true,"
+             " pointerId: id, pointerType: 'touch', isPrimary: primary, button: 0, buttons: type === 'pointerup' ? 0 : 1,"
+             " clientX: x, clientY: y }))")
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 3, true);"
+           f" t('pointerdown', {graph}, {x + 120}, {y}, 4, false); t('pointerup', {graph}, {x}, {y}, 3, true); return 1; }})()")
+    time.sleep(0.8)
+    check(f'{name}: no point is added', count(b) == n and posts(b)[log:] == [], [n, count(b), posts(b)[log:]])
+    # a second finger that lands outside the sheet drops it just the same
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 3, true);"
+           f" t('pointerdown', document.body, 5, 5, 4, false); t('pointerup', {graph}, {x}, {y}, 3, true); return 1; }})()")
+    time.sleep(0.8)
+    check(f'{name}: a second finger outside the sheet makes it no tap either', count(b) == n and posts(b)[log:] == [],
+          [n, count(b), posts(b)[log:]])
+    # the same finger alone is a tap
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 5, true); t('pointerup', {graph}, {x}, {y}, 5, true); return 1; }})()")
+    check(f'{name}: one finger alone still adds one', poll(lambda: count(b) == n + 1) is True, [n, count(b)])
+
+
+def a_full_table_says_so(b, d):
+    name = 'a_full_table_says_so'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    check(f'{name}: sixteen points', settle_to(b, 16), count(b))
+    time.sleep(0.5)
+    most = b.page(f'{COMPUTER}.eq.max')
+    x, y = empty_spot(b)
+    graph = "document.querySelector('#p-graph')"
+    log = len(posts(b))
+    b.page(f"(() => {{ __ptr('pointerdown', {graph}, {x}, {y}, 1); __ptr('pointerup', {graph}, {x}, {y}, 0); return 1; }})()")
+    said = poll(lambda: toasts(b))
+    check(f'{name}: a tap says the most the daemon holds', said == [f'{most} is the most'] and most is not None, [said, most])
+    check(f'{name}: and writes nothing', posts(b)[log:] == [], posts(b)[log:])
+
+
+def typed_words(b, d):
+    """`2.9k` and `+3,2` read as the numbers they mean."""
+    name = 'typed_words_read_k_and_a_comma'
+    load(b, d, 'computer')
+    settle_to(b, 5)
+    click(b, '#p-cm-eq')
+    time.sleep(0.5)
+
+    def type_into(selector, words):
+        b.page(f"(() => {{ const c = document.querySelector({json.dumps(selector)}); c.focus(); c.value = {json.dumps(words)};"
+               " c.dispatchEvent(new Event('input', { bubbles: true })); c.dispatchEvent(new Event('change', { bubbles: true })); })()")
+
+    before = b.page(f'{COMPUTER}.eq.points[1]')
+    type_into('#p-c2g', '+3,2')
+    check(f'{name}: +3,2 is 3.2 dB', poll(lambda: b.page(f'{COMPUTER}.eq.points[1].g') == 3.2) is True, b.page(f'{COMPUTER}.eq.points'))
+    type_into('#p-c2f', '2.9k')
+    check(f'{name}: 2.9k is 2900 Hz', poll(lambda: b.page(f'{COMPUTER}.eq.points.some((p) => p.f === 2900)')) is True,
+          [before, b.page(f'{COMPUTER}.eq.points')])
+    sent = [p[1] for p in posts(b) if p[0].startswith('api/v1/host/eq/points/')]
+    check(f'{name}: each typing is one write, done', [s.get('done') for s in sent] == [True, True], sent)
+
+
+def key_and_wheel_bursts(b, d):
+    """Ten wheel notches and five arrow keys are one live update each and one done at the end."""
+    name = 'wheel_and_arrow_bursts_end_in_one_done'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    settle_to(b, 5)
+    click(b, '#p-cm-eq')
+    time.sleep(0.5)
+    two = next(p for p in points_of(b) if p['n'] == 2)
+    steps = b.page('__core.drag.computerSteps()')
+    q0, g0 = b.page(f'{COMPUTER}.eq.points[1].q'), b.page(f'{COMPUTER}.eq.points[1].g')
+
+    def near(table, value):
+        return min(range(len(table)), key=lambda i: abs(table[i] - value))
+
+    def at(table, value):
+        return next((i for i, v in enumerate(table) if abs(v - value) < 1e-9), None)
+
+    log = len(posts(b))
+    for _ in range(10):
+        b.page(f"document.querySelector('#p-pt-2').dispatchEvent(new WheelEvent('wheel', {{ bubbles: true, cancelable: true,"
+               f" deltaY: -1, deltaMode: 1, clientX: {two['x']}, clientY: {two['y']} }}))")
+        time.sleep(0.08)
+    time.sleep(0.9)
+    sent = [p[1] for p in posts(b)[log:] if p[0] == 'api/v1/host/eq/points/2']
+    live, done = [s for s in sent if s.get('done') is False], [s for s in sent if s.get('done') is True]
+    idx = [at(steps['q'], s.get('q')) for s in live]
+    first = near(steps['q'], q0)
+    check(f'{name}: ten notches are ten live updates, a step each', idx == list(range(first + 1, first + 11)), [first, idx])
+    check(f'{name}: and one done, last, carrying the last Q', len(done) == 1 and sent[-1] is done[0]
+          and done[0].get('q') == live[-1].get('q') if live else False, sent[-3:])
+    log = len(posts(b))
+    for _ in range(5):
+        b.page("(() => { const el = document.querySelector('#p-pt-2'); el.focus();"
+               " el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })); })()")
+        time.sleep(0.08)
+    time.sleep(0.9)
+    sent = [p[1] for p in posts(b)[log:] if p[0] == 'api/v1/host/eq/points/2']
+    live, done = [s for s in sent if s.get('done') is False], [s for s in sent if s.get('done') is True]
+    idx = [at(steps['g'], s.get('g')) for s in live]
+    first = near(steps['g'], g0)
+    check(f'{name}: five arrow keys are five live updates, a step each', idx == list(range(first + 1, first + 6)), [first, idx])
+    check(f'{name}: and one done, last, carrying the last gain', len(done) == 1 and sent[-1] is done[0]
+          and done[0].get('g') == live[-1].get('g') if live else False, sent[-3:])
+    check(f'{name}: the gain is five steps up', poll(lambda: b.page(f'{COMPUTER}.eq.points[1].g') == steps['g'][first + 5]) is True,
+          b.page(f'{COMPUTER}.eq.points[1]'))
+
+
+def a_guest_full_table(b, d):
+    """A guest's tap on a full table is turned away with the sign-in words, not "N is the most"."""
+    name = 'a_guest_tap_on_a_full_table_is_told_to_sign_in'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    b.page("(() => { const h = __core.model.page().host; const pts = h.computer.eq.points;"
+           " const more = Array.from({ length: 16 - pts.length }, (_, i) => ({ ...pts[0], slot: 100 + i, f: 30 + i * 900 }));"
+           " __core.model.emit('host', { ...h, computer: { ...h.computer, eq: { ...h.computer.eq, points: [...pts, ...more] } } }); })()")
+    time.sleep(0.6)
+    check(f'{name}: sixteen points are drawn', count(b) == 16, count(b))
+    x, y = empty_spot(b)
+    graph = "document.querySelector('#p-graph')"
+    b.page(f"(() => {{ __ptr('pointerdown', {graph}, {x}, {y}, 1); __ptr('pointerup', {graph}, {x}, {y}, 0); return 1; }})()")
+    said = poll(lambda: toasts(b))
+    check(f'{name}: the core says why', bool(said) and all('sign in' in t.lower() for t in said), said)
+    check(f'{name}: and nothing is written', posts(b) == [], posts(b))
+
+
+def a_drag_draws_the_point_held(b, d):
+    """While point 2 is dragged its own mark, cell and label change in place; point 1's do not."""
+    name = 'a_drag_is_drawn_on_the_point_held'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    settle_to(b, 5)
+    click(b, '#p-cm-eq')
+    time.sleep(0.5)
+    two = next(p for p in points_of(b) if p['n'] == 2)
+    read = ("(() => ({ m1: document.querySelector('#p-pt-1').getAttribute('aria-valuenow'),"
+            " m2: document.querySelector('#p-pt-2').getAttribute('aria-valuenow'),"
+            " c1: document.querySelector('#p-c1g').value, c2: document.querySelector('#p-c2g').value,"
+            " label: document.querySelector('.p-dlab')?.textContent ?? null }))()")
+    before = b.page(read)
+    b.page(f"(() => {{ const el = document.querySelector('#p-pt-2'); __ptr('pointerdown', el, {two['x']}, {two['y']}, 1);"
+           f" for (let i = 1; i <= 8; i++) __ptr('pointermove', el, {two['x']}, {two['y']} - i * 6, 1); return 1; }})()")
+    time.sleep(0.4)
+    during = b.page(read)
+    check(f'{name}: the held point\'s mark and cell show the new gain', during['m2'] != before['m2'] and during['c2'] != before['c2'],
+          [before, during])
+    check(f'{name}: the other point\'s mark and cell are as they were', during['m1'] == before['m1'] and during['c1'] == before['c1'],
+          [before, during])
+    check(f'{name}: the label says the gain held', bool(during['label']) and during['c2'] in during['label'], during)
+    b.page(f"(() => {{ __ptr('pointerup', document.querySelector('#p-pt-2'), {two['x']}, {two['y']} - 48, 0); return 1; }})()")
+    time.sleep(0.6)
+
+
+def a_drag_ended_by_a_flip_leaves_later_holds_alone(b, d):
+    """A drag ended by a flip gives nothing back later: a cell typed in after flipping back keeps
+    its hold (a host reading meanwhile does not redraw the section and take the typing away)."""
+    name = 'a_drag_ended_by_a_flip_leaves_later_holds_alone'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    settle_to(b, 5)
+    click(b, '#p-cm-eq')
+    time.sleep(0.5)
+    two = next(p for p in points_of(b) if p['n'] == 2)
+    # in one breath: the drag is held, the side is flipped and flipped back, a cell is typed in and
+    # a host reading comes; the drag's own writes are answered after that
+    b.page(f"(() => {{ const el = document.querySelector('#p-pt-2'); __ptr('pointerdown', el, {two['x']}, {two['y']}, 1);"
+           f" for (let i = 1; i <= 8; i++) __ptr('pointermove', el, {two['x']} + i * 9, {two['y']} - i * 3, 1);"
+           " __core.computer.flip('dac'); __core.computer.flip('computer');"
+           " const c = document.querySelector('#p-c3f'); c.dataset.mine = '1'; c.focus(); c.value = '999';"
+           " c.dispatchEvent(new Event('input', { bubbles: true }));"
+           " const h = __core.model.page().host; __core.model.emit('host', { ...h, computer: { ...h.computer } }); return 1; })()")
+    time.sleep(1.2)
+    state = b.page("(() => { const c = document.querySelector('#p-c3f');"
+                   " return c ? { mine: c.dataset.mine, value: c.value, active: document.activeElement.id } : null; })()")
+    check(f'{name}: the cell typed in is still the one, with its text', bool(state) and state.get('mine') == '1' and state.get('value') == '999', state)
+
+
+def a_flip_mid_hold(b, d):
+    """The volume's `+` is held and the side flips from the keyboard: the steps stop."""
+    name = 'a_flip_mid_hold_stops_the_steps'
+    load(b, d, 'computer')
+    b.page(POINTER)
+    start = pct(b)
+    b.page("(() => { const el = document.querySelector('#p-cup'); const r = el.getBoundingClientRect();"
+           " __ptr('pointerdown', el, r.x + 2, r.y + 2, 1); return 1; })()")
+    time.sleep(1.0)
+    held = [p for p in posts(b) if p[0] == 'api/v1/host/volume']
+    check(f'{name}: the hold steps more than once', len(held) >= 3, held)
+    b.page("document.querySelector('#p-side-dac').focus()")
+    b.press('Enter')
+    time.sleep(0.4)
+    check(f'{name}: the DAC side is shown', b.page("__core.computer.side()") == 'dac')
+    log = len([p for p in posts(b) if p[0] == 'api/v1/host/volume'])
+    time.sleep(0.8)
+    check(f'{name}: no step after the flip', len([p for p in posts(b) if p[0] == 'api/v1/host/volume']) == log, posts(b)[-3:])
+    b.page("(() => { __ptr('pointerup', document.body, 1, 1, 0); return 1; })()")
+    time.sleep(0.4)
+    check(f'{name}: the volume stayed where the hold left it', pct(b) is not None and pct(b) >= start + 2, [start, pct(b)])
 
 
 def a_sorted(b, d):
@@ -713,6 +969,15 @@ one('the_switch_flips_volume_and_tone_together', a_switch)
 one('minus_plus_mute_set_the_computer_volume', a_volume)
 one('a_point_drag_posts_live_and_done_at_release', a_drag)
 one('a_tap_adds_a_point_and_x_removes_it', a_tap)
+one('a_tap_is_short_and_still', a_tap_is_short_and_still)
+one('a_second_finger_makes_the_tap_no_tap', a_second_finger_makes_the_tap_no_tap)
+one('a_full_table_says_so', a_full_table_says_so)
+one('typed_words_read_k_and_a_comma', typed_words)
+one('wheel_and_arrow_bursts_end_in_one_done', key_and_wheel_bursts)
+one('a_flip_mid_hold_stops_the_steps', a_flip_mid_hold)
+one('a_drag_ended_by_a_flip_leaves_later_holds_alone', a_drag_ended_by_a_flip_leaves_later_holds_alone)
+one('a_drag_is_drawn_on_the_point_held', a_drag_draws_the_point_held)
+one('a_guest_tap_on_a_full_table_is_told_to_sign_in', a_guest_full_table, web='guest = "read"')
 one('the_points_are_listed_by_frequency_and_the_selection_follows', a_sorted)
 one('sixteen_points_keep_the_layout', sixteen)
 one('a_flip_mid_drag_writes_nothing_more_than_the_last_value', a_flip_mid_drag)

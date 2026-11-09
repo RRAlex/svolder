@@ -30,7 +30,6 @@ import { registerTheme } from '../../core/registry.js';
 import { ember, mine, orderOf, shown } from './bind.js';
 import { screen } from './draw/screen.js';
 import { effective } from './draw/computer.js';
-import { computerView } from './computer-view.js';
 import { installComputer, syncComputer } from './computer.js';
 import { shell } from './draw/shell.js';
 import { SECTIONS, canArrange, endArrange, openArrange } from './arrange.js';
@@ -130,7 +129,7 @@ function mount(root, core, { signal }) {
   ember.core = core;
   ember.signal = signal;
   const page = core.model.page();
-  const view = computerView(core);
+  const view = core.computer.view();
   root.innerHTML = shell(page, document.getElementById('svolder-wordmark')?.innerHTML ?? '',
     view ?? { sw: null });
   document.getElementById('screen').innerHTML = screen(

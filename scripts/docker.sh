@@ -16,7 +16,8 @@ if [ "$env_only" = 0 ]; then
 fi
 
 # What docker-compose.yml needs from this host and cannot guess: the bluetooth group the
-# container joins to reach bluetoothd, and the user's id and runtime directory, where the
+# container joins to reach bluetoothd, the user's id and group id (the container's entrypoint
+# repairs the two folders for them), and the runtime directory, where the
 # PipeWire socket the computer's volume and EQ use lives (read by the host-audio override).
 # Each key is appended when .env lacks it; a line already there, hand-edited or not, is never rewritten.
 [ -f .env ] || : > .env
@@ -32,6 +33,10 @@ fi
 if ! env_has HOST_UID; then
     printf 'HOST_UID=%s\n' "$(id -u)" >> .env
     echo "wrote .env: HOST_UID=$(id -u)"
+fi
+if ! env_has HOST_GID; then
+    printf 'HOST_GID=%s\n' "$(id -g)" >> .env
+    echo "wrote .env: HOST_GID=$(id -g)"
 fi
 if ! env_has HOST_RUNTIME_DIR; then
     printf 'HOST_RUNTIME_DIR=%s\n' "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" >> .env
@@ -56,7 +61,7 @@ for dir in config run; do
 done
 # The image carries the static binaries and their licences, built first in the build container
 # from a clean tree, and the last commit's time, as the packages do.
-make -s release-tree static third-party-licenses ALLOW_DIRTY="${ALLOW_DIRTY:-0}"
+make -s release-tree static 3rdpartylicenses ALLOW_DIRTY="${ALLOW_DIRTY:-0}"
 epoch=${SOURCE_DATE_EPOCH:?}
 docker build --build-arg "UID=$(id -u)" --build-arg "VERSION=${VERSION:?}" \
     --build-arg "SOURCE_DATE_EPOCH=$epoch" \

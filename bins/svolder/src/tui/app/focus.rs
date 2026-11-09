@@ -7,7 +7,7 @@
 use svolder_profiles::{EqParam, EqSpec};
 use svolder_proto::FunctionId;
 
-use super::{App, Intent, Pane, Screen, ToneRow, cycled};
+use super::{App, Intent, Pane, SWITCH_ROW, Screen, ToneRow, cycled};
 
 /// Whether `intent` writes a value the user chose on a row of a list rather than on a control
 /// row of the device: a setting, the connection, a device's place in the list, a preset or an
@@ -98,11 +98,13 @@ impl App {
     /// through, and the screens whose rows no function names.
     pub fn cursor_id(&self) -> Option<FunctionId> {
         match (self.screen, self.pane) {
+            (Screen::Device, Pane::Controls) if self.switch_focused() => Some(SWITCH_ROW),
             (Screen::Device, Pane::Controls) => self.selected_control().map(|control| control.id),
             (Screen::Device, Pane::Tone) | (Screen::Tone, _) => match self.tone.row {
                 ToneRow::Mode => self.profile.eq.as_ref().map(EqSpec::mode_id),
                 ToneRow::Loudness => self.profile.eq.as_ref().map(EqSpec::loudness_id),
                 ToneRow::Band => self.band_cursor(),
+                ToneRow::Target => Some(SWITCH_ROW),
                 ToneRow::Point(_) => None,
             },
             (Screen::Device, Pane::Status) => None,
@@ -126,6 +128,7 @@ impl App {
         self.frame_flags.pane_changed |= self.pane != pane;
         self.pane = pane;
         self.selected = row;
+        self.switch_focus = false;
         self.cursor_moved(from);
     }
 
@@ -135,6 +138,7 @@ impl App {
     /// and loudness rows above it: the arrows then step the band that was clicked. On the
     /// device screen it takes the keys to the Tone pane as well ([`App::focus_tone_pane`]).
     pub(crate) fn focus_band(&mut self, band: usize) {
+        self.switch_focus = false;
         if self.on_computer() {
             self.focus_point(band);
             return;
@@ -160,6 +164,7 @@ impl App {
     pub(crate) fn focus_loudness(&mut self) {
         let from = self.cursor_id();
         self.focus_tone_pane();
+        self.switch_focus = false;
         self.tone.row = ToneRow::Loudness;
         self.note_tone_header(ToneRow::Loudness);
         self.cursor_moved(from);
@@ -175,6 +180,7 @@ impl App {
     /// [`App::focus_band`] instead.
     pub(crate) fn click_tone_row(&mut self, row: ToneRow) -> Vec<Intent> {
         let from = self.cursor_id();
+        self.switch_focus = false;
         self.focus_tone_pane();
         self.tone.row = row;
         self.note_tone_header(row);
@@ -182,7 +188,7 @@ impl App {
         match row {
             ToneRow::Mode => self.flat(),
             ToneRow::Loudness => self.loudness(),
-            ToneRow::Band | ToneRow::Point(_) => Vec::new(),
+            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target => Vec::new(),
         }
     }
 
@@ -212,7 +218,7 @@ impl App {
                     true => ToneRow::Loudness,
                     false => ToneRow::Mode,
                 },
-                ToneRow::Mode | ToneRow::Loudness => match self.on_computer() {
+                ToneRow::Mode | ToneRow::Loudness | ToneRow::Target => match self.on_computer() {
                     true => ToneRow::Point(self.tone.point),
                     false => ToneRow::Band,
                 },

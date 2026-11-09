@@ -385,7 +385,7 @@ fn the_computer_volume_row_says_muted_and_a_boost() {
     let rows = text(&buffer);
     let y = volume_row(&rows);
     let row: String = rows[y].chars().take(38).collect();
-    assert_eq!(row, "│                ███54%░░░░  muted   │");
+    assert_eq!(row, "│   Volume       ███54%░░░░  muted   │");
     let muted = buffer.cell((29, y as u16)).expect("the word");
     assert_eq!(muted.symbol(), "m");
     assert_eq!(
@@ -403,7 +403,7 @@ fn the_computer_volume_row_says_muted_and_a_boost() {
     let y = volume_row(&boosted);
     assert_eq!(
         boosted[y].chars().take(38).collect::<String>(),
-        "│                ███120%███  USB DAC │"
+        "│   Volume       ███120%███  USB DAC │"
     );
 }
 
@@ -417,7 +417,7 @@ fn without_a_reading_the_computer_volume_row_reads_a_dash_dim() {
     let rows = text(&buffer);
     let y = volume_row(&rows);
     let row: String = rows[y].chars().take(38).collect();
-    assert_eq!(row, "│                —                   │");
+    assert_eq!(row, "│   Volume       —                   │");
     let dash = buffer.cell((17, y as u16)).expect("the dash");
     assert_eq!(dash.symbol(), "—");
     let dim = theme.style(Role::Dim);
@@ -1309,4 +1309,130 @@ fn a_device_with_no_volume_still_has_the_computer_volume_row() {
         )),
         [crate::tui::app::Intent::HostVolume(55)]
     );
+}
+
+/// A device with no volume: the Host group's Volume row is the switch on the device's side, and
+/// `→` then `←` go to the computer and back with the cursor staying on the switch line.
+#[test]
+fn the_host_volume_row_without_a_device_volume_is_a_switch_on_both_sides() {
+    use crate::tui::app::Intent;
+    use crossterm::event::{KeyCode, KeyEvent};
+    let mut app = app_on(profile_named("kraken"));
+    app.host.linked = true;
+    app.host.fold_read(
+        Some(svolder_host::SinkState {
+            volume: 0.54,
+            muted: false,
+            name: "USB DAC".into(),
+            target: None,
+        }),
+        true,
+    );
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    app.selected = app.rows().len();
+    let press = |app: &mut App, code| app.key(KeyEvent::from(code));
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert!(app.on_computer());
+    assert!(app.switch_focused(), "the cursor stays on the switch line");
+    assert!(press(&mut app, KeyCode::Left).is_empty());
+    assert!(!app.on_computer());
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    press(&mut app, KeyCode::Down);
+    assert!(!app.switch_focused());
+    assert_eq!(
+        press(&mut app, KeyCode::Right),
+        [Intent::HostVolume(55)],
+        "the bar steps the computer's volume"
+    );
+}
+
+/// The same switch line wherever it is drawn: on the device's side of a device with no volume
+/// the Host Volume row is the Target line, reached by `↓` and `↑`, drawn with the side shown in
+/// the highlight box and the other dim, with the switch's own cursor for the chaser.
+#[test]
+fn the_host_volume_switch_has_the_look_and_the_chaser_of_the_target_row() {
+    use crate::tui::app::SWITCH_ROW;
+    use crate::tui::test_support::target_sides;
+    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::style::Modifier;
+    let mut app = app_on(profile_named("kraken"));
+    app.host.linked = true;
+    app.host.fold_read(
+        Some(svolder_host::SinkState {
+            volume: 0.54,
+            muted: false,
+            name: "USB DAC".into(),
+            target: None,
+        }),
+        true,
+    );
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    let press = |app: &mut App, code| app.key(KeyEvent::from(code));
+    let host_volume = app.rows().len();
+    // navigation: ↓ from the row above lands on it, ↓ again goes to the transport, ↑ comes back
+    app.selected = host_volume - 1;
+    let above = app.cursor_id();
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.selected, host_volume);
+    assert!(app.switch_focused());
+    assert_eq!(app.cursor_id(), Some(SWITCH_ROW));
+    assert_eq!(
+        app.frame_flags.left_row, above,
+        "the trail leaves the row above"
+    );
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.selected, host_volume + 1);
+    assert!(!app.switch_focused());
+    assert_eq!(
+        app.frame_flags.left_row,
+        Some(SWITCH_ROW),
+        "the trail leaves the switch"
+    );
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.selected, host_volume);
+    assert!(app.switch_focused());
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.selected, host_volume - 1);
+    assert!(!app.switch_focused());
+    press(&mut app, KeyCode::Down);
+
+    // the chaser's row is drawn, one line high
+    let mut terminal = Terminal::new(TestBackend::new(130, 50)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    let mut rows = Vec::new();
+    terminal
+        .draw(|f| {
+            rows = render::draw(f, &app, &Theme::new(false), &mut hits).rows;
+        })
+        .expect("the frame draws");
+    assert!(
+        rows.iter()
+            .any(|(id, rect)| *id == SWITCH_ROW && rect.height == 1)
+    );
+
+    // the look, in colour and in monochrome
+    for mono in [false, true] {
+        let theme = Theme::new(mono);
+        let name = app.session.product.clone();
+        let (line, dac, computer) = target_sides(&frame_with_theme(&app, 130, 50, &theme), &name);
+        eprintln!("mono={mono} selected host switch: {line}");
+        assert!(line.contains("▶ Target ‹ "), "{line}");
+        assert!(
+            dac.0.contains(Modifier::BOLD | Modifier::REVERSED),
+            "{dac:?}"
+        );
+        assert!(!computer.0.contains(Modifier::REVERSED), "{computer:?}");
+        assert!(!computer.0.contains(Modifier::BOLD));
+    }
+    app.selected = host_volume + 1;
+    let name = app.session.product.clone();
+    let (_, dac, computer) = target_sides(&frame(&app, 130, 50), &name);
+    assert!(dac.0.contains(Modifier::BOLD) && !dac.0.contains(Modifier::REVERSED));
+    assert!(!computer.0.contains(Modifier::BOLD));
 }

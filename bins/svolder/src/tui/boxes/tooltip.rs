@@ -252,7 +252,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
             &format!("Band {}", band + 1),
             "double-click a value to edit it",
         ]),
-        Hit::Side(_) => lines(&[
+        Hit::Side(_) | Hit::Target => lines(&[
             "Side",
             "a click or C switches between the device and the computer",
         ]),

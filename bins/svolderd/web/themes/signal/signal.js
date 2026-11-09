@@ -120,13 +120,9 @@ openers.player = (page, _hop, view) => playerScreen(page, view.now);
 /** The parts of the computer side (the volume and the tone control the core reads out of the page's
  * host), or nothing while the computer's controls are not what is shown (not served, unavailable). */
 function computerParts(page, view) {
-  const computer = view.computer;
-  if (computer?.side() !== 'computer') return null;
-  return {
-    volume: computer.volumeOf(page),
-    tone: computer.toneOf(page),
-    picked: view.pick?.device === page.shown ? view.pick.n : null,
-  };
+  const computer = view.computer?.view(page);
+  if (computer?.side !== 'computer') return null;
+  return { volume: computer.volume, tone: computer.tone, picked: computer.picked };
 }
 
 /** What the computer opens: choosing its hop is the flip, so the DAC's first screen, drawn for the
@@ -199,13 +195,12 @@ function mount(root, core, { signal }) {
     chosen: core.computer.kept() === 'computer' ? null
       : (core.model.shown() ? shownHopId(core.model.shown()) : null),
     hops: () => hopsOf(core.model.page(), core.model.shown(), view.state, view.chosen),
-    /** The core's computer side (the flip is this page's choice of the computer's hop), and the
-     * point picked in the table. */
+    /** The core's computer side (the flip is this page's choice of the computer's hop; the point
+     * picked in the table is the core's too). */
     computer: core.computer,
     /** Whether the person has chosen a hop (else the shown device's, or the computer's when that is
      * the side kept, is the one chosen). */
     byHand: false,
-    pick: { n: null, device: null },
     /** The device the controls below the line act on: the hop chosen when it is a device (a linked
      * amp is not the device shown), else the shown one. */
     target() {

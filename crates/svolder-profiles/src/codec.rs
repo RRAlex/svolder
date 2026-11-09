@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use svolder_proto::function::{FIRMWARE_FAMILY, FIRMWARE_VERSION_QUERY};
 use svolder_proto::{FunctionId, Message, Value, ValueType};
 
 use crate::convert::{EqMode, EqParam, raw_to_display};
@@ -34,6 +35,19 @@ pub struct Reading {
     pub value: Option<f64>,
     /// The unit `value` is expressed in, such as `dB`.
     pub unit: Option<String>,
+}
+
+/// The label of a firmware version reading, `210.2.<subsystem>`: subsystem 1 is the main
+/// firmware, 2 the DSP's. `None` for every other id.
+pub fn firmware_label(id: FunctionId) -> Option<String> {
+    if id.first() != FIRMWARE_FAMILY || id.second() != Some(FIRMWARE_VERSION_QUERY) {
+        return None;
+    }
+    match id.third()? {
+        1 => Some("Firmware".to_string()),
+        2 => Some("DSP firmware".to_string()),
+        _ => None,
+    }
 }
 
 /// Explain one message through a profile: what it addresses and what it says.
@@ -158,6 +172,18 @@ pub fn describe(profile: &Profile, message: &Message) -> Reading {
             };
             return eq_reading(label, display, value, unit);
         }
+    }
+    if let Some(label) = firmware_label(id) {
+        return Reading {
+            id,
+            key: None,
+            label,
+            kind: None,
+            display: raw.to_string(),
+            value: None,
+            raw,
+            unit: None,
+        };
     }
     Reading {
         id,

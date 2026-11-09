@@ -2065,7 +2065,9 @@ async fn saving_a_passphrase_a_direct_session_judges_a_mismatch_says_so_at_once(
     let says = |name: &str, passphrase: &str| {
         let entry = DeviceConfig {
             passphrase: passphrase.into(),
-            ..device_config(name, 0)
+            // "fake" keeps unit ...00, the watched device's; any other name gets ...01, since a
+            // file holds a unit once.
+            ..device_config(name, u8::from(name != "fake"))
         };
         Intent::UpdateDevice(name.into(), entry)
     };

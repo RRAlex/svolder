@@ -47,9 +47,10 @@ use svolder_profiles::tone::apo::{self, Correction, FilterKind, SourceFilter};
 
 use super::control::{Edit, EqControl, Keep};
 use super::live::{CONFIG_RATE_HZ, LiveNode, SLOTS, render_live_conf};
-use super::manage::{ApplyRequest, Chain, EqFailure, Status, check_playable, played_preamp};
-use super::points::Points;
-use super::session::{Outbox, Params};
+use super::manage::{
+    ApplyRequest, Chain, EqFailure, Status, check_playable, checked_request, kept_conf,
+};
+use super::session::{Link, Session};
 use super::{HostEqState, Manager, Route};
 
 /// The sink's rates a sequence moves among.
@@ -64,6 +65,21 @@ const SHRUNK_REPORTS: usize = 3;
 
 /// The shortest time between two starts of `pw-cli`, as the session keeps it.
 const RESTART_GAP_MS: u64 = 1_000;
+
+/// The ticks of the quiet tail at the end of a sequence (a multiple of 45: it is run as `Ticks`
+/// events), more than [`QUIET_MS`] of them.
+const TAIL_TICKS: u32 = 90;
+
+/// How long the world is left alone (no event but time going by) before the liveness rule is
+/// asked.
+const QUIET_MS: u64 = 3_000;
+
+/// How far, in dB, what the node plays may be from what the controller shows when it says it is
+/// live.
+const LIVE_TOLERANCE_DB: f64 = 0.05;
+
+/// The frequencies the liveness rule compares at: this many steps of a log grid.
+const LIVE_GRID: u32 = 96;
 
 /// The wait the command line makes after it starts the chain.
 const START_WATCH_MS: u64 = 300;
@@ -265,6 +281,18 @@ struct World {
     /// What the controller and the chain wrote, for the rule that nothing is written at start.
     writes: usize,
     sends: usize,
+    /// The sink's rate as the controller last read it (a look at the node, or the sink's rate
+    /// for an apply).
+    looked_rate: u32,
+    /// A line was taken by a `pw-cli` that ended without applying it: nothing the controller can
+    /// read says so, and until the node is replaced the liveness rule does not apply to it.
+    lost_line: bool,
+    /// What the node plays may differ from what the controller shows, and nothing the controller
+    /// reads says so: the graph was rebuilt at the rate it already ran at (the slots went back),
+    /// or a daemon started over a node it did not start (it shows the state file; the node plays
+    /// what it was started from). Until a line carrying every slot lands, or the node is
+    /// replaced, the liveness rule does not apply.
+    unreconciled: bool,
     /// A rule the model saw broken, said once.
     broken: Vec<String>,
     /// What happened, when a run is traced.
@@ -289,6 +317,32 @@ impl World {
         self.dir.join("host-eq.toml")
     }
 
+    /// What the controller and the chain have written and sent, and the state file as it is: a
+    /// call that must write nothing leaves this as it was.
+    fn footprint(&self) -> (usize, usize, Option<Vec<u8>>) {
+        (
+            self.writes,
+            self.sends,
+            std::fs::read(self.state_path()).ok(),
+        )
+    }
+
+    /// Whether something is armed that makes the next line fail once, or a refusal is
+    /// on its way: the controller is then not expected to have settled.
+    fn disturbed(&self) -> bool {
+        self.fail_next_write
+            || self.cli.dies_after_next_line.is_some()
+            || self.cli.refused
+            || self.cli.refusal_in.is_some()
+            || self.refuse_sends_until_ms > self.clock_ms
+            || self.lost_line
+            || self.unreconciled
+            || self
+                .node
+                .as_ref()
+                .is_some_and(|node| node.listed_at_ms > self.clock_ms)
+    }
+
     fn state(&self) -> Option<HostEqState> {
         HostEqState::load(&self.state_path()).ok().flatten()
     }
@@ -301,6 +355,10 @@ impl World {
             .as_ref()
             .map(|conf| Node::start(self.next_id, conf, self.clock_ms + self.list_delay_ms));
         self.node_is_ours = ours;
+        self.lost_line = false;
+        if ours {
+            self.unreconciled = false;
+        }
         let id = self.next_id;
         let pre = self
             .node
@@ -340,31 +398,8 @@ impl World {
     /// What `Host::apply` does up to the start of the chain: the checks, the preamp and the
     /// config it will write. `rate_hz` is what the caller knows of the sink's rate.
     fn stage_apply(mut request: ApplyRequest) -> Result<(HostEqState, Conf), EqFailure> {
-        let stated = request.correction.preamp_db;
-        if !stated.is_finite() || stated > 30.0 {
-            return Err(failure("the preamp is not within +30 dB"));
-        }
-        let held = Points::from_state(&HostEqState {
-            on: true,
-            name: String::new(),
-            origin: None,
-            target: String::new(),
-            route: Route::Smart,
-            manager: Manager::Child,
-            previous_default: None,
-            preamp_db: 0.0,
-            filters: request.correction.filters.clone(),
-            slots: request.slots.clone(),
-        });
-        if request.correction.filters.len() > SLOTS {
-            return Err(failure("more than 16 filters"));
-        }
-        let mut shape = request.correction.clone();
-        shape.preamp_db = 0.0;
-        apo::validate(&shape).map_err(|e| failure(&e.to_string()))?;
+        let held = checked_request(&mut request, Manager::Child)?;
         let rate = request.rate_hz.unwrap_or(CONFIG_RATE_HZ);
-        check_playable(&request.correction, rate)?;
-        request.correction.preamp_db = played_preamp(&request.correction, rate);
         let text = render_live_conf(
             &held,
             request.correction.preamp_db,
@@ -418,9 +453,16 @@ impl World {
             format!("set-param node {id}: slots {slots:?} preamp {pre:?}")
         });
         let lands = !matches!(self.cli.dies_after_next_line, Some(false));
+        self.lost_line |= !lands;
         match self.node.as_mut() {
             Some(node) if node.id == id => {
                 if lands {
+                    if (1..=SLOTS).all(|slot| {
+                        let prefix = format!("l{slot:02}:");
+                        params.iter().any(|(name, _)| name.starts_with(&prefix))
+                    }) {
+                        self.unreconciled = false;
+                    }
                     for (name, value) in params {
                         if node.ports.contains_key(name) {
                             node.ports.insert(name.clone(), held_value(name, *value));
@@ -515,15 +557,7 @@ impl Chain for ModelChain {
         let Some(state) = world.state().filter(|state| state.on) else {
             return Ok(());
         };
-        let rate = request.rate_hz.unwrap_or(CONFIG_RATE_HZ);
-        let mut correction = request.correction;
-        correction.preamp_db = played_preamp(&correction, rate);
-        let points = Points::from_state(&HostEqState {
-            filters: correction.filters.clone(),
-            slots: request.slots.clone(),
-            ..state
-        });
-        let text = render_live_conf(&points, correction.preamp_db, "sink", Route::Smart, rate);
+        let text = kept_conf(&state, request);
         world.conf = Some(parse_conf(&text));
         world.writes += 1;
         Ok(())
@@ -538,155 +572,107 @@ impl Chain for ModelChain {
     }
 }
 
-/// The controller's `Params` over the world: the session's own bookkeeping ([`Outbox`], the
-/// kept node, the restart gap, the refusal) over a `pw-cli` that lives in the world.
-struct ModelParams {
+/// The controller's `Params` over the world: the session's own code ([`Session`]: the kept node,
+/// the refusal, the repair, the retry) over a `pw-cli` that lives in the world.
+type ModelParams = Session<ModelLink>;
+
+/// What the model gives the session in place of a child process and `pw-dump`: the `pw-cli` of
+/// the world, its restart gap in the world's clock, and the node the world lists.
+struct ModelLink {
     world: Shared,
-    outbox: Outbox,
-    node: Option<LiveNode>,
     started_ms: Option<u64>,
+    /// The controller dropped the node to look at the chain: the next read is that look.
+    looking: bool,
 }
 
-impl ModelParams {
-    fn new(world: Shared) -> ModelParams {
-        ModelParams {
+impl ModelLink {
+    fn params(world: Shared) -> ModelParams {
+        Session::new(ModelLink {
             world,
-            outbox: Outbox::default(),
-            node: None,
             started_ms: None,
-        }
+            looking: false,
+        })
     }
+}
 
+#[async_trait]
+impl Link for ModelLink {
     fn take_refusal(&mut self) -> bool {
-        let refused = {
-            let mut world = world(&self.world);
-            let refused = world.cli.alive && std::mem::take(&mut world.cli.refused);
-            world.cli.refusal_in = match world.cli.refusal_in {
-                Some(1) => {
-                    world.cli.refused = true;
-                    None
-                }
-                Some(more) => Some(more - 1),
-                None => None,
-            };
-            refused
+        let mut world = world(&self.world);
+        let refused = world.cli.alive && std::mem::take(&mut world.cli.refused);
+        world.cli.refusal_in = match world.cli.refusal_in {
+            Some(1) => {
+                world.cli.refused = true;
+                None
+            }
+            Some(more) => Some(more - 1),
+            None => None,
         };
-        if refused {
-            self.node = None;
-            self.outbox.mark_full();
-        }
         refused
     }
 
-    fn ensure_running(&mut self) -> bool {
+    fn ensure_running(&mut self) -> Option<bool> {
         let mut world = world(&self.world);
         if world.cli.alive {
-            return true;
+            return Some(false);
         }
         if self
             .started_ms
             .is_some_and(|started| world.clock_ms < started + RESTART_GAP_MS)
         {
-            return false;
+            return None;
         }
         self.started_ms = Some(world.clock_ms);
         world.cli = Cli {
             alive: true,
             ..Cli::default()
         };
-        drop(world);
-        self.outbox.mark_full();
-        true
+        Some(true)
     }
 
-    async fn deliver(&mut self, id: u32, params: &[(String, f64)]) -> bool {
-        self.outbox.record(params);
-        for _ in 0..2 {
-            self.take_refusal();
-            let Some(node) = self.node().await else {
-                return false;
-            };
-            if node.id != id {
-                self.outbox.mark_full();
-                return false;
-            }
-            if !self.ensure_running() {
-                return false;
-            }
-            let line = self.outbox.line(params);
-            let written = {
-                let mut world = world(&self.world);
-                let once = std::mem::take(&mut world.fail_next_write);
-                match once || world.refuse_sends_until_ms > world.clock_ms {
-                    true => {
-                        world.cli.alive = false;
-                        false
-                    }
-                    false => {
-                        world.set_param(node.id, &line);
-                        true
-                    }
-                }
-            };
-            if written {
-                self.outbox.delivered();
-                return true;
-            }
-            self.node = None;
-            self.outbox.mark_full();
-        }
-        false
-    }
-}
+    async fn wait_ready(&mut self) {}
 
-#[async_trait]
-impl Params for ModelParams {
-    async fn node(&mut self) -> Option<LiveNode> {
-        self.take_refusal();
-        if self.node.is_none() {
-            let world = world(&self.world);
-            let node = world.listed()?;
-            self.node = Some(LiveNode {
-                id: node.id,
-                rate_hz: Some(world.sink_rate),
-                params: node
-                    .ports
-                    .iter()
-                    .map(|(name, value)| (name.clone(), f64::from(*value)))
-                    .collect(),
-            });
+    fn node_dropped(&mut self) {
+        self.looking = true;
+    }
+
+    async fn write(&mut self, id: u32, params: &[(String, f64)]) -> bool {
+        let mut world = world(&self.world);
+        let once = std::mem::take(&mut world.fail_next_write);
+        match once || world.refuse_sends_until_ms > world.clock_ms {
+            true => {
+                world.cli.alive = false;
+                false
+            }
+            false => {
+                world.set_param(id, params);
+                true
+            }
         }
-        self.node.clone()
+    }
+
+    async fn read_node(&mut self) -> Option<LiveNode> {
+        let looking = std::mem::take(&mut self.looking);
+        let mut world = world(&self.world);
+        let found = world.listed().map(|node| LiveNode {
+            id: node.id,
+            rate_hz: Some(world.sink_rate),
+            params: node
+                .ports
+                .iter()
+                .map(|(name, value)| (name.clone(), f64::from(*value)))
+                .collect(),
+        })?;
+        if looking {
+            world.looked_rate = world.sink_rate;
+        }
+        Some(found)
     }
 
     async fn sink_rate(&mut self) -> Option<u32> {
-        Some(world(&self.world).sink_rate)
-    }
-
-    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
-        let sent = self.deliver(node, params).await;
-        if !sent {
-            self.outbox.mark_full();
-        }
-        sent
-    }
-
-    fn forget_node(&mut self) {
-        self.node = None;
-    }
-
-    fn new_chain(&mut self) {
-        self.node = None;
-        self.outbox.new_chain();
-    }
-
-    async fn settle(&mut self, node: Option<u32>) -> bool {
-        self.take_refusal();
-        match (self.outbox.repair_due(), node) {
-            (false, _) => true,
-            (true, None) => false,
-            (true, Some(node)) => self.send(node, &[]).await,
-        }
+        let mut world = world(&self.world);
+        world.looked_rate = world.sink_rate;
+        Some(world.sink_rate)
     }
 }
 
@@ -909,61 +895,93 @@ pub fn generate(seed: u64, len: usize) -> Vec<Event> {
     // Each sequence leans a little on its own mix, so some are all drags and some all
     // restarts.
     (0..len)
-        .map(|_| match rng.below(100) {
-            0..=19 => Event::Ticks(1 + rng.below(45) as u32),
-            20..=37 => Event::Drag {
-                pick: rng.below(16) as usize,
-                kind: rng.chance(15).then(|| filter(&mut rng, true).kind),
-                f: rng.chance(30).then(|| rng.log_range(20.0, 20_000.0)),
-                g: rng.chance(85).then(|| rng.range(-12.0, 12.0)),
-                q: rng.chance(20).then(|| rng.log_range(0.1, 10.0)),
-                steps: rng.below(5) as u8,
-                gap_ticks: rng.below(3) as u8,
-            },
-            38..=45 => {
-                let (filters, stated) = curve(&mut rng);
-                Event::Load { filters, stated }
-            }
-            46..=52 => Event::Toggle(rng.chance(50)),
-            53..=58 => {
-                let (filters, stated) = curve(&mut rng);
-                Event::Cli {
-                    filters,
-                    stated,
-                    gap_ticks: rng.below(9) as u8,
-                }
-            }
-            59..=64 => Event::NodeRestart,
-            65..=73 => Event::Rate(rng.pick(&RATES)),
-            74..=77 => {
-                let hand = rng.chance(70);
-                Event::Add(filter(&mut rng, hand))
-            }
-            78..=81 => Event::Remove {
-                pick: rng.below(16) as usize,
-            },
-            82..=84 => Event::CliDeath {
-                after_line: match rng.below(3) {
-                    0 => None,
-                    1 => Some(true),
-                    _ => Some(false),
-                },
-            },
-            85..=86 => Event::RefuseSends {
-                ms: rng.pick(&[200, 1_500, 6_000]),
-            },
-            87..=89 => Event::Fail {
-                kind: rng.below(4) as u8,
-            },
-            90..=91 => Event::Reload,
-            92..=93 => Event::ListDelay {
-                ms: rng.pick(&[0, 0, 300, 1_200]),
-            },
-            94..=95 => Event::FailNextWrite,
-            96..=97 => Event::RefusalLag(rng.below(3) as u8),
-            _ => Event::DaemonRestart,
+        .map(|_| {
+            let roll = rng.below(100);
+            event_for(&mut rng, roll)
         })
         .collect()
+}
+
+/// The rolls (of the 100 of [`event_for`]) of the events the targeted profile raises: a command
+/// line apply, a node that starts again, a refusal read late, a write that fails once, and the
+/// drag, listed four times so that half of the draw is a drag (the lines a replaced chain
+/// refuses are a drag's).
+const TARGETED_ROLLS: [u64; 8] = [53, 59, 96, 94, 20, 25, 30, 35];
+
+/// A sequence of `len` events for `seed` from the targeted profile: [`generate`]'s mix with
+/// nearly half of the events taken from [`TARGETED_ROLLS`]: the events whose compound can leave a
+/// chain replaced while a line is refused or fails (a command line apply, a node that starts
+/// again, a refusal read late and a write that fails once) and the drag that sends the line. A
+/// separate stream: the seeds of [`generate`] do not depend on it.
+pub fn generate_targeted(seed: u64, len: usize) -> Vec<Event> {
+    let mut rng = Rng::new(seed ^ 0x7A12_6E7E_D00D_F00D);
+    (0..len)
+        .map(|_| {
+            let roll = match rng.chance(45) {
+                true => rng.pick(&TARGETED_ROLLS),
+                false => rng.below(100),
+            };
+            event_for(&mut rng, roll)
+        })
+        .collect()
+}
+
+/// The event a `roll` of 0 to 99 stands for, with its fields drawn from `rng`.
+fn event_for(rng: &mut Rng, roll: u64) -> Event {
+    match roll {
+        0..=19 => Event::Ticks(1 + rng.below(45) as u32),
+        20..=37 => Event::Drag {
+            pick: rng.below(16) as usize,
+            kind: rng.chance(15).then(|| filter(rng, true).kind),
+            f: rng.chance(30).then(|| rng.log_range(20.0, 20_000.0)),
+            g: rng.chance(85).then(|| rng.range(-12.0, 12.0)),
+            q: rng.chance(20).then(|| rng.log_range(0.1, 10.0)),
+            steps: rng.below(5) as u8,
+            gap_ticks: rng.below(3) as u8,
+        },
+        38..=45 => {
+            let (filters, stated) = curve(rng);
+            Event::Load { filters, stated }
+        }
+        46..=52 => Event::Toggle(rng.chance(50)),
+        53..=58 => {
+            let (filters, stated) = curve(rng);
+            Event::Cli {
+                filters,
+                stated,
+                gap_ticks: rng.below(9) as u8,
+            }
+        }
+        59..=64 => Event::NodeRestart,
+        65..=73 => Event::Rate(rng.pick(&RATES)),
+        74..=77 => {
+            let hand = rng.chance(70);
+            Event::Add(filter(rng, hand))
+        }
+        78..=81 => Event::Remove {
+            pick: rng.below(16) as usize,
+        },
+        82..=84 => Event::CliDeath {
+            after_line: match rng.below(3) {
+                0 => None,
+                1 => Some(true),
+                _ => Some(false),
+            },
+        },
+        85..=86 => Event::RefuseSends {
+            ms: rng.pick(&[200, 1_500, 6_000]),
+        },
+        87..=89 => Event::Fail {
+            kind: rng.below(4) as u8,
+        },
+        90..=91 => Event::Reload,
+        92..=93 => Event::ListDelay {
+            ms: rng.pick(&[0, 0, 300, 1_200]),
+        },
+        94..=95 => Event::FailNextWrite,
+        96..=97 => Event::RefusalLag(rng.below(3) as u8),
+        _ => Event::DaemonRestart,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1020,6 +1038,10 @@ struct Lab {
     _dir: Dir,
     /// The event being run, for the message of a failure.
     at: usize,
+    /// When the last event that was not time going by ended, on the world's clock.
+    quiet_since_ms: u64,
+    /// The liveness rule has been checked since then.
+    live_checked: bool,
 }
 
 /// Why a sequence failed.
@@ -1037,7 +1059,7 @@ fn new_control(shared: &Shared) -> EqControl {
         Arc::new(ModelChain {
             world: shared.clone(),
         }),
-        Box::new(ModelParams::new(shared.clone())),
+        Box::new(ModelLink::params(shared.clone())),
         Keep::File(path),
     )
 }
@@ -1067,6 +1089,9 @@ impl Lab {
             writes: 0,
             sends: 0,
             broken: Vec::new(),
+            looked_rate: rate,
+            lost_line: false,
+            unreconciled: false,
             trace: None,
         }));
         let control = new_control(&shared);
@@ -1077,6 +1102,8 @@ impl Lab {
             daemon_ticks: 0,
             _dir: dir,
             at: 0,
+            quiet_since_ms: 10_000,
+            live_checked: false,
         }
     }
 
@@ -1131,14 +1158,159 @@ impl Lab {
             self.control.tick().await;
             self.daemon_ticks += 1;
             if self.daemon_ticks.is_multiple_of(20) {
-                self.control.reload_if_changed();
+                self.reload()?;
             }
             self.check()?;
         }
         Ok(())
     }
 
+    /// Run `event`, and the liveness rule once the world has been quiet long enough.
     async fn run(&mut self, event: &Event) -> Result<(), Failure> {
+        self.run_event(event).await?;
+        match event {
+            Event::Ticks(_) => self.liveness().await,
+            _ => {
+                self.quiet_since_ms = world(&self.shared).clock_ms;
+                self.live_checked = false;
+                Ok(())
+            }
+        }
+    }
+
+    /// The end of every sequence, which no event stands for: the faults that were armed and not
+    /// used are disarmed, the daemon reads the state file, and the world is left alone for
+    /// [`TAIL_TICKS`] ticks, so the liveness rule is asked of what the sequence ended on.
+    async fn quiet_tail(&mut self, at: usize) -> Result<(), Failure> {
+        self.at = at;
+        {
+            let mut world = world(&self.shared);
+            world.note(|| "the quiet tail".to_string());
+            world.fail_apply = 0;
+            world.fail_remove = 0;
+            world.fail_keep = 0;
+            world.fail_start = 0;
+            world.fail_next_write = false;
+            world.refuse_sends_until_ms = 0;
+            world.cli.dies_after_next_line = None;
+            world.refusal_lag = 0;
+        }
+        self.run(&Event::Reload).await?;
+        for _ in 0..TAIL_TICKS / 45 {
+            self.run(&Event::Ticks(45)).await?;
+        }
+        Ok(())
+    }
+
+    /// The daemon reads the state file: a read writes and sends nothing (what it finds is
+    /// taken up at a tick).
+    fn reload(&mut self) -> Result<(), Failure> {
+        let before = world(&self.shared).footprint();
+        self.control.reload_if_changed();
+        if world(&self.shared).footprint() != before {
+            return Err(Failure {
+                event: self.at,
+                what: "a reload of the state file wrote or sent something".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The liveness rule, once after [`QUIET_MS`] with no event and nothing armed to fail: the
+    /// controller must not have stopped serving. When it says it is on and live, the node plays
+    /// the points it shows, at the rate the sink runs at, under the preamp it shows (within
+    /// [`LIVE_TOLERANCE_DB`] at every frequency of a grid). When it is off and its curve is
+    /// playable at the sink's rate, turning it on works.
+    async fn liveness(&mut self) -> Result<(), Failure> {
+        let (clock, disturbed) = {
+            let world = world(&self.shared);
+            (world.clock_ms, world.disturbed())
+        };
+        if self.live_checked || clock < self.quiet_since_ms + QUIET_MS || disturbed {
+            return Ok(());
+        }
+        self.live_checked = true;
+        let view = self.control.view();
+        let (rate, node) = {
+            let world = world(&self.shared);
+            (
+                world.sink_rate,
+                world
+                    .node
+                    .as_ref()
+                    .map(|node| ['l', 'r'].map(|c| played(node, c))),
+            )
+        };
+        let filters: Vec<SourceFilter> = view
+            .points
+            .iter()
+            .map(|point| SourceFilter {
+                kind: point.kind.parse().expect("a point's kind is a keyword"),
+                f: point.f,
+                g: point.g,
+                q: point.q,
+            })
+            .collect();
+        let fail = |what: String| {
+            Err(Failure {
+                event: self.at,
+                what,
+            })
+        };
+        match (view.on && view.live, node) {
+            (true, Some(channels)) => {
+                let (sets, _) = super::live::played_sets(
+                    &Correction {
+                        preamp_db: 0.0,
+                        filters,
+                    },
+                    rate,
+                );
+                let top = (f64::from(rate) * 0.45).min(20_000.0);
+                for (channel, (node_sets, pre_db)) in ['l', 'r'].into_iter().zip(&channels) {
+                    for step in 0..=LIVE_GRID {
+                        let f = 20.0 * (top / 20.0).powf(f64::from(step) / f64::from(LIVE_GRID));
+                        let w = 2.0 * std::f64::consts::PI * f / f64::from(rate);
+                        let plays = summed_db(node_sets, w) + pre_db;
+                        let shown = summed_db(&sets, w) + view.preamp_db;
+                        if (plays - shown).abs() > LIVE_TOLERANCE_DB {
+                            return fail(format!(
+                                "the EQ says it is live, and the node plays {plays:+.3} dB at {f:.0} Hz on {channel} where the view's points under its preamp of {:+.3} dB make {shown:+.3} dB, at {rate} Hz",
+                                view.preamp_db
+                            ));
+                        }
+                    }
+                }
+            }
+            (false, None) if !view.on && !filters.is_empty() => {
+                let curve = Correction {
+                    preamp_db: 0.0,
+                    filters,
+                };
+                // With a fault armed the call may be refused for it: the rule waits.
+                let armed = {
+                    let world = world(&self.shared);
+                    world.fail_apply + world.fail_remove + world.fail_keep + world.fail_start > 0
+                };
+                if !armed && check_playable(&curve, rate).is_ok() {
+                    let turned_on = self.control.set_on(true).await;
+                    self.check()?;
+                    if let Err(failure) = turned_on {
+                        return Err(Failure {
+                            event: self.at,
+                            what: format!(
+                                "the EQ is off with a curve that plays at {rate} Hz, and turning it on is refused: {failure}"
+                            ),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn run_event(&mut self, event: &Event) -> Result<(), Failure> {
         match event {
             Event::Ticks(count) => self.ticks(*count).await?,
             Event::Drag {
@@ -1235,9 +1407,7 @@ impl Lab {
                     world(&self.shared).write_state_as_command_line(&state);
                 }
             }
-            Event::Reload => {
-                self.control.reload_if_changed();
-            }
+            Event::Reload => self.reload()?,
             Event::NodeRestart => {
                 let mut world = world(&self.shared);
                 if world.node.is_some() {
@@ -1246,6 +1416,12 @@ impl Lab {
             }
             Event::Rate(rate) => {
                 let mut world = world(&self.shared);
+                // A rate the controller last looked at again (a rebuild at the rate the sink
+                // runs at, or a change that is undone before its next look) changes nothing it
+                // can see.
+                if world.looked_rate == *rate {
+                    world.unreconciled = true;
+                }
                 world.sink_rate = *rate;
                 if let Some(node) = world.node.as_mut() {
                     node.load_slots();
@@ -1278,22 +1454,21 @@ impl Lab {
             Event::FailNextWrite => world(&self.shared).fail_next_write = true,
             Event::RefusalLag(lag) => world(&self.shared).refusal_lag = *lag,
             Event::DaemonRestart => {
-                let (writes, sends, state) = {
+                let before = {
                     let mut world = world(&self.shared);
                     // The old daemon's `pw-cli` ends with it.
                     world.cli = Cli::default();
-                    (
-                        world.writes,
-                        world.sends,
-                        std::fs::read(world.state_path()).ok(),
-                    )
+                    world.footprint()
                 };
                 self.control = new_control(&self.shared);
                 self.daemon_ticks = 0;
-                let world = world(&self.shared);
-                let after = std::fs::read(world.state_path()).ok();
-                if world.writes != writes || world.sends != sends || after != state {
-                    drop(world);
+                {
+                    let mut world = world(&self.shared);
+                    if world.node.is_some() {
+                        world.unreconciled = true;
+                    }
+                }
+                if world(&self.shared).footprint() != before {
                     return Err(Failure {
                         event: self.at,
                         what: "the daemon wrote or sent something while it started".to_string(),
@@ -1336,6 +1511,9 @@ pub fn run_traced(
                     break;
                 }
             }
+            if result.is_ok() {
+                result = lab.quiet_tail(events.len()).await;
+            }
             if let Some(trace) = trace {
                 let mut world = world(&lab.shared);
                 world.note(|| format!("{:?}", result.as_ref().err()));
@@ -1372,6 +1550,13 @@ pub fn sequence_of(seed: u64) -> (u32, Vec<Event>) {
     (start_rate(seed), generate(seed, len))
 }
 
+/// The events of `seed` from the targeted profile ([`generate_targeted`]), as the lab runs them.
+pub fn sequence_of_targeted(seed: u64) -> (u32, Vec<Event>) {
+    let mut rng = Rng::new(seed ^ 0x5A5A_A5A5);
+    let len = 20 + rng.below(50) as usize;
+    (start_rate(seed), generate_targeted(seed, len))
+}
+
 /// `events` with as many removed as still fail the same way: chunks first, then one by one.
 pub fn shrink(rate: u32, events: &[Event]) -> Vec<Event> {
     let mut events = events.to_vec();
@@ -1384,6 +1569,9 @@ pub fn shrink(rate: u32, events: &[Event]) -> Vec<Event> {
             "unstable",
             "stale id",
             "while it started",
+            "says it is live",
+            "turning it on",
+            "reload",
             "panic",
         ]
         .into_iter()
@@ -1452,15 +1640,17 @@ fn describe(event: &Event) -> String {
 }
 
 /// The report of a failing seed: what broke and the shrunk sequence that does it.
-pub fn report(seed: u64, failure: &Failure) -> String {
-    let (rate, events) = sequence_of(seed);
+fn report(seed: u64, failure: &Failure, sequence: fn(u64) -> (u32, Vec<Event>)) -> String {
+    let (rate, events) = sequence(seed);
     let shrunk = shrink(rate, &events);
     let again = run_sequence(rate, &shrunk).err();
+    let place = match failure.event >= events.len() {
+        true => format!("in the quiet tail after {} events", events.len()),
+        false => format!("event {} of {}", failure.event + 1, events.len()),
+    };
     let mut text = format!(
-        "seed {seed}: {} (event {} of {})\nshrunk to {} events, the sink starting at {rate} Hz",
+        "seed {seed}: {} ({place})\nshrunk to {} events, the sink starting at {rate} Hz",
         failure.what,
-        failure.event + 1,
-        events.len(),
         shrunk.len()
     );
     if let Some(again) = again {
@@ -1474,6 +1664,15 @@ pub fn report(seed: u64, failure: &Failure) -> String {
 
 /// Run seeds `first..first + runs`, on every core; the reports of the ones that failed.
 pub fn run_seeds(first: u64, runs: u64) -> Vec<String> {
+    run_block(first, runs, sequence_of)
+}
+
+/// [`run_seeds`] on the targeted profile ([`generate_targeted`]).
+pub fn run_targeted_seeds(first: u64, runs: u64) -> Vec<String> {
+    run_block(first, runs, sequence_of_targeted)
+}
+
+fn run_block(first: u64, runs: u64, sequence: fn(u64) -> (u32, Vec<Event>)) -> Vec<String> {
     let next = AtomicUsize::new(0);
     let reported = AtomicUsize::new(0);
     let failures = Mutex::new(Vec::new());
@@ -1489,11 +1688,11 @@ pub fn run_seeds(first: u64, runs: u64) -> Vec<String> {
                         return;
                     }
                     let seed = first + at;
-                    let (rate, events) = sequence_of(seed);
+                    let (rate, events) = sequence(seed);
                     if let Err(failure) = run_sequence(rate, &events) {
                         // The first few are shrunk and told in full; the rest by their seed.
                         let text = match reported.fetch_add(1, Ordering::SeqCst) < SHRUNK_REPORTS {
-                            true => report(seed, &failure),
+                            true => report(seed, &failure, sequence),
                             false => format!("seed {seed}: {}", failure.what),
                         };
                         crate::locked(&failures).push((seed, text));

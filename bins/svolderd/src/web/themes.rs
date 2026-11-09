@@ -122,7 +122,7 @@ pub(crate) static THEMES: &[Theme] = &[
             js "smoke-engine.js", js "smoke-notes.js",
             js "draw/html.js", js "draw/parts.js", js "draw/meter-arch.js", js "draw/dial.js",
             js "draw/curve.js", js "draw/screen.js", js "draw/shell.js",
-            js "computer.js", js "computer-view.js", js "draw/computer.js"
+            js "computer.js", js "computer-page.js", js "computer-steps.js", js "draw/computer.js"
         ]
     },
     theme! {
@@ -170,7 +170,7 @@ pub(crate) static THEMES: &[Theme] = &[
             js "presets-wire.js", js "facts-wire.js", js "ask.js", js "slim.js", js "fold.js", js "strip-wire.js",
             js "press.js", js "draw/amp.js", js "amp-wire.js", js "device-list.js", js "draw/hop.js",
             js "hops-wire.js", js "draw/player.js", js "draw/computer.js", js "draw/card.js",
-            js "card-wire.js", js "driver.js", js "morph.js", js "computer-wire.js"
+            js "card-wire.js", js "driver.js", js "morph.js", js "computer-wire.js", js "shelf-asks.js"
         ]
     },
     theme! {
@@ -198,7 +198,7 @@ pub(crate) static THEMES: &[Theme] = &[
             js "draw/slots.js", js "draw/controls.js", js "draw/facts.js", js "draw/gauges.js", js "controls-wire.js",
             js "facts-wire.js", js "fold.js", js "gestures.js", js "place.js", js "draw/meters.js",
             js "states.js", js "card-wire.js", js "draw/card.js",
-            js "computer-view.js", js "points.js", js "points-wire.js"
+            js "points-wire.js"
         ]
     },
 ];

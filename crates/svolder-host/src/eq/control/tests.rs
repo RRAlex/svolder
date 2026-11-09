@@ -658,10 +658,8 @@ fn node(id: u32, rate_hz: Option<u32>) -> LiveNode {
     LiveNode {
         id,
         rate_hz,
-        params: crate::eq::live::preamp_params(0.0)
-            .into_iter()
-            .map(|(name, _)| (name, 0.0))
-            .collect(),
+        // Ports that hold +60 dB bound no preamp the tests send.
+        params: crate::eq::live::preamp_params(60.0).into_iter().collect(),
     }
 }
 
@@ -1145,6 +1143,45 @@ async fn a_refused_edit_while_off_changes_nothing_and_turns_nothing_on() {
     assert!(params.sent().is_empty());
 }
 
+/// The command line applies a curve and writes the state file; the controller, which has not read
+/// it, is turned off before it looks at the chain, and the remove fails. Its own save took the
+/// command line's place in the file, so the reload would never read it: the chain the command
+/// line started must still get the controller's points, or it plays a curve the screen does not
+/// show.
+#[tokio::test]
+async fn a_turn_off_that_fails_after_a_command_line_apply_still_sends_its_points() {
+    let dir = Dir::new();
+    let (mut control, chain, params) = setup(Keep::File(dir.state()));
+    control
+        .load(
+            "Shelf".into(),
+            None,
+            correction(vec![hsc(1000.0, 6.0, 0.707)], 0.0),
+        )
+        .await
+        .unwrap();
+    // The command line's chain, and its state file, which the controller has not read.
+    params.set_node(Some(node(41, Some(48_000))));
+    saved(&dir.state(), vec![pk(300.0, 1.0, 1.0)], vec![1], true);
+    chain.refuse(Some(EqFailure {
+        what: "no remove".into(),
+        next: "x".into(),
+    }));
+    assert!(control.set_on(false).await.is_err());
+    assert!(control.view().on);
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    let sends = params.sent();
+    let last = sends.last().expect("the chain was sent the points");
+    assert!((1..=16).all(|slot| touches(last, slot)), "{last:?}");
+    assert!(
+        params.lines().last().unwrap().starts_with("set-param 41 "),
+        "{:?}",
+        params.lines()
+    );
+}
+
 #[tokio::test]
 async fn a_reload_forgets_the_node_so_the_next_send_names_the_new_one() {
     let dir = Dir::new();
@@ -1268,6 +1305,24 @@ fn nothing_past_ten(params: &FakeParams) {
             }
         }
     }
+}
+
+/// A turn-on the sink's rate refuses does not pin that rate: with the sink back at 48 kHz the
+/// same load plays.
+#[tokio::test]
+async fn a_refused_turn_on_does_not_pin_the_sinks_rate() {
+    let dir = Dir::new();
+    let (mut control, _chain, params) = setup(Keep::File(dir.state()));
+    let shelf = || correction(vec![hsc(1000.0, 14.5, 0.707)], 0.0);
+
+    params.set_node(Some(node(1, Some(192_000))));
+    let refused = control.load("Shelf".into(), None, shelf()).await;
+    assert!(refused.unwrap_err().what.contains("192000 Hz"));
+    assert!(!control.view().on);
+
+    params.set_node(Some(node(1, Some(48_000))));
+    control.load("Shelf".into(), None, shelf()).await.unwrap();
+    assert!(control.view().on);
 }
 
 /// The high shelf at 1 kHz of +14.5 dB is playable at 48 kHz and its b1 passes -10 at 192 kHz,
@@ -1707,6 +1762,68 @@ async fn a_failed_off_recovers_once_the_sink_plays_the_curve_again() {
     assert!((1..=16).all(|slot| touches(sends.last().unwrap(), slot)));
 }
 
+/// A chain that cannot be removed while the rate refuses the curve is tried again every look, and
+/// the retries write nothing; the retry that works while the rate still refuses keeps the
+/// preamp the curve was saved with.
+#[tokio::test]
+async fn held_retries_leave_the_state_file_alone_and_a_late_success_keeps_its_preamp() {
+    let dir = Dir::new();
+    // The shelf is refused at 192 kHz; the two boosts near each other add up differently at
+    // each rate, so the preamp it needs at 192 kHz is not the one it needs at 48 kHz.
+    let curve = correction(
+        vec![
+            hsc(1000.0, 14.5, 0.707),
+            pk(8_000.0, 12.0, 0.5),
+            pk(20_000.0, 12.0, 0.5),
+        ],
+        0.0,
+    );
+    assert!(check_playable(&curve, 192_000).is_err());
+    let (mut control, chain, params) = setup(Keep::File(dir.state()));
+    control
+        .load("Shelf".into(), None, curve.clone())
+        .await
+        .unwrap();
+    let saved = HostEqState::load(&dir.state()).unwrap().unwrap();
+    chain.refuse(Some(EqFailure {
+        what: "no remove".into(),
+        next: "x".into(),
+    }));
+    params.set_node(Some(node(1, Some(192_000))));
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    assert!(
+        control
+            .view()
+            .note
+            .unwrap()
+            .contains("could not be turned off")
+    );
+
+    std::fs::remove_file(dir.state()).unwrap();
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    assert!(!dir.state().exists(), "a retry wrote the state file");
+
+    chain.refuse(None);
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    assert!(!control.view().on);
+    let late = HostEqState::load(&dir.state()).unwrap().unwrap();
+    assert!(!late.on);
+    assert_eq!(late.preamp_db, saved.preamp_db);
+    // A save that measured at the refusing rate would differ.
+    let at_192k = played_preamp(&curve, 192_000);
+    assert!(
+        (at_192k - saved.preamp_db).abs() > 0.05,
+        "{at_192k} {}",
+        saved.preamp_db
+    );
+}
+
 /// The preamp ports of `send`, as a send of their own.
 fn preamp_only(send: &[(String, f64)]) -> Vec<(String, f64)> {
     send.iter()
@@ -1805,4 +1922,19 @@ async fn the_preamp_of_a_node_another_process_started_bounds_what_is_sent_to_it(
         (1..=16).all(|slot| touches(sent, slot)),
         "the update carries every slot"
     );
+}
+
+/// A preamp port at or below 0 holds the floor, not nothing; no port listed holds nothing.
+#[test]
+fn a_silent_preamp_port_reads_as_the_floor() {
+    let ports = |value: f64| -> HashMap<String, f64> {
+        crate::eq::live::preamp_params(0.0)
+            .into_iter()
+            .map(|(name, _)| (name, value))
+            .collect()
+    };
+    assert_eq!(held_preamp_db(&ports(0.0)), Some(-120.0));
+    assert_eq!(held_preamp_db(&ports(-1.0)), Some(-120.0));
+    assert_eq!(held_preamp_db(&ports(1.0)), Some(0.0));
+    assert_eq!(held_preamp_db(&HashMap::new()), None);
 }

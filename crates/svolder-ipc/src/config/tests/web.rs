@@ -258,3 +258,112 @@ fn update_web_writes_only_enabled_and_listen() {
     Config::update_web(&path, |_| {}).unwrap();
     assert!(std::fs::read_to_string(&path).unwrap() == untouched);
 }
+
+/// `SVOLDER_WEB_LISTEN` and `SVOLDER_MCP_LISTEN` change only the default address: a `listen` in
+/// the file wins, a blank one counts as absent, and a bad value is refused by the variable's name.
+#[test]
+fn the_listen_defaults_come_from_the_environment_and_the_file_wins() {
+    let env = ListenDefaults {
+        web: Some("0.0.0.0:8738".to_string()),
+        mcp: Some("0.0.0.0:8737".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::parse_with_listen_defaults("", &env).unwrap();
+    assert_eq!(c.web.listen.to_string(), "0.0.0.0:8738");
+    assert_eq!(c.mcp.listen.to_string(), "0.0.0.0:8737");
+    let c =
+        Config::parse_with_listen_defaults("[web]\nenabled = true\n[mcp]\nlisten = \"\"\n", &env)
+            .unwrap();
+    assert_eq!(c.web.listen.to_string(), "0.0.0.0:8738");
+    assert_eq!(c.mcp.listen.to_string(), "0.0.0.0:8737");
+    let text = "[web]\nlisten = \"127.0.0.1:9000\"\n[mcp]\nlisten = \"127.0.0.1:9001\"\n";
+    let c = Config::parse_with_listen_defaults(text, &env).unwrap();
+    assert_eq!(c.web.listen.to_string(), "127.0.0.1:9000");
+    assert_eq!(c.mcp.listen.to_string(), "127.0.0.1:9001");
+    let none = ListenDefaults::default();
+    let c = Config::parse_with_listen_defaults("", &none).unwrap();
+    assert_eq!(c, Config::parse("").unwrap());
+    let bad = ListenDefaults {
+        web: Some("everywhere".to_string()),
+        mcp: None,
+        ..ListenDefaults::default()
+    };
+    let err = Config::parse_with_listen_defaults("", &bad).unwrap_err();
+    assert!(err.to_string().contains("SVOLDER_WEB_LISTEN"), "{err}");
+}
+
+/// The auth check sees the address that applies: `auth = "none"` on a wildcard default is refused.
+#[test]
+fn auth_none_is_checked_against_the_default_listen_too() {
+    let env = ListenDefaults {
+        web: Some("0.0.0.0:8738".to_string()),
+        mcp: None,
+        ..ListenDefaults::default()
+    };
+    assert!(
+        Config::parse_with_listen_defaults("[web]\nenabled = true\nauth = \"none\"\n", &env)
+            .is_err()
+    );
+}
+
+/// A wildcard that came from `SVOLDER_*_LISTEN` refuses `auth = "none"` only for a table that is
+/// enabled, and the refusal names the variable; a wildcard written in the file is refused as before.
+#[test]
+fn auth_none_on_an_env_wildcard_is_refused_by_name_and_only_when_enabled() {
+    let env = ListenDefaults {
+        web: Some("0.0.0.0:8738".to_string()),
+        mcp: Some("0.0.0.0:8737".to_string()),
+        ..ListenDefaults::default()
+    };
+    for table in ["web", "mcp"] {
+        let off = format!("[{table}]\nauth = \"none\"\n");
+        assert!(
+            Config::parse_with_listen_defaults(&off, &env).is_ok(),
+            "{table}"
+        );
+        let on = format!("[{table}]\nenabled = true\nauth = \"none\"\n");
+        let err = Config::parse_with_listen_defaults(&on, &env)
+            .unwrap_err()
+            .to_string();
+        let var = format!("SVOLDER_{}_LISTEN", table.to_uppercase());
+        assert!(err.contains(&var), "{err}");
+        assert!(err.contains("loopback"), "{err}");
+        let file = format!("[{table}]\nauth = \"none\"\nlisten = \"0.0.0.0:9000\"\n");
+        let err = Config::parse_with_listen_defaults(&file, &env)
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains("SVOLDER_"), "{err}");
+    }
+}
+
+/// `SVOLDER_WEB_URL` sets only the default `[web] url`: a `url` in the file wins, a blank one
+/// counts as absent, and a bad value is refused by the variable's name.
+#[test]
+fn the_url_default_comes_from_the_environment_and_the_file_wins() {
+    let env = ListenDefaults {
+        web_url: Some("http://192.168.1.9:8738".to_string()),
+        ..ListenDefaults::default()
+    };
+    assert_eq!(
+        Config::parse_with_listen_defaults("", &ListenDefaults::default())
+            .unwrap()
+            .web
+            .url,
+        None
+    );
+    let c = Config::parse_with_listen_defaults("", &env).unwrap();
+    assert_eq!(c.web.url.as_deref(), Some("http://192.168.1.9:8738/"));
+    let c = Config::parse_with_listen_defaults("[web]\nurl = \"\"\n", &env).unwrap();
+    assert_eq!(c.web.url.as_deref(), Some("http://192.168.1.9:8738/"));
+    let c = Config::parse_with_listen_defaults("[web]\nurl = \"https://svolder.home.lan\"\n", &env)
+        .unwrap();
+    assert_eq!(c.web.url.as_deref(), Some("https://svolder.home.lan/"));
+    let bad = ListenDefaults {
+        web_url: Some("192.168.1.9".to_string()),
+        ..ListenDefaults::default()
+    };
+    let err = Config::parse_with_listen_defaults("", &bad)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("SVOLDER_WEB_URL"), "{err}");
+}

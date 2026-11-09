@@ -44,7 +44,7 @@ dark paper. Later tasks add the sections' checks here.
   an_amp_shows_power_meters_and_its_readouts           a needle per meter at the model's fraction; power
   the_spec_table_lists_every_fact                      each fact with the model's words
   the_states_in_papers_words                           the card as the red note, try now, the lost
-                                                       stream, the waiting page
+                                                       stream and the waiting page (inert, an open form keeps its text)
   a_second_device_is_one_tap_away                      `also here: Amp` shows the amp
   no_sideways_scroll_at_390_with_long_words            long names and titles, DAC, amp and Loki Max
   notes_appear_and_update                              the notes from the model, the EQ's words and the
@@ -1827,7 +1827,8 @@ def the_spec(b, d):
 WATCHED = """(() => { window.__seen = { card: false, waiting: false, line: false };
   const sheet = document.getElementById('paper');
   const look = () => { if (document.querySelector('.pn.red.card')) window.__seen.card = true;
-    if (sheet.classList.contains('waiting')) window.__seen.waiting = true;
+    if (sheet.classList.contains('waiting')) { window.__seen.waiting = true;
+      if (sheet.inert) window.__seen.inert = true; }
     const sub = document.querySelector('.p-sub');
     if (sub && sub.textContent === 'reading the device again…') window.__seen.line = true; };
   new MutationObserver(look).observe(sheet, { attributes: true, childList: true, subtree: true,
@@ -1873,20 +1874,36 @@ def the_states():
         forget(b, d)
         load(b, d)
         check('  with the daemon there the subtitle is the device\'s line', 'Reconnecting' not in b.page(SUB))
+        # a form is open (it holds its section) when the stream is lost
+        reach(b, '#p-preset-save')
+        check('the_states_in_papers_words: a form is open and holds its section before the stream is lost',
+              poll(lambda: b.page("!!document.querySelector('#p-presets .p-askbox')"), 5.0))
+        set_text(b, '#p-presets .p-askbox input', 'Late night')
         d.proc.terminate()
         d.proc.wait(5)
         check('  the daemon stopped: the subtitle reads `Reconnecting to svolder…`, the sheet is faded and inert',
               poll(lambda: b.page(SUB) == 'Reconnecting to svolder…', 20.0)
               and b.page("document.getElementById('paper').classList.contains('faded')")
               and b.page("document.getElementById('paper').inert"), b.page(SUB))
+        FORM = "document.querySelector('#p-presets .p-askbox input')?.value"
+        check('the_states_in_papers_words: a lost stream makes the sheet inert with the form open and its text kept',
+              b.page("document.getElementById('paper').inert") is True and b.page(FORM) == 'Late night',
+              [b.page("document.getElementById('paper').inert"), b.page(FORM)])
         d.restart()
         check('  restarted: the subtitle comes back and the sheet can be used',
               poll(lambda: 'Reconnecting' not in b.page(SUB) and b.page(SUB) != '', 30.0)
               and not b.page("document.getElementById('paper').inert"), b.page(SUB))
+        check('the_states_in_papers_words: on wake the form is usable with the same text',
+              b.page(FORM) == 'Late night' and b.page("document.getElementById('paper').inert") is False, b.page(FORM))
         b.page(WATCHED)
+        b.page("window.__seen.inert = false")
         b.page(HIDE)
         time.sleep(3.0)
         b.page(SHOW)
+        check('the_states_in_papers_words: the form stayed open with its text through the waiting page, which was inert',
+              poll(lambda: b.page('window.__seen.inert'), 10.0) is True
+              and b.page(FORM) == 'Late night' and poll(lambda: not b.page("document.getElementById('paper').inert"), 15.0),
+              [b.page('window.__seen.inert'), b.page(FORM)])
         check('  hidden 3 s then shown: the page waits (`reading the device again…`) until the first reading',
               poll(lambda: b.page('window.__seen.waiting'), 10.0) and poll(lambda: b.page('window.__seen.line'), 10.0)
               and poll(lambda: not b.page("document.getElementById('paper').classList.contains('waiting')"), 15.0),

@@ -8,7 +8,7 @@ nightdrive_theme.py; what both share is in nightdrive_base.py.
   reduced_motion_starts_on_calm_and_full_can_be_picked   draws keep coming under Full while reduced
   a_paused_player_on_a_desktop_keeps_its_levels_own_pace   draws go on at their rate when the player pauses
   what_a_draw_costs_on_the_computer_side            the same median with eight points shown, the curve up and a bell lit (4.5 ms, Chromium)
-  what_a_draw_costs                                 drawMs p95; a draw with every cell lit at 4.5 ms or less (median of 5, Chromium)
+  what_a_draw_costs                                 drawMs p95; a draw with every cell lit, the curve up and a bell lit at 4.5 ms or less (median of 5, Chromium)
   a desktop starts with the wet road allowed by the budget   the budget's answer to the real draws: the wet road is allowed
   the_road_cruises_with_the_song_and_keeps_the_tempo   floor rows a second, loud, silent and with the mood off
   a_slow_page_steps_down_on_the_rate                a page that draws fast and seldom steps down; left alone it keeps its density and rate
@@ -17,7 +17,12 @@ nightdrive_theme.py; what both share is in nightdrive_base.py.
   choosing_full_on_a_phone_lifts_the_cap_at_once    Chromium: a phone in Calm, still capped, then Full: the cap is off within 1.5 s and the draws a second
                                                     are over 45; under a 5x CPU slowdown the scene steps down within 2.5 s, then draws 25 or more a second, and has settled by 3.5 s
   a_paused_phone_keeps_the_road_smooth              Chromium: paused, the draws are 25 to 34 a second (the road still rolls)
-Usage: python3 nightdrive_timing.py chromium|firefox"""
+  a_phone_stays_usable, slow draws step the scale down, a_tap_opens_the_menu_with_the_cpu_slowed
+                                                    Chromium, a phone at density 3 with the CPU slowed 6x and 30x: the density, the step-down on slow draws, the tap that opens the menu within a second
+                                                    (real draw cost and real wall time, moved here from nightdrive_theme.py)
+Usage: python3 nightdrive_timing.py chromium|firefox   (ND_ONLY=phone_budget: only the phone budget case)"""
+import os
+
 import nightdrive_base as base
 from nightdrive_base import *  # noqa: F401,F403 (the shared helpers, by their own names)
 
@@ -33,6 +38,12 @@ SAMPLE = """new Promise((done) => { const out = []; const end = performance.now(
 
 
 WHOLE = '(() => DRIVER.then((m) => m.bound.scene.floor.whole))()'.replace('DRIVER', DRIVER)
+
+
+# a pointer moved over a bubble every 0.3 s from the page keeps the curve up and a bell lit
+HOVER = """(() => { const scene = document.querySelector('.nd-scene'); const d = __core.theme.driver;
+  window.__hover = setInterval(() => { const t = d.tune(); const bub = t.bubbles[3] || t.bubbles[0] || { x: t.w / 2, y: t.H - 0.08 * t.h };
+    scene.dispatchEvent(new PointerEvent('pointermove', { clientX: bub.x, clientY: bub.y, pointerType: 'mouse', isPrimary: true, bubbles: true })); }, 300); return 1; })()"""
 
 
 def rows_a_second(b, secs=4.0):
@@ -119,12 +130,18 @@ def what_a_draw_costs(b, d):
     time.sleep(1.0)
     plain = b.page(SAMPLE)
     print(f'INFO  {browser} 1280x800 dpr 1: drawMs p95 {p95(plain):.2f} ms (mean of 60, sampled 4 s), max {max(plain):.2f}')
-    # the worst cases: every cell of the rows lit at 0.9 (the heat grid at its most lifted), and the quiet
-    # (the wet road and the haze drawn, the floor flat)
+    # the worst cases: every cell of the rows lit at 0.9 (the heat grid at its most lifted) with the curve up and a band's
+    # bell lit all along (a pointer moved over its bubble every 0.3 s from the page, as on the computer side below, so the two
+    # numbers compare like for like), and the quiet (the wet road and the haze drawn, the floor flat)
+    b.page(HOVER)
     b.page(f'({FLOOR_AT})(0.9)')
-    time.sleep(1.0)
+    time.sleep(2.0)
+    tuned = b.page('__core.theme.driver.tune()')
     full = b.page(SAMPLE)
     five = b.page(FIVE)
+    b.page('clearInterval(window.__hover)')
+    check('what_a_draw_costs: the curve is up with a band\'s bell lit while every cell is lit',
+          tuned['m'] >= 0.5 and tuned['lit'] is not None and len(tuned['bubbles']) > 0, [tuned['m'], tuned['lit'], len(tuned['bubbles'])])
     print(f'INFO  {browser} 1280x800 dpr 1, every cell lit: drawMs p95 {p95(full):.2f} ms, max {max(full):.2f}, '
           f'median of 5 {median(five["ms"]):.2f} ms {[round(x, 2) for x in five["ms"]]}')
     b.page(f'({HOLD})(0, 120)')
@@ -166,9 +183,7 @@ def what_a_draw_costs_on_the_computer_side(b, d):
         b.page(f"__core.actions.computer.addPoint({{ type: {json.dumps(kind)}, f: {f}, g: {g}, q: {q} }}).then(() => 1)")
         time.sleep(0.2)
     time.sleep(1.0)
-    b.page("""(() => { const scene = document.querySelector('.nd-scene'); const d = __core.theme.driver;
-      window.__hover = setInterval(() => { const t = d.tune(); const bub = t.bubbles[3] || { x: t.w / 2, y: t.H - 0.08 * t.h };
-        scene.dispatchEvent(new PointerEvent('pointermove', { clientX: bub.x, clientY: bub.y, pointerType: 'mouse', isPrimary: true, bubbles: true })); }, 300); return 1; })()""")
+    b.page(HOVER)
     b.page('__core.theme.driver.forceDrawMs(2)')
     b.page(f'({FLOOR_AT})(0.9)')
     time.sleep(2.0)
@@ -340,13 +355,85 @@ def the_paused_phone(d):
             b.close()
 
 
+def touch_send(b, kind, points):
+    """Chromium: the fingers `points` ((id, x, y) each) are down, or move there."""
+    b.send('Input.dispatchTouchEvent', {'type': kind, 'touchPoints': [{'x': x, 'y': y, 'id': i} for i, x, y in points]})
+
+
+def the_phone_budget(d):
+    """Chromium, a phone at density 3 with the CPU slowed: the canvases are held to a density of 2 and
+    drawn at 30 a second from the first frame (a finger is a coarse pointer), the scale steps down on slow
+    draws without touching the Motion choice. The tap on the frame's button is a
+    smoke test at 6x (the menu opens within a second): at that load a draw is about 4 ms, under the
+    budget, so it does not test the step-down; at 30x, where the budget acts, the throttled main thread
+    alone takes 1.2 to 1.7 s to open the menu, so no second-long bound holds there."""
+    b = common.Chromium(size=(390, 844), dpr=3, touch=True)
+    try:
+        forget(b, d)
+        load(b, d)
+        time.sleep(1.5)
+        dims = b.page("""(() => { const c = document.getElementById('nd-road');
+          return [c.width, c.clientWidth, c.height, c.clientHeight]; })()""")
+        first = b.page(PERF)
+        check('a_phone_stays_usable: at density 3 the canvases are held to a backing density of 2',
+              dims[0] == 2 * dims[1] and dims[2] == 2 * dims[3] and first['scale'] == 2
+              and first['step'] == 0, [dims, first])
+        check('a_phone_starts_without_the_wet_road: the budget does not allow it at first', first['wet'] is False, first)
+        b.send('Emulation.setCPUThrottlingRate', {'rate': 6})
+        time.sleep(4.0)
+        six = b.page(PERF)
+        print(f'INFO  chromium 390x844 dpr 3, CPU 6x slower: drawMs {six["drawMs"]:.1f} ms, scale {six["scale"]}')
+        b.send('Emulation.setCPUThrottlingRate', {'rate': 30})
+        stepped = poll(lambda: b.page(PERF)['scale'] < 2, 15.0)
+        slow = b.page(PERF)
+        print(f'INFO  chromium 390x844 dpr 3, CPU 30x slower: drawMs {slow["drawMs"]:.1f} ms, scale {slow["scale"]}, '
+              f'step {slow["step"]}, capped {slow["capped"]}')
+        after = b.page("""(() => { const c = document.getElementById('nd-road');
+          return [c.width, c.clientWidth, document.getElementById('fx-button') !== null,
+            localStorage.getItem('svolder.theme.nightdrive.motion')]; })()""")
+        motion = b.page("""import(new URL('assets/themes/nightdrive/driver.js', document.baseURI)).then((m) => m.bound.view.motion)""")
+        check('  slow draws step the scale down, the CSS size is the same and the Motion choice is untouched',
+              stepped and slow['scale'] < 2 and slow['scale'] >= 1 and after[0] == round(after[1] * slow['scale'])
+              and after[3] is None and motion == 'full', [slow, after, motion])
+        b.send('Emulation.setCPUThrottlingRate', {'rate': 6})
+        time.sleep(1.0)
+        x, y = common.center(b, '#fx-button')
+        t0 = time.time()
+        touch_send(b, 'touchStart', [(1, x, y)])
+        touch_send(b, 'touchEnd', [])
+        opened = poll(lambda: b.page("!!document.querySelector('[data-motion]')"), 3.0)
+        took = time.time() - t0
+        check('  a_tap_opens_the_menu_with_the_cpu_slowed: with the CPU 6x slower, a tap on the frame\'s button opens the menu '
+              'within a second', opened and took < 1.0, [opened, round(took, 2), b.page(PERF)])
+        check('  no page error', errors(b) == [], errors(b)[:3])
+        b.send('Emulation.setCPUThrottlingRate', {'rate': 1})
+    finally:
+        try:
+            forget(b, d)
+        finally:
+            b.close()
+
+
 d = common.Daemon('gungnir2-v2', host='fake')
+if os.environ.get('ND_ONLY') == 'phone_budget':
+    if browser == 'chromium':
+        the_phone_budget(d)
+    d.stop()
+    base.finish('nightdrive_timing.py')
+    raise SystemExit(0)
 # the cases that make a browser of their own run first, with no other page drawing beside them
 the_readout_rate(d)
 if browser == 'chromium':
     the_phone_cap(d)
     the_full_switch(d)
     the_paused_phone(d)
+    # a daemon of its own: the case needs the player playing (a paused one is idle, the budget lets the wet road
+    # back and does not step down), and the case above leaves this one paused
+    budget_d = common.Daemon('gungnir2-v2', host='fake')
+    try:
+        the_phone_budget(budget_d)
+    finally:
+        budget_d.stop()
 b = make()
 try:
     hidden(b, d)

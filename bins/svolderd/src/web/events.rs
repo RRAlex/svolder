@@ -241,7 +241,7 @@ async fn run(
         mark_seen(&mut tracked.watched);
     }
     // Held for as long as the stream lives. What the host holds now is the snapshot's.
-    let mut page = page::Task::new(Arc::clone(&cx), route);
+    let mut page = page::Task::new(Arc::clone(&cx), route).await;
     let hello = Event::default()
         .retry(Duration::from_secs(2))
         .comment("svolder");
@@ -249,10 +249,11 @@ async fn run(
         return;
     }
     let devices = devices(web).await;
-    page.watch_fleet(&devices);
-    let shown_view = shown
-        .as_ref()
-        .and_then(|tracked| device::Read::of(&cx, &tracked.info.name));
+    page.watch_fleet(&devices).await;
+    let shown_view = match shown.as_ref() {
+        Some(tracked) => device::Read::of(&cx, &tracked.info.name).await,
+        None => None,
+    };
     let mut page_model = model::page_model(
         web,
         cx.viewer,
@@ -262,10 +263,10 @@ async fn run(
         None,
     )
     .await;
-    let followed_views: Vec<Option<device::Read>> = followed
-        .iter()
-        .map(|tracked| device::Read::of(&cx, &tracked.info.name))
-        .collect();
+    let mut followed_views: Vec<Option<device::Read>> = Vec::new();
+    for tracked in &followed {
+        followed_views.push(device::Read::of(&cx, &tracked.info.name).await);
+    }
     page_model.followed = followed
         .iter()
         .zip(&followed_views)
@@ -321,14 +322,14 @@ fn mark_seen(watched: &mut Watched) {
 }
 
 /// The followed devices' models, by URL segment, as they read now.
-pub(super) fn followed_models(cx: &Context) -> BTreeMap<String, DeviceModel> {
-    cx.followed
-        .iter()
-        .filter_map(|name| {
-            let read = device::Read::of(cx, name)?;
-            Some((view::segment(name), read.model()))
-        })
-        .collect()
+pub(super) async fn followed_models(cx: &Context) -> BTreeMap<String, DeviceModel> {
+    let mut models = BTreeMap::new();
+    for name in &cx.followed {
+        if let Some(read) = device::Read::of(cx, name).await {
+            models.insert(view::segment(name), read.model());
+        }
+    }
+    models
 }
 
 /// `value` as one event named `name`.

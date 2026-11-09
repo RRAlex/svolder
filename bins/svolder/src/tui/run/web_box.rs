@@ -16,9 +16,7 @@ use svolder_ipc::{Request, Response};
 use super::Look;
 use super::Watching;
 use super::look::{Browser, Copier};
-use crate::commands::web::{
-    LOGIN_FRAGMENT, first_lan, interfaces, local_base, open_link, phone_base,
-};
+use crate::commands::web::{LOGIN_FRAGMENT, lan_here, local_base, open_link, phone_base};
 use crate::tui::boxes::connections::{Modal, osc52};
 use crate::tui::boxes::web_box::Code;
 use crate::tui::clipboard::{self, Tried};
@@ -178,8 +176,15 @@ pub(super) fn answered(watching: &mut Watching, (link, answer): Asked, now: Inst
     let conn = &watching.app.overlays.conn;
     let made_for = listens(conn);
     let (_, listen) = made_for;
-    let phone = phone_base(conn.web.url.as_deref(), listen, first_lan(&interfaces()));
+    let phone = phone_base(conn.web.url.as_deref(), listen, lan_here());
     let local = phone.is_err();
+    // A wildcard listen with no address a phone reaches (a container with no [web] url) is said,
+    // not left looking like a link that works.
+    let unreachable = phone
+        .as_ref()
+        .err()
+        .filter(|_| listen.ip().is_unspecified())
+        .cloned();
     let base = phone.unwrap_or_else(|_| local_base(listen));
     let code = match answer {
         Some(Response::WebLink {
@@ -216,6 +221,9 @@ pub(super) fn answered(watching: &mut Watching, (link, answer): Asked, now: Inst
             }
             false => web.pair = Some(code),
         }
+    }
+    if link && let Some(why) = unreachable {
+        watching.app.warn(why);
     }
     true
 }

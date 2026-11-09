@@ -32,15 +32,15 @@ export function wireTone({
   });
 
   /** A tap that cannot write: the core turns it away and says why (a guest, a page whose writes
-   * are off); the mode asked is the one it is already in. */
-  const refuse = () => core.actions.setMode(store.part('tone')?.mode);
+   * are off). */
+  const refuse = () => core.actions.refuse();
 
   /** Open the list `options` under `opener`, holding the tone section while it is open. */
   function list(opener, label, options, choose) {
     // The hold is taken before the list opens (opening one closes another, whose release must
     // not let the section go) and given back if it cannot open.
     keep.around(() => openList({
-      opener, label, options, choose, signal, onClose: () => keep.drop(),
+      opener, label, options, choose, signal, onClose: () => keep.release(),
     }));
   }
 

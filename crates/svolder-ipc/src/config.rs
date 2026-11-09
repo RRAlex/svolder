@@ -37,6 +37,7 @@ mod tui;
 mod tui_settings;
 
 pub use hops::{Hop, HopKind, HopWhat};
+pub use parse::ListenDefaults;
 pub use template::DEFAULT_SPECTRUM;
 pub use tui_settings::{
     ACCENT, COLORS, CONFIRM_QUIT, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT, INTRO_SOUND,
@@ -67,6 +68,10 @@ pub struct Config {
     pub presets: Vec<Preset>,
     /// What the sound goes through after the DAC, one per TOML `[[hop]]` table, in file order.
     pub hops: Vec<Hop>,
+    /// What a file that configures one unit twice was read as: the later blocks are not in
+    /// [`Config::devices`], and each entry says which and why. They come out as warnings.
+    #[serde(skip)]
+    pub dropped_duplicates: Vec<String>,
     /// How a command reaches a daemon, from the TOML `[daemon]` table.
     pub daemon: DaemonConfig,
     /// How `svolder tui` looks and behaves, from the TOML `[tui]` table.
@@ -965,6 +970,7 @@ impl Default for Config {
             devices: Vec::new(),
             presets: Vec::new(),
             hops: Vec::new(),
+            dropped_duplicates: Vec::new(),
             daemon: DaemonConfig::default(),
             tui: TuiConfig::default(),
             mqtt: MqttConfig::default(),
@@ -1304,6 +1310,24 @@ impl Config {
         (!known).then_some(name)
     }
 
+    /// The failure of a verb that needs the default when [`Config::dangling_default`] names
+    /// something: the plain sentence, or, when the name is a block that was left out as a
+    /// duplicate of another for its unit, that line with its cure.
+    pub fn dangling_default_failure(&self) -> Option<String> {
+        let name = self.dangling_default()?;
+        let left_out = format!("{name:?} is left out").to_ascii_lowercase();
+        Some(
+            match self
+                .dropped_duplicates
+                .iter()
+                .find(|line| line.to_ascii_lowercase().contains(&left_out))
+            {
+                Some(line) => format!("{}: {line}", dangling_default_message(name)),
+                None => dangling_default_message(name),
+            },
+        )
+    }
+
     /// Whether a `[[device]]` block is named `name`, matching case and the blanks round it
     /// aside ([`same_name`]).
     fn configures(&self, name: &str) -> bool {
@@ -1360,6 +1384,7 @@ impl Config {
             .map(dangling_default_message)
             .into_iter()
             .collect();
+        said.extend(self.dropped_duplicates.iter().cloned());
         for hop in &self.hops {
             if let HopWhat::Linked { device } = &hop.what
                 && !self.configures(device)

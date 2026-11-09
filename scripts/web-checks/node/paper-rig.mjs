@@ -56,7 +56,7 @@ export function computerView(page, side = 'computer') {
   const computer = createComputer({ store, storage, holds });
   computer.flip(side);
   return {
-    view: { phone: false, coarse: false, state: 'open', now: 0, rulerPx: 1000, computer, point: null },
+    view: { phone: false, coarse: false, state: 'open', now: 0, rulerPx: 1000, computer },
     computer,
   };
 }

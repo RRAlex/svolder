@@ -71,6 +71,9 @@ pub trait Files {
 
     /// The names the configured devices already carry.
     fn taken_names(&self) -> Vec<String>;
+
+    /// The configured devices' names with the unit ids their blocks carry.
+    fn taken_units(&self) -> Vec<(String, String)>;
 }
 
 /// Everything the wizard can do to the machine it runs on: the three seams together.

@@ -326,3 +326,42 @@ async fn a_hop_edit_sets_keeps_and_clears_after() {
     assert!(!config(&dac).contains("after"), "{}", config(&dac));
     dac.stop().await;
 }
+
+/// A reload the daemon cannot finish (a user profile that will not parse) leaves its own list
+/// as it was; the answer to a hop write still lists the file just written, and an edit made
+/// then merges onto the file's hop, not an older one.
+#[tokio::test]
+async fn the_answer_after_a_failed_reload_shows_the_file() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    std::fs::create_dir_all(dac.dir.join("profiles")).unwrap();
+    std::fs::write(dac.dir.join("profiles/broken.toml"), "not a profile = [").unwrap();
+    let reloaded = dac.fleet.request(svolder_ipc::Request::Reload).await;
+    assert!(
+        matches!(reloaded, svolder_ipc::Response::Error { .. }),
+        "the reload should fail: {reloaded:?}"
+    );
+    let reply = call(
+        &web,
+        post(
+            "/api/v1/hops",
+            r#"{"name":"Amp","kind":"amp","note":"one"}"#,
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    assert_eq!(answered(&reply.body), ["Amp"]);
+    // Another writer changes the note in the file; the edit keeps it where it does not touch it.
+    let text = config(&dac).replace("note = \"one\"", "note = \"two\"");
+    std::fs::write(dac.dir.join("config.toml"), text).unwrap();
+    let reply = call(
+        &web,
+        post("/api/v1/hops/edit", r#"{"id":"Amp","after":"dac"}"#),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(said["hops"][0]["note"], "two", "{said}");
+    assert_eq!(file_hops(&dac), ["Amp"]);
+    dac.stop().await;
+}

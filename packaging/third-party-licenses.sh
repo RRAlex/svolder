@@ -7,7 +7,7 @@
 # in besides: libdbus, from the source libdbus-sys bundles; the Rust standard library; musl
 # libc, which the Rust musl target carries; and the files the web UI serves, the IBM Plex and
 # Geist, Crimson Pro, Caveat, Russo One and Mr Dafoe fonts and htmx, with the licences they ship with.
-# `make third-party-licenses` runs it in the build container from the repository root. The
+# `make 3rdpartylicenses` runs it in the build container from the repository root. The
 # crates are fetched first, then cargo-about runs --frozen, off the network, so the file depends
 # only on Cargo.lock.
 set -eu

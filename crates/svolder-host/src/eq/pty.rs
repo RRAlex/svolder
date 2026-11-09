@@ -29,8 +29,8 @@ fn check(result: libc::c_int) -> io::Result<libc::c_int> {
     }
 }
 
-/// Open a terminal whose end for the child does not echo, is very wide (so nothing the line
-/// editor draws wraps) and is not inherited by any other program svolder starts.
+/// Open a terminal whose end for the child does not echo, reads raw, is very wide (so nothing the
+/// line editor draws wraps) and is not inherited by any other program svolder starts.
 pub(super) fn open() -> io::Result<Pty> {
     let flags = libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC;
     // SAFETY: each call is given a descriptor this function owns and a buffer it sized; the
@@ -47,7 +47,11 @@ pub(super) fn open() -> io::Result<Pty> {
         let slave = OwnedFd::from_raw_fd(check(libc::open(name.as_ptr(), flags))?);
         let mut attributes: libc::termios = std::mem::zeroed();
         check(libc::tcgetattr(slave.as_raw_fd(), &mut attributes))?;
-        attributes.c_lflag &= !(libc::ECHO | libc::ECHONL);
+        // Raw reads: a canonical terminal caps a line at 4095 bytes, and a live update of 16
+        // points is about 5 KB.
+        attributes.c_lflag &= !(libc::ECHO | libc::ECHONL | libc::ICANON);
+        attributes.c_cc[libc::VMIN] = 1;
+        attributes.c_cc[libc::VTIME] = 0;
         check(libc::tcsetattr(
             slave.as_raw_fd(),
             libc::TCSANOW,
@@ -77,5 +81,28 @@ pub(super) fn open() -> io::Result<Pty> {
             from_child: Receiver::from_owned_fd_unchecked(reading)?,
             slave,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The child's end reads raw (a line editor, or a program that reads a line at a time, sees
+    /// no 4095-byte limit), does not echo, and a read returns with the first byte.
+    #[tokio::test]
+    async fn the_childs_end_is_raw_without_echo() {
+        let pty = open().expect("a terminal opens");
+        // SAFETY: the descriptor is the one `pty` owns; `attributes` is a plain struct that
+        // `tcgetattr` fills.
+        let attributes = unsafe {
+            let mut attributes: libc::termios = std::mem::zeroed();
+            check(libc::tcgetattr(pty.slave.as_raw_fd(), &mut attributes)).expect("attributes");
+            attributes
+        };
+        assert_eq!(attributes.c_lflag & libc::ICANON, 0, "canonical mode is on");
+        assert_eq!(attributes.c_lflag & (libc::ECHO | libc::ECHONL), 0);
+        assert_eq!(attributes.c_cc[libc::VMIN], 1);
+        assert_eq!(attributes.c_cc[libc::VTIME], 0);
     }
 }

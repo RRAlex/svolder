@@ -69,14 +69,43 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree third-party-licenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots web-icons rate-check rate-check-test web-shots web-snippets theme-css-check web-checks web-checks-quick paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab docker install install-service uninstall
+.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots web-icons rate-check rate-check-test release-notes-test web-shots web-snippets tests-check theme-css-check web-checks web-checks-quick web-checks-task paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
 
-help: ## Show available targets
-	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
+##@ Start
+##@ Try it
+##@ Install
+##@ Check
+##@ Long checks (not part of check)
+#: Checks that the web tests catch a deliberate break: every web mutant runner, one after the other,
+#: with its kills and wall time, then a summary; fails when a mutant survives. Slow, by hand only,
+#: never a gate. FULL=1 adds the browser ones, many hours. The node runners take seconds to a few
+#: minutes. The browser runners run their mutants in a pool (MUT_WORKERS, default from the cores and
+#: the CPU pressure), timing mutants alone, and re-run every mutant the pool did not kill alone: only
+#: that result counts.
+#: Needs node and python3; FULL=1 also the browser checks (a built svolderd, Chromium).
+#: FULL=1|0   also run the browser runners (default 0: the node ones only)
+#: MUT_WORKERS=<number>   workers of each browser runner (default from the cores and CPU pressure)
+tests-check: ## Check the web tests catch a deliberate break (by hand)
+	@bash scripts/web-checks/mutants.sh $(if $(filter 1,$(FULL)),--full)
+
+##@ Pictures and generated docs
+##@ Release builds (docker)
+##@ Clean
+
+##@ Start
+#: Give T=<target> to show that target's details and settings.
+help: ## This list; make help T=<target> for one target's details
+	@sh scripts/make-help.sh Makefile $(T)
+
+# Fails if a summary would not fit `make help`'s one line, or a #: line has no target below it.
+help-check:
+	@sh scripts/make-help.sh --check Makefile
 
 # deps-build, deps-lint and deps-check run first in the targets that build, lint or check on this
 # host: they stop before cargo starts when something is missing, and print nothing otherwise.
-deps: ## Check the tools and libraries the build and `make check` need, and name the command that installs what is missing
+#: Checks the tools and libraries the build and `make check` need, and prints the command that
+#: installs what is missing.
+deps: ## Check the build's tools; name the command to install them
 	@CARGO=$(CARGO) sh scripts/build-deps.sh check
 
 deps-build:
@@ -96,18 +125,25 @@ build: deps-build ## Build every crate
 
 # The block between the markers is generated, not hand-written: this target is the only
 # thing that should touch it, from whatever the just-built binary's own table says now.
-docs-env: deps-build ## Rewrite docs/usage/environment.md's environment-variable table from the built binary
+##@ Pictures and generated docs
+#: Rewritten from the built binary's own list of environment variables.
+docs-env: deps-build ## Rewrite docs/usage/environment.md's variable table
 	$(CARGO) build -q -p svolder
 	awk '/<!-- env-table:begin -->/ { print; system("SVOLDER_HOST=off target/debug/svolder help env --markdown"); skip=1; next } /<!-- env-table:end -->/ { skip=0 } !skip' docs/usage/environment.md > docs/usage/environment.md.new
 	mv docs/usage/environment.md.new docs/usage/environment.md
 
-check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check workflow-check web-snippets theme-css-check rate-check-test deps-test test ## Format check, lints, safety tripwire, docs check, licence check, SPDX header check, workflow check, web mutation snippets, rate-check parser self-test, build-deps self-test, tests
+##@ Check
+#: Format check, lints, safety tripwire, docs check, licence check, SPDX header check, workflow
+#: check, web mutation snippets, theme CSS check, rate-check parser self-test, build-deps self-test, sim-app preflight self-test,
+#: tests and this help's own check.
+check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check workflow-check web-snippets theme-css-check rate-check-test release-notes-test deps-test sim-app-test help-check test ## Everything a commit must pass (make help T=check)
 
-license-check: deps-check ## Fail if a dependency's licence is not compatible with GPL-3.0-or-later
+license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-later
 	CARGO=$(CARGO) python3 scripts/check-licenses.py --self-test
 	CARGO=$(CARGO) python3 scripts/check-licenses.py
 
-build-image: ## Build the container the release builds run in (needs docker)
+##@ Release builds (docker)
+build-image: ## Build the container the release builds run in
 	docker build -q --platform $(PLATFORM) -f packaging/Dockerfile.build -t $(BUILD_IMAGE) packaging
 
 # A release artifact names a commit: its version, its time and its source tarball.
@@ -116,11 +152,13 @@ release-tree:
 	@[ "$(ALLOW_DIRTY)" = 1 ] || [ -z "$$(git status --porcelain)" ] \
 	  || { echo "release builds need a clean tree: commit first (ALLOW_DIRTY=1 tries the packaging anyway)"; exit 1; }
 
-third-party-licenses: build-image ## Write the licences of everything in the binaries to target/dist/THIRD-PARTY-LICENSES (needs docker)
+#: The licences of everything inside the binaries, gathered in the release container.
+3rdpartylicenses: build-image ## Write target/dist/THIRD-PARTY-LICENSES
 	$(IN_BUILD) $(BUILD_IMAGE) packaging/third-party-licenses.sh
 
 # Its own target directory keeps the musl build apart from the host's and each architecture's apart.
-static: build-image ## Build static svolder, svolderd and svolder-sim in a container into target/dist (needs docker); ARCH=aarch64 builds arm64 into target/dist/aarch64
+#: ARCH=x86_64|aarch64   the architecture (default x86_64); aarch64 goes into target/dist/aarch64
+static: build-image ## Static svolder, svolderd, svolder-sim into target/dist
 	$(IN_BUILD) $(STATIC_ENV) $(BUILD_IMAGE) cargo build --release --locked --target $(STATIC_TARGET) --target-dir $(STATIC_DIR) \
 	  -p svolder -p svolderd -p svolder-sim
 	mkdir -p $(STATIC_OUT)
@@ -131,23 +169,28 @@ static: build-image ## Build static svolder, svolderd and svolder-sim in a conta
 # crates). The static binaries and THIRD-PARTY-LICENSES come first; the licence file does not
 # depend on the architecture.
 ifeq ($(ARCH_GIVEN),)
-packages: release-tree ## Build both architectures' packages (.deb x2, .rpm, tarballs x2, source tarball), then PKGBUILD, SHA256SUMS and RELEASE-NOTES.md into target/dist (needs docker, a git checkout); ARCH=x86_64 or ARCH=aarch64 builds that architecture's alone
+#: Both architectures' .deb, .rpm and tarballs, the source tarball, then PKGBUILD, SHA256SUMS and
+#: RELEASE-NOTES.md. Needs a git checkout.
+#: ARCH=x86_64|aarch64   that architecture's packages alone (default: both, then PKGBUILD, sums, notes)
+packages: release-tree ## Every release package into target/dist
 	$(MAKE) packages ARCH=x86_64
 	$(MAKE) packages ARCH=aarch64
 	$(MAKE) release-files
 else
-packages: release-tree static third-party-licenses
+packages: release-tree static 3rdpartylicenses
 	git archive --format=tar --prefix=svolder-$(VERSION)/ -o target/source.tar HEAD
 	$(IN_BUILD) -e SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) $(BUILD_IMAGE) packaging/package.sh $(VERSION) target/source.tar $(ARCH)
 endif
 
 # What combines the two architectures: PKGBUILD, SHA256SUMS (last) and RELEASE-NOTES.md.
-release-files: ## Write PKGBUILD, SHA256SUMS and RELEASE-NOTES.md in target/dist from both architectures' packages (run by `make packages` without ARCH)
+#: Written from both architectures' packages; `make packages` without ARCH runs it.
+release-files: ## PKGBUILD, SHA256SUMS, RELEASE-NOTES.md in target/dist
 	@sh packaging/release-files.sh $(VERSION)
 
 # The second build starts from empty musl target directories (the crates stay downloaded),
 # so every artifact is built again and checked against the first one's sha256.
-repro-check: ## Build the release artifacts for both architectures twice and fail if any differs (needs docker; about 13 minutes with the arm64 image and crates cached, about 40 cold)
+#: Both architectures: about 13 minutes with the arm64 image and the crates cached, about 40 cold.
+repro-check: ## Build the release twice; fail if any file differs
 	$(if $(ARCH_GIVEN),$(error repro-check covers both architectures: leave ARCH unset))
 	$(MAKE) -s packages
 	sha256sum $(addprefix $(DIST)/,$(ARTIFACTS)) > target/repro.sha256
@@ -156,17 +199,22 @@ repro-check: ## Build the release artifacts for both architectures twice and fai
 	sha256sum -c target/repro.sha256 || { echo "repro-check: differs; compare with diffoscope"; exit 1; }
 	@echo "repro-check: every artifact is the same on a second build"
 
-spdx-check: deps-check ## Fail if a source file lacks its SPDX licence or copyright header
+##@ Check
+spdx-check: deps-check ## Fail if a source file lacks its SPDX header
 	@files=$$(git ls-files) || { echo "spdx-check: git ls-files failed; this check needs a git checkout"; exit 1; }; \
 	files=$$(echo "$$files" | grep -E '\.rs$$|\.toml$$|\.ya?ml$$|^Dockerfile|^scripts/|^systemd/|^packaging/|^Makefile$$|^flake\.nix$$|^bins/svolderd/templates/.*\.html$$|^bins/svolderd/web/.*\.(css|js|svg)$$' | grep -v '^bins/svolderd/web/themes/ember/htmx\.min\.js$$'); \
 	if [ -z "$$files" ]; then echo "spdx-check: no source files found; this check needs a git checkout"; exit 1; fi; \
 	echo "$$files" | tr '\n' '\0' | xargs -0 sh scripts/spdx-check.sh || exit 1; \
 	echo "spdx-check: $$(echo "$$files" | wc -l) files carry the SPDX headers"
 
-theme-css-check: ## Fail if a theme's style sheet names the frame's own parts (the menu button, its menu, the picker): a theme dresses them with the --frame-* tokens only
+#: The menu button, its menu and the picker belong to the frame: a theme dresses them with the
+#: --frame-* tokens only.
+theme-css-check: ## Fail if a theme styles the frame's own parts
 	@python3 -I scripts/theme-css-check.py
 
-workflow-check: ## Fail if a GitHub Actions workflow could start by itself (any trigger but workflow_dispatch and a v* tag push), uses an action not pinned to a commit SHA, or runs a make target that does not exist
+#: Fails if a workflow could start by itself (any trigger but workflow_dispatch and a v* tag push),
+#: uses an action not pinned to a commit SHA, or runs a make target that does not exist.
+workflow-check: ## Fail on a GitHub workflow that is unsafe or broken
 	python3 -I scripts/workflow-check.py --self-test
 	python3 -I scripts/workflow-check.py
 
@@ -186,6 +234,7 @@ workflow-check: ## Fail if a GitHub Actions workflow could start by itself (any 
 # naming whatever a test left in TMPDIR, apart from those pinned homes. The scratch directory
 # has a short fixed prefix so the longest test socket path stays under the 108 bytes a socket
 # address holds.
+##@ Start
 test: deps-build ## Run all tests
 	@scratch=$$(mktemp -d /tmp/sv.XXXXXX) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
@@ -203,7 +252,10 @@ test: deps-build ## Run all tests
 	  exit 1; \
 	fi
 
-safety-tests: ## Fail if a safety test has gone missing: the volume's glide, the firmware-update and passphrase refusals (profile loader and the layers below), the capture's argv and scrub, the remote views
+##@ Check
+#: The volume's glide, the firmware-update and passphrase refusals (profile loader and the layers
+#: below), the capture's argv and scrub, the remote views.
+safety-tests: ## Fail if a safety test has gone missing
 	@missing=''; \
 	n=0; \
 	while IFS='|' read -r path fn || [ -n "$$path" ]; do \
@@ -222,32 +274,38 @@ safety-tests: ## Fail if a safety test has gone missing: the volume's glide, the
 	  exit 1; \
 	fi
 
-docs-check: ## Fail on a broken documentation link, a stale path, an over-long design doc or a process tag
+#: Also fails on an over-long design doc.
+docs-check: ## Fail on a broken doc link, stale path or process tag
 	@python3 scripts/docs-check.py --self-test
 	@python3 scripts/docs-check.py
 
-docs-check-merge: ## Run before a merge to main: docs-check, and docs/ holds only shipped docs
+docs-check-merge: ## Before a merge to main: docs-check, shipped docs only
 	@python3 scripts/docs-check.py --merge
 
+##@ Start
 fmt: deps-lint ## Format the code
 	$(CARGO) fmt --all
 
+##@ Check
 fmt-check: deps-lint ## Fail if code is not formatted
 	$(CARGO) fmt --all -- --check
 
 clippy: deps-lint ## Lint with warnings as errors
 	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings
 
+##@ Clean
 clean: ## Remove build output
 	$(CARGO) clean
 
 # Docker's images and the container's .env, config/ and run/ stay: they belong to an installed
 # container, not to a build.
-clean-all: clean ## Remove build output, the `nix build` link and the crates this checkout downloaded, so the next build starts as a new checkout's
+#: The next build starts as a new checkout's would.
+clean-all: clean ## clean, plus the nix link and this checkout's crates
 	@if [ -L result ]; then rm result; fi
 	@sh scripts/clean-downloads.sh
 
-clean-rust: clean-all ## Everything clean-all removes, and cargo's whole download cache: every Rust project on this machine downloads its crates again
+#: Every Rust project on this machine downloads its crates again.
+clean-rust: clean-all ## clean-all, plus cargo's whole download cache
 	@sh scripts/clean-downloads.sh all
 
 # PROFILE=<fake profile> and SIGNAL=1 reach the fake device as SVOLDER_FAKE_PROFILE and
@@ -255,84 +313,144 @@ clean-rust: clean-all ## Everything clean-all removes, and cargo's whole downloa
 # A knob not given is cleared from the shell's environment, so the default is the default.
 DEMO_KNOBS = env $(if $(PROFILE),SVOLDER_FAKE_PROFILE=$(PROFILE),-u SVOLDER_FAKE_PROFILE) $(if $(SIGNAL),SVOLDER_FAKE_SIGNAL=$(SIGNAL),-u SVOLDER_FAKE_SIGNAL)
 
-demo: deps-build ## Build, then try the TUI and the web UI on a fake device with YOUR COMPUTER'S REAL AUDIO (volume, player, EQ); PROFILE=fake-amp SIGNAL=1 pick the device
+##@ Try it
+#: Drives your computer's real volume, media player and EQ: a volume or player change stays after
+#: the demo; the computer EQ it applied is removed when it ends.
+#: PROFILE=fake-amp|fake-mono|fake-five|bifrost3|<profile>   the fake device, any name in profiles/ (default gungnir2-v2, a DAC with tone control; fake-amp, -mono, -five: 2, 1, 5 meters)
+#: SIGNAL=1   a demo signal moves the meters (a profile with meters: fake-amp, fake-mono, fake-five)
+demo: deps-build ## TUI + web UI on a fake device; drives your real audio
 	$(CARGO) build --workspace
 	$(DEMO_KNOBS) target/debug/svolder tui --demo --host --web
 
-demo-dac: deps-build ## Like `make demo` on the fake DAC with its tone control (your computer's real audio)
+demo-dac: deps-build ## make demo on the fake DAC; drives your real audio
 	@$(MAKE) --no-print-directory demo PROFILE= SIGNAL=
 
-demo-amp: deps-build ## Like `make demo` on the fake amplifier with its meters moving (your computer's real audio)
+demo-amp: deps-build ## make demo on the fake amp; drives your real audio
 	@$(MAKE) --no-print-directory demo PROFILE=fake-amp SIGNAL=1
 
-demo-computer: deps-build ## Like `make demo-dac`, with a simulated computer side: your real audio is not touched (flip a page to the computer: volume, EQ points, presets)
+#: The computer side (volume, EQ points, presets) is simulated on the web page; the TUI shows
+#: "computer controls unavailable" for now.
+demo-computer: deps-build ## TUI + web UI on a fake DAC; your audio untouched
 	$(CARGO) build --workspace
 	$(DEMO_KNOBS) target/debug/svolder tui --demo --web
 
-demo-computer-amp: deps-build ## Like `make demo-computer` on the fake amplifier with its meters moving: a simulated computer side, your real audio is not touched
+demo-computer-amp: deps-build ## demo-computer on the fake amp; your audio untouched
 	@$(MAKE) --no-print-directory demo-computer PROFILE=fake-amp SIGNAL=1
 
-demo-safe: deps-build ## Build, then try the TUI on a fake device and a throwaway daemon (touches nothing of yours)
+#: Touches nothing of yours.
+demo-safe: deps-build ## TUI alone on a fake device; your audio untouched
 	$(CARGO) build --workspace
 	$(DEMO_KNOBS) target/debug/svolder tui --demo
 
-screenshots: deps-build ## Draw the README's pictures into docs/images from the TUI's own renderer (needs ffmpeg, fonts-ubuntu, fonts-dejavu-core; downloads one AutoEq file once)
+#: Starts svolder-sim for the official Schiit phone app (legacy advertisement, decoded frames
+#: printed), after checking bluetoothd's flags read-only; when they are missing it prints the
+#: systemd drop-in and the commands, changes nothing and starts nothing. Uses a real adapter,
+#: so pick one no device of yours uses. Passphrase 1234. The app lists it as svolder-sim.
+#: A=<hciN>   the Bluetooth adapter the sim advertises on (default hci0)
+#: MODEL=<profile>   the built-in device profile it emulates (default gungnir2-v2)
+sim-app: deps-build ## Simulator for the Schiit phone app; uses a real adapter
+	$(CARGO) build -p svolder-sim
+	@SIM_APP_BIN="$${CARGO_TARGET_DIR:-target}/debug/svolder-sim" sh scripts/sim-app.sh --adapter $(or $(A),hci0) --model $(or $(MODEL),gungnir2-v2)
+
+sim-app-test:
+	@sh scripts/sim-app-test.sh
+
+##@ Pictures and generated docs
+#: Needs ffmpeg, fonts-ubuntu and fonts-dejavu-core; downloads one AutoEq file once.
+screenshots: deps-build ## Draw the README's TUI pictures into docs/images
 	@bash scripts/screenshots.sh
 
-web-icons: ## Draw the web UI's icons from the wordmark into bins/svolderd/web (needs ffmpeg)
+web-icons: ## Draw the web UI's icons from the wordmark (ffmpeg)
 	$(CARGO) test -q -p svolderd --bin svolderd -- --ignored --exact web::icons::draw
 	for size in 192 512; do \
 	  ffmpeg -v error -y -fflags +bitexact -i target/web-icons/icon-$$size.ppm -map_metadata -1 \
 	    -flags:v +bitexact -pred mixed bins/svolderd/web/icon-$$size.png; \
 	done
 
-rate-check-test: ## Run the rate-check script's parsers on saved tool output (no PipeWire)
+##@ Check
+rate-check-test: ## Run rate-check's parsers on saved output (no PipeWire)
 	@bash scripts/rate-check.sh --self-test >/dev/null || bash scripts/rate-check.sh --self-test
+release-notes-test: ## Run the release-notes extraction on a temp repo
+	@bash packaging/release-notes.sh --self-test >/dev/null || bash packaging/release-notes.sh --self-test
 
-rate-check: ## Measure by hand whether the host capture leaves the graph's rate to the player (the real PipeWire session with silent streams; never part of check)
+##@ Long checks (not part of check)
+#: Measures on the real PipeWire session with silent streams.
+rate-check: ## By hand: does the capture leave the rate to the player?
 	@bash scripts/rate-check.sh
 
-web-shots: ## Shoot the web UI in headless Firefox and Chromium into target/web-shots, and the README's two pictures (needs both browsers, ffmpeg and python3-websockets; run make screenshots once first)
+##@ Pictures and generated docs
+#: Into target/web-shots. Needs both browsers, ffmpeg and python3-websockets; run
+#: make screenshots once first.
+web-shots: ## Web UI stills in Firefox and Chromium, README pictures
 	@bash scripts/web-shots.sh
 
-paper-shots: deps-build ## Shoot Paper's stills: DAC and amp, desktop and phone, light and dark, into target/web-shots/paper (Chromium)
+#: Chromium: DAC and amp, desktop and phone, light and dark.
+paper-shots: deps-build ## Paper's stills into target/web-shots/paper
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/paper_shots.py
 
-signal-shots: deps-build ## Shoot Signal's stills: DAC, amp chosen, declared hop chosen, lost link, + sheet, linked amp shown, tablet, phone, into target/web-shots/signal (Chromium)
+#: Chromium: DAC, amp chosen, declared hop chosen, lost link, + sheet, linked amp shown, tablet, phone.
+signal-shots: deps-build ## Signal's stills into target/web-shots/signal
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/signal_shots.py
 
-nightdrive-shots: deps-build ## Shoot Night drive's stills: desktop at rest, a bubble held, the sheet, out of reach, no capture, phone upright and sideways (DAC and computer side), into target/web-shots/nightdrive (Chromium)
+#: Chromium: desktop at rest, a bubble held, the sheet, out of reach, no capture, phone upright
+#: and sideways (DAC and computer side).
+nightdrive-shots: deps-build ## Night drive's stills into target/web-shots/nightdrive
 	@$(CARGO) build -q -p svolderd
 	@python3 scripts/web-checks/nightdrive_shots.py
 
-web-snippets: ## Fail if a web mutation runner's snippet does not occur exactly once in its file (needs python3 only)
+##@ Check
+#: Needs python3 only.
+web-snippets: ## Fail if a web mutant's snippet is not in its file once
 	@python3 scripts/web-checks/snippets.py
 
-web-checks: deps-build ## Run the web UI's node harnesses and browser checks in headless Chromium and Firefox (needs node, python3-websockets, python3-numpy, python3-pil, both browsers, geckodriver; never takes a picture of the smoke; over an hour at the default WEB_CHECKS_JOBS=6, a failure re-run alone)
+##@ Long checks (not part of check)
+#: The node harnesses and the browser checks, headless; a failure is re-run alone. Never takes a
+#: picture of the smoke. Needs node, python3-websockets, python3-numpy, python3-pil, both browsers
+#: and geckodriver.
+#: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
+web-checks: deps-build ## Every web check in Chromium and Firefox (over an hour)
 	@bash scripts/web-checks/run-all.sh
 
-web-checks-quick: deps-build ## Quick web gate: the node harnesses, the browser checks that leave the smoke alone and one short smoke check per browser (about 38 minutes at the default WEB_CHECKS_JOBS=6, a failure re-run alone); refuses after a smoke file changed, then run web-checks
+#: The node harnesses, the browser checks that leave the smoke alone and one short smoke check per
+#: browser. Refuses after a smoke file changed: run web-checks then.
+#: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
+web-checks-quick: deps-build ## The quick web gate (about 38 minutes)
 	@bash scripts/web-checks/run-all.sh --quick
 
-e2e: deps-build ## End-to-end test over BlueZ (needs two extended-advertising controllers); not part of check
+#: The quick gate with the logic-only checks (Space key, device presets, core rows) in Chromium
+#: only. For a task or a lane end; refuses like the quick gate.
+#: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
+web-checks-task: deps-build ## The task web gate (quick, logic checks in Chromium only)
+	@bash scripts/web-checks/run-all.sh --task
+
+#: Needs two extended-advertising controllers.
+e2e: deps-build ## End to end over BlueZ
 	@bash scripts/e2e.sh
 
-host-e2e: deps-build ## End-to-end check of the computer EQ on a private PipeWire and WirePlumber (no sound card; never touches your session); not part of check
+#: A private PipeWire and WirePlumber: no sound card, never touches your session.
+host-e2e: deps-build ## The computer EQ end to end on a private PipeWire
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolderd
 	@bash scripts/host-e2e/run.sh
 
-preamp-lab: deps-build ## Long run of the computer EQ's preamp lab: random event sequences against a model of PipeWire (SEED=first seed, RUNS=how many; default 1000 and 5000); not part of check
+#: Random event sequences against a model of PipeWire.
+#: SEED=<number>   the first sequence's seed (default 1000)
+#: RUNS=<number>   how many sequences (default 5000)
+preamp-lab: deps-build ## Long run of the computer EQ's preamp lab
 	@scratch=$$(mktemp -d /tmp/sv.XXXXXX) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	SVOLDER_LAB_SEED="$(or $(SEED),1000)" SVOLDER_LAB_RUNS="$(or $(RUNS),5000)" TMPDIR="$$scratch" \
 	  $(CARGO) test --release -p svolder-host --lib -- --ignored --nocapture the_lab_finds_nothing_in_a_long_run
 
+##@ Release builds (docker)
 docker: ## Build the container image (skips without Docker)
 	@VERSION=$(VERSION) SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) ALLOW_DIRTY=$(ALLOW_DIRTY) sh scripts/docker.sh
 
-install: deps-build ## Build release, install the binaries under PREFIX (default ~/.local) and restart a running daemon (RESTART=0 skips)
+##@ Install
+#: PREFIX=<directory>   where the binaries go, in PREFIX/bin (default ~/.local)
+#: RESTART=0|1   0 leaves a running daemon alone (default 1: restart it on the new build)
+install: deps-build ## Build release, install, restart a running daemon
 	$(CARGO) build --release --workspace
 	install -Dm755 target/release/svolder  $(BINDIR)/svolder
 	install -Dm755 target/release/svolderd $(BINDIR)/svolderd
@@ -350,10 +468,12 @@ endif
 # One thing writes the unit files, and it is the verb: it renders them for the socket this
 # session resolves and the binary it was run from, writes them where UNITDIR says, and enables
 # them. A machine installed by hand and one installed by make end up with the same two files.
-install-service: install ## Write and enable the user units through `svolder daemon install` (as root: write them for every user, each user enables them)
+#: Through `svolder daemon install`. As root: writes them for every user, and each user enables them.
+install-service: install ## Write and enable the user units
 	SVOLDER_UNITDIR=$(UNITDIR) SVOLDER_SYSTEMCTL=$(SYSTEMCTL) $(BINDIR)/svolder daemon install
 
-uninstall: ## Remove the installed binaries and the user units (as root: remove the files, each user disables them)
+#: As root: removes the files, and each user disables them.
+uninstall: ## Remove the installed binaries and the user units
 	SVOLDER_UNITDIR=$(UNITDIR) SVOLDER_SYSTEMCTL=$(SYSTEMCTL) \
 	  $(BINDIR)/svolder daemon uninstall || true
 	rm -f $(BINDIR)/svolder $(BINDIR)/svolderd $(BINDIR)/svolder-sim

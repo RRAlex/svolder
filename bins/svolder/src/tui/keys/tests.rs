@@ -192,6 +192,10 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     app.flip_side();
                 }
             }
+            if hint.label.ends_with("on Target") {
+                // the switch row's own keys act with the keys on it
+                app.focus_switch();
+            }
             let before = app.snapshot_for_test();
             let intents = app.key(KeyEvent::from(hint.code));
             assert!(

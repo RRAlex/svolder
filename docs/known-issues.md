@@ -328,6 +328,10 @@ that branch rather than listed here.
   attached over SSH) makes the copy tools run against that session's clipboard, which is the
   computer's, not the one you sit at, and the note says `copied with xclip` without naming it
   (`bins/svolder/src/tui/clipboard.rs`).
+- [limit, with 0.33.0] **The TUI shows "computer controls unavailable" under `make demo-computer`.**
+  The demo's fake device is flipped to the computer in the web page, but the TUI has no simulated
+  computer side to talk to, so its Target row says the computer's controls are unavailable; a
+  simulated computer side is planned for 0.33.0 (`bins/svolder/src/tui/app/side.rs`).
 - [trade-off] **A tone edit waits out another front end's preset recall.** While a recall from
   Home Assistant or MCP is running on the daemon, a tone-control edit from the TUI waits for it to
   finish, and the TUI waits with it, redrawing and reading keys again only once the write is
@@ -467,13 +471,6 @@ that branch rather than listed here.
   read off the host task, so a front end sees a new track with `cover: null` and then the same
   track with the picture's hash; the cover's box is fixed, so nothing moves, and waiting for the
   read would delay every track change (`bins/svolderd/src/host.rs`).
-- [debt] **The web page's live stream reads `config.toml` on the daemon's runtime.** A turn of the
-  stream that sends the parts or the whole model reads the file for the presets that fit and for
-  whether it can be written, on an async worker instead of a blocking one, so a slow file system
-  holds that stream's turn. The fleet turn does the same once a second per page: a `Devices`
-  request to the daemon and a read of the file's modification time
-  (`bins/svolderd/src/web/events/device.rs`, `bins/svolderd/src/web/events/page.rs`,
-  `bins/svolderd/src/web/api.rs`).
 - [test, with Bifrost 3 testing] **The shared listen is proven on fakes and on one device.** Every
   actor looks for its device through one `Scanner`: the listen that runs hears every device
   looked for while it runs, answers each the moment it is heard (the one that leaves nobody
@@ -489,6 +486,20 @@ that branch rather than listed here.
 
 ### CLI
 
+- [bug] **A pw-cli that dies after taking a line can leave a value unapplied.** The computer EQ's
+  session repairs the link only when its outbox is marked full, and a pw-cli that ends is noticed
+  only at the next send: the last value of a drag can stay unapplied while the view says live,
+  until the next edit. The volume cap still holds. A fix needs the link to report that it ended
+  since its last line (`crates/svolder-host/src/eq/session.rs`).
+- [bug] **A daemon that starts over a chain it did not start shows the saved state.** When the
+  daemon starts while a computer EQ chain from another run is playing (for example one left in
+  the middle of a drag), the view shows `host-eq.toml` while the chain plays what it was started
+  from, until the next edit or apply (`EqControl::new` and `adopt` in
+  `crates/svolder-host/src/eq/control.rs`).
+- [bug] **A revert of the chain at the same rate is not noticed.** The controller sends every
+  slot again when the sink's rate changes or the chain restarts; a rebuild at the same rate, or a
+  rate round trip between two looks, puts the chain's own values back unseen. The volume cap holds
+  for any revert (`crates/svolder-host/src/eq/control.rs`).
 - [limit] **A unit's chain and a process chain look the same.** The computer EQ finds its
   PipeWire chain by its exact command line, which is the same under svolder's user unit and under
   the background-process manager (only the process's cgroup would tell them apart, and svolder
@@ -580,26 +591,22 @@ that branch rather than listed here.
 
 ### Web page
 
-- [debt, with Ember] **The band helpers exist twice.** `bandSteps`, `BAND_PARAM` and `bandWriter`
-  moved to the core for Paper, and Ember's `tone-graph.js` keeps its own copies, because this
-  release changes no file of Ember's (`bins/svolderd/web/core/tone-drag.js`,
-  `bins/svolderd/web/themes/ember/tone-graph.js`).
-- [bug] **After no theme can start, the menu still draws the failed theme's rows.** When a theme
-  fails to load and Ember fails as well, the page shows a popup with a reload link, but `core.theme`
-  still names the theme that was bound last, so the menu button opens that theme's rows, and a pick
-  in the picker closes it with no word (`bins/svolderd/web/core/switch.js`).
+- [debt, with 0.33.0] **Ember keeps its own `watchTouch`.** The tone graph's touch listeners in
+  `themes/ember/computer-page.js` are a copy of the core's `touchWatch`; it works, and the next
+  Ember change moves it onto the core (`bins/svolderd/web/themes/ember/computer-page.js`).
+- [bug, with 0.33.0] **A preset reloaded under the same name mid-drag is missed.** The page's
+  drag follows the wire view by preset name, so a preset reloaded with the same name while a point
+  is held is not seen as a change; the same preset maps each slot to the same filter, so the drag
+  still writes the right one. A generation counter on the wire view would close it (the name
+  compare is in `bins/svolderd/web/core/computer.js`).
+- [debt, with Ember] **Ember keeps its own band step reading and writer chain.** `bandSteps` and
+  `bandWriter` moved to the core for Paper, and Ember's `tone-graph.js` still reads its steps and
+  writes its bands through its own chain (it uses the core's `BAND_PARAM`)
+  (`bins/svolderd/web/core/tone-drag.js`, `bins/svolderd/web/themes/ember/tone-graph.js`).
 - [trade-off] **The `ember-parts` fixture is 4.25 MB.** It holds the markup of every part of every
   device kind, so the node check compares the browser-drawn page with the daemon's own drawing
   byte for byte; a smaller fixture would prove less (`scripts/web-checks/node/fixtures/ember-parts.json`).
-- [debt] **A raise the sender drops overwrites the run's last answer.** A volume raise that waited
-  behind a refused write and is dropped sets `state.last` to its own `dropped` answer, so the call
-  that started the run resolves with the dropped raise's word instead of the write that was
-  refused (`bins/svolderd/web/core/actions.js`).
-- [debt, with Path] **The fleet handler prunes followed devices without opening the stream
-  again.** A `fleet` event that no longer lists a followed device forgets it and takes it off the
-  list, but the open stream is not opened again without it, so it goes on asking for the device
-  until the next reopen (`bins/svolderd/web/core/stream.js`).
-- [debt, with Paper] **The theme style check is name-based, and a theme script that timed out may
+- [debt, with 0.33.0] **The theme style check is name-based, and a theme script that timed out may
   still run.** `theme-css-check.py` finds the frame's selectors by their names, so a theme that
   styles one through another selector is not seen; a theme script that timed out is given up on,
   but the browser can still run it when it arrives late
@@ -608,28 +615,10 @@ that branch rather than listed here.
   theme.** The page paints the scheme the server sent and takes it as the person's choice at boot,
   so a link that switches the theme while another theme's cookie is set loses a stored Dark; the
   alternative is a flash of the wrong scheme (`bins/svolderd/web/core/core.js`).
-- [debt, with Paper] **While a list or a form holds a section, a lost or waking sheet stays
-  clickable.** The sheet goes inert only when nothing is held, and an open list or form holds its
-  section; the core still drops raises while the page is not open, so no volume is written
-  (`bins/svolderd/web/themes/paper/live.js`).
-- [debt, with Paper] **A tap that cannot write goes through a turned-away `setMode`.** Paper's
-  `refuse()` asks the core to set the mode it is already in, so that the core turns the tap away
-  and says why; the core has no public helper that only says it
-  (`bins/svolderd/web/themes/paper/tone-wire.js`).
-- [debt] **The page rounds ties up where the daemon rounds half to even.** The page's `toFixed`
-  takes a value that falls on a tie up, and the daemon's formatter takes it to the even digit; the
-  node fixture's tolerance hides the difference (`bins/svolderd/web/themes/ember/draw/`).
-- [debt] **A hop answer is stale after a failed reload, and an edit reads the hop before the
-  lock.** After a failed reload of the configuration a hop write answers the list it last held,
-  and an edit reads the hop it changes before it takes the file's lock. The CLI's `hops` verbs do
-  the same (`bins/svolderd/src/web/writes/config_edit.rs`,
-  `bins/svolder/src/commands.rs`).
-- [test] **A stream's `close()` and its wait while lost are untested.** That `close()` removes its
-  listeners, and that a woken page keeps waiting through a lost link, have no check of their own
-  (`bins/svolderd/web/core/stream.js`).
-- [test] **The hand-run `ember-parts` mutants are not a re-runnable check.** The mutants listed in
-  the coverage notes were run by hand and each was killed; no script runs them again
-  (`scripts/web-checks/COVERAGE.md`).
+- [debt] **The computer side rewrites the daemon's words with patterns.** `plain()` turns the
+  daemon's path verdicts ("PipeWire is on USB 2") into the page's words with regular expressions,
+  so a reworded verdict falls through unchanged. The real fix is a structured verdict from the
+  daemon, a wire change (`bins/svolderd/web/themes/signal/draw/computer.js`).
 
 ### Simulator and fake transport
 
@@ -652,6 +641,11 @@ that branch rather than listed here.
 
 ### Tests and tooling
 
+- [limit] **`cargo audit` warns about two unmaintained crates and finds no vulnerability.** `paste`
+  comes in through nalgebra (the EQ's curve fitting), and `ttf-parser` through `ab_glyph`, a
+  dev-dependency of `bins/svolder` for the README screenshots; both are flagged as unmaintained,
+  neither has an advisory against it, and svolder cannot replace either, so they are watched at
+  each dependency refresh (`Cargo.lock`).
 - [observed] **The `playing` check of Ember fails now and then in Firefox.** In the runs of
   0.31.2 it failed three times, with a 2 px overflow of the title marquee under load, a
   geckodriver websocket 405 and a websockets `InvalidMessage`, and each time passed when run alone;
@@ -678,32 +672,10 @@ that branch rather than listed here.
   error a script or a click raises after the load in both (`scripts/web-checks/`); both fail on any
   Content Security Policy report Chromium logs, and Firefox writes none in this mode. The policy is
   the daemon's one header, so Chromium's check stands for both (`scripts/web-shots.sh`).
-- [test] **Two `backend` tests fail inside a container.** `make check` in a container passes but
-  for these two: `daemon_install_writes_where_it_is_told_and_runs_the_systemctl_it_is_given` meets
-  `daemon install`'s refusal to write user units in a container, and
-  `the_chain_prints_nothing_of_its_own_when_a_daemon_will_not_come_up` expects BlueZ's answer for
-  an adapter that does not exist and gets no system D-Bus to ask instead
-  (`bins/svolder/tests/backend.rs`).
-- [test] **Animated-path helpers pair a capable layer with a no-colour theme on purpose.**
-  `animated` draws on the monochrome theme so that what the layer paints stands out, which
-  `shows_effects` would refuse (it is named `capable_over_no_colour`); a non-monochrome theme the
-  layer would never run on is refused by `animated_with`
-  (`bins/svolder/src/tui/run/look/tests.rs`).
-- [test] **An unnamed run takes BlueZ's first adapter, which no dongle test can steer.** With no
+- [test, with hardware] **An unnamed run takes BlueZ's first adapter, which no dongle test can steer.** With no
   `--adapter`, no configured `adapter` and no remembered one, the transport opens the first adapter
   BlueZ lists, which on a machine with a built-in controller need not be the one that hears the
   device (`bins/svolder/src/backend/direct.rs`).
-- [test] **The happy path of `tui::run` and `tui::wizard::setup` through a real terminal is
+- [test, with 0.34.0] **The happy path of `tui::run` and `tui::wizard::setup` through a real terminal is
   untested.** The refusals and the choice of front end are tested over a `Claim` seam; a real
   `Guard` cannot be built in a unit test (`bins/svolder/src/tui/terminal.rs`).
-- [test] **No loop-level test moves a preset from the DAC to the computer and back.** The guard that
-  turns the computer EQ off before a DAC load has a unit test, but nothing runs the whole `Intent`
-  from the preset list through the loop to the DAC's writes (`bins/svolder/src/tui/run/computer.rs`).
-- [test] **The joined write queue's bound of 64 is untested.** The TUI's queue of computer edits
-  keeps the newest live value per point and every `done`, and caps at 64 by dropping only the
-  oldest live values; `Other` and `Last` items are never dropped. Each joined request times out,
-  so the queue drains even behind a daemon that does not answer, and a test can fill it with a
-  never-ending first item (`bins/svolder/src/tui/run/computer.rs`).
-- [test] **Night drive's mouse hover over the tone band has no browser check.** The touch band of
-  the curve (±12 dB and a fingertip) is checked for touch and tap; the hover cursor that follows the
-  same band is not (`bins/svolderd/web/themes/nightdrive/`).

@@ -16,7 +16,7 @@ peak is measured and what the chain refuses; the controls are in [host-control.m
 - **The coefficients as PipeWire runs them.** PipeWire takes its control values as f32, so the
   coefficients are rounded to f32 first: they are the very values sent.
 - **The whole band the chain plays, DC to Nyquist.** A shelf's asymptote and a resonant shelf's bump
-  lie outside 20 Hz to 20 kHz, so a shelf preset gets a lower preamp than that window gives: a
+  lie outside 20 Hz to 20 kHz, so a shelf preset gets a deeper preamp cut than that window gives: a
   resonant shelf of +12 dB at Q 10 needs about −30 dB where the window gives −6. The DAC's red zone
   keeps the app's window.
 - **Narrow peaks.** A peaking filter near Nyquist is a few hertz wide, so the samples are a log grid
@@ -74,9 +74,10 @@ Three more rules keep that true when something else changes the chain:
   as the config has them under a preamp worked out for the points as they stand.
 - A chain the controller did not start (it was running when the daemon started, it started again,
   the command line replaced it, or it is the first looked at after an apply) is looked at before
-  anything is sent to it. The preamp it holds then bounds every preamp sent until an apply or an adopt says what it was
-  started from: it was safe for the slots the chain starts from. A reload does not lift the bound
-  for good: it is taken again from the node at the next look.
+  anything is sent to it. The preamp it holds then bounds every preamp sent until an apply, or a
+  state file read at start or on a reload, says what it was started from: the bound suits the
+  slots the chain starts from. After a reload the bound is taken again from the node at the next
+  look.
 - The session sends only to the node id the controller looked at. When the node it finds is under
   another id (a refusal dropped the kept node, or a write failed and it was found again), the line
   is not written; the controller looks at that node and sends once more.
@@ -86,9 +87,12 @@ Three more rules keep that true when something else changes the chain:
   daemon reads it, whatever the rate.
 
 The price is plain: after a curve is softened live, the level stays at the applied curve's preamp
-until the next apply, which is turning the EQ on, loading a preset softer than the applied curve,
-a change of a point's type, a point added or removed, or a restart of the chain (which loads the
-config on disk). A hand edit that softens the curve does not apply.
+until the next apply. What applies is turning the EQ off and on, loading a preset softer than the
+applied curve, an edit made while the EQ is off, an edit when live updates are not available, and
+a restart of the chain (which loads the config on disk). A hand edit that softens the curve, a
+point's new type, and a point added or removed all go live and do not apply. The node bound has the
+same price: a user whose chain was sent to by a command-line apply before the daemon's reload
+plays quieter than the points need, until the next apply.
 
 ## A chain from an older svolder
 
@@ -112,13 +116,37 @@ removed, preset loads harder and softer than the loaded curve, the EQ on and off
 applies with the state file written before or after the daemon's look, state reloads, node
 restarts, rate changes among 44.1 to 192 kHz, `pw-cli` deaths (also mid-line), refused sends, a
 write that fails once, refusals the session reads zero to two reads late (its reader task sets
-the flag a moment after `pw-cli` prints it), a failed Off or apply, nodes that are listed late, daemon restarts and ticks of 50 ms.
+the flag a moment after `pw-cli` prints it), a failed Off or apply, nodes that are listed late,
+daemon restarts and ticks of 50 ms. A rate event with the rate the sink already runs at models a
+rebuild of the graph, which puts the slots back without a change of rate.
 
 After every event and every tick the curve the node plays (its ports, as the model holds them)
 times the preamp it plays must peak at most 0.01 dB over unity over the whole band at the current
 rate, measured by an evaluator of its own, and each biquad must be stable. Also: no `set-param` to
-a stale id after the controller's own apply, nothing written or sent while the daemon starts, and
-no panic. A failing seed prints the shrunk sequence; `SVOLDER_LAB_SEED=<seed> cargo test -p
-svolder-host --lib lab_trace -- --ignored --nocapture` prints what happened step by step. A short
-run of 300 seeds is part of `make check`; `make preamp-lab SEED=<first> RUNS=<count>` runs the
-long one (5000 sequences by default, about a minute and a half).
+a stale id after the controller's own apply, nothing written or sent while the daemon starts or
+reads the state file (an event or a tick's reload), and no panic.
+
+The rule that nothing plays over unity says nothing about whether the EQ still works, so a second
+one asks after three seconds with no event, once, while nothing is armed to fail (a refused send,
+a node not listed yet) and the controller can tell what the node plays. It cannot after a line a
+dying `pw-cli` took without applying; after the graph is rebuilt at a rate the controller last
+read (the slots go back, and a revert with no rate change is not noticed); when the daemon starts
+over a node it did not start. The rule waits there for the next line that carries every slot, or a
+node the controller started. A controller that says it is on and live must have a node that plays
+the points it shows, at the rate the sink runs at, under the preamp it shows, within 0.05 dB at
+every frequency of a grid. One that is off, with a curve that plays at the sink's rate, must turn
+on when asked.
+
+The short run is two blocks of 300 seeds. The first draws every kind of event with its usual
+weight. The second, the targeted profile, takes nearly half of its events from a command-line
+apply, a node that starts again, a refusal read late, a write that fails once and drags: the
+compound that can leave a chain replaced while a line is refused or lost. Against a copy that
+sends a line to a node other than the one it looked at, it fails 132 of 5000 seeds where the
+first block fails 58. It draws from a stream of its own, so the first block's seeds do not depend
+on it. Every sequence ends with a quiet tail: the faults armed and not used are disarmed, the
+daemon reads the state file and the world is left alone for 90 ticks, so the liveness rule is
+asked of the state the sequence ended in. A failing seed prints the shrunk
+sequence; `SVOLDER_LAB_SEED=<seed> cargo test -p svolder-host --lib lab_trace -- --ignored
+--nocapture` prints what happened step by step. The short run is part of `make check`;
+`make preamp-lab SEED=<first> RUNS=<count>` runs the long one (5000 sequences of each profile by
+default).

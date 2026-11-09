@@ -23,7 +23,7 @@ use svolder_profiles::tone::preset::same_name;
 use super::config_edit::{config_file, edit_then_reload};
 use super::writer;
 use crate::web::Web;
-use crate::web::model::fleet_model;
+use crate::web::model::fleet_model_of;
 use crate::web::router::{devices, error, parse};
 
 /// What a refused write calls itself: `Saving hops is off: …`.
@@ -67,9 +67,29 @@ fn kind_of(word: &str) -> Result<HopKind, Response> {
 }
 
 /// After a write: tell the open pages and answer the hops as the model lists them.
-async fn answer(web: &Web) -> Response {
+///
+/// The hops are the file just written, read again here: the daemon's reload may have failed and
+/// left it holding an older list, and the answer is what the file says.
+async fn answer(web: &Web, path: &FilePath) -> Response {
     web.fleet_changed.send_modify(|turn| *turn += 1);
-    let fleet = fleet_model(web, &devices(web).await).await;
+    let devices = devices(web).await;
+    let reread = {
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || Config::load_from(&path)).await
+    };
+    let fleet = match reread {
+        Ok(Ok(config)) => fleet_model_of(web, &devices, &config),
+        failed => {
+            let why = match failed {
+                Ok(Err(why)) => why.to_string(),
+                _ => "the read stopped".to_string(),
+            };
+            crate::log::warn(&format!(
+                "web: the hops after a write could not be read back from the file: {why}"
+            ));
+            crate::web::model::fleet_model(web, &devices).await
+        }
+    };
     axum::Json(serde_json::json!({ "hops": fleet.hops })).into_response()
 }
 
@@ -79,8 +99,8 @@ async fn written(
     path: std::path::PathBuf,
     edit: impl FnOnce(&FilePath) -> Result<(), ConfigError> + Send + 'static,
 ) -> Response {
-    match edit_then_reload(web, path, refusal, edit).await {
-        Ok(()) => answer(web).await,
+    match edit_then_reload(web, path.clone(), refusal, edit).await {
+        Ok(()) => answer(web, &path).await,
         Err(refused) => refused,
     }
 }
@@ -104,7 +124,7 @@ async fn add(State(web): State<Web>, headers: HeaderMap, body: axum::body::Bytes
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    let (path, config) = match config_file(&web, WHAT) {
+    let (path, config) = match config_file(&web, WHAT).await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -182,44 +202,47 @@ async fn edit(State(web): State<Web>, headers: HeaderMap, body: axum::body::Byte
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    let (path, config) = match config_file(&web, WHAT) {
+    let (path, config) = match config_file(&web, WHAT).await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
-    let Some(old) = config.hop(&asked.id) else {
+    if config.hop(&asked.id).is_none() {
         return no_such_hop(&asked.id);
+    }
+    let kind = match asked.kind.as_deref().map(kind_of).transpose() {
+        Ok(kind) => kind,
+        Err(refused) => return refused,
     };
-    let what = match (&old.what, asked.name, asked.kind) {
-        (HopWhat::Declared { kind, name }, new_name, new_kind) => HopWhat::Declared {
-            kind: match new_kind {
-                Some(word) => match kind_of(&word) {
-                    Ok(kind) => kind,
-                    Err(refused) => return refused,
+    let (id, name, note, after) = (asked.id.clone(), asked.name, asked.note, asked.after);
+    // The hop the change merges onto is read under the writer's lock, not here.
+    written(&web, path, move |path| {
+        Config::edit_hop(path, &id, |old| {
+            let what = match (&old.what, name, kind) {
+                (HopWhat::Declared { kind, name }, new_name, new_kind) => HopWhat::Declared {
+                    kind: new_kind.unwrap_or(*kind),
+                    name: new_name.unwrap_or_else(|| name.clone()),
                 },
-                None => *kind,
-            },
-            name: new_name.unwrap_or_else(|| name.clone()),
-        },
-        (HopWhat::Linked { device }, None, None) => HopWhat::Linked {
-            device: device.clone(),
-        },
-        (HopWhat::Linked { device }, _, _) => {
-            return refused(format!(
-                "{device:?} links a device, which gives it its name and kind; \
-                 remove the hop and add it declared to name it"
-            ));
-        }
-    };
-    let hop = Hop {
-        what,
-        note: match asked.note {
-            Some(note) => note,
-            None => old.note.clone(),
-        },
-        after: asked.after.or_else(|| old.after.clone()),
-    };
-    let id = old.id().to_string();
-    written(&web, path, move |path| Config::update_hop(path, &id, &hop)).await
+                (HopWhat::Linked { device }, None, None) => HopWhat::Linked {
+                    device: device.clone(),
+                },
+                (HopWhat::Linked { device }, _, _) => {
+                    return Err(ConfigError::Parse(format!(
+                        "{device:?} links a device, which gives it its name and kind; \
+                         remove the hop and add it declared to name it"
+                    )));
+                }
+            };
+            Ok(Hop {
+                what,
+                note: match note {
+                    Some(note) => note,
+                    None => old.note.clone(),
+                },
+                after: after.or_else(|| old.after.clone()),
+            })
+        })
+    })
+    .await
 }
 
 /// What `hops/remove` takes.
@@ -237,7 +260,7 @@ async fn remove(State(web): State<Web>, headers: HeaderMap, body: axum::body::By
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    let (path, config) = match config_file(&web, WHAT) {
+    let (path, config) = match config_file(&web, WHAT).await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -263,7 +286,7 @@ async fn move_to(State(web): State<Web>, headers: HeaderMap, body: axum::body::B
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    let (path, config) = match config_file(&web, WHAT) {
+    let (path, config) = match config_file(&web, WHAT).await {
         Ok(found) => found,
         Err(refused) => return refused,
     };

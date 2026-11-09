@@ -13,8 +13,8 @@
 // - data-json, data-texts, data-db and data-readings are compared as JSON, and so is the text of
 //   a `<script type="application/json">` block (read as it stands, with no character references
 //   decoded: the page parses it as JSON).
-// - The numbers of x1 y1 x2 y2 cx cy x y r d data-at data-glow and data-y may differ by 0.011:
-//   the rest of the value must be the same.
+// - Numbers are compared as written: the drawing rounds as the daemon's formatter does (ties to the
+//   even digit, core/words.js fixedEven), so no tolerance is left.
 
 import assert from 'node:assert/strict';
 
@@ -22,10 +22,6 @@ const DROPPED = new Set([
   'hx-post', 'hx-ext', 'hx-target', 'hx-swap', 'hx-trigger', 'hx-get', 'hx-push-url',
 ]);
 const JSON_ATTRS = new Set(['data-json', 'data-texts', 'data-db', 'data-readings']);
-const NUMERIC_ATTRS = new Set([
-  'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'x', 'y', 'r', 'd', 'data-at', 'data-glow', 'data-y',
-]);
-const TOLERANCE = 0.011;
 
 const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
@@ -105,14 +101,6 @@ function sameValue(name, a, b) {
       if (a === b) return null;
       return `${name}: ${a.slice(0, 60)} against ${b.slice(0, 60)}`;
     }
-  }
-  if (NUMERIC_ATTRS.has(name)) {
-    const number = /-?\d+(?:\.\d+)?/g;
-    const [skeletonA, skeletonB] = [a.replace(number, '#'), b.replace(number, '#')];
-    const [numbersA, numbersB] = [a.match(number) ?? [], b.match(number) ?? []];
-    const close = skeletonA === skeletonB && numbersA.length === numbersB.length
-      && numbersA.every((x, i) => Math.abs(Number(x) - Number(numbersB[i])) <= TOLERANCE);
-    return close ? null : `${name}: ${a} against ${b}`;
   }
   return a === b ? null : `${name}: ${JSON.stringify(a)} against ${JSON.stringify(b)}`;
 }

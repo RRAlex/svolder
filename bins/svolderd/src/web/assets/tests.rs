@@ -63,6 +63,8 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "themes/ember/tone-motion.js",
         "core/tone-curve.js",
         "core/tone-drag.js",
+        "core/point-drag.js",
+        "core/table.js",
         "themes/ember/tone-graph.js",
         "themes/ember/keys.js",
         "themes/ember/facts.js",

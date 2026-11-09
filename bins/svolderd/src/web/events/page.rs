@@ -45,7 +45,7 @@ pub(super) struct Task {
 impl Task {
     /// The page's task. The route reads are held for as long as it lives when `route` is set,
     /// and the host's changes are followed only by a page that needs it.
-    pub(super) fn new(cx: Arc<Context>, route: bool) -> Task {
+    pub(super) async fn new(cx: Arc<Context>, route: bool) -> Task {
         let mut host = cx.web.fleet.host_watch(route);
         if let Some(watch) = host.as_mut() {
             watch.changes.borrow_and_update();
@@ -55,12 +55,14 @@ impl Task {
         }
         let mut fleet_changed = cx.web.fleet_changed.subscribe();
         fleet_changed.borrow_and_update();
-        let host_key =
-            host_parts(&cx).map(|(card, route)| HostKey::new(&card, route, host_computer(&cx)));
+        let host_key = match host_parts(&cx) {
+            Some((card, route)) => Some(HostKey::new(&card, route, host_computer(&cx).await)),
+            None => None,
+        };
         Task {
             host,
             host_key,
-            eq_stamp: eq_stamp(),
+            eq_stamp: eq_stamp().await,
             fleet_changed,
             fleet_key: None,
             fleet_sent: String::new(),
@@ -70,8 +72,8 @@ impl Task {
 
     /// Note what the fleet is made of now, `devices`: call it before the model that carries the
     /// fleet is read, so a change in between is found.
-    pub(super) fn watch_fleet(&mut self, devices: &[DeviceInfo]) {
-        self.fleet_key = Some(self.key_of(devices));
+    pub(super) async fn watch_fleet(&mut self, devices: &[DeviceInfo]) {
+        self.fleet_key = Some(self.key_of(devices).await);
     }
 
     /// Take the fleet and the hops `model` carries as what the page has.
@@ -114,8 +116,12 @@ impl Task {
     }
 
     /// What the fleet's event is made of now.
-    fn key_of(&self, devices: &[DeviceInfo]) -> FleetKey {
+    async fn key_of(&self, devices: &[DeviceInfo]) -> FleetKey {
         let web = &self.cx.web;
+        let config = match web.fleet.config_path() {
+            Some(path) => stamp_off_thread(path).await,
+            None => None,
+        };
         FleetKey {
             devices: devices
                 .iter()
@@ -130,11 +136,7 @@ impl Task {
                     )
                 })
                 .collect(),
-            config: web
-                .fleet
-                .config_path()
-                .and_then(|path| std::fs::metadata(path).ok())
-                .and_then(|meta| meta.modified().ok()),
+            config,
         }
     }
 
@@ -144,7 +146,7 @@ impl Task {
     async fn fleet_turn(&mut self, tx: &mpsc::Sender<Event>, forced: bool) -> bool {
         let web = &self.cx.web;
         let devices = devices(web).await;
-        let key = self.key_of(&devices);
+        let key = self.key_of(&devices).await;
         if !forced && self.fleet_key.as_ref() == Some(&key) {
             return true;
         }
@@ -164,7 +166,7 @@ impl Task {
         if self.host.is_none() {
             return true;
         }
-        let stamp = eq_stamp();
+        let stamp = eq_stamp().await;
         if stamp == self.eq_stamp {
             return true;
         }
@@ -176,7 +178,7 @@ impl Task {
     async fn host_turn(&mut self, tx: &mpsc::Sender<Event>) -> bool {
         // One read of the route (and of the state file behind it): the key and the event say the same.
         let parts = host_parts(&self.cx);
-        let computer = host_computer(&self.cx);
+        let computer = host_computer(&self.cx).await;
         let key = parts
             .as_ref()
             .map(|(card, route)| HostKey::new(card, route.clone(), computer.clone()));
@@ -218,13 +220,21 @@ fn host_parts(cx: &Context) -> Option<(Playing, Option<RouteModel>)> {
 }
 
 /// The computer's controls for the page's shown device.
-fn host_computer(cx: &Context) -> Option<ComputerModel> {
-    model::host_computer(&cx.web, cx.shown.as_ref())
+async fn host_computer(cx: &Context) -> Option<ComputerModel> {
+    model::host_computer(&cx.web, cx.shown.as_ref()).await
 }
 
 /// When the computer EQ's state file last changed; `None` while there is none.
-fn eq_stamp() -> Option<SystemTime> {
-    stamp_of(&svolder_ipc::config::host_eq_state_path())
+async fn eq_stamp() -> Option<SystemTime> {
+    stamp_off_thread(svolder_ipc::config::host_eq_state_path()).await
+}
+
+/// [`stamp_of`] on a blocking thread.
+async fn stamp_off_thread(path: std::path::PathBuf) -> Option<SystemTime> {
+    tokio::task::spawn_blocking(move || stamp_of(&path))
+        .await
+        .ok()
+        .flatten()
 }
 
 /// When `path` was last written; `None` while it is not there.

@@ -9,7 +9,6 @@
 import { TITLE, statusOf } from '../../core/title.js';
 import { eqMarkup, noVolumeMarkup } from './draw/hud.js';
 import { outrunVolume } from './draw/volume.js';
-import { computerView } from './computer-view.js';
 import { eqLine, topLine, volumeOf } from './hud.js';
 
 /** The input that wakes the HUD. */
@@ -192,7 +191,7 @@ export function wireHud({
     // the verdict's line pushes the EQ line down where the keys stand by the menu button (style.css)
     if (top.right) page.classList.add('nd-verdict');
     else page.classList.remove('nd-verdict');
-    const comp = computerView(core);
+    const comp = core.computer.view();
     const line = eqLine(model, comp);
     put(eq, 'eq', eqMarkup(line));
     eq.hidden = !line;

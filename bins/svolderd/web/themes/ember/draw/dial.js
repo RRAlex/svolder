@@ -5,6 +5,8 @@
 // it, so the dial a reading arrives at is the dial the page drew. Pure numbers in, numbers and
 // strings out: no DOM. Coordinates are strings of two decimals.
 
+import { fixedEven } from '../../../core/words.js';
+
 /** The dial's sweep, in degrees. */
 export const SWEEP = 270;
 /** How many ticks it has. */
@@ -23,7 +25,7 @@ export function angle(raw, lo, hi) {
 /** The point at `deg` and radius `r` about (100, 100): `[x, y]`, each two decimals. */
 export function point(deg, r) {
   const a = (deg * Math.PI) / 180;
-  return [(100 + r * Math.sin(a)).toFixed(2), (100 - r * Math.cos(a)).toFixed(2)];
+  return [fixedEven(100 + r * Math.sin(a), 2), fixedEven(100 - r * Math.cos(a), 2)];
 }
 
 /** A line along the radius at `deg`, from `r1` to `r2`: `[x1, y1, x2, y2]`. */
@@ -94,7 +96,7 @@ export function labels(volume) {
     const [x, y] = point(a, 112 + 7 * Math.abs(Math.sin((a * Math.PI) / 180)));
     return {
       text,
-      at: at.toFixed(2),
+      at: fixedEven(at, 2),
       x,
       y,
       red: risk !== null && at >= risk,

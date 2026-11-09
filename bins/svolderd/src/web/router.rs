@@ -252,9 +252,10 @@ async fn page_for(
     headers: &HeaderMap,
 ) -> pages::Page {
     let shown = shown(web, devices, query.get("device").map(String::as_str));
-    let loaded = shown
-        .as_ref()
-        .and_then(|info| api::load(web, &info.name).ok());
+    let loaded = match shown.as_ref() {
+        Some(info) => api::load_off_thread(web, &info.name).await.ok(),
+        None => None,
+    };
     let (theme, scheme) = themes::chosen(headers, query.get("theme").map(String::as_str));
     page_over(web, viewer, devices, shown, loaded, theme, scheme).await
 }

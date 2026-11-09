@@ -24,8 +24,9 @@ use crate::commands::token;
 use crate::qr;
 
 /// Interface names whose addresses a phone does not reach this computer on: containers' and
-/// virtual machines' bridges.
-const NOT_LAN: [&str; 4] = ["docker", "br-", "veth", "virbr"];
+/// virtual machines' bridges and their ends (Docker's `docker0` and `br-*`, `veth*`, Podman's
+/// `podman*`, CNI's `cni*`, libvirt's `virbr*`).
+const NOT_LAN: [&str; 6] = ["docker", "br-", "veth", "virbr", "podman", "cni"];
 
 /// Carry out `web` or one of its sub-commands.
 pub(crate) async fn run(
@@ -46,7 +47,7 @@ async fn open(g: &Globals<'_>, qr_code: bool) -> Result<ExitCode, String> {
     let socket = socket::path::resolve(g.socket, config.socket.as_deref());
     let listen = served(&socket).await?;
     let base = match qr_code {
-        true => phone_base(config.web.url.as_deref(), listen, first_lan(&interfaces()))?,
+        true => phone_base(config.web.url.as_deref(), listen, lan_here())?,
         false => local_base(listen),
     };
     let (code, secs) = code(&socket, true).await?;
@@ -86,7 +87,7 @@ async fn pair(g: &Globals<'_>) -> Result<ExitCode, String> {
     let socket = socket::path::resolve(g.socket, config.socket.as_deref());
     let listen = served(&socket).await?;
     let (code, secs) = code(&socket, false).await?;
-    let base = phone_base(config.web.url.as_deref(), listen, first_lan(&interfaces()))
+    let base = phone_base(config.web.url.as_deref(), listen, lan_here())
         .unwrap_or_else(|_| local_base(listen));
     println!("{code}");
     eprintln!("svolder: {}", pairing_note(&minutes(secs), &base));
@@ -199,7 +200,12 @@ pub(crate) fn phone_base(
             SocketAddr::new(IpAddr::V4(lan), listen.port())
         )
     })
-    .ok_or_else(|| "no network address of this computer was found: set [web] url".to_string())
+    .ok_or_else(|| {
+        "no address a phone could reach was found (a container on a bridge network has only its \
+         own): set [web] url, or SVOLDER_WEB_URL in the container's environment, to the address \
+         your phone reaches (e.g. http://<host-ip>:8738)"
+            .to_string()
+    })
 }
 
 /// `[web] url` as the base of a link: its scheme, host, port and path put together again, the
@@ -223,6 +229,58 @@ fn url_base(url: &str) -> Result<String, String> {
     Ok(match path.ends_with('/') {
         true => format!("{origin}{path}"),
         false => format!("{origin}{path}/"),
+    })
+}
+
+/// The address a phone could open on this computer: [`first_lan`] of its interfaces, unless this
+/// is a container on a bridge network, whose own address no phone reaches (see [`lan_in`]).
+pub(crate) fn lan_here() -> Option<Ipv4Addr> {
+    lan_in(
+        svolder_ipc::checks::live::in_container(),
+        &interfaces(),
+        std::fs::read_to_string("/proc/net/route")
+            .ok()
+            .and_then(|table| default_gateway(&table)),
+    )
+}
+
+/// [`lan_here`] with whether this is a container, the interfaces and the default gateway given.
+///
+/// A container with host networking (`network_mode: host`) sees the host's interfaces, so the
+/// host's LAN address is right and nothing is refused, though `/.dockerenv` exists. A container on
+/// a bridge network has one interface whose address is in Docker's 172.16.0.0/12 or Podman's
+/// 10.88.0.0/16 and shares its /16 with its default gateway (the bridge): that address is no use
+/// to a phone, so none is offered and the caller says to set `[web] url`. A host whose own LAN is
+/// 172.16.0.0/12 and runs a host-networked container is told the same, wrongly, and `[web] url`
+/// then fixes it.
+pub(crate) fn lan_in(
+    container: bool,
+    interfaces: &[(String, Ipv4Addr, bool, bool)],
+    gateway: Option<Ipv4Addr>,
+) -> Option<Ipv4Addr> {
+    let lan = first_lan(interfaces)?;
+    let private_bridge = |ip: Ipv4Addr| {
+        let [a, b, ..] = ip.octets();
+        (a == 172 && (16..32).contains(&b)) || (a == 10 && b == 88)
+    };
+    let same_16 = |gw: Ipv4Addr| gw.octets()[..2] == lan.octets()[..2];
+    if container && private_bridge(lan) && gateway.is_some_and(same_16) {
+        return None;
+    }
+    Some(lan)
+}
+
+/// The default route's gateway in the text of `/proc/net/route`, whose addresses are
+/// little-endian hexadecimal.
+pub(crate) fn default_gateway(table: &str) -> Option<Ipv4Addr> {
+    table.lines().skip(1).find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let (destination, gateway) = (fields.get(1)?, fields.get(2)?);
+        if *destination != "00000000" {
+            return None;
+        }
+        let raw = u32::from_str_radix(gateway, 16).ok()?;
+        Some(Ipv4Addr::from(raw.swap_bytes()))
     })
 }
 

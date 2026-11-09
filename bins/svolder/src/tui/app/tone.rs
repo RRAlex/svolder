@@ -12,7 +12,7 @@ use crate::tui::boxes::edit_line;
 use crate::tui::boxes::presets;
 
 use super::intent::set;
-use super::{App, Intent, stepped};
+use super::{App, Intent, Screen, stepped};
 
 /// What one key press multiplies or divides a band's Q by.
 const Q_FACTOR: f64 = 1.1;
@@ -35,6 +35,8 @@ pub enum ToneRow {
     Band,
     /// A point of the computer's table, 0-based, on the computer side.
     Point(usize),
+    /// The DAC/Computer switch, the row over Mode on the tone-control screen: `←→` pick the side.
+    Target,
 }
 
 impl App {
@@ -109,6 +111,23 @@ impl App {
     /// band, in the order the pane draws them. Landing on the mode or the loudness notes which
     /// of the two it is, for `Tab` to come back to on the tone screen.
     pub(super) fn move_tone_row(&mut self, delta: isize) {
+        // On the tone screen the switch is the row over Mode.
+        if self.screen == Screen::Tone && self.switch_available() {
+            match (self.tone.row, delta.signum()) {
+                (ToneRow::Target, 1) => self.tone.row = ToneRow::Mode,
+                (ToneRow::Target, _) => {}
+                (ToneRow::Mode, -1) => self.tone.row = ToneRow::Target,
+                _ => {
+                    self.move_tone_row_below(delta);
+                }
+            }
+            return;
+        }
+        self.move_tone_row_below(delta);
+    }
+
+    /// [`App::move_tone_row`] among the rows from Mode down.
+    fn move_tone_row_below(&mut self, delta: isize) {
         if self.on_computer() {
             // The mode, then a row per point.
             let at = match self.tone.row {
@@ -122,7 +141,7 @@ impl App {
             return;
         }
         let at = match self.tone.row {
-            ToneRow::Mode => 0,
+            ToneRow::Mode | ToneRow::Target => 0,
             ToneRow::Loudness => 1,
             ToneRow::Band | ToneRow::Point(_) => 2 + self.tone.band,
         };
@@ -143,7 +162,7 @@ impl App {
         match row {
             ToneRow::Mode => self.tone.header_loudness = false,
             ToneRow::Loudness => self.tone.header_loudness = true,
-            ToneRow::Band | ToneRow::Point(_) => {}
+            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target => {}
         }
     }
 
@@ -159,6 +178,7 @@ impl App {
         if self.on_computer() {
             return match self.tone.row {
                 ToneRow::Point(at) => self.nudge_point_gain(at, dir),
+                ToneRow::Target => Vec::new(),
                 _ => self.step_computer_mode(dir),
             };
         }
@@ -166,6 +186,7 @@ impl App {
             return Vec::new();
         };
         match self.tone.row {
+            ToneRow::Target => Vec::new(),
             ToneRow::Mode => self.step_mode(mode_id, dir),
             ToneRow::Loudness => {
                 let target = self.loudness_target(dir);
@@ -207,6 +228,10 @@ impl App {
     pub(super) fn tone_key(&mut self, code: KeyCode) -> Vec<Intent> {
         if code == KeyCode::Char('C') {
             return self.flip_side();
+        }
+        self.settle_switch();
+        if let Some(intents) = self.switch_key(code) {
+            return intents;
         }
         if self.on_computer()
             && let Some(intents) = self.computer_tone_key(code)

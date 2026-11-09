@@ -61,8 +61,10 @@ for `heldS` (60 s), since drawing was not what was slow.
 holding it, and measures for `probeS` (2 s, and again after each step it takes) in short spans: after `probeLookS` (0.5 s) of
 draws, a mean over `slowMs` across the last `probeDraws` (8) draws, or fewer draws in that span than the bar above, steps down at
 once, so a phone settles in about a second a step (a 5x CPU slowdown settles in about 2 s). The limits are the ones above; only
-the time to find them out is short. A transient jank in the first 2 s of a probe can keep a lower tier; the ladder walks back up. The tier that held (`{ capped, step }`)
-is kept per browser (the theme's `tier` preference) and is where the next visit starts; the measuring corrects it.
+the time to find them out is short. The tier that held (`{ capped, step }`) is kept per browser
+(the theme's `tier` preference) and is where the next visit starts; the measuring corrects it.
+
+A transient jank in the first 2 s of a probe can keep a lower tier; the ladder walks back up.
 
 **A phone starts at the cap.** A coarse pointer starts with the cap on (30 a second) and the wet
 road off, and the way back lifts the cap after 10 s under budget to `phoneFps` (60) rather than to the

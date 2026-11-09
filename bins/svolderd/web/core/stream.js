@@ -154,7 +154,7 @@ export function createStream({
       // No stream is open until the reopen: a device switched meanwhile is opened on then.
       source = null;
       openedFor = undefined;
-      reopen = setTimeout(() => open(), REOPEN_MS);
+      reopen = setTimeout(() => open(true), REOPEN_MS);
       try {
         const answer = await fetch('api/v1/session', { credentials: 'same-origin' });
         const session = await answer.json();
@@ -187,12 +187,17 @@ export function createStream({
     on('fleet', (data) => {
       store.emit('fleet', data);
       const listed = new Set((data.devices ?? []).map((entry) => entry.url));
-      for (const url of following.filter((one) => !listed.has(one))) {
+      const pruned = following.filter((one) => !listed.has(one));
+      for (const url of pruned) {
         following = following.filter((one) => one !== url);
         store.forget(url);
       }
       const shown = store.shown();
-      if (shown && !listed.has(shown)) {
+      const dropped = Boolean(shown) && !listed.has(shown);
+      // The open stream carries the pruned devices in its address: it is opened again without
+      // them, once; a dropped shown device opens it anew when the page moves off it.
+      if (pruned.length > 0 && !dropped) open(true);
+      if (dropped) {
         const first = data.devices?.[0]?.url;
         if (first) show?.(first);
         else store.replace({ ...store.page(), shown: null, device: null, card: null, strip: null });

@@ -234,7 +234,29 @@ fn draw_controls(
         }
         .intersection(inner);
         hits.push(row, Hit::Row(Pane::Controls, index));
+        // The switch line over the bar is a row of its own for the effects: the Volume row's
+        // is the bar's line alone.
+        let row = match controls.switch {
+            Some(line) if line == *top => Rect {
+                y: row.y.saturating_add(1),
+                height: row.height.saturating_sub(1),
+                ..row
+            },
+            _ => row,
+        };
         rows.push((*id, row));
+    }
+    if let Some(line) = controls.switch {
+        rows.push((
+            crate::tui::app::SWITCH_ROW,
+            Rect {
+                x: inner.x,
+                y: inner.y + line,
+                width: inner.width,
+                height: 1,
+            }
+            .intersection(inner),
+        ));
     }
     // The Host group's rows come after the device's own, and a click focuses them under the
     // index the keys reach them by.

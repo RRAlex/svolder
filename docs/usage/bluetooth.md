@@ -89,6 +89,19 @@ only to its kind of control.
 Every example in this reference that talks to the fake device passes `--transport fake` explicitly,
 since the default is now `auto`.
 
+## Raspberry Pi
+
+A Raspberry Pi may start with Bluetooth switched off. `svolder doctor` names both cases and the fix:
+
+- The radio is blocked by rfkill (`rfkill list bluetooth` says `Soft blocked: yes`): run
+  `sudo rfkill unblock bluetooth`. A hard block is a hardware switch or the firmware, and no command
+  lifts it. `bluetoothctl power on` fails on a blocked adapter.
+- The Bluetooth service is not running, so BlueZ is not on the system bus: run
+  `sudo systemctl unmask bluetooth && sudo systemctl enable --now bluetooth`.
+
+In Docker the host does both, not the container: the container has no `bluetoothd` of its own and
+reaches the host's through the bind-mounted system bus.
+
 ## Real Bluetooth
 
 `--transport ble` (or `SVOLDER_TRANSPORT=ble`) talks to a Forkbeard device directly over a real
@@ -215,6 +228,39 @@ between them a front end has one, two and more than two channels to draw against
 above). The fake and the simulator report the `Power meters` switch on from the start. `watch` shows
 the signal as ordinary meter events, through a direct session or the daemon alike.
 
+### The simulator's readings
+
+A Bifrost 3 reads whether USB is connected (`7`), whether S/PDIF is locked (`8`) and the sample rate
+it is receiving (`6`), and a simulator started with `--profile bifrost3` can play all three:
+
+- `--usb on|off`, `--spdif-locked on|off` and `--sample-rate HZ` (`44100`, or `44.1k`) set what the
+  device reads from the start; the default is USB off, S/PDIF unlocked and 48 kHz.
+- While it runs, a line on its stdin changes one: `usb 1`, `spdif 0`, `rate 96000` (`on`/`off` also
+  work, and a blank line or one starting with `#` is skipped). The change is pushed to the connected
+  central as a Status of that reading, as the device does when the thing it reads changes, so the
+  daemon's readings, the Status pane and the web page's All readings table follow at once. Setting a
+  reading to the value it holds sends nothing, and a central that is not subscribed reads the change
+  at its next refresh.
+- A bad line (`rate 50000`, `usb maybe`, a command the sim does not know) is one line on stderr
+  and the sim keeps running. The rate must be one the profile has a code for, which the error lists:
+  on the Bifrost 3 they are 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz, sent as the
+  profile's code (`1` to `8`). A profile without the reading (a Gungnir 2 has no `usb_connected`)
+  refuses the flag with exit 2, or the line.
+
+The simulator reads stdin to the end of it, and reads a terminal too, so typing into a foreground sim
+works. A sim started in the background from an interactive shell (`&`) must have its stdin
+redirected, `</dev/null` or a FIFO to drive it from a script; otherwise the shell stops it with
+SIGTTIN when it reads. USB is sent as a Boolean; S/PDIF lock on a Bifrost 3 is sent as a UInt8, 1
+while locked, as the unit does (a Gungnir 2 sends a Boolean).
+
+```sh
+svolder-sim --adapter hci0 --profile bifrost3 --sample-rate 44100 --usb on
+# then, typed into it while a central is connected:
+spdif 1
+rate 96000
+usb 0
+```
+
 ### Tracing a connect
 
 `SVOLDER_BLE_TRACE=1` prints one line to stderr per connect step, naming the step and its elapsed
@@ -243,6 +289,14 @@ the BLE MIDI GATT service makes a MIDI client on the host demand pairing with it
 `scripts/e2e.sh` prints a hint naming this when it saw the peer exposing that service.
 
 ### The simulator against the official phone app
+
+`make sim-app` does this: it builds `svolder-sim`, reads the running bluetoothd's command line (no
+`sudo`, nothing changed) and, when the two host flags below are missing, prints the systemd drop-in to
+create and the two `sudo systemctl` commands, then stops. Otherwise it prints a short note and runs
+`svolder-sim --adapter <A> --layout legacy --trace --profile <MODEL>`. `A=hci1` picks the adapter
+(default `hci0`; use one none of your own devices uses) and `MODEL=<profile>` the device it emulates
+(default `gungnir2-v2`; `svolder-sim --help` and `profiles/` name the others). The passphrase is
+`1234` and the app lists the sim as `svolder-sim`. The manual steps and the reasons follow.
 
 `svolder-sim` can stand in for a Forkbeard device towards the Schiit app on a phone, which exercises
 this project's protocol code from the other side. The app scans legacy advertising PDUs only,
@@ -304,6 +358,11 @@ config or the command line named. `svolder doctor` grades every adapter present 
 configured device and warns when the configured `adapter` grades worse than another one on the host;
 the setup wizard's Adapter step does the same grading for a device it is adding and writes the best
 one into `adapter`.
+
+When you read BlueZ state by hand on a host with several adapters, remember that `bluetoothctl`
+answers for its default controller only: run `bluetoothctl list`, then `select <adapter address>`,
+before `info <device address>`. Otherwise `info` says `not available` for a device another adapter
+holds.
 
 ### Timing
 

@@ -1574,7 +1574,7 @@ fn facts_list_every_reading_named_or_not() {
                 "Input",
                 Some(NOW_MS - 7_000)
             ),
-            ("210.2.2", "?", Some(NOW_MS - 120_000)),
+            ("210.2.2", "DSP firmware", Some(NOW_MS - 120_000)),
         ]
     );
     assert_eq!(s.facts.rows[1].value, "9");
@@ -1583,7 +1583,7 @@ fn facts_list_every_reading_named_or_not() {
     assert_eq!(facts["now_ms"], 1_700_000_100_000_u64);
     assert_eq!(facts["rows"][0]["heard_at_ms"], 1_700_000_093_000_u64);
     assert_eq!(facts["rows"][1]["id"], "210.2.2");
-    assert_eq!(facts["rows"][1]["label"], "?");
+    assert_eq!(facts["rows"][1]["label"], "DSP firmware");
 }
 
 /// A device echoes a passphrase change with a status on function 250 that carries the new code

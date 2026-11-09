@@ -14,6 +14,7 @@ use clap::{Parser, ValueEnum};
 use svolder_fake::FakeDevice;
 use svolder_proto::{Passphrase, UnitId};
 
+mod controls;
 mod legacy_adv;
 mod peripheral;
 
@@ -96,6 +97,20 @@ struct Args {
     /// answers for every adapter on the host.
     #[arg(long)]
     accept_pairing: bool,
+    /// Start with the USB connection (reading `usb_connected`) on or off. Change it while
+    /// running with the line `usb 1` or `usb 0` on stdin. Needs a profile with that reading,
+    /// such as `bifrost3`.
+    #[arg(long, value_name = "on|off", value_parser = controls::parse_switch)]
+    usb: Option<bool>,
+    /// Start with S/PDIF locked (reading `spdif_locked`) on or off. Change it while running with
+    /// `spdif 1` or `spdif 0` on stdin.
+    #[arg(long, value_name = "on|off", value_parser = controls::parse_switch)]
+    spdif_locked: Option<bool>,
+    /// Start with the device reading this sample rate in hertz, such as 44100 or 44.1k. Change
+    /// it while running with `rate 96000` on stdin. The profile's own rates only; the Bifrost 3
+    /// reads 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz.
+    #[arg(long, value_name = "HZ", value_parser = controls::parse_rate)]
+    sample_rate: Option<u32>,
 }
 
 /// The fake device the flags describe: its faults, and how it reports a Loki Max's bands and its
@@ -118,6 +133,20 @@ fn seed_device(
         }
     }
     device
+}
+
+/// Set the readings the start flags name, which a central finds as they are at its first
+/// refresh. An error is the one line to print: the profile lacks the reading, or the rate.
+fn seed_readings(args: &Args, device: &mut FakeDevice) -> Result<(), String> {
+    let knobs = [
+        args.usb.map(controls::Knob::Usb),
+        args.spdif_locked.map(controls::Knob::SpdifLocked),
+        args.sample_rate.map(controls::Knob::SampleRate),
+    ];
+    for knob in knobs.into_iter().flatten() {
+        controls::apply(device, knob)?;
+    }
+    Ok(())
 }
 
 // One thread runs every task, so the writes bluetoothd hands over as separate D-Bus calls start
@@ -147,7 +176,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Passphrase::from_digits(arr)?
         }
     };
-    let device = seed_device(&args, &profile, unit, passphrase);
+    let mut device = seed_device(&args, &profile, unit, passphrase);
+    if let Err(e) = seed_readings(&args, &mut device) {
+        eprintln!("svolder-sim: {e}");
+        std::process::exit(2);
+    }
     if args.signal && !device.plays_a_signal() {
         eprintln!("{NO_SCALED_METER}");
         std::process::exit(2);
@@ -215,6 +248,65 @@ mod tests {
             FunctionId::two(6, 3)
         );
         assert!(handle(&mut device, recall()).is_empty());
+    }
+
+    /// The start flags set the readings a central finds at its first refresh; a flag the
+    /// profile cannot honour is an error, not a silent no-op.
+    #[test]
+    fn the_start_flags_seed_the_readings() {
+        use svolder_proto::{FunctionId, Value};
+        let reg = svolder_profiles::Registry::builtin().expect("the built-in profiles");
+        let profile = reg.get("bifrost3").expect("the Bifrost 3").clone();
+        let args = Args::parse_from([
+            "svolder-sim",
+            "--adapter",
+            "hci0",
+            "--profile",
+            "bifrost3",
+            "--usb",
+            "on",
+            "--spdif-locked",
+            "off",
+            "--sample-rate",
+            "44.1k",
+        ]);
+        let mut device = seed_device(
+            &args,
+            &profile,
+            "0102030405060708".parse().expect("a unit id"),
+            Passphrase::NONE,
+        );
+        seed_readings(&args, &mut device).expect("a Bifrost 3 has all three");
+        let refresh = svolder_proto::encode_command(
+            &svolder_proto::Message::command(FunctionId::one(1), Value::Data(vec![])),
+            Passphrase::NONE,
+        )
+        .expect("a frame");
+        let frame = device.handle(&refresh).remove(0);
+        let n = svolder_proto::decode_notification(&frame).expect("a notification");
+        let read = |id| {
+            n.messages
+                .iter()
+                .find(|m| m.id == FunctionId::one(id))
+                .map(|m| m.value.clone())
+        };
+        assert_eq!(read(7), Some(Value::Bool(true)));
+        assert_eq!(read(8), Some(Value::U8(0)));
+        assert_eq!(read(6), Some(Value::U8(1)));
+
+        let gungnir = reg.get("gungnir2-v2").expect("a profile").clone();
+        let mut other = seed_device(
+            &args,
+            &gungnir,
+            "0102030405060708".parse().expect("a unit id"),
+            Passphrase::NONE,
+        );
+        assert!(
+            seed_readings(&args, &mut other)
+                .unwrap_err()
+                .contains("usb_connected")
+        );
+        assert!(Args::try_parse_from(["svolder-sim", "--adapter", "a", "--usb", "maybe"]).is_err());
     }
 
     /// `--signal` is a switch, off unless it is asked for.

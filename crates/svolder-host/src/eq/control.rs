@@ -194,9 +194,9 @@ pub struct EqControl {
     /// again: another process may have put it there, so what it was started from is not known
     /// and the next look takes its preamp as a bound.
     unvouched: bool,
-    /// The preamp the node held when it was first looked at, in dB. It was safe for the slots
-    /// the node started from, which a change of rate puts back, so no preamp above it is sent
-    /// until an apply says what the chain is.
+    /// The preamp the node held when it was first looked at, in dB. It suits the slots the node
+    /// starts from, which a change of rate puts back, so no preamp above it is sent until an
+    /// apply says what the chain is.
     node_cap: Option<f64>,
     unavailable: Option<String>,
     /// The slots that moved since the last send.
@@ -317,8 +317,8 @@ impl EqControl {
         self.set_confs(Some(self.points.correction(self.stated)));
         self.base = Some(state);
         // What a command line wrote was worked out at the rate it writes at, whatever the
-        // sink runs at now: the first look at the chain checks the curve at the running rate
-        // and sends every slot again.
+        // sink runs at now. On a reload the first look sends every slot again; at start it
+        // does so only when the sink is not at 48 kHz (the rate change sends them).
         self.fresh_chain(CONFIG_RATE_HZ);
     }
 
@@ -479,10 +479,11 @@ impl EqControl {
 
     /// Apply the points: the chain is built, or rebuilt, with them.
     async fn apply(&mut self) -> Result<(), EqFailure> {
-        // With no chain there is no rate known: the sink's own is read, and the config is
+        // With no chain there is no rate known: the sink's own is read at every try, so a turn-on
+        // a rate refused does not hold that rate once the sink has changed, and the config is
         // written at it. Unread, it is written at the default and the first look at the chain
         // sends every slot again.
-        if self.known_rate.is_none() {
+        if !self.on || self.known_rate.is_none() {
             self.known_rate = self.params.sink_rate().await;
         }
         let state = self.chain.apply(self.request()).await?;
@@ -527,6 +528,9 @@ impl EqControl {
     /// Keep the points in the state file, when the controller keeps one.
     fn save_state(&mut self) -> Result<(), EqFailure> {
         if let (Keep::File(path), Some(base)) = (&self.keep, &self.base) {
+            // A file written by someone else since it was last read or written is about to be
+            // replaced unread: the chain it describes is sent these points at the next look.
+            let foreign = stamp_of(&self.keep) != self.stamp;
             let state = HostEqState {
                 on: self.on,
                 name: self.name(),
@@ -546,6 +550,10 @@ impl EqControl {
                 .map_err(|e| refusal(e, "Check that the directory can be written to"))?;
             self.base = Some(state);
             self.stamp = stamp_of(&self.keep);
+            if foreign {
+                self.resend = true;
+                self.watch_due = true;
+            }
         }
         Ok(())
     }
@@ -582,7 +590,8 @@ impl EqControl {
 
     /// Take the chain out of the path and keep the points, with the state saying off.
     async fn turn_off(&mut self) -> Result<(), EqFailure> {
-        if self.on {
+        // A turn-off that is tried again while held saved the points at the first try.
+        if self.on && !self.held {
             self.save_state()?;
         }
         self.chain.remove().await?;
@@ -590,12 +599,13 @@ impl EqControl {
         self.on = false;
         self.unknown = false;
         self.legacy = false;
-        self.held = false;
         self.dirty.clear();
         if let Some(base) = self.base.as_mut() {
             base.on = false;
         }
+        // Still held here, so the preamp saved is the one the curve played with.
         let saved = self.save_state();
+        self.held = false;
         // With no chain there is no rate to know: the next one is checked and written at the
         // default, and the first look at it checks the curve at the rate the sink runs at.
         self.known_rate = None;
@@ -849,6 +859,8 @@ impl EqControl {
             .iter()
             .position(|held| *held == slot)
             .ok_or_else(|| {
+                // The web core finds this refusal by "moved or is gone" (`movedPoint`), and the
+                // tests of the daemon's route and of the controller pin the words.
                 refusal(
                     format!("the point in slot {slot} has moved or is gone"),
                     "Read the points again",
@@ -866,7 +878,9 @@ impl EqControl {
     }
 
     /// Send every slot that moved, and the preamp, in one call. Whether they went (or there was
-    /// nothing to send).
+    /// nothing to send). A node found under another id whose line also fails counts as a failed
+    /// tick like any other; reaching `FAIL_LIMIT` that way takes the node changing again between
+    /// the look and the send, that many times inside `FAIL_WINDOW`.
     async fn send_dirty(&mut self) -> bool {
         if self.send_dirty_once().await {
             return true;
@@ -1020,6 +1034,11 @@ impl EqControl {
                 let at = rate.map_or_else(String::new, |rate| format!(" at {rate} Hz"));
                 self.note = Some(match off {
                     Ok(()) => format!("computer EQ turned off{at}: {failure}"),
+                    // Removed, and only the state could not be saved: the chain is off.
+                    Err(why) if !self.on => format!(
+                        "computer EQ turned off{at}: {failure} \
+                         (its state could not be saved: {why})"
+                    ),
                     Err(why) => {
                         self.sent.rate = rate;
                         self.held = true;
@@ -1139,14 +1158,16 @@ impl EqControl {
     }
 }
 
-/// The preamp in dB a node holds, from its `Mult` ports (the lower of the two channels); `None`
-/// when they say nothing (a port that is not above 0).
+/// The preamp in dB a node holds, from its `Mult` ports (the lower of the two channels, a port at
+/// or below 0 reading as the -120 dB floor); `None` when no port is listed.
 fn held_preamp_db(params: &HashMap<String, f64>) -> Option<f64> {
     preamp_params(0.0)
         .iter()
         .filter_map(|(name, _)| params.get(name).copied())
-        .filter(|mult| *mult > 0.0)
-        .map(|mult| (20.0 * mult.log10()).max(-120.0))
+        .map(|mult| match mult > 0.0 {
+            true => (20.0 * mult.log10()).max(-120.0),
+            false => -120.0,
+        })
         .min_by(f64::total_cmp)
 }
 

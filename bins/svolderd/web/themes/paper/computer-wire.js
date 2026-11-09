@@ -4,54 +4,41 @@
 // the title, the volume (a drag along the 0 to 100 % ruler, the keys, `− quieter`, `mute`,
 // `louder +`), the tone (`off` and `EQ`, the points on the graph dragged, tapped to add, stepped
 // with the arrow keys and the wheel, the table's type words, typed or stepped cells and `×`,
-// `+ Add point`) and the presets. Every write goes through `core.actions.computer`. Flipping
-// writes nothing: it ends what is in hand, as for another device shown (live.js).
+// `+ Add point`) and the presets. The core does the hand's work (core.drag.pointDrag: the drag, the
+// tap, the wheel and key bursts; core.drag.table: the rows below the view; core.actions.computer:
+// every write); this wires Paper's elements to it and draws what it says. Flipping writes nothing:
+// it ends what is in hand, as for another device shown (live.js).
 //
 // A drag holds the tone section until its writes are answered and draws the graph and the row from
 // the values it asks for; a cell being typed in holds it too, so a read of the computer meanwhile
 // does not take the typing away.
 
 import { askForm, askQuestion, closeAsk } from './ask.js';
-import { viewerQuiet } from './draw/side.js';
 import { heldCurve, valueWords } from './draw/computer.js';
 import { dragAlong, sliderKeys } from './gestures.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { keeper } from './live.js';
 import { place } from './place.js';
 import { WORDS } from './words.js';
-import { markersOf } from '../../core/computer.js';
-import { F_MAX, F_MIN } from '../../core/tone-curve.js';
-
-const VIEW_WIDTH = 1000;
-const VIEW_HEIGHT = 260;
-const TYPES = ['PK', 'LSC', 'HSC'];
-/** The hand ranges of a typed value, and the places it is written to. */
-const RANGE = { f: [F_MIN, F_MAX, 2], g: [-12, 12, 1], q: [0.1, 10, 2] };
-const KEYS = { ArrowLeft: ['f', -1], ArrowRight: ['f', 1], ArrowDown: ['g', -1], ArrowUp: ['g', 1] };
+import { POINT_TYPES, markersOf } from '../../core/computer.js';
+import { VIEW_HEIGHT, VIEW_WIDTH } from '../../core/tone-curve.js';
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
-const round = (value, places) => Math.round(value * 10 ** places) / 10 ** places;
 
 /** Wire the computer's side of the sheet in `root` until `signal` aborts. */
 export function wireComputer({
-  root, core, live, view, signal,
+  root, core, live, signal,
 }) {
   const comp = core.computer;
   const actions = core.actions.computer;
-  const { computerSteps, createDrag, grab, labelAt, plotMap, pointWriter, REACH, startOf, wheelSteps }
-    = core.drag;
-  const tables = computerSteps();
+  const { labelAt, markersIn } = core.drag;
   const page = () => core.model.page();
   const on = () => comp.side() === 'computer';
-  const quiet = () => viewerQuiet(page());
+  const quiet = () => !core.actions.canWrite(page());
   const tone = () => comp.toneOf(page());
   const points = () => tone()?.points ?? [];
   const keep = keeper(live, 'tone');
   const nothing = () => {};
-
-  /** A tap that cannot write: the core turns it away and says why (a guest, a page whose writes
-   * are off). */
-  const refuse = () => actions.setMode(tone()?.modes?.[1]?.on ? 'eq' : 'off').catch(nothing);
 
   // ---- the switch -----------------------------------------------------------------------------
 
@@ -66,25 +53,17 @@ export function wireComputer({
   const pct = () => comp.volumeOf(page())?.pct ?? null;
   const drawVolume = () => live.draw('volume');
 
-  /** Ask for `value` %: held and shown at once, sent by the core. */
+  /** Ask for `value` %: held and shown at once, sent by the core (which turns a viewer who may not
+   * write away, and says why). */
   function setPct(value) {
-    if (quiet()) {
-      refuse();
-      return;
-    }
     actions.setVolume(value).catch(nothing);
     drawVolume();
   }
 
-  /** One step of 1 % (the core holds it to the sink's own rule); a viewer who may not write is
-   * told so. */
-  function step(delta) {
+  /** A step of `delta` % (one is 1 %, held to the sink's own rule; a larger one is a page key). */
+  function nudge(delta) {
     if (!on() || pct() === null) return;
-    if (quiet()) {
-      refuse();
-      return;
-    }
-    actions.step(delta).catch(nothing);
+    actions.nudge(delta).catch(nothing);
     drawVolume();
   }
 
@@ -97,7 +76,7 @@ export function wireComputer({
       onStart(at, event) {
         gripped = false;
         if (quiet()) {
-          refuse();
+          core.actions.refuse();
           return;
         }
         gripped = true;
@@ -118,11 +97,7 @@ export function wireComputer({
     sliderKeys(vbox, {
       signal,
       match: '#p-needle',
-      step(delta) {
-        if (!on() || pct() === null) return;
-        if (Math.abs(delta) === 1) step(delta);
-        else setPct(clamp(pct() + delta, 0, 100));
-      },
+      step: nudge,
       home() {
         if (on() && pct() !== null) setPct(0);
       },
@@ -136,7 +111,7 @@ export function wireComputer({
         root,
         el: word,
         signal,
-        step: (el) => step(el.dataset.act === 'c-up' ? 1 : -1),
+        step: (el) => nudge(el.dataset.act === 'c-up' ? 1 : -1),
         live: () => on() && !quiet() && pct() !== null,
       });
     }, { signal });
@@ -144,14 +119,10 @@ export function wireComputer({
       const word = event.target.closest?.('[data-act]');
       if (!word || !on()) return;
       if (word.dataset.act === 'c-down' || word.dataset.act === 'c-up') {
-        if (event.detail === 0) step(word.dataset.act === 'c-up' ? 1 : -1);
+        if (event.detail === 0) nudge(word.dataset.act === 'c-up' ? 1 : -1);
       } else if (word.dataset.act === 'c-mute') {
         if (pct() === null) return;
-        if (quiet()) {
-          refuse();
-          return;
-        }
-        actions.setMute(!comp.volumeOf(page()).muted).catch(nothing);
+        actions.toggleMute().catch(nothing);
         drawVolume();
       }
     }, { signal });
@@ -162,31 +133,52 @@ export function wireComputer({
   const box = root.querySelector('#p-tone');
   if (box) wireTone(box);
 
-  /** The point `n` is the one the hand is on: its row and its mark are drawn so, in place. */
-  function select(n) {
-    view.point = n;
-    for (const el of box.querySelectorAll('tr[data-n], .pt[data-n]')) {
-      el.classList.toggle('sel', Number(el.dataset.n) === n);
-    }
-  }
-
   function wireTone(section) {
     live.onSwitch(() => {
       closeList();
       keep.reset();
     });
 
+    // ---- the table: the point in hand lit, the rows below the view counted
+
+    const label = () => section.querySelector('#p-more');
+    const table = core.drag.table({
+      box: () => section.querySelector('#p-ptsbox'),
+      // the words under the table are Paper's own element, shown and hidden with the count
+      note: () => null,
+      row: (n) => section.querySelector(`tr[data-n="${n}"]`),
+      lit(n) {
+        for (const el of section.querySelectorAll('tr[data-n], .pt[data-n]')) {
+          el.classList.toggle('sel', Number(el.dataset.n) === n);
+        }
+      },
+      rows: (area) => area.querySelectorAll('tbody tr'),
+      exact: true,
+      fadeClass: 'fade',
+      moreWords: WORDS.moreBelow,
+      onMore(hidden) {
+        const words = label();
+        if (!words) return;
+        words.hidden = hidden === 0;
+        words.textContent = WORDS.moreBelow(hidden);
+      },
+    });
+    /** The point `n` is the one the hand is on: its row and its mark are drawn so, in place. */
+    const select = (n) => table.pick(n, { scroll: false });
+    // the points the table lists scroll: how many are not fully in view below, and the fade over
+    // the last (a section drawn again starts from the markup's own count)
+    section.addEventListener('scroll', () => table.scrolled(), { capture: true, signal });
+
     // ---- the mode, the type words, the removing and adding
 
-    /** Send the change `fields` of point `n` at once (a typed value, a step, a type). */
+    /** Send the change `fields` of point `n` at once (a type). */
     function send(n, fields) {
-      if (quiet()) {
-        refuse();
-        return;
-      }
       actions.setPoint(n, fields, { done: true }).catch(nothing);
       live.draw('tone');
     }
+
+    /** `+ Add point` and a tap on a full table say how many the EQ holds at most. */
+    const full = (max) => core.frame.toast(`${max} is the most`);
 
     section.addEventListener('click', (event) => {
       const el = event.target.closest?.('[data-act]');
@@ -194,15 +186,12 @@ export function wireComputer({
       const n = Number(el.dataset.n);
       switch (el.dataset.act) {
         case 'c-mode':
-          if (quiet()) refuse();
-          else {
-            actions.setMode(el.dataset.mode).catch(nothing);
-            live.draw('tone');
-          }
+          actions.setMode(el.dataset.mode).catch(nothing);
+          live.draw('tone');
           break;
         case 'c-type': {
           if (quiet()) {
-            refuse();
+            core.actions.refuse();
             return;
           }
           if (closeOf(el)) return;
@@ -210,41 +199,25 @@ export function wireComputer({
           keep.around(() => openList({
             opener: el,
             label: WORDS.typeList,
-            options: TYPES.map((t) => ({ value: t, text: t, on: t === now })),
+            options: POINT_TYPES.map((t) => ({ value: t, text: t, on: t === now })),
             choose: (type) => send(n, { type }),
             signal,
-            onClose: () => keep.drop(),
+            onClose: () => keep.release(),
           }));
           break;
         }
         case 'c-remove':
-          if (quiet()) refuse();
-          else {
-            if (view.point === n) view.point = null;
-            actions.removePoint(n).catch(nothing);
-          }
+          actions.removePoint(n).catch(nothing);
           break;
         case 'c-add':
-          if (quiet()) {
-            refuse();
-            return;
-          }
-          add(comp.addAt(comp.nextFree(points()), 0));
+          actions.addNext().then((done) => {
+            if (done.ok) select(done.n);
+            else if (done.full) full(done.max);
+          }).catch(nothing);
           break;
         default:
       }
     }, { signal });
-
-    /** Add the point `made` (or tell the table is full); the new one is the one in hand. */
-    function add(made) {
-      if (!made) {
-        core.frame.toast(`${tone()?.points?.length ?? 16} is the most`);
-        return;
-      }
-      actions.addPoint(made).then((done) => {
-        if (done.ok) select(done.n);
-      }).catch(nothing);
-    }
 
     // ---- the cells: typed or stepped
 
@@ -257,7 +230,6 @@ export function wireComputer({
     section.addEventListener('focusin', (event) => {
       const cell = event.target.closest?.('.p-cell');
       if (!cell) return;
-      select(Number(cell.dataset.n));
       cell.select?.();
     }, { signal });
     section.addEventListener('input', (event) => {
@@ -272,29 +244,25 @@ export function wireComputer({
       if (cell) release(cell);
     }, { signal });
 
-    /** The cell's text as a value within the hand ranges, or `null` for words that are no number. */
-    function parsed(cell) {
-      const text = cell.value.replace('−', '-').replace(/[^0-9+\-.]/g, '');
-      const value = Number(text);
-      if (text === '' || !Number.isFinite(value)) return null;
-      const [low, high, places] = RANGE[cell.dataset.param];
-      return round(clamp(value, low, high), places);
+    /** The cell's text put back as the point has it. */
+    function putBack(cell) {
+      const now = points()[Number(cell.dataset.n) - 1];
+      if (now) cell.value = valueWords[cell.dataset.param](now[cell.dataset.param]);
     }
 
-    /** A typed value is sent as typed (within the hand ranges); words that are no number, or the
-     * value already there, put the cell back as it was. */
+    /** A typed value is written by the core as typed (`2.9k`, `+3,2`, rounded to the places of its
+     * field, held to the hand range); words that are no number (toasted), or the value already
+     * there, put the cell back as it was. */
     function commit(cell) {
       release(cell);
       const n = Number(cell.dataset.n);
       const { param } = cell.dataset;
       const now = points()[n - 1];
-      const value = parsed(cell);
-      if (!now || value === null || value === now[param] || cell.value === valueWords[param](now[param])) {
-        if (now) cell.value = valueWords[param](now[param]);
-        return;
-      }
-      cell.value = valueWords[param](value);
-      send(n, { [param]: value });
+      if (!now) return;
+      actions.cell(n, param, cell.value, valueWords[param](now[param])).then((answer) => {
+        if ((!answer.ok || answer.nothing) && cell.isConnected) putBack(cell);
+      }).catch(nothing);
+      live.draw('tone');
     }
 
     section.addEventListener('change', (event) => {
@@ -306,66 +274,50 @@ export function wireComputer({
       if (!cell || !on()) return;
       if (event.key === 'Enter') {
         event.preventDefault();
-        if (quiet()) refuse();
-        else commit(cell);
+        commit(cell);
       } else if (event.key === 'Escape') {
         event.preventDefault();
         release(cell);
-        const now = points()[Number(cell.dataset.n) - 1];
-        if (now) cell.value = valueWords[cell.dataset.param](now[cell.dataset.param]);
+        putBack(cell);
       } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
         event.preventDefault();
-        if (quiet()) refuse();
-        else stepOf(Number(cell.dataset.n), cell.dataset.param, event.key === 'ArrowUp' ? 1 : -1);
+        actions.stepPoint(Number(cell.dataset.n), cell.dataset.param, event.key === 'ArrowUp' ? 1 : -1)
+          .catch(nothing);
+        live.draw('tone');
       }
     }, { signal });
     // a cell that cannot be typed in (a guest's) says why on the touch
     section.addEventListener('pointerdown', (event) => {
-      if (on() && quiet() && event.target.closest?.('.p-cell')) refuse();
+      if (on() && quiet() && event.target.closest?.('.p-cell')) core.actions.refuse();
     }, { signal });
 
-    /** The table's step after (or before) point `n`'s `param`: one step of the hand's grid. */
-    function stepOf(n, param, delta) {
-      const now = points()[n - 1];
-      if (!now) return;
-      const table = tables[param];
-      const at = startOf(tables, now)[param];
-      const next = table[clamp(at + delta, 0, table.length - 1)];
-      if (Math.sign(next - now[param]) === delta) send(n, { [param]: next });
-    }
-
-    // ---- the graph: a drag, a tap, the arrow keys, the wheel
-
-    /** The marks on the drawn graph in px. */
-    const marksIn = (graph, rect) => [...graph.querySelectorAll('.pt[data-n]')].map((p) => ({
-      band: Number(p.dataset.n),
-      x: Number(p.dataset.x) * rect.width,
-      y: Number(p.dataset.y) * rect.height,
-    }));
+    // ---- the graph: a drag, a tap, the arrow keys, the wheel (the core's hand)
 
     /** The drag's words beside its point: `105 Hz, +5.5 dB`. */
     function say(graph, rect, point, values) {
-      let label = graph.querySelector('.p-dlab');
-      if (!label) {
-        label = graph.ownerDocument.createElement('span');
-        label.className = 'p-dlab';
-        label.setAttribute('aria-hidden', 'true');
-        graph.append(label);
+      let words = graph.querySelector('.p-dlab');
+      if (!words) {
+        words = graph.ownerDocument.createElement('span');
+        words.className = 'p-dlab';
+        words.setAttribute('aria-hidden', 'true');
+        graph.append(words);
       }
-      label.textContent = `${valueWords.f(values.f)}, ${valueWords.g(values.g)}`;
+      words.textContent = `${valueWords.f(values.f)}, ${valueWords.g(values.g)}`;
       const spot = labelAt({ x: point.x * rect.width, y: point.y * rect.height },
         { width: rect.width, height: rect.height },
-        { width: label.offsetWidth, height: label.offsetHeight });
-      label.style.left = `${spot.x.toFixed(1)}px`;
-      label.style.top = `${spot.y.toFixed(1)}px`;
+        { width: words.offsetWidth, height: words.offsetHeight });
+      words.style.left = `${spot.x.toFixed(1)}px`;
+      words.style.top = `${spot.y.toFixed(1)}px`;
     }
 
-    /** The graph and the row drawn from the values a drag asks for, in place. */
-    function drawHeld(n, raws) {
+    /** The graph and the row drawn from the values a drag asks for, in place. The section holds
+     * the numbers it was drawn with: `s.drawn` is the point's number in it. */
+    function drawHeld(s) {
       const graph = section.querySelector('#p-graph');
       const t = tone();
-      if (!graph || !t) return;
-      const values = { f: tables.f[raws.f], g: tables.g[raws.g], q: tables.q[raws.q] };
+      if (!graph || !t || !s.wrote) return;
+      const n = s.drawn;
+      const values = s.values();
       const list = t.points.map((p) => (p.n === n ? { ...p, ...values } : p));
       graph.querySelector('.p-curve').setAttribute('d', heldCurve(list));
       // every dot, the held one and the others it moves, sits on the summed curve
@@ -388,175 +340,86 @@ export function wireComputer({
       say(graph, graph.getBoundingClientRect(), point, values);
     }
 
-    /** The drags begun and not finished, and the one the pointer has now. */
-    const pending = [];
-    let active = null;
-    let tap = null;
-    let rest = 0;
-
-    function begin(graph, n, event, rect, at) {
-      const now = points()[n - 1];
-      const write = pointWriter({ actions: core.actions, n });
-      const entry = { n, pointer: event.pointerId, drag: null, ended: false };
-      let untrack = nothing;
-      entry.drag = createDrag({
-        band: n,
-        gesture: 'move',
-        start: startOf(tables, now),
-        press: at,
-        plot: { width: rect.width, height: rect.height },
-        steps: tables,
-        write,
-        map: plotMap({ width: rect.width, height: rect.height }),
-        on: {
-          held: (raws) => drawHeld(n, raws),
-          answer: nothing,
-          toast: (words) => core.frame.toast(words),
-          ended: () => {
-            if (active === entry) active = null;
-            untrack();
-            try {
-              graph.releasePointerCapture(entry.pointer);
-            } catch {
-              // already let go
-            }
-            // the last value goes after every write of the drag, then the section is given back
-            (async () => {
-              await Promise.all(pending.map((p) => p.drag.settled));
-              await write.release().catch(nothing);
-              const at = pending.indexOf(entry);
-              if (at >= 0) pending.splice(at, 1);
-              // a switch has reset the holds and forgotten the drag: nothing is left to give back
-              if (!entry.switched) keep.drop();
-              section.querySelector('.p-dlab')?.remove();
-              section.querySelector(`#p-pt-${n}`)?.focus({ preventScroll: true });
-            })();
-          },
+    const hand = core.drag.pointDrag({
+      points: (plot, rect) => markersIn(tone()?.markers, rect),
+      usable: () => on() && Boolean(tone()),
+      on: {
+        pick: select,
+        begin(s) {
+          s.drawn = s.n;
+          keep.take();
+          select(s.n);
         },
-      });
-      untrack = comp.track({ cancel: (why) => entry.drag.cancel(why) });
-      keep.take();
-      pending.push(entry);
-      active = entry;
-      select(n);
-      try {
-        graph.setPointerCapture(event.pointerId);
-      } catch {
-        // without capture the drag still ends on the cancel
-      }
-    }
+        held: drawHeld,
+        ended(s) {
+          if (s.lastPointer === null) return;
+          try {
+            s.plot.releasePointerCapture(s.lastPointer);
+          } catch {
+            // already let go
+          }
+        },
+        // the last value goes after every write of the drag, then the section is given back
+        finished(s) {
+          if (signal.aborted) return;
+          // a switch has reset the holds and forgotten the drag: nothing is left to give back
+          if (!s.switched) keep.drop();
+          section.querySelector('.p-dlab')?.remove();
+          // a drag ended by a flip leaves the focus where the person has put it since
+          if (!s.switched) section.querySelector(`#p-pt-${s.n}`)?.focus({ preventScroll: true });
+        },
+        added(answer) {
+          if (answer?.ok) select(answer.n);
+          else if (answer?.full) full(answer.max);
+        },
+      },
+    });
+    signal.addEventListener('abort', () => hand.destroy(), { once: true });
 
+    // any press at all, anywhere on the page (a second finger, a right button), makes a waiting tap no tap:
+    // before the graph's own press, which may begin one
+    root.ownerDocument.addEventListener('pointerdown', () => hand.dropTap(), { signal, capture: true });
     section.addEventListener('pointerdown', (event) => {
-      if (!on() || active || !event.isPrimary
-        || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      if (!on() || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
       const graph = event.target.closest?.('#p-graph');
-      if (!graph || !tone()) return;
-      const rect = graph.getBoundingClientRect();
-      const at = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      const touch = event.pointerType === 'touch';
+      if (!graph) return;
       // a touch grabs only from a point's own area (which keeps `touch-action: none`): a touch
       // beside it is the page's scroll
-      const n = touch && !event.target.closest('.pt') ? null
-        : grab(marksIn(graph, rect), at, { reach: touch ? REACH.touch : REACH.mouse });
-      if (n === null) {
-        // a press on an empty spot that is let go where it was is a tap that adds a point
-        tap = { id: event.pointerId, at, time: event.timeStamp };
-        return;
-      }
-      event.preventDefault();
-      if (quiet()) {
-        refuse();
-        return;
-      }
-      begin(graph, n, event, rect, at);
+      const grabs = event.pointerType !== 'touch' || Boolean(event.target.closest('.pt'));
+      hand.down(event, graph, { grabs });
     }, { signal });
-
     section.addEventListener('pointermove', (event) => {
-      if (!active || event.pointerId !== active.pointer) return;
-      const graph = section.querySelector('#p-graph');
-      if (!graph) return;
-      const rect = graph.getBoundingClientRect();
-      active.drag.move({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+      hand.move(event);
     }, { signal });
-
-    const finish = (cancelled) => (event) => {
-      if (tap && event.pointerId === tap.id) {
-        const graph = section.querySelector('#p-graph');
-        const mine = tap;
-        tap = null;
-        if (!cancelled && graph && on() && event.target.closest?.('#p-graph')) {
-          const rect = graph.getBoundingClientRect();
-          const at = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-          if (Math.hypot(at.x - mine.at.x, at.y - mine.at.y) < 8) {
-            if (quiet()) refuse();
-            else {
-              const map = plotMap({ width: rect.width, height: rect.height });
-              add(comp.addAt(map.hzAt(at.x), map.dbAt(at.y)));
-            }
-          }
-        }
-        return;
-      }
-      if (!active || event.pointerId !== active.pointer) return;
-      const graph = section.querySelector('#p-graph');
-      if (graph && !cancelled) {
-        const rect = graph.getBoundingClientRect();
-        active.drag.move({ x: event.clientX - rect.left, y: event.clientY - rect.top });
-      }
-      active.drag.release();
-    };
-    section.addEventListener('pointerup', finish(false), { signal });
-    section.addEventListener('pointercancel', finish(true), { signal });
-    section.addEventListener('lostpointercapture', finish(true), { signal });
+    section.addEventListener('pointerup', (event) => {
+      const done = hand.up(event);
+      if (done !== true) done?.catch?.(nothing);
+    }, { signal });
+    for (const type of ['pointercancel', 'lostpointercapture']) {
+      section.addEventListener(type, (event) => hand.cancel(event), { signal });
+    }
 
     // another device is shown, or the stream is lost: what is in hand writes nothing more
-    live.onSwitch(() => {
-      const ending = pending.splice(0);
-      active = null;
-      for (const entry of ending) {
-        entry.switched = true;
-        entry.drag.cancel('switch');
-      }
-    });
+    live.onSwitch(() => hand.switched());
     live.onReading('state', (state) => {
-      if (state !== 'lost') return;
-      for (const p of pending) p.drag.cancel('lost');
+      if (state === 'lost') hand.lost();
     });
 
-    // the arrow keys on a focused point step its frequency and its gain
+    // the arrow keys on a focused point step its frequency and its gain, live, and the burst of
+    // keys ends in one final write
     section.addEventListener('keydown', (event) => {
       const point = event.target.closest?.('.pt[data-n]');
-      const move = KEYS[event.key];
-      if (!point || !move || !on() || event.altKey || event.ctrlKey || event.metaKey) return;
-      event.preventDefault();
-      if (active) return;
-      if (quiet()) refuse();
-      else stepOf(Number(point.dataset.n), move[0], move[1]);
+      if (!point || !on()) return;
+      if (hand.key(event, Number(point.dataset.n)) === true) live.draw('tone');
     }, { signal });
 
-    // the wheel over a point steps its Q: up narrows the bell
+    // the wheel over a point steps its Q: up narrows the bell; a burst ends in one final write
     section.addEventListener('wheel', (event) => {
       const point = event.target.closest?.('.pt[data-n]');
-      if (!point || active || !on() || quiet()) return;
-      event.preventDefault();
-      const got = wheelSteps(rest, event.deltaY, event.deltaMode);
-      rest = got.rest;
-      if (got.steps !== 0) stepOf(Number(point.dataset.n), 'q', got.steps > 0 ? 1 : -1);
+      if (!point || !on() || quiet()) return;
+      if (hand.wheel(event, point.closest('#p-graph')) === true) live.draw('tone');
     }, { signal, passive: false });
 
-    // the points the table lists scroll: how many are not fully in view below, and the fade
-    // over the last (a section drawn again starts from the markup's own count)
-    section.addEventListener('scroll', () => {
-      const scroller = section.querySelector('#p-ptsbox');
-      const label = section.querySelector('#p-more');
-      if (!scroller || !label) return;
-      const bottom = scroller.scrollTop + scroller.clientHeight;
-      const below = [...scroller.querySelectorAll('tbody tr')]
-        .filter((r) => r.offsetTop + r.offsetHeight > bottom + 1).length;
-      label.hidden = below === 0;
-      label.textContent = WORDS.moreBelow(below);
-      scroller.classList.toggle('fade', below > 0);
-    }, { capture: true, signal });
     // a row the focus reaches (a cell, a word) is the one in hand
     section.addEventListener('focusin', (event) => {
       const row = event.target.closest?.('tr[data-n]');
@@ -586,7 +449,7 @@ export function wireComputer({
         no: 'keep',
         signal,
         onClose: () => {
-          pkeep.drop();
+          pkeep.release();
           resolve(said);
         },
         go: async () => {
@@ -601,8 +464,7 @@ export function wireComputer({
       if (!el || !on()) return;
       if (el.dataset.act === 'c-preset') {
         if (el.getAttribute('aria-disabled') === 'true' && !quiet()) return;
-        if (quiet()) refuse();
-        else actions.recallPreset(el.dataset.name, { asker }).catch(nothing);
+        actions.recallPreset(el.dataset.name, { asker }).catch(nothing);
       } else if (el.dataset.act === 'c-save') {
         pkeep.around(() => askForm({
           within: within(),
@@ -610,7 +472,7 @@ export function wireComputer({
           value: '',
           signal,
           opener: el,
-          onClose: () => pkeep.drop(),
+          onClose: () => pkeep.release(),
           submit: (text) => actions.savePreset(text),
         }));
       } else if (el.dataset.act === 'c-edit') {
@@ -626,15 +488,10 @@ export function wireComputer({
           label: WORDS.editList,
           options,
           signal,
-          onClose: () => pkeep.drop(),
+          onClose: () => pkeep.release(),
           choose: (value) => {
             const [kind, ...rest] = value.split(':');
             const from = rest.join(':');
-            const done = (call) => async () => {
-              const answer = await call();
-              comp.resync();
-              return answer;
-            };
             if (kind === 'rename') {
               pkeep.around(() => askForm({
                 within: within(),
@@ -642,8 +499,8 @@ export function wireComputer({
                 value: from,
                 signal,
                 opener: el,
-                onClose: () => pkeep.drop(),
-                submit: (text) => done(() => core.actions.renamePreset(from, text, opened))(),
+                onClose: () => pkeep.release(),
+                submit: (text) => actions.renamePreset(from, text, opened),
               }));
             } else {
               pkeep.around(() => askQuestion({
@@ -653,8 +510,8 @@ export function wireComputer({
                 no: 'keep',
                 signal,
                 opener: el,
-                onClose: () => pkeep.drop(),
-                go: done(() => core.actions.deletePreset(from, opened)),
+                onClose: () => pkeep.release(),
+                go: () => actions.deletePreset(from, opened),
               }));
             }
           },

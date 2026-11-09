@@ -20,7 +20,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use svolder_profiles::{ControlKind, EqParam};
 use svolder_proto::FunctionId;
-use svolder_proto::function::{FIRMWARE_FAMILY, FIRMWARE_VERSION_QUERY};
 
 use crate::tui::app::{App, Reading, Screen};
 use crate::tui::keys::Scene;
@@ -389,8 +388,8 @@ pub(crate) fn label_for(app: &App, id: FunctionId, raw: &serde_json::Value) -> S
             }
         }
     }
-    if id.first() == FIRMWARE_FAMILY && id.second() == Some(FIRMWARE_VERSION_QUERY) {
-        return "Firmware".to_string();
+    if let Some(label) = svolder_profiles::codec::firmware_label(id) {
+        return label;
     }
     "?".to_string()
 }

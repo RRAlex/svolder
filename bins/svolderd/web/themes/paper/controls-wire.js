@@ -186,7 +186,7 @@ export function wireControls({
           if (option) write(c.key, option.label, JSON.parse(option.json));
         },
         signal,
-        onClose: () => keep.drop(),
+        onClose: () => keep.release(),
       }));
     }
   }, { signal });

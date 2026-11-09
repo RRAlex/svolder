@@ -572,8 +572,8 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
 - **The Host group**, at the bottom of the Controls pane under a `Host` heading of its own, one row
   the Controls pane's cursor reaches under the device's own, and rows it does not reach (the
   Spectrum row in the wide and tall tiers, the Path row on a DAC joined to a daemon). The
-  computer's volume is not a row of the group: it is the Volume row, flipped by `C` (see "The
-  computer's side" below):
+  computer's volume is not a row of the group: it is the Volume row, with the `Target` switch over
+  it (see "The computer's side" below):
   - `Transport`: `◀◀  ▶  ▮▮  ▶▶` — previous, play, pause and next. `←→` move between the four,
     `␣`/`Enter` press the one under the cursor, which the focused row draws out of its highlight,
     and a click presses the one clicked. `▶` is drawn in the accent, bold, while the player plays,
@@ -803,11 +803,14 @@ mode instead.
 
 #### The computer's side (`C`)
 
-Where the computer's controls are there, the top line of the tone-control screen reads `EQ for ‹ NAME |
-Computer ›`, NAME being the device shown. `C`, or a click on either name, flips the screen to the
-computer: nothing is written by the flip, and the mode, the curve and the points are the computer's
-until it is flipped back. Where the computer's controls cannot be used, the reason stands in the
-switch's place: `computer controls unavailable: no pw-cli on this computer`.
+Where the computer's controls are there, the top line of the tone-control screen reads `Target ‹ NAME |
+Computer ›`, NAME being the device shown, and the mode and the preset are on the row under it. The
+switch is a row of its own, above Mode: `↑` from Mode reaches it, `←` picks the device and `→` the
+computer (`␣` or `Enter` the other one), `↓` goes back to Mode, whose `←→` keep their own values.
+`C` flips from anywhere; a click on either name flips and focuses the row, and a click elsewhere on the line focuses it. On the row only its own keys act: `←→`, `␣`/`Enter` and `C` (`m` and the volume keys do nothing there). Nothing is written by the flip, and the
+mode, the curve and the points are the computer's until it is flipped back. Where the computer's
+controls cannot be used, the reason stands in the switch's place, on the one header line, and no
+key focuses it: `Target NAME  computer controls unavailable: no pw-cli on this computer`.
 
 On the computer the mode reads `Mode ‹ Off | EQ ›`, with no Loudness, and `←→` or a click on it
 turns the computer EQ on or off. Under the curve the Points pane lists the points, `#  Type  Freq
@@ -826,9 +829,12 @@ the Q, sent as it moves (at most 20 times a second) and at the release. Hand val
 to 20 kHz, plus or minus 12 dB and Q 0.1 to 10. The Correction pane, in the wide tier, says that on
 the computer nothing is fitted: every filter plays as written.
 
-The Controls pane has the same switch on a line of its own over the Volume row's bar, `Volume ‹ NAME |
-Computer ›`, the device's name cut where the pane is narrow (`C` works wherever the switch is not
-drawn). On the computer's side the row is the
+The Controls pane has the same switch, `Target ‹ NAME | Computer ›`, as a row of its own over the
+Volume row: `↑` from Volume reaches it, and `↓` from the row above lands on it first, a further `↓` going
+on to Volume; `←`/`→` pick the device or the computer, and the focused row wears the cursor, with the side
+shown in the highlight box (bold) and the other side plain dim, and `+`, `-` and `m` do nothing while it is focused (the wheel stays positional: over the bar it steps the volume). A click on a name flips and focuses the switch, a click elsewhere on its line focuses it. The Volume row keeps only the volume. The device's name is cut where the
+pane is narrow, and the switch never joins the Volume line (`C` works wherever the switch is not
+drawn). Where the device has no volume of its own the Host group's Volume row is the switch on the device's side, with `←→` picking the target; on the computer's side it becomes the switch line over the bar, and the cursor stays on the switch line through the flip. On the computer's side the Volume row is the
 computer's default sink: a bar from 0 to 100 % with the volume written inside it, `muted` while it
 is, and the sink's own name dim after them; before it has been read it reads `—`, never a live 0 %.
 `←→`, `+`, `-` and the wheel step it 1 %, never above 100 % (a sink something else boosted comes
@@ -1482,7 +1488,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.32.0 │
+│                          v0.32.5 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1884,7 +1890,7 @@ The nine steps, each a screen of the wizard:
 | Health | How this host looks | the `doctor` checks above and their summary, `▶ Continue` the way on, and `Later: open svolder without a device` to leave the wizard for the interface; a fix's own `svolder setup`/`svolder daemon install` line never appears here, since this run is the one or leads to the other |
 | Fixes | What svolder can put right itself | one confirmation for every unprivileged fix the Health step found (`Apply N fixes` / `Skip`, defaulting to Skip); skipped outright on a host with none |
 | Scan | Find the device | up to three five-second windows, stopping at the first that hears one; nothing heard offers `Scan again` / `Skip` and says to power the device on and close the phone app; three scans that could not run at all — no adapter, a bus that will not answer — end the run on the last reason given |
-| Pick | Which device | one device by number, when more than one answered — product, unit id, signal, and the profile the advertisement matches; an unknown product offers the profile list instead |
+| Pick | Which device | one device by number, when more than one answered — product, unit id, signal, and the profile the advertisement matches; a unit that is already configured is left out, with a line naming its device (`Left out, already configured: dac (0102030405060708)`); an unknown product offers the profile list instead |
 | Name | What to call it | a typed name, defaulting to the product; a name already configured is refused and asked again |
 | Passphrase | The device wants its passphrase | shown only after the first connect is refused, as a row like the Devices editor's: `←→` step it `none` → `auto` → a code, `‹ ____ ›` opening on the code, where only digits are typed, in order, and `Backspace` takes back the last; `Enter` answers with what the row is on, and a code of fewer than four digits is refused on the step (`a code is four digits`) without troubling the wizard. Where the terminal cannot be claimed the plain prompt takes a typed line: four digits, `auto`, `none` or blank for none |
 | Adapter | Which adapter to use | shown only with two or more adapters present: each one's catch rate against the device just picked, best first, written into `adapter` |

@@ -5,10 +5,21 @@ services:
   svolder:
     container_name: svolder
     # The image `make docker` builds: the static release binaries, running as the host user's
-    # uid so the files under ./config and ./run belong to them. After an update, `make docker`
+    # uid (PUID/PGID below) so the files under ./config and ./run belong to them; a folder Docker
+    # created root-owned is handed to that user at the first start. After an update, `make docker`
     # again, then `docker compose up -d`.
     image: svolder:local
     restart: unless-stopped
+    # The container shares the host's network, so the web UI (8738) and the MCP server (8737) are
+    # reached at the host's own address, and the QR code and pair link carry the host's LAN address
+    # as a native install's do. In the container both listen on every interface by default and
+    # nothing answers until ./config/svolder/config.toml has [web] enabled = true (or [mcp]
+    # enabled = true); both need the token (`docker exec svolder svolder web token`, or `... mcp
+    # token`). They bind on the host directly, so a svolderd running natively on this machine must
+    # not have web or MCP enabled on the same ports: the second listener alone fails with
+    # "cannot listen", and the daemon keeps its devices. Without host networking, publish the ports
+    # and set [web] url to the address your phone reaches.
+    network_mode: host
     # Longer than the daemon's own shutdown (up to 30 s for a stop that finds a connect in
     # flight, then a final settle): Docker's default 10 s would kill the daemon mid-connect
     # and leave the adapter's link behind.
@@ -18,8 +29,16 @@ services:
     # profile carries no D-Bus rules, so the bus refuses even the connection's Hello, and
     # SELinux hosts refuse a confined container the bus socket outright. Both options run
     # the container without that profile and change nothing in the host's own policy; a
-    # host without AppArmor or SELinux ignores them. The process still runs as the non-root
-    # user with Docker's capability set and seccomp filter.
+    # host without AppArmor or SELinux ignores them. The entrypoint drops to the non-root
+    # PUID:PGID before svolderd starts, which keeps Docker's capability set and seccomp filter.
+    # The user the daemon runs as; `make docker` writes the host's into .env. The entrypoint
+    # creates nothing: it hands ./config and ./run to this user when Docker made them root-owned.
+    environment:
+      PUID: ${HOST_UID:-1000}
+      PGID: ${HOST_GID:-1000}
+      # The address your phone reaches, for the QR code and pair link: only needed without host
+      # networking, or behind a reverse proxy (a `url` in config.toml wins).
+      # SVOLDER_WEB_URL: http://<host-ip>:8738
     security_opt:
       - apparmor=unconfined
       - label=disable
@@ -29,10 +48,6 @@ services:
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     # The computer's volume and EQ are opt-in: docker-compose.host-audio.yml, which `make docker`
     # enables in .env (COMPOSE_FILE) when it finds the host's PipeWire socket.
-    # The web UI, when ./config/svolder/config.toml has [web] enabled = true and
-    # listen = "0.0.0.0:8738": publish its port to reach it from this computer and your network.
-    # ports:
-    #   - "8738:8738"
     # The host's bluetooth group, so this container's user can reach bluetoothd over the
     # bind-mounted system bus. The gid differs between hosts (`getent group bluetooth`), so
     # there is no default: `make docker` writes the host's into .env, which compose reads.

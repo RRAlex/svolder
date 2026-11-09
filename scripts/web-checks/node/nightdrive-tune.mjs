@@ -8,11 +8,12 @@ import {
   GRACE_MS, bandsOf, bubblesOf, computerTone, createMorph, curveAt, diamondsOf, gMaxOf, halfPoints, heldTone,
   inBand, labelOf, mountainMap, qAtDiamond, tunable, tunableComputer,
 } from '../../../bins/svolderd/web/themes/nightdrive/tune.js';
+import { wireBands } from '../../../bins/svolderd/web/themes/nightdrive/bands-wire.js';
 import { wireTune } from '../../../bins/svolderd/web/themes/nightdrive/tune-wire.js';
-import { GUEST, computerRig, point } from './nightdrive-rig.mjs';
+import { DAC as RIG_DAC, GUEST, computerRig, point } from './nightdrive-rig.mjs';
 import { axisX } from '../../../bins/svolderd/web/themes/nightdrive/axis.js';
 import { responseDb } from '../../../bins/svolderd/web/core/tone-curve.js';
-import { createDrag, bandSteps } from '../../../bins/svolderd/web/core/tone-drag.js';
+import { computerSteps, createDrag, bandSteps } from '../../../bins/svolderd/web/core/tone-drag.js';
 
 let n = 0;
 const ok = async (name, fn) => { await fn(); n++; console.log('ok', name); };
@@ -450,7 +451,14 @@ function fakeScene() {
   scene.releasePointerCapture = () => {};
   scene.contains = () => true;
   scene.append = () => {};
-  scene.ownerDocument = { createElement: () => ({ style: {}, setAttribute() {}, remove() {}, offsetWidth: 80, offsetHeight: 20 }) };
+  scene.made = [];
+  scene.ownerDocument = {
+    createElement: () => {
+      const el = { style: {}, setAttribute() {}, remove() {}, offsetWidth: 80, offsetHeight: 20 };
+      scene.made.push(el);
+      return el;
+    },
+  };
   return scene;
 }
 const pointerEvent = (type, x, y, more = {}) => Object.assign(new Event(type), {
@@ -624,6 +632,411 @@ await ok('the_curve_stops_being_dim_when_a_drag_begins_with_the_eq_off', async (
   await flush();
   assert.equal(tune.frame().ghost, true, 'the drag over and the model still off: dim again');
   abort.abort();
+});
+
+// ---- the computer's points through the core's hand ----
+/** The tuner over `rig`'s page with its scene; the curve is up (the pointer rested over the band). */
+function mount(rig, { up = true } = {}) {
+  const scene = fakeScene();
+  const abort = new AbortController();
+  const live = { onSwitch() {}, onReading: (event, fn) => abort.signal.addEventListener('abort', rig.store.on(event, fn), { once: true }) };
+  const tune = wireTune({
+    root: { querySelector: () => scene }, core: rig.core, live, geometry: () => ({ w: W, h: H, H: HORIZON }), signal: abort.signal,
+  });
+  if (up) {
+    scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+    for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  }
+  return { scene, tune, abort };
+}
+/** The paced writes of a drag are out (the core sends a live update every 50 ms). */
+const settle = async () => { await flush(); await new Promise((r) => setTimeout(r, 160)); await flush(); };
+const slotted = (points) => points.map((p, i) => ({ ...p, slot: i + 1 }));
+const slottedRig = (more = {}) => {
+  const base = computerRig().core.model.page().host.computer;
+  return computerRig({ computer: { ...base, eq: { ...base.eq, points: slotted(base.eq.points) } }, ...more });
+};
+const writes = (rig) => rig.posts.filter(([path]) => path.startsWith('api/v1/host/eq/points/')).map(([path, body]) => ({ path, ...body }));
+const touchEvent = (type, touches, changed = touches) => Object.assign(new Event(type, { cancelable: true }), {
+  touches, changedTouches: changed,
+});
+const finger = (id, x, y, scene) => ({ identifier: id, clientX: x, clientY: y, target: scene });
+
+await ok('a_re_sort_while_a_point_is_held_moves_the_lit_point_the_held_number_and_the_label_with_it', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const bubble = tune.read().bubbles[0];
+  scene.dispatchEvent(pointerEvent('pointerdown', bubble.x, bubble.y));
+  scene.dispatchEvent(pointerEvent('pointermove', bubble.x + 40, bubble.y));
+  await flush();
+  assert.equal(tune.read().held, 1);
+  assert.equal(tune.read().lit, 1);
+  // another front end edits the dragged point (slot 1) to 1500 Hz: the table lists it third now
+  const host = rig.store.page().host;
+  const eq = host.computer.eq;
+  const moved = eq.points.map((p) => (p.slot === 1 ? { ...p, f: 1500 } : p)).sort((a, b) => a.f - b.f);
+  rig.store.emit('host', { ...host, computer: { ...host.computer, eq: { ...eq, points: moved } } });
+  const read = tune.read();
+  assert.equal(read.held, 3, 'the held point is the one listed third now');
+  assert.equal(read.lit, 3, 'its bell is lit');
+  const spot = read.bubbles.find((b) => b.band === 3);
+  const label = scene.made.at(-1);
+  near(Number.parseFloat(label.style.left), Math.max(0, Math.min(spot.x - 40, W - 80)), 0.1);
+  // the writes name the point by its slot throughout, and the release is one last value
+  scene.dispatchEvent(pointerEvent('pointerup', bubble.x + 40, bubble.y, { buttons: 0 }));
+  // let go: the bell stays lit on the point, where it is listed now
+  assert.equal(tune.read().held, null);
+  assert.equal(tune.read().lit, 3);
+  await settle();
+  const sent = writes(rig);
+  assert.ok(sent.length > 0 && sent.every((w) => w.slot === 1), JSON.stringify(sent));
+  assert.equal(sent.filter((w) => w.done === true).length, 1);
+  abort.abort();
+});
+
+await ok('a_wheel_notch_between_points_steps_the_q_of_the_nearest_in_x', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const first = tune.read().bubbles[0];
+  // far from every bubble, in the band: the nearest in x takes it
+  const spot = { x: first.x + 5, y: map.yOfDb(0) + 60 };
+  const wheel = Object.assign(new Event('wheel', { cancelable: true }), { clientX: spot.x, clientY: spot.y, deltaY: -100, deltaMode: 0, ctrlKey: false });
+  scene.dispatchEvent(wheel);
+  await flush();
+  assert.equal(wheel.defaultPrevented, true);
+  assert.equal(tune.read().lit, 1);
+  const sent = writes(rig);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].path, 'api/v1/host/eq/points/1');
+  assert.ok(sent[0].q > 0.7 && sent[0].done === false, JSON.stringify(sent));
+  abort.abort();
+});
+
+await ok('a_finger_on_a_point_drags_it_two_fingers_pinch_its_q_and_a_finger_on_empty_ground_taps_a_point_in', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const b = tune.read().bubbles[3];
+  // the touch's pointer press, then the touch event: the point is dragged by the touch
+  scene.dispatchEvent(pointerEvent('pointerdown', b.x, b.y, { pointerType: 'touch', pointerId: 7 }));
+  scene.dispatchEvent(touchEvent('touchstart', [finger(1, b.x, b.y, scene)]));
+  assert.equal(tune.read().held, 4);
+  scene.dispatchEvent(touchEvent('touchmove', [finger(1, b.x + 30, b.y - 20, scene)]));
+  await flush();
+  scene.dispatchEvent(touchEvent('touchend', [], [finger(1, b.x + 30, b.y - 20, scene)]));
+  await settle();
+  const dragged = writes(rig);
+  assert.ok(dragged.length >= 2 && dragged.every((w) => w.path === 'api/v1/host/eq/points/4'), JSON.stringify(dragged));
+  assert.equal(dragged.at(-1).done, true);
+  assert.equal(rig.posts.filter(([path]) => path === 'api/v1/host/eq/points').length, 0, 'a finger on a point adds none');
+  // two fingers over the point in hand halve its Q
+  const before = writes(rig).length;
+  scene.dispatchEvent(touchEvent('touchstart', [finger(1, b.x - 50, b.y, scene), finger(2, b.x + 50, b.y, scene)]));
+  scene.dispatchEvent(touchEvent('touchmove', [finger(1, b.x - 100, b.y, scene), finger(2, b.x + 100, b.y, scene)]));
+  await flush();
+  scene.dispatchEvent(touchEvent('touchend', [], [finger(1, b.x - 100, b.y, scene), finger(2, b.x + 100, b.y, scene)]));
+  await settle();
+  const pinched = writes(rig).slice(before);
+  assert.ok(pinched.length >= 2 && pinched.every((w) => w.path === 'api/v1/host/eq/points/4'), JSON.stringify(pinched));
+  assert.ok(pinched.filter((w) => w.q !== undefined).every((w) => w.q < 2), JSON.stringify(pinched));
+  // a finger on empty ground taps a point in
+  const spot = { x: 640, y: map.yOfDb(9) };
+  scene.dispatchEvent(pointerEvent('pointerdown', spot.x, spot.y, { pointerType: 'touch', pointerId: 8 }));
+  scene.dispatchEvent(touchEvent('touchstart', [finger(3, spot.x, spot.y, scene)]));
+  scene.dispatchEvent(pointerEvent('pointerup', spot.x, spot.y, { pointerType: 'touch', pointerId: 8, buttons: 0 }));
+  await flush();
+  assert.equal(rig.posts.filter(([path]) => path === 'api/v1/host/eq/points').length, 1);
+  abort.abort();
+});
+
+await ok('a_diamond_of_the_lit_point_drags_its_q_and_follows_a_re_sort', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const b = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointermove', b.x, b.y));
+  tune.step(0.016, performance.now());
+  const [lo] = tune.read().diamonds;
+  assert.equal(tune.read().lit, 4);
+  scene.dispatchEvent(pointerEvent('pointerdown', lo.x, lo.y));
+  assert.equal(tune.read().heldSide, 'lo');
+  scene.dispatchEvent(pointerEvent('pointermove', lo.x - 60, lo.y));
+  await flush();
+  // the point is listed elsewhere meanwhile: the drag's number follows
+  const host = rig.store.page().host;
+  const eq = host.computer.eq;
+  const moved = eq.points.map((p) => (p.slot === 4 ? { ...p, f: 300 } : p)).sort((a, c) => a.f - c.f);
+  rig.store.emit('host', { ...host, computer: { ...host.computer, eq: { ...eq, points: moved } } });
+  assert.equal(tune.read().held, 3);
+  scene.dispatchEvent(pointerEvent('pointerup', lo.x - 60, lo.y, { buttons: 0 }));
+  await settle();
+  const sent = writes(rig);
+  assert.ok(sent.length >= 2 && sent.every((w) => w.slot === 4), JSON.stringify(sent));
+  assert.ok(sent.some((w) => w.q !== undefined), 'a Q went out');
+  assert.equal(sent.at(-1).done, true);
+  abort.abort();
+});
+
+/** `mount` with a scene width the test changes. */
+function mountSized(rig, width) {
+  const scene = fakeScene();
+  const abort = new AbortController();
+  const live = { onSwitch() {}, onReading: (event, fn) => abort.signal.addEventListener('abort', rig.store.on(event, fn), { once: true }) };
+  const tune = wireTune({
+    root: { querySelector: () => scene }, core: rig.core, live, geometry: () => ({ w: width(), h: H, H: HORIZON }), signal: abort.signal,
+  });
+  scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+  for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  return { scene, tune, abort };
+}
+
+await ok('a_frame_builds_the_curve_once_and_the_map_once_and_keeps_them_while_nothing_changes', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const a = tune.frame();
+  const b = tune.frame();
+  assert.equal(typeof a.curve, 'function');
+  assert.equal(a.curve, b.curve, 'the same curve function while the tone, the map and the width are the same');
+  assert.equal(tune.curve(), a.curve);
+  // the bell's diamonds sit on that curve: lit point, diamonds on the curve it has
+  scene.dispatchEvent(pointerEvent('pointermove', a.bubbles[3].x, a.bubbles[3].y));
+  const lit = tune.frame();
+  assert.ok(lit.bell, 'a bell is lit');
+  for (const d of lit.bell.diamonds) near(d.y, lit.curve(d.x), 1e-9);
+  assert.equal(lit.curve, a.curve);
+  // a tone that changes (a held value) gets its own curve, and so does a scene that is resized
+  rig.core.actions.computer.setPoint(4, { g: -5 }, { done: false });
+  rig.store.emit('host', rig.store.page().host);
+  assert.notEqual(tune.frame().curve, a.curve);
+  abort.abort();
+  let wide = W;
+  const again = mountSized(rig, () => wide);
+  const c = again.tune.frame().curve;
+  wide = W / 2;
+  assert.notEqual(again.tune.frame().curve, c, 'the width is in the memo');
+  again.abort.abort();
+});
+
+await ok('a_finger_on_a_diamond_drags_its_q_and_one_done_ends_it', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const b = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointermove', b.x, b.y));
+  tune.step(0.016, performance.now());
+  const [lo] = tune.read().diamonds;
+  scene.dispatchEvent(pointerEvent('pointerdown', lo.x, lo.y, { pointerType: 'touch', pointerId: 9 }));
+  // the same finger's touch event follows its pointer's press: one touch must not let the drag go
+  scene.dispatchEvent(touchEvent('touchstart', [finger(1, lo.x, lo.y, scene)]));
+  // the touch of that finger may stand on a point's bubble too (a narrow bell): it is the diamond's drag, not a new one
+  scene.dispatchEvent(touchEvent('touchstart', [finger(1, b.x, b.y, scene)]));
+  assert.equal(tune.read().heldSide, 'lo', 'the diamond is still held after the finger\'s touchstart');
+  scene.dispatchEvent(pointerEvent('pointermove', lo.x - 60, lo.y, { pointerType: 'touch', pointerId: 9 }));
+  scene.dispatchEvent(touchEvent('touchmove', [finger(1, b.x + 40, b.y, scene)]));
+  scene.dispatchEvent(pointerEvent('pointerup', lo.x - 60, lo.y, { pointerType: 'touch', pointerId: 9, buttons: 0 }));
+  assert.equal(tune.read().held, null, 'the finger started no second drag on the bubble beside the diamond');
+  scene.dispatchEvent(touchEvent('touchend', [], [finger(1, b.x + 40, b.y, scene)]));
+  await settle();
+  const sent = writes(rig);
+  assert.ok(sent.length >= 2 && sent.every((w) => w.slot === 4), JSON.stringify(sent));
+  assert.ok(sent.some((w) => w.q !== undefined), 'a Q went out');
+  assert.equal(sent.filter((w) => w.done === true).length, 1);
+  abort.abort();
+});
+
+await ok('a_second_finger_always_makes_the_press_no_tap', async () => {
+  const rig = slottedRig();
+  const { scene, tune, abort } = mount(rig);
+  const spot = { x: 640, y: map.yOfDb(9) };
+  const place = { h: H, H: HORIZON };
+  assert.ok(inBand(place, spot.y));
+  const added = () => rig.posts.filter(([path]) => path === 'api/v1/host/eq/points').length;
+  const press = (extra) => {
+    scene.dispatchEvent(pointerEvent('pointerdown', spot.x, spot.y, { pointerType: 'touch', pointerId: 8 }));
+    scene.dispatchEvent(touchEvent('touchstart', [finger(1, spot.x, spot.y, scene), ...extra]));
+    scene.dispatchEvent(pointerEvent('pointerup', spot.x, spot.y, { pointerType: 'touch', pointerId: 8, buttons: 0 }));
+  };
+  // the second finger's middle is out of the band, a third finger comes, or its target is off the scene
+  press([finger(2, spot.x, map.yOfDb(-12) + 400, scene)]);
+  await settle();
+  assert.equal(added(), 0, 'a middle out of the band');
+  press([finger(2, spot.x + 10, spot.y, scene), finger(3, spot.x - 10, spot.y, scene)]);
+  await settle();
+  assert.equal(added(), 0, 'a third finger');
+  scene.contains = (el) => el === scene;
+  press([finger(2, spot.x + 10, spot.y, {})]);
+  await settle();
+  assert.equal(added(), 0, 'a target off the scene');
+  scene.contains = () => true;
+  // one finger still taps
+  press([]);
+  await settle();
+  assert.equal(added(), 1);
+  abort.abort();
+});
+
+await ok('the_memo_of_the_map_and_the_curve_has_every_term_of_the_scene_in_its_key', async () => {
+  const rig = slottedRig();
+  const geo = { w: W, h: H, H: HORIZON, v: H };
+  const scene = fakeScene();
+  const abort = new AbortController();
+  const live = { onSwitch() {}, onReading: (event, fn) => abort.signal.addEventListener('abort', rig.store.on(event, fn), { once: true }) };
+  const tune = wireTune({
+    root: { querySelector: () => scene }, core: rig.core, live, geometry: () => ({ ...geo }), signal: abort.signal,
+  });
+  scene.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+  for (let i = 0; i < 40; i++) tune.step(0.05, performance.now());
+  const same = tune.frame().curve;
+  assert.equal(tune.frame().curve, same);
+  for (const [term, to] of [['H', HORIZON + 40], ['v', H - 100], ['h', H + 60], ['w', W - 100]]) {
+    const before = geo[term];
+    geo[term] = to;
+    const next = tune.frame().curve;
+    assert.notEqual(next, same, `${term} is in the key`);
+    // and the curve answers the new numbers: the y of the curve at the middle moves with the map
+    geo[term] = before;
+    assert.notEqual(tune.frame().curve, next, `${term} back again rebuilds`);
+    tune.frame();
+  }
+  // a narrower scene: a diamond's Q is asked from the frequency under the pointer on the map of that width
+  geo.w = W - 100;
+  const b4 = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointermove', b4.x, b4.y));
+  tune.step(0.016, performance.now());
+  const [lo] = tune.read().diamonds;
+  scene.dispatchEvent(pointerEvent('pointerdown', lo.x, lo.y));
+  scene.dispatchEvent(pointerEvent('pointermove', lo.x - 90, lo.y));
+  scene.dispatchEvent(pointerEvent('pointerup', lo.x - 90, lo.y, { buttons: 0 }));
+  await settle();
+  const qs = computerSteps().q;
+  const p4 = rig.core.model.page().host.computer.eq.points[3];
+  const fresh = mountainMap({ w: W - 100, h: H, H: HORIZON, gMax: 12 });
+  const want = qs[qAtDiamond(qs, { f0: p4.f, gainDb: p4.g, q: p4.q, type: p4.type }, 'lo', fresh.hzAt(lo.x - 90))];
+  const asked = writes(rig).filter((w) => w.q !== undefined).at(-1).q;
+  near(asked, want, want * 0.05);
+  abort.abort();
+  // the gain range: the device's steps list a largest gain of 6 dB instead of 12, the tone itself the same object
+  const dac = computerRig({ side: 'dac', device: { ...RIG_DAC, tone: toneOf(), tone_steps: STEPS } });
+  const sceneD = fakeScene();
+  const stopD = new AbortController();
+  const tuneD = wireTune({
+    root: { querySelector: () => sceneD }, core: dac.core, live: { onSwitch() {}, onReading() {} },
+    geometry: () => ({ w: W, h: H, H: HORIZON }), signal: stopD.signal,
+  });
+  sceneD.dispatchEvent(pointerEvent('pointermove', 640, map.yOfDb(0)));
+  for (let i = 0; i < 40; i++) tuneD.step(0.05, performance.now());
+  const wide = tuneD.frame().curve;
+  assert.equal(typeof wide, 'function');
+  dac.store.device().tone_steps = { ...STEPS, gain: [[-6, '-6.0 dB'], [6, '+6.0 dB']] };
+  assert.notEqual(tuneD.frame().curve, wide, 'gMax is in the key');
+  stopD.abort();
+});
+
+await ok('a_diamond_drag_with_the_eq_off_lifts_the_dim_and_a_flip_lets_go_of_the_lit_point', async () => {
+  const base = computerRig().core.model.page().host.computer;
+  const rig = computerRig({ computer: { ...base, eq: { ...base.eq, on: false, points: slotted(base.eq.points) } } });
+  const { scene, tune, abort } = mount(rig);
+  const b = tune.read().bubbles[3];
+  scene.dispatchEvent(pointerEvent('pointermove', b.x, b.y));
+  tune.step(0.016, performance.now());
+  const [lo] = tune.read().diamonds;
+  assert.equal(tune.frame().ghost, true);
+  scene.dispatchEvent(pointerEvent('pointerdown', lo.x, lo.y));
+  scene.dispatchEvent(pointerEvent('pointermove', lo.x - 60, lo.y));
+  await flush();
+  assert.equal(tune.frame().ghost, false, 'the first move of a diamond lifts the dim');
+  scene.dispatchEvent(pointerEvent('pointerup', lo.x - 60, lo.y, { buttons: 0 }));
+  await settle();
+  assert.equal(tune.read().lit, 4);
+  // the side flips: the number lit on it is not the same on the other
+  rig.core.computer.flip('dac');
+  assert.equal(tune.read().lit, null);
+  abort.abort();
+});
+
+/** The sheet's point steppers over a real core: `repeat` is the core's hold stood in for, so the test says when the
+ * hold steps and when it ends. */
+function steppers(rig, state = 'live') {
+  const listeners = {};
+  const wrap = {
+    addEventListener(type, fn) { (listeners[type] ??= []).push(fn); },
+    querySelector: () => null,
+  };
+  const abort = new AbortController();
+  const holds = {};
+  const core = {
+    ...rig.core,
+    hold: { repeat(event, opts) { holds.opts = opts; holds.ended = 0; opts.onStart?.(); opts.step(opts.el); return { end: () => { holds.ended += 1; opts.onEnd(); } }; } },
+  };
+  wireBands({
+    core, live: { onSwitch() {}, onReading() {} }, sheet: { body: () => null, wrap, keep: { take() {}, drop() {}, dropLater() {} }, isOpen: () => false },
+    view: { state }, signal: abort.signal,
+  });
+  const button = (n, param, step) => ({
+    dataset: { act: 'point-step', point: String(n), param, step: String(step) }, id: '',
+  });
+  const press = (el) => {
+    const event = { target: { closest: () => el }, isPrimary: true, pointerType: 'mouse', button: 0 };
+    for (const fn of listeners.pointerdown) fn(event);
+  };
+  return { press, holds, abort, button };
+}
+
+await ok('a_held_point_stepper_goes_on_with_its_point_after_a_re_sort_and_ends_with_one_final_write', async () => {
+  const rig = slottedRig();
+  const { press, holds, abort, button } = steppers(rig);
+  const el = button(1, 'g', 1);
+  press(el);
+  await settle();
+  // another front end re-lists the point stepped (slot 1) third; the drawn button still says 1
+  const host = rig.store.page().host;
+  const eq = host.computer.eq;
+  const moved = eq.points.map((p) => (p.slot === 1 ? { ...p, f: 1500 } : p)).sort((a, b) => a.f - b.f);
+  rig.store.emit('host', { ...host, computer: { ...host.computer, eq: { ...eq, points: moved } } });
+  holds.opts.step(el);
+  holds.opts.step(el);
+  await settle();
+  const sent = writes(rig);
+  assert.ok(sent.length >= 3 && sent.every((w) => w.slot === 1), `every step went to the same point: ${JSON.stringify(sent)}`);
+  assert.equal(sent.filter((w) => w.done === true).length, 0, 'no final write while the hold goes on');
+  holds.opts.onEnd();
+  await settle();
+  const all = writes(rig);
+  assert.equal(all.filter((w) => w.done === true).length, 1, 'one final write at the end');
+  assert.equal(all.at(-1).slot, 1);
+  abort.abort();
+});
+
+await ok('a_held_point_stepper_is_over_when_its_point_is_removed_and_never_steps_the_one_that_took_its_number', async () => {
+  const rig = slottedRig();
+  const { press, holds, abort, button } = steppers(rig);
+  const el = button(1, 'g', 1);
+  press(el);
+  await settle();
+  const sent = writes(rig).length;
+  // another front end removes the point (slot 1): the hold is ended, with no final write for it
+  const host = rig.store.page().host;
+  const eq = host.computer.eq;
+  rig.store.emit('host', { ...host, computer: { ...host.computer, eq: { ...eq, points: eq.points.filter((p) => p.slot !== 1) } } });
+  await settle();
+  assert.equal(holds.ended, 1, 'the hold ended');
+  assert.equal(writes(rig).filter((w) => w.done === true).length, 0, 'no final write for a point that is gone');
+  // a repeat that was already on its way steps nothing: the point now listed first is another
+  holds.opts.step(el);
+  await settle();
+  assert.equal(writes(rig).length, sent, 'nothing written for the neighbour');
+  abort.abort();
+});
+
+await ok('a_point_stepper_pressed_while_the_stream_is_waiting_or_lost_steps_nothing_and_leaves_no_burst_open', async () => {
+  for (const state of ['waiting', 'lost']) {
+    const rig = slottedRig();
+    const { press, holds, abort, button } = steppers(rig, state);
+    press(button(1, 'g', 1));
+    await settle();
+    assert.equal(writes(rig).length, 0, `no step while ${state}: ${JSON.stringify(writes(rig))}`);
+    holds.opts.onEnd();
+    await settle();
+    assert.equal(writes(rig).length, 0, `and no stray final write while ${state}`);
+    abort.abort();
+  }
 });
 
 console.log(`nightdrive-tune.mjs: ${n} passed`);

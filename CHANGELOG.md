@@ -8,6 +8,194 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.32.5
+
+Fixes from a first user's Raspberry Pi 4 and Docker set-up.
+
+- **Docker first start**: when `./config` or `./run` did not exist, Docker creates them owned by
+  root and the daemon could not write its configuration. The image's entrypoint now hands a
+  root-owned folder to your user (`PUID` and `PGID`, which compose takes from `HOST_UID` and
+  `HOST_GID` in `.env`), says on stderr when a folder belongs to someone else, and runs the daemon
+  without root's group; the published-image steps no longer need `mkdir` and `chown`.
+  `docker exec svolder svolder ...` runs as the daemon's user.
+- **Doctor on a Raspberry Pi**: an adapter blocked by rfkill gets `sudo rfkill unblock bluetooth`
+  (a hardware block says so; each adapter is judged by its own switch), and a Bluetooth service
+  that is not on the system bus gets `sudo systemctl enable --now bluetooth` (install bluez if it
+  is missing). The Bluetooth guide has a Raspberry Pi section.
+- **Web and MCP in Docker**: the compose files now give the container the host's network and the
+  image listens on every interface, so the steps are `enabled = true` under `[web]` or `[mcp]` in
+  `config.toml`, then `docker exec svolder svolder web token` to sign in; the QR code and pair link
+  carry the host's LAN address. A native `svolderd` on the same machine must not serve the same
+  ports. `svolder web --qr` in a container on a bridge network says to set `[web] url`. New
+  `SVOLDER_WEB_LISTEN`, `SVOLDER_MCP_LISTEN` and `SVOLDER_WEB_URL` set only the defaults; the file
+  wins. The web-address picker also skips Podman and CNI interfaces.
+- For contributors: `make sim-app` starts the simulator for the Schiit phone app, after checking
+  BlueZ's flags and printing the drop-in when they are missing; the release workflow check now
+  requires every Dockerfile `COPY` source to be staged into the image's build context.
+
+## 0.32.4
+
+- Editing a device so that it no longer shares a unit with another device is accepted; the edit is judged by the file it would leave, not the file it starts from.
+- For contributors: `make tests-check` (was `make mutants`) checks that the web tests catch a deliberate break. It is slow, by hand only and not part of any gate.
+- A test race in the events stream's host-hold test is fixed: it reads until the pause it asserts has arrived.
+
+## 0.32.3
+
+A fix release: the TUI's Target row is reached and drawn like the rows around it, a Yes/No question
+on the web page owns the keyboard, a unit is configured once, and the daemon's reads of
+`config.toml` leave its async threads. It also carries 0.31.3 to 0.32.2, which were never
+released on their own; their notes follow.
+
+- **Target row reached going down**: `↓` from the row above Volume (Mute) lands on the Target row
+  first instead of skipping it, a further `↓` going on to Volume.
+- **Target row chaser**: the Target row has a cursor of its own on the device and tone-control
+  screens, so the trail and the shimmer play when the cursor moves onto or off it.
+- **Target row look**: with the Target row selected, the side shown is in the highlight box, bold,
+  and the other side plain dim, in colour and in monochrome; unselected, the side shown stays bold.
+  A device with no volume gets the same look, keys and chaser on its Host Volume switch.
+- **One unit, one device**: a unit id is configured once. `svolder add`, the setup wizard and the
+  TUI's device editor refuse a second device on a unit another device carries, naming both, and
+  the setup wizard's scan list leaves configured units out with a line saying which devices they
+  are. A file that already has two `[[device]]` blocks for one unit (the wizard used to allow it)
+  still starts the daemon and loads in every command: the first block is used, the later one is
+  left out, and a warning says so (also in `svolder doctor`), for example `devices "dac" and
+  "amp" are both configured for unit 1A2B3C4D5E6F7A8B; "amp" is left out and "dac" is used. Run
+  `svolder remove amp` or edit the file to take one of the two blocks out`. `svolder remove` works
+  on such a file; other device writes refuse until it is fixed.
+- **Hop edits**: `svolder hops edit` and the page's hop edit read the hop they change under the
+  configuration file's lock, so an edit that races another write keeps the other change; the page's
+  answer to a hop write lists the file just written.
+- **Web page, a question owns the keyboard**: while Ember's Yes/No question is open, the arrow
+  keys, `m`, `0` and `f` no longer change the volume, the mute or the tone behind it; only the
+  question's own keys act, and `T` no longer opens the theme picker behind it.
+- **Web page, Paper's lost or waiting sheet is out of reach**: a list or a form open on the sheet
+  no longer keeps it clickable when the stream is lost or the page waits for the device again; the
+  form stays, with what was typed, and is usable again when the page wakes.
+- **Web page, no theme can start**: when no theme starts, the menu and the picker no longer draw
+  the failed theme's rows, and a card picked in the picker tries that theme.
+- **Web page, waking after a lost link**: a page that was waking when its link dropped keeps its
+  dial and sliders inert until the first reading of the reopened stream, as a page that woke
+  without a drop does.
+- **Web page, a device that leaves the fleet**: when the daemon stops listing a device the page
+  follows, the page's stream is opened again without it, once, instead of going on asking for it.
+- **Web page, a refusal is kept**: a volume raise the page drops after a refused write no longer
+  replaces the refusal as the answer to that write.
+- **The web page's config reads leave the async threads**: the live stream, page loads, tone and
+  preset saves, the preset and hop writes and the computer's presets no longer read `config.toml`
+  on the daemon's async threads.
+
+Internal:
+
+- `make mutants` runs every node web mutant, and `make mutants FULL=1` the browser ones too, with each runner's kills and wall time and a non-zero exit when a mutant survives. The browser runners share one pool (`MUT_WORKERS`, default from the cores and the CPU pressure), and Ember's and Paper's mutants run only the cases they name.
+- **Ember's drawing**: its dial, meters and tone curve, on the first draw and on live updates
+  alike, round a value that falls exactly halfway to the even digit, as the daemon's own text does
+  (0.125 is `0.12`).
+- **Container runs**: the two `backend` tests that cannot pass inside a container skip themselves
+  there, with the reason on stderr.
+- **Dependencies**: `fixedbitset` 0.5.9, `itoa` 1.0.19 and `uuid` 1.29.2, patch bumps only.
+- **The web checks**: browser checks hold `/tmp/svolder-web-gate.lock` shared and the timing checks
+  exclusive, the job count follows the cores and the CPU pressure, `make web-checks-task` runs the
+  logic-only checks in Chromium alone, each run writes its per-check times to
+  `target/web-checks/timing.tsv`, and the README in `scripts/web-checks/` describes the ladder. The
+  quick and task gates reuse a check's pass while the files it reads are unchanged and report it as
+  `cached` (`WEB_CHECKS_NO_CACHE=1` runs everything), and Night drive's Still and readout rates are
+  checked against a fake clock.
+  New cases: a stream's `close()` and its wait while lost, a fleet that prunes, a kept refusal,
+  and Night drive's mouse hover at the tone band's edges.
+
+## 0.32.2
+
+Groundwork for the Bifrost 3: the simulator can play the unit's USB, S/PDIF and sample-rate
+readings, the TUI picks between the DAC and the computer, and `make help` reads as a short menu.
+
+- **The simulator's knobs**: `svolder-sim --profile bifrost3` starts with `--usb on|off`,
+  `--spdif-locked on|off` and `--sample-rate HZ` (`44100` or `44.1k`; USB off, S/PDIF unlocked and
+  48 kHz by default) and, while it runs, takes the lines `usb 1|0`, `spdif 1|0` and `rate 96000`
+  on its standard input. Each change goes to the connected central at once as a Status, so the
+  Status pane, `status --json` and the web page's readings follow. A bad value is one line on
+  standard error and the sim keeps going. The S/PDIF lock goes out as a UInt8, as a Bifrost 3
+  sends it.
+- **Firmware labels**: a unit's readings 210.2.1 and 210.2.2 read `Firmware` and `DSP firmware`
+  in the CLI, the TUI and the web page.
+- **Target in the TUI**: a `Target` row on the Controls pane and at the top of the tone screen
+  picks the DAC or the computer with `←` and `→`, the same switch as the web page's. The Volume and
+  Mode rows keep their own values; the row says why when the computer cannot be used.
+- **`make help`** is in sections with one short line per target; `make help T=<target>` gives the
+  details, with each setting and the values it takes. On a terminal the sections and targets are
+  bold, the settings dim and the warning about your real audio yellow; a pipe, `NO_COLOR` and
+  `TERM=dumb` get plain text. `make help-check` is part of `make check`.
+- **`third-party-licenses` is now `3rdpartylicenses`**, the make target that writes the notices.
+- **Docs**: when you read BlueZ state by hand with several adapters, `bluetoothctl list` then
+  `select <adapter address>` first, since a bare `bluetoothctl info` answers for its default
+  controller only; the simulator's standard input when it runs as a background job.
+
+Internal:
+
+- **Dependencies**: `cargo update` within the current versions (rmcp 3.9, ureq-proto 0.7, toml 1.2,
+  unicode-width 0.2.3 and 32 more); builds and the whole test suite pass, and `cargo audit` (0.22.2)
+  finds no known vulnerability, only two unmaintained-crate warnings (`paste` and `ttf-parser`),
+  which are in the known issues.
+
+## 0.32.1
+
+A burn-down after the Computer flip: the computer's EQ is steadier in the four web themes and in
+the daemon, and a machine that was missing its chain now finds it.
+
+- **Ember**: the computer's points table has `−` and `+` steppers for the point you picked, in the
+  look of the DAC's table (hold one to keep stepping; the last value is written when you let go).
+  The tone part's DAC and Computer swap now waits for wheel and stepper bursts on Ember's computer
+  curve, as it already did for drags and steppers, so a flip no longer replaces the panel under
+  your hand.
+- **Paper**: a number typed in a cell reads `2.9k` and a comma (`+3,2`), and a word that is no
+  number is said and the cell put back. The wheel and the arrow keys on a point are one burst, so
+  ten notches make ten live updates and one saved write instead of ten saved writes. A tap that
+  adds a point needs under 6 px and 600 ms (it was 8 px with no time limit), and a second finger
+  anywhere on the page drops a waiting tap, so it adds no point.
+- **Night drive**: the computer's points table has `−` and `+` steppers on each value (a phone
+  shows a point as a block), and a held stepper ends when its point is removed by another front
+  end instead of going on to the point that took its number. The lit bell, its label and a drag
+  follow the points when they are put in order. Two fingers pinch the point in hand; the question
+  for a preset a device plays too is asked in the sheet with Apply and Keep.
+- **Signal**: an arrow key on a point is a live update and one saved write (two posts for one key),
+  a typed value equal to the point's own value writes nothing, and the player hop reads
+  `PipeWire volume 54 %`.
+- **In every theme**: a typed value is rounded to its field (frequency to 0.01 Hz, gain to 0.1 dB,
+  Q to 0.01) and Enter on a cell that has not changed writes nothing, even for a +14 dB point.
+  Removing the point in hand puts none in hand. A tap on a full table says `16 is the most`. The
+  tone curve, the marker and the label follow a point that moved when the table was put in order.
+  A comma in a typed value is read both ways, as a decimal mark and as a thousands separator, and
+  the field's range picks the one that fits (`1,000` Hz is 1000, `20,500` Hz is 20.5); when the
+  range cannot tell (`20,000` Hz) the cell keeps its value and says `Write 20 or 20k.`
+- **Where the computer's chain is found**: a machine whose wireplumber says it is older than 0.5
+  while its `wpctl` is 0.5 lists the filter-chain sink under `Filters:`; svolder now reads both
+  headings, so the computer EQ finds its chain there.
+- **The daemon**: a refused turn-on no longer keeps the sink's rate in mind, so the same load
+  plays once the sink is back at a rate it can; retries while a turn-off is held write nothing to
+  the state file, and a late success keeps the preamp it measured at the rate that played. A save
+  over a state file written by the command line meanwhile sends the screen's points at the next look, to the
+  command line's chain. The terminal of `pw-cli` reads raw, so a 16-point update is not cut at
+  4095 bytes.
+- **The TUI**: the write queue's bound of 64 and the move back to the DAC (the computer's EQ goes
+  off first, and a refusal leaves both sides as they were) have tests.
+- **Docs**: what applies after a live softening, what a reload does to the node bound, and the
+  quieter-until-an-apply price of the node cap, in `docs/design/host-control-preamp.md`.
+
+Internal:
+
+- **The computer side's shared web code** (the typed-number words, the point hand with its drag,
+  tap, touch, pinch, wheel and key bursts, the table, the computer view, the presets and the
+  volume steps) moved into the web core and the four themes call it; their requests are the same
+  but for the lines above. Each helper has a node case written first and mutants that fail it
+  (`mutate_computer.sh`), and `contract.py` pins the core's members.
+- **The preamp lab** has a liveness rule (a quiet node plays the view's curve under its preamp), a
+  reload-writes-nothing rule, a quiet tail after every sequence and a targeted short run beside the
+  ordinary one; the controller's checked request and the session's deliver, settle and node run
+  once, over a small link trait, for the daemon and the lab.
+- **Checks**: Night drive's wet-road case pins the measured draw time (it raced the draw budget
+  under Firefox load), a second case pins the budget's hysteresis, and `ND_ONLY=wet_road` runs
+  them alone. The 16-point drag and the chain's node id before and after a restart are in
+  `make host-e2e`. `computer_paper` is in both lists of `run-all.sh`.
+
 ## 0.32.0
 
 The web page, the terminal and Home Assistant can now change the computer's own sound: one switch
@@ -107,7 +295,7 @@ Night drive and Signal's second pass gave every theme these, from the shared cor
 - A canvas loop may run under reduced motion and at a pace, and the analysis rules (the held
   bass, the minute's range) are the core's.
 
-Also in this release:
+Also:
 
 - **The CLI demo**: `svolder tui --demo --host --web` opts the demo into the computer's real
   audio and the web page; the default demo stays safe. `make demo` uses them, and
@@ -173,14 +361,6 @@ Signal found four things the shared core lacked; all are fixed for every theme:
   and a page keeps the last thing it heard, dimmed, while the connection is lost.
 - A theme can place the menu button against the window instead of the page
   (`anchor(el, { fixed })`), which a pinned strip needs; Ember and Paper place it as before.
-
-0.31.3 was not released on its own. Its changes ship in this release:
-
-- **Paper**: the red volume note's arrow climbs the margin on the needle's side instead of running
-  over the tone section, and The device starts folded.
-- **Releases**: pushing a version tag starts the release workflow, which also runs the whole test
-  suite on arm64 before anything is published.
-- `svolder-sim --trace` stamps every line with the milliseconds since the simulator started.
 
 ## 0.31.3
 

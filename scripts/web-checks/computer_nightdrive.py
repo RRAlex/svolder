@@ -21,6 +21,10 @@ controls, on a fake host (`SVOLDER_HOST=fake`: its sink and EQ live in memory, n
   the_side_survives_a_reload            the side kept is the one drawn after a load; no live 0 %, no write
   the_mountains_draw_the_curve_dimmed_while_the_eq_is_off   the curve and bubbles at 45 % with the EQ off, dots still on it
   a_flip_ends_a_wheel_burst_with_one_done   the burst's timer is cancelled by the flip
+  a_held_stepper_follows_its_point_through_a_re_sort   (Chromium) a held frequency + carries its point past a neighbour: the steps go on to the same point
+  a_flip_mid_hold_ends_the_hold        (Chromium) a held volume key and a keyboard flip: the hold ends, nothing more is written
+  the_mouse_hover_band_is_the_curves_window_and_a_hands_reach   the mouse's band: a pointer 6 px above leaves the mountains, 6 px inside raises the curve
+  the_points_table_has_steppers_that_step_and_repeat   a - and a + beside each value of a point: a step a last value, a held one repeats
   the_keys_keep_the_focus_across_a_keyboard_flip   the key chosen keeps the focus
   presets_save_rename_delete_from_the_computer_side   the same actions as the DAC's
   the_same_preset_on_both_asks_and_yes_flattens_the_dac   the question; no sends nothing, yes confirms
@@ -60,6 +64,8 @@ TUNE = '__core.theme.driver.tune()'
 WINDOW_BASE, WINDOW_SPAN = 0.08, 0.14
 TUNE_ON = "document.querySelector('.nd-scene').dataset.tune === 'on'"
 CARD = "document.querySelector('.ask')"
+# the question the sheet asks in its own place (ask.js)
+ASK = "document.querySelector('.nd-askbox')"
 SHEET = "!!document.getElementById('nd-dialog')"
 # the plan of a non-flat curve: a low shelf, peaks of both signs and a high shelf
 PLAN = [('LSC', 105, 5.5, 0.7), ('PK', 180, -2.1, 0.9), ('PK', 1200, -1.8, 1.4), ('PK', 2900, 3.2, 2.0),
@@ -448,6 +454,27 @@ def add_remove(b, d):
           len(got) == 1 and flat is True and b.page(f'{POINTS}.length') == 1
           and b.page("document.querySelector('#nd-px-1').getAttribute('aria-label')") == 'Remove point 1',
           [got, b.page(POINTS)])
+
+
+def full_table(b, d):
+    """With sixteen points a tap on the mountains, curve up, adds nothing and says how many the EQ holds at most."""
+    start(b, d)
+    flip(b, 'computer')
+    seed(b, 16)
+    name = 'a_tap_on_a_full_table_says_so'
+    most = b.page(f'{COMPUTER}.eq.max')
+    marks, t, box = curve_up(b)
+    # sixteen bubbles leave less room: any place 14 px or more from every bubble will do
+    spot = next(((x, y) for fx in (0.04, 0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.96)
+                 for dy in (0.0, 0.05, -0.05, 0.08, -0.08, 0.1, -0.1)
+                 for x, y in [(box[0] + fx * t['w'], box[1] + t['H'] - 0.08 * t['h'] + dy * t['h'])]
+                 if all(math.hypot(x - mx, y - my) > 14 for mx, my in marks.values())), None)
+    check('a_tap_on_a_full_table_says_so: there is room to tap', spot is not None, marks)
+    clear(b)
+    b.click(*spot)
+    said = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)") or None)
+    check(f'{name}: a tap says the most the daemon holds', said == [f'{most} is the most'] and most is not None, [said, most])
+    check(f'{name}: and writes nothing', posts(b, 'api/v1/host/eq/points') == [], posts(b))
 
 
 def sorted_points(b, d):
@@ -913,23 +940,30 @@ def both_sides(b, d):
     flip(b, 'computer')
     open_sheet(b)
     clear(b)
-    tap(b, '#nd-presets [data-act="preset"][data-name="Warm"]')
-    card = poll(lambda: b.page(f'!!{CARD}'))
-    words = b.page(f'{CARD}?.querySelector(".ask-words").textContent') or ''
-    check(f'{name}: it asks, with the device named', card is True and 'flatten' in words and 'Gungnir 2' in words, words)
-    b.page(f'{CARD}.querySelector(".ask-no").click()')
+    chip = '#nd-presets [data-act="preset"][data-name="Warm"]'
+    on_chip = f"document.activeElement === document.querySelector('{chip}')"
+    tap(b, chip)
+    card = poll(lambda: b.page(f'!!{ASK}'))
+    words = b.page(f'{ASK}?.querySelector(".nd-question").textContent') or ''
+    check(f'{name}: it asks in the sheet, with the device named', card is True and 'flatten' in words and 'Gungnir 2' in words
+          and b.page(f'!{CARD}'), words)
+    click_el(b, '.nd-askbox [data-answer="keep"]')
     time.sleep(0.8)
     log = posts(b)
     check(f'{name}: no sends nothing more and says nothing',
-          len(log) == 1 and log[0][2] == 409 and b.page(f'!{CARD}') and b.page("document.querySelectorAll('#toasts .toast').length") == 0, log)
-    tap(b, '#nd-presets [data-act="preset"][data-name="Warm"]')
-    poll(lambda: b.page(f'!!{CARD}'))
-    b.page(f'{CARD}.querySelector(".ask-yes").click()')
+          len(log) == 1 and log[0][2] == 409 and b.page(f'!{ASK}') and b.page("document.querySelectorAll('#toasts .toast').length") == 0, log)
+    check(f'{name}: the focus is on the chip after no', b.page(on_chip) is True, b.page('document.activeElement?.id'))
+    tap(b, chip)
+    poll(lambda: b.page(f'!!{ASK}'))
+    click_el(b, '.nd-askbox [data-answer="apply"]')
     time.sleep(1.2)
     log = posts(b)
     check(f'{name}: yes repeats with confirm and lands', len(log) == 3 and log[2][1].get('confirm') is True and log[2][2] == 200, log)
     flat = poll(lambda: 'Warm' not in (playing() or '') and b.page(f'{COMPUTER}.eq.preset') == 'Warm')
     check(f'{name}: the DAC is flat, the computer plays it', flat is True, [playing(), b.page(f'{COMPUTER}.eq.preset')])
+    # the answer, the write and the sheet drawn again: the focus is on the chip, and the page's own card never showed
+    check(f'{name}: the focus is on the chip after yes, the write and the redraw', poll(lambda: b.page(on_chip)) is True,
+          b.page('document.activeElement?.id'))
 
 
 def amp(b, d):
@@ -1104,6 +1138,16 @@ def pictures():
             d.stop()
 
 
+def put_back(b, found):
+    """The EQ's points as `found` lists them (type, f, g, q): missing ones added, the extra ones removed, the others set back."""
+    b.page(f"(async () => {{ const want = {json.dumps(found)}; const a = __core.actions.computer;"
+           f" while ({POINTS}.length < want.length) await a.addPoint(want[{POINTS}.length]);"
+           f" while ({POINTS}.length > want.length) await a.removePoint({POINTS}.length);"
+           f" for (let i = 0; i < want.length; i++) await a.setPoint(i + 1, want[i], {{ done: true }});"
+           " return 1; })()")
+    b.sleep(1.0)
+
+
 def touch(d, size):
     """A finger on the mountains (Chromium, touch emulation) in a window of `size`: a phone upright, a phone on its
     side, a desktop-sized window."""
@@ -1119,6 +1163,9 @@ def touch(d, size):
         b.page('window.__posts.length = 0')
         flip(b, 'computer')
         seed(b, 4)
+        # the points as this window size found them: whatever it changes or adds is put back at the end, so the next
+        # window size starts from the same four points
+        found = b.page(f'{POINTS}.map((p) => ({{ type: p.type, f: p.f, g: p.g, q: p.q }}))')
 
         def fingers(pts):
             return [{'x': x, 'y': y, 'id': i} for i, (x, y) in enumerate(pts)]
@@ -1168,6 +1215,8 @@ def touch(d, size):
         clear(b)
         t = b.page(TUNE)
         x, y = next((bub['x'], bub['y']) for bub in t['bubbles'] if bub['band'] == 2)
+        # nothing in hand: two fingers pinch the point nearest their middle (a point in hand is pinched wherever they are)
+        b.page('__core.computer.pick(null)')
         q0 = b.page(f'{POINTS}[1].q')
         a, c = (x - 40, y), (x + 40, y)
         touch_at([a, c])
@@ -1231,9 +1280,221 @@ def touch(d, size):
         stacked = [bub for bub in t['bubbles'] if abs(bub['x'] - t['w'] * math.log(3000 / 20) / math.log(1000)) < 3]
         check(f'{name}: every bubble is drawn inside the band, however the points add up',
               len(stacked) >= 3 and all(top < bub['y'] < bottom for bub in t['bubbles']), [t['bubbles'], top, bottom])
+        # a point in hand is the one pinched, wherever the two fingers are
+        clear(b)
+        t = b.page(TUNE)
+        q2 = b.page(f'{POINTS}[1].q')
+        x, y = next((bub['x'], bub['y']) for bub in t['bubbles'] if bub['band'] == 2)
+        b.page('__core.computer.pick(3)')
+        q3 = b.page(f'{POINTS}[2].q')
+        a, c = (x - 40, y), (x + 40, y)
+        touch_at([a, c])
+        for i in range(1, 11):
+            b.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': fingers([(a[0] - 4 * i, a[1]), (c[0] + 4 * i, c[1])])})
+            b.sleep(0.03)
+        lift()
+        b.sleep(1.2)
+        check(f'{name}: with a point in hand, two fingers over another pinch the one in hand',
+              abs(b.page(f'{POINTS}[2].q') - q3 / 2) <= q3 / 2 * 0.2 and b.page(f'{POINTS}[1].q') == q2, [q3, b.page(f'{POINTS}[2].q'), q2, b.page(f'{POINTS}[1].q')])
+        # one finger on a diamond of the lit point drags its Q: the Q moves and one done ends it
+        clear(b)
+        b.page('__core.computer.pick(null)')
+        t = b.page(TUNE)
+        # a peaking point: a shelf's upper diamond sits on its own bubble, where a finger cannot tell them apart
+        kinds = b.page(f'{POINTS}.map((p) => p.type)')
+        peaks = [bub for bub in t['bubbles'] if kinds[bub['band'] - 1] == 'PK']
+        pick = next((bub for bub in peaks if 3 <= bub['band'] <= 4), peaks[0] if peaks else None)
+        band, (bx, by) = pick['band'], (pick['x'], pick['y'])
+        touch_at([(bx, by)])
+        lift()
+        b.sleep(0.4)
+        clear(b)
+        t = b.page(TUNE)
+        diamond = next((dm for dm in t['diamonds'] if dm['side'] == 'hi'), None)
+        q_before = b.page(f'{POINTS}[{band - 1}].q')
+        if diamond:
+            touch_at([(diamond['x'], diamond['y'])])
+            for mx, my in path_to(diamond['x'], diamond['y'], [(diamond['x'] + 50, diamond['y'])]):
+                b.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': fingers([(mx, my)])})
+                b.sleep(0.03)
+            lift()
+            b.sleep(1.2)
+        log = [p for p in posts(b) if p[0].startswith('api/v1/host/eq/points/')]
+        dones = [p for p in log if p[1].get('done') is True]
+        check(f'{name}: one finger on a diamond drags its Q, one done at the lift',
+              diamond is not None and len(log) >= 2 and len(dones) == 1 and any('q' in p[1] for p in log) and b.page(f'{POINTS}[{band - 1}].q') != q_before,
+              [diamond, len(log), len(dones), q_before, b.page(f'{POINTS}[{band - 1}].q')])
+        # a shelf too: its bell is lit by a tap, then a diamond (a finger's width from the bubble, or the
+        # press would be the bubble's) is dragged: the Q moves and the frequency and the gain do not
+        clear(b)
+        b.page('__core.computer.pick(null)')
+        t = b.page(TUNE)
+        shelf = next(((bub['band'], bub['x'], bub['y']) for bub in t['bubbles'] if kinds[bub['band'] - 1] != 'PK'), None)
+        apart = None
+        if shelf:
+            sband, sx, sy = shelf
+            touch_at([(sx, sy)])
+            lift()
+            b.sleep(0.4)
+            # a shelf's diamond stands apart from its bubble at some widths only: the Q is set until it does
+            for q in (0.178, 0.25, 0.35, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 8.0):
+                b.page(f"__core.actions.computer.setPoint({sband}, {{ q: {q} }}, {{ done: true }}).then(() => 1)")
+                b.sleep(0.7)
+                t = b.page(TUNE)
+                mark = next((bub for bub in t['bubbles'] if bub['band'] == sband), None)
+                # a finger's width from every bubble, so no bubble is within the touch reach of the press
+                far = [dm for dm in t['diamonds'] if mark and all(
+                    math.hypot(dm['x'] - bub['x'], dm['y'] - bub['y']) > 30 for bub in t['bubbles'])]
+                if far:
+                    apart = far[0]
+                    break
+        if apart:
+            before = b.page(f'{POINTS}[{sband - 1}]')
+            clear(b)
+            touch_at([(apart['x'], apart['y'])])
+            for mx, my in path_to(apart['x'], apart['y'], [(apart['x'] + 40, apart['y'])]):
+                b.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': fingers([(mx, my)])})
+                b.sleep(0.03)
+            lift()
+            b.sleep(1.2)
+            after = b.page(f'{POINTS}[{sband - 1}]')
+            slog = [p for p in posts(b) if p[0].startswith('api/v1/host/eq/points/')]
+            check(f'{name}: one finger on a shelf\'s diamond moves its Q and neither its frequency nor its gain',
+                  after['q'] != before['q'] and after['f'] == before['f'] and after['g'] == before['g']
+                  and len(slog) >= 2 and any('q' in p[1] for p in slog)
+                  and not any('f' in p[1] or 'g' in p[1] for p in slog)
+                  and len([p for p in slog if p[1].get('done') is True]) == 1, [before, after, slog[:3]])
+        else:
+            check(f'{name}: one finger on a shelf\'s diamond moves its Q and neither its frequency nor its gain',
+                  False, f'no shelf has a diamond a finger apart from every bubble at this size (shelf {shelf})')
         check(f'{name}: no page error', page_errors(b) == [], page_errors(b)[:3])
     finally:
+        try:
+            put_back(b, found)
+        except Exception as error:  # a window that failed early may have nothing to put back
+            print('note: the points were not put back:', error)
         b.close()
+
+
+def point_steppers(b, d):
+    """The points' table steps like the band table: a `-` and a `+` beside each value, a step a last value, a held one repeating."""
+    start(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    open_sheet(b)
+    name = 'the_points_table_has_steppers_that_step_and_repeat'
+    check(f'{name}: each value has a stepper pair, named for its point',
+          b.page("['f', 'g', 'q'].every((p) => ['m', 'p'].every((s) => !!document.getElementById(`nd-p2${p}${s}`)))") is True
+          and b.page("document.getElementById('nd-p2gp').getAttribute('aria-label')") == 'Raise the gain of point 2',
+          b.page("document.getElementById('nd-p2gp')?.outerHTML"))
+    g0 = b.page(f'{POINTS}[1].g')
+    clear(b)
+    tap(b, '#nd-p2gp')
+    got = poll(lambda: posts(b, 'api/v1/host/eq/points/2'))
+    check(f'{name}: + steps the gain one tenth, as a last value', bool(got) and bare(got[-1][1]) == {'g': round(g0 + 0.1, 1), 'done': True}, got)
+    time.sleep(0.6)
+    check(f'{name}: and the field shows it', b.page("document.getElementById('nd-p2g').value") == b.page(f'__core.words.gainText({POINTS}[1].g)'),
+          b.page("document.getElementById('nd-p2g').value"))
+    clear(b)
+    tap(b, '#nd-p2fm')
+    got = poll(lambda: posts(b, 'api/v1/host/eq/points/2'))
+    check(f'{name}: - on the frequency steps it down a step of the hand\'s grid',
+          bool(got) and got[-1][1].get('done') is True and got[-1][1]['f'] < b.page(f'{POINTS}[1].f') * 1.0001 and 'f' in got[-1][1], got)
+    time.sleep(0.6)
+    clear(b)
+    x, y = common.center(b, '#nd-p3qp')
+    q0 = b.page(f'{POINTS}[2].q')
+    hold(b, x, y, 1.3)
+    log = posts(b, 'api/v1/host/eq/points/3')
+    check(f'{name}: a held + repeats, a live write each step and one last value at the release',
+          len(log) >= 5 and [p[1].get('done') for p in log].count(True) == 1 and log[-1][1].get('done') is True
+          and all(p[1].get('done') is False for p in log[:-1]) and b.page(f'{POINTS}[2].q') > q0,
+          [len(log), [p[1].get('done') for p in log], q0, b.page(f'{POINTS}[2].q')])
+    n = len(log)
+    time.sleep(0.6)
+    check(f'{name}: and stops with the release', len(posts(b, 'api/v1/host/eq/points/3')) == n, [n, len(posts(b, 'api/v1/host/eq/points/3'))])
+
+
+def stepper_resort(b, d):
+    """A held frequency stepper that carries its point past a neighbour: the table re-sorts and the hold goes on with the same point."""
+    start(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    name = 'a_held_stepper_follows_its_point_through_a_re_sort'
+    for f in (3000, 3080):
+        b.page(f"__core.actions.computer.addPoint({{ type: 'PK', f: {f}, g: 1, q: 1 }}).then(() => 1)")
+        time.sleep(0.3)
+    time.sleep(0.8)
+    open_sheet(b)
+    n = b.page(f'{POINTS}.findIndex((p) => p.f === 3000) + 1')
+    slot = b.page(f'{POINTS}[{n - 1}].slot')
+    clear(b)
+    x, y = common.center(b, f'#nd-p{n}fp')
+    hold(b, x, y, 1.6)
+    log = [p[1] for p in posts(b) if p[0].startswith('api/v1/host/eq/points/')]
+    where = b.page(f'{POINTS}.findIndex((p) => p.slot === {slot}) + 1')
+    check(f'{name}: the held + moved the point past its neighbour', where > n and len(log) >= 4, [n, where, len(log)])
+    check(f'{name}: every step went to the same point, by its slot', len({p.get('slot') for p in log}) == 1 and log[0].get('slot') == slot,
+          [slot, [p.get('slot') for p in log]])
+
+
+def hold_flip(b, d):
+    """A held volume key and a keyboard flip: the hold ends with the flip, nothing more is written to either side."""
+    start(b, d)
+    flip(b, 'computer')
+    name = 'a_flip_mid_hold_ends_the_hold'
+    clear(b)
+    x, y = common.center(b, '#nd-vup')
+    press(b, x, y)
+    b.sleep(1.0)
+    held = len(posts(b, 'api/v1/host/volume'))
+    b.page("document.getElementById('nd-side-dac').focus()")
+    b.press('Enter')
+    poll(lambda: b.page('__core.computer.side()') == 'dac')
+    b.sleep(0.4)
+    after_flip = len(posts(b))
+    b.sleep(1.0)
+    release(b, x, y)
+    b.sleep(0.5)
+    check(f'{name}: the held + had stepped before the flip', held >= 3, held)
+    check(f'{name}: nothing is written after the flip, to either side', len(posts(b)) == after_flip, [after_flip, posts(b)[after_flip:]])
+
+
+def mouse_band(b, d):
+    """The mouse over the mountains of a desktop window: the band that shows the curve and takes a press is the curve's window
+    plus a hand's reach (the formula the touch run covers with a finger), so a pointer just above it leaves the mountains as
+    they are and one just inside it raises the curve; a tap at the top edge adds a point drawn inside the band."""
+    name = 'the_mouse_hover_band_is_the_curves_window_and_a_hands_reach'
+    start(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    marks, t, box = curve_up(b)
+    v = t['v']
+    top = t['H'] - (WINDOW_BASE + WINDOW_SPAN) * v - 26
+    fx = next(f / 20 * t['w'] for f in range(1, 20) if all(abs(box[0] + f / 20 * t['w'] - mx) > 60 for mx, _ in marks.values()))
+    poll(lambda: b.page(TUNE)['m'] < 0.3, 6.0)
+    for _ in range(12):
+        hover(b, box[0] + fx + (_ % 2) * 3, box[1] + top - 6)
+        time.sleep(0.08)
+    check(f'{name}: a pointer 6 px above the band leaves the mountains as they are', b.page(TUNE)['m'] < 0.3, b.page(TUNE)['m'])
+    for _ in range(12):
+        hover(b, box[0] + fx + (_ % 2) * 3, box[1] + top + 6)
+        time.sleep(0.08)
+    check(f'{name}: a pointer 6 px inside it raises the curve', b.page(TUNE)['m'] >= 0.5, b.page(TUNE)['m'])
+    clear(b)
+    have = len(b.page(POINTS))
+    gesture(b, box[0] + fx, box[1] + top - 6, [(box[0] + fx, box[1] + top - 6)])
+    check(f'{name}: a press 6 px above the band adds no point', len(b.page(POINTS)) == have and posts(b, 'api/v1/host/eq/points') == [],
+          [have, posts(b)])
+    for _ in range(12):
+        hover(b, box[0] + fx + (_ % 2) * 3, box[1] + top + 6)
+        time.sleep(0.08)
+    gesture(b, box[0] + fx, box[1] + top + 1, [(box[0] + fx, box[1] + top + 1)])
+    t = b.page(TUNE)
+    added = [bub for bub in t['bubbles'] if abs(bub['x'] - fx) < 3]
+    check(f'{name}: a tap at the top edge adds a point drawn inside the band, at +12 dB',
+          len(b.page(POINTS)) == have + 1 and len(added) == 1 and top < added[0]['y'] <= t['H'] - (WINDOW_BASE + WINDOW_SPAN) * v + 1,
+          [added, top, t['H']])
 
 
 def one(name, fn, size=(1280, 900), fleet=(), web='auth = "none"'):
@@ -1252,10 +1513,17 @@ one('minus_plus_mute_set_the_computer_volume', volume)
 one('a_point_drag_posts_live_and_done_at_release', drag)
 one('every_dot_is_on_the_curve', dots)
 one('a_tap_adds_a_point_and_x_removes_it', add_remove)
+one('a_tap_on_a_full_table_says_so', full_table)
 one('the_points_are_listed_by_frequency', sorted_points)
 one('the_mode_the_type_a_typed_value_and_the_presets_write', controls, size=(1280, 900))
 one('an_untouched_cell_writes_nothing', untouched)
 one('the_wheel_sets_the_q', wheel_q)
+one('the_mouse_hover_band_is_the_curves_window_and_a_hands_reach', mouse_band)
+one('the_points_table_has_steppers_that_step_and_repeat', point_steppers)
+if browser == 'chromium':
+    one('a_held_stepper_follows_its_point_through_a_re_sort', stepper_resort)
+if browser == 'chromium':
+    one('a_flip_mid_hold_ends_the_hold', hold_flip)
 one('sixteen_points_keep_the_layout', sixteen)
 if browser == 'chromium':
     one('a_flip_mid_drag_writes_nothing', mid_drag)

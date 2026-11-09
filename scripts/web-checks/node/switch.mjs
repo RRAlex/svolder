@@ -105,6 +105,10 @@ function rig({
     frame: {
       toasts: [],
       toast: (text, action, options) => core.frame.toasts.push({ text, action, options }),
+      dismissToast(key) {
+        const at = core.frame.toasts.findIndex((t) => (t.options?.key ?? t.text) === key);
+        if (at >= 0) core.frame.toasts.splice(at, 1);
+      },
       closeMenu() {}, closePicker() {}, fade() {}, anchor() {},
     },
     stream: { opened: 0, open() { core.stream.opened++; } },
@@ -127,7 +131,7 @@ function rig({
       if (!bound && t.schemes.length > 1) store.set(key, JSON.stringify(bootScheme(painted)));
       bound = true;
       const mode = () => JSON.parse(store.get(key) ?? '"auto"');
-      core.scheme = { mode, effective: () => (mode() === 'auto' ? t.schemes[0] : mode()) };
+      core.scheme = { stop() {}, mode, effective: () => (mode() === 'auto' ? t.schemes[0] : mode()) };
     },
   });
   core.registry.add(theme(EMBER));
@@ -212,6 +216,22 @@ await ok('the_theme_and_the_fallback_both_failing_leaves_a_popup_that_stays_not_
   assert.equal(last.options.ms, 0, 'it stays');
   assert.equal(last.action.label, 'Reload');
   assert.equal(r.switcher.current(), null);
+  assert.equal(r.core.theme, null, 'the menu and the picker are not left with the failed theme');
+  assert.equal(r.core.scheme, null, 'nor its light or dark');
+});
+
+await ok('a_card_picked_after_no_theme_could_start_starts_that_theme', async () => {
+  const boom = () => { throw new Error('no'); };
+  const r = rig({ first: 'paper', mounts: { paper: boom, ember: boom } });
+  assert.equal(await r.switcher.start('paper'), null);
+  r.core.registry.add({
+    id: 'paper', label: 'Paper', needs: [], schemes: ['light', 'dark'],
+    mount() { return { unmount() {} }; },
+  });
+  await r.switcher.to('paper');
+  assert.equal(r.switcher.current()?.id, 'paper');
+  assert.equal(r.core.theme?.id, 'paper');
+  assert.equal(r.root.empty, true);
 });
 
 await ok('a_pick_whose_theme_and_fallback_both_fail_says_so_and_the_switch_is_released', async () => {
@@ -225,8 +245,11 @@ await ok('a_pick_whose_theme_and_fallback_both_fail_says_so_and_the_switch_is_re
   assert.equal(r.switcher.current(), null);
   assert.equal(r.toasts.at(-1).text, 'svolder could not draw the page.');
   assert.equal(r.root.empty, true);
-  // released: another pick runs (nothing is mounted, so it waits for a mount that is not there)
+  assert.equal(r.core.theme, null);
+  // released: a later pick tries its theme, and the popup goes once it mounts
   await r.switcher.to('paper');
+  assert.equal(r.switcher.current()?.id, 'paper');
+  assert.deepEqual(r.toasts, []);
 });
 
 await ok('a_pick_before_the_first_mount_does_nothing', async () => {

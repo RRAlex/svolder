@@ -124,24 +124,40 @@ fn watch_output(stream: impl AsyncRead + Unpin + Send + 'static, seen: Arc<Seen>
     });
 }
 
-/// A running `pw-cli`.
-struct Running {
-    child: Child,
-    stdin: Sender,
-    seen: Arc<Seen>,
+/// What the session's code needs of the `pw-cli` it feeds and the graph it reads: the one part
+/// that differs between the real session (a child process on a terminal, `pw-dump`) and the
+/// lab's model of it. Everything above it (the kept node, the refusal, the repair of what was
+/// refused, the retry of a line that fails) is [`Session`], and runs the same in both.
+#[async_trait]
+pub(super) trait Link: Send + Sync {
+    /// Whether the `pw-cli` refused a `set-param` since this was last asked.
+    fn take_refusal(&mut self) -> bool;
+
+    /// A `pw-cli` to be fed: `Some(false)` when one is running, `Some(true)` when one was
+    /// started now, `None` when there is none and none can be started yet.
+    fn ensure_running(&mut self) -> Option<bool>;
+
+    /// Wait for a `pw-cli` just started to be ready for a line.
+    async fn wait_ready(&mut self);
+
+    /// Give the running `pw-cli` one `set-param` of `params` for node `id`. `false` when it did
+    /// not take it; it is then gone.
+    async fn write(&mut self, id: u32, params: &[(String, f64)]) -> bool;
+
+    /// Read the live chain's node from the graph; `None` when it is not there, or not listed.
+    async fn read_node(&mut self) -> Option<LiveNode>;
+
+    /// The rate the default output runs at.
+    async fn sink_rate(&mut self) -> Option<u32>;
+
+    /// The kept node was dropped on purpose, so the next read of it is a look at the chain.
+    fn node_dropped(&mut self) {}
 }
 
-/// The real [`Params`]: one held-open `pw-cli`, and `pw-dump` to find the node.
-pub struct PwCliSession {
-    program: OsString,
-    dump: PwDump,
-    restart_gap: Duration,
-    running: Option<Running>,
-    started: Option<Instant>,
-    node: Option<LiveNode>,
-    /// The last rate a node was read with: a sink that is suspended shows none, which is not a
-    /// change of rate.
-    rate: Option<u32>,
+/// The session over a [`Link`]: the kept node and what is owed the chain.
+pub(super) struct Session<L: Link> {
+    pub(super) link: L,
+    pub(super) node: Option<LiveNode>,
     outbox: Outbox,
 }
 
@@ -211,19 +227,141 @@ impl Outbox {
     }
 }
 
+impl<L: Link> Session<L> {
+    pub(super) fn new(link: L) -> Self {
+        Self {
+            link,
+            node: None,
+            outbox: Outbox::default(),
+        }
+    }
+
+    /// Whether a refusal has been read and not yet acted on: the kept node is then dropped and
+    /// the next line carries every port.
+    fn take_refusal(&mut self) -> bool {
+        let refused = self.link.take_refusal();
+        if refused {
+            self.node = None;
+            self.outbox.mark_full();
+        }
+        refused
+    }
+
+    /// Give `params` (or every port, after a restart or a refusal) to `pw-cli`.
+    async fn deliver(&mut self, id: u32, params: &[(String, f64)]) -> bool {
+        self.outbox.record(params);
+        // A line that fails is tried once more, after the node is found again and `pw-cli` is
+        // started if it is gone.
+        for _ in 0..2 {
+            self.take_refusal();
+            let Some(node) = self.node().await else {
+                return false;
+            };
+            if node.id != id {
+                self.outbox.mark_full();
+                return false;
+            }
+            match self.link.ensure_running() {
+                None => return false,
+                Some(true) => {
+                    // What a `pw-cli` that ended may have left unread in its pipe is sent
+                    // again.
+                    self.outbox.mark_full();
+                    self.link.wait_ready().await;
+                }
+                Some(false) => {}
+            }
+            let line = self.outbox.line(params);
+            if self.link.write(node.id, &line).await {
+                self.outbox.delivered();
+                return true;
+            }
+            self.node = None;
+            self.outbox.mark_full();
+        }
+        false
+    }
+}
+
+#[async_trait]
+impl<L: Link> Params for Session<L> {
+    async fn node(&mut self) -> Option<LiveNode> {
+        self.take_refusal();
+        if self.node.is_none() {
+            self.node = Some(self.link.read_node().await?);
+        }
+        self.node.clone()
+    }
+
+    async fn sink_rate(&mut self) -> Option<u32> {
+        self.link.sink_rate().await
+    }
+
+    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
+        let sent = self.deliver(node, params).await;
+        if !sent {
+            self.outbox.mark_full();
+        }
+        sent
+    }
+
+    fn forget_node(&mut self) {
+        self.node = None;
+        self.link.node_dropped();
+    }
+
+    fn new_chain(&mut self) {
+        self.node = None;
+        self.outbox.new_chain();
+    }
+
+    async fn settle(&mut self, node: Option<u32>) -> bool {
+        self.take_refusal();
+        match (self.outbox.repair_due(), node) {
+            (false, _) => true,
+            (true, None) => false,
+            (true, Some(node)) => self.send(node, &[]).await,
+        }
+    }
+}
+
+/// A running `pw-cli`.
+struct Running {
+    child: Child,
+    stdin: Sender,
+    seen: Arc<Seen>,
+}
+
+/// The real [`Link`]: one held-open `pw-cli`, and `pw-dump` to find the node.
+struct PwLink {
+    program: OsString,
+    dump: PwDump,
+    restart_gap: Duration,
+    running: Option<Running>,
+    started: Option<Instant>,
+    /// The last rate a node was read with: a sink that is suspended shows none, which is not a
+    /// change of rate.
+    rate: Option<u32>,
+}
+
+/// The real [`Params`]: one held-open `pw-cli`, and `pw-dump` to find the node.
+pub struct PwCliSession {
+    session: Session<PwLink>,
+}
+
 impl PwCliSession {
     /// A session through the `pw-cli` at `program`, finding the node through `dump`. Nothing
     /// is started until the first send.
     pub fn new(program: impl Into<OsString>, dump: PwDump) -> Self {
         Self {
-            program: program.into(),
-            dump,
-            restart_gap: RESTART_GAP,
-            running: None,
-            started: None,
-            node: None,
-            rate: None,
-            outbox: Outbox::default(),
+            session: Session::new(PwLink {
+                program: program.into(),
+                dump,
+                restart_gap: RESTART_GAP,
+                running: None,
+                started: None,
+                rate: None,
+            }),
         }
     }
 
@@ -259,64 +397,45 @@ impl PwCliSession {
 
     /// The same session with at least `gap` between two starts of `pw-cli`.
     pub fn with_restart_gap(mut self, gap: Duration) -> Self {
-        self.restart_gap = gap;
+        self.session.link.restart_gap = gap;
         self
     }
 
-    /// Whether a `pw-cli` is there to be fed: the one running, or one started now when none
-    /// is, or has exited, and the gap since the last start has passed.
-    fn ensure_running(&mut self) -> bool {
-        if let Some(running) = self.running.as_mut() {
-            match running.child.try_wait() {
-                Ok(None) => return true,
-                _ => self.running = None,
+    /// Tell `pw-cli` to quit and wait for it to end, killing it if it does not.
+    pub async fn close(&mut self) {
+        if self.session.link.running.is_none() {
+            return;
+        }
+        if !self.session.link.write_line("quit").await {
+            self.session.node = None;
+        }
+        if let Some(mut running) = self.session.link.running.take() {
+            drop(running.stdin);
+            if tokio::time::timeout(QUIT_WITHIN, running.child.wait())
+                .await
+                .is_err()
+            {
+                let _ = running.child.kill().await;
             }
         }
-        if self
-            .started
-            .is_some_and(|started| started.elapsed() < self.restart_gap)
-        {
-            return false;
-        }
-        self.started = Some(Instant::now());
-        // `pw-cli` is given a terminal, not pipes: on a pipe it holds its output back in blocks,
-        // and its refusals would come long after the lines they answer.
-        let Ok(pty) = super::pty::open() else {
-            return false;
-        };
-        let Ok(streams) = (0..3)
-            .map(|_| pty.slave.try_clone().map(std::process::Stdio::from))
-            .collect::<Result<Vec<_>, _>>()
-        else {
-            return false;
-        };
-        let mut streams = streams.into_iter();
-        let child = Command::new(&self.program)
-            .stdin(streams.next().expect("three streams"))
-            .stdout(streams.next().expect("three streams"))
-            .stderr(streams.next().expect("three streams"))
-            .kill_on_drop(true)
-            .spawn();
-        let Ok(child) = child else {
-            return false;
-        };
-        let seen = Arc::new(Seen {
-            refused: AtomicBool::new(false),
-            ready: watch::channel(false).0,
-        });
-        watch_output(pty.from_child, seen.clone());
-        self.running = Some(Running {
-            child,
-            stdin: pty.to_child,
-            seen,
-        });
-        // What a `pw-cli` that ended may have left unread in its pipe is sent again.
-        self.outbox.mark_full();
-        true
     }
 
+    /// Whether a refusal from the running `pw-cli` has been read and not yet acted on. The
+    /// session learns of a refusal from the output's reader, a moment after `pw-cli` wrote it, so
+    /// a caller that must act after the refusal has arrived (a test) waits on this.
+    #[doc(hidden)]
+    pub fn refusal_read(&self) -> bool {
+        self.session
+            .link
+            .running
+            .as_ref()
+            .is_some_and(|running| running.seen.refused.load(Ordering::SeqCst))
+    }
+}
+
+impl PwLink {
     /// Write one line to the running `pw-cli`; a line it cannot take ends it.
-    async fn write(&mut self, line: &str) -> bool {
+    async fn write_line(&mut self, line: &str) -> bool {
         let Some(running) = self.running.as_mut() else {
             return false;
         };
@@ -330,53 +449,62 @@ impl PwCliSession {
             Ok(Ok(())) => true,
             _ => {
                 self.running = None;
-                self.node = None;
                 false
-            }
-        }
-    }
-
-    /// Tell `pw-cli` to quit and wait for it to end, killing it if it does not.
-    pub async fn close(&mut self) {
-        if self.running.is_none() {
-            return;
-        }
-        self.write("quit").await;
-        if let Some(mut running) = self.running.take() {
-            drop(running.stdin);
-            if tokio::time::timeout(QUIT_WITHIN, running.child.wait())
-                .await
-                .is_err()
-            {
-                let _ = running.child.kill().await;
             }
         }
     }
 }
 
-impl PwCliSession {
-    /// Whether a refusal from the running `pw-cli` has been read and not yet acted on. The
-    /// session learns of a refusal from the output's reader, a moment after `pw-cli` wrote it, so
-    /// a caller that must act after the refusal has arrived (a test) waits on this.
-    #[doc(hidden)]
-    pub fn refusal_read(&self) -> bool {
+#[async_trait]
+impl Link for PwLink {
+    fn take_refusal(&mut self) -> bool {
         self.running
             .as_ref()
-            .is_some_and(|running| running.seen.refused.load(Ordering::SeqCst))
+            .is_some_and(|running| running.seen.refused.swap(false, Ordering::SeqCst))
     }
 
-    /// Whether the running `pw-cli` refused a `set-param` since this was last asked; the kept
-    /// node is then dropped and the next line carries every port.
-    fn take_refusal(&mut self) -> bool {
-        let refused = self
-            .running
-            .as_ref()
-            .is_some_and(|running| running.seen.refused.swap(false, Ordering::SeqCst));
-        if refused {
-            self.node = None;
-            self.outbox.mark_full();
+    /// Whether a `pw-cli` is there to be fed: the one running, or one started now when none
+    /// is, or has exited, and the gap since the last start has passed.
+    fn ensure_running(&mut self) -> Option<bool> {
+        if let Some(running) = self.running.as_mut() {
+            match running.child.try_wait() {
+                Ok(None) => return Some(false),
+                _ => self.running = None,
+            }
         }
-        refused
+        if self
+            .started
+            .is_some_and(|started| started.elapsed() < self.restart_gap)
+        {
+            return None;
+        }
+        self.started = Some(Instant::now());
+        // `pw-cli` is given a terminal, not pipes: on a pipe it holds its output back in blocks,
+        // and its refusals would come long after the lines they answer.
+        let pty = super::pty::open().ok()?;
+        let streams = (0..3)
+            .map(|_| pty.slave.try_clone().map(std::process::Stdio::from))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let mut streams = streams.into_iter();
+        let child = Command::new(&self.program)
+            .stdin(streams.next().expect("three streams"))
+            .stdout(streams.next().expect("three streams"))
+            .stderr(streams.next().expect("three streams"))
+            .kill_on_drop(true)
+            .spawn()
+            .ok()?;
+        let seen = Arc::new(Seen {
+            refused: AtomicBool::new(false),
+            ready: watch::channel(false).0,
+        });
+        watch_output(pty.from_child, seen.clone());
+        self.running = Some(Running {
+            child,
+            stdin: pty.to_child,
+            seen,
+        });
+        Some(true)
     }
 
     /// Wait for a `pw-cli` just started to say it is connected, for at most [`READY_WITHIN`].
@@ -388,81 +516,48 @@ impl PwCliSession {
         let _ = tokio::time::timeout(READY_WITHIN, ready.wait_for(|ready| *ready)).await;
     }
 
-    /// Give `params` (or every port, after a restart or a refusal) to `pw-cli`.
-    async fn deliver(&mut self, id: u32, params: &[(String, f64)]) -> bool {
-        self.outbox.record(params);
-        // A line that fails is tried once more, after the node is found again and `pw-cli` is
-        // started if it is gone.
-        for _ in 0..2 {
-            self.take_refusal();
-            let Some(node) = self.node().await else {
-                return false;
-            };
-            if node.id != id {
-                self.outbox.mark_full();
-                return false;
-            }
-            let started = self.started;
-            if !self.ensure_running() {
-                return false;
-            }
-            if self.started != started {
-                self.wait_ready().await;
-            }
-            let line = set_param_line(node.id, &self.outbox.line(params));
-            if self.write(&line).await {
-                self.outbox.delivered();
-                return true;
-            }
-            self.outbox.mark_full();
+    async fn write(&mut self, id: u32, params: &[(String, f64)]) -> bool {
+        self.write_line(&set_param_line(id, params)).await
+    }
+
+    async fn read_node(&mut self) -> Option<LiveNode> {
+        let mut node = props_of(&self.dump.read().await?)?;
+        match node.rate_hz {
+            Some(rate) => self.rate = Some(rate),
+            None => node.rate_hz = self.rate,
         }
-        false
+        Some(node)
+    }
+
+    async fn sink_rate(&mut self) -> Option<u32> {
+        super::live::default_sink_rate(&self.dump.read().await?)
     }
 }
 
 #[async_trait]
 impl Params for PwCliSession {
     async fn node(&mut self) -> Option<LiveNode> {
-        self.take_refusal();
-        if self.node.is_none() {
-            let mut node = props_of(&self.dump.read().await?)?;
-            match node.rate_hz {
-                Some(rate) => self.rate = Some(rate),
-                None => node.rate_hz = self.rate,
-            }
-            self.node = Some(node);
-        }
-        self.node.clone()
+        self.session.node().await
     }
 
     async fn sink_rate(&mut self) -> Option<u32> {
-        super::live::default_sink_rate(&self.dump.read().await?)
+        self.session.sink_rate().await
     }
 
     async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
-        let sent = self.deliver(node, params).await;
-        if !sent {
-            self.outbox.mark_full();
-        }
-        sent
+        self.session.send(node, params).await
     }
 
     fn forget_node(&mut self) {
-        self.node = None;
+        self.session.forget_node();
     }
 
     fn new_chain(&mut self) {
-        self.node = None;
-        self.outbox.new_chain();
+        self.session.new_chain();
     }
 
     async fn settle(&mut self, node: Option<u32>) -> bool {
-        self.take_refusal();
-        match (self.outbox.repair_due(), node) {
-            (false, _) => true,
-            (true, None) => false,
-            (true, Some(node)) => self.send(node, &[]).await,
-        }
+        self.session.settle(node).await
     }
 }
 

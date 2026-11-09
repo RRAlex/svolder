@@ -1132,7 +1132,9 @@ async fn a_daemon_that_cannot_capture_leaves_the_tui_on_its_own() {
         until("the own capture started", || held.calls() == [usb()]).await;
         held.push(block(1.0, 1.0));
         shows(&frames, FULL_ROW).await;
-        assert_eq!(sent.frames_open(), 0, "the connection was kept");
+        // The own capture starts as the refusal is read, and the connection closes beside it, not
+        // before: let go within the usual bound, not at the instant the row shows.
+        until("the connection was let go", || sent.frames_open() == 0).await;
     })
     .await;
 

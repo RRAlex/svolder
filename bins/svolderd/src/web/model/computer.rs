@@ -179,39 +179,59 @@ type Kept = (
 pub(crate) struct SavedPresets(std::sync::Mutex<Option<Kept>>);
 
 /// The saved presets of `web`'s configuration. A fleet with no file of its own is read each time.
-fn saved_presets(web: &Web) -> Vec<Preset> {
-    let read = || {
+async fn saved_presets(web: &Web) -> Vec<Preset> {
+    let Some(path) = web.fleet.config_path() else {
+        return read_presets(web).await;
+    };
+    let stamp = {
+        let path = path.clone();
+        tokio::task::spawn_blocking(move || {
+            std::fs::metadata(&path)
+                .ok()
+                .and_then(|meta| Some((meta.modified().ok()?, meta.len())))
+        })
+        .await
+        .ok()
+        .flatten()
+    };
+    {
+        let kept = web
+            .saved_presets
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((kept_path, kept_stamp, presets)) = kept.as_ref()
+            && *kept_path == path
+            && stamp.is_some()
+            && *kept_stamp == stamp
+        {
+            return presets.clone();
+        }
+    }
+    let presets = read_presets(web).await;
+    *web.saved_presets
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((path, stamp, presets.clone()));
+    presets
+}
+
+/// The presets the configuration holds, read on a blocking thread; none when it cannot be read.
+async fn read_presets(web: &Web) -> Vec<Preset> {
+    let web = web.clone();
+    tokio::task::spawn_blocking(move || {
         web.fleet
             .config()
             .map(|config| config.presets)
             .unwrap_or_default()
-    };
-    let Some(path) = web.fleet.config_path() else {
-        return read();
-    };
-    let stamp = std::fs::metadata(&path)
-        .ok()
-        .and_then(|meta| Some((meta.modified().ok()?, meta.len())));
-    let mut kept = web
-        .saved_presets
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some((kept_path, kept_stamp, presets)) = kept.as_ref()
-        && *kept_path == path
-        && stamp.is_some()
-        && *kept_stamp == stamp
-    {
-        return presets.clone();
-    }
-    let presets = read();
-    *kept = Some((path, stamp, presets.clone()));
-    presets
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// The computer's controls for a page showing `shown`, from `view`; `None` while the daemon
 /// does not serve them (the host is off).
-pub(crate) fn computer_model(
+pub(crate) async fn computer_model(
     web: &Web,
     view: &HostView,
     shown: Option<&DeviceInfo>,
@@ -220,7 +240,7 @@ pub(crate) fn computer_model(
         return None;
     }
     let eq = view.eq.as_ref()?;
-    let saved = saved_presets(web);
+    let saved = saved_presets(web).await;
     let on = eq.on.then_some(eq.preset.as_deref()).flatten();
     Some(ComputerModel {
         volume: view.volume.as_ref().map(|v| VolumeModel {

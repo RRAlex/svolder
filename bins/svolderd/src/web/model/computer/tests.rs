@@ -91,7 +91,7 @@ async fn the_model_carries_volume_eq_and_the_shared_presets() {
     let info = web.fleet.resolve(Some("dac")).unwrap();
     let mut model = None;
     for _ in 0..200 {
-        model = host_model_of(&web, &info);
+        model = host_model_of(&web, &info).await;
         if model.as_ref().is_some_and(|m| m["volume"].is_object()) {
             break;
         }
@@ -128,8 +128,8 @@ async fn the_model_carries_volume_eq_and_the_shared_presets() {
 }
 
 /// The computer's model as JSON, for the host the daemon serves, shown on `info`.
-fn host_model_of(web: &crate::web::Web, info: &svolder_ipc::DeviceInfo) -> Option<Value> {
-    let model = crate::web::model::host_computer(web, Some(info))?;
+async fn host_model_of(web: &crate::web::Web, info: &svolder_ipc::DeviceInfo) -> Option<Value> {
+    let model = crate::web::model::host_computer(web, Some(info)).await?;
     Some(serde_json::to_value(model).unwrap())
 }
 
@@ -155,7 +155,7 @@ async fn a_preset_of_seventeen_filters_is_listed_disabled_with_the_reason() {
     }
     let web = web_over(&daemon);
     let info = web.fleet.resolve(Some("dac")).unwrap();
-    let model = host_model_of(&web, &info).expect("a model");
+    let model = host_model_of(&web, &info).await.expect("a model");
     let presets = model["presets"].as_array().unwrap();
     let find = |name: &str| presets.iter().find(|p| p["name"] == name).cloned();
     let wide = find("Wide").unwrap_or_else(|| panic!("no Wide in {presets:?}"));
@@ -181,8 +181,11 @@ async fn the_saved_presets_follow_the_file() {
             .map(|p| p["name"].as_str().unwrap().to_string())
             .collect()
     };
-    let before = host_model_of(&web, &info).expect("a model");
-    assert_eq!(names(&before), names(&host_model_of(&web, &info).unwrap()));
+    let before = host_model_of(&web, &info).await.expect("a model");
+    assert_eq!(
+        names(&before),
+        names(&host_model_of(&web, &info).await.unwrap())
+    );
     assert!(!names(&before).contains(&"Mine".to_string()));
     let correction = Correction {
         preamp_db: 0.0,
@@ -198,7 +201,7 @@ async fn the_saved_presets_follow_the_file() {
         &preset::from_computer("Mine", correction),
     )
     .unwrap();
-    let after = host_model_of(&web, &info).expect("a model");
+    let after = host_model_of(&web, &info).await.expect("a model");
     assert!(names(&after).contains(&"Mine".to_string()), "{after}");
     daemon.stop().await;
 }

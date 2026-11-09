@@ -97,6 +97,7 @@ function rig({ page = pageOf('Gungnir%202', dac()), needs = ['meters', 'host'], 
     dispatchEvent: (event) => lost.push(event.detail),
   };
   let watcher = null;
+  const watching = { stops: 0 };
   const stream = createStream({
     store,
     needs,
@@ -104,7 +105,10 @@ function rig({ page = pageOf('Gungnir%202', dac()), needs = ['meters', 'host'], 
     fetch: sessionFetch ?? (async () => ({
       json: async () => session ?? { signed_in: true, guest: false },
     })),
-    watchVisible: (options) => { watcher = options; return { stop() {}, observe() {} }; },
+    watchVisible: (options) => {
+      watcher = options;
+      return { stop() { watching.stops++; }, observe() {} };
+    },
     signedOut: () => { exits.out++; },
     reload: () => { exits.reload++; },
     show: (url) => actions.showDevice(url, { push: false }),
@@ -112,7 +116,7 @@ function rig({ page = pageOf('Gungnir%202', dac()), needs = ['meters', 'host'], 
   });
   // A real watch says it is on show at once when the page is.
   if (visible === 'visible') watcher.onShow();
-  return { store, stream, actions, exits, classes, lost, watcher: () => watcher, source: () => FakeSource.all.at(-1) };
+  return { store, stream, actions, exits, classes, lost, watching, watcher: () => watcher, source: () => FakeSource.all.at(-1) };
 }
 
 await ok('the_url_says_the_device_its_needs_and_follows', () => {
@@ -383,8 +387,106 @@ await ok('a_fleet_that_no_longer_lists_a_followed_device_drops_it', () => {
   source().send('fleet', { devices: [{ url: 'Gungnir%202' }], hops: [] });
   assert.deepEqual(stream.followed(), []);
   assert.equal(store.device('Amp'), null);
-  assert.equal(FakeSource.all.length, opened, 'the stream stays open');
+  assert.equal(FakeSource.all.length, opened + 1, 'the stream is opened again, once, without it');
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters,host');
+  source().send('fleet', { devices: [{ url: 'Gungnir%202' }], hops: [] });
+  assert.equal(FakeSource.all.length, opened + 1, 'a fleet that prunes nothing opens nothing');
   assert.equal(store.page().fleet.devices.length, 1);
+});
+
+await ok('a_fleet_that_prunes_two_followed_devices_reopens_the_stream_once', () => {
+  const page = pageOf('Gungnir%202', dac(), { followed: { Amp: amp(), Other: amp() } });
+  const { stream, source } = rig({ page });
+  stream.follow(['Amp', 'Other']);
+  stream.open();
+  const opened = FakeSource.all.length;
+  const first = source();
+  first.send('fleet', { devices: [{ url: 'Gungnir%202' }], hops: [] });
+  assert.deepEqual(stream.followed(), []);
+  assert.equal(FakeSource.all.length, opened + 1, 'one reopen for both');
+  assert.equal(first.closed, true);
+});
+
+await ok('a_fleet_that_prunes_a_followed_device_and_drops_the_shown_one_reopens_once', async () => {
+  const fleet = { devices: [{ url: 'Gungnir%202' }, { url: 'Amp' }, { url: 'Other' }], hops: [] };
+  const page = pageOf('Gungnir%202', dac(), { fleet, followed: { Other: amp() } });
+  const { stream, source } = rig({ page, read: () => ({ device: amp(), strip: null }) });
+  stream.follow(['Other']);
+  stream.open();
+  const before = FakeSource.all.length;
+  source().send('fleet', { devices: [{ url: 'Amp' }], hops: [] });
+  await flush();
+  assert.deepEqual(stream.followed(), []);
+  assert.equal(FakeSource.all.length, before + 1, 'one stream, on the device now shown');
+  assert.equal(source().url, 'api/v1/events?device=Amp&needs=meters,host');
+});
+
+await ok('close_removes_its_listeners_and_nothing_reopens', async () => {
+  const { store, stream, source, watching } = rig();
+  stream.open();
+  const live = source();
+  live.send('open');
+  stream.close();
+  assert.equal(live.closed, true);
+  assert.equal(watching.stops, 1, 'the visibility watch is stopped');
+  const count = FakeSource.all.length;
+  // A switch of device no longer opens a stream.
+  store.replace(pageOf('Amp', amp()));
+  assert.equal(FakeSource.all.length, count, 'the store\'s model is no longer listened to');
+  // What the closed source still has queued reaches nothing.
+  const heard = [];
+  store.on('volume', (d) => heard.push(d));
+  live.send('volume', { device: 'Amp', raw: 1 });
+  live.send('error');
+  await flush();
+  assert.deepEqual(heard, []);
+  assert.equal(store.state(), 'open', 'no lost link is made after the close');
+  advance(REOPEN_MS * 3);
+  assert.equal(FakeSource.all.length, count, 'no reopen timer is left');
+  // A close during a lost link takes the pending reopen with it.
+  const lostRig = rig();
+  lostRig.stream.open();
+  const dead = lostRig.source();
+  dead.send('error');
+  await flush();
+  lostRig.stream.close();
+  advance(REOPEN_MS * 2);
+  assert.equal(FakeSource.all.length, 1, 'the reopen after an error does not run once closed');
+});
+
+await ok('a_woken_page_keeps_waiting_through_a_lost_link', async () => {
+  const { store, stream, source, watcher, classes } = rig();
+  stream.open();
+  watcher().onHide();
+  watcher().onShow();
+  assert.equal(store.state(), 'waiting');
+  source().send('error');
+  await flush();
+  assert.equal(store.state(), 'lost', 'lost shows over the wait');
+  assert.equal(classes.has('lost'), true);
+  assert.equal(classes.has('waking'), false, 'the waking notice gives way to the lost one');
+  advance(REOPEN_MS - 1);
+  assert.equal(store.state(), 'lost', 'still lost, the wait is not what shows');
+  advance(1);
+  assert.equal(FakeSource.all.length, 3, 'the stream opens again');
+  source().send('open');
+  assert.equal(store.state(), 'waiting', 'the first reading is still waited for');
+  assert.equal(classes.has('waking'), true, 'dimmed as a waking page is');
+  source().send('volume', { device: 'Gungnir%202', raw: 41 });
+  assert.equal(store.state(), 'open');
+  assert.equal(classes.has('lost') || classes.has('waking'), false);
+  // a wait that had already ended is not revived by the reopen
+  const done = rig();
+  done.stream.open();
+  done.watcher().onHide();
+  done.watcher().onShow();
+  advance(WAIT_MS);
+  assert.equal(done.store.state(), 'open');
+  done.source().send('error');
+  await flush();
+  advance(REOPEN_MS);
+  done.source().send('open');
+  assert.equal(done.store.state(), 'open');
 });
 
 await ok('a_fleet_that_no_longer_lists_the_shown_device_shows_the_first_it_lists_or_none', async () => {

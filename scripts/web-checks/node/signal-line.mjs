@@ -5,11 +5,12 @@
 // the stand-ins (an amp no hop links, the AutoEq headphones) and the choice that falls back to the
 // shown device when its hop goes. Run: node signal-line.mjs
 import assert from 'node:assert/strict';
-import { createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { THIS_COMPUTER, createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import {
   followedUrls, hopsOf, keepChoice, shownHopId, sideOf,
 } from '../../../bins/svolderd/web/themes/signal/line.js';
+import { COMPUTER_NAME } from '../../../bins/svolderd/web/themes/signal/words.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -293,6 +294,7 @@ const memory = () => {
 ok('the_computer_hop_is_called_this_computer', () => {
   const computer = computerOf(hopsOf(page(), DAC.url));
   assert.equal(computer.name, 'This computer');
+  assert.equal(COMPUTER_NAME, THIS_COMPUTER, 'the name is the core\'s, as the switch says it');
   // its words: the audio server and the rate; nothing about controls until the hop is chosen
   assert.deepEqual(computer.words, ['PipeWire · 96 kHz']);
   const chosen = computerOf(hopsOf(page(), DAC.url, 'open', 'computer'));

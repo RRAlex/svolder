@@ -8,7 +8,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use svolder_ipc::{
-    Client, Config, DeviceConfig, DeviceInfo, MAX_SCAN_WINDOW, Request, Response, ScanEntry, socket,
+    Client, Config, ConfigError, DeviceConfig, DeviceInfo, MAX_SCAN_WINDOW, Request, Response,
+    ScanEntry, socket,
 };
 use svolder_proto::UnitId;
 
@@ -266,13 +267,9 @@ pub async fn add(
         Ok(config) => config,
         Err(e) => return config_failure(e).report(),
     };
-    // The writer refuses a name that is taken; a unit id that is taken is this verb's to
-    // refuse, since a second block for one device is two names for the same thing.
-    if let Some(clash) = config
-        .devices
-        .iter()
-        .find(|d| d.udid.parse::<UnitId>() == Ok(unit))
-    {
+    // The writer refuses a name or a unit that is taken too; this is the same check, made
+    // first so the verb says it in its own words before it asks for a name.
+    if let Some(clash) = config.device_for_unit(&unit) {
         return Failure::of(
             Kind::Usage,
             format!("udid {udid:?} is already configured as {:?}", clash.name),
@@ -355,27 +352,24 @@ fn scan_first() -> Failure {
 /// so it is answered with the verb that lists the names there are.
 pub async fn remove(g: &Globals<'_>, name: &str) -> ExitCode {
     let path = Config::path();
+    // Read leniently, and left to the writer to say a name is not there: a file that
+    // configures one unit twice is read with the later block left out, and that later block is
+    // the very one the user may be asking to remove.
     let config = match Config::load_from(&path) {
         Ok(config) => config,
         Err(e) => return config_failure(e).report(),
     };
-    if !config
-        .devices
-        .iter()
-        .any(|device| device.name.eq_ignore_ascii_case(name))
-    {
-        return Failure::of(
-            Kind::Usage,
-            format!("no device named {name:?} is configured; run `svolder devices` to list them"),
-        )
-        .report();
-    }
     match Config::remove_device(&path, name) {
         Ok(()) => {
             eprintln!("svolder: removed {name} from {}", path.display());
             reload_daemon(g, &config).await;
             ExitCode::SUCCESS
         }
+        Err(ConfigError::Parse(why)) if why.starts_with("no device named") => Failure::of(
+            Kind::Usage,
+            format!("no device named {name:?} is configured; run `svolder devices` to list them"),
+        )
+        .report(),
         Err(e) => config_failure(e).report(),
     }
 }

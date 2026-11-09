@@ -4,22 +4,29 @@
 #
 # make web-checks: every node harness and every browser check of the web UI's effects (the menu,
 # the levels, the layer, the smoke, what stirs it, its notes), the node ones once and the
-# browser ones in headless Chromium and headless Firefox, WEB_CHECKS_JOBS at a time (default 6;
-# 1 runs them one after the other, the serial lane's checks after the others) against throwaway
+# browser ones in headless Chromium and headless Firefox, WEB_CHECKS_JOBS at a time (default from
+# the cores and the CPU pressure, see auto_jobs; 1 runs them one after the other, the serial lane's
+# checks after the others) against throwaway
 # fake daemons (never the
 # installed binaries, never ports 8737/8738; each check has its own daemon home, free ports,
 # browser profile and output files). A check that fails beside others is run again alone: passing
 # is `flaky` (counted as passed, listed in the total), failing again is FAIL. One line per check
 # as it finishes, a total, exit 1 on any FAIL. Each check's whole output is kept in target/web-checks/out/. Nothing
 # here takes a picture of the smoke: it is read with readPixels and float readbacks, numbers only.
-# The mutation runners (mutate_*.py, node/mutate_*.sh) are slow and run by hand, one worker.
+# The mutation runners (mutate_*.py, node/mutate_*.sh) are slow, by hand only, never a gate: `make tests-check` (FULL=1 for the browser ones).
+# Every check's wall, CPU and peak RSS go to target/web-checks/timing.tsv; the README has the
+# gate ladder (task, lane end, merge, milestone, release) and the lock rules.
+# The quick and task gates reuse a browser check's last pass when nothing it reads changed (the
+# result cache, fingerprint.py; WEB_CHECKS_NO_CACHE=1 runs everything); the full gate and the
+# exclusive lane always run cold. A reused check is reported as `cached`.
 #
 # Which gate when (the coverage map, COVERAGE.md, says what each check proves and where):
-#   run-all.sh          the full gate (make web-checks, over an hour at WEB_CHECKS_JOBS=6; the smoke's checks
-#                       take about half of it): required before every merge, and whenever a smoke
+#   run-all.sh          the full gate (make web-checks, 47 minutes in 0.32.0 at 6 jobs): required before every merge, and whenever a smoke
 #                       file (smoke.js, smoke-model.js, smoke-director.js, smoke-engine.js,
 #                       smoke-notes.js, effects.js, under bins/svolderd/web/themes/ember/) or one
 #                       of the smoke's own checks changed;
+#   run-all.sh --task   the quick gate's set with the logic-only checks (logic_only below) in
+#                       Chromium only (make web-checks-task): a task or a lane end; refuses like --quick;
 #   run-all.sh --quick  the quick gate (make web-checks-quick, about 38 min at WEB_CHECKS_JOBS=6, much longer with WEB_CHECKS_JOBS=1): the node
 #                       checks, the browser checks that do not exercise the smoke (the effects
 #                       menu and layout, the Tone message, the ring click, the curve's mouse
@@ -36,15 +43,18 @@ set -uo pipefail
 here=$(dirname "$(readlink -f "$0")")
 root=$(dirname "$(dirname "$here")")
 out=$root/target/web-checks/out
+timing=$root/target/web-checks/timing.tsv
 cargo=${CARGO:-cargo}
 
 quick=0
+task=0
 refusal_only=0
 case "${1:-}" in
     "") ;;
     --quick) quick=1 ;;
+    --task) quick=1; task=1 ;;
     --refusal-only) quick=1; refusal_only=1 ;;
-    *) echo "usage: run-all.sh [--quick]" >&2; exit 2 ;;
+    *) echo "usage: run-all.sh [--quick | --task]" >&2; exit 2 ;;
 esac
 
 # The files whose change needs the full gate: the smoke's, effects.js (it starts and stops the
@@ -59,9 +69,9 @@ smoke_files=(
     $w/effects.js
     $c/smoke_core.py $c/smoke_page.py $c/smoke_quick.py $c/smoke_probe.py $c/notes.py
     $c/notes_tune.py $c/haze.py $c/scroll.py $c/sources.py $c/sweep.py $c/touch.py
-    $c/effects_cycle.py $c/tune.py $c/common.py $c/run-all.sh $c/COVERAGE.md $c/soak.py
+    $c/effects_cycle.py $c/tune.py $c/common.py $c/fingerprint.py $c/gate_cache.sh $c/run-all.sh $c/COVERAGE.md $c/soak.py
     $c/mutate_smoke.py $c/mutate_notes.py $c/mutate_haze.py $c/mutate_scroll.py
-    $c/mutate_sources.py $c/mutate_effects.py $c/mutate_registry.py
+    $c/mutate_sources.py $c/mutate_effects.py $c/mutate_registry.py $c/mutpool.py
     $n/director.mjs $n/effects.mjs $n/look-values.mjs $n/model.mjs $n/notes.mjs $n/sources.mjs
     $n/mutate_director.sh $n/mutate_model.sh $n/mutate_notes.sh $n/mutate_sources.sh
 )
@@ -89,7 +99,16 @@ refuse_if_smoke_changed() {
         for f in "${smoke_files[@]}"; do
             case $line in
                 "$f" | "$f"/*)
-                    echo "web-checks: a smoke file changed ($line): run make web-checks" >&2
+                    case $line in
+                        $c/common.py | $c/run-all.sh | $c/COVERAGE.md | $c/fingerprint.py | $c/gate_cache.sh)
+                            what="the gate's own harness changed ($line); every check reads it"
+                            ;;
+                        *) what="a smoke file or one of the smoke's checks changed ($line)" ;;
+                    esac
+                    echo "web-checks: $what, so the quick and task gates cannot vouch for it." \
+                        "Run the merge rung: make web-checks (the full gate, both engines)." \
+                        "A lane end with only this change may run the full gate once instead of" \
+                        "the task gate. See 'The gate ladder' in scripts/web-checks/README.md." >&2
                     exit 1
                     ;;
             esac
@@ -106,6 +125,7 @@ fi
 
 missing=()
 command -v node >/dev/null || missing+=("node")
+[ -x /usr/bin/time ] || missing+=("/usr/bin/time (install it: sudo apt install time)")
 command -v python3 >/dev/null || missing+=("python3")
 python3 -I -c 'import websockets' 2>/dev/null || missing+=("python3-websockets (apt package)")
 python3 -I -c 'import numpy, PIL' 2>/dev/null ||
@@ -118,21 +138,67 @@ if [ ${#missing[@]} -gt 0 ]; then
     exit 1
 fi
 
+# read before the build: the gate's own compile would otherwise raise the pressure it reads
+# The default job count: a quarter of the cores (6 on 24), less when the CPU is already contended.
+# The contention is read from the kernel's pressure stall information (/proc/pressure/cpu, the
+# `some` line's avg10: the share of the last 10 s in which some task waited for a core), not
+# from the load average, which counts tasks blocked on I/O as well and so reads high while the
+# CPUs are idle. avg10 under 10: the quarter; under 30: two thirds of it; under 60: half; more:
+# 2. Never fewer than 2 nor more than 12. Without the pressure file the quarter. WEB_CHECKS_JOBS
+# overrides it.
+auto_jobs() {
+    local cores base p=0 n
+    cores=$(nproc 2>/dev/null || echo 4)
+    base=$((cores / 4))
+    [ "$base" -lt 2 ] && base=2
+    [ "$base" -gt 12 ] && base=12
+    if [ -r /proc/pressure/cpu ]; then
+        p=$(awk '$1 == "some" { sub("avg10=", "", $2); print int($2) }' /proc/pressure/cpu 2>/dev/null)
+        case $p in '' | *[!0-9]*) p=0 ;; esac
+    fi
+    if [ "$p" -lt 10 ]; then n=$base
+    elif [ "$p" -lt 30 ]; then n=$((base * 2 / 3))
+    elif [ "$p" -lt 60 ]; then n=$((base / 2))
+    else n=2
+    fi
+    [ "$n" -lt 2 ] && n=2
+    echo "web-checks: $n jobs ($cores cores, CPU pressure avg10 ${p}%; WEB_CHECKS_JOBS overrides)" >&2
+    echo "$n"
+}
+if [ -n "${WEB_CHECKS_JOBS:-}" ]; then jobs_n=$WEB_CHECKS_JOBS; else jobs_n=$(auto_jobs); fi
+case $jobs_n in
+    '' | *[!0-9]* | 0) echo "web-checks: WEB_CHECKS_JOBS must be a number of 1 or more" >&2; exit 2 ;;
+esac
+
+# The result cache (fingerprint.py): read on the quick and task gates only, written on every gate
+# after a pass. WEB_CHECKS_NO_CACHE=1 runs every check. The shared part of the fingerprint (the
+# binaries, the web dir, the browsers) is taken after the build below.
+fpy=("python3" -I "$here/fingerprint.py")
+cache_read=0
+[ "$quick" -eq 1 ] && [ "${WEB_CHECKS_NO_CACHE:-}" != 1 ] && cache_read=1
+cache_ok=0
+cached=()
+declare -A fps=()
+CFP= CFP_SCRIPT= CFP_ENGINE=
+
 if ! "$cargo" build -q --manifest-path "$root/Cargo.toml" -p svolderd -p svolder; then
     echo "web-checks: the svolderd/svolder build failed; no check ran against a stale binary" >&2
     exit 1
 fi
 
+fp_base=$("${fpy[@]}" base) || fp_base=
+[ -z "$fp_base" ] && cache_read=0
+if [ "$cache_read" -eq 1 ]; then
+    echo "web-checks: result cache on (a check unchanged since its last pass is reported cached;" \
+        "WEB_CHECKS_NO_CACHE=1 runs every check)" >&2
+fi
+
 # leftovers of earlier runs (profiles, daemon homes, web copies) go, then the old outputs; this
 # runs before any check starts, never while one runs
 mkdir -p "$out"
-find "$root/target/web-checks" -mindepth 1 -maxdepth 1 ! -name out -exec rm -rf {} +
+find "$root/target/web-checks" -mindepth 1 -maxdepth 1 ! -name out ! -name cache -exec rm -rf {} +
+printf 'check\tengine\tlane\tverdict\twall_s\tcpu_s\trss_mb\n' >"$timing"
 find "$out" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-
-jobs_n=${WEB_CHECKS_JOBS:-6}
-case $jobs_n in
-    '' | *[!0-9]* | 0) echo "web-checks: WEB_CHECKS_JOBS must be a number of 1 or more" >&2; exit 2 ;;
-esac
 
 # A TERM or INT (or an early exit) stops every check that is running. Each check runs in a process
 # group of its own (setsid) whose id is kept in $out/LABEL.pgid, so the kill reaches the check's
@@ -159,6 +225,34 @@ trap stop_children EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# The per-check measurements: one tab-separated row per run of a check (label, engine, lane, verdict,
+# wall seconds, CPU seconds = user+sys of its waited-for descendants, peak RSS in MB of its largest
+# process) into $timing, from GNU time; the top 15 by wall are printed at the end.
+# The gate lock, shared with the other lanes and gates on this machine: browser checks hold it
+# shared (flock -s), so any number run side by side; a check that reads timing (a draw cost, a
+# frame rate) and the re-run of a failed check hold it exclusive (flock -x) and so run with no other
+# browser check of any gate on the machine. A check that waits over 10 s says so. The node harnesses do not take it.
+gate_lock=${WEB_CHECKS_LOCK:-/tmp/svolder-web-gate.lock}
+lock_mode=
+tsv_row() {
+    local label=$1 lane=$2 verdict=$3 tfile=$4 engine=- wall u s rss
+    case $label in
+        *-chromium) engine=chromium ;;
+        *-firefox) engine=firefox ;;
+    esac
+    read -r wall u s rss < <(tail -n 1 "$tfile" 2>/dev/null) || true
+    if [ -z "${rss:-}" ]; then wall=0; u=0; s=0; rss=0; fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$label" "$engine" "$lane" "$verdict" "$wall" \
+        "$(awk -v u="$u" -v s="$s" 'BEGIN { printf "%.1f", u + s }')" \
+        "$(awk -v k="$rss" 'BEGIN { printf "%.0f", k / 1024 }')" >>"$timing"
+}
+top_table() {
+    [ -s "$timing" ] || return 0
+    echo "slowest 15 runs (wall s, CPU s, peak RSS MB of the largest process; all rows in $timing):"
+    tail -n +2 "$timing" | sort -t$'\t' -k5,5nr | head -n 15 |
+        awk -F'\t' '{ printf "  %-30s %-9s %-7s %6.1f %7.1f %6d\n", $1, $2, $3, $5, $6, $7 }'
+}
+
 # excerpt FILE: what failed in a check's output, indented.
 excerpt() {
     grep -a '^FAIL\|Error\|Traceback' "$1" | head -n 5 | sed 's/^/        /'
@@ -170,12 +264,21 @@ excerpt() {
 # last line) is printed as it finishes. A check with no verdict file at the end was lost (killed,
 # crashed) and counts as FAIL.
 one_check() {
-    local label=$1 file=$2 fail_word=$3 start=$SECONDS verdict=ok c= last msg term=
+    local label=$1 file=$2 fail_word=$3 start=$SECONDS verdict=ok c= last msg term= tfile
     shift 3
+    tfile=$out/$label.time
+    lockcmd=()
+    if [ -n "${lock_mode:-}" ]; then
+        lockcmd=(flock "$lock_mode" "$gate_lock")
+        if ! flock -w 10 "$lock_mode" "$gate_lock" true 2>/dev/null; then
+            echo "waiting  $label: waiting for the gate lock (held by another gate)"
+        fi
+    fi
+    rm -f "$tfile"
     # a TERM while the check is being launched is held until its pid is known, then acted on
     trap 'term=1' TERM
     rm -f "$out/$label.verdict"
-    setsid -w "$@" >"$file" 2>&1 &
+    setsid -w "${lockcmd[@]}" /usr/bin/time -f '%e %U %S %M' -o "$tfile" "$@" >"$file" 2>&1 &
     c=$!
     echo "$c" >"$out/$label.pgid"
     trap 'rm -f "$out/$label.pgid"; kill -TERM -- "-$c" 2>/dev/null; wait "$c" 2>/dev/null; exit 143' TERM
@@ -184,6 +287,15 @@ one_check() {
     rm -f "$out/$label.pgid"
     last=$(tail -n 1 "$file")
     printf '%s %s\n' "$verdict" $((SECONDS - start)) >"$out/$label.verdict"
+    if [ -n "${CFP:-}" ]; then
+        # stored only when nothing it reads changed while it ran
+        if [ "$verdict" = ok ] && [ "$("${fpy[@]}" full "$CFP_SCRIPT" "$CFP_ENGINE" 2>/dev/null)" = "$CFP" ]; then
+            "${fpy[@]}" store "$label" "$CFP"
+        else
+            "${fpy[@]}" forget "$label"
+        fi
+    fi
+    tsv_row "$label" "${lane:-pool}" "$verdict" "$tfile"
     msg=$(printf '%-5s %-28s %4ds  %s' "$verdict" "$label" $((SECONDS - start)) "$last")
     if [ "$verdict" != ok ]; then
         msg+=$'\n'$(excerpt "$file")
@@ -205,14 +317,44 @@ check_cmd() {
     esac
 }
 
+# cached_check LABEL: a check unchanged since its last pass is not run; its verdict is ok and its
+# row says `cached`.
+cached_check() {
+    local label=$1 engine=-
+    case $label in
+        *-chromium) engine=chromium ;;
+        *-firefox) engine=firefox ;;
+    esac
+    printf 'ok 0\n' >"$out/$label.verdict"
+    printf '%s\t%s\t%s\t%s\t0\t0.0\t0\n' "$label" "$engine" "${lane:-pool}" cached >>"$timing"
+    printf '%-5s %-28s %4ds  %s\n' cached "$label" 0 "unchanged since its last pass (WEB_CHECKS_NO_CACHE=1 runs it)"
+    cached+=("$label")
+}
+
 # run_pool JOBS ENTRY...: the entries, JOBS at a time, in the order given.
 run_pool() {
-    local n=$1 entry label
+    local n=$1 entry label script
     shift
     for entry in "$@"; do
-        while [ "$(jobs -rp | wc -l)" -ge "$n" ]; do wait -n 2>/dev/null; done
         label=${entry%%|*}
+        CFP=
+        if [ "$cache_ok" -eq 1 ]; then
+            script=${entry#*|}
+            CFP=$("${fpy[@]}" check "${script%%|*}" "${entry##*|}" "$fp_base") || CFP=
+            fps[$label]=$CFP
+            if [ "$cache_read" -eq 1 ] && [ -n "$CFP" ] && "${fpy[@]}" hit "$label" "$CFP"; then
+                cached_check "$label"
+                continue
+            fi
+        fi
+        while [ "$(jobs -rp | wc -l)" -ge "$n" ]; do wait -n 2>/dev/null; done
         check_cmd "$entry"
+        if [ -n "$CFP" ]; then
+            # the fingerprint again, now that the slot is free and the check is about to start
+            CFP_SCRIPT=${script%%|*} CFP_ENGINE=${entry##*|}
+            CFP=$("${fpy[@]}" full "$CFP_SCRIPT" "$CFP_ENGINE") || CFP=
+            fps[$label]=$CFP
+        fi
         one_check "$label" "$out/$label.out" "$pool_fail" "${CMD[@]}" &
     done
     wait
@@ -242,20 +384,25 @@ by_weight() {
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
 for name in effects facts model sources notes director keep tone-curve tone-drag playing viz \
-    core-store core-stream core-actions core-computer core-prefs core-registry core-climb core-loop core-title core-hold ember-parts \
+    core-store core-stream core-actions core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-hold ember-parts \
     level-write toast frame-keys switch ember-order contract \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes paper-fold \
     signal-line signal-draw nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls signal-controls; do
     node_entries+=("node-$name|node/$name.mjs|")
 done
-node_entries+=("gate-refusal|gate_refusal.sh|")
+node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|")
 
-# The checks that read a pace, a calm rate (simulated frames a second against a band) or a time
-# series from the page's own frames: they need the machine to themselves, so they run one at a time
-# after the parallel part, on both gates. (nightdrive_timing is Night drive's draw cost, its draws and floor
-# rows a second and the budget's rate rule; the rest of that theme, nightdrive_theme, runs in the pool. scroll
-# holds the smoke's velocity to bounds that depend on how fast the wheel steps and the frames come.)
-serial_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick nightdrive_timing)
+# The checks that assert a frame rate, a draw cost or a wall-clock pace (frames a second against a
+# band, a flick's speed, a velocity after wheel steps a set time apart) need the machine to
+# themselves: they hold the gate lock exclusive and run one at a time after the parallel part, on both
+# gates, and a re-run of any check takes the lock exclusive too. smoke_core and haze are whole files
+# here (their rate cases are not split out); smoke_page, smoke_quick, effects_cycle, scroll and notes
+# assert rates or wall-clock pace; sources reads pointer pauses of 20 and 300 ms on the page's own
+# clock against the browser's event times (a fake clock cannot move those); nightdrive_timing is Night
+# drive's draw cost, its phone budget and its tap under a slowed CPU. The pace asserts that moved to a
+# fake clock (fakeclock.py: nightdrive_theme's Still and readout rates) stay in the pool; the README's
+# "Pace asserts left in the pool" lists the rest.
+serial_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick notes sources nightdrive_timing)
 
 if [ "$quick" -eq 1 ]; then
     browser_checks=(effects_menu effects_layout tone_note knob_click tone_drag playing \
@@ -269,8 +416,16 @@ else
 fi
 entries=()
 serial_entries=()
+# The checks whose asserts are pure logic driven through the page (the values, the keys, the link,
+# the presets, the rows): another engine adds little to them, so the task gate runs them in Chromium
+# only; the quick and the full gate run them in both engines.
+logic_only=(space_key device_presets core_rows)
 for browser in chromium firefox; do
     for name in "${browser_checks[@]}"; do
+        if [ "$task" -eq 1 ] && [ "$browser" = firefox ] &&
+            [[ " ${logic_only[*]} " == *" $name "* ]]; then
+            continue
+        fi
         entry="$name-$browser|$name.py|$browser"
         case " ${serial_scripts[*]} " in
             *" $name "*) serial_entries+=("$entry") ;;
@@ -284,11 +439,30 @@ if [ "$quick" -eq 0 ]; then
 fi
 entries+=("firefox_preload|firefox_preload.py|")
 
+# WEB_CHECKS_ONLY="label label ...": run only those entries (a debugging aid for the gate itself).
+if [ -n "${WEB_CHECKS_ONLY:-}" ]; then
+    only() {
+        local e kept=()
+        for e in "$@"; do [[ " $WEB_CHECKS_ONLY " == *" ${e%%|*} "* ]] && kept+=("$e"); done
+        printf '%s\n' "${kept[@]}"
+    }
+    mapfile -t node_entries < <(only "${node_entries[@]}")
+    mapfile -t entries < <(only "${entries[@]}")
+    mapfile -t serial_entries < <(only "${serial_entries[@]}")
+    [ -z "${node_entries[*]}" ] && node_entries=()
+    [ -z "${entries[*]}" ] && entries=()
+    [ -z "${serial_entries[*]}" ] && serial_entries=()
+fi
+
 total=$(( ${#node_entries[@]} + ${#entries[@]} + ${#serial_entries[@]} ))
 
 # The node harnesses and the gate's own refusal check: a second or two, one at a time.
 pool_fail=FAIL
+lane=node lock_mode=
 run_pool 1 "${node_entries[@]}"
+lane=pool lock_mode=-s
+# only the pool's browser checks use the cache; the serial lane's pace and draw-cost checks run cold
+cache_ok=1
 
 # The browser checks, longest first, JOBS at a time. With more than one job a failure is not
 # final: it is run again alone below. With one job the order is the listed one and a failure stands.
@@ -310,6 +484,10 @@ for entry in "${ordered[@]}"; do
     [ -r "$out/$label.verdict" ] && read -r word _ <"$out/$label.verdict"
     if [ "$word" = retry ]; then
         echo "again $label (alone)"
+        lane=again lock_mode=-x
+        CFP=${fps[$label]:-}
+        script=${entry#*|} CFP_SCRIPT=${script%%|*} CFP_ENGINE=${entry##*|}
+        [ -n "$CFP" ] && { CFP=$("${fpy[@]}" full "$CFP_SCRIPT" "$CFP_ENGINE") || CFP=; }
         check_cmd "$entry"
         one_check "$label" "$out/$label.again.out" FAIL "${CMD[@]}" &
         wait $!
@@ -323,9 +501,14 @@ done
 
 # The serial lane, one at a time on a quiet machine; a failure stands.
 pool_fail=FAIL
+cache_ok=0 CFP=
+lane=serial lock_mode=-x
+serial_start=$SECONDS
 if [ ${#serial_entries[@]} -gt 0 ]; then
     run_pool 1 "${serial_entries[@]}"
 fi
+
+serial_wall=$((SECONDS - serial_start))
 
 # The verdict: a check with no verdict file was lost (killed, crashed) and is a FAIL.
 failed=0
@@ -345,6 +528,11 @@ note=
 if [ ${#flaky[@]} -gt 0 ]; then
     note=" (${#flaky[@]} flaky: ${flaky[*]})"
 fi
+if [ ${#cached[@]} -gt 0 ]; then
+    note+=" (${#cached[@]} cached, not run: ${cached[*]})"
+fi
+echo "serial lane: $serial_wall s"
+top_table
 echo "web-checks: $((total - failed)) of $total checks passed in $SECONDS s$note" \
     "(output in target/web-checks/out)"
 [ "$failed" -eq 0 ]

@@ -19,6 +19,9 @@
 #     `${{ github.head_ref }}` (script injection: pass them through `env:`);
 #   - a `git ... clone` carries `http.extraheader` after the subcommand (the token would be
 #     persisted in .git/config; `git -c ... clone` is transient);
+#   - a step that runs `docker build -f .../Dockerfile ... ctx` does not stage into `ctx/` every
+#     source the Dockerfile's `COPY` lines name (the release image is built from a context of
+#     its own, so a new COPY source must be copied there too);
 #   - a `make` target a step runs, or a packaging/ or scripts/ file it names, does not exist.
 import glob
 import os
@@ -64,6 +67,31 @@ def steps(doc):
     for job in (doc.get("jobs") or {}).values():
         for step in job.get("steps") or []:
             yield step
+
+
+def copy_sources(dockerfile):
+    """The local sources of the Dockerfile's COPY lines (not `--from=` ones)."""
+    sources = []
+    for line in dockerfile.splitlines():
+        words = line.split()
+        if not words or words[0].upper() != "COPY" or any(w.startswith("--from") for w in words):
+            continue
+        args = [w for w in words[1:] if not w.startswith("--")]
+        sources += args[:-1]
+    return sources
+
+
+def context_errors(run, dockerfile):
+    """The COPY sources a `docker build ... ctx` step does not stage into ctx/."""
+    if not re.search(r"\bdocker\s+build\b", run) or not re.search(r"\bctx\s*$", run, re.M):
+        return []
+    errors = []
+    for source in copy_sources(dockerfile):
+        directory, name = os.path.split(source)
+        staged_dir = "ctx/" + (directory + "/" if directory else "")
+        if staged_dir not in run or name not in run:
+            errors.append(f"the image step does not stage `{source}` (a Dockerfile COPY source) into {staged_dir}")
+    return errors
 
 
 def check(path, targets):
@@ -128,6 +156,10 @@ def check(path, targets):
             for w in words:
                 if w not in targets:
                     errors.append(f"`make {w}`: no such target in the Makefile")
+        dockerfile_path = os.path.join(ROOT, "Dockerfile")
+        if os.path.exists(dockerfile_path):
+            with open(dockerfile_path, encoding="utf-8") as f:
+                errors += context_errors(step.get("run", ""), f.read())
         for p in re.findall(r"\b(?:packaging|scripts)/[\w./-]+\.(?:sh|py|in)\b", run):
             if not os.path.exists(os.path.join(ROOT, p)):
                 errors.append(f"`{p}` does not exist")
@@ -151,6 +183,18 @@ def self_test():
         ("on:\n  push:\n    tags: ['v*']\n  schedule:\n    - cron: '0 0 * * *'\n", False),
     ]
     bad = 0
+    dockerfile = "COPY target/dist/a target/dist/b /x/\nCOPY --from=b /y /z\nCOPY LICENSE /l\nCOPY packaging/e.sh /bin/e\n"
+    stage = "mkdir -p ctx/target/dist\ncp t/a t/b ctx/target/dist/\ncp t/LICENSE ctx/\n"
+    build = "docker build -f src/Dockerfile -t i ctx\n"
+    for run, ok in [
+        (stage + "mkdir -p ctx/packaging\ncp src/packaging/e.sh ctx/packaging/\n" + build, True),
+        (stage + build, False),
+        (stage.replace("t/LICENSE ctx/", "") + "mkdir -p ctx/packaging\ncp src/packaging/e.sh ctx/packaging/\n" + build, False),
+        ("docker build -f src/Dockerfile -t i .\n", True),
+    ]:
+        if bool(context_errors(run, dockerfile)) == ok:
+            print(f"workflow-check: self-test: context case {run!r} should {'pass' if ok else 'fail'}")
+            bad += 1
     for text, ok in cases:
         got = not trigger_errors(yaml.safe_load(text))
         if got != ok:

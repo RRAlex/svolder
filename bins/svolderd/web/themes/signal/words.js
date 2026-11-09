@@ -16,8 +16,9 @@ export const AUTOEQ = 'from your AutoEq preset';
 export const CHANGES = 'changes the sound';
 export const AS_SENT = 'arrives as sent';
 
-/** The computer's hop on the line: its name, its audio server, and what it says while chosen. */
-export const COMPUTER_NAME = 'This computer';
+/** The computer's hop on the line: its name (the core's, as the switch calls it), its audio server,
+ * and what it says while chosen. */
+export { THIS_COMPUTER as COMPUTER_NAME } from '../../core/computer.js';
 export const COMPUTER_SERVER = 'PipeWire';
 export const CONTROLS_BELOW = 'controls below';
 /** What the hop says where the computer's controls cannot be used. */
@@ -113,7 +114,7 @@ export const SHELF = {
   presetName: 'Preset name',
   newName: 'New name',
   answers: {
-    save: 'Save', rename: 'Rename', cancel: 'Cancel', delete: 'Delete', keep: 'Keep', unlink: 'Unlink', remove: 'Remove',
+    save: 'Save', rename: 'Rename', cancel: 'Cancel', delete: 'Delete', apply: 'Apply', keep: 'Keep', unlink: 'Unlink', remove: 'Remove',
   },
   askDelete: (name) => `Delete \u201C${name}\u201D? The bands on the device stay as they are.`,
   askSlot: (slot) => `Save the bands to ${slot}? What the device holds there is replaced.`,

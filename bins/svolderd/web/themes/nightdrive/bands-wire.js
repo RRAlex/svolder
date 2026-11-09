@@ -11,11 +11,12 @@
 // and ends with the pointer's release or cancel anywhere, the window losing focus, the page hidden,
 // the stream lost, another device shown, no such key left or the 10 s cap.
 
+import { WORDS } from './draw/bands.js';
 import { inertOf } from './inert.js';
-import { writeField } from './points-wire.js';
 
-/** The sheet's steppers a long press repeats: a band's value and the loudness strength. */
-const STEPPERS = '[data-act="band"][data-step], [data-act="loudness"][data-step]';
+/** The sheet's steppers a long press repeats: a band's value, the loudness strength and a value of the computer's
+ * points. */
+const STEPPERS = '[data-act="band"][data-step], [data-act="loudness"][data-step], [data-act="point-step"][data-step]';
 
 /** A hold ends at this age (ms), whatever else. */
 const CAP_MS = 10_000;
@@ -57,7 +58,8 @@ export function wireBands({
     } else if (event.key === 'Enter') {
       event.preventDefault();
       if (field.dataset.point) {
-        writeField(core, field);
+        // what was typed is rounded, held to the hand range and written as a last value; a cell left as it was writes nothing
+        core.actions.computer.cell(Number(field.dataset.point), field.dataset.param, field.value, field.defaultValue);
         field.blur();
         return;
       }
@@ -70,6 +72,8 @@ export function wireBands({
 
   /** The press of a stepper that is held now (the core's hold), or null. */
   let hold = null;
+  /** Whether a hold is on: a step of a hold that has ended (its repeat already on the way) is none. */
+  let holding = false;
 
   // ---- the values put in place while a stepper is held ----
   /** The model's band values and strength put into the table as they are, but for the field typed in. */
@@ -88,14 +92,49 @@ export function wireBands({
     const strength = body.querySelector('#nd-loud i');
     if (strength && tone.strength !== undefined) strength.textContent = `strength ${tone.strength ?? '—'}`;
   }
+  /** The computer's point values put into the table as they are while a stepper is held, but for the field typed in. */
+  function patchPoints() {
+    const body = sheet.body();
+    const tone = core.computer.tone();
+    if (!body || !tone) return;
+    for (const p of tone.points) {
+      for (const param of ['f', 'g', 'q']) {
+        const field = body.querySelector(`#nd-p${p.n}${param}`);
+        if (!field || field === typing) continue;
+        const text = WORDS[param](p[param]);
+        field.value = text;
+        field.defaultValue = text;
+      }
+    }
+  }
+  /** Whether a stepper may step and a hold may repeat: one rule, so a step is never taken that its hold cannot end. */
+  const canStep = () => !inert() && view.state !== 'lost' && view.state !== 'waiting';
+  /** The hand that steps the computer's points for the steppers (the core's burst: each step a live write, the last
+   * value once as the final one when the hold ends; it follows the point through a re-sort and ends if the point is
+   * removed). */
+  const stepper = core.drag.pointDrag({ points: () => [], usable: () => canStep() });
+  const offComputer = core.computer.on(({ type }) => {
+    // a flip, or the point stepped removed by another front end: the hold is over (never on to the point that took its number)
+    if (type === 'flip') hold?.end();
+    if (type === 'gone') hold?.end();
+    if (type !== 'flip' && hold && sheet.isOpen()) patchPoints();
+  });
+  signal.addEventListener('abort', () => {
+    offComputer();
+    stepper.destroy();
+  }, { once: true });
   live.onReading('part', ({ device, name }) => {
     if (hold && device === store.shown() && name === 'tone' && sheet.isOpen()) patch();
   });
 
   // ---- the steppers ----
-  /** One step of the stepper `el`, to `target`. */
-  function stepOnce(el, target) {
-    if (el.dataset.act === 'band') {
+  /** One step of the stepper `el`, to `target`; `held` for a step of a held press. */
+  function stepOnce(el, target, held = false) {
+    if (el.dataset.act === 'point-step') {
+      // a held press goes on with the same point after a re-sort: the burst follows it, the drawn number may not
+      const n = held && stepper.burst ? stepper.burst.n : Number(el.dataset.point);
+      stepper.step(n, el.dataset.param, Number(el.dataset.step), { hold: held });
+    } else if (el.dataset.act === 'band') {
       core.actions.setBand(Number(el.dataset.band), BAND_PARAM[el.dataset.param],
         { step: Number(el.dataset.step) }, { device: target });
     } else {
@@ -109,16 +148,19 @@ export function wireBands({
     if (!first || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     hold?.end();
     const target = store.shown();
+    holding = true;
     hold = core.hold.repeat(event, {
       root: wrap,
       el: first,
-      step: (el) => stepOnce(el, target),
+      step: (el) => holding && stepOnce(el, target, true),
       find: () => (first.id ? wrap.querySelector(`#${CSS.escape(first.id)}`) : null),
-      live: () => !inert() && view.state !== 'lost' && view.state !== 'waiting',
+      live: canStep,
       cap: CAP_MS,
       onStart: () => keep.take(),
       onEnd: () => {
         hold = null;
+        holding = false;
+        stepper.finishBurst();
         keep.drop();
       },
       signal,

@@ -35,7 +35,7 @@ export function presetsOf(tone) {
 }
 
 /** The sheet's sections for `page`'s device; `view.facts.open` says whether its facts are unfolded. With the
- * computer as the side shown (`comp`, ../computer-view.js) the mode, the table of points and the presets are its, in
+ * computer as the side shown (`comp`, the core's `computer.view()`) the mode, the table of points and the presets are its, in
  * the places the device's were. */
 export function drawSheet(page, view = {}, comp = null) {
   const device = page?.device;

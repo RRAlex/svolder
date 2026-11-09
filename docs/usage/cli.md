@@ -127,7 +127,8 @@ answers. The steps:
    or skip choice when nothing is heard, with "power the device on and close the phone app, which
    holds its only connection".
 4. **Pick** — one device by number, when more than one answered: product, unit id, signal, and the
-   profile the advertisement matches; an unknown product offers the profile list instead.
+   profile the advertisement matches (a unit that is already configured is left out, with a line
+   naming its device); an unknown product offers the profile list instead.
 5. **Name** — defaults to the product name; a name already configured is refused.
 6. **Passphrase** — asked only after the first connect is refused: the four digits the phone app
    shows, `auto` to have svolder read the code from the device, or `none` — typed, or left blank —
@@ -228,7 +229,8 @@ svolder: no devices configured; add one with `svolder add <udid> --name NAME`
 
 Add a `[[device]]` entry to the configuration file, creating the file from the template (and its
 directory) first if either is absent. A `name` is required, and a duplicate `name` or `udid` is
-refused; the file is re-parsed after writing, before this reports success, so a config that would
+refused (a unit is configured once, so a second name for a unit another device carries is
+refused, naming that device); the file is re-parsed after writing, before this reports success, so a config that would
 not load is never left behind. Without a `<UDID>`, on a terminal, `add` runs the same guided walk
 `setup` does (see "setup" above), starting from its Scan step, with `--name`, `--profile` and
 `--passphrase` pre-filling its answers; off a terminal it prints the hint toward `svolder scan`
@@ -1324,7 +1326,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.32.0
+svolder 0.32.5
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

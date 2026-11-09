@@ -4,7 +4,7 @@
 
 # Writes what combines the two architectures' packages in target/dist: PKGBUILD (both tarballs'
 # checksums in it), SHA256SUMS (every release asset but itself, written last) and
-# RELEASE-NOTES.md (packaging/release-notes.md.in with the version's section of CHANGELOG.md at its @CHANGELOG@ line).
+# RELEASE-NOTES.md (packaging/release-notes.md.in with the version's section of CHANGELOG.md, and the older untagged ones, at its @CHANGELOG@ line).
 # `make packages` runs it on the host, from the repository root, with the version as its argument.
 set -eu
 
@@ -22,15 +22,9 @@ for f in ${assets% PKGBUILD}; do
   }
 done
 
-# The section's body: the lines after its heading up to the next version's, without the blank
-# lines around it. Checked before anything is written, so a failed run leaves target/dist as it was.
-section=$(awk -v h="## $version" '$0 == h { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md \
-  | sed '/./,$!d')
-[ -n "$section" ] || { echo "release-files: CHANGELOG.md has no section '## $version'" >&2; exit 1; }
-[ "$section" != 'To be written at the merge.' ] || {
-  echo "release-files: CHANGELOG.md's '## $version' section is still the placeholder" >&2
-  exit 1
-}
+# The changelog text: the version's section and the older ones no tag covers (release-notes.sh).
+# Checked before anything is written, so a failed run leaves target/dist as it was.
+section=$(bash packaging/release-notes.sh "$version")
 
 # The package description is the one package.sh gives the .deb and the .rpm.
 summary=$(sed -n 's/^summary="\(.*\)"$/\1/p' packaging/package.sh)

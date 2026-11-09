@@ -132,6 +132,30 @@ from the rest of the page so the themes work can lift both. Only what a browser 
 pointer and touch events, scroll, capture, the swap hold) is left to browser checks. The key list
 (`?`) has a line for the gestures.
 
+**The computer's curve.** The drag of the computer's points (a press, a tap that adds a point, two
+fingers, the wheel and the arrow keys) is the core's, `core/point-drag.js`, over the same gestures
+(`tone-drag.js`): one session per drag, followed to the row the table lists its point in after a
+re-sort, and a wheel or key burst that ends in one final write. The DAC's drag described here is
+separate, in the Ember page's `tone-graph.js`.
+
+A theme gives the hand the plot's geometry and hears what happens; it owns its listeners. Beyond
+the press, tap, touch, wheel and key methods the hand has:
+- `step(n, param, delta, { hold })`: a stepper's step of `f`, `g` or `q`, a live write in the keys'
+  burst. A held stepper passes `hold: true`, so the burst has no timer and ends at `finishBurst()`
+  when the hold does.
+- `begin({ n, plot, gesture, press, pointerId, touchIds })`: a session for a gesture the theme names
+  (a pinch from a diamond, fed by the session's `drag.spread`), `dropTap()` for a press that is no
+  tap, `watchTouch(plot, on)` for the touch listeners of a pinch (and the standalone `touchWatch`).
+- a session's `values()` (the numbers the drag asks), and `labelWords(point, { qPrefix })`.
+- `on.added` hears `{ ok: false, full: true, max }` for a tap on a full table, and `on.pick` hears
+  `null` or a renumbered point when a remove changed the point in hand. A burst on a point that is
+  removed ends with no final write; one on a point listed elsewhere follows it.
+
+The core also has `actions.canWrite()` (pure: may this page write), `computer.eqOf(page)` and
+`computer.view().eq` (the EQ's mode, preset and whether it is confirmed, with no curve worked
+out), `core.curve.VIEW_WIDTH` and `VIEW_HEIGHT` (the graph's viewBox) and
+`core.drag.POINT_TYPES`.
+
 Not in it: adding or removing bands, changing a band's filter type, moving several bands at once, an
 undo history (`Esc` ends a drag where it is), dragging by keyboard (the steppers and typed values
 are that route), and the knob's zone following the drag.

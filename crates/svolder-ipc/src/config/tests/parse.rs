@@ -153,3 +153,39 @@ fn host_table_defaults_to_enabled() {
     );
     assert!(Config::parse("[host]\nenabled = \"maybe\"\n").is_err());
 }
+
+/// Two blocks for one unit are refused, in words that name both devices and the unit, however
+/// the unit id is spelled in each.
+#[test]
+fn two_blocks_for_one_unit_are_refused_naming_both() {
+    let text = "[[device]]\nname=\"dac\"\nudid=\"1a2b3c4d5e6f7a8b\"\n\n\
+                [[device]]\nname=\"amp\"\nudid=\"1A2B3C4D5E6F7A8B\"\n";
+    let err = Config::parse_strict(text).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "config: devices \"dac\" and \"amp\" are both configured for unit 1A2B3C4D5E6F7A8B; \
+         a unit is configured once, so remove one of the two blocks"
+    );
+    let apart = "[[device]]\nname=\"dac\"\nudid=\"1A2B3C4D5E6F7A8B\"\n\n\
+                 [[device]]\nname=\"amp\"\nudid=\"0102030405060708\"\n";
+    assert_eq!(Config::parse(apart).unwrap().devices.len(), 2);
+}
+
+/// A lenient parse (the daemon's and the commands') keeps the first block for a unit, leaves
+/// the later one out and warns, naming both devices and the cure.
+#[test]
+fn a_lenient_parse_keeps_the_first_block_for_a_unit_and_warns() {
+    let text = "[[device]]\nname=\"dac\"\nudid=\"1A2B3C4D5E6F7A8B\"\n\n\
+                [[device]]\nname=\"amp\"\nudid=\"1a2b3c4d5e6f7a8b\"\n";
+    let config = Config::parse(text).unwrap();
+    assert_eq!(config.devices.len(), 1);
+    assert_eq!(config.devices[0].name, "dac");
+    let warnings = config.warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("\"dac\"")
+            && warnings[0].contains("\"amp\"")
+            && warnings[0].contains("svolder remove amp"),
+        "{warnings:?}"
+    );
+}

@@ -3,21 +3,26 @@
 // The tone control's curve maths in the page, a port of the core's (`tone/response.rs`) and of
 // the graph's maps (`web/view/tone.rs`): what a set of bands does to the frequency response, the
 // peak that can clip, its words, and the viewBox's x and y for a frequency and a gain. Pure
-// numbers in, numbers or strings out: no DOM, no import, so node loads it as the browser does.
+// numbers in, numbers or strings out: no DOM, and only the core's `fixedEven` imported, so node loads it as the browser does.
 // `scripts/web-checks/node/tone-curve.mjs` holds it to the core's own numbers (a fixture a Rust
 // test writes), so the page and the TUI draw one curve.
+
+import { fixedEven } from './words.js';
 
 export const POINTS = 181;
 export const RANGE_DB = 13;
 export const F_MIN = 20;
 export const F_MAX = 20000;
 export const PEAK_SHOWN_DB = 0.05;
+/** The graph's viewBox: the curve, the markers and the hand on it are all in these units (10 per
+ * dB, from +13 dB at the top to -13 dB at the bottom). */
+export const VIEW_WIDTH = 1000;
+export const VIEW_HEIGHT = 20 * RANGE_DB;
 
 const SAMPLE_RATE_HZ = 48000;
 const PEAK_SAMPLES = 1024;
 const PEAK_WINDOW_OCTAVES = 0.5;
 const PEAK_STEPS = 60;
-const VIEW_WIDTH = 1000;
 
 // `n` log-spaced frequencies from 20 Hz to 20 kHz.
 export function logFreqs(n) {
@@ -155,7 +160,7 @@ export function clippingPeak(mode, bands) {
 // The peak's words: `peak +1.5 dB`, a minus written U+2212.
 export function peakWords(db) {
   const negative = db < 0 || Object.is(db, -0);
-  return `peak ${negative ? '−' : '+'}${Math.abs(db).toFixed(1)} dB`;
+  return `peak ${negative ? '−' : '+'}${fixedEven(Math.abs(db), 1)} dB`;
 }
 
 // The viewBox x of a frequency.
@@ -190,6 +195,6 @@ const FREQS = logFreqs(POINTS);
 // `M x y L x y …` through the viewBox y values `ys` at the curve's 181 frequencies.
 export function linePath(ys) {
   return ys.slice(0, POINTS)
-    .map((y, i) => `${i === 0 ? 'M' : 'L'}${xOf(FREQS[i]).toFixed(1)} ${y.toFixed(1)}`)
+    .map((y, i) => `${i === 0 ? 'M' : 'L'}${fixedEven(xOf(FREQS[i]), 1)} ${fixedEven(y, 1)}`)
     .join('');
 }

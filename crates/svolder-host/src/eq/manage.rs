@@ -542,57 +542,7 @@ impl Host {
             return Err(failure);
         }
         let manager = self.manager()?;
-        // The stated preamp is bounded where it is read (a file, the configuration); the one
-        // saved may be lower than -30 dB for a correction that peaks high, and is applied again
-        // as it stands. Here the filters are checked, and a preamp that is not a number or
-        // boosts beyond +30 dB is refused.
-        let stated = request.correction.preamp_db;
-        if !stated.is_finite() || stated > 30.0 {
-            return Err(trouble(
-                format!(
-                    "the correction cannot be applied: Preamp {stated} dB is not within +30 dB"
-                ),
-                "Fix the preamp",
-            ));
-        }
-        let held = Points::from_state(&HostEqState {
-            on: true,
-            name: String::new(),
-            origin: None,
-            target: String::new(),
-            route: Route::Smart,
-            manager,
-            previous_default: None,
-            preamp_db: 0.0,
-            filters: request.correction.filters.clone(),
-            slots: request.slots.clone(),
-        });
-        if request.correction.filters.len() > SLOTS {
-            return Err(trouble(
-                format!(
-                    "{} filters; the computer EQ holds {SLOTS}",
-                    request.correction.filters.len()
-                ),
-                "Use a curve of 16 filters or fewer",
-            ));
-        }
-        let mut shape = request.correction.clone();
-        shape.preamp_db = 0.0;
-        apo::validate(&shape).map_err(|e| {
-            trouble(
-                format!("the correction cannot be applied: {e}"),
-                "Fix the band or the filter it names",
-            )
-        })?;
-        check_playable(
-            &request.correction,
-            request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
-        )?;
-        // Whatever the correction states, it is never applied above unity.
-        request.correction.preamp_db = played_preamp(
-            &request.correction,
-            request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
-        );
+        let held = checked_request(&mut request, manager)?;
         let pipewire = self.pipewire.clone().expect("unavailable() checked it");
         plain(&pipewire)?;
         plain(&self.conf)?;
@@ -732,22 +682,8 @@ impl Host {
         let Some(state) = self.state().filter(|state| state.on) else {
             return Ok(());
         };
-        let mut correction = request.correction;
-        correction.preamp_db =
-            played_preamp(&correction, request.rate_hz.unwrap_or(CONFIG_RATE_HZ));
-        let points = Points::from_state(&HostEqState {
-            filters: correction.filters.clone(),
-            slots: request.slots.clone(),
-            ..state.clone()
-        });
         plain(&self.conf)?;
-        let conf = render_live_conf(
-            &points,
-            correction.preamp_db,
-            &state.target,
-            state.route,
-            request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
-        );
+        let conf = kept_conf(&state, request);
         write_atomically(&self.conf, conf.as_bytes()).map_err(|e| cannot_write(&self.conf, e))
     }
 
@@ -1264,6 +1200,86 @@ impl Chain for Host {
     fn state(&self) -> Option<HostEqState> {
         Host::state(self)
     }
+}
+
+/// The pure prefix of an apply: the request's preamp, filters and rate are checked, and its preamp
+/// is set to the one the filters need at its rate, so nothing is ever applied above unity. Returns
+/// the points the request holds. Every path that applies (`Host::apply`, the lab's model of it)
+/// goes through here.
+///
+/// The stated preamp is bounded where it is read (a file, the configuration); the one saved may
+/// be lower than -30 dB for a correction that peaks high, and is applied again as it stands. Here
+/// the filters are checked, and a preamp that is not a number or boosts beyond +30 dB is refused.
+pub(crate) fn checked_request(
+    request: &mut ApplyRequest,
+    manager: Manager,
+) -> Result<Points, EqFailure> {
+    let stated = request.correction.preamp_db;
+    if !stated.is_finite() || stated > 30.0 {
+        return Err(trouble(
+            format!("the correction cannot be applied: Preamp {stated} dB is not within +30 dB"),
+            "Fix the preamp",
+        ));
+    }
+    let held = Points::from_state(&HostEqState {
+        on: true,
+        name: String::new(),
+        origin: None,
+        target: String::new(),
+        route: Route::Smart,
+        manager,
+        previous_default: None,
+        preamp_db: 0.0,
+        filters: request.correction.filters.clone(),
+        slots: request.slots.clone(),
+    });
+    if request.correction.filters.len() > SLOTS {
+        return Err(trouble(
+            format!(
+                "{} filters; the computer EQ holds {SLOTS}",
+                request.correction.filters.len()
+            ),
+            "Use a curve of 16 filters or fewer",
+        ));
+    }
+    let mut shape = request.correction.clone();
+    shape.preamp_db = 0.0;
+    apo::validate(&shape).map_err(|e| {
+        trouble(
+            format!("the correction cannot be applied: {e}"),
+            "Fix the band or the filter it names",
+        )
+    })?;
+    check_playable(
+        &request.correction,
+        request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
+    )?;
+    // Whatever the correction states, it is never applied above unity.
+    request.correction.preamp_db = played_preamp(
+        &request.correction,
+        request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
+    );
+    Ok(held)
+}
+
+/// The config a running chain restarts from for `request`: its points under the preamp they need
+/// at its rate, written for the sink and route `state` holds. Shared by `Host::keep_conf` and the
+/// lab's model of it.
+pub(crate) fn kept_conf(state: &HostEqState, request: ApplyRequest) -> String {
+    let mut correction = request.correction;
+    correction.preamp_db = played_preamp(&correction, request.rate_hz.unwrap_or(CONFIG_RATE_HZ));
+    let points = Points::from_state(&HostEqState {
+        filters: correction.filters.clone(),
+        slots: request.slots.clone(),
+        ..state.clone()
+    });
+    render_live_conf(
+        &points,
+        correction.preamp_db,
+        &state.target,
+        state.route,
+        request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
+    )
 }
 
 /// The files an apply writes, staged beside their places before anything is changed.

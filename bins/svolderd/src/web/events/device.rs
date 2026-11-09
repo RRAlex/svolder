@@ -44,8 +44,11 @@ pub(super) struct Read {
 
 impl Read {
     /// The device `name` with its presets, read now; `None` when it cannot be read.
-    pub(super) fn of(cx: &Context, name: &str) -> Option<Read> {
-        Some(Read::from(cx, api::load(&cx.web, name).ok()?))
+    pub(super) async fn of(cx: &Context, name: &str) -> Option<Read> {
+        Some(Read::from(
+            cx,
+            api::load_off_thread(&cx.web, name).await.ok()?,
+        ))
     }
 
     /// The device `name` as the components' turns read it: no presets, the configuration file
@@ -394,7 +397,7 @@ impl Task {
         // presets); the components' turns, up to 20 a second, skip it. A turn that finds the
         // shape changed is a parts turn.
         let read = if parts {
-            Read::of(&cx, &self.name)
+            Read::of(&cx, &self.name).await
         } else {
             Read::live(&cx, &self.name)
         };
@@ -403,7 +406,7 @@ impl Task {
         };
         if !parts && self.stale(&read) {
             parts = true;
-            let Some(loaded) = Read::of(&cx, &self.name) else {
+            let Some(loaded) = Read::of(&cx, &self.name).await else {
                 return true;
             };
             read = loaded;
@@ -448,7 +451,7 @@ impl Task {
             None,
         )
         .await;
-        page.followed = followed_models(cx);
+        page.followed = followed_models(cx).await;
         send_json(tx, "model", &page).await.is_ok()
     }
 }

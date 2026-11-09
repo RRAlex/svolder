@@ -728,7 +728,8 @@ async fn a_superseded_write_answers_204_and_draws_nothing() {
     let web = web(open(), Arc::clone(&dac.fleet));
     let answer = super::outcome(&web, "dac", crate::writer::Outcome::Superseded, &[], |_| {
         serde_json::Value::Null
-    });
+    })
+    .await;
     assert_eq!(answer.status(), Code::NO_CONTENT);
     let answer = super::outcome(
         &web,
@@ -736,7 +737,8 @@ async fn a_superseded_write_answers_204_and_draws_nothing() {
         crate::writer::Outcome::Cancelled("the link went down"),
         &[],
         |_| serde_json::Value::Null,
-    );
+    )
+    .await;
     assert_eq!(answer.status(), Code::CONFLICT);
     dac.stop().await;
 }

@@ -238,7 +238,9 @@ schema = 1
 # [[device]]
 # The name the front ends pick this device out by.
 # name = "bifrost"
-# The device's 8-byte unit id, as sixteen hex characters.
+# The device's 8-byte unit id, as sixteen hex characters. A unit is configured once: svolder's
+# writers refuse a second block for it, and a file that has one anyway starts with the first
+# block, a warning, and the later block left out (`svolder remove <name>` takes one out).
 # udid = "1A2B3C4D5E6F7A8B"
 # The profile to drive it with, when it differs from the one svolder detects.
 # profile = "bifrost3"

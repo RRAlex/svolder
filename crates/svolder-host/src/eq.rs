@@ -516,6 +516,7 @@ mod systemd;
 
 pub use control::{CUSTOM, Edit, EqControl, EqView, Keep, LIVE_NOTE, PointView};
 pub use live::{LiveNode, PREAMP, PreampCarrier, SHAPE, SlotShape};
+pub(crate) use manage::checked_request;
 pub use manage::{
     ApplyRequest, Chain, EqFailure, Host, Status, UNIT, check_playable, lowered_note,
     played_preamp, safe_preamp,

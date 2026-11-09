@@ -275,7 +275,7 @@ fn a_failed_save_names_the_config_path() {
 }
 
 /// Have the writers of `path` meet after reading it.
-fn meet_at(path: &Path) {
+pub(super) fn meet_at(path: &Path) {
     MEETINGS.lock().unwrap().push((
         path.to_path_buf(),
         std::sync::Arc::new((std::sync::Mutex::new(0), std::sync::Condvar::new())),

@@ -21,7 +21,7 @@ use dbus::blocking::Connection;
 use dbus::blocking::stdintf::org_freedesktop_dbus::ObjectManager;
 
 use super::processes::{RunningDaemon, running_daemons};
-use super::{AdapterFacts, BluezFacts, EnvFacts, Probes, SystemdFacts, UnitFacts};
+use super::{AdapterFacts, BluezFacts, EnvFacts, Probes, RfkillFacts, SystemdFacts, UnitFacts};
 
 /// How long any one D-Bus call or subprocess gets before it is given up on.
 pub const TIMEOUT: Duration = Duration::from_secs(2);
@@ -54,6 +54,8 @@ pub struct LiveSnapshot {
     profiles_error: Option<String>,
     /// Every svolderd this user is running, as `/proc` reports them.
     daemons: Vec<RunningDaemon>,
+    /// The host's Bluetooth rfkill switches.
+    rfkill: Vec<RfkillFacts>,
 }
 
 impl Probes for LiveSnapshot {
@@ -83,6 +85,10 @@ impl Probes for LiveSnapshot {
 
     fn daemons(&self) -> Vec<RunningDaemon> {
         self.daemons.clone()
+    }
+
+    fn rfkill(&self) -> Vec<RfkillFacts> {
+        self.rfkill.clone()
     }
 }
 
@@ -139,6 +145,7 @@ fn unread(why: String) -> LiveSnapshot {
         profiles: Vec::new(),
         profiles_error: None,
         daemons: Vec::new(),
+        rfkill: Vec::new(),
     }
 }
 
@@ -153,7 +160,32 @@ fn gather(socket: &Path, config: &Path) -> LiveSnapshot {
         profiles,
         profiles_error,
         daemons: running_daemons(),
+        rfkill: rfkill_in(Path::new("/sys/class/rfkill")),
     }
+}
+
+/// The Bluetooth switches under an rfkill directory (`/sys/class/rfkill`, readable without root):
+/// each entry's `type`, `name` (the adapter, `hci0`), `soft` and `hard`. An entry that cannot be read is left out.
+fn rfkill_in(dir: &Path) -> Vec<RfkillFacts> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<RfkillFacts> = entries
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let read = |file: &str| std::fs::read_to_string(path.join(file)).ok();
+            if read("type")?.trim() != "bluetooth" {
+                return None;
+            }
+            Some(RfkillFacts {
+                name: read("name")?.trim().to_string(),
+                soft: read("soft")?.trim() == "1",
+                hard: read("hard")?.trim() == "1",
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found
 }
 
 /// What BlueZ answers to `GetManagedObjects` on `org.bluez`: every object carrying
@@ -166,14 +198,14 @@ fn bluez_facts() -> BluezFacts {
     };
     let connection = match Connection::new_system() {
         Ok(connection) => connection,
-        Err(e) => return unreachable(e.to_string()),
+        Err(e) => return unreachable(bus_error(&e)),
     };
     let objects = match connection
         .with_proxy("org.bluez", "/", TIMEOUT)
         .get_managed_objects()
     {
         Ok(objects) => objects,
-        Err(e) => return unreachable(e.to_string()),
+        Err(e) => return unreachable(bus_error(&e)),
     };
     let mut adapters: Vec<AdapterFacts> = objects
         .iter()
@@ -197,6 +229,16 @@ fn bluez_facts() -> BluezFacts {
         reachable: Ok(()),
         adapters,
         unreadable: None,
+    }
+}
+
+/// A D-Bus error as `<error name>: <message>`: `dbus::Error`'s own Display is the message alone,
+/// and the check decides by the name.
+fn bus_error(e: &dbus::Error) -> String {
+    match (e.name(), e.message()) {
+        (Some(name), Some(message)) => format!("{name}: {message}"),
+        (Some(name), None) => name.to_string(),
+        (None, _) => e.to_string(),
     }
 }
 
@@ -555,6 +597,57 @@ mod tests {
         ADAPTERS, BLUETOOTH_SERVICE, CONFIG, DAEMON, Outcome, State, exit_code, run,
     };
     use crate::test_support::TempPath;
+
+    /// rfkill entries of type bluetooth are read; others and unreadable ones are left out.
+    #[test]
+    fn rfkill_reads_the_bluetooth_entries() {
+        let dir = std::env::temp_dir().join(format!("svolder-rfkill-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let entry = |name: &str, kind: &str, soft: &str, hard: &str| {
+            let d = dir.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("type"), format!("{kind}\n")).unwrap();
+            std::fs::write(d.join("name"), format!("hci{}\n", &name[6..])).unwrap();
+            std::fs::write(d.join("soft"), format!("{soft}\n")).unwrap();
+            std::fs::write(d.join("hard"), format!("{hard}\n")).unwrap();
+        };
+        entry("rfkill0", "wlan", "1", "0");
+        entry("rfkill1", "bluetooth", "1", "0");
+        entry("rfkill2", "bluetooth", "0", "1");
+        std::fs::create_dir_all(dir.join("rfkill3")).unwrap();
+        let facts = rfkill_in(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            facts,
+            vec![
+                crate::checks::RfkillFacts {
+                    name: "hci1".into(),
+                    soft: true,
+                    hard: false
+                },
+                crate::checks::RfkillFacts {
+                    name: "hci2".into(),
+                    soft: false,
+                    hard: true
+                },
+            ]
+        );
+        assert!(rfkill_in(&dir).is_empty());
+    }
+
+    /// A D-Bus error is told by its name first, as the bluetooth-service check reads it.
+    #[test]
+    fn a_bus_error_is_written_name_then_message() {
+        let e = dbus::Error::new_custom(
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+            "The name org.bluez was not provided by any .service files",
+        );
+        assert_eq!(
+            bus_error(&e),
+            "org.freedesktop.DBus.Error.ServiceUnknown: The name org.bluez was not provided by \
+             any .service files"
+        );
+    }
 
     /// A unit systemd is starting or reloading is running, though only an `active` one is active.
     #[test]

@@ -8,6 +8,7 @@
 import {
   linePath, POINTS, xOf, yOf,
 } from '../../../core/tone-curve.js';
+import { fixedEven } from '../../../core/words.js';
 
 /** The area's closing: down to 0 dB and back along it. */
 const CLOSE = 'L1000.0 130.0L0.0 130.0Z';
@@ -35,10 +36,10 @@ export function curve(tone) {
     line: path,
     area: path ? `${path}${CLOSE}` : '',
     ghost,
-    ys: line ? line.map((y) => y.toFixed(1)).join(',') : '',
-    peak: tone.peak ? { y: yOf(tone.peak.db).toFixed(1), words: tone.peak.words } : null,
+    ys: line ? line.map((y) => fixedEven(y, 1)).join(',') : '',
+    peak: tone.peak ? { y: fixedEven(yOf(tone.peak.db), 1), words: tone.peak.words } : null,
     markers: tone.markers.map((m) => ({
-      band: m.band, x: xOf(m.hz).toFixed(1), y: yOf(m.db).toFixed(1),
+      band: m.band, x: fixedEven(xOf(m.hz), 1), y: fixedEven(yOf(m.db), 1),
     })),
   };
 }

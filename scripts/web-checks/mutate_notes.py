@@ -3,11 +3,13 @@
 """Mutation checks for the smoke's notes: each mutation edits a copy of the page's web dir (never
 the repo), runs notes.py (Chromium) against it and must make at least one check FAIL (a crash
 without a FAIL line is reported as an error, not a kill).
-One worker (the default; do not raise MUT_WORKERS): the checks' timing-based bounds flake under
-two.
-Usage: python3 mutate_notes.py [name ...]   (default: all)   Env: MUT_WORKERS (default 1)"""
-import concurrent.futures, os, shutil, subprocess, sys
-import common
+One at a time whatever MUT_WORKERS says (the checks' timing-based bounds flake side by side); the web
+gate lock is held shared around each run.
+Usage: python3 mutate_notes.py [name ...]   (default: all)"""
+import os
+import sys
+
+import mutpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 M, S, N = 'themes/ember/smoke-model.js', 'themes/ember/smoke.js', 'themes/ember/smoke-notes.js'
@@ -233,39 +235,17 @@ VISIBLE = {'a note carves no gap', 'a note forms in empty sky',
 
 
 def run(name):
-    web = common.scratch('mut-web-')
-    shutil.copytree(common.WEB, web + '/w')
-    for f, old, new in MUTATIONS[name]:
-        p = f'{web}/w/{f}'
-        s = open(p).read()
-        assert old in s, f'{name}: {old[:50]!r} not in {f}'
-        open(p, 'w').write(s.replace(old, new, 1))
-    env = dict(os.environ, SMOKE_WEB=web + '/w')
     if name in LOST:
-        argv = [f'{HERE}/smoke_page.py', 'chromium', 'lost_link']
+        script, args = 'smoke_page.py', ['chromium', 'lost_link']
     elif name in VISIBLE:
-        argv = [f'{HERE}/notes.py', 'chromium', 'visible']
+        script, args = 'notes.py', ['chromium', 'visible']
     else:
-        argv = [f'{HERE}/notes.py', 'chromium', *(['settle'] if name in QUICK else [])]
-    r = subprocess.run([sys.executable, *argv], env=env,
-                       capture_output=True, text=True, timeout=1500)
-    shutil.rmtree(web, ignore_errors=True)
-    fails = [l for l in r.stdout.splitlines() if l.startswith('FAIL')]
-    if not fails and r.returncode:
-        tail = (r.stderr.strip().splitlines() or ['no output'])[-1][:200]
-        return name, None, '(error, not a kill) ' + tail
-    return name, fails, ''
+        script, args = 'notes.py', ['chromium', *(['settle'] if name in QUICK else [])]
+    return mutpool.run_script(name, script, MUTATIONS[name], args=args, secs=1500)
 
 
-names = sys.argv[1:] or list(MUTATIONS)
-bad = 0
-with concurrent.futures.ThreadPoolExecutor(int(os.environ.get('MUT_WORKERS', '1'))) as ex:
-    for name, fails, err in ex.map(run, names):
-        print('ERROR   ' if fails is None else 'KILLED  ' if fails else 'SURVIVED', name)
-        for f in (fails or [])[:6]:
-            print('    ', f[:110])
-        if err:
-            print('    ', err)
-        bad += not fails
-print(f'{len(names) - bad} of {len(names)} mutations killed')
-sys.exit(1 if bad else 0)
+def attempt(name):
+    return mutpool.timed_call(run, name)
+
+
+sys.exit(mutpool.run_names(sys.argv[1:] or list(MUTATIONS), attempt, serial=True))

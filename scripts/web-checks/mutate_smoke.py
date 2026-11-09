@@ -3,12 +3,13 @@
 """Mutation checks for the smoke's core and its page driver: each mutation edits a copy of the
 page's web dir (never the repo), runs smoke_core.py (Chromium), or the sections of smoke_page.py
 named in PAGE, against it and must make at least one check FAIL.
-One worker (the default; do not raise MUT_WORKERS): the checks' timing-based bounds flake under
-two.
-Usage: python3 mutate_smoke.py [name ...]   (default: all)   Env: HIDDEN_SECS (default 5 here),
-MUT_WORKERS (default 1)"""
-import concurrent.futures, os, shutil, subprocess, sys
-import common
+One at a time whatever MUT_WORKERS says (the checks' timing-based bounds flake side by side); the web
+gate lock is held shared around each run.
+Usage: python3 mutate_smoke.py [name ...]   (default: all)   Env: HIDDEN_SECS (default 5 here)"""
+import os
+import sys
+
+import mutpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 M = 'themes/ember/smoke-model.js'
@@ -235,36 +236,17 @@ PAGE = {
 
 
 def run(name):
-    web = common.scratch('mut-web-')
-    shutil.copytree(common.WEB, web + '/w')
-    for f, old, new in MUTATIONS[name]:
-        p = f'{web}/w/{f}'
-        s = open(p).read()
-        assert old in s, f'{name}: {old[:50]!r} not in {f}'
-        open(p, 'w').write(s.replace(old, new, 1))
-    env = dict(os.environ, SMOKE_WEB=web + '/w', HIDDEN_SECS=os.environ.get('HIDDEN_SECS', '5'))
-    cmd = ([f'{HERE}/smoke_page.py', 'chromium', *PAGE[name]] if name in PAGE
-           else [f'{HERE}/smoke_core.py', 'chromium'])
-    r = subprocess.run([sys.executable, *cmd], env=env, capture_output=True, text=True,
-                       timeout=900)
-    shutil.rmtree(web, ignore_errors=True)
-    fails = [l for l in r.stdout.splitlines() if l.startswith('FAIL')]
-    if not fails and r.returncode:
-        # no FAIL line: an infrastructure crash is an error, never a kill
-        tail = (r.stderr.strip().splitlines() or ['no output'])[-1][:200]
-        return name, None, '(error, not a kill) ' + tail
-    return name, fails, ''
+    if name in PAGE:
+        script, args = 'smoke_page.py', ['chromium', *PAGE[name]]
+    else:
+        script, args = 'smoke_core.py', ['chromium']
+    return mutpool.run_script(name, script, MUTATIONS[name], {'HIDDEN_SECS': os.environ.get('HIDDEN_SECS', '5')}, args)
+
+
+def attempt(name):
+    return mutpool.timed_call(run, name)
 
 
 names = sys.argv[1:] or list(MUTATIONS)
-bad = 0
-with concurrent.futures.ThreadPoolExecutor(int(os.environ.get('MUT_WORKERS', '1'))) as ex:
-    for name, fails, err in ex.map(run, names):
-        print('ERROR   ' if fails is None else 'KILLED  ' if fails else 'SURVIVED', name)
-        for f in (fails or [])[:3]:
-            print('    ', f[:160])
-        if err:
-            print('    ', err)
-        bad += not fails
-print(f'{len(names) - bad} of {len(names)} mutations killed')
-sys.exit(1 if bad else 0)
+# the draw-cost numbers (`cost`) are timings: those mutants take the web gate exclusively
+sys.exit(mutpool.run_names(names, attempt, [n for n in names if 'cost' in PAGE.get(n, ())], serial=True))

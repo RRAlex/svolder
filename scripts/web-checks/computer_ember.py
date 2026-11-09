@@ -22,12 +22,15 @@ controls, on a fake host (`SVOLDER_HOST=fake`: its sink and EQ live in memory, n
                                         and the load writes nothing
   the_same_preset_on_both_asks_and_yes_flattens_the_dac   the question card; no sends nothing, yes
                                         confirms and the DAC is flat
+  the_open_question_owns_the_keyboard   while the Yes/No card is open no document key (arrows, m, 0, f,
+                                        v, a, ?) acts behind it; Tab and Escape still work
   the_amp_page_flips_to_the_computer_with_the_dac_parts   the fake amp's page has the switch and,
                                         flipped, the DAC page's knob and tone section
   a_finger_adds_drags_and_pinches       (Chromium, touch emulation) a tap adds, a finger drags a
                                         point, two fingers halve its Q
 Pictures of the computer side (desktop and phone) are saved under target/web-shots/ember/ (Chromium run).
-Usage: python3 computer_ember.py chromium|firefox"""
+Usage: python3 computer_ember.py chromium|firefox [case ...]   (the cases named run alone: a `one(...)`
+name, or `touch`; mutate_ember.py runs it so)"""
 import json
 import math
 import os
@@ -40,6 +43,7 @@ import common
 os.environ.setdefault('SVOLDER_FAKE_COMPUTER_VOLUME', '42')
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
+ONLY = set(sys.argv[2:])
 fails = []
 passed = 0
 t0 = time.time()
@@ -196,7 +200,8 @@ def path_to(x, y, to, step=4):
     return out
 
 
-def gesture(b, x, y, to, button='left', step=4):
+def gesture(b, x, y, to, button='left', step=4, pause=0.0):
+    """A press at (x, y), a move along `to` and a release; `pause` seconds between the moves."""
     path = path_to(x, y, to, step)
     if browser == 'chromium':
         press(b, x, y, button)
@@ -209,13 +214,15 @@ def gesture(b, x, y, to, button='left', step=4):
                 {'type': 'pointerDown', 'button': code}]
         for mx, my in path:
             acts.append({'type': 'pointerMove', 'duration': 0, 'origin': 'viewport', 'x': int(mx), 'y': int(my)})
+            if pause:
+                acts.append({'type': 'pause', 'duration': int(pause * 1000)})
         acts.append({'type': 'pointerUp', 'button': code})
         b._post('/actions', {'actions': [{'type': 'pointer', 'id': 'mouse',
                                           'parameters': {'pointerType': 'mouse'}, 'actions': acts}]})
     b.sleep(1.2)
 
 
-def wheel(b, x, y, dy):
+def wheel(b, x, y, dy, rest=0.5):
     if browser == 'chromium':
         b.send('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': x, 'y': y})
         b.send('Input.dispatchMouseEvent', {'type': 'mouseWheel', 'x': x, 'y': y, 'deltaX': 0, 'deltaY': dy})
@@ -223,7 +230,7 @@ def wheel(b, x, y, dy):
         b._post('/actions', {'actions': [{'type': 'wheel', 'id': 'wheel', 'actions': [
             {'type': 'scroll', 'x': int(x), 'y': int(y), 'deltaX': 0, 'deltaY': int(dy),
              'duration': 0, 'origin': 'viewport'}]}]})
-    b.sleep(0.5)
+    b.sleep(rest)
 
 
 def hold(b, x, y, secs):
@@ -329,7 +336,7 @@ def drag(b, d):
         release(b, x + 40, y - 30)
         b.sleep(1.2)
     else:
-        gesture(b, x, y, [(x + 40, y - 30)])
+        gesture(b, x, y, [(x + 40, y - 30)], pause=0.04)
     a = state(b)
     log = posts(b, 'api/v1/host/eq/points/4')
     flags = [p[1].get('done') for p in log]
@@ -337,7 +344,7 @@ def drag(b, d):
           len(log) >= 2 and flags[-1] is True and all(f is False for f in flags[:-1]), flags)
     gaps = [round(y[3] - x[3]) for x, y in zip(log[:-2], log[1:-1])]
     check('a_point_drag_posts_live_and_done_at_release: at most 20 a second (the live ones 45 ms apart or more)',
-          len(gaps) >= 1 and all(g >= 45 for g in gaps), gaps)
+          len(gaps) >= 2 and all(g >= 45 for g in gaps), gaps)
     held = [p[1] for p in log]
     check('a_point_drag_posts_live_and_done_at_release: the posts carry the point\'s frequency and gain',
           any('f' in p for p in held) and any('g' in p for p in held), held[:4])
@@ -429,6 +436,66 @@ def add_remove(b, d):
           len(got) == 1 and flat is True and b.page(f'{POINTS}.length') == 1
           and b.page("document.querySelector('#part-tone .pt[data-n=\"1\"] [data-comp=remove]').getAttribute('aria-label')") == 'Remove point 1',
           [got, b.page(POINTS)])
+
+
+def second_finger(b, d):
+    """Finger 1 down on empty graph ground, finger 2 down off the graph, finger 1 up at once: two fingers were
+    down, so no point is added; one finger alone still adds one."""
+    name = 'a_second_finger_off_the_graph_makes_the_tap_no_tap'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 3)
+    s = state(b)
+    px, py, pw, ph = s['plot']
+    spot = None
+    for fx in (0.12, 0.3, 0.45, 0.62, 0.78, 0.9):
+        for fy in (0.12, 0.88, 0.25, 0.75):
+            x, y = px + fx * pw, py + fy * ph
+            if all(math.hypot(x - mx, y - my) > 40 for mx, my in s['marks'].values()):
+                spot = (x, y)
+                break
+        if spot:
+            break
+    x, y = spot
+    n = b.page(f'{POINTS}.length')
+    log = len(posts(b, 'api/v1/host/eq/points'))
+    graph = "document.querySelector('.eqg.pts .plot')"
+    touch = ("(type, el, x, y, id, primary) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true,"
+             " pointerId: id, pointerType: 'touch', isPrimary: primary, button: 0, buttons: type === 'pointerup' ? 0 : 1,"
+             " clientX: x, clientY: y }))")
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 3, true);"
+           f" t('pointerdown', document.body, 5, 5, 4, false); t('pointerup', {graph}, {x}, {y}, 3, true); return 1; }})()")
+    time.sleep(0.9)
+    check(f'{name}: no point is added', b.page(f'{POINTS}.length') == n
+          and len(posts(b, 'api/v1/host/eq/points')) == log, [n, b.page(f'{POINTS}.length')])
+    b.page(f"(() => {{ const t = {touch}; t('pointerdown', {graph}, {x}, {y}, 5, true); t('pointerup', {graph}, {x}, {y}, 5, true); return 1; }})()")
+    check(f'{name}: one finger alone still adds one', poll(lambda: b.page(f'{POINTS}.length') == n + 1) is True,
+          b.page(f'{POINTS}.length'))
+
+
+def full_table(b, d):
+    """With sixteen points a tap on empty ground adds nothing and says how many the EQ holds at most."""
+    name = 'a_tap_on_a_full_table_says_so'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 16)
+    s = state(b)
+    px, py, pw, ph = s['plot']
+    spot = None
+    for fx in (0.05, 0.12, 0.3, 0.45, 0.62, 0.78, 0.9, 0.97):
+        for fy in (0.06, 0.94, 0.12, 0.88, 0.25, 0.75):
+            x, y = px + fx * pw, py + fy * ph
+            if all(math.hypot(x - mx, y - my) > 20 for mx, my in s['marks'].values()):
+                spot = (x, y)
+                break
+        if spot:
+            break
+    most = b.page(f'{COMPUTER}.eq.max')
+    forget(b)
+    b.click(*spot)
+    said = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)") or None)
+    check(f'{name}: a tap says the most the daemon holds', said == [f'{most} is the most'] and most is not None, [said, most])
+    check(f'{name}: and writes nothing', posts(b, 'api/v1/host/eq/points') == [], posts(b))
 
 
 def sorted_points(b, d):
@@ -529,9 +596,12 @@ def wheel_and_right(b, d):
     x, y = s['marks']['4']
     q0 = b.page(f'{POINTS}[3].q')
     forget(b)
-    wheel(b, x, y, -120)
+    wheel(b, x, y, -120, rest=0)
+    kept = "import(new URL('assets/themes/ember/keep.js', document.baseURI)).then((m) => m.holds('part-tone'))"
+    check('the_wheel_and_a_right_drag_set_the_q: a notch holds the tone part\'s swap while its burst runs', b.page(kept) is True)
     wheel(b, x, y, -120)
     time.sleep(0.8)
+    check('the_wheel_and_a_right_drag_set_the_q: and lets it go with the burst\'s last write', b.page(kept) is False)
     log = posts(b, 'api/v1/host/eq/points/4')
     q1 = b.page(f'{POINTS}[3].q')
     check('the_wheel_and_a_right_drag_set_the_q: two notches up narrow the Q, ended by a done',
@@ -580,12 +650,183 @@ def untouched(b, d):
     time.sleep(0.6)
     check('an_untouched_cell_writes_nothing: Enter on a +14 dB cell as it was posts nothing (it is not pulled in to +12)',
           editing is True and posts(b) == [], (editing, b.page(held), posts(b)))
+    # read again after the Enter: no host event came between the poll and the tap, so the cell and
+    # the model both still say +14 and the empty request log is about the untouched cell
+    again = b.page(f"document.querySelector({json.dumps(cell)}).textContent")
+    check('an_untouched_cell_writes_nothing: after the Enter the cell and the model still say +14',
+          '14.0' in (again or '') and b.page(f'{POINTS}[2].g') == 14, (again, b.page(f'{POINTS}[2]')))
     at_fourteen(b, cell, f"document.querySelector({json.dumps(cell)}).textContent")
     tap(b, cell)
     b.page("(() => { const i = document.querySelector('#part-tone .pt[data-n=\"3\"] .cell input'); i.value = '14';"
            " i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()")
     time.sleep(0.6)
     check('an_untouched_cell_writes_nothing: the same number typed again posts nothing', posts(b) == [], posts(b))
+
+
+def steppers(b, d):
+    name = 'the_computer_table_steps_like_the_dac_table'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    box = "document.querySelector('#part-tone .bedit')"
+    editor = f"({box} || document.createElement('div'))"
+    check(f'{name}: nothing to step until a point is picked', b.page(f'!{box} || {box}.hidden') is True)
+    # the editor shows at the press itself, not only when the part is drawn again
+    at_once = b.page("(() => { document.querySelector('#part-tone .pt[data-n=\"3\"] .pn').click();"
+                     " const e = document.querySelector('#part-tone .bedit');"
+                     " return !!e && !e.hidden && e.dataset.n === '3'; })()")
+    check(f'{name}: the editor shows as the row is picked', at_once is True)
+    tap(b, '#part-tone .pt[data-n="2"] .pn')
+    got = b.page(f"!{editor}.hidden ? [...{editor}.querySelectorAll('.stp')].map((e) => e.dataset.param"
+                 " + ':' + e.querySelector('.lbl').textContent + ':' + e.querySelectorAll('button').length) : null")
+    check(f'{name}: a picked point shows Frequency, Gain and Q, each with a - and a +',
+          got == ['f:Frequency:2', 'g:Gain:2', 'q:Q:2'], got)
+    row = state(b)['rows'][1]['cells']
+    shown = b.page(f"[...{editor}.querySelectorAll('.stp .v')].map((e) => e.textContent)")
+    check(f'{name}: the values are the row\'s own words', shown == row[1:], [shown, row])
+    labels = b.page(f"[...{editor}.querySelectorAll('.stp button')].map((e) => e.getAttribute('aria-label'))")
+    check(f'{name}: the buttons are named like the DAC editor\'s',
+          labels == ['Lower the frequency', 'Raise the frequency', 'Lower the gain', 'Raise the gain',
+                     'Lower the q', 'Raise the q'], labels)
+    # the editor's number is not a field: the DAC editor's type-a-value box is the DAC's alone
+    forget(b)
+    tap(b, '#part-tone .bedit .stp[data-param="g"] .v')
+    time.sleep(0.4)
+    check(f'{name}: a press on the editor\'s number opens no field and writes nothing',
+          b.page("!document.querySelector('#part-tone .bedit input')") is True and posts(b) == [], posts(b))
+    g0 = b.page(f'{POINTS}[1].g')
+    forget(b)
+    tap(b, '#part-tone .bedit .stp[data-param="g"] [data-dir="1"]')
+    log = poll(lambda: [p for p in posts(b, 'api/v1/host/eq/points/2') if p[1].get('done')])
+    allp = posts(b, 'api/v1/host/eq/points/2')
+    check(f'{name}: + on the gain posts one step live and one done at the end',
+          len(log) == 1 and allp[0][1].get('g') == round(g0 + 0.1, 1) and allp[0][1].get('done') is False
+          and allp[-1][1].get('done') is True, allp)
+    time.sleep(0.6)
+    check(f'{name}: the model, the row and the editor say it',
+          b.page(f'{POINTS}[1].g') == round(g0 + 0.1, 1)
+          and state(b)['rows'][1]['cells'][2] == b.page(f"{editor}.querySelector('.stp[data-param=g] .v')?.textContent"),
+          [b.page(f'{POINTS}[1]'), state(b)['rows'][1]])
+    q0 = b.page(f'{POINTS}[1].q')
+    forget(b)
+    tap(b, '#part-tone .bedit .stp[data-param="q"] [data-dir="-1"]')
+    poll(lambda: [p for p in posts(b, 'api/v1/host/eq/points/2') if p[1].get('done')])
+    time.sleep(0.6)
+    check(f'{name}: - on the Q lowers it', b.page(f'{POINTS}[1].q') < q0, [q0, b.page(f'{POINTS}[1].q')])
+    # a press from the keyboard steps once
+    forget(b)
+    b.page("document.querySelector('#part-tone .bedit .stp[data-param=\"f\"] [data-dir=\"1\"]').focus()")
+    f0 = b.page(f'{POINTS}[1].f')
+    b.press('Enter')
+    poll(lambda: [p for p in posts(b, 'api/v1/host/eq/points/2') if p[1].get('done')])
+    time.sleep(0.6)
+    kb = [p[1] for p in posts(b, 'api/v1/host/eq/points/2')]
+    check(f'{name}: Enter on a focused + steps once', b.page(f'{POINTS}[1].f') > f0
+          and len([k for k in kb if k.get('done') is False]) == 1, [f0, kb])
+    # held: one step, then a run of them at the pace of 20 a second at most, one done at the end
+    gain = '#part-tone .bedit .stp[data-param="g"] [data-dir="1"]'
+    forget(b)
+    g1 = b.page(f'{POINTS}[1].g')
+    x, y = common.center(b, gain)
+    hold(b, x, y, 1.3)
+    time.sleep(0.6)
+    run = posts(b, 'api/v1/host/eq/points/2')
+    live = [p for p in run if p[1].get('done') is False]
+    gs = [p[1]['g'] for p in live]
+    gaps = [round(q[3] - p[3]) for p, q in zip(live, live[1:])]
+    check(f'{name}: a held + repeats, one done at the end, never faster than 20 a second',
+          len(live) >= 5 and gs == sorted(gs) and run[-1][1].get('done') is True
+          and len([p for p in run if p[1].get('done')]) == 1 and all(g >= 45 for g in gaps),
+          [len(live), gs[:6], gaps[:6], run[-1][1]])
+    check(f'{name}: and the model holds the last one', b.page(f'{POINTS}[1].g') == gs[-1] > g1,
+          [b.page(f'{POINTS}[1].g'), gs[-3:], g1])
+    # a step against its key does nothing: a point beyond the hand range stays where it is
+    b.page("(() => { const h = __core.model.page().host;"
+           " const pts = h.computer.eq.points.map((p, i) => (i === 1 ? { ...p, g: 14 } : p));"
+           " __core.model.emit('host', { ...h, computer: { ...h.computer, eq: { ...h.computer.eq, points: pts } } }); })()")
+    poll(lambda: '14.0' in (b.page("document.querySelector('#part-tone .bedit .stp[data-param=g] .v')?.textContent") or ''))
+    forget(b)
+    tap(b, gain)
+    time.sleep(0.8)
+    check(f'{name}: + on a +14 dB gain posts nothing', posts(b) == [], posts(b))
+    # a lost stream writes nothing: neither a press nor a key steps
+    b.page("document.body.classList.add('lost')")
+    forget(b)
+    b.page("document.querySelector('#part-tone .bedit .stp[data-param=g] [data-dir=\"-1\"]').click()")
+    time.sleep(0.8)
+    check(f'{name}: a key on a stepper with the stream lost posts nothing', posts(b) == [], posts(b))
+    b.page("document.body.classList.remove('lost')")
+
+
+def steppers_flip(b, d):
+    """A stepper held and the side flipped from the keyboard (Chromium holds the button across calls,
+    Firefox in one call, the flip made by the page)."""
+    name = 'a_held_stepper_ends_at_a_flip'
+    load(b, d)
+    flip(b, 'computer')
+    seed(b, 4)
+    tap(b, '#part-tone .pt[data-n="1"] .pn')
+    x, y = common.center(b, '#part-tone .bedit .stp[data-param="g"] [data-dir="-1"]')
+    forget(b)
+    if browser == 'firefox':
+        # one call holds the button for 1.8 s; the page flips 0.9 s into it
+        b.page("setTimeout(() => __core.computer.flip('dac'), 900)")
+        b._post('/actions', {'actions': [
+            {'type': 'pointer', 'id': 'mouse', 'parameters': {'pointerType': 'mouse'}, 'actions': [
+                {'type': 'pointerMove', 'duration': 0, 'origin': 'viewport', 'x': int(x), 'y': int(y)},
+                {'type': 'pointerDown', 'button': 0}, {'type': 'pause', 'duration': 1800},
+                {'type': 'pointerUp', 'button': 0}]}]})
+        b.sleep(1.0)
+        log = posts(b, 'api/v1/host/eq/points/1')
+        check(f'{name}: the flip ended the hold: the DAC side shows, one done closes the run, nothing follows',
+              b.page('__core.computer.side()') == 'dac' and len(log) >= 2
+              and len([p for p in log if p[1].get('done')]) == 1 and log[-1][1].get('done') is True
+              and len(posts(b)) == len(log), [b.page('__core.computer.side()'), log[-3:]])
+        return
+    b.page("window.__btn = document.querySelector('#part-tone .bedit .stp[data-param=g] [data-dir=\"-1\"]')")
+    press(b, x, y)
+    b.sleep(0.9)
+    check(f'{name}: the button held is not drawn again under the finger',
+          b.page('window.__btn.isConnected') is True)
+    b.page("document.getElementById('side-dac').focus()")
+    b.press('Enter')
+    b.sleep(0.8)
+    flipped = b.page('__core.computer.side()') == 'dac'
+    seen = len(posts(b))
+    b.sleep(0.9)
+    check(f'{name}: the flip ends it: the DAC side shows and nothing more is posted while the button is down',
+          flipped and len(posts(b)) == seen, [flipped, seen, len(posts(b))])
+    release(b, x, y)
+    b.sleep(1.0)
+    log = posts(b, 'api/v1/host/eq/points/1')
+    check(f'{name}: and one done closes the run',
+          len([p for p in log if p[1].get('done')]) == 1 and log[-1][1].get('done') is True
+          and len(posts(b)) == len(log), log[-3:])
+
+
+def volume_flip(b, d):
+    """The computer's + held and the side flipped from the keyboard (Chromium)."""
+    name = 'a_held_volume_button_ends_at_a_flip'
+    load(b, d)
+    flip(b, 'computer')
+    x, y = common.center(b, 'sv-knob[data-computer] .step[data-step="-1"]')
+    forget(b)
+    press(b, x, y)
+    b.sleep(0.9)
+    repeating = len(posts(b, 'api/v1/host/volume'))
+    b.page("document.getElementById('side-dac').focus()")
+    b.press('Enter')
+    b.sleep(0.8)
+    flipped = b.page('__core.computer.side()') == 'dac'
+    seen = len(posts(b, 'api/v1/host/volume'))
+    b.sleep(0.9)
+    check(f'{name}: it was repeating, the flip ends it and nothing more is posted while the button is down',
+          repeating >= 3 and flipped and len(posts(b, 'api/v1/host/volume')) == seen,
+          [repeating, flipped, seen, len(posts(b, 'api/v1/host/volume'))])
+    release(b, x, y)
+    b.sleep(0.8)
+    check(f'{name}: the release writes nothing either', len(posts(b, 'api/v1/host/volume')) == seen,
+          [seen, len(posts(b, 'api/v1/host/volume'))])
 
 
 def sixteen(b, d):
@@ -739,8 +980,13 @@ def both_sides(b, d):
     words = b.page(f'{CARD}?.querySelector(".ask-words").textContent') or ''
     check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: it asks, with the device named',
           card is True and 'flatten' in words and 'Gungnir 2' in words, words)
+    # the chip is drawn again while the question is open: the focus still comes back to it
+    b.page("(() => { const c = document.querySelector('#part-presets .pre[data-name=\"Warm\"]');"
+           " c.replaceWith(c.cloneNode(true)); })()")
     b.page(f'{CARD}.querySelector(".ask-no").click()')
     time.sleep(0.8)
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: a chip drawn again meanwhile gets the focus back',
+          b.page("document.activeElement?.dataset?.name") == 'Warm', b.page('document.activeElement?.tagName'))
     log = posts(b)
     check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: no sends nothing more and says nothing',
           len(log) == 1 and log[0][2] == 409 and b.page(f'!{CARD}')
@@ -752,9 +998,42 @@ def both_sides(b, d):
     log = posts(b)
     check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: yes repeats with confirm and lands',
           len(log) == 3 and log[2][1].get('confirm') is True and log[2][2] == 200, log)
+    time.sleep(0.6)
+    check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: the focus is on the chip after the answer',
+          b.page("document.activeElement?.dataset?.name") == 'Warm', b.page('document.activeElement?.outerHTML?.slice(0, 80)'))
     flat = poll(lambda: 'Warm' not in (playing() or '') and b.page(f'{COMPUTER}.eq.preset') == 'Warm')
     check('the_same_preset_on_both_asks_and_yes_flattens_the_dac: the DAC is flat, the computer plays it',
           flat is True, [playing(), b.page(f'{COMPUTER}.eq.preset')])
+
+
+def ask_owns_keys(b, d):
+    load(b, d)
+    d.post('Gungnir 2', 'presets/recall', {'name': 'Warm'})
+    time.sleep(1.0)
+    flip(b, 'computer')
+    forget(b)
+    tap(b, '#part-presets .pre[data-name="Warm"]')
+    poll(lambda: b.page(f'!!{CARD}'))
+    before = posts(b)
+    for key in ('ArrowLeft', 'ArrowRight', 'm', '0', 'f', 'p', 'v', 'a', '?'):
+        b.page("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',"
+               f" {{ key: {json.dumps(key)}, bubbles: true, cancelable: true }}))")
+        time.sleep(0.1)
+    b.press('ArrowLeft')
+    b.press('m')
+    time.sleep(0.5)
+    check('the_open_question_owns_the_keyboard: no key writes behind it',
+          posts(b) == before, posts(b))
+    b.press('t')
+    check('the_open_question_owns_the_keyboard: the question is still open and nothing else opened (no keys list, arranging or theme picker)',
+          b.page(f'!!{CARD} && !document.querySelector("#keys:not([hidden]), .arrange, .picker, #picker, [data-picker]")') is True)
+    b.press('Tab')
+    check('the_open_question_owns_the_keyboard: Tab still moves between its buttons',
+          b.page("document.activeElement.classList.contains('ask-yes')") is True)
+    b.press('Escape')
+    time.sleep(0.4)
+    check('the_open_question_owns_the_keyboard: Escape answers No and closes it',
+          b.page(f'!{CARD}') is True and len(posts(b)) == len(before))
 
 
 def amp(b, d):
@@ -821,6 +1100,12 @@ def touch():
         forget(b)
         s = state(b)
         x, y = s['marks']['2']
+        b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': fingers([(x, y)])})
+        b.sleep(0.05)
+        b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+        b.sleep(1.0)
+        check('a_finger_adds_drags_and_pinches: a tap on a point adds nothing and writes nothing',
+              posts(b) == [], posts(b))
         scroll = b.page('window.scrollY')
         b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': fingers([(x, y)])})
         # straight up: the gain moves and the frequency does not, so the table keeps its order
@@ -854,6 +1139,8 @@ def touch():
 
 
 def one(name, fn, env=None, fleet=FLEET, web='auth = "none"', size=(1280, 1100)):
+    if ONLY and name not in ONLY:
+        return
     d = common.Daemon('gungnir2-v2', host='fake', fleet=fleet, env=env or {}, web=web)
     b = make(size)
     try:
@@ -895,21 +1182,28 @@ one('the_pill_flips_volume_and_tone_together', pill)
 one('minus_plus_mute_set_the_computer_volume', volume)
 one('a_point_drag_posts_live_and_done_at_release', drag)
 one('a_tap_adds_a_point_and_x_removes_it', add_remove)
+one('a_tap_on_a_full_table_says_so', full_table)
+one('a_second_finger_off_the_graph_makes_the_tap_no_tap', second_finger)
 one('the_mode_the_type_a_typed_value_and_the_presets_write', controls)
 one('the_points_are_listed_by_frequency_and_the_selection_follows', sorted_points)
 one('the_wheel_and_a_right_drag_set_the_q', wheel_and_right)
 one('an_untouched_cell_writes_nothing', untouched)
+one('the_computer_table_steps_like_the_dac_table', steppers)
 one('sixteen_points_keep_the_layout', sixteen)
+one('a_held_stepper_ends_at_a_flip', steppers_flip)
 if browser == 'chromium':
     one('a_flip_mid_drag_writes_nothing', mid_drag)
+    one('a_held_volume_button_ends_at_a_flip', volume_flip)
 one('a_guest_sees_the_computer_inert', guest, web='guest = "read"')
 one('the_side_survives_a_reload', kept)
 one('the_pill_keeps_the_focus_across_a_keyboard_flip', keyboard)
 one('presets_save_rename_delete_from_the_computer_side', save_as)
 one('the_same_preset_on_both_asks_and_yes_flattens_the_dac', both_sides)
+one('the_open_question_owns_the_keyboard', ask_owns_keys)
 one('the_amp_page_flips_to_the_computer_with_the_dac_parts', amp)
-if browser == 'chromium':
+if browser == 'chromium' and (not ONLY or 'touch' in ONLY):
     touch()
+if browser == 'chromium' and not ONLY:
     pictures()
 print(f'computer_ember.py {browser}: {passed} passed, {len(fails)} failed in {time.time() - t0:.0f} s')
 sys.exit(1 if fails else 0)

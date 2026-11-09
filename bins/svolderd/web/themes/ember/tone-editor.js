@@ -195,7 +195,7 @@ export function installToneEditor(given) {
 
   // Tap a value to type it: Enter writes it, read on the server with its unit; Esc puts it back.
   document.addEventListener('click', (event) => {
-    const value = event.target.closest('.bedit .v');
+    const value = event.target.closest('#part-bands .bedit .v');
     if (!value || value.querySelector('input')) return;
     const param = value.closest('.stp').dataset.param;
     const input = document.createElement('input');

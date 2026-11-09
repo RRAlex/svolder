@@ -294,7 +294,7 @@ await ok('a_hold_taken_around_a_call_is_given_back_if_it_throws', () => {
   const keep = keeper(live, 'tone');
   assert.equal(keep.around(() => 7), 7);
   assert.equal(live.held('tone'), true);
-  keep.drop();
+  keep.release();
   assert.throws(() => keep.around(() => { throw new Error('no list'); }), /no list/);
   assert.equal(live.held('tone'), false);
 });
@@ -337,6 +337,26 @@ await ok('the_state_fades_or_stills_the_sheet_and_rewrites_the_title', () => {
   assert.ok(root.boxes.title.innerHTML.includes('DAC, connected'));
   store.setState('open');
   assert.equal(root.sheetEl.inert, false);
+});
+
+await ok('a_gesture_that_ends_with_a_form_open_leaves_a_form_only_hold_so_a_lost_sheet_is_inert', () => {
+  const { live, store, root } = rig();
+  live.drawAll();
+  const keep = keeper(live, 'presets');
+  keep.around(() => 1); // the Save-as form is open
+  keep.take(); // a drag in hand, then let go
+  keep.drop();
+  assert.equal(live.held('presets'), true, 'the form still holds its section');
+  store.setState('lost');
+  assert.equal(root.sheetEl.inert, true, 'the form is no gesture: the lost sheet is out of reach');
+  store.setState('open');
+  keep.take();
+  store.setState('lost');
+  assert.equal(root.sheetEl.inert, false, 'a gesture in hand still delays it');
+  keep.drop();
+  assert.equal(root.sheetEl.inert, true, 'and the form alone does not');
+  keep.release();
+  assert.equal(live.held('presets'), false);
 });
 
 await ok('a_state_change_during_a_hold_neither_stills_the_sheet_nor_leaves_the_section_stale', () => {

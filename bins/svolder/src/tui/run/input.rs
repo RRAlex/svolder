@@ -307,6 +307,16 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             }
             Flow::Continue(watching)
         }
+        MouseAction::Target(side) => {
+            let intents = watching.app.click_target(side);
+            for intent in intents {
+                match take_intent(intent, opener, watching, mouse, look, screen).await {
+                    Flow::Continue(next) => watching = next,
+                    ended => return ended,
+                }
+            }
+            Flow::Continue(watching)
+        }
         MouseAction::StepMode(dir) => {
             let intents = watching.app.step_tone_mode(dir);
             watching.app.touched(&intents);

@@ -257,3 +257,78 @@ async fn the_codes_come_from_the_daemons_web_ui() {
             .contains("no daemon answers")
     );
 }
+
+fn nic(name: &str, ip: [u8; 4]) -> (String, Ipv4Addr, bool, bool) {
+    (name.to_string(), Ipv4Addr::from(ip), true, false)
+}
+
+/// The picker never takes a container or virtual bridge: this host runs Docker, whose bridges
+/// come before its LAN in the list.
+#[test]
+fn the_lan_picker_skips_every_bridge_and_virtual_interface() {
+    let all = vec![
+        nic("docker0", [172, 17, 0, 1]),
+        nic("br-1213b93b2ef6", [172, 18, 0, 1]),
+        nic("veth1a2b", [169, 254, 1, 1]),
+        nic("podman0", [10, 88, 0, 1]),
+        nic("cni-podman1", [10, 89, 0, 1]),
+        nic("cni0", [10, 244, 0, 1]),
+        nic("virbr0", [192, 168, 122, 1]),
+        nic("br0", [10, 0, 66, 52]),
+    ];
+    assert_eq!(first_lan(&all), Some(Ipv4Addr::new(10, 0, 66, 52)));
+    assert_eq!(first_lan(&all[..7]), None);
+}
+
+/// A container on a bridge network has only its own address, which no phone reaches; one with
+/// host networking sees the host's, which is right even though /.dockerenv exists.
+#[test]
+fn only_a_bridge_network_container_offers_no_lan_address() {
+    let bridge = vec![nic("eth0", [172, 17, 0, 2])];
+    let gw = Some(Ipv4Addr::new(172, 17, 0, 1));
+    assert_eq!(
+        lan_in(false, &bridge, gw),
+        Some(Ipv4Addr::new(172, 17, 0, 2))
+    );
+    let lan = lan_in(true, &bridge, gw);
+    assert_eq!(lan, None);
+    let podman = vec![nic("eth0", [10, 88, 0, 5])];
+    assert_eq!(
+        lan_in(true, &podman, Some(Ipv4Addr::new(10, 88, 0, 1))),
+        None
+    );
+    // Host networking: the host's interfaces, the host's LAN gateway.
+    let host = vec![nic("docker0", [172, 17, 0, 1]), nic("br0", [10, 0, 66, 52])];
+    assert_eq!(
+        lan_in(true, &host, Some(Ipv4Addr::new(10, 0, 0, 1))),
+        Some(Ipv4Addr::new(10, 0, 66, 52))
+    );
+    // A bridge-looking address whose gateway is elsewhere is a real LAN.
+    let lan172 = vec![nic("eth0", [172, 20, 5, 9])];
+    assert_eq!(
+        lan_in(true, &lan172, Some(Ipv4Addr::new(172, 21, 0, 1))),
+        Some(Ipv4Addr::new(172, 20, 5, 9))
+    );
+    let why = phone_base(None, addr("0.0.0.0:8738"), None).unwrap_err();
+    assert!(
+        why.contains(
+            "set [web] url, or SVOLDER_WEB_URL in the container's environment, to the address \
+             your phone reaches"
+        ),
+        "{why}"
+    );
+    assert!(why.contains("http://<host-ip>:8738"), "{why}");
+    assert_eq!(
+        phone_base(Some("http://192.168.1.9:8738"), addr("0.0.0.0:8738"), None).unwrap(),
+        "http://192.168.1.9:8738/"
+    );
+}
+
+#[test]
+fn the_default_gateway_is_read_from_the_route_table() {
+    let table = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n\
+                 eth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\n\
+                 eth0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n";
+    assert_eq!(default_gateway(table), Some(Ipv4Addr::new(172, 17, 0, 1)));
+    assert_eq!(default_gateway("Iface\tDestination\n"), None);
+}

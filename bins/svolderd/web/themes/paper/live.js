@@ -55,34 +55,48 @@ function renumbered(id, from, to) {
 }
 
 /** A counted hold of the section `name`, for gestures and open lists that may overlap: it is held
- * from the first `take()` and let go at the `drop()` that matches the last. `around(fn)` runs `fn`
- * with a hold taken and gives it back if `fn` throws. `reset()` lets go of every hold at once (the
+ * from the first `take()` and let go at the `drop()` that matches the last (a gesture's); `around(fn)`
+ * runs `fn` with a list's or form's hold taken (`release()` gives it back, and does when `fn` throws). `reset()` lets go of every hold at once (the
  * shown device was replaced). `hand({ pending, ms })` is the hold of a thing in the hand (a scale):
  * `grip()` on every move or key, `letGo()` when the hand is away, which gives the hold back once
  * `pending()` (a promise: the writes not yet answered) is settled and `ms` have passed, unless a
  * new grip came meanwhile (a slow answer must not release a hold the next gesture took). */
 export function keeper(live, name) {
-  let holds = 0;
+  /** The holds of gestures and the holds of open lists and forms, counted apart: a list or a form
+   * does not keep a still sheet usable, a gesture in hand does. */
+  let gestures = 0;
+  let asks = 0;
+  const note = () => {
+    if (gestures + asks === 0) live.hold(name, false);
+    else live.hold(name, true, gestures > 0);
+  };
   const keep = {
     take() {
-      holds++;
-      live.hold(name, true);
+      gestures++;
+      note();
     },
     drop() {
-      holds = Math.max(0, holds - 1);
-      if (holds === 0) live.hold(name, false);
+      gestures = Math.max(0, gestures - 1);
+      note();
     },
+    /** Hold the section for an open list or form (`release()` gives it back, when it closes). */
     around(fn) {
-      keep.take();
+      asks++;
+      note();
       try {
         return fn();
       } catch (error) {
-        keep.drop();
+        keep.release();
         throw error;
       }
     },
+    release() {
+      asks = Math.max(0, asks - 1);
+      note();
+    },
     reset() {
-      holds = 0;
+      gestures = 0;
+      asks = 0;
       live.hold(name, false);
     },
     hand({ pending, ms }) {
@@ -131,6 +145,8 @@ export function createLive({ core, root, signal, view }) {
   const stale = new Set();
   const off = [];
   const switchers = [];
+  /** The sections held by a gesture, not only by an open list or form. */
+  const gesturing = new Set();
   /** The device the sheet showed when it last looked: a change of it is a switch. */
   let seen = store.shown();
 
@@ -178,8 +194,9 @@ export function createLive({ core, root, signal, view }) {
     for (const [state, name] of Object.entries(STILL)) {
       sheet.classList.toggle(name, view.state === state);
     }
-    // A gesture in hand is not cut short: the sheet turns inert when the hold ends.
-    sheet.inert = view.state in STILL && holding.size === 0;
+    // A gesture in hand is not cut short: the sheet turns inert when it ends. An open list or form
+    // does not keep the sheet usable: it stays open, with what was typed, and is usable again on wake.
+    sheet.inert = view.state in STILL && gesturing.size === 0;
   }
 
   function draw(name) {
@@ -242,8 +259,8 @@ export function createLive({ core, root, signal, view }) {
   // The person flipped the side: whatever was open or in hand on the other side ends (as for
   // another device shown), then the sheet is drawn for the side. What this viewer changed on the
   // computer and the daemon has taken is drawn again once the model has been read.
-  // An edit that ended moved a point in the table's frequency order: the point in hand and the
-  // focus on its mark follow it.
+  // An edit that ended moved a point in the table's frequency order: the focus on its mark follows
+  // it (the core moves the point in hand).
   let refocus = null;
   off.push(core.computer.on(({ type, from, to }) => {
     if (type === 'flip') {
@@ -251,7 +268,6 @@ export function createLive({ core, root, signal, view }) {
       for (const fn of switchers) fn();
       drawAll();
     } else if (type === 'moved') {
-      if (view.point === from) view.point = to;
       refocus = renumbered(globalThis.document?.activeElement?.id, from, to);
     } else if (type === 'settled' && side === 'computer') {
       FLIPPED.forEach(draw);
@@ -287,13 +303,18 @@ export function createLive({ core, root, signal, view }) {
     drawAll,
     draw,
 
-    /** Hold the section `name` (`on`) or let it go: what came while it was held is drawn now. */
-    hold(name, on) {
+    /** Hold the section `name` (`on`) or let it go: what came while it was held is drawn now.
+     * `gesture` says a gesture is part of the hold (not only an open list or form). */
+    hold(name, on, gesture = true) {
       if (on) {
         holding.add(name);
+        if (gesture) gesturing.add(name);
+        else gesturing.delete(name);
+        stillness();
         return;
       }
       holding.delete(name);
+      gesturing.delete(name);
       stillness();
       if (stale.has(name)) draw(name);
     },

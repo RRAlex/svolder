@@ -24,7 +24,7 @@ use svolder_proto::{FunctionId, ValueType};
 use super::{outcome, with_parts, writable, writer};
 use crate::device::{Command, Feed};
 use crate::web::Web;
-use crate::web::api::{Loaded, load};
+use crate::web::api::{self, Loaded};
 use crate::web::model::Part;
 use crate::web::router::{error, parse};
 use crate::web::view::minus;
@@ -122,6 +122,7 @@ async fn mode(
         &[Part::Tone],
         |_| serde_json::json!({ "mode": mode.name() }),
     )
+    .await
 }
 
 /// What `eq/bands/{band}` takes: one step either way, a value typed in the parameter's unit, or
@@ -221,6 +222,7 @@ async fn band(
         let raw = echo.raw.as_i64().unwrap_or_default();
         band_json(&eq, index, param, raw, switched)
     })
+    .await
 }
 
 /// Wait, for a moment, until the mode reads EQ on `device`: the switch is written after the band
@@ -399,6 +401,7 @@ async fn loudness(
         let raw = echo.raw.as_i64();
         serde_json::json!({ "raw": raw, "text": raw.map_or_else(String::new, |r| r.to_string()) })
     })
+    .await
 }
 
 /// What `presets/recall` takes.
@@ -418,7 +421,7 @@ async fn recall(
     if let Err(refused) = writer(&web, &headers) {
         return refused;
     }
-    let device = match load(&web, &name) {
+    let device = match api::load_off_thread(&web, &name).await {
         Ok(device) => device,
         Err(refused) => return refused,
     };
@@ -437,12 +440,15 @@ async fn recall(
     match web.fleet.recall(&device.info, &asked.name, fitting).await {
         Err(why) => error(StatusCode::CONFLICT, why),
         Ok((_, Answer::Error { message, .. })) => error(StatusCode::CONFLICT, message),
-        Ok((recalled, _)) => with_parts(
-            &web,
-            &name,
-            serde_json::json!({ "name": recalled.preset.name }),
-            &[Part::Tone, Part::Presets],
-        ),
+        Ok((recalled, _)) => {
+            with_parts(
+                &web,
+                &name,
+                serde_json::json!({ "name": recalled.preset.name }),
+                &[Part::Tone, Part::Presets],
+            )
+            .await
+        }
     }
 }
 

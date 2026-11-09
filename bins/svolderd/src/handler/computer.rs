@@ -62,7 +62,7 @@ impl Daemon {
         match op {
             HostEqOp::SaveAs { name } => answer(self.save_computer_curve(&name).await),
             HostEqOp::Preset { ref device, .. } => {
-                let presets = match self.recallable(device.as_deref()) {
+                let presets = match self.recallable(device.as_deref()).await {
                     Ok(presets) => presets,
                     Err(why) => return refuse(why),
                 };
@@ -80,10 +80,11 @@ impl Daemon {
 
     /// The presets a recall on the computer may name: the saved ones, and the built-ins of the
     /// shown device's own tone control.
-    fn recallable(&self, device: Option<&str>) -> Result<Vec<Preset>, String> {
-        let config = Config::load_from(&self.config_path)
-            .map_err(|_| "the configuration could not be read; see the daemon's log".to_string())?;
-        let mut presets = config.presets.clone();
+    async fn recallable(&self, device: Option<&str>) -> Result<Vec<Preset>, String> {
+        let path = self.config_path.clone();
+        let mut presets = tokio::task::spawn_blocking(move || read_presets(&path))
+            .await
+            .map_err(|_| STOPPED.to_string())??;
         // A device that is named must be there; with none named the default stands in.
         let shown = match device {
             Some(_) => Some(self.resolve(device).map_err(|refused| refused.message)?),
@@ -184,18 +185,38 @@ impl Daemon {
             preamp_db: view.preamp_db,
             filters,
         };
-        Config::writable(&self.config_path)
-            .map_err(|why| format!("Saving presets is off: {why}"))?;
-        let config = Config::load_from(&self.config_path)
-            .map_err(|_| "the configuration could not be read; see the daemon's log".to_string())?;
-        let names = config.presets.iter().map(|p| p.name.as_str());
-        let wanted = preset::new_name(name, names, None)
-            .map_err(|why| why.to_string())?
-            .to_string();
-        let saved = preset::from_computer(&wanted, correction);
-        Config::add_preset(&self.config_path, &saved).map_err(|e| e.to_string())?;
+        let path = self.config_path.clone();
+        let name = name.to_string();
+        tokio::task::spawn_blocking(move || save_preset(&path, &name, correction))
+            .await
+            .map_err(|_| STOPPED.to_string())??;
         self.reload_all().await.map(drop)
     }
+}
+
+/// What a refused configuration read says.
+const UNREADABLE: &str = "the configuration could not be read; see the daemon's log";
+
+/// What a configuration access that did not finish says.
+const STOPPED: &str = "the configuration access stopped";
+
+/// The presets the configuration file at `path` holds.
+fn read_presets(path: &std::path::Path) -> Result<Vec<Preset>, String> {
+    let config = Config::load_from(path).map_err(|_| UNREADABLE.to_string())?;
+    Ok(config.presets.clone())
+}
+
+/// Add `correction` to the file at `path` as a preset of the user's called `name`, under a name
+/// the file does not hold yet.
+fn save_preset(path: &std::path::Path, name: &str, correction: Correction) -> Result<(), String> {
+    Config::writable(path).map_err(|why| format!("Saving presets is off: {why}"))?;
+    let config = Config::load_from(path).map_err(|_| UNREADABLE.to_string())?;
+    let names = config.presets.iter().map(|p| p.name.as_str());
+    let wanted = preset::new_name(name, names, None)
+        .map_err(|why| why.to_string())?
+        .to_string();
+    let saved = preset::from_computer(&wanted, correction);
+    Config::add_preset(path, &saved).map_err(|e| e.to_string())
 }
 
 /// Function `id`'s raw reading among `readings`.
@@ -204,4 +225,46 @@ fn raw_of(readings: &[svolder_proto::Message], id: FunctionId) -> Option<i64> {
         .iter()
         .find(|reading| reading.id == id)
         .and_then(|reading| reading.value.as_i64())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dir(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("svolderd-computer-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A saved curve lands in the file under its name, a second one under the same name is
+    /// refused.
+    #[test]
+    fn a_curve_is_saved_once_per_name_and_read_back() {
+        let dir = dir("save");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "schema = 1\n").unwrap();
+        let curve = || Correction {
+            preamp_db: -2.0,
+            filters: vec![SourceFilter {
+                kind: FilterKind::Peaking,
+                f: 1000.0,
+                g: 3.0,
+                q: 1.0,
+            }],
+        };
+        save_preset(&path, "Mine", curve()).unwrap();
+        assert!(save_preset(&path, "Mine", curve()).is_err());
+        save_preset(&path, "Other", curve()).unwrap();
+        let names: Vec<String> = read_presets(&path)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names.contains(&"Mine".to_string()), "{names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

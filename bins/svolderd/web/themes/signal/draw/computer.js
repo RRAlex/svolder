@@ -5,10 +5,13 @@
 // volume in percent, the tone curve with a dot on each point, the mode (Off | EQ), the points'
 // table, the presets and, last, the short facts of the route that are not controls (the sound card
 // and its format, the other streams, the verdict). Nothing below the line names the computer.
-// Pure: the core's view of the computer (`core.computer.volumeOf` and `toneOf`) in, markup out.
+// Pure: the core's view of the computer (`core.computer.view`) in, markup out.
 // The elements carry their own `data-act` names (`cvol-*`, `cmute`, `cmode`, `cpreset`, `cpoint`,
 // `cadd`, `cremove`), which only computer-wire.js acts on.
 
+import { ROWS_SHOWN } from '../../../core/computer.js';
+import { isLong } from '../../../core/table.js';
+import { gainText, hzText, qText } from '../../../core/words.js';
 import {
   COMPUTER, POINTS, SHELF, WORDS, rateWords,
 } from '../words.js';
@@ -17,23 +20,7 @@ import { esc } from './esc.js';
 import { VIEW_HEIGHT, VIEW_WIDTH, plot } from './tone.js';
 import { button } from './word.js';
 
-/** The rows of the points' table in view before it scrolls. */
-export const ROWS_SHOWN = 6;
-
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
-
-/** dB with one decimal and a true minus; no sign on zero. */
-function dbText(db) {
-  const text = Math.abs(db).toFixed(1);
-  return db < 0 && text !== '0.0' ? `−${text}` : text;
-}
-
-/** A frequency in Hz: whole above 100, one decimal below, no trailing zero. */
-export const hzText = (f) => `${Number(f.toFixed(f < 100 ? 1 : 0))} Hz`;
-/** A gain with its sign. */
-export const gainText = (g) => `${g > 0 && g.toFixed(1) !== '0.0' ? '+' : ''}${dbText(g)} dB`;
-/** A Q with two decimals. */
-export const qText = (q) => q.toFixed(2);
 
 /** A marker of the core's (`toneOf`, on the summed curve at the point's frequency, in the plot's units) as
  * fractions of the plot (`x`, `y` from 0 to 1, from the top left). */
@@ -123,7 +110,7 @@ export const lineHtml = (tone) => `${esc(tone.line)}${tone.verified ? ''
  * that counts the points and the preamp. */
 export function computerPoints(tone, { inert, picked = null }) {
   const heads = POINTS.heads.map((h) => `<span role="columnheader">${esc(h)}</span>`).join('');
-  const long = tone.points.length > ROWS_SHOWN;
+  const long = isLong(tone.points.length);
   const rows = tone.points.map((p) => row(p, { picked, inert })).join('');
   const add = button('cadd', POINTS.add, inert || !tone.canAdd, ' id="sg-cadd"', 'sg-btn sg-pill');
   const note = tone.note ? `<p class="sg-note">${esc(tone.note)}</p>` : '';

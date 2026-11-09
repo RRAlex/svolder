@@ -329,3 +329,73 @@ fn a_hop_kind_is_read_as_written_in_lower_case() {
     assert_eq!(HopKind::named("amp"), Some(HopKind::Amp));
     assert_eq!(HopKind::named("Amp"), None);
 }
+
+/// Two edits of one hop at once, each changing a different key and keeping the rest of the hop
+/// as it read it, meeting after each has read the file: the hop each merges onto is the one the
+/// file holds under the lock, so neither change is lost.
+#[test]
+fn two_edits_of_one_hop_at_once_both_keep_their_change() {
+    let dir = temp_dir("config-hop-edit");
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        "[[hop]]\nname = \"Amp\"\nkind = \"amp\"\n\n[[hop]]\nname = \"Cans\"\nkind = \"headphones\"\n",
+    )
+    .unwrap();
+    super::writers::meet_at(&path);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            Config::edit_hop(&path, "Amp", |old| {
+                Ok(Hop {
+                    note: Some("warm".into()),
+                    ..old.clone()
+                })
+            })
+            .expect("the note written");
+        });
+        scope.spawn(|| {
+            Config::edit_hop(&path, "Amp", |old| {
+                Ok(Hop {
+                    after: Some("Cans".into()),
+                    ..old.clone()
+                })
+            })
+            .expect("the after written");
+        });
+    });
+    let amp = Config::load_from(&path)
+        .unwrap()
+        .hop("Amp")
+        .unwrap()
+        .clone();
+    assert_eq!(amp.note.as_deref(), Some("warm"), "the note was lost");
+    assert_eq!(amp.after.as_deref(), Some("Cans"), "the after was lost");
+}
+
+/// `edit_hop` hands the change the hop as the file holds it, refuses an id no block carries,
+/// and refuses what the change refuses, leaving the file as it was.
+#[test]
+fn edit_hop_reads_the_file_and_refuses_what_it_should() {
+    let dir = temp_dir("config-hop-edit");
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        "[[hop]]\nname = \"Amp\"\nkind = \"amp\"\nnote = \"on disk\"\n",
+    )
+    .unwrap();
+    Config::edit_hop(&path, "amp", |old| {
+        assert_eq!(old.note.as_deref(), Some("on disk"));
+        Ok(Hop {
+            note: None,
+            ..old.clone()
+        })
+    })
+    .unwrap();
+    assert_eq!(Config::load_from(&path).unwrap().hops[0].note, None);
+    let missing = Config::edit_hop(&path, "Nope", |old| Ok(old.clone())).unwrap_err();
+    assert!(missing.to_string().contains("no hop named"), "{missing}");
+    let before = std::fs::read_to_string(&path).unwrap();
+    let refused = Config::edit_hop(&path, "Amp", |_| Err(ConfigError::Parse("no".into())));
+    assert!(refused.is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}

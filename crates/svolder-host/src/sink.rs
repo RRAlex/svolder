@@ -163,8 +163,8 @@ pub async fn output_within(program: &OsStr, args: &[&str], timeout: Duration) ->
 
 impl Wpctl {
     /// The id of the sink whose `node.name` is `name`, found by reading `wpctl status` for the
-    /// ids under `Sinks:` and inspecting each; `None` when there is no such sink or `wpctl`
-    /// does not answer.
+    /// sink ids (see [`sink_ids`]) and inspecting each; `None` when there is no such sink or
+    /// `wpctl` does not answer.
     pub async fn find_sink(&self, name: &str) -> Option<u32> {
         let status = self.run(&["status"]).await?;
         for id in sink_ids(&status) {
@@ -196,19 +196,29 @@ impl Wpctl {
 }
 
 /// The ids of the sinks `wpctl status` lists, in its order: the numbered entries under its
-/// `Sinks:` heading.
+/// `Sinks:` heading, and the entries tagged `[Audio/Sink]` under `Filters:` (WirePlumber 0.5
+/// lists a filter-chain sink there).
 pub fn sink_ids(status: &str) -> Vec<u32> {
+    #[derive(PartialEq)]
+    enum Section {
+        Other,
+        Sinks,
+        Filters,
+    }
     let mut ids = Vec::new();
-    let mut in_sinks = false;
+    let mut section = Section::Other;
     for line in status.lines() {
         let line = line.trim_start_matches(|c: char| "│├└─ \t*".contains(c));
         if line.trim_end() == "Sinks:" {
-            in_sinks = true;
+            section = Section::Sinks;
+        } else if line.trim_end() == "Filters:" {
+            section = Section::Filters;
         } else if line.trim_end().ends_with(':')
             || matches!(line.trim_end(), "Audio" | "Video" | "Settings")
         {
-            in_sinks = false;
-        } else if in_sinks
+            section = Section::Other;
+        } else if section != Section::Other
+            && (section == Section::Sinks || line.trim_end().ends_with("[Audio/Sink]"))
             && let Some((number, _)) = line.split_once('.')
             && let Ok(id) = number.parse()
         {
@@ -341,9 +351,58 @@ mod tests {
 
     #[test]
     fn only_the_ids_under_sinks_are_sinks() {
-        let status = "PipeWire 1.6.2\n\nAudio\n ├─ Devices:\n │      40. Card\n │\n ├─ Sinks:\n │  *   42. DAC [vol: 1.00]\n │      43. Speakers\n │\n ├─ Sources:\n │      50. Mic\n ├─ Filters:\n │      60. x\n └─ Streams:\n        70. y\n\nVideo\n ├─ Sinks:\n";
+        let status = "PipeWire 1.6.2\n\nAudio\n ├─ Devices:\n │      40. Card\n │\n ├─ Sinks:\n │  *   42. DAC [vol: 1.00]\n │      43. Speakers\n │\n ├─ Sources:\n │      50. Mic\n ├─ Filters:\n │      60. x [Stream/Output/Audio]\n └─ Streams:\n        70. y\n\nVideo\n ├─ Sinks:\n";
         assert_eq!(sink_ids(status), [42, 43]);
         assert_eq!(sink_ids(""), Vec::<u32>::new());
+    }
+
+    /// What `wpctl status` of WirePlumber 0.5 prints on a private PipeWire with a null sink and
+    /// the filter chain running.
+    const STATUS_WITH_CHAIN: &str = r#"PipeWire 'svolder-e2e-0' [1.6.2, user@host, cookie:1457588367]
+ └─ Clients:
+        23. WirePlumber                         [1.6.2, user@host, pid:737770]
+        28. WirePlumber [export]                [1.6.2, user@host, pid:737770]
+        33. pw-cat                              [1.6.2, user@host, pid:737895]
+        39. wpctl                               [1.6.2, user@host, pid:739268]
+        50. pipewire                            [1.6.2, user@host, pid:739242]
+        51. pw-cli                              [1.6.2, user@host, pid:737979]
+
+Audio
+ ├─ Devices:
+ │  
+ ├─ Sinks:
+ │  *   17. svolder e2e sink                    [vol: 1.00]
+ │  
+ ├─ Sources:
+ │  
+ ├─ Filters:
+ │    - filter-chain-739242-7                                       
+ │      49. svolder_eq.output                                            [Stream/Output/Audio]
+ │      57. svolder_eq                                                   [Audio/Sink]
+ │  
+ └─ Streams:
+        34. pw-cat                                                      
+             32. output_FL       > svolder EQ:playback_FL	[active]
+             35. output_FR       > svolder EQ:playback_FR	[active]
+
+Video
+ ├─ Devices:
+ │  
+ ├─ Sinks:
+ │  
+ ├─ Sources:
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:
+"#;
+
+    #[test]
+    fn a_filter_chain_sink_under_filters_is_a_sink() {
+        assert_eq!(sink_ids(STATUS_WITH_CHAIN), [17, 57]);
     }
 
     /// What `wpctl inspect` prints for a USB DAC, cut to the lines that matter and a few that

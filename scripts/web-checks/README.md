@@ -22,8 +22,9 @@ describes the layer they cover.
 ## Run it
 
 ```sh
-make web-checks-quick   # about 38 minutes at the default 6 jobs (much longer with WEB_CHECKS_JOBS=1): the page changed, the smoke did not
-make web-checks         # over an hour at 6 jobs: everything, before merging any change to the web page
+make web-checks-task    # the quick gate with the logic-only checks in Chromium only: a task or a lane end
+make web-checks-quick   # about 38 minutes at 6 jobs (much longer with WEB_CHECKS_JOBS=1): the page changed, the smoke did not
+make web-checks         # 47 minutes in 0.32.0, over an hour on a busy machine: everything, before merging any change to the web page
 ```
 
 One check on its own, from the repository root (build the daemon first with `cargo build -p
@@ -49,26 +50,126 @@ line per check with its time and last output line, then a total.
 
 - `make web-checks`: every node harness, every browser check in both browsers, the gate refusal;
   before a merge, and whenever a smoke file or one of the smoke's own checks changed.
+- `make web-checks-task`: the quick gate's set with the logic-only checks in Chromium only; the
+  rung for a task or a lane end (the ladder is below).
 - `make web-checks-quick`: the node harnesses, the checks that leave the smoke alone (effects menu
   and layout, the Tone message, the ring click, the curve's drag, Now playing, the visualizer,
   devices, a Loki Max's presets, the Firefox preload) and `smoke_quick.py` per browser; after a
   change to the page, the styles or the templates that does not touch the smoke.
 
-Both gates run their browser checks `WEB_CHECKS_JOBS` at a time (default 6; `1` is one by one, the
-serial lane's checks after the others), longest first (the `weight` table in `run-all.sh`; refresh it from a run's times when the
-checks change). Every check has its own daemon home, free ports, browser profile and output files, so
-any two can run side by side. A check that fails beside others is run once more alone: passing
-alone is `flaky` (counted as passed, named in the total line, both outputs kept in
-`target/web-checks/out/NAME.out` and `NAME.again.out`), failing again is `FAIL`. On both gates
-`smoke_core.py`, `smoke_page.py`, `haze.py`, `effects_cycle.py`, `scroll.py` (the smoke's velocity
-after wheel steps a set time apart), `smoke_quick.py` and
-`nightdrive_timing.py` (Night drive's draw cost and its draws and floor rows a second) run one at a
-time after the parallel part: they read the page's own frame pace and calm rate and want the machine
-to themselves. A TERM or Ctrl-C stops
-every running check, and their browsers and daemons with them.
+### The gate ladder
 
-The quick gate refuses, with `web-checks: a smoke file changed (NAME): run make web-checks` and
-exit 1, when a file of the smoke or one of its own checks changed against `main`
+Which rung to run, from the smallest. The estimates are the targets of the speed work, the times
+of a run on a quiet machine appear in `target/web-checks/timing.tsv`.
+
+| Rung | What to run | About |
+|---|---|---|
+| A task (in the implementer's own worktree) | `cargo fmt` and `clippy` on the touched crates, `cargo test -p <crate>`, `make web-snippets`, the node harnesses (`node scripts/web-checks/node/NAME.mjs`, seconds each), and the browser checks the change touches by name, in Chromium: `python3 scripts/web-checks/NAME.py chromium`. For a whole web change `make web-checks-task` | 1 to 6 minutes by name; the task gate about 30 minutes |
+| A lane end (the review) | `make check`, `make web-checks-task`; the checks that changed, in both engines by name | 10 to 20 minutes plus the task gate |
+| A merge to main | `make check`, `make web-checks` (the full gate: every check, Firefox included), `make host-e2e` once, `make e2e` once when the Bluetooth path changed | 35 to 45 minutes of web gate, plus 12 of `make check` |
+| A milestone merge | the merge rung, then `make host-e2e` five times, `make preamp-lab`, `nightdrive_timing.py` and the smoke's timing on a quiet machine | about 2 hours, unattended |
+| A release (a tag) | the milestone rung on the export tree with its own `CARGO_TARGET_DIR`, `make repro-check`, `make packages`, `make web-shots` | about 1.5 hours plus the CI build |
+
+Firefox: the checks of the page's layout, its pointer events, its canvas and its fonts run in both
+engines on every web gate. The logic-only checks (`space_key`, `device_presets`, `core_rows`: the `logic_only` list in `run-all.sh`)
+run in Chromium only on `make web-checks-task` and in both on the quick and the full gate, so
+Firefox sees every check at least at the merge rung. A mutant run never blocks a task or a lane end.
+
+### Running them
+
+The gates run their browser checks `WEB_CHECKS_JOBS` at a time. The default is a quarter of the
+cores (6 on 24), cut to two thirds, a half or 2 when the CPU is contended: the rule reads the
+kernel's pressure stall information, `/proc/pressure/cpu`'s `some` line, `avg10` under 10 % keeps the
+quarter, under 30 % two thirds, under 60 % a half, more than that 2 (never fewer than 2 nor more
+than 12). It is not the load average, which counts tasks waiting on I/O and so reads high on idle
+CPUs. The run says which number it chose and why; `WEB_CHECKS_JOBS=N` overrides it, `1` is one by one
+(the serial lane's checks after the others). The checks run longest first (the `weight` table in
+`run-all.sh`; refresh it from a run's times when the checks change). Every check has its own daemon
+home, free ports, browser profile and output files, so any two can run side by side. A check that
+fails beside others is run once more alone: passing alone is `flaky` (counted as passed, named in
+the total line, both outputs kept in `target/web-checks/out/NAME.out` and `NAME.again.out`),
+failing again is `FAIL`.
+
+The gate lock, `/tmp/svolder-web-gate.lock` (`WEB_CHECKS_LOCK` names another file for a test of the
+gate itself), is shared by every gate and lane on the machine: a browser check holds it shared
+(`flock -s`), any number at once; a check that asserts a pace holds it exclusive (`flock -x`) and so
+runs with no other browser check of any lane beside it. The re-run of a failed check holds it
+exclusive too, so "failed alone" means alone on the machine's gate. A check that waits more than 10 s
+for the lock prints `waiting for the gate lock (held by another gate)`; the lock is not fair
+(shared holders keep arriving), so a long wait means another gate's pool is running. On both gates
+these run one at a time in the exclusive lane after the parallel part: `nightdrive_timing.py`
+(Night drive's draw cost, its draws and floor rows a second, the budget's rate rule, its phone budget and the tap under a slowed CPU), `smoke_core.py`
+and `haze.py` (draw cost and frame rate cases, not split from their logical ones, so the whole file
+is there), and `smoke_page.py`, `smoke_quick.py`, `effects_cycle.py`, `scroll.py`, `notes.py` and `sources.py`,
+which assert a frame rate or a wall-clock pace (the red zone's frames a second, the calm rate band,
+a flick's speed, the velocity after wheel steps, the 20 and 300 ms pointer pauses). A TERM or Ctrl-C stops every running check, and
+their browsers and daemons with them.
+
+### The fake clock
+
+An assert that counts what the page's own timers and frames do in a stretch of time (draws in 5 s, writes
+in 3 s) reads the machine's load as well as the page's code on the real clock. `fakeclock.py` gives such a
+case a clock it moves itself: `install(b)` before the page loads (Chromium
+`Page.addScriptToEvaluateOnNewDocument`, Firefox a WebDriver BiDi preload script), `take(b)` once the page
+has booted and settled on the real clock (it then freezes `performance.now`, `Date.now`, `setTimeout`,
+`setInterval` and `requestAnimationFrame`, the timers and frames already waiting move over with the time
+they had left), and `advance(b, ms)` to move it, a frame every 1/60 s and every due timer in order, with the
+page's promises and the daemon's messages let through between the steps. The count in 5 virtual seconds
+is then the page's, the same on a quiet and a loaded machine (Night drive's Still: 5 draws in 5 s, the
+readout's box: 6 writes in 3 s, in both engines). Fetches and sockets stay real, so a case that depends on
+the daemon's pace in real time does not use it; its limits: `setTimeout(0)` chains, `new Date()` with no argument, `event.timeStamp`, CSS animations and transitions, and iframes stay on the real clock; the cases that use it run in a browser of their own, since
+the wrapped timers are in every page that browser loads. The cases on it: `nightdrive_theme.py`
+`the_pace_on_a_fake_clock` (`ND_ONLY=pace` runs just those, seconds).
+
+What stays real-time, and why:
+
+- A draw's cost, the budget's step-down and a tap under a slowed CPU are the real work, so they are real
+  and exclusive: `nightdrive_timing.py` (it now holds Night drive's phone budget too:
+  `a_phone_stays_usable`, the step-down at 30x and the tap that opens the menu within a second at 6x, moved
+  there from `nightdrive_theme.py`), `smoke_core.py` and `haze.py` (the draw cost and rate cases),
+  `smoke_page.py`, `smoke_quick.py`, `effects_cycle.py`, `scroll.py` and `notes.py` (frame rates and wall-clock paces).
+- `sources.py` is in the exclusive lane whole: its coalesced-move strokes read pauses of 20 and 300 ms
+  between pointer events against the browser's own event times, which a page clock cannot move, and the
+  smoke engine under it paces by the real frame. It runs on the full gate only.
+- Still in the pool, and a failure under load there is re-run exclusive: `nightdrive_theme.py`'s waits for
+  the fade and the volume bubble (a sleep of the check's against the page's timer, the check's sleeps
+  are lower bounds so only a page timer more than a second late fails them), `visualizer.py` ("the chip goes
+  after about a second", the same shape), `signal_theme.py` (no rate assert, only `within 3 s` waits) and
+  `paper.py` (its rate-a-second hits belong to the web-themes lane).
+
+### The result cache
+
+The quick and task gates (`make web-checks-quick`, `make web-checks-task`) do not rerun a pool browser
+check whose last pass is still good; the full gate (`make web-checks`, the merge rung) never reads the
+cache, so it stays cold (it does write a record after each pass). A check's fingerprint
+(`fingerprint.py`) is a hash of the built `svolderd` and `svolder` binaries, the web directory the daemon
+serves, the check's own file, every helper it really imports or opens here (`common.py` and the rest,
+followed through their own imports; not file names in comments), the engine's name, the browsers'
+versions, the env that moves the daemon or the web dir (`SVOLDERD`, `SVOLDER`, `SMOKE_WEB`,
+`SMOKE_EMBEDDED`) and the env that chooses a check's cases (`ND_ONLY`, `ND_CASES`, `WEB_CHECK_THEMES`,
+`HAZE_SECTIONS`, `SCROLL_SECTIONS`, `HIDDEN_SECS`, `LOOK_*`, `SVOLDER_FAKE_*`, `SECS`, `REPS`, the stills
+switches). A pass stored under the same fingerprint is reused: the check is not run, its line says
+`cached`, its row in `timing.tsv` has the verdict `cached` and 0 s, and the total line names the cached
+checks. Any change to any of those inputs changes the fingerprint and the check runs.
+
+A pass is stored only when the fingerprint taken right before the run equals the one taken right after
+it (a pass that needed the alone retry is cached too), never when a subset env var is set (that run was not the whole check), and never when a browser's
+version cannot be read. Records are written atomically, one file per check and engine, in
+the `cache` directory under `target/web-checks`; a failed run drops its record; `rm -r` the directory to start over.
+`WEB_CHECKS_NO_CACHE=1` makes the quick and task gates run everything. The serial lane (the pace and
+draw-cost checks) and the node harnesses never use the cache. The quick gate's refusal stays by changed
+files, not fingerprints: it is about what the quick set does not run (the smoke's checks read
+`common.py` too, and a fingerprint cannot vouch for a check that is not in the set). `gate_cache.sh`
+proves the fingerprint on a throwaway tree.
+
+Every run writes `target/web-checks/timing.tsv`, one row per run of a check (the label, the engine,
+the lane `node`, `pool`, `again` or `serial`, the verdict, the wall seconds, the CPU seconds of the
+check's waited-for descendants and the peak resident memory in MB of its largest process, from GNU
+`time`), and ends with the serial lane's wall time and the 15 slowest runs.
+
+The quick and task gates refuse, with a message that names the file, says whether it is a smoke file
+or the gate's own harness (`common.py`, `run-all.sh`, `COVERAGE.md`, `fingerprint.py`, `gate_cache.sh`) and names the rung to run
+(`make web-checks`, the merge rung), and exit 1, when a file of the smoke or one of its own checks changed against `main`
 (`WEB_CHECKS_BASE` names another base) in the commits, the working tree or the untracked files. The
 list is `smoke_files` in `run-all.sh`: the smoke's scripts under `bins/svolderd/web/themes/ember/`,
 `effects.js` (it starts and stops the smoke, and the quick gate does not cycle effects), the
@@ -105,7 +206,7 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   cases (frozen: no test writes it). The same harness holds the claims the Rust tests
   keep of the model to the markup Ember draws (the cases named like those tests). `node/html-same.mjs` is the comparison (tags read in order; the attributes htmx
   reads dropped, attribute order and entities ignored, whitespace runs one space, JSON attributes
-  and JSON data blocks as JSON, drawn numbers within 0.011); the harness checks that comparison
+  and JSON data blocks as JSON, drawn numbers as written: no tolerance); the harness checks that comparison
   first.
 - `node/keep.mjs`: the swap hold of the tone part while a point is dragged (`keep.js`), with and
   without `Element.moveBefore`, two overlapping holds, and the part drawn again once they go, once,
@@ -213,11 +314,26 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `node/core-computer.mjs`: the core's computer side on fakes for the post, the read, the clock and the
   question: the side kept per viewer, the switch, a flip that writes nothing, the shelves of the curve,
   the steps, the point a tap or `+ Add point` makes, a drag's pace and its release, the value held while
-  a host update arrives, a guest, every route, the volume's cap and first paint, the both-sides question.
+  a host update arrives, a guest, every route, the volume's cap and first paint, the both-sides question,
+  the typed cell and the arrow step, `actions.refuse()`, the hand ranges against the Rust ones, the
+  question's `returnTo`.
+- `node/core-words.mjs`: the core's words: a typed number (`2.9k`, `+3,2 dB`) and a point's frequency,
+  gain and Q as a table writes them.
+- `node/core-table.mjs`: the points table's helpers (rows out of view counted, also for rows in a
+  tbody of unequal heights, a row scrolled into view, the scroll kept across a draw, a typed cell's
+  Enter, Escape and leaving), with fake elements.
+- `node/core-point-drag.mjs`: the hand on the computer's curve (`core/point-drag.js`): a drag's
+  paced writes and its one last value (also at a flip), the follow of a re-sort by slot, a point
+  removed or a preset loaded meanwhile, the wheel and arrow bursts (N live and one last, a re-sort
+  or a flip during one, a wide wheel), a tap that adds a point, pointer cancel, two fingers, a page
+  that may not write, Escape, a lost stream, tearing down; a stepper's held burst (no timer, one
+  last value at the hold's end), a begin for a pinch from a diamond, a second finger that drops the
+  tap, a tap on a full table, the touch listeners that come off, the held values and the label's
+  words, the point in hand after a remove, a burst whose point is removed or listed elsewhere.
 - `computer_core.py`: the computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
   the host event, every action's request and read-back, a refusal, the side kept across a reload with no
   write, a point write's slot (and a stale table, and a 409 for a point that moved), an unavailable computer
-  (`SVOLDER_FAKE_HOST_EQ=off`), the question card's keys and buttons, and the same preset on both sides with
+  (`SVOLDER_FAKE_HOST_EQ=off`), the question card's keys and buttons, the hand built over the core, and the same preset on both sides with
   its yes. Each theme's check also proves that Enter on an untouched cell writes nothing.
 - `computer_ember.py`: Ember's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
   the switch, the knob in %, the points' table, the curve under the mouse (tap, drag, wheel, right drag), a
@@ -464,6 +580,8 @@ and a guest's taps asked of the core and posting nothing, the device's slots (a 
 - `touch.py`: a finger stirs the smoke under touch emulation, and the page still scrolls.
 - `firefox_preload.py`: Firefox's error collector sees an error thrown by a page's first script.
 - `gate_refusal.sh`: the quick gate's refusal, on a throwaway repository.
+- `fakeclock.py`: the controllable page clock (see "The fake clock").
+- `fingerprint.py` and `gate_cache.sh`: the result cache's fingerprint and its record, and the proof of both on a throwaway tree.
 - `common.py`, `smoke_probe.py`: the shared driver (fake daemon, Chromium over CDP, Firefox over
   geckodriver) and the in-page probe; not checks. A `Daemon` takes `fleet=[(profile, name, udid)]`
   (more fake devices, each with its `[[device]]` block), reads its model (`model(name)`), writes
@@ -491,26 +609,42 @@ at the copy and expects a failure. A mutant that passes is reported as `SURVIVED
 not cover that edit. An edit whose anchor text no longer exists in the source stops the runner with
 `ANCHOR MISSING`: the list needs updating to the code.
 
-They are slow, so they run by hand, one at a time (a second one makes the timing bounds flake),
-and are optional: the gates do not run them.
+They are slow, so they run by hand only and are never part of a gate. `make tests-check` runs
+the node runners (a few at a time, `MUTANTS_JOBS`, default 4) and `make tests-check FULL=1` every browser
+runner too, one runner after the other; it prints each runner's kills of its mutants and its wall time,
+then a summary, and fails when a mutant survives. The browser runners share `mutpool.py`: the pool
+(`MUT_WORKERS`, default from the cores and the CPU pressure; each mutant has its own scratch web copy,
+daemon and browser), the mutants whose named check measures timing alone after the pool, every mutant the
+pool did not kill run again alone (only the alone result counts; a pool kill stands), a baseline that
+failed run again and not remembered, a run whose daemon lost the race for its port started again, and the
+web gate lock (`/tmp/svolder-web-gate.lock`) held shared around a run and exclusive around a timing one.
+`mutate_haze.py` and `mutate_scroll.py` run every mutant alone, and `mutate_smoke.py`, `mutate_notes.py`,
+`mutate_sources.py` and `mutate_effects.py` one at a time: their timing bounds flake side by side.
 
 - node: `bash scripts/web-checks/node/mutate_director.sh`, `mutate_model.sh`, `mutate_notes.sh`,
-  `mutate_sources.sh`, `mutate_paper.sh` (thirteen mutants of Paper's ruler, notes, changes,
+  `mutate_sources.sh`, `mutate_paper.sh` (27 mutants of Paper's ruler, notes, changes,
   log and words, run against a copy of the web dir by `node/paper-*.mjs`) and `mutate_signal.sh`
-  (thirteen mutants of Signal's line, fold, computer hop, strip, linked amp and faults, volume and transport icons, the mode's place, the Loudness chip and the menu row, run by `node/signal-*.mjs`)
-  `mutate_computer.sh` (six mutants of the core's point writes: the slot dropped from a set or a remove, sent as the place, a 409 that does not end the drag or says the daemon's words, run by `node/core-computer.mjs`),
-  and `mutate_nightdrive.sh` (twenty-two mutants (a minute's fade and a ridge smoothed over 0.6 of a band among them, the wet road's slices swaying each by their own phase among them) of Night drive's camera, axis, levels, tempo, sky, ear, look, budget, floor drawing, tuning, words and dash, run by `node/nightdrive-*.mjs`);
+  (26 mutants of Signal's line, fold, computer hop, strip, linked amp and faults, volume and transport icons, the mode's place, the Loudness chip and the menu row, run by `node/signal-*.mjs`)
+  `mutate_computer.sh` (140 mutants of the core's point writes and helpers: the slot
+  dropped from a set or a remove, sent as the place, a 409 that does not end the drag or says the
+  daemon's words, the cell's equal-value guards, the step's direction, the refusal, the question's
+  return (also after the caller's work), the cell's rounding, the points' most, the words and the
+  hand ranges, the table, the hand on the curve, run by `node/core-computer.mjs`, `node/core-words.mjs`,
+  `node/core-table.mjs` and `node/core-point-drag.mjs`),
+  and `mutate_nightdrive.sh` (62 mutants (a minute's fade and a ridge smoothed over 0.6 of a band among them, the wet road's slices swaying each by their own phase among them) of Night drive's camera, axis, levels, tempo, sky, ear, look, budget, floor drawing, tuning, words and dash, run by `node/nightdrive-*.mjs`);
 - browser: `python3 scripts/web-checks/mutate_smoke.py [name ...]`, and the same for
   `mutate_notes.py`, `mutate_haze.py`, `mutate_scroll.py`, `mutate_sources.py`,
-  `mutate_effects.py`, `mutate_webui.py`, `mutate_registry.py`, `mutate_signal.py` (Signal's page:
+  `mutate_effects.py`, `mutate_webui.py`, `mutate_registry.py`, `mutate_ember.py` (29 mutants of Ember's computer
+  side: the drawing through `node/ember-parts.mjs`, the wiring through `computer_ember.py`, each
+  killed only by a case that names it), `mutate_signal.py` (26 mutants of Signal's page:
   the amp's write without the amp's url, the dots ignoring reduced motion, the slim bar never
   pinning, a held plus that never repeats, a blur that does not stop a hold, a pinch the wrong way, a tall window that stretches, a shelf of three columns, the Add device row opening the sheet for a guest (the core refuses a guest's post, so the sheet
-  is what can be mutated), the strip not centring, each killed only by the check it names; it drives `signal_theme.py`, fifteen full runs, so a
-  complete `mutate_signal.py` run takes about 75 minutes)
-  `mutate_nightdrive.py` (Night drive's page, Chromium, twenty-nine mutants: a sky drawn twelve times in every draw, a loop each mount starts and nothing ends, a long press that presses on its release, a first tap on a faded dash let through, a wet-road copy made a tenth of a second apart, an amp's meters heard as a part, the fade not woken by focus, trouble fading, the analysis kept while hidden, reduced motion starting on Full, Still at the screen's rate, a dash hold that never repeats, a diamond drag that writes nothing, a pinch on band 1, hit tests in canvas pixels, a switch that lets a drag write, a guest's morph, a first touch that grabs, a question that sends early or on Keep, a band field or a list chip that writes when it should not, the core letting a guest's call go out, the sheet's focus not given back, its columns swapped, the menu button following the page on a phone, Space playing under the menu, a 30 px picker close key; each run names the cases of `nightdrive_theme.py`, `nightdrive_sheet.py`, `nightdrive_phone.py`, `nightdrive_states.py`, `space_key.py` or `effects_menu.py` it needs, runs them unmutated first and counts a kill only when a check the mutant names fails)
-  and `mutate_paper.py` (Paper's page:
+  is what can be mutated), the strip not centring, each killed only by the check it names; it drives `signal_theme.py` and `computer_signal.py`, the pool runs the mutants,
+  then again alone each one it did not kill and the five whose check measures repeat timing)
+  `mutate_nightdrive.py` (Night drive's page, Chromium, 55 mutants: a sky drawn twelve times in every draw, a loop each mount starts and nothing ends, a long press that presses on its release, a first tap on a faded dash let through, a wet-road copy made a tenth of a second apart, an amp's meters heard as a part, the fade not woken by focus, trouble fading, the analysis kept while hidden, reduced motion starting on Full, Still at the screen's rate, a dash hold that never repeats, a diamond drag that writes nothing, a pinch on band 1, hit tests in canvas pixels, a switch that lets a drag write, a guest's morph, a first touch that grabs, a question that sends early or on Keep, a band field or a list chip that writes when it should not, the core letting a guest's call go out, the sheet's focus not given back, its columns swapped, the menu button following the page on a phone, Space playing under the menu, a 30 px picker close key; each run names the cases of `nightdrive_theme.py`, `nightdrive_sheet.py`, `nightdrive_phone.py`, `nightdrive_states.py`, `space_key.py` or `effects_menu.py` it needs, runs them unmutated first and counts a kill only when a check the mutant names fails)
+  and `mutate_paper.py` (15 mutants of Paper's page, each running only the cases of `paper.py` or `computer_paper.py` it names, after the same cases passed unmutated:
   `place` setting nothing, Auto ignoring the system, a held section drawn anyway, the log empty, a
-  meter's needle at its class-A share; it drives `paper.py`) (with no name they run every
+  meter's needle at its class-A share, which drive `paper.py`, and ten of the computer's side, which drive `computer_paper.py`) (with no name they run every
   mutant; each file's header says which check it drives).
 
 A worked example from `node/mutate_model.sh`: the line `Math.exp((-4 * dt) / secs)|Math.exp((-2 *

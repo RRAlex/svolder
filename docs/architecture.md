@@ -26,8 +26,8 @@ Each says how a part works now and the principles behind it.
 - [MQTT and Home Assistant](design/mqtt-and-home-assistant.md): the bridge, discovery, commands.
 - [The MCP server](design/mcp-server.md): the HTTP server, the tools, the volume rules for a model.
 - [Host audio](design/host-audio.md): the computer's sink, players and capture, and the computer EQ.
-- [The daemon's capture](design/host-capture.md): the holds, the shared capture, the frames on the
-  web and the socket.
+- [The daemon's capture](design/host-capture.md): holds, shared capture, frames to web and socket.
+- [Computer controls](design/host-control.md) and [preamp](design/host-control-preamp.md).
 - [The terminal UI](design/tui.md): the app and its loop, screens and boxes, the key table and the
   three key rules, roles and palettes, the intro, the squirrel and the animation layer.
 - [The web UI](design/web-ui.md): the request's way in, sign-in and tokens, view models, the stream,
@@ -235,7 +235,7 @@ the MCP server shares (`src/http.rs`).
 | Templates | `bins/svolderd/templates/` (`page.html`, `signin.html`) | askama templates checked when the daemon is built; `src/web/pages.rs` renders them: the page's frame and the sign-in page. A theme draws everything else from the model. |
 | Writes | `src/web/writes.rs` | A control, the volume, a climb's end: all through the device's `Writer` as `Origin::Web`; Identify through the daemon's request. |
 | Live updates | `src/web/events.rs` and `events/` | One server-sent stream of JSON events per page: the model, then what changed. |
-| Static files | `bins/svolderd/web/`: `core/` (`frame.css`, `core.js`, `boot.js`, `store.js`, `stream.js`, `actions.js`, `api.js`, `toast.js`, `visible.js`, `tone-curve.js`, `tone-drag.js`, `login.js`, and the rest of the core's modules; [web themes](design/web-themes.md)), `themes/ember/` (`style.css`, `ember.js`, `live.js`, `press.js`, `strip.js`, `tone-motion.js`, `tone-graph.js`, `tone-editor.js`, `keys.js`, `facts.js`, `playing.js`, `knob.js`, `slider.js`, `meters.js`, `keep.js`, and the rest of the page's scripts), `fonts/`, the icons | Embedded in the binary by `src/web/assets.rs`; `SVOLDER_WEB_ASSETS=<dir>` reads a folder instead, for editing without a rebuild. |
+| Static files | `bins/svolderd/web/`: `core/` (`frame.css`, `core.js`, `boot.js`, `store.js`, `stream.js`, `actions.js`, `api.js`, `toast.js`, `visible.js`, `tone-curve.js`, `tone-drag.js`, `point-drag.js`, `table.js`, `login.js`, and the rest of the core's modules; [web themes](design/web-themes.md)), `themes/ember/` (`style.css`, `ember.js`, `live.js`, `press.js`, `strip.js`, `tone-motion.js`, `tone-graph.js`, `tone-editor.js`, `keys.js`, `facts.js`, `playing.js`, `knob.js`, `slider.js`, `meters.js`, `keep.js`, and the rest of the page's scripts), `fonts/`, the icons | Embedded in the binary by `src/web/assets.rs`; `SVOLDER_WEB_ASSETS=<dir>` reads a folder instead, for editing without a rebuild. |
 | Effects | `web/themes/ember/effects.js`, `smoke*.js` beside it | A registry of page effects (Smoke, Glow, Off). The smoke is split in three: `smoke-model.js` holds every number (`TUNING`), `smoke-director.js` holds the rules and plans a frame with no GPU, `smoke-engine.js` runs the plan in WebGL, and `smoke.js` is the thin runtime. |
 
 To restyle: colours and sizes are tokens at the top of `themes/ember/style.css`, a part's markup is

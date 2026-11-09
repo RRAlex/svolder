@@ -27,24 +27,35 @@ const RELOAD_WAIT: Duration = Duration::from_secs(5);
     clippy::result_large_err,
     reason = "the refusal is the answer the handler returns as it is"
 )]
-pub(super) fn config_file(web: &Web, what: &str) -> Result<(PathBuf, Config), Response> {
+pub(super) async fn config_file(web: &Web, what: &str) -> Result<(PathBuf, Config), Response> {
     let Some(path) = web.fleet.config_path() else {
         return Err(error(
             StatusCode::CONFLICT,
             "svolder's configuration file is unknown here",
         ));
     };
-    if let Err(why) = Config::writable(&path) {
-        return Err(error(
+    // Both reads touch the file, which a slow file system must not make an async worker wait for.
+    let read = {
+        let path = path.clone();
+        tokio::task::spawn_blocking(move || -> Result<Config, Option<String>> {
+            Config::writable(&path).map_err(Some)?;
+            Config::load_from(&path).map_err(|_| None)
+        })
+        .await
+    };
+    match read {
+        Ok(Ok(config)) => Ok((path, config)),
+        Ok(Err(Some(why))) => Err(error(
             StatusCode::CONFLICT,
             format!("Saving {what} is off: {why}"),
-        ));
-    }
-    match Config::load_from(&path) {
-        Ok(config) => Ok((path, config)),
-        Err(_) => Err(error(
+        )),
+        Ok(Err(None)) => Err(error(
             StatusCode::CONFLICT,
             "the daemon's configuration could not be read; see its log",
+        )),
+        Err(_) => Err(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the configuration could not be read",
         )),
     }
 }

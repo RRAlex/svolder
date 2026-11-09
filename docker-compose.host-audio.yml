@@ -14,10 +14,10 @@
 # the first PipeWire restart. The clients reach PipeWire through PIPEWIRE_REMOTE; anything the
 # daemon's own `pipewire` child creates goes in the private tmpfs, never the read-only mount. Docker never creates the path: with no session the container refuses to start
 # instead of leaving a root-owned directory on the host. The runtime directory is 0700 and the
-# host user's, so the container runs as that uid with group 0, which owns what the image writes.
+# host user's, so the container's daemon runs as that uid: the entrypoint drops to PUID:PGID (HOST_UID and
+# HOST_GID, which the main file passes), and HOST_UID must be set for this file.
 services:
   svolder:
-    user: "${HOST_UID:?set HOST_UID in .env or the environment, make docker writes it}:0"
     volumes:
       - type: bind
         source: "${HOST_RUNTIME_DIR:?set HOST_RUNTIME_DIR in .env or the environment, make docker writes it}"
@@ -27,7 +27,7 @@ services:
           create_host_path: false
     # The container's own runtime directory, for the `pipewire` child the daemon starts.
     tmpfs:
-      - "/run/user/${HOST_UID}:mode=0700,uid=${HOST_UID},gid=0"
+      - "/run/user/${HOST_UID:?set HOST_UID in .env or the environment, make docker writes it}:mode=0700,uid=${HOST_UID},gid=${HOST_GID:-1000}"
     environment:
       PIPEWIRE_REMOTE: /run/host-runtime/pipewire-0
       PIPEWIRE_RUNTIME_DIR: /run/user/${HOST_UID}

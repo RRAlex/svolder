@@ -35,6 +35,12 @@ pub(super) const F_RANGE: (f64, f64) = (20.0, 20_000.0);
 pub(super) const G_RANGE: (f64, f64) = (-12.0, 12.0);
 pub(super) const Q_RANGE: (f64, f64) = (0.1, 10.0);
 
+/// The cursor id of the Target row: the switch is no control's row, so it has an address of its
+/// own for the trail and the shimmer to name it by. Safe: it is only a key into the frame's
+/// drawn rows for effects, never written to a device or used to find a control.
+pub(crate) const SWITCH_ROW: svolder_proto::FunctionId =
+    svolder_proto::FunctionId::three(255, 255, 255);
+
 impl App {
     /// Whether the switch is drawn: the computer's controls are there to flip to, or say why
     /// they are not.
@@ -63,6 +69,169 @@ impl App {
                     .clone()
             })
             .clone()
+    }
+
+    /// Whether the computer's controls are there and can be used, so the screens lay a switch
+    /// out: the reason line stands in its place otherwise.
+    pub fn switch_offered(&self) -> bool {
+        self.computer_offered() && self.host.computer.unavailable().is_none()
+    }
+
+    /// Whether the switch is a row the keys can be on: the computer's controls are there and can
+    /// be used (the reason line that stands in the switch's place otherwise is not focusable), and
+    /// the screen showing drew it at its last frame (a pane with no room for it has no row).
+    pub fn switch_available(&self) -> bool {
+        self.switch_offered()
+            && match self.screen {
+                Screen::Tone => self.drawn.tone_switch.get(),
+                _ => self.drawn.controls_switch.get(),
+            }
+    }
+
+    /// Whether the Controls pane has a switch row of its own over the selected row: the one
+    /// carrying the volume, the device's own or the Host group's while the computer is shown.
+    fn switch_over_selected(&self) -> bool {
+        self.screen == Screen::Device
+            && self.pane == super::Pane::Controls
+            && self.switch_available()
+            && (self.focused_volume_row()
+                || (self.on_computer()
+                    && self.host_row() == Some(crate::tui::host::HostRow::Volume)))
+    }
+
+    /// Whether the selected row is the Host group's Volume row on the device's side of a device
+    /// with no volume of its own: the row is the switch itself, with no bar under it, so the
+    /// keys are on the switch whenever they are on the row.
+    fn switch_is_the_row(&self) -> bool {
+        self.screen == Screen::Device
+            && self.pane == super::Pane::Controls
+            && self.switch_available()
+            && !self.on_computer()
+            && self.host_row() == Some(crate::tui::host::HostRow::Volume)
+    }
+
+    /// Whether the selected control is the device's volume.
+    fn focused_volume_row(&self) -> bool {
+        match (self.selected_control(), self.volume()) {
+            (Some(selected), Some(volume)) => selected.id == volume.id,
+            _ => false,
+        }
+    }
+
+    /// Whether the keys are on the switch row: the tone-control screen's `Target` row, or on the
+    /// Controls pane the line over the Volume row.
+    pub fn switch_focused(&self) -> bool {
+        match self.screen {
+            Screen::Tone => self.tone.row == ToneRow::Target && self.switch_available(),
+            _ => self.switch_is_the_row() || (self.switch_focus && self.switch_over_selected()),
+        }
+    }
+
+    /// Drop a focus on the switch that no longer holds: the controls became unusable, the row
+    /// moved. Called before every key and when the session reaches the host, so a switch that
+    /// comes back is not focused again behind the user's back.
+    pub(crate) fn settle_switch(&mut self) {
+        if self.tone.row == ToneRow::Target && !self.switch_focused() {
+            self.tone.row = ToneRow::Mode;
+        }
+        if self.switch_focus && !self.switch_focused() {
+            self.switch_focus = false;
+        }
+    }
+
+    /// `↑` from the row under the switch moves onto the switch, `↓` from the switch back down.
+    /// Answers whether the move was the switch's. On the tone screen the switch is a row of the
+    /// tone control ([`ToneRow::Target`]) and [`App::move_tone_row`] moves it.
+    pub(crate) fn move_onto_switch(&mut self, delta: isize) -> bool {
+        if self.screen == Screen::Tone {
+            return false;
+        }
+        if self.switch_is_the_row() {
+            return false;
+        }
+        if self.switch_focused() {
+            if delta > 0 || self.selected == 0 {
+                self.switch_focus = delta <= 0;
+                return true;
+            }
+            self.switch_focus = false;
+            return false;
+        }
+        self.switch_focus = delta < 0 && self.switch_over_selected();
+        self.switch_focus
+    }
+
+    /// After a `↓` that moved the selection off row `from`: where it landed on the row that
+    /// carries the switch, the switch is the line it lands on, with the Volume row's bar under
+    /// it one more `↓` away.
+    pub(crate) fn land_on_switch(&mut self, from: usize) {
+        if self.selected != from && self.switch_over_selected() {
+            self.switch_focus = true;
+        }
+    }
+
+    /// Focus the switch row, the way a click on it does: where the screen has one.
+    pub(crate) fn focus_switch(&mut self) {
+        if !self.switch_available() {
+            return;
+        }
+        let from = self.cursor_id();
+        match self.screen {
+            Screen::Tone => self.tone.row = ToneRow::Target,
+            Screen::Device => {
+                let at = match self.volume() {
+                    Some(volume) => self.rows().iter().position(|r| r.control.id == volume.id),
+                    None => self
+                        .host_rows()
+                        .iter()
+                        .position(|row| *row == crate::tui::host::HostRow::Volume)
+                        .map(|at| self.rows().len() + at),
+                };
+                if let Some(at) = at {
+                    self.frame_flags.pane_changed |= self.pane != super::Pane::Controls;
+                    self.pane = super::Pane::Controls;
+                    self.selected = at;
+                    self.switch_focus = true;
+                }
+            }
+            _ => {}
+        }
+        self.cursor_moved(from);
+    }
+
+    /// A click on the switch row: focus it, and on a name pick that side.
+    pub(crate) fn click_target(&mut self, side: Option<Side>) -> Vec<Intent> {
+        self.focus_switch();
+        match side {
+            Some(side) => self.pick_side(side),
+            None => Vec::new(),
+        }
+    }
+
+    /// Pick `side` for the screens, the way `←` (the device) and `→` (the computer) do on the
+    /// switch row; nothing happens where it is the side shown.
+    pub(crate) fn pick_side(&mut self, side: Side) -> Vec<Intent> {
+        match (side == Side::Computer) == self.on_computer() {
+            true => Vec::new(),
+            false => self.flip_side(),
+        }
+    }
+
+    /// The keys of the switch row while it is focused: `←` the device, `→` the computer,
+    /// `Space` and `Enter` the other side. `None` for any other key.
+    pub(crate) fn switch_key(&mut self, code: crossterm::event::KeyCode) -> Option<Vec<Intent>> {
+        use crossterm::event::KeyCode;
+        if !self.switch_focused() {
+            return None;
+        }
+        Some(match code {
+            KeyCode::Left => self.pick_side(Side::Dac),
+            KeyCode::Right => self.pick_side(Side::Computer),
+            KeyCode::Char(' ') | KeyCode::Enter => self.flip_side(),
+            // `+`, `-` and `m` are the volume's, and the row shows Target: they do nothing.
+            KeyCode::Char('+' | '=' | '-' | 'm') => Vec::new(),
+            _ => return None,
+        })
     }
 
     /// Whether the computer's side is the one shown.
@@ -164,6 +333,13 @@ impl App {
         };
         self.pointer.curve_drag = None;
         self.tone.edit_line = None;
+        // On the device's side the Host group's Volume row is the switch itself: the cursor stays
+        // on the switch line when the row becomes a line and a bar.
+        let on_switch = self.switch_focused()
+            || (self.screen == Screen::Device
+                && self.pane == super::Pane::Controls
+                && !self.on_computer()
+                && self.host_row() == Some(crate::tui::host::HostRow::Volume));
         self.side = match self.side {
             Side::Dac => Side::Computer,
             Side::Computer => Side::Dac,
@@ -173,6 +349,9 @@ impl App {
             (Side::Dac, ToneRow::Point(_)) => ToneRow::Band,
             (_, row) => row,
         };
+        if self.screen == Screen::Device {
+            self.switch_focus = on_switch;
+        }
         self.frame_flags.screen_changed = true;
         intents
     }

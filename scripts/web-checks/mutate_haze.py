@@ -3,14 +3,12 @@
 """Mutation checks for the haze, its shade and its pace: each mutation edits a copy of the page's
 web dir (never the repo), runs the sections of haze.py (Chromium, or Firefox with --firefox) that
 must see it, and must make at least one check FAIL. Slow (a section is up to three minutes): run
-by hand, one worker.
+by hand. Every mutant runs alone, one at a time (the pace probe times a stroke).
 Usage: python3 mutate_haze.py [--firefox] [name ...]   (default: all)"""
 import os
-import shutil
-import subprocess
 import sys
 
-import common
+import mutpool
 
 BROWSER = 'firefox' if '--firefox' in sys.argv else 'chromium'
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -77,34 +75,13 @@ MUTATIONS = {
 
 def run(name):
     sections, edits = MUTATIONS[name]
-    web = common.scratch('mut-web-')
-    shutil.copytree(common.WEB, web + '/w')
-    for f, old, new in edits:
-        p = f'{web}/w/{f}'
-        s = open(p).read()
-        assert old in s, f'{name}: {old[:50]!r} not in {f}'
-        open(p, 'w').write(s.replace(old, new, 1))
-    env = dict(os.environ, SMOKE_WEB=web + '/w', HAZE_SECTIONS=sections)
-    r = subprocess.run([sys.executable, f'{HERE}/haze.py', BROWSER], env=env,
-                       capture_output=True, text=True, timeout=900)
-    shutil.rmtree(web, ignore_errors=True)
-    fails = [x for x in r.stdout.splitlines() if x.startswith('FAIL')]
-    if not fails and r.returncode:
-        # no FAIL line: an infrastructure crash is an error, never a kill
-        tail = (r.stderr.strip().splitlines() or ['no output'])[-1][:200]
-        return name, None, '(error, not a kill) ' + tail
-    return name, fails, ''
+    return mutpool.run_script(name, 'haze.py', edits, {'HAZE_SECTIONS': sections}, (BROWSER,))
+
+
+def attempt(name):
+    return mutpool.timed_call(run, name)
 
 
 names = [a for a in sys.argv[1:] if not a.startswith('--')] or list(MUTATIONS)
-bad = 0
-for name in names:
-    name, fails, err = run(name)
-    print('ERROR   ' if fails is None else 'KILLED  ' if fails else 'SURVIVED', name, flush=True)
-    for f in (fails or [])[:3]:
-        print('    ', f[:160])
-    if err:
-        print('    ', err)
-    bad += not fails
-print(f'{len(names) - bad} of {len(names)} mutations killed')
-sys.exit(1 if bad else 0)
+# the pace probe measures a stroke's duration: every mutant runs alone (the pool runs none of them)
+sys.exit(mutpool.run_names(names, attempt, names))

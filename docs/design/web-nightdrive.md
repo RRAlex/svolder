@@ -374,7 +374,7 @@ daemon captures the computer's audio only for a page that is looked at.
 | `scene-wire.js` | the loop: reads the analysis, rolls the floor, makes the mood and draws the frame |
 | `draw/` | the canvases' drawing (`sky.js`, `road.js`, `heat.js`, `mood.js`, `events.js`, `tune.js`, `esc.js`, `palette.js`) and the markup of the HUD, the volume, the dash, the sheet's sections, the card (`hud.js`, `volume.js`, `dash.js`, `sheet.js`, `modes.js`, `bands.js`, `presets.js`, `slots.js`, `controls.js`, `facts.js`, `meters.js`, `gauges.js`, `card.js`) |
 | `tune.js`, `tune-wire.js` | the tone control on the mountains as numbers, and the hands on it |
-| `computer-view.js`, `points.js`, `points-wire.js` | the computer's side: what the drawing reads of the core, the points' words and ranges, the points' table's hands |
+| `points-wire.js` | the computer's side: the points' table's hands (what the drawing reads of the computer is the core's `computer.view()`) |
 | `hud.js`, `hud-wire.js`, `dash-fade.js`, `rest.js` | the HUD's words, its fade, the dash's fade, the resting cursor |
 | `dash-wire.js`, `volume-keys.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `gestures.js`, `lists.js`, `ask.js`, `fold.js`, `act.js`, `inert.js`, `place.js` | the hands: what a tap, a hold, a drag, a key, a list or a question does, and the log of what this page asked |
 | `states.js`, `words.js` | how the page stands and the quiet line's words; the fixed words |

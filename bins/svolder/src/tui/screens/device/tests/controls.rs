@@ -490,7 +490,7 @@ fn the_volume_row_carries_the_switch() {
         &[("PK", 1000.0, 0.0, 1.0)],
     ));
     let name = app.session.product.clone();
-    let switch = format!("Volume       ‹ {name} | Computer ›");
+    let switch = format!("Target ‹ {name} | Computer ›");
     let rows = wide(&app);
     let at = rows
         .iter()
@@ -532,4 +532,347 @@ fn the_volume_row_carries_the_switch() {
         wide(&app).iter().any(|row| row.contains(&switch)),
         "the switch stays on the other side"
     );
+}
+
+/// [`mockup_app`] with the computer's controls there, the keys on the Volume row.
+fn switch_app() -> App {
+    let mut app = mockup_app();
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+        false,
+        &[("PK", 1000.0, 0.0, 1.0)],
+    ));
+    let volume = app.volume().expect("a volume").id;
+    app.selected = app
+        .rows()
+        .iter()
+        .position(|row| row.control.id == volume)
+        .expect("the volume row");
+    app
+}
+
+fn press(app: &mut App, code: KeyCode) -> Vec<crate::tui::app::Intent> {
+    app.key(crossterm::event::KeyEvent::from(code))
+}
+
+/// `↑` from the Volume row reaches the switch row, `←→` there pick the side and write nothing,
+/// and `↓` goes back to the volume, whose `←→` change only the volume.
+#[test]
+fn the_switch_is_a_row_above_volume_whose_arrows_pick_the_side() {
+    let mut app = switch_app();
+    assert!(!app.switch_focused());
+    // on the volume, the arrows step it and never flip the side
+    assert!(!press(&mut app, KeyCode::Left).is_empty());
+    assert!(!app.on_computer());
+    assert!(press(&mut app, KeyCode::Up).is_empty());
+    assert!(app.switch_focused());
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert!(app.on_computer());
+    assert!(press(&mut app, KeyCode::Right).is_empty());
+    assert!(app.on_computer(), "→ is the computer, it does not toggle");
+    assert!(press(&mut app, KeyCode::Left).is_empty());
+    assert!(!app.on_computer());
+    assert!(app.switch_focused());
+    press(&mut app, KeyCode::Down);
+    assert!(!app.switch_focused());
+    assert!(
+        !press(&mut app, KeyCode::Right).is_empty(),
+        "the volume steps"
+    );
+    assert!(!app.on_computer());
+    // `C` flips from wherever the keys are
+    assert!(press(&mut app, KeyCode::Char('C')).is_empty());
+    assert!(app.on_computer());
+}
+
+/// `↓` from the row above Volume lands on the switch first, a further `↓` on Volume; `↑` from
+/// Volume reaches the switch and a further `↑` the row above, so no row is skipped either way.
+#[test]
+fn the_switch_is_reached_going_down_as_well_as_up() {
+    let mut app = switch_app();
+    let volume = app.selected;
+    assert!(volume > 0, "a row above Volume");
+    app.selected = volume - 1;
+    assert!(!app.switch_focused());
+    press(&mut app, KeyCode::Down);
+    assert!(app.switch_focused(), "↓ from the row above lands on Target");
+    assert_eq!(app.selected, volume);
+    press(&mut app, KeyCode::Down);
+    assert!(!app.switch_focused());
+    assert_eq!(app.selected, volume);
+    press(&mut app, KeyCode::Up);
+    assert!(app.switch_focused());
+    press(&mut app, KeyCode::Up);
+    assert!(!app.switch_focused());
+    assert_eq!(app.selected, volume - 1);
+}
+
+/// The switch has a cursor of its own: moving onto it from Volume and off it again each name the
+/// row the cursor left, so the trail plays on it as on any row.
+#[test]
+fn the_switch_has_its_own_cursor_and_earns_the_trail() {
+    let mut app = switch_app();
+    let volume = app.cursor_id().expect("Volume has a cursor");
+    press(&mut app, KeyCode::Up);
+    let switch = app.cursor_id().expect("the switch has a cursor");
+    assert_ne!(switch, volume);
+    assert_eq!(app.frame_flags.left_row, Some(volume), "left Volume");
+    app.frame_flags.left_row = None;
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.frame_flags.left_row, Some(switch), "left the switch");
+    assert_eq!(app.cursor_id(), Some(volume));
+    // the frame draws the switch's own line as a row the trail can play over
+    press(&mut app, KeyCode::Up);
+    let mut terminal = Terminal::new(TestBackend::new(130, 30)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    let mut areas = None;
+    terminal
+        .draw(|f| {
+            areas = Some(render::draw(f, &app, &Theme::new(false), &mut hits));
+        })
+        .expect("the frame draws");
+    let areas = areas.expect("areas");
+    let at = areas
+        .rows
+        .iter()
+        .find(|(id, _)| *id == switch)
+        .expect("the switch is a drawn row")
+        .1;
+    let volume_at = areas
+        .rows
+        .iter()
+        .find(|(id, _)| *id == volume)
+        .expect("Volume is a drawn row")
+        .1;
+    assert_eq!(at.height, 1);
+    assert!(at.y < volume_at.y, "{at:?} over {volume_at:?}");
+}
+
+/// Which side the Target line shows stands out: unselected, the side shown is bold and the other
+/// dim; selected, the side shown is the highlight box and the other plain dim with no box, in
+/// colour and in monochrome alike.
+#[test]
+fn the_selected_target_line_boxes_the_side_shown() {
+    use crate::tui::test_support::target_sides;
+    use ratatui::style::Modifier;
+    for mono in [false, true] {
+        let theme = Theme::new(mono);
+        let mut app = switch_app();
+        let name = app.session.product.clone();
+        let shot = |app: &App| target_sides(&frame_with_theme(app, 130, 30, &theme), &name);
+
+        let (line, dac, computer) = shot(&app);
+        eprintln!("mono={mono} unselected, device : {line}");
+        assert!(dac.0.contains(Modifier::BOLD) && !dac.0.contains(Modifier::REVERSED));
+        assert!(!computer.0.contains(Modifier::BOLD));
+        assert_ne!(dac, computer);
+
+        press(&mut app, KeyCode::Up);
+        let (line, dac, computer) = shot(&app);
+        eprintln!("mono={mono} selected,   device : {line}");
+        assert!(
+            dac.0.contains(Modifier::BOLD | Modifier::REVERSED),
+            "{dac:?}"
+        );
+        assert!(
+            !computer.0.contains(Modifier::REVERSED),
+            "no box: {computer:?}"
+        );
+        assert!(!computer.0.contains(Modifier::BOLD));
+        assert_ne!(dac, computer);
+
+        press(&mut app, KeyCode::Right);
+        let (line, dac, computer) = shot(&app);
+        eprintln!("mono={mono} selected,   computer: {line}");
+        assert!(
+            computer.0.contains(Modifier::BOLD | Modifier::REVERSED),
+            "{computer:?}"
+        );
+        assert!(!dac.0.contains(Modifier::REVERSED), "no box: {dac:?}");
+
+        press(&mut app, KeyCode::Down);
+        let (line, _, computer) = shot(&app);
+        eprintln!("mono={mono} unselected, computer: {line}");
+        assert!(computer.0.contains(Modifier::BOLD) && !computer.0.contains(Modifier::REVERSED));
+    }
+}
+
+/// The focused switch row is the one drawn with the cursor, the Volume row is not, and the label
+/// is `Target` over the bar on both sides.
+#[test]
+fn the_focused_switch_row_wears_the_cursor() {
+    let mut app = switch_app();
+    let on_cursor = |app: &App| {
+        text(&frame(app, 130, 30))
+            .iter()
+            .any(|row| row.contains("▶ Target ‹ "))
+    };
+    assert!(!on_cursor(&app));
+    press(&mut app, KeyCode::Up);
+    assert!(on_cursor(&app));
+    assert!(
+        text(&frame(&app, 130, 30))
+            .iter()
+            .all(|row| !row.contains("▶ Volume")),
+        "the Volume row is not focused while the switch is"
+    );
+    press(&mut app, KeyCode::Right);
+    assert!(on_cursor(&app), "the keys stay on the switch");
+    press(&mut app, KeyCode::Down);
+    assert!(!on_cursor(&app));
+}
+
+/// Where the computer's controls cannot be used the reason stands in the switch's place, and no
+/// key focuses it.
+#[test]
+fn the_unavailable_reason_is_not_focusable() {
+    let mut app = switch_app();
+    app.host.computer.eq.as_mut().expect("an eq").unavailable =
+        Some("computer controls unavailable: no pw-cli on this computer".into());
+    let rows = text(&frame(&app, 130, 30));
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("Target") && row.contains("unavailable")),
+        "{rows:?}"
+    );
+    let before = app.selected;
+    press(&mut app, KeyCode::Up);
+    assert!(!app.switch_focused());
+    assert_ne!(app.selected, before, "↑ moves to the row above instead");
+}
+
+/// At 80 columns the device's name is cut and the switch stays on its own line above the bar.
+#[test]
+fn the_switch_stays_off_the_volume_line_in_a_narrow_pane() {
+    let mut app = switch_app();
+    app.session.product = "A very long device name indeed".into();
+    let rows = text(&screen(&app));
+    let at = rows
+        .iter()
+        .position(|row| row.contains("Target ‹ ") && row.contains("| Computer ›"))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    assert!(rows[at].contains('…'), "the name is cut: {:?}", rows[at]);
+    assert!(!rows[at + 1].contains("Computer"));
+    assert!(
+        rows[at + 1].contains('█') || rows[at + 1].contains("109"),
+        "{:?}",
+        rows[at + 1]
+    );
+}
+
+/// While the switch is focused only its own keys act: `+`, `-` and `m` do nothing, and a key of
+/// the volume row still works once the focus is back on it.
+#[test]
+fn the_volume_keys_do_nothing_on_the_target_row() {
+    let mut app = switch_app();
+    press(&mut app, KeyCode::Up);
+    assert!(app.switch_focused());
+    for key in ['+', '=', '-', 'm'] {
+        assert!(press(&mut app, KeyCode::Char(key)).is_empty(), "{key}");
+    }
+    assert!(app.switch_focused());
+    press(&mut app, KeyCode::Down);
+    assert!(!press(&mut app, KeyCode::Char('+')).is_empty());
+}
+
+/// A focus on the switch ends with anything that moves the focus: Tab, a click on a row, a
+/// device change, and the controls going unusable — which a return of them does not undo.
+#[test]
+fn the_switch_focus_does_not_outlive_its_row() {
+    let mut app = switch_app();
+    press(&mut app, KeyCode::Up);
+    assert!(app.switch_focused());
+    press(&mut app, KeyCode::Tab);
+    assert!(!app.switch_focused(), "Tab left the pane");
+
+    let mut app = switch_app();
+    press(&mut app, KeyCode::Up);
+    app.focus(crate::tui::app::Pane::Controls, 0);
+    assert!(!app.switch_focused());
+
+    let mut app = switch_app();
+    press(&mut app, KeyCode::Up);
+    app.settle_on(crate::tui::app::Screen::Device);
+    assert!(!app.switch_focused());
+
+    let mut app = switch_app();
+    press(&mut app, KeyCode::Up);
+    app.host.computer.eq.as_mut().expect("an eq").unavailable = Some("no pw-cli".into());
+    // the key finds the focus gone and steps the volume
+    assert!(!press(&mut app, KeyCode::Left).is_empty());
+    assert!(!app.on_computer());
+    app.host.computer.eq.as_mut().expect("an eq").unavailable = None;
+    assert!(!app.switch_focused(), "the focus does not come back");
+}
+
+/// A click on a name shows that side and focuses the switch, so `←→` go on from there; a click on
+/// the line outside the names focuses it too.
+#[test]
+fn a_click_on_the_switch_focuses_it() {
+    let mut app = switch_app();
+    let mut terminal = Terminal::new(TestBackend::new(130, 30)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    terminal
+        .draw(|f| {
+            render::draw(f, &app, &Theme::new(false), &mut hits);
+        })
+        .expect("the frame draws");
+    let rows = text(terminal.backend().buffer());
+    let y = u16::try_from(
+        rows.iter()
+            .position(|row| row.contains("Target ‹"))
+            .expect("the switch"),
+    )
+    .unwrap();
+    let col = |needle: &str| {
+        let byte = rows[usize::from(y)].find(needle).expect(needle);
+        u16::try_from(rows[usize::from(y)][..byte].chars().count()).unwrap()
+    };
+    let click = |x| crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: x,
+        row: y,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    };
+    // the label
+    let action = crate::tui::mouse::resolve(&hits, click(col("Target")), &app);
+    assert_eq!(action, Some(crate::tui::mouse::MouseAction::Target(None)));
+    assert!(app.click_target(None).is_empty());
+    assert!(app.switch_focused());
+    // a name
+    let action = crate::tui::mouse::resolve(&hits, click(col("Computer")), &app);
+    assert_eq!(
+        action,
+        Some(crate::tui::mouse::MouseAction::Target(Some(
+            crate::tui::app::Side::Computer
+        )))
+    );
+    app.focus(crate::tui::app::Pane::Controls, 0);
+    assert!(!app.switch_focused());
+    assert!(
+        app.click_target(Some(crate::tui::app::Side::Computer))
+            .is_empty()
+    );
+    assert!(app.on_computer() && app.switch_focused());
+    assert!(press(&mut app, KeyCode::Left).is_empty());
+    assert!(!app.on_computer());
+}
+
+/// At the smallest size the switch is drawn on the Controls pane and the keys know it; a frame
+/// that could not draw it leaves no row to be on.
+#[test]
+fn the_switch_fits_the_controls_pane_at_80_columns() {
+    let app = switch_app();
+    assert!(
+        text(&screen(&app))
+            .iter()
+            .any(|row| row.contains("Target ‹ "))
+    );
+    assert!(app.drawn.controls_switch.get());
+    assert!(crate::tui::screens::switch::fits(25));
+    assert!(!crate::tui::screens::switch::fits(24));
+    let mut app = switch_app();
+    app.drawn.controls_switch.set(false);
+    assert!(!app.switch_available());
+    assert!(press(&mut app, KeyCode::Up).is_empty());
+    assert!(!app.switch_focused());
 }

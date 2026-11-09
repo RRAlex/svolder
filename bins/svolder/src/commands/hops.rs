@@ -11,8 +11,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use svolder_ipc::Config;
 use svolder_ipc::config::{Hop, HopKind, HopWhat};
+use svolder_ipc::{Config, ConfigError};
 use svolder_profiles::Family;
 use svolder_profiles::tone::preset::same_name;
 
@@ -257,47 +257,48 @@ async fn link(
     Ok(())
 }
 
-/// Change the hop `id`: what `change` names, and nothing else.
+/// Change the hop `id`: what `change` names, and nothing else. The hop it merges onto is the one
+/// the file holds under the writer's lock.
 async fn edit(g: &Globals<'_>, id: &str, change: Change) -> Result<(), Failure> {
     let (config, path) = loaded()?;
     let old = config.hop(id).ok_or_else(|| no_such_hop(id))?;
-    let what = match (&old.what, change.name, change.kind) {
-        (HopWhat::Declared { kind, name }, new_name, new_kind) => HopWhat::Declared {
-            kind: match new_kind {
-                Some(word) => kind_of(&word)?,
-                None => *kind,
+    let kind = change.kind.as_deref().map(kind_of).transpose()?;
+    let mut linked_refusal = None;
+    let mut changed = String::new();
+    let outcome = Config::edit_hop(&path, old.id(), |old| {
+        let what = match (&old.what, change.name, kind) {
+            (HopWhat::Declared { kind, name }, new_name, new_kind) => HopWhat::Declared {
+                kind: new_kind.unwrap_or(*kind),
+                name: new_name.unwrap_or_else(|| name.clone()),
             },
-            name: new_name.unwrap_or_else(|| name.clone()),
-        },
-        (HopWhat::Linked { device }, None, None) => HopWhat::Linked {
-            device: device.clone(),
-        },
-        (HopWhat::Linked { device }, _, _) => {
-            return Err(Failure::of(
-                Kind::Usage,
-                format!(
+            (HopWhat::Linked { device }, None, None) => HopWhat::Linked {
+                device: device.clone(),
+            },
+            (HopWhat::Linked { device }, _, _) => {
+                let words = format!(
                     "{device:?} links a device, which gives it its name and kind; \
                      remove the hop and add it declared to name it"
-                ),
-            ));
-        }
-    };
-    let hop = Hop {
-        what,
-        note: match change.note {
-            Some(note) => note,
-            None => old.note.clone(),
-        },
-        after: change.after.or_else(|| old.after.clone()),
-    };
-    Config::update_hop(&path, old.id(), &hop).map_err(config_failure)?;
-    written(
-        g,
-        &config,
-        &path,
-        &format!("changed hop {:?}", hop.id().trim()),
-    )
-    .await;
+                );
+                linked_refusal = Some(words.clone());
+                return Err(ConfigError::Parse(words));
+            }
+        };
+        let hop = Hop {
+            what,
+            note: match change.note {
+                Some(note) => note,
+                None => old.note.clone(),
+            },
+            after: change.after.or_else(|| old.after.clone()),
+        };
+        changed = hop.id().trim().to_string();
+        Ok(hop)
+    });
+    if let Some(words) = linked_refusal {
+        return Err(Failure::of(Kind::Usage, words));
+    }
+    outcome.map_err(config_failure)?;
+    written(g, &config, &path, &format!("changed hop {changed:?}")).await;
     Ok(())
 }
 

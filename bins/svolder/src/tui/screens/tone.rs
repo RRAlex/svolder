@@ -55,6 +55,7 @@ use super::device::{
     self, BANDS_APPLY_IN_EQ, ModeHalves, band_dim, band_ids, band_values, bands_apply, mode_line,
     row_style,
 };
+use super::switch;
 
 /// The words in the Response chart's top border.
 const RESPONSE_ACTIONS: [Action; 3] = [
@@ -208,7 +209,7 @@ pub fn draw(
     let Some(eq) = app.profile.eq.as_ref() else {
         return Vec::new();
     };
-    let (tier, [header, response, bands]) = rows(area, table_rows(app, eq));
+    let (tier, [header, response, bands]) = rows(area, table_rows(app, eq), split_of(app, area));
     let standing = match app.on_computer() {
         true => computer_standing(app),
         false => presets::standing(app),
@@ -216,7 +217,13 @@ pub fn draw(
     let target = target_of(app, standing.as_ref());
 
     let text = device::header_text(header);
-    let (line, halves, switch) = header_line(
+    app.drawn.tone_switch.set(split_of(app, area));
+    let HeaderLines {
+        line,
+        second,
+        halves,
+        switch,
+    } = header_line(
         app,
         eq,
         theme,
@@ -243,19 +250,40 @@ pub fn draw(
     hits.push(mark, hit);
     // The mode and the loudness are rows the keys change as well, drawn in the header: each
     // half is the row a change to it glows and shimmers over.
-    let half = |(at, width): (usize, usize)| {
+    let half_on = |y: u16, (at, width): (usize, usize)| {
         Rect {
             x: text.x + u16::try_from(at).unwrap_or(0),
-            y: text.y,
+            y,
             width: u16::try_from(width).unwrap_or(0),
             height: 1,
         }
-        .intersection(header)
+        .intersection(area)
     };
+    // Where the switch has the header's own row, the mode's is the one under the rule.
+    let mode_y = match second {
+        Some(_) => header.y + header.height,
+        None => text.y,
+    };
+    let half = |cells: (usize, usize)| half_on(mode_y, cells);
+    if let Some(line) = second {
+        let row = Rect { y: mode_y, ..text }.intersection(area);
+        frame.render_widget(Paragraph::new(line), row);
+    }
     let mut header_rows = vec![(eq.mode_id(), half(halves.mode))];
     if let Some(switch) = switch {
+        // from the label to the end of the second name
+        let start = switch[0]
+            .1
+            .0
+            .saturating_sub(widgets::text::cells(switch::LABEL) + 3);
+        let end = switch[1].1.0 + switch[1].1.1;
+        hits.push(half_on(text.y, (start, end - start)), Hit::Target);
+        header_rows.push((
+            crate::tui::app::SWITCH_ROW,
+            half_on(text.y, (start, end - start)),
+        ));
         for (side, (at, width)) in switch {
-            hits.push(half((at, width)), Hit::Side(side));
+            hits.push(half_on(text.y, (at, width)), Hit::Side(side));
         }
     }
     let computer = app.on_computer();
@@ -290,7 +318,7 @@ pub fn draw(
     draw_response(
         frame,
         chart,
-        curve_area_in(area, table_rows(app, eq), has_side),
+        curve_area_in(area, table_rows(app, eq), has_side, split_of(app, area)),
         app,
         eq,
         (theme, tier, target.as_deref()),
@@ -356,8 +384,17 @@ fn split_response(response: Rect, tier: Tier, side: bool) -> (Rect, Option<Rect>
 ///
 /// The Response block takes what the others leave, so a taller terminal draws a taller curve
 /// and a device with fewer bands a longer one.
-fn rows(area: Rect, bands: usize) -> (Tier, [Rect; 3]) {
+fn rows(area: Rect, bands: usize, split: bool) -> (Tier, [Rect; 3]) {
     let (tier, [header, body]) = layout_tier::split(area);
+    // The mode's row under the header's rule, where the switch has the header's own.
+    let body = match split {
+        true => Rect {
+            y: body.y + 1,
+            height: body.height.saturating_sub(1),
+            ..body
+        },
+        false => body,
+    };
     let table = u16::try_from(bands)
         .unwrap_or(0)
         .saturating_add(BANDS_CHROME + tier.top());
@@ -377,7 +414,7 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
     let Some(eq) = app.profile.eq.as_ref() else {
         return Vec::new();
     };
-    let (tier, [_, response, bands]) = rows(area, table_rows(app, eq));
+    let (tier, [_, response, bands]) = rows(area, table_rows(app, eq), split_of(app, area));
     let (chart, _) = split_response(response, tier, app.tone.target_cache.target());
     vec![(FrameId::Response, chart), (FrameId::Bands, bands)]
 }
@@ -391,8 +428,14 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
 /// `app` rather than for a band count a caller has to know.
 pub(crate) fn curve_of(area: Rect, app: &App) -> Option<Rect> {
     let eq = app.profile.eq.as_ref()?;
-    (Graph::of(app, eq) != Graph::Loudness)
-        .then(|| curve_area_in(area, table_rows(app, eq), app.tone.target_cache.target()))
+    (Graph::of(app, eq) != Graph::Loudness).then(|| {
+        curve_area_in(
+            area,
+            table_rows(app, eq),
+            app.tone.target_cache.target(),
+            split_of(app, area),
+        )
+    })
 }
 
 /// Whether the curve [`curve_of`] answers for is muted: a flat curve in EQ mode or Flat mode,
@@ -413,19 +456,19 @@ pub(crate) fn curve_muted(app: &App) -> bool {
 /// with one has fewer columns ([`curve_of`]).
 #[cfg(test)]
 pub(crate) fn curve_area(area: Rect, bands: usize) -> Rect {
-    curve_area_in(area, bands, false)
+    curve_area_in(area, bands, false, false)
 }
 
 /// The cells the computer side's curve is drawn in over `area`.
 #[cfg(test)]
 pub(crate) fn computer_curve_area(area: Rect) -> Rect {
-    curve_area_in(area, points::POINT_ROWS, true)
+    curve_area_in(area, points::POINT_ROWS, true, true)
 }
 
 /// The cells the response curve is drawn in, for a frame that does, or does not, have the side
 /// pane beside the chart ([`split_response`]).
-fn curve_area_in(area: Rect, bands: usize, side: bool) -> Rect {
-    let (tier, [_, response, _]) = rows(area, bands);
+fn curve_area_in(area: Rect, bands: usize, side: bool, split: bool) -> Rect {
+    let (tier, [_, response, _]) = rows(area, bands, split);
     let (chart, _) = split_response(response, tier, side);
     let inner = response_block(tier).inner(chart);
     let left = GAIN_LABEL_WIDTH + 1;
@@ -453,31 +496,68 @@ fn header_line(
     theme: &Theme,
     area: Rect,
     (standing, target): (Option<&Standing>, Option<&TargetView>),
-) -> (Line<'static>, ModeHalves, Option<Switch>) {
+) -> HeaderLines {
     let width = device::header_text(area).width;
+    // With the computer's controls usable, the switch is the header's own line and the mode,
+    // the loudness and the preset go on the row under it.
+    let drawn = match split_of(app, area) {
+        true => switch::draw(
+            app,
+            theme,
+            switch_room(area),
+            theme.style(Role::Header),
+            app.switch_focused(),
+        ),
+        false => None,
+    };
+    let split = drawn.is_some();
     let lead = match device::marked(area.width) {
         true => "",
         false => " svolder  ",
     };
     let mouse = device::mouse_span(app, theme);
+    let mouse_w = match split {
+        true => 0,
+        false => mouse.width(),
+    };
     // The mode and the loudness at their own width, with no pad for a focused half: what the
     // preset's name is measured against, so moving between the rows never cuts it differently.
     let natural = mode_line(app, eq, theme, MODE_FIELD, 0).0.width();
     // The device's name gives way to the mode, the loudness and the mouse indicator, cut short
     // with `…` where it would push them off the line.
     let name_room =
-        usize::from(width).saturating_sub(widgets::text::cells(lead) + natural + 2 + mouse.width());
+        usize::from(width).saturating_sub(widgets::text::cells(lead) + natural + 2 + mouse_w);
     let mut spans = Vec::new();
     if !lead.is_empty() {
         spans.push(Span::styled(lead, theme.style(Role::Header)));
     }
+    let mut second = None;
     let mut switch = None;
-    match side_spans(app, theme) {
-        Some((words, cells)) if widgets::text::cells(lead) + cells.0 <= usize::from(width) => {
-            let at = spans.iter().map(Span::width).sum::<usize>();
-            switch = cells.1.map(|[(a, wa), (b, wb)]| {
-                [(Side::Dac, (at + a, wa)), (Side::Computer, (at + b, wb))]
-            });
+    let mut first = None;
+    match (split, side_spans(app, theme)) {
+        (true, _) => {
+            if let Some(drawn) = drawn {
+                let at = spans.iter().map(Span::width).sum::<usize>() + CURSOR;
+                let [(a, wa, sa), (b, wb, sb)] = drawn.names;
+                switch = Some([(sa, (at + a, wa)), (sb, (at + b, wb))]);
+                let mark = match app.switch_focused() {
+                    true => Span::styled("▶ ", theme.style(Role::Cursor)),
+                    false => Span::raw("  "),
+                };
+                let mut line = spans.clone();
+                line.push(mark);
+                line.extend(drawn.spans);
+                first = Some(line);
+            }
+            // the product and the logo word are on the switch's row; this row opens on blanks
+            if !lead.is_empty() {
+                spans[0] = Span::raw(" ".repeat(widgets::text::cells(lead)));
+            }
+            spans.push(Span::raw(" ".repeat(CURSOR)));
+        }
+        (false, Some((words, cells)))
+            if widgets::text::cells(lead) + cells.0 <= usize::from(width) =>
+        {
             spans.extend(words);
         }
         _ => spans.push(Span::styled(
@@ -486,8 +566,7 @@ fn header_line(
         )),
     }
     let mut line = Line::from(spans);
-    let room =
-        usize::from(width).saturating_sub(line.width() + natural + 2 + mouse.width() + PRESET_GAP);
+    let room = usize::from(width).saturating_sub(line.width() + natural + 2 + mouse_w + PRESET_GAP);
     if let Some(preset) = preset_text(standing, room) {
         line.push_span(Span::raw(preset));
         // What follows the name goes in only where it fits whole: the name is cut first.
@@ -498,7 +577,7 @@ fn header_line(
         for words in words.into_iter().flatten() {
             let words = format!("{PRESET_OPEN}{words}");
             let left = usize::from(width)
-                .saturating_sub(line.width() + natural + 2 + mouse.width() + PRESET_GAP);
+                .saturating_sub(line.width() + natural + 2 + mouse_w + PRESET_GAP);
             if widgets::text::cells(&words) > left {
                 break;
             }
@@ -508,17 +587,32 @@ fn header_line(
     // What mode_line has left to draw in, once this line's own text and the mouse indicator —
     // "  " and the indicator itself — have taken their share: the budget a focused half's own
     // trailing pad is bound to, so it can never push the mouse indicator's own last column off.
-    let mode_budget = usize::from(width).saturating_sub(line.width() + 2 + mouse.width());
+    let mode_budget = usize::from(width).saturating_sub(line.width() + 2 + mouse_w);
     let (mode, halves) = mode_line(app, eq, theme, MODE_FIELD, mode_budget);
-    let tail = mode.width() + 2 + mouse.width();
+    let tail = mode.width() + 2 + mouse_w;
     let gap = usize::from(width).saturating_sub(line.width() + tail);
     line.push_span(Span::raw(" ".repeat(gap)));
     let mode_start = line.width();
     for span in mode.spans {
         line.push_span(span);
     }
-    line.push_span(Span::raw("  "));
-    line.push_span(mouse);
+    let line = match first {
+        Some(first) => {
+            // The switch's row carries the mouse indicator at its end.
+            let mut top = Line::from(first);
+            let gap = usize::from(width).saturating_sub(top.width() + 2 + mouse.width());
+            top.push_span(Span::raw(" ".repeat(gap)));
+            top.push_span(Span::raw("  "));
+            top.push_span(mouse);
+            second = Some(line);
+            top
+        }
+        None => {
+            line.push_span(Span::raw("  "));
+            line.push_span(mouse);
+            line
+        }
+    };
     let halves = ModeHalves {
         mode: (mode_start + halves.mode.0, halves.mode.1),
         loudness: (mode_start + halves.loudness.0, halves.loudness.1),
@@ -528,15 +622,50 @@ fn header_line(
             mode_start + halves.mode_arrows.1,
         ),
     };
-    (line, halves, switch)
+    HeaderLines {
+        line,
+        second,
+        halves,
+        switch,
+    }
+}
+
+/// The cells the mouse indicator may take at the end of the switch's row.
+const MOUSE_CELLS: usize = 9;
+
+/// The cells the switch has on the header's first row of `area`: the line less the wordmark's
+/// word where there is one, the row cursor and the mouse indicator.
+fn switch_room(area: Rect) -> usize {
+    let lead = match device::marked(area.width) {
+        true => 0,
+        false => widgets::text::cells(" svolder  "),
+    };
+    usize::from(device::header_text(area).width).saturating_sub(lead + CURSOR + 2 + MOUSE_CELLS)
+}
+
+/// Whether the header is two rows: the switch's, and the mode's under it. It is where the
+/// computer's controls can be used and the row has room for the switch.
+fn split_of(app: &App, area: Rect) -> bool {
+    app.switch_offered() && switch::fits(switch_room(area))
+}
+
+/// The cells the row cursor takes in front of the switch's names.
+const CURSOR: usize = 2;
+
+/// What the header draws: its first line, the row under it where the switch has the first,
+/// where the mode's halves lie (on the second row where there is one) and the switch's names.
+struct HeaderLines {
+    line: Line<'static>,
+    second: Option<Line<'static>>,
+    halves: ModeHalves,
+    switch: Option<Switch>,
 }
 
 /// Where the two halves of the side switch lie in the header, each as a first cell and a width.
 type Switch = [(Side, (usize, usize)); 2];
 
-/// The side switch, `EQ for ‹ Gungnir 2 | Computer ›`, with the side shown standing out, its width
-/// and where its two names lie in it; where the computer's controls cannot be used, the device's
-/// name and the reason in the switch's place. `None` where the computer is not offered.
+/// Where the computer's controls cannot be used, the header's words in the switch's place: the
+/// label, the device's name and the reason. `None` where they can, or the computer is not offered.
 #[allow(clippy::type_complexity, reason = "one private pair of answers")]
 fn side_spans(
     app: &App,
@@ -546,43 +675,19 @@ fn side_spans(
         return None;
     }
     let head = theme.style(Role::Header);
-    let mut spans = vec![Span::styled("EQ for ", head)];
-    if let Some(why) = app.host.computer.unavailable() {
-        spans.push(Span::styled(app.session.product.clone(), head));
-        spans.push(Span::styled(format!("  {why}"), theme.style(Role::Dim)));
-        let width = spans.iter().map(Span::width).sum();
-        return Some((spans, (width, None)));
+    if !app.computer_offered() {
+        return None;
     }
-    let (on, off) = (theme.style(Role::SelectName), theme.style(Role::Dim));
-    let arrow = theme.style(Role::ModeArrow);
-    let (dac, computer) = match app.on_computer() {
-        true => (off, on),
-        false => (on, off),
-    };
-    spans.push(Span::styled("‹ ", arrow));
-    let first = spans.iter().map(Span::width).sum::<usize>();
-    let name = app.session.product.clone();
-    let name_width = widgets::text::cells(&name);
-    spans.push(Span::styled(name, dac));
-    spans.push(Span::styled(" | ", arrow));
-    let second = first + name_width + 3;
-    spans.push(Span::styled(COMPUTER, computer));
-    spans.push(Span::styled(" ›", arrow));
+    let why = app.host.computer.unavailable()?;
+    let mut spans = vec![
+        Span::styled(format!("{} ", switch::LABEL), head),
+        Span::styled(app.session.product.clone(), head),
+        Span::styled(format!("  {why}"), theme.style(Role::Dim)),
+    ];
     let width = spans.iter().map(Span::width).sum();
-    Some((
-        spans,
-        (
-            width,
-            Some([
-                (first, name_width),
-                (second, widgets::text::cells(COMPUTER)),
-            ]),
-        ),
-    ))
+    spans.shrink_to_fit();
+    Some((spans, (width, None)))
 }
-
-/// What the switch calls the computer.
-const COMPUTER: &str = "Computer";
 
 /// What the header says about the presets in `room` cells — `Preset NAME`, `Preset NAME*`,
 /// `Preset custom` or `loading NAME`, after [`PRESET_OPEN`] — with the name cut short to fit, or
@@ -1151,7 +1256,7 @@ pub(crate) fn draw_edit_line(
 ) -> Option<Rect> {
     let line = app.tone.edit_line.as_ref()?;
     let eq = app.profile.eq.as_ref()?;
-    let (tier, [_, _, bands]) = rows(area, table_rows(app, eq));
+    let (tier, [_, _, bands]) = rows(area, table_rows(app, eq), split_of(app, area));
     let row = band_area(tier.block().inner(bands), line.band);
     let (text, caret) = edit_line_text(line, usize::from(row.width), theme);
     widgets::surfaces::modal_ground(frame, row, theme);

@@ -756,8 +756,37 @@ impl<E: Effects> Wizard<E> {
             }
         };
         self.scan_failures = 0;
-        self.seen = heard.entries;
+        // A unit that is configured is not offered again: a second block for it would be a
+        // second actor on one device, and the file refuses it.
+        let taken: Vec<(String, svolder_proto::UnitId)> = self
+            .effects
+            .taken_units()
+            .into_iter()
+            .filter_map(|(name, unit)| Some((name, unit.parse().ok()?)))
+            .collect();
+        let named = |entry: &ScanEntry| {
+            let unit = entry.unit.parse::<svolder_proto::UnitId>().ok()?;
+            taken
+                .iter()
+                .find(|(_, held)| *held == unit)
+                .map(|(name, _)| name.clone())
+        };
+        let mut left_out = Vec::new();
+        let mut offered = Vec::new();
+        for entry in heard.entries {
+            match named(&entry) {
+                Some(name) => left_out.push(format!("{name} ({})", entry.unit)),
+                None => offered.push(entry),
+            }
+        }
+        self.seen = offered;
         self.notices = heard.notices;
+        if !left_out.is_empty() {
+            self.notices.push(format!(
+                "Left out, already configured: {}.",
+                left_out.join(", ")
+            ));
+        }
         self.scanned = true;
         if !self.seen.is_empty() {
             self.go(Step::Pick);
