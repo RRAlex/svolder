@@ -42,7 +42,8 @@ dark paper. Later tasks add the sections' checks here.
   the_cover_shows_in_monochrome                        the host's picture beside the track, a grey filter in light
                                                        and in dark paper; none leaves no box and no gap
   an_amp_shows_power_meters_and_its_readouts           a needle per meter at the model's fraction; power
-  the_spec_table_lists_every_fact                      each fact with the model's words
+  the_device_word_opens_the_devices_page               `Device settings…` opens the popup at the device's page; the sheet draws
+                                                       no fact
   the_states_in_papers_words                           the card as the red note, try now, the lost
                                                        stream and the waiting page (inert, an open form keeps its text)
   a_second_device_is_one_tap_away                      `also here: Amp` shows the amp
@@ -213,8 +214,9 @@ def title_and_footer(b, d):
         card: document.getElementById('p-card').children.length }; })()""")
     check('the_title_and_the_footer_say_what_the_model_says: the title names the device and its line',
           got['h1'] == 'Gungnir 2' and got['sub'].startswith('DAC, connected'), got)
-    check('  the footer has the version, the key to the themes and the theme\'s name',
-          f"svolder {got['version']}" in got['foot'] and 'T for themes' in got['foot']
+    check('  the footer has the version, the keys to the themes and to Help and the theme\'s name',
+          f"svolder {got['version']}" in got['foot']
+          and 'T for themes \u00b7 Space for play or pause \u00b7 ? for help' in got['foot']
           and got['foot'].endswith('Paper'), got['foot'])
     check('  the slot is 44 by 44 and a device that is reachable has no card',
           got['slot'] == [44, 44] and got['card'] == 0, got)
@@ -1798,29 +1800,23 @@ def the_amp():
         amp.stop()
 
 
-def the_spec(b, d):
+def the_device_word(b, d):
     forget(b, d)
     load(b, d)
-    facts = d.model(DEVICE)['facts']
-    got = b.page("Object.fromEntries([...document.querySelectorAll('#p-device [data-fact]')]"
-                 ".map((t) => [t.dataset.fact, t.textContent]))")
-    want = {'Product': facts['product'], 'Firmware': facts['firmware'], 'Profile': facts['profile'],
-            'Link': facts['link'], 'Unit': facts['unit']}
-    want['DSP'] = '—' if facts['dsp'] is None else str(facts['dsp'])
-    check('the_spec_table_lists_every_fact: product, unit, firmware, DSP, profile and link say what the model says',
-          all(got.get(k) == v for k, v in want.items()), [got, want])
-    check('  the signal and every reading row are there, each with the age it was heard',
-          'Signal' in got and all(r['id'] in got for r in facts['rows'])
-          and b.page("document.querySelectorAll('#p-readings tr').length") == len(facts['rows']),
-          [len(facts['rows']), b.page("document.querySelectorAll('#p-readings tr').length")])
-    check('  the device\'s section is headed `The device` (the fold\'s button) and `All readings`',
-          b.page("[...document.querySelectorAll('#p-device .p-label')].map((h) => h.firstElementChild?.textContent"
-                 " ?? h.textContent)") == ['The device', 'All readings'])
-    b.page(POSTS)
-    reach(b, '[data-act=device-fold]')
-    reach(b, '[data-act=identify]')
-    check('  `identify` asks the unit and says so',
-          poll(lambda: posts_to(b, '/identify') == ['{}'], 5.0), posts_to(b, '/identify'))
+    got = b.page("""(() => ({ words: [...document.querySelectorAll('#p-device [data-act]')]
+      .map((w) => [w.dataset.act, w.textContent]),
+      facts: document.querySelectorAll('#paper [data-fact], #p-spec, #p-readings, #p-device-body').length,
+      identify: document.querySelectorAll('[data-act=identify]').length }))()""")
+    check('the_device_word_opens_the_devices_page: the sheet ends in the written word `Device settings…` and'
+          ' draws no fact, no readings and no identify', got['words'] == [['device-settings', 'Device settings…']]
+          and got['facts'] == 0 and got['identify'] == 0, got)
+    reach(b, '[data-act=device-settings]')
+    state = poll(lambda: b.page("__core.router.state().popup") == 'devices', 8.0)
+    page = b.page("__core.router.state().page")
+    check('  the word opens the Devices popup at the page of the device the sheet shows',
+          state is True and page == 'd-' + b.page('__core.model.shown()'), [state, page])
+    b.press('Escape')
+    check('  Escape closes it', poll(lambda: b.page("__core.router.state().popup") is None, 5.0))
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
@@ -1941,91 +1937,6 @@ def the_fleet():
     finally:
         b.close()
         fleet.stop()
-
-
-FOLD = """(() => { const btn = document.querySelector('#p-device [data-act=device-fold]');
-  const shown = (s) => { const e = document.querySelector(s); return Boolean(e) && e.checkVisibility()
-    && e.getBoundingClientRect().height > 0; };
-  let stored = null; try { stored = localStorage.getItem('svolder.theme.paper.deviceOpen'); } catch (e) {}
-  return { tag: btn && btn.tagName, expanded: btn && btn.getAttribute('aria-expanded'),
-    controls: btn && btn.getAttribute('aria-controls'),
-    head: [...document.querySelectorAll('#p-device .p-label')][0].getBoundingClientRect().height > 0,
-    spec: shown('#p-spec'), readings: shown('#p-readings'), identify: shown('.p-identify'),
-    facts: document.querySelectorAll('#p-device [data-fact]').length, stored }; })()"""
-
-
-def the_device_fold():
-    fleet = common.Daemon('gungnir2-v2', host='fake', fleet=[('fake-amp', 'Amp', '1112131415161718')],
-                          env={'SVOLDER_FAKE_SIGNAL': '1'})
-    b = make()
-    try:
-        forget(b, fleet)
-        load(b, fleet)
-        got = b.page(FOLD)
-        check('the_device_starts_folded: with no stored choice only the heading shows, a button that says '
-              '`aria-expanded=false`; the facts, the readings and Identify are folded away',
-              got['tag'] == 'BUTTON' and got['expanded'] == 'false' and got['controls'] == 'p-device-body'
-              and got['head'] and not got['spec'] and not got['readings'] and not got['identify']
-              and got['facts'] > 8 and got['stored'] is None, got)
-        reach(b, '[data-act=device-fold]')
-        got = b.page(FOLD)
-        check('  the heading unfolds it: expanded, the facts, the readings and Identify show, the choice is stored',
-              got['expanded'] == 'true' and got['spec'] and got['readings'] and got['identify']
-              and got['stored'] == 'true', got)
-        time.sleep(2.5)
-        got = b.page(FOLD)
-        check('  it stays open across the one-second redraws', got['expanded'] == 'true' and got['spec'], got)
-        reach(b, '.p-also [data-go=device]')
-        poll(lambda: b.page("document.querySelector('#p-title h1').textContent") == 'Amp', 8.0)
-        time.sleep(0.5)
-        got = b.page(FOLD)
-        check('  a switch to the amp keeps it open', got['expanded'] == 'true' and got['spec']
-              and got['readings'], got)
-        load(b, fleet)
-        got = b.page(FOLD)
-        check('  the choice survives a reload', got['expanded'] == 'true' and got['spec'] and got['readings'], got)
-        b.page("document.querySelector('[data-act=device-fold]').focus()")
-        b.press('Enter')
-        time.sleep(0.4)
-        got = b.page(FOLD)
-        check('  the heading takes the keyboard: Enter on it folds the section and the focus stays on it',
-              got['expanded'] == 'false' and not got['spec'] and got['stored'] == 'false'
-              and b.page("document.activeElement?.dataset.act") == 'device-fold', got)
-        load(b, fleet)
-        got = b.page(FOLD)
-        check('  folding back is kept across a reload too', got['expanded'] == 'false' and not got['spec']
-              and not got['readings'] and not got['identify'], got)
-        check('  no page error', errors(b) == [], errors(b)[:3])
-    finally:
-        b.close()
-        fleet.stop()
-
-
-def the_device_fold_without_storage():
-    """Storage refused (every write throws, every read finds nothing): the heading still unfolds
-    `The device` and it stays open across the redraws."""
-    d = common.Daemon('gungnir2-v2', host='fake')
-    b = make()
-    try:
-        forget(b, d)
-        b.preload("""(() => { const no = () => { throw new DOMException('refused', 'SecurityError'); };
-          Storage.prototype.setItem = no; Storage.prototype.getItem = no; })();""")
-        load(b, d)
-        got = b.page(FOLD)
-        check('the_device_fold_works_without_storage: with storage refused the section starts folded',
-              got['expanded'] == 'false' and not got['spec'], got)
-        reach(b, '[data-act=device-fold]')
-        got = b.page(FOLD)
-        check('  the heading unfolds it', got['expanded'] == 'true' and got['spec'] and got['readings'], got)
-        d.post(DEVICE, 'eq/mode', {'mode': 'eq'})
-        time.sleep(2.5)
-        got = b.page(FOLD)
-        check('  and it stays open across a redraw of the section', got['expanded'] == 'true' and got['spec'], got)
-        reach(b, '[data-act=device-fold]')
-        check('  a second tap folds it again', b.page(FOLD)['expanded'] == 'false')
-    finally:
-        b.close()
-        d.stop()
 
 
 def presets_toml(names):
@@ -2419,7 +2330,7 @@ try:
         the_transport(b, d)
         the_cover(b, d)
         print('INFO desktop 1280x900:', b.page(WHERE))
-        the_spec(b, d)
+        the_device_word(b, d)
         check('no page error in the whole run', errors(b) == [], errors(b)[:3])
     finally:
         b.close()
@@ -2434,8 +2345,6 @@ the_red_note()
 the_volume_arrow()
 the_states()
 the_fleet()
-the_device_fold()
-the_device_fold_without_storage()
 zone_label()
 long_words()
 if browser == 'chromium':

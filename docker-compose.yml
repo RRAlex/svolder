@@ -13,17 +13,27 @@ services:
     # The container shares the host's network, so the web UI (8738) and the MCP server (8737) are
     # reached at the host's own address, and the QR code and pair link carry the host's LAN address
     # as a native install's do. In the container both listen on every interface by default and
-    # nothing answers until ./config/svolder/config.toml has [web] enabled = true (or [mcp]
-    # enabled = true); both need the token (`docker exec svolder svolder web token`, or `... mcp
-    # token`). They bind on the host directly, so a svolderd running natively on this machine must
-    # not have web or MCP enabled on the same ports: the second listener alone fails with
-    # "cannot listen", and the daemon keeps its devices. Without host networking, publish the ports
-    # and set [web] url to the address your phone reaches.
+    # nothing answers until one is turned on: SVOLDER_WEB_ENABLED or SVOLDER_MCP_ENABLED below,
+    # `docker exec svolder svolder web on` (or `... mcp on`), the TUI's Settings, or [web] enabled =
+    # true (or [mcp] enabled = true) in ./config/svolder/config.toml. Both need the token (`docker
+    # exec svolder svolder web token`, or `... mcp token`). They bind on the host directly, so a
+    # svolderd running natively on this machine must not have web or MCP enabled on the same ports:
+    # the second listener alone fails with "cannot listen", and the daemon keeps its devices.
+    # Without host networking, publish the ports and set [web] url to the address your phone
+    # reaches.
     network_mode: host
     # Longer than the daemon's own shutdown (up to 30 s for a stop that finds a connect in
     # flight, then a final settle): Docker's default 10 s would kill the daemon mid-connect
     # and leave the adapter's link behind.
     stop_grace_period: 45s
+    # Docker's default log (json-file) grows without bound, which fills a small disk such as a
+    # Raspberry Pi's SD card: three files of 10 MB at most are kept, and `docker logs svolder`
+    # reads them.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # The bind-mounted system bus is mediated by the host's mandatory access control, which
     # confines the container's process by profile, not by user: Docker's default AppArmor
     # profile carries no D-Bus rules, so the bus refuses even the connection's Hello, and
@@ -36,6 +46,10 @@ services:
     environment:
       PUID: ${HOST_UID:-1000}
       PGID: ${HOST_GID:-1000}
+      # Turns the web page on (port 8738); an `enabled` under [web] in config.toml wins.
+      # SVOLDER_WEB_ENABLED: "1"
+      # Turns the MCP server on (port 8737); an `enabled` under [mcp] in config.toml wins.
+      # SVOLDER_MCP_ENABLED: "1"
       # The address your phone reaches, for the QR code and pair link: only needed without host
       # networking, or behind a reverse proxy (a `url` in config.toml wins).
       # SVOLDER_WEB_URL: http://<host-ip>:8738

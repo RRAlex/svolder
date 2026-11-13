@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use svolder_ipc::CODE_NOT_FOUND;
+use svolder_ipc::{CODE_LINK, CODE_TIMEOUT, CODE_USAGE};
 
 /// A handle with nothing behind it: `matches` is the only thing exercised against it, and
 /// nothing it does reaches the channels this never spawned an actor to answer on.
@@ -274,7 +276,7 @@ async fn a_command_that_needs_the_link_ends_the_wait_and_restarts_the_schedule()
     )
     .await;
     assert!(
-        matches!(&refused, Response::Error { code: 3, message } if message == "device not connected"),
+        matches!(&refused, Response::Error { code: CODE_LINK, message, .. } if message == "device not connected"),
         "got {refused:?}"
     );
     let woken = next_attempt(&mut seen).await;
@@ -338,7 +340,13 @@ async fn a_read_during_the_wait_leaves_the_schedule_alone() {
 
     let state = ask(&handle, Command::State).await;
     assert!(
-        matches!(&state, Response::Error { code: 3, .. }),
+        matches!(
+            &state,
+            Response::Error {
+                code: CODE_LINK,
+                ..
+            }
+        ),
         "got {state:?}"
     );
     assert_eq!(
@@ -680,7 +688,7 @@ async fn commands_are_answered_while_a_connect_attempt_runs() {
     // reached, rather than answering with an empty list of readings.
     let state = ask(&handle, Command::State).await;
     assert!(
-        matches!(&state, Response::Error { code: 3, message } if *message == svolder_ipc::not_found_yet("parked")),
+        matches!(&state, Response::Error { code: CODE_LINK, message, reason: Some(svolder_ipc::Reason::NotFoundYet) } if *message == svolder_ipc::not_found_yet("parked")),
         "got {state:?}"
     );
     // A read of one key says the device has not been found, not that the key is unknown.
@@ -692,12 +700,12 @@ async fn commands_are_answered_while_a_connect_attempt_runs() {
     )
     .await;
     assert!(
-        matches!(&got, Response::Error { code: 3, message } if *message == svolder_ipc::not_found_yet("parked")),
+        matches!(&got, Response::Error { code: CODE_LINK, message, .. } if *message == svolder_ipc::not_found_yet("parked")),
         "got {got:?}"
     );
     let eq = ask(&handle, Command::EqShow).await;
     assert!(
-        matches!(&eq, Response::Error { code: 3, message } if *message == svolder_ipc::not_found_yet("parked")),
+        matches!(&eq, Response::Error { code: CODE_LINK, message, .. } if *message == svolder_ipc::not_found_yet("parked")),
         "got {eq:?}"
     );
     // A command that needs the link is refused at once rather than queued behind the attempt.
@@ -712,7 +720,7 @@ async fn commands_are_answered_while_a_connect_attempt_runs() {
     )
     .await;
     assert!(
-        matches!(&set, Response::Error { code: 3, message } if message == "device not connected"),
+        matches!(&set, Response::Error { code: CODE_LINK, message, .. } if message == "device not connected"),
         "got {set:?}"
     );
     // The refusal gate still stands with no link: a firmware-update id is turned away.
@@ -727,7 +735,7 @@ async fn commands_are_answered_while_a_connect_attempt_runs() {
     )
     .await;
     assert!(
-        matches!(&refused, Response::Error { code: 1, message } if message.contains("firmware")),
+        matches!(&refused, Response::Error { code: CODE_USAGE, message, .. } if message.contains("firmware")),
         "got {refused:?}"
     );
     // The device is reported as not connected throughout.
@@ -1024,12 +1032,12 @@ async fn a_reused_session_takes_the_advertised_passphrase_under_auto() {
 fn the_firmware_family_and_the_passphrase_function_are_refused() {
     let refused = refuse(FunctionId::two(210, 1)).expect("210.1 is restricted");
     assert!(
-        matches!(&refused, Response::Error { code: 1, message } if message.contains("firmware")),
+        matches!(&refused, Response::Error { code: CODE_USAGE, message, .. } if message.contains("firmware")),
         "got {refused:?}"
     );
     let sensitive = refuse(FunctionId::one(250)).expect("250 is sensitive");
     assert!(
-        matches!(&sensitive, Response::Error { code: 1, message }
+        matches!(&sensitive, Response::Error { code: CODE_USAGE, message, .. }
                 if message == "function 250 changes the passphrase; use `svolder passphrase set`"),
         "got {sensitive:?}"
     );
@@ -1053,14 +1061,20 @@ fn raw_requests_parse_the_way_the_cli_parses_them() {
 
 #[test]
 fn link_failures_map_to_the_codes_the_cli_exits_with() {
-    assert_eq!(code_for(&BleError::NotFound), 2);
-    assert_eq!(code_for(&BleError::Connection("x".into())), 3);
-    assert_eq!(code_for(&BleError::Bootloader), 3);
-    assert_eq!(code_for(&BleError::PassphraseRejected), 3);
-    assert_eq!(code_for(&BleError::Adapter("x".into())), 3);
-    assert_eq!(code_for(&BleError::Timeout(Duration::from_secs(1))), 4);
-    assert_eq!(code_for(&BleError::Proto(ProtoError::BadUnitId)), 1);
-    assert_eq!(code_for(&BleError::Profile(ProfileError::NoEq)), 1);
+    assert_eq!(code_for(&BleError::NotFound), CODE_NOT_FOUND);
+    assert_eq!(code_for(&BleError::Connection("x".into())), CODE_LINK);
+    assert_eq!(code_for(&BleError::Bootloader), CODE_LINK);
+    assert_eq!(code_for(&BleError::PassphraseRejected), CODE_LINK);
+    assert_eq!(code_for(&BleError::Adapter("x".into())), CODE_LINK);
+    assert_eq!(
+        code_for(&BleError::Timeout(Duration::from_secs(1))),
+        CODE_TIMEOUT
+    );
+    assert_eq!(
+        code_for(&BleError::Proto(ProtoError::BadUnitId)),
+        CODE_USAGE
+    );
+    assert_eq!(code_for(&BleError::Profile(ProfileError::NoEq)), CODE_USAGE);
 }
 
 /// The daemon refuses a device with no tone control in the profile crate's own words, the
@@ -1069,7 +1083,7 @@ fn link_failures_map_to_the_codes_the_cli_exits_with() {
 fn no_tone_control_is_refused_in_the_profile_crates_words() {
     let said = ProfileError::NoEq.to_string();
     assert!(
-        matches!(no_eq(), Response::Error { code: 1, ref message } if *message == said),
+        matches!(no_eq(), Response::Error { code: CODE_USAGE, ref message, .. } if *message == said),
         "got {:?}",
         no_eq()
     );
@@ -1154,6 +1168,7 @@ async fn connected_actor_over(
         failures: 0,
         farewell: None,
         episode: Episode::default(),
+        first_attempt: None,
     }
 }
 
@@ -1299,7 +1314,7 @@ async fn an_unusable_passphrase_leaves_the_device_not_connected_with_code_3() {
     )
     .await;
     assert!(
-        matches!(&set, Response::Error { code: 3, message } if message == "device not connected"),
+        matches!(&set, Response::Error { code: CODE_LINK, message, .. } if message == "device not connected"),
         "got {set:?}"
     );
     assert!(!handle.describe().connected);
@@ -1794,6 +1809,7 @@ async fn unproven_actor() -> Actor {
         failures: 0,
         farewell: None,
         episode: Episode::default(),
+        first_attempt: None,
     }
 }
 
@@ -1947,7 +1963,13 @@ async fn a_refused_waited_set_brings_the_note_back() {
         })
         .await;
     assert!(
-        matches!(answered, Response::Error { code: 3, .. }),
+        matches!(
+            answered,
+            Response::Error {
+                code: CODE_LINK,
+                ..
+            }
+        ),
         "got {answered:?}"
     );
     assert_eq!(actor.note, Some(PassphraseNote::Differs));
@@ -2170,7 +2192,7 @@ async fn a_step_with_no_reading_to_step_from_is_refused_with_code_4() {
                 })
                 .await;
             assert!(
-                matches!(&refused, Response::Error { code: 4, message } if message == "no current value for trim"),
+                matches!(&refused, Response::Error { code: CODE_TIMEOUT, message, .. } if message == "no current value for trim"),
                 "{value}: got {refused:?}"
             );
         }
@@ -2549,7 +2571,7 @@ async fn identify_during_the_wait_leaves_the_schedule_alone() {
 
     let answer = ask(&handle, Command::Identify).await;
     assert!(
-        matches!(&answer, Response::Error { code: 3, message } if message == "device not connected"),
+        matches!(&answer, Response::Error { code: CODE_LINK, message, .. } if message == "device not connected"),
         "got {answer:?}"
     );
     assert_eq!(
@@ -2589,7 +2611,7 @@ async fn identify_on_a_device_whose_profile_offers_none_is_refused_in_words() {
         }
         let answer = actor.run_command(Command::Identify).await;
         assert!(
-            matches!(&answer, Response::Error { code: 1, message } if message == "fake offers no identify"),
+            matches!(&answer, Response::Error { code: CODE_USAGE, message, .. } if message == "fake offers no identify"),
             "linked {linked}: {answer:?}"
         );
     }
@@ -2812,6 +2834,27 @@ async fn a_signal_is_stamped_when_the_listen_heard_it() {
     );
 }
 
+/// Each strength a listen heard goes into the ring, at the moment it was heard, and `readings`
+/// answers the series; a held advertisement adds nothing. The series is kept while the device
+/// is not connected.
+#[tokio::test(start_paused = true)]
+async fn the_strengths_heard_are_a_series_in_the_readings_answer() {
+    let (actor, handle) = actor_and_handle().await;
+    let mut advert = actor.advert.clone().expect("the actor holds an advert");
+    clock_at(100_000);
+    advert.rssi = Some(-70);
+    actor.update_identity(&advert, Some(95_000));
+    advert.rssi = Some(-40);
+    actor.update_identity(&advert, None);
+    advert.rssi = Some(-61);
+    actor.update_identity(&advert, Some(100_000));
+    locked(&handle.info).connected = false;
+    let Response::Readings { signal, .. } = handle.readings(1800) else {
+        panic!("not a readings answer");
+    };
+    assert_eq!(signal, [(95_000, -70.0), (100_000, -61.0)]);
+}
+
 /// An advertisement the adapter held, not one a listen heard, carries a cached strength that is
 /// no hearing: it leaves the signal held as it was, or none.
 #[tokio::test(start_paused = true)]
@@ -3016,7 +3059,7 @@ async fn get_of_an_action_is_a_usage_error_in_the_profiles_words() {
     let (actor, _fake) = loki_actor().await;
     for key in ["recall", "save"] {
         let answered = actor.get(key);
-        let Response::Error { code, message } = &answered else {
+        let Response::Error { code, message, .. } = &answered else {
             panic!("{key}: {answered:?}");
         };
         assert_eq!(*code, 1, "{key}");
@@ -3041,7 +3084,7 @@ async fn set_recall_with_a_slot_past_the_actions_slots_is_refused_before_any_fra
                 no_wait: false,
             })
             .await;
-        let Response::Error { code, message } = &answered else {
+        let Response::Error { code, message, .. } = &answered else {
             panic!("{slot}: {answered:?}");
         };
         assert_eq!(*code, 1, "{slot}");

@@ -33,7 +33,8 @@ pub mod token;
 pub use config::{
     ColorDepth, Config, DaemonConfig, DeviceConfig, EffectsConfig, FamilyAccents, GraphSpan,
     HostConfig, IntroEffect, LinkSpan, McpConfig, TUI_SETTINGS, Transition, TuiConfig, TuiSetting,
-    TuiSettingKind, TuiValue, WebAuth, WebConfig, WebGuest, normal_origin,
+    TuiSettingKind, TuiValue, WebAuth, WebConfig, WebGuest, normal_origin, passphrase_from,
+    profile_for_advert,
 };
 pub use error::{ConfigError, IpcError};
 pub use host::{
@@ -41,12 +42,21 @@ pub use host::{
     PlayingView, Verdict, path_line, sink_is_dac,
 };
 pub use passphrase_note::{PassphraseNote, passphrase_verdict};
-pub use socket::client::{Client, is_running};
+pub use socket::client::{Client, is_running, request_on_own_connection};
 pub use socket::protocol::{
-    CODE_COMPUTER_UNAVAILABLE, DeviceInfo, Event, HostEqOp, LinkChange, MAX_SCAN_WINDOW, McpStatus,
-    MqttStatus, NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, READINGS_SPAN_SECS, RecallOut,
-    Reply, Request, RequestLine, Response, ScanEntry, SeriesOut, TokenInfo, TokenKind, ValueObject,
-    WEB_OFF, WebStatus, not_found_yet, raw_json, to_line,
+    ACTOR_STOP_MARGIN, AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, AutoEqGroup, AutoEqMeasurement,
+    AutoEqOp, AutoEqPreview, AutoEqSaved, AutoEqSearch, AutoEqTarget, AutoEqVariant,
+    BRIDGE_STOP_BOUND, CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT,
+    CODE_UNKNOWN_REQUEST, CODE_USAGE, COMMAND_DEADLINE, COMMAND_WORST_CASE, ConfiguredDevice,
+    Connect, ConnectFailure, DEFAULT_REQUEST_TIMEOUT, DeviceConfigOp, DeviceInfo, Event,
+    FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_REASONS, FEATURE_SERVER_SWITCH,
+    FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, HostEqOp, JOB_RESULT_MAX_BYTES,
+    JOB_STOP_BOUND, JobEvent, JobId, JobState, LinkChange, MAX_SCAN_WINDOW, McpStatus, MqttStatus,
+    NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, PassphraseKind, ProfileChoice,
+    READINGS_SPAN_SECS, RELOAD_TIMEOUT, RUNTIME_STOP_BOUND, Reason, RecallOut, Reply, Request,
+    RequestLine, Response, SERIES_SIGNAL, ScanEntry, SeriesOut, Server, TokenInfo, TokenKind,
+    ValueObject, WALK_IDLE_BOUND, WEB_OFF, WRITE_SETTLE_BOUND, WalkOp, WebStatus, not_found_yet,
+    raw_json, to_line,
 };
 pub use socket::server::{Bound, Handler, bind, listen_fds, serve, serve_bound, serve_on};
 pub use socket::signal::{

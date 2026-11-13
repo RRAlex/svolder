@@ -120,10 +120,7 @@ impl HostMode {
     pub(crate) fn of(value: Option<&OsStr>) -> HostMode {
         if svolder_host::is_off(value) {
             HostMode::Off
-        } else if value
-            .and_then(OsStr::to_str)
-            .is_some_and(|value| value.trim().eq_ignore_ascii_case("fake"))
-        {
+        } else if svolder_host::is_fake(value) {
             HostMode::Fake
         } else {
             HostMode::Real

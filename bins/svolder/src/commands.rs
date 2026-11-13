@@ -36,5 +36,6 @@ pub(crate) mod host_eq;
 pub(crate) mod identify;
 pub(crate) mod interrupts;
 pub(crate) mod profiles;
+pub(crate) mod server_switch;
 pub(crate) mod token;
 pub(crate) mod web;

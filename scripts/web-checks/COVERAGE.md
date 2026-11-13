@@ -250,6 +250,23 @@ alone.
   window round the highest sample (case "peak away from every band centre"), Flat markers at
   0 dB, a peak shown from 0 dB, a hyphen for the minus, too few golden-section steps.
 
+## The shared plot
+
+- `core/plot.js` draws the response plot and a sparkline as SVG strings from data it is given (it
+  fits nothing). The frame is the tone curve's view box and its 0 dB line sits at `yOf(0)`; grid
+  lines stand at `xOf` of each frequency inside the plot (others left out); a curve through known
+  points lands on `xOf`/`yOf` (a gain past the range held at the edge, bad points left out); the
+  response curve's fill closes along the 0 dB line; full-height spans are clipped to 20 Hz to
+  20 kHz and a span that misses the plot, runs backwards or is not a number is dropped; a gap span
+  shades between the target and the fit only inside its range, its ends cut on the curves, and is
+  dropped for empty curves. A sparkline has a fixed box and the caller's scale (values held to it),
+  or the data's; a missing sample (no number) or a time step over `gap` breaks the line instead of
+  joining it; a lone sample is a dot; an empty series is the box alone; a flat series sits
+  mid-height; no output holds NaN or Infinity; a caller's class is escaped. Signal's and Paper's
+  tone plots, drawn on it, equal their pre-move output (`node/fixtures/plot-move.json`) for every
+  fixture page, the held graphs and flat, one-band, three-band and empty curves. Proved by
+  `node/plot.mjs`.
+
 ## The curve's gestures
 
 - A press grabs the nearer band's point within 12 px (a mouse) or 24 px (a finger), the picked band
@@ -299,9 +316,9 @@ alone.
 - The frame's menu button, menu and picker (`core/frame.js`, `menu.js`, `picker.js`): the button is
   one node over the theme root, on top and not covered, kept displayed and clickable whatever a
   theme's sheet says, at the top right with 16 px insets without an anchor; the menu's rows reach
-  the arrows in order (the Theme row, the theme's rows, then Device and Sign out when they apply),
-  Escape and `q` close it, and with two devices the Device row opens in place into a radio per
-  device; a guest's menu has Sign in. `T` opens the picker (also while the button is faded, which
+  the arrows in order (the Theme row, the theme's rows, then the popups' rows and Sign out when they
+  apply), Escape and `q` close it, and no row names a device (the Devices popup shows another one); a
+  guest's menu has Sign in. `T` opens the picker (also while the button is faded, which
   brings it back), types in a text field, and the page under the picker gets no key; a pick of
   another theme unmounts the old one and mounts the new one, a theme that throws leaves Ember with
   its popup, and a mute still being written when the theme unmounts leaves no error. Proved by
@@ -558,13 +575,13 @@ alone.
   height (168 px below 1100 px, 188 from there), the verdict first, at 820, 1100 and 1280 px; a path
   that does not fit its card ends in a chip of three dots, the verdict first, the hops cut kept in
   the page and named by the dots, and comes back whole when the card grows, and a card too low even
-  for the verdict drops the dots too. The `?` list leaves out its `v` row on a page with no card.
+  for the verdict drops the dots too. Help leaves out the `v` row on a page with no card.
   `node/viz.mjs` ties the head script's storage key to the card's. Proved by `playing.py` "the band
   is 168 px tall" / "188 px tall", "every chip of the path sits inside the band's box (...
   visualizer off)", "a path that does not fit ends in a chip of three dots ...", "the hops put out
   of sight stay in the page ...", "a lower card cuts more ..." and "the row comes back whole when
-  the card does". A guest and a page with writes off have a `?` list of `v` and `?`: "and ? opens a
-  list of the keys ...". Hand-run mutant, killed: `fitPath` not called.
+  the card does". A guest and a page with writes off have `v`, `A`, `T` and `?` in Help: "and ?
+  opens Help with the keys ...". Hand-run mutant, killed: `fitPath` not called.
 
 ## The visualizer card
 
@@ -697,6 +714,11 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   change one device only, a part event carrying the copy it replaced; the stream's model replaces
   a stale first snapshot; a read of the model after a refusal republishes the parts a refused
   write leaves unsettled. Proved by `node/core-store.mjs`.
+- The page's calls (`core/api.js`): `post` and `get` each answer `{ status, ...json }`; a
+  401 loads the sign-in page and is still answered; no answer at all is status 0 with the words
+  "svolder did not answer.", never a rejection; a body that is no JSON keeps the status and adds no
+  fields; each sends its own request with the session cookie. The store's GET goes through `get`.
+  Proved by `node/core-api.mjs`.
 - The stream: its address (the device, the needs, the followed devices), an error closing it and
   reopening it 2 s later, never by the browser's own retry, and asking the session (a sign-in that
   ended loads the sign-in page, a signed-in page now a guest's reloads); a page hidden past the
@@ -704,7 +726,17 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   shown device's first reading or 5 s, a screen with nothing to read ready at its model; a device
   switched while the page rests is the one opened on waking, one switched on a live stream replaces
   the stream and no event of the old one reaches the page; a followed device the fleet no longer
-  lists is dropped and its events change nothing. Proved by `node/core-stream.mjs`.
+  lists is dropped and its events change nothing. Several owners (the theme, a popup) each `want`
+  feeds and devices: the address is the union, it reopens only when the union changes (under the
+  waiting, resting and lost rules above), a release takes only its owner's wants, and a release made
+  after a newer want of the same owner changes nothing; the same feeds in another order reopen
+  nothing; a followed device that leaves the fleet for an event is off the address and back on it,
+  with no new want, when the fleet lists it again; a hold opens the changed union once at its end
+  (`node/core-stream.mjs`); a theme switch asks for the new theme's needs and opens the stream once,
+  a failed mount leaves no wants (`node/switch.mjs`). The shown device's strip is a need
+  (`strip`, listed only by Ember): without it the stream's `strip` events are dropped and a device
+  switch reads the model without `?strip=1` (`node/core-actions.mjs`). Proved by
+  `node/core-stream.mjs`.
 - The actions: each posts today's request; a guest's call sends nothing and offers Sign in, a
   read-only page's says why; a refusal is toasted with the daemon's words and the model read again;
   the answer's toast is said and its parts applied; the volume is written one at a time with the
@@ -740,9 +772,12 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   `a_409_for_a_point_that_moved_ends_the_drag_toasts_once_and_sends_nothing_more`).
 - The computer in a real page (`computer_core.py`, both browsers, `SVOLDER_HOST=fake`):
   `the_host_event_carries_the_computer` (a DAC's page and an amp's), `each_action_reaches_its_route` (the
-  request log and the model read back), `a_refusal_toasts_and_rereads`,
+  request log's routes, all answered 200, and the model read back; the bodies, the slots (1 to 16), the tone's
+  line and modes, the toolbox of the hand (`core.eq`'s wiring), and the switch-alone list of an unavailable host are
+  held by `node/core-computer.mjs`, `node/contract.mjs` and `node/core-point-drag.mjs`), `a_refusal_toasts_and_rereads`
+  (in the same page),
   `the_side_is_kept_and_a_flip_writes_nothing` (a reload with the side kept posts nothing),
-  `every_point_write_carries_its_slot` and `a_stale_place_still_lands_on_the_point_dragged` (another viewer's add moves the places: the write lands on the point dragged and its neighbour is untouched; a point that is gone is one 409, one toast and no more writes),
+  `a_stale_place_still_lands_on_the_point_dragged` (another viewer's add moves the places: the write lands on the point dragged and its neighbour is untouched; a point that is gone is one 409, one toast and no more writes),
   `unavailable_hides_nothing_but_says_why` (`SVOLDER_FAKE_HOST_EQ=off`), `the_question_is_asked_with_keys_and_buttons`
   (`core.ask`: Yes and No at 44 px, the focus on No, Escape and `n` say No, `y` and a click say Yes),
   `the_open_question_owns_the_keyboard` (no arrow, `m`, `0`, `f` or other document key writes behind the open card; Tab and Escape still act) and
@@ -813,19 +848,536 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   between draws leaves one timer or frame outstanding and draws at the new rate):
   `node/core-loop.mjs`. The analysis rules (`core/viz-model.js`) are served from the core
   for any theme: `the_analysis_rules_are_served_from_the_core`, tested by `node/viz.mjs`.
-- The tab's title, for every theme: `<device> · connected — svolder`, `reconnecting` while the
-  stream is lost, `reading again`, `resting`, a card's title in lower case for a device out of reach
+- The tab's title, for every theme (the core writes it): `<device> · connected — svolder`,
+  `reconnecting` while the stream is lost, `reading again`, `resting`, a card's title in lower case for a device out of reach
   and `fault` for a fault (the stream's state first, then the card), plain `svolder` with no
   device; a part another piece adds follows the status and goes when removed, one that throws is left
-  out (`node/core-title.mjs`). Proved on Ember, Paper, Signal and Night drive, connected, with the daemon gone and
-  back, and after a device switch, by `core_rows.py` (both browsers).
+  out (`node/core-title.mjs`). Proved on Ember (the page's own theme; the title is the core's, so
+  the other three add nothing) connected, with the daemon gone and back, and after a device switch,
+  by `core_rows.py` (both browsers); Signal's lost and back by `signal_theme.py`.
 - The held `−` and `+`, for every theme: one step at the press, after 380 ms a step every 70 ms; it
   follows the button of the pressed one's id through a redraw, and ends at the release or cancel of
   that pointer anywhere, a move of it with no button down, the window's blur, the page hidden, the
   hold no longer allowed, no button left, 10 s of repeats, the signal's abort, `end()` (with `leave`
   also the pointer leaving the button or the button losing the capture); a viewer who may not write
   gets one step, no repeat; a context menu over the held button is prevented; `onStart`/`onEnd`
-  bracket it once (`node/core-hold.mjs`).
+  bracket it once (`node/core-repeat.mjs`).
+
+- The core's markup helpers: `esc` escapes the five markup characters (the ampersand once), reads `null`
+  and `undefined` as empty and other values as their text; `attr` writes ` name="value"` escaped, a true
+  value bare, no value as nothing (`node/core-html.mjs`, 5 cases).
+
+- The ages of a Device section are kept current by one ticker (`core.clock.tickAges`), which every theme calls
+  with its own selectors and words (Ember, Paper, Signal and Night drive hold no ticker of their own): each age
+  and the signal's age step as the clock steps, worked out from the part's `data-now` and the time since the part
+  was first seen, whatever the browser's own clock says; a live signal says its age from half a minute; a cell is
+  written only when its words change; a row taken off the page, or the whole section, is not touched again; a
+  section drawn again is aged from its own stamp; the timer starts when the page is on show (with a write at
+  once), rests while it is hidden, and is cleared by `stop()` and by the abort of the signal a theme passes (its
+  unmount), after which nothing is written; `when` holds the writing (a caller's hidden section) while the part's
+  arrival is still noted; the words (`ago`) and the clock (`now`) are the caller's (`node/core-clock.mjs`, 12
+  cases). That the Devices popup's `stamp`, `ages` and `signal` selectors match what it draws: `core-device-wire.mjs`
+  (`the_ages_are_kept_by_the_cores_ticker_with_the_selectors_of_the_page`, `the_readings_ages_are_kept_by_the_same_ticker_as_the_signals`)
+  and `completeness.py`, "the ages step" (the popup's facts and readings, once per theme, Chromium).
+
+- The core's driver for the device's facts (`core/driver.js`, `core.driver`): a label of `deviceFactsOf` of the
+  device the caller names goes to the mounted theme's driver and its answer comes back as it is; a theme's fact
+  (Cover), an unknown label, a target, a call that names no device, a device the page does not hold, a device that
+  is not the one on show (the theme draws the shown device's facts only) and a theme with no driver are refused
+  with `false` (`reach`) and `null` (`shown`), the theme not asked; after a theme switch the new theme's driver
+  answers and the old one is asked no more (`node/core-driver.mjs`, 8 cases). `core` has the member
+  (`contract.py`, "the core has these members and no others"). The parts of `core` a theme or a popup builds
+  on have their members pinned the same way ("<part> has these members and no others"): `core.stream`,
+  `core.popups`, `core.keys` (its hands; the frame's own keys are the list's entries), `core.driver` and
+  `core.clock`, beside the tone control's, the computer's, the actions', the stack's, the router's and the
+  frame's.
+
+- The menu's rows (`core/menu-rows.js`: which rows and in what order, with no page): the frame's own rows
+  for a writer, a reader and a guest (Device, then Sign out; a guest's Sign in is a link whose run does
+  nothing), one device (drawn, disabled, the menu does not stay), no device, a shown device the list does not
+  hold, a viewer with no sign-in; the whole menu (the Theme row, the theme's rows as the very objects it gave,
+  the frame's rule only when the frame has rows) and the device list (a radio per device, the shown one asked
+  each time): `node/core-menu-rows.mjs`, 10 cases. `menu.js` draws and runs them; in a browser the rows are
+  held by `effects_menu.py` and the mutant "the Theme row does not open the picker" (`mutate_effects.py`,
+  on `core/menu-rows.js`).
+
+- The menu's keys, and a modal's over it (`core/menu.js`, `core/modal.js` through `core/frame.js`), on the
+  real core over jsdom: `node/core-menu.mjs`, 7 cases ("arrow_down_on_the_closed_button_opens_the_menu_on_the_checked_radio",
+  "the_arrows_go_round_the_ends_past_a_disabled_and_a_hidden_row", "the_menu_has_no_device_row_with_one_device_or_with_two",
+  "escape_and_q_close_the_menu_and_the_focus_is_back_on_the_button",
+  "a_tab_out_of_the_menu_closes_it_and_leaves_the_focus_where_it_went",
+  "a_modal_opened_over_the_menu_closes_it_and_owns_the_keys",
+  "tab_goes_round_inside_a_modal_and_between_its_controls_it_is_the_browsers"). In a browser the same keys are
+  held by `effects_menu.py` and `modal.py`.
+- A node harness that needs jsdom never passes without it (`node/dom.mjs`): it prints `SKIPPED` and exits 77,
+  and passes with that line only under `WEB_CHECK_ALLOW_NO_JSDOM=1`, which also lets `run-all.sh` start
+  without jsdom (`node/dom-skip.mjs`, 5 cases, run against `core-modal.mjs` and the pure `core-html.mjs`; 4
+  where jsdom does not load, and it then skips by the same rule). Run by hand with
+  `WEB_CHECK_JSDOM_MODULE=nope` (jsdom cannot load): the node list fails 15 harnesses, each saying `SKIPPED`;
+  with `WEB_CHECK_ALLOW_NO_JSDOM=1` beside it, none fails and the same 15 say `SKIPPED`. The cache stores no
+  pass of a run with either variable set (`SUBSET_EXACT` in `fingerprint.py`).
+
+- The popup skeleton (`core/popups/frame.js`: the titled box, the close button, the side list beside the
+  page, the redraw that keeps the focus) and the sample popup that fills it (`core/popups/sample/draw.js`,
+  `wire.js`): `node/core-popups.mjs`. Draws, as strings: "a_hostile_title_is_escaped_in_the_title_and_the_lists_label",
+  "the_side_list_marks_its_current_entry", "the_box_says_list_or_page_which_is_what_the_phone_layout_turns_on",
+  "the_head_has_the_title_and_the_close_button_and_a_page_its_way_back",
+  "loading_and_failed_put_the_frames_line_in_place_of_the_body",
+  "the_samples_draws_escape_the_device_and_name_the_device_they_follow". The wire, on the real core, stack and
+  router over jsdom: "opening_draws_the_frame_the_list_and_the_live_line" (the focus on the current entry, the
+  page behind inert), "a_reading_redraws_the_live_line_alone", "a_reading_leaves_an_open_ask_and_its_focus_alone",
+  "a_redraw_keeps_the_focus_by_id" (a control that is gone: the focus goes to the popup, never the page),
+  "a_twin_that_takes_no_focus_gives_way_to_the_next_choice", "on_a_phone_a_step_keeps_the_focus_inside_the_popup"
+  (the phone layout put on jsdom: what the sheet does not show takes no focus; list to page is the way back,
+  page to list the current entry, opened at a page the way back),
+  "closing_releases_the_stream_want_and_gives_the_focus_back",
+  "a_popup_opened_from_a_control_drawn_again_meanwhile_returns_the_focus_to_its_twin" (the stack finds its
+  opener again by id; the choice itself is in `node/core-modal.mjs`, "the_focus_comes_back_to_returnTo_else_the_opener"),
+  "escape_in_the_inline_ask_cancels_the_ask_and_a_second_escape_closes_the_popup",
+  "tab_goes_round_a_popup_past_what_its_layout_does_not_show" (a wide window at page two, a phone at the list
+  and at a page),
+  "the_list_takes_its_keys_from_the_popup_and_a_pick_or_escape_closes_the_list_alone" (the panel in the page
+  pane with no `within`),
+  "back_closes_it_and_never_changes_the_device", "back_from_a_page_entered_from_the_list_is_the_list_and_the_back_button_too",
+  "a_click_beside_the_box_closes_it_and_one_inside_does_not", "an_open_ask_goes_with_a_step_to_another_page",
+  "a_redraw_over_an_open_ask_or_list_closes_it_and_the_first_escape_closes_the_popup" (the frame's `draw`,
+  `loading` and `failed` close the ask and the list of their own popup, the focus stays in it, and a `put`
+  closes neither).
+  The lazy loading (`core.popups.add`, the router's `load`, `loading`, `failed`):
+  "a_page_has_no_popup_until_one_is_added_and_a_name_is_added_once",
+  "entries_given_as_the_popup_is_added_stand_beside_the_loading_line",
+  "the_frame_shows_at_once_with_the_loading_line_and_draws_when_the_module_arrives",
+  "the_loader_runs_once_for_two_opens", "open_and_close_before_the_import_resolves_draws_nothing_and_holds_no_want",
+  "opened_again_before_the_import_resolves_it_is_drawn_once_at_the_page_of_then",
+  "a_rejected_import_shows_a_line_and_escape_still_closes", "a_rejected_import_and_back_still_closes",
+  "a_module_without_a_wire_and_a_wire_that_throws_are_the_failed_line_too"; a `show` that throws
+  ("a_part_that_throws_on_a_later_open_shows_the_failed_line_and_closes_like_any_popup",
+  "a_part_that_throws_as_it_is_first_shown_is_hidden_and_kept",
+  "a_popup_without_a_loader_whose_show_throws_still_stands_and_closes"); `core` has the member `popups`
+  (`contract.py`, "the core has these members and no others").
+  The sample is no popup of the page: "a_core_nothing_registered_the_sample_with_opens_nothing" and
+  "nothing_of_the_page_names_the_sample" (no shipped file outside `core/popups/sample/` names it). Every file
+  under `web/core/popups` is served (`cargo test -p svolderd web::assets`, `every_popup_file_on_disk_is_served`:
+  the folder is read from disk, so a file that is not in `ASSETS` fails it; the sample is the one
+  exception: it is read only from a `SVOLDER_WEB_ASSETS` directory and is never in the binary).
+
+- The mounted instance (`core.mounted`; `core/registry.js`, `core/core.js`, `core/menu.js`): what a theme's
+  `mount()` returns, `{ unmount, menuRows?, keys? }`, is handed to the registry's hooks and is `core.mounted`
+  while the theme is on show; a bare function or nothing is no instance and still mounts and unmounts; an
+  unmount that throws still aborts the signal and tells the hook (`node/core-registry.mjs`, the three instance
+  cases). The menu draws the instance's rows before the theme object's and gives them the core, a theme without
+  instance fields keeps the theme object's rows and table, after an unmount and the next mount the old
+  instance's rows and key table are gone, and a theme that throws as it mounts leaves no instance behind
+  (`node/core-mounted.mjs`, 5 cases, the real core and menu). Signal's row is the mount's (its line, its core,
+  its signal; nothing once the mount has gone): `node/signal-draw.mjs`,
+  `the_menu_row_adds_a_device_while_a_device_is_shown`. In a browser the three themes' rows are held by the
+  checks that open the menu (`effects_menu.py`, `signal_theme.py`, `nightdrive_theme.py`).
+
+- The key table (`core/keys.js`, `core.keys.bind`, `listed`, `zonesOf`, `zoneOf`; `node/core-keys.mjs`, 20 cases, the real
+  stack of modals in front of the keys): an entry with `run` fires once for its key and is handed the event; an
+  entry answers to each key of its `keys`; an entry whose `when` is false is neither bound nor listed, and `when`
+  is asked at each key with the core's facts under the theme's; `listed` gives the entries that apply, the very
+  objects, in table order, with the facts given or else the ones the table was bound with; nothing fires while a
+  modal is open, in an input, a text area, a select or an editable element, with Ctrl, Alt or Meta, or for a key
+  the menu owns; a held key fires again only for an entry with `repeat`; a key a widget stops does not reach the
+  table; the first entry that applies takes the key and a `run` that throws stops nothing; the signal unbinds and
+  a table bound without one is refused; two tables do not leak into each other across a theme switch; a table
+  that binds a key the frame reserves (by any of its `keys`) is refused at bind time and nothing of it is bound,
+  while an `own` entry may name one; a key of the page with neither a `run` nor `own: true` is refused, and so
+  is `own` with a `run` or on a gesture; a malformed entry is refused (no `id` or another's, a `key` that is
+  neither a keycap's name nor a list of them, several keycaps in one string, no zone or words, a `run` on a
+  widget's zone or on a gesture, a `run` on a key that could never fire), while a keycap of two words, a list of
+  keycaps and a gesture's name pass; `zonesOf` is every zone that holds the element, the outermost first, each
+  once, and `zoneOf` the innermost of them, else `'page'`; `core.keys` is the frame's own list (`T`, Space)
+  that Paper's sheet reads.
+
+- The frame's `?` and the last focus (`core/frame.js`): `?` alone or with Shift is the frame's under the rule of
+  `T` (not in a field, not with Ctrl, Alt or Meta), the picker's key stays `T` alone and no table may bind `T`,
+  `?` or Space (`node/frame-keys.mjs`, `the_question_mark_is_the_frames_under_the_rule_of_t`; `node/core-keys.mjs`).
+  The focus inside `#theme` is recorded and its zone found in the table of the theme on show, by an ancestor;
+  the menu, its button and a modal do not overwrite it; an element that left the page is none, a hidden one
+  (`hidden` or `display: none` on it or on what holds it, or the browser's `checkVisibility` saying no) is none
+  while it is hidden, and a theme switch clears it (`node/core-mounted.mjs`, the four focus cases). A focus
+  that leaves to nothing clears it, one that goes to another control, the menu or a modal does not, nor
+  does a window going behind another (`node/core-mounted.mjs`,
+  `a_focus_that_leaves_to_nothing_clears_the_last_focus`; in a browser `popups.py`,
+  `a_click_on_empty_ground_clears_here`, every theme).
+  `?` opens nothing under a theme's own sheet and over a modal of the stack, and opens Help with nothing over
+  the page and from the open menu (`node/core-mounted.mjs`). `core.frame` has the members, `zoneNames`
+  among them (`contract.py`). Here's main case, in a browser: `popups.py`
+  `here_is_the_widget_that_had_the_focus` (a fresh page, Tab to a control in a zone, `?` as Help's first open
+  of the page, its rows then the page's; Everywhere and back; another zone), every theme with such a control.
+
+- The All readings disclosure of a device's page, drawn (`core/popups/devices/readings.js`; the wire is in the
+  entry below): `node/core-device-readings.mjs`, 10 cases, strings only.
+  "closed_unless_the_state_says_open_and_nothing_is_drawn_inside_while_closed" (a `<details>`, its summary
+  `All readings`, an empty place, the converter not called),
+  "open_holds_a_table_of_every_reading_its_name_its_value_and_its_age" (caption, column and row headers, the
+  daemon's order), "the_summary_holds_no_heading_and_the_draw_uses_the_frames_classes",
+  "a_value_is_what_the_converter_says_and_the_daemons_words_without_one",
+  "an_age_is_in_the_cores_words_with_what_the_ticker_reads" (`ageWords`, `data-heard-at`, `data-now`, the
+  `READINGS_AGES` selectors, a reading with no stamp, a stamp ahead of the clock),
+  "a_device_that_is_not_connected_shows_its_last_known_readings_as_such",
+  "a_device_with_no_reading_says_so_connected_or_not", "a_reading_the_profile_does_not_name_is_called_by_its_id",
+  "every_string_is_escaped", "the_ids_are_of_the_part_and_hold_across_a_rename". Not checked anywhere yet: the
+  disclosure in a browser (no wire), the ticker on its cells, the table's look in each theme.
+
+- The settings part of a device's page, drawn (`core/popups/devices/settings.js`; no wire calls it yet):
+  `node/core-device-settings.mjs`, 18 cases, strings only. The words:
+  "every_reason_reads_as_words_at_every_setting" (each of `DEVICE_REFUSALS` at each of the four settings),
+  "taken_names_that_another_device_has_the_name", "invalid_says_what_is_wrong_for_that_setting",
+  "the_file_and_the_daemon_reasons_say_what_happened_and_whether_trying_again_helps",
+  "failed_uses_the_daemons_words_and_a_setting_s_own_when_it_gave_none", "a_passphrase_is_in_no_refusal_s_words".
+  The draw: "a_device_that_is_not_the_default_has_make_default_and_the_default_says_so",
+  "the_name_is_a_field_holding_the_current_name_with_a_save_button",
+  "a_refused_name_is_invalid_and_described_by_the_words",
+  "sending_disables_that_setting_s_controls_only_and_says_so",
+  "every_setting_shows_its_refusal_at_its_own_control",
+  "the_profile_names_the_current_one_on_a_control_that_opens_a_list",
+  "the_list_leaves_the_base_profiles_out_but_for_the_one_a_device_is_pinned_to",
+  "each_passphrase_kind_is_said_in_words_with_change", "change_shows_a_form_whose_field_is_never_filled"
+  (`autocomplete="new-password"`, no `value`, the reveal toggle's `aria-pressed`),
+  "the_ids_come_from_the_setting_and_hold_across_a_rename", "every_string_is_escaped",
+  "no_passphrase_is_anywhere_in_the_draw". The settings' wire and browser cases are in the entry below.
+
+- The facts, Identify and All readings of a device's page, drawn once by the core (`core/popups/devices/facts.js`,
+  the wire's places, `core/driver.js`; the four themes' Device fold-outs draw none of them): `node/core-device-facts.mjs`
+  (7 cases over every fixture device: every `deviceFactsOf` fact is drawn with the daemon's words, Unit only when
+  shown, the passphrase note only when noted, Product with or without a name, Identify offered or not and
+  `aria-disabled` with its reason on a device that is away or cannot be asked, the ages' stamps, escaping, no
+  passphrase digits), `node/core-driver.mjs` (7: the core's driver opens the popup at the device's page through the
+  router, All readings for a reading row, refuses a theme's fact, a target, no device named, a device the page does
+  not hold and a viewer the router turns away), and in `core-device-wire.mjs`: the facts drawn for the page's device
+  and none on the Overview, a `facts` part put in place, Identify naming the page's device and off with its reason on
+  a device that is away, the facts read afresh when a page opens (and an older answer dropped), the one ticker,
+  All readings closed and empty until opened, following the parts while open, never drawn again, closed for another
+  device's page, the last known readings of a device that is away, and Remove… (asks once with Keep focused, names
+  the page's device, the Overview with its line and the focus, every refusal at the control with the question
+  staying, the in-flight words, the shown device's removal then a rename ends on the right device, the last device).
+  In a browser, `devices_popup.py` (188 checks in Chromium, four themes, one daemon each, plus a guest's and a
+  read-only page's): `the_facts_stand_under_the_graphs` (the model's words, the order, Identify's POST to the page's
+  device and the daemon's words in the toast, a device that is not connected), `all_readings_is_a_disclosure`
+  (closed and empty, a real click opens it with a row and an age per reading, a second closes it, 390 px),
+  `the_fold_out_foot_opens_the_page` (each theme's own *Device settings…*, wide and at 390 px),
+  `the_overview_says_the_config_changed` (a hand edit of the daemon's file shows the daemon's words on the Overview in
+  every theme, wide and at 390 px; a rename through the page leaves none; a SIGHUP takes it away at the page's next read, popup still open),
+  `remove_asks_once_and_ends_on_the_overview` (a device that is not shown, then the shown one, then a rename),
+  and a guest's and a read-only page's themes draw no *Device settings…*.
+  The EQ library popup (`core/popups/eq-library/`, `core/autoeq-actions.js`), in `core-eq-library.mjs` (30 cases, each
+  on the real core over a jsdom page and a fake daemon, with a device on show that has neighbours): the row (a
+  writer's, between Devices and Help), the title naming the side in every draw, a guest and a read-only page with no
+  way in, a device switch closing it and aborting what is on its way; the search (one request after the pause, Enter
+  at once, an input method that is composing sends nothing, a stale answer dropped in either order and with the
+  abort delivered or not, an aborted request no failure, the groups, the recommended first, the index's date and the
+  daemon's note, the count and *narrow the search*, disclosures kept, loading, empty and failed, every refusal as
+  words); the preview (the call names the shown device and the measurement's four keys, the graph's target, fit and
+  gap and the numbers, no gap or boost drawn when there is none, *Compare with…* as a list in the pane with the
+  second target and numbers, two choices in either order, each refusal); the import (the name left to the daemon
+  while it is the headphone's, a typed one sent, saved and not on, `taken` at the field with the suggestion and
+  `bad_name` in the daemon's words, an empty name sends nothing, the answer and the model's event in either order);
+  the upload (read in the page, named after the file, Save disabled with its reason, the daemon's parse words, a
+  file over 64 KiB refused in the page); the saved presets (the marks, each reason Overwrite is disabled, one
+  question with Keep focused, `force`, a refusal that keeps the question, a model event that does not draw the list
+  under a question); the computer's side (the title, no fit, the correction's numbers, Overwrite disabled, the
+  computer made unavailable) and the calls that name no side. In a browser, `eq_library.py` (31 checks per theme in
+  Chromium, one daemon per run whose AutoEq is a loopback fixture): the menu row, the search by typing and by a real
+  Enter, the preview's numbers against the daemon's own preview route and the graph's colours against the theme's
+  tokens, *Compare with…*, a measurement with no file, the import and the suggestion, the saved marks and the
+  overwrite question, the upload, the computer side, 390 px with the way back, nothing scrolls sideways;
+  `popups.py` has the popup's row, `contract.py` the five new actions.
+- The tone graph's overlay of an imported preset (5.4): `node/plot.mjs` (`overlayShapes`, `fitWords`: the daemon's spans
+  only, none without a fit), `node/ember-parts.mjs`, `node/signal-draw.mjs`, `node/paper-draw.mjs` (drawn under the
+  curve with the fit in words while the EQ is on; none without an overlay, in Flat or in Loudness),
+  `node/nightdrive-hud.mjs` (`fit` in the EQ line), `node/nightdrive-floor.mjs` (`gapColumns`, the tint only in its
+  columns), `node/nightdrive-ridge.mjs` (the ghost ridge held above the horizon), `node/nightdrive-tune.mjs` (the
+  overlay of the shown device, not of the computer), `node/nightdrive-budget.mjs` (the layer goes second, comes back
+  before the wet road, is skipped while none is wanted). In a browser `tone_overlay.py` (28 checks in the three themes
+  with a graph, 6 in Night drive) and `nightdrive_timing.py`'s `what_a_draw_costs_with_the_overlay`.
+  The checks that pinned the fold-outs' facts and what became of each: Ember `node/ember-parts.mjs` facts cases
+  (moved to `core-device-facts.mjs`; the fold-out's own cases stay), `node/facts.mjs` `overtaken` (gone with the
+  fold-out's read; the popup keeps the newer part, `core-device-wire.mjs`), Paper `paper-draw.mjs`
+  `every_fact_is_on_the_sheet` / `the_device_is_folded_unless_the_view_says_it_is_open` (replaced by the foot case;
+  facts moved), `paper-fold.mjs` (gone with Paper's fold), `paper.py` `the_spec` / `the_device_fold` /
+  `the_device_fold_without_storage` (replaced by `the_device_word`; facts moved), Signal `signal-draw.mjs`
+  `the_facts_start_folded` / `the_fold_is_kept…` (replaced by the foot case) and `signal_theme.py` `the_facts`
+  (replaced), Night drive `nightdrive-draw.mjs` `the_facts_start_folded` (replaced) and `nightdrive_sheet.py`
+  `the_facts_unfold…` / `identify_says_the_daemons_words` (replaced by the foot case; Identify's words are
+  `devices_popup.py`'s), `completeness.py` (the facts are reached through the popup, closed before the theme's cover),
+  `mutate_effects.py` / `mutate_signal.sh` mutants of the fold (the first retargeted at the core's driver, the second removed).
+
+- The Devices popup's *+ Add a device* (`core/walk-actions.js`, `popups/devices/walk.js`, `walk-wire.js`):
+  `node/core-device-walk.mjs`, 49 cases. The calls: "start_is_a_post_that_answers_the_job",
+  "each_call_is_a_post_to_the_job_it_names", "a_call_that_names_no_job_sends_nothing",
+  "each_refusal_is_a_reason_of_the_closed_list_with_the_daemons_words_beside",
+  "the_closed_list_is_frozen_and_lists_every_reason_once", "no_answer_at_all_is_a_reason_of_its_own", a guest's and a
+  read-only page's turn-away, "a_passphrase_is_in_the_body_only". The draws, over `fixtures/device-walk.json` (the
+  daemon's own `walk` events on the fake transport): the warning with the safe answer focused, the scan prompt and the
+  rows keyed by unit, a walk that works read-only and busy, the pick with a configured unit not pressable, the
+  daemon's refusal at its control, a text field that holds nothing and hints the default, a secret field never filled
+  with a reveal, done with the device and its link, a walk that ended with no device, another origin's walk as words,
+  starting and joining, the five places by id, escaping, every refusal reason worded. The wire on the real core over a
+  jsdom page: the entry and the start, the states in place with no entry pushed, the answer and the state in either
+  order, states that come before the start answers, a job the daemon forgot (said once, no retry), a walk that does not
+  wait, a refusal at the field with what was typed kept, the passphrase through a redraw and the reveal and dropped when
+  refused, another origin's walk read-only and left alone, a `web` walk taken over after a reload, ended walks nobody
+  saw no notice, leaving stops the walk by its job (three ways, and not after the end), a start answered after leaving
+  is stopped, Back and Stop name their job, done and *Open its page*, the first device of a fresh install shown with
+  no push, the walk want beside the follow. In a browser, `devices_popup.py`: `add_a_device_draws_the_daemons_walk`
+  (every theme: the last entry, the warning with Cancel focused, the frame's font, ink and tap size, the rows noted
+  by an observer while it listens, Escape at the pick and a phone's Back stop the walk, 390 px), `add_a_device_walks_
+  to_the_end` (the pick, the name, done, the list, the link, *Open its page*, Escape mid-walk), `add_a_device_rejoins_
+  a_walk` (a reload, a walk of the socket read-only and left running), `add_the_first_device_of_a_fresh_install`, and a
+  guest's and a read-only page's no add page (no walk request).
+
+- The settings of a device's page, wired (`core/popups/devices/wire.js`, `settings.js`, `core.stream.renamed`):
+  `node/core-device-wire.mjs`, 51 cases (6 of them a reader's: no POST, no read of the list and no settings through every gesture; the model and the fleet event in either order; a device gone said once with no retry loop; a put leaves the ages; a viewer changed under the popup draws again; the add address opens the Overview) (2 of them the config line: a write's answer clears it in either order with the fleet read, a closed popup forgets it) (19 for the settings, 7 for Remove…, 5 for the facts and Identify, 4 for All
+  readings), every one with another device on show than the page's:
+  "a_devices_page_has_its_settings_above_the_graphs_and_the_overview_has_none",
+  "the_name_is_saved_by_enter_or_save_naming_the_pages_device_and_the_page_follows" (the request, the page, the
+  title and the list follow in place, no entry pushed, the focus),
+  "the_form_is_sent_by_enter_too_and_an_unchanged_or_empty_name_sends_nothing",
+  "while_a_write_is_on_its_way_the_place_says_so_and_a_refusal_reads_at_the_control" (in flight, typed text kept,
+  the daemon's words for a name, `aria-invalid`, the focus), "every_refusal_reason_reads_its_words_at_its_control"
+  (each of the nine reasons the daemon and the page give, and any other),
+  "the_profile_is_picked_from_a_list_in_the_popup_and_no_pin_sends_null" (the list in the popup, Escape closes it
+  alone, the profile it has sends nothing),
+  "the_passphrase_form_sends_each_of_its_three_choices_and_the_code_in_the_body_only" (the code kept through the
+  reveal toggle and a stream update, nowhere in the popup, the title, the address or the history),
+  "a_bad_code_or_a_refused_one_stays_in_the_form_with_its_words_and_the_focus",
+  "a_passphrase_change_on_the_device_that_is_playing_asks_once_and_keep_has_the_focus",
+  "a_card_whose_sound_goes_elsewhere_is_no_device_that_is_playing",
+  "make_default_names_the_pages_device_and_the_mark_moves",
+  "the_shown_devices_rename_moves_the_page_behind_with_it",
+  "what_is_typed_survives_another_setting_saved_and_a_profile_changed_elsewhere_reaches_the_page",
+  "a_name_the_daemon_encodes_beyond_encodeURIComponent_keeps_the_page" (`Desk (left)`),
+  "the_shown_devices_rename_moves_the_page_behind_when_the_fleet_comes_before_the_answer",
+  "a_code_typed_on_one_devices_page_is_not_carried_to_another_devices_page". In a browser, `devices_popup.py` (the settings' share of its
+  checks, four themes, a second daemon for a guest and a third with writes off): `the_settings_stand_above_the_graphs`,
+  `a_rename_follows_the_device` (a refused name as words, Enter, the page, title and list in place, no entry pushed,
+  and back), `the_shown_devices_rename_moves_the_page_behind`, `the_passphrase_has_three_choices` (each choice's
+  body; the code kept through the reveal toggle and nowhere in the popup after), `the_profile_is_picked_from_a_list`,
+  `make_default_moves_the_mark`, `the_forms_are_dressed_by_the_frames_tokens`, `nothing_scrolls_sideways` (wide and
+  at 390 px with the form open), `the_settings_are_tappable`, `a_guest_reads_the_devices_popup`, `a_page_with_writes_off_reads_the_devices_popup` (a signed-in viewer, `writes = false`: the row, the read-only list, graphs, facts, All readings, the foot reading *Devices…*, no POST and no GET of `api/v1/devices`); the shown device that is not the first renamed (`Other (left)`) and back; with WEB_CHECK_SHOTS a
+  picture `<theme>-device.png` of a device's page with the passphrase form open, the code chosen. Not covered in a browser: the question on a playing device (the
+  fake device is not on the computer's path; node has it).
+- The writes to a configured device's settings (`core/device-config-actions.js`, the members `renameDevice`,
+  `setProfile`, `setPassphrase`, `makeDefault`, `removeDevice` of `core.actions`): `node/core-device-config.mjs`,
+  8 cases, each with the DAC on show and the amp named.
+  "each_request_is_a_post_to_the_named_device_with_another_on_show" (method, path, body, headers, through the
+  real `post` of `core/api.js`),
+  "a_call_that_names_no_device_sends_nothing_and_never_falls_back_to_the_shown_one" (reason `no_device`),
+  "a_write_answers_the_devices_and_the_profiles_and_touches_nothing_else" (no toast, no model read),
+  "each_refusal_is_a_reason_the_page_can_word_with_the_daemons_words_beside" (`taken`, `missing`, `invalid`,
+  `read_only`, `file_busy`, `stopping`, a bare and a worded 401, 403, a 404 with no reason, 400, the plain-text
+  413, a reason the list lacks, 500, 503), "no_answer_at_all_is_a_reason_of_its_own",
+  "a_guest_and_a_page_with_writes_off_send_nothing_and_say_why",
+  "every_reason_a_write_can_answer_is_listed_once" (`DEVICE_REFUSALS`),
+  "a_passphrase_travels_in_the_body_only" (not in the address, a header, a toast, a console line, the history,
+  the store or the answer, for every answer above and for daemon words that quote it). Rule 6 of
+  `make theme-css-check` reads the five from `core/actions.js` (a self-test case each, with no `{ device }`).
+  Not proved here: any call from a popup's wire (none exists yet), the routes themselves (the crate's tests),
+  and `contract.py`'s member list in a browser.
+
+- The Devices popup (`core/popups/devices/draw.js`, `wire.js`, its entry in `core/popups/listed.js`, the `fpd-*`
+  rules of `core/frame.css`): `node/core-devices.mjs`, 30 cases (the config line's draw and its wire: in, out at the 10 s read, the words as given,
+  the focus unmoved, none on a device's page). Draws, as strings:
+  "the_side_list_is_overview_a_break_then_each_device_with_its_dot_and_the_shown_tag" (a hostile name escaped),
+  "a_devices_state_is_said_in_words_with_since_when_the_daemon_knows",
+  "the_graphs_stand_signal_first_then_in_the_profiles_order" (nothing is sorted by kind),
+  "a_raw_reading_is_worded_through_the_models_controls" (`stepWords` of `core/words.js`),
+  "a_controls_line_is_drawn_in_steps_from_the_spans_start_to_now",
+  "a_graph_has_its_name_its_last_reading_and_a_text_alternative" (`role="img"` with name, last reading, range),
+  "a_series_with_one_reading_or_none_says_so_in_words_and_draws_no_box",
+  "a_devices_block_names_it_says_its_state_and_dims_one_that_is_not_connected" (no `fpd-*` rule names a colour
+  or an opacity), "the_overview_is_every_device_in_order_and_a_page_is_one_with_show_on_the_page". The wire, on
+  the real core with device A on show and the pages about B and C (I4: each request is read):
+  "the_list_is_the_configured_devices_and_every_series_request_names_its_device" (no key listener, no write),
+  "a_page_reads_its_own_device_and_never_the_shown_one",
+  "the_stream_follows_the_listed_devices_and_the_store_forgets_them_at_the_close" (the first real `follow`: the
+  address, `store.forget`), "a_device_the_fleet_drops_while_its_page_stands_is_forgotten_and_the_page_says_so",
+  "a_device_that_connects_or_drops_changes_its_dot_and_its_line_and_nothing_else" (same elements, same focus),
+  "a_device_that_appears_is_listed_and_the_selection_and_the_focus_stay",
+  "a_rename_of_the_pages_device_moves_the_page_in_place",
+  "show_on_the_page_switches_the_device_keeps_the_popup_and_pushes_nothing" (then Back: list, closed, on the
+  new device), "the_graphs_are_read_again_on_a_timer_for_the_devices_in_view_only",
+  "a_series_or_a_list_that_cannot_be_read_says_so_in_the_daemons_words",
+  "a_reader_has_the_row_and_the_popup_by_the_router_and_by_the_address_read_only" (a guest and a read-only page),
+  "a_viewer_who_lost_the_right_gets_the_read_only_popup_from_forward_onto_an_entry_of_this_load" (a writer has the
+  popup back by Forward; with the page's viewer replaced by a guest's the same entry opens it read-only and
+  asks no list), "an_event_of_another_device_leaves_the_focus_on_show_on_the_page" (a
+  `device`, a link `part` and the stream's `model`: the same button, the same focus),
+  "graphs_that_came_before_the_devices_model_are_worded_when_it_arrives",
+  "an_older_answer_of_the_list_never_overwrites_a_newer_one",
+  "a_device_that_appears_or_leaves_takes_nothing_typed_on_another_devices_page" (the side list alone is drawn:
+  a field in the pane keeps its element, its words and the focus). In a browser, `popups.py`:
+  `an_event_of_another_device_leaves_the_focus_where_it_is` and the second half of
+  `a_guest_reads_the_devices_popup` (`guest_devices`, `lost_right`), in every theme.
+  The rule that a popup names its device is also `make theme-css-check` rule 6, over every file of a popup's
+  folder, the actions read from `core/actions.js` (21 self-test cases).
+
+- A popup that stays through a device switch (`stays` of `core/popups/listed.js`, `closeAll({ device: true })`
+  of `core/modal.js`, `shown` and `pushState` of `core/router.js`, `showDevice` of `core/navigation.js`):
+  `node/core-stay.mjs`, on the real core (not the router alone), 8 cases:
+  "a_staying_popup_stands_through_a_switch_and_no_entry_is_pushed" (with and without a push: page, focus,
+  address and entry), "back_steps_page_list_closed_on_the_new_device_and_forward_opens_nothing_closed" (no
+  device is read on the way), "the_close_button_after_a_switch_lands_on_the_new_device",
+  "a_popup_that_does_not_stay_closes_as_before", "a_question_over_a_staying_popup_is_answered_no_and_the_popup_stands",
+  "the_shown_device_removed_moves_the_page_and_the_popup_stands" and
+  "a_rename_that_changes_the_address_moves_the_page_and_the_popup_stands" (the stream's `fleet` event),
+  "with_no_popup_a_device_shown_without_a_push_still_names_itself_in_the_entry"; and in
+  `node/core-router.mjs`, on two loads of one history,
+  "after_a_switch_under_a_staying_popup_and_a_reload_back_keeps_the_device_shown" and
+  "a_new_chain_of_loads_takes_no_device_a_staying_popup_carried_in_the_one_before" (an entry with no state
+  between two loads: the carried base is dropped). Shown red first: on the tree
+  before, the first case fails (`popup-stay` is gone after `showDevice`).
+
+- The Help popup (`core/popups/help/`, its entry in `core/popups/listed.js`, the `?` of `core/frame.js`):
+  `node/core-help.mjs`, 30 cases. Draws, as strings: a key's row (keycaps, a gesture's name plain, hostile
+  words escaped, the frame's classes alone), Here's groups (the focused widget first, two zones on one element
+  one group, an `own` key of another widget, the page with the frame's keys last), the line for a focus that
+  is nowhere, a heading for a zone with no name, Everywhere, About (the version, a guest's words, the daemon,
+  links with `target="_blank"` and `rel="noopener"` that are the workspace's `repository` and places the README
+  links). **Help cannot drift**: on the four themes' real tables, for a writer and a guest, with the focus in
+  each zone in turn, every row is an entry `listed` gives (the theme's or the frame's), every listed entry of a
+  zone Help names is a row, each heading is the theme's name for the zone, Everywhere is the page's keys with
+  the frame's; every zone of a table has a name in `ZONES` and none is left over. The wire and the key, on the
+  real core over jsdom: Help is the last listed popup with the row `Help…` for everyone; it opens on Here; Here
+  is read at each show; the three pages step and the tab's title names each; a guest opens it; no stream want
+  and no key listener; `?` opens it through the router with one entry of the history, does nothing while Help
+  stands, types in a field, does nothing held or with Ctrl, Alt or Meta, closes the menu first; the menu's row
+  opens it. In a browser: `popups.py` (Help's row and its `extra`: `help_opens_by_its_menu_row_and_by_the_question_mark`
+  for a writer and a guest, `help_names_its_pages_in_the_tab_title`, `back_steps_page_list_closed`,
+  `a_page_with_no_control_scrolls_by_the_keyboard`, `a_click_on_empty_ground_clears_here`, and every case of
+  the frame at 1280 px and 390 px) and `keys.py` (`help_shows_the_tables_and_nothing_else`: Here and
+  Everywhere against `core.keys.listed` in the page, on each theme's page as it opens, opened with `?`, for a
+  writer and a guest, and in every state of `STATES`). Also `effects_menu.py` (`?` on the page, on the closed
+  menu button and in the open menu), `playing.py` (a guest's and a read-only page's Help; no `v` without a
+  card), `modal.py` and `computer_ember.py` (no Help under a modal or an open question).
+
+- Ember's keys from its key table (`themes/ember/key-table.js`, `themes/ember/keys.js`; `node/ember-keys.mjs`, 11
+  cases, the core's real `bind`): `←` `→` step the volume one step, prevent the scroll and repeat while held, and
+  are a control's own on the dial, a slider, a segment, the presets, the bands and the band editor; `m` mutes, `0`
+  centres the balance, `f` goes to Flat unless it is on, `p` focuses the preset that is on (else the first); a key
+  whose control the screen lacks does nothing; a held key acts once but for the arrows; no key acts in a field,
+  with Ctrl, Alt or Meta, or in the menu; a guest and a page whose link is down have no key that writes; `?`
+  is none of Ember's keys (no key card in the page, no entry names it, Ember does nothing on it: the frame
+  opens Help); `v` is listed only while the screen has a visualizer card; every key of the page has a `run`
+  and each widget's key names a zone. In a browser: the checks that press Ember's keys
+  (`effects_menu.py`, `knob_click.py`, `arrange.py`, `playing.py`, `visualizer.py`, `computer_ember.py`,
+  `core_rows.py`).
+
+- The themes' key tables (`themes/<id>/key-table.js`; `node/theme-keys.mjs`, 24 cases, six a theme): the
+  keycaps, zones and words of each table are the ones the harness holds; the core's `bind` takes each table with
+  a `run` on every key of the page that is not `own`, and refuses the table as data where the page has a key
+  with neither; the ids are each entry's own; the keys of the page are Ember's seven, Night drive's `↑ ↓` and none for Paper and
+  Signal; the `own` entries are Ember's Escape of Arrange mode and its Escape of a drag on a curve; every zone parses as a selector
+  and a zone's entries stand together; every keycap is one a keyboard has (a letter, a digit or a named key;
+  several keys are a list) and only Ember's `curve` is a gesture; the words are sentence case, short, with no
+  full stop; a viewer who may not write has fewer keys and none that writes, and the keys of the page such a
+  viewer keeps are pinned (Ember's `v` and `A`; none in Night drive, whose arrows are a writer's: silent
+  and unlisted for a guest). Night drive's arrows from the table (`node/nightdrive-keys.mjs`, 5
+  cases, the core's real `bind`): `↑` and `↓` step once a press and keep the page from scrolling, the system's
+  repeat is no second press and still does not scroll, the release ends the key, nothing steps while a control
+  has the focus, while something stands over the page, with Ctrl, Alt, Meta or Shift or once another listener
+  took the key, and the keys go with the mount. In a browser: `computer_nightdrive.py`, `nightdrive_theme.py`.
+
+- A listed key is bound and a bound global key is listed (`keys.py`, both browsers, the four themes; a fake DAC
+  with a player and a second device for a writer, a DAC with a player for a guest, a DAC with no player):
+  `the_table_is_the_mounted_instances_and_every_entry_is_whole` (the table the frame gives is the mounted
+  instance's, each entry with a key, a zone and words); `every_page_key_that_applies_is_really_bound` (each key
+  of each `run` entry of zone `page` that `core.keys.listed` gives, pressed with the real keyboard, calls its
+  `run` once: Ember's seven, Night drive's one, none for Paper and Signal; by a spy over the entry's `run` for
+  every key, and by the page's own answer for Ember's `←` `→` (the volume one step), `m` (the mute flips), `p`
+  (a preset has the focus), `A` and `a` (Arrange mode) and Night drive's `↑` `↓` (the volume one step); Ember's
+  `0`, `f` and `v` by the spy alone); `a_key_with_no_entry_does_nothing_global` (letters and digits no theme
+  lists, the other themes' page keys and the keys a widget has: no `run` is called and the volume, the mute,
+  the tone mode, the focus, what stands over the page and the address stay as they were);
+  `an_entry_whose_when_is_false_is_neither_bound_nor_listed` (a guest's Ember has none of `←` `→`, `m`, `0`,
+  `f`, `p`, not in `listed` and dead under the finger, and no theme lists a widget key that writes for a
+  guest; Ember on a page with no visualizer card has no `v`); `every_widget_entrys_zone_matches_an_element`
+  (each widget entry is listed with an element in its zone on the page as it opens or in a state: Ember's
+  Arrange mode, a typed band value and a cell of the computer's points typed in; Paper's list, question and
+  computer's side; Signal's question, list of devices, Add to the chain sheet, the computer's hop (its
+  curve's points, the only ones with an Escape) and the edit form of a declared hop;
+  Night drive's list, sheet and question in the sheet). Each rule was seen to
+  fail once on a broken copy of the web tree (the binding dropping `m`; a `q` listener outside the table; `v`
+  and `0` without their `when`; a zone renamed; a table that is not the instance's).
+  `every_own_key_of_the_page_is_really_answered`: a key of the page that a listener of the theme's own answers
+  (`own`) would be pressed for each viewer and no `run` called (no theme has one now: the count is 0, pinned);
+  Ember's Escape leaves
+  Arrange mode in the state that shows it, and its Escape ends a drag in the state that holds a point of the
+  curve by a real press (the entry applies, and is listed, only while a point is held). The static half is `make
+  theme-css-check`, rule 5, in two parts (49 self-test cases). A key a theme's script compares a key press with
+  is in its table (`event.key === 'x'`, the literal first, a `switch`, a local `key`, `key: [...]` and `keys:
+  [...]`, the allowed `Tab`, a control's `key`, a theme with no table). And no theme file listens for a key on
+  the window or the document outside `core.keys.bind`, however the handler reads the key: a window listener for
+  a key the table lists for a widget, the key taken apart in the parameter, `keyup` under another name for the
+  event, `.includes(event.key)`, `event.code`, a map lookup, the document reached through the root or under a
+  local name, a key event named in a list of events and `onkeydown =` each fail; so do a local with a fallback
+  (`?? window`, `|| document`, a ternary), the document taken apart under another name, `(window)`,
+  `[window][0]`, `root.getRootNode()`, `document.querySelector('html')`, `document.body.parentNode`, the window
+  held in an object or a member, a parameter a call in the file hands the window, an event name put together on
+  the window (`'key' + 'down'`) and the attribute `'onkeydown'`. `LISTENERS` in the script allows a listener on
+  the window or the document (eight lines: the file, the event, the entry and the reason); a second listener in
+  an allowed file, an allowed listener that is gone, an `own` entry with no line and a line whose entry is not
+  `own` each fail, and so does a file whose line names no entry (a listener that reads no key) and that
+  reads `.key`, `.code`, `.keyCode` or `.which`. A key listener on a parameter the check cannot follow (an exported function's, a nameless
+  function's, one handed on as a value, a parameter taken apart, a bare `this`) fails unless `HANDED` gives it
+  a line (four: the three themes' `sliderKeys(el)` and Signal's `wireStrip({ band })`, each with what its
+  callers hand it); a line with no listener fails. A listener on an element, on a parameter every call in the
+  file hands an element and a key event the test driver makes pass. Not seen, since the rule is a pattern over
+  one file: a global that comes from another file under a name of its own (an import, a member of an object
+  built elsewhere, what a function returns), an element lookup or an event name put together elsewhere,
+  `Reflect.apply` and the like, and a `HANDED` reason that is no longer true. Nothing in the browser counts
+  the key listeners a theme adds to the window or the document (owed to P-1).
+
+- The section keeper (`core/freeze.js`, `core.freeze`; `node/core-freeze.mjs`, 26 cases): a section under the hand
+  (`take`, or a list open with `around`) is kept from a redraw and drawn once from the newest model when the last hold
+  goes; holds are counted and never go below zero; two sections are independent; a gesture's holds and a list's are
+  counted apart and the live is told which; `dropLater` gives one back on the next task, an open list's before a
+  gesture's, and a `reset` lets a list's hold go too and cancels the give-backs planned before it; a `hand` holds from the first grip until its writes are answered and `ms` have passed,
+  a new grip keeps what a slow answer would have released, and a hand a reset let go of holds again at its next
+  grip, and a forgotten hand drops nothing; `createRelease` gives back on the next task, or after the pointer up of the press going; `createLive`
+  follows the device its caller names (`device()`: one that is not the shown device is drawn from its own events
+  and not from the shown one's, and a caller that names none is refused), draws each section for the parts it shows
+  and every section when the computer's side changes, tells a switch to another device once, keeps the stream's state on the view, and after the signal aborts nothing is kept, listened
+  to or drawn.
+  `core.freeze`'s members are pinned in `contract.py`. The themes' own wiring of it is theirs: `signal_theme.py`,
+  `paper.py`, `nightdrive_theme.py` and `nightdrive_sheet.py`.
+
+- The core's pinned aliases (`core/core.js`; `node/core-names.mjs`, 3 cases): `core.hold` is `core.repeat` with the
+  two paces under their old names, every member of `core.drag` is the same function or constant as the member
+  of `core.eq.bands`, `core.eq.points` or `core.eq.table` of that name (`pointDrag` and `table` are the two makers),
+  and `core.drag` holds nothing `core.eq` does not; the core is made over a jsdom page. `contract.py` pins the
+  alias's keys.
+
+- The core's inline ask (`core/inline-ask.js`): a form draws the classes, words and separator it is given
+  (the frame's classes by default), has the focus and the text selected, submits its text and closes on ok
+  giving the focus back, stays open with its text when refused or when the submit throws, sends no empty
+  name, cancels; a question asks once however often `yes` is pressed, dresses `delete` and `remove` as
+  danger, keeps `no` focused, stays open when refused; a second ask replaces the first; the abort signal
+  closes it; the part has no key listener (Escape on the page does nothing), `key` takes Escape alone,
+  `listen` hands a box's keys to it, and inside a modal of the real stack Escape cancels the ask while the
+  modal stays open and typing is never prevented. One ask is open per scope (a modal of the real stack, else
+  the page): an ask in a modal and one on the page do not close each other, `closeAsk()` closes the page's
+  alone and `closeAsk(el)` the modal's, two asks in one modal replace each other, a modal that closes (or is
+  taken out of the page) closes its ask and leaves no entry behind, and a sheet a theme marks modal inside its
+  page is the page's scope (`node/core-inline-ask.mjs`, 30 cases).
+
+- The core's list (`core/list.js`): it draws the classes and options it is given (the frame's by default)
+  in the opener's `root`, `within` or the body, marks the opener `aria-expanded` and focuses the chosen option;
+  a tap chooses after the list has closed and the focus is back on the opener; a press outside closes it, one
+  on the opener does not; a second list replaces the first and `closeOf` toggles the opener's; `below` puts it
+  under the opener and `auto` over one in the lower half of the box; the part has no key listener, `key` takes
+  the arrows (wrapping), Home, End and Escape, `listen` hands a panel's keys to it, and inside a modal of the
+  real stack the modal hands them in and Escape closes the list but not the modal. One list is open per scope:
+  a list in a modal and one on the page do not close each other, `closeList()` closes the page's alone,
+  `closeOf` and `closeList(el)` find the modal's, two lists in one modal replace each other, and a modal that
+  closes closes its list and leaves no entry behind. In a place for lists (`data-list-place`, a popup's page
+  pane) the panel is placed in what the place scrolls and where it shows it whole: under the opener, else over
+  it, else against the bottom, kept left of the scrollbar
+  ("in_a_popups_pane_the_panel_is_placed_in_what_the_pane_scrolls_and_where_it_shows"; `node/core-list.mjs`,
+  19 cases).
 
 - The frame's Space key plays and pauses the computer's player, in every theme (`space_key.py`, both browsers):
   `space_on_the_body_posts_one_press_and_does_not_scroll`, Space on a focused button activates it and posts no press,
@@ -836,6 +1388,118 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
 - The theme picker's close button (`effects_menu.py`, both browsers): `the_picker_close_button_is_44_px_inside_the_window`
   at 1280x800, 412x915 and 360x780 in all four themes, and a click on it closes the picker with the focus back on the
   menu button.
+- A popup's frame over the four themes (`core/popups/frame.js`, the `fp-*` classes of `core/frame.css`, the
+  lazy loader): `popups.py`, both browsers, one loop over the themes and the popups of its `POPUPS` table (the
+  sample popup and Help; P-2 and P-3 add a row each). At 1280 px: `nothing_of_the_popup_is_loaded_before_it_is_opened`
+  (no request under `core/popups/<name>/` before the first open, one after), `the_popup_is_on_top_of_the_theme`
+  (`elementFromPoint` at the box's centre and at two corners of the window: over Night drive's canvas, Ember's
+  smoke and the menu's button), `the_page_behind_is_inert`, `tab_stays_inside` (twelve Tabs at the list, eight at the last page, where the way back is the last control in
+  the markup and is not shown),
+  `the_list_and_the_page_stand_side_by_side`, `the_colours_are_the_themes_tokens` (the box's ground is
+  `--frame-surface` and the title `--frame-ink`, in each scheme of the theme; the themes do not all give one
+  ground), `nothing_scrolls_sideways`, `a_list_opens_inside_the_box` (the panel of the sample's list inside
+  the box and what the pane shows, next to its chip, on top at its own centre; a pick closes it, keeps the
+  popup and is shown; in a box made low the panel is no taller than the pane shows, goes with its chip when
+  the pane is scrolled, and Escape closes it alone; seen failing on the sheet of before, where the panel
+  landed off by the pane's offset), `escape_closes_the_ask_then_the_popup` (the focus back on its opener,
+  the device and the history's entry as before), `back_closes_it` (no device read). At 390 px:
+  `on_a_phone_the_popup_fills_the_screen` (the box is the window and on top everywhere; the list at the list,
+  the page with the way back at a page; the page behind inert; the focus on the current entry at the list, on
+  the way back after a step to a page, on the list again after the way back; eight Tabs at the list never leave
+  the popup, past the page pane's controls that are not shown; no sideways scroll).
+  Checked by hand once that it can fail: with the
+  veil's `z-index` and the phone rule taken out of `frame.css`, five asserts fail in Night drive. What a popup
+  draws and what its wire does stay in node (`node/core-popups.mjs`); the stack's own rules stay in `modal.py`.
+- The popup frame's groundwork. Node, `node/core-popups.mjs`:
+  "an_entry_carries_a_dot_a_tag_and_a_group_break_and_a_plain_one_is_as_it_was",
+  "the_shared_pieces_are_strings_that_escape_their_words",
+  "every_shared_class_has_a_rule_dressed_by_the_frames_tokens_alone" (`fp-key`, `fp-dot`, `fp-tag`,
+  `fp-heading`, `fp-row`, `fp-graph` and their parts: a rule each, tokens with a default, no colour),
+  "a_draw_can_change_the_title_and_the_entries_and_the_loading_line_keeps_them",
+  "a_listed_popup_is_added_with_the_core_and_its_row_opens_it" and
+  "the_page_as_shipped_adds_the_popups_of_its_list_and_no_other" (one list, `core/popups/listed.js`),
+  "a_click_on_the_entry_whose_page_the_pane_shows_pushes_no_entry",
+  "the_veil_closes_it_only_when_the_press_and_the_release_are_both_on_it",
+  "the_tab_title_names_the_open_popup_and_its_page_until_it_closes_any_way",
+  "the_box_has_an_entry_animation_hook_that_no_theme_sets" and
+  "the_box_is_one_element_through_every_draw_so_it_comes_in_once_an_opening",
+  "a_viewer_who_does_not_see_a_popups_row_cannot_open_it_and_nothing_loads" (a guest, a page whose writes
+  are off, a writer whose page comes back a guest's) and
+  "the_question_mark_is_listed_once_the_page_has_the_help_popup". `node/core-router.mjs`:
+  "a_popup_its_viewer_may_not_open_opens_by_no_path_and_says_so_once_per_ask". `node/core-menu-rows.mjs`:
+  "a_listed_popups_row_stands_before_the_device_for_who_sees_it",
+  "the_list_refuses_a_popup_without_its_row_and_a_name_twice",
+  "the_pages_list_is_one_the_core_can_read_and_holds_no_popup_yet"; `node/core-menu.mjs`:
+  "a_listed_popups_row_is_in_the_menu_and_opens_its_popup"; `node/core-keys.mjs`:
+  "the_cores_keys_hold_the_frames_own_list_beside_the_tables_hands" (`core.keys.frame`, with `?` listed
+  once the page has a Help popup); `node/core-inline-ask.mjs`:
+  "the_question_is_read_by_focus_both_answers_are_described_by_it",
+  "the_name_field_says_it_is_invalid_only_once_the_browser_does"; `node/core-router.mjs`:
+  "a_popup_entry_pushed_with_no_tap_or_key_is_said_in_the_console"; `node/core-list.mjs`:
+  "the_panel_is_measured_at_the_places_corner_out_of_sight_and_shown_once_placed". Browser, `popups.py`,
+  per theme: `a_drag_that_ends_on_the_veil_keeps_the_popup` (a press in the name field let go on the veil
+  keeps the popup and the text; a click on the veil closes it), `the_page_does_not_scroll_under_the_veil`
+  (the veil's `overflow` and `overscroll-behavior` in both browsers; in Chromium a wheel over the veil
+  leaves `scrollY`, in Ember, Paper and Signal, whose pages scroll at 1280 by 800; Night drive's does
+  not; Firefox's WebDriver wheel does not pass through its compositor, where the rule lives, and chains
+  out of a box that overflows too, so no wheel case there), `the_box_opens_with_no_animation`,
+  `an_entry_animation_runs_once_an_opening` (the token set by the check to a 30 s animation on a page
+  loaded afresh: the first open starts it once and it runs on over the module's arrival, a step starts
+  nothing, a second open starts it once more),
+  `a_popup_opens_from_a_tap_or_a_key` (no router warning through the run, the check's opens and steps
+  being real clicks; an open by script once the last tap has worn off is said). `keys.py`:
+  `the_key_listeners_on_the_window_and_the_document_are_the_allowed_ones` (the count per file against
+  `LISTENERS`, the binding's one, none whose adder is unknown; the method wrapped is
+  `EventTarget.prototype.addEventListener`). Checked that it can fail: in Paper's mount, a `keydown`
+  listener added by `Reflect.apply(EventTarget.prototype.addEventListener, globalThis, …)` and a `keyup`
+  one added from a timer through `bind` pass `make theme-css-check` and fail two asserts in each of
+  Paper's states.
+- The modal layer (`core/modal.js`): one stack that the picker, the question and every popup stand on.
+  `node/core-modal.mjs` (jsdom): `the_top_modal_owns_every_key_and_t_and_question_mark_do_nothing` (no listener of a
+  theme on the document or the window hears a key, the browser's own action is left),
+  `the_stack_keeps_its_order_and_the_key_goes_to_the_top_only`,
+  `escape_closes_the_top_only_and_a_key_the_modal_takes_is_its_own`,
+  `tab_stays_inside_the_top_and_is_the_browsers_own_between_its_ends`,
+  `a_field_types_and_a_list_gets_its_keys_through_the_modals_onkey` (a part in a modal attaches no key listener: the
+  field's typing is never prevented, the list's arrows, Enter and its own Escape come through `onKey`),
+  `a_key_of_a_composition_is_left_to_the_field`, `an_onclose_that_throws_does_not_leave_the_rest_open`,
+  `a_modal_taken_out_of_the_page_is_off_the_stack`,
+  `the_page_under_the_top_is_inert_but_the_popups` (`role`, `aria-modal`, `aria-labelledby`; what was inert before
+  stays so), `the_focus_comes_back_to_returnTo_else_the_opener` (an id found again, the frame's button when the
+  opener is gone or takes no focus, nothing when a named place is not there yet or the focus was nowhere), `close_all_empties_the_stack_from_the_top_and_tells_each_once`,
+  `a_modal_closed_under_another_leaves_the_top_alone_and_hands_its_place_up`, `the_same_element_is_one_modal`,
+  `the_picker_is_a_modal_on_the_stack_with_its_own_keys`, `t_closes_the_picker_and_a_pick_closes_it_first`,
+  `the_question_is_a_modal_on_the_stack_and_closing_it_is_a_no`; `node/switch.mjs`
+  `a_switch_closes_every_modal_while_the_theme_it_leaves_is_still_on_show`. In both browsers, all four themes
+  (`modal.py`): `the_top_modal_owns_every_key` (its control first: with nothing open Space posts a press in every
+  theme, ArrowLeft a volume in Ember, ArrowUp one in Night drive; then arrows, `m`, `0`, `f`, `p`, `v`, `a`, `?`,
+  `q`, `T`, Space post nothing and open nothing, the focus in the modal or on the page),
+  `the_question_owns_the_keyboard`, `t_is_the_sheets_under_a_themes_own_sheet` (Night drive, Signal),
+  `a_device_switch_closes_every_modal`, `a_theme_switch_closes_every_modal` (a popup too, which opens again). `core.frame.covered()` is what
+  Night drive's volume keys and wheel and Ember's Arrange Escape ask (`computer_nightdrive.py`'s probe with
+  `aria-modal`, `arrange.py` `t_opens_the_picker_while_arranging`, `space_key.py`).
+- The router (`core/router.js`): the history state `{ device, popup, page }`, its popups on the stack.
+  `node/core-router.mjs` (jsdom's history, the real stack, a popup that notes what it is told):
+  `a_popup_is_on_the_stack_and_off_it_with_the_history_whoever_closes_it` (Escape, `closeAll`, Back, the close
+  button, the element taken out of the page; it opens again after each),
+  `a_page_loaded_again_opens_no_popup_of_the_load_before` (a reload in the middle of a popup's page then Back;
+  Escape, a reload, then Forward), `back_from_a_popup_page_never_calls_showdevice`,
+  `back_past_the_popup_changes_the_device_only_when_the_device_part_changed`,
+  `a_popup_page_may_name_another_device_than_the_one_shown`, `an_entry_without_a_device_keeps_the_shown_device`,
+  `escape_or_the_close_button_steps_back_past_the_popup_and_forward_opens_nothing` (Forward after Back shows it
+  again), `a_page_changed_from_a_page_replaces_and_null_steps_back_to_the_list`,
+  `a_push_asked_for_while_the_step_back_is_on_its_way_waits_for_it`,
+  `a_device_shown_hides_the_popup_and_a_step_back_into_it_shows_the_device_then_the_popup`,
+  `a_popup_nothing_registered_is_a_plain_entry`. On a real history, with a popup that stands on the stack
+  (`modal.py`, both browsers, all four themes): `back_steps_the_popup_and_never_changes_the_device`, which also
+  holds a close asked for during a step back to the list (two steps of the router's own) and a device shown
+  from inside the popup.
+- The frame's tokens and the phone width (`make theme-css-check`, from the style sheets' text): every theme sets
+  every colour token of `core/frame.css` in its root block and again in each block of another scheme it lists
+  (`themes.rs`), and every width a media query of `core/frame.css` names is `max-width: <PHONE_MAX_PX>px`
+  (`core/phone.js`). Rule 4 reads the themes' scripts: a theme file imports a core module directly only if `PURE` (in the script) lists it or the name it takes (a service, a namespace import, a dynamic import and a re-export of one are named). Its `--self-test` breaks a copy of the sheets and scripts fourteen ways and wants each named: a token left
+  out, set only for a state of the root, only in a media query, only for another theme's name, left out of
+  Paper's dark block; the phone layout at 600 px, in `em`, beside a second width; a theme importing a service, `tickAges`, a namespace, a dynamic import (a string, a template literal, a `new URL`, a computed path, a query string after the file) and a re-export, while a dynamic import of a pure module passes; `modal.py` `the_popups_are_centred_up_to_the_phone_width` (a toast at 719 and 720 px).
 
 ### The core's computer hand, table and typed words
 
@@ -881,9 +1545,8 @@ read the same DOM.
   with the loudness strength's round - and +, the curve's line, area, ghost, peak and a point per
   band, the band table faint in Flat), bands, presets (the status lines, the user's own presets
   with rename and delete, save, a configuration that cannot be written) and device presets (the
-  slots with save, the built-in settings, a guest's inert ones), facts (the product known or not,
-  the unit, the DSP build, the passphrase note, an advertised and a live signal, readings with and
-  without a stamp, Identify offered and not) and Now playing (a track with its cover, length and
+  slots with save, the built-in settings, a guest's inert ones), the Device fold-out (no fact, no
+  readings, no Identify; *Device settings…* for a writer and not for a guest or a read-only page) and Now playing (a track with its cover, length and
   position, a bare one, a paused one, the transport for a writer and none for a guest, the path
   with its hops, with none and not read yet, the sink named or not) parts, the screen in the
   default order and in a kept one, and the page's shell (one device, two with the switcher, a name
@@ -984,10 +1647,11 @@ read the same DOM.
 - The conventions every theme keeps (`docs/design/web-themes.md`, "What every theme does the same way"):
   the menu button in the top-right corner of every theme and nothing right of it in Ember's header
   (`frame_button.py`, both browsers: "the_menu_button_is_in_the_top_right_corner_in_every_theme",
-  "ember_keeps_nothing_right_of_the_button"); the cover of the track is a fact of `factsOf(device)`
-  that Ember, Paper and Signal show (`node/contract.mjs` "facts_name_what_the_device_section_shows",
-  `completeness.py` "the cover is a fact" and "all N facts are reached and shown with the model's
-  words"; Night drive's driver reads them from the dash and the sheet).
+  "ember_keeps_nothing_right_of_the_button"); the cover of the track is a fact of
+  `themeFactsOf(device)`, the facts every theme shows itself (`node/contract.mjs`
+  "theme_facts_name_what_stays_in_every_theme"; `completeness.py`, on every theme, "the cover is
+  a fact" on the Gungnir 2 and "theme facts (the theme's driver): all N are reached and shown with
+  the model's words" on every device, through `core.theme.driver`; a list with nothing in it fails).
 
 Every theme presents everything a device offers, on every kind of device, and shows every fact of
 the Device section (design 4.6). `core/contract.js` lists what that is from a device's model, and a
@@ -995,12 +1659,16 @@ theme's test driver (`theme.driver`: `reach`, `operate`, `shown`, `state`) is wh
 to prove it. They judge what the fake daemon holds and what the theme shows, never pixels.
 
 - The model's controls are of kinds the core knows (`choice`, `toggle`, `slider`, `readout` and the
-  volume, power, tone, presets and device presets objects), `targetsOf` and `factsOf` list every
-  control, action and fact of every device kind in the fixture, each target maps to one action
+  volume, power, tone, presets and device presets objects), `targetsOf` lists every control and
+  action of every device kind in the fixture, the facts are two lists (`deviceFactsOf`: the Device
+  section's facts and the reading rows, which the core's driver answers for; `themeFactsOf`: the
+  cover, which each theme's driver answers for) that share no label and, the device's first, are
+  every fact in the order the Device section has them, each target maps to one action
   request with today's path and body (a readout none, a slot's save and recall one each), a followed
   device's targets carry its name, a guest's send nothing and say why. Proved by `node/contract.mjs`
   ("every_control_has_a_kind_the_core_knows", "every_target_maps_to_one_action_request",
-  "a_followed_devices_targets_carry_its_name", and the lists' own tests). Mutants
+  "a_followed_devices_targets_carry_its_name",
+  "the_two_lists_share_no_label_and_together_are_every_fact_in_order", and the lists' own tests). Mutants
   (`mutate_effects.py`, the entries "contract: ..."): a band without its Q, the Signal fact or the
   unit not listed, the transport's pause and play swapped, the slots not listed.
 - One short pass for each theme the page lists, through its driver: "volume_up_and_down",
@@ -1008,9 +1676,10 @@ to prove it. They judge what the fake daemon holds and what the theme shows, nev
   (the device dropped on the check's cue, the daemon restarted), "a_refused_write" (a step sent to a
   device that went out of reach while the page's stream was closed: the daemon's words are shown and
   nothing changes), "resting_and_waking" (a change made while the page rests shows within 2 s of its
-  waking), "the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade",
+  waking), "the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade" (where the driver left the theme's
+  own sheet open, Night drive's, T opens nothing over it and opens the picker once Escape has closed it),
   "theme_query_switches_and_is_kept" (`?theme=` and its cookie) and the guest's pass (no request,
-  "Sign in to change this"). The core's members are pinned (`core` has these seventeen and no
+  "Sign in to change this"). The core's members are pinned (`core` has the listed members and no
   others), and the menu button is displayed, visible, opaque, at least 24 px, on top at its centre
   and inside the window for every theme, every device kind and at 1280 x 900 and 390 x 844 (the page
   scrolled to its top: Ember's button sits in its header). Proved by `contract.py` in both browsers.
@@ -1018,16 +1687,36 @@ to prove it. They judge what the fake daemon holds and what the theme shows, nev
   lost card not the lost state, the toasts never shown, the page never resting, the volume shown
   as its number only, the button hidden or too small.
 - Completeness: every `targetsOf` target of a Gungnir 2 with a player, a fake amp with a signal, a
-  fake five-meter amp, a fake mono amp and a Loki Max is reached and operated, and the model route
+  fake five-meter amp, a fake mono amp, a Loki Max and an Aegir 2 (the one device of the fleet with a
+  power switch, which is turned off and on again on every theme, and whose power readouts are shown
+  with the model's words on every theme: Paper writes them as margin notes and its driver reads the
+  words after the note's label) is reached and operated, and the model route
   reports the change (a readout is shown with the model's words; a slot's save is proved by what a
-  recall brings back; each operation is one write request); every `factsOf` fact is reached and
-  shown with the model's words (a reading that moves is held to its shape). Proved by
-  `completeness.py` (Chromium). Mutants: the Device fold-out not opened, a slot save that does not
-  answer its question, the loudness steppers swapped.
+  recall brings back; each operation is one write request). The facts are two checks with two
+  drivers: every `deviceFactsOf` fact is reached and shown with the model's words through the core's
+  driver (`core.driver`, told the device by its url; it opens the Devices popup at that device's page
+  through the router, opens All readings for a reading row and reads the cell; `node/core-driver.mjs`),
+  every device having some, and every `themeFactsOf` fact
+  (the cover) through the theme's own driver (`core.theme.driver`); a reading that moves is held to
+  its shape. What there is to prove is held on every theme and every device, so a pass with less to
+  do fails: the page lists targets, the computer's side lists targets (an amp's too), the theme's
+  list of facts is not empty (the fake host's player has a cover on every device) and, on the
+  Gungnir 2, the player has its buttons and a track, the three transport targets and the cover are
+  listed. The counts of one theme are not compared with another's (the lists hold no theme,
+  `node/contract.mjs`), and that the computer's targets start with the switch is `contract.py`'s,
+  on every theme in both browsers. Once per theme, on its first device with reading rows: "every
+  age on show has words" (each cell that carries `data-heard-at`, the attribute `tickAges` reads in
+  every theme) and "the ages step" (2.2 s later at least one reading's age in seconds, in a cell
+  that stayed in place, says other words: only the ticker writes into a cell in place, a section
+  drawn again brings new cells), so a theme whose `stamp` or `ages` selector for `core.clock.tickAges` does not
+  match what it draws fails (the `signal` selector is not held).
+  Proved by `completeness.py` (Chromium). Mutants: the core's driver not opening All readings, a slot save that
+  does not answer its question, the loudness steppers swapped.
 - The rows Ember does not use: a second device followed over one stream (`stream.follow`), a hop
   added from the page (in the model within 1.5 s and in the config file), the menu's fade and its
   return on a pointer move, a press, a touch or a key, a band moved from a 400 x 100 map by
-  `drag.createDrag` (the steps at the daemon are those of the target Hz and dB), light and dark
+  `eq.bands.createDrag` (the steps at the daemon are those of the target Hz and dB; the steps the drag
+  holds are `node/tone-drag.mjs`'s), light and dark
   following the system with the person's word held and kept as `probe.light` (Chromium), a canvas
   loop that stops while the page is hidden and starts again, and Ember unmounted and mounted again
   (no canvas, no layer left, one write for one key press, no error), and Ember mounted while the
@@ -1036,7 +1725,8 @@ to prove it. They judge what the fake daemon holds and what the theme shows, nev
   (`node/core-stream.mjs`). Proved by `core_rows.py`
   (both browsers). Mutants: the button never fading, a followed device not asked for, a hop added
   by the edit route, the scheme not on the root or not kept in the cookie, the loop ignoring a
-  hidden page, the drag's gain read from the x, Ember's listeners outliving its mount.
+  hidden page, Ember's listeners outliving its mount (`mutate_effects.py`); the drag's gain read
+  from the x is killed by `node/tone-drag.mjs`, through the same script.
 - `tone_drag.py` and `effects_menu.py` drop their device by `Daemon.drop()` (the fake watches a
   file, `SVOLDER_FAKE_GONE_FILE`) and assert it was connected before; `tone_note.py` brings the Tone
   pane into view before each click and waits for what it measures.
@@ -1117,10 +1807,10 @@ proved by node harnesses; its light and dark and its first frame by `paper.py` i
   ("the_amp_draws_power_and_a_needle_per_meter": amp, five, mono) and `paper.py`
   ("an_amp_shows_power_meters_and_its_readouts": needle within 0.05 of the model's fraction in the same
   tick, power off and on written).
-- The device's facts: the spec table (product, unit when shown, firmware, DSP, profile, link, signal,
-  passphrase when noted), every reading with the age it was heard (kept current while the page is on
-  show) and `identify` with its words. Proved by `node/paper-draw.mjs` ("every_fact_is_on_the_sheet",
-  every fixture) and `paper.py` ("the_spec_table_lists_every_fact").
+- The device's facts are the Devices popup's; the sheet ends in one written word, `Device settings…`, for a
+  viewer who may write. Proved by `node/paper-draw.mjs` ("the_sheet_ends_in_device_settings_and_draws_no_fact", every
+  fixture) and `paper.py` ("the_device_word_opens_the_devices_page": a real click opens the popup at the device's page).
+  The facts, Identify and All readings moved to `core-device-facts.mjs`, `core-device-wire.mjs` and `devices_popup.py`.
 - The card and the states: a lost link or a fault is the red note under the title (`p.pn.red.card`),
   its words in print, the faults listed with their advice, `try now` and the seconds to the next try;
   a page with no device draws only the card; a stopped daemon reads `Reconnecting to svolder...` and
@@ -1270,7 +1960,7 @@ later tasks through `openers`.
   `the_shelf_lists_every_control_the_model_has` (every fake fixture: each control but the input, which
   the first screen draws, once, whatever its kind; every band's three values with their steppers,
   the loudness, every preset, slot and setting), `the_band_table_has_typed_values_and_steppers` (a
-  guest's fields read-only), `the_facts_start_folded`, `the_fold_is_kept_as_open_or_closed_and_works_without_storage`,
+  guest's fields read-only), `the_shelf_ends_in_device_settings_for_a_viewer_who_may_have_the_popup_and_draws_no_fact`,
   `a_loki_max_shows_its_slots_and_settings` (in the middle column, no band table, a guest cannot save),
   `the_presets_have_save_as_rename_and_delete_for_a_writer_only`, `a_shelf_without_a_device_is_nothing`,
   `the_slim_bar_names_the_hops_and_rings_the_chosen_one` (escaped, the volume beside the shown device),
@@ -1285,8 +1975,8 @@ later tasks through `openers`.
   centre, a drag, the Loudness strength: see `the_loudness_buttons_step_the_strength`), `a_slot_save_asks_first` (a Loki Max: slots, settings, the
   question before the write, `confirm: true` only after `Save`, recall and a built-in setting),
   `an_open_list_survives_a_part_update` (a list and a question both stay through a change from
-  elsewhere), `the_facts_unfold_and_the_choice_survives_a_reload` (`svolder.theme.signal.facts`,
-  folded by default, still folds with storage refused, Identify posts),
+  elsewhere), `the_facts` (`the_shelf_foot_opens_the_devices_page`: the shelf draws no fact and ends in `Device settings…`, which opens the
+  popup at the device's page),
   `the_slim_bar_pins_when_the_line_scrolls_away` (64 px at the top, under the frame's layer, the same
   hops as the line, the chosen one with the DAC's volume, gone at the top) and
   `a_slim_bar_tap_chooses_and_scrolls_up` (and no bar on a phone). The guest check also taps the shelf.
@@ -1303,7 +1993,7 @@ later tasks through `openers`.
   `an_amps_controls_are_inert_for_a_viewer_who_may_not_write`,
   `the_meters_are_put_in_place_without_drawing_the_area_again`,
   `the_dac_keeps_its_volume_written_while_the_amp_is_chosen` (muted, no volume read),
-  `an_amps_shelf_is_its_facts_and_not_its_power`; `node/signal-line.mjs`
+  `an_amps_shelf_is_its_foot_and_not_its_power_or_identify`; `node/signal-line.mjs`
   `a_chosen_amp_that_leaves_the_fleet_gives_the_box_back_to_the_dac` (unplugged, unlinked, the list of
   followed devices). The completeness test now asserts the drawn hook of every preset, slot, setting, mode,
   loudness and transport target (it asserted nothing for them) and walks the amp's area; the no-style and
@@ -1324,17 +2014,15 @@ later tasks through `openers`.
   green and yellow words, the quiet word) reads at 4.5 or more on both ends of the ground.
 - The test driver (`themes/signal/driver.js`, Task 9): `reach` chooses the hop that holds the target as a person taps it on
   the line (the shown device's own, or a linked amp's when the control is the amp's, so its writes carry `{ device: url }`),
-  unfolds the facts, scrolls to the word, scale, chip or field (`#sg-vtrack`, `[data-act=...]`, `[data-key]`, `.sg-scale`,
-  `#sg-facts-body td[data-fact]`), `operate` taps it, presses the arrow keys on a scale, types nothing but steps a band
+  scrolls to the word, scale, chip or field (`#sg-vtrack`, `[data-act=...]`, `[data-key]`, `.sg-scale`), `operate` taps it, presses the arrow keys on a scale, types nothing but steps a band
   with its `-` and `+`, picks an option of the list a chip opens (a longer choice, the slot to save over, then the
   question's `save`), and `shown` reads the words on the page (the volume's `aria-valuetext`, a band's field, a scale's
   value); `state` reads the core's state, the card and the toasts. `contract.py` and `completeness.py` run Signal like every
   listed theme (`NO_DRIVER_YET` is gone from both). Proved by `contract.py` in both browsers (66 checks) and by
   `completeness.py` (every target reached, operated and read back from the model route, one write each; every fact shown
   with the model's words) on the Gungnir 2 (36 targets, 36 facts), the amp (3, 14), the five-meter amp (3, 17), the mono
-  amp (3, 14) and the Loki Max (19, 15): the counts equal Ember's and Paper's on every kind.
-- Every theme lists what the first theme lists (`completeness.py`, `same_counts`): per device kind, the count of targets of
-  each kind and of facts must equal the first theme's, failing with the kind and the two counts, so Signal's counts equal Ember's.
+  amp (3, 14) and the Loki Max (19, 15). The lists are the core's and hold no theme (`targetsOf`, `deviceFactsOf` and
+  `themeFactsOf` take the device's model alone, `node/contract.mjs`), so every theme is asked for the same targets and facts.
 - The four hands-on passes of 0.31.4 (checks written after the code; each new check was run against the page of
   `1219166c` and fails there, by the browser run of `the_mode_has_its_place`, `the_loudness_buttons_step_the_strength`,
   `holding_a_band_stepper_repeats`, `the_menu_row_adds_a_device`, `the_tab_title_names_the_device_and_the_connection` and
@@ -1364,7 +2052,7 @@ later tasks through `openers`.
     redraws of the shelf (the button is replaced, the hold follows it by id), and stops on release, cancel, blur, a hidden
     page, the button leaving and another device shown; no context menu and no selection or panning on a stepper; a key is one
     step.
-  - Add device (`node/signal-draw.mjs` `the_menu_row_adds_a_device_while_a_device_is_shown`; browser `the_menu_row_adds_a_device`
+  - Add to the chain (`node/signal-draw.mjs` `the_menu_row_adds_a_device_while_a_device_is_shown`; browser `the_menu_row_adds_a_device`
     and every `the_plus_sheet_*` check, which now open the sheet from the menu): the row is there with a device shown,
     absent without one, opens the sheet, and the focus goes back to the menu button.
   - The tab's title (`the_tab_title_names_the_device_and_the_connection`, `a_lost_stream_*`, `a_lost_device_*`):
@@ -1374,14 +2062,13 @@ later tasks through `openers`.
   dropping the hops after the DAC (`signal-draw.mjs` `a_declared_hop_says_where_it_sits_and_moves_by_the_whole_lists_places`,
   and `signal-line.mjs` `the_line_runs_player_computer_dac_then_its_hops_in_file_order`), a declared hop drawn live
   (`signal-line.mjs` `a_linked_hop_is_live_only_when_listed`), a chosen hop that disappears staying chosen (`signal-line.mjs`
-  `a_choice_that_disappears_goes_back_to_the_shown_device`), the facts starting open (`signal-draw.mjs`
-  `the_fold_is_kept_as_open_or_closed_and_works_without_storage`), the computer's hop gaining a write
+  `a_choice_that_disappears_goes_back_to_the_shown_device`), the computer's hop gaining a write
   (`signal-draw.mjs` `the_computer_opens_the_routes_facts_read_only`), the strip not centring the chosen hop
   (`signal-draw.mjs` `the_strip_is_the_same_hops_a_step_apart_with_the_wire_under_them`).
 - Mutants of Signal's page, run by hand with `mutate_signal.py` (one worker, `signal_theme.py` in Chromium; each killed by
   the check named): an amp control written without `{ device: url }` (`an_amp_control_writes_to_the_amps_url`), the dots
   ignoring reduced motion (`the_dots_stand_still_under_reduced_motion`), the slim bar never pinning (`the_slim_bar` "scrolled
-  past the line, it is shown" and `a_slim_bar_tap_chooses_and_scrolls_up`), the Add device row opening the sheet for a guest
+  past the line, it is shown" and `a_slim_bar_tap_chooses_and_scrolls_up`), the Add to the chain row opening the sheet for a guest
   (the core refuses a guest's post, so the sheet's opening is what is mutated; killed by `a_guest_cannot_add_or_edit_a_hop`), the strip not centring (`the_strip_centres_the_chosen_hop`).
 - Declared hops (Task 6): `node/signal-draw.mjs` `the_sheet_offers_unlinked_amps_first` (the amps no hop links as
   `<name> (connected)` before Amp / Headphones / Speakers / Other, the first chosen with its own name; none left: an
@@ -1392,7 +2079,7 @@ later tasks through `openers`.
   escaped, a hop the list lost draws nothing), `the_sheet_and_the_declared_area_are_inert_for_a_viewer_who_may_not_write`,
   `no_style_attribute_in_the_sheet_or_the_declared_area`; `node/signal-line.mjs`
   `a_chosen_hop_removed_elsewhere_gives_the_box_back` (removed, renamed, moved to another line). In the browser
-  (`signal_theme.py`, both browsers): `the_plus_sheet_adds_a_declared_hop` (opened from the menu's Add device… row; the sheet, Escape and Cancel send nothing,
+  (`signal_theme.py`, both browsers): `the_plus_sheet_adds_a_declared_hop` (opened from the menu's Add to the chain… row; the sheet, Escape and Cancel send nothing,
   the typed fields survive a host / fleet / part reading, Add posts name / kind / note / the DAC's name, the new hop is
   chosen with its dashed box, then the repo-built `svolder hops list` on the same temp homes lists it; a refused name
   keeps the sheet open; a connected amp is linked and followed), `edit_changes_the_name_and_note` (in place, Escape,
@@ -1400,7 +2087,7 @@ later tasks through `openers`.
   `move_earlier_reorders_the_line` (the whole list's place posted, the CLI order, the ends disabled; a linked amp
   moves too), `remove_asks_then_removes` (Keep sends nothing, one removal by id, the box back on the DAC),
   `a_chosen_hop_removed_elsewhere_gives_the_box_back` (with the Edit form open, with a Remove question open; nothing
-  posted) and `a_guest_cannot_add_or_edit_a_hop` (a real guest: the menu's Add device… row refuses, every button inert, the core's words, nothing
+  posted) and `a_guest_cannot_add_or_edit_a_hop` (a real guest: the menu's Add to the chain… row refuses, every button inert, the core's words, nothing
   posted).
 - The player, the computer and the states (Task 7). `node/signal-draw.mjs`: `the_player_opens_the_track_and_the_verdict`
   (the title, the byline, the progress that moves, the transport, the path's hops and its verdict in the colour of its
@@ -1437,11 +2124,11 @@ later tasks through `openers`.
   way chooses one hop, a short one nothing, a tap on a neighbour, a swipe is not also a tap, nothing past the ends, a vertical
   stroke scrolls the page (Chromium) and chooses nothing, nothing posted), `the_strip_pins_when_scrolled` (sticky at the top
   under the frame's layer, no slim bar, a tap while pinned chooses, keyboard focus lands under the strip and above the Now
-  playing bar), `touch_targets_are_44_px` (every button, hop, field and slider of a DAC page and the Add device sheet),
+  playing bar), `touch_targets_are_44_px` (every button, hop, field and slider of a DAC page and the Add to the chain sheet),
   `no_sideways_scroll_with_long_hop_names` (a DAC, an amp and a Loki Max with six hops after the device, a 40-character name and
   `Left/Right Cans`, at 390 and 1100 px: the page does not scroll sideways, also with the long hop chosen; at 1100 px the labels
   stay inside the page and clear of each other) and `the_said_and_stub_do_not_overlap` (host off and the stream lost, 1280, 720
-  and 390 px). The floating `+` is gone: Add device… is a row of the frame's menu.
+  and 390 px). The floating `+` is gone: Add to the chain… is a row of the frame's menu.
   Fix round 1: the frame's menu button is 44 px on a phone, sized by Signal's `--frame-btn-size` token (the frame is not
   edited), and keeps the page's right 60 px to itself (its hit area reaches 7 px past it); the strip is centred in the
   rest. `the_menu_button_clears_the_strip` (360, 390 and 719 px, with the first, the DAC and the last hop chosen: the
@@ -1794,15 +2481,15 @@ dash and the sheet come with the later tasks.
   Escape in a field writing the value, a list's Escape choosing an option.
 - The rest of a device on the sheet, amps and other kinds (`node/nightdrive-draw.mjs`):
   `the_sheet_lists_every_control_the_model_has` (every control of every fixture once: a toggle a pill, a slider a
-  scale with a knob and its centre, a readout its words, the power key and its switches), `the_facts_start_folded`,
+  scale with a knob and its centre, a readout its words, the power key and its switches), `the_sheet_ends_in_device_settings_for_a_viewer_who_may_have_the_popup_and_draws_no_fact`,
   `a_loki_max_shows_its_slots_and_settings`, `an_amps_dash_has_power_and_temperature_gauges` (arcs filled by the
   state and the number, the model's minus read), `an_amp_never_morphs` (no bands, nothing tunable),
   `faults_are_listed_with_their_advice_and_turn_the_top_red` (the top line's tone is `bad`). In a browser
   (`nightdrive_sheet.py`, both): `a_slot_save_asks_first` (nothing posted before `Save`; then the slot with
-  `confirm`), `the_facts_unfold_and_the_choice_survives_a_reload` (the fold kept under `svolder.theme.nightdrive.facts`),
+  `confirm`), `the_sheet_foot_opens_the_devices_page` (the sheet draws no fact and ends in `Device settings…`, which opens the popup over it),
   `an_amp_shown_alone_keeps_the_music_and_its_gauges`, `an_amps_meters_move_live_on_the_sheet` (the fake amp with its signal
   on: a needle changes at least twice in 3 s with the sheet left open, the same element), `every_control_writes` (a toggle, a scale by key and by the
-  centre tap and a press along it, the amp's power key and switch), `identify_says_the_daemons_words`.
+  centre tap and a press along it, the amp's power key and switch).
 
 - The phone (`nightdrive_phone.py`, both browsers): `portrait_puts_the_scene_above_the_dash_panel` (412x915 and 360x780: the panel is two rows, under 30 % of the window (the scene above it over 77 %), to the window's bottom and edges, translucent (alpha .7) with every text in it at 4.5:1 or more over the brightest cell the floor can draw behind it (the DAC's page and, as `the_amp_panel_text_keeps_contrast`, an amp's with its gauges; a named selector with no element fails); the scene runs behind it; the switch is one pill `DAC | PC` in the scene's top left corner (an amp `AMP | PC`; each segment keeps its whole name as its accessible name), 36 px tall with a 44 px hit area, clear of the menu button and the device line; the volume is in the scene, centred, under the EQ line and above the sun at rest; `−` `MUTE` `+` and the transport on ONE row, the track with the input and `DEVICE ▴` on the Now-playing line below; the EQ line holds the gains; no scroll), `the_portrait_volume_fades_with_the_hud` (upright, the volume, the device line and the EQ line reach opacity 0 and the panel stays at 1), `landscape_shows_the_scene_full_with_a_slim_dash` (844x390 and 667x375: the scene and
   its canvas are the window, the dash one row under a quarter of the height with every key inside, the switch's pill in the top left corner, left of the device line and clear of the volume, the volume above the dash),
@@ -1838,7 +2525,7 @@ dash and the sheet come with the later tasks.
 
 - The driver (`themes/nightdrive/driver.js`, `contract.py` and `completeness.py`, which no longer leave Night drive out): `reach` shuts or
   opens the sheet as the target needs it (the volume, the mute, the input, an amp's power key, the transport and the cover are on the dash; every
-  other control, the bands, the modes, the presets, the slots and the facts are on the sheet, whose folded facts it unfolds), scrolls to the word,
+  other control, the bands, the modes, the presets and the slots are on the sheet), scrolls to the word,
   scale or chip and says whether it is drawn and in view; `operate` taps a key (a step of the volume is a tap with no pointer, which is one step),
   presses the arrow keys on a scale, steps a band with its `-` and `+`, picks an option of the list a chip opens (a long input, the slot to save over,
   then the question's `save`); `shown` reads the words on the page (the outrun volume's reading, a band's field, a scale's value, the strength under
@@ -1846,8 +2533,7 @@ dash and the sheet come with the later tasks.
   device's link word stands beside its name while the link is not on (`the_link_state_is_in_words_beside_the_name`, found missing by the contract and
   fixed in `hud.js`). Proved by `contract.py` in both browsers (67 checks each) and by `completeness.py` in both (every target reached, operated and
   read back from the model route, one write each; every fact shown with the model's words) on the Gungnir 2 (36 targets, 36 facts), the amp (3, 14), the
-  five-meter amp (3, 17), the mono amp (3, 14) and the Loki Max (19, 15): run with `WEB_CHECK_THEMES=ember,nightdrive`, the per-kind counts of targets and facts
-  equal Ember's (the 36 `count equals` checks). The menu-button check accepts a page that does not scroll (Night drive's page never does: its root is the
+  five-meter amp (3, 17), the mono amp (3, 14) and the Loki Max (19, 15). The menu-button check accepts a page that does not scroll (Night drive's page never does: its root is the
   window), where it still wants the button pinned to the window.
 - The top line with the link words (`nightdrive_theme.py`, both browsers, density 3): `the_top_line_with_the_link_words_has_room` (the device dropped, so the left reads
   `Gungnir 2 · not connected · USB 1 · 48 kHz` and the right the card's words: at 1280x800, 412x915 and 360x780 the two parts, the dB readout, the EQ readout and the
@@ -1878,6 +2564,22 @@ dash and the sheet come with the later tasks.
   `Keep writes nothing`, `a_slot_save_asks_first`), a band field that writes on Escape, a second tap on the input chip that writes, the core letting a guest's and a
   read-only page's call go out (`a_guests_tap_posts_nothing`, `a_guests_sheet_is_inert_in_a_browser`, `a_guest_tap_on_the_mountains_says_why`: a request brings the sign-in, so those
   checks read the page going away as a request that went out), a switch that writes and a first touch that grabs. Twenty-two mutants, 17 minutes 40 seconds in all.
+
+## The sweeps (0.33.0)
+
+- Contrast. `contrast.py` (both engines, every theme and scheme the page lists, every state of `sweep_states.py`; in the full gate only): text on its
+  ground at 4.5:1 (3:1 large, 3:1 for a disabled control), control edges, the focus ring after a Tab and the graph's series, target,
+  compare and gap against the plot's ground at 3:1, the popups' head, pane, side list, inline ask, list panel and refused-setting
+  words included; a gradient or picture ground is sampled from a screenshot with the text hidden. Rule: a pair that is not in
+  `contrast-baseline.json` and fails, or one that got worse by more than 0.02, fails. It cannot see canvas text (Night drive's HUD,
+  Ember's notes), an image's pixels, hover or animation states, forced colours.
+- Phone overflow. `phone_sweep.py` (both engines): the page and each popup entry loaded at 360 px (and at 390 and 768 px for the writer's and
+  the guest's pages): `scrollWidth` against the window, the popup box's own, every box that scrolls sideways (the popup's pane and side list), elements cut by the window or by an ancestor that clips, controls under 24 px with no 24 px of hit area and a
+  neighbour within 24 px; `phone-baseline.json` holds today's failures. The Night drive phone layout's own rules stay
+  `nightdrive_phone.py`'s.
+- Routes against their docs. `make routes-doc-check`: every `.route("/api/v1/..")` of the daemon is a row of the table in
+  `docs/usage/web-ui.md` with its method and each row is served; the fields of the configured-devices, series, walk, AutoEq and preset-save
+  routes agree between the table, the Rust type and the page's calls; those write routes reach `writer(`. Self-tested on fixed texts.
 
 ## The quick gate
 

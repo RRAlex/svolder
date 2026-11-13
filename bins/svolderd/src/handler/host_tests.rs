@@ -432,10 +432,10 @@ async fn host_press_answers_ack_or_error() {
     assert_eq!(daemon.handle(press("play")).await, Response::Ack);
     assert_eq!(daemon.handle(press("Next")).await, Response::Ack);
 
-    let Response::Error { code, message } = daemon.handle(press("rewind")).await else {
+    let Response::Error { code, message, .. } = daemon.handle(press("rewind")).await else {
         panic!("an unknown button is refused");
     };
-    assert_eq!(code, 1);
+    assert_eq!(code, CODE_USAGE);
     assert!(
         message.contains("rewind") && message.contains("previous"),
         "{message}"

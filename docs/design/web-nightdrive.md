@@ -10,9 +10,9 @@ toward you, one row of the music at each step. The volume is a large neon number
 strip along the bottom, and everything else is on a sheet that slides over the scene. It is dark only.
 It is plain ES modules with no build step, in `bins/svolderd/web/themes/nightdrive/`, and one entry
 in `bins/svolderd/src/web/themes.rs`. It is built on the core alone: no file of Ember's, Paper's or
-Signal's belongs to it, and the gaps it found in the core were fixed in the core ([the second page](web-nightdrive-checks.md#what-night-drive-found-missing-in-the-core)).
-[Web themes](web-themes.md) says what a theme is; [the frame](frame.md) says what the page keeps
-for itself.
+Signal's belongs to it; [the second page](web-nightdrive-checks.md#what-night-drive-needs-of-the-core)
+has what it needs of the core. [Web themes](web-themes.md) says what a theme is; [the frame](frame.md)
+says what the page keeps for itself.
 
 In this theme's words, **the scene** is the canvases and what the HUD lays over them, **the
 mountains** are the spectrum's ridge, **the floor** is the grid of cells in front of it, **the dash**
@@ -62,6 +62,10 @@ quiet record and a loud one use the whole range of colours. The colour is a ramp
 through pink and orange to pale yellow (`draw/heat.js`, `RAMP`), cut into `STEPS` (64) colours once,
 and it leans to a warm ramp for bass-heavy music and a cool one for bright music. The road stops (rows frozen) in Calm and Still, while the device
 is out of reach and while the stream is lost.
+
+**The tone overlay** of an imported preset: `fit 0.9 dB` in the EQ line, the target as a ghost ridge
+and the floor tinted under the gap, one layer the budget drops second
+([web-nightdrive-checks.md](web-nightdrive-checks.md#the-tone-overlay)).
 
 **Draws that do not allocate.** The floor and the ridge reuse their arrays; `nightdrive-glow.mjs`
 fails on `shadowBlur`: the glow is drawn as stacked strokes and gradients, never blurred, because a
@@ -243,10 +247,10 @@ and the ✕ button, Escape or a tap on the scene closes it and gives the focus b
   table** (typed values with `−` and `+`, one device step a tap, a held one repeats) and the
   **presets** (chips; Save as, Rename and Delete ask their question in place), the device's slots and
   its controls (balance and sliders as scales, toggles as pills), an amp's meters with their zones.
-  The device's **facts** fold across both columns; the fold is kept as the preference `facts`
-  (`open` or `closed`), works when storage is refused, and a guest may open it.
+  *Device settings…* stands across both columns and opens the device's page in the Devices popup
+  (its facts and Identify are that page's); a viewer who may not write sees `Devices…`, read-only.
 - **On a phone held upright** the sheet slides up from the dash to 30 % from the top, one column:
-  Mode, Input, presets, bands, slots, controls, facts, scrolling inside.
+  Mode, Input, presets, bands, slots, controls, Device settings…, scrolling inside.
 - **On a phone held sideways** (under 500 px high) it slides in from the right, `min(420px, 60vw)`
   wide, the same column.
 
@@ -269,7 +273,9 @@ line to its right. A desktop keeps its two keys left of the menu button, with th
 scene the wheel is the mountains' (the Q), and the first wheel over a number that has faded only
 wakes the HUD. `↑` and `↓` step it when nothing has the keyboard focus and no sheet, question or
 menu is open; held, they repeat after the core's pause at its pace, and they wake a faded dash like
-any key. `←` and `→` are not read.
+any key. `←` and `→` are not read. The arrows are the one key of the whole page in Night drive's
+key table (`key-table.js`): the mount binds the table through `core.keys.bind` and
+`volume-keys.js` holds what a press does.
 
 The presets are what the model offers: a preset made by AutoEq is one of the chips. There is no
 AutoEq picker in this theme; adding one is a new feature for every front end.
@@ -277,9 +283,9 @@ AutoEq picker in this theme; adding one is a new feature for every front end.
 Every write goes through `core.actions`; a question that asks before it writes (delete a preset,
 replace what a slot holds) has the safe answer focused, and an answer the daemon refuses leaves the
 question open with what was typed. A slot save posts `"confirm": true` only after the question is
-answered. The sheet is drawn again from every answer, so a section in use is held (`live.js`
-`hold`/`release`): a value being typed, a list open, a question asked, a stepper held, and what
-came meanwhile is drawn from the newest model when it is let go.
+answered. The sheet is drawn again from every answer, so a section in use is frozen (`core.freeze`:
+`createLive`'s `freeze`/`thaw`, counted by `keeper`): a value being typed, a list open, a question
+asked, a stepper held, and what came meanwhile is drawn from the newest model when it is let go.
 
 The bubbles are not focusable. The band table is the keyboard path to every band value.
 
@@ -357,7 +363,7 @@ sun, a cyan ridge and four lines of the road, with no font. Night drive needs `m
 
 Nothing Night drive draws carries a `style=` attribute or an inline script or style: positions are set
 through the style object or as SVG attributes, and the canvases are drawn from script. Browser storage
-is only through `core.prefs`, under `svolder.theme.nightdrive.<name>`: `motion`, `facts` and
+is only through `core.prefs`, under `svolder.theme.nightdrive.<name>`: `motion` and
 `fade-after`.
 
 **The analysis is held only while the scene is on show.** The theme opens `core.analysis` when the
@@ -376,9 +382,9 @@ daemon captures the computer's audio only for a page that is looked at.
 | `tune.js`, `tune-wire.js` | the tone control on the mountains as numbers, and the hands on it |
 | `points-wire.js` | the computer's side: the points' table's hands (what the drawing reads of the computer is the core's `computer.view()`) |
 | `hud.js`, `hud-wire.js`, `dash-fade.js`, `rest.js` | the HUD's words, its fade, the dash's fade, the resting cursor |
-| `dash-wire.js`, `volume-keys.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `gestures.js`, `lists.js`, `ask.js`, `fold.js`, `act.js`, `inert.js`, `place.js` | the hands: what a tap, a hold, a drag, a key, a list or a question does, and the log of what this page asked |
+| `dash-wire.js`, `volume-keys.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `gestures.js`, `lists.js`, `ask.js` (the core's list and inline ask in Night drive's classes and words), `inert.js`, `place.js` | the hands: what a tap, a hold, a drag, a key, a list or a question does |
 | `states.js`, `words.js` | how the page stands and the quiet line's words; the fixed words |
-| `live.js` | the store's events on the page: which sections are drawn again, which are held |
+| `live.js` | the parts of the shown device each section shows; the store's events on the page, which sections are drawn again and which are held, are `core.freeze.createLive`'s |
 | `debug.js`, `debug-wire.js`, `stats.js` | the readout and the switches, the draws' times |
 | `driver.js`, `preview.js`, `style.css` | the test driver, the picker's picture, the tokens and every section |
 

@@ -250,6 +250,73 @@ fn logs_says_a_daemon_that_writes_no_file_before_it_reads_the_fallback() {
     assert_eq!(older.note, None, "an older daemon keeps today's line");
 }
 
+/// In a container the daemon's stderr is the container's log, which nothing inside it can
+/// read: `logs` names the command that reads it on the host and runs no reader, whether the
+/// daemon said it writes no file or nothing answered and no file is there.
+#[test]
+fn logs_in_a_container_names_docker_logs_and_reads_nothing() {
+    let tools = Tools::new(&no_units());
+    let dir = temp_dir("daemon-logs-container");
+    let log = dir.0.join("svolderd.log");
+    let ctl = tools.ctl().in_container();
+    for said in [LogSaid::NoFile, LogSaid::Unsaid] {
+        let nothing = read_plan(&ctl, &log, &said, true)
+            .err()
+            .expect("nothing to read here");
+        assert_eq!(
+            nothing,
+            "svolder: the daemon does not log to a file; in a container what it says is the \
+             container's own log, read on the host: `docker logs -f <container>` for Docker, \
+             `podman logs -f <container>` for Podman (the compose file names the container \
+             `svolder`)",
+            "{said:?}"
+        );
+        assert!(!nothing.contains("reading"), "nothing is read: {nothing}");
+    }
+    let once = read_plan(&ctl, &log, &LogSaid::NoFile, false)
+        .err()
+        .expect("nothing to read here");
+    assert!(
+        once.contains("`docker logs <container>` for Docker, `podman logs <container>` for"),
+        "{once}"
+    );
+    logs_from(&ctl, &log, &LogSaid::NoFile, true, None).expect("said, not failed");
+    let readers: Vec<String> = tools
+        .calls()
+        .into_iter()
+        .filter(|call| call.starts_with("journalctl") || call.starts_with("tail"))
+        .collect();
+    assert_eq!(readers, Vec::<String>::new(), "no reader ran");
+}
+
+/// A container where systemd manages the daemon keeps its log in the journal, as anywhere: a
+/// daemon that says nothing, or that it writes no file, is read from there.
+#[test]
+fn logs_in_a_container_with_systemd_units_reads_the_journal() {
+    let tools = Tools::new(&installed_units(RUNTIME_LISTEN_STREAM));
+    let ctl = tools.ctl().in_container();
+    for said in [LogSaid::NoFile, LogSaid::Unsaid] {
+        let plan = read_plan(&ctl, Path::new("/nowhere/svolderd.log"), &said, false)
+            .unwrap_or_else(|why| panic!("{said:?}: {why}"));
+        assert_eq!(plan.program, "journalctl", "{said:?}");
+    }
+}
+
+/// A container whose daemon names a file, or that holds the fallback file, is read as anywhere.
+#[test]
+fn logs_in_a_container_still_reads_a_file_that_is_there() {
+    let tools = Tools::new(&no_units());
+    let dir = temp_dir("daemon-logs-container-file");
+    let log = dir.0.join("svolderd.log");
+    std::fs::write(&log, "x\n").expect("the log is written");
+    let ctl = tools.ctl().in_container();
+    let plan = read_plan(&ctl, &log, &LogSaid::Unsaid, false).expect("the fallback file");
+    assert_eq!(plan.program, "tail");
+    let named = LogSaid::Path(log.display().to_string());
+    let plan = read_plan(&ctl, &log, &named, false).expect("the named file");
+    assert_eq!(plan.program, "tail");
+}
+
 /// A daemon that takes the connection and never answers is given [`ASK_WAIT`], then read as
 /// one that said nothing, so `logs` falls back instead of hanging.
 #[tokio::test]

@@ -260,7 +260,7 @@ pub struct Mpris {
 impl Mpris {
     /// The players on this user's session bus: the one `DBUS_SESSION_BUS_ADDRESS` names, else
     /// `$XDG_RUNTIME_DIR/bus` when it is there. `None` when there is no session bus, it does not
-    /// answer, or [`host_off`](crate::host_off) says host audio is off for this process.
+    /// answer, or [`host_unreached`](crate::host_unreached) says host audio is off for this process.
     ///
     /// No bus is ever started to answer: a session without one simply has no players.
     pub async fn session() -> Option<Self> {
@@ -271,7 +271,7 @@ impl Mpris {
     /// ([`NoBus::Absent`], also when host audio is off) or one that has not answered
     /// ([`NoBus::Silent`]).
     pub async fn look_session() -> Result<Self, NoBus> {
-        if crate::host_off() {
+        if crate::host_unreached() {
             return Err(NoBus::Absent);
         }
         let address = session_address(

@@ -14,7 +14,6 @@
 import { heldGraph } from './draw/tone.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { placeOpen } from './place.js';
-import { createRelease } from './press.js';
 import { WORDS } from './words.js';
 
 const STEPS = { ArrowLeft: ['f', -1], ArrowRight: ['f', 1], ArrowDown: ['g', -1], ArrowUp: ['g', 1] };
@@ -29,7 +28,7 @@ export function wireTone({
   const store = core.model;
   const {
     BAND_PARAM, REACH, bandSteps, bandWriter, createDrag, grab, labelAt, wheelSteps,
-  } = core.drag;
+  } = core.eq.bands;
 
   /** The drags begun and not finished, oldest first (their writes are waited for in turn). */
   const pending = [];
@@ -49,7 +48,7 @@ export function wireTone({
 
   // A list closed by a press outside it gives its hold back only after that press is over, so the
   // redraw cannot replace the chip under the click that follows.
-  const release = createRelease(root.ownerDocument, shelfKeep, signal);
+  const release = core.freeze.createRelease(root.ownerDocument, shelfKeep, signal);
 
   /** Open the list `options` under `opener`, holding the shelf while it is open. */
   function list(opener, label, options, choose) {
@@ -143,6 +142,9 @@ export function wireTone({
     graph.querySelector('.sg-shade').setAttribute('d', held.shade);
     graph.querySelector('.sg-curve').classList.remove('faint');
     graph.querySelector('.sg-shade').classList.remove('faint');
+    graph.querySelector('.sg-gap')?.remove();
+    graph.querySelector('.sg-fit')?.remove();
+    graph.querySelector('.sg-sr')?.remove();
     const point = graph.querySelector(`.sg-pt[data-band="${band}"]`);
     point.dataset.x = held.point.x.toFixed(5);
     point.dataset.y = held.point.y.toFixed(5);

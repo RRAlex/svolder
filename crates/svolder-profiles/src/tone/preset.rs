@@ -287,6 +287,16 @@ pub fn imported_update_refusal(name: &str) -> String {
     format!("{name} is imported: save the curve under a new name")
 }
 
+/// What updating a built-in preset with the device's curve is refused with.
+pub fn builtin_update_refusal(name: &str) -> String {
+    format!("{name} is built in: save the curve under a new name")
+}
+
+/// What overwriting a preset with the computer's points is refused with: the computer's points
+/// are saved as a new preset only.
+pub const COMPUTER_UPDATE_REFUSAL: &str =
+    "the computer's points are saved as a new preset, not over one";
+
 /// The most fits [`fit_for`] keeps: a key is about 2 KB, and every row of a list asks for its
 /// fit on every frame, so the cap is well above the longest list.
 const FIT_CACHE_MAX: usize = 4096;
@@ -317,7 +327,7 @@ pub fn fit_for(eq: &EqSpec, imported: &Imported) -> Arc<Fit> {
 /// `EqSpec.id`, `mode_sub` and `loudness_sub` are left out on purpose: fitted bands are
 /// physical values, the same on every device with the same layout. The preamp is in the key
 /// although it does not change the fit, so one key stands for one whole correction.
-fn fit_key(eq: &EqSpec, correction: &Correction) -> Vec<u64> {
+pub fn fit_key(eq: &EqSpec, correction: &Correction) -> Vec<u64> {
     let mut key = vec![
         eq.range.to_bits(),
         eq.gain_range.0.to_bits(),
@@ -733,7 +743,7 @@ pub fn on<'a>(
         && (0..eq.bands.len()).all(|band| {
             [EqParam::Gain, EqParam::Frequency, EqParam::Q]
                 .into_iter()
-                .all(|param| eq.band_id(band, param).and_then(&step).is_some())
+                .all(|param| eq.band_id(band, param).and_then(step).is_some())
         });
     if !read {
         return On::Unread;

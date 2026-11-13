@@ -4,7 +4,7 @@
 // guest, a page whose writes are off) it is drawn `quiet` with `aria-disabled`; a tap on it still
 // reaches the core, which says why nothing happens. Pure: strings in, markup out.
 
-import { mayWrite } from '../../../core/actions.js';
+import { mayWrite } from '../../../core/write.js';
 import { esc } from './esc.js';
 
 /** The markup of a button that does `act`: `inert` for a viewer who may not write, `attrs` the rest

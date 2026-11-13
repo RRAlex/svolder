@@ -18,7 +18,8 @@ import { shelfAsks } from './shelf-asks.js';
 import { SHELF } from './words.js';
 
 /** Wire the presets of the shelf in `root` until `signal` aborts; `keep` is the shelf's count of
- * holds and `release()` gives one back once the press that closed a list is over (press.js). */
+ * holds and `release()` gives one back once the press that closed a list is over
+ * (`core.freeze.createRelease`). */
 export function wirePresets({
   root, core, live, act, view, keep, release, signal,
 }) {

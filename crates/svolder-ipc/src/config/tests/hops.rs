@@ -101,7 +101,7 @@ fn a_hop_with_an_unknown_key_or_a_taken_id_or_no_name_is_refused() {
     let twice = "[[hop]]\nname = \"X\"\nkind = \"amp\"\n[[hop]]\ndevice = \" x \"\n";
     let err = Config::parse(twice).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("already configured")),
+        matches!(&err, ConfigError::Taken { kind: "hop", .. }),
         "{err:?}"
     );
     let err = Config::parse("[[hop]]\nname = \"  \"\nkind = \"amp\"\n").unwrap_err();
@@ -153,7 +153,7 @@ fn add_hop_appends_and_refuses_a_taken_id() {
     for taken in ["HD 650", "hd 650 "] {
         let err = Config::add_hop(&path, &declared(HopKind::Speakers, taken)).unwrap_err();
         assert!(
-            matches!(&err, ConfigError::Parse(m) if m.contains("HD 650")),
+            matches!(&err, ConfigError::Taken { kind: "hop", name } if name == "HD 650"),
             "{taken:?}: {err:?}"
         );
     }
@@ -226,7 +226,7 @@ fn update_hop_keeps_its_place_and_its_comments() {
 
     let err = Config::update_hop(&path, "nobody", &linked).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("nobody")),
+        matches!(&err, ConfigError::Missing { kind: "hop", name } if name == "nobody"),
         "{err:?}"
     );
     let onto = Hop {

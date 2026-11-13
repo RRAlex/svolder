@@ -4,7 +4,6 @@
 //! What a key press or a click asks for: a write to the device, to the configuration file or
 //! to the host, or a change of the `[tui]` table.
 
-use svolder_autoeq::Entry as Measurement;
 use svolder_host::Button;
 use svolder_ipc::config::{McpConfig, MqttConfig, RefreshWeeks, WebConfig};
 use svolder_ipc::{ColorDepth, DeviceConfig, EffectsConfig, TuiConfig, TuiSetting, TuiValue};
@@ -80,14 +79,24 @@ pub enum Intent {
     /// Read the presets from the configuration file again, and the state of the computer EQ,
     /// for the preset list that has just opened.
     ReadPresets,
-    /// Fetch the AutoEq index: from the cache unless it is due again by `[autoeq]
-    /// refresh_weeks`, or at once when `refresh`.
-    AutoEqIndex {
-        /// Whether to fetch whatever the cached copy's age.
-        refresh: bool,
+    /// Ask the daemon's AutoEq service a search question. `soon` waits out a pause in the typing
+    /// first, so a burst of keys is one question.
+    AutoEqSearch {
+        /// The question.
+        ask: crate::tui::boxes::presets::search::Ask,
+        /// Whether to wait for the typing to pause.
+        soon: bool,
     },
-    /// Download this measurement's parametric EQ file.
-    AutoEqDownload(Measurement),
+    /// Have the daemon download this measurement's correction and save it as the preset `name`,
+    /// for the side `target`.
+    AutoEqImport {
+        /// The measurement (boxed: the intent rides in every key's answer).
+        variant: Box<svolder_ipc::AutoEqVariant>,
+        /// The preset's name, which no preset carries.
+        name: String,
+        /// The side of the EQ the list is for.
+        target: svolder_ipc::AutoEqTarget,
+    },
     /// Take the computer EQ off, and then load the preset of this name onto the DAC once it is.
     MoveToDac(String),
     /// Change the computer EQ: its mode or its points.

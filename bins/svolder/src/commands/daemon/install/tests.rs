@@ -78,6 +78,15 @@ async fn install_writes_both_units_for_this_machine_and_enables_them() {
         service_unit.contains("ExecStart=/opt/svolder/bin/svolderd"),
         "the service starts the daemon beside this binary: {service_unit}"
     );
+    assert!(
+        !service_unit.contains("__"),
+        "nothing was left unfilled: {service_unit}"
+    );
+    assert!(
+        service_unit.contains("RestrictAddressFamilies=")
+            && service_unit.contains("NoNewPrivileges=yes"),
+        "the sandbox reaches the written unit: {service_unit}"
+    );
     assert_eq!(
         tools.calls(),
         vec![

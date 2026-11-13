@@ -84,7 +84,7 @@ const STATE_EVERY: Duration = Duration::from_millis(100);
 const METERS_EVERY: Duration = Duration::from_secs(1);
 /// The longest a stop waits for the broker to take the last words before it disconnects
 /// regardless.
-const STOP_WITHIN: Duration = Duration::from_secs(3);
+const STOP_WITHIN: Duration = svolder_ipc::BRIDGE_STOP_BOUND.saturating_sub(Duration::from_secs(1));
 
 /// What the bridge reaches the computer's EQ through: the host's view as it changes, and the
 /// switch that turns the EQ on and off.
@@ -237,7 +237,7 @@ impl Bridge {
     /// Stop the bridge, keeping `devices`: every device it publishes that is not among them
     /// has its topics cleared as if it had been taken out of the file, then `offline` goes out
     /// for each one kept and for the bridge, and it disconnects — taking no longer than
-    /// [`STOP_WITHIN`] and a moment.
+    /// [`svolder_ipc::BRIDGE_STOP_BOUND`].
     pub async fn stop(self, devices: &[Arc<DeviceHandle>]) {
         let keep = devices
             .iter()
@@ -245,7 +245,7 @@ impl Bridge {
             .collect();
         let (done, stopped) = oneshot::channel();
         if self.ops.send(Op::Stop { keep, done }).is_ok() {
-            let _ = tokio::time::timeout(STOP_WITHIN + Duration::from_secs(1), stopped).await;
+            let _ = tokio::time::timeout(svolder_ipc::BRIDGE_STOP_BOUND, stopped).await;
         }
     }
 }

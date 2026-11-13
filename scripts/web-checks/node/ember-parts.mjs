@@ -19,7 +19,7 @@ import {
   angle, arc, LABEL_GAP, labels, point, spoke, SWEEP as DIAL_SWEEP, TICKS, ticks,
 } from '../../../bins/svolderd/web/themes/ember/draw/dial.js';
 import { curve } from '../../../bins/svolderd/web/themes/ember/draw/curve.js';
-import { xOf, yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
+import { POINTS, logFreqs, xOf, yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
 import { attr, esc } from '../../../bins/svolderd/web/themes/ember/draw/html.js';
 import { sameHtml } from './html-same.mjs';
 
@@ -282,6 +282,46 @@ ok('the_curve_draws_the_line_the_area_and_the_ghost_for_each_mode', () => {
   const unread = curve(deviceOf('dac-unread').tone);
   assert.equal(unread.ghost, null);
   assert.ok(unread.ys.split(',').every((y) => y === flatY));
+});
+
+/** The daemon's overlay on the 181 points: the target 4 dB up, the fit meeting it but for 600-1500 Hz. */
+const overlayOn = (gap) => {
+  const hzs = logFreqs(POINTS);
+  return {
+    name: 'Imp', target: hzs.map(() => 4), fit: hzs.map((hz) => (hz > 500 && hz < 2000 ? 0 : 4)),
+    gap, gap_db: 2, rms_db: 0.93, worst_db: 4, worst_hz: 1000,
+  };
+};
+const withOverlay = (name, overlay, mode) => {
+  const device = deviceOf(name);
+  return { ...device, tone: { ...device.tone, overlay, ...(mode ? { mode } : {}) } };
+};
+const toneOf = (device) => PARTS.tone(device, fixture.cases[0].page, { oob: true });
+
+ok('an_overlay_is_drawn_under_the_line_with_the_fit_in_words', () => {
+  const html = toneOf(withOverlay('dac', overlayOn([[600, 1500]])));
+  assert.equal((html.match(/<path class="gap"/g) ?? []).length, 1);
+  assert.equal((html.match(/<path class="tgt"/g) ?? []).length, 1);
+  assert.ok(html.indexOf('class="gap"') < html.indexOf('class="tgt"')
+    && html.indexOf('class="tgt"') < html.indexOf('class="line"'));
+  assert.match(html, /<span class="fitt" title="fit 0\.9 dB, worst 4\.0 dB at 1\.0 kHz\.[^"]*" aria-hidden="true">fit 0\.9 dB<\/span>/);
+  assert.match(html, /<span class="[a-z-]*sr">fit 0\.9 dB, worst 4\.0 dB at 1\.0 kHz\. The dotted line is the target; the shade is where the bands miss it by more than 2 dB\.<\/span>/);
+});
+
+ok('an_overlay_whose_misses_the_daemon_did_not_span_fills_nothing', () => {
+  const html = toneOf(withOverlay('dac', overlayOn([])));
+  assert.doesNotMatch(html, /class="gap"/);
+  assert.match(html, /class="tgt"/);
+});
+
+ok('no_overlay_and_a_mode_that_is_not_eq_draw_none', () => {
+  const plain = toneOf(deviceOf('dac'));
+  assert.doesNotMatch(plain, /class="gap"|class="tgt"|fitt/);
+  assert.equal(curve(deviceOf('dac').tone).overlay, null);
+  for (const mode of ['flat', 'loudness']) {
+    const html = toneOf(withOverlay('dac', overlayOn([[600, 1500]]), mode));
+    assert.doesNotMatch(html, /class="gap"|class="tgt"|fitt/);
+  }
 });
 
 for (const c of fixture.cases) {
@@ -713,39 +753,33 @@ ok('an_active_fault_is_in_the_card_and_never_in_controls', () => {
   assert.ok(drawn('fault', 'card').includes('<li>'));
 });
 
-ok('facts_list_every_reading_named_or_not', () => {
-  const facts = deviceOf('dac-facts-heard').facts;
-  const rows = [
-    { id: '2', label: 'Input', value: '3 (Optical)', heard_at_ms: 1700000093000 },
-    { id: '210.2.2', label: '?', value: '9', heard_at_ms: 1700000040000 },
-  ];
-  const html = drawn('dac-facts-heard', 'facts', { facts: { ...facts, rows } });
-  assert.ok(html.includes('data-now="1700000100000"'), html);
-  assert.ok(html.includes('data-heard-at="1700000093000"'), html);
-  assert.ok(html.includes('>210.2.2<') && html.includes('>?<'), html);
-});
-
 ok('the_passphrase_never_reaches_a_remote_view_in_the_facts', () => {
   for (const c of fixture.cases.filter((x) => x.page.device)) {
     assert.ok(!drawn(c.name, 'facts').includes('>250<'), c.name);
   }
 });
 
-ok('facts_show_firmware_and_dsp_when_read_and_dash_when_not', () => {
+ok('the_device_fold_out_holds_no_fact_and_no_identify_the_device_page_has_them', () => {
   const facts = deviceOf('dac').facts;
-  const read = drawn('dac', 'facts', { facts: { ...facts, firmware: '11', dsp: 4 } });
-  assert.ok(read.includes('<dd>11</dd>') && read.includes('<dd>4</dd>'), read);
-  const unread = drawn('dac', 'facts', { facts: { ...facts, firmware: '3 (advertised)', dsp: null } });
-  assert.ok(unread.includes('<dt>DSP</dt><dd>—</dd>'), unread);
+  for (const name of ['dac', 'dac-guest', 'amp', 'dac-facts-heard']) {
+    const html = drawn(name, 'facts');
+    for (const word of [facts.firmware, facts.unit, 'Product', 'Firmware', 'All readings',
+      'Identify', 'data-identify', '<table']) {
+      assert.ok(!html.includes(word), `${name}: ${word}`);
+    }
+  }
 });
 
-ok('facts_say_the_device_the_link_and_the_signal', () => {
-  const guest = drawn('dac-guest', 'facts');
-  const { unit } = deviceOf('dac').facts;
-  assert.ok(unit && !guest.includes(unit), 'a guest sees no unit id');
-  assert.ok(!guest.includes('Passphrase'), guest);
-  assert.ok(guest.includes('data-identify') && guest.includes('aria-disabled="true"'), guest);
-  assert.ok(drawn('dac', 'facts').includes(unit));
+ok('the_fold_out_ends_in_device_settings_or_for_a_reader_device', () => {
+  const html = drawn('dac', 'facts');
+  assert.ok(html.includes('data-device-settings') && html.includes('Device settings…'), html);
+  for (const name of ['dac-guest', 'dac-readonly', 'amp-guest']) {
+    const foot = drawn(name, 'facts');
+    assert.ok(foot.includes('data-device-settings') && foot.includes('>Devices…<'), name);
+    assert.ok(!foot.includes('Device settings'), `${name}: a reader's foot has the other word`);
+    assert.ok(!foot.includes(' hidden'), `${name}: the disclosure holds the foot, so it is shown`);
+  }
+  assert.ok(!drawn('dac', 'facts').includes(' hidden'), 'a writer\'s fold-out is shown');
 });
 
 ok('facts_are_closed_by_default', () => {
@@ -754,29 +788,6 @@ ok('facts_are_closed_by_default', () => {
   assert.ok(!html.includes(' open'), html);
   assert.ok(screenOf('dac').includes('id="part-facts"'));
   assert.ok(screenOf('amp').includes('id="part-facts"'));
-});
-
-ok('a_profile_that_offers_no_identify_has_no_identify_button', () => {
-  const facts = deviceOf('dac').facts;
-  const none = drawn('dac', 'facts', { facts: { ...facts, identify_offered: false } });
-  assert.ok(!none.includes('data-identify') && !none.includes('Identify'), none);
-  assert.ok(drawn('dac', 'facts').includes('data-identify'));
-});
-
-ok('the_identify_button_carries_the_daemons_gap', () => {
-  const gap = deviceOf('dac').facts.identify_gap_secs;
-  assert.ok(drawn('dac', 'facts').includes(`data-gap="${gap}"`));
-});
-
-ok('facts_escape_what_a_label_and_a_value_say', () => {
-  const facts = deviceOf('dac').facts;
-  const rows = [{
-    id: '2', label: '<script>alert("x")</script>', value: '<img src=x onerror="y">', heard_at_ms: null,
-  }];
-  const html = drawn('dac', 'facts', { facts: { ...facts, rows } });
-  assert.ok(!html.includes('<script>') && !html.includes('<img'), html);
-  assert.ok(html.includes('&lt;script&gt;') && html.includes('&lt;img'), html);
-  assert.ok(html.includes('onerror=&quot;y&quot;') && !html.includes('onerror="y"'), html);
 });
 
 ok('a_loki_max_screen_has_device_presets_and_no_tone_presets', () => {
@@ -955,38 +966,27 @@ ok('the_keys_are_offered_to_a_viewer_who_may_write', () => {
   assert.equal(bodyClass(writer), 'writes');
   for (const wanted of [
     '<p class="kh2" aria-hidden="true">',
-    '<div class="keys" id="keys" hidden>',
-    '<dt><kbd>A</kbd></dt><dd>Arrange sections</dd>',
-    '<dt><kbd>T</kbd></dt><dd>Themes</dd>',
-    '<dt><kbd>Space</kbd></dt><dd>Play or pause</dd>',
-    '<dt><kbd>?</kbd></dt><dd>This list</dd>',
-    '<dd>Centre the balance</dd>',
+    '<kbd>m</kbd> mute',
+    '<kbd>?</kbd> keys</p>',
   ]) {
     assert.ok(html.includes(wanted), wanted);
   }
+  // the shell holds no key list: `?` opens the Help popup, which lists the keys
+  assert.ok(!html.includes('id="keys"') && !html.includes('<dl>'), 'no key card in the shell');
   for (const name of [readOnlyCase, guestCase]) {
     const page = caseOf(name).page;
     const keys = shell(page, WORDMARK);
     assert.notEqual(bodyClass(page), 'writes', name);
-    for (const absent of ['<dd>Centre the balance</dd>', '<dd>Volume one step</dd>', '<dd>Tone control to Flat</dd>']) {
+    for (const absent of ['<kbd>m</kbd> mute', 'id="keys"', '<dl>']) {
       assert.ok(!keys.includes(absent), `${name}: ${absent}`);
     }
-    for (const wanted of [
-      '<div class="keys" id="keys" hidden>',
-      '<kbd>v</kbd></dt><dd class="kviz">The visualizer\'s look</dd>',
-      '<dt><kbd>A</kbd></dt><dd>Arrange sections</dd>',
-      '<dt><kbd>T</kbd></dt><dd>Themes</dd>',
-      '<dt><kbd>?</kbd></dt><dd>This list</dd>',
-      '<p class="kh2" aria-hidden="true"><kbd>?</kbd> keys</p>',
-    ]) {
-      assert.ok(keys.includes(wanted), `${name}: ${wanted}`);
-    }
+    assert.ok(keys.includes('<p class="kh2" aria-hidden="true"><kbd>?</kbd> keys</p>'), name);
   }
 });
 
 // ------------------------------------------------------------------------ the computer's side
 
-const { ROWS_SHOWN, createComputer, createHolds } = await import('../../../bins/svolderd/web/core/computer.js');
+const { ROWS_SHOWN, createComputer, createPending } = await import('../../../bins/svolderd/web/core/computer.js');
 const { createStore } = await import('../../../bins/svolderd/web/core/store.js');
 const { switchPill, pointWords } = await import('../../../bins/svolderd/web/themes/ember/draw/computer.js');
 
@@ -1022,8 +1022,8 @@ function viewOf(name, { side = 'computer', computer = computerModel(), guest = f
     : fixture.cases.find((c) => c.name === name);
   const page = { ...base.page, host: computer === null ? null : { track: null, route: null, computer } };
   const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
-  const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
-  const core = createComputer({ store, storage: memory(), holds });
+  const pending = createPending({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
+  const core = createComputer({ store, storage: memory(), pending });
   core.flip(side);
   return { page, view: core.view(), core, store };
 }
@@ -1059,7 +1059,7 @@ ok('no_pill_without_a_dac_or_the_computer', () => {
   const noDevice = fixture.cases.find((c) => !c.page.device);
   const store = createStore({ ...noDevice.page, host: { track: null, route: null, computer: computerModel() } },
     { signedOut: () => {}, fetch: async () => ({}) });
-  const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({}) }) });
+  const core = createComputer({ store, storage: memory(), pending: createPending({ store, fetch: async () => ({}) }) });
   assert.equal(core.view(), null);
 });
 

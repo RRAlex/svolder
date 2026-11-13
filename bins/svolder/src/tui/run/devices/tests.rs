@@ -202,12 +202,14 @@ async fn asking_the_daemon_again_takes_its_rows_and_keeps_the_ones_it_does_not_l
     );
     watching.close().await;
 }
-/// An edited device is written through the configuration writer, the daemon holding the
-/// devices is told to read the file again, and the list is drawn from what is on disk.
+/// An edited device is the daemon's write (an op that rewrites the file it reads), and the list
+/// and the editor's records are then the daemon's view of the devices, which never carries a
+/// passphrase but its kind.
 #[tokio::test]
-async fn an_edited_device_is_written_to_the_file_and_the_daemon_told() {
+async fn an_edited_device_is_written_by_the_daemon_and_the_list_is_its_view() {
     let daemon = stub_daemon().await;
     let path = config_naming(&["gungnir", "bifrost"]);
+    daemon.applies_device_ops_to(&path);
     let opener = opener_on(path.clone(), never_opens());
     let backend = Backend::stub_remote(&daemon.socket).await;
     let mut app = app_for(&backend);
@@ -235,8 +237,8 @@ async fn an_edited_device_is_written_to_the_file_and_the_daemon_told() {
         "the file was not rewritten"
     );
     assert_eq!(
-        watching.app.devices.configured[0].passphrase, "1234",
-        "the editor's own view is not what the file says"
+        watching.app.devices.configured[0].passphrase, "set",
+        "the editor's records are not the daemon's view (a code is only its kind)"
     );
     assert_eq!(
         watching
@@ -247,7 +249,7 @@ async fn an_edited_device_is_written_to_the_file_and_the_daemon_told() {
             .map(|row| row.name.clone())
             .collect::<Vec<_>>(),
         ["dac", "bifrost"],
-        "the list is not what the file says"
+        "the list is not the daemon's view"
     );
     assert_eq!(daemon.reloads(), 1, "the daemon was not told to reload");
     assert_eq!(
@@ -479,13 +481,13 @@ async fn reading_the_file_again_moves_only_the_device_lists_own_cursor() {
     backend.close().await;
     let path = config_naming(&["gungnir"]);
     app.show(Screen::Device);
-    app.selected = 4;
+    app.set_selected(4);
     relisted(&path, &mut app).expect("the file reads");
-    assert_eq!(app.selected, 4, "the Controls pane's cursor moved");
+    assert_eq!(app.selected(), 4, "the Controls pane's cursor moved");
     app.show(Screen::Devices);
-    app.selected = 4;
+    app.set_selected(4);
     relisted(&path, &mut app).expect("the file reads");
-    assert_eq!(app.selected, 0, "the list's cursor is past its one row");
+    assert_eq!(app.selected(), 0, "the list's cursor is past its one row");
 }
 /// A write the file refuses is a notice on the key line: nothing crashes, and nothing is
 /// quietly dropped.
@@ -725,6 +727,41 @@ async fn removing_the_watched_device_switches_to_what_is_left() {
     assert_eq!(watching.app.screen, Screen::Device);
     watching.close().await;
 }
+/// A reload a Settings write still owes is carried over a switch to another device, not dropped
+/// with the watching it was owed on.
+#[tokio::test(start_paused = true)]
+async fn a_reload_owed_by_a_settings_write_survives_a_switch_of_device() {
+    let (backend, gate, app) = fake(SHORT_DEADLINE).await;
+    let path = config_naming(&["gungnir", "bifrost"]);
+    let log: Log = Log::default();
+    let opener = opener_on(
+        path.clone(),
+        fake_open(Arc::clone(&log), Arc::clone(&gate), &[]),
+    );
+    let mut watching = watching(backend, app, Some("gungnir"));
+    let _ = relisted(&path, &mut watching.app);
+    super::super::look::reload_soon(&mut watching, &path);
+
+    let mut mouse = SpyMouse::default();
+    let flow = take_intent(
+        Intent::SwitchDevice("bifrost".into()),
+        &opener,
+        watching,
+        &mut mouse,
+        &mut look(),
+        &mut (),
+    )
+    .await;
+    let watching = carried_on(flow);
+
+    assert_eq!(opens(&log), vec![(Some("bifrost".to_string()), true)]);
+    let owed = watching
+        .reload_owed
+        .as_ref()
+        .expect("the reload is still owed");
+    assert_eq!(owed.1, path);
+    watching.close().await;
+}
 /// A run started without `-d` is on whichever device the configuration picked, and the
 /// backend is what says which one that is: removing it switches to the device still
 /// configured, exactly as removing a device named on the command line does.
@@ -784,6 +821,7 @@ async fn renaming_the_watched_device_reopens_it_under_its_new_name() {
     let daemon = stub_daemon().await;
     let path = config_naming(&["fake"]);
     Config::set_default_device(&path, Some("fake")).expect("the default is written");
+    daemon.applies_device_ops_to(&path);
     let (spare, gate, _) = fake(SHORT_DEADLINE).await;
     spare.close().await;
     let log: Log = Log::default();
@@ -1882,31 +1920,28 @@ async fn carried_all<O: Open>(
     watching
 }
 
-/// The preset list's AutoEq search and the computer's recall through the loop with a fake
-/// network and a fake host: the intents start jobs, the jobs' ends come back the way the loop's own arm takes them,
-/// and the import lands in the configuration file as an imported preset, unloaded.
+/// The preset list's AutoEq search and import through the loop, with a stub
+/// daemon that serves AutoEq: the intents start tasks, the tasks' ends come back the way the
+/// loop's own arm takes them, and the daemon's import lands in the configuration file as an
+/// imported preset, unloaded, which the loop then reads again.
 #[tokio::test]
-async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through_the_loop() {
+async fn the_preset_list_imports_from_autoeq_through_the_loop() {
     use crossterm::event::{KeyCode, KeyEvent};
 
-    use crate::tui::run::jobs::{Jobs, next};
-    use crate::tui::run::test_support::FakeHands;
+    use crate::tui::run::jobs::next;
+    use crate::tui::run::test_support::on_a_daemon;
 
-    let hands = Arc::new(FakeHands {
-        index_lines: Some(vec![
-            "- [Sennheiser HD 650](./oratory1990/over-ear/Sennheiser%20HD%20650) by oratory1990"
-                .into(),
-        ]),
-        text: Some("Preamp: -3.0 dB\nFilter 1: ON PK Fc 1000 Hz Gain 2.0 dB Q 1.0\n".into()),
-        ..FakeHands::default()
-    });
-    let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
-    let path = config_naming(&["gungnir"]);
+    let (daemon, path, mut watching) = on_a_daemon().await;
+    daemon.autoeq().index(&[
+        "- [Sennheiser HD 650](./oratory1990/over-ear/Sennheiser%20HD%20650) by oratory1990",
+    ]);
+    daemon.autoeq().saves("Sennheiser HD 650", 1);
+    daemon.autoeq().writes_into(
+        path.clone(),
+        "Preamp: -3.0 dB\nFilter 1: ON PK Fc 1000 Hz Gain 2.0 dB Q 1.0\n",
+    );
     let opener = opener_on(path.clone(), never_opens());
-    let _ = relisted(&path, &mut app);
-    app.show(Screen::Tone);
-    let mut watching = watching(backend, app, None);
-    watching.jobs = Jobs::over(hands.clone());
+    watching.app.show(Screen::Tone);
 
     let press = async |mut watching: Watching, code: KeyCode| {
         let intents = watching.app.key(KeyEvent::from(code));
@@ -1915,13 +1950,24 @@ async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through
     for code in [KeyCode::Char('p'), KeyCode::Char('a')] {
         watching = press(watching, code).await;
     }
-    // The index job ends; its answer is folded in where the loop's arm folds it.
+    // The first question, sent at once, ends; its answer is folded in where the loop's arm
+    // folds it.
     let done = next(&mut watching.jobs.ended).await;
     let intents = presets::done(&mut watching.app, done);
     watching = carried_all(intents, &opener, watching).await;
+    // Every key asks, and the loop sends only the last question once the typing pauses.
     for letter in "hd650".chars() {
         watching = press(watching, KeyCode::Char(letter)).await;
     }
+    assert_eq!(daemon.autoeq().searches(), [(String::new(), false)]);
+    watching.jobs.send_due();
+    let done = next(&mut watching.jobs.ended).await;
+    let intents = presets::done(&mut watching.app, done);
+    watching = carried_all(intents, &opener, watching).await;
+    assert_eq!(
+        daemon.autoeq().searches(),
+        [(String::new(), false), ("hd650".to_string(), false)]
+    );
     watching = press(watching, KeyCode::Enter).await;
     let done = next(&mut watching.jobs.ended).await;
     let intents = presets::done(&mut watching.app, done);
@@ -1944,6 +1990,38 @@ async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through
         "the import was loaded"
     );
 
+    watching.close().await;
+}
+
+/// An imported preset on the computer's side: `Enter` sends it to the loop's own controller, whose
+/// view names it as the one on the computer.
+#[tokio::test]
+async fn an_imported_preset_goes_to_the_computer_through_the_loop() {
+    use crossterm::event::{KeyCode, KeyEvent};
+
+    let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
+    let path = config_naming(&["gungnir"]);
+    let kept = svolder_profiles::tone::preset::Preset::imported(
+        "Sennheiser HD 650",
+        svolder_profiles::tone::preset::Imported {
+            origin: Some("AutoEq · oratory1990 · over-ear".into()),
+            correction: svolder_profiles::tone::apo::parse(
+                "Preamp: -3.0 dB\nFilter 1: ON PK Fc 1000 Hz Gain 2.0 dB Q 1.0\n",
+            )
+            .expect("the correction parses")
+            .correction,
+        },
+    );
+    Config::add_preset(&path, &kept).expect("the scratch config takes the preset");
+    let opener = opener_on(path.clone(), never_opens());
+    let _ = relisted(&path, &mut app);
+    app.show(Screen::Tone);
+    let mut watching = watching(backend, app, None);
+    let press = async |mut watching: Watching, code: KeyCode| {
+        let intents = watching.app.key(KeyEvent::from(code));
+        carried_all(intents, &opener, watching).await
+    };
+
     // On the computer's side `Enter` on it sends it to the loop's own controller, whose view
     // names it as the one on the computer.
     let chain = Arc::new(svolder_host::fake::FakeChain::new());
@@ -1955,7 +2033,6 @@ async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through
         ),
     ));
     watching.app.host.computer.eq = watching.computer.view().map(Box::new);
-    watching = press(watching, KeyCode::Esc).await;
     watching = press(watching, KeyCode::Char('C')).await;
     assert!(watching.app.on_computer());
     watching = press(watching, KeyCode::Char('p')).await;
@@ -1983,6 +2060,101 @@ async fn the_preset_list_imports_from_autoeq_and_puts_it_on_the_computer_through
     watching.close().await;
 }
 
+/// A search the daemon is slow to answer (it may be fetching AutoEq's index, 10 to 60 s) holds
+/// nothing of the loop: the intent returns at once, keys go on being taken meanwhile, and the
+/// answer arrives when the daemon gives it.
+#[tokio::test]
+async fn a_slow_search_never_holds_the_loop() {
+    use crossterm::event::{KeyCode, KeyEvent};
+
+    use crate::tui::run::jobs::next;
+    use crate::tui::run::test_support::on_a_daemon;
+
+    let (daemon, path, mut watching) = on_a_daemon().await;
+    daemon.autoeq().index(&[
+        "- [Sennheiser HD 650](./oratory1990/over-ear/Sennheiser%20HD%20650) by oratory1990",
+    ]);
+    daemon.autoeq().holds_searches();
+    let opener = opener_on(path, never_opens());
+    watching.app.show(Screen::Tone);
+
+    for code in [KeyCode::Char('p'), KeyCode::Char('a'), KeyCode::Char('h')] {
+        let intents = watching.app.key(KeyEvent::from(code));
+        watching = carried_all(intents, &opener, watching).await;
+    }
+    assert!(
+        presets::search::showing(&watching.app),
+        "the box is up while the daemon is still working"
+    );
+    assert!(watching.jobs.ended.try_recv().is_err());
+
+    daemon.autoeq().lets_searches_go();
+    let done = next(&mut watching.jobs.ended).await;
+    assert!(matches!(done, presets::Done::Searched(..)));
+    watching.close().await;
+}
+
+/// Leaving the search box leaves no question behind it: `Esc` within the pause sends nothing, and
+/// the question already in flight is stopped, as the loop settles it each turn.
+#[tokio::test]
+async fn leaving_the_search_box_drops_its_questions() {
+    use crossterm::event::{KeyCode, KeyEvent};
+
+    let (daemon, path, mut watching) = crate::tui::run::test_support::on_a_daemon().await;
+    daemon.autoeq().index(&[
+        "- [Sennheiser HD 650](./oratory1990/over-ear/Sennheiser%20HD%20650) by oratory1990",
+    ]);
+    daemon.autoeq().holds_searches();
+    let opener = opener_on(path, never_opens());
+    watching.app.show(Screen::Tone);
+    for code in [KeyCode::Char('p'), KeyCode::Char('a'), KeyCode::Char('h')] {
+        let intents = watching.app.key(KeyEvent::from(code));
+        watching = carried_all(intents, &opener, watching).await;
+    }
+    assert!(
+        watching.jobs.due_at().is_some(),
+        "a question waits for the typing"
+    );
+    assert!(
+        watching.jobs.is_searching(),
+        "the opening question is held by the daemon"
+    );
+    // While the box shows, the loop leaves them be.
+    watching.settle_search();
+    assert!(watching.jobs.due_at().is_some());
+    assert!(watching.jobs.is_searching());
+
+    let intents = watching.app.key(KeyEvent::from(KeyCode::Esc));
+    watching = carried_all(intents, &opener, watching).await;
+    watching.settle_search();
+    assert!(
+        watching.jobs.due_at().is_none(),
+        "the waiting question outlived the box"
+    );
+    // An aborted task ends at its next poll.
+    tokio::task::yield_now().await;
+    assert!(
+        !watching.jobs.is_searching(),
+        "the question in flight outlived the box"
+    );
+    watching.jobs.send_due();
+    daemon.autoeq().lets_searches_go();
+    tokio::task::yield_now().await;
+    assert!(
+        watching.jobs.ended.try_recv().is_err(),
+        "an answer came for a box that is gone"
+    );
+    // The typed question never reached the daemon (the opening one may have, or been stopped).
+    assert!(
+        daemon
+            .autoeq()
+            .searches()
+            .iter()
+            .all(|(query, _)| query.is_empty())
+    );
+    watching.close().await;
+}
+
 /// The toast the loop is showing, if any.
 fn toast_of(watching: &Watching) -> Option<String> {
     watching.app.toast().map(|toast| toast.text.clone())
@@ -1999,6 +2171,7 @@ async fn saving_a_passphrase_the_daemon_judges_a_mismatch_says_so_at_once() {
 
     let daemon = stub_daemon().await;
     let path = config_naming(&[CANONICAL, OTHER]);
+    daemon.applies_device_ops_to(&path);
     let opener = opener_on(path.clone(), never_opens());
     let backend = Backend::stub_remote(&daemon.socket).await;
     let app = app_for(&backend);
@@ -2146,6 +2319,7 @@ async fn a_reopen_over_a_daemon_seeds_the_graphs_from_its_readings() {
         }],
         recalls: Vec::new(),
         link: Vec::new(),
+        signal: Vec::new(),
     });
     let (spare, gate, _) = fake(SHORT_DEADLINE).await;
     spare.close().await;
@@ -2190,6 +2364,7 @@ async fn a_reopen_that_carries_the_histories_does_not_seed_them_again() {
         }],
         recalls: Vec::new(),
         link: Vec::new(),
+        signal: Vec::new(),
     });
     let (spare, gate, mut old) = fake(SHORT_DEADLINE).await;
     spare.close().await;
@@ -2242,5 +2417,372 @@ async fn the_header_follows_the_daemons_recall_memory() {
     .expect("a recalled update");
     watching.app.apply(Update::Recalled(update), Instant::now());
     assert_eq!(watching.app.presets.loaded_preset.as_deref(), Some("Bass"));
+    watching.close().await;
+}
+
+/// While a daemon runs the editor's save, a removal and a default go to it as `device_config`
+/// ops, never into the file by this side; clearing the default is its own op.
+#[tokio::test]
+async fn device_writes_go_to_the_daemon_as_ops_while_one_runs() {
+    use svolder_ipc::DeviceConfigOp;
+
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir", "bifrost"]);
+    // No file is named for the daemon: an op it takes changes nothing here.
+    daemon.lists_features(&["device_crud"]);
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, Some("bifrost"));
+    let _ = relisted(&path, &mut watching.app);
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let edited = DeviceConfig {
+        name: "dac".into(),
+        passphrase: "1234".into(),
+        ..device_config("gungnir", 0)
+    };
+    for intent in [
+        Intent::UpdateDevice("gungnir".into(), edited),
+        Intent::DefaultDevice(Some("bifrost".into())),
+        Intent::DefaultDevice(None),
+        Intent::RemoveDevice("bifrost".into()),
+    ] {
+        watching = carried_on(taken(intent, &opener, watching).await);
+    }
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "the file was written behind the daemon"
+    );
+    let ops = daemon.device_ops();
+    assert_eq!(ops.len(), 4, "{ops:?}");
+    assert!(matches!(&ops[0], DeviceConfigOp::Update { device, .. } if device == "gungnir"));
+    assert!(matches!(&ops[1], DeviceConfigOp::SetDefault { device } if device == "bifrost"));
+    assert_eq!(ops[2], DeviceConfigOp::ClearDefault);
+    assert!(matches!(&ops[3], DeviceConfigOp::Remove { device } if device == "bifrost"));
+    watching.close().await;
+}
+
+/// A refusal is worded from its typed reason and says nothing of a passphrase; a daemon that
+/// has no `device_crud` is told to restart and nothing is written behind it.
+#[tokio::test]
+async fn a_refused_device_write_is_worded_and_an_old_daemon_is_never_written_around() {
+    use svolder_ipc::{CODE_USAGE, Reason};
+
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir"]);
+    let before = std::fs::read_to_string(&path).unwrap();
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, Some("gungnir"));
+    let _ = relisted(&path, &mut watching.app);
+
+    // A daemon that lists no device_crud.
+    let remove = Intent::RemoveDevice("gungnir".into());
+    watching = carried_on(taken(remove.clone(), &opener, watching).await);
+    assert!(
+        toast_of(&watching).is_some_and(|text| text.contains("cannot edit the devices")),
+        "{:?}",
+        toast_of(&watching)
+    );
+    assert_eq!(
+        watching.app.notices.advice.as_deref(),
+        Some("Run `svolder daemon restart`")
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+    for (reason, words) in [
+        (Reason::Taken, "another device already has that name"),
+        (Reason::Missing, "no longer configured"),
+        (Reason::FileBusy, "busy with another writer"),
+        (Reason::Stopping, "the daemon is stopping"),
+    ] {
+        daemon.refuses_device_ops(Response::error(CODE_USAGE, "x").with_reason(reason));
+        watching.app.dismiss_toast();
+        watching = carried_on(taken(remove.clone(), &opener, watching).await);
+        assert!(
+            toast_of(&watching).is_some_and(|text| text.contains(words)),
+            "{reason:?}: {:?}",
+            toast_of(&watching)
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    watching.close().await;
+}
+
+/// A save sends only what the person changed: a code another front end wrote since this session
+/// read the file is not sent back with a rename, and the file keeps it.
+#[tokio::test]
+async fn a_rename_sends_the_name_alone_and_leaves_a_newer_passphrase_be() {
+    use svolder_ipc::DeviceConfigOp;
+
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir", "bifrost"]);
+    daemon.applies_device_ops_to(&path);
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, Some("bifrost"));
+    let _ = relisted(&path, &mut watching.app);
+
+    // Another front end changes the code after this session read the file.
+    let mut newer = device_config("gungnir", 0);
+    newer.passphrase = "4821".into();
+    Config::update_device(&path, "gungnir", &newer).expect("the other front end writes");
+
+    let renamed = DeviceConfig {
+        name: "dac".into(),
+        ..watching.app.devices.configured[0].clone()
+    };
+    let watching = carried_on(
+        taken(
+            Intent::UpdateDevice("gungnir".into(), renamed),
+            &opener,
+            watching,
+        )
+        .await,
+    );
+    assert_eq!(
+        daemon.device_ops(),
+        [DeviceConfigOp::Update {
+            device: "gungnir".into(),
+            name: Some("dac".into()),
+            profile: None,
+            passphrase: None,
+        }]
+    );
+    let written = Config::load_from(&path).unwrap();
+    assert_eq!(written.devices[0].name, "dac");
+    assert_eq!(
+        written.devices[0].passphrase, "4821",
+        "the newer code was written back"
+    );
+    watching.close().await;
+}
+
+/// A device whose code the daemon holds opens the editor on a code with no digits, and saving
+/// without touching that row sends no passphrase; typing one does.
+#[tokio::test]
+async fn an_untouched_code_the_daemon_holds_is_not_sent_back() {
+    use crate::tui::boxes::editor;
+    use crossterm::event::KeyCode;
+
+    let daemon = stub_daemon().await;
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let mut app = app_for(&backend);
+    app.devices.configured = vec![DeviceConfig {
+        passphrase: "set".into(),
+        ..device_config("gungnir", 0)
+    }];
+    app.devices.rows = vec![crate::backend::DeviceRow {
+        name: "gungnir".into(),
+        ..Default::default()
+    }];
+    editor::open(&mut app);
+    let intents = editor::key(&mut app, KeyCode::Enter);
+    let [Intent::UpdateDevice(_, device)] = intents.as_slice() else {
+        panic!("the save did not ask for one update: {intents:?}");
+    };
+    assert_eq!(device.passphrase, "set", "an untouched code was replaced");
+    backend.close().await;
+}
+
+/// The daemon's view replaces what the file said: a device only the daemon has is listed and
+/// can be edited, one it does not have is gone, and the default follows its flag.
+#[tokio::test]
+async fn the_daemons_view_is_the_list_and_the_editors_records() {
+    use svolder_ipc::{ConfiguredDevice, PassphraseKind};
+
+    let (backend, _gate) = Backend::fake(SHORT_DEADLINE).await;
+    let mut app = app_for(&backend);
+    app.devices.configured = vec![device_config("only-in-my-file", 0)];
+    app.devices.rows = vec![crate::backend::DeviceRow {
+        name: "only-in-my-file".into(),
+        ..Default::default()
+    }];
+    let view = |name: &str, unit: &str, default: bool| ConfiguredDevice {
+        unit: unit.into(),
+        name: name.into(),
+        profile: Some("bifrost3".into()),
+        passphrase: PassphraseKind::Set,
+        default,
+        connected: true,
+        not_connected_since_ms: None,
+    };
+    apply_view(
+        &mut app,
+        &[
+            view("desk", "0A0B0C0D0E0F1011", false),
+            view("amp", "0A0B0C0D0E0F1012", true),
+        ],
+    );
+    let names: Vec<_> = app
+        .devices
+        .rows
+        .iter()
+        .map(|row| row.name.as_str())
+        .collect();
+    assert_eq!(names, ["desk", "amp"]);
+    assert_eq!(app.devices.default_device.as_deref(), Some("amp"));
+    assert_eq!(app.devices.configured[0].passphrase, "set");
+    assert_eq!(
+        app.devices.configured[0].profile.as_deref(),
+        Some("bifrost3")
+    );
+    backend.close().await;
+}
+
+/// The daemon's list is asked in a task and taken once it has answered: the call that starts the
+/// ask returns at once, the next one that finds it answered applies it, and a daemon that cannot
+/// list is not asked again.
+#[tokio::test]
+async fn the_daemons_list_is_asked_in_a_task_and_taken_when_it_answers() {
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir", "bifrost"]);
+    daemon.applies_device_ops_to(&path);
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, Some("bifrost"));
+
+    super::take_view(&mut watching);
+    assert!(watching.view_ask.is_some(), "the ask was not started");
+    assert!(
+        watching.app.devices.rows.is_empty(),
+        "the list was taken before an answer"
+    );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while watching
+            .view_ask
+            .as_ref()
+            .is_some_and(|ask| !ask.is_finished())
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the ask answers");
+    super::take_view(&mut watching);
+    let names: Vec<_> = watching
+        .app
+        .devices
+        .rows
+        .iter()
+        .map(|row| row.name.as_str())
+        .collect();
+    assert_eq!(names, ["gungnir", "bifrost"]);
+
+    // A daemon without `device_crud` answers once, and is not asked again.
+    daemon.lists_features(&[]);
+    super::take_view(&mut watching);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while watching
+            .view_ask
+            .as_ref()
+            .is_some_and(|ask| !ask.is_finished())
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the ask answers");
+    super::take_view(&mut watching);
+    assert!(watching.view_off);
+    assert!(watching.view_ask.is_none());
+    watching.close().await;
+}
+
+/// A save is measured against the record the editor opened on, not against the list as the
+/// daemon's view refreshed it since: a code another front end set while the editor was open is
+/// not sent back as the old `auto`.
+#[tokio::test]
+async fn a_save_is_measured_against_the_record_the_editor_opened_on() {
+    use crate::tui::boxes::editor;
+    use crossterm::event::KeyCode;
+    use svolder_ipc::{ConfiguredDevice, DeviceConfigOp, PassphraseKind};
+
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&["device_crud"]);
+    let path = config_naming(&["gungnir"]);
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, Some("gungnir"));
+    let _ = relisted(&path, &mut watching.app);
+    watching.app.set_selected(0);
+    editor::open(&mut watching.app);
+    // Another front end sets a code while the editor is open; the list is refreshed.
+    super::apply_view(
+        &mut watching.app,
+        &[ConfiguredDevice {
+            unit: "0102030405060700".into(),
+            name: "gungnir".into(),
+            profile: None,
+            passphrase: PassphraseKind::Set,
+            default: false,
+            connected: true,
+            not_connected_since_ms: None,
+        }],
+    );
+    let intents = editor::key(&mut watching.app, KeyCode::Enter);
+    let [Intent::UpdateDevice(name, device)] = intents.as_slice() else {
+        panic!("the save did not ask for one update: {intents:?}");
+    };
+    let renamed = DeviceConfig {
+        name: "dac".into(),
+        ..device.clone()
+    };
+    let watching = carried_on(
+        taken(
+            Intent::UpdateDevice(name.clone(), renamed),
+            &opener,
+            watching,
+        )
+        .await,
+    );
+    let ops = daemon.device_ops();
+    assert!(
+        matches!(
+            &ops[..],
+            [DeviceConfigOp::Update {
+                passphrase: None,
+                ..
+            }]
+        ),
+        "{ops:?}"
+    );
+    watching.close().await;
+}
+
+/// One failed ask (the file busy, a daemon restarting) is tried again at the next relist: only a
+/// daemon without `device_crud` turns the list off.
+#[tokio::test]
+async fn a_failed_list_ask_is_tried_again_at_the_next_relist() {
+    use svolder_ipc::{CODE_USAGE, Reason, Response};
+
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir"]);
+    daemon.applies_device_ops_to(&path);
+    daemon.refuses_device_ops(Response::error(CODE_USAGE, "busy").with_reason(Reason::FileBusy));
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, Some("gungnir"));
+
+    super::take_view(&mut watching);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while watching
+            .view_ask
+            .as_ref()
+            .is_some_and(|ask| !ask.is_finished())
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the ask answers");
+    super::take_view(&mut watching);
+    assert!(!watching.view_off, "one failed ask turned the list off");
+    assert!(watching.view_ask.is_some(), "no new ask was started");
     watching.close().await;
 }

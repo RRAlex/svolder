@@ -15,18 +15,42 @@
 // stream opens a new stream at once, and nothing the old stream still carried reaches the page. A
 // page that is waiting keeps waiting through such a switch, for the new device's first reading.
 //
-// The state ('open', 'lost', 'resting', 'waiting') lives in the store; the body's `lost` and
-// `waking` classes and the document's `svolder-lost` event follow it.
+// More than one owner can ask the stream for feeds: the theme mounted, and each popup that shows
+// devices live. Each owner `want`s its `needs` (the words of STREAM_NEEDS) and the devices it
+// `follow`s, and the stream's address is the union of every owner's wants; it opens afresh only
+// when the union changes, under the rules above, and an owner that leaves (`release`) takes only
+// its own wants with it.
+//
+// The state ('open', 'lost', 'resting', 'waiting') is the page's, not a device's, and lives in the
+// store; the body's `lost` and `waking` classes and the document's `svolder-lost` event follow it.
 
 import { pageShown } from './visible.js';
+
+/** The card the daemon gives a page whose configuration names no device (web/view.rs `no_devices`):
+ * the page shows it as it does at a load, when the last device goes while it is open. */
+const NO_DEVICES = Object.freeze({
+  kind: 'dim',
+  title: 'No devices',
+  detail: 'No devices yet. `svolder setup` adds one.',
+  spans: [{ code: false, text: 'No devices yet. ' }, { code: true, text: 'svolder setup' },
+    { code: false, text: ' adds one.' }],
+  faults: [],
+  retry_in: null,
+  try_now: false,
+});
 
 /** How long after an error the stream opens again, in milliseconds. */
 export const REOPEN_MS = 2000;
 /** The longest a woken page waits for its first reading, in milliseconds. */
 export const WAIT_MS = 5000;
 
-/** The address of the stream: the device shown, what the page needs (`meters`, `host`) and the
- * devices it follows. The names are the model's own URL segments, already encoded. */
+/** What the daemon can send beside a device's own parts: the words an owner's `needs` may name
+ * (`strip` is the shown device's composite bar, which one theme draws; `walk` is the device walk's
+ * states, which only a viewer who may write is sent). */
+export const STREAM_NEEDS = ['meters', 'host', 'strip', 'walk'];
+
+/** The address of the stream: the device shown, what the page needs (`meters`, `host`, `strip`) and
+ * the devices it follows. The names are the model's own URL segments, already encoded. */
 export function streamUrl({ device, needs = [], follow = [] } = {}) {
   const query = [];
   if (device) query.push(`device=${device}`);
@@ -36,16 +60,17 @@ export function streamUrl({ device, needs = [], follow = [] } = {}) {
 }
 
 /**
- * The stream over `store`. `needs` is what the page asks the daemon to send (a list, or a
- * function giving it at each open); `watchVisible` is visible.js's; `signedOut` loads the sign-in
+ * The stream over `store`. What it asks the daemon to send and the devices it carries come from the
+ * owners' `want`s; `watchVisible` is visible.js's; `signedOut` loads the sign-in
  * page and `reload` loads this one again; `show(url)` shows another device (a fleet that no longer
  * lists the one shown moves the page to the first one it lists, or to the empty page when it
  * lists none); `doc` is the document (its body and its events).
- * Returns `{ open, close, follow, followed }`: `open` opens the stream on the device shown now,
- * `follow(urls)` sets the other devices it carries.
+ * Returns `{ open, close, want, follow, followed, needed }`: `open` opens the stream on the device
+ * shown now; `want(owner, { needs, follow })` sets what `owner` asks for and returns its `release`;
+ * `follow(urls)` sets the devices the theme carries; `batch()` batches changes of wants.
  */
 export function createStream({
-  store, needs = [], EventSource, fetch, watchVisible, signedOut, reload, show,
+  store, EventSource, fetch, watchVisible, signedOut, reload, show,
   doc = globalThis.document,
 }) {
   let source = null;
@@ -53,7 +78,33 @@ export function createStream({
   let openedFor;
   let reopen = 0;
   let waitTimer = 0;
-  let following = [];
+  /** What each owner asks for, by owner: `{ needs, follow }`. An owner's want is kept as it asked;
+   * the devices the fleet does not list are left off the address, not off the want. */
+  const wants = new Map();
+  /** The devices the last fleet event listed (`null` before the first: nothing is left off). */
+  let listed = null;
+  /** The renames of the shown device that are on their way: old address to new. */
+  const renamed = new Map();
+  /** The last shown device the fleet dropped and the device the page moved to instead: a rename
+   * that is told after the drop (the fleet event came before the write's answer) still moves the
+   * page to the renamed device. */
+  let lastDrop = null;
+  function moveRenamed() {
+    if (!lastDrop) return;
+    const to = renamed.get(lastDrop.from);
+    if (![lastDrop.to, lastDrop.from].includes(store.shown())) {
+      // an old drop the page has left: forget it, and keep the renames that are on their way
+      lastDrop = null;
+    } else if (to && listed?.has(to)) {
+      renamed.delete(lastDrop.from);
+      lastDrop = null;
+      show?.(to);
+    }
+  }
+  /** The feeds the open stream was opened with, as `wantsKey` says them. */
+  let openedKey = '';
+  /** How many batches are on: while one is, a change of wants opens nothing. */
+  let batches = 0;
   let lost = false;
   let waiting = false;
   /** Whether the stream was closed for good: nothing it has pending may reach the page. */
@@ -87,12 +138,27 @@ export function createStream({
    * meters only when the page asked for them). */
   function readable(held) {
     if (!held) return false;
-    const wanted = typeof needs === 'function' ? needs() : needs;
+    const wanted = union('needs');
     return Boolean(held.volume) || (held.controls ?? []).some((control) => control.kind === 'slider')
       || (Boolean(held.meters) && wanted.includes('meters'));
   }
 
-  const isFollowed = (url) => following.includes(url);
+  /** Every owner's `key` (`needs` or `follow`), each word once, the first owner's first; a
+   * followed device the fleet does not list is left out. */
+  function union(key) {
+    const all = [...new Set([...wants.values()].flatMap((one) => one[key]))];
+    return key === 'follow' && listed ? all.filter((url) => listed.has(url)) : all;
+  }
+
+  /** The union as a set, in a fixed order: the same feeds in another order are the same key. */
+  const wantsKey = () => `${[...union('needs')].sort()}|${[...union('follow')].sort()}`;
+
+  /** Open the stream again when what it carries is no longer what the owners want. */
+  function reopenIfChanged() {
+    if (source && batches === 0 && wantsKey() !== openedKey) open(true);
+  }
+
+  const isFollowed = (url) => union('follow').includes(url);
   const known = (url) => url === store.shown() || isFollowed(url);
 
   /** Close the stream and what waits on it; a resting page keeps nothing open. */
@@ -117,9 +183,11 @@ export function createStream({
       return;
     }
     const shownNow = store.shown();
-    const wanted = typeof needs === 'function' ? needs() : needs;
-    const mine = new EventSource(streamUrl({ device: shownNow, needs: wanted, follow: following }));
+    const mine = new EventSource(streamUrl({
+      device: shownNow, needs: union('needs'), follow: union('follow'),
+    }));
     source = mine;
+    openedKey = wantsKey();
     if (wasWaiting) setWaiting(true);
     else settle();
     openedFor = shownNow;
@@ -179,6 +247,7 @@ export function createStream({
     });
     for (const name of ['volume', 'level', 'meters', 'strip']) {
       on(name, (data) => {
+        if (name === 'strip' && !union('needs').includes('strip')) return;
         if (!known(data.device ?? store.shown())) return;
         store.emit(name, data);
         heard(data);
@@ -186,24 +255,36 @@ export function createStream({
     }
     on('fleet', (data) => {
       store.emit('fleet', data);
-      const listed = new Set((data.devices ?? []).map((entry) => entry.url));
-      const pruned = following.filter((one) => !listed.has(one));
-      for (const url of pruned) {
-        following = following.filter((one) => one !== url);
-        store.forget(url);
-      }
+      const before = union('follow');
+      listed = new Set((data.devices ?? []).map((entry) => entry.url));
+      for (const url of before) if (!union('follow').includes(url)) store.forget(url);
       const shown = store.shown();
       const dropped = Boolean(shown) && !listed.has(shown);
-      // The open stream carries the pruned devices in its address: it is opened again without
-      // them, once; a dropped shown device opens it anew when the page moves off it.
-      if (pruned.length > 0 && !dropped) open(true);
+      // The open stream carries the devices that left in its address, and lacks one that came
+      // back: it is opened again with the fleet's own, once; a dropped shown device opens it anew
+      // when the page moves off it.
+      if (!dropped) reopenIfChanged();
       if (dropped) {
-        const first = data.devices?.[0]?.url;
+        // a device renamed from a page that stays on show moves to its new address
+        const moved = renamed.get(shown);
+        renamed.clear();
+        const first = listed.has(moved) ? moved : data.devices?.[0]?.url;
+        lastDrop = first && first !== moved ? { from: shown, to: first } : null;
         if (first) show?.(first);
-        else store.replace({ ...store.page(), shown: null, device: null, card: null, strip: null });
+        else {
+          store.replace({
+            ...store.page(), shown: null, device: null, card: NO_DEVICES, strip: null,
+          });
+        }
+      } else if (!shown && data.devices?.length > 0) {
+        // the page showed the no-device card and a device has come: it takes up the first one
+        show?.(data.devices[0].url);
+      } else {
+        moveRenamed();
       }
     });
     on('host', (data) => store.emit('host', data));
+    on('walk', (data) => store.emit('walk', data));
   }
 
   // The page rests once it has been hidden for the grace, and wakes when it is shown: the stream
@@ -229,6 +310,16 @@ export function createStream({
   });
   settle();
 
+  /** Change the wants with `change`: the devices nobody carries any more are forgotten, and a
+   * live stream opens again when its address would differ. */
+  function apply(change) {
+    const carried = union('follow');
+    change();
+    const now = union('follow');
+    for (const url of carried) if (!now.includes(url)) store.forget(url);
+    reopenIfChanged();
+  }
+
   return {
     open,
 
@@ -240,17 +331,54 @@ export function createStream({
       watch?.stop?.();
     },
 
-    /** Carry these devices (URL segments) beside the one shown; the stream opens again on the
-     * new address when the list changed. */
-    follow(urls) {
-      const next = [...new Set(urls)];
-      const gone = following.filter((url) => !next.includes(url));
-      const changed = next.length !== following.length || next.some((url, i) => url !== following[i]);
-      following = next;
-      for (const url of gone) store.forget(url);
-      if (changed && source) open(true);
+    /**
+     * Set what `owner` asks for: the `needs` (words of STREAM_NEEDS, others are left out) and the
+     * devices (URL segments) to carry beside the one shown. It replaces the owner's earlier want.
+     * The stream opens again on the new address when the union changed, and a device nobody
+     * follows any more is forgotten. Returns the owner's `release`, which takes this want away
+     * (once; a want made since is not touched).
+     */
+    want(owner, { needs = [], follow = [] } = {}) {
+      const mine = {
+        needs: [...new Set(needs.filter((word) => STREAM_NEEDS.includes(word)))],
+        follow: [...new Set(follow)],
+      };
+      apply(() => wants.set(owner, mine));
+      return () => {
+        if (wants.get(owner) === mine) apply(() => wants.delete(owner));
+      };
     },
 
-    followed: () => [...following],
+    /** Carry these devices (URL segments) beside the one shown, as the theme's own want; its
+     * needs stay as they were. */
+    follow(urls) {
+      const kept = wants.get('theme');
+      apply(() => wants.set('theme', { needs: kept?.needs ?? [], follow: [...new Set(urls)] }));
+    },
+
+    followed: () => union('follow'),
+
+    /** The shown device `from` is being renamed to the address `to`: if the fleet then lists `to`
+     * and no longer `from`, the page moves to `to`, not to the fleet's first device. */
+    renamed(from, to) {
+      renamed.set(from, to);
+      moveRenamed();
+    },
+
+    /** Batch every change of wants: the stream opens at most once, when the returned function
+     * ends the batch, and only if what it carries then differs from what it was opened with. */
+    batch() {
+      batches++;
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        batches--;
+        reopenIfChanged();
+      };
+    },
+
+    /** Every feed some owner asks for now. */
+    needed: () => union('needs'),
   };
 }

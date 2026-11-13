@@ -501,7 +501,7 @@ fn draw_search(
         .unwrap_or(0);
     let name_width = visible
         .iter()
-        .map(|entry| widgets::text::cells(&entry.name))
+        .map(|entry| widgets::text::cells(&entry.variant.name))
         .max()
         .unwrap_or(0)
         .min(across.saturating_sub(CURSOR_WIDTH + TRAIL + GAP + source_width));
@@ -520,8 +520,8 @@ fn draw_search(
     for (at, (entry, source)) in visible.iter().zip(&sources).enumerate() {
         let at = top + at;
         let focused = at == row;
-        let first = at == 0 || search.rows[at - 1].name != entry.name;
-        let name = widgets::text::cut_to_cells(&entry.name, name_width);
+        let first = at == 0 || search.rows[at - 1].key != entry.key;
+        let name = widgets::text::cut_to_cells(&entry.variant.name, name_width);
         let name = widgets::text::pad_cells(&name, name_width);
         let line = Line::from(vec![
             match first || focused {
@@ -544,7 +544,9 @@ fn draw_search(
     }
     let hint = match (search.query.trim().is_empty(), search.rows.is_empty()) {
         (true, _) => Some(SEARCH_HINT),
-        (false, true) if matches!(search.load, search::Load::Ready) => Some(SEARCH_NONE),
+        (false, true) if matches!(search.load, search::Load::Ready) && !search.waiting => {
+            Some(SEARCH_NONE)
+        }
         _ => None,
     };
     if let Some(hint) = hint {
@@ -557,7 +559,7 @@ fn draw_search(
     while lines.len() < 2 + rows_room {
         lines.push(Line::default());
     }
-    let status = search::status(search, app.presets.autoeq.as_deref());
+    let status = search::status(search);
     let role = match search.load {
         search::Load::Failed(_) => Role::Warn,
         _ => Role::Dim,

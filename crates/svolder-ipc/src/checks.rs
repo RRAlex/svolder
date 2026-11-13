@@ -181,7 +181,8 @@ pub struct AdapterFacts {
 /// One kernel rfkill switch of type `bluetooth`, from `/sys/class/rfkill`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RfkillFacts {
-    /// The adapter the switch belongs to, as the switch's `name` file says it: `hci0`.
+    /// The switch's `name` file: an adapter's (`hci0`), or a platform switch's
+    /// (`thinkpad_bluetooth`).
     pub name: String,
     /// Blocked by software: `rfkill block`, or a desktop's airplane mode. `rfkill unblock` lifts it.
     pub soft: bool,
@@ -196,10 +197,22 @@ enum Block {
     Hard,
 }
 
+/// Whether an rfkill switch name is an adapter's own (`hci0`); any other name is a platform
+/// switch (`thinkpad_bluetooth`, `dell-bluetooth`).
+fn is_adapter_name(name: &str) -> bool {
+    name.strip_prefix("hci")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// The block on the radio of adapter `name`, `None` when its switch is not blocked or it has
-/// none; a hard block outranks a soft one.
+/// none; a hard block outranks a soft one. A switch not named for an adapter is a platform
+/// switch and blocks every adapter.
 fn block_of(rfkill: &[RfkillFacts], name: &str) -> Option<Block> {
-    let mine = || rfkill.iter().filter(|r| r.name == name);
+    let mine = || {
+        rfkill
+            .iter()
+            .filter(|r| r.name == name || !is_adapter_name(&r.name))
+    };
     if mine().any(|r| r.hard) {
         Some(Block::Hard)
     } else if mine().any(|r| r.soft) {

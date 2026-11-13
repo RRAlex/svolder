@@ -72,7 +72,9 @@ ok('no_device_says_svolder', () => {
   const { store, document } = make();
   store.replace(model({ shown: null, device: null, fleet: { devices: [], hops: [] } }));
   assert.equal(document.title, 'svolder');
-  assert.equal(titleOf({ name: undefined, status: 'connected', more: ['x'] }), 'svolder');
+  assert.equal(titleOf({ name: undefined, status: 'connected', more: ['x'] }), 'x — svolder',
+    'with no device the words of a part still stand (a popup open on a page with no device)');
+  assert.equal(titleOf({ name: undefined, status: 'connected' }), 'svolder');
 });
 ok('a_device_switch_names_the_new_device', () => {
   const { store, document } = make();

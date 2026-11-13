@@ -10,7 +10,7 @@
 use svolder_host::eq::{EqView, PointView};
 use svolder_ipc::HostEqOp;
 
-use super::{App, Intent, Screen, ToneRow};
+use super::{App, ControlsCursor, Intent, Screen, ToneRow};
 
 /// Which side is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -123,7 +123,9 @@ impl App {
     pub fn switch_focused(&self) -> bool {
         match self.screen {
             Screen::Tone => self.tone.row == ToneRow::Target && self.switch_available(),
-            _ => self.switch_is_the_row() || (self.switch_focus && self.switch_over_selected()),
+            _ => {
+                self.switch_is_the_row() || (self.cursor.on_target() && self.switch_over_selected())
+            }
         }
     }
 
@@ -134,8 +136,20 @@ impl App {
         if self.tone.row == ToneRow::Target && !self.switch_focused() {
             self.tone.row = ToneRow::Mode;
         }
-        if self.switch_focus && !self.switch_focused() {
-            self.switch_focus = false;
+        if let ControlsCursor::Target { over } = self.cursor
+            && !self.switch_focused()
+        {
+            self.cursor = ControlsCursor::Row(over);
+        }
+    }
+
+    /// The cursor over the selected row: on the switch line when `target`, else on the row.
+    fn cursor_over(&self, target: bool) -> ControlsCursor {
+        match target {
+            true => ControlsCursor::Target {
+                over: self.selected(),
+            },
+            false => ControlsCursor::Row(self.selected()),
         }
     }
 
@@ -150,23 +164,23 @@ impl App {
             return false;
         }
         if self.switch_focused() {
-            if delta > 0 || self.selected == 0 {
-                self.switch_focus = delta <= 0;
+            if delta > 0 || self.selected() == 0 {
+                self.cursor = self.cursor_over(delta <= 0);
                 return true;
             }
-            self.switch_focus = false;
+            self.cursor = ControlsCursor::Row(self.selected());
             return false;
         }
-        self.switch_focus = delta < 0 && self.switch_over_selected();
-        self.switch_focus
+        self.cursor = self.cursor_over(delta < 0 && self.switch_over_selected());
+        self.cursor.on_target()
     }
 
     /// After a `↓` that moved the selection off row `from`: where it landed on the row that
     /// carries the switch, the switch is the line it lands on, with the Volume row's bar under
     /// it one more `↓` away.
     pub(crate) fn land_on_switch(&mut self, from: usize) {
-        if self.selected != from && self.switch_over_selected() {
-            self.switch_focus = true;
+        if self.selected() != from && self.switch_over_selected() {
+            self.cursor = self.cursor_over(true);
         }
     }
 
@@ -190,8 +204,7 @@ impl App {
                 if let Some(at) = at {
                     self.frame_flags.pane_changed |= self.pane != super::Pane::Controls;
                     self.pane = super::Pane::Controls;
-                    self.selected = at;
-                    self.switch_focus = true;
+                    self.cursor = ControlsCursor::Target { over: at };
                 }
             }
             _ => {}
@@ -350,7 +363,7 @@ impl App {
             (_, row) => row,
         };
         if self.screen == Screen::Device {
-            self.switch_focus = on_switch;
+            self.cursor = self.cursor_over(on_switch);
         }
         self.frame_flags.screen_changed = true;
         intents

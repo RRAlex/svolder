@@ -27,7 +27,7 @@ export function wireGraph({
   const box = root.querySelector('#p-tone');
   if (!box) return;
   const store = core.model;
-  const { BAND_PARAM, REACH, bandSteps, bandWriter, createDrag, grab, labelAt, wheelSteps } = core.drag;
+  const { BAND_PARAM, REACH, bandSteps, bandWriter, createDrag, grab, labelAt, wheelSteps } = core.eq.bands;
 
   /** The drags begun and not finished, oldest first (their writes are waited for in turn). */
   const pending = [];
@@ -74,6 +74,9 @@ export function wireGraph({
     const curve = graph.querySelector('.p-curve');
     curve.setAttribute('d', held.d);
     curve.classList.remove('faint');
+    graph.querySelector('.p-gap')?.remove();
+    graph.querySelector('.p-fit')?.remove();
+    graph.querySelector('.p-sr')?.remove();
     const point = graph.querySelector(`.pt[data-band="${band}"]`);
     point.dataset.x = held.point.x.toFixed(5);
     point.dataset.y = held.point.y.toFixed(5);

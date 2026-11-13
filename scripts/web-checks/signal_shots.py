@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Signal's stills (`make signal-shots`), taken in Chromium: a DAC at desktop width (1280), with the
-linked amp chosen, with a declared hop chosen, with its link lost, the Add device sheet open, the linked amp
+linked amp chosen, with a declared hop chosen, with its link lost, the Add to the chain sheet open, the linked amp
 shown on its own page, a tablet (768 by 1024) and the phone (390 by 844) at rest, scrolled to
 the tone control and scrolled with the strip pinned. Ten pictures in
 `target/web-shots/signal/`, their paths printed. No check: the pictures are for looking. Daemons are
@@ -21,7 +21,7 @@ ROUTE = """(() => { const w = document.querySelector('[data-hop=computer] .sg-w'
 # a declared pair of hops after the DAC: a linked amp and headphones with a note
 LINKED = ('auth = "none"\n\n[[hop]]\ndevice = "Amp"\nafter = "Gungnir 2"\n\n'
           '[[hop]]\nname = "HD 650"\nkind = "headphones"\nafter = "Gungnir 2"\nnote = "on the desk"\n')
-# the amp offered by the Add device sheet is one no hop links yet
+# the amp offered by the Add to the chain sheet is one no hop links yet
 UNLINKED = 'auth = "none"\n\n[[hop]]\nname = "HD 650"\nkind = "headphones"\nafter = "Gungnir 2"\nnote = "on the desk"\n'
 FLEET = [('aegir2', 'Amp', '1112131415161718')]
 written = []

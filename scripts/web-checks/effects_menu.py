@@ -173,18 +173,23 @@ try:
     s = state(b)
     check('Enter opens with focus on the checked item', s['open'] and s['focus'] == 'glow', s)
     reached = b.ev(REACHABLE)
-    check('the rows the arrows reach with Smoke disabled: the Theme row, Glow, Off, Arrange (the '
-          'Device row is disabled with one device, and there is no Sign out with auth none)',
-          reached == ['menu-theme', 'glow', 'off', 'menu-arrange'], reached)
+    check('the rows the arrows reach with Smoke disabled: the Theme row, Glow, Off, Arrange, Devices, EQ '
+          'library, Help (the Device row is disabled with one device, and there is no Sign out with auth '
+          'none)',
+          reached == ['menu-theme', 'glow', 'off', 'menu-arrange', 'menu-popup-devices',
+                      'menu-popup-eq-library', 'menu-popup-help'], reached)
     order = []
-    for k in ('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'End',
-              'Home'):
+    for k in ('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp',
+              'ArrowRight', 'ArrowLeft', 'End', 'Home'):
         b.press(k)
         order.append(state(b)['focus'])
-    check('arrows wrap, skip the disabled Smoke and the Device row (one device); Home/End jump; '
-          'the Arrange row is the last of them',
-          order == ['off', 'menu-arrange', 'menu-theme', 'menu-arrange', 'menu-theme',
-                    'menu-arrange', 'menu-arrange', 'menu-theme'], order)
+    check('arrows wrap: Down past the Help row, the last, is the Theme row; they skip the disabled Smoke and '
+          'the Device row (one device) and reach the Devices and EQ library rows; Right is Down and Left is '
+          'Up; End and Home jump',
+          order == ['off', 'menu-arrange', 'menu-popup-devices', 'menu-popup-eq-library',
+                    'menu-popup-help', 'menu-popup-eq-library', 'menu-popup-devices',
+                    'menu-popup-eq-library', 'menu-popup-devices', 'menu-popup-help',
+                    'menu-theme'], order)
     b.press('ArrowDown')
     b.press('ArrowDown')
     b.press('Enter')
@@ -246,20 +251,34 @@ try:
     check('volume and mute keys in the menu send nothing', posts == [], posts)
     b.press('Escape')
     b.ev("document.activeElement.blur()")
+    def helped(want):
+        """Whether the Help popup stands (`want`: drawn) or has gone, within four seconds."""
+        read = ("document.getElementById('popup-help')?.querySelector('.fp-box')?.dataset.state === 'ready'"
+                if want else "!document.getElementById('popup-help')")
+        for _ in range(40):
+            if b.ev(read) is True:
+                return True
+            b.sleep(0.1)
+        return False
+
     b.press('?')
-    shown = b.ev("!document.getElementById('keys').hidden")
-    check('? on the page opens the key list', shown is True, shown)
-    b.ev("document.querySelector('.fxbtn').focus()")
-    b.press('q')
-    shown = b.ev("!document.getElementById('keys').hidden")
-    check('a key on the closed button reaches the page: the ? list closes', shown is False, shown)
-    b.press('?')
-    shown = b.ev("!document.getElementById('keys').hidden")
-    check('  and ? on the closed button toggles it open', shown is True, shown)
-    b.press('Enter')
+    check('? on the page opens the Help popup', helped(True))
     b.press('Escape')
-    shown = b.ev("!document.getElementById('keys').hidden")
-    check('  nor does Escape in the open menu', shown is True, shown)
+    check('  and Escape closes it', helped(False))
+    b.ev("document.querySelector('.fxbtn').focus()")
+    b.press('?')
+    check('  ? on the closed button opens it too', helped(True))
+    b.press('Escape')
+    helped(False)
+    b.ev("document.querySelector('.fxbtn').focus()")
+    b.press('Enter')
+    opened = state(b)['open']
+    b.press('?')
+    stands = helped(True)
+    s = state(b)
+    check('  ? in the open menu closes the menu and opens Help', opened and not s['open'] and stands, s)
+    b.press('Escape')
+    check('  and Escape closes Help alone: the menu stays closed', helped(False) and not state(b)['open'])
     errs = errors(b)
     check('no page error', errs == [], errs)
     b.close()
@@ -406,9 +425,9 @@ try:
     for k in ('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'End', 'Home'):
         b.press(k)
         order.append(state(b)['focus'])
-    check('the arrows reach the switch after the levels, then the Arrange row, and wrap (Smoke is '
-          'disabled here)',
-          order == ['off', 'viz', 'menu-arrange', 'viz', 'menu-arrange', 'menu-theme'], order)
+    check('the arrows reach the switch after the levels, then the Arrange row; End is the Help row, the last '
+          '(Smoke is disabled here)',
+          order == ['off', 'viz', 'menu-arrange', 'viz', 'menu-popup-help', 'menu-theme'], order)
     b.ev("document.querySelector('.fxpop [data-switch=viz]').focus()")
     b.press(' ')
     s = state(b)
@@ -774,30 +793,16 @@ try:
     check('no page error through the theme switches', errs == [], errs)
     b.close()
 
-    # the Device row lists the devices when there are two
+    # the menu has no Device row: the Devices popup shows another device
     two = common.Daemon(more=[('Second', '1112131415161718')])
     b = make()
     b.goto(two.url)
     open_by_click(b)
-    row = b.ev("""(() => { const r = document.getElementById('menu-device');
-      return [r.textContent.trim(), r.getAttribute('aria-disabled')]; })()""")
-    check('with two devices the Device row names the shown one and is enabled',
-          row == ['Device: Gungnir 2 ›', None], row)
-    click_el(b, '#menu-device')
-    radios = b.ev("""[...document.querySelectorAll('.fxpop [data-device]')].map(
-      r => [r.dataset.device, r.getAttribute('aria-checked'), r.getAttribute('role')])""")
-    check('  it opens in place into one radio per device, the shown one checked',
-          [r[1:] for r in radios] == [['true', 'menuitemradio'], ['false', 'menuitemradio']]
-          and len(radios) == 2, radios)
-    check('  the menu stays open on the list', state(b)['open'] is True)
-    click_el(b, '.fxpop [data-device]:not([aria-checked=true])')
-    b.sleep(1.2)
-    now = b.ev("""({ shown: document.querySelector('.devs .dev[aria-current=page] b').textContent,
-      open: !document.getElementById('fx-menu').hidden })""")
-    check('  choosing the other shows it and closes the menu',
-          now == {'shown': 'Second', 'open': False}, now)
+    rows = b.ev("""[document.getElementById('menu-device') !== null,
+      document.querySelectorAll('.fxpop [data-device]').length]""")
+    check('with two devices the menu has no Device row and no list of devices', rows == [False, 0], rows)
     errs = errors(b)
-    check('no page error from the Device row', errs == [], errs)
+    check('no page error from the menu', errs == [], errs)
     b.close()
 
     # a guest's menu offers Sign in
@@ -935,12 +940,14 @@ try:
         b.sleep(0.6)
         g = b.ev(menu_geo)
         y0, y1 = g['bottom'] - 20, g['top'] + 20
-        b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x - 60, 'y': y0, 'id': 1}]})
-        for i in range(1, 13):
-            b.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': x - 60, 'y': y0 + (y1 - y0) * i / 12, 'id': 1}]})
-            b.sleep(0.016)
-        b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
-        b.sleep(0.6)
+        # the menu holds more than one drag of its own height brings up: two drags
+        for _ in range(2):
+            b.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x - 60, 'y': y0, 'id': 1}]})
+            for i in range(1, 13):
+                b.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': x - 60, 'y': y0 + (y1 - y0) * i / 12, 'id': 1}]})
+                b.sleep(0.016)
+            b.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+            b.sleep(0.6)
         after = b.ev(menu_geo)
         check(f'  ({theme}) a touch drag of the open menu brings its last row into view',
               after['scrollTop'] > 0 and after['lastBottom'] <= after['bottom'] + 1 and after['lastTop'] >= after['top'] - 1, after)

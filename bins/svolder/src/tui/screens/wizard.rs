@@ -143,7 +143,15 @@ pub fn draw(
     let answers_at = lines.len();
     let (answers, offered) = answering(step, theme, answer_room.saturating_sub(wait.len()), width);
     lines.extend(answers);
+    // The devices a scan has heard fill what the frame has left under the wait, so they never
+    // move what answers the step: the ones that do not fit are counted.
+    let mut heard = Vec::new();
+    if !wait.is_empty() {
+        let left = room.saturating_sub(lines.len() + wait.len());
+        heard = heard_lines(&step.heard, left, theme);
+    }
     lines.extend(wait);
+    lines.extend(heard);
     frame.render_widget(Paragraph::new(lines), inside);
 
     for at in 0..offered.shown {
@@ -193,6 +201,30 @@ pub fn draw(
     // The wizard has no panes: the theme's ground goes under all of it.
     widgets::surfaces::paint_surfaces(frame.buffer_mut(), &[], theme);
     laid_out
+}
+
+/// The devices heard so far as rows, at most `room` of them: when they do not all fit the last
+/// row says how many were left out.
+fn heard_lines(heard: &[String], room: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let row = |text: String, role: Role| Line::from(Span::styled(text, theme.style(role)));
+    match heard.len() > room {
+        false => heard
+            .iter()
+            .map(|heard| row(format!("   {heard}"), Role::Text))
+            .collect(),
+        true => {
+            let shown = room.saturating_sub(1);
+            let mut lines: Vec<_> = heard[..shown]
+                .iter()
+                .map(|heard| row(format!("   {heard}"), Role::Text))
+                .collect();
+            if room > 0 {
+                let more = heard.len() - shown;
+                lines.push(row(format!("   … {more} more heard"), Role::Faint));
+            }
+            lines
+        }
+    }
 }
 
 /// The rows of `said` from `scroll` on that fit in `room`, and how many are below them.
@@ -330,8 +362,15 @@ fn field(step: &ShownStep, theme: &Theme) -> Line<'static> {
             Span::raw(" "),
             Span::styled(MARKER, theme.style(Role::Cursor)),
             Span::raw(" ‹ "),
-            Span::styled(row.shown(), theme.style(Role::SelectName)),
+            Span::styled(row.drawn(), theme.style(Role::SelectName)),
             Span::raw(" ›"),
+            Span::styled(
+                match row.is_revealed() {
+                    true => "  Tab hides the code",
+                    false => "  Tab shows the code",
+                },
+                theme.style(Role::Faint),
+            ),
         ]);
     }
     let typed = match step.typed.is_empty() {

@@ -288,7 +288,8 @@ impl Analyser {
     /// not a number counts as silence; a trailing half frame is dropped.
     pub fn push(&mut self, interleaved: &[f32]) -> Vec<Frame> {
         let mut frames = Vec::new();
-        for pair in interleaved.chunks_exact(2) {
+        let (pairs, _) = interleaved.as_chunks::<2>();
+        for pair in pairs {
             let sample = |s: f32| if s.is_finite() { s } else { 0.0 };
             let (l, r) = (sample(pair[0]), sample(pair[1]));
             self.ring[0][self.at] = l;
@@ -796,8 +797,11 @@ mod tests {
     /// channel that counts, not their mix, which is silent.
     #[test]
     fn out_of_phase_kicks_are_still_beats() {
-        let flipped: Vec<f32> = kicks(120.0, 4.0)
-            .chunks_exact(2)
+        let kicks = kicks(120.0, 4.0);
+        let flipped: Vec<f32> = kicks
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|pair| [pair[0], -pair[1]])
             .collect();
         let all = frames(&flipped);

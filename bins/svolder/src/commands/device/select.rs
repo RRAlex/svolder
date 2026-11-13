@@ -10,7 +10,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use svolder_ble::{Advertisement, Advertisements, BleError, Transport};
 use svolder_ipc::ScanEntry;
-use svolder_profiles::{Profile, Registry};
+use svolder_profiles::Registry;
 use svolder_proto::UnitId;
 
 use crate::backend::Failure;
@@ -227,12 +227,4 @@ pub(super) fn ambiguous(found: &[Advertisement], registry: &Registry) -> Failure
 /// What a scan that heard nothing earns, in the words a session reports it with.
 fn nothing_in_range() -> Failure {
     Failure::of(Kind::NothingInRange, BleError::NotFound.to_string())
-}
-
-/// Choose the profile for an advertisement: registry select by product id + firmware,
-/// else a generic profile.
-pub fn profile_for(reg: &Registry, advert: &Advertisement) -> Profile {
-    reg.select(advert.manufacturer.product_id, advert.firmware_build())
-        .cloned()
-        .unwrap_or_else(|| Registry::generic(advert.manufacturer.product_id))
 }

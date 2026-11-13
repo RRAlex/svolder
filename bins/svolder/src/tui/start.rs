@@ -306,7 +306,12 @@ impl Adding for Live<'_, '_> {
             return Err(Failure::of(Kind::Usage, why));
         }
         let effects = LiveEffects::live(&crate::wizard::quietly(self.g), &self.path).await?;
-        Ok(Wizard::starting_at(effects, Step::Scan, Given::default()))
+        let socket = effects.socket().to_path_buf();
+        let mut wizard = Wizard::starting_at(effects, Step::Scan, Given::default());
+        // With a daemon running the walk is its job: a walk already running there, or a daemon
+        // that cannot walk, comes back here as the failure the screen says.
+        wizard.attach(&socket).await?;
+        Ok(wizard)
     }
 }
 

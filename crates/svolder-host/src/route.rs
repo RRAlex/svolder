@@ -52,9 +52,12 @@ impl PwDump {
     }
 
     /// The dump through the `pw-dump` [`PW_DUMP_ENV`] names, else `pw-dump` on `PATH`; `None`
-    /// when [`host_off`](crate::host_off) says host audio is off for this process.
+    /// when [`host_unreached`](crate::host_unreached) says host audio is off for this process.
     pub fn from_env() -> Option<Self> {
-        Self::resolve(crate::host_off(), std::env::var_os(PW_DUMP_ENV).as_deref())
+        Self::resolve(
+            crate::host_unreached(),
+            std::env::var_os(PW_DUMP_ENV).as_deref(),
+        )
     }
 
     /// The dump `from_env` makes of `named` (the value of [`PW_DUMP_ENV`]), `None` when `off`.

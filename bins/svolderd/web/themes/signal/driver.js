@@ -3,7 +3,7 @@
 // The test driver of the theme Signal, which the contract and completeness checks drive (see the
 // checks' README; core/contract.js lists what they ask for). It does what a person does on
 // Signal's page: it chooses the hop of the line that holds a control (the shown device's own, or a
-// linked amp's), unfolds the facts, scrolls to the word, scale or chip, then taps it, presses a key
+// linked amp's), scrolls to the word, scale or chip, then taps it, presses a key
 // on a scale or picks an option of the list a chip opens (`operate`), and reads the words the page
 // shows for it (`shown`). It never calls an action of the core itself: a write the check sees went
 // through Signal's own handlers.
@@ -11,13 +11,14 @@
 //   reach(target) -> boolean            chooses its hop, scrolls to it, says whether it is drawn
 //   operate(target, change) -> void     { step: ±1 } | { raw } | { value } | { on } | { apply } |
 //                                       { recall } | { save } | { side } (the line's computer hop) | {}
-//   shown(target) -> string | null      the words shown for a control, or for a fact by its label
+//   shown(target) -> string | null      the words shown for a control, or the cover's address
 //   state() -> { lost, waiting, resting, toasts }
 //   linkWords() -> string | null        the words drawn beside the shown device's name that tell its link
 //                                       state (null when none are drawn)
 
-/** The core Signal was given, `null` until Signal is mounted (signal.js fills it). */
-export const bound = { core: null, add: null, canAdd: null };
+/** The core Signal was given, `null` until Signal is mounted (signal.js fills it). It is the
+ * driver's alone: Signal's own code reads the mount's scope. */
+export const bound = { core: null };
 
 /** The attribute-selector form of `text`. */
 const q = (text) => CSS.escape(String(text));
@@ -104,7 +105,8 @@ function findComputer(target) {
 function find(target) {
   if (typeof target === 'object' && 'computer' in target) return findComputer(target);
   if (target === 'Cover') return one('#sg-now .sg-cover img');
-  if (typeof target === 'string') return one(`#sg-facts-body td[data-fact="${q(target)}"]`);
+  // the device's facts are the Devices popup's, drawn by the core: the core's driver answers them
+  if (typeof target === 'string') return null;
   if ('control' in target) {
     const key = q(target.control);
     const kind = controlOf(target.control);
@@ -197,18 +199,10 @@ async function choose(target) {
   await settle();
 }
 
-/** Open the facts when `target` is drawn inside them folded away, as a person taps their title. */
-async function unfold(target) {
-  if (typeof target !== 'string' || target === 'Cover' || !one('#sg-facts-body[hidden]')) return;
-  tap(one('[data-act="facts-fold"]'));
-  await settle();
-}
-
 /** Scroll to `target` and say whether it is drawn and in view; looked for again after the scroll,
  * which a section drawn again may have replaced. */
 async function seen(target) {
   await choose(target);
-  await unfold(target);
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);

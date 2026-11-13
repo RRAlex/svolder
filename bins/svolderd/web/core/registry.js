@@ -5,10 +5,13 @@
 // evaluated (`registerTheme`). A theme that cannot be loaded, says it cannot run here or throws
 // while it mounts is replaced by the fallback (Ember) and the person is told.
 //
-// A theme is `{ id, label, needs, schemes, supported?(), mount(root, core), preview?(box) }`;
-// `mount` returns `{ unmount() }` (or the unmount function itself). `mount` is given a third
-// argument, `{ signal }`, an AbortSignal that is aborted when the mount throws and when the theme
-// is unmounted, so what the theme listens to goes with it.
+// A theme is `{ id, label, needs, schemes, supported?(), mount(root, core), preview?(box) }`.
+// `mount` returns the mounted instance, `{ unmount(), menuRows?(core), keys? }`: what this mount
+// gives the frame (its rows in the menu, its key table), held in the mount's own scope and gone
+// with it. `{ unmount() }` alone, the unmount function itself, or nothing are as good: the frame
+// then reads the theme object's `menuRows` and `keys`. `mount` is given a third argument,
+// `{ signal }`, an AbortSignal that is aborted when the mount throws and when the theme is
+// unmounted, so what the theme listens to goes with it.
 
 /** The themes registered by modules as they were evaluated, until a registry takes them. */
 const registered = [];
@@ -23,9 +26,13 @@ const importEntry = (entry) => import(new URL(`../${entry.module}`, import.meta.
 
 /** The registry of the themes `list` names (`[{id, label, blurb, module, schemes}]`); `importer`
  * loads a listed theme's module (the browser's `import` by default); `beforeMount(theme)` is
- * called as a theme is about to mount (the core binds the theme's preferences there) and
- * `afterMount(theme)` once it is on show (the frame learns of its menu rows there). */
-export function createRegistry(list, { importer = importEntry, beforeMount, afterMount } = {}) {
+ * called as a theme is about to mount (the core binds the theme's preferences there),
+ * `afterMount(theme, instance)` once it is on show (the frame learns of its menu rows there) and
+ * `afterUnmount(theme, instance)` once it has been unmounted; `instance` is the object `mount`
+ * returned, or `null` when it returned a function or nothing. */
+export function createRegistry(list, {
+  importer = importEntry, beforeMount, afterMount, afterUnmount,
+} = {}) {
   const entries = new Map(list.map((entry) => [entry.id, entry]));
   const themes = new Map();
 
@@ -37,6 +44,7 @@ export function createRegistry(list, { importer = importEntry, beforeMount, afte
   return {
     beforeMount,
     afterMount,
+    afterUnmount,
     list: () => [...entries.values()],
     get: (id) => entries.get(id),
 
@@ -71,19 +79,26 @@ export function createRegistry(list, { importer = importEntry, beforeMount, afte
   };
 }
 
+/** The mounted instance in what `theme.mount` returned: the object itself, or `null` for a
+ * function or nothing. */
+const instanceOf = (mounted) => (mounted !== null && typeof mounted === 'object' ? mounted : null);
+
 /** The unmount of what `theme.mount` returned (a function, an object with one, or nothing), then
- * the abort of the mount's signal. */
-const unmounter = (mounted, controller) => async () => {
+ * the abort of the mount's signal and `left()`, whatever the unmount did. */
+const unmounter = (mounted, controller, left) => async () => {
   try {
     if (typeof mounted === 'function') await mounted();
     else await mounted?.unmount?.();
   } finally {
     controller.abort();
+    left();
   }
 };
 
 /**
- * Mount the theme `id` on `root` with `core`; resolves `{ id, unmount }` for the theme mounted.
+ * Mount the theme `id` on `root` with `core` (its stream is told what the theme needs); resolves
+ * `{ id, unmount, instance }` for the theme mounted (`instance`: what its `mount` returned when
+ * that is an object, else `null`).
  * A theme that does not load, that says `supported()` is not ok, whose files `prepare(entry)` (the
  * page's loading of its sheets, metas and scripts; the fallback's too) says are not in place, or
  * that throws while it mounts is replaced by `fallback` and `toast` says "<Label> could not start
@@ -102,10 +117,14 @@ export async function mountTheme({
     }
     const controller = new AbortController();
     try {
+      // The theme is the stream's owner `theme`: what it needs replaces what the last one did.
+      core.stream?.want('theme', { needs: theme.needs });
       registry.beforeMount?.(theme);
       const mounted = await theme.mount(root, core, { signal: controller.signal });
-      registry.afterMount?.(theme);
-      return { id: which, unmount: unmounter(mounted, controller) };
+      const instance = instanceOf(mounted);
+      registry.afterMount?.(theme, instance);
+      const left = () => registry.afterUnmount?.(theme, instance);
+      return { id: which, instance, unmount: unmounter(mounted, controller, left) };
     } catch (error) {
       controller.abort();
       throw error;

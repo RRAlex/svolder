@@ -8,8 +8,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use svolder_ipc::{
-    Client, Config, ConfigError, DeviceConfig, DeviceInfo, MAX_SCAN_WINDOW, Request, Response,
-    ScanEntry, socket,
+    Client, Config, ConfigError, DeviceConfig, DeviceConfigOp, DeviceInfo, MAX_SCAN_WINDOW, Reason,
+    Request, Response, ScanEntry, socket,
 };
 use svolder_proto::UnitId;
 
@@ -144,7 +144,7 @@ async fn devices_over_daemon(path: &std::path::Path, json: bool) -> Result<ExitC
             }
             Ok(ExitCode::SUCCESS)
         }
-        Ok(Response::Error { code, message }) => {
+        Ok(Response::Error { code, message, .. }) => {
             eprintln!("svolder: {message}");
             Ok(ExitCode::from(code))
         }
@@ -287,6 +287,21 @@ pub async fn add(
         passphrase: passphrase.to_string(),
         inputs: std::collections::BTreeMap::new(),
     };
+    // While a daemon runs it is the one writer: the add is its op, and it reloads itself.
+    let op = DeviceConfigOp::Add {
+        unit: udid.to_string(),
+        name: name.clone(),
+        profile: device.profile.clone(),
+        passphrase: Some(device.passphrase.clone()),
+    };
+    match through_daemon(g, &config, op).await {
+        Err(failure) => return failure.report(),
+        Ok(true) => {
+            eprintln!("svolder: added {name} ({udid}), through the daemon");
+            return ExitCode::SUCCESS;
+        }
+        Ok(false) => {}
+    }
     match Config::add_device(&path, &device) {
         Ok(()) => {
             eprintln!("svolder: added {name} ({udid}) to {}", path.display());
@@ -342,6 +357,7 @@ fn scan_first() -> Failure {
         code: Kind::Usage.code(),
         what: "add needs the unit id of a device".to_string(),
         next: "Run `svolder scan` and use the `add` line it prints under the device".to_string(),
+        reason: None,
     }
 }
 
@@ -359,17 +375,63 @@ pub async fn remove(g: &Globals<'_>, name: &str) -> ExitCode {
         Ok(config) => config,
         Err(e) => return config_failure(e).report(),
     };
+    let op = DeviceConfigOp::Remove {
+        device: name.to_string(),
+    };
+    match through_daemon(g, &config, op).await {
+        Err(failure) if failure.reason == Some(Reason::Missing) => {
+            return not_configured(name).report();
+        }
+        Err(failure) => return failure.report(),
+        Ok(true) => {
+            eprintln!("svolder: removed {name}, through the daemon");
+            return ExitCode::SUCCESS;
+        }
+        Ok(false) => {}
+    }
     match Config::remove_device(&path, name) {
         Ok(()) => {
             eprintln!("svolder: removed {name} from {}", path.display());
             reload_daemon(g, &config).await;
             ExitCode::SUCCESS
         }
-        Err(ConfigError::Parse(why)) if why.starts_with("no device named") => Failure::of(
-            Kind::Usage,
-            format!("no device named {name:?} is configured; run `svolder devices` to list them"),
-        )
-        .report(),
+        Err(ConfigError::Missing { kind: "device", .. }) => not_configured(name).report(),
         Err(e) => config_failure(e).report(),
+    }
+}
+
+/// What a name no device carries earns.
+fn not_configured(name: &str) -> Failure {
+    Failure::of(
+        Kind::Usage,
+        format!("no device named {name:?} is configured; run `svolder devices` to list them"),
+    )
+}
+
+/// Send `op` to the daemon on the resolved socket while one runs: `Ok(true)` once it has
+/// written, `Ok(false)` with no daemon (the caller's own writer stands), and the refusal, worded
+/// from its typed reason, otherwise. A daemon that cannot take the op, or a socket that cannot
+/// be tried, is a refusal too: nothing is written behind a daemon.
+pub(super) async fn through_daemon(
+    g: &Globals<'_>,
+    config: &Config,
+    op: DeviceConfigOp,
+) -> Result<bool, Failure> {
+    let socket = socket::path::resolve(g.socket, config.socket.as_deref());
+    match crate::reach::device_request(&socket, op).await? {
+        None => Ok(false),
+        Some(Response::DeviceConfig { .. }) => Ok(true),
+        Some(Response::Error {
+            code,
+            message,
+            reason,
+        }) => {
+            let words = crate::reach::refusal_words(reason, &message);
+            Err(Failure::from_daemon_on(&socket, code, words, reason))
+        }
+        Some(other) => Err(Failure::of(
+            Kind::DaemonError,
+            format!("the daemon sent an unexpected reply: {other:?}"),
+        )),
     }
 }

@@ -2,15 +2,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The question every theme can ask: a card with the words and two buttons, Yes and No, that
 // resolves `true` or `false`. It is for a choice the daemon hands back to the person (a preset
-// that two sides would play twice). The focus goes to No, the safe answer; Tab moves between the
-// buttons, `y` and `n` answer, Escape is No, every other key is stopped before the theme's own
-// handlers (the card owns the keyboard), a touch or a click on a button answers. The card is
-// a modal dialog: the rest of the page is inert while it is open and the focus goes back to where
-// it was when the card closes (or to the element `returnTo` names, found again by id when the
-// card closes and again, for a short while, each time the page changes after the answer, for a
-// control that is drawn afresh meanwhile). One question at a time: a second one answers the first
-// No. The card is dressed from the `--frame-*` tokens (frame.css), so each
-// theme's own frame colours reach it.
+// that two sides would play twice). The card is a modal of the core's stack (modal.js): the rest
+// of the page is inert while it is open, it owns the keyboard (no key reaches a theme's own
+// handlers), Tab moves between its buttons and Escape is No. The focus goes to No, the safe
+// answer; `y` and `n` answer, a touch or a click on a button answers, and a card closed with the
+// stack (a theme switch, a device switch) is answered No. When the card closes the focus goes back
+// to where it was (or to the element `returnTo` names, found again by id when the card closes and
+// again, for a short while, each time the page changes after the answer, for a control that is
+// drawn afresh meanwhile). One question at a time: a second one answers the first No. The card is
+// dressed from the `--frame-*` tokens (frame.css), so each theme's own frame colours reach it.
 
 /** How long (ms) after an answer the focus is given back to a control that is drawn again. */
 const RESTORE_MS = 1500;
@@ -19,32 +19,27 @@ const RESTORE_MS = 1500;
 let counter = 0;
 
 /**
- * The asker over `document`: `ask(question, { yes, no, returnTo })` shows the card and resolves the
- * person's answer; `ask.close()` answers an open question No; `ask.opened()` says whether one is
- * open.
+ * The asker over `document`, on the stack `modal`: `ask(question, { yes, no, returnTo })` shows the
+ * card and resolves the person's answer; `ask.close()` answers an open question No; `ask.opened()`
+ * says whether one is open.
  */
-export function createAsk({ document }) {
+export function createAsk({ document, modal }) {
   let current = null;
   /** Ends the watch for the control to give the focus back to, when one is on. */
   let stopWatching = () => {};
 
+  /** Answer the open question: its card leaves the stack, which tells `closed`. */
   function finish(answer) {
-    const open = current;
-    if (!open) return;
-    current = null;
-    open.listening.abort();
-    open.box.remove();
-    for (const el of open.inerted) el.inert = false;
+    if (!current) return;
+    current.answer = answer;
+    current.standing.close();
+  }
+
+  /** The card `open` has left the stack (the focus is back already): its answer is given. */
+  function closed(open) {
+    if (current === open) current = null;
     const back = () => (open.returnTo ? document.getElementById(open.returnTo) : null);
-    const focusBack = () => {
-      try {
-        (back() ?? open.before)?.focus?.();
-      } catch {
-        // the element that had the focus is gone
-      }
-    };
-    focusBack();
-    open.resolve(answer);
+    open.resolve(open.answer);
     // The caller's own work follows the answer (a write, the model read again, a control drawn
     // afresh): the focus is given back to the control found again by id for a short while, each
     // time the page changes, until it has landed or the window is over; a focus the person has put
@@ -93,9 +88,6 @@ export function createAsk({ document }) {
       const id = `ask-${++counter}`;
       const box = document.createElement('div');
       box.className = 'ask';
-      box.setAttribute('role', 'dialog');
-      box.setAttribute('aria-modal', 'true');
-      box.setAttribute('aria-labelledby', id);
       const words = document.createElement('p');
       words.id = id;
       words.className = 'ask-words';
@@ -110,50 +102,28 @@ export function createAsk({ document }) {
         el.addEventListener('click', () => finish(answer));
         return el;
       };
-      const yesButton = button(yes, 'yes', true);
       const noButton = button(no, 'no', false);
-      row.append(yesButton, noButton);
+      row.append(button(yes, 'yes', true), noButton);
       box.append(words, row);
-      const listening = new AbortController();
-      const before = document.activeElement;
-      // the page behind the card is out of reach while it is open (the popups stay readable)
-      const inerted = [...document.body.children].filter((el) => !el.inert && el.id !== 'toasts');
-      for (const el of inerted) el.inert = true;
-      current = { box, resolve, listening, before, inerted, returnTo };
-      document.body.append(box);
-      document.addEventListener('keydown', (event) => {
-        // The card owns the keyboard: a key it does not take is stopped here, before the theme's
-        // own handlers (a volume or a mute written behind a modal). The browser's own action for
-        // it (Enter or Space on a focused button) is left to run.
-        if (event.ctrlKey || event.altKey || event.metaKey) {
-          event.stopImmediatePropagation();
-          return;
-        }
-        const own = box.contains(event.target);
-        if (event.key === 'Escape') {
+      // a card closed any other way (Escape, the stack emptied) is a No
+      const open = { resolve, returnTo, answer: false, standing: null };
+      current = open;
+      open.standing = modal.open({
+        el: box,
+        labelledBy: id,
+        focus: noButton,
+        returnTo,
+        onClose: () => closed(open),
+        // `y` and `n` answer, from inside the card and without a modifier
+        onKey(event) {
+          if (event.ctrlKey || event.altKey || event.metaKey) return false;
+          const letter = event.key.toLowerCase();
+          if ((letter !== 'y' && letter !== 'n') || !box.contains(event.target)) return false;
           event.preventDefault();
-          event.stopImmediatePropagation();
-          finish(false);
-        } else if (own && (event.key === 'y' || event.key === 'Y')) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          finish(true);
-        } else if (own && (event.key === 'n' || event.key === 'N')) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          finish(false);
-        } else if (event.key === 'Tab') {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          const buttons = [yesButton, noButton];
-          const at = buttons.indexOf(document.activeElement);
-          const step = event.shiftKey ? -1 : 1;
-          buttons[(at + step + buttons.length) % buttons.length].focus();
-        } else {
-          event.stopImmediatePropagation();
-        }
-      }, { capture: true, signal: listening.signal });
-      noButton.focus();
+          finish(letter === 'y');
+          return true;
+        },
+      });
     });
   }
 

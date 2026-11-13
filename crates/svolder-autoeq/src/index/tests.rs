@@ -245,3 +245,41 @@ fn exact_finds_only_the_whole_name() {
     assert!(exact(&entries, "650").is_empty());
     assert!(exact(&entries, " - ").is_empty());
 }
+
+#[test]
+fn the_group_key_is_the_plain_name() {
+    let a = entry("Sennheiser HD 650", "oratory1990");
+    let b = entry("sennheiser hd-650", "crinacle");
+    assert_eq!(a.group_key(), "sennheiserhd650");
+    assert_eq!(a.group_key(), b.group_key());
+    assert_ne!(a.group_key(), entry("Sennheiser HD 600", "x").group_key());
+    assert!(!exact(std::slice::from_ref(&a), "Sennheiser HD650").is_empty());
+}
+
+#[test]
+fn the_measurement_words_are_the_origin_without_autoeq() {
+    let plain = entry("HD 650", "oratory1990");
+    assert_eq!(plain.measurement(), "oratory1990 · over-ear");
+    let gras = Entry {
+        rig: Some("GRAS 43AG-7".into()),
+        ..entry("HD 650", "crinacle")
+    };
+    assert_eq!(gras.measurement(), "crinacle · over-ear · GRAS 43AG-7");
+    assert_eq!(gras.origin(), "AutoEq · crinacle · over-ear · GRAS 43AG-7");
+    assert_eq!(plain.origin(), "AutoEq · oratory1990 · over-ear");
+}
+
+#[test]
+fn the_refresh_policy_follows_the_weeks() {
+    assert_eq!(Refresh::of(true, None), Refresh::Now);
+    assert_eq!(Refresh::of(true, Some(4)), Refresh::Now);
+    assert_eq!(Refresh::of(false, None), Refresh::Never);
+    assert_eq!(Refresh::of(false, Some(13)), Refresh::AfterWeeks(13));
+    let now = SystemTime::now();
+    let weeks = |n: u64| now - Duration::from_secs(n * 7 * 24 * 3600 + 60);
+    assert!(Refresh::AfterWeeks(2).is_stale(weeks(3), now));
+    assert!(!Refresh::AfterWeeks(2).is_stale(weeks(1), now));
+    assert!(!Refresh::Never.is_stale(weeks(500), now));
+    assert!(Refresh::Now.is_stale(now, now));
+    assert!(!Refresh::AfterWeeks(1).is_stale(now + Duration::from_secs(10), now));
+}

@@ -16,7 +16,7 @@
 mod direct;
 pub mod launch;
 mod stale;
-pub use stale::{reload_if_reads, reload_if_stale};
+pub use stale::{refusal_if_missing, reload_if_reads, reload_if_stale};
 #[cfg(not(test))]
 mod remote;
 /// The daemon half, whose own cases serve a stand-in daemon that the TUI's cases reach for
@@ -30,8 +30,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use svolder_ble::{BleError, Transport};
-use svolder_ipc::ValueObject;
-use svolder_ipc::{Config, DeviceConfig, Request, Response, ScanEntry};
+use svolder_ipc::{
+    CODE_LINK, CODE_USAGE, Config, DeviceConfig, Request, Response, ScanEntry, ValueObject,
+};
 use svolder_profiles::units;
 use svolder_profiles::{Control, ControlKind, Profile};
 use svolder_proto::FunctionId;
@@ -250,6 +251,7 @@ impl WriteError {
                 code: *code,
                 what: message.clone(),
                 next: (*next).to_string(),
+                reason: None,
             },
         }
     }
@@ -305,12 +307,12 @@ fn refused(code: u8, next: &'static str, message: impl Into<String>) -> WriteErr
 
 /// A refusal the user can fix by typing the command differently: exit 1.
 fn bad_request(message: impl Into<String>) -> WriteError {
-    refused(1, next_step(Kind::Usage), message)
+    refused(CODE_USAGE, next_step(Kind::Usage), message)
 }
 
 /// A refusal that comes of the link being away: exit 3.
 fn no_link(message: impl Into<String>) -> WriteError {
-    refused(3, next_step(Kind::Dropped), message)
+    refused(CODE_LINK, next_step(Kind::Dropped), message)
 }
 
 impl Backend {
@@ -1092,7 +1094,7 @@ impl Backend {
     /// of their own (owned, so it can be spawned), which holds the daemon's capture for as long
     /// as the stream it gives lives: `None` for a direct session. An error is the daemon's
     /// refusal (a daemon from before the frames, or with no host audio:
-    /// [`svolder_ipc::IpcError::Protocol`]) or the connection's failure.
+    /// [`svolder_ipc::IpcError::Refused`]) or the connection's failure.
     pub fn host_frames(
         &self,
     ) -> Option<
@@ -1104,9 +1106,44 @@ impl Backend {
         > + Send
         + 'static,
     > {
+        self.daemon_stream(Request::HostFrames)
+    }
+
+    /// A future that opens the stream `request` asks for, one for which
+    /// [`Request::is_stream`] holds, over a connection of its own (owned, so it can be
+    /// spawned): `None` for a direct session. The request connection of this backend is never
+    /// held by it. An error is the daemon's refusal or the connection's failure.
+    pub fn daemon_stream(
+        &self,
+        request: Request,
+    ) -> Option<
+        impl Future<
+            Output = Result<
+                futures::stream::BoxStream<'static, svolder_ipc::Event>,
+                svolder_ipc::IpcError,
+            >,
+        > + Send
+        + 'static,
+    > {
         match self {
             Backend::Direct(_) => None,
-            Backend::Remote(remote) => Some(remote.host_frames()),
+            Backend::Remote(remote) => Some(remote.open_stream(request)),
+        }
+    }
+
+    /// A future that sends `request`, one that runs long on purpose, over a connection of its
+    /// own (owned, so it can be spawned) and waits for its reply as long as `within` allows
+    /// (`None`: as long as the daemon takes): `None` for a direct session. The request
+    /// connection of this backend is never held behind it.
+    pub fn daemon_long_request(
+        &self,
+        request: Request,
+        within: Option<std::time::Duration>,
+    ) -> Option<impl Future<Output = Result<Response, svolder_ipc::IpcError>> + Send + 'static>
+    {
+        match self {
+            Backend::Direct(_) => None,
+            Backend::Remote(remote) => Some(remote.long_request(request, within)),
         }
     }
 

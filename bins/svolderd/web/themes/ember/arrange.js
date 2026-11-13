@@ -9,7 +9,6 @@
 // browser, per theme and per layout, by Done alone; Escape puts back the order from before and an
 // unmount leaves the stored order as it was.
 
-import { menuOwns } from '../../core/menu.js';
 import { ember, live as liveOrder } from './bind.js';
 import {
   MOVABLE, ZONES, isDefault, moveBy, moveTo, orderFor, resolveOrder,
@@ -464,8 +463,8 @@ export function startArrange({ root, core, prefs, layout }) {
     if (drag && event.pointerId === drag.pointer && handleOf(drag.id) === event.target) land(false);
   }, opts);
   document.addEventListener('keydown', (event) => {
-    // The frame's menu and picker have their own Escape.
-    if (event.key !== 'Escape' || menuOwns(event) || document.getElementById('picker')) return;
+    // The frame's menu and what stands over the page have their own Escape.
+    if (event.key !== 'Escape' || core.frame.covered()) return;
     event.preventDefault();
     end('cancel');
   }, opts);

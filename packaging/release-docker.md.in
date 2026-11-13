@@ -16,6 +16,21 @@ docker pull ghcr.io/rralex/svolder:@VERSION@
 docker compose up -d
 ```
 
+First run, with the container up (each command runs as the daemon's user):
+
+```
+docker exec -it svolder svolder setup    # the wizard: device, name, passphrase
+docker exec -it svolder svolder          # the terminal UI
+docker exec svolder svolder web on       # the web page, port 8738 (`mcp on`: the MCP server)
+docker exec svolder svolder web token    # the token the page's sign-in takes
+docker logs -f svolder                   # the daemon's log, warnings included
+```
+
+The wizard and the verbs write `./config/svolder/config.toml`, the one configuration file; there is
+none to write by hand. To turn the page on from the compose file instead, uncomment
+`SVOLDER_WEB_ENABLED: "1"` (or `SVOLDER_MCP_ENABLED: "1"`) under `environment:`; an `enabled` in
+`config.toml` wins over it. The compose file keeps the container's log to three files of 10 MB.
+
 The computer's volume and EQ are opt-in. Save the attached `docker-compose.host-audio.yml` as
 `docker-compose.override.yml` beside `docker-compose.yml` and append your runtime
 directory to `.env` (`>>`, never `>`; `HOST_UID` is already there):
@@ -31,10 +46,11 @@ without it. To turn it off, delete the override file.
 
 The compose file gives the container the host's network, so the web page (8738) and the MCP server
 (8737) are reached at the host's own address, and a native `svolderd` on the same machine must not
-serve the same ports. They answer once `[web]` or `[mcp]` has `enabled = true` in
-`config/svolder/config.toml` (`docker compose restart svolder` after); sign in with
-`docker exec svolder svolder web token`. Only without host networking does the page need the address
-your phone reaches: `url` under `[web]`, or `SVOLDER_WEB_URL` in the compose file.
+serve the same ports. They answer once turned on (`svolder web on`, `svolder mcp on`, the TUI's
+Settings, the compose file's switch, or `enabled = true` under `[web]` or `[mcp]` in
+`config/svolder/config.toml`), with no restart; sign in with `docker exec svolder svolder web
+token`. Only without host networking does the page need the address your phone reaches: `url` under
+`[web]`, or `SVOLDER_WEB_URL` in the compose file.
 
 To update, `docker compose pull` and then `docker compose up -d`. The image is built for x86_64 and arm64. The attached `docker-compose.yml` and `docker-compose.host-audio.yml` are the two files here
 `SHA256SUMS` does not list.

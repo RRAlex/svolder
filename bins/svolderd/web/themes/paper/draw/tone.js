@@ -7,8 +7,11 @@
 // frequency and a gain with the core's own maps. Pure: the model in, markup and numbers out.
 
 import {
-  POINTS, VIEW_HEIGHT, VIEW_WIDTH, linePath, logFreqs, markerPoint, responseDb, xOf, yOf,
+  POINTS, VIEW_HEIGHT, VIEW_WIDTH, logFreqs, markerPoint, responseDb, xOf, yOf,
 } from '../../../core/tone-curve.js';
+import {
+  curveD, fitWords, frame, overlayNote, overlayShapes, path, zeroLine,
+} from '../../../core/plot.js';
 import { presetName, presetOf } from '../notes.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
@@ -26,9 +29,7 @@ export function pointsOf(tone) {
 }
 
 /** The curve's path in the plot's own box. */
-export function curvePath(response) {
-  return linePath(response.map(yOf));
-}
+export const curvePath = curveD;
 
 /** The value of step `raw` in `rows` (`[[value, words], …]`), or nothing for one that is not a
  * number. */
@@ -89,7 +90,8 @@ function row(inert, r) {
   return `<tr data-band="${r.band}"><th scope="row">${esc(r.band)}</th>${PARAMS.map(cell).join('')}</tr>`;
 }
 
-/** The graph: its zero line, the curve and a point for each band (none in Loudness). */
+/** The graph: its zero line, the curve, the imported preset's target and gap while the EQ is on,
+ * and a point for each band (none in Loudness). */
 function graph(tone, device, inert) {
   const dashed = tone.mode === 'flat' ? ' faint' : '';
   const own = tone.mode === 'eq' || tone.mode === 'flat';
@@ -104,10 +106,14 @@ function graph(tone, device, inert) {
       + `${Number.isInteger(raw) ? ` aria-valuenow="${raw}"` : ''} aria-valuetext="${esc(r.g)}"`
       + `${inert ? ' aria-disabled="true"' : ''}></button>`;
   }).join('') : '';
-  return `<div id="p-graph" class="p-graph"><svg viewBox="0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}"`
-    + ' preserveAspectRatio="none" aria-hidden="true">'
-    + `<path class="p-zero" d="M0 ${yOf(0)}H${VIEW_WIDTH}"/>`
-    + `<path class="p-curve${dashed}" d="${curvePath(tone.response ?? [])}"/></svg>${points}</div>`;
+  const overlay = tone.mode === 'eq' ? tone.overlay : null;
+  const shapes = overlayShapes(overlay, { target: 'p-target', gap: 'p-gap' });
+  const fit = fitWords(overlay);
+  const drawn = zeroLine('p-zero') + shapes.gap + shapes.target
+    + path(curveD(tone.response ?? []), `p-curve${dashed}`);
+  return `<div id="p-graph" class="p-graph">${frame(drawn)}${points}`
+    + `${fit ? `<span class="p-fit" title="${esc(overlayNote(overlay))}" aria-hidden="true">${esc(fit)}</span>`
+      + `<span class="p-sr">${esc(overlayNote(overlay))}</span>` : ''}</div>`;
 }
 
 /** The tone section for the shown device; nothing for a device with no tone control. */

@@ -77,6 +77,29 @@ async fn list_status(addr: SocketAddr, token: Option<&str>) -> u16 {
         .expect("a status line")
 }
 
+/// Whether the MCP server answers a `tools/list` with `token` at `addr`: false when nothing
+/// accepts there, or what does is not that server; a listener that hangs fails the test.
+async fn serves_mcp(addr: SocketAddr, token: &str) -> bool {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let request = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\n\
+             Content-Type: application/json\r\n\
+             Accept: application/json, text/event-stream\r\n\
+             MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/list\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n{TOOLS_LIST}",
+            TOOLS_LIST.len()
+        );
+        let mut stream = TcpStream::connect(addr).await.ok()?;
+        stream.write_all(request.as_bytes()).await.ok()?;
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.ok()?;
+        Some(String::from_utf8_lossy(&raw).starts_with("HTTP/1.1 200"))
+    })
+    .await
+    .expect("whatever holds the port answers or refuses within 5 s")
+    .unwrap_or(false)
+}
+
 /// The generated token, once the daemon has written it.
 fn generated_token(state_home: &Path) -> String {
     std::fs::read_to_string(state_home.join("svolder").join("mcp-token"))
@@ -234,7 +257,8 @@ async fn a_reload_that_turns_mcp_off_closes_the_port() {
     tokio::time::timeout(TEST_TIMEOUT, async {
         let (child, mut client) = daemon_with(&with_mcp("")).await;
         let addr = wait_listening(&mut client, &child).await;
-        assert!(TcpStream::connect(addr).await.is_ok());
+        let token = generated_token(&state_home(&child));
+        assert_eq!(list_status(addr, Some(&token)).await, 200);
 
         std::fs::write(child.config_path(), CONFIG).expect("turn [mcp] off");
         client
@@ -242,9 +266,12 @@ async fn a_reload_that_turns_mcp_off_closes_the_port() {
             .await
             .expect("a reload reply");
         assert_eq!(mcp_status(&mut client).await, McpStatus::Off);
+        // The freed port may be taken by another process before this connect (the system picks
+        // it, and parallel tests and daemons pick too), so the test asks whether the MCP server
+        // still answers there, not whether anything accepts.
         assert!(
-            TcpStream::connect(addr).await.is_err(),
-            "the port is still open"
+            !serves_mcp(addr, &token).await,
+            "the MCP server still answers on its port"
         );
 
         // And on again.

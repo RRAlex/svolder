@@ -16,8 +16,11 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use svolder_ipc::Config;
 use svolder_ipc::token::{self, Store, Token, TokenError};
+use svolder_ipc::{
+    Config, DEFAULT_REQUEST_TIMEOUT, FEATURE_SERVER_SWITCH, McpStatus, Request, Response, Server,
+    WebStatus,
+};
 
 use super::{
     Backend, DAEMON_POLL_FIRST, DAEMON_POLL_MAX, DaemonInfo, Flow, Look, Open, Opener, RECONNECTED,
@@ -166,10 +169,47 @@ pub(super) async fn changed<O: Open>(
     watching: &mut Watching,
     site: &TokenSite,
     change: &ConnChange,
+    look: &Look,
+    screen: &mut dyn Shown,
 ) {
     if let Some(words) = watching.app.overlays.conn.read_only() {
         watching.app.warn(words);
         return;
+    }
+    // Turning the web UI or the MCP server on or off while a daemon runs is its switch, which
+    // writes the file and starts or stops the server itself; no other writer is behind it.
+    if let Some((server, enabled)) = switch_of(change) {
+        let socket = super::devices::daemon_socket(opener, watching);
+        // The daemon's version and then its reload can take seconds: shown as a wait.
+        let mut wait = super::devices::Wait::new(format!(
+            "turning the {} {}…",
+            server.table(),
+            if enabled { "on" } else { "off" }
+        ));
+        let sent = wait
+            .on(
+                switch_through(&socket, server, enabled),
+                watching,
+                look,
+                screen,
+                crate::tui::waiting::Interrupted::Carry,
+            )
+            .await;
+        match sent.unwrap_or(Ok(None)) {
+            Ok(Some(line)) => {
+                super::devices::ask_again(watching);
+                reread(watching, site);
+                if let Some(line) = line {
+                    watching.app.warn(line);
+                }
+                return;
+            }
+            Ok(None) => {}
+            Err(words) => {
+                watching.app.warn(words);
+                return;
+            }
+        }
     }
     let wrote = match (change.is_mcp(), change.is_web()) {
         (true, _) => Config::update_mcp(&opener.path, |mcp| change.apply_mcp(mcp)),
@@ -177,8 +217,53 @@ pub(super) async fn changed<O: Open>(
         (false, false) => Config::update_mqtt(&opener.path, |mqtt| change.apply_mqtt(mqtt)),
     };
     if super::written(opener, watching, wrote).await {
+        // `written` asked the daemon again after its reload
         reread(watching, site);
-        watching.daemon_version = ask_daemon(watching.backend.as_ref());
+    }
+}
+
+/// The server and the state a change is the daemon's switch for: only the two on/off keys.
+fn switch_of(change: &ConnChange) -> Option<(Server, bool)> {
+    match change {
+        ConnChange::WebEnabled(on) => Some((Server::Web, *on)),
+        ConnChange::McpEnabled(on) => Some((Server::Mcp, *on)),
+        _ => None,
+    }
+}
+
+/// Send the switch to the daemon on `socket` when one runs: `Ok(None)` with none (the caller
+/// writes the file), `Ok(Some(None))` once the server stands as asked, `Ok(Some(Some(line)))`
+/// with the daemon's own line when it does not, and the words of a refusal otherwise: a daemon
+/// that cannot switch is told to restart, and nothing is written behind it.
+async fn switch_through(
+    socket: &Path,
+    server: Server,
+    enabled: bool,
+) -> Result<Option<Option<String>>, String> {
+    match crate::reach::daemon_runs(socket, FEATURE_SERVER_SWITCH, "switch its servers").await {
+        Ok(false) => return Ok(None),
+        Ok(true) => {}
+        Err(failure) => return Err(failure.to_string()),
+    }
+    let request = Request::ServerSwitch { server, enabled };
+    let reply =
+        svolder_ipc::request_on_own_connection(socket, request, Some(DEFAULT_REQUEST_TIMEOUT))
+            .await;
+    match reply {
+        Ok(Response::ServerSwitch { web, mcp }) => {
+            let (line, standing) = match server {
+                Server::Web => (web.line(), matches!(web, WebStatus::Listening { .. })),
+                Server::Mcp => (mcp.line(), matches!(mcp, McpStatus::Listening { .. })),
+            };
+            Ok(Some((standing != enabled).then_some(line)))
+        }
+        Ok(Response::Error { message, .. }) => Err(message),
+        Ok(other) => Err(format!("the daemon sent an unexpected reply: {other:?}")),
+        Err(svolder_ipc::IpcError::Refused(answer)) => match *answer {
+            Response::Error { message, .. } => Err(message),
+            other => Err(format!("the daemon sent an unexpected reply: {other:?}")),
+        },
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -328,6 +413,17 @@ pub(super) fn daemon_answered(
 ) {
     if let Some(info) = &info {
         watching.app.overlays.conn.daemon_said(info, own_config);
+        match (
+            &watching.app.overlays.conn.config_changed,
+            info.config_changed,
+        ) {
+            (Some(words), true) if !watching.app.session.config_changed_told => {
+                watching.app.session.config_changed_told = true;
+                watching.app.warn(words.clone());
+            }
+            (_, false) => watching.app.session.config_changed_told = false,
+            _ => {}
+        }
     }
     if info.is_none() {
         watching.app.overlays.conn.daemon_missing();

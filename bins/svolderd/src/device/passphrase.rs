@@ -140,8 +140,7 @@ pub(super) fn resolve_passphrase(
     config: &DeviceConfig,
     advert: &Advertisement,
 ) -> Result<Passphrase, String> {
-    match config.passphrase.as_str() {
-        "auto" => Ok(advert.manufacturer.passphrase()),
-        text => Passphrase::from_text(text).map_err(|e| e.to_string()),
-    }
+    config
+        .passphrase_for(&advert.manufacturer)
+        .map_err(|e| e.to_string())
 }

@@ -4,7 +4,7 @@
 // test driver the contract and completeness checks drive (see the checks' README; core/contract.js
 // lists what they ask for). The driver does what a person does on Night drive's page: it shuts or
 // opens the sheet (the volume, the mute, the input, the power key, the transport and the cover live
-// on the dash; everything else on the sheet), unfolds the facts, scrolls to the word, scale or chip,
+// on the dash; everything else on the sheet), scrolls to the word, scale or chip,
 // then taps it, presses a key on a scale or picks an option of the list a chip opens (`operate`),
 // and reads the words the page shows for it (`shown`). It never calls an action of the core itself:
 // a write the check sees went through Night drive's own handlers.
@@ -37,8 +37,10 @@
 //   forceStepDown() -> bool             step the budget down as slow draws would (the wet road goes first)
 //   curveAt(x) -> y                     the y of the curve drawn now at an x in CSS px, null while none
 
-/** The core and the mounted scene, `null` until Night drive is mounted and the page's `view` (nightdrive.js and scene-wire.js fill them). */
-export const bound = { core: null, scene: null, view: null, sheet: null };
+/** The core, the mounted scene and the page's `view`, `null` until Night drive is mounted
+ * (nightdrive.js and scene-wire.js fill them). They are the driver's and the checks' alone: Night
+ * drive's own code reads the mount's scope. */
+export const bound = { core: null, scene: null, view: null };
 
 /** The attribute-selector form of `text`. */
 const q = (text) => CSS.escape(String(text));
@@ -120,7 +122,8 @@ function findComputer(target) {
 function find(target) {
   if (typeof target === 'object' && 'computer' in target) return findComputer(target);
   if (target === 'Cover') return one('#nd-dash .nd-cover img');
-  if (typeof target === 'string') return one(`#nd-facts-body td[data-fact="${q(target)}"]`);
+  // the device's facts are the Devices popup's, drawn by the core: the core's driver answers them
+  if (typeof target === 'string') return null;
   if ('control' in target) {
     const key = q(target.control);
     const kind = controlOf(target.control);
@@ -185,18 +188,10 @@ async function sheetFor(target) {
   await settle();
 }
 
-/** Open the facts when `target` is drawn inside them folded away, as a person taps their title. */
-async function unfold(target) {
-  if (typeof target !== 'string' || !one('#nd-facts-body[hidden]')) return;
-  tap(one('[data-act="facts-fold"]'));
-  await settle();
-}
-
 /** Put the sheet right for `target`, scroll to it and say whether it is drawn and in view; looked for
  * again after the scroll, which a section drawn again may have replaced. */
 async function seen(target) {
   await sheetFor(target);
-  await unfold(target);
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);

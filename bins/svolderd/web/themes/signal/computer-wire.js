@@ -6,7 +6,7 @@
 // value typed, a type chosen, a point added or removed) and the curve under the mouse and the
 // finger: a press on a dot drags its frequency and gain, a tap on an empty spot adds a point, the
 // wheel or two fingers set a Q, the arrow keys step a focused dot. The hand, the table and the
-// typed cell are the core's (`core.drag.pointDrag`, `table`, `editCell`): this module forwards the
+// typed cell are the core's (`core.eq.points`, `core.eq.table`, `core.eq.table.editCell`): this module forwards the
 // page's events to them and draws what they say; every write goes through
 // `core.actions.computer`. A viewer who may not write taps the same words and the core says why
 // nothing happens.
@@ -61,7 +61,7 @@ export function wireComputer({
   }
 
   const scroller = () => shelf.querySelector('.sg-pscroll');
-  const table = core.drag.table({
+  const table = core.eq.table({
     box: scroller,
     note: () => shelf.querySelector('.sg-pmore'),
     row: (n) => shelf.querySelector(`.sg-prow[data-n="${n}"]`),
@@ -214,7 +214,7 @@ export function wireComputer({
     const button = event.target.closest?.(STEPPERS);
     if (!button || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     hold?.end();
-    hold = core.hold.repeat(event, {
+    hold = core.repeat(event, {
       root: box,
       el: button,
       step: (el) => nudge(el.dataset.act === 'cvol-up' ? 1 : -1),
@@ -247,7 +247,7 @@ export function wireComputer({
     s.label.textContent = words;
     const at = { x: Number(dot.dataset.x) * rect.width, y: Number(dot.dataset.y) * rect.height };
     const size = { width: s.label.offsetWidth, height: s.label.offsetHeight };
-    const spot = core.drag.labelAt(at, { width: rect.width, height: rect.height }, size);
+    const spot = core.eq.bands.labelAt(at, { width: rect.width, height: rect.height }, size);
     s.label.style.left = `${spot.x.toFixed(1)}px`;
     s.label.style.top = `${spot.y.toFixed(1)}px`;
   }
@@ -257,8 +257,8 @@ export function wireComputer({
     if (n > 0) table.pick(n);
   }
 
-  const hand = core.drag.pointDrag({
-    points: (graph, rect) => core.drag.markersIn(tone()?.markers, rect),
+  const hand = core.eq.points({
+    points: (graph, rect) => core.eq.points.markersIn(tone()?.markers, rect),
     usable: shown,
     on: {
       pick: (n) => table.pick(n),
@@ -371,7 +371,7 @@ export function wireComputer({
     if (!field.matches('.sg-pval')) return;
     if (!field.readOnly) field.select?.();
     let over = false;
-    core.drag.editCell(field, {
+    core.eq.table.editCell(field, {
       n,
       param: field.dataset.param,
       shown: field.defaultValue,
@@ -391,7 +391,7 @@ export function wireComputer({
         field.value = field.defaultValue;
         if (field.isConnected) field.replaceWith(field.cloneNode(true));
       },
-    });
+    }).listen();
   }, { signal });
   shelf.addEventListener('focusout', (event) => {
     if (!event.target.closest?.('.sg-ptype') || !shelf.dataset.typing) return;

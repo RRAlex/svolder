@@ -844,15 +844,19 @@ async fn the_daemon_answer_is_the_version_mcp_and_web_of_a_version_reply_and_not
             mcp_token: None,
             web: Some(svolder_ipc::WebStatus::Off),
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         },
     }));
+    let info = daemon_answer(&socket).await.expect("a version answer");
     assert_eq!(
-        daemon_answer(&socket).await,
-        Some((
-            "9.9.9".to_string(),
+        (info.version.as_str(), info.mcp, info.web),
+        (
+            "9.9.9",
             Some(McpStatus::Off),
             Some(svolder_ipc::WebStatus::Off)
-        ))
+        )
     );
     let _ = std::fs::remove_file(&socket);
 
@@ -961,4 +965,102 @@ async fn a_look_with_a_configured_device_does_not_connect_to_the_socket() {
         ),
         "nothing connected to the socket"
     );
+}
+
+/// A config file that changed since the daemon's last reload grades the daemon check `!` with
+/// the daemon's words and the reload verb, which the doctor offers and never applies; a quiet
+/// daemon leaves the check as it was, and a check that already had a fix keeps it.
+#[test]
+fn a_changed_config_grades_the_daemon_check_with_a_reload_fix() {
+    let words = daemon_version::config_changed_line("/config/config.toml");
+    let mut outcomes = vec![outcome(checks::DAEMON, State::Pass, None)];
+
+    grade_config_changed(&mut outcomes, None, false);
+    assert_eq!(outcomes[0].state, State::Pass);
+    assert!(outcomes[0].fix.is_none());
+
+    grade_config_changed(&mut outcomes, Some(words.clone()), false);
+    assert_eq!(outcomes[0].state, State::Warn);
+    assert_eq!(
+        lines(&outcomes[0]),
+        [
+            format!("! {} — {words}", checks::DAEMON),
+            "    fix: svolder daemon reload".to_string(),
+        ]
+    );
+    assert!(!outcomes[0].fix.as_ref().expect("a fix").applies_itself);
+    let json = serde_json::to_value(&outcomes[0]).expect("the outcome serialises");
+    assert_eq!(json["fix"], "svolder daemon reload");
+    assert_eq!(json["applies_itself"], false);
+
+    let mut skewed = vec![Outcome {
+        reason: "svolderd.socket is installed but not enabled".into(),
+        ..outcome(checks::DAEMON, State::Warn, Some(fix(DAEMON_INSTALL, true)))
+    }];
+    grade_config_changed(&mut skewed, Some(words.clone()), false);
+    assert!(skewed[0].reason.ends_with(&words), "{}", skewed[0].reason);
+    assert_eq!(skewed[0].fix.as_ref().unwrap().command, DAEMON_INSTALL);
+
+    // A missing file is told in its own words, and no reload is offered: the daemon refuses it.
+    let gone = daemon_version::config_missing_line("/config/config.toml");
+    let mut missing = vec![outcome(checks::DAEMON, State::Pass, None)];
+    grade_config_changed(&mut missing, Some(gone.clone()), true);
+    assert_eq!(missing[0].state, State::Warn);
+    assert_eq!(missing[0].reason, gone);
+    assert!(missing[0].fix.is_none());
+}
+
+/// While the daemon says its file is gone, the rows about the host's own missing file offer
+/// nothing that writes one: a file made from the template and then reloaded would drop every
+/// device the daemon holds. The restore-then-reload words stay on the daemon row.
+#[test]
+fn a_missing_daemon_config_withdraws_the_fixes_that_would_write_one() {
+    let gone = daemon_version::config_missing_line("/config/config.toml");
+    let mut outcomes = vec![
+        outcome(checks::DAEMON, State::Pass, None),
+        outcome(checks::CONFIG, State::Warn, Some(fix(SETUP, true))),
+        config_file_row(Path::new("/config/config.toml"), true).expect("a row"),
+    ];
+    grade_config_changed(&mut outcomes, Some(gone.clone()), true);
+    assert_eq!(outcomes[0].reason, gone);
+    assert!(outcomes[1].fix.is_none(), "{:?}", outcomes[1]);
+    assert!(outcomes[2].fix.is_none(), "{:?}", outcomes[2]);
+
+    // A file that changed, not one that is gone, leaves them be.
+    let mut changed = vec![
+        outcome(checks::DAEMON, State::Pass, None),
+        outcome(checks::CONFIG, State::Warn, Some(fix(SETUP, true))),
+    ];
+    grade_config_changed(&mut changed, Some("config: changed".into()), false);
+    assert!(changed[1].fix.is_some());
+}
+
+/// The doctor's read of a daemon carries the changed flag and the file the daemon names.
+#[tokio::test]
+async fn the_daemon_answer_carries_the_changed_config_words() {
+    use svolder_ipc::socket::protocol::{Reply, Response};
+    let socket = fake_daemon(Some(Reply::Response {
+        id: 1,
+        response: Response::Version {
+            version: "9.9.9".into(),
+            mqtt: None,
+            mcp: None,
+            log: None,
+            config: Some("/config/config.toml".into()),
+            mcp_token: None,
+            web: None,
+            web_token: None,
+            features: Vec::new(),
+            config_changed: true,
+            config_missing: false,
+        },
+    }));
+    let info = daemon_answer(&socket).await.expect("a version answer");
+    assert_eq!(
+        info.config_changed_words().as_deref(),
+        Some(
+            "config: /config/config.toml changed since the last reload: svolder daemon reload (or SIGHUP)"
+        )
+    );
+    let _ = std::fs::remove_file(&socket);
 }

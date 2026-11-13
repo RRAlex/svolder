@@ -509,7 +509,7 @@ fn on_red_a_focused_bars_empty_cells_take_the_emphasis_dim_shade() {
         let mut look = red_look(depth, Transition::None);
         let mut app = heard("gungnir2-v2");
         // Input, Phase invert, NOS filter, Mute, then Volume.
-        app.selected = 4;
+        app.set_selected(4);
         colour(&mut look, &app);
         assert_eq!(look.theme.bar_dim(), wanted, "{depth:?}");
         let (buffer, _) = drawn_on(&app, &look);

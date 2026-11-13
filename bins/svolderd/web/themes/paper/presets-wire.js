@@ -13,7 +13,6 @@
 
 import { askForm, askQuestion, closeAsk } from './ask.js';
 import { closeList, closeOf, openList } from './lists.js';
-import { keeper } from './live.js';
 import { WORDS } from './words.js';
 
 /** Wire the two presets sections of the sheet in `root` until `signal` aborts. */
@@ -26,7 +25,7 @@ export function wirePresets({
   function wireSection(name, onWord) {
     const box = root.querySelector(`#p-${name}`);
     if (!box) return;
-    const keep = keeper(live, name);
+    const keep = core.freeze.keeper(live, name);
     const section = {
       keep,
       /** The place a form or question is drawn in, found now: the section may have been drawn

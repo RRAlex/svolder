@@ -382,6 +382,47 @@ fn the_demo_runs_in_a_private_directory_and_quitting_removes_it() {
     );
 }
 
+/// The demo's TUI has a computer side to flip to, the daemon's simulated one, and says nothing of
+/// the computer's controls being unavailable: `C` shows the computer, whose sink is the
+/// simulated one and not this machine's.
+#[test]
+fn the_demo_tui_has_a_simulated_computer_side() {
+    let Some(mut demo) = Demo::start() else {
+        return;
+    };
+    let (_pid, dir) = demo.wait_for_daemon();
+    demo.wait_for_tui(&dir);
+    assert!(
+        demo.shows("Target"),
+        "the Target row is drawn; the screen was: {:?}",
+        without_escapes(&demo.seen)
+    );
+    for needle in ["42%", "Off | EQ", "1000 Hz"] {
+        assert!(
+            !without_escapes(&demo.seen).contains(needle),
+            "the device's side shows {needle:?}, which is the computer's"
+        );
+    }
+    demo.type_keys(b"C");
+    assert!(
+        demo.shows("42%"),
+        "the computer side shows the simulated 42 %; the screen was: {:?}",
+        without_escapes(&demo.seen)
+    );
+    // The simulated computer EQ's rows: its mode switch and its one point.
+    for needle in ["Off | EQ", "1000 Hz"] {
+        assert!(
+            demo.shows(needle),
+            "the computer side shows {needle:?}; the screen was: {:?}",
+            without_escapes(&demo.seen)
+        );
+    }
+    assert!(
+        !without_escapes(&demo.seen).contains("computer controls unavailable"),
+        "the computer's controls are there"
+    );
+}
+
 /// Ctrl-C is a key in the TUI and ends the demo the way `q` does.
 #[test]
 fn ctrl_c_ends_the_demo_and_removes_the_directory() {

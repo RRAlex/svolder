@@ -570,10 +570,13 @@ fn header_line(
     if let Some(preset) = preset_text(standing, room) {
         line.push_span(Span::raw(preset));
         // What follows the name goes in only where it fits whole: the name is cut first.
-        let words = [
-            target.map(|view| view.header.clone()),
-            device::host_eq_words(app, area),
-        ];
+        // The fit of the bands on the device, which a band edit moves; left out while a band is
+        // unread, as the web page leaves out its overlay.
+        let bands = plot(app, eq).filters;
+        let fit = target
+            .filter(|_| bands.len() == eq.bands.len())
+            .map(|view| view.header(&bands));
+        let words = [fit, device::host_eq_words(app, area)];
         for words in words.into_iter().flatten() {
             let words = format!("{PRESET_OPEN}{words}");
             let left = usize::from(width)

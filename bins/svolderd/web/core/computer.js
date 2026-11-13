@@ -7,9 +7,9 @@
 // points and the preamp, and the point a tap or `+ Add point` makes are plain data here; the writes
 // are `actions.computer`.
 //
-// What this viewer is changing is held: a value asked for (the volume, a point's frequency, gain
+// What this viewer is changing is pending: a value asked for (the volume, a point's frequency, gain
 // or Q) is drawn as asked and is not moved by a host update meanwhile; once the writes have
-// settled the host's own model is read again and the held values go. Flipping to the other side
+// settled the host's own model is read again and the pending values go. Flipping to the other side
 // writes nothing: it ends any drag or hold a theme has registered with `track`, and keeps the
 // side in storage.
 
@@ -109,12 +109,12 @@ export function nextFree(points) {
 }
 
 /**
- * The values this viewer is changing, by key (`volume`, `mute`, `mode`, `point:<id>`, the id being
- * the point's slot), until the daemon's own model has been read after them. `fetch` reads (the
- * page's); `listen(fn)` hears `'held'` when a value is held and `'settled'` when held values
- * went.
+ * The pending values: those this viewer is changing, by key (`volume`, `mute`, `mode`,
+ * `point:<id>`, the id being the point's slot), until the daemon's own model has been read after
+ * them. `fetch` reads (the page's); `listen(fn)` hears `'held'` when a value becomes pending and
+ * `'settled'` when pending values went.
  */
-export function createHolds({ store, fetch }) {
+export function createPending({ store, fetch }) {
   const held = new Map();
   const heard = new Set();
   const notify = (type, extra) => heard.forEach((fn) => fn(type, extra));
@@ -282,8 +282,8 @@ export function createHolds({ store, fetch }) {
 }
 
 /** The core's `computer` over `store`: the kept side (in `storage`), the parts of the computer's
- * controls, and the points a tap makes. `holds` is the values this viewer is changing. */
-export function createComputer({ store, storage, holds }) {
+ * controls, and the points a tap makes. `pending` is the values this viewer is changing. */
+export function createComputer({ store, storage, pending }) {
   let kept = readSide(storage);
   const listeners = new Set();
   const open = new Set();
@@ -309,7 +309,7 @@ export function createComputer({ store, storage, holds }) {
   // goes with the side or the device and follows a point the daemon lists elsewhere.
   const picked = { n: null, device: null };
 
-  holds.listen((type, extra) => {
+  pending.listen((type, extra) => {
     if (type === 'moved' && picked.n === extra.from) picked.n = extra.to;
     notify(type, extra);
   });
@@ -318,7 +318,7 @@ export function createComputer({ store, storage, holds }) {
   let shownBefore = store.shown();
   store.on('model', () => {
     const now = store.shown();
-    if (now !== shownBefore) holds.clear();
+    if (now !== shownBefore) pending.clear();
     shownBefore = now;
   });
 
@@ -349,7 +349,7 @@ export function createComputer({ store, storage, holds }) {
       notify('picked', { n });
     },
     /** Read the computer's model again (a preset renamed or deleted changed its list). */
-    resync: () => holds.resync(),
+    resync: () => pending.resync(),
     /** The side this viewer chose, whether or not it can be shown. */
     kept: () => kept,
     /**
@@ -435,8 +435,8 @@ export function createComputer({ store, storage, holds }) {
     volumeOf(page) {
       if (!drawable(page)) return null;
       const read = modelOf(page).volume;
-      const pct = holds.get('volume')?.value ?? read?.pct ?? null;
-      const muted = holds.get('mute')?.value ?? read?.muted ?? false;
+      const pct = pending.get('volume')?.value ?? read?.pct ?? null;
+      const muted = pending.get('mute')?.value ?? read?.muted ?? false;
       let aria = 'Volume, not read yet';
       if (pct !== null) aria = `Volume ${pct} %${muted ? ', muted' : ''}`;
       return {
@@ -461,7 +461,7 @@ export function createComputer({ store, storage, holds }) {
       const eq = modelOf(page).eq;
       if (!eq) return null;
       return {
-        on: holds.get('mode')?.value ?? eq.on,
+        on: pending.get('mode')?.value ?? eq.on,
         preset: eq.preset ?? null,
         verified: !eq.running_unknown,
       };
@@ -482,7 +482,7 @@ export function createComputer({ store, storage, holds }) {
       const eq = model.eq;
       if (!eq) return null;
       const listed = (eq.points?.length ? eq.points : [FLAT_POINT]).map((point, i) => ({
-        type: point.type, f: point.f, g: point.g, q: point.q, ...holds.get(`point:${pointId(point, i)}`)?.value,
+        type: point.type, f: point.f, g: point.g, q: point.q, ...pending.get(`point:${pointId(point, i)}`)?.value,
       }));
       const points = listed.map((point, i) => ({ n: i + 1, ...point }));
       const { on, preset, verified } = computer.eqOf(page);

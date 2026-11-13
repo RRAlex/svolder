@@ -130,6 +130,32 @@ function lifts(geo, floor) {
   }
 }
 
+/** The alpha the ground is tinted with under the daemon's gap spans. */
+export const GAP_ALPHA = 0.22;
+
+/** Tint the cells of the strip between row edges `a` and `b` (the offsets into `GX`/`GL`) whose
+ * columns `cols` marks, as one path per run of neighbouring columns. */
+function tintGap(g, a, b, cols) {
+  g.fillStyle = PALETTE.gapTint;
+  g.globalAlpha = GAP_ALPHA;
+  let i = 0;
+  while (i < COLUMNS) {
+    if (!cols[i]) {
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end < COLUMNS && cols[end]) end++;
+    g.beginPath();
+    g.moveTo(GX[a + i], GL[a + i]);
+    for (let j = i + 1; j <= end; j++) g.lineTo(GX[a + j], GL[a + j]);
+    for (let j = end; j >= i; j--) g.lineTo(GX[b + j], GL[b + j]);
+    g.closePath();
+    g.fill();
+    i = end;
+  }
+}
+
 /** Draw the plain grid and the floor of `floor`: a grid whose crossings are lifted by the level of
  * their row, the far strips first so the near ones cover them, each strip filled (the ground, then each
  * cell's heat) and then its lines. `frame.look` is the mood's look (look.js). */
@@ -143,6 +169,7 @@ export function drawRoad(g, geo, floor, frame) {
   const heat = (0.45 + 0.55 * look.mood) * dim;
   const ground = dull ? 1 : 1 - 0.85 * look.wet;
   const colours = heatColours(look.x);
+  const tint = !dull && frame.overlay?.cols ? frame.overlay.cols : null;
   const { peak } = floor;
   const stride = COLUMNS + 1;
   const line = Math.max(1, unitOf(w) * 1.1);
@@ -165,6 +192,7 @@ export function drawRoad(g, geo, floor, frame) {
       g.fillStyle = PALETTE.ground;
       g.fill();
     }
+    if (tint) tintGap(g, a, b, tint);
     // neighbouring cells of one colour and nearly one alpha are filled as one path: fewer fills, and no seam
     let was = -1;
     let level = -1;
@@ -223,6 +251,32 @@ export function drawRoad(g, geo, floor, frame) {
     }
   }
   g.globalAlpha = 1;
+}
+
+/** The alpha of the target's ghost ridge. */
+export const GHOST_ALPHA = 0.55;
+
+/** The target's ghost ridge: the imported preset's target (`overlay.y`, `x => y` on the mountains' own
+ * frequency axis and gain window, the tone curve's) as a faint dotted line behind the mountains, held
+ * above the horizon. Nothing without an overlay. */
+export function drawTarget(g, geo, overlay) {
+  if (!overlay?.y) return;
+  const { w, H } = geo;
+  const px = unitOf(w);
+  g.save();
+  g.globalAlpha = GHOST_ALPHA;
+  g.strokeStyle = PALETTE.targetRidge;
+  g.lineWidth = 1.6 * px;
+  g.lineCap = 'round';
+  g.setLineDash([1.5 * px, 5 * px]);
+  g.beginPath();
+  for (let x = 0; x <= w; x += RIDGE.step * 2) {
+    const y = Math.min(H, overlay.y(x));
+    if (x === 0) g.moveTo(x, y);
+    else g.lineTo(x, y);
+  }
+  g.stroke();
+  g.restore();
 }
 
 /** The ridge's levels smoothed across frequency, and its heights at each sample, worked out once a

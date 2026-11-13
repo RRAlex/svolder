@@ -54,7 +54,7 @@ impl App {
             KeyCode::Down if self.move_onto_switch(1) => Vec::new(),
             KeyCode::Up => self.move_selection(-1),
             KeyCode::Down => {
-                let from = self.selected;
+                let from = self.selected();
                 let intents = self.move_selection(1);
                 self.land_on_switch(from);
                 intents
@@ -159,7 +159,7 @@ impl App {
     /// it does not).
     pub(crate) fn identify_offered(&self) -> bool {
         let row = (self.screen == Screen::Devices)
-            .then(|| self.devices.rows.get(self.selected))
+            .then(|| self.devices.rows.get(self.selected()))
             .flatten()
             .and_then(|row| row.profile.as_deref());
         match row {
@@ -251,7 +251,7 @@ impl App {
         if !self.host_shown() {
             return None;
         }
-        let at = self.selected.checked_sub(self.row_count())?;
+        let at = self.selected().checked_sub(self.row_count())?;
         self.host_rows().get(at).copied()
     }
 
@@ -470,7 +470,7 @@ impl App {
 
     /// The control the Controls pane has focused, whichever pane the keys are going to.
     pub fn selected_control(&self) -> Option<&Control> {
-        self.row_controls().get(self.selected).copied()
+        self.row_controls().get(self.selected()).copied()
     }
 
     /// The control a key acts on: the Controls pane's own selection, and nothing at all

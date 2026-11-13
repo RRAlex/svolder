@@ -11,7 +11,7 @@
 //   tone-motion.js the tone curve's easing and flashes
 //   tone-editor.js the steppers that repeat while held, and the band editor
 //   tone-graph.js  the graph's points under the mouse: drag, right drag and wheel
-//   keys.js        the desktop keys and the key list
+//   keys.js        the desktop keys; key-table.js the theme's key table and its zones' names
 //   facts.js       the Device fold-out: its open state, its ages and the Identify button
 //   playing.js     the Now playing card: its time and bar, the transport and the phone's line
 //   visualizer.js  the visualizer card: the canvas, the looks, the frames stream
@@ -39,7 +39,8 @@ import { startStrip, stopStrip, strip } from './strip.js';
 import { installToneMotion, once } from './tone-motion.js';
 import { installToneEditor, syncEditor } from './tone-editor.js';
 import { endDrag, installToneGraph } from './tone-graph.js';
-import { installKeys } from './keys.js';
+import { ZONES } from './key-table.js';
+import { installKeys, TABLE } from './keys.js';
 import { installFacts, syncFacts } from './facts.js';
 import { installPlaying, syncPlaying } from './playing.js';
 import {
@@ -124,7 +125,8 @@ function dropPreserved() {
   for (const kept of document.querySelectorAll('[hx-preserve]')) kept.removeAttribute('id');
 }
 
-/** Mount Ember on `root`: draw it, wire it, follow the model; returns the way to unmount. */
+/** Mount Ember on `root`: draw it, wire it, follow the model; returns the mounted instance (the
+ * way to unmount, the rows this mount gives the frame's menu and the theme's key table). */
 function mount(root, core, { signal }) {
   ember.core = core;
   ember.signal = signal;
@@ -185,16 +187,21 @@ function mount(root, core, { signal }) {
     ember.signal = null;
   });
 
-  return function unmount() {
-    live.stop();
-    stopStrip();
-    reset();
-    root.replaceChildren();
+  return {
+    menuRows,
+    keys: TABLE,
+    zones: ZONES,
+    unmount() {
+      live.stop();
+      stopStrip();
+      reset();
+      root.replaceChildren();
+    },
   };
 }
 
-/** The rows Ember gives the frame's menu: the effects and the visualizer's switch, then the way
- * into Arrange mode. */
+/** The rows a mount of Ember gives the frame's menu: the effects and the visualizer's switch, then
+ * the way into Arrange mode. */
 function menuRows() {
   return [...effects.menuRows(), { kind: 'sep' }, {
     kind: 'action',
@@ -210,16 +217,15 @@ function menuRows() {
 }
 
 /** The theme as the registry lists it: it asks the daemon for the meters and the computer's player,
- * and draws the analysis of the music; its menu button is the waves, and its rows in the frame's
- * menu are the effects, the visualizer's switch and the way into Arrange mode; its `sections` are
+ * and draws the analysis of the music; its menu button is the waves (its rows in the frame's menu
+ * come from the mounted instance); its `sections` are
  * the ones Arrange moves; its `driver` is the test driver of the contract checks. */
 export const theme = {
   id: 'ember',
   label: 'Ember',
-  needs: ['meters', 'host', 'analysis'],
+  needs: ['meters', 'host', 'analysis', 'strip'],
   schemes: ['dark'],
   menuButton: { icon: 'waves', label: 'Effects' },
-  menuRows,
   menuOpening: effects.opening,
   sections: SECTIONS,
   preview,

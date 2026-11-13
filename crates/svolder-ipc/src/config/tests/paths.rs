@@ -70,6 +70,15 @@ fn the_scratch_sweep_removes_only_finished_runs() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// Lets go of a root's lock for good. `flock` belongs to the open file description, which a
+/// child of another test's `fork` shares until its `exec`, so closing this descriptor alone can
+/// leave the lock held for that long; `LOCK_UN` releases it for every copy.
+fn release_lock(lock: std::fs::File) {
+    use std::os::fd::AsRawFd;
+    // SAFETY: `flock` only reads the descriptor, which `lock` keeps open for the call.
+    unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
+}
+
 /// The sweep keeps a scratch root whose run holds its lock, whatever its pid says (a run in
 /// another PID namespace has a pid this one cannot see in `/proc`), and removes it once the lock
 /// is let go.
@@ -79,13 +88,26 @@ fn the_scratch_sweep_keeps_a_root_whose_run_holds_its_lock() {
     // Pids no process here has, as a run in another PID namespace looks from here.
     let (live, lock) = scratch_root(&temp, 4_294_967_294).expect("a root");
     let (over, ended) = scratch_root(&temp, 4_294_967_293).expect("a root");
-    drop(ended);
+    release_lock(ended);
     sweep_finished_scratch_homes(&temp);
     assert!(live.exists(), "a live run's root was removed");
     assert!(!over.exists(), "a finished run's root was kept");
-    drop(lock);
+    release_lock(lock);
     sweep_finished_scratch_homes(&temp);
     assert!(!live.exists(), "a root outlived its run");
+}
+
+/// A copy of the lock's descriptor that outlives the run (a child between `fork` and `exec`
+/// holds one) does not keep the root: the lock goes with `release_lock`, not with the close.
+#[test]
+fn a_copied_lock_descriptor_does_not_keep_a_finished_roots_lock() {
+    let temp = temp_dir("config-writer");
+    let (root, lock) = scratch_root(&temp, 4_294_967_294).expect("a root");
+    let forked_copy = lock.try_clone().expect("a duplicate descriptor");
+    release_lock(lock);
+    sweep_finished_scratch_homes(&temp);
+    assert!(!root.exists(), "a copy of the descriptor kept the root");
+    drop(forked_copy);
 }
 
 /// A root another live run holds (the same pid in another PID namespace) is not shared: the

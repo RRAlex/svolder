@@ -376,6 +376,7 @@ async fn a_fleet_change_reaches_the_open_streams() {
         after: None,
     };
     let body = response.into_body();
+    let daemon = Arc::clone(&dac.daemon);
     let declare = move || {
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         svolder_ipc::Config::add_hop(&path, &hop).expect("the hop is added");
@@ -386,7 +387,13 @@ async fn a_fleet_change_reaches_the_open_streams() {
             .unwrap()
             .set_modified(modified)
             .unwrap();
-        web.fleet_changed.send_modify(|turn| *turn += 1);
+        // The daemon holds the file as of its last reload, so the hop is read once it has.
+        let daemon = Arc::clone(&daemon);
+        let web = web.clone();
+        tokio::spawn(async move {
+            daemon.reload_all().await.unwrap();
+            web.fleet_changed.send_modify(|turn| *turn += 1);
+        });
     };
     let hops = |seen: &[(String, String)]| {
         all(seen, "fleet")
@@ -413,7 +420,46 @@ async fn a_hop_written_into_the_file_is_found_on_the_seconds_turn() {
         note: None,
         after: None,
     };
-    let declare = move || svolder_ipc::Config::add_hop(&path, &hop).expect("the hop is added");
+    let daemon = Arc::clone(&dac.daemon);
+    let declare = move || {
+        svolder_ipc::Config::add_hop(&path, &hop).expect("the hop is added");
+        let daemon = Arc::clone(&daemon);
+        tokio::spawn(async move { daemon.reload_all().await.unwrap() });
+    };
+    let found = |seen: &[(String, String)]| {
+        all(seen, "fleet")
+            .iter()
+            .any(|f| f["hops"][0]["name"] == "Loki")
+    };
+    let seen = events_until(body, after_model(declare, found)).await;
+    assert!(found(&seen), "{seen:?}");
+    dac.stop().await;
+}
+
+/// A hop written into the file, then reloaded after the second's turn has looked at the file,
+/// still reaches the open page: the fleet follows the daemon's snapshot, not the file's date.
+#[tokio::test]
+async fn a_reload_after_the_seconds_turn_reaches_the_open_page() {
+    let dac = fake_daemon("gungnir2-v2", "Gungnir 2").await;
+    let body = open_stream(Arc::clone(&dac.fleet), "/api/v1/events?device=Gungnir%202").await;
+    let path = dac.dir.join("config.toml");
+    let hop = svolder_ipc::config::Hop {
+        what: svolder_ipc::config::HopWhat::Declared {
+            kind: svolder_ipc::config::HopKind::Amp,
+            name: "Loki".to_string(),
+        },
+        note: None,
+        after: None,
+    };
+    let daemon = Arc::clone(&dac.daemon);
+    let declare = move || {
+        svolder_ipc::Config::add_hop(&path, &hop).expect("the hop is added");
+        let daemon = Arc::clone(&daemon);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            daemon.reload_all().await.unwrap()
+        });
+    };
     let found = |seen: &[(String, String)]| {
         all(seen, "fleet")
             .iter()

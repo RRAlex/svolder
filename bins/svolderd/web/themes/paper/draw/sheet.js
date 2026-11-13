@@ -21,9 +21,6 @@ import { volume, volumeInPlace } from './volume.js';
 
 export { esc };
 
-/** The width under which the sheet is a phone's: one column, the notes after what they are about. */
-export const PHONE_MAX_PX = 719;
-
 /** The sections of the two columns, top to bottom. */
 const LEFT = ['tone', 'power', 'meters'];
 const RIGHT = ['controls', 'playing', 'presets', 'device-presets'];

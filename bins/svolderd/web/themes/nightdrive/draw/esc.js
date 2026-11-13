@@ -1,10 +1,4 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// Words from the model made safe to put into Night drive's markup.
-
-const ESCAPES = {
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;',
-};
-
-/** `text` made safe to put into markup, in text or in a quoted attribute. */
-export const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => ESCAPES[c]);
+// The words from the model made safe to put into markup: the core's, kept at this path for the draws.
+export { esc } from '../../../core/html.js';

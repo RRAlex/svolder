@@ -4,6 +4,7 @@
 // the path's verdict, which trouble replaces), the EQ line and the volume. No DOM here; the
 // drawing is in draw/hud.js and draw/volume.js.
 
+import { fitWords, overlayNote } from '../../core/plot.js';
 import { TITLE, statusOf } from '../../core/title.js';
 import { HUD } from './words.js';
 
@@ -75,7 +76,8 @@ function computerEqLine(eq) {
 /**
  * The EQ line: `{ lead, name, gains }`, `name` the bright part. In EQ it is `EQ` then the preset's
  * name when one is on (`lead: 'EQ'`, `name: 'WARM'`, else `lead: ''`, `name: 'EQ'`) and the
- * bands' gains; Loudness `LOUDNESS 3` and Flat `FLAT` have none. `null` for a device with no tone. With the
+ * bands' gains, and `fit` (`fit 0.9 dB`, the daemon's miss) while an imported preset's overlay is served; Loudness
+ * `LOUDNESS 3` and Flat `FLAT` have neither. `null` for a device with no tone. With the
  * computer as the side shown (`comp`, the core's `computer.view()`) it is the computer's: `OFF` or `EQ` and the preset.
  */
 export function eqLine(page, comp = null) {
@@ -90,9 +92,11 @@ export function eqLine(page, comp = null) {
   if (tone.mode === 'flat') return { lead: '', name: HUD.flat, gains: [] };
   const gains = (tone.bands?.rows ?? []).map((r) => gainWords(r.g));
   const preset = device.presets?.status?.name;
-  return preset
+  const fit = fitWords(tone.overlay);
+  const line = preset
     ? { lead: HUD.eq, name: String(preset).toUpperCase(), gains }
     : { lead: '', name: HUD.eq, gains };
+  return fit ? { ...line, fit, note: overlayNote(tone.overlay) } : line;
 }
 
 /** The name of the DAC an amp is linked after, or `null`. */

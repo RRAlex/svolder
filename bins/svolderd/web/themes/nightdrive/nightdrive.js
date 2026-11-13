@@ -15,8 +15,8 @@
 //                sheet-wire.js opens and closes it and works the mode and the input, bands-wire.js the
 //                band table and the loudness, presets-wire.js the presets, ask.js the questions they ask
 //   draw/slots.js, draw/controls.js, draw/facts.js, draw/meters.js the rest of the sheet (the device's slots, its
-//                controls, its facts and faults, an amp's meters); controls-wire.js and facts-wire.js the hands on
-//                them, fold.js keeps the facts' fold; draw/gauges.js an amp's gauges in the dash
+//                controls, its faults and the foot that opens its page in the Devices popup, an amp's meters);
+//                controls-wire.js and facts-wire.js the hands on them; draw/gauges.js an amp's gauges in the dash
 //   tune.js      the tone control on the mountains as numbers (the map, the bubbles, the morph);
 //                tune-wire.js the hands on it, draw/tune.js the bubbles
 //   points-wire.js   the computer's side (the switch by the menu button or in the panel's top row, its volume in the
@@ -30,16 +30,17 @@
 //   hud.js       the HUD's words from the model; draw/hud.js and draw/volume.js its markup and the
 //                outrun volume; hud-wire.js draws them and fades them after the idle time
 //   draw/dash.js the dash's markup (the keys, the input, the track, the transport); dash-wire.js draws
-//                it and works its keys through the core's hold and actions; act.js logs the writes,
-//                lists.js is the list a long input opens
+//                it and works its keys through the core's hold and actions; the core's act.js logs the
+//                writes, lists.js is the list a long input opens
 //   words.js     the fixed words
 //   debug.js     the readout and the bisect switches the address asks for (`?nd-debug`); debug-wire.js its box;
 //                stats.js the draws' times and rate
 //   driver.js    what the checks reach into
 //   preview.js   the picture of the theme in the frame's menu and picker
 
+import { PHONE_MAX_PX } from '../../core/phone.js';
 import { registerTheme } from '../../core/registry.js';
-import { createAct } from './act.js';
+import { createAct } from '../../core/act.js';
 import { wireBands } from './bands-wire.js';
 import { wireCard } from './card-wire.js';
 import { wireControls } from './controls-wire.js';
@@ -48,10 +49,10 @@ import { wireDashFade } from './dash-fade.js';
 import { ASKED } from './debug.js';
 import { wireDebug } from './debug-wire.js';
 import { bound, driver } from './driver.js';
+import { KEYS, ZONES } from './key-table.js';
 import { wireFacts } from './facts-wire.js';
-import { createFold } from './fold.js';
 import { wireHud } from './hud-wire.js';
-import { PARTS_OF, createLive } from './live.js';
+import { PARTS_OF } from './live.js';
 import { MOTIONS, motionOf } from './motion.js';
 import { wirePoints } from './points-wire.js';
 import { wirePresets } from './presets-wire.js';
@@ -70,14 +71,15 @@ const SKELETON = `<div id="nightdrive" class="nd"><div class="nd-scene" role="im
   + '<div id="nd-dash" class="nd-dash"></div><div id="nd-cardbox" class="nd-cardbox" hidden></div></div>'
   + '<div id="nd-sheet-wrap" class="nd-sheet-wrap" hidden></div></div>';
 
-/** Mount Night drive on `root`: draw the scene, follow the model; returns the way to unmount. */
+/** Mount Night drive on `root`: draw the scene, follow the model; returns the mounted instance
+ * (the way to unmount, the rows this mount gives the frame's menu and the theme's key table). */
 function mount(root, core, { signal }) {
   root.innerHTML = SKELETON;
   bound.core = core;
   const page = root.querySelector('#nightdrive');
   const view = {
     /** A phone: a narrow window, or a short one (a phone held sideways). */
-    phone: () => innerWidth < 720 || innerHeight < 500,
+    phone: () => innerWidth <= PHONE_MAX_PX || innerHeight < 500,
     portrait: () => innerHeight > innerWidth,
     /** The motion level: `full`, `calm` or `still` (the menu's rows, kept per browser). */
     motion: motionOf(core.prefs, globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches),
@@ -87,8 +89,6 @@ function mount(root, core, { signal }) {
     /** The tuning on the mountains and the sheet of the device: their parts come with them. */
     tune: null,
     sheet: null,
-    /** Whether the device's facts are unfolded on the sheet (fold.js: kept per browser). */
-    facts: createFold(() => core.prefs),
     /** The volume step this page asked for and is waiting on, `{ raw, at }`, so the reading that answers it is its own. */
     asked: null,
     /** Open the sheet of the device from `opener` (the dash's `DEVICE ▴` or the menu's row) and close it
@@ -100,10 +100,12 @@ function mount(root, core, { signal }) {
   let dash = null;
   let sheet = null;
   let cards = null;
-  const live = createLive({
+  const live = core.freeze.createLive({
     core,
     signal,
     view,
+    // the page follows the device it shows
+    device: () => core.model.shown(),
     sections: {
       scene: {
         parts: ['card'],
@@ -139,10 +141,7 @@ function mount(root, core, { signal }) {
   wireControls({
     core, live, act, sheet, signal,
   });
-  wireFacts({
-    core, live, view, sheet, signal,
-  });
-  bound.sheet = (opener) => view.openSheet(opener);
+  wireFacts({ core, sheet, signal });
   hud = wireHud({ root, core, view });
   wireDashFade({
     page, fade: hud.fade, live, signal,
@@ -163,25 +162,36 @@ function mount(root, core, { signal }) {
     keepOut: () => [...root.querySelectorAll('.nd-left, .nd-right, .nd-eq, .nd-odb, .nd-novol, .nd-quiet, .nd-swkeys')],
   });
   live.drawAll();
-  return function unmount() {
-    bound.core = null;
-    bound.sheet = null;
-    bound.scene = null;
-    bound.view = null;
-    view.tune = null;
-    sheet.close(false);
-    rest.stop();
-    readout?.stop();
-    scene.stop();
-    live.stop();
-    hud.stop();
-    core.frame.anchor(null);
-    root.replaceChildren();
+  // The theme's key table as it is bound: `↑` and `↓`, the page's one key, step the volume as the
+  // dash does (volume-keys.js); every other entry is a key its widget handles.
+  const keys = KEYS.map((entry) => (
+    entry.id === 'volume' ? { ...entry, run: (event) => dash.volumeKey(event) } : entry));
+  core.keys.bind(keys, { signal });
+  return {
+    menuRows: () => menuRows({ core, view, signal }),
+    keys,
+    zones: ZONES,
+    unmount() {
+      bound.core = null;
+      bound.scene = null;
+      bound.view = null;
+      view.tune = null;
+      sheet.close(false);
+      rest.stop();
+      readout?.stop();
+      scene.stop();
+      live.stop();
+      hud.stop();
+      core.frame.anchor(null);
+      root.replaceChildren();
+    },
   };
 }
 
-/** The theme's rows in the frame's menu: the motion levels, a rule and the device's sheet. */
-function menuRows() {
+/** The rows a mount of Night drive gives the frame's menu: the motion levels, a rule and the
+ * device's sheet. `view` is the mount's (its `motion`, its `openSheet`) and `signal` the mount's:
+ * a row does nothing once the mount has gone. */
+export function menuRows({ core, view, signal }) {
   return [
     { kind: 'heading', text: SCENE.motion },
     ...MOTIONS.map((id) => ({
@@ -189,12 +199,12 @@ function menuRows() {
       id,
       label: MOTION_WORDS[id],
       dataset: { motion: id },
-      checked: () => bound.view?.motion === id,
+      checked: () => !signal.aborted && view.motion === id,
       disabled: () => null,
       choose() {
-        if (!bound.view) return;
-        bound.view.motion = id;
-        bound.core?.prefs.set('motion', id);
+        if (signal.aborted) return;
+        view.motion = id;
+        core.prefs.set('motion', id);
       },
     })),
     { kind: 'sep' },
@@ -203,8 +213,10 @@ function menuRows() {
       id: 'nd-sheet',
       label: SCENE.device,
       elementId: 'menu-nd-sheet',
-      available: () => Boolean(bound.sheet && bound.core?.model.shown()),
-      run: () => bound.sheet?.(),
+      available: () => Boolean(!signal.aborted && core.model.shown()),
+      run: () => {
+        if (!signal.aborted) view.openSheet();
+      },
     },
   ];
 }
@@ -219,7 +231,6 @@ export const theme = {
   menuButton: { icon: 'waves', label: SCENE.menu },
   preview,
   driver,
-  menuRows,
   mount,
 };
 

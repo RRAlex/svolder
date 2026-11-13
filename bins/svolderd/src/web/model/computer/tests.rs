@@ -153,6 +153,7 @@ async fn a_preset_of_seventeen_filters_is_listed_disabled_with_the_reason() {
         };
         svolder_ipc::Config::add_preset(&config, &preset::from_computer(name, correction)).unwrap();
     }
+    daemon.daemon.reload_all().await.unwrap();
     let web = web_over(&daemon);
     let info = web.fleet.resolve(Some("dac")).unwrap();
     let model = host_model_of(&web, &info).await.expect("a model");
@@ -167,7 +168,7 @@ async fn a_preset_of_seventeen_filters_is_listed_disabled_with_the_reason() {
     daemon.stop().await;
 }
 
-/// The saved presets are kept while the file stands and read again when it changes.
+/// The saved presets are the daemon's own: a hand edit of the file shows after a reload.
 #[tokio::test]
 async fn the_saved_presets_follow_the_file() {
     let daemon = fake_daemon_playing("gungnir2-v2", "dac").await;
@@ -201,6 +202,11 @@ async fn the_saved_presets_follow_the_file() {
         &preset::from_computer("Mine", correction),
     )
     .unwrap();
+    assert!(
+        !names(&host_model_of(&web, &info).await.unwrap()).contains(&"Mine".to_string()),
+        "a hand edit shows only after a reload"
+    );
+    daemon.daemon.reload_all().await.unwrap();
     let after = host_model_of(&web, &info).await.expect("a model");
     assert!(names(&after).contains(&"Mine".to_string()), "{after}");
     daemon.stop().await;

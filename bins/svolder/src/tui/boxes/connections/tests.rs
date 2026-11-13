@@ -105,6 +105,9 @@ fn the_daemon_says_where_it_reads_and_the_rows_follow() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     let mut conn = Connections::default();
     conn.daemon_said(&said(Some("/home/user/.config/svolder/config.toml")), own);
@@ -156,6 +159,9 @@ fn described(kind: TokenKind, path: Option<&str>, tail: &str) -> DaemonInfo {
         }),
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     }
 }
 
@@ -260,6 +266,9 @@ fn no_daemon_or_an_older_reply_leaves_the_sessions_own_reading() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     conn.daemon_said(&older, Path::new(OWN_CONFIG));
     assert_eq!(conn.token_state(), TokenState::Own);

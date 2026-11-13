@@ -58,8 +58,10 @@ def h_tree(path):
 
 # Env a check reads to choose or change its cases (a subset, a duration, stills kept): a run with any of
 # them set is not the whole check, so its pass is never stored, and they are hashed into base() too.
-SUBSET_EXACT = {'ND_ONLY', 'ND_CASES', 'WEB_CHECK_THEMES', 'HAZE_SECTIONS', 'SCROLL_SECTIONS',
-                'HIDDEN_SECS', 'SECS', 'REPS', 'VIZ_SHOTS', 'ARRANGE_SHOTS', 'MUT_WORKERS'}
+SUBSET_EXACT = {'ND_ONLY', 'ND_CASES', 'WEB_CHECK_THEMES', 'WEB_CHECK_POPUPS', 'WEB_CHECK_WHO', 'WEB_SWEEP_PAR',
+                'WEB_CHECK_ALLOW_NO_JSDOM', 'WEB_CHECK_JSDOM_MODULE', 'HAZE_SECTIONS',
+                'SCROLL_SECTIONS', 'HIDDEN_SECS', 'SECS', 'REPS', 'VIZ_SHOTS', 'ARRANGE_SHOTS',
+                'MUT_WORKERS'}
 SUBSET_PREFIX = ('LOOK_', 'ND_', 'SVOLDER_FAKE_')
 
 

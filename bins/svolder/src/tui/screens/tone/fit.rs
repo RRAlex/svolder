@@ -13,6 +13,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
+use svolder_profiles::tone::fit::GAP_DB;
 use svolder_profiles::tone::response::{self, BandParams};
 
 use crate::tui::app::{App, TargetView};
@@ -24,8 +25,6 @@ use super::{GAIN_CEILING_DB, GAIN_FLOOR_DB, frequency_at, gain_at, row_at};
 
 /// Columns the side pane takes in the wide tier, borders included.
 pub(super) const SIDE_WIDTH: u16 = 34;
-/// The least the fit may miss the target by, in dB, before the gap between them is filled.
-pub(super) const GAP_DB: f64 = 2.0;
 /// What the side pane is titled.
 const SIDE_TITLE: &str = " Correction ";
 /// Blank rows between the side pane's last filter or preamp row and the fit line.
@@ -129,7 +128,17 @@ pub(super) fn draw_side(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let width = usize::from(inner.width).saturating_sub(2);
-    let fit = widgets::text::wrap(&view.fit, width);
+    // The bands on the device, as the header reads them; the preset's own fit while one is unread.
+    let bands = app
+        .profile
+        .eq
+        .as_ref()
+        .map(|eq| (eq.bands.len(), super::plot(app, eq).filters));
+    let words = match bands {
+        Some((count, filters)) if filters.len() == count => view.fit_line(&filters),
+        _ => view.fit.clone(),
+    };
+    let fit = widgets::text::wrap(&words, width);
     // The heading, the preamp, the gap and the fit lines are always there; the filters take
     // what is left.
     let fixed = 2 + SIDE_GAP + fit.len();

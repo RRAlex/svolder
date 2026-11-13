@@ -16,11 +16,11 @@ use std::process::{ExitCode, Stdio};
 
 use svolder_ipc::socket::daemon_version::{RESTART_COMMAND, VERSION_WAIT, version_within};
 use svolder_ipc::token::Store;
-use svolder_ipc::{Client, Config, Request, Response, WebStatus, normal_origin, socket};
+use svolder_ipc::{Client, Config, Request, Response, Server, WebStatus, normal_origin, socket};
 
 use crate::backend::Globals;
 use crate::cli::WebCommand;
-use crate::commands::token;
+use crate::commands::{server_switch, token};
 use crate::qr;
 
 /// Interface names whose addresses a phone does not reach this computer on: containers' and
@@ -36,6 +36,8 @@ pub(crate) async fn run(
 ) -> Result<ExitCode, String> {
     match command {
         None => open(g, qr).await,
+        Some(WebCommand::On) => server_switch::run(g, Server::Web, true).await,
+        Some(WebCommand::Off) => server_switch::run(g, Server::Web, false).await,
         Some(WebCommand::Pair) => pair(g).await,
         Some(WebCommand::Token { rotate }) => token::token(g, Store::WEB, rotate).await,
     }
@@ -119,11 +121,9 @@ pub(crate) async fn served(socket: &Path) -> Result<SocketAddr, String> {
     match version_within(socket, VERSION_WAIT).await {
         Some(info) => listening_at(info.web.as_ref()),
         None => Err(format!(
-            "no daemon answers on {}: the daemon serves the web UI; {}",
-            socket.display(),
-            svolder_ipc::WEB_OFF
-                .split_once(": ")
-                .map_or("", |(_, fix)| fix)
+            "no daemon answers on {}: the daemon serves the web UI; {RESTART_COMMAND} starts \
+             one, and `svolder web on` turns the web UI on",
+            socket.display()
         )),
     }
 }
@@ -249,10 +249,13 @@ pub(crate) fn lan_here() -> Option<Ipv4Addr> {
 /// A container with host networking (`network_mode: host`) sees the host's interfaces, so the
 /// host's LAN address is right and nothing is refused, though `/.dockerenv` exists. A container on
 /// a bridge network has one interface whose address is in Docker's 172.16.0.0/12 or Podman's
-/// 10.88.0.0/16 and shares its /16 with its default gateway (the bridge): that address is no use
-/// to a phone, so none is offered and the caller says to set `[web] url`. A host whose own LAN is
-/// 172.16.0.0/12 and runs a host-networked container is told the same, wrongly, and `[web] url`
-/// then fixes it.
+/// 10.88.0.0/16 and shares its /16 with its default gateway (the bridge), or the address of
+/// slirp4netns and pasta (10.0.2.0/24 behind the gateway 10.0.2.2, which rootless Docker's host
+/// networking has too): that address is no use to a phone, so none is offered and the caller says
+/// to set `[web] url`. A host whose own LAN is 172.16.0.0/12 and runs a host-networked container
+/// is told the same, wrongly, and `[web] url` then fixes it. Bridges in other ranges (Docker's
+/// pools continue at 192.168.0.0/20, and custom pools go anywhere) cannot be told from a real LAN
+/// with one `eth0` and a gateway, so they are offered and the documentation says to set `url`.
 pub(crate) fn lan_in(
     container: bool,
     interfaces: &[(String, Ipv4Addr, bool, bool)],
@@ -264,7 +267,8 @@ pub(crate) fn lan_in(
         (a == 172 && (16..32).contains(&b)) || (a == 10 && b == 88)
     };
     let same_16 = |gw: Ipv4Addr| gw.octets()[..2] == lan.octets()[..2];
-    if container && private_bridge(lan) && gateway.is_some_and(same_16) {
+    let slirp = lan.octets()[..3] == [10, 0, 2] && gateway == Some(Ipv4Addr::new(10, 0, 2, 2));
+    if container && ((private_bridge(lan) && gateway.is_some_and(same_16)) || slirp) {
         return None;
     }
     Some(lan)

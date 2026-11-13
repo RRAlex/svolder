@@ -27,17 +27,20 @@ pub use crate::error::ConfigError;
 mod autoeq;
 mod connections;
 mod devices;
+pub use devices::device_name_refusal;
 mod edit;
 mod flock;
 mod hops;
 mod parse;
 mod presets;
+mod resolve;
 mod template;
 mod tui;
 mod tui_settings;
 
 pub use hops::{Hop, HopKind, HopWhat};
 pub use parse::ListenDefaults;
+pub use resolve::{passphrase_from, profile_for_advert};
 pub use template::DEFAULT_SPECTRUM;
 pub use tui_settings::{
     ACCENT, COLORS, CONFIRM_QUIT, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT, INTRO_SOUND,
@@ -1009,7 +1012,8 @@ pub fn config_home() -> PathBuf {
 /// directory is kept; any other value, or none, becomes the root's directory of that name.
 /// `make test` points `TMPDIR` at a directory of its own and the homes beside it, so each test
 /// binary pins its own homes under that `TMPDIR`. When no safe root can be made, the homes are
-/// left as they are. `SVOLDER_MCP_TOKEN` and `SVOLDER_WEB_TOKEN` are removed, and
+/// left as they are. `SVOLDER_MCP_TOKEN`, `SVOLDER_WEB_TOKEN` and the web and MCP switch, listen
+/// and URL variables are removed, and
 /// `SVOLDER_WIREPLUMBER` and `SVOLDER_AUTOEQ_URL` get the values `make test` gives them when
 /// unset. The scratch roots of runs whose lock nobody holds are removed first.
 ///
@@ -1051,6 +1055,18 @@ pub unsafe fn pin_scratch_homes() {
     unsafe { std::env::remove_var("SVOLDER_MCP_TOKEN") };
     // SAFETY: the caller guarantees one thread.
     unsafe { std::env::remove_var("SVOLDER_WEB_TOKEN") };
+    // The container switches and listen defaults would turn a test daemon's servers on or move
+    // them onto a developer's own ports.
+    for name in [
+        "SVOLDER_WEB_ENABLED",
+        "SVOLDER_MCP_ENABLED",
+        "SVOLDER_WEB_LISTEN",
+        "SVOLDER_MCP_LISTEN",
+        "SVOLDER_WEB_URL",
+    ] {
+        // SAFETY: the caller guarantees one thread.
+        unsafe { std::env::remove_var(name) };
+    }
     if std::env::var_os("SVOLDER_AUTOEQ_URL").is_none() {
         // SAFETY: the caller guarantees one thread.
         unsafe { std::env::set_var("SVOLDER_AUTOEQ_URL", "http://127.0.0.1:9/") };
@@ -1438,13 +1454,37 @@ impl Config {
         Self::load_from(&Self::path())
     }
 
-    /// Load and validate the file at `path`; `Ok(Config::default())` when it is absent.
+    /// Load and validate the file at `path`. An absent file reads as an empty one: every key
+    /// at its default, those the environment names ([`ListenDefaults`]) included.
     pub fn load_from(path: &Path) -> Result<Config, ConfigError> {
+        Self::load_from_with(path, &ListenDefaults::from_env())
+    }
+
+    /// [`Config::load_from`] with the environment's defaults given rather than read.
+    pub fn load_from_with(path: &Path, env: &ListenDefaults) -> Result<Config, ConfigError> {
         match std::fs::read_to_string(path) {
-            Ok(text) => Self::parse(&text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+            Ok(text) => Self::parse_with_listen_defaults(&text, env),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Self::parse_with_listen_defaults("", env)
+            }
             Err(e) => Err(ConfigError::Io(path.to_path_buf(), e)),
         }
+    }
+}
+
+/// The refusal for a `kind` block (`device`, `hop` or `preset`) no block of the file carries.
+fn missing(kind: &'static str, name: &str) -> ConfigError {
+    ConfigError::Missing {
+        kind,
+        name: name.to_string(),
+    }
+}
+
+/// The refusal for a block a writer found and then no longer holds.
+fn vanished(kind: &'static str, name: &str) -> ConfigError {
+    ConfigError::Vanished {
+        kind,
+        name: name.to_string(),
     }
 }
 

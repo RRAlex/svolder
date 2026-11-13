@@ -14,6 +14,7 @@ export const SWITCHES = Object.freeze({
   nodash: 'the dash along the bottom',
   nohud: 'the top line, the volume and the EQ line',
   nomood: 'the mood: the night, the sun, the heat and the road\'s speed stay as they were, with no flare and no wave',
+  nooverlay: 'the tone overlay: the target\'s ghost ridge and the tint under the gap',
   nowet: 'the wet road: the sky and the mountains mirrored in the floor',
   noembers: 'the embers that rise from the floor at a peak',
   nohaze: 'the haze over the far floor',

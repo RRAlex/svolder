@@ -37,7 +37,7 @@ function stage() {
   };
   const control = { key: 'balance', raw: 0, lo: -10, hi: 10, centre: 0 };
   const core = {
-    drag: { BAND_PARAM: {} },
+    eq: { bands: { BAND_PARAM: {} } },
     hold: { repeat() { return { end() {} }; } },
     actions: {
       setControl(key, body, opts) {

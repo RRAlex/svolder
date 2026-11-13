@@ -47,8 +47,8 @@ mod about {
     pub(super) const DECODE: &str =
         "Decode a captured frame (command or notification) given as hex";
     pub(super) const PROFILES: &str = "Inspect device profiles";
-    pub(super) const MCP: &str = "The MCP server's bearer token";
-    pub(super) const WEB: &str = "Open the web UI, or print a link, a code or its token";
+    pub(super) const MCP: &str = "Turn the MCP server on or off, or print its bearer token";
+    pub(super) const WEB: &str = "Open the web UI, turn it on or off, or print a code or its token";
     pub(super) const CONFIG: &str = "Configuration paths, settings and the template";
 }
 
@@ -633,6 +633,8 @@ pub(crate) enum DaemonCommand {
         #[arg(short = 'f', long)]
         follow: bool,
     },
+    /// Have the daemon read its configuration and profiles again and apply them
+    Reload,
     /// Restart the daemon
     Restart {
         /// Restart only a daemon that is running, and start none
@@ -661,6 +663,10 @@ pub(crate) enum ProfilesCommand {
 
 #[derive(Subcommand)]
 pub(crate) enum McpCommand {
+    /// Turn the MCP server on: `[mcp] enabled = true`, which a running daemon acts on at once
+    On,
+    /// Turn the MCP server off: `[mcp] enabled = false`, which a running daemon acts on at once
+    Off,
     /// Print the bearer token a client of the MCP server sends, and nothing else
     Token {
         /// Replace the generated token with a fresh one before printing it
@@ -671,6 +677,10 @@ pub(crate) enum McpCommand {
 
 #[derive(Subcommand)]
 pub(crate) enum WebCommand {
+    /// Turn the web UI on: `[web] enabled = true`, which a running daemon acts on at once
+    On,
+    /// Turn the web UI off: `[web] enabled = false`, which a running daemon acts on at once
+    Off,
     /// Print a six-digit code that signs in one browser within five minutes
     Pair,
     /// Print the token the web UI's sign-in page takes, and nothing else

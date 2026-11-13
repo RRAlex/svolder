@@ -47,12 +47,14 @@ meters play a music-like signal.
 
 The daemon and the TUI read their configuration and state from the private directory, which is also
 their runtime directory, and the daemon's `systemctl` and unit directory are not there either, with
-MQTT off, and `SVOLDER_HOST` is set to `off` for the TUI (and the daemon runs a fake host), since the host controls would change your own
-speakers' volume and your media players: nothing of yours is read, written or acted on, not your
-configuration, your state, your socket, your daemon or your audio. The TUI only ever connects to
-that daemon's socket, so no daemon is started beside it and `--transport`, `--adapter` and
-`--socket` do not apply (`-d` and `-v` do); adding a device from the Devices screen says it is not
-part of the demo.
+MQTT off, and `SVOLDER_HOST` is set to `fake` for the TUI and the daemon: the daemon runs a
+simulated host (a player, a route, a computer volume and a computer EQ with presets, all in memory)
+and the TUI reaches no host audio of its own, only that daemon's, since the host controls would
+change your own speakers' volume and your media players: nothing of yours is read, written or acted
+on, not your configuration, your state, your socket, your daemon or your audio. The TUI only ever
+connects to that daemon's socket, so no daemon is started beside it and `--transport`, `--adapter`
+and `--socket` do not apply (`-d` and `-v` do); adding a device from the Devices screen says it is
+not part of the demo.
 
 Once the intro is over a toast, which stays six seconds, names the command for a second front end on
 the same daemon, `svolder tui --join <directory>/sv.sock`, to see two front ends on one daemon or
@@ -67,10 +69,10 @@ demo removes any such directory that is over a minute old and has no daemon hold
 `--host` and `--web` are opt-in extras of `--demo` and are refused without it (`make demo` runs
 `svolder tui --demo --host --web`; `make demo-dac` and `make demo-amp` pick the fake DAC or the fake
 amplifier with its meters moving; `PROFILE=<fake profile>` and `SIGNAL=1` reach the fake device as
-`SVOLDER_FAKE_PROFILE` and `SVOLDER_FAKE_SIGNAL`; `make demo-computer` and `make demo-computer-amp` run
-`svolder tui --demo --web` instead, whose web page has a simulated computer side: your real audio is not
-touched). The fake device list has one device per run, so
-there is no DAC-with-an-amplifier demo.
+`SVOLDER_FAKE_PROFILE` and `SVOLDER_FAKE_SIGNAL`; `make demo-computer` and `make demo-computer-amp`
+run `svolder tui --demo --web` instead, whose TUI and web page share the daemon's simulated computer
+side: your real audio is not touched, and a volume or EQ change in one shows in the other). The fake
+device list has one device per run, so there is no DAC-with-an-amplifier demo.
 
 `--host` leaves the host on for the daemon and the TUI, so the fake device sits beside your computer's
 real audio: the spectrum and meters follow the default sink, the Now playing card and its transport
@@ -930,7 +932,8 @@ While the preset on the device, or the one loaded with changes (`NAME*`), is an 
   curve), which is not what the device applies; values past the graph's -12 to +6 dB clip as the
   curve does.
 
-The header adds `fit 0.9 dB`, the RMS error of the fit over 20 Hz to 10 kHz, after the preset's name
+The header adds `fit 0.9 dB`, the RMS error of the bands on the device against the correction over
+20 Hz to 10 kHz (so a band edit moves it, as it moves the page's), after the preset's name
 where the line has room for it whole; at 80 columns it usually has not. A band preset draws none of
 this. A Gungnir 2 with band 2 lifted to +6 dB after loading an imported preset with a +5 dB bass
 shelf and a -3 dB notch at 3 kHz, on an 80×24 terminal:
@@ -965,9 +968,10 @@ shelf and a -3 dB notch at 3 kHz, on an 80×24 terminal:
 In the wide tier (from 120 columns) a side pane, `Correction`, stands to the right of the graph: the
 correction's source (the `origin` the file records, else `Imported`) and how many filters it has,
 one row per filter — its type, frequency, gain and Q, as `LSC   105  +5.0 0.70` — then the preamp
-and the fit line (`fit 0.1 dB RMS · worst 0.7 dB at 20.0 Hz`, with `lower volume` after it where the
-fitted bands boost). Filters the pane has no room for end in `… N more`. The pane takes its columns
-from the graph, so the graph is that much narrower there. Its top:
+and the fit line (`fit 2.6 dB RMS · worst 5.1 dB at 159 Hz`, with `lower volume` after it where the
+bands boost), of the bands on the device now, as the header's figure is. Filters the pane has no
+room for end in `… N more`. The pane takes its columns from the graph, so the graph is that much
+narrower there. Its top:
 
 ```
 ┌ Correction ────────────────────┐
@@ -976,13 +980,13 @@ from the graph, so the graph is that much narrower there. Its top:
 │ PK   3000  -3.0 2.00           │
 │ Preamp -3.0 dB                 │
 │                                │
-│ fit 0.1 dB RMS · worst 0.7 dB  │
-│ at 20.0 Hz · lower volume 5.2  │
+│ fit 2.6 dB RMS · worst 5.1 dB  │
+│ at 159 Hz · lower volume 6.0   │
 │ dB                             │
 ```
 
-The target, the fit and their strings are worked out once, when the preset or the presets file
-changes, and kept; a frame only reads them.
+The target and the preset's own fit are worked out once, when the preset or the presets file
+changes, and kept; a frame reads them, and works the bands' fit out on 181 points, as the page does.
 
 #### The edit line (`Enter`)
 
@@ -1182,15 +1186,24 @@ left click outside the box presses `Esc`, which closes it.
 
 `a` opens a box over the list with a query line over the matching measurements, one row each — the
 headphone, then who measured it and on what, the recommended measurement of each headphone first.
-Typing filters live, so `hd 6` finds every HD 6xx; `↑↓` move; `Enter` downloads the focused
-measurement and imports it as a preset that remembers where it came from; `Esc` goes back to the
-list. The status line says where the index is from (`index from 2026-07-01 · 3 measurements`), or
-that it is being fetched, or why it could not be.
+Typing asks the daemon, which searches its index, so `hd 6` finds every HD 6xx; `↑↓` move; `Enter`
+has the daemon download the focused measurement and import it as a preset that remembers where it
+came from; `Esc` goes back to the list. The status line says where the index is from (`index from
+2026-07-01 · 3 measurements`), or that it is being fetched, or why it could not be.
 
-`Ctrl-R` fetches the index again whatever its age; otherwise it is read from the cache and fetched
-when it is older than `[autoeq] refresh_weeks`. Fetching and downloading run off the loop, so typing
-never waits on the network. A headphone's name is the preset's name, as `eq import --autoeq` names
-it; a name another preset already carries opens the name prompt, prefilled with `NAME (source)`.
+AutoEq needs `svolderd`, the one process that reaches the internet: with no daemon the status line
+says `AutoEq needs svolderd, which fetches it: none is running; svolder daemon restart starts
+one`, and a daemon older than this build says to restart it. The TUI never waits on the daemon,
+which may be loading the index for up to a minute: the list follows the typing 200 ms after the
+last key (a burst of keys is one question, so the daemon does not search once per key), a slow
+answer shows when it comes, and an answer that arrives after a newer question, or after the box
+closed, is dropped. Until the answer to the query on the line is in, `Enter` waits, since the rows
+may be for another query. `Ctrl-R` asks the daemon to fetch the index again whatever its age;
+otherwise it reads its cache and fetches when the copy is older than `[autoeq] refresh_weeks`. A
+headphone's name is the preset's name, as `eq import --autoeq` names it; a name another preset
+already carries opens the name prompt, prefilled with `NAME (source)`. The preset is saved by the
+daemon, for the side the list shows (the computer takes up to 16 filters), then read back into the
+list, which focuses it and says it in a toast. The preset is saved, not loaded.
 
 ```
  svolder  Gungnir 2  Preset Flat        Mode ‹ EQ ›   Loudness ░░░░░ 0  mouse:on
@@ -1417,7 +1430,14 @@ configuration file alone, and draw `-` for what it cannot say.
 - `n` runs the same guided walk `setup` does (see ["setup"](cli.md#setup)), on its own screen, from
   its Scan step; the host is looked over first, under a frame that says so, with `q` and Ctrl-C read
   throughout; adding a device switches to it, leaving without adding one (`q`, or `Esc` on the Scan
-  step) comes back to the list, an empty Devices screen included
+  step) comes back to the list, an empty Devices screen included. With a daemon running the walk is
+  the daemon's: there is no Adapter step, a first prompt names the devices that hold a link (the
+  scan may briefly disturb them), a walk already running elsewhere is refused in a notice naming
+  where it was started, leaving cancels only this walk, and a code is asked on an empty row each
+  time, drawn masked as typed (`Tab` shows it). The editor's save, a removal, the default (`none`
+  included) and the Web UI and MCP on/off rows are the daemon's writes too, a refusal worded from
+  its reason (the name is taken, the device is gone, the file is busy, the daemon is stopping) and
+  a daemon too old for them told to restart
 - `u` opens a small editor over the list, for the selected device's name, passphrase, profile, and
   whether it is the default, with everything around it dimmed:
 
@@ -1467,11 +1487,12 @@ configuration file alone, and draw `-` for what it cannot say.
   │           └──────────────────────────────────────────────────────┘           │
   ```
 
-Every write from this screen — adding, editing, or removing — goes through the same config writers
-`add`/`remove` (above) use, tells a running daemon to `reload`, and re-reads the file before drawing
-the list again; a rename or removal of the device being watched reopens the session under its new
-name, or under the first device still configured, or sends the loop to the same guided walk `n` runs
-when none is left; leaving that walk comes back to the empty list while a device is still on screen.
+Every write from this screen — adding, editing, or removing — is the daemon's when one runs (the `n`
+item above); with none it goes through the same config writers `add`/`remove` (above) use, and the
+file is re-read before the list is drawn again; a rename or removal of the device being watched
+reopens the session under its new name, or under the first device still configured, or sends the
+loop to the same guided walk `n` runs when none is left; leaving that walk comes back to the empty
+list while a device is still on screen.
 
 ### Menu (`Esc`)
 
@@ -1488,7 +1509,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.32.5 │
+│                          v0.33.0 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1734,7 +1755,16 @@ turning the bridge on with no host, is reported as `settings not saved: …` and
 then sends the daemon a `reload`. A daemon that reads another configuration file than this session's
 — a container's — makes every Connect row read-only: a key reports
 `read-only here: the daemon reads PATH`, and the right column names that path. The Connect category
-needs a daemon for its status rows; with none they read `no daemon`.
+needs a daemon for its status rows; with none they read `no daemon`. While the daemon says its
+`config.toml` changed since its last reload (a hand edit it has not taken) every Connect row's text
+also carries `config: PATH changed since the last reload: svolder daemon reload (or SIGHUP)`, in the
+warning colour (with the file gone: `config: PATH is missing: the daemon keeps its running
+configuration; restore the file, then svolder daemon reload`), and a warning toast says it once for
+each change. The TUI asks the daemon at its start, after its Connect, device and preset writes,
+while the category shows and, whichever screen shows, every minute while it runs on a daemon, so an
+edit made in another terminal reaches it. A change made in the Settings box (`[tui]`, the AutoEq
+refresh) has a daemon that reads the same file reload a second after the last one (and at quit), so
+it is never announced as a hand edit; no key of the TUI reloads the daemon.
 
 #### The Web UI box
 
@@ -1889,7 +1919,7 @@ The nine steps, each a screen of the wizard:
 |---|---|---|
 | Health | How this host looks | the `doctor` checks above and their summary, `▶ Continue` the way on, and `Later: open svolder without a device` to leave the wizard for the interface; a fix's own `svolder setup`/`svolder daemon install` line never appears here, since this run is the one or leads to the other |
 | Fixes | What svolder can put right itself | one confirmation for every unprivileged fix the Health step found (`Apply N fixes` / `Skip`, defaulting to Skip); skipped outright on a host with none |
-| Scan | Find the device | up to three five-second windows, stopping at the first that hears one; nothing heard offers `Scan again` / `Skip` and says to power the device on and close the phone app; three scans that could not run at all — no adapter, a bus that will not answer — end the run on the last reason given |
+| Scan | Find the device | up to three five-second windows, stopping at the first that hears one; with a daemon the step lists the devices heard so far under `listening…`, ending `… N more heard` when they do not fit; nothing heard offers `Scan again` / `Skip` and says to power the device on and close the phone app; three scans that could not run at all — no adapter, a bus that will not answer — end the run on the last reason given |
 | Pick | Which device | one device by number, when more than one answered — product, unit id, signal, and the profile the advertisement matches; a unit that is already configured is left out, with a line naming its device (`Left out, already configured: dac (0102030405060708)`); an unknown product offers the profile list instead |
 | Name | What to call it | a typed name, defaulting to the product; a name already configured is refused and asked again |
 | Passphrase | The device wants its passphrase | shown only after the first connect is refused, as a row like the Devices editor's: `←→` step it `none` → `auto` → a code, `‹ ____ ›` opening on the code, where only digits are typed, in order, and `Backspace` takes back the last; `Enter` answers with what the row is on, and a code of fewer than four digits is refused on the step (`a code is four digits`) without troubling the wizard. Where the terminal cannot be claimed the plain prompt takes a typed line: four digits, `auto`, `none` or blank for none |

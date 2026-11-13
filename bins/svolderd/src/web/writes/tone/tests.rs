@@ -447,6 +447,10 @@ async fn a_guest_and_a_read_only_page_cannot_touch_the_tone_control() {
 /// as 1 or 0; a raw value needs no reading.
 #[test]
 fn a_loudness_step_needs_a_reading() {
+    #[allow(
+        clippy::result_large_err,
+        reason = "the refusal is the answer the handler returns as it is"
+    )]
     let step = |read, step, raw| super::loudness_target(read, &super::LoudnessWrite { step, raw });
     assert_eq!(step(Some(10), Some(1), None).ok(), Some(11));
     assert_eq!(step(Some(0), Some(-1), None).ok(), Some(0));
@@ -461,6 +465,10 @@ fn a_loudness_step_needs_a_reading() {
 async fn a_raw_step_without_a_value_is_a_conflict_not_out_of_range() {
     let dac = fake_daemon("gungnir2-v2", "dac").await;
     let eq = eq(&dac);
+    #[allow(
+        clippy::result_large_err,
+        reason = "the refusal is the answer the handler returns as it is"
+    )]
     let answer = |index, raw| super::raw_value(&eq, index, EqParam::Frequency, raw);
     assert!(answer(0, 64).is_ok());
     // a band the tone control does not have has no frequency at any step
@@ -479,5 +487,110 @@ async fn a_raw_step_without_a_value_is_a_conflict_not_out_of_range() {
         let out = answer(0, raw).unwrap_err();
         assert_eq!(out.status(), Code::UNPROCESSABLE_ENTITY, "{raw}");
     }
+    dac.stop().await;
+}
+
+/// While an imported preset is on the device the tone view carries its target, its fit and the
+/// numbers on the curve's 181 points; a band preset carries none.
+#[tokio::test]
+async fn an_imported_preset_on_the_device_carries_the_overlay() {
+    let client = svolder_autoeq::Client::new(
+        "http://127.0.0.1:1/results/".into(),
+        std::env::temp_dir().join(format!("svolderd-overlay-{}", std::process::id())),
+        svolder_autoeq::Limits::default(),
+    );
+    let dac = crate::web::test_support::fake_daemon_reaching("gungnir2-v2", "dac", client).await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    let text = "Preamp: -4 dB\\nFilter 1: ON LSC Fc 105 Hz Gain 6.0 dB Q 0.70\\n\
+                Filter 2: ON PK Fc 1000 Hz Gain -2.0 dB Q 1.00\\n\
+                Filter 3: ON PK Fc 3500 Hz Gain 3.0 dB Q 2.00\\n";
+    let upload = format!(r#"{{"text":"{text}","name":"Imp"}}"#);
+    let reply = call(&web, post("/api/v1/autoeq/upload", &upload)).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let recall = post("/api/v1/devices/dac/presets/recall", r#"{"name":"Imp"}"#);
+    let reply = call(&web, recall).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    let overlay = &said["parts"]["tone"]["overlay"];
+    assert_eq!(overlay["name"], "Imp", "{said}");
+    assert_eq!(overlay["target"].as_array().unwrap().len(), 181);
+    assert_eq!(overlay["fit"].as_array().unwrap().len(), 181);
+    assert!(overlay["rms_db"].is_number() && overlay["worst_hz"].is_number());
+    assert_eq!(overlay["gap_db"], 2.0);
+    assert_eq!(overlay["preamp_db"], -4.0);
+    let warm = post("/api/v1/devices/dac/presets/recall", r#"{"name":"Warm"}"#);
+    let said: serde_json::Value = serde_json::from_str(&call(&web, warm).await.body).unwrap();
+    assert!(said["parts"]["tone"].get("overlay").is_none(), "{said}");
+    dac.stop().await;
+}
+
+/// After an imported preset is on, a band edit moves the served fit, the gap and the RMS with the
+/// curve: they are those of the bands on the device now, never the preset's own fit.
+#[tokio::test]
+async fn an_edited_band_moves_the_overlays_fit_gap_and_rms() {
+    let client = svolder_autoeq::Client::new(
+        "http://127.0.0.1:1/results/".into(),
+        std::env::temp_dir().join(format!("svolderd-overlay-edit-{}", std::process::id())),
+        svolder_autoeq::Limits::default(),
+    );
+    let dac = crate::web::test_support::fake_daemon_reaching("gungnir2-v2", "dac", client).await;
+    let eq = eq(&dac);
+    let web = web(open(), Arc::clone(&dac.fleet));
+    let text = "Preamp: -4 dB\\nFilter 1: ON LSC Fc 105 Hz Gain 6.0 dB Q 0.70\\n\
+                Filter 2: ON PK Fc 1000 Hz Gain -2.0 dB Q 1.00\\n\
+                Filter 3: ON PK Fc 3500 Hz Gain 3.0 dB Q 2.00\\n";
+    let upload = format!(r#"{{"text":"{text}","name":"Imp"}}"#);
+    assert_eq!(
+        call(&web, post("/api/v1/autoeq/upload", &upload))
+            .await
+            .status,
+        Code::OK
+    );
+    let recall = post("/api/v1/devices/dac/presets/recall", r#"{"name":"Imp"}"#);
+    let said: serde_json::Value = serde_json::from_str(&call(&web, recall).await.body).unwrap();
+    let before = said["parts"]["tone"].clone();
+    assert_eq!(
+        before["overlay"]["fit"], before["response"],
+        "on: the fit is the curve"
+    );
+    // a gain moved far from the fit: band 3 to +10 dB
+    let step = post(
+        "/api/v1/devices/dac/eq/bands/3",
+        r#"{"param":"g","value":"+10 dB"}"#,
+    );
+    let reply = call(&web, step).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let want = i64::from(eq.gain_raw(10.0));
+    assert!(comes_to(&dac, eq.band_id(2, EqParam::Gain).unwrap(), want).await);
+    let model = call(
+        &web,
+        crate::web::test_support::get("/api/v1/devices/dac/model"),
+    )
+    .await;
+    let model: serde_json::Value = serde_json::from_str(&model.body).unwrap();
+    let after = &model["device"]["tone"];
+    let overlay = &after["overlay"];
+    assert_eq!(
+        overlay["name"], "Imp",
+        "still the imported preset: {overlay}"
+    );
+    assert_eq!(
+        overlay["fit"], after["response"],
+        "the fit follows the bands: {overlay}"
+    );
+    assert_ne!(overlay["fit"], before["overlay"]["fit"]);
+    assert!(
+        overlay["rms_db"].as_f64().unwrap() > before["overlay"]["rms_db"].as_f64().unwrap() + 0.5,
+        "{overlay} against {}",
+        before["overlay"]
+    );
+    assert_ne!(
+        overlay["gap"], before["overlay"]["gap"],
+        "the gap moved with the edit"
+    );
+    assert_eq!(
+        overlay["target"], before["overlay"]["target"],
+        "the target stays"
+    );
     dac.stop().await;
 }

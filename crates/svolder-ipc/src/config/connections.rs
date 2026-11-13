@@ -12,7 +12,7 @@ use std::path::Path;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
 use super::edit::{edit_file, set_key_at};
-use super::{Config, ConfigError, McpConfig, MqttConfig, WebConfig};
+use super::{Config, ConfigError, ListenDefaults, McpConfig, MqttConfig, WebConfig};
 
 impl Config {
     /// Change the `[mcp]` table of the file at `path` with `edit`, and rewrite only the keys of
@@ -26,8 +26,19 @@ impl Config {
     /// at the end of the document when there is something to write. A file that does not
     /// parse, or whose result would not, is left as it was and the error returned.
     pub fn update_mcp(path: &Path, edit: impl FnOnce(&mut McpConfig)) -> Result<(), ConfigError> {
+        Self::update_mcp_with(path, &ListenDefaults::from_env(), edit)
+    }
+
+    /// [`Config::update_mcp`] with the environment's defaults given rather than read: the table
+    /// `edit` is handed has them applied, so a server the environment turned on is turned off
+    /// by writing `enabled = false`.
+    pub fn update_mcp_with(
+        path: &Path,
+        env: &ListenDefaults,
+        edit: impl FnOnce(&mut McpConfig),
+    ) -> Result<(), ConfigError> {
         edit_file(path, |doc| {
-            let before = Config::parse(&doc.to_string())?.mcp;
+            let before = Config::parse_with_listen_defaults(&doc.to_string(), env)?.mcp;
             let mut after = before.clone();
             edit(&mut after);
             if before.enabled != after.enabled {
@@ -47,8 +58,18 @@ impl Config {
     /// `enabled` and `listen` that change alters, as [`Config::update_mcp`] does for `[mcp]`:
     /// the TUI's Web box changes nothing else.
     pub fn update_web(path: &Path, edit: impl FnOnce(&mut WebConfig)) -> Result<(), ConfigError> {
+        Self::update_web_with(path, &ListenDefaults::from_env(), edit)
+    }
+
+    /// [`Config::update_web`] with the environment's defaults given rather than read, as
+    /// [`Config::update_mcp_with`].
+    pub fn update_web_with(
+        path: &Path,
+        env: &ListenDefaults,
+        edit: impl FnOnce(&mut WebConfig),
+    ) -> Result<(), ConfigError> {
         edit_file(path, |doc| {
-            let before = Config::parse(&doc.to_string())?.web;
+            let before = Config::parse_with_listen_defaults(&doc.to_string(), env)?.web;
             let mut after = before.clone();
             edit(&mut after);
             if before.enabled != after.enabled {

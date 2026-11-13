@@ -6,15 +6,16 @@
 // buttons the drag grabs. Pure: the model in, markup and numbers out.
 
 import {
-  POINTS, VIEW_HEIGHT, VIEW_WIDTH, linePath, logFreqs, markerPoint, responseDb, xOf, yOf,
+  POINTS, VIEW_HEIGHT, VIEW_WIDTH, logFreqs, markerPoint, responseDb, xOf, yOf,
 } from '../../../core/tone-curve.js';
+import {
+  FREQ_MARKS, curveD, fillD, fitWords, frame, freqAt, overlayNote, overlayShapes, path, zeroLine,
+} from '../../../core/plot.js';
 import { WORDS } from '../words.js';
 import { esc } from './esc.js';
 
 export { VIEW_HEIGHT, VIEW_WIDTH };
 const FREQS = logFreqs(POINTS);
-/** The frequencies written under the curve (Hz) and how they read. */
-const MARKS = [[60, '60'], [250, '250'], [1000, '1k'], [4000, '4k'], [12000, '12k']];
 
 /** The points on the graph, one per band the model marks: where it stands as a fraction of the plot
  * (`x`, `y` from 0 to 1, from the top left). */
@@ -25,13 +26,10 @@ export function pointsOf(tone) {
 }
 
 /** The curve's path in the plot's own box. */
-export const curvePath = (response) => linePath(response.map(yOf));
+export const curvePath = curveD;
 
 /** The shade between the curve and the 0 dB line, closed along it. */
-export function shadePath(response) {
-  const zero = yOf(0);
-  return `${curvePath(response)}L${VIEW_WIDTH} ${zero}L0 ${zero}Z`;
-}
+export const shadePath = fillD;
 
 /** The value of step `raw` in `rows` (`[[value, words], …]`), or nothing for one that is not a
  * number. */
@@ -86,20 +84,25 @@ function graph(tone, device, inert) {
       + `${Number.isInteger(raw) ? ` aria-valuenow="${raw}"` : ''} aria-valuetext="${esc(r.g)}"`
       + `${inert ? ' aria-disabled="true"' : ''}></button>`;
   }).join('') : '';
-  return plot({ id: 'sg-graph', response: tone.response ?? [], faint: tone.mode === 'flat', points });
+  return plot({ id: 'sg-graph', response: tone.response ?? [], faint: tone.mode === 'flat', points,
+    overlay: tone.mode === 'eq' ? tone.overlay : null });
 }
 
 /** The plot: the zero line, the shaded curve (faint while the curve is not the one playing), the
- * buttons of `points` over it and the frequencies under it. The computer's graph is drawn by it too. */
-export function plot({ id, response, faint, points }) {
+ * imported preset's `overlay` (the gap under the target's dotted line, and the fit in words), the
+ * buttons of `points` over it and the frequencies under it. The computer's graph is drawn by it
+ * too, with no overlay. */
+export function plot({ id, response, faint, points, overlay }) {
   const dim = faint ? ' faint' : '';
-  const freqs = MARKS.map(([hz, text]) => `<span class="sg-flab" data-at="${(xOf(hz) / VIEW_WIDTH).toFixed(5)}">`
+  const freqs = FREQ_MARKS.map(([hz, text]) => `<span class="sg-flab" data-at="${freqAt(hz).toFixed(5)}">`
     + `${text}</span>`).join('');
-  return `<div id="${id}" class="sg-graph"><svg viewBox="0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}"`
-    + ' preserveAspectRatio="none" aria-hidden="true">'
-    + `<path class="sg-zero" d="M0 ${yOf(0)}H${VIEW_WIDTH}"/>`
-    + `<path class="sg-shade${dim}" d="${shadePath(response)}"/>`
-    + `<path class="sg-curve${dim}" d="${curvePath(response)}"/></svg>${points}`
+  const shapes = overlayShapes(overlay, { target: 'sg-target', gap: 'sg-gap' });
+  const fit = fitWords(overlay);
+  const drawn = zeroLine('sg-zero') + path(fillD(response), `sg-shade${dim}`) + shapes.gap
+    + shapes.target + path(curveD(response), `sg-curve${dim}`);
+  return `<div id="${id}" class="sg-graph">${frame(drawn)}${points}`
+    + `${fit ? `<span class="sg-fit" title="${esc(overlayNote(overlay))}" aria-hidden="true">${esc(fit)}</span>`
+      + `<span class="sg-sr">${esc(overlayNote(overlay))}</span>` : ''}`
     + `<div class="sg-freqs" aria-hidden="true">${freqs}</div></div>`;
 }
 

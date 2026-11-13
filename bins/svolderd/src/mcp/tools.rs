@@ -56,6 +56,7 @@ use crate::device::Command;
 use crate::fleet::Fleet;
 use crate::locks::locked;
 use crate::writer::{Glided, Mode, Options, Outcome};
+use svolder_ipc::CODE_TIMEOUT;
 use svolder_profiles::device_presets;
 use svolder_profiles::{Control, ControlKind, Profile, convert, intent};
 use svolder_proto::{FunctionClass, FunctionId};
@@ -781,7 +782,11 @@ impl Tools {
         };
         match self.fleet.request(asked).await {
             Response::Identify { device, sent } => Ok(json!({ "device": device, "sent": sent })),
-            Response::Error { message, .. } if message == svolder_ipc::NOT_CONNECTED => {
+            Response::Error {
+                message,
+                reason: Some(svolder_ipc::Reason::NotConnected),
+                ..
+            } => {
                 let wait = info
                     .retry_in_secs
                     .map(|secs| format!(", next attempt in {secs} s"))
@@ -1140,7 +1145,9 @@ impl Tools {
             .await
         {
             Response::Value(vo) => Ok(vo.raw.as_i64()),
-            Response::Error { code: 4, .. } => Ok(None),
+            Response::Error {
+                code: CODE_TIMEOUT, ..
+            } => Ok(None),
             other => Err(answer_error(other).into()),
         }
     }

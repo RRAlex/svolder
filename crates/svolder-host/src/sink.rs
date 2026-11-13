@@ -110,9 +110,9 @@ impl Wpctl {
     }
 
     /// The sink through the `wpctl` [`WPCTL_ENV`] names, else `wpctl` on `PATH`; `None` when
-    /// [`host_off`](crate::host_off) says host audio is off for this process.
+    /// [`host_unreached`](crate::host_unreached) says host audio is off for this process.
     pub fn from_env() -> Option<Self> {
-        if crate::host_off() {
+        if crate::host_unreached() {
             return None;
         }
         let program = std::env::var_os(WPCTL_ENV)

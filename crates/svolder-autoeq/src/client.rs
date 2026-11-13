@@ -13,29 +13,21 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ureq::Agent;
 use ureq::tls::{Certificate, RootCerts, TlsConfig, TlsProvider};
 
-use crate::index::{Entry, parse_index};
+use crate::index::{Entry, Index, Refresh, parse_index};
 
 /// Where the index is fetched from unless `SVOLDER_AUTOEQ_URL` names another base.
 const DEFAULT_BASE: &str = "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/";
+
+/// Where a client for the fake transport (`SVOLDER_TRANSPORT=fake`: demos, tests, checks) points
+/// unless `SVOLDER_AUTOEQ_URL` says otherwise: this machine's discard port, where nothing listens,
+/// so a fake daemon never reaches the internet.
+const FAKE_BASE: &str = "http://127.0.0.1:9/results/";
 
 /// The name the index is cached under.
 const CACHE_FILE: &str = "INDEX.md";
 
 /// How many redirects a request follows.
 const MAX_REDIRECTS: u32 = 5;
-
-const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
-
-/// When [`Client::index`] fetches the index again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Refresh {
-    /// Only when there is no cached copy.
-    Never,
-    /// When the cached copy is older than this many weeks.
-    AfterWeeks(u8),
-    /// Now, whatever the cached copy's age.
-    Now,
-}
 
 /// The byte and time limits of a transfer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,18 +55,6 @@ impl Default for Limits {
             file_bytes: 64 * 1024,
         }
     }
-}
-
-/// The index as [`Client::index`] returns it.
-#[derive(Debug, Clone)]
-pub struct Index {
-    /// Every entry, in AutoEq's order.
-    pub entries: Vec<Entry>,
-    /// When this copy was fetched (the cache file's modification time).
-    pub fetched: SystemTime,
-    /// What the caller should say about where the copy came from: set when a refresh failed
-    /// and the cached copy was used instead.
-    pub note: Option<String>,
 }
 
 /// Why the index or a file could not be had.
@@ -132,6 +112,19 @@ pub enum AutoEqError {
     },
 }
 
+impl AutoEqError {
+    /// Whether the server answered 404: the index lists a file that is not there.
+    pub fn is_missing_file(&self) -> bool {
+        matches!(self, AutoEqError::Status { status: 404, .. })
+    }
+}
+
+/// The words for a listed measurement whose file is not there: `<subject> is listed but its file
+/// is not there`. The caller adds its own next step.
+pub fn missing_file_words(subject: &str) -> String {
+    format!("{subject} is listed but its file is not there")
+}
+
 /// A blocking AutoEq client: a base URL, a cache directory and limits.
 #[derive(Debug, Clone)]
 pub struct Client {
@@ -154,18 +147,24 @@ impl Client {
         }
     }
 
-    /// A client for `SVOLDER_AUTOEQ_URL` or AutoEq's own repository, with the default limits.
-    pub fn from_env(cache_dir: PathBuf) -> Client {
-        Client::from_var("SVOLDER_AUTOEQ_URL", cache_dir)
+    /// A client for a daemon whose transport is `transport` (`fake` or not), however the daemon
+    /// was told it: the base is `configured` (the value of `SVOLDER_AUTOEQ_URL`), else AutoEq's
+    /// own repository, or the address nothing listens on under `fake`.
+    pub fn for_transport(
+        transport: &str,
+        configured: Option<String>,
+        cache_dir: PathBuf,
+    ) -> Client {
+        let fake = transport.trim() == "fake";
+        Client::new(base_from(configured, fake), cache_dir, Limits::default())
     }
 
     /// A client for the base URL in the environment variable `var` (unset or blank means AutoEq's
-    /// own repository), with the default limits.
+    /// own repository, or an address nothing listens on under `SVOLDER_TRANSPORT=fake`), with the
+    /// default limits.
     pub fn from_var(var: &str, cache_dir: PathBuf) -> Client {
-        let base = std::env::var(var)
-            .ok()
-            .filter(|url| !url.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_BASE.to_string());
+        let fake = std::env::var("SVOLDER_TRANSPORT").is_ok_and(|kind| kind.trim() == "fake");
+        let base = base_from(std::env::var(var).ok(), fake);
         Client::new(base, cache_dir, Limits::default())
     }
 
@@ -177,16 +176,14 @@ impl Client {
     /// The index, from the cache or the network as `refresh` and the cached copy's age say.
     ///
     /// A fetched index replaces the cached one atomically, and only when it holds at least one
-    /// entry. A failed fetch with a cached copy in hand returns that copy with a note saying so;
-    /// a failed fetch with none is [`AutoEqError::NoIndex`].
+    /// entry; one that cannot be cached is returned with a note saying so. A failed fetch with a
+    /// cached copy in hand returns that copy with a note saying so; a failed fetch with none is
+    /// [`AutoEqError::NoIndex`].
     pub fn index(&self, refresh: Refresh) -> Result<Index, AutoEqError> {
         let cached = self.read_cache();
-        let stale = match (&cached, refresh) {
-            (None, _) | (_, Refresh::Now) => true,
-            (Some(_), Refresh::Never) => false,
-            (Some(copy), Refresh::AfterWeeks(weeks)) => SystemTime::now()
-                .duration_since(copy.fetched)
-                .is_ok_and(|age| age > WEEK * u32::from(weeks)),
+        let stale = match &cached {
+            None => true,
+            Some(copy) => refresh.is_stale(copy.fetched, SystemTime::now()),
         };
         if !stale {
             return Ok(cached.expect("a fresh copy is a cached one"));
@@ -234,11 +231,16 @@ impl Client {
         if entries.is_empty() {
             return Err(AutoEqError::EmptyIndex { url });
         }
-        self.write_cache(&text)?;
+        // A cache that cannot be written does not lose the index just fetched: it is returned
+        // with a note saying so.
+        let note = self
+            .write_cache(&text)
+            .err()
+            .map(|error| format!("not cached: {error}"));
         Ok(Index {
             entries,
             fetched: SystemTime::now(),
-            note: None,
+            note,
         })
     }
 
@@ -327,6 +329,21 @@ impl Client {
                 Err(fail(error))
             }
         }
+    }
+}
+
+/// The base URL `configured` names, or the default one when it is unset or blank.
+fn base_from(configured: Option<String>, fake: bool) -> String {
+    configured
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| default_base(fake).to_string())
+}
+
+/// The base URL used when none is given: AutoEq's own, or [`FAKE_BASE`] under the fake transport.
+fn default_base(fake: bool) -> &'static str {
+    match fake {
+        true => FAKE_BASE,
+        false => DEFAULT_BASE,
     }
 }
 

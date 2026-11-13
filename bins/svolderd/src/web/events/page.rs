@@ -2,28 +2,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The task that follows what belongs to the whole page: the fleet (the devices and the hops
-//! after them) and the computer's player.
+//! after them), the computer's player, and the device walk.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use axum::response::sse::Event;
-use svolder_ipc::DeviceInfo;
+use futures::StreamExt;
+use futures::stream::BoxStream;
+use svolder_ipc::{DeviceInfo, JobState, Request, WalkOp};
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use super::{Context, host_changed, send_json};
 use crate::fleet::HostWatch;
+use crate::locks::locked;
 use crate::web::model::{self, ComputerModel, HostModel, PageModel, RouteModel};
 use crate::web::router::devices;
 use crate::web::view::{self, Playing};
 
 /// What the fleet's event says, from what it is made of: the devices' names, links and
-/// families, and when the configuration file (which holds the hops) last changed.
-#[derive(Debug, PartialEq, Eq)]
+/// families, the default device (a hop with no `after` follows it) and the configuration the
+/// daemon holds (which has the hops). The snapshot is held, so one that was replaced never
+/// compares equal to its successor.
+#[derive(Debug)]
 struct FleetKey {
     devices: Vec<(String, &'static str, &'static str, &'static str)>,
-    config: Option<SystemTime>,
+    default: Option<String>,
+    config: Option<Arc<svolder_ipc::Config>>,
+}
+
+impl PartialEq for FleetKey {
+    fn eq(&self, other: &Self) -> bool {
+        let same_config = match (&self.config, &other.config) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        same_config && self.default == other.default && self.devices == other.devices
+    }
 }
 
 /// The page's task.
@@ -40,6 +57,13 @@ pub(super) struct Task {
     /// What the `fleet` event last said, and what it was made of.
     fleet_key: Option<FleetKey>,
     fleet_sent: String,
+    /// The walk's states, for a page that needs them and a viewer who may write: one follow of
+    /// the daemon's per page. Behind a lock so the task stays `Sync`, taken for one poll at a
+    /// time.
+    walk: Option<std::sync::Mutex<BoxStream<'static, svolder_ipc::Event>>>,
+    /// The walks this page has seen running: only their end can have written a device, an ended
+    /// walk the follow replays on opening has not.
+    running: std::collections::BTreeSet<svolder_ipc::JobId>,
 }
 
 impl Task {
@@ -59,6 +83,18 @@ impl Task {
             Some((card, route)) => Some(HostKey::new(&card, route, host_computer(&cx).await)),
             None => None,
         };
+        let walk = match cx.needs.walk && may_write(&cx) {
+            true => {
+                let follow = Request::Walk { op: WalkOp::Follow };
+                cx.web
+                    .fleet
+                    .stream(follow)
+                    .await
+                    .ok()
+                    .map(std::sync::Mutex::new)
+            }
+            false => None,
+        };
         Task {
             host,
             host_key,
@@ -66,6 +102,8 @@ impl Task {
             fleet_changed,
             fleet_key: None,
             fleet_sent: String::new(),
+            walk,
+            running: std::collections::BTreeSet::new(),
             cx,
         }
     }
@@ -73,7 +111,7 @@ impl Task {
     /// Note what the fleet is made of now, `devices`: call it before the model that carries the
     /// fleet is read, so a change in between is found.
     pub(super) async fn watch_fleet(&mut self, devices: &[DeviceInfo]) {
-        self.fleet_key = Some(self.key_of(devices).await);
+        self.fleet_key = Some(self.key_of(devices));
     }
 
     /// Take the fleet and the hops `model` carries as what the page has.
@@ -106,6 +144,11 @@ impl Task {
                         return;
                     }
                 }
+                event = walk_event(&self.walk) => {
+                    if !self.walk_turn(&tx, event).await {
+                        return;
+                    }
+                }
                 _ = second.tick() => {
                     if !self.fleet_turn(&tx, false).await || !self.eq_turn(&tx).await {
                         return;
@@ -115,14 +158,39 @@ impl Task {
         }
     }
 
+    /// Send a state of the walk, `None` once its stream has ended (the daemon stopping). A walk
+    /// that ended with a device written turns the fleet for every open page. `false` when the
+    /// page has gone.
+    async fn walk_turn(
+        &mut self,
+        tx: &mpsc::Sender<Event>,
+        event: Option<svolder_ipc::Event>,
+    ) -> bool {
+        match event {
+            Some(svolder_ipc::Event::Walk(job)) => {
+                let wrote = walk_wrote(&mut self.running, &job);
+                if wrote {
+                    self.cx.web.fleet_changed.send_modify(|turn| *turn += 1);
+                }
+                let told = serde_json::json!({
+                    "run": super::run_stamp(), "job": job.job, "state": job.state,
+                });
+                send_json(tx, "walk", &told).await.is_ok()
+            }
+            Some(_) => true,
+            None => {
+                self.walk = None;
+                true
+            }
+        }
+    }
+
     /// What the fleet's event is made of now.
-    async fn key_of(&self, devices: &[DeviceInfo]) -> FleetKey {
+    fn key_of(&self, devices: &[DeviceInfo]) -> FleetKey {
         let web = &self.cx.web;
-        let config = match web.fleet.config_path() {
-            Some(path) => stamp_off_thread(path).await,
-            None => None,
-        };
         FleetKey {
+            default: web.fleet.resolve(None).ok().map(|info| info.name),
+            config: web.fleet.config().ok(),
             devices: devices
                 .iter()
                 .map(|info| {
@@ -136,17 +204,16 @@ impl Task {
                     )
                 })
                 .collect(),
-            config,
         }
     }
 
     /// Send the fleet when it changed: a device's link or family, the list, or the hops, which
-    /// are re-read only when the configuration file has changed or `forced` says it has.
+    /// are re-read only when the daemon's configuration has changed or `forced` says it has.
     /// `false` when the page has gone.
     async fn fleet_turn(&mut self, tx: &mpsc::Sender<Event>, forced: bool) -> bool {
         let web = &self.cx.web;
         let devices = devices(web).await;
-        let key = self.key_of(&devices).await;
+        let key = self.key_of(&devices);
         if !forced && self.fleet_key.as_ref() == Some(&key) {
             return true;
         }
@@ -188,6 +255,38 @@ impl Task {
         self.host_key = key;
         let host = parts.map(|(card, route)| HostModel::new(&card, route, computer));
         send_json(tx, "host", &host).await.is_ok()
+    }
+}
+
+/// Whether `job`'s state is the end of a walk this page saw running, with a device written; the
+/// jobs seen running are kept in `running`. An ended walk the follow replays on opening was never
+/// seen running, so it is not counted, and a final state sent again counts once.
+fn walk_wrote(
+    running: &mut std::collections::BTreeSet<svolder_ipc::JobId>,
+    job: &svolder_ipc::JobEvent,
+) -> bool {
+    if job.state.is_final() {
+        running.remove(&job.job)
+            && matches!(&job.state, JobState::Done { payload } if !payload.is_null())
+    } else {
+        running.insert(job.job);
+        false
+    }
+}
+
+/// Whether the page's viewer may write: signed in, with `[web] writes` on. Only such a viewer
+/// may walk, so only such a page is sent the walk's states.
+fn may_write(cx: &Context) -> bool {
+    cx.viewer == crate::web::Viewer::Signed && cx.web.config.writes
+}
+
+/// The walk's next event; for ever when the page does not follow the walk.
+async fn walk_event(
+    walk: &Option<std::sync::Mutex<BoxStream<'static, svolder_ipc::Event>>>,
+) -> Option<svolder_ipc::Event> {
+    match walk.as_ref() {
+        Some(stream) => std::future::poll_fn(|cx| locked(stream).poll_next_unpin(cx)).await,
+        None => std::future::pending().await,
     }
 }
 
@@ -244,6 +343,63 @@ fn stamp_of(path: &std::path::Path) -> Option<SystemTime> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use super::walk_wrote;
+    use serde_json::json;
+    use svolder_ipc::{JobEvent, JobState};
+
+    fn done(job: u64, payload: serde_json::Value) -> JobEvent {
+        JobEvent {
+            job,
+            state: JobState::Done { payload },
+        }
+    }
+
+    fn progress(job: u64) -> JobEvent {
+        JobEvent {
+            job,
+            state: JobState::Progress { payload: json!({}) },
+        }
+    }
+
+    #[test]
+    fn a_walk_seen_running_then_done_with_a_device_counts() {
+        let mut running = BTreeSet::new();
+        assert!(!walk_wrote(&mut running, &progress(1)));
+        assert!(walk_wrote(&mut running, &done(1, json!({"name": "d"}))));
+    }
+
+    #[test]
+    fn a_replayed_done_for_a_job_never_seen_running_does_not_count() {
+        let mut running = BTreeSet::new();
+        assert!(!walk_wrote(&mut running, &done(1, json!({"name": "d"}))));
+    }
+
+    #[test]
+    fn a_done_sent_again_counts_once() {
+        let mut running = BTreeSet::new();
+        walk_wrote(&mut running, &progress(1));
+        assert!(walk_wrote(&mut running, &done(1, json!({"name": "d"}))));
+        assert!(!walk_wrote(&mut running, &done(1, json!({"name": "d"}))));
+    }
+
+    #[test]
+    fn a_done_with_nothing_written_or_a_cancel_counts_for_nothing_and_leaves_the_set() {
+        let mut running = BTreeSet::new();
+        walk_wrote(&mut running, &progress(1));
+        assert!(!walk_wrote(&mut running, &done(1, serde_json::Value::Null)));
+        walk_wrote(&mut running, &progress(2));
+        assert!(!walk_wrote(
+            &mut running,
+            &JobEvent {
+                job: 2,
+                state: JobState::Cancelled
+            }
+        ));
+        assert!(running.is_empty());
+    }
+
     use super::*;
 
     #[test]

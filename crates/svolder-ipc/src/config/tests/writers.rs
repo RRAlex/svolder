@@ -4,6 +4,7 @@
 //! How the writers treat the file: its mode, concurrent saves, the lock and failed writes.
 
 use super::*;
+use svolder_profiles::tone::preset::NameRefusal;
 
 /// A file that would not load again is not written: the Settings box would have saved a
 /// configuration the next run refuses to start on.
@@ -350,7 +351,7 @@ fn two_writers_adding_the_same_name_at_once_leave_one_preset_and_one_refusal() {
     assert!(
         results
             .iter()
-            .any(|r| matches!(r, Err(ConfigError::Parse(m)) if m.contains("already exists"))),
+            .any(|r| matches!(r, Err(ConfigError::Name(NameRefusal::Taken(_))))),
         "{results:?}"
     );
     let presets = Config::load_from(&path).unwrap().presets;

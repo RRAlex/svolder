@@ -24,7 +24,7 @@ fn writes_from_a_list(intent: &Intent) -> bool {
             | Intent::UpdatePreset(..)
             | Intent::RenamePreset(..)
             | Intent::RemovePreset(_)
-            | Intent::AutoEqDownload(_)
+            | Intent::AutoEqImport { .. }
     )
 }
 
@@ -68,8 +68,8 @@ impl App {
             | Intent::RenamePreset(..)
             | Intent::RemovePreset(_)
             | Intent::ReadPresets
-            | Intent::AutoEqIndex { .. }
-            | Intent::AutoEqDownload(_)
+            | Intent::AutoEqSearch { .. }
+            | Intent::AutoEqImport { .. }
             | Intent::HostEq(_)
             | Intent::MoveToDac(_)
             | Intent::Tui(_)
@@ -127,8 +127,7 @@ impl App {
         let from = self.cursor_id();
         self.frame_flags.pane_changed |= self.pane != pane;
         self.pane = pane;
-        self.selected = row;
-        self.switch_focus = false;
+        self.set_selected(row);
         self.cursor_moved(from);
     }
 
@@ -138,7 +137,7 @@ impl App {
     /// and loudness rows above it: the arrows then step the band that was clicked. On the
     /// device screen it takes the keys to the Tone pane as well ([`App::focus_tone_pane`]).
     pub(crate) fn focus_band(&mut self, band: usize) {
-        self.switch_focus = false;
+        self.set_selected(self.selected());
         if self.on_computer() {
             self.focus_point(band);
             return;
@@ -164,7 +163,7 @@ impl App {
     pub(crate) fn focus_loudness(&mut self) {
         let from = self.cursor_id();
         self.focus_tone_pane();
-        self.switch_focus = false;
+        self.set_selected(self.selected());
         self.tone.row = ToneRow::Loudness;
         self.note_tone_header(ToneRow::Loudness);
         self.cursor_moved(from);
@@ -180,7 +179,7 @@ impl App {
     /// [`App::focus_band`] instead.
     pub(crate) fn click_tone_row(&mut self, row: ToneRow) -> Vec<Intent> {
         let from = self.cursor_id();
-        self.switch_focus = false;
+        self.set_selected(self.selected());
         self.focus_tone_pane();
         self.tone.row = row;
         self.note_tone_header(row);

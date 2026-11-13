@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security issue or a conduct problem privately
+    url: https://github.com/RRAlex/svolder/security/advisories/new
+    about: Only the maintainer reads it. Do not open a public issue for these.
+  - name: Documentation
+    url: https://github.com/RRAlex/svolder#readme
+    about: The README links the usage guide, the known issues and the protocol.

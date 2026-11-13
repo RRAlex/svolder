@@ -943,3 +943,58 @@ fn a_boolean_readout_is_worded_by_its_key() {
     let plain = control("kara", "headphone").flag_words();
     assert_eq!((plain.on(), plain.off()), ("yes", "no"));
 }
+
+/// The key readings each concrete profile marks, in the order it lists them, which is the order
+/// of its controls and so differs between products (a row pins the order as well as the set): on
+/// a DAC the sample rate, the volume and the input; on a preamp the input and the volume; on an
+/// amp its meters and its warm-up state. Never a setting that only changes when someone
+/// changes it.
+const KEY_READINGS: &[(&str, &str)] = &[
+    ("gungnir2-v1", "input sample_rate"),
+    ("gungnir2-v2", "sample_rate volume input"),
+    ("yggdrasil", "sample_rate volume input"),
+    ("bifrost3", "sample_rate volume input"),
+    ("mimir", "volume sample_rate input"),
+    ("meshcard", "volume sample_rate"),
+    ("eitr2", "volume sample_rate"),
+    ("freya", "input volume"),
+    ("freya2", "input volume"),
+    ("kara", "input volume"),
+    ("saga2", "input volume"),
+    ("lyr5", "input volume"),
+    ("lokimax", "input"),
+    ("hati", "input"),
+    ("skoll", "input"),
+    ("stjarna", "input"),
+    ("aegir2", "meter_1 meter_2 warming_up"),
+    ("vidar2", "meter_1 meter_2 warming_up"),
+    ("gjallarhorn", "meter_1 meter_2"),
+    (
+        "kraken",
+        "meter_1 meter_2 warming_up meter_3 meter_4 meter_5",
+    ),
+    ("tyr", "meter_1 warming_up"),
+    ("wotan", "meter_1 meter_2 warming_up"),
+    ("fake-amp", "meter_1 meter_2"),
+    ("fake-five", "meter_1 meter_2 meter_3 meter_4 meter_5"),
+    ("fake-mono", "meter_1"),
+];
+
+#[test]
+fn every_concrete_profile_marks_its_key_readings() {
+    let r = Registry::builtin().unwrap();
+    let listed: BTreeSet<&str> = KEY_READINGS.iter().map(|(name, _)| *name).collect();
+    for (name, _) in EXPECTED {
+        assert!(listed.contains(name), "{name} has no row in KEY_READINGS");
+    }
+    let mut report = String::new();
+    for (name, want) in KEY_READINGS {
+        let p = r.get(name).unwrap_or_else(|| panic!("no profile {name}"));
+        let have = p.key_readings();
+        let want: Vec<&str> = want.split(' ').collect();
+        if have != want {
+            report.push_str(&format!("{name}: {have:?}, not {want:?}\n"));
+        }
+    }
+    assert!(report.is_empty(), "\n{report}");
+}

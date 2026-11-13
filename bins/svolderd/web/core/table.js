@@ -108,8 +108,15 @@ export function createTable({
  * before it was edited): Enter writes it (`cell(n, param, typed, shown)` is
  * `actions.computer.cell`, which says what is wrong with it and writes nothing for no change),
  * Escape or leaving the field puts the old text back. `restore()` puts the text back and `after()`
- * runs once the flow is over, whichever way it ended (a theme draws what waited). Returns
- * `{ close() }`, which ends the flow the way Escape does.
+ * runs once the flow is over, whichever way it ended (a theme draws what waited).
+ *
+ * The flow attaches no key listener (a part inside a modal hears no key of its own): whoever owns
+ * the keyboard hands each key to `flow.key(event)`, a modal from its `onKey`, a theme's page by
+ * `flow.listen()`, which listens on the field. While the flow is not over, `key` takes Enter and
+ * Escape alone and returns true for them, so it never prevents what the browser does with any
+ * other key (typing, Tab, the caret).
+ * Returns `{ key, listen, close, written }`: `close()` ends the flow the way Escape does, and
+ * `written` is the promise of the write Enter started (a write that throws rejects it), or null.
  */
 export function editCell(input, { n, param, shown, cell, restore = () => {}, after = () => {} }) {
   let over = false;
@@ -119,15 +126,7 @@ export function editCell(input, { n, param, shown, cell, restore = () => {}, aft
     restore();
     after();
   };
-  input.addEventListener('keydown', async (event) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation?.();
-      close();
-      return;
-    }
-    if (event.key !== 'Enter' || over) return;
-    event.preventDefault?.();
-    over = true;
+  const write = async () => {
     // read before `restore()`: a theme's restore may put the old text back in the field
     const typed = input.value;
     restore();
@@ -136,7 +135,29 @@ export function editCell(input, { n, param, shown, cell, restore = () => {}, aft
     } finally {
       after();
     }
-  });
+  };
+  const flow = {
+    key(event) {
+      if (event.key === 'Escape') {
+        // an Escape of the field never reaches the page, whether the flow is over or not
+        event.stopPropagation?.();
+        if (over) return false;
+        close();
+        return true;
+      }
+      if (over) return false;
+      if (event.key !== 'Enter') return false;
+      event.preventDefault?.();
+      over = true;
+      flow.written = write();
+      return true;
+    },
+    listen() {
+      input.addEventListener('keydown', flow.key);
+    },
+    close,
+    written: null,
+  };
   input.addEventListener('blur', close);
-  return { close };
+  return flow;
 }

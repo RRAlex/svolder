@@ -7,9 +7,11 @@
 #
 # It builds the release on GitHub's own runners, one native build per architecture (no
 # emulation), and publishes it:
+#   proven    asks the API whether check.yml already passed on this very commit (it runs on every
+#             push to main, and the release order is: push main, wait for check.yml to pass, then
+#             push the tag); any doubt, a failed call, or a by-hand run says `false`
 #   test      check.yml: `make check` on an arm64 runner (the x86_64 suite runs before the tag is
-#             pushed); the same workflow runs on every push to main, so what this runner needs is
-#             proven before a tag
+#             pushed); skipped when `proven`, so a proven commit is not tested twice
 #   build     `make packages ARCH=...` on x86_64 and on arm64; contents: read, no token while
 #             it builds
 #   image     the Docker image on each architecture, from that build's tarball (packages: write)
@@ -17,7 +19,8 @@
 #   release   the only job that writes the release: combines both builds (`make release-files`),
 #             writes the compose file and the notes, attaches everything to a draft, checks the
 #             draft against SHA256SUMS, publishes it, and deletes the draft if any step fails
-# A failing `test` stops the run before the images or the release exist. A failed run leaves no
+# A failing `test` stops the run before the images or the release exist; a skipped one (proven)
+# does not, which is why image and release spell out their conditions. A failed run leaves no
 # release behind (images already pushed stay on ghcr).
 #
 # The images are tagged VERSION (both architectures) and, because each architecture is built on
@@ -47,7 +50,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  proven:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      proven: ${{ steps.ask.outputs.proven }}
+    steps:
+      - name: Ask whether check.yml passed on this commit
+        id: ask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # The default is false: the test runs. Only a successful answer naming a passed push run
+          # of check.yml on exactly this commit says true, and a by-hand run never asks.
+          proven=false
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/check.yml/runs?head_sha=$GITHUB_SHA&event=push&status=success&per_page=100" \
+              --jq '[.workflow_runs[] | select(.head_sha == env.GITHUB_SHA and .event == "push" and .conclusion == "success")] | length') \
+              || n=0
+            case $n in ''|*[!0-9]*) n=0 ;; esac
+            if [ "$n" -gt 0 ]; then proven=true; fi
+          fi
+          echo "check.yml proven on $GITHUB_SHA: $proven"
+          echo "proven=$proven" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: proven
+    if: needs.proven.outputs.proven != 'true'
     uses: ./.github/workflows/check.yml
     permissions:
       contents: read
@@ -108,7 +140,9 @@ jobs:
           if-no-files-found: error
 
   image:
-    needs: [build, test]
+    needs: [proven, build, test]
+    # test passed, or was skipped because the commit is proven; never after a failed or cancelled one.
+    if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.proven.outputs.proven == 'true')) }}
     strategy:
       matrix:
         include:
@@ -174,6 +208,8 @@ jobs:
 
   manifest:
     needs: image
+    # Explicit: the implicit success() would see the skipped test further up and skip this job.
+    if: ${{ !cancelled() && !failure() && needs.image.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -201,7 +237,8 @@ jobs:
           docker buildx imagetools create -t "$image:$VERSION" "$image:$VERSION-amd64" "$image:$VERSION-arm64"
 
   release:
-    needs: [build, test, manifest]
+    needs: [proven, build, test, manifest]
+    if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && needs.manifest.result == 'success' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.proven.outputs.proven == 'true')) }}
     runs-on: ubuntu-24.04
     # The only job that writes the release, and it runs no build code.
     permissions:

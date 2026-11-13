@@ -70,6 +70,7 @@ in the schema denies unknown fields, so a misspelt key fails the load with the p
 | `advice` | A `fault`'s required text: what to do about it. Every front end shows it. |
 | `only_while` | A boolean readout that reads true only while the named boolean control also does. |
 | `auto_off` | A boolean readout the session writes false whenever the device reports it true. |
+| `key_reading` | `true` marks the control as one of the device's key readings, which a front end graphs first ([Key readings](#key-readings)). Any control with a numeric reading. |
 | `reads` | Further ids a status is read as this control from, a list of one to three bytes each: `reads = [[6, 1]]`. A status on an id that equals an entry or lies under it reads as this control. An entry may not meet another control's `id` or `reads`, an action's `id`, the `[eq]` family or a restricted function; the control's own `id` may lie under its own entry. |
 | `slots` | An `action`'s slot count, 1 to 255 (required). |
 | `overwrites` | An `action` that overwrites what the device holds, so a front end asks before it. |
@@ -106,6 +107,16 @@ from a label. A new control that raises the output and carries no flag is a defe
 
 The volume's own rules (the cap, the question, the glide) hang on the level whose key is `volume`,
 so a device's output volume is called `volume`.
+
+### Key readings
+
+`key_reading = true` on a control marks it as one of the device's key readings: a reading someone
+watches, which a front end graphs before the rest. Mark what moves by itself or is looked at often
+(a DAC's sample rate, volume and input; an amp's meters and its warm-up state), not a setting that
+only changes when someone changes it. The signal strength is always the first key reading and
+needs no mark. The readings follow in the order of the controls. Any control with a numeric
+reading can carry the mark; an action cannot, and neither can a control whose `value_type` is
+`data`. A child that restates a control restates the mark with it.
 
 ### `[eq]`
 

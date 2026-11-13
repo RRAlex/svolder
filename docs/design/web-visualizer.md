@@ -130,7 +130,7 @@ The clock offset is taken from each stream's `hello` (the daemon's clock against
 `performance.timeOrigin + performance.now()`), and not corrected by frames: a frame's `t` against
 that offset is its delay. Correcting by `t` would hide the steady delay that the page is to show and
 plan around, and the offset is taken again on every stream, so it cannot drift for long. The
-median of the last 2 s is the Device fold-out's "Visualizer delay N ms" row (`facts.js`
+median of the last 2 s is the Device fold-out's "Visualizer delay N ms" row (Ember's `facts.js`
 `setVizDelay`, written only while the card runs). A look that moves continuously tolerates a frame
 up to about 120 ms behind the sound, and a frame is dropped only when a newer one has arrived. A
 beat is scheduled ahead from the tempo and phase, so its pulse lands on time even with a steady

@@ -47,6 +47,11 @@ fn cli_token(binary: &Path, home: &Path) -> String {
         .env("XDG_DATA_HOME", home)
         .env("XDG_RUNTIME_DIR", home)
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .env_remove("SVOLDER_MCP_TOKEN")
         .output()
         .expect("the binary runs");

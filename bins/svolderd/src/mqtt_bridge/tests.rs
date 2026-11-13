@@ -8,12 +8,14 @@ use crate::device::Command;
 use crate::recall;
 use crate::test_support::shown;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use svolder_ipc::CODE_LINK;
 use svolder_ipc::Response;
 use svolder_profiles::{EqMode, tone::preset};
 use svolder_proto::Value;
 
 /// A broker in this process and a client that watches it, for the tests that look at what the
 /// bridge's client sends rather than at what the task holds.
+#[cfg(feature = "broker-tests")]
 #[path = "../../../../crates/svolder-mqtt/tests/support/broker.rs"]
 mod broker;
 
@@ -195,10 +197,7 @@ fn stand_device_on(profile_name: &str, unit: &str, name: &str) -> (DeviceHandle,
             seen += 1;
             log.lock().expect("the log").push(shown(&command));
             if seen == fail_at.load(Ordering::SeqCst) {
-                let _ = reply.send(Response::Error {
-                    code: 3,
-                    message: "the device said no".into(),
-                });
+                let _ = reply.send(Response::error(CODE_LINK, "the device said no"));
                 continue;
             }
             let message = match &command {
@@ -1584,6 +1583,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
 
 /// The retained configs an earlier run left under the computer, which Home Assistant would
 /// remove and add again if they were cleared before being announced.
+#[cfg(feature = "broker-tests")]
 fn left_over() -> [String; 3] {
     [
         "homeassistant/switch/svolder_computer/computer_eq/config".to_string(),
@@ -1596,6 +1596,7 @@ fn left_over() -> [String; 3] {
 /// A start whose host view has not yet reported the computer clears nothing before it does:
 /// the entities about to be announced are never cleared first, and the ones it will not serve
 /// are cleared once it has.
+#[cfg(feature = "broker-tests")]
 #[tokio::test]
 async fn a_computer_not_yet_reported_is_not_swept_before_it_is() {
     let broker = broker::TestBroker::start();
@@ -1636,6 +1637,7 @@ async fn a_computer_not_yet_reported_is_not_swept_before_it_is() {
 
 /// A computer that never reports one (host audio off) is swept once the start has had its
 /// time: nothing is cleared before, and every retained config is after.
+#[cfg(feature = "broker-tests")]
 #[tokio::test]
 async fn a_computer_that_stays_unreported_is_swept_after_the_start_settles() {
     let broker = broker::TestBroker::start();

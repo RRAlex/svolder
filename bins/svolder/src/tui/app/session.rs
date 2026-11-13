@@ -37,6 +37,10 @@ pub struct Session {
     /// The daemon version the last warning was about: a daemon of that version is not warned
     /// about again, however many devices this session opens on it or times it restarts.
     pub daemon_version_warned: Option<String>,
+    /// Whether the daemon's `config changed` words were toasted since it last said the file was
+    /// unchanged: a change is told once, and a daemon that says unchanged again (a reload took
+    /// it) lets the next change be told.
+    pub config_changed_told: bool,
     /// The command that joins this run's daemon from a second terminal, in the demo; the Esc menu
     /// shows it.
     pub join_hint: Option<String>,

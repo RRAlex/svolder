@@ -4,8 +4,8 @@
 // the title, the volume (a drag along the 0 to 100 % ruler, the keys, `− quieter`, `mute`,
 // `louder +`), the tone (`off` and `EQ`, the points on the graph dragged, tapped to add, stepped
 // with the arrow keys and the wheel, the table's type words, typed or stepped cells and `×`,
-// `+ Add point`) and the presets. The core does the hand's work (core.drag.pointDrag: the drag, the
-// tap, the wheel and key bursts; core.drag.table: the rows below the view; core.actions.computer:
+// `+ Add point`) and the presets. The core does the hand's work (core.eq.points: the drag, the
+// tap, the wheel and key bursts; core.eq.table: the rows below the view; core.actions.computer:
 // every write); this wires Paper's elements to it and draws what it says. Flipping writes nothing:
 // it ends what is in hand, as for another device shown (live.js).
 //
@@ -17,7 +17,6 @@ import { askForm, askQuestion, closeAsk } from './ask.js';
 import { heldCurve, valueWords } from './draw/computer.js';
 import { dragAlong, sliderKeys } from './gestures.js';
 import { closeList, closeOf, openList } from './lists.js';
-import { keeper } from './live.js';
 import { place } from './place.js';
 import { WORDS } from './words.js';
 import { POINT_TYPES, markersOf } from '../../core/computer.js';
@@ -31,13 +30,14 @@ export function wireComputer({
 }) {
   const comp = core.computer;
   const actions = core.actions.computer;
-  const { labelAt, markersIn } = core.drag;
+  const { labelAt } = core.eq.bands;
+  const { markersIn } = core.eq.points;
   const page = () => core.model.page();
   const on = () => comp.side() === 'computer';
   const quiet = () => !core.actions.canWrite(page());
   const tone = () => comp.toneOf(page());
   const points = () => tone()?.points ?? [];
-  const keep = keeper(live, 'tone');
+  const keep = core.freeze.keeper(live, 'tone');
   const nothing = () => {};
 
   // ---- the switch -----------------------------------------------------------------------------
@@ -107,7 +107,7 @@ export function wireComputer({
     vbox.addEventListener('pointerdown', (event) => {
       const word = event.target.closest?.('[data-act="c-down"], [data-act="c-up"]');
       if (!word || !on() || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
-      core.hold.repeat(event, {
+      core.repeat(event, {
         root,
         el: word,
         signal,
@@ -142,7 +142,7 @@ export function wireComputer({
     // ---- the table: the point in hand lit, the rows below the view counted
 
     const label = () => section.querySelector('#p-more');
-    const table = core.drag.table({
+    const table = core.eq.table({
       box: () => section.querySelector('#p-ptsbox'),
       // the words under the table are Paper's own element, shown and hidden with the count
       note: () => null,
@@ -340,7 +340,7 @@ export function wireComputer({
       say(graph, graph.getBoundingClientRect(), point, values);
     }
 
-    const hand = core.drag.pointDrag({
+    const hand = core.eq.points({
       points: (plot, rect) => markersIn(tone()?.markers, rect),
       usable: () => on() && Boolean(tone()),
       on: {
@@ -431,7 +431,7 @@ export function wireComputer({
 
   const pbox = root.querySelector('#p-presets');
   if (pbox) {
-    const pkeep = keeper(live, 'presets');
+    const pkeep = core.freeze.keeper(live, 'presets');
     live.onSwitch(() => {
       closeList();
       closeAsk();

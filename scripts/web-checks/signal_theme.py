@@ -36,7 +36,7 @@ tasks add the rest of the open area's checks here.
   a_preset_saves_renames_and_deletes            Save as, Rename, Delete in place; Delete asks first
   a_slot_save_asks_first                        a Loki Max slot is written only after `Save`
   an_open_list_survives_a_part_update           a list and a question stay through a change from elsewhere
-  the_facts_unfold_and_the_choice_survives_a_reload   folded by default, kept as `open` / `closed`
+  the_shelf_foot_opens_the_devices_page         `Device settings…` opens the popup at the device's page; no fact on the shelf
   the_power_switch_writes                       a preamp's shelf has its power, a tap writes it
   the_slim_bar_pins_when_the_line_scrolls_away  64 px under the frame's layer, the chosen hop with the volume
   a_slim_bar_tap_chooses_and_scrolls_up         the tap chooses the hop and the page goes to the top
@@ -52,11 +52,11 @@ tasks add the rest of the open area's checks here.
   move_earlier_reorders_the_line                the whole list's place; the ends are disabled
   remove_asks_then_removes                      one question in place; Keep sends nothing
   a_chosen_hop_removed_elsewhere_gives_the_box_back   the form and the question close, nothing posted
-  a_guest_cannot_add_or_edit_a_hop              the menu's Add device… refuses, every edit inert, the core's words, nothing posted
+  a_guest_cannot_add_or_edit_a_hop              the menu's Add to the chain… refuses, every edit inert, the core's words, nothing posted
   the_strip_centres_the_chosen_hop              390 px: a strip 92 px high, the chosen hop at the middle and boxed 112 by 74
   a_swipe_chooses_the_neighbour                 a drag or a tap moves the choice one hop; vertical strokes still scroll
   the_strip_pins_when_scrolled                  sticky at the top under the frame's layer; focus lands clear of it
-  touch_targets_are_44_px                       the buttons, hops, fields and sliders, the Add device sheet, Loudness's round buttons
+  touch_targets_are_44_px                       the buttons, hops, fields and sliders, the Add to the chain sheet, Loudness's round buttons
   no_sideways_scroll_with_long_hop_names        a DAC, an amp and a Loki Max, 390 and 1100 px
   the_said_and_stub_do_not_overlap              host off and the stream lost, three widths
   the_menu_button_clears_the_strip              a 44 px button over no hop, dot, wire or box (360, 390, 719 px)
@@ -153,7 +153,7 @@ def click_el(b, selector):
 
 
 def add_device(b):
-    """Open the sheet the way a person does: the frame's menu, its Add device… row."""
+    """Open the sheet the way a person does: the frame's menu, its Add to the chain… row."""
     click_el(b, '.fxbtn')
     poll(lambda: b.page("!!document.getElementById('menu-add-device')"), 3.0)
     click_el(b, '#menu-add-device')
@@ -254,7 +254,7 @@ CLEAR = """(() => { const hit = (e) => { const r = e.getBoundingClientRect(); re
 
 def the_last_box_clears_the_buttons(b, d):
     """The chosen last hop's box (200 px) does not meet the menu button, from 720 to 1600 px; the page
-    has no floating + any more (Add device is a row of the menu)."""
+    has no floating + any more (Add to the chain is a row of the menu)."""
     for width in (720, 760, 800, 860, 900, 960, 1024, 1100, 1280, 1440, 1600):
         b.resize(width, 800)
         time.sleep(0.5)
@@ -1077,7 +1077,11 @@ def the_choices(b, d):
     b.page(POSTS)
     options = [o['label'] for o in control(d, 'input')['options']]
     want = next(o for o in options if o != chosen(control(d, 'input')) and o == 'Optical')
-    click_el(b, f'[data-act=choice][data-key=input][data-value={want}]')
+    # the graph keeps a line under it for the fit's words, so the chip may be below the first screen: a person scrolls
+    chip = f'[data-act=choice][data-key=input][data-value={want}]'
+    b.page(f"(document.querySelector({json.dumps(chip)}).scrollIntoView({{ block: 'center' }}), 1)")
+    time.sleep(0.3)
+    click_el(b, chip)
     check('an_input_chip_sets_the_input: `Optical` is written to the input',
           poll(lambda: chosen(control(d, 'input')) == want, 8.0), chosen(control(d, 'input')))
     check('  by one write: the input chip under the band table is wired once',
@@ -1126,12 +1130,14 @@ def guest_tap():
         guest = b.page("__core.model.page().viewer.guest")
         live = b.page("[...document.querySelectorAll('#sg-open button:not([aria-disabled=true]),"
                       " #sg-open [role=slider]:not([aria-disabled=true]), #sg-now button:not([aria-disabled=true]),"
-                      " #sg-shelf button:not([aria-disabled=true]):not([data-act=facts-fold]),"
+                      " #sg-shelf button:not([aria-disabled=true]),"
                       " #sg-shelf [role=slider]:not([aria-disabled=true]),"
                       " #sg-shelf input:not([aria-disabled=true])')]"
                       ".map((x) => x.id || x.dataset.act)")
-        check('a_guests_tap_posts_nothing: a real guest page draws every control of the first screen inert',
-              guest is True and live == [], [guest, live])
+        # the reader's foot (*Devices…*) is navigation, live by design: it opens the read-only popup
+        check('a_guests_tap_posts_nothing: a real guest page draws every control of the first screen inert,'
+              ' the Devices… foot aside',
+              guest is True and live == ['device-settings'], [guest, live])
         taps = ['#sg-vup', '#sg-vdown', '#sg-mute', '[data-act=choice][data-key=input][data-value=Optical]',
                 '[data-act=mode][data-mode=flat]', '#sg-pr-1', '#sg-pt-2']
         missing = [t for t in taps if not b.page(f'!!document.querySelector({json.dumps(t)})')]
@@ -1146,9 +1152,9 @@ def guest_tap():
         b.press('ArrowUp')
         b.page("document.getElementById('sg-vtrack').focus()")
         b.press('ArrowUp')
-        # the shelf: a stepper, a typed value, a switch, a preset, the balance's centre and its keys,
-        # Identify; and no Save as, Rename or Delete at all
-        for tapped in ['#sg-b1gp', '#sg-t-phase', '#sg-pr-1', '#sg-ce-balance', '#sg-identify']:
+        # the shelf: a stepper, a typed value, a switch, a preset, the balance's centre and its keys;
+        # and no Save as, Rename or Delete at all
+        for tapped in ['#sg-b1gp', '#sg-t-phase', '#sg-pr-1', '#sg-ce-balance']:
             tap(b, tapped)
         type_into(b, '#sg-b1f', '100 Hz')
         b.press('Enter')
@@ -1408,38 +1414,17 @@ def the_facts(b, d):
     forget(b, d)
     load(b, d)
     b.page(POSTS)
-    got = b.page("""(() => { const t = document.getElementById('sg-facts-fold');
-      const body = document.getElementById('sg-facts-body');
-      return { expanded: t.getAttribute('aria-expanded'), hidden: body.hidden,
-        shown: body.getBoundingClientRect().height > 0 }; })()""")
-    check('the_facts_unfold_and_the_choice_survives_a_reload: the facts start folded',
-          got == {'expanded': 'false', 'hidden': True, 'shown': False}, got)
-    tap(b, '#sg-facts-fold')
-    got = b.page("""({ expanded: document.getElementById('sg-facts-fold').getAttribute('aria-expanded'),
-      shown: document.getElementById('sg-facts-body').getBoundingClientRect().height > 0,
-      stored: localStorage.getItem('svolder.theme.signal.facts'),
-      firmware: document.querySelector('[data-fact=Firmware]').textContent })""")
-    check('  a tap unfolds them and the choice is stored as `open`',
-          got['expanded'] == 'true' and got['shown'] and got['stored'] == '"open"', got)
-    check('  they read the device\'s own words', got['firmware'] == b.page("__core.model.device().facts.firmware"), got)
-    load(b, d)
-    b.page(POSTS)
-    check('  a reload finds them open',
-          b.page("document.getElementById('sg-facts-body').hidden") is False)
-    tap(b, '#sg-identify')
-    check('  Identify is under them and posts', poll(lambda: posts_to(b, 'identify') == ['{}'], 5.0),
-          posts_to(b, 'identify'))
-    tap(b, '#sg-facts-fold')
-    check('  a second tap folds them again and stores `closed`',
-          b.page("localStorage.getItem('svolder.theme.signal.facts')") == '"closed"')
-    load(b, d)
-    check('  and a reload keeps them folded', b.page("document.getElementById('sg-facts-body').hidden") is True)
-    # a browser that refuses its storage still folds and unfolds
-    b.page("(() => { Object.defineProperty(window, 'localStorage', { get() { throw new Error('refused'); } });"
-           " return 1; })()")
-    b.page("(() => { const t = document.getElementById('sg-facts-fold'); t.click(); return 1; })()")
-    check('  without storage it still unfolds',
-          b.page("document.getElementById('sg-facts-body').hidden") is False)
+    got = b.page("""(() => ({ foot: [...document.querySelectorAll('#sg-facts [data-act]')].map((x) => [x.dataset.act, x.textContent]),
+      facts: document.querySelectorAll('#sg-shelf [data-fact], #sg-spec, #sg-readings, #sg-identify, #sg-facts-fold').length }))()""")
+    check('the_shelf_foot_opens_the_devices_page: the shelf ends in `Device settings…` and draws no fact, no readings and no Identify',
+          got['foot'] == [['device-settings', 'Device settings…']] and got['facts'] == 0, got)
+    tap(b, '#sg-facts [data-act=device-settings]')
+    opened = poll(lambda: b.page("__core.router.state().popup") == 'devices', 8.0)
+    page = b.page("__core.router.state().page")
+    check('  the button opens the Devices popup at the page of the shelf\'s device',
+          opened is True and page == 'd-' + b.page('__core.model.shown()'), [opened, page])
+    b.press('Escape')
+    check('  Escape closes it', poll(lambda: b.page("__core.router.state().popup") is None, 5.0))
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
@@ -1505,7 +1490,6 @@ def focus_clear(b, d):
     forget(b, d)
     b.resize(1280, 600)
     load(b, d)
-    b.page("document.getElementById('sg-facts-fold').click()")
     for last in ("(() => { const all = [...document.querySelectorAll('#sg-shelf button, #sg-shelf input')]"
                  ".filter((e) => e.offsetParent !== null); all[all.length - 1].focus(); return 1; })()",
                  "(() => { document.getElementById('sg-b1f').focus(); return 1; })()"):
@@ -1774,8 +1758,16 @@ def guest_amp():
         check('a_guest_cannot_unlink_or_switch_an_amp: a guest page', b.page("__core.model.page().viewer.guest") is True)
         amp_chosen(b)
         live = b.page("[...document.querySelectorAll('#sg-open button:not([aria-disabled=true]),"
-                      " #sg-shelf button:not([aria-disabled=true]):not([data-act=facts-fold])')].map((x) => x.id || x.dataset.act)")
-        check('  every control of the amp\'s area is drawn inert', live == [], live)
+                      " #sg-shelf button:not([aria-disabled=true])')].map((x) => x.id || x.dataset.act)")
+        # the reader's foot is navigation, not a control: *Devices…* opens the read-only popup
+        check('  every control of the amp\'s area but the foot is drawn inert', live == ['device-settings'], live)
+        foot = '#sg-shelf [data-act=device-settings]'
+        check('  the foot reads Devices…', b.page(f"document.querySelector('{foot}')?.textContent.trim()") == 'Devices…')
+        click_el(b, foot)
+        check('  and a tap on it opens the read-only Devices popup',
+              poll(lambda: b.page("!!document.querySelector('[id^=popup-devices]')"), 8.0) is True)
+        b.press('Escape')
+        time.sleep(0.4)
         for one in ('#sg-power', '#sg-pt-power_meters', '#sg-amp-identify', '#sg-amp-unlink'):
             if b.page(f'!!document.querySelector({json.dumps(one)})'):
                 click_el(b, one)
@@ -2058,11 +2050,11 @@ def plus_sheet():
         forget(b, d)
         load(b, d, route=True)
         b.page(POSTS)
-        check('  there is no + on the page: the menu has the row Add device…, a live one',
+        check('  there is no + on the page: the menu has the row Add to the chain…, a live one',
               b.page("!document.getElementById('sg-add')") and (lambda: (click_el(b, '.fxbtn'), poll(lambda: b.page(
                   "!!document.getElementById('menu-add-device')"), 3.0), b.page(
                   "(() => { const r = document.getElementById('menu-add-device');"
-                  " return r.textContent.trim() === 'Add device…' && r.getAttribute('aria-disabled') !== 'true'; })()"),
+                  " return r.textContent.trim() === 'Add to the chain…' && r.getAttribute('aria-disabled') !== 'true'; })()"),
                   b.press('Escape'))[2])())
         add_device(b)
         got = b.page("""({ open: """ + SHEET_OPEN + """, title: (document.getElementById('sg-sheet-title') || {}).textContent,
@@ -2326,7 +2318,7 @@ def guest_hops():
         check('a_guest_cannot_add_or_edit_a_hop: a guest page', b.page("__core.model.page().viewer.guest") is True)
         add_device(b)
         time.sleep(0.4)
-        check('  the menu\'s Add device… opens no sheet for a guest, posts nothing and says why',
+        check('  the menu\'s Add to the chain… opens no sheet for a guest, posts nothing and says why',
               not b.page(SHEET_OPEN) and hop_posts(b) == [] and 'Sign in' in b.page('document.body.innerText'),
               [b.page(SHEET_OPEN), hop_posts(b)])
         choose_hop(b, HD)
@@ -2732,7 +2724,7 @@ def finger_tap(b, selector):
 
 
 def finger_add_device(b):
-    """The menu's Add device… row, by finger taps."""
+    """The menu's Add to the chain… row, by finger taps."""
     finger_tap(b, '.fxbtn')
     poll(lambda: b.page("!!document.getElementById('menu-add-device')"), 3.0)
     finger_tap(b, '#menu-add-device')
@@ -2780,7 +2772,7 @@ def the_strip(b, d):
     check('  one horizontal listbox, one option chosen, the open area is the chosen hop\'s',
           got['role'] == 'listbox' and got['orient'] == 'horizontal' and got['selected'] == 1
           and got['chosen'] == 'device:Gungnir%202' and got['open'] == 'device:Gungnir%202', got)
-    check('  there is no + after the last hop (Add device… is in the menu)', got['plus'] is False, got['plus'])
+    check('  there is no + after the last hop (Add to the chain… is in the menu)', got['plus'] is False, got['plus'])
     first = poll(lambda: b.page(OFFSET), 10.0)
     check('  the wire runs under the hops, green before the DAC, and its dots move while the player plays',
           first is not None and poll(lambda: b.page(OFFSET) != first, 5.0), first)
@@ -2903,7 +2895,6 @@ def small_targets(b):
 def touch_targets(b, d):
     forget(b, d)
     load(b, d, route=True)
-    b.page("document.getElementById('sg-facts-fold').click()")
     found = small_targets(b)
     check('touch_targets_are_44_px: every button, hop, field and slider Signal draws on a DAC page at 390 px, and the frame\'s menu button (sized by Signal\'s token), is 44 px or more',
           found == [], found)
@@ -2922,7 +2913,7 @@ def touch_targets(b, d):
     # the sheet, from the menu's row
     finger_add_device(b)
     opened = poll(lambda: b.page(SHEET_OPEN))
-    check('  a finger on the menu button and its Add device… row opens the sheet', opened)
+    check('  a finger on the menu button and its Add to the chain… row opens the sheet', opened)
     sheet = b.page("""[...document.querySelectorAll('#sg-sheet button, #sg-sheet input')].filter((e) => !e.closest('[hidden]'))
       .map((e) => { const r = e.getBoundingClientRect(); return [e.id || e.dataset.act || e.className, Math.round(r.width), Math.round(r.height)]; })
       .filter((x) => Math.min(x[1], x[2]) < 43.5)""")
@@ -2954,7 +2945,7 @@ def the_menu_row(b, d):
     click_el(b, '.fxbtn')
     row = poll(lambda: b.page("(() => { const r = document.getElementById('menu-add-device');"
                               " return r && r.textContent.trim(); })()"), 3.0)
-    check('the_menu_row_adds_a_device: the frame\'s menu has `Add device…` while a device is shown', row == 'Add device\u2026', row)
+    check('the_menu_row_adds_a_device: the frame\'s menu has `Add to the chain…` while a device is shown', row == 'Add to the chain\u2026', row)
     b.press('Escape')
     add_device(b)
     check('  its row opens the sheet; the focus goes back to the menu button when it closes',

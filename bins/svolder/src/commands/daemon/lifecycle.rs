@@ -172,10 +172,22 @@ pub(super) async fn wait_for_the_socket_to_close(socket: &Path) -> Result<(), Fa
     Ok(())
 }
 
-/// How long a restart waits for the old daemon to exit once its socket is gone: the daemon's own
-/// shutdown deadline (its farewell bound and a margin of six seconds) and two seconds more.
-pub(crate) const LOCK_WAIT: Duration =
-    svolder_ble::FAREWELL_BOUND.saturating_add(Duration::from_secs(8));
+/// How long a restart waits for the old daemon to exit once its socket is gone: every bounded
+/// step of the daemon's stop, in the order it takes them (jobs, the MQTT bridge, actors, a write
+/// under way, the transport's settle, the end of the runtime; `docs/design/jobs.md` lists them
+/// and a test reads the daemon's source to hold the list to it), and two seconds more for the
+/// servers, which stop at once. The socket's lock is held to the end of the process, so the sum
+/// is what a new daemon waits for to take it. The service unit's `TimeoutStopSec` (60 s) is
+/// longer than the stop's worst case; `svolder daemon stop` waits only for the socket to go,
+/// which happens before all of it.
+pub(crate) const LOCK_WAIT: Duration = svolder_ipc::JOB_STOP_BOUND
+    .saturating_add(svolder_ipc::BRIDGE_STOP_BOUND)
+    .saturating_add(svolder_ble::FAREWELL_BOUND)
+    .saturating_add(svolder_ipc::ACTOR_STOP_MARGIN)
+    .saturating_add(svolder_ipc::WRITE_SETTLE_BOUND)
+    .saturating_add(svolder_ble::CLOSE_GRACE)
+    .saturating_add(svolder_ipc::RUNTIME_STOP_BOUND)
+    .saturating_add(Duration::from_secs(2));
 
 /// [`the_old_daemon_exits_within`], saying on standard error when it gives up; the caller starts
 /// the new daemon either way.

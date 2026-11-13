@@ -32,7 +32,7 @@ MUTATIONS = {
     'the slim bar never pins': (['the_slim_bar_pins_when_the_line_scrolls_away'], [
         (S + 'slim.js', "bar.hidden = last.isIntersecting;", "bar.hidden = true;"),
     ]),
-    'the Add device row opens the sheet for a guest': (['a_guest_cannot_add_or_edit_a_hop'], [
+    'the Add to the chain row opens the sheet for a guest': (['a_guest_cannot_add_or_edit_a_hop'], [
         (S + 'hops-wire.js', "  function add() {\n    if (inert()) {", "  function add() {\n    if (false) {"),
     ]),
     'a held band stepper never repeats': (['holding_a_band_stepper_repeats'], [
@@ -52,7 +52,7 @@ MUTATIONS = {
         (S + 'volume-wire.js', "      live: () => !inert() && !quiet(),", "      live: () => false,"),
     ]),
     'a blur does not stop a hold': (['holding_plus_repeats'], [
-        ('core/hold.js', "  globalThis.window.addEventListener('blur', end, own);\n", ""),
+        ('core/repeat.js', "  globalThis.window.addEventListener('blur', end, own);\n", ""),
     ]),
     'a hold does not hold the open area': (['holding_plus_repeats'], [
         (S + 'volume-wire.js', "      onStart: () => keep.take(),", "      onStart: () => {},"),
@@ -86,19 +86,12 @@ MUTATIONS = {
     'the recall question is the core card': (['the_same_preset_on_both_asks_and_yes_flattens_the_dac'], [
         (S + 'computer-wire.js', "act.recallPreset(el.dataset.name, { asker: asker(el) })", "act.recallPreset(el.dataset.name)"),
     ], 'computer_signal.py'),
-    'a typed value is not rounded to its places': (['a_typed_value_is_rounded_to_its_places'], [
-        ('core/actions.js', "const typedValue = round(value, places);", "const typedValue = value;"),
-    ], 'computer_signal.py'),
-    'a typed value equal to the point is written': (['a_typed_value_is_rounded_to_its_places'], [
-        ('core/actions.js', "if (typedValue === parse(shown ?? '') || typedValue === current) {",
-         "if (typedValue === parse(shown ?? '')) {"),
-    ], 'computer_signal.py'),
     # three layers each stop the repeat after a flip (the hop's own end, the core's lookup of the pressed
     # button, the step's `shown()` guard): one removed alone leaves the others, so the mutant removes all
     'a flip does not end a held plus (nothing else stops the repeat)': (['a_flip_mid_hold_ends_the_repeat'], [
         (S + 'computer-wire.js', "    give = false;\n    hold?.end();\n    give = true;", "    give = false;\n    give = true;"),
-        ('core/hold.js', "  if (pressed.id) return root.querySelector(", "  if (false) return root.querySelector("),
-        ('core/hold.js', "  return pressed.isConnected ? pressed : null;", "  return pressed;"),
+        ('core/repeat.js', "  if (pressed.id) return root.querySelector(", "  if (false) return root.querySelector("),
+        ('core/repeat.js', "  return pressed.isConnected ? pressed : null;", "  return pressed;"),
         (S + 'computer-wire.js', "    if (shown()) act.nudge(delta).catch(() => {});", "    act.nudge(delta).catch(() => {});"),
     ], 'computer_signal.py'),
     'the typed cell is read after the field was put back': (['an_untouched_cell_writes_nothing', 'the_mode_the_type_a_typed_value'], [

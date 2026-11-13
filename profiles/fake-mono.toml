@@ -24,6 +24,7 @@ id = [20, 1]
 key = "meter_1"
 label = "Meter M"
 kind = "meter"
+key_reading = true
 channel = "M"
 scale = { zero_from = "meter_floor", full = 1000, class_a = 0.10 }
 

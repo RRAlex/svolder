@@ -12,7 +12,7 @@ use std::sync::Arc;
 use svolder_ble::Advertisement;
 use svolder_ipc::Response;
 use svolder_ipc::config::DeviceConfig;
-use svolder_profiles::{Profile, Registry, apply_input_labels};
+use svolder_profiles::{Profile, Registry};
 
 use super::Actor;
 use super::answers::usage_error;
@@ -88,16 +88,9 @@ pub(super) fn resolve_profile(
     config: &DeviceConfig,
     advert: &Advertisement,
 ) -> Profile {
-    let mut profile = config
-        .profile
-        .as_deref()
-        .and_then(|name| registry.get(name).cloned())
-        .or_else(|| {
-            registry
-                .select(advert.manufacturer.product_id, advert.firmware_build())
-                .cloned()
-        })
-        .unwrap_or_else(|| Registry::generic(advert.manufacturer.product_id));
-    apply_input_labels(&mut profile, &config.inputs);
-    profile
+    config.profile_for(
+        registry,
+        advert.manufacturer.product_id,
+        advert.firmware_build(),
+    )
 }

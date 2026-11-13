@@ -321,7 +321,7 @@ fn a_click_on_a_tab_header_shows_that_screen() {
 #[test]
 fn a_click_on_a_pane_header_focuses_the_pane_without_moving_the_selection() {
     let mut app = app();
-    app.selected = 3;
+    app.set_selected(3);
     let mut hits = HitMap::default();
     hits.push(rect(0, 1, 40, 1), Hit::PaneHeader(Pane::Status));
 
@@ -663,7 +663,7 @@ fn the_mouse_follows_the_wide_and_tall_layout() {
         let (x, y) = cell_on_row(&buffer, "┌ Controls", "C");
         assert_eq!(
             resolve(&hits, click(x, y), &app),
-            Some(MouseAction::Focus(Pane::Controls, app.selected)),
+            Some(MouseAction::Focus(Pane::Controls, app.selected())),
             "{width}×{height}: the Controls title"
         );
 
@@ -1165,7 +1165,7 @@ fn the_words_leave_the_rest_of_the_border_its_hits() {
     // The Tone pane starts at column 38; its title is the first cell after the corner.
     assert_eq!(
         resolve(&hits, click(40, 2), &app),
-        Some(MouseAction::Focus(Pane::Tone, app.selected))
+        Some(MouseAction::Focus(Pane::Tone, app.selected()))
     );
     let app = app_showing(Screen::Devices);
     let hits = frame_hits(&app, 80, 24);

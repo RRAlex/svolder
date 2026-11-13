@@ -226,11 +226,11 @@ fn the_device_screen_keeps_its_row_across_a_visit() {
         for _ in 0..3 {
             press(&mut app, KeyCode::Down);
         }
-        assert_eq!(app.selected, 3);
+        assert_eq!(app.selected(), 3);
         ch(&mut app, key);
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.screen, Screen::Device, "{key}");
-        assert_eq!(app.selected, 3, "{key}");
+        assert_eq!(app.selected(), 3, "{key}");
     }
 }
 
@@ -245,7 +245,10 @@ fn a_new_lower_reading_leaves_the_telemetry_highlight_on_its_reading() {
     press(&mut app, KeyCode::Down);
     assert_eq!(focused_reading(&app), "90.3");
     hear_unwritable(&mut app, &["89.01"]);
-    assert_eq!((app.selected, focused_reading(&app).as_str()), (3, "90.3"));
+    assert_eq!(
+        (app.selected(), focused_reading(&app).as_str()),
+        (3, "90.3")
+    );
     let intents = press(&mut app, KeyCode::Right);
     assert!(
         matches!(&intents[..], [Intent::Raw { id, value, .. }] if id == "90.3" && value == "6"),
@@ -267,7 +270,10 @@ fn telemetry_comes_back_to_the_same_reading() {
     press(&mut app, KeyCode::Esc);
     hear_unwritable(&mut app, &["89.01"]);
     ch(&mut app, 't');
-    assert_eq!((app.selected, focused_reading(&app).as_str()), (3, "90.3"));
+    assert_eq!(
+        (app.selected(), focused_reading(&app).as_str()),
+        (3, "90.3")
+    );
 }
 
 /// A refresh that leaves out the focused reading puts the highlight on the first row.
@@ -283,7 +289,7 @@ fn a_refresh_without_the_focused_reading_focuses_the_first_row() {
         vec![raw_vo("90.01", "u8", 5), raw_vo("90.02", "u8", 5)],
         Instant::now(),
     );
-    assert_eq!(app.selected, 0);
+    assert_eq!(app.selected(), 0);
 }
 
 /// A remembered row past the end of a list that has shrunk since lands on the last row.
@@ -297,11 +303,11 @@ fn a_remembered_row_past_a_shorter_list_lands_on_its_last_row() {
     for _ in 0..3 {
         press(&mut app, KeyCode::Down);
     }
-    assert_eq!(app.selected, 3);
+    assert_eq!(app.selected(), 3);
     press(&mut app, KeyCode::Esc);
     app.devices.rows.truncate(2);
     app.show(Screen::Devices);
-    assert_eq!(app.selected, 1);
+    assert_eq!(app.selected(), 1);
 }
 
 /// A device switch starts every screen at its first row.
@@ -321,10 +327,10 @@ fn a_device_switch_clears_what_each_screen_remembered() {
         press(&mut app, KeyCode::Down);
     }
     app.settle_on(Screen::Device);
-    assert_eq!(app.selected, 0);
+    assert_eq!(app.selected(), 0);
     for screen in [Screen::Telemetry, Screen::Devices, Screen::Tone] {
         app.show(screen);
-        assert_eq!(app.selected, 0, "{screen:?}");
+        assert_eq!(app.selected(), 0, "{screen:?}");
     }
 }
 
@@ -333,7 +339,7 @@ fn a_device_switch_clears_what_each_screen_remembered() {
 #[test]
 fn settings_comes_back_to_its_row() {
     let mut app = app();
-    let under = app.selected;
+    let under = app.selected();
     ch(&mut app, 's');
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Down);
@@ -346,7 +352,7 @@ fn settings_comes_back_to_its_row() {
             row: 2
         })
     );
-    assert_eq!(app.selected, under);
+    assert_eq!(app.selected(), under);
 }
 
 /// `c` shows the Controls screen from every other screen the way `e`, `t` and `d` show theirs.

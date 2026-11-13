@@ -11,7 +11,7 @@ import { drawSheet, sheetFrame } from '../../../bins/svolderd/web/themes/nightdr
 import { inputRow, modeRow } from '../../../bins/svolderd/web/themes/nightdrive/draw/modes.js';
 import { bandTable } from '../../../bins/svolderd/web/themes/nightdrive/draw/bands.js';
 import { drawControls } from '../../../bins/svolderd/web/themes/nightdrive/draw/controls.js';
-import { drawFacts, drawFaults } from '../../../bins/svolderd/web/themes/nightdrive/draw/facts.js';
+import { drawFaults, drawFoot } from '../../../bins/svolderd/web/themes/nightdrive/draw/facts.js';
 import { drawGauges } from '../../../bins/svolderd/web/themes/nightdrive/draw/gauges.js';
 import { drawMeters } from '../../../bins/svolderd/web/themes/nightdrive/draw/meters.js';
 import { drawSlots } from '../../../bins/svolderd/web/themes/nightdrive/draw/slots.js';
@@ -50,7 +50,7 @@ function tags(html, tag) {
 }
 const classes = (el) => (el.class ?? '').split(' ');
 const everything = (page) => [drawSheet(page, view), sheetFrame(), modeRow(page.device), inputRow(page.device),
-  bandTable(page.device), presetBox(page.device), drawSlots(page.device), drawControls(page.device), drawFacts(page.device, true),
+  bandTable(page.device), presetBox(page.device), drawSlots(page.device), drawControls(page.device), drawFoot(page.device),
   drawFaults(page.device), drawGauges(page.device), drawMeters(page.device)].join('');
 
 ok('the_sheet_runs_mode_input_then_bands_beside_presets', () => {
@@ -121,10 +121,10 @@ ok('a_guests_sheet_is_drawn_inert', () => {
   for (const name of ['dac-guest', 'dac-readonly', 'dac-loudness-guest']) {
     const page = pageOf(name);
     const html = drawSheet(page, view);
-    const buttons = tags(html, 'button');
+    // the foot is navigation: *Devices…* opens the read-only page and is not inert
+    const buttons = tags(html, 'button').filter((b) => b['data-act'] !== 'device-settings');
     assert.ok(buttons.length > 20, name);
-    // the fold of the facts only shows or hides what is read: it works for a guest too
-    for (const b of buttons.filter((x) => x['data-act'] !== 'facts-fold')) {
+    for (const b of buttons) {
       assert.equal(b['aria-disabled'], 'true', `${name}: ${b.id} is aria-disabled`);
       assert.ok(classes(b).includes('quiet'), `${name}: ${b.id} is quiet`);
     }
@@ -137,7 +137,8 @@ ok('a_guests_sheet_is_drawn_inert', () => {
   const page = pageOf('dac');
   page.viewer = { ...page.viewer, writes: false };
   page.device.inert = false;
-  assert.ok(tags(drawSheet(page, view), 'button').filter((b) => b['data-act'] !== 'facts-fold').every((b) => b['aria-disabled'] === 'true'), 'writes off');
+  assert.ok(tags(drawSheet(page, view), 'button').filter((b) => b['data-act'] !== 'device-settings')
+    .every((b) => b['aria-disabled'] === 'true'), 'writes off');
   const live = drawSheet(pageOf('dac'), view);
   assert.ok(!tags(live, 'button').some((b) => b['aria-disabled'] === 'true'), 'a writer\'s sheet is not inert');
 });
@@ -173,19 +174,25 @@ ok('the_sheet_lists_every_control_the_model_has', () => {
   assert.ok(html.includes('data-act="centre"'), 'a tap on the value goes to the centre');
 });
 
-ok('the_facts_start_folded', () => {
-  const device = pageOf('dac').device;
-  const folded = drawFacts(device, false);
-  assert.match(folded, /aria-expanded="false"/);
-  assert.match(folded, /<div id="nd-facts-body" hidden>/);
-  assert.ok(folded.includes('show the facts'));
-  const open = drawFacts(device, true);
-  assert.match(open, /aria-expanded="true"/);
-  assert.ok(!/id="nd-facts-body" hidden/.test(open));
-  assert.ok(open.includes('data-fact="Firmware"') && open.includes('data-act="identify"'), 'the table and Identify');
-  assert.equal(drawFacts(null, true), '');
-  assert.ok(drawSheet(pageOf('dac'), { facts: { open: false } }).includes('id="nd-facts-body" hidden'));
-  assert.ok(!drawSheet(pageOf('dac'), { facts: { open: true } }).includes('id="nd-facts-body" hidden'));
+ok('the_sheet_ends_in_device_settings_or_for_a_reader_device_and_draws_no_fact', () => {
+  const page = pageOf('dac');
+  const foot = drawFoot(page.device, false);
+  const button = tags(foot, 'button')[0];
+  assert.equal(button['data-act'], 'device-settings');
+  assert.equal(button['data-device'], page.device.url, 'it names the sheet\'s device');
+  assert.ok(foot.includes('Device settings…'));
+  assert.equal(drawFoot(null, false), '');
+  const reader = drawFoot(page.device, true);
+  assert.equal(tags(reader, 'button')[0]['data-act'], 'device-settings', 'a reader has the way in too');
+  assert.ok(reader.includes('>Devices…<') && !reader.includes('Device settings'), 'with the other word');
+  const html = drawSheet(page, view);
+  for (const word of ['data-fact="Firmware"', 'data-act="identify"', 'nd-facts-body', 'facts-fold',
+    'All readings']) assert.ok(!html.includes(word), word);
+  assert.ok(html.includes('data-act="device-settings"'));
+  for (const name of ['dac-guest', 'dac-readonly']) {
+    const sheet = drawSheet(pageOf(name), view);
+    assert.ok(sheet.includes('data-act="device-settings"') && sheet.includes('>Devices…<'), name);
+  }
 });
 
 ok('a_loki_max_shows_its_slots_and_settings', () => {

@@ -17,7 +17,6 @@ import { drawSheet, sheetFrame } from './draw/sheet.js';
 import { inertOf } from './inert.js';
 import { closeAsk } from './ask.js';
 import { closeList, closeOf, openList } from './lists.js';
-import { createRelease, keeper } from './live.js';
 import { placeSheet } from './place.js';
 import { SHEET } from './words.js';
 
@@ -27,7 +26,7 @@ const BEHIND = '.nd-scene, #nd-layer';
 /**
  * Wire the sheet in `root` (`#nd-sheet-wrap`) to `core` and `view` until `signal` aborts. `live` is
  * `createLive`'s handle, `act` the write log. Returns `{ draw(page), open(opener), close(refocus),
- * isOpen(), body(), wrap, keep, release }`; `keep` and `release` are the sheet's holds (live.js) for the wires
+ * isOpen(), body(), wrap, keep, release }`; `keep` and `release` are the sheet's holds (`core.freeze`) for the wires
  * that work its other sections.
  */
 export function wireSheet({
@@ -36,8 +35,8 @@ export function wireSheet({
   const store = core.model;
   const page = root.querySelector('#nightdrive');
   const wrap = root.querySelector('#nd-sheet-wrap');
-  const keep = keeper(live, 'sheet');
-  const release = createRelease(root.ownerDocument, keep, signal);
+  const keep = core.freeze.keeper(live, 'sheet');
+  const release = core.freeze.createRelease(root.ownerDocument, keep, signal);
   let dialog = null;
   let body = null;
   /** What opened the sheet, `{ id, el }`, for the focus to go back to. */
@@ -48,7 +47,7 @@ export function wireSheet({
 
   /** The points' table of the computer's EQ: the rows out of view counted under it, its scroll kept across a draw
    * (its rows are not lit or scrolled to: the table is short of a point in hand). */
-  const table = core.drag.table({
+  const table = core.eq.table({
     box: () => body?.querySelector('#nd-pscroll'),
     note: () => body?.querySelector('#nd-more'),
     row: () => null,

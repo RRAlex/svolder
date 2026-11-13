@@ -2,29 +2,42 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The core a theme is given: the model of the page, the actions that change a device or the
 // computer, the side of the page this viewer looks at (the device or the computer), the question a
-// theme can ask, the preferences of the theme mounted, light or dark, the lifecycle of a canvas,
-// the host's analysis, the tone curve's maths and gestures, the words and the clock, the frame
-// (the menu's button, its menu, the picker of themes and the popups) and the registry of themes. `createCore` makes every
-// module and joins what they leave to it: the store's state and events go to the climb's popup and
-// the tone mode's note, and a step of the browser's history shows the device it names.
+// theme can ask, the stack of modals, the router of the history, the preferences of the theme
+// mounted, light or dark, the lifecycle of a canvas, the host's analysis, the tone curve's maths
+// and gestures (`eq`: the bands' drag, the points' hand, the table), the plots' SVG, the words and
+// the clock, the section keeper, the frame (the menu's button, its menu, the picker of themes and
+// the toasts), the keys (the frame's own list and the binding of a theme's key table), the
+// registry of themes and the checks' driver for the device's facts (driver.js:
+// test surface, as a theme's own driver is). `createCore` makes every module and joins what they
+// leave to it: the store's state and events go to the climb's toast and the tone mode's note, a
+// device shown pushes through the router, and another device on show closes every modal but a
+// popup that stays (popups/listed.js).
 //
 // The preferences and the light or dark are bound to the theme being mounted (`prefs`, `scheme`
-// and `theme` are of the theme last mounted), and the stream asks the daemon for what that theme
-// needs.
+// and `theme` are of the theme last mounted; `mounted` is what its `mount()` returned, while it
+// is on show), and the stream asks the daemon for what that theme
+// needs (the theme is one owner of the stream's feeds, set as it mounts; see stream.js).
 
 import { post, signedOut } from './api.js';
 import { createActions } from './actions.js';
 import { createAsk } from './ask.js';
 import { createAnalysis } from './analysis.js';
 import { createClimb } from './climb.js';
-import { createComputer, createHolds, POINT_TYPES } from './computer.js';
+import { createComputer, createPending, POINT_TYPES } from './computer.js';
+import { createDriver } from './driver.js';
 import { createFrame } from './frame.js';
-import { HOLD_AFTER_MS, HOLD_EVERY_MS, holdRepeat } from './hold.js';
+import { createKeys } from './keys.js';
+import { menuOwns } from './menu.js';
+import { createModals } from './modal.js';
+import { REPEAT_AFTER_MS, REPEAT_EVERY_MS, repeat } from './repeat.js';
 import {
   labelWords, markersIn, pointDrag, pointValues, POINT_KEYS, touchWatch,
 } from './point-drag.js';
 import { bootScheme, createPrefs, storageOf, writeChoice } from './prefs.js';
 import { createRegistry } from './registry.js';
+import { HELP, POPUPS } from './popups/listed.js';
+import { createPopups } from './popups/popups.js';
+import { createRouter } from './router.js';
 import { createScheme, paintChrome } from './scheme.js';
 import { createStore } from './store.js';
 import { createStream } from './stream.js';
@@ -35,56 +48,59 @@ import { dismissToast, toast } from './toast.js';
 import { canvasLoop } from './lifecycle.js';
 import { watchVisible } from './visible.js';
 import * as clock from './clock.js';
+import * as freeze from './freeze.js';
+import * as plot from './plot.js';
 import * as curve from './tone-curve.js';
 import * as drag from './tone-drag.js';
 import * as words from './words.js';
-
-/** What the daemon can send beside a device's own parts: the words a theme's `needs` may name. */
-const STREAM_NEEDS = ['meters', 'host'];
-
-/** The device a step of the history shows, by its URL segment: the one the entry kept, else the
- * one the address names, else the first the fleet lists. */
-function deviceOf(window, store, state) {
-  const devices = store.page().fleet?.devices ?? [];
-  if (typeof state?.device === 'string') return state.device;
-  const asked = new URLSearchParams(window.location.search).get('device');
-  const named = devices.find((entry) => {
-    try {
-      return decodeURIComponent(entry.url) === asked;
-    } catch {
-      return false;
-    }
-  });
-  return (named ?? devices[0])?.url ?? null;
-}
 
 /**
  * The core over `page` (the page's model), listing `themes` (`[{id, label, blurb, module, styles,
  * schemes}]`), in `window`; `importer` loads a theme's module (the registry's own by default);
  * `pick(id)` is what a card of the frame's picker asks for (the page switches themes there);
- * `painted` is the scheme the server drew the first frame in (`'light'`, `'dark'`, or nothing).
+ * `painted` is the scheme the server drew the first frame in (`'light'`, `'dark'`, or nothing);
+ * `popups` is the list of the page's popups (popups/listed.js), each added to `core.popups`.
  */
 export function createCore({
-  page, themes = [], window, importer, pick = () => {}, painted = null,
+  page, themes = [], window, importer, pick = () => {}, painted = null, popups = POPUPS,
 }) {
   const document = window.document;
   const fetchNow = (...args) => window.fetch(...args);
   const storage = storageOf(window);
 
   const store = createStore(page, { fetch: fetchNow, signedOut });
-  const holds = createHolds({ store, fetch: fetchNow });
-  const ask = createAsk({ document });
-  const computer = createComputer({ store, storage, holds });
+  const pending = createPending({ store, fetch: fetchNow });
+  const modal = createModals({ document, fallback: () => document.getElementById('fx-button') });
+  const ask = createAsk({ document, modal });
+  const computer = createComputer({ store, storage, pending });
+  // a device shown pushes its entry through the router, which shows a device when a step of the
+  // history names another and keeps its popups on the stack
+  const router = createRouter({
+    window,
+    modal,
+    device: store.shown(),
+    show: (url) => actions.showDevice(url, { push: false }),
+    // the tab's title names the open popup and its page
+    changed: () => core.title?.refresh(),
+  });
   const actions = createActions({
-    store, post, toast, history: window.history, location: window.location, holds, ask, computer,
+    store, post, toast, history: router, location: window.location, pending, ask, computer,
+    needs: () => core.stream.needed(),
   });
   const climb = createClimb({ toast, dismissToast, body: document.body });
   const toneNote = createToneNote({ toast, now: () => window.performance.now() });
   const analysis = createAnalysis({ EventSource: window.EventSource });
   const registry = createRegistry(themes, {
     ...(importer ? { importer } : {}),
-    beforeMount: (theme) => bind(theme),
-    afterMount: (theme) => {
+    beforeMount: (theme) => {
+      core.mounted = null;
+      bind(theme);
+    },
+    afterUnmount: () => {
+      core.mounted = null;
+    },
+    afterMount: (theme, instance) => {
+      core.mounted = instance;
       try {
         framed.mounted(theme);
       } catch (error) {
@@ -93,55 +109,83 @@ export function createCore({
     },
   });
 
+  /** The tone control's hands, by what they move: `bands` is the band drag (tone-drag.js); `points`
+   * makes the hand on the computer's curve (point-drag.js), over this core's actions and computer,
+   * and carries its helpers; `table` makes the points' table (table.js) and carries the typed cell,
+   * the label words and the point types. */
+  const tone = {
+    bands: drag,
+    points: Object.assign(
+      (options) => pointDrag({
+        actions, computer, toast: (text) => core.frame.toast(text), ...options,
+      }),
+      { pointValues, markersIn, POINT_KEYS, touchWatch },
+    ),
+    table: Object.assign(
+      (options) => createTable({ computer, ...options }),
+      { editCell, labelWords, POINT_TYPES, isLong },
+    ),
+  };
+
   /** The core, whose `prefs`, `scheme` and `theme` follow the theme mounted. */
   const core = {
     model: store,
     actions,
     computer,
     ask,
+    modal,
+    router,
+    // the popups of the page, each loaded when it is first opened (popups/popups.js)
+    popups: null,
     prefs: null,
     scheme: null,
     theme: null,
+    // what the theme on show returned from `mount()`, `{ unmount, menuRows?, keys? }`, or `null`
+    // (none on show, or its mount returned a function): the frame reads it before `theme`
+    mounted: null,
     lifecycle: { watchVisible, canvasLoop },
     analysis,
     title: null,
-    hold: { repeat: holdRepeat, AFTER_MS: HOLD_AFTER_MS, EVERY_MS: HOLD_EVERY_MS },
+    // press-and-hold repeat (repeat.js); `hold` is its old name, pinned for a theme written
+    // against it
+    repeat,
+    hold: { repeat, AFTER_MS: REPEAT_AFTER_MS, EVERY_MS: REPEAT_EVERY_MS },
     curve,
-    drag: {
-      ...drag,
-      // the hand on the computer's curve and its table (point-drag.js, table.js), over this core's
-      // actions and computer
-      pointDrag: (options) => pointDrag({
-        actions, computer, toast: (text) => core.frame.toast(text), ...options,
-      }),
-      labelWords,
-      pointValues,
-      markersIn,
-      POINT_KEYS,
-      POINT_TYPES,
-      touchWatch,
-      table: (options) => createTable({ computer, ...options }),
-      editCell,
-      isLong,
-    },
+    plot,
+    eq: tone,
+    // `eq` was `drag`: its old name, pinned, for a theme written against it
+    drag: { ...drag, ...tone.points, ...tone.table, pointDrag: tone.points, table: tone.table },
     words,
     clock,
+    // the section keeper: a section under the person's hand is kept from a redraw (freeze.js)
+    freeze,
     frame: null,
-    keys: [{ key: 'T', words: 'Themes' }, { key: 'Space', words: 'Play or pause' }],
+    // the key table's hands (`bind`, `listed`, `zoneOf`, `zonesOf`) and the frame's own keys as
+    // a list, `keys.frame` (keys.js); `?` is listed once the page has a Help popup
+    keys: createKeys({
+      document,
+      menuOwns,
+      base: () => ({
+        canWrite: actions.canWrite(),
+        help: core.popups?.names().includes(HELP) === true,
+      }),
+    }),
     registry,
     climb,
     toneNote,
     stream: null,
+    // the checks' way to the device's facts, on the Devices popup's device page (driver.js)
+    driver: createDriver({ store, router, document }),
   };
 
   core.title = createTitle({ store, document });
+  core.popups = createPopups({ core, document, listed: popups });
 
   const framed = createFrame({ window, core, pick: (id) => pick(id) });
   core.frame = framed.frame;
 
   core.stream = createStream({
     store,
-    needs: () => (core.theme?.needs ?? []).filter((need) => STREAM_NEEDS.includes(need)),
     EventSource: window.EventSource,
     fetch: fetchNow,
     watchVisible,
@@ -188,8 +232,16 @@ export function createCore({
     else climb.drop();
   };
 
-  // A page read afresh (a snapshot, a device switched to) is a first sight of the tone mode.
+  // A page read afresh (a snapshot, a device switched to) is a first sight of the tone mode, and
+  // what stood over the device shown before does not stand over another: a question, the picker
+  // and every popup close, but a popup that says it stays (it is about the devices, not about
+  // the one on show).
+  let shownWas = store.shown();
   store.on('model', () => {
+    if (store.shown() !== shownWas) {
+      shownWas = store.shown();
+      modal.closeAll({ device: true });
+    }
     toneNote.forget();
     seen();
   });
@@ -210,11 +262,6 @@ export function createCore({
     if (now) climb.drop();
     if (now !== lost) toneNote.forget();
     lost = now;
-  });
-
-  window.addEventListener('popstate', (event) => {
-    const url = deviceOf(window, store, event.state);
-    if (url) actions.showDevice(url, { push: false });
   });
 
   return core;

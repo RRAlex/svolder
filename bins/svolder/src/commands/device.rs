@@ -54,7 +54,7 @@ use passphrase::passphrase_set;
 use presets::{eq_delete, eq_import, eq_list, eq_load, eq_rename, eq_save};
 pub(crate) use presets::{no_such_preset, read_correction, saved_line};
 pub(crate) use select::collect_unique;
-pub use select::{Selected, profile_for, select_device};
+pub use select::{Selected, select_device};
 pub use values::{get, inspect, raw, set, status};
 pub use watch::watch;
 
@@ -102,7 +102,7 @@ pub(crate) async fn eq(g: &Globals<'_>, command: EqCommand) -> Result<ExitCode, 
             all,
             refresh,
             json,
-        } => eq_search(&query, all, refresh, json).await,
+        } => eq_search(g, &query, all, refresh, json).await,
         EqCommand::Rename { old, new } => Ok(eq_rename(g, &old, &new).await),
         EqCommand::Delete { name, yes } => Ok(eq_delete(g, &name, yes).await),
         EqCommand::Flatten => eq_flatten(g).await,
@@ -255,22 +255,34 @@ pub(crate) async fn reload_daemon_quietly(g: &Globals<'_>, config: &Config) -> O
         return None;
     }
     let path = socket::path::resolve(g.socket, config.socket.as_deref());
-    if !svolder_ipc::is_running(&path).await {
-        return None;
-    }
-    let mut client = Client::connect(&path).await.ok()?;
-    Some(match client.request(Request::Reload).await {
-        Ok(Response::Reloaded { devices }) => format!(
-            "the daemon now holds {}",
-            match devices.is_empty() {
-                true => "no devices".to_string(),
-                false => devices.join(", "),
-            }
-        ),
-        Ok(Response::Error { message, .. }) => format!("the daemon did not reload: {message}"),
-        Ok(other) => format!("the daemon answered {other:?} rather than reloading"),
-        Err(e) => format!("the daemon did not reload: {e}"),
-    })
+    // A socket that cannot be tried may have a daemon behind it: that is said, not read as none.
+    let mut client = match Client::connect_if_any(&path).await {
+        Ok(Some(client)) => client,
+        Ok(None) => return None,
+        Err(e) => {
+            return Some(format!(
+                "the daemon was not told to reload: cannot reach {}: {e}",
+                path.display()
+            ));
+        }
+    };
+    Some(
+        match client
+            .request_within(Request::Reload, Some(svolder_ipc::RELOAD_TIMEOUT))
+            .await
+        {
+            Ok(Response::Reloaded { devices }) => format!(
+                "the daemon now holds {}",
+                match devices.is_empty() {
+                    true => "no devices".to_string(),
+                    false => devices.join(", "),
+                }
+            ),
+            Ok(Response::Error { message, .. }) => format!("the daemon did not reload: {message}"),
+            Ok(other) => format!("the daemon answered {other:?} rather than reloading"),
+            Err(e) => format!("the daemon did not reload: {e}"),
+        },
+    )
 }
 
 /// Tell a running daemon that a preset was written to `path`, when it reads that very file, so
@@ -284,6 +296,29 @@ pub(crate) async fn reload_daemon_for_presets(g: &Globals<'_>, config: &Config, 
     let socket = socket::path::resolve(g.socket, config.socket.as_deref());
     if svolder_ipc::is_running(&socket).await {
         crate::backend::reload_if_reads(socket, path).await;
+    }
+}
+
+/// Refuse a write of `path` that a running daemon reading it would answer with the missing-file
+/// words: the file is gone, and a write would start it from the template and the reload after it
+/// would drop every device. Exit 1 with the daemon's own words, as its refused writes do.
+pub(crate) async fn refuse_if_daemon_misses(
+    g: &Globals<'_>,
+    config: &Config,
+    path: &Path,
+) -> Result<(), Failure> {
+    if matches!(g.transport, "ble" | "fake") {
+        return Ok(());
+    }
+    let socket = socket::path::resolve(g.socket, config.socket.as_deref());
+    match crate::backend::refusal_if_missing(&socket, path).await {
+        Some(words) => Err(Failure {
+            code: 1,
+            what: words,
+            next: String::new(),
+            reason: Some(svolder_ipc::Reason::ReadOnly),
+        }),
+        None => Ok(()),
     }
 }
 

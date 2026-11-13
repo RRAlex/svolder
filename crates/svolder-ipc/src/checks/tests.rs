@@ -789,6 +789,25 @@ fn switch(name: &str, soft: bool, hard: bool) -> RfkillFacts {
     }
 }
 
+/// A laptop's platform switch (`thinkpad_bluetooth`, `dell-bluetooth`) is named for the vendor,
+/// not for an adapter, and blocks every adapter.
+#[test]
+fn a_platform_rfkill_switch_blocks_every_adapter() {
+    let mut p = healthy();
+    p.bluez.adapters[0].powered = false;
+    p.bluez.adapters[1].powered = false;
+    p.rfkill = vec![switch("thinkpad_bluetooth", true, false)];
+    let soft = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(soft.fix.unwrap().command, "sudo rfkill unblock bluetooth");
+    p.rfkill = vec![switch("dell-bluetooth", false, true)];
+    let hard = named(run(&p, sock(), false), ADAPTERS);
+    assert!(hard.fix.is_none(), "{hard:?}");
+    // An unblocked platform switch changes nothing.
+    p.rfkill = vec![switch("asus-bluetooth", false, false)];
+    let off = named(run(&p, sock(), false), ADAPTERS);
+    assert_eq!(off.fix.unwrap().command, "bluetoothctl power on");
+}
+
 #[test]
 fn rfkill_is_judged_per_adapter() {
     // The onboard radio (hci0) is blocked on purpose; the dongle (hci1) is wanted and just off.

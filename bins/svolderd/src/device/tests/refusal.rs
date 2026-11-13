@@ -7,6 +7,7 @@
 use svolder_ble::{Advertised, FakeTransport};
 
 use super::*;
+use svolder_ipc::CODE_LINK;
 
 fn code(text: &str) -> Passphrase {
     Passphrase::from_text(text).expect("four digits")
@@ -122,8 +123,8 @@ async fn the_same_code_again_gives_one_drop_and_then_a_kept_refused_link() {
     assert!(handle.describe().connected, "the refused link is kept");
     let seen = transport.device().lock().unwrap().commands_seen();
     match ask(&handle, mute()).await {
-        Response::Error { code, message } => {
-            assert_eq!(code, 3);
+        Response::Error { code, message, .. } => {
+            assert_eq!(code, CODE_LINK);
             assert!(message.contains("passphrase"), "{message}");
         }
         other => panic!("got {other:?}"),
@@ -150,7 +151,10 @@ async fn no_advertisement_in_the_window_gives_one_drop_and_then_a_kept_refused_l
     assert!(handle.describe().connected);
     assert!(matches!(
         ask(&handle, mute()).await,
-        Response::Error { code: 3, .. }
+        Response::Error {
+            code: CODE_LINK,
+            ..
+        }
     ));
     assert_eq!(refusal_lines().len(), 1);
 }
@@ -187,7 +191,10 @@ async fn a_refusal_on_a_write_drops_the_link_once_and_reads_the_code_afresh() {
     transport.advertise(Advertised::UntilReleased(code("1234")));
     assert!(matches!(
         ask(&handle, mute()).await,
-        Response::Error { code: 3, .. }
+        Response::Error {
+            code: CODE_LINK,
+            ..
+        }
     ));
     settled(&handle).await;
 

@@ -13,6 +13,7 @@ id = [2]
 key = "input"
 label = "Input"
 kind = "select"
+key_reading = true
 values = { 1 = "Input 1", 2 = "Input 2", 3 = "Input 3", 4 = "Input 4" }
 
 [[control]]
@@ -35,6 +36,7 @@ id = [6]
 key = "volume"
 label = "Volume"
 kind = "level"
+key_reading = true
 range = [0, 63]
 unit = "dB"
 convert = { linear = [-64.0, 0.0] }

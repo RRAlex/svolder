@@ -5,7 +5,7 @@
 //! `host_eq`, and the two things a recall on the computer needs from the devices the daemon
 //! holds: which of them play the same preset, and flattening them when the user said yes.
 
-use svolder_ipc::{Config, HostEqOp, Response};
+use svolder_ipc::{HostEqOp, Response};
 use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
 use svolder_profiles::tone::preset::{self, Preset};
 use svolder_proto::FunctionId;
@@ -23,9 +23,9 @@ fn refuse(message: impl Into<String>) -> Response {
     let message = message.into();
     let code = match crate::host::is_unavailable(&message) {
         true => svolder_ipc::CODE_COMPUTER_UNAVAILABLE,
-        false => 1,
+        false => svolder_ipc::CODE_USAGE,
     };
-    Response::Error { code, message }
+    Response::error(code, message)
 }
 
 fn answer(result: Result<(), impl Into<EqRefusal>>) -> Response {
@@ -60,7 +60,10 @@ impl Daemon {
     /// `host_eq`: an acknowledgement, or the reason in words.
     pub(super) async fn host_eq(&self, origin: Origin, op: HostEqOp) -> Response {
         match op {
-            HostEqOp::SaveAs { name } => answer(self.save_computer_curve(&name).await),
+            HostEqOp::SaveAs { name } => match self.save_computer_curve(&name).await {
+                Ok(()) => Response::Ack,
+                Err(refused) => refused,
+            },
             HostEqOp::Preset { ref device, .. } => {
                 let presets = match self.recallable(device.as_deref()).await {
                     Ok(presets) => presets,
@@ -81,10 +84,7 @@ impl Daemon {
     /// The presets a recall on the computer may name: the saved ones, and the built-ins of the
     /// shown device's own tone control.
     async fn recallable(&self, device: Option<&str>) -> Result<Vec<Preset>, String> {
-        let path = self.config_path.clone();
-        let mut presets = tokio::task::spawn_blocking(move || read_presets(&path))
-            .await
-            .map_err(|_| STOPPED.to_string())??;
+        let mut presets = self.config_snapshot().presets.clone();
         // A device that is named must be there; with none named the default stands in.
         let shown = match device {
             Some(_) => Some(self.resolve(device).map_err(|refused| refused.message)?),
@@ -163,7 +163,11 @@ impl Daemon {
 
     /// Save the computer EQ's points as a preset of the user's under `name`, then have the
     /// daemon read its configuration again.
-    async fn save_computer_curve(&self, name: &str) -> Result<(), String> {
+    #[allow(
+        clippy::result_large_err,
+        reason = "the refusal is the answer the socket sends as it is"
+    )]
+    async fn save_computer_curve(&self, name: &str) -> Result<(), Response> {
         let view = self.host.view_now().await.eq.unwrap_or_default();
         let filters = view
             .points
@@ -172,7 +176,7 @@ impl Daemon {
                 let kind = point
                     .kind
                     .parse::<FilterKind>()
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| refuse(e.to_string()))?;
                 Ok(SourceFilter {
                     kind,
                     f: point.f,
@@ -180,43 +184,16 @@ impl Daemon {
                     q: point.q,
                 })
             })
-            .collect::<Result<Vec<_>, String>>()?;
+            .collect::<Result<Vec<_>, Response>>()?;
         let correction = Correction {
             preamp_db: view.preamp_db,
             filters,
         };
-        let path = self.config_path.clone();
-        let name = name.to_string();
-        tokio::task::spawn_blocking(move || save_preset(&path, &name, correction))
+        self.save_preset(name, preset::from_computer(name, correction), false)
             .await
-            .map_err(|_| STOPPED.to_string())??;
-        self.reload_all().await.map(drop)
+            .map(drop)
+            .map_err(|why| why.answer())
     }
-}
-
-/// What a refused configuration read says.
-const UNREADABLE: &str = "the configuration could not be read; see the daemon's log";
-
-/// What a configuration access that did not finish says.
-const STOPPED: &str = "the configuration access stopped";
-
-/// The presets the configuration file at `path` holds.
-fn read_presets(path: &std::path::Path) -> Result<Vec<Preset>, String> {
-    let config = Config::load_from(path).map_err(|_| UNREADABLE.to_string())?;
-    Ok(config.presets.clone())
-}
-
-/// Add `correction` to the file at `path` as a preset of the user's called `name`, under a name
-/// the file does not hold yet.
-fn save_preset(path: &std::path::Path, name: &str, correction: Correction) -> Result<(), String> {
-    Config::writable(path).map_err(|why| format!("Saving presets is off: {why}"))?;
-    let config = Config::load_from(path).map_err(|_| UNREADABLE.to_string())?;
-    let names = config.presets.iter().map(|p| p.name.as_str());
-    let wanted = preset::new_name(name, names, None)
-        .map_err(|why| why.to_string())?
-        .to_string();
-    let saved = preset::from_computer(&wanted, correction);
-    Config::add_preset(path, &saved).map_err(|e| e.to_string())
 }
 
 /// Function `id`'s raw reading among `readings`.
@@ -229,7 +206,9 @@ fn raw_of(readings: &[svolder_proto::Message], id: FunctionId) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use svolder_ipc::{Reason, Response};
+
+    use crate::handler::tests::daemon_over;
 
     fn dir(tag: &str) -> std::path::PathBuf {
         let dir =
@@ -239,32 +218,50 @@ mod tests {
         dir
     }
 
-    /// A saved curve lands in the file under its name, a second one under the same name is
-    /// refused.
-    #[test]
-    fn a_curve_is_saved_once_per_name_and_read_back() {
-        let dir = dir("save");
+    fn mine() -> String {
+        "schema = 1\n[[preset]]\nname = \"Mine\"\nmode = \"eq\"\nbands = [0, 0, 0, 0, 0]\n"
+            .to_string()
+    }
+
+    /// The words and reason of a refused answer.
+    fn refused(answer: Response) -> (String, Option<Reason>) {
+        match answer {
+            Response::Error {
+                message, reason, ..
+            } => (message, reason),
+            other => panic!("not a refusal: {other:?}"),
+        }
+    }
+
+    /// The socket's `SaveAs` refuses a taken name and a read-only file in the words it always
+    /// had, each with its reason, and judges the file before the name.
+    #[tokio::test]
+    async fn the_save_as_refusals_keep_their_words_and_order() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = dir("refusals");
         let path = dir.join("config.toml");
-        std::fs::write(&path, "schema = 1\n").unwrap();
-        let curve = || Correction {
-            preamp_db: -2.0,
-            filters: vec![SourceFilter {
-                kind: FilterKind::Peaking,
-                f: 1000.0,
-                g: 3.0,
-                q: 1.0,
-            }],
-        };
-        save_preset(&path, "Mine", curve()).unwrap();
-        assert!(save_preset(&path, "Mine", curve()).is_err());
-        save_preset(&path, "Other", curve()).unwrap();
-        let names: Vec<String> = read_presets(&path)
-            .unwrap()
-            .into_iter()
-            .map(|p| p.name)
-            .collect();
-        assert_eq!(names.len(), 2, "{names:?}");
-        assert!(names.contains(&"Mine".to_string()), "{names:?}");
+        std::fs::write(&path, mine()).unwrap();
+        let daemon = daemon_over(path.clone(), dir.join("profiles")).shared();
+        let (words, reason) = refused(daemon.save_computer_curve("mine").await.unwrap_err());
+        assert_eq!(words, "config: a preset named \"Mine\" already exists");
+        assert_eq!(reason, Some(Reason::Taken));
+        let (words, reason) = refused(daemon.save_computer_curve("  ").await.unwrap_err());
+        assert!(!words.is_empty());
+        assert_eq!(reason, Some(Reason::BadName));
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let off = format!(
+            "Saving presets is off: {} is read-only (0444)",
+            path.display()
+        );
+        let (words, reason) = refused(daemon.save_computer_curve("Other").await.unwrap_err());
+        assert_eq!((words, reason), (off.clone(), Some(Reason::ReadOnly)));
+        let (words, reason) = refused(daemon.save_computer_curve("mine").await.unwrap_err());
+        assert_eq!(
+            (words, reason),
+            (off, Some(Reason::ReadOnly)),
+            "the file is judged before the name"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

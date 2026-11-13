@@ -440,7 +440,7 @@ impl Host {
         let forced = word.as_deref().and_then(Manager::parse);
         let bad_manager = word.filter(|_| forced.is_none());
         Host {
-            off: crate::host_off(),
+            off: crate::host_unreached(),
             container,
             wpctl: std::env::var_os(crate::sink::WPCTL_ENV)
                 .filter(|named| !named.is_empty())
@@ -466,8 +466,15 @@ impl Host {
     /// no `pipewire`.
     pub fn unavailable(&self) -> Option<EqFailure> {
         if self.off {
+            // Names the value the process runs with: `fake` leaves it no host of its own too.
+            let value = std::env::var_os(crate::HOST_ENV);
+            let word = if crate::is_fake(value.as_deref()) {
+                "fake"
+            } else {
+                "off"
+            };
             return Some(trouble(
-                "host EQ is off: SVOLDER_HOST=off",
+                format!("host EQ is off: SVOLDER_HOST={word}"),
                 "Unset SVOLDER_HOST to use the computer EQ",
             ));
         }

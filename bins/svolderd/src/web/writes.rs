@@ -12,18 +12,24 @@
 //! A write answers a component's JSON with the parts it changed (`parts`, as the model's parts
 //! are) and, where the page says something about it, the words of its toast (`toast`).
 //!
+//! - `autoeq`: AutoEq from the page: search, preview, import and upload, through the daemon.
 //! - `config_edit`: what the configuration writes share, the file and the edit then reload.
 //! - `device_presets`: a device's own presets from the page: recall a slot, save to one, apply a
 //!   built-in setting.
+//! - `devices`: the configured devices from the page: list, add, edit, remove, make default.
 //! - `hops`: the hops after the DAC from the page: add, edit, remove and move.
 //! - `presets`: the user's presets from the page: save, rename and delete.
 //! - `tone`: the tone control from the page: the mode, a band, the loudness and a preset's recall.
+//! - `walk`: the device walk from the page: start it, answer it, step back, cancel it.
 
+mod autoeq;
 mod config_edit;
 mod device_presets;
+mod devices;
 mod hops;
 mod presets;
 mod tone;
+mod walk;
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -31,7 +37,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use hyper::{HeaderMap, StatusCode};
 use serde::Deserialize;
-use svolder_ipc::{NOT_CONNECTED, Request, Response as Answer, ValueObject};
+use svolder_ipc::{Reason, Request, Response as Answer, ValueObject};
 use svolder_profiles::safety::{self, Rules, Situation};
 use svolder_profiles::units::{self, Outside, Refusal};
 use svolder_profiles::{Control, ControlKind, roles};
@@ -44,6 +50,8 @@ use super::{Viewer, Web, viewer};
 use crate::device::Command;
 use crate::writer::{Glided, Mode, Options, Outcome};
 
+pub(crate) use autoeq::{UPLOAD_BODY_MAX, UPLOAD_PATH};
+
 /// The writes' routes.
 pub(crate) fn routes() -> Router<Web> {
     Router::new()
@@ -53,9 +61,12 @@ pub(crate) fn routes() -> Router<Web> {
         .route("/api/v1/devices/{device}/connect", post(connect))
         .route("/api/v1/devices/{device}/identify", post(identify))
         .merge(tone::routes())
+        .merge(autoeq::routes())
         .merge(device_presets::routes())
         .merge(presets::routes())
         .merge(hops::routes())
+        .merge(devices::routes())
+        .merge(walk::routes())
 }
 
 /// What a page with `[web] writes` off says to a viewer who may read but not write.
@@ -392,7 +403,11 @@ async fn identify(
         Answer::Identify { sent, .. } => {
             axum::Json(serde_json::json!({ "sent": sent })).into_response()
         }
-        Answer::Error { message, .. } if message == NOT_CONNECTED => {
+        Answer::Error {
+            message,
+            reason: Some(Reason::NotConnected),
+            ..
+        } => {
             let wait = device
                 .info
                 .retry_in_secs

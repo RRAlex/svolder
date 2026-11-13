@@ -11,7 +11,7 @@
 // core says why nothing happens.
 //
 // With the computer as the side shown (core.computer) the bubbles are its EQ's points, each on the curve the
-// points sum to, whatever their type: the core's hand (`core.drag.pointDrag`) does the gestures and the writes, given
+// points sum to, whatever their type: the core's hand (`core.eq.points`) does the gestures and the writes, given
 // the curve's window of the scene as its plot. A press grabs a point and a drag moves its frequency and gain, the
 // wheel and two fingers set its Q, and a tap on an empty spot adds a PK there. They are written as live updates, the
 // last value at the release; a flip of the side ends a drag or a wheel burst and writes only that last value. The
@@ -22,6 +22,7 @@
 // the tone as it stood at the press with the values the drag asks for, so a reading that comes
 // meanwhile never moves a bubble under the hand; it is drawn from the model afterwards.
 
+import { gapColumns } from './axis.js';
 import {
   bandsOf, bubblesOf, computerTone, createMorph, curveAt, diamondsOf, gMaxOf, heldTone, inBand, labelOf,
   mountainMap, qAtDiamond, tunable, tunableComputer,
@@ -45,8 +46,9 @@ export function wireTune({
   const scene = root.querySelector('.nd-scene');
   const store = core.model;
   const {
-    BAND_PARAM, REACH, bandSteps, bandWriter, computerSteps, createDrag, grab, labelAt, labelWords, startOf, wheelSteps,
-  } = core.drag;
+    BAND_PARAM, REACH, bandSteps, bandWriter, computerSteps, createDrag, grab, labelAt, startOf, wheelSteps,
+  } = core.eq.bands;
+  const { labelWords } = core.eq.table;
   const morph = createMorph();
   const now = () => globalThis.performance.now();
 
@@ -105,6 +107,7 @@ export function wireTune({
     };
     return mapCache.map;
   };
+  let overlayCache = null;
   const lazyMap = {
     hzAt: (x) => mapNow().hzAt(x),
     dbAt: (y) => mapNow().dbAt(y),
@@ -198,7 +201,7 @@ export function wireTune({
     return { top: map.yOfDb(0) - range * perDb, height: 2 * range * perDb };
   }
 
-  const ph = core.drag.pointDrag({
+  const ph = core.eq.points({
     rectOf: () => {
       const rect = scene.getBoundingClientRect();
       const win = windowOf();
@@ -695,6 +698,28 @@ export function wireTune({
     /** The tone curve as a function of x (its y, CSS px of the scene), null while the device has none: what the
      * mountains take the shape of when there is no music to follow. */
     curve: () => curveOf(toneNow()),
+
+    /**
+     * The shown device's overlay as the scene draws it, `{ y, cols }`, or null: `y` is the target as `x => y`
+     * on the mountains' own axis and gain window, `cols` the floor's columns the daemon's gap spans cover
+     * (null while a drag of a band has not settled: the spans are of the bands before it). Null on the
+     * computer side, off EQ and with no overlay in the model.
+     */
+    overlay: () => {
+      if (onComputer()) return null;
+      const tone = store.part('tone');
+      const served = tone?.mode === 'eq' ? tone.overlay : null;
+      if (!served?.target?.length) return null;
+      const map = mapNow();
+      const w = geometry().w;
+      const c = overlayCache;
+      if (!c || c.served !== served || c.map !== map || c.w !== w) {
+        overlayCache = {
+          served, map, w, y: curveAt(served.target, map, w), cols: gapColumns(served.gap),
+        };
+      }
+      return { y: overlayCache.y, cols: snap ? null : overlayCache.cols };
+    },
 
     /** Whether the mountains are changing now (a drag is held or the morph is moving): drawn at
      * the screen's rate; a curve at rest is drawn at the level's pace. */

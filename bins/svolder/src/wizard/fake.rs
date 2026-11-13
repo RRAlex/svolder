@@ -38,6 +38,8 @@ pub(crate) struct Record {
     daemon: bool,
     /// How many times a running daemon was told to read the file again.
     reloads: usize,
+    /// How many times the adapters were graded.
+    graded: usize,
 }
 
 /// A machine the wizard can walk over: what it answers is set before the run, and what the
@@ -272,6 +274,11 @@ impl FakeEffects {
         self.record.lock().expect("the record").daemon
     }
 
+    /// How many times the adapters were graded.
+    pub(crate) fn graded(&self) -> usize {
+        self.record.lock().expect("the record").graded
+    }
+
     /// How many times a running daemon was told to read the file again.
     pub(crate) fn reloads(&self) -> usize {
         self.record.lock().expect("the record").reloads
@@ -327,6 +334,7 @@ impl Radio for FakeEffects {
     }
 
     async fn grade(&self, _udid: &str) -> Vec<Grade> {
+        self.record.lock().expect("the record").graded += 1;
         self.grades.clone()
     }
 

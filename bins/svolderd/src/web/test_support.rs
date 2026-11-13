@@ -168,14 +168,30 @@ async fn fake_daemon_on(
     extra: &str,
     mode: crate::host::HostMode,
 ) -> FakeDaemon {
-    fleet_daemon(&[(profile, name, "0102030405060708")], extra, mode).await
+    fleet_daemon(&[(profile, name, "0102030405060708")], extra, mode, None).await
+}
+
+/// A [`FakeDaemon`] of `profile`'s device named `name` whose AutoEq service reaches `client`
+/// (a loopback server's), as a real daemon reaches AutoEq's repository.
+pub(crate) async fn fake_daemon_reaching(
+    profile: &str,
+    name: &str,
+    client: svolder_autoeq::Client,
+) -> FakeDaemon {
+    fleet_daemon(
+        &[(profile, name, "0102030405060708")],
+        "",
+        crate::host::HostMode::Off,
+        Some(client),
+    )
+    .await
 }
 
 /// A [`FakeDaemon`] of several devices, each `(profile, name, unit id)`, all connected: the
 /// first answers as the single one does, the others answer their own units
 /// (`SVOLDER_FAKE_MORE`'s fleet).
 pub(crate) async fn fake_daemon_fleet(devices: &[(&str, &str, &str)]) -> FakeDaemon {
-    fleet_daemon(devices, "", crate::host::HostMode::Off).await
+    fleet_daemon(devices, "", crate::host::HostMode::Off, None).await
 }
 
 /// The fake daemon over `devices`, with the lines of `extra` appended to its `config.toml`.
@@ -183,6 +199,7 @@ async fn fleet_daemon(
     devices: &[(&str, &str, &str)],
     extra: &str,
     mode: crate::host::HostMode,
+    autoeq: Option<svolder_autoeq::Client>,
 ) -> FakeDaemon {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -220,15 +237,19 @@ async fn fleet_daemon(
         }
         [] => panic!("a fake daemon needs a device"),
     };
-    let daemon = crate::handler::Daemon::new(
+    let mut daemon = crate::handler::Daemon::new(
         transport,
         registry,
         config.clone(),
         dir.join("profiles"),
         dir.join("s.sock"),
+        svolder_ipc::Config::load_from(&config).unwrap_or_default(),
     )
-    .with_host_mode(mode)
-    .shared();
+    .with_host_mode(mode);
+    if let Some(client) = autoeq {
+        daemon = daemon.with_autoeq(client);
+    }
+    let daemon = daemon.shared();
     let loaded = svolder_ipc::Config::load_from(&config).unwrap();
     daemon.reconcile(&loaded).await;
     daemon.host_to(&loaded.host);

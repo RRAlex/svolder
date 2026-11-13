@@ -5,7 +5,7 @@
 // the stand-ins (an amp no hop links, the AutoEq headphones) and the choice that falls back to the
 // shown device when its hop goes. Run: node signal-line.mjs
 import assert from 'node:assert/strict';
-import { THIS_COMPUTER, createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { THIS_COMPUTER, createComputer, createPending } from '../../../bins/svolderd/web/core/computer.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import {
   followedUrls, hopsOf, keepChoice, shownHopId, sideOf,
@@ -339,7 +339,7 @@ ok('choosing_it_is_the_flip_and_another_hop_flips_back', () => {
     host: host({ computer: { volume: { pct: 42, muted: false }, eq: null, presets: [], unavailable: null } }),
   };
   const store = createStore(withComputer, { signedOut: () => {}, fetch: async (...a) => { posts.push(a); return { status: 200, json: async () => ({}) }; } });
-  const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
+  const core = createComputer({ store, storage: memory(), pending: createPending({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
   assert.equal(core.side(), 'dac');
   core.flip(sideOf('computer'));
   assert.equal(core.side(), 'computer');

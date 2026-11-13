@@ -4,7 +4,7 @@
 // handed to the sections as `view.computer`). A sheet drawn without the core's computer (node, a
 // theme preview) is the device's. Pure.
 
-import { mayWrite } from '../../../core/actions.js';
+import { mayWrite } from '../../../core/write.js';
 
 /** Whether the computer's side is the one drawn. */
 export const onComputer = (view) => view?.computer?.side?.() === 'computer';

@@ -9,7 +9,6 @@
 //   words.js     the fixed words and the lines worked out from the model
 //   draw/        the sections, one function each; place.js puts their marks where they stand
 //   live.js      the store's events on the sheet: which sections are drawn again, which are held
-//   act.js       the log of what this page asked of the device
 //   ruler.js     the volume's ruler as numbers; volume-wire.js the hands on it (gestures.js)
 //   tone-wire.js the hands on the tone's words and table; graph.js on the EQ graph's points;
 //   computer-wire.js the hands on the computer's side: the switch by the title, its volume, its
@@ -25,15 +24,16 @@
 //   driver.js    the test driver the contract and completeness checks drive
 //   preview.js   the picture of the theme in the frame's menu and picker
 
+import { PHONE_MAX_PX } from '../../core/phone.js';
 import { registerTheme } from '../../core/registry.js';
-import { createAct } from './act.js';
+import { createAct } from '../../core/act.js';
 import { createChanges } from './changes.js';
-import { createFold } from './fold.js';
 import { wireComputer } from './computer-wire.js';
 import { wireControls } from './controls-wire.js';
 import { wireDevice } from './device-wire.js';
-import { PHONE_MAX_PX, sheet } from './draw/sheet.js';
+import { sheet } from './draw/sheet.js';
 import { bound, driver } from './driver.js';
+import { KEYS, ZONES } from './key-table.js';
 import { createLive } from './live.js';
 import { placeNotes } from './marks.js';
 import { wirePresets } from './presets-wire.js';
@@ -57,28 +57,27 @@ function menuRows(core) {
     row('dark', 'Dark')];
 }
 
-/** Mount Paper on `root`: draw the sheet, follow the model; returns the way to unmount. */
+/** Mount Paper on `root`: draw the sheet, follow the model; returns the mounted instance (the way
+ * to unmount and the theme's key table). */
 function mount(root, core, { signal }) {
   root.innerHTML = sheet(core.model.page());
   const narrow = window.matchMedia(`(max-width: ${PHONE_MAX_PX}px)`);
   const touch = window.matchMedia('(pointer: coarse)');
-  const fold = createFold(() => core.prefs);
   const view = {
     phone: narrow.matches,
     coarse: touch.matches,
     state: core.model.state(),
-    keys: core.keys,
+    /** The frame's keys that apply for the viewer now, which the footer names at each draw: `T`,
+     * the Help popup's `?` and, for a viewer who may write, Space. */
+    get keys() {
+      return core.keys.listed(core.keys.frame);
+    },
     /** The core's computer: which side is drawn, and what the computer's controls read. */
     computer: core.computer,
     /** The point of the computer's EQ the hand is on (its row and its mark are drawn selected). */
     point: null,
     /** The step the person last asked of the volume, until the device reports it. */
     asked: null,
-    /** `The device`'s fold: open or folded, in memory and in this browser; folded until chosen. */
-    fold,
-    get deviceOpen() {
-      return fold.open;
-    },
     /** The last change seen on the device (changes.js) and the log of what this page asked. */
     changes: createChanges(),
     log: () => [],
@@ -141,11 +140,18 @@ function mount(root, core, { signal }) {
   });
   wireControls({ root, core, live, act, signal });
   wirePresets({ root, core, live, act, signal });
-  wireDevice({ root, core, live, view, act, signal });
-  return function unmount() {
-    bound.core = null;
-    live.stop();
-    root.replaceChildren();
+  wireDevice({ root, core, act, signal });
+  // Paper has no key of the whole page: binding the table binds none, and says at once when an
+  // entry cannot be read.
+  core.keys.bind(KEYS, { signal });
+  return {
+    keys: KEYS,
+    zones: ZONES,
+    unmount() {
+      bound.core = null;
+      live.stop();
+      root.replaceChildren();
+    },
   };
 }
 

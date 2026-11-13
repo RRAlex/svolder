@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The index text (`results/INDEX.md`): one line per measurement, parsed into [`Entry`]s, and
-//! the search over them.
+//! the search over them, with the words and rules both callers share (the group key, the
+//! measurement words, when the index is fetched again). Nothing here reaches the network.
+
+use std::time::{Duration, SystemTime};
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
@@ -16,6 +19,55 @@ const COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
 
 /// The forms a measurement folder ends in.
 const FORMS: [&str; 3] = ["over-ear", "in-ear", "earbud"];
+
+const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// When the index is fetched again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refresh {
+    /// Only when there is no cached copy.
+    Never,
+    /// When the cached copy is older than this many weeks.
+    AfterWeeks(u8),
+    /// Now, whatever the cached copy's age.
+    Now,
+}
+
+impl Refresh {
+    /// The policy for a request: `refresh` asks for the index now; otherwise `weeks` is the
+    /// config's `[autoeq] refresh_weeks` (`None` for never).
+    pub fn of(refresh: bool, weeks: Option<u8>) -> Refresh {
+        match (refresh, weeks) {
+            (true, _) => Refresh::Now,
+            (false, None) => Refresh::Never,
+            (false, Some(weeks)) => Refresh::AfterWeeks(weeks),
+        }
+    }
+
+    /// Whether a copy fetched at `fetched` is due to be fetched again by this policy at `now`.
+    /// A copy dated after `now` is never old.
+    pub fn is_stale(self, fetched: SystemTime, now: SystemTime) -> bool {
+        match self {
+            Refresh::Never => false,
+            Refresh::Now => true,
+            Refresh::AfterWeeks(weeks) => now
+                .duration_since(fetched)
+                .is_ok_and(|age| age > WEEK * u32::from(weeks)),
+        }
+    }
+}
+
+/// The index: every entry, and where the copy came from.
+#[derive(Debug, Clone)]
+pub struct Index {
+    /// Every entry, in AutoEq's order.
+    pub entries: Vec<Entry>,
+    /// When this copy was fetched (the cache file's modification time).
+    pub fetched: SystemTime,
+    /// What the caller should say about where the copy came from: set when a refresh failed
+    /// and the cached copy was used instead.
+    pub note: Option<String>,
+}
 
 /// One measurement of one headphone: a line of the index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,13 +83,25 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// The key of the headphone this entry measures: the name as lowercase letters and digits.
+    /// Entries with one key are one headphone, whoever measured it; `exact` compares with the
+    /// same form.
+    pub fn group_key(&self) -> String {
+        plain(&self.name)
+    }
+
+    /// `source · form[ · rig]`: what tells two measurements of one headphone apart.
+    pub fn measurement(&self) -> String {
+        match &self.rig {
+            Some(rig) => format!("{} · {} · {rig}", self.source, self.form),
+            None => format!("{} · {}", self.source, self.form),
+        }
+    }
+
     /// What a preset made from this entry remembers about its origin:
     /// `AutoEq · <source> · <form>[ · <rig>]`.
     pub fn origin(&self) -> String {
-        match &self.rig {
-            Some(rig) => format!("AutoEq · {} · {} · {rig}", self.source, self.form),
-            None => format!("AutoEq · {} · {}", self.source, self.form),
-        }
+        format!("AutoEq · {}", self.measurement())
     }
 
     /// The URL of this entry's `ParametricEQ.txt` under `base` (the `results/` directory):

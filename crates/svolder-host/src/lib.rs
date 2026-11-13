@@ -51,13 +51,33 @@ pub use sink::{Sink, SinkState, Wpctl};
 /// `off`, whatever the config says.
 pub const HOST_ENV: &str = "SVOLDER_HOST";
 
-/// Whether [`HOST_ENV`] turns host audio off for this process.
+/// True when this process reaches no part of the host itself: [`HOST_ENV`] reads `off` (held off
+/// altogether) or `fake` (a daemon's simulated host, which leaves a front end nothing of its own
+/// to reach). False for the real host. See [`host_held_off`] for `off` alone.
 ///
 /// The constructors that read the environment ([`Wpctl::from_env`], [`Mpris::session`],
 /// [`PwRecord::from_env`]) ask this themselves and give nothing back when it says so, so a
-/// process run with `SVOLDER_HOST=off` never reaches the host's tools or its session bus.
-pub fn host_off() -> bool {
+/// process run with `SVOLDER_HOST=off` or `fake` never reaches the host's tools or its session
+/// bus.
+pub fn host_unreached() -> bool {
+    let value = std::env::var_os(HOST_ENV);
+    is_off(value.as_deref()) || is_fake(value.as_deref())
+}
+
+/// True only when [`HOST_ENV`] reads `off` for this process: the host is held off altogether, and
+/// a front end does not even ask a daemon for its view of it. False for `fake`, under which a
+/// front end reaches no host of its own but follows the daemon's simulated one, and for the real
+/// host.
+pub fn host_held_off() -> bool {
     is_off(std::env::var_os(HOST_ENV).as_deref())
+}
+
+/// True when `value`, a value of [`HOST_ENV`], asks for the simulated host: `fake`, in any case
+/// and with any surrounding blanks. False for `off`, for anything else and for nothing.
+pub fn is_fake(value: Option<&OsStr>) -> bool {
+    value
+        .and_then(OsStr::to_str)
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("fake"))
 }
 
 /// Whether a value of [`HOST_ENV`] turns host audio off: `off`, in any case and with any
@@ -84,6 +104,15 @@ mod tests {
         for value in ["off", "OFF", "Off", " off\n"] {
             assert!(is_off(Some(OsStr::new(value))), "{value:?}");
         }
+    }
+
+    #[test]
+    fn fake_in_any_case_is_the_simulated_host_and_not_off() {
+        for value in ["fake", "FAKE", " Fake\n"] {
+            assert!(is_fake(Some(OsStr::new(value))), "{value:?}");
+            assert!(!is_off(Some(OsStr::new(value))), "{value:?}");
+        }
+        assert!(!is_fake(None) && !is_fake(Some(OsStr::new("off"))));
     }
 
     /// A lock a panicking thread left poisoned is still taken, with what it held.

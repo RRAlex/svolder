@@ -1,8 +1,9 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// What the scene may cost a phone: the wet road, the density its canvases are drawn at, capped at once,
-// and a step-down on slow draws that drops the wet road first, then lowers the density, then the rate,
-// and brings them back in the other order after a good while.
+// What the scene may cost a phone: the wet road, the tone overlay (the target's ghost ridge and the
+// ground's tint under the gap, only while an imported preset is on), the density its canvases are drawn
+// at, capped at once, and a step-down on slow draws that drops the wet road first, then the overlay, then
+// lowers the density, then the rate, and brings them back in the other order after a good while.
 // Two things step it down: a slow mean draw time, and too few draws a second while the scene asks for
 // every frame (a page slow in compositing or in input handling draws fast and seldom). A phone starts at
 // the rate's cap. Time-based, from the draws' own times and the clock handed in; no DOM here.
@@ -18,7 +19,8 @@
  * draws a second than this, for this long, while the scene asks for every frame, steps down as a slow
  * mean does (at the cap, under 0.7 of the cap's own rate). `heldS`: how long after that the way back up stays shut, since drawing was not what was slow.
  * `wetHeldS`: how long the wet road, the costliest layer, stays off once a step-down has dropped it, so that
- * it does not come and go with every minute of good draws. A probe (`probe()`: the scene starts drawing every frame, as when
+ * it does not come and go with every minute of good draws. `overlayHeldS`: the same for the overlay layer, which costs far less
+ * than the wet road and so goes second, and is the last thing but the wet road to come back. A probe (`probe()`: the scene starts drawing every frame, as when
  * Full is chosen) lifts the rate's cap unless a step-down is holding it, and for the next `probeS` seconds (and each time
  * it steps down) judges after `probeLookS` of draws instead of a whole window: a mean over `slowMs` across the last `probeDraws`
  * draws, or too few draws in that span by the same rates, steps down at once, so a phone settles in about a second.
@@ -40,6 +42,7 @@ export const BUDGET = Object.freeze({
   lowForS: 3,
   heldS: 60,
   wetHeldS: 180,
+  overlayHeldS: 60,
   probeS: 2,
   probeLookS: 0.5,
   probeDraws: 8,
@@ -73,6 +76,9 @@ export function createBudget({ coarse = false, start = null } = {}) {
   let step = start?.step ?? 0;
   let capped = start ? Boolean(start.capped) : coarse;
   let wet = !coarse;
+  let layer = true;
+  let layerWanted = false;
+  let layerHeldUntil = -Infinity;
   let probing = start !== null;
   let probeEnd = null;
   let liftCap = false;
@@ -93,8 +99,8 @@ export function createBudget({ coarse = false, start = null } = {}) {
   const scaleAt = (n) => Math.max(floor(), base * BUDGET.step ** n);
   const mean = () => times.reduce((a, b) => a + b, 0) / times.length;
 
-  /** One step down (the wet road first, the rate's cap once the scale is at its floor); whether the
-   * scale changed. */
+  /** One step down (the wet road first, the overlay layer while one is wanted, the rate's cap once the
+   * scale is at its floor); whether the scale changed. */
   function lower(seconds) {
     calmSince = null;
     lowSince = null;
@@ -106,6 +112,11 @@ export function createBudget({ coarse = false, start = null } = {}) {
       wet = false;
       droppedIdle = idle;
       wetHeldUntil = seconds + BUDGET.wetHeldS;
+      return false;
+    }
+    if (layer && layerWanted) {
+      layer = false;
+      layerHeldUntil = seconds + BUDGET.overlayHeldS;
       return false;
     }
     if (scaleAt(step) > floor() + 1e-9) {
@@ -125,6 +136,8 @@ export function createBudget({ coarse = false, start = null } = {}) {
     get capped() { return capped; },
     get step() { return step; },
     get wet() { return wet; },
+    /** Whether the overlay layer is drawn: wanted (`setOverlay`) and not dropped. */
+    get overlay() { return layerWanted && layer; },
     /** The tier now, `{ capped, step }`: what a viewer's next visit starts from (it is only a start: the probe corrects it). */
     get tier() { return { capped, step }; },
 
@@ -138,6 +151,12 @@ export function createBudget({ coarse = false, start = null } = {}) {
       calmSince = null;
       lowSince = null;
       freshAt = null;
+    },
+
+    /** Whether the scene has an overlay to draw (an imported preset is on): only then is the layer a step-down
+     * can drop, and a step-down that finds none leaves it to the next layer. */
+    setOverlay(wanted) {
+      layerWanted = Boolean(wanted);
     },
 
     /** Whether the scene is idle (silent or paused) now. A change starts the measuring again, so the draws it
@@ -212,6 +231,10 @@ export function createBudget({ coarse = false, start = null } = {}) {
       if (step > 0) {
         step--;
         return true;
+      }
+      if (layerWanted && !layer && seconds >= layerHeldUntil) {
+        layer = true;
+        return false;
       }
       if (!wet && seconds >= wetHeldUntil) {
         wet = true;

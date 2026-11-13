@@ -16,7 +16,7 @@
 // A replacing model that carries no strip (the stream's never does) keeps the strip the page holds
 // for the same device shown; another device shown clears it.
 
-import { NO_ANSWER, signedOut as apiSignedOut } from './api.js';
+import { get, signedOut as apiSignedOut } from './api.js';
 
 /** The names of a device's parts, as the model and the `part` events name them. */
 export const PARTS = ['link', 'card', 'volume', 'controls', 'meters', 'power', 'tone', 'presets',
@@ -116,21 +116,8 @@ export function createStore(page, { fetch, signedOut = apiSignedOut }) {
   }
 
   /** GET a device's model: `{status, device, strip}`, or the words of why not. */
-  async function read(url, { strip = false } = {}) {
-    try {
-      const answer = await fetch(`api/v1/devices/${url}/model${strip ? '?strip=1' : ''}`,
-        { credentials: 'same-origin' });
-      let json = {};
-      try {
-        json = await answer.json();
-      } catch {
-        json = {};
-      }
-      if (answer.status === 401) signedOut();
-      return { status: answer.status, ...json };
-    } catch {
-      return { status: 0, error: NO_ANSWER };
-    }
+  function read(url, { strip = false } = {}) {
+    return get(`api/v1/devices/${url}/model${strip ? '?strip=1' : ''}`, { fetch, signedOut });
   }
 
   return {

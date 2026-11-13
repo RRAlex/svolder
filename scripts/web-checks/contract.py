@@ -42,9 +42,9 @@ ONLY = set(filter(None, os.environ.get('WEB_CHECK_THEMES', '').split(',')))
 FLEET = [('fake-amp', 'Amp', '1112131415161718'), ('fake-five', 'Five', '2122232425262728'),
          ('fake-mono', 'Mono', '3132333435363738'), ('lokimax', 'Loki Max', '4142434445464748')]
 # the members of `core`, which every theme may rely on and none may find missing
-CORE = ['actions', 'analysis', 'ask', 'climb', 'clock', 'computer', 'curve', 'drag', 'frame', 'hold',
-        'keys', 'lifecycle', 'model', 'prefs', 'registry', 'scheme', 'stream', 'theme', 'title',
-        'toneNote', 'words']
+CORE = ['actions', 'analysis', 'ask', 'climb', 'clock', 'computer', 'curve', 'drag', 'driver', 'eq', 'frame',
+        'freeze', 'hold', 'keys', 'lifecycle', 'modal', 'model', 'mounted', 'plot', 'popups', 'prefs', 'registry', 'repeat', 'router',
+        'scheme', 'stream', 'theme', 'title', 'toneNote', 'words']
 # the members of the parts of `core` a theme builds on, pinned like the core's own: the drag's
 # helpers and the hand's makers, the computer's side, the actions and the computer's actions
 CORE_DRAG = ['AXIS_HOLD_PX', 'BAND_PARAM', 'LABEL_GAP_PX', 'POINT_KEYS', 'POINT_TYPES', 'Q_HALVES_PX',
@@ -58,37 +58,79 @@ CORE_CURVE = ['F_MAX', 'F_MIN', 'PEAK_SHOWN_DB', 'POINTS', 'RANGE_DB', 'VIEW_HEI
 CORE_COMPUTER = ['addAt', 'drawable', 'eqOf', 'flip', 'kept', 'nextFree', 'on', 'pick', 'picked',
                  'repick', 'resync', 'side', 'switchOf', 'tone', 'toneOf', 'track', 'view',
                  'volumeOf']
-CORE_ACTIONS = ['applySetting', 'canWrite', 'computer', 'connect', 'deletePreset', 'hops',
-                'identify', 'press', 'recallPreset', 'recallSlot', 'refuse', 'renamePreset',
-                'savePreset', 'saveSlot', 'setBand', 'setControl', 'setLoudness', 'setMode',
-                'setVolume', 'showDevice', 'signInPrompt', 'signOut', 'stopClimb']
+CORE_ACTIONS = ['applySetting', 'autoEqImport', 'autoEqPreview', 'autoEqSearch', 'autoEqUpload',
+                'canWrite', 'computer', 'connect', 'deletePreset', 'hops', 'identify',
+                'makeDefault', 'overwritePreset', 'press', 'recallPreset', 'recallSlot', 'refuse',
+                'removeDevice', 'renameDevice', 'renamePreset', 'savePreset', 'saveSlot',
+                'setBand', 'setControl', 'setLoudness', 'setMode', 'setPassphrase', 'setProfile',
+                'setVolume', 'showDevice', 'signInPrompt', 'signOut', 'stopClimb', 'walk']
 CORE_ACTIONS_COMPUTER = ['addNext', 'addPoint', 'cell', 'current', 'deletePreset', 'nudge',
                          'recallPreset', 'removePoint', 'renamePreset', 'savePreset', 'setMode',
                          'setMute', 'setPoint', 'setVolume', 'step', 'stepPoint', 'toggleMute']
-# the hand `core.drag.pointDrag` makes, the table `core.drag.table` makes, the flow of a typed cell and
+# the hand `core.eq.points` makes, the table `core.eq.table` makes, the flow of a typed cell and
 # the computer's view of a page that has the computer's side
 CORE_HAND = ['active', 'begin', 'blur', 'burst', 'canGrab', 'cancel', 'destroy', 'down', 'dropTap',
              'escape', 'finishBurst', 'key', 'lost', 'move', 'session', 'step', 'switched',
              'touchEnd', 'touchMove', 'touchStart', 'up', 'watchTouch', 'wheel']
 CORE_TABLE = ['keep', 'pick', 'reset', 'restore', 'reveal', 'scrolled', 'updateMore']
 CORE_VIEW = ['eq', 'picked', 'side', 'sw', 'tone', 'volume', 'writes']
+# the stack of modals, the router of the history and the frame, which every popup and theme stand on
+CORE_MODAL = ['close', 'closeAll', 'key', 'open', 'opened']
+CORE_ROUTER = ['close', 'open', 'pushState', 'register', 'shown', 'state', 'step']
+CORE_FRAME = ['anchor', 'closeMenu', 'closePicker', 'covered', 'dismissToast', 'fade',
+              'inMenu', 'keyTable', 'lastFocus', 'menuOwns', 'openMenu', 'openPicker', 'realign',
+              'toast', 'zoneNames']
+CORE_FREEZE = ['createLive', 'createRelease', 'keeper']
+# the stream, the popups, the key table's hands with the frame's own list (`frame`), the checks'
+# driver and the clock
+CORE_STREAM = ['batch', 'close', 'follow', 'followed', 'needed', 'open', 'renamed', 'want']
+CORE_POPUPS = ['add', 'listed', 'names', 'openDevice']
+CORE_KEYS = ['bind', 'frame', 'listed', 'zoneOf', 'zonesOf']
+CORE_DRIVER = ['reach', 'shown']
+CORE_CLOCK = ['AGES_EVERY_MS', 'clockOffset', 'daemonClock', 'elapsedUs', 'fraction', 'tickAges', 'timeWords']
+# `core.eq` (the tone control's hands) and its three parts: the band drag is the drag's own functions,
+# the point drag and the table are makers that carry their helpers. `core.drag` is its old name, pinned
+CORE_EQ = ['bands', 'points', 'table']
+_NOT_BANDS = {'POINT_KEYS', 'POINT_TYPES', 'editCell', 'isLong', 'labelWords', 'markersIn',
+              'pointDrag', 'pointValues', 'table', 'touchWatch'}
+CORE_EQ_BANDS = sorted(set(CORE_DRAG) - _NOT_BANDS)
+CORE_EQ_POINTS = ['POINT_KEYS', 'markersIn', 'pointValues', 'touchWatch']
+CORE_EQ_TABLE = ['POINT_TYPES', 'editCell', 'isLong', 'labelWords']
 PAGE_KEYS = {
+    'core.freeze': 'Object.keys(__core.freeze)',
     'core.drag': 'Object.keys(__core.drag)',
+    'core.eq': 'Object.keys(__core.eq)',
+    'core.eq.bands': 'Object.keys(__core.eq.bands)',
+    'core.eq.points': 'Object.keys(__core.eq.points)',
+    'core.eq.table': 'Object.keys(__core.eq.table)',
     'core.curve': 'Object.keys(__core.curve)',
     'core.computer': 'Object.keys(__core.computer)',
     'core.actions': 'Object.keys(__core.actions)',
     'core.actions.computer': 'Object.keys(__core.actions.computer)',
-    'the hand of core.drag.pointDrag': (
-        "(() => { const h = __core.drag.pointDrag({ points: () => [] }); const k = Object.keys(h);"
+    'core.modal': 'Object.keys(__core.modal)',
+    'core.router': 'Object.keys(__core.router)',
+    'core.frame': 'Object.keys(__core.frame)',
+    'core.stream': 'Object.keys(__core.stream)',
+    'core.popups': 'Object.keys(__core.popups)',
+    'core.keys': 'Object.keys(__core.keys)',
+    'core.driver': 'Object.keys(__core.driver)',
+    'core.clock': 'Object.keys(__core.clock)',
+    'the hand of core.eq.points': (
+        "(() => { const h = __core.eq.points({ points: () => [] }); const k = Object.keys(h);"
         " h.destroy(); return k; })()"),
-    'the table of core.drag.table': (
-        "Object.keys(__core.drag.table({ box: () => null, note: () => null, row: () => null,"
+    'the table of core.eq.table': (
+        "Object.keys(__core.eq.table({ box: () => null, note: () => null, row: () => null,"
         " moreWords: String }))"),
 }
 EXPECTED_KEYS = {
-    'core.drag': CORE_DRAG, 'core.curve': CORE_CURVE, 'core.computer': CORE_COMPUTER,
+    'core.freeze': CORE_FREEZE,
+    'core.drag': CORE_DRAG, 'core.eq': CORE_EQ, 'core.eq.bands': CORE_EQ_BANDS,
+    'core.eq.points': CORE_EQ_POINTS, 'core.eq.table': CORE_EQ_TABLE, 'core.curve': CORE_CURVE, 'core.computer': CORE_COMPUTER,
     'core.actions': CORE_ACTIONS, 'core.actions.computer': CORE_ACTIONS_COMPUTER,
-    'the hand of core.drag.pointDrag': CORE_HAND, 'the table of core.drag.table': CORE_TABLE,
+    'core.modal': CORE_MODAL, 'core.router': CORE_ROUTER, 'core.frame': CORE_FRAME,
+    'core.stream': CORE_STREAM, 'core.popups': CORE_POPUPS, 'core.keys': CORE_KEYS,
+    'core.driver': CORE_DRIVER, 'core.clock': CORE_CLOCK,
+    'the hand of core.eq.points': CORE_HAND, 'the table of core.eq.table': CORE_TABLE,
 }
 COMPUTER_TARGETS = ("import(new URL('assets/core/contract.js', document.baseURI))"
                     ".then((c) => c.computerTargetsOf(__core.model.page()))")
@@ -185,6 +227,9 @@ def volume_and_mute(p):
     up = poll(lambda: p.model()['volume']['raw'] == vol['raw'] + 1)
     check(p.tag('volume_up_and_down: a step up raises the daemon\'s volume.raw by one'), up,
           [vol['raw'], p.model()['volume']['raw']])
+    # A step starts from the page's own value: the step down waits until the stream has brought
+    # the page the value the step up left at the daemon.
+    poll(lambda: p.b.page('__core.model.device().volume.raw') == p.model()['volume']['raw'])
     p.operate({'control': 'volume'}, {'step': -1})
     down = poll(lambda: p.model()['volume']['raw'] == vol['raw'])
     check(p.tag('volume_up_and_down: and a step down lowers it again'), down,
@@ -299,6 +344,18 @@ def menu_and_picker(p):
     button = b.page(BUTTON)
     check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
                 'one button'), button['count'] == 1, button)
+    # a sheet of the theme's own that the driver left open owns the key: T opens nothing over it
+    own = "document.querySelector('#theme [aria-modal=\"true\"]')"
+    if b.page(f'!!{own}'):
+        b.press('T')
+        time.sleep(0.4)
+        check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
+                    'under the theme\'s own sheet T opens nothing'),
+              b.page(f"!document.getElementById('picker') && !!{own}") is True)
+        b.page(f"(({own}.querySelector('button:not([disabled])') ?? {own}).focus(), 1)")
+        b.press('Escape')
+        check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
+                    'Escape closes that sheet'), poll(lambda: b.page(f'!{own}')))
     b.press('T')
     check(p.tag('the_menu_button_is_present_and_t_opens_the_picker_also_after_a_fade: '
                 'T opens the picker'), poll(lambda: b.page("!!document.getElementById('picker')")))
@@ -475,8 +532,16 @@ try:
         keys = sorted(b.page(expression))
         check(f'{name} has these members and no others', keys == EXPECTED_KEYS[name],
               sorted(set(keys) ^ set(EXPECTED_KEYS[name])))
+    listed = b.page('__core.popups.listed().map((p) => [p.name, p.row.sees, p.stays === true])')
+    check('the page lists Devices (everyone\'s, which stays through a device switch), the EQ library (a '
+          'writer\'s) and Help, in that order',
+          listed == [['devices', 'everyone', True], ['eq-library', 'writer', False],
+                     ['help', 'everyone', False]], listed)
+    check('core.words words a step of a level', b.page(
+        "[__core.words.stepWords({ lo: 2, texts: ['a', 'b'] }, 3), __core.words.stepWords({ lo: 0 }, 7)]")
+        == ['b', '7'])
     check('the point types and the graph viewBox are the core\'s constants',
-          b.page("JSON.stringify([__core.drag.POINT_TYPES, __core.curve.VIEW_WIDTH,"
+          b.page("JSON.stringify([__core.eq.table.POINT_TYPES, __core.curve.VIEW_WIDTH,"
                  " __core.curve.VIEW_HEIGHT])") == '[["PK","LSC","HSC"],1000,260]')
     for theme in themes:
         began = time.time()

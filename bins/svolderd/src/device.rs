@@ -323,9 +323,9 @@ impl DeviceHandle {
 
     /// The `readings` reply for this device: the last `span_secs` seconds (at most
     /// [`svolder_ipc::READINGS_SPAN_SECS`]) of its readings, binned by the second, and its link's
-    /// changes in that span, and the presets recalled on it in that span. Each series and the
-    /// link's changes start with the newest point from before the span, which says what held
-    /// when it began.
+    /// changes in that span, the presets recalled on it in that span, and the signal strengths
+    /// heard in it. Each series and the link's changes start with the newest point from before
+    /// the span, which says what held when it began.
     pub fn readings(&self, span_secs: u64) -> Response {
         let now_ms = wall_ms();
         let now = std::time::Instant::now();
@@ -335,25 +335,73 @@ impl DeviceHandle {
             (Arc::clone(&info.ring), Arc::clone(&info.history))
         };
         let profile = self.feed.borrow().profile.clone();
-        let series = locked(&ring).series_out(
-            profile.as_deref(),
-            now,
-            now_ms,
-            std::time::Duration::from_secs(span_secs),
-        );
+        let span = std::time::Duration::from_secs(span_secs);
+        // One hold of the ring for its three answers: each is taken in a statement of its own,
+        // since a guard made inside the answer below would live to its end.
+        let (series, recalls, signal) = {
+            let ring = locked(&ring);
+            (
+                ring.series_out(profile.as_deref(), now, now_ms, span),
+                ring.recalls_out(now, now_ms, span),
+                ring.signal_out(now, now_ms, span),
+            )
+        };
         let link = locked(&history).within(now_ms, span_secs);
         Response::Readings {
             device: self.name.clone(),
             now_ms,
             bin_ms: u64::try_from(Window::DAEMON.bin.as_millis()).unwrap_or(1000),
             series,
-            recalls: locked(&ring).recalls_out(
-                now,
-                now_ms,
-                std::time::Duration::from_secs(span_secs),
-            ),
+            recalls,
             link,
+            signal,
         }
+    }
+
+    /// When the link was last lost, in unix milliseconds: the newest change of the day's
+    /// history, when it is a loss. None while the link is up and for a device that has had no
+    /// link within the history.
+    pub fn lost_at_ms(&self) -> Option<u64> {
+        let history = Arc::clone(&locked(&self.info).history);
+        let newest = locked(&history).newest();
+        newest.filter(|change| !change.connected).map(|c| c.at_ms)
+    }
+
+    /// The ids of the device's key readings, in order: the signal strength, which every device
+    /// has, then the keys its profile marks, once the device has been seen and the actor knows
+    /// which profile that is.
+    pub fn key_readings(&self) -> Vec<String> {
+        let profile = self.feed.borrow().profile.clone();
+        std::iter::once(svolder_ipc::SERIES_SIGNAL)
+            .chain(profile.iter().flat_map(|profile| profile.key_readings()))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether this is the device that sends `advert`.
+    pub fn sends(&self, advert: &Advertisement) -> bool {
+        self.udid
+            .parse::<UnitId>()
+            .is_ok_and(|unit| unit == advert.unit_id())
+    }
+
+    /// Take a hearing of the device by a listen that was not its own (the `scan` verb's, a
+    /// walk's) as its signal: the strength the advertisement carries, heard now, and a point of
+    /// its signal series. An advertisement that carries no strength changes nothing.
+    pub fn heard_on_air(&self, advert: &Advertisement) {
+        let Some(dbm) = advert.rssi else {
+            return;
+        };
+        let ring = {
+            let mut info = locked(&self.info);
+            info.signal = Some(svolder_ipc::Signal {
+                dbm,
+                source: svolder_ipc::SignalSource::Advert,
+                heard_at_ms: history::wall_ms(),
+            });
+            Arc::clone(&info.ring)
+        };
+        locked(&ring).heard_signal(dbm, std::time::Instant::now());
     }
 
     /// This device's row for the `devices` verb.
@@ -381,6 +429,7 @@ impl DeviceHandle {
             refused: info.refused,
             recalled: self.writer.recalled().borrow().clone(),
             signal: info.signal,
+            key_readings: self.key_readings(),
         }
     }
 }
@@ -394,6 +443,44 @@ pub fn spawn(
     registry: Arc<Registry>,
     config: DeviceConfig,
     scanner: Arc<Scanner>,
+) -> Result<DeviceHandle, String> {
+    spawn_reporting(transport, registry, config, scanner, None)
+}
+
+/// How a probe's first discover-and-connect attempt ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstAttempt {
+    /// The link is up; `refused` when the device turned the passphrase away on it.
+    Connected {
+        /// whether the device refused the code
+        refused: bool,
+    },
+    /// The attempt failed; `heard` when a listen heard the device before the connect failed.
+    Failed {
+        /// whether the device was heard
+        heard: bool,
+    },
+}
+
+/// [`spawn`] for a passphrase test: the same actor, which also says how its first attempt ended
+/// on the receiver handed back. It is meant to be asked to shut down once that answer is in.
+pub fn spawn_probe(
+    transport: Arc<dyn Transport>,
+    registry: Arc<Registry>,
+    config: DeviceConfig,
+    scanner: Arc<Scanner>,
+) -> Result<(DeviceHandle, oneshot::Receiver<FirstAttempt>), String> {
+    let (first, answer) = oneshot::channel();
+    spawn_reporting(transport, registry, config, scanner, Some(first)).map(|h| (h, answer))
+}
+
+/// [`spawn`], with the sender a probe's first attempt is reported on.
+fn spawn_reporting(
+    transport: Arc<dyn Transport>,
+    registry: Arc<Registry>,
+    config: DeviceConfig,
+    scanner: Arc<Scanner>,
+    first_attempt: Option<oneshot::Sender<FirstAttempt>>,
 ) -> Result<DeviceHandle, String> {
     let unit: UnitId = config
         .udid
@@ -441,6 +528,7 @@ pub fn spawn(
         failures: 0,
         farewell: None,
         episode: Episode::default(),
+        first_attempt,
     };
     let name = actor.name.clone();
     tokio::spawn(actor.run(rx));
@@ -549,6 +637,8 @@ struct Actor {
     /// Where the refusal episode of a device on `auto` stands: whether its one drop of the link
     /// is spent. See [`Episode`].
     episode: Episode,
+    /// A probe's: where its first attempt's end is reported, until it is.
+    first_attempt: Option<oneshot::Sender<FirstAttempt>>,
 }
 
 impl Actor {

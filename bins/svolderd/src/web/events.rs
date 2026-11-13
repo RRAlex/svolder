@@ -22,7 +22,9 @@
 //!   a second;
 //! - `strip`: the shown device's bars of each second not sent yet, with the `device`;
 //! - `fleet`: the devices' links or families, the list, or the hops changed;
-//! - `host` (with `needs=host`): the computer's player changed, with or without a device.
+//! - `host` (with `needs=host`): the computer's player changed, with or without a device;
+//! - `walk` (with `needs=walk`, for a viewer who may write): a state of the device walk,
+//!   `{job, state}`, each whole: the walk's last state when the stream opens, then each change.
 //!
 //! A keep-alive comment goes out every 15 s. While the stream lives, with `needs=host` and a device
 //! shown, it holds the host's reads on (the route, and the computer's volume). A rotated token ends
@@ -33,7 +35,7 @@
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axum::Router;
@@ -87,6 +89,8 @@ pub(super) struct Needs {
     pub(super) meters: bool,
     /// The computer's player.
     pub(super) host: bool,
+    /// The device walk's states, for a viewer who may write.
+    pub(super) walk: bool,
 }
 
 /// What the stream's URL asks for.
@@ -115,6 +119,7 @@ impl Asked {
                         match word {
                             "meters" => asked.needs.meters = true,
                             "host" => asked.needs.host = true,
+                            "walk" => asked.needs.walk = true,
                             _ => {}
                         }
                     }
@@ -330,6 +335,19 @@ pub(super) async fn followed_models(cx: &Context) -> BTreeMap<String, DeviceMode
         }
     }
     models
+}
+
+/// The daemon's run: a stamp taken the first time it is asked for, in milliseconds since the Unix
+/// epoch. Job ids restart at 1 with each run, so a page keys walks by this stamp and the job.
+pub(crate) fn run_stamp() -> u64 {
+    static RUN: OnceLock<u64> = OnceLock::new();
+    *RUN.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            })
+    })
 }
 
 /// `value` as one event named `name`.

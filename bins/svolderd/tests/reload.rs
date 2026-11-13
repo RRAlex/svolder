@@ -17,6 +17,7 @@ use common::{
     CONFIG, POLL, POLLS, STEP_BUDGET, TEST_TIMEOUT, connect, daemon, device_names, spawn_daemon,
     spawn_daemon_with_handed_over_socket, wait_until_connected,
 };
+use svolder_ipc::CODE_LINK;
 
 /// A second device the fake transport never advertises, so it is configured and running but
 /// never connected — which is all the device set needs to show it.
@@ -269,7 +270,7 @@ async fn a_reload_that_corrects_the_passphrase_frees_the_next_write() {
         wait_until_connected(&mut child, &mut client).await;
         let refused = set_input(&mut client).await;
         assert!(
-            matches!(&refused, Response::Error { code: 3, message } if message.contains("passphrase")),
+            matches!(&refused, Response::Error { code: CODE_LINK, message, .. } if message.contains("passphrase")),
             "got {refused:?}"
         );
 
@@ -307,7 +308,7 @@ async fn a_reload_of_an_unparsable_file_keeps_the_devices_it_has() {
             .request(Request::Reload)
             .await
             .expect("a reload reply");
-        let Response::Error { code, message } = &refused else {
+        let Response::Error { code, message, .. } = &refused else {
             panic!("got {refused:?}");
         };
         assert_eq!(*code, 1, "got {refused:?}");

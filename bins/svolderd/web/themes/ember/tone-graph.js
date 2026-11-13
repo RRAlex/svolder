@@ -29,7 +29,7 @@ import {
   POINTS, clippingPeak, linePath, logFreqs, markerPoint, peakWords, responseDb, yOf,
 } from '../../core/tone-curve.js';
 import { fixedEven } from '../../core/words.js';
-import { BAND_PARAM, LABEL_GAP_PX, REACH, createDrag, grab, labelAt, wheelSteps } from '../../core/tone-drag.js';
+import { BAND_PARAM, LABEL_GAP_PX, REACH, grab, labelAt, wheelSteps } from '../../core/tone-drag.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const VIEW_WIDTH = 1000;
@@ -201,6 +201,9 @@ function draw(s, raws) {
   if (pathLine) pathLine.dataset.y = ys.map((y) => fixedEven(y, 1)).join(',');
   svg.querySelector('.area')?.setAttribute('d', `${line}L1000.0 130.0L0.0 130.0Z`);
   svg.querySelector('.ghost')?.remove();
+  svg.querySelector('.gap')?.remove();
+  s.figure.querySelector('.fitt')?.remove();
+  s.figure.querySelector('.fitsr')?.remove();
   const own = parsed[s.band - 1];
   if (own && s.marker) {
     const at = markerPoint('eq', own);
@@ -321,6 +324,10 @@ function release() {
   session?.drag.release();
 }
 
+/** Whether a point of the device's curve is held: a drag that is over and only waits for its
+ * writes to be answered is not. */
+export const dragging = () => session !== null && !session.over;
+
 /** End the drag where it is because the screen is going: what was asked is still written. */
 export function endDrag() {
   session?.drag.cancel('switch');
@@ -331,7 +338,7 @@ export function endDrag() {
  * by the caller; its writes are still waited for. */
 function launch(s, gesture, press, start) {
   const rect = s.plot.getBoundingClientRect();
-  const drag = createDrag({
+  const drag = ember.core.eq.bands.createDrag({
     band: s.band,
     gesture,
     start,

@@ -32,9 +32,11 @@ change walks the same code from a key press; the words (actor, writer, slot, fle
 A daemon that finds the socket taken exits 3 and has opened no link, so a second daemon never steals
 devices from the first. While it serves, `stop_or_signal` ends the accept loop on SIGINT, SIGTERM, a
 `stop` request, or the socket file being unlinked or replaced under the listener (`socket_taken`
-compares the inode it bound, every second). Then `Daemon::shutdown` stops the HTTP servers, the host service
-(after them, so no open page is told on the way down that the computer is no longer watched), the MQTT
-bridge (which says `offline` first), and asks every actor to close at once.
+compares the inode it bound, every second). Then `Daemon::shutdown` stops the jobs (the device
+walk's and AutoEq's), the HTTP servers, the host service (after them, so no open page is told on the
+way down that the computer is no longer watched), the MQTT bridge (which says `offline` first), and
+asks every actor to close at once: the published ones, the ones a reload is starting, and the walk's
+passphrase probe ([device-walk.md](device-walk.md#the-probe)).
 
 `Daemon` (`bins/svolderd/src/handler.rs`) is the one object everything reaches: the set of device
 handles, the transport, the shared scanner, the registry, the host service (the computer's player,
@@ -69,7 +71,12 @@ history and readings answers use). The signal strength comes from the advertisem
 the daemon's hands an actor when it hears its device: `discover` (`device/attempt.rs`) returns the
 advertisement with the moment the listen handed it over, and `update_identity`
 (`device/publish.rs`) keeps its `rssi` in `LiveInfo.signal` as an `Advert` signal stamped with that
-moment, so `devices` reports it as `DeviceInfo.signal`. An advertisement taken from the adapter's
+moment, so `devices` reports it as `DeviceInfo.signal`, and adds it to the ring's signal series,
+which `readings` answers as `signal` and the web's `series` route under the id `signal`: one point
+for each advertisement an attempt heard, kept while no link is up, and none while one is; an
+answer holds only the points inside its span, since an older strength says nothing of it. A denser
+series for a device that is away needs a listen that runs between attempts, which the daemon does
+not have. An advertisement taken from the adapter's
 held list (when the listen heard nothing) comes with no moment and sets no signal, since its
 strength is a cached value, not a hearing. An advertisement with no strength leaves the held signal
 as it is, and a lost link leaves it too, with its own source and stamp: it is always the strength
@@ -257,9 +264,9 @@ reads, the passphrase change, reload and shutdown go straight to the actor.
 ## Reload
 
 `Daemon::reload_all` (SIGHUP, or a `reload` request, which the CLI and the web UI send after they
-edit the file) re-reads the configuration and the user profile directory before acting on either, so
-a profile that does not parse leaves every device as it was. It holds one lock for the whole reload,
-then:
+edit the file, and `svolder daemon reload` sends on its own) re-reads the configuration and the user
+profile directory before acting on either, so a profile that does not parse leaves every device as
+it was. It holds one lock for the whole reload, then:
 
 - `reconcile` matches devices by name, case-insensitively. A new name gets an actor; a lost name has
   its actor stopped; a name whose unit id changed has the old actor stopped before the new one
@@ -280,6 +287,26 @@ then:
 
 The device set is swapped in whole, so a request in flight resolves against one complete set or the
 other.
+
+Every read that becomes the config snapshot (the first read at start, `reload_all`'s, and the
+read-back after a write the daemon makes in `edit_then_reload`) is held with the file's mtime from
+just before the read, on the same ticket rule as the snapshot. `Daemon::config_changed` looks the
+file's mtime up when asked, off the async threads, and says whether it differs from the stamp:
+differs, not newer, so an older file put back, a file that appeared or went count, and only the
+time is compared. The daemon's own writes are excluded by the read-back; a reload that fails leaves
+snapshot and stamp as they were, so the change stands. There is no watcher and no poll, and nothing
+is applied on the strength of it. The `version` answer carries it as `config_changed`.
+
+A file that was read once and is gone is `config_missing` in the same answer: the daemon keeps the
+configuration it runs, refuses a reload and every write it would make (a write would start a new
+file from the template, and the reload after it would read that as the whole configuration) in the
+words of `config_missing_refusal`, and takes the file again at the first reload once it is back.
+A daemon started with no file at all has nothing held, so it still reloads and writes a fresh one.
+
+A request reads the snapshot and never the file, so a hand edit shows in the socket, the web page
+and the MCP tools alike only after the next reload; `handler/config_write.rs` is the one place the
+socket, the web server and the MCP server reach config writes through, and only a write reads the
+file again, under the writer's lock.
 
 ## Principles
 

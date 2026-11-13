@@ -17,7 +17,7 @@ use svolder_profiles::tone::preset::Imported;
 
 use crate::tui::app::{App, Intent};
 
-use super::import::{self, Alt};
+use super::import;
 use super::{PresetList, Step};
 
 /// What the prompt starts with.
@@ -266,7 +266,7 @@ fn read(app: &mut App) -> Vec<Intent> {
         origin: None,
         correction: parsed.correction,
     };
-    import::ready(app, name, imported, skipped, Alt::Number)
+    import::ready(app, name, imported, skipped)
 }
 
 #[cfg(test)]

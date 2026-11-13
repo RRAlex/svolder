@@ -64,14 +64,7 @@ pub struct Grade {
 /// One advertisement as a scan row, with the signal strength and the product id the
 /// advertisement itself carries, and the product named as `registry` names it.
 pub fn entry(advert: &Advertisement, registry: &Registry) -> ScanEntry {
-    ScanEntry {
-        unit: advert.unit_id().to_string(),
-        product_id: advert.manufacturer.product_id,
-        product: product_of(advert, registry).map(str::to_string),
-        firmware: advert.firmware_build(),
-        passphrase: advert.manufacturer.passphrase().is_well_formed(),
-        rssi: advert.rssi,
-    }
+    ScanEntry::from_advert(&advert.manufacturer, advert.rssi, registry)
 }
 
 /// What the device behind an advertisement is called: [`Registry::product_name`] for the

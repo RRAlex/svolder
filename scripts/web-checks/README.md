@@ -42,7 +42,7 @@ line per check with its time and last output line, then a total.
 
 ## Requirements
 
-`node`, `python3` with `python3-websockets`, `python3-numpy` and `python3-pil` (apt packages),
+`node` with `node-jsdom`, `python3` with `python3-websockets`, `python3-numpy` and `python3-pil` (apt packages),
 `chromium`, `firefox` and `geckodriver` (the browsers may be snaps), and a Rust toolchain to build
 `svolderd`. `run-all.sh` names anything missing and stops before it runs a check.
 
@@ -147,6 +147,7 @@ serves, the check's own file, every helper it really imports or opens here (`com
 followed through their own imports; not file names in comments), the engine's name, the browsers'
 versions, the env that moves the daemon or the web dir (`SVOLDERD`, `SVOLDER`, `SMOKE_WEB`,
 `SMOKE_EMBEDDED`) and the env that chooses a check's cases (`ND_ONLY`, `ND_CASES`, `WEB_CHECK_THEMES`,
+`WEB_CHECK_POPUPS`,
 `HAZE_SECTIONS`, `SCROLL_SECTIONS`, `HIDDEN_SECS`, `LOOK_*`, `SVOLDER_FAKE_*`, `SECS`, `REPS`, the stills
 switches). A pass stored under the same fingerprint is reused: the check is not run, its line says
 `cached`, its row in `timing.tsv` has the verdict `cached` and 0 s, and the total line names the cached
@@ -180,6 +181,9 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 
 - `snippets.py`: loads every `mutate_*.py` table and fails when an entry's `old` text does not occur
   exactly once in the file it names; needs only python3 (`make web-snippets`, part of `make check`).
+- `node-list.py`: fails when a `node/*.mjs` harness is missing from `run-all.sh`'s node list or a listed
+  name has no file (the helpers other harnesses import are named in it, each with its reason); run by
+  `make web-snippets` too.
 - `node/model.mjs`: the smoke's model (`smoke-model.js`): the rhythm, the sources' strength, the
   palette, the haze, the scroll push, bad input.
 - `node/notes.mjs`: the notes' numbers: the agitation measure, the gate, the settle watch, volume
@@ -190,6 +194,9 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   together, away and lost, bad input.
 - `node/effects.mjs`: the effects module: stored level, which level the page picks, the background
   alpha.
+- `node/plot.mjs`: `core/plot.js`, the shared SVG strings of the response plot and the sparkline (frame
+  geometry, curves, clipped spans, gaps, escaping), and Signal's and Paper's tone plots against their
+  pre-move output in `node/fixtures/plot-move.json`.
 - `node/tone-curve.mjs`: the page's copy of the tone control's curve maths (`tone-curve.js`) against
   `node/fixtures/tone-curve.json`, the core's own numbers that a Rust test writes and keeps current.
 - `node/tone-drag.mjs`: the curve's gestures (`tone-drag.js`) over fake writes that answer when the
@@ -219,13 +226,28 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `node/frame-keys.mjs`: the frame's reserved key (`core/frame.js`): `T` is the frame's unless a
   field it would type into has the focus or Ctrl, Alt or Meta is held; and the two helpers Ember's keys
   ask the menu (`core/menu.js`: whose a key is, whether a node is inside it).
+- `node/core-modal.mjs`: the core's modal layer (`core/modal.js`) and its two clients, the picker and the
+  question, on a jsdom page (`node/dom.mjs`): the top of the stack owns every key (a theme's listeners on the
+  document and the window hear none; `T` and `?` do nothing), Escape closes the top only, Tab stays in it, the
+  page under the top is inert but the popups, the focus returns to `returnTo`, else the opener, else the frame's
+  button, `closeAll` empties the stack, a field in a modal types and a list in it gets its keys through `onKey`,
+  and the picker's and the question's own keys.
+- `node/core-router.mjs`: the core's router (`core/router.js`) with the real stack and a popup on jsdom's
+  history: the popup is on the stack and off it with the history whoever closes it, a page loaded again opens
+  no popup of the load before, Back steps
+  page → list → closed and shows no device, a step past the popup shows a device only when the entry names
+  another, an entry without a device keeps the shown one, Escape steps back past the popup and Forward after
+  it opens nothing, a push asked for during such a step waits for it.
+- `node/dom.mjs`: not a harness: the jsdom page those two share (`page(html)` gives the window, a key sender
+  and a wait for queued tasks). The apt package `node-jsdom`.
 - `node/ember-order.mjs`: the order of Ember's sections (`order.js`): the default, a kept order that
   drops what the layout lacks and gives a new section its default zone, the arrow keys' moves, a
   section placed by index, and one order per layout.
 - `node/contract.mjs`: what every theme must present (`core/contract.js`), read from the fixture's
   pages (every device kind, a guest's too): every control of the model is of a kind the core knows
   (`choice`, `toggle`, `slider`, `readout` and the volume, power, tone, presets and device presets
-  objects), `targetsOf` and `factsOf` list what the model offers, each target maps to one action
+  objects), `targetsOf`, `deviceFactsOf` and `themeFactsOf` list what the model offers (the two lists
+  of facts share no label and together are every fact in order), each target maps to one action
   request with today's path and body (a readout none, a slot's save and recall one each), a
   followed device's targets carry its name, and a guest's send nothing and say to sign in.
 - `node/switch.mjs`: the theme on show and the switch (`core/switch.js`), over a fake head: whichever
@@ -239,18 +261,194 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `node/playing.mjs`: the Now playing card's arithmetic (`clock.js`, `playing.js`): the elapsed time from the
   player's position, rate and read time (none while paused, clamped to the length), the daemon-clock
   offset it is worked out against, the bar's fraction and the `m:ss` and `h:mm:ss` words.
+- `node/core-api.mjs`: the page's calls to the daemon (`post`, `get`: the status with the
+  JSON body, a 401 loading the sign-in page, no answer as status 0, a body that is no JSON).
 - `node/core-store.mjs`, `core-stream.mjs`, `core-actions.mjs`: the core's model store (a model
   replaces everything and says so once, a part event changes one device, a reading folds in, a
   write's answer applies its parts), its one event stream (the address, the reopen after 2 s, the
   session question, the rest and the wait on waking, a device switched while it rests, a device no
-  longer followed) and its actions (each posts today's request; a guest's or a read-only page's
-  send nothing; a refusal is toasted and the model read again; the volume's cap and the raise that
+  longer followed, the union of several owners' wants) and its actions (each posts today's
+  request; a guest's or a read-only page's send nothing; a refusal is toasted and the model read again; the volume's cap and the raise that
   waits for a live stream; a device switch and its address), over fake streams, clocks and posts.
 - `node/core-title.mjs`: the tab's title the core keeps for every theme (the device, the status words,
   the parts a theme adds).
-- `node/core-hold.mjs`: the held `−` and `+` the core gives every theme (a step at the press, the
+- `node/core-repeat.mjs`: the held `−` and `+` the core gives every theme (a step at the press, the
   repeat after 380 ms every 70, the ways it ends, a redraw that replaces the button, the 10 s cap),
   over a fake clock and fake events.
+- `node/core-freeze.mjs`: the section keeper (`core/freeze.js`): the holds on a section counted, a
+  list's apart from a gesture's, the give-back after the press, the reset, and `createLive` over a
+  fake store, following the device its caller names.
+- `node/core-names.mjs`: the core's pinned aliases (`core.hold`, `core.drag`): each member is the
+  current name's own (`core.repeat`, `core.eq`), over a core made on a jsdom page.
+- `node/core-html.mjs`: the core's markup helpers (`esc` on the five markup characters, `null` and
+  `undefined` as empty; `attr` quoting, a bare true attribute, none for no value).
+- `node/core-inline-ask.mjs`: the inline ask (a form for a name, a question that asks once): the classes
+  and words passed are the ones drawn, typing, submit, a refused answer, cancel, one ask replacing the
+  one before, and the keys handed in (`key`, `listen`, a modal of the real stack).
+- `node/core-list.mjs`: the list of options next to a chip (the classes passed, `aria-expanded`, a tap
+  chooses after the close, a press outside, one at a time, `below` and `auto` places, the keys handed in
+  by `key`, `listen` and a modal of the real stack, the place in a popup's page pane, which scrolls).
+- `node/core-clock.mjs`: the one ticker of a Device section's ages (`tickAges` of `core/clock.js`), on a
+  jsdom page with a fake clock, fake timers and a fake watch of the page: the ages and the signal's age
+  step with the clock on the daemon's time, a cell is written only when its words change, a row or a
+  section that left is not touched, a section drawn again is aged from its own stamp, the timer runs
+  only while the page is on show and goes with `stop()` and with the aborted signal of a theme's
+  unmount, a gate (`when`) holds the writing but not the note of the part's arrival.
+- `node/core-mounted.mjs`: the mounted instance (`core.mounted`, what a theme's `mount()` returns),
+  on the real core over a jsdom page: the instance's `menuRows` are the ones the menu draws, before
+  the theme object's; a theme with no instance fields, or one that returns a bare function, keeps
+  the theme object's; after an unmount and the next mount the old instance's rows and key table are
+  gone; a theme that throws as it mounts leaves none behind; the last focus (not the menu's, not
+  a modal's, not a hidden element) and the frame's `?` (not under a sheet).
+- `node/core-menu-rows.mjs`: the menu's rows as data (`core/menu-rows.js`, no page): the frame's own
+  rows for a writer, a reader and a guest, in order (Device, then Sign out or Sign in); one device
+  is a row that opens nothing and none is no row; the whole menu is the Theme row, the theme's own
+  rows as given, a rule and the frame's; the device list is a heading and a radio for each device.
+- `node/core-menu.mjs`: the keys of the frame's menu and of a modal over it, on the real core over a
+  jsdom page: ArrowDown on the closed button opens the menu on the checked radio, the arrows go
+  round the ends past a disabled and a hidden row, Home and End, Escape and `q` close it with the
+  focus back on the button (Ctrl+q does not), a Tab out closes it and leaves the focus where it
+  went, the Device row opens its list in place; a modal opened from the open menu closes the menu
+  and owns every key (ArrowDown sent to the menu's button opens nothing), and Tab goes round
+  inside the modal. These need a key that travels to the window and a real focus, which is why
+  they are on jsdom (`node/dom.mjs`, whose header says when a harness uses it).
+- `node/dom-skip.mjs`: where jsdom does not load, a harness that needs it prints `SKIPPED` as its
+  last line and exits 77 (a failure for the gate); with `WEB_CHECK_ALLOW_NO_JSDOM=1` it prints
+  the same line and passes, and `run-all.sh` starts without jsdom; a pure harness never skips.
+  Its own case that needs jsdom is left out where jsdom does not load, and it then ends by the
+  same rule, so a machine without jsdom passes the node list under the variable (the harnesses
+  that need a page say `SKIPPED`, the others run) and fails it without. A run with the variable
+  set is never stored in the gate's cache.
+- `node/core-device-wire.mjs`: the settings of a device's page in the Devices popup, on the real core over a jsdom
+  page with another device on show: each control's request, the refusals' words, the in-flight state, the focus, typed
+  text kept through a put, a rename (and the shown device's), a setting changed elsewhere, the question on a playing
+  device, and *Remove…*, the facts, Identify and All readings (35 cases). `node/core-device-facts.mjs` draws the
+  facts and Identify from every fixture device. `devices_popup.py` is the same in a browser, in every theme, with
+  one daemon per theme because Remove… leaves none of the configuration as it found it
+  (`python3 devices_popup.py chromium|firefox`; `WEB_CHECK_SHOTS=<folder>` writes `<theme>-device.png`).
+- `node/core-eq-library.mjs`: the EQ library popup (`core/popups/eq-library/`) on the real core over a jsdom page and
+  a fake daemon: the search and its late answers, the preview, the import, the upload, the saved presets with
+  *Overwrite with current…*, the computer's side (30 cases). `eq_library.py` is the same in a browser, in every theme,
+  against a daemon whose AutoEq is a loopback server of the small fixture under `fixtures/autoeq/` (no check reaches
+  AutoEq's servers; every daemon the checks start defaults `SVOLDER_AUTOEQ_URL` to a port nothing listens on)
+  (`python3 eq_library.py chromium|firefox`; `WEB_CHECK_SHOTS=<folder>` writes `<theme>-preview.png`).
+- `contrast.py` and `phone_sweep.py`: two sweeps over every state `sweep_states.py` visits (the page, the frame's menu,
+  each popup the page lists on each entry, a device's page with its forms and lists open, a dimmed device, the add
+  walk's pages, the config-changed line, the EQ library's preview, a guest's and a read-only page, a page with no
+  device), in every theme and every scheme the page lists. Each theme runs in a child process of its own with its own
+  browser and daemons (`WEB_SWEEP_PAR` limits how many run at once). A visit fails when it does not reach a state it
+  names. `contrast.py` reads the computed colours (the browser resolves the tokens) and computes WCAG 2.2 ratios: text
+  4.5:1 (3:1 large), control edges, focus rings and graph strokes and fills 3:1; a ground that is a picture, a gradient or a
+  canvas behind the text is sampled from a screenshot with the text, outlines and shadows hidden, at its darkest and
+  lightest. `phone_sweep.py` loads the states with the browser already at 360 px (every theme, scheme and visitor) and
+  at 390 and 768 px (the writer's and the guest's pages, first scheme), and reads the page's and the popup's sideways
+  scroll, every box that scrolls sideways (the popup's pane and side list included), every element cut by the window or
+  by an ancestor that clips, and controls under 24 px with no room around them (WCAG 2.5.8). Each has a baseline of
+  what fails today (`contrast-baseline.json`, `phone-baseline.json`): a failure that is not in it, or one that got
+  worse, fails the check; `python3 <check>.py chromium --update-baseline` rewrites it (a person looks at the diff
+  first). Each also plants a fault it must see (a title in the popup's own colour; a 700 px element in Help's pane).
+  They are in the full gate only. Run one on its own, from the repository root, with
+  `python3 scripts/web-checks/contrast.py chromium`; `WEB_CHECK_THEMES=ember WEB_CHECK_WHO=writer` narrows it.
+  `WEB_CHECK_PALETTE=<folder>` has `contrast.py` write the palette report (`5.5-palettes.md` and one swatch strip per
+  theme and scheme in a folder `p5-shots`); `WEB_CHECK_SHOTS=<folder>` has `phone_sweep.py` write a picture of each page
+  that scrolls sideways. `python3 contrast.py --self-test` and `phone_sweep.py --self-test` run the arithmetic and the
+  verdict without a browser.
+- `make routes-doc-check` (`scripts/routes-doc-check.py`, no browser, in `make check`): the routes the daemon registers against the
+  routes' table of `docs/usage/web-ui.md`, the fields of the configured-devices, series, walk and AutoEq routes against their Rust
+  types and the page's calls, and that those write routes are behind the writer gate.
+- `tone_overlay.py`: the tone graph's overlay of an imported preset (the target dotted, the gap shaded, the fit in
+  words; Night drive's ghost ridge, floor tint and `fit` in the HUD) in a browser, in every theme: a daemon with an
+  uploaded preset the device's five bands cannot follow, every shape counted against the model route's own
+  `tone.overlay`, the colours against the theme's tokens, a pointer that still reaches the points, none with a
+  built-in preset, the budget dropping Night drive's layer second. `nightdrive_timing.py` holds its draw cost
+  (`ND_ONLY=overlay`). `WEB_CHECK_SHOTS=<folder>` writes `<theme>.png` and `nightdrive-phone.png`.
+- `node/core-device-config.mjs`: the writes to a configured device's settings
+  (`core/device-config-actions.js`: rename, profile, passphrase, default, remove), through the
+  real `post` over a fetch the test answers: each request's method, path and body with another
+  device on show than the one named, no request when none is named, the devices answer handed
+  back, every refusal as a reason, a passphrase that is in the body and nowhere else.
+- `node/core-help.mjs`: the Help popup (`core/popups/help/`): its draws as strings (a key's row,
+  Here's groups, the line for a focus that is nowhere, Everywhere, About and its links), that Help
+  shows the listed entries of the zones it names and no other on the four themes' real tables
+  (a writer, a guest, the focus in each zone), that every zone has a name, and, on the real core
+  over a jsdom page, its wire (Here read at each show, a guest, no stream want, no key listener)
+  and the `?` key (through the router, not in a field, nothing while Help stands, the menu
+  closed first).
+- `node/core-devices.mjs`: the Devices popup (`core/popups/devices/`). Its draws as strings (the
+  side list with dots and the Shown tag, a state in words, the graphs' order, a graph with its
+  text alternative, one reading or none said in words, a device that is not connected dimmed by
+  a class, the Overview, a device's page). Its wire on the real core over a jsdom page, with
+  another device on show than the page is about: every request names the page's device, the
+  stream's address and `store.forget` at the close, a device the fleet drops, a device that
+  connects or appears (focus and selection kept), a rename, *Show on the page*, the timed
+  re-read, a list or a series that cannot be read, no way in for a guest.
+- `node/core-device-facts.mjs`: the facts and Identify of a device's page in the Devices popup
+  (`core/popups/devices/facts.js`), from every fixture device: every fact of `deviceFactsOf` with the daemon's
+  words, Unit and the passphrase note only when there are some, Identify offered or not, and off with its reason
+  when the device is away, the stamps the ticker reads, escaping.
+- `node/core-device-readings.mjs`: the All readings disclosure of a device's page
+  (`core/popups/devices/readings.js`), as strings: closed and open, the table (name, value, age),
+  the value through the converter, the ages in the core's words with what the ticker reads, a
+  device that is not connected, a device with no reading, every string escaped, ids that hold
+  across a rename.
+- `node/core-device-settings.mjs`: the settings part of a device's page
+  (`core/popups/devices/settings.js`), as strings: the words of every refusal at each setting, the
+  name's field, the profile's button and its choices (no base profile but a pinned one), each
+  passphrase kind and the form *Change* shows, *Make default* and the default's word, each
+  setting idle, sending and refused, ids that hold across a rename, every string escaped, no
+  passphrase anywhere.
+- `node/core-stay.mjs`: a popup that stays through a change of the shown device (`stays: true`
+  in `core/popups/listed.js`), on the real core over a jsdom page (store, stack, router, actions
+  and stream together): it stands through `showDevice` with and without a push, no entry is
+  pushed, the entry names the new device and its address, Back steps page → list → closed on
+  the new device, Forward opens nothing that was closed; a popup that does not stay and a
+  question over a staying one close; the shown device removed or renamed (the fleet event).
+- `node/core-popups.mjs`: the popup skeleton (`core/popups/frame.js`) and the sample popup that
+  fills it (`core/popups/sample/`). The draws as strings: a hostile title and device name escaped,
+  the side list's current entry, the box's `fp-at-list` / `fp-at-page` class (what the phone layout
+  turns on), the loading and failed lines. The wire on the real core over a jsdom page: opening
+  draws and the focus opens on the current entry, a reading redraws the live line alone and leaves
+  an open ask's field alone, a redraw keeps the focus by id, closing releases the stream want and
+  gives the focus back, Escape in the inline ask cancels the ask and a second Escape closes the
+  popup, Tab goes round past what a layout does not show, the list's panel is in the page pane
+  and takes its keys from the popup, Back closes it, no device is shown by any of these; a core nothing registered the sample
+  with opens nothing, and no shipped file outside the sample's folder names it. The lazy loading
+  (`core/popups/popups.js`, `core/router.js`): the frame shows at once with the loading line and
+  draws when the module arrives, the loader runs once for two opens, open and close before the
+  import resolves draws nothing and holds no want, a rejected import (or a module with no wire,
+  or a wire that throws) shows the failed line and Escape and Back still close it, and the next
+  open loads again; a part that throws in `show`, at its first show, a later open or a step, is
+  told to hide (its want is released), shows the failed line, closes like any popup and is kept
+  (the wire is made once); a popup without a loader whose `show` throws stands and closes too.
+- `node/core-keys.mjs`: a theme's key table and its binding (`core/keys.js`, `core.keys`), on a jsdom
+  page with the real stack of modals in front: an entry with `run` fires once for its key (or each
+  of its `keys`), one whose `when` is false is neither bound nor listed, nothing fires over a modal,
+  in a field that takes typing, with Ctrl, Alt or Meta or for a key the menu owns, a held key fires
+  only for an entry that repeats, the mount's signal unbinds, two tables do not hear each other
+  across a theme switch, a table that binds a reserved key or holds a malformed entry is refused at
+  bind time (a key of the page with neither a `run` nor `own: true` among them), `listed` keeps
+  table order, `zonesOf` gives every zone that holds an element and `zoneOf` the innermost.
+- `node/ember-keys.mjs`: Ember's keys over its key table (`themes/ember/keys.js`,
+  `themes/ember/key-table.js`) with the core's real binding, on a jsdom page with stand-ins for the
+  dial, the balance slider, the Flat option and the presets: what each key of the page does, when
+  it does nothing (a guest, a lost link, a field, a modifier, the menu, a control with arrows of
+  its own, a held key), that `?` is none of Ember's keys (no key card; the frame opens Help), and
+  the table's shape.
+- `node/theme-keys.mjs`: the four themes' key tables (`themes/<id>/key-table.js`): the core can read
+  and bind each, every entry has an id of its own, a widget's zone is a selector and its entries
+  stand together, every keycap is one a keyboard has, the words are sentence case with no full
+  stop, a viewer who may not write has
+  fewer keys and none that writes, and the keys, zones and words are the ones written in the
+  harness (the list the Help popup shows: a change of wording shows there).
+- `node/nightdrive-keys.mjs`: Night drive's `↑` and `↓` (`themes/nightdrive/volume-keys.js`) bound
+  from its key table by the core's real binding: one step a press, no scroll, the system's repeat
+  is no second press, nothing while a control has the focus, something stands over the page, with
+  a modifier or once another listener took the key; the keys go with the mount.
+- `node/core-driver.mjs`: the core's test driver for the device's facts (`core/driver.js`), over fake
+  theme drivers: a label of `deviceFactsOf` of the device the caller names is handed to the mounted
+  theme's driver; a theme's fact (Cover), an unknown label, a target, no device named, a device the
+  page does not hold or does not show and a theme without a driver are refused (`false`, `null`, no
+  throw); the theme mounted now is the one that answers.
 - `node/core-prefs.mjs`, `core-registry.mjs`, `core-climb.mjs`, `core-loop.mjs`: the core's
   preferences and light or dark (storage that refuses, the choice and its cookie, the system's
   setting followed until overridden), the theme registry (a theme that throws or cannot run falls
@@ -295,6 +493,25 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   on every kind of device at 1280 and 390 px. `WEB_CHECK_THEMES` (a comma list, as
   `WEB_CHECK_THEMES=paper`) limits it and `completeness.py` to the named themes while one is being
   worked on; unset, both run every listed theme, and a name the page does not list fails the pass.
+- `keys.py`: a listed key is bound and a bound global key is listed, in every theme the registry
+  lists, from the key table the theme gives the frame (`core.frame.keyTable()`): each key of the
+  page that applies is pressed with the real keyboard and its `run` is called once (a spy over the
+  entry's `run`; Ember's volume, mute, preset and Arrange keys and Night drive's arrows are also
+  read off the page), keys with no entry of the page call no `run` and leave the page as it was,
+  an entry whose `when` is false (a guest's keys that write, Ember's `v` with no visualizer card)
+  is neither listed nor bound, and every widget entry is seen once with an element in its zone, on
+  the page as it opens or in a state the check puts it in (a list, a question, the sheet, Arrange
+  mode, the computer's side). It counts the key listeners too: `addEventListener` of the window
+  and the document is wrapped before the page's scripts (at `EventTarget.prototype`, which
+  every way of adding one ends in), and no file of a theme has more key listeners on at once
+  than `LISTENERS` of `scripts/theme-css-check.py` gives it, with the binding's one in
+  `core/keys.js` and none whose adder is no script of the page. A key of the page that the theme's own listener answers (`own`;
+  no theme has one now) is pressed and the page's answer read. It opens the Help popup on each
+  page and in each state and holds its rows to `core.keys.listed`
+  (`help_shows_the_tables_and_nothing_else`). The static half is `make theme-css-check`,
+  rule 5: a key a script compares a key press with is in the table, and no theme file listens
+  for a key on the window or the document outside the table's binding, as far as a pattern over
+  one file reads (the script's header says what it cannot see).
 - `frame_button.py`: the frame's menu button is the same in every theme the registry lists (Night drive
   too): 44 by 44 px, 8 px from the top and the right, at 1280x800, 768x1024, 412x915 and 360x780, for a
   signed-in viewer and a guest, and nothing the theme draws stands under it, with the scrolled case really
@@ -303,14 +520,56 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   is posted (relative `api/v1/host/press`) and the page does not scroll; on a focused button that button is
   activated and nothing is posted; an open menu owns the key; in a text field it types; with no player on the page
   nothing is posted.
+- `modal.py`: the core's modal layer and router in a browser, in all four themes, with a probe modal and a probe
+  popup: Space, Ember's ArrowLeft and Night drive's ArrowUp write with nothing open (the control) and no key
+  writes or opens anything behind a modal of the stack or behind the question, Tab stays in it, `T` opens
+  nothing under a theme's own sheet,
+  Escape closes it with the focus back on its opener; a device switch and a theme switch close every modal;
+  Back steps the popup page → list → closed and reads no device, Escape lands on the entry the popup was
+  opened from and Forward after it opens nothing, two of the router's own steps in a row land where they
+  should (a real history takes both, jsdom's does not); a toast is centred up to `PHONE_MAX_PX`.
+- `popups.py`: a popup's frame (`core/popups/`) in a browser, in all four themes, at 1280 px and at
+  390 px: one loop over the themes and over the popups of its `POPUPS` table (the sample and
+  Help, which also has its menu row, `?`, a guest, the tab's title, Back's steps, a page with no
+  control and a click on empty ground; `WEB_CHECK_SHOTS=<folder>` writes a picture of Here over
+  each theme), so a popup is added
+  as a row of data (`title`, `folder`, `add`, `entries`, `ask`, `form`, `list`, `extra`), never as a loop or a
+  check of its own. It holds what no node harness can see: nothing under the popup's folder is
+  requested before the first open; the box is on top at its centre and the veil at the window's
+  corners (`elementFromPoint`, over Night drive's canvas and Ember's smoke); the page behind is
+  inert; Tab stays inside, past a control the layout does not show; the list and the page stand
+  side by side; the box's ground and the
+  title's colour are the theme's `--frame-surface` and `--frame-ink` in each scheme the theme has,
+  and the themes do not all give one ground; nothing scrolls sideways; a list's panel stands
+  inside the box, on top, and goes with its chip when the pane is scrolled; Escape closes an open
+  inline ask alone and then the popup, with the focus back where it was and the device the same;
+  Back closes it and reads no device; a press in the name field let go on the veil keeps the
+  popup and its text, and a click on the veil closes it; the veil contains its overscroll (in
+  Chromium a wheel over it leaves the page where it was; in Firefox, whose WebDriver wheel does
+  not pass through the compositor that keeps the rule, the sheet's values are read); the box
+  opens with no animation, and with the token set by the check an entry animation starts once
+  an opening and runs on over the module's arrival; the router says nothing in the console (the check opens a popup by a
+  real click on a button it adds for that click, and steps by a real click), and does say it for
+  an open by script once the last tap has worn off; on a phone the box is the window, shows the
+  list or the page and the way back. Today's one row is the sample popup, which the check adds to the core
+  it holds. It imports `modal.py`'s helpers (`check`, `poll`, `load`, the page expressions);
+  `modal.py` keeps the stack's own rules (who owns a key, the history's steps, a device or a
+  theme switch), on its probe modal and probe popup. `WEB_CHECK_POPUPS=sample` limits it to the
+  named popups, `WEB_CHECK_THEMES` to the named themes.
 - `ember_link.py`: Ember's connection state as a dot after the shown device's name (an image named by
   the state's words, not a tab stop): every state's word (`not connected`, `connecting…`, connected),
   its place after a switch of two devices, a long name, and the muted volume reading `−∞ dB`.
 - `completeness.py`: every target and fact of `core/contract.js` (and the computer's `computerTargetsOf`, reached by every theme) on a Gungnir 2 with a player, an
   amp with a signal, a five-meter amp, a mono amp and a Loki Max (one daemon,
   `Daemon(fleet=[(profile, name, udid)])`), in Chromium, for each theme the page lists: reached,
-  operated, and the change read back from the model route; every fact shown with the model's words (the
-  track's cover is one: shown by every theme as the picture asked for by its version).
+  operated, and the change read back from the model route; every fact shown with the model's words, by
+  two drivers: the device's facts (`deviceFactsOf`: the Device section and the reading rows) through the
+  core's driver (`core.driver`, given the device by its url), the theme's facts (`themeFactsOf`: the
+  track's cover, shown by every theme as the picture asked for by its version) through the theme's own
+  driver (`core.theme.driver`). What there is to prove is held on every theme and device (the page and
+  the computer's side list targets, the theme's list of facts is not empty, the Gungnir 2 has its player,
+  its transport targets and its cover), and once per theme the ages step: every cell with `data-heard-at`
+  has words and a reading's age that stayed in place says other words 2.2 s later.
 - `node/core-computer.mjs`: the core's computer side on fakes for the post, the read, the clock and the
   question: the side kept per viewer, the switch, a flip that writes nothing, the shelves of the curve,
   the steps, the point a tap or `+ Add point` makes, a drag's pace and its release, the value held while
@@ -331,9 +590,9 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   tap, a tap on a full table, the touch listeners that come off, the held values and the label's
   words, the point in hand after a remove, a burst whose point is removed or listed elsewhere.
 - `computer_core.py`: the computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
-  the host event, every action's request and read-back, a refusal, the side kept across a reload with no
-  write, a point write's slot (and a stale table, and a 409 for a point that moved), an unavailable computer
-  (`SVOLDER_FAKE_HOST_EQ=off`), the question card's keys and buttons, the hand built over the core, and the same preset on both sides with
+  the host event, every action's route and read-back (a refusal in the same page), the side kept across a
+  reload with no write, a stale table (and a 409 for a point that moved), an unavailable computer
+  (`SVOLDER_FAKE_HOST_EQ=off`), the question card's keys and buttons, and the same preset on both sides with
   its yes. Each theme's check also proves that Enter on an untouched cell writes nothing.
 - `computer_ember.py`: Ember's computer side in a real page (both browsers, `SVOLDER_HOST=fake`, no PipeWire):
   the switch, the knob in %, the points' table, the curve under the mouse (tap, drag, wheel, right drag), a
@@ -353,14 +612,14 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   `This computer` whole from 600 px up; a finger and a pinch in Chromium. It saves the
   computer side, desktop and phone, the sheet shut and open, in the web-shots folder `nightdrive`.
 - `core_rows.py`: the core's rows Ember does not use, from a test page: a second device followed
-  over one stream, a hop added, the menu's fade, a band moved by `core.drag` from plain
+  over one stream, a hop added, the menu's fade, a band moved by `core.eq.bands` from plain
   coordinates, light and dark following the system (Chromium), a canvas loop that pauses while the
-  page is hidden, a theme unmounted and mounted again, the tab's title on Ember, Paper, Signal and Night drive (connected,
+  page is hidden, a theme unmounted and mounted again, the tab's title on Ember (connected,
   reconnecting, a device switch), and Ember mounted while the stream is lost.
 - `node/paper-tokens.mjs`, `node/paper-words.mjs`, `node/paper-live.mjs`, `node/paper-ruler.mjs`, `node/paper-draw.mjs`, `node/paper-notes.mjs`: the theme Paper's tokens
   (AA on its sheet in light and dark paper, the two dark blocks alike, every frame colour token set,
   the planned values), its words (the title's line, the footer's date, only characters its fonts
-  carry) and its sheet and what keeps it current (`draw/sheet.js`, `live.js`, `act.js`, `place.js`:
+  carry) and its sheet and what keeps it current (`draw/sheet.js`, `live.js`, `place.js`:
   which sections a change draws, a held section waiting for the newest model, the log of what the
   page asked, marks placed through the style object) and its volume's ruler (the steps' places,
   the labels at each 10 dB read off the device's table, the ticks, the zones, the drawn section) and
@@ -394,7 +653,7 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `node/signal-draw.mjs`: what Signal draws of a DAC's first screen (`themes/signal/draw/`): the
   volume with its unit, the curve with a point on each band, the input chips and the mode row (the
   Loudness chip's round `−` and `+`; the mode under the curve on a phone, heading the shelf's middle
-  column on a desktop, the input and presets first in a phone's shelf), the Add device row of the
+  column on a desktop, the input and presets first in a phone's shelf), the Add to the chain row of the
   menu, the Now playing bar with its progress, the shelf, a live amp's area (power, meters, Unlink), the player's and the computer's
   open areas (the computer read only), the card of a device in trouble and the broken line, what a guest's or a
   read-only viewer's controls owe (drawn inert), no `style` attribute and escaped words.
@@ -416,7 +675,7 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   live dot with its power, switches and meters, its writes going to its own URL, the DAC's volume
   written under its name while the amp is chosen, the device list opened by the DAC's name, a chosen
   amp that leaves the fleet, Unlink asked once and the amp left standing alone, and a guest's taps; the
-  menu's Add device… row and the sheet that declares a hop (checked against `svolder hops list` on the same temp homes), a declared hop's
+  menu's Add to the chain… row and the sheet that declares a hop (checked against `svolder hops list` on the same temp homes), a declared hop's
   Edit in place, Move earlier / later and Remove asked once, a hop removed elsewhere, and a guest's taps on them; the player
   chosen (its transport, the bottom bar hidden), the computer's read-only facts, a lost device's card with Try now and the
   seconds, a lost stream (`Reconnecting to svolder…`, faded, inert) and a refused write's toast; the
@@ -429,7 +688,7 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   `contract.py` and `completeness.py` run Signal through its test driver (`themes/signal/driver.js`)
   like every listed theme.
 - `signal_shots.py` (`make signal-shots`, Chromium): Signal's stills, a DAC at desktop width, with the
-  linked amp chosen, with a declared hop chosen, with its link lost, the Add device sheet open, the linked amp shown on its own page, a tablet (768 px), and a phone
+  linked amp chosen, with a declared hop chosen, with its link lost, the Add to the chain sheet open, the linked amp shown on its own page, a tablet (768 px), and a phone
   at rest and scrolled with the strip pinned, into `target/web-shots/signal`; no check, only pictures.
 - `nightdrive_shots.py` (`make nightdrive-shots`, Chromium): Night drive's stills on the fake capture's
   music, a desktop at rest, with a bubble held, with the sheet open, with the device out of reach and with no
@@ -638,7 +897,7 @@ web gate lock (`/tmp/svolder-web-gate.lock`) held shared around a run and exclus
   side: the drawing through `node/ember-parts.mjs`, the wiring through `computer_ember.py`, each
   killed only by a case that names it), `mutate_signal.py` (26 mutants of Signal's page:
   the amp's write without the amp's url, the dots ignoring reduced motion, the slim bar never
-  pinning, a held plus that never repeats, a blur that does not stop a hold, a pinch the wrong way, a tall window that stretches, a shelf of three columns, the Add device row opening the sheet for a guest (the core refuses a guest's post, so the sheet
+  pinning, a held plus that never repeats, a blur that does not stop a hold, a pinch the wrong way, a tall window that stretches, a shelf of three columns, the Add to the chain row opening the sheet for a guest (the core refuses a guest's post, so the sheet
   is what can be mutated), the strip not centring, each killed only by the check it names; it drives `signal_theme.py` and `computer_signal.py`, the pool runs the mutants,
   then again alone each one it did not kill and the five whose check measures repeat timing)
   `mutate_nightdrive.py` (Night drive's page, Chromium, 55 mutants: a sky drawn twelve times in every draw, a loop each mount starts and nothing ends, a long press that presses on its release, a first tap on a faded dash let through, a wet-road copy made a tenth of a second apart, an amp's meters heard as a part, the fade not woken by focus, trouble fading, the analysis kept while hidden, reduced motion starting on Full, Still at the screen's rate, a dash hold that never repeats, a diamond drag that writes nothing, a pinch on band 1, hit tests in canvas pixels, a switch that lets a drag write, a guest's morph, a first touch that grabs, a question that sends early or on Keep, a band field or a list chip that writes when it should not, the core letting a guest's call go out, the sheet's focus not given back, its columns swapped, the menu button following the page on a phone, Space playing under the menu, a 30 px picker close key; each run names the cases of `nightdrive_theme.py`, `nightdrive_sheet.py`, `nightdrive_phone.py`, `nightdrive_states.py`, `space_key.py` or `effects_menu.py` it needs, runs them unmutated first and counts a kill only when a check the mutant names fails)

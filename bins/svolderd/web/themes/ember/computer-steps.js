@@ -32,7 +32,7 @@ export function pressed(event) {
   if (event.button !== 0 || off(button) || !usable()) return true;
   const { param, dir } = button.dataset;
   const same = `#part-tone [data-comp="step"][data-param="${param}"][data-dir="${dir}"]`;
-  ember.core.hold.repeat(event, {
+  ember.core.repeat(event, {
     root: document.body,
     el: button,
     step: (el) => step(el, true),

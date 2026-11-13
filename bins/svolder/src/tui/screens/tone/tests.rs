@@ -1657,29 +1657,97 @@ fn the_curve_is_drawn_over_the_gap() {
     }
 }
 
-/// The header says how well the bands fit — `fit 0.9 dB` — after the preset's name, for an
-/// imported preset only, and a band preset's header is as it was.
+/// The preview of the imported preset `Phones` against the bands standing on the device now,
+/// worked out as the daemon's overlay works it out: `Preview::of_bands` (which reads the shared
+/// `fit::miss`) on the web's `PREVIEW_POINTS` points.
+fn preview_of_the_bands_on_the_device(app: &App) -> svolder_profiles::tone::fit::Preview {
+    use svolder_profiles::tone::fit::{PREVIEW_POINTS, Preview};
+    use svolder_profiles::tone::response::{BandParams, log_freqs};
+    let eq = app.profile.eq.as_ref().expect("a tone control");
+    let correction = &app.presets.saved[0]
+        .source
+        .as_ref()
+        .expect("an imported preset")
+        .correction;
+    let bands: Vec<BandParams> = (0..eq.bands.len())
+        .map(|band| {
+            let raw = |param| {
+                let id = eq.band_id(band, param).expect("a band");
+                u8::try_from(app.raw_of(id).expect("a band that is read")).expect("a step")
+            };
+            BandParams {
+                f0: eq
+                    .frequency(band, raw(svolder_profiles::EqParam::Frequency))
+                    .expect("a frequency"),
+                gain_db: eq.gain_db(raw(svolder_profiles::EqParam::Gain)),
+                q: eq.q(raw(svolder_profiles::EqParam::Q)),
+            }
+        })
+        .collect();
+    Preview::of_bands(correction, &bands, &log_freqs(PREVIEW_POINTS))
+}
+
+/// How far those bands miss the preset, in dB RMS.
+fn rms_of_the_bands_on_the_device(app: &App) -> f64 {
+    preview_of_the_bands_on_the_device(app)
+        .fit
+        .expect("a device preview has a fit")
+        .rms_db
+}
+
+/// The header says how well the bands on the device fit the imported preset — `fit 0.9 dB` —
+/// after the preset's name, for an imported preset only, and a band preset's header is as it was.
+/// The figure is the bands' own, as the web page's overlay says it: it moves with a band edit
+/// and is not the preset's own fit, which only the bands the fit made have.
 #[test]
-fn the_header_names_the_fit_of_an_imported_preset() {
+fn the_header_names_the_fit_of_the_bands_against_an_imported_preset() {
     let app = fitted_app();
-    let rms = {
-        let eq = app.profile.eq.as_ref().unwrap();
-        let imported = app.presets.saved[0].source.as_ref().unwrap();
-        svolder_profiles::tone::preset::fit_for(eq, imported).rms_db
-    };
+    let on = rms_of_the_bands_on_the_device(&app);
     let at = |app: &App, width| header_row(app, width, 30);
     let header = at(&app, 126);
-    let want = format!("Preset Phones  fit {rms:.1} dB");
+    let want = format!("Preset Phones  fit {on:.1} dB");
     assert!(header.contains(&want), "|{header}|");
     assert!(!at(&app, 80).contains("fit "), "no room at 80 columns");
-    let changed = at(&imported_app(), 126);
+
+    // Loaded with changes: the bands are band 2 lifted, and the header says how far those miss.
+    let changed = imported_app();
+    let off = rms_of_the_bands_on_the_device(&changed);
     assert!(
-        changed.contains(&format!("Preset Phones*  fit {rms:.1} dB")),
-        "|{changed}|"
+        (off - on).abs() >= 0.1,
+        "the two cases must differ for this to mean something: {on} {off}"
+    );
+    let header = at(&changed, 126);
+    assert!(
+        header.contains(&format!("Preset Phones*  fit {off:.1} dB")),
+        "|{header}|"
     );
     let mut warm = flat_app();
     warm.presets.loaded_preset = Some("Warm".into());
     let header = at(&warm, 126);
+    assert!(!header.contains("fit "), "|{header}|");
+}
+
+/// A band edit moves the header's figure at once, with no new load of the preset: the figure
+/// follows the bands the device holds, a dragged point's value included, and is left out while a
+/// band is unread, as the page leaves out its overlay.
+#[test]
+fn a_band_edit_moves_the_headers_fit_and_an_unread_band_leaves_it_out() {
+    let mut app = fitted_app();
+    let before = header_row(&app, 126, 30);
+    // Band 2 up to +6 dB, as a key press on the gain row would leave it.
+    hear(&mut app, vec![vo("12.2.3", 127)]);
+    let after = header_row(&app, 126, 30);
+    let rms = rms_of_the_bands_on_the_device(&app);
+    assert!(after.contains(&format!("fit {rms:.1} dB")), "|{after}|");
+    assert_ne!(before, after, "the edit left the header as it was");
+
+    let mut unread = imported_app();
+    let eq = unread.profile.eq.clone().expect("a tone control");
+    let gain = eq
+        .band_id(1, svolder_profiles::EqParam::Gain)
+        .expect("a band of the profile");
+    unread.readings.values.remove(&gain);
+    let header = header_row(&unread, 126, 30);
     assert!(!header.contains("fit "), "|{header}|");
 }
 
@@ -2401,5 +2469,37 @@ fn the_tone_screen_at_80_by_24_keeps_its_blocks_whole() {
             .count()
             >= 3,
         "{rows:#?}"
+    );
+}
+
+/// The side pane's fit line is the bands on the device's too, in the header's words and on the
+/// header's points: after a band edit the pane and the header say one figure, and the pane's
+/// worst miss and volume to lower are the bands' own.
+#[test]
+fn the_side_pane_says_the_fit_of_the_bands_on_the_device() {
+    let app = imported_app();
+    let preview = preview_of_the_bands_on_the_device(&app);
+    let words = preview.fit_line().expect("a device preview has a fit");
+    let rows = text(&frame_with_theme(&app, 126, 30, &Theme::new(false))).join(" ");
+    let squeezed = rows.split_whitespace().collect::<Vec<_>>().join(" ");
+    // The pane wraps the line, so its first words are looked for whole.
+    let fit = preview.fit.as_ref().expect("a device preview has a fit");
+    let first = format!(
+        "fit {:.1} dB RMS · worst {:.1} dB",
+        fit.rms_db, fit.worst_db
+    );
+    assert!(squeezed.contains(&first), "{first:?} not in |{squeezed}|");
+    let own = svolder_profiles::tone::preset::fit_for(
+        app.profile.eq.as_ref().unwrap(),
+        app.presets.saved[0].source.as_ref().unwrap(),
+    )
+    .line();
+    assert_ne!(
+        words, own,
+        "the fixture must differ from the preset's own fit"
+    );
+    assert!(
+        !squeezed.contains(&own),
+        "the preset's own fit is on the pane"
     );
 }

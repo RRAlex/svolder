@@ -49,11 +49,11 @@ fn devices_are_added_updated_and_removed_without_touching_the_rest() {
     assert!(text.contains("adapter = \"hci1\" # dongle"), "{text}");
     assert!(matches!(
         Config::remove_device(&path, "nobody"),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Missing { kind: "device", .. })
     ));
     assert!(matches!(
         Config::update_device(&path, "nobody", &dac),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Missing { kind: "device", .. })
     ));
 }
 
@@ -95,7 +95,7 @@ fn a_device_whose_name_is_taken_is_refused() {
     let before = std::fs::read_to_string(&path).unwrap();
     let err = Config::add_device(&path, &device("DAC", "0102030405060708")).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("dac")),
+        matches!(&err, ConfigError::Taken { kind: "device", name } if name == "dac"),
         "got {err:?}"
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
@@ -104,7 +104,7 @@ fn a_device_whose_name_is_taken_is_refused() {
     let before = std::fs::read_to_string(&path).unwrap();
     let err = Config::update_device(&path, "dac", &device("AMP", "1112131415161718")).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("amp")),
+        matches!(&err, ConfigError::Taken { kind: "device", name } if name == "amp"),
         "got {err:?}"
     );
     assert_eq!(
@@ -275,4 +275,127 @@ fn an_edit_that_cures_a_duplicate_unit_is_accepted() {
     let after = Config::parse_strict(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!(after.dropped_duplicates.is_empty());
     assert_eq!(after.devices.len(), 2);
+}
+
+/// A name that is none (blank, longer than a name may be, holding a control character) is
+/// refused by the add and by a rename onto it, as a hop's is, with a refusal whose reason on the
+/// wire is `invalid`; the file is left as it was. A block that already carries such a name is
+/// still edited under it.
+#[test]
+fn a_device_name_that_is_none_is_refused_as_invalid() {
+    use crate::socket::protocol::Reason;
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    Config::add_device(&path, &device("dac", "1112131415161718")).unwrap();
+    let before = std::fs::read_to_string(&path).unwrap();
+    let long = "x".repeat(41);
+    for bad in ["", "   ", "a\nb", long.as_str()] {
+        let added = Config::add_device(&path, &device(bad, "0102030405060708")).unwrap_err();
+        assert!(matches!(added, ConfigError::Parse(_)), "{bad:?}: {added:?}");
+        assert_eq!(added.reason(), Reason::Invalid);
+        let renamed =
+            Config::update_device(&path, "dac", &device(bad, "1112131415161718")).unwrap_err();
+        assert!(
+            matches!(renamed, ConfigError::Parse(_)),
+            "{bad:?}: {renamed:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+    assert_eq!(
+        Config::add_device(&path, &device("", "0102030405060708"))
+            .unwrap_err()
+            .to_string(),
+        "config: a device needs a name"
+    );
+    let bad_hop = Config::add_hop(
+        &path,
+        &Hop {
+            what: HopWhat::Declared {
+                kind: HopKind::Amp,
+                name: " ".into(),
+            },
+            note: None,
+            after: None,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(bad_hop.reason(), Reason::Invalid);
+
+    // A name written with blanks round it is stored without them.
+    Config::add_device(&path, &device(" amp ", "0102030405060708")).unwrap();
+    // A file written before the rule keeps its long name through an edit of something else.
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("\"amp\"", &format!("\"{long}\""));
+    std::fs::write(&path, text).unwrap();
+    let mut kept = device(&long, "0102030405060708");
+    kept.passphrase = "1234".into();
+    Config::update_device(&path, &long, &kept).unwrap();
+    let config = Config::load_from(&path).unwrap();
+    assert_eq!(config.devices[1].name, long);
+    assert_eq!(config.devices[1].passphrase, "1234");
+}
+
+/// The writers that take a selector find the device and write it under the file's one lock: a
+/// second writer that comes while the first is between its find and its write waits for it and
+/// builds on what it wrote, so neither change is lost. The selector is a configured name or a
+/// whole unit id, neither case-sensitive, and one that names nothing is refused as missing.
+#[test]
+fn a_selected_device_is_found_and_written_under_one_lock() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    Config::add_device(&path, &device("dac", "1112131415161718")).unwrap();
+    let (found, proceed) = std::sync::mpsc::channel();
+    let first = std::thread::spawn({
+        let path = path.clone();
+        move || {
+            Config::patch_device(&path, "DAC", |current| {
+                found.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                Ok(DeviceConfig {
+                    profile: Some("bifrost3".into()),
+                    ..current.clone()
+                })
+            })
+        }
+    });
+    proceed.recv().unwrap();
+    Config::patch_device(&path, "1112131415161718", |current| {
+        Ok(DeviceConfig {
+            passphrase: "1234".into(),
+            ..current.clone()
+        })
+    })
+    .unwrap();
+    first.join().unwrap().unwrap();
+    let config = Config::load_from(&path).unwrap();
+    assert_eq!(config.devices[0].profile.as_deref(), Some("bifrost3"));
+    assert_eq!(config.devices[0].passphrase, "1234");
+
+    // The default is written under the name the file spells, only for a device it configures.
+    Config::default_to_device(&path, "1112131415161718").unwrap();
+    assert_eq!(
+        Config::load_from(&path).unwrap().default_device.as_deref(),
+        Some("dac")
+    );
+    for refused in [
+        Config::default_to_device(&path, "nobody"),
+        Config::remove_selected_device(&path, "0102030405060708"),
+        Config::patch_device(&path, "nobody", |current| Ok(current.clone())),
+    ] {
+        assert!(
+            matches!(&refused, Err(ConfigError::Missing { kind: "device", .. })),
+            "{refused:?}"
+        );
+    }
+    // A patch that refuses writes nothing.
+    let before = std::fs::read_to_string(&path).unwrap();
+    let refused = Config::patch_device(&path, "dac", |_| Err(ConfigError::Parse("no".into())));
+    assert!(matches!(refused, Err(ConfigError::Parse(_))));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+    Config::remove_selected_device(&path, "Dac").unwrap();
+    let config = Config::load_from(&path).unwrap();
+    assert!(config.devices.is_empty());
+    assert_eq!(config.default_device, None);
 }

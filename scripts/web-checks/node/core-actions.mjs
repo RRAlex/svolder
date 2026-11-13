@@ -28,7 +28,9 @@ const pageOf = (viewer, over = {}) => ({
 const SIGNED = { signed_in: true, guest: false, writes: true, read_only: null };
 
 // Everything the actions touch, faked. `reply(path, body)` answers a post: a status and JSON.
-function rig({ viewer = SIGNED, page, reply = () => ({ status: 200 }), model } = {}) {
+function rig({
+  viewer = SIGNED, page, reply = () => ({ status: 200 }), model, needs = [],
+} = {}) {
   const posts = [];
   const gets = [];
   const toasts = [];
@@ -48,6 +50,7 @@ function rig({ viewer = SIGNED, page, reply = () => ({ status: 200 }), model } =
     toast: (text, action) => toasts.push(action ? [text, action] : [text]),
     history: { pushState: (...args) => pushed.push(args) },
     location: { assign: (to) => assigned.push(to) },
+    needs: () => needs,
   });
   return { store, actions, posts, gets, toasts, pushed, assigned };
 }
@@ -306,6 +309,67 @@ await ok('a_device_that_cannot_be_shown_stays_and_says_so', async () => {
   const out = rig({ model: () => ({ status: 401, body: {} }) });
   await out.actions.showDevice('Amp');
   assert.deepEqual(out.assigned, ['./']);
+});
+
+await ok('every_device_action_acts_on_the_shown_device_when_it_names_none', async () => {
+  const table = [
+    [(a) => a.setVolume(30), 'volume'], [(a) => a.setControl('input', { value: 'USB' }), 'controls/input'],
+    [(a) => a.setMode('eq'), 'eq/mode'], [(a) => a.setBand(2, 'g', { step: 1 }), 'eq/bands/2'],
+    [(a) => a.setLoudness({ step: -1 }), 'eq/loudness'], [(a) => a.recallPreset('W'), 'presets/recall'],
+    [(a) => a.savePreset('M'), 'presets'], [(a) => a.renamePreset('M', 'Y'), 'presets/rename'],
+    [(a) => a.deletePreset('M'), 'presets/delete'], [(a) => a.recallSlot(2), 'device-presets/recall'],
+    [(a) => a.saveSlot(2, true), 'device-presets/save'], [(a) => a.applySetting('W'), 'device-presets/apply'],
+    [(a) => a.connect(), 'connect'], [(a) => a.identify(), 'identify'], [(a) => a.stopClimb(), 'volume/stop'],
+  ];
+  for (const [run, path] of table) {
+    const { actions, posts } = rig();
+    await run(actions);
+    assert.equal(posts[0]?.[0], `api/v1/devices/Gungnir%202/${path}`, path);
+  }
+});
+
+await ok('every_device_action_acts_on_the_device_it_names_while_another_is_shown', async () => {
+  const B = { device: 'Amp' };
+  const table = [
+    [(a) => a.setVolume(30, B), 'volume', { raw: 30 }],
+    [(a) => a.setControl('input', { value: 'USB' }, B), 'controls/input', { value: 'USB' }],
+    [(a) => a.setMode('eq', B), 'eq/mode', { mode: 'eq' }],
+    [(a) => a.setBand(2, 'g', { step: 1 }, B), 'eq/bands/2', { param: 'g', step: 1 }],
+    [(a) => a.setLoudness({ step: -1 }, B), 'eq/loudness', { step: -1 }],
+    [(a) => a.recallPreset('Warm', B), 'presets/recall', { name: 'Warm' }],
+    [(a) => a.savePreset('Mine', B), 'presets', { name: 'Mine' }],
+    [(a) => a.renamePreset('Mine', 'Yours', B), 'presets/rename', { from: 'Mine', to: 'Yours' }],
+    [(a) => a.deletePreset('Mine', B), 'presets/delete', { name: 'Mine' }],
+    [(a) => a.recallSlot(2, B), 'device-presets/recall', { slot: 2 }],
+    [(a) => a.saveSlot(2, true, B), 'device-presets/save', { slot: 2, confirm: true }],
+    [(a) => a.applySetting('Warm', B), 'device-presets/apply', { name: 'Warm' }],
+    [(a) => a.connect(B), 'connect', {}],
+    [(a) => a.identify(B), 'identify', {}],
+    [(a) => a.stopClimb(B), 'volume/stop', {}],
+  ];
+  for (const [run, path, body] of table) {
+    const { actions, posts, store } = rig();
+    assert.equal(store.shown(), 'Gungnir%202');
+    await run(actions);
+    assert.deepEqual(posts, [[`api/v1/devices/Amp/${path}`, body]], path);
+  }
+  // with nothing shown, a call that names no device is turned back and one that names it writes
+  const empty = rig({ page: pageOf(SIGNED, { shown: null, device: null, followed: {} }) });
+  const lost = await empty.actions.setControl('input', { value: 'USB' });
+  assert.equal(lost.ok, false);
+  assert.equal(lost.error, 'No device is shown.');
+  assert.deepEqual(empty.posts, []);
+  await empty.actions.setControl('input', { value: 'USB' }, B);
+  assert.deepEqual(empty.posts, [['api/v1/devices/Amp/controls/input', { value: 'USB' }]]);
+});
+
+await ok('show_device_asks_for_the_strip_only_when_an_owner_needs_it', async () => {
+  const plain = rig({ needs: ['meters', 'host'] });
+  await plain.actions.showDevice('Amp');
+  assert.deepEqual(plain.gets, ['api/v1/devices/Amp/model'], 'no strip for a theme that draws none');
+  const drawn = rig({ needs: ['meters', 'strip'] });
+  await drawn.actions.showDevice('Amp');
+  assert.deepEqual(drawn.gets, ['api/v1/devices/Amp/model?strip=1']);
 });
 
 await ok('show_device_pushes_the_address', async () => {

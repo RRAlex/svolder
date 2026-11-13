@@ -581,10 +581,9 @@ fn the_key_row_and_the_help_overlay_name_the_new_keys() {
 /// The search box at 80×24, with the index held, a query typed and the focus on the second
 /// measurement of a headphone that two sources measured. usage/tui.md shows this very frame.
 fn searching_frame() -> Vec<String> {
-    let mut app = crate::tui::test_support::presets::searching(
-        crate::tui::test_support::presets::two_headphones(),
-    );
-    crate::tui::test_support::type_text(&mut app, "hd 6");
+    let entries = crate::tui::test_support::presets::two_headphones();
+    let mut app = crate::tui::test_support::presets::searching(&entries);
+    crate::tui::test_support::presets::search_typing(&mut app, &entries, "hd 6");
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Down);
     let (buffer, _) = frame(&app, (80, 24), &Theme::new(false));

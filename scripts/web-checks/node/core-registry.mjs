@@ -195,4 +195,66 @@ await ok('the_list_and_get_give_what_the_page_was_told_and_add_extends_it', asyn
   assert.ok(registry.loaded('extra'));
 });
 
+await ok('what_mount_returns_is_the_mounted_instance_and_the_hooks_are_told', async () => {
+  const told = [];
+  const registry = createRegistry(LIST, {
+    afterMount: (t, instance) => told.push(['mounted', t.id, instance]),
+    afterUnmount: (t, instance) => told.push(['unmounted', t.id, instance]),
+  });
+  const rows = () => [{ kind: 'heading', text: 'x' }];
+  const keys = [{ key: 'm', zone: 'page', words: 'Mute' }];
+  let left = 0;
+  const made = { unmount() { left++; }, menuRows: rows, keys };
+  registry.add(theme('ember'));
+  registry.add(theme('probe', { mount: () => made }));
+  const mount = (id) => mountTheme({ registry, id, root: {}, core: {}, toast() {} });
+  const mounted = await mount('probe');
+  assert.equal(mounted.instance, made, 'the very object the theme returned');
+  assert.deepEqual(told, [['mounted', 'probe', made]]);
+  await mounted.unmount();
+  assert.equal(left, 1);
+  assert.deepEqual(told.at(-1), ['unmounted', 'probe', made]);
+  assert.equal(told.length, 2);
+});
+
+await ok('a_theme_that_returns_a_bare_function_or_nothing_still_mounts_and_unmounts', async () => {
+  const told = [];
+  const registry = createRegistry(LIST, {
+    afterMount: (t, instance) => told.push(['mounted', t.id, instance]),
+    afterUnmount: (t, instance) => told.push(['unmounted', t.id, instance]),
+  });
+  let left = 0;
+  registry.add(theme('ember', { mount: () => () => { left++; } }));
+  registry.add(theme('probe', { mount: () => undefined }));
+  const mount = (id) => mountTheme({ registry, id, root: {}, core: {}, toast() {} });
+  const bare = await mount('ember');
+  assert.equal(bare.instance, null, 'a bare function is the unmount and no instance');
+  await bare.unmount();
+  assert.equal(left, 1);
+  const none = await mount('probe');
+  assert.equal(none.id, 'probe');
+  assert.equal(none.instance, null);
+  await none.unmount();
+  assert.deepEqual(told, [
+    ['mounted', 'ember', null], ['unmounted', 'ember', null],
+    ['mounted', 'probe', null], ['unmounted', 'probe', null],
+  ]);
+});
+
+await ok('an_unmount_that_throws_still_tells_the_hook_and_aborts_the_signal', async () => {
+  const told = [];
+  const registry = createRegistry(LIST, { afterUnmount: (t) => told.push(t.id) });
+  let signal = null;
+  registry.add(theme('ember', {
+    mount(root, core, given) {
+      signal = given.signal;
+      return { unmount() { throw new Error('stuck'); } };
+    },
+  }));
+  const mounted = await mountTheme({ registry, id: 'ember', root: {}, core: {}, toast() {} });
+  await assert.rejects(mounted.unmount(), /stuck/);
+  assert.equal(signal.aborted, true);
+  assert.deepEqual(told, ['ember']);
+});
+
 console.log(`${n} core-registry checks passed`);

@@ -4,23 +4,24 @@
 //! The `daemon` verbs: what the daemon is doing, what it has said, and how it is installed,
 //! restarted, stopped and taken out again.
 //!
-//! Two machines are served by the same six verbs. On one, systemd owns the daemon: the units
+//! Two machines are served by the same verbs. On one, systemd owns the daemon: the units
 //! this project installs say what it does, `systemctl --user` starts and stops it, and
 //! `journalctl` has its log. On the other there are no units at all (no systemd, or a user who
 //! never installed them), and the daemon is the one a front end started itself: the socket says
 //! whether it is up, a `stop` request stops it, and its log is the file
 //! [`crate::state::log_path`] names. Every verb asks which machine it is on and does the right
-//! one of the two.
+//! one of the two. `reload` is the exception: the socket is the only way to ask for it.
 //!
 //! Everything that runs a program runs it through [`Ctl`], which gives it a deadline and looks
 //! it up on a `PATH` a test can point somewhere else, so no case here needs a systemd.
 //!
 //! This module holds what the verbs share: [`Ctl`], the facts about the units that decide which
-//! machine this is, and the failures they report. The verbs themselves are in four children:
+//! machine this is, and the failures they report. The verbs themselves are in five children:
 //!
 //! - [`status`]: what the daemon is doing, and the units around it.
 //! - [`logs`]: what the daemon has said, read from the journal or the log file.
 //! - [`lifecycle`]: `restart` and `stop`.
+//! - [`reload`]: have the running daemon read its files again.
 //! - [`install`]: writing the units, enabling them, and taking them out again.
 
 use std::ffi::{OsStr, OsString};
@@ -38,6 +39,7 @@ use crate::recovery::{Failure, Kind};
 pub(crate) mod install;
 pub(crate) mod lifecycle;
 pub(crate) mod logs;
+pub(crate) mod reload;
 pub(crate) mod status;
 
 /// Carry out one of the `daemon` sub-commands.
@@ -48,6 +50,7 @@ pub(crate) async fn run(g: &Globals<'_>, command: DaemonCommand) -> ExitCode {
         DaemonCommand::Restart { if_running } => {
             crate::done(lifecycle::restart(g, if_running).await)
         }
+        DaemonCommand::Reload => crate::done(reload::reload(g).await),
         DaemonCommand::Stop => crate::done(lifecycle::stop(g).await),
         DaemonCommand::Install { on_demand } => {
             // A machine that writes no unit files — one that generates them, or a container —
@@ -88,6 +91,9 @@ pub struct Ctl {
     /// Whether the programs run in a process group of their own, out of reach of the Ctrl-C
     /// the terminal sends to this process's group.
     own_group: bool,
+    /// Whether this process runs in a container, where the daemon is the container's own
+    /// process and what it says is the container's log.
+    container: bool,
 }
 
 impl Ctl {
@@ -97,6 +103,7 @@ impl Ctl {
             systemctl: checks::live::systemctl_program(),
             path: None,
             own_group: false,
+            container: checks::live::in_container(),
         }
     }
 
@@ -107,6 +114,13 @@ impl Ctl {
         self
     }
 
+    /// The same programs, as a process in a container runs them.
+    #[cfg(test)]
+    pub(crate) fn in_container(mut self) -> Ctl {
+        self.container = true;
+        self
+    }
+
     /// The programs in `dir`, and nothing else.
     #[cfg(test)]
     fn in_dir(dir: &std::path::Path) -> Ctl {
@@ -114,6 +128,7 @@ impl Ctl {
             systemctl: "systemctl".into(),
             path: Some(dir.as_os_str().to_os_string()),
             own_group: false,
+            container: false,
         }
     }
 
@@ -137,6 +152,7 @@ impl Ctl {
             systemctl: systemctl.into(),
             path: None,
             own_group: false,
+            container: false,
         }
     }
 
@@ -283,6 +299,7 @@ fn trouble(what: String, next: &str) -> Failure {
         code: 1,
         what,
         next: next.to_string(),
+        reason: None,
     }
 }
 

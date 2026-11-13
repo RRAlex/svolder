@@ -41,6 +41,9 @@ impl Handler for Answering {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     }
 

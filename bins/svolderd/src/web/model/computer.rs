@@ -15,7 +15,7 @@ use svolder_profiles::tone::response;
 use crate::web::Web;
 
 /// How many points the curve has, as the tone control's does.
-const POINTS: usize = 181;
+const POINTS: usize = svolder_profiles::tone::fit::PREVIEW_POINTS;
 
 /// The computer's volume as the page draws it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -164,69 +164,12 @@ fn presets_model(
         .collect()
 }
 
-/// What the configuration file's path, modification time and length were when the presets were
-/// read, and the presets.
-type Kept = (
-    std::path::PathBuf,
-    Option<(std::time::SystemTime, u64)>,
-    Vec<Preset>,
-);
-
-/// The saved presets, as the configuration file last read, kept by the file's path, modification
-/// time and length: a host event (up to ten a second while an EQ drag runs) reads nothing, and a
-/// file that does not parse is read, and logged, once per change.
-#[derive(Default)]
-pub(crate) struct SavedPresets(std::sync::Mutex<Option<Kept>>);
-
-/// The saved presets of `web`'s configuration. A fleet with no file of its own is read each time.
-async fn saved_presets(web: &Web) -> Vec<Preset> {
-    let Some(path) = web.fleet.config_path() else {
-        return read_presets(web).await;
-    };
-    let stamp = {
-        let path = path.clone();
-        tokio::task::spawn_blocking(move || {
-            std::fs::metadata(&path)
-                .ok()
-                .and_then(|meta| Some((meta.modified().ok()?, meta.len())))
-        })
-        .await
-        .ok()
-        .flatten()
-    };
-    {
-        let kept = web
-            .saved_presets
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((kept_path, kept_stamp, presets)) = kept.as_ref()
-            && *kept_path == path
-            && stamp.is_some()
-            && *kept_stamp == stamp
-        {
-            return presets.clone();
-        }
-    }
-    let presets = read_presets(web).await;
-    *web.saved_presets
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((path, stamp, presets.clone()));
-    presets
-}
-
-/// The presets the configuration holds, read on a blocking thread; none when it cannot be read.
-async fn read_presets(web: &Web) -> Vec<Preset> {
-    let web = web.clone();
-    tokio::task::spawn_blocking(move || {
-        web.fleet
-            .config()
-            .map(|config| config.presets)
-            .unwrap_or_default()
-    })
-    .await
-    .unwrap_or_default()
+/// The saved presets of `web`'s configuration, as the daemon holds it; none when it has none.
+fn saved_presets(web: &Web) -> Vec<Preset> {
+    web.fleet
+        .config()
+        .map(|config| config.presets.clone())
+        .unwrap_or_default()
 }
 
 /// The computer's controls for a page showing `shown`, from `view`; `None` while the daemon
@@ -240,7 +183,7 @@ pub(crate) async fn computer_model(
         return None;
     }
     let eq = view.eq.as_ref()?;
-    let saved = saved_presets(web).await;
+    let saved = saved_presets(web);
     let on = eq.on.then_some(eq.preset.as_deref()).flatten();
     Some(ComputerModel {
         volume: view.volume.as_ref().map(|v| VolumeModel {

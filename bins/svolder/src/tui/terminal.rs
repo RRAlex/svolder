@@ -4,6 +4,7 @@
 //! Raw-mode terminal setup and teardown, undone on every exit path including a panic.
 
 use std::io::IsTerminal;
+use std::mem::ManuallyDrop;
 use std::time::{Duration, Instant};
 
 use svolder_ipc::Config;
@@ -196,8 +197,9 @@ impl MouseCapture for Mouse {
 /// The terminal and the mouse capture are separate fields so a caller can lend out both at
 /// once: the event loop draws on one and toggles the other.
 pub struct Guard {
-    /// The ratatui terminal, backed by the alternate screen and raw mode.
-    pub terminal: ratatui::DefaultTerminal,
+    /// The ratatui terminal, backed by the alternate screen and raw mode. Never dropped: its
+    /// own drop prints when the cursor cannot be shown, and a hung-up terminal cannot show it.
+    pub terminal: ManuallyDrop<ratatui::DefaultTerminal>,
     /// This terminal's mouse capture.
     pub mouse: Mouse,
 }
@@ -218,10 +220,10 @@ impl Guard {
         std::panic::set_hook(Box::new(move |info| {
             mouse_off_then_flush(&mut Mouse { on: true }, &mut StdinFlush);
             restore_title();
-            ratatui::restore();
+            let _ = ratatui::try_restore();
             hook(info);
         }));
-        let terminal = ratatui::try_init()?;
+        let terminal = ManuallyDrop::new(ratatui::try_init()?);
         let mut guard = Guard {
             terminal,
             mouse: Mouse::default(),
@@ -244,10 +246,13 @@ fn restore_title() {
 impl Drop for Guard {
     /// Turn mouse capture off, drain and discard the input that arrives meanwhile, put the
     /// terminal's own title back, and leave the alternate screen and raw mode, best-effort.
+    ///
+    /// Nothing here prints or panics on a terminal that has hung up: every answer is dropped.
     fn drop(&mut self) {
         mouse_off_then_flush(&mut self.mouse, &mut StdinFlush);
         restore_title();
-        ratatui::restore();
+        let _ = ratatui::try_restore();
+        let _ = self.terminal.show_cursor();
     }
 }
 

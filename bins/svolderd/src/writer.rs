@@ -73,9 +73,10 @@ use crate::log;
 use crate::recall::{self, Applied, Recalled};
 pub use slots::Mode;
 use slots::{Action, Queued, Slots};
+use svolder_ipc::{CODE_LINK, CODE_TIMEOUT, CODE_USAGE};
 
 /// The longest a write waits to be handed to the actor, and then for the actor's answer.
-const WRITE_DEADLINE: Duration = Duration::from_secs(60);
+pub(crate) const WRITE_DEADLINE: Duration = svolder_ipc::COMMAND_DEADLINE;
 
 /// How long a band written without waiting is awaited for its echo; it mirrors the session's set
 /// timeout (`SessionConfig::set_timeout`).
@@ -114,6 +115,17 @@ impl Origin {
             Origin::Mcp => "mcp",
             Origin::Mqtt => "mqtt",
             Origin::Web => "web",
+        }
+    }
+
+    /// The front end, as a person is told of it: what a refusal that names who holds the job
+    /// says. A terminal's walk is the terminal's, whichever client of the socket it is.
+    pub(crate) fn who(self) -> &'static str {
+        match self {
+            Origin::Socket => "the terminal",
+            Origin::Mcp => "the MCP server",
+            Origin::Mqtt => "the MQTT bridge",
+            Origin::Web => "the web page",
         }
     }
 }
@@ -463,10 +475,9 @@ impl Answer {
                 let _ = glided.send(match outcome {
                     Outcome::Done(response) => Glided::Landed(response),
                     Outcome::Superseded => Glided::Superseded,
-                    Outcome::Cancelled(why) => Glided::Refused(Response::Error {
-                        code: 3,
-                        message: why.to_string(),
-                    }),
+                    Outcome::Cancelled(why) => {
+                        Glided::Refused(Response::error(CODE_LINK, why.to_string()))
+                    }
                 });
             }
             Answer::Step { .. } => {}
@@ -1130,10 +1141,10 @@ impl Task {
             .control_named(&key)
             .filter(|control| control.kind == ControlKind::Level)
         else {
-            let _ = glided.send(Glided::Refused(Response::Error {
-                code: 1,
-                message: format!("{key} is not a level of {}", self.name()),
-            }));
+            let _ = glided.send(Glided::Refused(Response::error(
+                CODE_USAGE,
+                format!("{key} is not a level of {}", self.name()),
+            )));
             return;
         };
         let reading = self.reading(control.id);
@@ -1687,10 +1698,7 @@ impl Task {
                     self.settle_asked(
                         id,
                         self.asked_of(id, &pending.command),
-                        &Response::Error {
-                            code: 3,
-                            message: "the climb ended".to_string(),
-                        },
+                        &Response::error(CODE_LINK, "the climb ended".to_string()),
                     );
                     let ended = match self.current(id) {
                         Some(response) => Outcome::Done(response),
@@ -2043,14 +2051,7 @@ impl Task {
             Err(why) => {
                 let _ = planned.send(Planned::Refused(why.clone()));
                 self.recalls.push(Box::pin(async move {
-                    (
-                        done,
-                        Response::Error {
-                            code: 1,
-                            message: why,
-                        },
-                        Vec::new(),
-                    )
+                    (done, Response::error(CODE_USAGE, why), Vec::new())
                 }));
             }
         }
@@ -2170,10 +2171,7 @@ fn silences(profile: &Profile, command: &Command) -> bool {
 
 /// The answer for a level with no reading to judge a glide from.
 fn no_reading(key: &str) -> Response {
-    Response::Error {
-        code: 4,
-        message: format!("no current value for {key}"),
-    }
+    Response::error(CODE_TIMEOUT, format!("no current value for {key}"))
 }
 
 /// Whether the device reads its output muted (a `mutes_output` toggle on) or off (a
@@ -2231,10 +2229,16 @@ async fn recall_steps(
                 at: Instant::now(),
             });
         }
-        if let Response::Error { code, message } = response {
-            let stopped = Response::Error {
-                code,
-                message: recall::stopped_after(sent, total, &message),
+        if let Response::Error {
+            code,
+            message,
+            reason,
+        } = response
+        {
+            let stopped = Response::error(code, recall::stopped_after(sent, total, &message));
+            let stopped = match reason {
+                Some(reason) => stopped.with_reason(reason),
+                None => stopped,
             };
             return (stopped, stepped);
         }
@@ -2264,10 +2268,10 @@ async fn wait(device: &str, answered: oneshot::Receiver<Response>) -> Response {
 
 /// The answer for an actor that took a command and did not answer it within [`WRITE_DEADLINE`].
 fn unanswered(device: &str) -> Response {
-    Response::Error {
-        code: 4,
-        message: format!("device {device} did not answer within {WRITE_DEADLINE:?}"),
-    }
+    Response::error(
+        CODE_TIMEOUT,
+        format!("device {device} did not answer within {WRITE_DEADLINE:?}"),
+    )
 }
 
 /// Whether `response` says a write was sent and no echo came back in time, so the device may have
@@ -2275,7 +2279,12 @@ fn unanswered(device: &str) -> Response {
 /// answers with code 4 and its words) or this writer's [`unanswered`]. The other code 4
 /// answers, a level with no reading and a command the actor never took, say it went nowhere.
 fn timed_out(response: &Response) -> bool {
-    let Response::Error { code: 4, message } = response else {
+    let Response::Error {
+        code: CODE_TIMEOUT,
+        message,
+        ..
+    } = response
+    else {
         return false;
     };
     message.starts_with("no confirmation within ") || message.contains(" did not answer within ")
@@ -2283,18 +2292,15 @@ fn timed_out(response: &Response) -> bool {
 
 /// The answer for a device whose actor has stopped.
 pub(crate) fn not_running(device: &str) -> Response {
-    Response::Error {
-        code: 3,
-        message: format!("device {device} is not running"),
-    }
+    Response::error(CODE_LINK, format!("device {device} is not running"))
 }
 
 /// The answer for an actor that did not take a command within [`WRITE_DEADLINE`].
 fn not_taken(device: &str) -> Response {
-    Response::Error {
-        code: 4,
-        message: format!("device {device} did not take the command within {WRITE_DEADLINE:?}"),
-    }
+    Response::error(
+        CODE_TIMEOUT,
+        format!("device {device} did not take the command within {WRITE_DEADLINE:?}"),
+    )
 }
 
 #[cfg(test)]

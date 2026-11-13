@@ -244,7 +244,7 @@ fn the_row_a_key_wrote_to_is_the_one_that_sweeps() {
         .control_by_key("mute")
         .expect("the Gungnir 2 has a mute")
         .id;
-    app.selected = 0;
+    app.set_selected(0);
     assert_ne!(app.cursor_id(), Some(mute), "the cursor is on the mute row");
 
     app.key(KeyEvent::from(KeyCode::Char('m')));
@@ -363,7 +363,9 @@ fn the_selected_row_is_reminded_on_the_schedule_and_never_under_an_overlay() {
 fn selections() -> Vec<(&'static str, App, KeyCode)> {
     use crate::tui::app::SettingsBox;
     use crate::tui::test_support::app_showing;
-    use crate::tui::test_support::presets::{own, resting, searching, two_headphones};
+    use crate::tui::test_support::presets::{
+        own, resting, search_typing, searching, two_headphones,
+    };
     use svolder_profiles::EqMode;
 
     let mut menu = app_showing(Screen::Device);
@@ -373,10 +375,9 @@ fn selections() -> Vec<(&'static str, App, KeyCode)> {
     let mut presets = resting("gungnir2-v2", EqMode::Eq);
     presets.presets.saved = vec![own("HD650 warm", 5, 1.0), own("Bright", 5, -1.0)];
     presets.key(KeyEvent::from(KeyCode::Char('p')));
-    let mut search = searching(two_headphones());
-    for letter in "hd 6".chars() {
-        search.key(KeyEvent::from(KeyCode::Char(letter)));
-    }
+    let entries = two_headphones();
+    let mut search = searching(&entries);
+    search_typing(&mut search, &entries, "hd 6");
     vec![
         (
             "the Telemetry rows",
@@ -527,7 +528,7 @@ fn a_row_under_an_open_menu_does_not_shimmer_but_the_menus_own_selection_does() 
     run_out(&mut effects);
     // The list under the menu moves with the menu open: nothing sweeps it.
     effects.on_key(t0);
-    app.selected += 1;
+    app.set_selected(app.selected() + 1);
     let areas = row_areas(&app);
     arm_effects(&mut app, &mut effects, &areas, &theme, t0);
     assert!(!effects.active(), "a row under the menu swept");

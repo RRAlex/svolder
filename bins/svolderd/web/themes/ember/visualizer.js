@@ -43,7 +43,6 @@
 
 import { BANDS, VizModel, posFreq } from '../../core/viz-model.js';
 import { CURVE_FILL_ALPHA, CURVE_LEFT, CURVE_RIGHT, alpha, pixel } from './viz-colour.js';
-import { watchVisible } from '../../core/visible.js';
 import { ember, mine, orderOf } from './bind.js';
 import { seat } from './sections.js';
 import { setVizDelay } from './facts.js';
@@ -556,7 +555,7 @@ function bind(root) {
   }
   if (watch) watch.observe(root);
   else {
-    watch = watchVisible({
+    watch = ember.core.lifecycle.watchVisible({
       element: root,
       onVisible(shown) {
         if (shown) start();

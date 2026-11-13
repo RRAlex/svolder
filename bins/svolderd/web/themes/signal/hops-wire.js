@@ -43,9 +43,9 @@ function busy(form, on) {
   }
 }
 
-/** Wire the menu's Add device row and the hops' buttons in `root` until `signal` aborts (it returns
- * `{ add, canAdd }`: what the row runs, and whether it can); `keep` is the count of holds
- * on the open area. */
+/** Wire the menu's Add to the chain row and the hops' buttons in `root` until `signal` aborts (it
+ * returns `{ add, canAdd }`: what the row runs, and whether it can); `keep` is the count of
+ * holds on the open area. */
 export function wireHops({
   root, core, live, view, keep, signal,
 }) {
@@ -145,7 +145,8 @@ export function wireHops({
     (form.querySelector('[role=radio][aria-checked=true]') ?? form.querySelector('input')).focus({ preventScroll: true });
   }
 
-  /** The menu's Add device row: the sheet, or for a viewer who may not write the core's refusal. */
+  /** The menu's Add to the chain row: the sheet, or for a viewer who may not write the core's
+   * refusal. */
   function add() {
     if (inert()) {
       core.actions.hops.add({});

@@ -1413,6 +1413,6 @@ fn on_the_computer_side(watching: &mut Watching) -> usize {
         .iter()
         .position(|row| row.control.key == "volume")
         .expect("a volume row");
-    watching.app.selected = volume;
+    watching.app.set_selected(volume);
     volume
 }

@@ -4,6 +4,43 @@
 use super::*;
 use svolder_proto::{FunctionId, Message, Value};
 
+mod autoeq;
+mod device_config;
+mod families;
+mod handshake;
+mod server_switch;
+mod walk;
+
+/// A scan row is built from what an advertisement carries, with the product named as the
+/// registry names it: one builder for the daemon's rows and the front end's.
+#[test]
+fn a_scan_row_is_built_from_the_advertisement_and_the_registry() {
+    let registry = svolder_profiles::Registry::builtin().expect("the built-in profiles load");
+    let product_id = registry
+        .names()
+        .iter()
+        .filter_map(|name| registry.get(name))
+        .find_map(|profile| profile.product_id)
+        .expect("a built-in profile names a product");
+    let unit: svolder_proto::UnitId = "0102030405060708".parse().expect("a unit id");
+    let manufacturer = svolder_proto::ManufacturerData {
+        product_id,
+        incomplete_dfu: false,
+        unit_id: unit,
+        encrypted_passphrase: 0,
+        firmware_build: 7,
+        module_hardware: 0,
+        module_firmware: 0,
+    };
+    let row = ScanEntry::from_advert(&manufacturer, Some(-61), &registry);
+    assert_eq!(row.unit, "0102030405060708");
+    assert_eq!(row.product_id, product_id);
+    assert_eq!(row.product.as_deref(), registry.product_name(product_id));
+    assert!(row.product.is_some());
+    assert_eq!((row.firmware, row.rssi), (7, Some(-61)));
+    assert!(!row.passphrase, "no code advertised");
+}
+
 /// A scan row from a daemon that carried neither the product id nor the signal strength
 /// still reads, as a row that has neither: a front end and a daemon of different builds
 /// still understand each other's scans.
@@ -69,6 +106,9 @@ fn the_mqtt_status_round_trips_through_a_version_reply() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
             .expect("the reply decodes");
@@ -95,6 +135,9 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     })
     .unwrap();
     assert!(newer.contains(r#""mqtt":{"state":"off"}"#), "{newer}");
@@ -116,6 +159,9 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     );
 
@@ -131,6 +177,9 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     );
 }
@@ -148,6 +197,9 @@ fn the_config_path_is_additive() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     let line = serde_json::to_string(&reply).unwrap();
     assert!(
@@ -167,6 +219,9 @@ fn the_config_path_is_additive() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     );
 }
@@ -204,6 +259,9 @@ fn the_mcp_field_is_additive() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
             .expect("the reply decodes");
@@ -218,6 +276,9 @@ fn the_mcp_field_is_additive() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     })
     .unwrap();
     assert!(!without.contains("mcp"), "{without}");
@@ -233,6 +294,9 @@ fn the_mcp_field_is_additive() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     );
 }
@@ -271,6 +335,9 @@ fn the_web_field_is_additive() {
             mcp_token: None,
             web: Some(web),
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
             .expect("the reply decodes");
@@ -286,6 +353,9 @@ fn the_web_field_is_additive() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     let line = serde_json::to_string(&silent).unwrap();
     assert!(!line.contains("\"web"), "{line}");
@@ -301,6 +371,9 @@ fn the_web_field_is_additive() {
             mcp_token: None,
             web: Some(WebStatus::Unknown),
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     );
 }
@@ -482,6 +555,7 @@ fn sample_response_replies() -> Vec<(&'static str, Reply)> {
         passphrase_note: None,
         refused: false,
         recalled: None,
+        key_readings: Vec::new(),
     };
 
     let scan_entry = ScanEntry {
@@ -540,10 +614,7 @@ fn sample_response_replies() -> Vec<(&'static str, Reply)> {
             "Error",
             Reply::Response {
                 id: 6,
-                response: Response::Error {
-                    code: 1,
-                    message: "test error".into(),
-                },
+                response: Response::error(CODE_USAGE, "test error"),
             },
         ),
         (
@@ -572,6 +643,9 @@ fn sample_response_replies() -> Vec<(&'static str, Reply)> {
                     mcp_token: None,
                     web: None,
                     web_token: None,
+                    features: Vec::new(),
+                    config_changed: false,
+                    config_missing: false,
                 },
             },
         ),
@@ -704,6 +778,9 @@ fn the_token_description_is_additive_and_carries_no_token() {
         mcp_token: Some(info.clone()),
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     let line = serde_json::to_string(&reply).unwrap();
     assert!(!line.contains(fake), "the reply carries the token");
@@ -736,6 +813,9 @@ fn the_token_description_is_additive_and_carries_no_token() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     })
     .unwrap();
     assert!(!without.contains("mcp_token"), "{without}");
@@ -753,6 +833,9 @@ fn version_reply_carries_the_log_and_decodes_without_it() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     let line = serde_json::to_string(&reply).unwrap();
     assert!(
@@ -770,6 +853,9 @@ fn version_reply_carries_the_log_and_decodes_without_it() {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     })
     .unwrap();
     assert!(!none.contains("log"), "{none}");
@@ -984,6 +1070,9 @@ fn the_oldest_shapes_still_decode() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     );
     let device: DeviceInfo = serde_json::from_str(
@@ -1098,6 +1187,9 @@ fn a_version_reply_carries_the_web_fields_and_decodes_without_them() {
         mcp_token: None,
         web: Some(WebStatus::Off),
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     };
     let line = serde_json::to_string(&new).unwrap();
     assert!(line.contains(r#""web":{"state":"off"}"#), "{line}");
@@ -1126,6 +1218,7 @@ fn a_readings_answer_round_trips() {
             at_ms: 1_000,
             connected: true,
         }],
+        signal: vec![(96_000, -58.0)],
     };
     let line = serde_json::to_string(&answer).unwrap();
     assert!(line.contains(r#""aggregate":"max""#), "{line}");
@@ -1626,4 +1719,74 @@ fn the_both_sides_question_has_its_own_reply() {
     );
     assert_eq!(serde_json::from_value::<Response>(line).unwrap(), ask);
     assert_eq!(crate::CODE_COMPUTER_UNAVAILABLE, 6);
+}
+
+/// `config_changed` is on the wire only while it is true, and a reply without it (an older
+/// daemon's) reads as unchanged.
+#[test]
+fn config_changed_is_sent_only_when_true_and_an_older_reply_reads_unchanged() {
+    let reply = |config_changed| Response::Version {
+        version: "0.33.0".into(),
+        mqtt: None,
+        mcp: None,
+        config: None,
+        log: None,
+        mcp_token: None,
+        web: None,
+        web_token: None,
+        features: Vec::new(),
+        config_changed,
+        config_missing: false,
+    };
+    let quiet = serde_json::to_string(&reply(false)).unwrap();
+    assert!(!quiet.contains("config_changed"), "{quiet}");
+    let loud = serde_json::to_string(&reply(true)).unwrap();
+    assert!(loud.contains(r#""config_changed":true"#), "{loud}");
+    assert_eq!(
+        serde_json::from_str::<Response>(&loud).unwrap(),
+        reply(true)
+    );
+    assert_eq!(
+        serde_json::from_str::<Response>(&quiet).unwrap(),
+        reply(false)
+    );
+    let older = r#"{"result":"version","version":"0.32.0"}"#;
+    assert_eq!(serde_json::from_str::<Response>(older).unwrap(), {
+        let mut older = reply(false);
+        if let Response::Version { version, .. } = &mut older {
+            *version = "0.32.0".into();
+        }
+        older
+    });
+}
+
+/// `config_missing` is on the wire only while it is true, and a reply without it reads as there.
+#[test]
+fn config_missing_is_sent_only_when_true_and_an_older_reply_reads_there() {
+    let reply = |config_missing| Response::Version {
+        version: "0.33.0".into(),
+        mqtt: None,
+        mcp: None,
+        config: None,
+        log: None,
+        mcp_token: None,
+        web: None,
+        web_token: None,
+        features: Vec::new(),
+        config_changed: config_missing,
+        config_missing,
+    };
+    let quiet = serde_json::to_string(&reply(false)).unwrap();
+    assert!(!quiet.contains("config_missing"), "{quiet}");
+    let loud = serde_json::to_string(&reply(true)).unwrap();
+    assert!(loud.contains(r#""config_missing":true"#), "{loud}");
+    assert_eq!(
+        serde_json::from_str::<Response>(&loud).unwrap(),
+        reply(true)
+    );
+    let older = r#"{"result":"version","version":"0.32.0","config_changed":true}"#;
+    let Response::Version { config_missing, .. } = serde_json::from_str(older).unwrap() else {
+        panic!("a version answer");
+    };
+    assert!(!config_missing);
 }

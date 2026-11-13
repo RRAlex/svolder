@@ -224,7 +224,7 @@ impl Readings {
 }
 
 /// How the series of function `id` aggregates: by maximum for a meter, a level or a fault.
-fn aggregate_of(profile: &Profile, id: FunctionId) -> Aggregate {
+pub fn aggregate_of(profile: &Profile, id: FunctionId) -> Aggregate {
     let peaks = profile.control_by_id(id).is_some_and(|c| {
         matches!(
             c.kind,

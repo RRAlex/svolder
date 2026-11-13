@@ -14,11 +14,12 @@ What each verb returns to the shell. Back to the [usage index](README.md).
 | 0 | Command succeeded |
 | 1 | Usage error, or command refused (e.g., restricted function, bad control name) |
 | 2 | Device not found (no matching device in scan results, or device selector did not match) |
-| 3 | Connection failed |
+| 3 | Connection failed (also: no daemon for a verb that needs one, such as `eq search`) |
 | 4 | Device did not confirm the command within the timeout |
 | 5 | An active fault was reported by the device |
 | 6 | The computer's controls are unavailable (PipeWire tools or socket missing, or host audio off) |
-| 130 | `watch` was told not to wait for the release (Ctrl-C during it); `capture` was ended by Ctrl-C before its frame window |
+| 7 | The daemon does not know the request, or lacks the feature asked for (it is older than this svolder: `svolder daemon restart`); `add`, `remove`, `setup`'s walk, the device edits and the AutoEq verbs (`eq search`, `eq import`) say so with 7 |
+| 130 | `watch` was told not to wait for the release (Ctrl-C during it); `capture` was ended by Ctrl-C before its frame window; `setup` or `add` was left by Ctrl-C, SIGTERM or a closed terminal during the daemon's walk (the walk is cancelled); `eq import --autoeq` was left by Ctrl-C or a closed terminal (the daemon's job is cancelled) |
 
 With no `-d` and several devices in range, the candidates are listed on stderr and the command exits
 2; name one of them with `-d`:
@@ -40,6 +41,8 @@ agree:
 | connect refused, or a write rejected by a passphrase | 3 | give svolder the device's passcode (`svolder setup`, the Devices screen's `u`, or `passphrase` in the config); if it is lost, `auto` reads it from the device — see ["Forgot the passphrase"](cli.md#forgot-the-passphrase) |
 | a device dropped during `watch` or the TUI | 3 | the reconnect notice, then "if it does not come back, `svolder doctor`" |
 | the daemon answered with an error | its own | `svolder daemon logs` |
+| the daemon's `config.toml` is gone (a reload, or a write that would start a new file) | 1 | restore the file, then run the verb again |
+| the daemon is older than this svolder and lacks what is asked (a walk, a device edit, `identify`) | 7 | `svolder daemon restart` |
 | a device the daemon holds has not been found yet (`amp has not been found yet`) | 3 | svolderd keeps looking: check that it is on and in range (`svolder daemon logs`) |
 | the daemon's configuration names no device (the message names the daemon by its socket) | its own (2) | `svolder --socket <that socket> add <udid> --name NAME`, which also tells that daemon to reload, run with the `XDG_CONFIG_HOME` that makes `add` write the file the daemon reads (its `--config`, or the one under its own `XDG_CONFIG_HOME`) |
 | autospawn could not start the daemon | 3 | the log `svolder daemon logs` prints |

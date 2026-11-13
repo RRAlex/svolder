@@ -12,7 +12,7 @@ import { inputRow, modeRow } from './modes.js';
 import { inertOf } from '../inert.js';
 import { presetBox } from './presets.js';
 import { drawControls } from './controls.js';
-import { drawFacts, drawFaults } from './facts.js';
+import { drawFaults, drawFoot } from './facts.js';
 import { drawMeters } from './meters.js';
 import { drawSlots } from './slots.js';
 
@@ -34,7 +34,7 @@ export function presetsOf(tone) {
   };
 }
 
-/** The sheet's sections for `page`'s device; `view.facts.open` says whether its facts are unfolded. With the
+/** The sheet's sections for `page`'s device. With the
  * computer as the side shown (`comp`, the core's `computer.view()`) the mode, the table of points and the presets are its, in
  * the places the device's were. */
 export function drawSheet(page, view = {}, comp = null) {
@@ -51,7 +51,7 @@ export function drawSheet(page, view = {}, comp = null) {
     + `${section('nd-bands', bands)}`
     + `<div id="nd-side" class="nd-side">${section('nd-presets', presets)}`
     + `${section('nd-slots', drawSlots(device, own))}${section('nd-controls', drawControls(device, own))}${section('nd-meters', drawMeters(device))}</div>`
-    + `${section('nd-facts', drawFacts(device, Boolean(view.facts?.open), inert))}`;
+    + `${section('nd-facts', drawFoot(device, inert))}`;
 }
 
 /** The sheet's frame: the close key and the body the sections are drawn into. */

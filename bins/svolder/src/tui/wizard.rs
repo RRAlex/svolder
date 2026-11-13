@@ -24,14 +24,14 @@ use crossterm::event::{
     Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
     MouseEventKind,
 };
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use svolder_ipc::{Config, DeviceConfig};
 
 use crate::backend::{Failure, Globals};
 use crate::recovery::Kind;
-use crate::wizard::{Effects, Prompt, Step, Wizard};
+use crate::wizard::{Effects, Prompt, Step, Takes, Wizard};
 
 use super::app::Screen;
 use super::keys::{self, Scene};
@@ -46,12 +46,21 @@ use super::widgets::passphrase_row::PassphraseRow;
 use super::widgets::spinner;
 use super::{TuiOptions, render, screens};
 
+/// The code a run that a signal ended leaves with.
+pub(super) const SIGNALLED: u8 = 130;
+
 /// The title a frame carries before the wizard has said what the first step is.
 const OPENING: &str = "Setting up";
 
 /// The choice that asks for nothing to be done, which is the one answer to a step that spends
 /// no time at all: nothing is waited for, so nothing says it is being waited for.
 const SKIP: &str = "Skip";
+
+/// What is waited for while an answer the command line gave is sent.
+const SENDING: &str = "sending what was given…";
+
+/// What is waited for while the daemon's walk goes back a step.
+const BACKING: &str = "going back…";
 
 /// What a wait that has been asked to end says while the effect under it is seen through.
 const FINISHING: &str = "finishing…";
@@ -115,6 +124,9 @@ pub(super) enum WizardEnd {
     Quit,
     /// The wizard wrote this device, and the device screen opens on it.
     Added(DeviceConfig),
+    /// A signal ended the run (Ctrl-C outside the terminal's raw mode, SIGHUP, SIGTERM): the walk
+    /// is cancelled and the process leaves with [`SIGNALLED`].
+    Signalled,
     /// The run ended on its own: the code to leave with, and what to say once the terminal is
     /// back.
     Stopped {
@@ -152,6 +164,10 @@ pub(super) struct ShownStep {
     /// exactly when `waiting` is, which is what keeps the spinner off a step that is asking
     /// rather than waiting.
     pub(super) spinner: Option<char>,
+    /// Where the lines of the devices a daemon's scan has heard so far arrive, while one runs.
+    pub(super) hearing: Option<tokio::sync::watch::Receiver<Vec<String>>>,
+    /// The devices heard so far, drawn under the wait.
+    pub(super) heard: Vec<String>,
     /// The device the last step hands over to, once the walk has one.
     pub(super) opens: Option<String>,
     /// Whether the wizard can still go back from this step.
@@ -190,6 +206,7 @@ impl ShownStep {
                 body: Vec::new(),
                 choices: Vec::new(),
                 default: 0,
+                takes: Takes::Choice,
             },
             choice: 0,
             typing: false,
@@ -199,10 +216,31 @@ impl ShownStep {
             notice: None,
             waiting: None,
             spinner: None,
+            hearing: None,
+            heard: Vec::new(),
             opens: None,
             can_go_back: false,
             scroll: 0,
             said: Said::default(),
+        }
+    }
+
+    /// Forget what was typed and the step it was typed for, so the next prompt is shown afresh
+    /// whatever it says: a line typed at one step is never carried to another's field.
+    pub(super) fn forget(&mut self) {
+        let waiting = self.waiting.take();
+        *self = ShownStep::opening();
+        self.waiting = waiting;
+    }
+
+    /// Empty the Passphrase step's row once its code has been sent.
+    pub(super) fn spent_the_code(&mut self) {
+        if let Some(row) = self.code.as_mut() {
+            row.forget_digits();
+        }
+        if self.prompt.takes == Takes::Secret {
+            self.typed.clear();
+            self.caret = 0;
         }
     }
 
@@ -252,6 +290,20 @@ impl ShownStep {
     pub(super) fn wait_for(&mut self, waiting: Option<String>) {
         self.spinner = waiting.is_some().then(|| spinner::glyph(Duration::ZERO));
         self.waiting = waiting;
+    }
+
+    /// Draw the devices `scan` hears from now on under the wait, or none at all for `None`.
+    pub(super) fn listen_to(&mut self, scan: Option<tokio::sync::watch::Receiver<Vec<String>>>) {
+        self.heard.clear();
+        self.hearing = scan;
+        self.hear();
+    }
+
+    /// Take the devices heard so far, while something is being waited for.
+    pub(super) fn hear(&mut self) {
+        if let Some(scan) = self.hearing.as_mut() {
+            self.heard.clone_from(&scan.borrow_and_update());
+        }
     }
 
     /// Turn the spinner to its glyph `elapsed` after the wait now showing began, while
@@ -400,9 +452,23 @@ where
     B: Backend,
     S: Stream<Item = io::Result<Event>> + Unpin,
 {
-    let end = walk(terminal, events, wizard, theme, leaving).await;
-    // However the walk ended, a device it wrote is the daemon's to know of.
-    wizard.tell_the_daemon().await;
+    // A signal that leaves a walk the daemon runs (the terminal closed, an ssh session dropped)
+    // ends it here, so the walk this run started is cancelled below and not left busy.
+    let presses = wizard.presses();
+    let pressed = async {
+        match &presses {
+            Some(presses) => presses.next().await,
+            None => std::future::pending().await,
+        }
+    };
+    let end = tokio::select! {
+        end = walk(terminal, events, wizard, theme, leaving) => end,
+        () = pressed => WizardEnd::Signalled,
+    };
+    // However the walk ended, a walk the daemon still runs for it is cancelled, and a device it
+    // wrote is the daemon's to know of. No frame is drawn over this: a daemon that does not answer
+    // the cancel holds the last one for up to three seconds.
+    wizard.leave().await;
     end
 }
 
@@ -429,15 +495,29 @@ where
         // What the next step spends before it can be shown is named while it is spent. Nothing
         // has been asked for yet, so giving up here drops the work and leaves.
         view.wait_for(wizard.busy());
-        let asked = wait_on(
-            &mut canvas,
-            events,
-            &mut reading,
-            &mut view,
-            CANCELS,
-            wizard.prompt(),
-        )
-        .await;
+        let fresh = wizard.stopped().is_none();
+        // The daemon's walk that already waits at a prompt has it at once: nothing is waited for,
+        // so no frame is drawn over the keys that are read while one is (a key pressed the moment
+        // a step is answered would be dropped as the wait's). A prompt not there yet is waited
+        // for, the read of its states picking up where this left it.
+        let ready = match wizard.is_remote() {
+            true => wizard.prompt().now_or_never(),
+            false => None,
+        };
+        let asked = match ready {
+            Some(asked) => Waited::Done(asked),
+            None => {
+                wait_on(
+                    &mut canvas,
+                    events,
+                    &mut reading,
+                    &mut view,
+                    CANCELS,
+                    wizard.prompt(),
+                )
+                .await
+            }
+        };
         view.wait_for(None);
         // Nothing came back at all: the user left while the step was being worked out.
         let Waited::Done(asked) = asked else {
@@ -445,8 +525,49 @@ where
         };
         // The wizard has nothing left to ask, which is what the last step answered leaves.
         let Some(prompt) = asked else {
+            // The daemon's walk could not be had, or went away: the run says why.
+            if fresh && let Some(code) = wizard.stopped() {
+                return WizardEnd::Stopped {
+                    code,
+                    why: wizard.stopped_why().unwrap_or_default().to_string(),
+                };
+            }
             break;
         };
+        // An answer the command line gave to this step is sent now, under a wait of its own,
+        // and the next prompt is asked for.
+        if wizard.has_given_answer(&prompt) {
+            view.wait_for(Some(SENDING.to_string()));
+            let sent = wait_on(
+                &mut canvas,
+                events,
+                &mut reading,
+                &mut view,
+                false,
+                wizard.answer_given(&prompt),
+            )
+            .await;
+            view.wait_for(None);
+            let (sent, left) = match sent {
+                Waited::Done(sent) => (sent, false),
+                Waited::Left(sent) => (sent, true),
+                Waited::GaveUp => return WizardEnd::Quit,
+            };
+            if let Err(failure) = sent {
+                if let Some(code) = wizard.stopped() {
+                    return WizardEnd::Stopped {
+                        code,
+                        why: failure.to_string(),
+                    };
+                }
+                view.show(prompt);
+                view.notice = Some(failure.to_string());
+            }
+            if left {
+                return WizardEnd::Quit;
+            }
+            continue;
+        }
         view.show(prompt);
         // The last step ends on what this front end does next: open the device it added.
         view.hands_over_to(wizard.added());
@@ -485,8 +606,32 @@ where
                 Asked::Nothing => {}
                 Asked::Quit => return WizardEnd::Quit,
                 Asked::Back if wizard.can_go_back() => {
-                    wizard.back();
-                    view.notice = None;
+                    // The step before is asked afresh: nothing typed here, a passphrase above
+                    // all, is carried into the field of another step.
+                    view.wait_for(wizard.is_remote().then(|| BACKING.to_string()));
+                    let backed = wait_on(
+                        &mut canvas,
+                        events,
+                        &mut reading,
+                        &mut view,
+                        CANCELS,
+                        wizard.back(),
+                    )
+                    .await;
+                    view.wait_for(None);
+                    if matches!(backed, Waited::GaveUp) {
+                        return WizardEnd::Quit;
+                    }
+                    view.forget();
+                    if let Some(code) = wizard.stopped() {
+                        return WizardEnd::Stopped {
+                            code,
+                            why: wizard.stopped_why().unwrap_or_default().to_string(),
+                        };
+                    }
+                    if matches!(backed, Waited::Left(_)) {
+                        return WizardEnd::Quit;
+                    }
                     break;
                 }
                 Asked::Back if returns => return WizardEnd::Quit,
@@ -504,7 +649,13 @@ where
                         }
                     };
                     view.wait_for(waiting_for(&view.prompt, choice));
+                    if view.prompt.step == Step::Scan {
+                        view.listen_to(wizard.heard());
+                    }
                     let cancels = !writes(&view.prompt, choice);
+                    // The code is sent with this answer and is not kept: a refused one is asked
+                    // for again on an empty row.
+                    view.spent_the_code();
                     let answered = wait_on(
                         &mut canvas,
                         events,
@@ -515,6 +666,7 @@ where
                     )
                     .await;
                     view.wait_for(None);
+                    view.listen_to(None);
                     let (answered, left) = match answered {
                         Waited::Done(answered) => (answered, false),
                         Waited::Left(answered) => (answered, true),
@@ -667,7 +819,7 @@ fn writes(prompt: &Prompt, choice: usize) -> bool {
     }
     match prompt.step {
         Step::Fixes | Step::Name | Step::Passphrase | Step::Adapter | Step::Daemon => true,
-        Step::Health | Step::Scan | Step::Pick | Step::Done => false,
+        Step::Health | Step::Linked | Step::Scan | Step::Pick | Step::Done => false,
     }
 }
 
@@ -682,7 +834,7 @@ fn waiting_for(prompt: &Prompt, choice: usize) -> Option<String> {
         Step::Scan => "listening…",
         Step::Name | Step::Passphrase => "connecting…",
         Step::Daemon => "installing the user service…",
-        Step::Health | Step::Pick | Step::Adapter | Step::Done => return None,
+        Step::Health | Step::Linked | Step::Pick | Step::Adapter | Step::Done => return None,
     };
     Some(waiting.to_string())
 }
@@ -732,6 +884,7 @@ where
             Interrupted::Carry
         }
         WaitSignal::Tick(now) => {
+            view.hear();
             view.spin(now.saturating_duration_since(since));
             if view.waiting.is_some()
                 && let Ok(said) = draw(canvas, view)
@@ -792,6 +945,10 @@ fn draw<B: Backend>(canvas: &mut Canvas<B>, view: &ShownStep) -> Result<Said, B:
 /// Devices screen. A quit leaves with success, and an effect the machine refused with its own
 /// code. Nothing is printed while the screen is claimed; what a run has to say is said here,
 /// once the terminal is back.
+#[allow(
+    clippy::result_large_err,
+    reason = "the Err hands the wizard back to the caller, who runs the plain front end with it"
+)]
 pub(crate) async fn setup<E: Effects>(
     g: &Globals<'_>,
     wizard: Wizard<E>,
@@ -811,6 +968,10 @@ pub(crate) async fn setup<E: Effects>(
 
 /// [`setup`](fn@setup) over a given terminal claim, the writer its fallback line goes to, the
 /// loaded configuration and the path it was loaded from.
+#[allow(
+    clippy::result_large_err,
+    reason = "the Err hands the wizard back to the caller, who runs the plain front end with it"
+)]
 async fn setup_on<E: Effects>(
     claim: &impl Claim,
     err: &mut impl std::io::Write,
@@ -890,6 +1051,10 @@ async fn setup_on<E: Effects>(
             )
             .await);
         }
+        WizardEnd::Signalled => {
+            drop(guard);
+            return Ok(ExitCode::from(SIGNALLED));
+        }
         WizardEnd::Stopped { code, why } => {
             drop(guard);
             eprintln!("svolder: {why}");
@@ -940,5 +1105,7 @@ async fn setup_on<E: Effects>(
     .await)
 }
 
+#[cfg(test)]
+mod remote_tests;
 #[cfg(test)]
 mod tests;

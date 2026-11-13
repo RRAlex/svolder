@@ -748,7 +748,7 @@ mod tests {
                 let (plain, _) = drawn_with(
                     &{
                         let mut closed = app_showing(app.screen);
-                        closed.selected = app.selected;
+                        closed.set_selected(app.selected());
                         closed
                     },
                     theme,

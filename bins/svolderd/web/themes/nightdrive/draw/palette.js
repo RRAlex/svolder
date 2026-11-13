@@ -39,6 +39,8 @@ export const PALETTE = Object.freeze({
   bubbleHeld: '#22d3ee',
   bubbleRing: '#b5f7ff',
   bubbleGlow: '#22d3ee',
+  targetRidge: '#ffb3ec',
+  gapTint: 'rgb(255, 209, 102)',
   highlight: '#ff9ae6',
   highlightClear: 'rgba(255,154,230,0)',
   diamond: '#1a0030',

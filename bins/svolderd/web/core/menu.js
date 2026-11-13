@@ -1,12 +1,13 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The menu the frame's button opens: one row for the theme (its name and a small preview; it opens
-// the picker), then the rows the theme itself offers (`theme.menuRows(core)`), then the rows every
-// theme has: the device shown (it opens a list of devices when there are two or more) and
-// Sign out, or a guest's Sign in. The rows are drawn when a theme is mounted and again each time
-// the menu opens (the theme's `menuOpening()`, if it has one, runs first: the place for work the
-// theme does only for a person who looks), so they say what the theme and the page are then; in
-// between `sync` keeps them in step.
+// the picker), then the rows the theme itself offers (`menuRows(core)` of the mounted instance,
+// else of the theme object), then the rows every theme has: the popups' rows and Sign out, or a
+// guest's Sign in. Which rows and in what
+// order is menu-rows.js; this file draws them, keeps them in step and runs them. The rows are drawn
+// when a theme is mounted and again each time the menu opens (the theme's `menuOpening()`, if it
+// has one, runs first: the place for work the theme does only for a person who looks), so they say
+// what the theme and the page are then; in between `sync` keeps them in step.
 //
 // A row the theme gives is one of
 //   { kind: 'heading', text }
@@ -18,6 +19,8 @@
 //
 // The keys are the menu's while it is open: the arrows move between the rows that can be chosen
 // (round the ends), Home and End jump, Escape or `q` closes, Tab leaves.
+
+import { menuRows } from './menu-rows.js';
 
 const ROLE = { radio: 'menuitemradio', check: 'menuitemcheckbox', action: 'menuitem' };
 
@@ -128,89 +131,45 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
     });
   }
 
-  /** The theme's rows, or none when it has none or its rows throw. */
+  /** The rows of the theme on show, or none when it has none or its rows throw: the mounted
+   * instance's `menuRows` when it has one, else the theme object's. */
   function themeRows(theme) {
     try {
-      return theme?.menuRows?.(core) ?? [];
+      const from = typeof core.mounted?.menuRows === 'function' ? core.mounted : theme;
+      return from?.menuRows?.(core) ?? [];
     } catch (error) {
       console.warn('svolder: the theme\'s menu rows threw, so the menu shows only the frame\'s', error);
       return [];
     }
   }
 
-  /** The device list in place of the rows: a radio for each device, the one shown checked. */
-  function showDevices() {
-    const page = core.model.page();
-    rows = [];
-    add({ kind: 'heading', text: 'Device' });
-    for (const device of page.fleet?.devices ?? []) {
-      add({
-        kind: 'radio',
-        label: device.name,
-        dataset: { device: device.url },
-        checked: () => core.model.shown() === device.url,
-        disabled: () => null,
-        choose: () => core.actions.showDevice(device.url),
-      });
-    }
-    pop.replaceChildren(...rows.map((row) => row.el));
-    sync();
-    if (opened()) fit();
-    (pop.querySelector('[aria-checked=true]') ?? choices()[0])?.focus();
-  }
-
-  /** The rows the frame adds to every theme's: the device, then Sign out or Sign in. */
-  function frameRows(page) {
-    const devices = page.fleet?.devices ?? [];
-    const shown = devices.find((device) => device.url === page.shown);
-    const out = [];
-    if (devices.length > 0) {
-      const many = devices.length > 1;
-      out.push({
-        kind: 'action',
-        label: `Device: ${shown?.name ?? 'none'}`,
-        elementId: 'menu-device',
-        go: true,
-        stay: many,
-        disabled: !many,
-        run: showDevices,
-      });
-    }
-    if (page.viewer?.guest) {
-      out.push({
-        kind: 'action', tag: 'a', label: 'Sign in', href: './?sign-in', elementId: 'menu-sign-in',
-        run() {},
-      });
-    } else if (page.viewer?.sign_out) {
-      out.push({
-        kind: 'action', label: 'Sign out', elementId: 'menu-sign-out',
-        run: () => core.actions.signOut(),
-      });
-    }
-    return out;
-  }
-
   /** The rows of the menu, drawn from the theme and the page as they are now. */
   function rebuild() {
     rows = [];
     const theme = core.theme;
-    const row = add({
-      kind: 'action', label: `Theme: ${theme?.label ?? ''}`, elementId: 'menu-theme', go: true,
-      run: openPicker,
+    const page = core.model.page();
+    const list = menuRows({
+      theme,
+      given: themeRows(theme),
+      viewer: page.viewer,
+      popups: core.popups?.listed() ?? [],
+      run: {
+        picker: openPicker,
+        signOut: () => core.actions.signOut(),
+        popup: (name) => core.router.open(name),
+      },
     });
-    const thumb = span('mthumb');
-    row.el.prepend(thumb);
-    try {
-      theme?.preview?.(thumb);
-    } catch (error) {
-      console.warn('svolder: the theme\'s preview threw', error);
-    }
-    for (const def of themeRows(theme)) add(def);
-    const own = frameRows(core.model.page());
-    if (own.length > 0) add({ kind: 'sep', own: true });
-    for (const def of own) {
+    for (const def of list) {
       const made = add(def);
-      if (def.disabled) made.el.setAttribute('aria-disabled', 'true');
+      if (def.picture) {
+        const thumb = span('mthumb');
+        made.el.prepend(thumb);
+        try {
+          theme?.preview?.(thumb);
+        } catch (error) {
+          console.warn('svolder: the theme\'s preview threw', error);
+        }
+      }
     }
     pop.replaceChildren(...rows.map((one) => one.el));
     sync();
@@ -284,8 +243,6 @@ export function createMenu({ document, window, core, wrap, button, pop, openPick
       def.flip();
       sync();
       close(true);
-    } else if (def.stay) {
-      def.run();
     } else {
       close(true);
       def.run();

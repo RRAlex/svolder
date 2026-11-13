@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+Preamp: -4.1 dB
+Filter 1: ON LSC Fc 105 Hz Gain 2.4 dB Q 0.70
+Filter 2: ON PK Fc 3500 Hz Gain 2.8 dB Q 2.50
+Filter 3: ON PK Fc 8000 Hz Gain -3.2 dB Q 3.00

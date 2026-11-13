@@ -14,6 +14,7 @@ import { arch } from './meter-arch.js';
 import {
   presetsSection, switchPill, toneSection, volumeModel,
 } from './computer.js';
+import { mayWrite } from '../../../core/write.js';
 import { attr, esc } from './html.js';
 
 /** The part's root asks htmx to swap it out of band. */
@@ -226,12 +227,16 @@ function graph(t) {
     '<path class="g0" d="M0 130H1000"/>',
     c.ghost === null ? '' : `<path class="ghost"${attr('d', c.ghost)}/>`,
     `<path class="area"${attr('d', c.area)}/>`,
+    c.overlay === null ? '' : c.overlay.gap,
+    c.overlay === null ? '' : c.overlay.target,
     `<path class="line"${attr('d', c.line)}${attr('data-y', c.ys)}/>`,
     peak,
     marks.join(''),
   );
   const axes = '<span class="gx x0">20 Hz</span><span class="gx x100">100</span> <span class="gx x1k">1k</span><span class="gx x10k">10k</span> <span class="gy y12">+12</span><span class="gy y6">+6</span><span class="gy y0">0</span> <span class="gy ym6">−6</span><span class="gy ym12">−12</span>';
-  const words = c.peak === null ? '' : `<span class="pkt">${esc(c.peak.words)}</span>`;
+  const fit = c.overlay?.words
+    ? `<span class="fitt"${attr('title', c.overlay.note)} aria-hidden="true">${esc(c.overlay.words)}</span><span class="fitsr">${esc(c.overlay.note)}</span>` : '';
+  const words = (c.peak === null ? '' : `<span class="pkt">${esc(c.peak.words)}</span>`) + fit;
   return `<figure class="eqg"${attr('data-readings', JSON.stringify(t.readings))}> <div class="plot"> <svg viewBox="0 0 1000 260" preserveAspectRatio="none" aria-hidden="true"> ${svg} </svg> ${axes} </div> ${words} </figure>`;
 }
 
@@ -312,36 +317,16 @@ function devicePresets(device, page, { oob } = {}) {
   return `<section id="part-device-presets" class="presets"${swap(oob)}> <h3>Presets</h3>${slots.join('')} <h4>Built in</h4>${builtins.join('')} </section>`;
 }
 
-/** One of the Device fold-out's readouts. */
-const factRow = (label, value, extra = '') => `<dl class="readout"><dt>${label}</dt><dd${extra}>${value}</dd></dl>`;
-
-/** The Device fold-out: the unit's facts, the table of every reading it holds and Identify. */
+/**
+ * The Device fold-out: what Ember shows of the device for playing (the visualizer's delay, which
+ * the page measures and adds), and at its foot *Device settings…* (*Devices…* for a viewer who may
+ * not write), which opens the device's page in the Devices popup: the facts, signal and readings
+ * are that page's, drawn by the core.
+ */
 function facts(device, page, { oob } = {}) {
-  const f = device.facts;
-  const product = f.product == null ? `product ${esc(f.product_id)}` : `${esc(f.product)} (product ${esc(f.product_id)})`;
-  const age = f.signal_age;
-  const signalAge = age
-    ? `${attr('data-head', age.head)}${attr('data-heard-at', age.heard_at_ms)}${attr('data-live', age.live)}`
-    : '';
-  // A space stands between the readouts, as the markup breaks its lines there.
-  const list = [
-    factRow('Product', product),
-    f.unit ? factRow('Unit', esc(f.unit), ' class="mono"') : '',
-    factRow('Firmware', esc(f.firmware)),
-    factRow('DSP', f.dsp == null ? '—' : esc(f.dsp)),
-    factRow('Profile', esc(f.profile)),
-    factRow('Link', esc(f.link)),
-    factRow('Signal', esc(f.signal), ` data-signal${signalAge}`),
-    f.passphrase_note == null ? '' : factRow('Passphrase', esc(f.passphrase_note), ' class="warn"'),
-  ].filter((x) => x !== '').join(' ');
-  const rows = f.rows.map((r) => {
-    const heard = r.heard_at_ms == null ? '>—</td>' : `${attr('data-heard-at', r.heard_at_ms)}></td>`;
-    return `<tr><td class="id">${esc(r.id)}</td><td>${esc(r.label)}</td><td class="val">${esc(r.value)}</td><td class="age"${heard}</tr>`;
-  });
-  const identify = f.identify_offered
-    ? ` <div class="identify"><button type="button" class="btn" data-identify${attr('data-gap', f.identify_gap_secs)}${f.identify ? '' : attr('aria-disabled', 'true')}>Identify</button> <span class="note">Asks the unit to show itself, so you can tell it from the others.</span> </div>`
-    : '';
-  return `<section id="part-facts" class="p-facts"${attr('data-now', f.now_ms)}${swap(oob)}> <details class="device-facts"><summary>Device</summary> <div class="facts"> ${list} </div> <h3>All readings</h3> <div class="readings-wrap"><table class="readings" aria-label="All readings"> <thead><tr><th scope="col">Id</th><th scope="col">Reading</th><th scope="col">Value</th> <th scope="col">Heard</th></tr></thead> <tbody>${rows.join('')}</tbody> </table></div>${identify} </details> </section>`;
+  const word = mayWrite(page) ? 'Device settings…' : 'Devices…';
+  const foot = ` <p class="foot"><button type="button" class="btn" data-device-settings>${word}</button></p>`;
+  return `<section id="part-facts" class="p-facts"${swap(oob)}> <details class="device-facts"><summary>Device</summary> <div class="facts"> </div>${foot} </details> </section>`;
 }
 
 /** The previous, play or pause, and next buttons. */

@@ -103,7 +103,7 @@ pub(super) fn lock(path: &Path) -> Result<Option<flock::Held>, ConfigError> {
     match flock::lock_beside(path, Wait::Until(LOCK_WAIT)) {
         Ok(held) => Ok(Some(held)),
         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-            Err(ConfigError::Io(path.to_path_buf(), e))
+            Err(ConfigError::Busy(path.to_path_buf()))
         }
         Err(_) => Ok(None),
     }

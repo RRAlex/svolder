@@ -1310,3 +1310,49 @@ async fn the_path_has_its_verdict_and_its_hops() {
     assert!(path.words.contains("computer volume 54 %"), "{path:?}");
     dac.stop().await;
 }
+
+/// A daemon's refusal keeps its words and its reason on the way to the page, under the status
+/// its reason stands for; one with no reason, or of a kind this build does not know, is a 500
+/// and never a 409 by default.
+#[tokio::test]
+async fn a_refusal_is_answered_by_its_reason() {
+    use svolder_ipc::{CODE_USAGE, Reason, Response as Answer};
+    let cases = [
+        (Some(Reason::Taken), Code::UNPROCESSABLE_ENTITY),
+        (Some(Reason::Invalid), Code::UNPROCESSABLE_ENTITY),
+        (Some(Reason::Missing), Code::NOT_FOUND),
+        (Some(Reason::ReadOnly), Code::CONFLICT),
+        (Some(Reason::FileBusy), Code::CONFLICT),
+        (Some(Reason::Stopping), Code::SERVICE_UNAVAILABLE),
+        (Some(Reason::Internal), Code::INTERNAL_SERVER_ERROR),
+        (Some(Reason::Unknown), Code::INTERNAL_SERVER_ERROR),
+        (None, Code::INTERNAL_SERVER_ERROR),
+    ];
+    for (reason, status) in cases {
+        let refused = match reason {
+            Some(reason) => Answer::error(CODE_USAGE, "why").with_reason(reason),
+            None => Answer::error(CODE_USAGE, "why"),
+        };
+        let response = super::refusal(refused);
+        assert_eq!(response.status(), status, "{reason:?}");
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let said: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(said["error"], "why");
+        assert_eq!(said.get("reason").is_some(), reason.is_some(), "{said}");
+    }
+    let other = super::refusal(Answer::Ack);
+    assert_eq!(other.status(), Code::INTERNAL_SERVER_ERROR);
+    // With no reason the code says the kind: a selector that matches no device, no link.
+    for (code, status) in [
+        (svolder_ipc::CODE_NOT_FOUND, Code::NOT_FOUND),
+        (svolder_ipc::CODE_LINK, Code::SERVICE_UNAVAILABLE),
+        (svolder_ipc::CODE_TIMEOUT, Code::INTERNAL_SERVER_ERROR),
+    ] {
+        assert_eq!(super::refusal(Answer::error(code, "why")).status(), status);
+    }
+    // A reason wins over the code.
+    let both = Answer::error(svolder_ipc::CODE_NOT_FOUND, "why").with_reason(Reason::Stopping);
+    assert_eq!(super::refusal(both).status(), Code::SERVICE_UNAVAILABLE);
+}

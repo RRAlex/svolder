@@ -69,13 +69,20 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check workflow-check test safety-tests docs-check docs-check-merge fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots web-icons rate-check rate-check-test release-notes-test web-shots web-snippets tests-check theme-css-check web-checks web-checks-quick web-checks-task paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check web-checks web-checks-quick web-checks-task paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
 
 ##@ Start
 ##@ Try it
 ##@ Install
 ##@ Check
 ##@ Long checks (not part of check)
+#: Closes a pty on `svolder add` at a daemon walk's name step (a hangup, as a closed terminal
+#: window is) against a fake daemon in temp homes, and fails unless the client leaves as a
+#: cancelled walk (130 or SIGHUP's own death) and never by SIGABRT. Needs python3 only.
+tui-hangup-check: deps-build ## A closed terminal during a daemon walk: no abort
+	@$(CARGO) build -p svolder -p svolderd
+	@python3 scripts/tui-hangup-check.py 3
+
 #: Checks that the web tests catch a deliberate break: every web mutant runner, one after the other,
 #: with its kills and wall time, then a summary; fails when a mutant survives. Slow, by hand only,
 #: never a gate. FULL=1 adds the browser ones, many hours. The node runners take seconds to a few
@@ -133,10 +140,10 @@ docs-env: deps-build ## Rewrite docs/usage/environment.md's variable table
 	mv docs/usage/environment.md.new docs/usage/environment.md
 
 ##@ Check
-#: Format check, lints, safety tripwire, docs check, licence check, SPDX header check, workflow
+#: Format check, lints, safety tripwire, docs check, licence check, SPDX header check, network check, systemd unit check, workflow
 #: check, web mutation snippets, theme CSS check, rate-check parser self-test, build-deps self-test, sim-app preflight self-test,
 #: tests and this help's own check.
-check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check workflow-check web-snippets theme-css-check rate-check-test release-notes-test deps-test sim-app-test help-check test check-no-bluez ## Everything a commit must pass (make help T=check)
+check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check test check-no-bluez ## Everything a commit must pass (make help T=check)
 
 license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-later
 	CARGO=$(CARGO) python3 scripts/check-licenses.py --self-test
@@ -159,7 +166,7 @@ release-tree:
 # Its own target directory keeps the musl build apart from the host's and each architecture's apart.
 #: ARCH=x86_64|aarch64   the architecture (default x86_64); aarch64 goes into target/dist/aarch64
 static: build-image ## Static svolder, svolderd, svolder-sim into target/dist
-	$(IN_BUILD) $(STATIC_ENV) $(BUILD_IMAGE) cargo build --release --locked --target $(STATIC_TARGET) --target-dir $(STATIC_DIR) \
+	$(IN_BUILD) $(STATIC_ENV) $(BUILD_IMAGE) cargo auditable build --release --locked --target $(STATIC_TARGET) --target-dir $(STATIC_DIR) \
 	  -p svolder -p svolderd -p svolder-sim
 	mkdir -p $(STATIC_OUT)
 	install -m755 $(addprefix $(STATIC_DIR)/$(STATIC_TARGET)/release/,svolder svolderd svolder-sim) $(STATIC_OUT)/
@@ -187,6 +194,15 @@ endif
 release-files: ## PKGBUILD, SHA256SUMS, RELEASE-NOTES.md in target/dist
 	@sh packaging/release-files.sh $(VERSION)
 
+# Builds the packages, installs the .deb in a throwaway container and starts the release image
+# with the compose file a release attaches; its containers and image are named
+# svolder-dryrun-<random>.
+#: About 4 minutes with the build images and crates cached, about 20 cold, nearly all of it
+#: `make packages`. Needs Docker and a clean tree (ALLOW_DIRTY=1 to try it anyway).
+#: SKIP_PACKAGES=1   reuse target/dist instead of building the packages
+release-dry-run: ## Dry-run a release: packages, .deb, container first run
+	@MAKE="$(MAKE)" ALLOW_DIRTY=$(ALLOW_DIRTY) SKIP_PACKAGES=$(SKIP_PACKAGES) bash scripts/release-dry-run.sh
+
 # The second build starts from empty musl target directories (the crates stay downloaded),
 # so every artifact is built again and checked against the first one's sha256.
 #: Both architectures: about 13 minutes with the arm64 image and the crates cached, about 40 cold.
@@ -207,9 +223,66 @@ spdx-check: deps-check ## Fail if a source file lacks its SPDX header
 	echo "$$files" | tr '\n' '\0' | xargs -0 sh scripts/spdx-check.sh || exit 1; \
 	echo "spdx-check: $$(echo "$$files" | wc -l) files carry the SPDX headers"
 
+NETWORK_CHECK_PKG ?= svolder
+#: svolderd is the only process that reaches the internet: `svolder` links no HTTP client or TLS.
+network-check: ## Fail if the svolder client binary links ureq or rustls
+	@# `cargo tree -i` prints the package's dependents when svolder links it, and says "nothing to
+	@# print" (another crate of the workspace has the package) or "did not match any packages"
+	@# (none has) when it does not. Fail closed: a clean answer is one of those two, and anything
+	@# else (a dependent line, a new wording, any other cargo failure) fails the check.
+	@for crate in ureq rustls; do \
+	  out=$$($(CARGO) tree -p $(NETWORK_CHECK_PKG) -e normal -i $$crate 2>&1); code=$$?; \
+	  if echo "$$out" | grep -qE "^$$crate v"; then \
+	    echo "network-check: $(NETWORK_CHECK_PKG) links $$crate (only svolderd may reach the internet):"; echo "$$out" | grep -E "^(ureq|rustls) "; exit 1; \
+	  fi; \
+	  if ! echo "$$out" | grep -qE "nothing to print|did not match any packages"; then \
+	    echo "network-check: cargo tree gave an answer this check does not know as clean (exit $$code):"; echo "$$out"; exit 1; \
+	  fi; \
+	done; \
+	echo "network-check: $(NETWORK_CHECK_PKG) links no ureq and no rustls"
+
+#: svolderd links both crates, so network-check must fail on it: proves the check can fail.
+network-check-test: ## Prove network-check can fail (on svolderd)
+	@if $(MAKE) --no-print-directory network-check NETWORK_CHECK_PKG=svolderd >/dev/null 2>&1; then \
+	  echo "network-check-test: network-check passed on svolderd, which links ureq and rustls: it cannot fail"; exit 1; \
+	fi; \
+	echo "network-check-test: network-check fails on svolderd, as it must"
+
+UNIT_SRC ?= systemd
+UNIT_DOC ?= docs/usage/daemon.md
+#: The shipped units, with the placeholders filled in, verify offline.
+unit-check: ## Fail if a shipped systemd unit does not verify
+	@# The drop-in's settings lines (comment and blank lines left out) must equal those of the
+	@# fenced block after the `<!-- drop-in` marker in $(UNIT_DOC).
+	@want=$$(grep -v -e '^#' -e '^$$' $(UNIT_SRC)/svolderd-filesystem.conf); \
+	have=$$(awk '/^<!-- drop-in/{m=1;next} m&&/^```/{if(f){exit}f=1;next} m&&f' $(UNIT_DOC) | grep -v -e '^#' -e '^$$'); \
+	if [ -z "$$have" ] || [ "$$want" != "$$have" ]; then echo "unit-check: the drop-in block in $(UNIT_DOC) differs from $(UNIT_SRC)/svolderd-filesystem.conf"; exit 1; fi; \
+	echo "unit-check: the docs' drop-in block matches the file"
+	@if ! command -v systemd-analyze >/dev/null 2>&1; then echo "unit-check: SKIPPED (systemd-analyze not found)"; exit 0; fi; \
+	mkdir -p target; d=$$(mktemp -d target/unit-check.XXXXXX) || exit 1; \
+	mkdir -p "$$d/bin" "$$d/plain" "$$d/dropin/svolderd.service.d" && printf '#!/bin/sh\n' > "$$d/bin/svolderd" && chmod +x "$$d/bin/svolderd"; \
+	for unit in svolderd.service svolderd.socket; do \
+	  sed -e "s|__BINDIR__|$$PWD/$$d/bin|g" -e 's|__SOCKET__|%t/svolder.sock|g' $(UNIT_SRC)/$$unit > "$$d/plain/$$unit"; \
+	done; \
+	cp "$$d/plain/svolderd.service" "$$d/plain/svolderd.socket" "$$d/dropin/"; \
+	cp $(UNIT_SRC)/svolderd-filesystem.conf "$$d/dropin/svolderd.service.d/filesystem.conf"; \
+	status=0; : > "$$d/shown"; \
+	for dir in plain dropin; do \
+	  out=$$(systemd-analyze --user verify "$$PWD/$$d/$$dir/svolderd.service" "$$PWD/$$d/$$dir/svolderd.socket" 2>&1); s=$$?; \
+	  if [ $$s -ne 0 ]; then status=$$s; echo "$$out"; fi; \
+	  echo "$$out" | grep -E 'svolderd|unit-check\.' >> "$$d/shown"; \
+	done; \
+	if [ -s "$$d/shown" ]; then cat "$$d/shown"; status=1; fi; \
+	rm -r "$$d"; \
+	if [ $$status -ne 0 ]; then echo "unit-check: systemd-analyze verify failed or warned about our units ($$status)"; exit 1; fi; \
+	echo "unit-check: the units verify, plain and with the filesystem drop-in"
+
 #: The menu button, its menu and the picker belong to the frame: a theme dresses them with the
 #: --frame-* tokens only.
+#: Also fails when a theme leaves a colour token of the frame unset in a scheme it lists, or the
+#: frame's sheet turns to its phone layout at another width than the core's PHONE_MAX_PX.
 theme-css-check: ## Fail if a theme styles the frame's own parts
+	@python3 -I scripts/theme-css-check.py --self-test
 	@python3 -I scripts/theme-css-check.py
 
 #: Fails if a workflow could start by itself (any trigger but workflow_dispatch and a v* tag push),
@@ -217,6 +290,14 @@ theme-css-check: ## Fail if a theme styles the frame's own parts
 workflow-check: ## Fail on a GitHub workflow that is unsafe or broken
 	python3 -I scripts/workflow-check.py --self-test
 	python3 -I scripts/workflow-check.py
+
+#: Needs the network (it fetches the RustSec advisory database and writes it to
+#: ~/.cargo/advisory-db) and cargo-audit, so it is not part of `make check`. The two known
+#: unmaintained warnings are allowed by id: paste (RUSTSEC-2024-0436, via nalgebra) and ttf-parser
+#: (RUSTSEC-2026-0192, via ab_glyph); any other advisory or warning fails.
+audit: ## Fail on an advisory in Cargo.lock (needs network)
+	@$(CARGO) audit --version >/dev/null 2>&1 || { echo "audit: cargo-audit is not installed: cargo install --locked cargo-audit" >&2; exit 1; }
+	$(CARGO) audit --deny warnings --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0192
 
 # SVOLDER_TEST_PREBUILT: this one cargo invocation builds every binary in the workspace
 # before it runs a test, so a test that needs a sibling binary uses the one on disk. Without it
@@ -239,7 +320,8 @@ test: deps-build ## Run all tests
 	@scratch=$$(mktemp -d /tmp/sv.XXXXXX) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	mkdir "$$scratch/t" || exit 1; \
-	env -u SVOLDER_MCP_TOKEN -u SVOLDER_WEB_TOKEN TMPDIR="$$scratch/t" \
+	env -u SVOLDER_MCP_TOKEN -u SVOLDER_WEB_TOKEN -u SVOLDER_WEB_ENABLED -u SVOLDER_MCP_ENABLED \
+	  -u SVOLDER_WEB_LISTEN -u SVOLDER_MCP_LISTEN -u SVOLDER_WEB_URL TMPDIR="$$scratch/t" \
 	  XDG_CONFIG_HOME="$$scratch/config" \
 	  XDG_STATE_HOME="$$scratch/state" \
 	  XDG_DATA_HOME="$$scratch/data" XDG_CACHE_HOME="$$scratch/cache" SVOLDER_WIREPLUMBER="$$scratch/no-wireplumber" \
@@ -256,9 +338,17 @@ test: deps-build ## Run all tests
 #: make check's tests on a private system bus with no BlueZ, as the release runner has. Starts a
 #: private D-Bus daemon with no BlueZ on it, points DBUS_SYSTEM_BUS_ADDRESS at it and
 #: runs `make test`, so a test that assumes BlueZ answers fails here as it does on the release
-#: runner, which has a system bus and no BlueZ. Needs dbus-daemon.
-check-no-bluez: ## make test on a system bus with no BlueZ, as CI has
-	@command -v dbus-daemon >/dev/null || { echo 'make check-no-bluez: dbus-daemon is not installed' >&2; exit 1; }; \
+#: runner, which has a system bus and no BlueZ. Needs dbus-daemon. Skipped, with a line saying
+#: why, when the system bus already has no BlueZ (running or startable: scripts/bus-has-bluez.sh
+#: exits 1), since `make test` just ran under exactly those conditions; a bus that cannot be
+#: asked gets the run.
+check-no-bluez: ## make test on a bus with no BlueZ (skipped if none)
+	@sh scripts/bus-has-bluez.sh; rc=$$?; \
+	if [ $$rc -eq 1 ]; then \
+	  echo 'make check-no-bluez: skipped, the system bus has no BlueZ (running or startable), so make test already ran without it'; \
+	  exit 0; \
+	fi; \
+	command -v dbus-daemon >/dev/null || { echo 'make check-no-bluez: dbus-daemon is not installed' >&2; exit 1; }; \
 	bus=$$(mktemp -d /tmp/sv-bus.XXXXXX) || exit 1; \
 	trap 'kill $$pid 2>/dev/null; rm -rf "$$bus"' EXIT; \
 	dbus-daemon --session --nofork --address="unix:path=$$bus/bus" & pid=$$!; \
@@ -292,6 +382,11 @@ safety-tests: ## Fail if a safety test has gone missing
 docs-check: ## Fail on a broken doc link, stale path or process tag
 	@python3 scripts/docs-check.py --self-test
 	@python3 scripts/docs-check.py
+
+#: The table of docs/usage/web-ui.md against the routes the daemon serves.
+routes-doc-check: ## Fail if the web routes and their docs table disagree
+	@python3 -I scripts/routes-doc-check.py --self-test
+	@python3 -I scripts/routes-doc-check.py
 
 docs-check-merge: ## Before a merge to main: docs-check, shipped docs only
 	@python3 scripts/docs-check.py --merge
@@ -342,8 +437,8 @@ demo-dac: deps-build ## make demo on the fake DAC; drives your real audio
 demo-amp: deps-build ## make demo on the fake amp; drives your real audio
 	@$(MAKE) --no-print-directory demo PROFILE=fake-amp SIGNAL=1
 
-#: The computer side (volume, EQ points, presets) is simulated on the web page; the TUI shows
-#: "computer controls unavailable" for now.
+#: The computer side (volume, EQ points, presets) is simulated in the demo's daemon, which the TUI
+#: and the web page share.
 demo-computer: deps-build ## TUI + web UI on a fake DAC; your audio untouched
 	$(CARGO) build --workspace
 	$(DEMO_KNOBS) target/debug/svolder tui --demo --web
@@ -416,12 +511,14 @@ nightdrive-shots: deps-build ## Night drive's stills into target/web-shots/night
 
 ##@ Check
 #: Needs python3 only.
-web-snippets: ## Fail if a web mutant's snippet is not in its file once
+web-snippets: ## Fail on a moved mutant snippet or an unlisted node harness
 	@python3 scripts/web-checks/snippets.py
+	@python3 -I scripts/web-checks/node-list.py --self-test
+	@python3 -I scripts/web-checks/node-list.py
 
 ##@ Long checks (not part of check)
 #: The node harnesses and the browser checks, headless; a failure is re-run alone. Never takes a
-#: picture of the smoke. Needs node, python3-websockets, python3-numpy, python3-pil, both browsers
+#: picture of the smoke. Needs node, node-jsdom, python3-websockets, python3-numpy, python3-pil, both browsers
 #: and geckodriver.
 #: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
 web-checks: deps-build ## Every web check in Chromium and Firefox (over an hour)

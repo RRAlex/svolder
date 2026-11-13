@@ -1,11 +1,10 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// Node harness for the pure rules of core/words.js and facts.js: the ages as the daemon words them
-// (the thresholds of `age_words` in crates/svolder-ipc/src/socket/signal.rs), the signal's words,
-// the Identify toast and the read that a newer swap overtakes. Run: node facts.mjs
+// Node harness for the pure rules of core/words.js: the ages as the daemon words them
+// (the thresholds of `age_words` in crates/svolder-ipc/src/socket/signal.rs), the signal's words
+// and the Identify toast. Run: node facts.mjs
 import assert from 'node:assert/strict';
 import { ageWords, identifyWords, signalText } from '../../../bins/svolderd/web/core/words.js';
-import { overtaken } from '../../../bins/svolderd/web/themes/ember/facts.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -53,12 +52,5 @@ ok('identifyWords: sent, just sent with the daemon\'s gap, and the daemon\'s own
     'device not connected, next attempt in 12 s',
   );
   assert.equal(identifyWords({ status: 0 }, '2'), 'The device did not answer.');
-});
-ok('overtaken: a swap or another element in place since the read began drops the read', () => {
-  const root = {};
-  assert.equal(overtaken({ root, swaps: 2 }, { root, swaps: 2 }), false);
-  assert.equal(overtaken({ root, swaps: 2 }, { root, swaps: 3 }), true);
-  assert.equal(overtaken({ root, swaps: 2 }, { root: {}, swaps: 2 }), true);
-  assert.equal(overtaken({ root, swaps: 2 }, { root: null, swaps: 2 }), true);
 });
 console.log(`facts.mjs: ${n} checks passed`);

@@ -3,7 +3,7 @@
 // The rest of a device below the first screen (the shelf): in three columns, the band table with
 // the values typed or stepped, then the presets (chips, Save as, Rename, Delete), the controls the
 // model lists (toggles as pills, choices as chips, balance and the like as scales, readouts), the
-// loudness strength and the device's own slots and settings, then the device's facts folded under
+// loudness strength and the device's own slots and settings, then *Device settings…* under
 // their title. It draws what the device's model has and nothing of the family it belongs to, so an
 // amp's shelf is this one too. Pure: the model in, markup out.
 
@@ -174,16 +174,16 @@ function devicePresets(device) {
 /**
  * The shelf of `device` (the model of the device the hop chosen is): two columns, the band table
  * (with a DAC's input under it), then the mode (with the loudness strength), power, presets,
- * controls and the device's own presets; the facts across the bottom. On a phone a DAC's input and
+ * controls and the device's own presets; *Device settings…* across the bottom. On a phone a DAC's input and
  * presets come first, right under the mode that ends the first screen. Nothing for no device. `own`
  * names what the open area draws for the device itself and the shelf leaves out:
- * `{ power, identify }`; `choices` marks a DAC's shelf, `phone` the phone's order.
+ * `{ power }`; `choices` marks a DAC's shelf, `phone` the phone's order.
  */
 export function drawShelf(page, device, view, own = {}) {
   if (!device) return '';
   const input = own.choices ? choices(device) : '';
   const picks = input ? `<section id="sg-choices" class="sg-side">${input}</section>` : '';
-  const facts_ = `<section id="sg-facts" class="sg-col">${facts(page, device, view, own)}</section></div>`;
+  const facts_ = `<section id="sg-facts" class="sg-col">${facts(page, device)}</section></div>`;
   const power_ = own.power ? '' : power(device);
   if (own.choices && own.phone) {
     return '<div class="sg-cols">'

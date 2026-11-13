@@ -2,22 +2,22 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The picker: a sheet over the page with a card for each theme the page ships, each card's picture
 // drawn by its theme (`theme.preview(box)`), the one in use marked. A pick of another theme goes to
-// `pick(id)`; Escape, a click outside the sheet, the close button at its top right or a pick closes
-// it. While it stands it is modal:
-// what is under it cannot be reached by the keys or the mouse, and the keys that move in it are
-// the sheet's.
+// `pick(id)`; Escape, the key that opened it, a click outside the sheet, the close button at its
+// top right or a pick closes it. It is a modal of the core's stack (modal.js): what is under it
+// cannot be reached by the keys or the mouse, and the keys that move in it are the sheet's.
 
 /** The words under the title. */
 const NOTE = 'Each browser keeps its own choice. Your sections\' order stays with each theme.';
 
 /**
- * The picker of `core`'s themes; `pick(id)` takes a card's theme, `under` lists the elements the
- * sheet covers (they go inert while it is open) and `button` is where the focus goes back to when
- * it was nowhere else. Returns `{ open, close, opened, key }`.
+ * The picker of `core`'s themes on the stack `modal`; `pick(id)` takes a card's theme and
+ * `toggles(event)` says whether a key is the one that opens the picker (it closes it too).
+ * Returns `{ open, close, opened }`.
  */
-export function createPicker({ document, core, pick, under, button }) {
+export function createPicker({ document, core, pick, modal, toggles }) {
   let sheet = null;
-  let back = null;
+  /** The sheet's place on the stack while it is open. */
+  let standing = null;
 
   /** An element of `tag` with `name` as its class. */
   function make(tag, name, text) {
@@ -59,13 +59,9 @@ export function createPicker({ document, core, pick, under, button }) {
 
   function open() {
     if (sheet) return;
-    back = document.activeElement;
     const current = core.theme?.id;
     sheet = make('div');
     sheet.id = 'picker';
-    sheet.setAttribute('role', 'dialog');
-    sheet.setAttribute('aria-modal', 'true');
-    sheet.setAttribute('aria-labelledby', 'picker-title');
     const inner = make('div', 'picker-sheet');
     const title = make('h2', '', 'Theme');
     title.id = 'picker-title';
@@ -77,9 +73,9 @@ export function createPicker({ document, core, pick, under, button }) {
       + '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
     grid.append(...core.registry.list().map((entry) => card(entry, current)));
     const foot = make('p', 'picker-foot');
-    const key = make('kbd', '', 'T');
+    const letter = make('kbd', '', 'T');
     const address = make('code', '', '?theme=ember');
-    foot.append('Press ', key, ' in any theme to open this or add ', address,
+    foot.append('Press ', letter, ' in any theme to open this or add ', address,
       ' to the address');
     inner.append(x, title, make('p', 'picker-note', NOTE), grid, foot);
     sheet.append(inner);
@@ -94,25 +90,31 @@ export function createPicker({ document, core, pick, under, button }) {
         close();
       }
     });
-    document.body.append(sheet);
-    for (const el of under) el.inert = true;
-    (cards().find((el) => el.getAttribute('aria-current') === 'true') ?? cards()[0])?.focus();
+    standing = modal.open({
+      el: sheet,
+      labelledBy: 'picker-title',
+      focus: cards().find((el) => el.getAttribute('aria-current') === 'true') ?? cards()[0],
+      onKey: key,
+      onClose: () => {
+        sheet = null;
+        standing = null;
+      },
+    });
   }
 
   function close() {
-    if (!sheet) return;
-    sheet.remove();
-    sheet = null;
-    for (const el of under) el.inert = false;
-    const to = back?.isConnected ? back : button;
-    back = null;
-    to.focus();
+    standing?.close();
   }
 
-  /** A key pressed while the picker is open: Escape closes, the arrows, Home and End and Tab move
-   * between the cards; no other key reaches the page under it. */
+  /** A key pressed while the picker is open, `true` when it is the picker's: the key that opened it
+   * closes it, the arrows, Home and End and Tab move between the cards. Escape is the stack's. */
   function key(event) {
-    if (!sheet) return;
+    if (toggles(event)) {
+      event.preventDefault();
+      // the key still held from the press that opened the picker is not a second press
+      if (!event.repeat) close();
+      return true;
+    }
     const list = reach();
     const at = list.indexOf(document.activeElement);
     const step = (by) => list[(at + by + list.length) % list.length];
@@ -125,15 +127,11 @@ export function createPicker({ document, core, pick, under, button }) {
       End: list[list.length - 2],
       Tab: step(event.shiftKey ? -1 : 1),
     }[event.key];
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    } else if (to) {
-      event.preventDefault();
-      to.focus();
-    }
-    event.stopPropagation();
+    if (!to) return false;
+    event.preventDefault();
+    to.focus();
+    return true;
   }
 
-  return { open, close, opened, key };
+  return { open, close, opened };
 }

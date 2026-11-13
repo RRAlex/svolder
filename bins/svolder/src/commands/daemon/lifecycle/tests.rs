@@ -369,3 +369,24 @@ async fn restart_if_running_restarts_a_service_that_is_starting_or_reloading() {
         );
     }
 }
+
+/// A restart waits for every bounded step of the old daemon's stop, with two seconds to spare
+/// for the servers, and the whole stays inside the service unit's `TimeoutStopSec` (60 s, which
+/// `make unit-check` holds the unit to). The steps are the ones `docs/design/jobs.md` lists; a
+/// test in svolderd holds the daemon's source to that list.
+#[test]
+fn the_restart_wait_covers_the_daemons_whole_stop() {
+    let steps = [
+        svolder_ipc::JOB_STOP_BOUND,
+        svolder_ipc::BRIDGE_STOP_BOUND,
+        svolder_ble::FAREWELL_BOUND + svolder_ipc::ACTOR_STOP_MARGIN,
+        svolder_ipc::WRITE_SETTLE_BOUND,
+        svolder_ble::CLOSE_GRACE,
+        svolder_ipc::RUNTIME_STOP_BOUND,
+    ];
+    let stop: Duration = steps.iter().sum();
+    assert_eq!(LOCK_WAIT, stop + Duration::from_secs(2));
+    let unit = include_str!("../../../../../../systemd/svolderd.service");
+    assert!(unit.contains("\nTimeoutStopSec=60\n"));
+    assert!(LOCK_WAIT < Duration::from_secs(60));
+}

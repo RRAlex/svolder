@@ -188,7 +188,7 @@ export function wireVolume({
       || (event.pointerType === 'mouse' && event.button !== 0)) return;
     hold?.end();
     // A press that steps once: a viewer who may not write is told so, once, not on every repeat.
-    hold = core.hold.repeat(event, {
+    hold = core.repeat(event, {
       root: box,
       el: button,
       step: (el) => nudge(el.dataset.act === 'volume-up' ? 1 : -1),

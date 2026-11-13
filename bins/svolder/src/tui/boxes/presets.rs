@@ -22,8 +22,8 @@
 use std::time::Instant;
 
 use crossterm::event::KeyCode;
-use svolder_autoeq::{Entry as Measurement, Index};
 use svolder_ipc::config::RefreshWeeks;
+use svolder_ipc::{AutoEqSaved, AutoEqSearch};
 use svolder_profiles::EqSpec;
 use svolder_profiles::tone::preset::{self, BothSides, EqCommand, Plan, Preset};
 use svolder_proto::FunctionId;
@@ -35,7 +35,7 @@ mod import;
 pub(crate) mod prompt;
 pub(crate) mod search;
 
-pub use import::Pending;
+pub use import::{Landed, Pending};
 pub use prompt::FilePrompt;
 pub use search::SearchBox;
 
@@ -74,8 +74,11 @@ pub struct PresetsBox {
     /// The list of the device's own presets over the device screen, while it is open: a device
     /// with a tone control has [`preset_list`](Self::preset_list) instead.
     pub device_list: Option<super::device_presets::DeviceList>,
-    /// The AutoEq index, once the search has had it: kept for the session.
-    pub autoeq: Option<std::sync::Arc<svolder_autoeq::Index>>,
+    /// The number of the last question the AutoEq search asked the daemon, over every box of the
+    /// session: an answer is taken only for the box's own last one.
+    pub ask_seq: u64,
+    /// The preset the daemon saved from AutoEq, until the presets are read again and it is said.
+    pub landed: Option<Landed>,
     /// How often the AutoEq index is fetched again, as the configuration file holds it.
     pub autoeq_weeks: RefreshWeeks,
     /// The preset loaded, or saved from the device, last this session: what the tone-control
@@ -154,20 +157,21 @@ pub enum Question {
 /// What a job the loop ran off the UI thread ended with.
 #[derive(Debug)]
 pub enum Done {
-    /// The AutoEq index, or why there is none.
-    Index(Result<Index, String>),
-    /// One measurement's correction text, or why it could not be had.
-    Download(Measurement, Result<String, String>),
+    /// The daemon's answer to a search question, or why there is none; it carries the question.
+    Searched(search::Ask, Result<AutoEqSearch, String>),
+    /// The daemon's import of a measurement under the preset name `0`: the preset it saved, or why it
+    /// did not.
+    Imported(String, Result<AutoEqSaved, String>),
 }
 
 /// Fold what a job ended with into the app, and answer with the writes it asks for.
 pub(crate) fn done(app: &mut App, done: Done) -> Vec<Intent> {
     match done {
-        Done::Index(result) => {
-            search::index_ready(app, result);
+        Done::Searched(ask, result) => {
+            search::answered(app, &ask, result);
             Vec::new()
         }
-        Done::Download(entry, result) => import::downloaded(app, &entry, result),
+        Done::Imported(name, result) => import::imported(app, &name, result),
     }
 }
 
@@ -333,7 +337,10 @@ pub(crate) fn reread(app: &mut App, presets: Vec<Preset>) {
             preset::fit_for(eq, source);
         }
     }
-    let row = on_row(app);
+    let mut row = on_row(app);
+    if let Some(landed) = app.presets.landed.take() {
+        row = say_landed(app, &landed).unwrap_or(row);
+    }
     if let Some(PresetList {
         row: focused,
         step: Step::Choosing,
@@ -341,6 +348,28 @@ pub(crate) fn reread(app: &mut App, presets: Vec<Preset>) {
     {
         *focused = row;
     }
+}
+
+/// Say in a toast that the daemon saved the preset `landed` names, with the preamp the file now
+/// says, and give the row it has in the list.
+fn say_landed(app: &mut App, landed: &Landed) -> Option<usize> {
+    let preamp = app
+        .presets
+        .saved
+        .iter()
+        .find(|preset| preset.name == landed.name)
+        .and_then(|preset| preset.source.as_ref())
+        .map(|source| source.correction.preamp_db);
+    app.notify(crate::commands::device::saved_line(
+        &landed.name,
+        landed.filters,
+        preamp,
+        landed.skipped,
+    ));
+    let eq = app.preset_spec()?;
+    entries(app, &eq)
+        .iter()
+        .position(|entry| entry.preset.name == landed.name)
 }
 
 /// The row of the preset that is on, or the first row where none is.
@@ -612,7 +641,7 @@ fn named(app: &mut App) -> Vec<Intent> {
         }
     };
     if let Some(pending) = importing {
-        return import::save(app, &name, pending.imported, pending.skipped);
+        return import::named(app, &name, *pending);
     }
     let intents = match renaming {
         Some(old) => {

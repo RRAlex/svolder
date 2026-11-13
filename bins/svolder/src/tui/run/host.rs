@@ -164,9 +164,9 @@ impl HostLink {
     }
 
     /// The host this session runs on, reached through `wpctl`, `pw-record` and the session
-    /// bus, or nothing at all when `held_off` (`SVOLDER_HOST=off`) says so.
-    pub(in crate::tui) fn session(held_off: bool) -> HostLink {
-        if held_off {
+    /// bus, or nothing at all when `unreached` (`SVOLDER_HOST=off` or `fake`) says so.
+    pub(in crate::tui) fn session(unreached: bool) -> HostLink {
+        if unreached {
             return HostLink::none();
         }
         let sink = Wpctl::from_env().map(|wpctl| Arc::new(wpctl) as Arc<dyn Sink>);
@@ -182,6 +182,17 @@ impl HostLink {
             Some(capture) => link.with_capture(Box::new(capture)),
             None => link,
         }
+    }
+
+    /// Whether the link reaches nothing of the host: no sink, no players to look for, nothing
+    /// to capture.
+    #[cfg(test)]
+    pub(in crate::tui) fn reaches_nothing(&self) -> bool {
+        self.ops.is_none()
+            && self.states.is_none()
+            && self.poll.is_none()
+            && self.connect.is_none()
+            && self.capture.is_none()
     }
 
     /// This link, capturing the default sink's monitor through `capture` whenever the app

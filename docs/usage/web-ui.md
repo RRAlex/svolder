@@ -20,13 +20,17 @@ socket, MQTT or MCP instead. This section is the guide; "web" below is the refer
 
 ### Turning it on
 
-The page is off unless `config.toml` turns it on; without a `[web]` section, or with
-`enabled = false`, the daemon opens no port:
+The page is off until something turns it on; without a `[web]` section, or with
+`enabled = false`, the daemon opens no port. `svolder web on` turns it on (and `svolder web off`
+off again, see ["web on, web off"](#web-on-web-off)), which writes this to `config.toml`:
 
 ```toml
 [web]
 enabled = true
 ```
+
+`SVOLDER_WEB_ENABLED=1` in the daemon's environment turns it on where the file has no `enabled`
+key, for a container's compose file; an `enabled` in the file wins.
 
 The defaults are `listen = "127.0.0.1:8738"` (this computer only), `auth = "token"`,
 `writes = true`, `guest = "none"`, no `max_volume_db`, no `url`, and empty `hosts` and `origins`.
@@ -51,15 +55,15 @@ link, the pairing code and the new token below.
 
 ### In Docker
 
-The compose file gives the container the host's network, and the image listens on every interface
-by default (`SVOLDER_WEB_LISTEN=0.0.0.0:8738`), so the only steps are `enabled = true` under `[web]`
-in `config.toml` under `config/svolder`, then `docker compose restart svolder`, and the sign-in,
-`docker exec svolder svolder web token`. `svolder web --qr` and `web pair` carry the host's LAN
-address. Only a container on a bridge network (no `network_mode: host`) needs `url` in the file, or
-`SVOLDER_WEB_URL` in the container's environment, the address your phone reaches, e.g.
-`http://<host-ip>:8738`, and says so when it is missing. A
-`listen` in the file still wins. See ["The web UI in the container"](daemon.md#the-web-ui-in-the-container) under
-"The daemon".
+The compose file gives the container the host's network, and the image listens on every interface by
+default (`SVOLDER_WEB_LISTEN=0.0.0.0:8738`), so the only steps are turning it on (`docker exec
+svolder svolder web on`, or `SVOLDER_WEB_ENABLED: "1"` in the compose file's `environment:`, or
+`enabled = true` under `[web]` in `config.toml` under `config/svolder` and `docker compose restart
+svolder`) and the sign-in, `docker exec svolder svolder web token`. `svolder web --qr` and `web
+pair` carry the host's LAN address. Only a container on a bridge network (no `network_mode: host`)
+needs `url` in the file, or `SVOLDER_WEB_URL` in the container's environment, the address your phone
+reaches, e.g. `http://<host-ip>:8738`, and says so when it is missing. A `listen` in the file still
+wins. See ["The web UI in the container"](daemon.md#the-web-ui-in-the-container) under "The daemon".
 
 ### Signing in
 
@@ -131,8 +135,9 @@ of it (see "Behind a proxy"). `svolder doctor` notes a listen address off loopba
 `guest = "read"` lets anyone who reaches the page look without signing in. A guest sees the devices,
 their values, the link, faults with their advice, the meters, the strip, the preset names with the
 one that is on, and the declared hops with their notes; never a unit id, a passphrase note, a path
-or the daemon's version. The Device fold-out is there without the unit id and the passphrase note,
-and its Identify button is inert.
+or the daemon's version. A guest opens the Devices popup read-only (see Devices): the device list,
+the Overview, each device's facts without its unit id, its signal, key graphs and All readings, and
+nothing that changes a device.
 
 Every control is drawn and inert, a touch on one says `Sign in to change this` with a Sign in
 button, and every write answers 401. The header's Sign in button opens the sign-in page, and a link
@@ -198,7 +203,7 @@ carries the same `Next attempt in N s.`, countdown and Try now while an attempt 
 `NAME refused its passphrase`, which says to run `svolder doctor`; and, with no device configured,
 `No devices yet. svolder setup adds one.` Active faults show as one card, `Fault` or `N faults`,
 with a line for each: its name and the profile's advice. It is the same on every device, an amp
-with no power button included, and the amp's Power section no longer lists faults.
+with no power button included, and the amp's Power section lists none.
 
 **Now playing.** When svolderd watches the computer's music player (the default; `SVOLDER_HOST=off`
 or `[host] enabled = false` turns it off, and a daemon with no session bus, as in a container, has
@@ -265,38 +270,42 @@ The card costs nothing when nobody looks: the page asks the daemon for frames on
 in front and the card is on screen, lets the stream go 2 s after it is not (a phone's background
 tab, or the card scrolled out of view), and the daemon stops capturing 2 s after that. When no
 capture is possible (no `pw-record`, a container, `[host]` off) the card keeps its size and says why
-in one quiet line. The Device fold-out shows `Visualizer delay N ms` while the card runs: how far
-behind the sound the frames arrive, the median of the last 2 s; up to about 120 ms is not noticed in
-the pictures.
+in one quiet line. Ember's Device fold-out shows `Visualizer delay N ms` while the card runs: how
+far behind the sound the frames arrive, the median of the last 2 s; up to about 120 ms is not
+noticed in the pictures.
 
 While the card runs, the effects follow the music too: the Glow's brightness rises above the
 volume's with how loud it plays and falls back when it stops, and the smoke puffs from the knob on
 each beat, on time. Both are the volume's alone when the card is hidden, the tab is in the
 background or no capture runs, and Off shows neither.
 
-**The Device fold-out.** At the foot of each device's screen a quiet `Device` line opens a fold-out
-(closed until you open it; the page remembers, in this browser, whether you left it open, and works
-without that). It says the product with its product id, the unit id (not to a guest), the firmware
-and the DSP build the device reported (`3 (advertised)` and a dash until it has, the first being
-the build the device advertised), the profile it is read through, the link (`connected`,
-`disconnected`, then `passphrase refused` or `readings stale` where that holds, joined by ` · `),
-the signal strength and the passphrase note. The signal reads `−62 dBm advert, 3 min ago`: where it
-was measured and how long ago, and `—` while the daemon has never heard one. Under the facts an
-**All readings** table lists every reading the daemon holds, named or not (never the one that echoes
-a passphrase change, which carries the code), with its function address, the profile's name for it
-(`?` when it has none), its value and how long ago the daemon heard it. The ages count up on the
-page. The part is sent again when a fact or a value changes (at most once a second; an amp's meters,
-which the page shows live, do not count, so their rows in the table are as they stood when the part
-was last sent), and when a reading is heard again with the same value in a later minute, so "Heard"
-for a value that does not change is accurate to about a minute; opening the fold-out reads it
-afresh, so the table is current when you look.
+**A device's facts.** At the foot of each device's screen (Ember's quiet `Device` fold-out, Paper's
+written word, Signal's and Night drive's button) stands *Device settings…*, which reads *Devices…*
+for a viewer who may not write (a guest, or a page with `[web] writes` off); it opens that device's
+page in the Devices popup, read-only for that viewer. Ember's fold-out also holds `Visualizer delay`
+while the card runs. The page says the product with its product id, the unit id, the firmware and
+the DSP build the device reported (`3 (advertised)` and a dash until it has, the first being the
+build the device advertised), the profile it is read through, the link (`connected`, `disconnected`,
+then `passphrase refused` or `readings stale` where that holds, joined by ` · `), the signal
+strength and the passphrase note. The signal reads `−62 dBm advert, 3 min ago`: where it was
+measured and how long ago, and `—` while the daemon has never heard one. Under the key graphs **All
+readings**, a disclosure that starts closed, holds a table of every reading the daemon holds, named
+or not (never the one that echoes a passphrase change, which carries the code), with its function
+address, the profile's name for it (`?` when it has none), its value and how long ago the daemon
+heard it. The ages count up on the page. The part is sent again when a fact or a value changes (at
+most once a second; an amp's meters, which the page shows live, do not count, so their rows in the
+table are as they stood when the part was last sent), and when a reading is heard again with the
+same value in a later minute, so "Heard" for a value that does not change is accurate to about a
+minute; opening the page reads it afresh, so the table is current when you look.
 
-The **Identify** button (not shown for a device whose profile offers no identify, the Mesh Card)
-asks the unit to show itself, to tell one from others. The page answers with a popup: `Identify
-sent`; `Just sent — wait 2 s` when one went out within the last two seconds (nothing is sent); or
-the daemon's words when the device is down (`device not connected, next attempt in N s`). It is a
-write: a guest or a page with `[web] writes` off has it inert, and what the unit does on the command
-(a blink, a timed cue) is not verified on hardware yet.
+The **Identify** button on that page (not shown for a device whose profile offers no identify, the
+Mesh Card; present but off, with its reason beside it, while the device is not connected) asks the
+unit to show itself, to tell one from others. The page answers with a popup: `Identify sent`; `Just
+sent — wait 2 s` when one went out within the last two seconds (nothing is sent); or the daemon's
+words when the device is down (`device not connected, next attempt in N s`). It is a write, and what
+the unit does on the command (a blink, a timed cue) is not verified on hardware yet. A guest or a
+page with `[web] writes` off has no Devices popup; the only Identify it still sees is Signal's, in
+the amp area, which is inert there.
 
 When the page loses its stream the controls dim and the pill says `Reconnecting to svolder…`; when
 the stream returns, that notice goes. When a device's link comes back (its `is out of reach` card
@@ -412,6 +421,13 @@ open at a time, and a preset recalled from the keyboard keeps the focus. A name 
 one a preset cannot have, is refused with a popup. Where `config.toml` cannot be written, the list
 says `Saving presets is off: WHY` and keeps recalling.
 
+The page model carries the list as `presets`: `status` (`lead`, `name`, `tail`: the line above the
+list), `rows`, `editable` (save, rename and delete show: the viewer may write and the configuration
+can be written), `recall` (a recall may be made from here) and `note` (why editing is hidden, for a
+viewer who may write). A row holds `name`, `built_in`, `imported` (an AutoEq or file preset: its
+bands are fitted, and an overwrite with the device's curve is refused), `on` (the lamp), and `json`
+and `rename_json`, the bodies its recall and delete post and its rename posts beside the new name.
+
 **A Loki Max's presets.** A device that keeps presets of its own (the Loki Max) has a Presets list
 of its own where a DAC has the tone presets: its three slots, `Preset 1` to `Preset 3`, then the
 built-in settings under `Built in`, with a lamp on the setting the six bands read (none while a band
@@ -439,13 +455,34 @@ or a preset was recalled; a second without a link has no bar.
 arrows on a focused control belonging to that control: `←` `→` change the volume one step, `m`
 mutes, `0` centres the balance, `f` sets the tone control to Flat, `p` focuses the preset that is
 on, `v` changes the visualizer's look (a guest has it too; it does nothing with the visualizer
-switched off), `A` arranges the sections (below), `T` opens the theme picker (every theme has it,
-a guest too), Space plays and pauses the computer's player (every theme has it; not while the focus
-is on a button, a link, a slider or another control Space itself works, nor while a menu or a dialog
-is open, and nothing where the page has no player) and `?` shows and hides the list, which also says how the curve is dragged. A guest,
-and a page with `[web] writes` off, have `v`, `A`, `T` and `?` only, and `?` lists just those; `v`
-is listed only where the screen has a visualizer card. The footer lists the keys at desktop width.
-The list closes by itself after 6 seconds, and at once on any key, click, scroll, wheel or touch.
+switched off), `A` arranges the sections (below), `T` opens the theme picker when nothing covers the
+page (every theme has it, a guest too; over an open question, a popup or a theme's own sheet it does
+nothing, and in the picker it closes it), Space plays and pauses the computer's player (every theme
+has it; not while the focus is on a button, a link, a slider or another control Space itself works,
+nor while a menu or a dialog is open, and nothing where the page has no player) and `?` opens
+**Help** (below), which lists the keys and says how the curve is dragged. A guest, and a page with
+`[web] writes` off, have `v`, `A`, `T` and `?` only, and Help lists just those; `v` is listed only
+where the screen has a visualizer card. The footer names a few keys at desktop width.
+
+**Help** is the menu's *Help…* row, or `?` in every theme (not while a field has the focus, nor
+over a question, another popup or a theme's own sheet; from the open menu it closes the menu
+first). It is open to a guest too and has three pages:
+
+- **Here**: the keys of what had the keyboard focus when Help was opened (the dial, a slider, a
+  point of the curve, a list), under the name of that control, then the keys of the whole page.
+  After a click on an empty part of the page nothing has the focus, and Here says so and shows
+  the keys of the whole page alone.
+- **Everywhere**: the keys that work on every screen of the theme, `T`, Space and `?` among
+  them.
+- **About**: the svolder version (not shown to a guest), the address of the daemon the page
+  talks to, and links to the project, which open in a new tab.
+
+Help shows the keys that work now: a key that needs a right the viewer has not, or a control the
+screen has not, is left out. On a phone Help fills the screen and shows its list of pages or one
+page, with a way back at the top. Escape, the close button, a click beside the box and Back close
+it; Back from a page goes to the list first. While Help is open the browser tab's title names it
+and its page (`Bifrost 3 · connected · Help · About — svolder`), so the history's entries read
+apart.
 
 **Arrange sections** (`A`, or *Arrange sections…* in the menu) is Ember's: it moves the screen's
 sections between the band across the top, the left column and the right column. An accent bar
@@ -459,20 +496,138 @@ default* puts Ember's own back (kept by *Done*) and Escape puts back the order y
 The order is kept in this browser, per device kind (a DAC's is not an amp's), and on a phone it
 reads band, left, right. The status card and the Device fold-out stay where they are.
 
-**The menu** is the round button just left of the link's pill (at the top right on a screen with
-no pill), on every screen and for a guest too. It opens a small list: first the **Theme** row (the
+**The menu** is the round button just left of the link's pill (at the top right on a screen with no
+pill), on every screen and for a guest too. It opens a small list: first the **Theme** row (the
 theme's name, with a small picture; it opens the picker), then the theme's own rows (Ember's are
 headed *Ember's effects*: the three levels below, the one that shows checked, and under them, when
 the screen has a Now playing card, a **Visualizer** switch, then **Arrange sections…**), then
-**Device** (the device shown; with two or more it lists them to pick one) and **Sign out**, or
-**Sign in** for a guest. A click or a tap picks a row and closes the list, and Escape, `q`, a
-click outside or the button again close it. By keyboard: `Tab` reaches the button first, `Enter`
-or `Space` opens it, the arrows move between the rows (round the ends, skipping any that is
-disabled), `Enter` or `Space` picks, and the focus returns to the button. The **picker** (the
-Theme row, or `T` from any theme) shows a card for each theme, the one in use marked; Escape or a
-click outside closes it, and a pick of another theme changes the page to it. Each browser keeps
-its own choice, and `?theme=ember` in the address always gets Ember back. See [the
-frame](../design/frame.md).
+**Devices…** (the Devices popup, below; read-only for a guest and where `[web] writes` is off), **EQ
+library…** (below; not for a guest, nor where `[web] writes` is off), **Help…** (the Help popup,
+above) and **Sign out**, or **Sign in** for a guest. Another device is shown from the Devices popup.
+A click or a tap picks a row and closes the list, and Escape, `q`, a click outside or the button
+again close it. By keyboard: `Tab` reaches the button first, `Enter` or `Space` opens it, the arrows
+move between the rows (round the ends, skipping any that is disabled), `Enter` or `Space` picks, and
+the focus returns to the button. The **picker** (the Theme row, or `T` from any theme) shows a card
+for each theme, the one in use marked; Escape or a click outside closes it, and a pick of another
+theme changes the page to it. Each browser keeps its own choice, and `?theme=ember` in the address
+always gets Ember back. See [the frame](../design/frame.md).
+
+**Devices** is the menu's *Devices…* row, in every theme, for everyone. A guest and a page with
+`[web] writes` off read it: the list, the Overview, a device's state, key graphs, facts, signal and
+All readings, and *Show on the page* (it picks the device their own page shows and writes nothing);
+there are no settings, no *Make default*, no *Remove…*, no *Identify*, no *+ Add a device* and no
+config line, and the daemon refuses every write whatever the page draws. A guest's facts have no
+unit id; a signed-in viewer of a page with writes off has it. Their list is the devices the page
+knows, kept current as devices come and go. It stays open while you look around and closes with its
+×, Escape, a click beside it or Back:
+
+- **The list** on its left names **Overview** and then every configured device, with a full dot
+  for one that is connected and a ring for one that is not, and the tag **Shown** on the device
+  the page shows, and last **+ Add a device**. On a phone the list is the first screen and an
+  entry opens its page.
+- **Overview** shows every device at once: its name, whether it is connected (or since when it
+  is not, when the daemon knows), and its key graphs over the last 30 minutes. The signal
+  strength comes first, then what the device's profile marks as worth watching (on a DAC the
+  volume, the sample rate and the input; on an amp its meters and its state). Each graph has
+  its name, the last reading and the range it moved in; a reading that did not change, or was
+  heard once or not at all, is said in a line of words instead of a flat graph. A device that
+  is not connected is drawn dimmed. The graphs are read again every ten seconds. When the
+  daemon's `config.toml` changed since its last reload (a hand edit it has not taken), the
+  Overview opens with the daemon's words, `config: PATH changed since the last reload: svolder
+  daemon reload (or SIGHUP)`, for a signed-in writer only; it goes at the next read after a reload,
+  with nothing pressed on the page. When the file is gone the words are `config: PATH is missing:
+  the daemon keeps its running configuration; restore the file, then svolder daemon reload`, in
+  the same place.
+- **A device's entry** opens that device's page: its settings, the same graphs, its facts and
+  *Identify*, **All readings**, and **Show on the page** (at the right of the name), which makes it
+  the device the page shows. The popup stays open, the tag moves, and Back still closes the popup
+  rather than going back to the device before. The page of the shown device says it is the one
+  shown.
+- **A device's settings** are saved one by one, each by its own control, and say at the control
+  when something was refused:
+  - **Name**: type it and press Enter or *Save*. A name another device has, or none, is refused
+    in words under the field and what you typed stays. A renamed device keeps its page: the popup
+    follows it to its new name, the list and the tab's title with it, and when it is the device
+    the page shows, so does the page.
+  - **Profile**: the button names the profile and opens a list; *Automatic* lets the daemon pick
+    the profile from what the device advertises.
+  - **Passphrase**: *Change* opens a small form with three choices: *Automatic* (read from what
+    the device advertises), *None*, or *A 4-digit code*, which you type (the field is never
+    filled in and has a *Show code* switch). On a device that is playing, the page asks first,
+    since a wrong code makes the device refuse the link and the sound stops. A passphrase typed
+    here, or in *+ Add a device*, travels over HTTP on the local network, like everything else on
+    the page, unless the page is served over HTTPS (behind a proxy that does it).
+  - **Make default**: makes the device the one the daemon uses when none is named. The device
+    that is the default says so.
+  - **Remove…**: asks once, naming the device (and saying so when it is playing), with *Keep*
+    chosen; on *Remove* the device leaves the configuration, the popup goes to the Overview with a
+    line that says what was removed, and when it was the device the page shows, the page moves to
+    the first device left. The device itself is not changed, and it can be added again.
+  A setting changed somewhere else (another browser, the terminal) shows on the page within ten
+  seconds.
+- **+ Add a device** is the walk `svolder setup` and the terminal's `n` run, with the daemon's own
+  words, step by step on the page. If a device is connected it warns first, naming it: the scan
+  and the passphrase test may briefly disturb its sound (*Cancel* has the focus; *Go on* carries
+  on). Then it listens for ten seconds and lists what it hears, a device that is configured already
+  saying which one; pick one (a configured unit cannot be picked), name it (the line under the
+  field is the name an empty answer takes) and, for a device that turns the automatic passphrase
+  away, type its four digits (the field is never filled in and has a *Show* switch). *Back* steps
+  back, *Stop adding* ends the walk, and leaving the page (another entry, Back, Escape, closing the
+  popup) stops a walk you started. When it is done the page says the device was added and whether
+  it is connected, with *Open its page*; on a first install the page behind shows the new device
+  too. Only one walk runs at a time: if one was started from the terminal the page says so and who
+  started it, and shows its step with nothing to press; a walk of this page that was running when
+  you reloaded is taken up where it stands.
+- **The facts** under the graphs are the ones the themes' Device fold-outs showed (the product,
+  the unit id, the firmware, the DSP build, the profile, the link, the signal), with **Identify**
+  under them: it asks the unit to show itself, and on a device that is not connected it is there
+  but off, with its reason beside it. **All readings** is a disclosure that starts closed: opened,
+  it lists every reading with its value and how long ago it was heard (the last known ones, as
+  such, for a device that is not connected); closed, nothing of it is drawn, so a browser's
+  find-in-page does not look inside it.
+
+**EQ library** is the menu's *EQ library…* row, in every theme, between *Devices…* and *Help…*, for
+whoever may change things (a guest and a page with `[web] writes` off do not have it). It is about
+the side the page shows: its title says which (`EQ library · Kara`, `EQ library · This computer`),
+and it closes when another device is shown. Its list on the left has three pages:
+
+- **AutoEq** searches AutoEq's index (through the daemon: the page never reaches the internet). Type
+  a headphone's name (at most 60 characters); the search is sent after a short pause, or at once on
+  Enter. The answer groups the headphones, each a disclosure of its measurements (source, form and
+  rig), AutoEq's recommended one first; it says how many headphones matched, how many more were left
+  out (*narrow the search*), how big the index is and when its copy was fetched, and the daemon's
+  note when it had to use an older copy. Choosing a measurement draws its **preview** for the side:
+  a graph of the target (dashed), what the device's bands can make of it (the line), the places
+  where they miss it widely (shaded), and the numbers the daemon worked out: the fit, the worst miss
+  and where it is, and how far to lower the volume when the bands boost. **Compare with…** lists the
+  other measurements of the same headphone and draws the second target (dotted) with its numbers
+  beside the first's. For the computer there is no fit: the graph is the correction as the computer
+  plays it. Under the preview, a name (the headphone's by default) and **Save as a preset**: it only
+  saves, it does not put the preset on, and says so. A name that is taken is refused at the field
+  with *Use “NAME (source)”* offered; a refusal of any other kind is worded under the field.
+- **Upload a file** reads a parametric EQ file (Equalizer APO text, the format AutoEq writes and
+  `svolder eq import` reads; 64 KiB at most) in the page and saves it as a preset named after the
+  file, or after the name you type. Save is off, with its reason, until a file is chosen; a file
+  svolder cannot read is refused in the daemon's words.
+- **Saved presets** lists the presets of the side, each marked *In the library* or *On Kara now*
+  (the one the device's bands match), and *built in* or *imported* where it is. **Overwrite with
+  current…** writes the device's bands over a preset of your own after one question (*Keep it*
+  chosen). It is off, with its reason, for a built-in preset, an imported one, the computer's side,
+  a device that is not connected, one with no tone control and one whose tone control has not been
+  read yet. The page does not say which preset a device's own slot holds, because the device does
+  not say.
+
+While an imported preset is on the device (or recalled and edited) and the EQ is on, each theme's
+tone graph shows what the TUI's does: the **target** as a dotted line, the **gap** shaded where the
+bands miss it by more than 2 dB (the daemon's spans, never a band of your own), and the fit in
+words, `fit 0.9 dB`. Ember, Signal and Paper draw them on their curve; Night drive writes
+`fit 0.9 dB` in its EQ line, draws the target as a faint ghost ridge behind the mountains and tints
+the floor under the gap (a slow phone gives the ghost ridge and the tint up before it lowers the
+density). There is none for the computer, for a built-in preset or in Flat and Loudness.
+
+Recall, rename and delete stay where each theme shows the presets. The terminal UI draws the fit
+and overwrites a preset with `u`, and `i` imports a file; comparing two measurements is not there
+yet.
 
 **Ember's effects** have three levels, chosen in the menu:
 
@@ -554,7 +709,7 @@ The system's reduced-motion setting is read once: it makes Glow the first defaul
 until you pick a level. The small motions (the dial's glide, the meters' fall, the tone curve's
 easing, the glow's turn, the title's loop) run whatever it says; the effects menu's Off level stills
 the rest of the page, and the title's loop stops only when the Now playing card opens. It is built
-for Firefox 121 and Chromium 120 or later.
+for Firefox 140 and Chromium 142 or later.
 
 **Paper** is the page's second theme: the same device drawn as a sheet of squared paper, with the
 words in print, the controls written out and a few handwritten notes. Pick it from the menu's
@@ -587,12 +742,11 @@ back.
   volume is above both columns, so a red note about it has its arrow go along the gap under them
   and up the sheet's margin on the needle's side, then in to the written volume, clear of the tone
   section and the controls. On a phone each note follows its section.
-- **The device.** Near the foot, *The device* is a heading you tap (or reach with Tab and open
-  with Enter or Space) to unfold the facts table, *All readings* and Identify; they start folded.
-  Open or folded, the choice is kept in this browser, for every device, like the paper's light or
-  dark, and a guest may open it too.
-- **A guest, or a page with writes off,** sees the same words with no underline, and a tap says
-  *Sign in to change this*.
+- **The device.** Near the foot, *Device settings…* is a written word that opens the device's page
+  in the Devices popup: the facts, *All readings* and Identify are there. A guest, or a page with
+  writes off, reads *Devices…* and gets the page read-only.
+- **A guest, or a page with writes off,** sees the same words with no underline (but *Devices…*,
+  which opens the read-only page), and a tap says *Sign in to change this*.
 - **A lost connection** reads *Reconnecting to svolder…* under the name and fades the sheet; a
   device out of reach is a red note with *try now*.
 
@@ -601,12 +755,13 @@ See [Paper](../design/web-paper.md).
 
 **Signal** is the page's third theme: the sound's way from the player to the ears drawn as one line,
 on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the page with
-`?theme=signal`. It is dark only; the only row it adds to the menu is *Add device…*.
+`?theme=signal`. It is dark only; the only row it adds to the menu is *Add to the chain…*.
 
 - **The line.** Left to right: the player (green), the computer (yellow), the device svolder shows
   (amber), then whatever comes after it. A solid dot is something svolder reads, with its live facts
   under the name; a plain ring with italic words is a hop you declared (with `svolder hops` or the
-  menu's *Add device…*), because svolder cannot see an analogue signal. After the DAC the line runs
+  menu's *Add to the chain…*), because svolder cannot see an analogue signal. After the DAC the line
+  runs
   on thinner and slower. Moving dots show the sound flowing while the player plays; they stop when
   it pauses, while the page is hidden and always under reduced motion. A stretch that the computer's
   EQ changes is yellow. The DAC says `arrives as sent` when it reads the rate the computer sends,
@@ -622,7 +777,7 @@ on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the p
   note with *Edit*, *Move earlier*, *Move later* and *Remove*, which asks once. The player opens Now
   playing with its transport and the path in words; the computer opens its sink, rate, volume, mute,
   the computer EQ and the preset applied, read only.
-- **Add device….** A row of the menu, while a device is shown. It opens the sheet *After the*
+- **Add to the chain….** A row of the menu, while a device is shown. It opens the sheet *After the*
   (device): Amp, Headphones, Speakers or Other, a name and an optional note. A Forkbeard amp the
   daemon lists that is not yet linked comes first as *name (connected)*, which links it. When you
   use an AutoEq preset on the computer and no headphones hop is declared, the line ends with a ring
@@ -670,19 +825,20 @@ draws on canvases, so it follows the music only when svolderd can capture the co
   `FLAT`). After 15 seconds with no input they fade out; a move, a key, a touch or the wheel brings
   them back at once, a volume changed elsewhere shows for 5 seconds, and trouble keeps them (or brings
   them back). The mouse cursor hides over the scene after 2 seconds still.
-- **The dash** along the bottom: `−` `MUTE` `+` (hold one and it repeats), the input as chips (a list
-  when there are more than three), the cover and the track with its progress bar, previous, play or
-  pause and next, and `DEVICE ▴`. An amp has its power key and gauges where the input would be.
-  Space plays and pauses the computer's player, as in every theme. The mouse wheel over the big
+- **The dash** along the bottom: `−` `MUTE` `+` (hold one and it repeats), the input as chips (a
+  list when there are more than three), the cover and the track with its progress bar, previous,
+  play or pause and next, and `DEVICE ▴`. An amp has its power key and gauges where the input would
+  be. Space plays and pauses the computer's player, as in every theme. The mouse wheel over the big
   volume number steps the volume (up is louder) and `↑` `↓` do too, when no control has the keyboard
   focus and no sheet or question is open; a held arrow repeats like a held `+`, and a step is the
-  device's own, or 1 % on the computer. The wheel anywhere else on the scene still sets the Q. On a
-  desktop and on a phone held sideways the dash fades to a fifth with the HUD, and the first tap on a
-  faded dash only wakes it and presses nothing; a key held on it, a list open on it, the keyboard
-  focus on it and a mouse resting over it keep it up. On a phone held upright the dash is a
-  translucent two-row panel over the foot of the scene that never fades and leaves the scene about nine tenths of the height. On a phone the switch is one small pill in the top left corner, across
-  from the menu button: `DAC │ PC` (`AMP │ PC` for an amp), the side shown lit; a desktop keeps two keys left
-  of the menu button.
+  device's own, or 1 % on the computer. The arrows are a writer's: for a guest they do nothing. The
+  wheel anywhere else on the scene still sets the Q. On a desktop and on a phone held sideways the
+  dash fades to a fifth with the HUD, and the first tap on a faded dash only wakes it and presses
+  nothing; a key held on it, a list open on it, the keyboard focus on it and a mouse resting over it
+  keep it up. On a phone held upright the dash is a translucent two-row panel over the foot of the
+  scene that never fades and leaves the scene about nine tenths of the height. On a phone the switch
+  is one small pill in the top left corner, across from the menu button: `DAC │ PC` (`AMP │ PC` for
+  an amp), the side shown lit; a desktop keeps two keys left of the menu button.
 - **Tuning on the mountains.** Move the pointer over the mountains and they turn into the tone
   curve with a bubble for each band: drag a bubble for its frequency and gain, drag the diamond at
   either end of the lit bell for its width (Q), scroll the wheel for the Q of the nearest band, or
@@ -721,15 +877,15 @@ and what the mood hears of it, and the switches in force.
 
 Name layers after it, separated by commas, to turn them off one at a time and find the cost:
 `?theme=nightdrive&nd-debug=noglow,nofloor`. The names are `noglow` (the glow of the sun, the
-mountains and the bubbles, and the page's CSS shadows), `nofloor` (the road's heat grid), `nosky` (the
-sky, the sun and the stars), `noridge` (the mountains), `nodash` (the dash along the bottom), `nohud`
-(the top line, the volume and the EQ line), `nomood` (the night, the sun, the heat and the road's
-speed stay as they were, with no flare and no wave), `nowet` (the wet road), `noembers` (the embers),
-`nohaze` (the haze over the far floor) and `dpr1` (one backing pixel per CSS pixel). A word that is
-not a name is listed as unknown. The parameter goes in the query, not after a `#`, which the page
-drops at once; a step to another device drops it from the address, and the box stays until the page
-is reloaded. Signing in with a link also drops the query (the sign-in page goes on to `./`), so open
-the link once, then the address with the query.
+mountains and the bubbles, and the page's CSS shadows), `nofloor` (the road's heat grid), `nosky`
+(the sky, the sun and the stars), `noridge` (the mountains), `nodash` (the dash along the bottom),
+`nohud` (the top line, the volume and the EQ line), `nooverlay` (the tone overlay), `nomood` (the
+night, the sun, the heat and the road's speed stay as they were, with no flare and no wave), `nowet`
+(the wet road), `noembers` (the embers), `nohaze` (the haze over the far floor) and `dpr1` (one
+backing pixel per CSS pixel). A word that is not a name is listed as unknown. The parameter goes in
+the query, not after a `#`, which the page drops at once; a step to another device drops it from the
+address, and the box stays until the page is reloaded. Signing in with a link also drops the query
+(the sign-in page goes on to `./`), so open the link once, then the address with the query.
 
 ## web
 
@@ -828,9 +984,18 @@ page for a browser that is not signed in (unless `guest = "read"`); `assets/FILE
 token or for a link code that has been used or has ended) and `POST pair` takes `{"code":"…"}`
 (`401` for a wrong code, saying how many tries are left, or for one that has ended), each answering
 `200` with the cookie; `POST logout` answers `200` and clears it. Reads under
-`api/v1/devices/DEVICE/` (`screen`, `parts/PART`, `model`, `strip`, `events`, the server-sent
-stream), `api/v1/fleet` and `api/v1/host` answer `401` with an empty body to a visitor who is
-neither signed in nor a guest, and `404` for an unknown device or part.
+`api/v1/devices/DEVICE/` (`model`, `strip`, `series`), `api/v1/events` (the server-sent stream),
+`api/v1/fleet` and `api/v1/host` answer `401` with an empty body to a visitor who is neither signed
+in nor a guest, and `404` for an unknown device.
+
+`GET api/v1/devices/DEVICE/series?ids=signal,volume&secs=1800` answers the last `secs` seconds (at
+most the half hour the daemon keeps, which is also what it answers without `secs`) of the readings
+named, one point a second at most: `signal` is the signal strength in dBm, heard whenever the daemon
+catches the device's advertisement (so not while it is connected), and every other id is the key of
+one of the device's controls, whose points are raw readings. Without `ids` it answers the device's
+key readings, the ones its profile marks. An id that names nothing is listed under `refused` and
+the others are still answered. An id asked twice is answered once, and more than 32 different ids
+in one request are a `400` that says so.
 
 Writes (`controls/KEY`, `volume`, `volume/stop`, `connect`, `eq/mode`, `eq/bands/N`, `eq/loudness`,
 `presets`, `presets/recall`, `presets/rename`, `presets/delete`, `device-presets/recall`,
@@ -842,6 +1007,128 @@ cannot change, `404` for an unknown device, control, band or preset, `409` with 
 refusal (the daemon's, a volume rule's, a configuration file that cannot be written), `422` for a
 value that is not a number in its unit, a name a preset or a hop cannot have or a hop that cannot
 take that edit, and `204` for a write a newer one replaced. Every error body is `{"error":"…"}`.
+
+**The routes at a glance**, every one the daemon serves under `api/v1/` with its method. A segment
+that varies is in capitals (`DEVICE` is a device's name or unit id, `JOB` a job's number, `N`, `KEY`
+and `BAND` what the paragraphs above name). *Takes* is the body's fields (a GET's query fields start
+with `?`), `none` for a route that reads nothing, and `not listed` where the paragraphs above and
+below are all there is. The table is checked against the daemon's sources and the page's scripts
+(`make routes-doc-check`): a route or a field missing here, or one the daemon does not serve, fails.
+
+| Method | Route | Takes |
+|---|---|---|
+| POST | `api/v1/autoeq/import` | `force`, `name`, `target`, `variant` |
+| POST | `api/v1/autoeq/preview` | `compare`, `target`, `variant` |
+| POST | `api/v1/autoeq/search` | `query`, `refresh` |
+| POST | `api/v1/autoeq/upload` | `force`, `name`, `text` |
+| GET | `api/v1/devices` | `none` |
+| POST | `api/v1/devices` | `name`, `passphrase`, `profile`, `unit` |
+| POST | `api/v1/devices/DEVICE/connect` | not listed |
+| POST | `api/v1/devices/DEVICE/controls/KEY` | not listed |
+| POST | `api/v1/devices/DEVICE/default` | `none` |
+| POST | `api/v1/devices/DEVICE/device-presets/apply` | not listed |
+| POST | `api/v1/devices/DEVICE/device-presets/recall` | not listed |
+| POST | `api/v1/devices/DEVICE/device-presets/save` | not listed |
+| POST | `api/v1/devices/DEVICE/edit` | `name`, `passphrase`, `profile` |
+| POST | `api/v1/devices/DEVICE/eq/bands/BAND` | not listed |
+| POST | `api/v1/devices/DEVICE/eq/loudness` | not listed |
+| POST | `api/v1/devices/DEVICE/eq/mode` | not listed |
+| POST | `api/v1/devices/DEVICE/identify` | not listed |
+| GET | `api/v1/devices/DEVICE/model` | not listed |
+| POST | `api/v1/devices/DEVICE/presets` | `force`, `from`, `name` |
+| POST | `api/v1/devices/DEVICE/presets/delete` | not listed |
+| POST | `api/v1/devices/DEVICE/presets/recall` | not listed |
+| POST | `api/v1/devices/DEVICE/presets/rename` | not listed |
+| POST | `api/v1/devices/DEVICE/remove` | `none` |
+| GET | `api/v1/devices/DEVICE/series` | `?ids`, `?secs` |
+| GET | `api/v1/devices/DEVICE/strip` | not listed |
+| POST | `api/v1/devices/DEVICE/volume` | not listed |
+| POST | `api/v1/devices/DEVICE/volume/stop` | not listed |
+| GET | `api/v1/events` | not listed |
+| GET | `api/v1/fleet` | not listed |
+| POST | `api/v1/hops` | not listed |
+| POST | `api/v1/hops/edit` | not listed |
+| POST | `api/v1/hops/move` | not listed |
+| POST | `api/v1/hops/remove` | not listed |
+| GET | `api/v1/host` | not listed |
+| GET | `api/v1/host/cover` | not listed |
+| POST | `api/v1/host/eq` | not listed |
+| POST | `api/v1/host/eq/points` | not listed |
+| POST | `api/v1/host/eq/points/N` | not listed |
+| POST | `api/v1/host/eq/points/N/remove` | not listed |
+| POST | `api/v1/host/eq/preset` | not listed |
+| GET | `api/v1/host/frames` | not listed |
+| POST | `api/v1/host/mute` | not listed |
+| POST | `api/v1/host/press` | not listed |
+| POST | `api/v1/host/volume` | not listed |
+| GET | `api/v1/session` | not listed |
+| POST | `api/v1/walk` | `none` |
+| POST | `api/v1/walk/JOB/answer` | `choice`, `text`, `run` |
+| POST | `api/v1/walk/JOB/back` | `run` |
+| POST | `api/v1/walk/JOB/cancel` | `run` |
+
+The configured devices are read and written by a signed-in viewer with writes on, and by nobody else
+(`401` and `403` as for the other writes, the list included): `GET api/v1/devices` lists them (unit,
+name, pinned profile, the kind of passphrase, the default mark, whether connected and since when
+not), `POST api/v1/devices` adds one (`{"unit":"…","name":"…"}`, with `profile` and `passphrase`
+where wanted), and `POST api/v1/devices/DEVICE/edit` (`name`, `profile`, `passphrase`, each only
+when the body carries it; `"profile": null` goes back to the detected profile), `/remove` and
+`/default` act on the device its name or unit id names. Each answers the list as it stands
+afterwards, and beside it `profiles`: every profile a device can be pinned to, by name
+(`{"name":"bifrost3","display":"Bifrost 3"}`; `display` is left out where it would repeat the name,
+and `"base":true` marks a profile that describes no product of its own), and `config_changed`: the
+daemon's words that `config.toml` changed since its last reload or is missing, or `null`. An edit's
+`profile` is taken when it is one of those names and refused as `invalid` otherwise; the list is
+empty while a file in the profiles folder cannot be read, and every pin is refused then. A
+passphrase travels in a request's body only, and no answer carries one. A refusal is
+`{"error":"…","reason":"…"}`: `422` for `taken` and `invalid`, `404` for `missing`, `409` for
+`read_only` and `file_busy`, `503` for `stopping`. While the daemon's `config.toml` is gone a write
+is a `409` `read_only` too, and the page shows the daemon's missing-file words in place of the
+read-only sentence. A body that is not what a route takes is a `400` with no `reason`, whose words
+name the key at fault and never what the body held; a body over 4 KB is a `413` in plain text, which
+the page never sends.
+
+The device walk (scan, pick, name, passphrase test, write; see the design's
+[device walk](../design/device-walk.md)) is run by the daemon and driven by the same viewers only
+(`401`, `403`): `POST api/v1/walk` starts it and answers `{"job":N,"run":R}`;
+`POST api/v1/walk/N/answer` takes `{"choice":N}` (from 0) or `{"text":"…"}` (a name, a passphrase),
+and `/back` and `/cancel` take nothing; each answers `204`. `R` is the daemon's run stamp: job ids
+restart with each run, so a body that adds `"run":R` to any of the three is refused `no_such_job`
+when `R` is not the daemon's run now (a body with no `run` is let through). Where the walk stands
+comes on `api/v1/events` with `needs=walk`, as `walk` events `{"run":R,"job":N,"state":{…}}`, each
+state whole (its prompt, the devices heard so far, why the last answer was refused), the walk's last
+state first. A refusal is
+`{"error":"…","reason":"…"}`: `409` for `busy` (another walk runs, its origin named) and
+`not_waiting` (the walk is working on an answer, or has ended), `404` for `no_such_job`, `503` for
+`stopping`. A walk nobody answers for 10 minutes ends cancelled. The passphrase travels in the
+answer's body only, and no state or refusal carries it.
+
+AutoEq is the daemon's: a signed-in viewer with writes on (a guest never makes the daemon reach the
+internet, so `401` and `403` as above, the search included) searches the index with `POST
+api/v1/autoeq/search` (`{"query":"hd650"}`, at most 60 characters; `"refresh":true` fetches the
+index again), previews a measurement with `/preview` and saves one with `/import`, and saves a
+file's text with `/upload`. A search answers `groups` (`{"key","name","variants"}`, each variant a
+measurement with its `words`, AutoEq's recommended one first), `more` (headphones left out past
+200), `measurements`, `fetched_unix` and a `note` when the cached copy was used. A measurement is
+the `variant` a search answered (`name`, `source`, `form`, `rig`), and the side is
+`"target":{"side":"device","device":"NAME"}` or `{"side":"computer"}`; an op that depends on a side
+names it, there is no default side (a body without one is a `400`). `/preview` (`variant`, `target`,
+`compare` for a second measurement) answers once, after the daemon's download and fit:
+`{"preview":{…},"compare":{…}}`, each a `target` on 181 log-spaced points, the correction's
+`preamp_db` and `peak_db`, and for a device a `fit` with its `response`, its `gap` spans (`from_hz`,
+`to_hz`, where the fit misses by more than 2 dB), `rms_db`, `worst_db` and `worst_hz`. `/import`
+(`variant`, `name`, `force`, `target`) and `/upload` (`text` of at most 64 KiB, `name`, `force`)
+answer `{"name","filters","skipped"}`. The reasons add `not_listed` (`404`) and `unreachable`
+(`502`) to the list above, and `busy` is `409`; a request that the client abandons cancels its
+download. The upload's body may be 128 KiB and the others' 8 KiB. `POST
+api/v1/devices/DEVICE/presets` also takes `"force":true`, which writes the device's bands over the
+user's preset of that name (a built-in, an imported preset and the computer's side are refused,
+`422` and `409`).
+
+While an imported preset is on the device, or recalled and edited, the device's model carries it as
+`tone.overlay` for the curve to draw (`name`, `origin`, `target`, `fit`, `gap` spans as `[from_hz,
+to_hz]`, `gap_db`, `rms_db`, `worst_db`, `worst_hz`, `preamp_db`, `peak_db`); the numbers are the
+daemon's, worked out from the bands on the device now: an edited band moves them with the curve.
 
 A write that lands answers JSON with `parts`, the parts of the device's model it changed as they
 stand after it (a control: `controls` and, on an amp, `power`; the mode, a band and the loudness:
@@ -891,16 +1178,18 @@ phone's (see "From a phone"). With no daemon, or a daemon whose web UI is off, i
 and naming the fix:
 
 ```
-svolder: no daemon answers on /run/user/1000/svolder.sock: the daemon serves the web UI; turn it on in the TUI's Settings, Connect, Web UI, or set [web] enabled = true and run svolder daemon restart
+svolder: no daemon answers on /run/user/1000/svolder.sock: the daemon serves the web UI; svolder daemon restart starts one, and `svolder web on` turns the web UI on
 ```
 
 ```
-Open the web UI, or print a link, a code or its token
+Open the web UI, turn it on or off, or print a code or its token
 
 Usage: svolder web [OPTIONS]
        svolder web <COMMAND>
 
 Commands:
+  on     Turn the web UI on: `[web] enabled = true`, which a running daemon acts on at once
+  off    Turn the web UI off: `[web] enabled = false`, which a running daemon acts on at once
   pair   Print a six-digit code that signs in one browser within five minutes
   token  Print the token the web UI's sign-in page takes, and nothing else
   help   Print this message or the help of the given subcommand(s)
@@ -908,6 +1197,60 @@ Commands:
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --qr                     Print the link as a QR code for a phone, in place of opening it here
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+### web on, web off
+
+Turns the web UI on or off. With a daemon running, the daemon makes the switch: it writes
+`enabled` under `[web]` in the configuration file it reads and reloads, which starts or stops the
+page at once, with no restart, also for a page that never ran. The verb prints the line
+`svolder daemon status` has for the page, `web: listening on 127.0.0.1:8738 (token, writes)` or
+`web: off`, on standard output.
+
+The verb exits 0 only when the page stands as asked. A page turned on that cannot listen exits 1
+with ``web: cannot listen on ADDR: WHY ([web] enabled = true is written; `svolder web off` takes
+it back)``. A page the daemon's answer still shows as it was, because its reload failed or took
+longer than the five seconds the write waits, exits 1 with `web: off ([web] enabled = true is
+written and the daemon has not acted on it: svolder daemon status)`. A daemon that refuses the
+write (a read-only file, a file that does not parse, a daemon that is stopping) exits 1 with its
+words. A daemon too old to make the switch is not written around: `the daemon (VERSION) cannot
+switch its servers, which this svolder asks it to: svolder daemon restart`.
+
+With no daemon (no socket, or one nothing listens on) the verb writes the key itself, prints
+`web: on in PATH` (the configuration file), and says on standard error `svolder: nothing answers
+on SOCKET: the web UI starts with the next daemon`. A file that is not there is made from the
+template. A socket that cannot be tried (one this user may not open, a path too long for a
+socket) may have a daemon behind it, so the verb writes nothing and exits 1 with `cannot reach
+the daemon's socket SOCKET: WHY`. Where `SVOLDER_WEB_ENABLED` already turns the page on and the
+file has no `enabled`, `web on` writes nothing and `web off` writes `enabled = false`, which wins
+over the variable.
+
+```
+Turn the web UI on: `[web] enabled = true`, which a running daemon acts on at once
+
+Usage: svolder web on [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+```
+Turn the web UI off: `[web] enabled = false`, which a running daemon acts on at once
+
+Usage: svolder web off [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]

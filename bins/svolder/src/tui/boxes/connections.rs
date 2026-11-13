@@ -166,6 +166,9 @@ pub struct Connections {
     pub daemon_up: Option<bool>,
     /// The configuration file the daemon reads, when it is not the file this session edits.
     pub elsewhere: Option<String>,
+    /// The daemon's line saying its configuration file changed since its last reload, while it
+    /// says so.
+    pub config_changed: Option<String>,
     /// What is open over the rows.
     pub modal: Option<Modal>,
 }
@@ -237,6 +240,7 @@ impl Connections {
     /// Take what the daemon said of itself in: its two servers' status, and whether it reads
     /// another configuration file than `own`, which makes every row read-only.
     pub fn daemon_said(&mut self, info: &DaemonInfo, own: &Path) {
+        self.config_changed = info.config_changed_words();
         self.mcp_status.clone_from(&info.mcp);
         self.mqtt_status.clone_from(&info.mqtt);
         self.daemon_token.clone_from(&info.mcp_token);
@@ -301,6 +305,7 @@ impl Connections {
     /// The daemon has not answered the last ask, so nothing it said stands.
     pub fn daemon_missing(&mut self) {
         self.daemon_up = Some(false);
+        self.config_changed = None;
         self.daemon_token = None;
         self.web_status = None;
         self.web_daemon_token = None;

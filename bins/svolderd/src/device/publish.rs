@@ -151,9 +151,11 @@ impl Actor {
 
     /// Record what the advertisement says about the device, with its product named as the
     /// registry the actor holds names it, and its signal strength when it carries one and a
-    /// listen of the daemon's heard it at `heard_at_ms`. An advertisement taken from the held
-    /// list has no such moment and leaves the signal as it is.
+    /// listen of the daemon's heard it at `heard_at_ms`, which also goes into the ring's signal
+    /// series. An advertisement taken from the held list has no such moment and leaves the
+    /// signal as it is.
     pub(super) fn update_identity(&self, advert: &Advertisement, heard_at_ms: Option<u64>) {
+        let mut heard = None;
         {
             let mut info = locked(&self.info);
             info.unit = advert.unit_id().to_string();
@@ -171,7 +173,15 @@ impl Actor {
                     source: SignalSource::Advert,
                     heard_at_ms,
                 });
+                heard = Some((Arc::clone(&info.ring), dbm, heard_at_ms));
             }
+        }
+        if let Some((ring, dbm, heard_at_ms)) = heard {
+            // The ring keeps time by the monotonic clock: the hearing is as long ago on it as
+            // the wall clock says.
+            let ago = std::time::Duration::from_millis(wall_ms().saturating_sub(heard_at_ms));
+            let now = std::time::Instant::now();
+            locked(&ring).heard_signal(dbm, now.checked_sub(ago).unwrap_or(now));
         }
         let firmware = advert.firmware_build();
         let signal = locked(&self.info).signal;

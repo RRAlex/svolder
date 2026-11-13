@@ -28,6 +28,7 @@ id = [2]
 key = "input"
 label = "Input"
 kind = "select"
+key_reading = true
 values = { 1 = "Balanced", 2 = "Single-Ended" }
 
 [[control]]

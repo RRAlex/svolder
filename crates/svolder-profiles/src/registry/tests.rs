@@ -1545,3 +1545,53 @@ fn an_unknown_key_lists_and_hints_the_action_keys_too() {
         other => panic!("{other:?}"),
     }
 }
+
+/// `key_reading = true` marks a control as one of the device's key readings; the profile lists
+/// their keys in the order of its controls, a child inherits its parent's marks with the
+/// controls and adds its own, and a control a child restates carries only the child's mark.
+#[test]
+fn key_readings_are_marked_per_control_and_listed_in_control_order() {
+    let base = "schema = 1\nname = \"base\"\n\
+        [[control]]\nid = [6]\nkey = \"sample_rate\"\nlabel = \"Sample rate\"\nkind = \"readout\"\n\
+        key_reading = true\n\
+        [[control]]\nid = [10]\nkey = \"volume\"\nlabel = \"Volume\"\nkind = \"level\"\n\
+        range = [0, 127]\nkey_reading = true\n\
+        [[control]]\nid = [11]\nkey = \"balance\"\nlabel = \"Balance\"\nkind = \"level\"\n\
+        range = [0, 30]\n";
+    let child = "schema = 1\nname = \"child\"\nproduct_id = 98\nextends = \"base\"\n\
+        [[control]]\nid = [2]\nkey = \"input\"\nlabel = \"Input\"\nkind = \"select\"\n\
+        values = { 1 = \"A\" }\nkey_reading = true\n\
+        [[control]]\nid = [10]\nkey = \"volume\"\nlabel = \"Volume\"\nkind = \"level\"\n\
+        range = [0, 63]\n";
+    let r = Registry::from_sources(vec![
+        ("base".into(), base.into()),
+        ("child".into(), child.into()),
+    ])
+    .unwrap();
+    assert_eq!(
+        r.get("base").unwrap().key_readings(),
+        ["sample_rate", "volume"]
+    );
+    assert_eq!(
+        r.get("child").unwrap().key_readings(),
+        ["sample_rate", "input"]
+    );
+    assert!(Registry::generic(1).key_readings().is_empty());
+}
+
+/// The mark is refused where no graph could follow: on an action, which has no reading, and on
+/// a control whose value is bytes.
+#[test]
+fn a_key_reading_is_a_control_with_a_number_to_draw() {
+    let text = refusal(concrete(&action("slots = 3\nkey_reading = true")));
+    assert!(text.contains("key_reading"), "{text}");
+    let bytes = "schema = 1\nname = \"x\"\n[[control]]\nid = [5]\nkey = \"k\"\nlabel = \"K\"\n\
+        kind = \"readout\"\nvalue_type = \"data\"\nkey_reading = true\n";
+    match Registry::from_sources(vec![("x".into(), bytes.into())]) {
+        Err(ProfileError::Control { key, reason, .. }) => {
+            assert_eq!(key, "k");
+            assert!(reason.contains("key_reading"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+}

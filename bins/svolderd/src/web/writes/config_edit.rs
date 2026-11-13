@@ -1,63 +1,65 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! What the page's configuration writes share (the user's presets, the hops): the file they edit
-//! and the edit itself, made through the core's writers, under their lock, then a reload of the
-//! daemon, as the CLI's writes do, so everything that follows the file follows the page.
+//! What the page's configuration writes share (the user's presets, the hops): the edit, which the
+//! daemon makes ([`crate::handler`]'s `config_write`) through the core's writers, under their
+//! lock, then a reload, as the CLI's writes do, so everything that follows the file follows the
+//! page. What is here only maps the daemon's answers to the page's, and hands the hops the path
+//! of the file their answer reads back.
 
 use std::path::{Path as FilePath, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::response::Response;
 use hyper::StatusCode;
-use svolder_ipc::{Config, ConfigError, Request};
+use svolder_ipc::{Config, ConfigError};
 
-use crate::log;
+use crate::handler::ConfigWriteError;
 use crate::web::Web;
 use crate::web::router::error;
 
-/// How long a configuration write waits for the daemon's reload before it answers anyway; the
-/// reload goes on.
-const RELOAD_WAIT: Duration = Duration::from_secs(5);
+/// A write that did not happen, as the answer to the page: a name the core refuses is a 422 in
+/// its words; every other refusal is `refuse`'s, or a 409 or a 500.
+fn refused_write(why: ConfigWriteError, refuse: fn(ConfigError) -> Response) -> Response {
+    match why {
+        ConfigWriteError::Unknown | ConfigWriteError::Off(_) => {
+            error(StatusCode::CONFLICT, why.to_string())
+        }
+        ConfigWriteError::Name(refusal) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, refusal.to_string())
+        }
+        ConfigWriteError::Refused(why) => refuse(why),
+        ConfigWriteError::Stopped | ConfigWriteError::Unchecked => {
+            error(StatusCode::INTERNAL_SERVER_ERROR, why.to_string())
+        }
+        ConfigWriteError::Stopping => error(StatusCode::SERVICE_UNAVAILABLE, why.to_string()),
+    }
+}
 
-/// The configuration file a write of `what` (`presets`, `hops`) edits, and what it holds now:
-/// 409 with why not when it cannot be written.
+/// What the daemon holds of the configuration from its last reload, for a write of `what`
+/// (`presets`, `hops`) that checks names against it: 409 with why not when the file cannot be
+/// written.
 #[allow(
     clippy::result_large_err,
     reason = "the refusal is the answer the handler returns as it is"
 )]
-pub(super) async fn config_file(web: &Web, what: &str) -> Result<(PathBuf, Config), Response> {
-    let Some(path) = web.fleet.config_path() else {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "svolder's configuration file is unknown here",
-        ));
-    };
-    // Both reads touch the file, which a slow file system must not make an async worker wait for.
-    let read = {
-        let path = path.clone();
-        tokio::task::spawn_blocking(move || -> Result<Config, Option<String>> {
-            Config::writable(&path).map_err(Some)?;
-            Config::load_from(&path).map_err(|_| None)
-        })
+pub(super) async fn config_for(web: &Web, what: &str) -> Result<Arc<Config>, Response> {
+    web.fleet
+        .config_for_write(what)
         .await
+        .map_err(|why| refused_write(why, conflict))
+}
+
+/// [`config_for`], and the path of the file a write of `what` edits.
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
+pub(super) async fn config_file(web: &Web, what: &str) -> Result<(PathBuf, Arc<Config>), Response> {
+    let Some(path) = web.fleet.config_path() else {
+        return Err(refused_write(ConfigWriteError::Unknown, conflict));
     };
-    match read {
-        Ok(Ok(config)) => Ok((path, config)),
-        Ok(Err(Some(why))) => Err(error(
-            StatusCode::CONFLICT,
-            format!("Saving {what} is off: {why}"),
-        )),
-        Ok(Err(None)) => Err(error(
-            StatusCode::CONFLICT,
-            "the daemon's configuration could not be read; see its log",
-        )),
-        Err(_) => Err(error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "the configuration could not be read",
-        )),
-    }
+    Ok((path, config_for(web, what).await?))
 }
 
 /// A writer's refusal as a 409 in its words.
@@ -65,40 +67,37 @@ pub(super) fn conflict(why: ConfigError) -> Response {
     error(StatusCode::CONFLICT, why.to_string())
 }
 
-/// Run `edit` on the file at `path` off the async threads, then have the daemon reload it; a
-/// writer's refusal is answered by `refuse`. The reload is waited for no longer than
-/// [`RELOAD_WAIT`]: a reload that finds `[web]` changed in the file stops this very server, and
-/// this answer must not be what holds that stop up.
+/// Run `edit` on the file off the async threads, then have the daemon reload it; a writer's
+/// refusal is answered by `refuse`.
 #[allow(
     clippy::result_large_err,
     reason = "the refusal is the answer the handler returns as it is"
 )]
 pub(super) async fn edit_then_reload(
     web: &Web,
-    path: PathBuf,
     refuse: fn(ConfigError) -> Response,
     edit: impl FnOnce(&FilePath) -> Result<(), ConfigError> + Send + 'static,
 ) -> Result<(), Response> {
-    match tokio::task::spawn_blocking(move || edit(&path)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(why)) => return Err(refuse(why)),
-        Err(_) => {
-            return Err(error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "the configuration write stopped",
-            ));
-        }
-    }
-    let fleet = Arc::clone(&web.fleet);
-    let reload = tokio::spawn(async move { fleet.request(Request::Reload).await });
-    match tokio::time::timeout(RELOAD_WAIT, reload).await {
-        Ok(Ok(svolder_ipc::Response::Error { message, .. })) => {
-            log::warn(&format!(
-                "web: the reload after a configuration write failed: {message}"
-            ));
-        }
-        Ok(Err(_)) => log::warn("web: the reload after a configuration write stopped"),
-        _ => {}
-    }
-    Ok(())
+    web.fleet
+        .edit_config(Box::new(edit))
+        .await
+        .map_err(|why| refused_write(why, refuse))
+}
+
+/// Save `saved` as the user's preset `name`, over the user's preset of that name when `force`: a
+/// name the core refuses is a 422, a writer's refusal a 409. Answers with the name as the file spells it.
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
+pub(super) async fn save_preset(
+    web: &Web,
+    name: &str,
+    saved: svolder_profiles::tone::preset::Preset,
+    force: bool,
+) -> Result<String, Response> {
+    web.fleet
+        .save_preset(name, saved, force)
+        .await
+        .map_err(|why| refused_write(why, conflict))
 }

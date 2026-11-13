@@ -97,6 +97,23 @@ ok('the_eq_line_reads_mode_or_preset_and_gains', () => {
   assert.equal(eqLine({ shown: null, device: null }), null);
 });
 
+ok('the_eq_line_carries_the_fit_while_an_overlay_is_served_in_eq_only', () => {
+  const overlay = { rms_db: 0.93, target: [], fit: [], gap: [] };
+  const line = eqLine(page({}, { tone: toneOf({ overlay }), presets: { status: { name: 'Imp' } } }));
+  assert.equal(line.fit, 'fit 0.9 dB');
+  assert.match(line.note, /^fit 0\.9 dB\./);
+  assert.equal(line.name, 'IMP');
+  assert.equal('fit' in eqLine(page({}, { tone: toneOf() })), false, 'no overlay, no fit');
+  assert.equal('fit' in eqLine(page({}, { tone: toneOf({ overlay: { ...overlay, rms_db: null } }) })), false);
+  for (const mode of ['flat', 'loudness']) {
+    assert.equal('fit' in eqLine(page({}, { tone: toneOf({ mode, overlay }) })), false, mode);
+  }
+  const html = eqMarkup(line);
+  assert.match(html, /<span class="nd-fit" title="fit 0\.9 dB\.[^"]*" aria-hidden="true">fit 0\.9 dB<\/span>/);
+  assert.match(html, /<span class="nd-sr">fit 0\.9 dB[^<]*The dotted line is the target[^<]*<\/span>$/);
+  assert.doesNotMatch(eqMarkup({ lead: '', name: 'EQ', gains: ['0.0'] }), /nd-fit/);
+});
+
 ok('the_volume_reads_its_db_and_muted_reads_minus_infinity', () => {
   const v = volumeOf(page());
   assert.deepEqual([v.figures, v.unit, v.muted, v.none], ['−23.5', 'dB', false, null]);

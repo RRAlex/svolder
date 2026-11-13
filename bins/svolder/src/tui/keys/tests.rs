@@ -229,7 +229,7 @@ fn every_lit_hint_on_a_loki_max_does_something_when_pressed() {
             if screen == Screen::Device {
                 // The Input select reads its first value, so the arrows have a row to step.
                 crate::tui::test_support::hear_one(&mut app, "2", 1);
-                app.selected = 0;
+                app.set_selected(0);
             }
             if screen == Screen::Settings {
                 app.overlays.settings = Some(crate::tui::app::SettingsBox {

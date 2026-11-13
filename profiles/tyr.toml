@@ -21,6 +21,7 @@ id = [20, 1]
 key = "meter_1"
 label = "Meter"
 kind = "meter"
+key_reading = true
 channel = "M"
 scale = { zero_from = "meter_floor", full = 1000, class_a = 0.10 }
 
@@ -37,6 +38,7 @@ id = [4]
 key = "warming_up"
 label = "Warming up"
 kind = "readout"
+key_reading = true
 value_type = "bool"
 only_while = "power"
 

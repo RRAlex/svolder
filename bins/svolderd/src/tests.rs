@@ -24,3 +24,34 @@ fn unit_tests_resolve_scratch_homes() {
     assert!(std::env::var_os("SVOLDER_MCP_TOKEN").is_none());
     assert!(std::env::var_os("SVOLDER_WEB_TOKEN").is_none());
 }
+
+/// A fake daemon's AutoEq base is the address nothing listens on whether the transport came as
+/// the flag or from the environment variable clap reads, and a configured URL still wins.
+#[test]
+fn a_fake_daemon_never_defaults_to_the_real_autoeq() {
+    use clap::Parser;
+    let fake = "http://127.0.0.1:9/results/";
+    let by_flag = crate::Args::parse_from(["svolderd", "--transport", "fake"]);
+    assert_eq!(by_flag.transport, "fake");
+    assert_eq!(
+        crate::autoeq_client(&by_flag, None).base(),
+        fake,
+        "the flag"
+    );
+    let ble = crate::Args::parse_from(["svolderd", "--transport", "ble"]);
+    let real = crate::autoeq_client(&ble, None);
+    assert!(
+        real.base().starts_with("https://"),
+        "a real transport keeps AutoEq's own"
+    );
+    let url = Some("http://127.0.0.1:1/x/".to_string());
+    assert_eq!(
+        crate::autoeq_client(&by_flag, url).base(),
+        "http://127.0.0.1:1/x/"
+    );
+    assert_eq!(
+        crate::autoeq_client(&by_flag, Some("  ".into())).base(),
+        fake,
+        "blank"
+    );
+}

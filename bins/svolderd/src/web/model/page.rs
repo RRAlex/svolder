@@ -82,6 +82,8 @@ pub(crate) struct EntryModel {
     pub(crate) name: String,
     pub(crate) url: String,
     pub(crate) dom: String,
+    /// Stays the same when the device is renamed (`view::key` of its unit).
+    pub(crate) key: String,
     pub(crate) family: &'static str,
     pub(crate) family_word: &'static str,
     pub(crate) link: LinkModel,
@@ -104,19 +106,16 @@ pub(crate) struct HopRow {
     pub(crate) live: bool,
 }
 
-/// The configuration as the fleet reads it, on a blocking thread; the default one when it cannot
-/// be read.
-pub(crate) async fn config_off_thread(web: &Web) -> svolder_ipc::Config {
-    let web = web.clone();
-    tokio::task::spawn_blocking(move || web.fleet.config().unwrap_or_default())
-        .await
-        .unwrap_or_default()
+/// The configuration as the fleet holds it (a shared snapshot, so no thread hop); the default
+/// one when it cannot be had.
+pub(crate) fn config_now(web: &Web) -> std::sync::Arc<svolder_ipc::Config> {
+    web.fleet.config().unwrap_or_default()
 }
 
 /// The fleet of `devices` and the hops `web`'s configuration declares, in file order.
 pub(crate) async fn fleet_model(web: &Web, devices: &[DeviceInfo]) -> FleetModel {
     // A configuration that cannot be read declares no hops.
-    let config = config_off_thread(web).await;
+    let config = config_now(web);
     fleet_model_of(web, devices, &config)
 }
 
@@ -165,6 +164,7 @@ pub(crate) fn fleet_model_of(web: &Web, devices: &[DeviceInfo], config: &Config)
                     name: info.name.clone(),
                     url: view::segment(&info.name),
                     dom: view::dom(&info.name),
+                    key: view::key(&info.unit),
                     family,
                     family_word,
                     link: (&view::link_of(info)).into(),

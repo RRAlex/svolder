@@ -14,9 +14,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createActions } from '../../../bins/svolderd/web/core/actions.js';
 import {
-  addedAt, createComputer, createHolds, FLAT_POINT, HAND, idAt, indexOfId, POINT_TYPES,
+  addedAt, createComputer, createPending, FLAT_POINT, HAND, idAt, indexOfId, POINT_TYPES,
 } from '../../../bins/svolderd/web/core/computer.js';
 import { createAsk } from '../../../bins/svolderd/web/core/ask.js';
+import { createModals } from '../../../bins/svolderd/web/core/modal.js';
 import { computerTargetsOf } from '../../../bins/svolderd/web/core/contract.js';
 import { SIDE_KEY, readSide, writeSide } from '../../../bins/svolderd/web/core/prefs.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
@@ -94,24 +95,24 @@ function rig({ computer = modelOf(), viewer = SIGNED, device, storage = memory()
     signedOut: () => {},
     fetch: async (path) => { gets.push(path); return { status: 200, json: async () => ({ device: dacDevice }) }; },
   });
-  const holds = createHolds({
+  const pending = createPending({
     store,
     fetch: async (path) => { gets.push(path); return { status: 200, json: async () => state.host }; },
   });
   const clock = fakeClock();
-  const computerCore = createComputer({ store, storage, holds });
+  const computerCore = createComputer({ store, storage, pending });
   const actions = createActions({
     store,
     post: async (path, body) => { posts.push([path, body]); return reply ? reply(path, body) : { status: 200, ok: true }; },
     toast: (text) => toasts.push(text),
     history: { pushState: () => {} },
     location: { assign: () => {} },
-    holds,
+    pending,
     ask: async (question) => { asked?.questions.push(question); return asked?.answer ?? false; },
     timing: clock,
     computer: computerCore,
   });
-  return { store, holds, actions, computer: computerCore, posts, gets, toasts, storage, clock, state };
+  return { store, pending, actions, computer: computerCore, posts, gets, toasts, storage, clock, state };
 }
 
 await ok('the_side_is_kept_per_viewer_and_defaults_to_the_dac', async () => {
@@ -378,7 +379,7 @@ await ok('a_host_update_mid_drag_keeps_the_dragged_value', async () => {
   const r = rig();
   let release;
   r.actions = createActions({
-    store: r.store, holds: r.holds, toast: () => {}, history: { pushState: () => {} },
+    store: r.store, pending: r.pending, toast: () => {}, history: { pushState: () => {} },
     location: { assign: () => {} }, timing: r.clock,
     post: async (path, body) => { r.posts.push([path, body]); await new Promise((res) => { release = res; }); return { status: 200 }; },
   });
@@ -402,7 +403,7 @@ await ok('a_host_update_mid_drag_keeps_the_dragged_value', async () => {
   await done;
   await flush();
   assert.deepEqual(r.posts.at(-1)[1], { f: 2500, g: 7, done: true }, 'the release sends the drag\'s values, not the model\'s');
-  assert.equal(r.holds.get('point:1'), null, 'the held value goes once the model is read again');
+  assert.equal(r.pending.get('point:1'), null, 'the held value goes once the model is read again');
   assert.ok(r.gets.some((g) => g.startsWith('api/v1/host')), 'the computer\'s model was read');
 });
 
@@ -460,7 +461,7 @@ await ok('a_guest_flips_and_writes_nothing', async () => {
   assert.deepEqual(guest.gets, []);
   assert.equal(answers.filter((a) => a.ok === false && a.error === 'Sign in to change this').length, 10,
     JSON.stringify(answers));
-  assert.equal(guest.holds.get('point:1'), null, 'a guest holds nothing');
+  assert.equal(guest.pending.get('point:1'), null, 'a guest holds nothing');
   const readOnly = rig({ viewer: { signed_in: true, guest: false, writes: false, read_only: 'Read-only: [web] writes is off' } });
   const refused = await readOnly.actions.computer.setVolume(10);
   assert.deepEqual(readOnly.posts, []);
@@ -543,7 +544,7 @@ await ok('the_volume_goes_one_at_a_time_with_the_newest_waiting', async () => {
   gates.shift()();
   await first;
   await flush();
-  assert.equal(r.holds.get('volume'), null, 'then the model is read again and the value goes');
+  assert.equal(r.pending.get('volume'), null, 'then the model is read again and the value goes');
 });
 
 await ok('a_refusal_toasts_the_daemons_words_and_reads_again', async () => {
@@ -553,12 +554,12 @@ await ok('a_refusal_toasts_the_daemons_words_and_reads_again', async () => {
   assert.deepEqual(r.toasts, ['computer controls unavailable: no pw-cli']);
   await flush();
   assert.ok(r.gets.some((g) => g.startsWith('api/v1/host')), 'the computer is read again');
-  assert.equal(r.holds.get('mode'), null, 'and what was shown as asked is what the daemon holds');
+  assert.equal(r.pending.get('mode'), null, 'and what was shown as asked is what the daemon holds');
   const point = rig({ reply: () => ({ status: 409, error: 'too many points' }) });
   const refused = await point.actions.computer.setPoint(1, { f: 100 }, { done: false });
   assert.equal(refused.ok, false);
   assert.deepEqual(point.toasts, ['too many points']);
-  assert.equal(point.holds.get('point:1'), null);
+  assert.equal(point.pending.get('point:1'), null);
 });
 
 await ok('the_same_preset_on_both_asks_and_yes_flattens_the_dac', async () => {
@@ -593,6 +594,35 @@ await ok('the_same_preset_on_both_asks_and_yes_flattens_the_dac', async () => {
   assert.equal(calls.length, 4);
 });
 
+await ok('a_preset_call_acts_on_the_device_it_names_not_the_one_shown', async () => {
+  // Gungnir 2 is shown; Amp is another device of the fleet.
+  const names = rig();
+  assert.equal(names.store.shown(), 'Gungnir%202');
+  await names.actions.computer.recallPreset('Warm', { device: 'Amp%201' });
+  await names.actions.computer.savePreset('Mine', { device: 'Amp%201' });
+  await names.actions.computer.renamePreset('Mine', 'Yours', { device: 'Amp%201' });
+  await names.actions.computer.deletePreset('Yours', { device: 'Amp%201' });
+  assert.deepEqual(names.posts, [
+    ['api/v1/host/eq/preset', { name: 'Warm', device: 'Amp 1' }],
+    ['api/v1/devices/Amp%201/presets', { name: 'Mine', from: 'computer' }],
+    ['api/v1/devices/Amp%201/presets/rename', { from: 'Mine', to: 'Yours' }],
+    ['api/v1/devices/Amp%201/presets/delete', { name: 'Yours' }],
+  ]);
+  // the question's yes repeats the call on the same device, not the shown one
+  const ask = { kind: 'both_sides', name: 'Warm', devices: ['dac'], question: 'Flatten?' };
+  const reply = (path, body) => (body.confirm ? { status: 200 }
+    : { status: 409, error: 'both', ask });
+  const yes = rig({ reply, asked: { questions: [], answer: true } });
+  await yes.actions.computer.recallPreset('Warm', { device: 'Amp%201' });
+  assert.deepEqual(yes.posts.map(([, body]) => body), [
+    { name: 'Warm', device: 'Amp 1' }, { name: 'Warm', device: 'Amp 1', confirm: true },
+  ]);
+  // a page that shows nothing still acts on the device named
+  const none = rig({ device: null });
+  await none.actions.computer.savePreset('Mine', { device: 'Amp%201' });
+  assert.deepEqual(none.posts, [['api/v1/devices/Amp%201/presets', { name: 'Mine', from: 'computer' }]]);
+});
+
 await ok('the_contract_lists_the_computers_targets', async () => {
   const r = rig();
   const targets = computerTargetsOf(r.store.page());
@@ -614,39 +644,39 @@ await ok('a_full_model_event_mid_drag_keeps_the_drags_holds_and_another_device_d
   r.store.replace({ ...r.store.page() });
   assert.equal(r.computer.toneOf(r.store.page()).points[0].f, 2500, 'a snapshot of the same device');
   r.store.replace({ ...r.store.page(), shown: 'Amp', device: { name: 'Amp', url: 'Amp' } });
-  assert.equal(r.holds.get('point:1'), null, 'another device shown holds nothing of it');
+  assert.equal(r.pending.get('point:1'), null, 'another device shown holds nothing of it');
 });
 
 await ok('a_newer_read_that_matches_releases_a_hold_and_an_overtaken_read_is_not_shown', async () => {
   const r = rig();
-  r.holds.set('volume', 60);
-  r.holds.release('volume');
+  r.pending.set('volume', 60);
+  r.pending.release('volume');
   // the read after a release lands and the hold goes
   r.state.host = { computer: modelOf({ volume: { pct: 10, muted: false, sink: 's' } }) };
   await flush();
-  assert.equal(r.holds.get('volume'), null, 'released once the read landed');
+  assert.equal(r.pending.get('volume'), null, 'released once the read landed');
   assert.equal(r.store.page().host.computer.volume.pct, 10);
   // a released hold meets a newer read that says what it holds: it goes at once
-  r.holds.set('volume', 70);
-  r.holds.release('volume');
+  r.pending.set('volume', 70);
+  r.pending.release('volume');
   r.store.emit('host', { ...r.store.page().host, computer: modelOf({ volume: { pct: 70, muted: false, sink: 's' } }) });
-  assert.equal(r.holds.get('volume'), null);
+  assert.equal(r.pending.get('volume'), null);
   // a read that does not match leaves a held (unreleased) value in place
-  r.holds.set('volume', 80);
+  r.pending.set('volume', 80);
   r.store.emit('host', { ...r.store.page().host, computer: modelOf({ volume: { pct: 70, muted: false, sink: 's' } }) });
   assert.equal(r.computer.volumeOf(r.store.page()).pct, 80);
   // the stale read: a stream event arrives while the read is in flight; the read is not shown
   const slow = rig();
   let finish;
   const store = slow.store;
-  const holds = createHolds({ store, fetch: () => new Promise((res) => { finish = res; }) });
-  holds.set('volume', 55);
-  holds.release('volume');
+  const pending = createPending({ store, fetch: () => new Promise((res) => { finish = res; }) });
+  pending.set('volume', 55);
+  pending.release('volume');
   store.emit('host', { ...store.page().host, computer: modelOf({ volume: { pct: 12, muted: false, sink: 's' } }) });
   finish({ status: 200, json: async () => ({ computer: modelOf({ volume: { pct: 99, muted: false, sink: 's' } }) }) });
   await flush();
   assert.equal(store.page().host.computer.volume.pct, 12, 'the newer stream event stands');
-  assert.equal(holds.get('volume'), null);
+  assert.equal(pending.get('volume'), null);
 });
 
 // slots that are not the points' numbers: a point's slot is its own, whatever place it is listed in
@@ -678,35 +708,35 @@ await ok('a_hold_follows_its_point_to_its_new_row_and_is_told', async () => {
   const heard = [];
   r.computer.on((event) => heard.push(event));
   await r.actions.computer.setPoint(1, { f: 5000 }, { done: false });
-  assert.equal(r.holds.get('point:7').value.f, 5000, 'held by the point\'s slot');
+  assert.equal(r.pending.get('point:7').value.f, 5000, 'held by the point\'s slot');
   await r.actions.computer.setPoint(1, {}, { done: true });
   // the daemon lists it second now: the read that says so tells the themes, then frees the hold
   r.state.host = { computer: withPoints([{ ...list[1] }, { ...list[0], f: 5000 }, list[2]]) };
   await flush();
   assert.deepEqual(heard.filter((e) => e.type === 'moved').map(({ from, to }) => [from, to]), [[1, 2]]);
-  assert.equal(r.holds.get('point:7'), null);
+  assert.equal(r.pending.get('point:7'), null);
   assert.equal(r.computer.toneOf(r.store.page()).points[0].f, 2000, 'no held value on the row it left');
 });
 
 await ok('a_point_is_followed_a_while_after_its_hold_goes_so_a_late_sort_is_seen', async () => {
   const list = slotted([point('PK', 226, 3, 1), point('PK', 2000, 3, 1)]);
   const r = rig({ computer: withPoints(list) });
-  r.holds.set('point:7', { g: 3, f: 300 });
+  r.pending.set('point:7', { g: 3, f: 300 });
   const heard = [];
   r.computer.on((event) => heard.push(event));
-  r.holds.release('point:7');
+  r.pending.release('point:7');
   // an event listed before the sort says what the hold holds: the hold goes
   r.store.emit('host', { ...r.store.page().host, computer: withPoints([{ ...list[0], f: 300 }, list[1]]) });
-  assert.equal(r.holds.get('point:7'), null);
+  assert.equal(r.pending.get('point:7'), null);
   // and the sort that follows is still seen as the point's move
   r.store.emit('host', { ...r.store.page().host, computer: withPoints([list[1], { ...list[0], f: 300 }]) });
   assert.deepEqual(heard.filter((e) => e.type === 'moved').map(({ from, to }) => [from, to]), [[1, 2]]);
   // another point that merely reads the same values does not free the hold of a point that is
   // not its own
-  r.holds.set('point:2', { g: 3, f: 300 });
-  r.holds.release('point:2');
+  r.pending.set('point:2', { g: 3, f: 300 });
+  r.pending.release('point:2');
   r.store.emit('host', { ...r.store.page().host, computer: withPoints([{ ...list[0], f: 300 }, list[1]]) });
-  assert.notEqual(r.holds.get('point:2'), null, 'its own point (slot 2) reads f 2000 on, not 300');
+  assert.notEqual(r.pending.get('point:2'), null, 'its own point (slot 2) reads f 2000 on, not 300');
 });
 
 await ok('a_drag_goes_on_with_its_own_point_when_another_client_re_sorts_the_table', async () => {
@@ -730,7 +760,7 @@ await ok('a_drag_goes_on_with_its_own_point_when_another_client_re_sorts_the_tab
   await last;
   assert.deepEqual(routes().slice(1), [['api/v1/host/eq/points/4', false], ['api/v1/host/eq/points/4', true]],
     'the live value and the release land on the point that was dragged, not on its neighbour');
-  assert.equal(r.holds.get('point:5'), null);
+  assert.equal(r.pending.get('point:5'), null);
 });
 
 await ok('a_drag_of_a_point_another_client_removed_ends_with_no_write', async () => {
@@ -757,7 +787,7 @@ await ok('a_preset_load_ends_a_held_drag_and_nothing_more_is_written_for_it', as
   r.store.emit('host', { ...r.store.page().host, computer: { ...withPoints(
     slotted([point('PK', 100, 1, 1), point('PK', 500, 1, 1), point('PK', 900, 1, 1)])),
   eq: { ...modelOf().eq, preset: 'Bass lift', points: slotted([point('PK', 100, 1, 1), point('PK', 500, 1, 1), point('PK', 900, 1, 1)]) } } });
-  assert.equal(r.holds.get('point:5'), null, 'the hold ended');
+  assert.equal(r.pending.get('point:5'), null, 'the hold ended');
   r.clock.advance(r.clock.t + 60);
   await r.actions.computer.setPoint(3, { g: 2 }, { done: false });
   r.clock.advance(r.clock.t + 60);
@@ -984,7 +1014,7 @@ await ok('a_removed_point_leaves_the_hand_and_the_ones_after_it_are_one_place_hi
   assert.equal(guest.computer.picked(), 2);
   // actions made with no computer remove all the same
   const bare = createActions({
-    store: r.store, post: async () => ({ status: 200, ok: true }), toast() {}, history: {}, location: {}, holds: r.holds,
+    store: r.store, post: async () => ({ status: 200, ok: true }), toast() {}, history: {}, location: {}, pending: r.pending,
   });
   assert.equal((await bare.computer.removePoint(1)).ok, true);
 });
@@ -1030,7 +1060,7 @@ await ok('an_answered_question_gives_the_focus_to_returnTo_found_again_by_id', a
   const byId = new Map();
   const old = el('button'); old.id = 'chip'; byId.set('chip', old);
   doc.activeElement = old;
-  const ask = createAsk({ document: doc });
+  const ask = createAsk({ document: doc, modal: createModals({ document: doc }) });
   const answer = ask('Play on both?', { returnTo: 'chip' });
   // the chip is drawn again while the card is open: a twin has the id now
   const twin = el('button'); twin.id = 'chip'; byId.set('chip', twin);
@@ -1097,7 +1127,7 @@ await ok('the_focus_lands_on_a_control_drawn_again_after_the_answer_and_after_a_
   };
   for (const button of [0, 1]) {
     draw().focus();
-    const ask = createAsk({ document: doc });
+    const ask = createAsk({ document: doc, modal: createModals({ document: doc }) });
     const caller = (async () => {
       const answer = await ask('Play on both?', { returnTo: 'chip' });
       // the caller's own work: the chip is drawn again once the answer is in
@@ -1113,7 +1143,7 @@ await ok('the_focus_lands_on_a_control_drawn_again_after_the_answer_and_after_a_
   // a focus the person moved meanwhile is left where it is
   draw().focus();
   const other = el('input'); other.id = 'other';
-  const ask = createAsk({ document: doc });
+  const ask = createAsk({ document: doc, modal: createModals({ document: doc }) });
   const asked = ask('Again?', { returnTo: 'chip' });
   body.children.at(-1).children[1].children[1].listeners.click();
   other.focus();
@@ -1130,7 +1160,7 @@ await ok('add_next_adds_a_flat_pk_in_the_widest_gap_and_says_when_the_table_is_f
   assert.equal(done.n, 3, 'the new point is listed after the 1 kHz one');
   // a point being dragged is counted where it is held, not where the model has it
   const held = rig();
-  held.holds.set('point:1', { f: 15000 });
+  held.pending.set('point:1', { f: 15000 });
   await held.actions.computer.addNext();
   assert.equal(held.posts[0][1].f, 1224.74);
   const eight = Array.from({ length: 8 }, (_, i) => point('PK', 100 + i * 10, 0, 1));
@@ -1197,7 +1227,7 @@ await ok('nudge_steps_the_volume_by_one_or_by_a_larger_step_and_mute_toggles_wha
 await ok('current_lays_the_values_being_changed_over_the_points', async () => {
   const r = rig({ computer: withPoints(slotted([point('PK', 1000, 3, 1), point('LSC', 100, -2, 0.7)])) });
   assert.deepEqual(r.actions.computer.current(2), { type: 'LSC', f: 100, g: -2, q: 0.7, slot: SLOTS[1] });
-  r.holds.set(`point:${SLOTS[1]}`, { g: 5 });
+  r.pending.set(`point:${SLOTS[1]}`, { g: 5 });
   assert.equal(r.actions.computer.current(2).g, 5);
   assert.deepEqual(r.actions.computer.current(9), FLAT_POINT, 'a point the list has not is the flat one');
 });
@@ -1207,10 +1237,10 @@ await ok('the_eq_is_a_light_read_of_the_mode_the_preset_and_whether_it_is_confir
   assert.equal(r.computer.eqOf(r.store.page()).preset, 'Warm');
   assert.deepEqual(r.computer.eqOf(r.store.page()), { on: true, preset: 'Warm', verified: true });
   // a mode being changed is laid over the model's, as `toneOf` does
-  r.holds.set('mode', false);
+  r.pending.set('mode', false);
   assert.equal(r.computer.eqOf(r.store.page()).on, false);
   assert.equal(r.computer.toneOf(r.store.page()).modes.find((m) => m.name === 'eq').on, false);
-  r.holds.drop('mode');
+  r.pending.drop('mode');
   // a preset the model has none of, a state that is only what the file says
   const unsure = rig({ computer: modelOf({ eq: { ...modelOf().eq, preset: null, running_unknown: true } }) });
   assert.deepEqual(unsure.computer.eqOf(unsure.store.page()), { on: true, preset: null, verified: false });
@@ -1328,7 +1358,7 @@ await ok('the_focus_lands_on_a_control_drawn_again_long_after_the_answer_and_the
   for (const button of [0, 1]) {
     observers.length = 0;
     draw().focus();
-    const ask = createAsk({ document: doc });
+    const ask = createAsk({ document: doc, modal: createModals({ document: doc }) });
     const answer = ask('Play on both?', { returnTo: 'chip' });
     body.children.at(-1).children[1].children[button].listeners.click();
     await answer;
@@ -1343,7 +1373,7 @@ await ok('the_focus_lands_on_a_control_drawn_again_long_after_the_answer_and_the
   // the window is over: a chip drawn after it is not given the focus
   observers.length = 0;
   draw().focus();
-  const ask = createAsk({ document: doc });
+  const ask = createAsk({ document: doc, modal: createModals({ document: doc }) });
   const answer = ask('Again?', { returnTo: 'chip' });
   body.children.at(-1).children[1].children[1].listeners.click();
   await answer;
@@ -1393,7 +1423,7 @@ await ok('a_press_or_a_key_of_the_persons_own_after_the_answer_ends_the_focus_wa
   for (const type of ['pointerdown', 'keydown']) {
     observers.length = 0;
     draw().focus();
-    const ask = createAsk({ document: doc });
+    const ask = createAsk({ document: doc, modal: createModals({ document: doc }) });
     const answer = ask('Play on both?', { returnTo: 'chip' });
     body.children.at(-1).children[1].children[0].listeners.click();
     await answer;

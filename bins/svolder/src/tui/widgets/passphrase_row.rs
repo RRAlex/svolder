@@ -42,13 +42,28 @@ const MODES: [Mode; 3] = [Mode::None, Mode::Auto, Mode::Code];
 
 /// The row: its mode, and the digits typed so far, which stay when the mode steps away from
 /// the code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PassphraseRow {
     /// Which of its three answers the row is on.
     mode: Mode,
     /// The digits typed so far, kept while the row is on another answer.
     digits: String,
+    /// Whether the digits are drawn as typed. They are masked until `Tab` shows them: the code
+    /// is the device's pairing secret, never drawn in clear by default.
+    revealed: bool,
 }
+
+impl PartialEq for PassphraseRow {
+    /// Whether the row is on the same answer with the same digits; showing them is not a change.
+    fn eq(&self, other: &PassphraseRow) -> bool {
+        self.mode == other.mode && self.digits == other.digits
+    }
+}
+
+impl Eq for PassphraseRow {}
+
+/// What stands for a digit typed while the code is masked.
+const MASK: char = '•';
 
 impl PassphraseRow {
     /// The row a configuration file's `passphrase` value opens: `auto`, `none`, or the code the
@@ -62,10 +77,17 @@ impl PassphraseRow {
                 PassphraseRow {
                     mode: Mode::Code,
                     digits: code.to_string(),
+                    revealed: false,
                 }
             }
             _ => PassphraseRow::on(Mode::Auto),
         }
+    }
+
+    /// Forget the digits typed, whichever answer the row is on.
+    pub fn forget_digits(&mut self) {
+        self.digits.clear();
+        self.revealed = false;
     }
 
     /// The row on a code with none of its digits typed yet.
@@ -78,6 +100,7 @@ impl PassphraseRow {
         PassphraseRow {
             mode,
             digits: String::new(),
+            revealed: false,
         }
     }
 
@@ -91,6 +114,32 @@ impl PassphraseRow {
     #[cfg(test)]
     pub fn digits(&self) -> &str {
         &self.digits
+    }
+
+    /// Whether the row is on the code, which is what can be masked.
+    pub fn on_code(&self) -> bool {
+        self.mode == Mode::Code
+    }
+
+    /// Whether the digits are drawn as typed, and so a hint says how to hide them.
+    pub fn is_revealed(&self) -> bool {
+        self.revealed
+    }
+
+    /// What the row is drawn as between its arrows: [`PassphraseRow::shown`], with the digits of a
+    /// code masked until `Tab` shows them.
+    pub fn drawn(&self) -> String {
+        match (self.mode, self.revealed) {
+            (Mode::Code, false) => {
+                let missing = CODE_DIGITS.saturating_sub(self.digits.len());
+                format!(
+                    "{}{}",
+                    MASK.to_string().repeat(self.digits.len()),
+                    "_".repeat(missing)
+                )
+            }
+            _ => self.shown(),
+        }
     }
 
     /// What the row reads between its arrows: `none`, `auto`, or the digits typed with a `_` for
@@ -146,6 +195,7 @@ impl PassphraseRow {
             KeyCode::Right => self.step(1),
             KeyCode::Char(c) if c.is_ascii_digit() => self.type_digit(c),
             KeyCode::Backspace => self.erase(),
+            KeyCode::Tab => self.revealed = !self.revealed,
             _ => return false,
         }
         true

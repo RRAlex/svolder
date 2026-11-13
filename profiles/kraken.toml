@@ -14,6 +14,7 @@ id = [20, 1]
 key = "meter_1"
 label = "Meter 1"
 kind = "meter"
+key_reading = true
 channel = "1"
 scale = { zero = 30, full = 600, class_a = 0.10 }
 
@@ -22,6 +23,7 @@ id = [20, 2]
 key = "meter_2"
 label = "Meter 2"
 kind = "meter"
+key_reading = true
 channel = "2"
 scale = { zero = 30, full = 600, class_a = 0.10 }
 
@@ -30,6 +32,7 @@ id = [20, 3]
 key = "meter_3"
 label = "Meter 3"
 kind = "meter"
+key_reading = true
 channel = "3"
 scale = { zero = 30, full = 600, class_a = 0.10 }
 
@@ -38,6 +41,7 @@ id = [20, 4]
 key = "meter_4"
 label = "Meter 4"
 kind = "meter"
+key_reading = true
 channel = "4"
 scale = { zero = 30, full = 600, class_a = 0.10 }
 
@@ -46,5 +50,6 @@ id = [20, 5]
 key = "meter_5"
 label = "Meter 5"
 kind = "meter"
+key_reading = true
 channel = "5"
 scale = { zero = 30, full = 600, class_a = 0.10 }

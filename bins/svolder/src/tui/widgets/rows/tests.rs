@@ -341,6 +341,7 @@ fn bar_value_does_not_panic_on_a_centre_and_raw_at_opposite_extremes() {
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     };
     let reading = Reading {

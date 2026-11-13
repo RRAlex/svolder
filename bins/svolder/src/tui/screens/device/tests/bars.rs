@@ -183,7 +183,7 @@ fn a_focused_volume_row_keeps_its_bar_in_its_own_colours() {
     for depth in [ColorDepth::TrueColor, ColorDepth::Ansi16] {
         let theme = Theme::from_config(&TuiConfig::default(), false, depth);
         let mut app = cutting_app();
-        app.selected = 4; // Volume
+        app.set_selected(4); // Volume
         let cells = row_cells(&frame_with_theme(&app, 80, 24, &theme), "Volume");
         let filled = &cells[17];
         assert_eq!(filled.symbol(), "█");
@@ -232,7 +232,7 @@ fn a_focused_volume_row_keeps_its_bar_in_its_own_colours() {
 fn a_focused_balance_or_loudness_row_keeps_its_track_in_its_own_colours() {
     let theme = Theme::from_config(&TuiConfig::default(), false, ColorDepth::TrueColor);
     let mut app = mockup_app();
-    app.selected = 5; // Balance
+    app.set_selected(5); // Balance
     let cells = row_cells(&frame_with_theme(&app, 80, 24, &theme), "Balance");
     let mark = cells
         .iter()
@@ -277,7 +277,7 @@ fn a_focused_balance_or_loudness_row_keeps_its_track_in_its_own_colours() {
 fn a_focused_bar_still_reads_in_monochrome() {
     let theme = Theme::new(true);
     let mut app = mockup_app();
-    app.selected = 4; // Volume
+    app.set_selected(4); // Volume
     let cells = row_cells(&frame_with_theme(&app, 80, 24, &theme), "Volume");
     let drawn: String = cells[17..27].iter().map(|cell| cell.symbol()).collect();
     assert_eq!(drawn, "█109/127┃░");

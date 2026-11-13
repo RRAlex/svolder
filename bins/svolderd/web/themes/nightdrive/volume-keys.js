@@ -1,25 +1,28 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The volume from the scene: the wheel over the big volume number and the arrow keys `↑` and `↓`. Both step the volume
+// The volume from the scene: the wheel over the big volume number and the arrow keys `↑` and `↓` (the one key of the
+// whole page in the theme's key table, which binds it: this module holds what a press does). Both step the volume
 // as `−` and `+` do (`nudge`, dash-wire.js: the device's own step, or 1 % of the computer's volume), so the cap, the
 // pacing, the refusals and the glide stay where they are.
 //
 // The wheel steps on a notch over the number; anywhere else on the scene it is the mountains' (tune-wire.js), and the
 // first wheel over a number that has faded only wakes the HUD, and a control with the focus does not stop it. The keys
-// step when nothing has the keyboard focus, never with the sheet, a question or a menu open; a key held repeats as a held `+` does (the core's pause and pace); a key
+// step when nothing has the keyboard focus, never while something stands over the page (the sheet, a question, a popup or a menu: the frame's `covered`); a key held repeats as a held `+` does (the core's pause and pace); a key
 // wakes a faded dash like any key. `←` and `→` are not read here, and a control that has the focus keeps its own keys.
 
-import { HOLD_AFTER_MS, HOLD_EVERY_MS } from '../../core/hold.js';
+import { REPEAT_AFTER_MS, REPEAT_EVERY_MS } from '../../core/repeat.js';
 
 const KEYS = { ArrowUp: 1, ArrowDown: -1 };
 
 /**
  * Wire the wheel and the arrow keys of `page` (`#nightdrive`) to `nudge(delta)` until `signal` aborts. `writable()` says
- * whether a held key may repeat; `wheelSteps` is the core's (`core.drag`: the rolled notch, up positive). Returns `{ end() }`,
- * which ends a key held down.
+ * whether a held key may repeat; `wheelSteps` is the core's (`core.eq.bands`: the rolled notch, up positive); `covered()` is
+ * the frame's (`core.frame.covered`: something stands over the page). Returns `{ end(), key(event) }`: `end` ends a
+ * key held down, and `key` is what a press of `↑` or `↓` does, which the theme's key table binds as the page's key
+ * (key-table.js, nightdrive.js).
  */
 export function wireVolumeKeys({
-  page, nudge, writable, wheelSteps, signal,
+  page, nudge, writable, wheelSteps, covered, signal,
 }) {
   const doc = page.ownerDocument;
   const win = doc.defaultView;
@@ -27,10 +30,6 @@ export function wireVolumeKeys({
   let first = 0;
   let every = 0;
   let rest = 0;
-
-  /** The sheet, a question or the frame's menu is open. */
-  const covered = () => Boolean(page.dataset.sheet)
-    || doc.querySelector('[aria-modal="true"], #nd-dialog, .fxpop:not([hidden])') !== null;
 
   /** Nothing to step the volume for from the keys: a control has the focus, or `covered`. */
   const busy = () => {
@@ -45,9 +44,11 @@ export function wireVolumeKeys({
     held = null;
   }
 
-  win.addEventListener('keydown', (event) => {
+  /** A press of `↑` or `↓`, as the theme's key table hands it in (`core.keys.bind`: never with
+   * Ctrl, Alt or Meta, in a field or in the menu). */
+  function key(event) {
     const delta = KEYS[event.key];
-    if (delta === undefined || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
+    if (delta === undefined || event.shiftKey || event.defaultPrevented) return;
     if (busy()) return;
     event.preventDefault();
     // the system's own repeat is not a second press: the page repeats at its own pace
@@ -59,9 +60,9 @@ export function wireVolumeKeys({
       every = setInterval(() => {
         if (!writable() || doc.hidden || busy()) end();
         else nudge(delta);
-      }, HOLD_EVERY_MS);
-    }, HOLD_AFTER_MS);
-  }, { signal });
+      }, REPEAT_EVERY_MS);
+    }, REPEAT_AFTER_MS);
+  }
   win.addEventListener('keyup', (event) => { if (event.key === held) end(); }, { signal, capture: true });
   win.addEventListener('blur', end, { signal });
   doc.addEventListener('visibilitychange', () => { if (doc.hidden) end(); }, { signal });
@@ -83,5 +84,5 @@ export function wireVolumeKeys({
     if (got.steps !== 0) nudge(got.steps > 0 ? 1 : -1);
   }, { signal, capture: true, passive: false });
 
-  return { end };
+  return { end, key };
 }

@@ -7,6 +7,8 @@ nightdrive_theme.py; what both share is in nightdrive_base.py.
   no_frame_while_hidden                             no draw while the page is hidden, draws again once shown
   reduced_motion_starts_on_calm_and_full_can_be_picked   draws keep coming under Full while reduced
   a_paused_player_on_a_desktop_keeps_its_levels_own_pace   draws go on at their rate when the player pauses
+  what_a_draw_costs_with_the_overlay                the same every-cell-lit median with an imported preset on (the target's ghost ridge and the tint under
+                                                    the gap), and without, both told; the one with the overlay is held to 4.5 ms (Chromium)
   what_a_draw_costs_on_the_computer_side            the same median with eight points shown, the curve up and a bell lit (4.5 ms, Chromium)
   what_a_draw_costs                                 drawMs p95; a draw with every cell lit, the curve up and a bell lit at 4.5 ms or less (median of 5, Chromium)
   a desktop starts with the wet road allowed by the budget   the budget's answer to the real draws: the wet road is allowed
@@ -20,10 +22,11 @@ nightdrive_theme.py; what both share is in nightdrive_base.py.
   a_phone_stays_usable, slow draws step the scale down, a_tap_opens_the_menu_with_the_cpu_slowed
                                                     Chromium, a phone at density 3 with the CPU slowed 6x and 30x: the density, the step-down on slow draws, the tap that opens the menu within a second
                                                     (real draw cost and real wall time, moved here from nightdrive_theme.py)
-Usage: python3 nightdrive_timing.py chromium|firefox   (ND_ONLY=phone_budget: only the phone budget case)"""
+Usage: python3 nightdrive_timing.py chromium|firefox   (ND_ONLY=phone_budget or ND_ONLY=overlay: only that case)"""
 import os
 
 import nightdrive_base as base
+from tone_overlay import put_wide_on
 from nightdrive_base import *  # noqa: F401,F403 (the shared helpers, by their own names)
 
 # five readings of the mean draw and of the draw count, a second apart (the median of the means is what a limit is held to)
@@ -167,6 +170,37 @@ def what_a_draw_costs(b, d):
               min(five['draws'][i + 1] - five['draws'][i] for i in range(4)) >= 25, five['draws'])
         check('  a draw with every cell lit takes 4.5 ms or less at 1280x800 dpr 1 (headless Chromium, the median of 5 readings, each the mean of 60 draws)',
               median(five['ms']) <= 4.5, [median(five['ms']), five])
+
+
+def what_a_draw_costs_with_the_overlay(b, d):
+    """The every-cell-lit median of five with a built-in preset on and then with an imported one on (the daemon serves its overlay: the
+    target's ghost ridge and the gap's tint are drawn), the curve up and a bell lit all along as in `what_a_draw_costs`; the one with the
+    overlay is held to the same 4.5 ms on Chromium. The preset the case leaves on is a built-in one."""
+    forget(b, d)
+    d.post('Gungnir 2', 'presets/recall', {'name': 'Warm'})
+    load(b, d)
+    poll(lambda: b.page(DRAWS) > 3)
+    b.page('__core.theme.driver.forceDrawMs(2)')
+    b.page(HOVER)
+    b.page(f'({FLOOR_AT})(0.9)')
+    time.sleep(2.0)
+    bare = b.page(FIVE)
+    overlay = put_wide_on(d)
+    drawn = poll(lambda: b.page('__core.theme.driver.perf().overlay') is True, 8.0)
+    time.sleep(2.0)
+    tuned = b.page('__core.theme.driver.tune()')
+    five = b.page(FIVE)
+    b.page('clearInterval(window.__hover)')
+    d.post('Gungnir 2', 'presets/recall', {'name': 'Warm'})
+    print(f'INFO  {browser} 1280x800 dpr 1, every cell lit, curve up: median of 5 without the overlay {median(bare["ms"]):.2f} ms '
+          f'{[round(x, 2) for x in bare["ms"]]}, with it {median(five["ms"]):.2f} ms {[round(x, 2) for x in five["ms"]]} '
+          f'({len(overlay["gap"])} gap spans)')
+    check('what_a_draw_costs_with_the_overlay: the overlay is drawn (the budget allows the layer) and the curve is up',
+          drawn is True and tuned['m'] >= 0.5, [drawn, tuned['m']])
+    if browser == 'chromium':
+        check('  the draws went on between the five readings', min(five['draws'][i + 1] - five['draws'][i] for i in range(4)) >= 25, five['draws'])
+        check('  a draw with every cell lit and the overlay on takes 4.5 ms or less (the median of 5 readings, each the mean of 60 draws)',
+              median(five['ms']) <= 4.5, [median(five['ms']), five, median(bare['ms'])])
 
 
 def what_a_draw_costs_on_the_computer_side(b, d):
@@ -421,6 +455,16 @@ if os.environ.get('ND_ONLY') == 'phone_budget':
     d.stop()
     base.finish('nightdrive_timing.py')
     raise SystemExit(0)
+if os.environ.get('ND_ONLY') == 'overlay':
+    b = make()
+    try:
+        b.resize(1280, 800)
+        what_a_draw_costs_with_the_overlay(b, d)
+    finally:
+        b.close()
+        d.stop()
+    base.finish('nightdrive_timing.py')
+    raise SystemExit(0)
 # the cases that make a browser of their own run first, with no other page drawing beside them
 the_readout_rate(d)
 if browser == 'chromium':
@@ -444,6 +488,7 @@ try:
     the_rate_trigger(d)
     b.resize(1280, 800)
     what_a_draw_costs(b, d)
+    what_a_draw_costs_with_the_overlay(b, d)
     what_a_draw_costs_on_the_computer_side(b, d)
     check('no page error in the whole run', errors(b) == [], errors(b)[:3])
 finally:

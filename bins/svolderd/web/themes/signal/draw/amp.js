@@ -64,19 +64,17 @@ function faults(device) {
     + `${tips ? `<ul class="sg-advice">${tips}</ul>` : ''}`;
 }
 
-/** The third column: the amp's name, what its facts say first, Identify, and Unlink where a hop of
+/** The third column: the amp's name, its faults, Identify, and Unlink where a hop of
  * the line links it (`linkId`, the hop's id in the configuration). */
 function about(device, linkId, tools) {
   const f = device.facts;
   const inert = Boolean(device.inert);
-  const rows = f ? [['Firmware', f.firmware], ['Link', f.link]].filter(([, v]) => v !== undefined && v !== null)
-    .map(([k, v]) => `<dt>${esc(k)}</dt><dd data-fact="${esc(k)}">${esc(v)}</dd>`).join('') : '';
   const identify = f?.identify_offered
     ? button('amp-identify', AMP.identify, !f.identify || inert, ' id="sg-amp-identify"', 'sg-btn sg-pill') : '';
   const unlink = linkId === null || linkId === undefined ? ''
     : button('amp-unlink', AMP.unlink, inert, ` id="sg-amp-unlink" data-hop-id="${esc(linkId)}"`, 'sg-btn sg-pill');
   return `<span class="sg-lbl">${esc(AMP.name(device.name))}</span>`
-    + `${rows ? `<dl class="sg-facts">${rows}</dl>` : ''}${faults(device)}`
+    + `${faults(device)}`
     + `<div class="sg-set">${identify}${unlink}</div><div class="sg-ask"></div>${tools}`;
 }
 

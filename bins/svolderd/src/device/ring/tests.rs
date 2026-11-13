@@ -215,3 +215,36 @@ fn a_whole_state_is_recorded_at_one_instant() {
         assert_eq!(values.len(), 1, "{series:?}");
     }
 }
+
+/// The ring keeps the signal strengths heard by the second, for half an hour, and answers the
+/// ones inside the span at wall-clock times: none from before it, since an old strength says
+/// nothing of the span.
+#[test]
+fn the_ring_keeps_the_signal_strengths_heard() {
+    let t0 = Instant::now();
+    let at = |secs| t0 + Duration::from_secs(secs);
+    let mut ring = Ring::default();
+    assert!(
+        ring.signal_out(t0, 100_000, Duration::from_secs(60))
+            .is_empty()
+    );
+    ring.heard_signal(-70, t0);
+    ring.heard_signal(-64, at(100));
+    ring.heard_signal(-58, at(170));
+    assert_eq!(
+        ring.signal_out(at(180), 1_000_000, Duration::from_secs(60)),
+        [(990_000, -58.0)],
+        "only what was heard inside the span"
+    );
+    assert_eq!(
+        ring.signal_out(at(180), 1_000_000, Duration::from_secs(1800))
+            .len(),
+        3
+    );
+    ring.heard_signal(-50, at(40 * 60));
+    assert_eq!(
+        ring.signal_out(at(40 * 60), 5_000_000, Duration::from_secs(1800)),
+        [(5_000_000, -50.0)],
+        "a strength heard more than half an hour ago is not answered"
+    );
+}

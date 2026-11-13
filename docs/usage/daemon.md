@@ -112,6 +112,117 @@ On NixOS (detected from `/etc/NIXOS`), `daemon install` writes nothing and inste
 home-manager block to put in your own configuration; in a container it says the daemon is the
 container's own process (see "Running in a container" below) and installs nothing either way.
 
+### The unit's stop timeout
+
+`svolderd.service` sets `TimeoutStopSec=60`. A stop that goes as slowly as it can (a job, the MQTT
+bridge, a device that does not answer, a write, the transport's settle and the end of the runtime,
+each at its bound) takes 51 seconds, and the unit gives it 60 so it does not depend on the service
+manager's own default: systemd's is 90 seconds (checked on systemd 259 with `systemctl show -p
+DefaultTimeoutStopUSec`, and in `systemd-system.conf(5)`), and a manager configured with a lower
+one would send SIGKILL in the middle of a worst-case stop and leave a device's session open.
+
+### The unit's sandbox
+
+`svolderd.service` carries these restrictions, in the order the unit lists them:
+
+- `NoNewPrivileges`: the daemon and what it starts cannot gain privileges.
+- `RestrictSUIDSGID`: no set-id files can be created.
+- `LockPersonality`: the execution domain cannot be changed.
+- `RestrictRealtime`: no real-time scheduling.
+- `RestrictNamespaces`: no new namespaces.
+- `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK`: Unix, IPv4, IPv6 and netlink
+  sockets only. Bluetooth goes through BlueZ over D-Bus and needs none of its own.
+- `SystemCallArchitectures=native`.
+
+The session bus, the system bus and PipeWire stay reachable, and so do the programs the daemon
+runs (`systemctl --user`, `wpctl`, `pw-cli`, `pipewire`). On a host with
+`kernel.apparmor_restrict_unprivileged_userns=1` (seen on Ubuntu 26.04) these were seen to hold:
+`NoNewPrivs: 1`, `Seccomp: 2`, packet and Bluetooth sockets refused, the daemon running.
+
+#### A stricter filesystem
+
+The unit does not restrict the file system. `svolderd-filesystem.conf`, a drop-in for the
+service, does; neither `svolder daemon install` nor the packages install it. It adds:
+
+- `ProtectSystem=strict` and `ProtectHome=read-only`: the file system is read-only to the daemon,
+  except the paths below.
+- `ProtectKernelTunables` and `ProtectControlGroups`: `/proc/sys`, `/sys` and the control groups
+  are read-only.
+- `ReadWritePaths=-%E %t`: the configuration directory (`$XDG_CONFIG_HOME`: `config.toml`, the
+  computer EQ's `host-eq.conf`, its user unit and autostart entry) and the runtime directory (the
+  socket, its lock, the computer EQ's pid file).
+- `StateDirectory=svolder` (mode 0700): systemd creates `$XDG_STATE_HOME/svolder` (tokens,
+  `host-eq.toml`) before the daemon starts and leaves it writable.
+- `CacheDirectory=svolder` (mode 0700): the same for `$XDG_CACHE_HOME/svolder`, where the daemon
+  keeps AutoEq's cached index; without it the read-only file system would stop the
+  daemon caching the index it fetches.
+
+To turn it on, make the drop-in with `systemctl --user edit --drop-in=filesystem svolderd.service`,
+paste this into the editor, save, and restart (`edit` reloads the manager itself); this works for
+every install, packages included:
+
+<!-- drop-in: compared with systemd/svolderd-filesystem.conf by make unit-check -->
+```
+[Service]
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ReadWritePaths=-%E %t
+StateDirectory=svolder
+StateDirectoryMode=0700
+CacheDirectory=svolder
+CacheDirectoryMode=0700
+```
+
+```
+systemctl --user restart svolderd.service
+```
+
+From a checkout, `mkdir -p ~/.config/systemd/user/svolderd.service.d` and copying
+`systemd/svolderd-filesystem.conf` there as `filesystem.conf` does the same, then
+`systemctl --user daemon-reload` before the restart.
+
+To turn it off, delete `~/.config/systemd/user/svolderd.service.d/filesystem.conf`, then run
+`systemctl --user daemon-reload` and `systemctl --user restart svolderd.service`. (`systemctl
+--user revert svolderd.service` also works but removes every drop-in of the service, not only
+this one.)
+
+With a `--config` kept elsewhere, or a `--socket` in a directory outside the runtime directory,
+add that path to `ReadWritePaths=` in the drop-in, for example `ReadWritePaths=-%E %t /srv/svolder`
+(a later `ReadWritePaths=` line adds to the earlier ones).
+
+The conditions:
+
+- systemd 254 or later. From 254 a user manager's `StateDirectory=` and `%S` follow
+  `$XDG_STATE_HOME`; before it they name the configuration home.
+- A host that lets a user manager create user namespaces. On a host with
+  `kernel.apparmor_restrict_unprivileged_userns=1` the settings are accepted and do nothing: no
+  warning, and the whole file system stays writable.
+- A session whose `XDG_CONFIG_HOME` and `XDG_STATE_HOME` reach the user manager
+  (`systemctl --user import-environment`, `environment.d`); otherwise the paths are the defaults
+  under the home.
+- A configuration directory that exists: `-%E` skips one that does not, so on an account without
+  `~/.config` the daemon cannot write its config until `mkdir -p ~/.config` has made it. The
+  drop-in does not use `ConfigurationDirectory=` to create it, since systemd would change the mode
+  of an existing `~/.config/svolder`.
+- It has not been proven end to end.
+
+`ProtectKernelModules=yes` is in neither file: on the host named above a service carrying it
+failed to start with status 218/CAPABILITIES.
+
+### AutoEq
+
+`svolderd` is the process that reaches AutoEq's repository for the web page's EQ library: it loads
+the index once at a time, caches it in `$XDG_CACHE_HOME/svolder/autoeq/INDEX.md` (refetched after
+`[autoeq] refresh_weeks`), downloads each correction within `eq.md`'s limits (up to four AutoEq jobs
+at once), fits it to a device's tone control in a worker thread, and saves an import through the
+configuration writer. `SVOLDER_AUTOEQ_URL` names another base, read once at start. It verifies TLS
+against the system's certificates: the packages depend on `ca-certificates` and the container image
+installs it. Under the opt-in filesystem drop-in the cache directory is writable
+(`CacheDirectory=svolder`); in a container the image puts the cache in the `/config` volume
+(`XDG_CACHE_HOME=/config/cache`).
+
 ### Release builds and packages
 
 The release artifacts are built in a container (`packaging/Dockerfile.build`), so a host needs
@@ -138,8 +249,11 @@ make repro-check            # make packages twice; fails if any artifact differs
 The release is built the same way on GitHub: pushing a `v*` tag starts
 `.github/workflows/release.yml` (by hand, `gh workflow run release.yml --ref vX -f version=X` runs it
 for a tag that has no release yet). It builds each architecture on a native runner
-(`make packages ARCH=...`) without write access and runs `make check` on an arm64 runner; the
-images and the release wait for that check. It then pushes the multi-architecture image, then a last
+(`make packages ARCH=...`) without write access and runs `make check` on an arm64 runner, unless
+`check.yml` (which runs on every push to main) already passed on that very commit, which the run
+asks the API first; a by-hand run always tests. The images and the release wait for that check. So
+push main, wait for `check.yml` to pass, then push the tag. On a machine whose system bus has no
+BlueZ, `make check-no-bluez` skips itself, since `make test` already ran that way. It then pushes the multi-architecture image, then a last
 job combines the files (`make release-files`), attaches the compose file
 (`packaging/release-compose.sh`: `docker-compose.yml` with its `image:` line and the comment above
 it changed for `ghcr.io/rralex/svolder:VERSION`), checks the draft against `SHA256SUMS` and
@@ -194,16 +308,19 @@ binaries are in `target/dist/aarch64`, which is not an asset either.
 
 `svolder-<version>-source.tar.gz` is the commit with every crate the build uses vendored beside it
 (libdbus's source inside `libdbus-sys`); it builds with no network (`cargo build --offline`, or the
-`static` target's own `cargo build` line for the static binaries). The binaries carry GPL code, so
-whoever publishes them publishes this tarball beside them, as the GPL asks, and THIRD-PARTY-LICENSES
-and the .deb's copyright point to it. `flake.nix` builds from the checkout
+`static` target's own `cargo auditable build` line for the static binaries). The binaries carry GPL
+code, so whoever publishes them publishes this tarball beside them, as the GPL asks, and
+THIRD-PARTY-LICENSES and the .deb's copyright point to it. `flake.nix` builds from the checkout
 with nixpkgs' toolchain instead (`nix build`, `nix run`), with the units in `lib/systemd/user` for a
 NixOS configuration's `systemd.packages`.
 
 The builds are reproducible on a best-effort basis: the container's base image is pinned by digest,
-its build tools by an Ubuntu archive snapshot (`SNAPSHOT`), Rust (`RUST_VERSION`) and cargo-about by
-version, and the crates by `Cargo.lock`; every file and package carries the last commit's time
-(`SOURCE_DATE_EPOCH`). `make repro-check` builds everything twice, both architectures, and compares
+its build tools by an Ubuntu archive snapshot (`SNAPSHOT`), Rust (`RUST_VERSION`), cargo-about and
+cargo-auditable by version, and the crates by `Cargo.lock`; every file and package carries the last
+commit's time (`SOURCE_DATE_EPOCH`). The release binaries are built with `cargo auditable build`,
+which embeds their dependency list (derived from `Cargo.lock`) for `cargo audit bin`. A plain
+`cargo build --offline` from the source tarball gives working binaries without that list, so they
+are not byte-identical to the released ones. `make repro-check` builds everything twice, both architectures, and compares
 the sha256 of each artifact, the arm64 ones included. With the arm64 build image and the crates
 cached it takes about 13 minutes here, most of it the emulated arm64 build; from a cold start (the
 image and the crates fetched, a first emulated build) add roughly 25 minutes. The container image
@@ -581,11 +698,52 @@ SVOLDER_SOCKET=./run/svolder.sock svolder status
 ```
 
 (`svolder` already honours `SVOLDER_SOCKET`, the flag's own environment source — see "Socket"
-above.) The TUI runs the same way, inside the container:
+above.)
+
+#### The first run
+
+The image holds the `svolder` CLI beside the daemon, and `docker exec svolder svolder ...` runs it
+as the daemon's user, so a first run writes no file by hand. With the container up
+(`docker compose up -d`):
 
 ```
-docker exec -it svolder svolder tui
+docker exec -it svolder svolder setup
+docker exec -it svolder svolder
+docker exec svolder svolder web on
+docker exec svolder svolder web token
+docker logs -f svolder
 ```
+
+- `svolder setup` is the wizard: it shows how the host looks (the Container row names a mount that
+  is missing), listens for the device, asks what to call it and its passphrase, and writes the
+  `[[device]]` block. `-it` gives it the terminal it needs.
+- `svolder` with no verb is the terminal UI, on the daemon the container runs, once a device is
+  configured; while none is, it opens the same wizard as `svolder setup`. The TUI's Settings box
+  has the Connect category, where the Web UI box and the MCP server row turn the two servers on.
+- `svolder web on` (and `svolder mcp on`) turns a server on without the TUI: the daemon writes
+  `enabled = true` under `[web]` (or `[mcp]`), reloads, and the verb prints
+  `web: listening on 0.0.0.0:8738 (token, writes)`; `web off` and `mcp off` turn it off again. No
+  restart is needed either way. `svolder web token` prints the token the sign-in page takes.
+- `docker logs -f svolder` follows the daemon's log, where its warnings go: the daemon writes to
+  the container's own log, which only the host reads (`podman logs` under Podman). Inside the
+  container `svolder daemon logs` reads nothing and says so, naming both commands, and
+  `svolder daemon status` ends with ``log: not a file; in a container, the container's own log
+  (`docker logs <container>` or `podman logs <container>` on the host)``. The compose file caps
+  that log (`logging:`, the `json-file` driver with `max-size: "10m"`
+  and `max-file: "3"`): Docker's default has no cap and fills a small disk such as a Raspberry
+  Pi's SD card.
+
+Everything these write is one file, `/config/svolder/config.toml` in the container and
+`./config/svolder/config.toml` on the host, made from the template (every key commented out at its
+default) the first time something is written; it can still be edited by hand, and
+`docker compose restart svolder` has the daemon read it again.
+
+The compose file can turn the servers on as well, with no file at all: under `environment:` it
+carries `SVOLDER_WEB_ENABLED: "1"` and `SVOLDER_MCP_ENABLED: "1"` commented out. Each is the
+default of its table's `enabled`: the page is on while the file has no `enabled` under `[web]`,
+and an `enabled` in the file, `true` or `false`, wins (so `svolder web off` still turns off a page
+the variable turned on). `1`, `true`, `yes` and `on` read as on, `0`, `false`, `no` and `off` as
+off; any other value stops the daemon at its start with a line naming the variable.
 
 The image carries the PipeWire client tools (`pw-cli`, `pw-dump`, `pw-record`, `pipewire`, `wpctl`)
 but no PipeWire daemon and no session bus. The computer's volume and EQ are opt-in, through
@@ -629,18 +787,25 @@ The compose file gives the container the host's network (`network_mode: host`), 
 reached at the host's own address and needs no published port. The image sets
 `SVOLDER_MCP_LISTEN=0.0.0.0:8737` (and `SVOLDER_WEB_LISTEN` for the web page), which changes only
 the default address: the server listens on every interface of the host, and the token (asked for by
-default) is the check. Nothing answers until `[mcp]` (or `[web]`) has `enabled = true` in
-`./config/svolder/config.toml`. A `listen` in that file still wins. The ports are the host's: a
+default) is the check. Nothing answers until the server is turned on (see "The first run" above:
+`svolder mcp on`, `svolder web on`, the two variables, or `enabled = true` under `[mcp]` or `[web]`
+in `./config/svolder/config.toml`). A `listen` in that file still wins. The ports are the host's: a
 `svolderd` running natively on the same machine must not have web or MCP enabled on 8737 or 8738 at
-once; the listener that finds the port taken reports `cannot listen on ADDR: WHY` in
-`svolder daemon status` and the daemon keeps its socket and its devices. To keep the server on the
-host's loopback only, write `listen = "127.0.0.1:8737"` in the file.
+once; the listener that finds the port taken reports `cannot listen on ADDR: WHY` in `svolder daemon
+status` and the daemon keeps its socket and its devices. To keep the server on the host's loopback
+only, write `listen = "127.0.0.1:8737"` in the file.
 
 Without host networking (a `ports:` list in place of `network_mode: host`, on a host such as Docker
 Desktop, or rootless Docker, where the host network is a private one of its own and does not reach
 the LAN), publish `8737:8737` and `8738:8738`; the container's
 address is then its own bridge one, so set `[web] url` to the address your phone reaches (see
-below).
+below). Under rootless Docker, use `ports:` and `[web] url` instead of host networking:
+`network_mode: host` there is RootlessKit's own network (the container sees 10.0.2.100 behind
+10.0.2.2), so the page is not reachable from the LAN or the host. The `--qr` code and pair link
+refuse that address, and the bridge ones in Docker's 172.16.0.0/12 and Podman's 10.88.0.0/16,
+and ask for `[web] url`; a bridge in any other range (Docker's address pools continue at
+192.168.0.0/20 after 172.31, and `default-address-pools` can be anywhere) is not recognised, so set
+`url` whenever the container is not on host networking.
 
 A generated token would live in the container's own writable layer and change on every recreate
 (`make docker`, then `docker compose up -d`), breaking every client, so keep the token under the
@@ -683,9 +848,10 @@ docker exec svolder svolder mcp token
 #### The web UI in the container
 
 The page is reached the same way as the MCP server: the container shares the host's network and
-listens on every interface by default (`SVOLDER_WEB_LISTEN`), so the only steps are `enabled = true`
-under `[web]` in `config/svolder/config.toml` (the file the container reads at
-`/config/svolder/config.toml`) and the sign-in, `docker exec svolder svolder web token`. The page is
+listens on every interface by default (`SVOLDER_WEB_LISTEN`), so the only steps are turning it on
+(`docker exec svolder svolder web on`, which writes `enabled = true` under `[web]` in
+`config/svolder/config.toml`, the file the container reads at `/config/svolder/config.toml`) and
+the sign-in, `docker exec svolder svolder web token`. The page is
 then reached from this computer and your network, and `svolder web --qr` and `web pair` carry the
 host's LAN address, as a native install's do; `listen = "127.0.0.1:8738"` keeps it on the host's loopback.
 
@@ -768,7 +934,11 @@ The reply carries `"web":{...}` for the web UI the same way, `{"state":"off"}`,
 `mcp_token` while the web UI has a token, both of which `daemon status` and the TUI's Web UI box
 read. A client that does not know the `mqtt`, `mcp`, `config`, `log`, `mcp_token`, `web` or
 `web_token` field ignores it, a daemon too old to send one answers without it, and a `state` a
-client does not know decodes as unknown rather than failing the reply. `stop` (`{"cmd":"stop"}`)
+client does not know decodes as unknown rather than failing the reply. `"config_changed":true`
+appears only while the configuration file's modification time differs from the one the daemon's
+snapshot was read at (a hand edit not yet reloaded); a daemon too old to send it reads as
+unchanged. `"config_missing":true` appears (with `config_changed`) only while the file the daemon
+read is gone; a daemon too old to send it reads as there. `stop` (`{"cmd":"stop"}`)
 answers `{"result":"stopping"}` and then ends the daemon's accept loop, as a SIGTERM would;
 `daemon stop` (below) sends it when systemd is not managing the daemon.
 
@@ -817,6 +987,14 @@ events more, in the usual `{"msg":"event","id":…,"event":…}` line:
 `{"event":"recalled","device":"fake","name":"HD650 warm"}` when the memory changes and
 `{"event":"climb","device":"fake","key":"volume","target":125}` when the daemon's climb of a level
 starts, is steered or ends (`target` is `null` once it has ended).
+
+A `devices` row also carries `"key_readings":["signal","volume"]`: the ids of the readings a front
+end graphs first for that device, `signal` (the radio signal strength, which every device has) and
+then the controls its profile marks `key_reading` (see the
+[profile format](../../profiles/README.md)), in the profile's order; each id is one `readings`
+keeps a series for. While the device has not been seen it is `["signal"]` alone, the profile's keys
+joining once the daemon knows the profile; the key is absent only from a daemon too old to send it.
+`svolder devices --json` prints it while a daemon answers, and not from the configuration alone.
 
 `host` (`{"cmd":"host"}`) answers what the daemon knows of the computer's music player and the route
 its sound takes to the default sink:
@@ -877,6 +1055,7 @@ Usage: svolder daemon [OPTIONS] <COMMAND>
 Commands:
   status     Print the daemon's unit states, version and connected devices
   logs       Print the daemon's log
+  reload     Have the daemon read its configuration and profiles again and apply them
   restart    Restart the daemon
   stop       Stop the daemon
   install    Write the systemd user units and enable them
@@ -917,6 +1096,13 @@ and a state this `svolder` does not know (`mcp: unknown`). The web UI's line fol
 `web: cannot listen on ADDR: WHY`, with the same two rules (`web: unknown`). A device the daemon is
 waiting to try again for carries the wait, as whole seconds.
 
+A daemon whose `config.toml` changed since its last reload (a hand edit it has not taken) gets a
+line after its version lines, `config: PATH changed since the last reload: svolder daemon reload
+(or SIGHUP)`, naming the file the daemon reads, which a container's daemon keeps elsewhere. A
+`config.toml` that was deleted gets `config: PATH is missing: the daemon keeps its running
+configuration; restore the file, then svolder daemon reload` instead: a reload of a missing file is
+refused (exit 1, the running configuration kept), never read as an empty configuration.
+
 A daemon whose version is not this svolder's gets a line after its own, `mismatch: daemon vX.Y.Z is
 older than this svolder vA.B.C: svolder daemon restart` for a daemon left running from before an
 upgrade, or `mismatch: daemon vX.Y.Z is newer than this svolder vA.B.C: restart svolder` for a
@@ -932,10 +1118,13 @@ daemon.
 The output ends with a `log:` line. A daemon that answers names its own log in its `version` reply,
 and the line says it: the file's path, or `log: the journal` for a daemon whose stderr is the
 journal. A daemon of this svolder's version or newer that names none writes no file, because its
-stderr is a terminal or a pipe, and the line says
-`log: not a file (stderr is a terminal or a pipe)`. With no daemon answering, and for an older one
-that cannot say, the line is the autospawn log file's path, `$XDG_STATE_HOME/svolder/svolderd.log`,
-and is printed only where systemd does not manage the daemon. Exits 0 whatever it finds.
+stderr is a terminal or a pipe, and the line says `log: not a file (stderr is a terminal or a
+pipe)`; in a container where systemd does not manage the daemon, where that pipe is usually the
+container's log, it says ``log: not a file; in a container, the container's own log (`docker logs
+<container>` or `podman logs <container>` on the host)``. With no daemon answering, and for an older
+one that cannot say, the line is the autospawn log file's path,
+`$XDG_STATE_HOME/svolder/svolderd.log`, and is printed only where systemd does not manage the
+daemon. Exits 0 whatever it finds.
 
 ```
 Print the daemon's unit states, version and connected devices
@@ -968,7 +1157,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.32.5 on /run/user/1000/svolder.sock
+daemon: 0.33.0 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)
@@ -1000,6 +1189,15 @@ daemon where it logs connects to its socket, so with socket activation it starts
 is read as one that said nothing. A configuration that does not parse does not stop it: the socket
 asked is the one `--socket` or the default names.
 
+In a container the daemon's stderr is usually the container's log, which nothing inside the
+container can read. There, for a daemon that writes no file (and with no daemon answering and no
+log file), `logs` reads nothing, exits 0 and says where the log is: ``svolder: the daemon does not
+log to a file; in a container what it says is the container's own log, read on the host: `docker
+logs <container>` for Docker, `podman logs <container>` for Podman (the compose file names the
+container `svolder`)``, with `-f` in both commands under `--follow`. A daemon started by hand in a
+container writes to the terminal it was started in. Where systemd manages the daemon inside the
+container, its log is the journal and `logs` reads it as anywhere.
+
 ```
 Print the daemon's log
 
@@ -1020,6 +1218,40 @@ Before anything has been autospawned:
 ```
 $ svolder daemon logs
 svolder: no daemon has logged anything to /home/user/.local/state/svolder/svolderd.log yet
+```
+
+### daemon reload
+
+Sends the running daemon its `reload` request (see "IPC protocol" above): it reads `config.toml` and
+the user's profiles again and applies them, starting, stopping or reconnecting devices, the MQTT
+bridge, the MCP server and the web UI as the files now say, and keeping every link that did not
+change. It prints `reloaded: the daemon now holds` and the devices the daemon runs. A file the
+daemon cannot parse is refused in the daemon's words, naming the file and the line; nothing changes
+and the verb exits with the daemon's own code, 1. When the file is this svolder's own too (one file
+for both, the usual case), this svolder's read of it fails first: the verb exits 1 with that parse
+error, and the daemon is never asked. A `config.toml` that is gone is refused the same way, exit 1
+(`PATH is missing: the daemon keeps its running configuration; restore the file, then try again`):
+the daemon keeps what it runs, and a reload takes the file again once it is back. A daemon started
+with no file at all still reloads. To drop the file on purpose, run `svolder daemon restart`: the
+new daemon starts with no file and so no devices. Or put a file back (`svolder config template`
+prints a fresh one to save at the path `svolder config path` names) and run `svolder daemon
+reload`. Where no daemon answers it exits 3, as every verb that needs
+one does. It is the way out of the `config: … changed since the last reload` line that `daemon
+status`, `doctor`, the TUI and the web page show after a hand edit; `systemctl --user reload
+svolderd` and a SIGHUP do the same.
+
+```
+Have the daemon read its configuration and profiles again and apply them
+
+Usage: svolder daemon reload [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
 ```
 
 ### daemon restart

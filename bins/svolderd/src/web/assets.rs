@@ -51,6 +51,10 @@ macro_rules! font {
     };
 }
 
+/// The check-only sample popup: served from a `SVOLDER_WEB_ASSETS` directory for the browser
+/// checks that load it, never embedded, so a release binary does not carry it.
+const DIR_ONLY: &[&str] = &["core/popups/sample/draw.js", "core/popups/sample/wire.js"];
+
 /// The files every theme shares: the core's, the icons and the fonts.
 const FILES: &[Entry] = &[
     (
@@ -99,6 +103,51 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/actions.js"),
     ),
     (
+        "core/write.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/write.js"),
+    ),
+    (
+        "core/computer-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/computer-actions.js"),
+    ),
+    (
+        "core/device-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/device-actions.js"),
+    ),
+    (
+        "core/device-config-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/device-config-actions.js"),
+    ),
+    (
+        "core/autoeq-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/autoeq-actions.js"),
+    ),
+    (
+        "core/volume-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/volume-actions.js"),
+    ),
+    (
+        "core/walk-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/walk-actions.js"),
+    ),
+    (
+        "core/host-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/host-actions.js"),
+    ),
+    (
+        "core/navigation.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/navigation.js"),
+    ),
+    (
         "core/prefs.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/prefs.js"),
@@ -119,9 +168,9 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/analysis.js"),
     ),
     (
-        "core/hold.js",
+        "core/repeat.js",
         "text/javascript; charset=utf-8",
-        include_bytes!("../../web/core/hold.js"),
+        include_bytes!("../../web/core/repeat.js"),
     ),
     (
         "core/viz-model.js",
@@ -164,6 +213,11 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/tone-curve.js"),
     ),
     (
+        "core/plot.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/plot.js"),
+    ),
+    (
         "core/tone-drag.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/tone-drag.js"),
@@ -189,9 +243,99 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/menu.js"),
     ),
     (
+        "core/popups/frame.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/frame.js"),
+    ),
+    (
+        "core/popups/listed.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/listed.js"),
+    ),
+    (
+        "core/popups/popups.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/popups.js"),
+    ),
+    (
+        "core/popups/devices/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/draw.js"),
+    ),
+    (
+        "core/popups/devices/facts.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/facts.js"),
+    ),
+    (
+        "core/popups/devices/readings.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/readings.js"),
+    ),
+    (
+        "core/popups/devices/settings.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/settings.js"),
+    ),
+    (
+        "core/popups/devices/walk.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/walk.js"),
+    ),
+    (
+        "core/popups/devices/walk-wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/walk-wire.js"),
+    ),
+    (
+        "core/popups/devices/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/devices/wire.js"),
+    ),
+    (
+        "core/popups/eq-library/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/eq-library/draw.js"),
+    ),
+    (
+        "core/popups/eq-library/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/eq-library/wire.js"),
+    ),
+    (
+        "core/popups/help/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/help/draw.js"),
+    ),
+    (
+        "core/popups/help/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/help/wire.js"),
+    ),
+    (
+        "core/menu-rows.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/menu-rows.js"),
+    ),
+    (
         "core/picker.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/picker.js"),
+    ),
+    (
+        "core/modal.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/modal.js"),
+    ),
+    (
+        "core/router.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/router.js"),
+    ),
+    (
+        "core/phone.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/phone.js"),
     ),
     (
         "core/switch.js",
@@ -204,6 +348,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/contract.js"),
     ),
     (
+        "core/driver.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/driver.js"),
+    ),
+    (
+        "core/freeze.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/freeze.js"),
+    ),
+    (
         "core/computer.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/computer.js"),
@@ -212,6 +366,31 @@ const FILES: &[Entry] = &[
         "core/ask.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/ask.js"),
+    ),
+    (
+        "core/html.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/html.js"),
+    ),
+    (
+        "core/inline-ask.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/inline-ask.js"),
+    ),
+    (
+        "core/list.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/list.js"),
+    ),
+    (
+        "core/keys.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/keys.js"),
+    ),
+    (
+        "core/act.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/act.js"),
     ),
     (
         "core/visible.js",
@@ -273,15 +452,23 @@ impl Assets {
     }
 
     /// The file a request names, when it is one of the web UI's; `None` for any other name,
-    /// and for a listed file a development directory does not hold.
+    /// and for a listed file a development directory does not hold. The check-only sample popup
+    /// ([`DIR_ONLY`]) is found only in a development directory.
     pub(crate) fn get(&self, name: &str) -> Option<Asset> {
-        let &(_, mime, embedded) = FILES
+        let listed = FILES
             .iter()
             .chain(THEMES.iter().flat_map(|theme| theme.files))
-            .find(|(listed, ..)| *listed == name)?;
-        let bytes: Cow<'static, [u8]> = match self {
-            Assets::Embedded => Cow::Borrowed(embedded),
-            Assets::Dir(dir) => Cow::Owned(std::fs::read(dir.join(name)).ok()?),
+            .find(|(listed, ..)| *listed == name);
+        let (mime, bytes): (&'static str, Cow<'static, [u8]>) = match (self, listed) {
+            (Assets::Embedded, Some(&(_, mime, embedded))) => (mime, Cow::Borrowed(embedded)),
+            (Assets::Dir(dir), Some(&(_, mime, _))) => {
+                (mime, Cow::Owned(std::fs::read(dir.join(name)).ok()?))
+            }
+            (Assets::Dir(dir), None) if DIR_ONLY.contains(&name) => (
+                "text/javascript; charset=utf-8",
+                Cow::Owned(std::fs::read(dir.join(name)).ok()?),
+            ),
+            _ => return None,
         };
         let etag = etag_of(&bytes);
         Some(Asset { bytes, mime, etag })

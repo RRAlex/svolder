@@ -37,6 +37,7 @@ fn a_device_line_says_how_long_the_daemon_is_waiting_before_it_tries_again() {
         passphrase_note: None,
         refused: false,
         recalled: None,
+        key_readings: Vec::new(),
     };
     assert_eq!(device_line(&device), "device bf3: connected (Gungnir 2)");
 
@@ -333,6 +334,9 @@ impl Handler for LogDaemon {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }
     }
 
@@ -487,6 +491,9 @@ async fn status_prints_no_mismatch_for_a_daemon_of_its_own_version() {
                     mcp_token: None,
                     web: None,
                     web_token: None,
+                    features: Vec::new(),
+                    config_changed: false,
+                    config_missing: false,
                 },
                 _ => Response::Ack,
             }
@@ -623,6 +630,9 @@ async fn status_gives_up_on_a_daemon_that_never_lists_its_devices() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         }),
     );
 
@@ -635,5 +645,148 @@ async fn status_gives_up_on_a_daemon_that_never_lists_its_devices() {
     assert!(
         lines.contains(&format!("devices: no answer within {ASK_WAIT:?}")),
         "{lines:?}"
+    );
+}
+
+/// In a container the same daemon's `log:` line names the container's log and the command that
+/// reads it, in place of `not a file`.
+#[tokio::test]
+async fn status_in_a_container_names_the_containers_log() {
+    let tools = Tools::new(&no_units());
+    let dir = temp_dir("daemon-status-container");
+    let socket = dir.0.join("svolder.sock");
+    let (stop, served) = a_daemon_of(&socket, env!("CARGO_PKG_VERSION"), None).await;
+    let ctl = tools.ctl().in_container();
+    let lines = status_lines(&ctl, &socket, Path::new("/nowhere/svolderd.log"), &[]).await;
+    let found: Vec<&String> = lines.iter().filter(|l| l.starts_with("log:")).collect();
+    assert_eq!(
+        found,
+        [
+            "log: not a file; in a container, the container's own log (`docker logs <container>` \
+          or `podman logs <container>` on the host)"
+        ],
+        "{lines:?}"
+    );
+    let _ = stop.send(());
+    let _ = served.await;
+}
+
+/// A daemon that answers `version` with `config` and `config_changed`, and nothing else.
+struct Says {
+    config: Option<&'static str>,
+    config_changed: bool,
+    config_missing: bool,
+}
+
+#[async_trait::async_trait]
+impl Handler for Says {
+    async fn handle(&self, request: Request) -> Response {
+        match request {
+            Request::Version => Response::Version {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                mqtt: None,
+                mcp: None,
+                config: self.config.map(str::to_string),
+                log: None,
+                mcp_token: None,
+                web: None,
+                web_token: None,
+                features: Vec::new(),
+                config_changed: self.config_changed,
+                config_missing: self.config_missing,
+            },
+            _ => Response::Ack,
+        }
+    }
+
+    async fn subscribe(
+        &self,
+        _device: Option<String>,
+    ) -> futures::stream::BoxStream<'static, Event> {
+        futures::stream::pending().boxed()
+    }
+}
+
+/// `status` for a daemon that says what it says of its file.
+async fn status_of(tag: &str, says: Says) -> Vec<String> {
+    let tools = Tools::new(&no_units());
+    let dir = temp_dir(tag);
+    let socket = dir.0.join("svolder.sock");
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let served = tokio::spawn({
+        let socket = socket.clone();
+        async move {
+            let _ = svolder_ipc::serve(&socket, Arc::new(says), async {
+                let _ = stopped.await;
+            })
+            .await;
+        }
+    });
+    for _ in 0..500 {
+        if svolder_ipc::is_running(&socket).await {
+            break;
+        }
+        tokio::time::sleep(POLL).await;
+    }
+    let lines = status_lines(&tools.ctl(), &socket, &dir.0.join("svolderd.log"), &[]).await;
+    let _ = stop.send(());
+    let _ = served.await;
+    lines
+}
+
+/// A daemon that says its file changed earns one line after its version lines, naming the file
+/// the daemon reads and the way to reload; one that does not earns none.
+#[tokio::test]
+async fn status_says_a_changed_config_with_the_daemons_file_and_the_reload() {
+    let quiet = status_of(
+        "daemon-status-quiet",
+        Says {
+            config: Some("/home/u/.config/svolder/config.toml"),
+            config_changed: false,
+            config_missing: false,
+        },
+    )
+    .await;
+    assert!(
+        quiet.iter().all(|line| !line.contains("changed")),
+        "{quiet:?}"
+    );
+
+    let loud = status_of(
+        "daemon-status-changed",
+        Says {
+            config: Some("/config/config.toml"),
+            config_changed: true,
+            config_missing: false,
+        },
+    )
+    .await;
+    let at = loud
+        .iter()
+        .position(|line| line.starts_with("daemon: "))
+        .expect("the daemon line");
+    assert_eq!(
+        loud[at + 1],
+        "config: /config/config.toml changed since the last reload: svolder daemon reload (or SIGHUP)",
+        "{loud:?}"
+    );
+
+    let gone = status_of(
+        "daemon-status-missing",
+        Says {
+            config: Some("/config/config.toml"),
+            config_changed: true,
+            config_missing: true,
+        },
+    )
+    .await;
+    let at = gone
+        .iter()
+        .position(|line| line.starts_with("daemon: "))
+        .expect("the daemon line");
+    assert_eq!(
+        gone[at + 1],
+        daemon_version::config_missing_line("/config/config.toml"),
+        "{gone:?}"
     );
 }

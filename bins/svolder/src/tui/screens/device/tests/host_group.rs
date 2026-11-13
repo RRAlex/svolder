@@ -907,7 +907,7 @@ fn the_transport_row_lights_the_button_the_player_is_on() {
 fn the_transport_rows_cursor_stands_out_and_no_player_dims_it() {
     let theme = Theme::new(false);
     let mut app = transporting(svolder_host::Status::Playing);
-    app.selected = app.rows().len();
+    app.set_selected(app.rows().len());
     app.host.button = 3;
     let buffer = frame_with_theme(&app, 80, 24, &theme);
     assert!(text(&buffer)[13].starts_with("│ ▶ Transport    ◀◀  ▶  ▮▮  ▶▶"));
@@ -1301,7 +1301,7 @@ fn a_device_with_no_volume_still_has_the_computer_volume_row() {
     app.flip_side();
     let rows = text(&frame(&app, 130, 50));
     assert!(rows.iter().any(|row| row.contains("█54%")), "{rows:#?}");
-    app.selected = app.rows().len();
+    app.set_selected(app.rows().len());
     assert_eq!(app.host_row(), Some(crate::tui::host::HostRow::Volume));
     assert_eq!(
         app.key(crossterm::event::KeyEvent::from(
@@ -1332,7 +1332,7 @@ fn the_host_volume_row_without_a_device_volume_is_a_switch_on_both_sides() {
         false,
         &[("PK", 1000.0, 0.0, 1.0)],
     ));
-    app.selected = app.rows().len();
+    app.set_selected(app.rows().len());
     let press = |app: &mut App, code| app.key(KeyEvent::from(code));
     assert!(press(&mut app, KeyCode::Right).is_empty());
     assert!(app.on_computer());
@@ -1376,10 +1376,10 @@ fn the_host_volume_switch_has_the_look_and_the_chaser_of_the_target_row() {
     let press = |app: &mut App, code| app.key(KeyEvent::from(code));
     let host_volume = app.rows().len();
     // navigation: ↓ from the row above lands on it, ↓ again goes to the transport, ↑ comes back
-    app.selected = host_volume - 1;
+    app.set_selected(host_volume - 1);
     let above = app.cursor_id();
     press(&mut app, KeyCode::Down);
-    assert_eq!(app.selected, host_volume);
+    assert_eq!(app.selected(), host_volume);
     assert!(app.switch_focused());
     assert_eq!(app.cursor_id(), Some(SWITCH_ROW));
     assert_eq!(
@@ -1387,7 +1387,7 @@ fn the_host_volume_switch_has_the_look_and_the_chaser_of_the_target_row() {
         "the trail leaves the row above"
     );
     press(&mut app, KeyCode::Down);
-    assert_eq!(app.selected, host_volume + 1);
+    assert_eq!(app.selected(), host_volume + 1);
     assert!(!app.switch_focused());
     assert_eq!(
         app.frame_flags.left_row,
@@ -1395,10 +1395,10 @@ fn the_host_volume_switch_has_the_look_and_the_chaser_of_the_target_row() {
         "the trail leaves the switch"
     );
     press(&mut app, KeyCode::Up);
-    assert_eq!(app.selected, host_volume);
+    assert_eq!(app.selected(), host_volume);
     assert!(app.switch_focused());
     press(&mut app, KeyCode::Up);
-    assert_eq!(app.selected, host_volume - 1);
+    assert_eq!(app.selected(), host_volume - 1);
     assert!(!app.switch_focused());
     press(&mut app, KeyCode::Down);
 
@@ -1430,7 +1430,7 @@ fn the_host_volume_switch_has_the_look_and_the_chaser_of_the_target_row() {
         assert!(!computer.0.contains(Modifier::REVERSED), "{computer:?}");
         assert!(!computer.0.contains(Modifier::BOLD));
     }
-    app.selected = host_volume + 1;
+    app.set_selected(host_volume + 1);
     let name = app.session.product.clone();
     let (_, dac, computer) = target_sides(&frame(&app, 130, 50), &name);
     assert!(dac.0.contains(Modifier::BOLD) && !dac.0.contains(Modifier::REVERSED));

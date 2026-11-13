@@ -9,6 +9,8 @@
 import assert from 'node:assert/strict';
 import { bootScheme } from '../../../bins/svolderd/web/core/prefs.js';
 import { createRegistry } from '../../../bins/svolderd/web/core/registry.js';
+import { createStore } from '../../../bins/svolderd/web/core/store.js';
+import { createStream } from '../../../bins/svolderd/web/core/stream.js';
 import { createSwitcher } from '../../../bins/svolderd/web/core/switch.js';
 
 let n = 0;
@@ -92,6 +94,7 @@ const PAPER = {
  * themes, a core of fakes, and the switcher. */
 function rig({
   first = 'paper', mounts = {}, search = '', timeoutMs = 30, painted = null, cookie = '', kept = {},
+  needs = {},
 } = {}) {
   const own = first === 'paper' ? PAPER : EMBER;
   const rendered = [['link', { href: `assets/${own.styles[0]}`, rel: 'stylesheet' }, own.id]];
@@ -111,11 +114,27 @@ function rig({
       },
       closeMenu() {}, closePicker() {}, fade() {}, anchor() {},
     },
-    stream: { opened: 0, open() { core.stream.opened++; } },
+    // the stack of modals: what `closeAll` found on show
+    modal: { closed: [], closeAll() { core.modal.closed.push(log.mounted.at(-1)); } },
+    stream: null,
   };
+  // The page's real stream over a model store, on a fake EventSource: every address opened is kept.
+  const opened = [];
+  const model = createStore({
+    v: 1, viewer: { guest: false, writes: true }, fleet: { devices: [], hops: [] }, shown: 'A',
+    device: null, followed: {}, card: null, host: null, strip: null,
+  }, { fetch: async () => ({ status: 200, json: async () => ({}) }) });
+  core.stream = createStream({
+    store: model,
+    EventSource: class { constructor(url) { opened.push(url); } addEventListener() {} close() {} },
+    fetch: async () => ({ json: async () => ({}) }),
+    watchVisible: () => ({ stop() {} }),
+    signedOut() {}, reload() {}, show() {},
+    doc: { visibilityState: 'visible', body: { classList: { toggle() {} } } },
+  });
   const log = { mounted: [], unmounted: [] };
   const theme = (list) => ({
-    id: list.id, label: list.label, needs: [], schemes: list.schemes,
+    id: list.id, label: list.label, needs: needs[list.id] ?? [], schemes: list.schemes,
     mount: mounts[list.id] ?? (() => {
       log.mounted.push(list.id);
       return { unmount() { log.unmounted.push(list.id); } };
@@ -139,7 +158,7 @@ function rig({
   const root = { replaceChildren() { root.empty = true; }, empty: false };
   const switcher = createSwitcher({ core, window, root, timeoutMs });
   const files = () => doc.head.children.map((el) => el.attrs.href ?? el.attrs.src ?? `meta:${el.attrs.name}`);
-  return { core, doc, window, store, switcher, log, root, files, toasts: core.frame.toasts };
+  return { core, doc, window, store, switcher, log, root, files, opened, toasts: core.frame.toasts };
 }
 
 const EMBER_FILES = ['assets/themes/ember/style.css', 'assets/themes/ember/htmx.min.js', 'assets/themes/ember/viz-pref.js'];
@@ -170,6 +189,18 @@ await ok('a_pick_of_ember_from_a_paper_first_paint_loads_embers_files_and_drops_
   assert.deepEqual(r.log.unmounted, ['paper']);
   assert.equal(r.switcher.current().id, 'ember');
   assert.equal(r.doc.documentElement.dataset.theme, 'ember');
+});
+
+await ok('a_switch_closes_every_modal_while_the_theme_it_leaves_is_still_on_show', async () => {
+  const r = rig({ first: 'paper' });
+  await r.switcher.start('paper');
+  assert.deepEqual(r.core.modal.closed, [], 'the first mount closes nothing');
+  await r.switcher.to('ember');
+  assert.deepEqual(r.core.modal.closed, ['paper'], 'once, before Ember is mounted');
+  // a theme whose files do not load leaves the page as it is, its modals too
+  r.doc.how = () => 'error';
+  await r.switcher.to('paper');
+  assert.deepEqual(r.core.modal.closed, ['paper']);
 });
 
 await ok('files_the_page_already_has_are_not_added_again', async () => {
@@ -301,6 +332,54 @@ await ok('a_fallback_to_ember_writes_ember_alone', async () => {
   assert.equal(mounted.id, 'ember');
   assert.match(r.doc.cookie, /svolder_theme=ember(;|$)/);
   assert.equal(r.store.get('svolder.theme'), 'ember');
+});
+
+await ok('a_theme_switch_asks_the_stream_for_the_new_themes_needs_and_opens_it_once', async () => {
+  const r = rig({ first: 'ember', needs: { ember: ['meters', 'host', 'analysis', 'strip'], paper: ['meters', 'host'] } });
+  await r.switcher.start('ember');
+  r.core.stream.open();
+  assert.deepEqual(r.opened, ['api/v1/events?device=A&needs=meters,host,strip'], 'analysis is no stream need');
+  await r.switcher.to('paper');
+  assert.deepEqual(r.opened.slice(1), ['api/v1/events?device=A&needs=meters,host'],
+    'Paper does not want the strip, and one reopen carries the switch');
+  assert.deepEqual(r.core.stream.needed(), ['meters', 'host']);
+});
+
+await ok('a_theme_switch_from_a_theme_that_follows_opens_the_stream_once', async () => {
+  const follows = { paper: (root, core) => { core.stream.follow(['Amp']); return () => core.stream.follow([]); } };
+  const r = rig({ first: 'paper', mounts: follows, needs: { paper: ['meters'], ember: ['meters', 'strip'] } });
+  await r.switcher.start('paper');
+  r.core.stream.open();
+  assert.deepEqual(r.opened, ['api/v1/events?device=A&needs=meters&follow=Amp']);
+  await r.switcher.to('ember');
+  assert.deepEqual(r.opened.slice(1), ['api/v1/events?device=A&needs=meters,strip'],
+    'the follow ends and the needs change in one reopen');
+  assert.deepEqual(r.core.stream.followed(), []);
+  await r.switcher.to('paper');
+  assert.deepEqual(r.opened.slice(2), ['api/v1/events?device=A&needs=meters&follow=Amp'],
+    'a theme that follows at its mount is carried by the same one reopen');
+});
+
+await ok('a_failed_mount_leaves_the_theme_wanting_nothing_and_a_fallback_wants_its_own', async () => {
+  const boom = () => { throw new Error('x'); };
+  const fallback = rig({ first: 'paper', mounts: { paper: boom }, needs: { paper: ['host'], ember: ['meters'] } });
+  await fallback.switcher.start('paper');
+  assert.deepEqual(fallback.core.stream.needed(), ['meters'], 'Ember, the fallback, asked');
+  const dead = rig({ first: 'paper', mounts: { paper: boom, ember: boom }, needs: { paper: ['host'], ember: ['meters'] } });
+  assert.equal(await dead.switcher.start('paper'), null);
+  assert.deepEqual(dead.core.stream.needed(), [], 'no theme, no wants');
+});
+
+await ok('a_throw_between_the_hold_and_the_mount_still_releases_the_stream', async () => {
+  const r = rig({ first: 'paper', needs: { paper: ['meters'], ember: ['meters', 'strip'] } });
+  await r.switcher.start('paper');
+  r.core.stream.open();
+  const before = r.opened.length;
+  r.core.frame.anchor = () => { throw new Error('anchor'); };
+  await r.switcher.to('ember').catch(() => {});
+  r.core.frame.anchor = () => {};
+  r.core.stream.follow(['Amp']);
+  assert.ok(r.opened.length > before, 'a want change after the throw still reopens the stream');
 });
 
 console.log(`${n} switch checks passed`);

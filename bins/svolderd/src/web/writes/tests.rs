@@ -10,6 +10,7 @@ use svolder_ipc::{Request, Response};
 use crate::fleet::{DaemonFleet, Fleet};
 use crate::web::test_support::{Code, FakeDaemon, call, fake_daemon, open, post, web, web_with};
 use crate::writer::{Mode, Origin};
+use svolder_ipc::CODE_LINK;
 
 /// The fake's volume as the daemon reads it now.
 async fn volume(dac: &FakeDaemon) -> i64 {
@@ -528,6 +529,165 @@ async fn a_guest_is_refused_on_every_write_route() {
     dac.stop().await;
 }
 
+/// Every route under `api/v1` that writes, with a body it would accept, and the writer's GET of
+/// the configured devices (a writer's view: units, pins, the default).
+const WRITE_ROUTES: &[(&str, &str, &str)] = &[
+    ("GET", "/api/v1/devices", ""),
+    ("POST", "/api/v1/devices", r#"{"unit":"AA:BB","name":"x"}"#),
+    ("POST", "/api/v1/devices/dac/edit", r#"{"name":"y"}"#),
+    ("POST", "/api/v1/devices/dac/remove", "{}"),
+    ("POST", "/api/v1/devices/dac/default", "{}"),
+    ("POST", "/api/v1/devices/dac/volume", r#"{"raw":50}"#),
+    ("POST", "/api/v1/devices/dac/volume/stop", "{}"),
+    ("POST", "/api/v1/devices/dac/connect", "{}"),
+    ("POST", "/api/v1/devices/dac/identify", "{}"),
+    (
+        "POST",
+        "/api/v1/devices/dac/controls/mute",
+        r#"{"value":true}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/devices/dac/controls/volume",
+        r#"{"raw":50}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/devices/dac/controls/input",
+        r#"{"value":"Optical"}"#,
+    ),
+    ("POST", "/api/v1/devices/dac/eq/mode", r#"{"mode":"tone"}"#),
+    ("POST", "/api/v1/devices/dac/eq/bands/0", r#"{"value":1}"#),
+    ("POST", "/api/v1/devices/dac/eq/loudness", r#"{"on":true}"#),
+    (
+        "POST",
+        "/api/v1/devices/dac/presets/recall",
+        r#"{"name":"Flat"}"#,
+    ),
+    ("POST", "/api/v1/devices/dac/presets", r#"{"name":"Mine"}"#),
+    (
+        "POST",
+        "/api/v1/devices/dac/presets/rename",
+        r#"{"from":"a","to":"b"}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/devices/dac/presets/delete",
+        r#"{"name":"Mine"}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/devices/dac/device-presets/recall",
+        r#"{"slot":1}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/devices/dac/device-presets/save",
+        r#"{"slot":1}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/devices/dac/device-presets/apply",
+        r#"{"slot":1}"#,
+    ),
+    ("POST", "/api/v1/hops", r#"{"name":"Amp","kind":"amp"}"#),
+    ("POST", "/api/v1/hops/edit", r#"{"id":"Amp","note":"x"}"#),
+    ("POST", "/api/v1/hops/remove", r#"{"id":"Amp"}"#),
+    ("POST", "/api/v1/hops/move", r#"{"id":"Amp","to":0}"#),
+    ("POST", "/api/v1/host/volume", r#"{"pct":50}"#),
+    ("POST", "/api/v1/host/mute", r#"{"muted":true}"#),
+    ("POST", "/api/v1/host/press", r#"{"key":"play"}"#),
+    ("POST", "/api/v1/host/eq", r#"{"on":true}"#),
+    ("POST", "/api/v1/host/eq/preset", r#"{"name":"Warm"}"#),
+    (
+        "POST",
+        "/api/v1/host/eq/points",
+        r#"{"type":"PK","f":1000,"g":3,"q":1}"#,
+    ),
+    ("POST", "/api/v1/host/eq/points/1", r#"{"g":2,"done":true}"#),
+    ("POST", "/api/v1/host/eq/points/1/remove", "{}"),
+    ("POST", "/api/v1/autoeq/search", r#"{"query":"hd 650"}"#),
+    ("POST", "/api/v1/autoeq/preview", "{}"),
+    ("POST", "/api/v1/autoeq/import", "{}"),
+    ("POST", "/api/v1/autoeq/upload", "{}"),
+    ("POST", "/api/v1/walk", "{}"),
+    ("POST", "/api/v1/walk/job/answer", "{}"),
+    ("POST", "/api/v1/walk/job/back", "{}"),
+    ("POST", "/api/v1/walk/job/cancel", "{}"),
+];
+
+/// A request of one of [`WRITE_ROUTES`].
+fn write_request(method: &str, path: &str, body: &str) -> hyper::Request<axum::body::Body> {
+    match method {
+        "GET" => crate::web::test_support::get(path),
+        _ => post(path, body),
+    }
+}
+
+/// The bytes of the daemon's configuration file, or nothing when there is none.
+fn config_bytes(dac: &FakeDaemon) -> Option<Vec<u8>> {
+    std::fs::read(dac.dir.join("config.toml")).ok()
+}
+
+/// A guest is refused 401 on every write route and the writer's device list, and nothing
+/// changes: the volume, the configuration file's bytes.
+#[tokio::test(start_paused = true)]
+async fn a_guest_is_refused_on_every_route_that_writes() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    set_volume(&dac, 40).await;
+    let token = "a-test-token-0123456789abcdefghijklmn";
+    let guests = web_with(
+        WebConfig {
+            enabled: true,
+            guest: WebGuest::Read,
+            ..WebConfig::default()
+        },
+        Arc::clone(&dac.fleet),
+        Some(token),
+    );
+    let before = config_bytes(&dac);
+    for (method, path, body) in WRITE_ROUTES {
+        let reply = call(&guests, write_request(method, path, body)).await;
+        assert_eq!(
+            reply.status,
+            Code::UNAUTHORIZED,
+            "{method} {path}: {}",
+            reply.body
+        );
+    }
+    assert_eq!(volume(&dac).await, 40);
+    assert_eq!(config_bytes(&dac), before);
+    dac.stop().await;
+}
+
+/// A signed-in page with `[web] writes` off is refused 403 on every write route and the
+/// writer's device list, and nothing changes.
+#[tokio::test(start_paused = true)]
+async fn a_page_with_writes_off_is_refused_on_every_route_that_writes() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    set_volume(&dac, 40).await;
+    let read_only = web(
+        WebConfig {
+            writes: false,
+            ..open()
+        },
+        Arc::clone(&dac.fleet),
+    );
+    let before = config_bytes(&dac);
+    for (method, path, body) in WRITE_ROUTES {
+        let reply = call(&read_only, write_request(method, path, body)).await;
+        assert_eq!(
+            reply.status,
+            Code::FORBIDDEN,
+            "{method} {path}: {}",
+            reply.body
+        );
+    }
+    assert_eq!(volume(&dac).await, 40);
+    assert_eq!(config_bytes(&dac), before);
+    dac.stop().await;
+}
+
 /// The volume written through `controls/{key}` takes the same road as `volume`: capped, and a
 /// raise to the top climbs instead of jumping.
 #[tokio::test(start_paused = true)]
@@ -617,7 +777,7 @@ impl Fleet for Counting {
     fn watch(&self, device: &svolder_ipc::DeviceInfo) -> Option<crate::fleet::Watched> {
         self.inner.watch(device)
     }
-    fn config(&self) -> Result<svolder_ipc::Config, String> {
+    fn config(&self) -> Result<Arc<svolder_ipc::Config>, String> {
         self.configs
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.config()
@@ -631,10 +791,7 @@ async fn try_now_wakes_the_device_and_a_refusal_is_a_409() {
     for (answer, status) in [
         (Response::Ack, Code::OK),
         (
-            Response::Error {
-                code: 3,
-                message: "the daemon is stopping".into(),
-            },
+            Response::error(CODE_LINK, "the daemon is stopping"),
             Code::CONFLICT,
         ),
     ] {
@@ -787,7 +944,7 @@ impl Fleet for Identifying {
     fn watch(&self, device: &svolder_ipc::DeviceInfo) -> Option<crate::fleet::Watched> {
         self.inner.watch(device)
     }
-    fn config(&self) -> Result<svolder_ipc::Config, String> {
+    fn config(&self) -> Result<Arc<svolder_ipc::Config>, String> {
         self.inner.config()
     }
 }
@@ -849,10 +1006,8 @@ async fn identify_on_a_device_that_is_down_says_so_with_the_wait() {
     let dac = fake_daemon("gungnir2-v2", "dac").await;
     let down = Arc::new(Identifying {
         inner: Arc::clone(&dac.fleet),
-        answer: Response::Error {
-            code: 3,
-            message: svolder_ipc::NOT_CONNECTED.to_string(),
-        },
+        answer: Response::error(CODE_LINK, svolder_ipc::NOT_CONNECTED)
+            .with_reason(svolder_ipc::Reason::NotConnected),
     });
     let page = web(open(), down as Arc<dyn Fleet>);
     let reply = call(&page, post("/api/v1/devices/dac/identify", "{}")).await;
@@ -866,10 +1021,7 @@ async fn identify_on_a_device_that_is_down_says_so_with_the_wait() {
     );
     let other = Arc::new(Identifying {
         inner: Arc::clone(&dac.fleet),
-        answer: Response::Error {
-            code: 3,
-            message: "the transport failed".to_string(),
-        },
+        answer: Response::error(CODE_LINK, "the transport failed".to_string()),
     });
     let page = web(open(), other as Arc<dyn Fleet>);
     let reply = call(&page, post("/api/v1/devices/dac/identify", "{}")).await;
@@ -960,7 +1112,7 @@ impl Fleet for Recording {
     fn watch(&self, device: &svolder_ipc::DeviceInfo) -> Option<crate::fleet::Watched> {
         self.inner.watch(device)
     }
-    fn config(&self) -> Result<svolder_ipc::Config, String> {
+    fn config(&self) -> Result<Arc<svolder_ipc::Config>, String> {
         self.inner.config()
     }
 }

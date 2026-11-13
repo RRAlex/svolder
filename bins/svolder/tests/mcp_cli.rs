@@ -25,6 +25,11 @@ fn svolder(args: &[&str], home: &Path, env_token: Option<&str>) -> (Option<i32>,
         .env("XDG_STATE_HOME", home)
         .env("XDG_RUNTIME_DIR", home)
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .env_remove("SVOLDER_MCP_TOKEN")
         .args(args);
     if let Some(token) = env_token {

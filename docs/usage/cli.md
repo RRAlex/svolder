@@ -45,7 +45,7 @@ in this order — `✓` pass, `!` warn, `✗` fail, `·` a fact worth recording 
 | Adapters | which adapters BlueZ reports, and whether the configured `adapter` is missing or unpowered |
 | Adapter grade | (a device configured, and more than one adapter present) each adapter's catch rate against the first configured device, best first as the setup wizard lists them, with adapters that tied left in the order the host reports them; warns when the configured `adapter` is not the best of them |
 | Runtime | `$XDG_RUNTIME_DIR`, and whether the socket's own directory can be written to |
-| Daemon | whether the systemd units are installed, enabled, and pointed at the resolved socket; a note, not a failure, where there is no systemd at all — autospawn or a direct session serve instead. A daemon answering on the socket with a version other than this svolder's grades `!` (`daemon vX.Y.Z is older than this svolder vA.B.C`, or `newer than` when the daemon is the later build, compared in semver order) and, for an older daemon, gives the fix `svolder daemon restart`, which doctor prints and never runs; a newer daemon has no fix to print, since restarting it changes nothing |
+| Daemon | whether the systemd units are installed, enabled, and pointed at the resolved socket; a note, not a failure, where there is no systemd at all — autospawn or a direct session serve instead. A daemon answering on the socket with a version other than this svolder's grades `!` (`daemon vX.Y.Z is older than this svolder vA.B.C`, or `newer than` when the daemon is the later build, compared in semver order) and, for an older daemon, gives the fix `svolder daemon restart`, which doctor prints and never runs; a newer daemon has no fix to print, since restarting it changes nothing; a daemon that says its `config.toml` changed since its last reload (a hand edit it has not taken) grades `!` with its words (`config: PATH changed since the last reload: svolder daemon reload (or SIGHUP)`) and, where the check has no fix of its own, the fix `svolder daemon reload`, printed and never run, since a reload changes the devices; a daemon whose `config.toml` is gone grades `!` with `config: PATH is missing: the daemon keeps its running configuration; restore the file, then svolder daemon reload` and no fix, since a reload of a missing file is refused |
 | Other daemons | one row per other svolderd of this user's listening on a socket this session does not reach — neither the one it resolves nor the one the systemd unit listens on — whoever started it and whatever network namespace it runs in: its pid, where it listens (the listening socket it holds, or its `--socket`/`SVOLDER_SOCKET` when its descriptors or its namespace's socket table cannot be read; for a daemon in another mount namespace, such as a container, that path reached through `/proc/<pid>/root`), and the command that stops that one, which doctor prints and never runs |
 | Config | whether the file parses, whether every device names a profile that exists, and whether any device is configured at all; a profile directory beside the file that cannot be read is named, with the reason, and a device whose profile may be in it is not called missing |
 | Config file | (no file yet) offers to create one from the template |
@@ -114,7 +114,15 @@ On a terminal, `svolder setup` and bare `svolder` with no device configured (see
 TUI wizard — see ["tui"](tui.md#tui)'s ["Setup wizard"](tui.md#setup-wizard) section below for the
 keys and the mockups. `svolder add` with no `<UDID>` on a terminal runs the same wizard starting
 from its Scan step, with `--name`, `--profile` and `--passphrase` (below) pre-filling its
-answers. The steps:
+answers. With a daemon running the scan, the passphrase test and the write are the daemon's walk,
+which the wizard only draws: there is no Adapter step, a warning names the devices that hold a
+link (the scan may briefly disturb them), `--name` is what an empty name line answers, `--profile`
+and `--passphrase` answer their steps (or are written once the device is),
+and leaving cancels the walk this run started and no other. A walk already running elsewhere (the
+web's *+ Add a device*, say) is refused with where it was started from. A daemon that is too old
+to walk is told to `svolder daemon restart`. A `--passphrase` written after the walk (the device
+took `auto`) goes into the device's record as given and is never tried on the device, as with
+`svolder add UNIT`. The steps:
 
 1. **Health** — the `doctor` checks above and their summary, with `Continue` and
    `Later: open svolder without a device`. Later (or `Esc` on this step) writes nothing and leaves
@@ -234,7 +242,9 @@ refused, naming that device); the file is re-parsed after writing, before this r
 not load is never left behind. Without a `<UDID>`, on a terminal, `add` runs the same guided walk
 `setup` does (see "setup" above), starting from its Scan step, with `--name`, `--profile` and
 `--passphrase` pre-filling its answers; off a terminal it prints the hint toward `svolder scan`
-instead:
+instead. While a daemon runs, `add` with a unit id is the daemon's own write (a `device_config` op,
+saying `through the daemon`) and never touches the file from this side; a daemon too old to take it
+is told to `svolder daemon restart`, and with none running the file is written here as before:
 
 ```
 $ svolder add --name bifrost
@@ -274,7 +284,9 @@ Take a `[[device]]` entry out of the configuration file. The file is re-parsed a
 this reports success; a `default_device` naming the device just removed is cleared in the same
 write, so the file never ends up naming a default that no longer exists. A running daemon is told to
 `reload` (see ["IPC protocol"](daemon.md#ipc-protocol)) once the write lands, so a `svolder devices`
-or the TUI's Devices screen run right after never shows a device the file no longer names.
+or the TUI's Devices screen run right after never shows a device the file no longer names. While a
+daemon runs the removal is the daemon's own write (saying `through the daemon`, no reload to send),
+and a name it does not know is answered as it is without one.
 
 ```
 Take a device out of the configuration
@@ -308,6 +320,11 @@ headphone amplifier, headphones or speakers. Each hop is a `[[hop]]` block of th
 device, and the list keeps the file's order, which is the order the sound takes. Like `add` and
 `remove`, none of these verbs opens a transport, and a running daemon is told to `reload` once a
 write lands. The file is re-parsed after each write, before it is reported.
+
+While a daemon says the file it reads is gone, a write is refused in the daemon's words (`PATH is
+missing: the daemon keeps its running configuration; restore the file, then try again`, exit 1): a
+write would start a new file from the template, and the reload after it would drop every
+device. Restore the file, then run the verb again.
 
 ```
 List or change what the sound goes through after the DAC
@@ -1326,7 +1343,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.32.5
+svolder 0.33.0
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

@@ -4,7 +4,7 @@
 // computer's model in its host, and the core's own `computer` over a stand-in store, so the sections
 // are drawn from the same data the page draws from. Not a test.
 import { readFileSync } from 'node:fs';
-import { createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { createComputer, createPending } from '../../../bins/svolderd/web/core/computer.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/ember-parts.json', import.meta.url), 'utf8'));
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -52,8 +52,8 @@ export function computerView(page, side = 'computer') {
     removeItem: (k) => map.delete(k),
   };
   const store = { page: () => page, shown: () => page.shown, on() {}, emit() {} };
-  const holds = createHolds({ store, fetch: async () => ({ status: 0 }) });
-  const computer = createComputer({ store, storage, holds });
+  const pending = createPending({ store, fetch: async () => ({ status: 0 }) });
+  const computer = createComputer({ store, storage, pending });
   computer.flip(side);
   return {
     view: { phone: false, coarse: false, state: 'open', now: 0, rulerPx: 1000, computer },

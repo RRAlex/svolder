@@ -3,7 +3,7 @@
 // What a press on the computer's side does on the theme Ember's page: the switch, the mode, the
 // presets, the table of points (a row picked, a value typed or stepped, the type chosen, a point
 // removed or added) and the curve under the mouse and the finger. The drag, the tap, the touch, the
-// wheel, the table's scroll and the typed cell are the core's (`core.drag`): this module forwards
+// wheel, the table's scroll and the typed cell are the core's (`core.eq`): this module forwards
 // the DOM's events to them and draws what they say (computer-page.js moves the curve while a drag
 // or a stepper is on; computer-steps.js is the steppers). Every element carries `data-comp` and
 // none carries `data-json`, so press.js leaves them alone.
@@ -31,7 +31,7 @@ const core = () => ember.core;
 const act = () => ember.core.actions.computer;
 
 const plotOf = (target) => target.closest?.('.eqg.pts .plot') ?? null;
-const pointsOf = (plot, rect) => core().drag.markersIn(tone()?.markers, rect);
+const pointsOf = (plot, rect) => core().eq.points.markersIn(tone()?.markers, rect);
 
 // ------------------------------------------------------------------------------- the table
 
@@ -44,6 +44,9 @@ function lit(n) {
   }
   paintEditor();
 }
+
+/** Whether a point of the computer's curve is held. */
+export const dragging = () => hand?.active === true;
 
 /** A screen or the tone part is in place: the table keeps its scroll, the picked row shows. */
 export function syncComputer() {
@@ -126,7 +129,7 @@ function edit(cell) {
   cell.replaceChildren(input);
   input.focus();
   input.select();
-  core().drag.editCell(input, {
+  core().eq.table.editCell(input, {
     n: Number(cell.dataset.n),
     param: cell.dataset.param,
     shown,
@@ -135,7 +138,7 @@ function edit(cell) {
       if (cell.isConnected) cell.textContent = shown;
     },
     after: readWaiting,
-  });
+  }).listen();
 }
 
 /** The id of the switch's half the focus is owed to after a keyboard flip. */
@@ -231,9 +234,9 @@ function chosen(event) {
  * `given.readWaiting` is called when a hold ends; the listeners go with the mount's signal. */
 export function installComputer(given) {
   readWaiting = given.readWaiting;
-  hand = core().drag.pointDrag({ points: pointsOf, usable, on: heard });
+  hand = core().eq.points({ points: pointsOf, usable, on: heard });
   installSteps({ hand });
-  table = core().drag.table({
+  table = core().eq.table({
     box: scroller,
     note: () => document.querySelector('#part-tone .more'),
     row: (n) => document.querySelector(`#part-tone .pt[data-n="${n}"]`),

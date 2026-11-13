@@ -211,7 +211,12 @@ impl Home {
                 .env("SVOLDER_TRANSPORT", "daemon")
                 .arg("--socket")
                 .arg(home.join("svolder.sock"))
-                .env_remove("SVOLDER_SOCKET"),
+                .env_remove("SVOLDER_SOCKET")
+                .env_remove("SVOLDER_WEB_ENABLED")
+                .env_remove("SVOLDER_MCP_ENABLED")
+                .env_remove("SVOLDER_WEB_LISTEN")
+                .env_remove("SVOLDER_MCP_LISTEN")
+                .env_remove("SVOLDER_WEB_URL"),
             None => command
                 .env("SVOLDER_TRANSPORT", "fake")
                 .env("SVOLDER_SOCKET", home.join("no-daemon.sock")),
@@ -328,6 +333,11 @@ impl Home {
             .env("XDG_RUNTIME_DIR", self.path())
             .env("XDG_STATE_HOME", self.path())
             .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
             .arg("--socket")
             .arg(&socket)
             .arg("--config")
@@ -691,6 +701,25 @@ async fn flat_goes_to_the_dac_with_no_question_while_the_computer_is_flat() {
     })
     .await
     .expect("the case finishes in time");
+}
+
+/// `SVOLDER_HOST=fake` stands for a daemon's simulated host, which a front end of its own never
+/// reaches: the CLI refuses as it does under `off`, and starts no `systemctl`, `pw-cli` or
+/// `wpctl`.
+#[test]
+fn under_a_fake_host_the_cli_reaches_no_real_audio() {
+    let home = Home::new();
+    import(&home, "My Phones");
+    let (code, _out, err) = home.run_with(
+        &["host", "eq", "apply", "My Phones"],
+        &[("SVOLDER_HOST", "fake")],
+    );
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("SVOLDER_HOST=fake"), "{err}");
+    assert!(!err.contains("SVOLDER_HOST=off"), "{err}");
+    assert!(!home.exists("svolder/host-eq.conf"));
+    assert!(!home.exists("units"));
+    assert_eq!(home.read("systemctl.log"), "");
 }
 
 #[test]

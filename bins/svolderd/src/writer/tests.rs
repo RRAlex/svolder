@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 
 use super::*;
 use crate::test_support::shown;
+use svolder_ipc::{CODE_LINK, CODE_TIMEOUT, CODE_USAGE};
 
 /// A stand-in device behind one actor channel, on a built-in profile: it records every command
 /// in the words [`shown`] gives, applies a set, a raw write, a band and a mode to its readings
@@ -121,10 +122,7 @@ fn stand(profile: &str, readings: &[(&str, i64)], acking: bool) -> (Writer, Stan
             if let Command::Raw { id, .. } = &command
                 && refuses.lock().expect("the refusals").contains(id)
             {
-                let _ = reply.send(Response::Error {
-                    code: 3,
-                    message: "the device said no".into(),
-                });
+                let _ = reply.send(Response::error(CODE_LINK, "the device said no"));
                 continue;
             }
             let mut follows = None;
@@ -163,10 +161,7 @@ fn stand(profile: &str, readings: &[(&str, i64)], acking: bool) -> (Writer, Stan
                 _ => None,
             };
             let Some(message) = message else {
-                let _ = reply.send(Response::Error {
-                    code: 1,
-                    message: "refused".into(),
-                });
+                let _ = reply.send(Response::error(CODE_USAGE, "refused"));
                 continue;
             };
             // An action is a command with no echo: the device takes it and nothing is read back.
@@ -350,7 +345,7 @@ async fn every_write_is_answered_once_the_actor_has_stopped() {
     assert!(
         matches!(
             answer,
-            Ok(Outcome::Done(Response::Error { code: 3, ref message }))
+            Ok(Outcome::Done(Response::Error { code: CODE_LINK, ref message, .. }))
                 if message == "device fake is not running"
         ),
         "{answer:?}"
@@ -428,15 +423,12 @@ async fn a_recall_sends_its_commands_in_order_and_acks() {
 
 #[tokio::test]
 async fn a_recall_that_fails_partway_stops_and_counts_the_writes_that_went_through() {
-    let refused = Response::Error {
-        code: 3,
-        message: "the device said no".to_string(),
-    };
+    let refused = Response::error(CODE_LINK, "the device said no".to_string());
     let (commands, seen, _task) = actor(vec![Response::Ack, Response::Ack, refused]);
     let steps = vec![mode("flat"), mode("eq"), mode("loudness"), mode("eq")];
     match steps_through(&commands, steps).await {
-        Response::Error { code, message } => {
-            assert_eq!(code, 3);
+        Response::Error { code, message, .. } => {
+            assert_eq!(code, CODE_LINK);
             assert_eq!(message, "stopped after 2 of 4 writes: the device said no");
         }
         other => panic!("{other:?}"),
@@ -1240,7 +1232,13 @@ async fn a_down_after_a_waited_lowering_that_timed_out_steps_from_the_lowering()
         .submit(Origin::Socket, set("volume", "50"), Mode::Ordered)
         .await;
     assert!(
-        matches!(lowered, Ok(Outcome::Done(Response::Error { code: 4, .. }))),
+        matches!(
+            lowered,
+            Ok(Outcome::Done(Response::Error {
+                code: CODE_TIMEOUT,
+                ..
+            }))
+        ),
         "{lowered:?}"
     );
     let down = writer
@@ -1257,7 +1255,7 @@ async fn a_down_after_a_waited_lowering_that_timed_out_steps_from_the_lowering()
 /// never went out.
 #[test]
 fn only_a_timeout_answer_says_the_write_may_have_landed() {
-    let words = |message: String| Response::Error { code: 4, message };
+    let words = |message: String| Response::error(CODE_TIMEOUT, message);
     let echo = crate::device::error_for(&svolder_ble::BleError::Timeout(Duration::from_secs(2)));
     assert!(timed_out(&echo));
     assert!(timed_out(&unanswered("fake")));
@@ -1266,10 +1264,10 @@ fn only_a_timeout_answer_says_the_write_may_have_landed() {
     assert!(!timed_out(&words(
         "no value reported yet for volume".into()
     )));
-    assert!(!timed_out(&Response::Error {
-        code: 1,
-        message: "no confirmation within 2s".into()
-    }));
+    assert!(!timed_out(&Response::error(
+        CODE_USAGE,
+        "no confirmation within 2s"
+    )));
     assert!(!timed_out(&Response::Ack));
 }
 
@@ -2392,8 +2390,8 @@ async fn a_setting_stops_at_the_first_refused_write_and_says_how_many_went() {
         .push("6.2".into());
     let Recalling { done, .. } = writer.apply(Origin::Mcp, "Bass Boost".into());
     match done.await {
-        Ok(Outcome::Done(Response::Error { code, message })) => {
-            assert_eq!(code, 3);
+        Ok(Outcome::Done(Response::Error { code, message, .. })) => {
+            assert_eq!(code, CODE_LINK);
             assert_eq!(message, "stopped after 1 of 3 writes: the device said no");
         }
         other => panic!("{other:?}"),
@@ -2492,7 +2490,10 @@ async fn a_setting_on_a_device_without_builtin_settings_is_refused_in_words() {
     ));
     assert!(matches!(
         done.await,
-        Ok(Outcome::Done(Response::Error { code: 1, .. }))
+        Ok(Outcome::Done(Response::Error {
+            code: CODE_USAGE,
+            ..
+        }))
     ));
     assert!(log(&stand).is_empty());
 }
@@ -3270,7 +3271,10 @@ async fn a_setting_step_that_timed_out_is_unreported_after_the_next_recall() {
     }
     assert!(matches!(
         done.await,
-        Ok(Outcome::Done(Response::Error { code: 4, .. }))
+        Ok(Outcome::Done(Response::Error {
+            code: CODE_TIMEOUT,
+            ..
+        }))
     ));
     let recall = writer.submit(Origin::Socket, set("recall", "2"), Mode::Ordered);
     quiet(&writer).await;

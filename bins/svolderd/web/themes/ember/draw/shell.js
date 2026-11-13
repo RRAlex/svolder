@@ -3,8 +3,9 @@
 // The theme Ember's shell: what stands around the screen, as the page's body holds it. The
 // effects layer, the header (the wordmark, the device switcher with the shown device's link dot
 // beside its name, a guest's Sign in, the empty slot the frame draws its menu button over), the
-// empty `main#screen` the screen is drawn into, the history canvas, the footer and the list of
-// keys. The server's frame carries the model's data block and the `<head>`. Pure, with no DOM.
+// empty `main#screen` the screen is drawn into, the history canvas and the footer (its key
+// hints name `?`, which opens the Help popup). The server's frame carries the model's data block
+// and the `<head>`. Pure, with no DOM.
 
 import { switchPill } from './computer.js';
 import { attr, esc } from './html.js';
@@ -12,12 +13,6 @@ import { attr, esc } from './html.js';
 /** The place the frame draws its menu button over, at the header's right: empty, of the button's
  * size (style.css). */
 const SLOT = '<span class="fxslot"></span>';
-
-/** The keys a viewer who may change a device has. */
-const WRITER_KEYS = '<p class="ktitle">Keys</p><dl> <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Volume one step</dd> <dt><kbd>m</kbd></dt><dd>Mute</dd> <dt><kbd>0</kbd></dt><dd>Centre the balance</dd> <dt class="kviz"><kbd>v</kbd></dt><dd class="kviz">The visualizer\'s look</dd> <dt><kbd>f</kbd></dt><dd>Tone control to Flat</dd> <dt><kbd>p</kbd></dt><dd>The preset that is on</dd> <dt>Curve</dt><dd>Drag a point for frequency and gain; wheel, right drag or pinch for Q</dd> <dt><kbd>A</kbd></dt><dd>Arrange sections</dd> <dt><kbd>T</kbd></dt><dd>Themes</dd> <dt><kbd>Space</kbd></dt><dd>Play or pause</dd> <dt><kbd>?</kbd></dt><dd>This list</dd> </dl>';
-
-/** The keys a guest, or a page with writes off, has: those that change nothing on the device. */
-const READER_KEYS = '<p class="ktitle">Keys</p><dl> <dt class="kviz"><kbd>v</kbd></dt><dd class="kviz">The visualizer\'s look</dd> <dt><kbd>A</kbd></dt><dd>Arrange sections</dd> <dt><kbd>T</kbd></dt><dd>Themes</dd> <dt><kbd>?</kbd></dt><dd>This list</dd> </dl>';
 
 /** The class the page's body carries: a guest's, a writer's, or none. */
 export function bodyClass(page) {
@@ -61,5 +56,5 @@ export function shell(page, wordmark = '', computer = null) {
   const hints = viewer.writes
     ? '<p class="kh2" aria-hidden="true"><kbd>←</kbd><kbd>→</kbd> volume <kbd>m</kbd> mute <kbd>0</kbd> centre <kbd>f</kbd> Flat <kbd>p</kbd> presets <kbd>?</kbd> keys</p>'
     : '<p class="kh2" aria-hidden="true"><kbd>?</kbd> keys</p>';
-  return `<div class="fx" aria-hidden="true"><div class="glow"></div></div> <div class="app"> <header class="top"> ${wordmark} <nav class="devs" aria-label="Devices"> ${switcher} </nav> <div class="side"> ${side} </div> ${SLOT} </header> <main id="screen"></main> <canvas class="hist" id="hist" aria-hidden="true"></canvas> <footer class="foot"> <span> ${version} </span> ${signOut} ${readOnly} ${hints} </footer> </div> <div class="keys" id="keys" hidden>${viewer.writes ? WRITER_KEYS : READER_KEYS}</div>`;
+  return `<div class="fx" aria-hidden="true"><div class="glow"></div></div> <div class="app"> <header class="top"> ${wordmark} <nav class="devs" aria-label="Devices"> ${switcher} </nav> <div class="side"> ${side} </div> ${SLOT} </header> <main id="screen"></main> <canvas class="hist" id="hist" aria-hidden="true"></canvas> <footer class="foot"> <span> ${version} </span> ${signOut} ${readOnly} ${hints} </footer> </div>`;
 }

@@ -128,6 +128,9 @@ async fn a_version_reply_is_a_daemon_info_and_another_reply_is_nothing() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         },
     }));
     assert_eq!(
@@ -140,6 +143,9 @@ async fn a_version_reply_is_a_daemon_info_and_another_reply_is_nothing() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         })
     );
     let _ = std::fs::remove_file(&socket);
@@ -177,6 +183,9 @@ async fn version_on_carries_the_log_with_the_info() {
             mcp_token: None,
             web: None,
             web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
         },
     }));
     let mut client = Client::connect(&socket).await.expect("connects");
@@ -192,6 +201,9 @@ async fn version_on_carries_the_log_with_the_info() {
                 mcp_token: None,
                 web: None,
                 web_token: None,
+                features: Vec::new(),
+                config_changed: false,
+                config_missing: false,
             },
             log: Some("journal".into()),
         }
@@ -230,4 +242,36 @@ async fn version_on_names_a_lost_connection() {
     assert!(matches!(why, Unanswered::Failed(_)));
     assert!(why.to_string().starts_with("no version ("), "{why}");
     let _ = std::fs::remove_file(&socket);
+}
+
+/// A daemon supports what its version answer lists, and an older daemon's answer lists nothing.
+#[test]
+fn a_daemon_supports_what_it_lists() {
+    let mut info = DaemonInfo {
+        version: "0.32.7".into(),
+        mqtt: None,
+        mcp: None,
+        config: None,
+        mcp_token: None,
+        web: None,
+        web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
+    };
+    assert!(!info.supports("reasons"));
+    info.features = vec!["reasons".into()];
+    assert!(info.supports("reasons"));
+    assert!(!info.supports("walk"));
+}
+
+/// The words for a changed configuration name the daemon's file and the way to reload.
+#[test]
+fn the_config_changed_line_names_the_file_and_the_reload() {
+    assert_eq!(
+        config_changed_line("/etc/svolder/config.toml"),
+        "config: /etc/svolder/config.toml changed since the last reload: svolder daemon reload \
+         (or SIGHUP)"
+    );
+    assert_eq!(RELOAD_COMMAND, "svolder daemon reload");
 }

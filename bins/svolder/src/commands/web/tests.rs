@@ -297,6 +297,24 @@ fn only_a_bridge_network_container_offers_no_lan_address() {
         lan_in(true, &podman, Some(Ipv4Addr::new(10, 88, 0, 1))),
         None
     );
+    // Rootless Docker's host networking and slirp4netns/pasta: 10.0.2.100 behind 10.0.2.2.
+    let slirp = vec![nic("eth0", [10, 0, 2, 100])];
+    assert_eq!(lan_in(true, &slirp, Some(Ipv4Addr::new(10, 0, 2, 2))), None);
+    // The same address behind another gateway, or off a container, is a LAN.
+    assert_eq!(
+        lan_in(true, &slirp, Some(Ipv4Addr::new(10, 0, 2, 1))),
+        Some(Ipv4Addr::new(10, 0, 2, 100))
+    );
+    assert_eq!(
+        lan_in(false, &slirp, Some(Ipv4Addr::new(10, 0, 2, 2))),
+        Some(Ipv4Addr::new(10, 0, 2, 100))
+    );
+    // A 192.168 home LAN on a host-networked container is never refused.
+    let home = vec![nic("eth0", [192, 168, 1, 20])];
+    assert_eq!(
+        lan_in(true, &home, Some(Ipv4Addr::new(192, 168, 1, 1))),
+        Some(Ipv4Addr::new(192, 168, 1, 20))
+    );
     // Host networking: the host's interfaces, the host's LAN gateway.
     let host = vec![nic("docker0", [172, 17, 0, 1]), nic("br0", [10, 0, 66, 52])];
     assert_eq!(

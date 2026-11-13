@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { createActions } from '../../../bins/svolderd/web/core/actions.js';
 import {
-  createComputer, createHolds, TAP_MS, TAP_PX, WHEEL_END_MS,
+  createComputer, createPending, TAP_MS, TAP_PX, WHEEL_END_MS,
 } from '../../../bins/svolderd/web/core/computer.js';
 import {
   labelWords, markersIn, pointDrag, pointValues, POINT_KEYS, touchWatch,
@@ -78,15 +78,15 @@ function rig({ list = LIST, viewer = SIGNED, eq = {}, usable = () => true, marks
   const store = createStore(page(make(list, {})), {
     signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({ device: dac }) }),
   });
-  const holds = createHolds({
+  const pending = createPending({
     store, fetch: async () => ({ status: 200, json: async () => state.host ?? { computer: make(list, {}) } }),
   });
   const clock = fakeClock();
-  const computer = createComputer({ store, storage: { getItem: () => null, setItem() {}, removeItem() {} }, holds });
+  const computer = createComputer({ store, storage: { getItem: () => null, setItem() {}, removeItem() {} }, pending });
   const actions = createActions({
     store, post: async (path, body) => { posts.push([path, body]); return { status: 200, ok: true }; },
     toast: (text) => toasts.push(text), history: { pushState() {} }, location: { assign() {} },
-    holds, ask: async () => false, timing: clock, computer,
+    pending, ask: async () => false, timing: clock, computer,
   });
   computer.flip('computer');
   const captured = [];
@@ -104,7 +104,7 @@ function rig({ list = LIST, viewer = SIGNED, eq = {}, usable = () => true, marks
     points: (_, rect) => (marks ? marks(rect) : markersIn(computer.tone()?.markers, rect)), on,
   });
   const host = (points, over) => store.emit('host', { ...store.page().host, computer: make(points, over) });
-  return { store, holds, actions, computer, hand, plot, posts, toasts, clock, log, captured, host, state, make };
+  return { store, pending, actions, computer, hand, plot, posts, toasts, clock, log, captured, host, state, make };
 }
 
 const markerOf = (r, k) => markersIn(r.computer.tone().markers, { width: 1000, height: 260 })[k - 1];
@@ -141,7 +141,7 @@ await ok('a_press_on_a_point_drags_it_with_paced_writes_and_one_last_value_at_th
   assert.deepEqual([all.at(-1).f, all.at(-1).g], [STEPS.f[last.f], STEPS.g[last.g]]);
   assert.equal(all.at(-1).done, true);
   assert.equal(r.hand.session, null);
-  assert.equal(r.holds.get('point:2'), null, 'the hold goes once the model is read');
+  assert.equal(r.pending.get('point:2'), null, 'the hold goes once the model is read');
   assert.deepEqual(r.log.map((e) => e[0]).filter((x, i, a) => a.indexOf(x) === i),
     ['pick', 'begin', 'held', 'ended', 'finished']);
 });

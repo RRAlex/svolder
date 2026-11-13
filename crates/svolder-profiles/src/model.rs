@@ -165,6 +165,10 @@ pub struct Control {
     pub powers_output: bool,
     /// Select or toggle only: any change to it asks first, whatever its direction.
     pub asks_on_change: bool,
+    /// The control is one of the device's key readings: a reading someone watches, which a
+    /// front end graphs before the rest ([`Profile::key_readings`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub key_reading: bool,
     /// Further function ids a status is read as this control from: a status whose id equals an
     /// entry or lies under it. Each entry is one to three bytes.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -337,6 +341,17 @@ pub struct EqSpec {
 }
 
 impl Profile {
+    /// The keys of the controls marked as key readings, in the order of the controls: the
+    /// readings of this product someone watches (a DAC's sample rate, volume and input, an
+    /// amp's meters and warm-up state), never a setting that only changes when it is changed.
+    pub fn key_readings(&self) -> Vec<&str> {
+        self.controls
+            .iter()
+            .filter(|control| control.key_reading)
+            .map(|control| control.key.as_str())
+            .collect()
+    }
+
     /// The control with this key, matched without regard to case.
     pub fn control_by_key(&self, key: &str) -> Option<&Control> {
         self.controls

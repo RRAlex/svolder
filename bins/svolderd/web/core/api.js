@@ -1,8 +1,8 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// Talking to svolder: the sign-in ending, a JSON write and the words of its refusal, and the
-// one-at-a-time sender. The core's actions and store import these; nothing here touches the stream or
-// the page's parts.
+// Talking to svolder: the sign-in ending, a JSON write, a read, the words of a
+// refusal, and the one-at-a-time sender. The core's actions and store import these; nothing here
+// touches the stream or the page's parts.
 
 /** What a write that switched the amp's mode to EQ tells the person. */
 export const MODE_SET_WORDS = 'Mode set to EQ';
@@ -15,21 +15,27 @@ export function signedOut() {
   location.assign('./');
 }
 
-/** POST `body` as JSON to `path` (relative), answering the parsed JSON with `status`. */
-export async function post(path, body) {
+/**
+ * One request to the daemon: the answer's parsed JSON with its `status`. A 401 loads the sign-in
+ * page (and is still answered); no answer at all is status 0 with the words NO_ANSWER, a refusal
+ * for every caller, never a rejection; a request ended through `io.signal` is that answer with
+ * `aborted: true`; a body that is no JSON leaves the status alone, so a non-JSON 200 answers
+ * `{ status: 200 }`, like an empty one. `io` may give the `fetch`, the `signedOut` and the abort
+ * `signal` to use (the page's own fetch and sign-in by default).
+ */
+async function call(path, init, io = {}) {
+  const send = io.fetch ?? ((...args) => globalThis.fetch(...args));
+  const out = io.signedOut ?? signedOut;
   let answer;
   try {
-    answer = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      credentials: 'same-origin',
+    answer = await send(path, {
+      ...init, credentials: 'same-origin', ...(io.signal ? { signal: io.signal } : {}),
     });
   } catch {
-    // Status 0 is no answer at all: a refusal for every caller, never a rejection.
-    return { status: 0, error: NO_ANSWER };
+    return io.signal?.aborted ? { status: 0, error: NO_ANSWER, aborted: true }
+      : { status: 0, error: NO_ANSWER };
   }
-  if (answer.status === 401) signedOut();
+  if (answer.status === 401) out();
   let json = {};
   try {
     json = await answer.json();
@@ -37,6 +43,20 @@ export async function post(path, body) {
     json = {};
   }
   return { status: answer.status, ...json };
+}
+
+/** POST `body` as JSON to `path` (relative), answering the parsed JSON with `status`. */
+export function post(path, body, io) {
+  return call(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, io);
+}
+
+/** GET `path` (relative), answering the parsed JSON with `status`. */
+export function get(path, io) {
+  return call(path, {}, io);
 }
 
 /** The words of a refused write's answer (no answer at all is status 0), or nothing. */

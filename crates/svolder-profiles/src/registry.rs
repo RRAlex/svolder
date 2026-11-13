@@ -631,12 +631,10 @@ fn parse_family(name: &str, family: &str) -> Result<Family, ProfileError> {
     }
 }
 
+/// A `[[control]]` entry that is not an action, checked: each group of keys is judged by its own
+/// function below, in this order: values, level, scale, meter marks, flags, convert, reads.
 fn build_control(profile: &str, def: &ControlDef) -> Result<Control, ProfileError> {
-    let fail = |reason: &str| ProfileError::Control {
-        profile: profile.to_string(),
-        key: def.key.clone(),
-        reason: reason.to_string(),
-    };
+    let fail = |reason: &str| control_error(profile, def, reason);
     if RESERVED_KEYS
         .iter()
         .any(|reserved| reserved.eq_ignore_ascii_case(&def.key))
@@ -677,90 +675,180 @@ fn build_control(profile: &str, def: &ControlDef) -> Result<Control, ProfileErro
             .map_err(|_| fail("unknown value_type"))?,
         None => kind.default_value_type(),
     };
+    let values = named_values(profile, def)?;
+    let range = def.range.map(|[lo, hi]| (lo, hi));
+    if kind == ControlKind::Level {
+        check_level(profile, def, range, value_type)?;
+    }
+    let log_scale = log_scale_of(profile, def, kind, range, value_type)?;
+    check_meter_marks(profile, def, kind, range)?;
+    check_flags(profile, def, kind, value_type)?;
+    let convert = convert_of(profile, def)?;
+    let reads = reads_of(profile, def)?;
+    Ok(Control {
+        id,
+        key: def.key.clone(),
+        label: def.label.clone(),
+        kind,
+        value_type,
+        values,
+        range,
+        center: def.center,
+        unit: def.unit.clone(),
+        convert,
+        channel: def.channel.clone(),
+        floor: def.floor,
+        tick: def.tick,
+        log_scale,
+        advice: def.advice.clone(),
+        only_while: def.only_while.clone(),
+        auto_off: def.auto_off,
+        output_gain: def.output_gain,
+        mutes_output: def.mutes_output,
+        powers_output: def.powers_output,
+        asks_on_change: def.asks_on_change,
+        key_reading: def.key_reading,
+        reads,
+    })
+}
+
+/// The refusal of the control `def` of `profile`, for `reason`.
+fn control_error(profile: &str, def: &ControlDef, reason: &str) -> ProfileError {
+    ProfileError::Control {
+        profile: profile.to_string(),
+        key: def.key.clone(),
+        reason: reason.to_string(),
+    }
+}
+
+/// The control's `values` table, sorted by raw value.
+fn named_values(profile: &str, def: &ControlDef) -> Result<Vec<(u8, String)>, ProfileError> {
     let mut values = Vec::new();
     if let Some(map) = &def.values {
         for (k, v) in map {
-            let raw: u8 = k.parse().map_err(|_| fail("values keys must be 0-255"))?;
+            let raw: u8 = k
+                .parse()
+                .map_err(|_| control_error(profile, def, "values keys must be 0-255"))?;
             values.push((raw, v.clone()));
         }
         values.sort_by_key(|(raw, _)| *raw);
     }
-    let range = def.range.map(|[lo, hi]| (lo, hi));
-    if kind == ControlKind::Level {
-        let (lo, hi) = range.ok_or_else(|| fail("level control needs range"))?;
-        if lo > hi {
-            return Err(fail("range must be low..=high"));
-        }
-        let (low, high) =
-            value_domain(value_type).ok_or_else(|| fail("level needs an integer value_type"))?;
-        if i128::from(lo) < low || i128::from(hi) > high {
-            return Err(fail("range exceeds the value_type domain"));
-        }
-        if def.center.is_some_and(|c| c < lo || c > hi) {
-            return Err(fail("center must be inside range"));
-        }
+    Ok(values)
+}
+
+/// A level's `range` and `center`: there, in order, inside what its wire type carries.
+fn check_level(
+    profile: &str,
+    def: &ControlDef,
+    range: Option<(i64, i64)>,
+    value_type: ValueType,
+) -> Result<(), ProfileError> {
+    let fail = |reason: &str| control_error(profile, def, reason);
+    let (lo, hi) = range.ok_or_else(|| fail("level control needs range"))?;
+    if lo > hi {
+        return Err(fail("range must be low..=high"));
     }
-    let log_scale = match &def.scale {
-        None => None,
-        Some(scale) => {
-            if kind != ControlKind::Meter {
-                return Err(fail("scale applies only to a meter"));
-            }
-            if range.is_some() || def.floor.is_some() || def.tick.is_some() {
-                return Err(fail("scale replaces range, floor and tick"));
-            }
-            let zero = match (scale.zero, &scale.zero_from) {
-                (Some(raw), None) => Zero::Fixed(raw),
-                (None, Some(key)) => Zero::Floor(key.clone()),
-                _ => return Err(fail("scale needs one of zero and zero_from")),
-            };
-            if scale.full <= 0 {
-                return Err(fail("scale's full must be above 0"));
-            }
-            if let Zero::Fixed(raw) = zero
-                && !(0..scale.full).contains(&raw)
-            {
-                return Err(fail("scale's zero must be at least 0 and below full"));
-            }
-            let (_, high) = value_domain(value_type)
-                .ok_or_else(|| fail("a meter needs an integer value_type"))?;
-            if i128::from(scale.full) > high {
-                return Err(fail("scale exceeds the value_type domain"));
-            }
-            if !(0.0..1.0).contains(&scale.class_a) {
-                return Err(fail("scale's class_a must be at least 0 and below 1"));
-            }
-            Some(LogScale {
-                zero,
-                full: scale.full,
-                class_a: scale.class_a,
-            })
-        }
+    let (low, high) =
+        value_domain(value_type).ok_or_else(|| fail("level needs an integer value_type"))?;
+    if i128::from(lo) < low || i128::from(hi) > high {
+        return Err(fail("range exceeds the value_type domain"));
+    }
+    if def.center.is_some_and(|c| c < lo || c > hi) {
+        return Err(fail("center must be inside range"));
+    }
+    Ok(())
+}
+
+/// A meter's logarithmic scale, from the control's `scale` table, when it has one.
+fn log_scale_of(
+    profile: &str,
+    def: &ControlDef,
+    kind: ControlKind,
+    range: Option<(i64, i64)>,
+    value_type: ValueType,
+) -> Result<Option<LogScale>, ProfileError> {
+    let fail = |reason: &str| control_error(profile, def, reason);
+    let Some(scale) = &def.scale else {
+        return Ok(None);
     };
-    if def.floor.is_some() || def.tick.is_some() {
-        if kind != ControlKind::Meter {
-            return Err(fail("floor and tick apply only to a meter"));
-        }
-        // Both are raw values on the meter's own scale, and both are drawn as a position on
-        // the bar `range` sets out, so neither means anything without it.
-        let (lo, hi) = range.ok_or_else(|| fail("floor and tick need range"))?;
-        if def.tick.is_some_and(|t| t < lo || t > hi) {
-            return Err(fail("tick must be inside range"));
-        }
-        if def.floor.is_some_and(|f| f >= hi) {
-            return Err(fail("floor must be below the top of range"));
-        }
-        if def.floor.is_some_and(|f| f < lo) {
-            return Err(fail("floor must be at or above the bottom of range"));
-        }
-        // A tick under the floor would sit where the bar is empty, so the glyph would mark a
-        // reading the bar cannot show and every reading above it would be reported hot.
-        if let (Some(floor), Some(tick)) = (def.floor, def.tick)
-            && tick < floor
-        {
-            return Err(fail("tick must be at or above floor"));
-        }
+    if kind != ControlKind::Meter {
+        return Err(fail("scale applies only to a meter"));
     }
+    if range.is_some() || def.floor.is_some() || def.tick.is_some() {
+        return Err(fail("scale replaces range, floor and tick"));
+    }
+    let zero = match (scale.zero, &scale.zero_from) {
+        (Some(raw), None) => Zero::Fixed(raw),
+        (None, Some(key)) => Zero::Floor(key.clone()),
+        _ => return Err(fail("scale needs one of zero and zero_from")),
+    };
+    if scale.full <= 0 {
+        return Err(fail("scale's full must be above 0"));
+    }
+    if let Zero::Fixed(raw) = zero
+        && !(0..scale.full).contains(&raw)
+    {
+        return Err(fail("scale's zero must be at least 0 and below full"));
+    }
+    let (_, high) =
+        value_domain(value_type).ok_or_else(|| fail("a meter needs an integer value_type"))?;
+    if i128::from(scale.full) > high {
+        return Err(fail("scale exceeds the value_type domain"));
+    }
+    if !(0.0..1.0).contains(&scale.class_a) {
+        return Err(fail("scale's class_a must be at least 0 and below 1"));
+    }
+    Ok(Some(LogScale {
+        zero,
+        full: scale.full,
+        class_a: scale.class_a,
+    }))
+}
+
+/// A linear meter's `floor` and `tick`: on a meter with a `range`, and inside it.
+fn check_meter_marks(
+    profile: &str,
+    def: &ControlDef,
+    kind: ControlKind,
+    range: Option<(i64, i64)>,
+) -> Result<(), ProfileError> {
+    let fail = |reason: &str| control_error(profile, def, reason);
+    if def.floor.is_none() && def.tick.is_none() {
+        return Ok(());
+    }
+    if kind != ControlKind::Meter {
+        return Err(fail("floor and tick apply only to a meter"));
+    }
+    // Both are raw values on the meter's own scale, and both are drawn as a position on
+    // the bar `range` sets out, so neither means anything without it.
+    let (lo, hi) = range.ok_or_else(|| fail("floor and tick need range"))?;
+    if def.tick.is_some_and(|t| t < lo || t > hi) {
+        return Err(fail("tick must be inside range"));
+    }
+    if def.floor.is_some_and(|f| f >= hi) {
+        return Err(fail("floor must be below the top of range"));
+    }
+    if def.floor.is_some_and(|f| f < lo) {
+        return Err(fail("floor must be at or above the bottom of range"));
+    }
+    // A tick under the floor would sit where the bar is empty, so the glyph would mark a
+    // reading the bar cannot show and every reading above it would be reported hot.
+    if let (Some(floor), Some(tick)) = (def.floor, def.tick)
+        && tick < floor
+    {
+        return Err(fail("tick must be at or above floor"));
+    }
+    Ok(())
+}
+
+/// The flags that belong to one kind of control each: refused on any other.
+fn check_flags(
+    profile: &str,
+    def: &ControlDef,
+    kind: ControlKind,
+    value_type: ValueType,
+) -> Result<(), ProfileError> {
+    let fail = |reason: &str| control_error(profile, def, reason);
     if def.only_while.is_some() || def.auto_off {
         if kind != ControlKind::Readout || value_type != ValueType::Bool {
             return Err(fail("only_while and auto_off apply only to a bool readout"));
@@ -785,7 +873,18 @@ fn build_control(profile: &str, def: &ControlDef) -> Result<Control, ProfileErro
     if def.powers_output && kind != ControlKind::Toggle {
         return Err(fail("powers_output applies only to a toggle"));
     }
-    let convert = match &def.convert {
+    // A key reading is graphed, and bytes are no number to draw.
+    if def.key_reading && value_type == ValueType::Data {
+        return Err(fail(
+            "key_reading applies only to a control with a numeric reading",
+        ));
+    }
+    Ok(())
+}
+
+/// The control's conversion between raw values and units, from its `convert` key.
+fn convert_of(profile: &str, def: &ControlDef) -> Result<Option<Convert>, ProfileError> {
+    Ok(match &def.convert {
         None => None,
         Some(ConvertDef::Table { table }) => {
             if db_tables::table(table).is_none() {
@@ -800,41 +899,26 @@ fn build_control(profile: &str, def: &ControlDef) -> Result<Control, ProfileErro
             min: *min,
             max: *max,
         }),
-    };
+    })
+}
+
+/// The further function ids of the control's `reads` key.
+fn reads_of(profile: &str, def: &ControlDef) -> Result<Vec<FunctionId>, ProfileError> {
     let mut reads = Vec::new();
     for entry in def.reads.iter().flatten() {
         let entry = FunctionId::new(entry)?;
         if entry.class() != FunctionClass::Normal {
-            return Err(fail(&format!(
-                "reads {entry}: function {entry} carries the passphrase or updates the firmware"
-            )));
+            return Err(control_error(
+                profile,
+                def,
+                &format!(
+                    "reads {entry}: function {entry} carries the passphrase or updates the firmware"
+                ),
+            ));
         }
         reads.push(entry);
     }
-    Ok(Control {
-        id,
-        key: def.key.clone(),
-        label: def.label.clone(),
-        kind,
-        value_type,
-        values,
-        range,
-        center: def.center,
-        unit: def.unit.clone(),
-        convert,
-        channel: def.channel.clone(),
-        floor: def.floor,
-        tick: def.tick,
-        log_scale,
-        advice: def.advice.clone(),
-        only_while: def.only_while.clone(),
-        auto_off: def.auto_off,
-        output_gain: def.output_gain,
-        mutes_output: def.mutes_output,
-        powers_output: def.powers_output,
-        asks_on_change: def.asks_on_change,
-        reads,
-    })
+    Ok(reads)
 }
 
 /// A `kind = "action"` entry: a command on `id` plus a slot, with nothing a reading would carry.
@@ -888,6 +972,7 @@ fn build_action(profile: &str, def: &ControlDef) -> Result<Action, ProfileError>
         ("mutes_output", def.mutes_output),
         ("powers_output", def.powers_output),
         ("asks_on_change", def.asks_on_change),
+        ("key_reading", def.key_reading),
         ("reads", def.reads.is_some()),
     ] {
         if set {

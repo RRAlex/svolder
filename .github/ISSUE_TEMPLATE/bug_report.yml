@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Bug report
+description: Something svolder does wrong
+labels: [bug]
+body:
+  - type: checkboxes
+    id: not-security
+    attributes:
+      label: Not a security issue
+      description: Security problems and conduct problems go to the private report form, never here.
+      options:
+        - label: This is not a security issue.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: svolder version
+      description: The output of `svolder --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How svolder was installed
+      options:
+        - Release package
+        - Container image
+        - From source
+        - Nix
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution
+      description: For example Ubuntu 24.04 or Fedora 41.
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device or devices
+      description: The product name, and the firmware version if you know it.
+  - type: textarea
+    id: done
+    attributes:
+      label: What you did
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or command output
+      description: Remove anything private first, such as passphrases, tokens, addresses and names.
+      render: shell

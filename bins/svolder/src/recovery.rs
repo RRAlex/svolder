@@ -16,7 +16,10 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use svolder_ble::BleError;
-use svolder_ipc::NOT_FOUND_YET;
+use svolder_ipc::socket::daemon_version::reason_of;
+use svolder_ipc::{
+    CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_UNKNOWN_REQUEST, CODE_USAGE, Reason,
+};
 
 /// What kind of thing went wrong.
 ///
@@ -38,6 +41,8 @@ pub enum Kind {
     Dropped,
     /// The daemon answered with an error of its own.
     DaemonError,
+    /// The daemon is up and older than this svolder: it does not know what is asked of it.
+    DaemonTooOld,
     /// The daemon is up, and its configuration names no device for it to serve.
     DaemonHasNoDevice,
     /// A daemon this process tried to start did not come up.
@@ -59,7 +64,7 @@ impl Kind {
         dead_code,
         reason = "the table is walked by the test that checks every step"
     )]
-    pub const ALL: [Kind; 13] = [
+    pub const ALL: [Kind; 14] = [
         Kind::NoAdapter,
         Kind::AdapterMissing,
         Kind::NothingInRange,
@@ -67,6 +72,7 @@ impl Kind {
         Kind::Refused,
         Kind::Dropped,
         Kind::DaemonError,
+        Kind::DaemonTooOld,
         Kind::DaemonHasNoDevice,
         Kind::AutospawnFailed,
         Kind::ConfigUnreadable,
@@ -79,19 +85,23 @@ impl Kind {
     ///
     /// The same three numbers [`code_for`] gives the [`BleError`] each kind stands for: 1 for
     /// something the user can retype, 2 for a device that was not found, 3 for a link or a
-    /// daemon that is not there. A daemon that answered with a code of its own keeps that one
-    /// instead, through [`Failure::from_daemon`].
+    /// daemon that is not there; 7 is a daemon that is there and too old for the request. A
+    /// daemon that answered with a code of its own keeps that
+    /// one instead, through [`Failure::from_daemon`].
     pub fn code(self) -> u8 {
         match self {
-            Kind::ConfigUnreadable | Kind::UnknownProduct | Kind::Usage => 1,
-            Kind::NothingInRange | Kind::AmbiguousDevice | Kind::DaemonHasNoDevice => 2,
+            Kind::ConfigUnreadable | Kind::UnknownProduct | Kind::Usage => CODE_USAGE,
+            Kind::DaemonTooOld => CODE_UNKNOWN_REQUEST,
+            Kind::NothingInRange | Kind::AmbiguousDevice | Kind::DaemonHasNoDevice => {
+                CODE_NOT_FOUND
+            }
             Kind::NoAdapter
             | Kind::AdapterMissing
             | Kind::Refused
             | Kind::Dropped
             | Kind::DaemonError
             | Kind::AutospawnFailed
-            | Kind::NoDaemon => 3,
+            | Kind::NoDaemon => CODE_LINK,
         }
     }
 }
@@ -142,6 +152,7 @@ pub fn next_step(kind: Kind) -> &'static str {
         Kind::Refused => REFUSED,
         Kind::Dropped => "If it does not come back, run `svolder doctor`",
         Kind::DaemonError => "See `svolder daemon logs`",
+        Kind::DaemonTooOld => "Run `svolder daemon restart`",
         Kind::DaemonHasNoDevice => NO_DEVICE_STEP,
         // The failure's own words name the log file; this names what prints it.
         Kind::AutospawnFailed => "See the log `svolder daemon logs` prints",
@@ -162,10 +173,10 @@ const NOT_FOUND_STEP: &str =
 /// The step an error the daemon answered with calls for: a usage step for a request it refused
 /// with code 1 (a value it cannot read, a read-only control), the one for a device it has not
 /// found yet, else the one every daemon error gets.
-pub fn daemon_step(code: u8, message: &str) -> &'static str {
-    match code {
-        1 => next_step(Kind::Usage),
-        3 if message.ends_with(NOT_FOUND_YET) => NOT_FOUND_STEP,
+pub fn daemon_step(code: u8, message: &str, reason: Option<Reason>) -> &'static str {
+    match (code, reason_of(code, message, reason)) {
+        (CODE_USAGE, _) => next_step(Kind::Usage),
+        (_, Some(Reason::NotFoundYet)) => NOT_FOUND_STEP,
         _ => next_step(Kind::DaemonError),
     }
 }
@@ -213,6 +224,9 @@ pub struct Failure {
     pub what: String,
     /// The one step that follows.
     pub next: String,
+    /// Why the daemon says it happened, for a failure that is its answer: the reason it sent, or
+    /// the one its words give a 0.32.x daemon ([`reason_of`]).
+    pub reason: Option<Reason>,
 }
 
 impl std::fmt::Display for Failure {
@@ -220,6 +234,7 @@ impl std::fmt::Display for Failure {
     /// a sentence (`.`, `?` or `!`) gains no full stop.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.what.ends_with(['.', '?', '!']) {
+            _ if self.next.is_empty() => f.write_str(&self.what),
             true => write!(f, "{} {}", self.what, self.next),
             false => write!(f, "{}. {}", self.what, self.next),
         }
@@ -230,18 +245,18 @@ impl From<svolder_host::eq::EqFailure> for Failure {
     /// The computer EQ's refusal, as a failure with code 1.
     fn from(failure: svolder_host::eq::EqFailure) -> Failure {
         Failure {
-            code: 1,
+            code: CODE_USAGE,
             what: failure.what,
             next: failure.next,
+            reason: None,
         }
     }
 }
 
 impl Failure {
-    /// Whether this is the daemon's answer for a device it has never found: code 3, in words
-    /// that end with [`NOT_FOUND_YET`].
+    /// Whether this is the daemon's answer for a device it has never found.
     pub fn is_not_found_yet(&self) -> bool {
-        self.code == 3 && self.what.ends_with(NOT_FOUND_YET)
+        self.code == CODE_LINK && self.reason == Some(Reason::NotFoundYet)
     }
 
     /// A failure of `kind`, in the words `detail` gives it, with the code and the step that
@@ -251,6 +266,7 @@ impl Failure {
             code: kind.code(),
             what: detail.into(),
             next: next_step(kind).to_string(),
+            reason: None,
         }
     }
 
@@ -264,15 +280,26 @@ impl Failure {
             code: code_for(err),
             what: err.to_string(),
             next: ble_next_step(err).to_string(),
+            reason: None,
         }
     }
 
     /// A failure the daemon answered with: its own code and its own words, and the step a
     /// daemon error calls for ([`daemon_step`]).
-    fn from_daemon(code: u8, message: impl Into<String>) -> Failure {
+    fn from_daemon(code: u8, message: impl Into<String>, reason: Option<Reason>) -> Failure {
         let what = message.into();
-        let next = daemon_step(code, &what).to_string();
-        Failure { code, what, next }
+        // The words for a missing configuration file give the step themselves.
+        let next = match svolder_ipc::socket::daemon_version::is_config_missing_refusal(&what) {
+            true => String::new(),
+            false => daemon_step(code, &what, reason).to_string(),
+        };
+        let reason = reason_of(code, &what, reason);
+        Failure {
+            code,
+            what,
+            next,
+            reason,
+        }
     }
 
     /// A failure the daemon on `socket` answered with.
@@ -283,13 +310,19 @@ impl Failure {
     /// it (the `add` in that step carries the same socket, so what it writes is what that daemon
     /// is told to reload). Every other answer is [`Failure::from_daemon`]'s. The code is the
     /// daemon's own either way.
-    pub fn from_daemon_on(socket: &Path, code: u8, message: impl Into<String>) -> Failure {
+    pub fn from_daemon_on(
+        socket: &Path,
+        code: u8,
+        message: impl Into<String>,
+        reason: Option<Reason>,
+    ) -> Failure {
         let message = message.into();
         if message != svolder_ipc::NO_DEVICES_CONFIGURED {
-            return Failure::from_daemon(code, message);
+            return Failure::from_daemon(code, message, reason);
         }
         Failure {
             code,
+            reason: None,
             what: format!(
                 "the daemon on {} serves no device: its configuration names none",
                 socket.display()
@@ -325,13 +358,13 @@ fn ble_next_step(err: &BleError) -> &'static str {
 /// The exit code a [`BleError`] earns, as the number a [`Failure`] carries it as.
 pub fn code_for(err: &BleError) -> u8 {
     match err {
-        BleError::NotFound => 2,
+        BleError::NotFound => CODE_NOT_FOUND,
         BleError::Connection(_)
         | BleError::Bootloader
         | BleError::PassphraseRejected
-        | BleError::Adapter(_) => 3,
-        BleError::Timeout(_) => 4,
-        BleError::Proto(_) | BleError::Profile(_) => 1,
+        | BleError::Adapter(_) => CODE_LINK,
+        BleError::Timeout(_) => CODE_TIMEOUT,
+        BleError::Proto(_) | BleError::Profile(_) => CODE_USAGE,
     }
 }
 
@@ -438,6 +471,7 @@ mod tests {
             std::path::Path::new("/tmp/sv.sock"),
             2,
             svolder_ipc::NO_DEVICES_CONFIGURED,
+            None,
         );
         assert_eq!(failure.code, 2);
         assert_eq!(
@@ -454,6 +488,7 @@ mod tests {
             std::path::Path::new("/tmp/my daemon/sv.sock"),
             2,
             svolder_ipc::NO_DEVICES_CONFIGURED,
+            None,
         );
         assert!(
             spaced
@@ -463,8 +498,12 @@ mod tests {
         );
 
         // Any other refusal from the same daemon keeps its own words and the generic step.
-        let other =
-            Failure::from_daemon_on(std::path::Path::new("/tmp/sv.sock"), 5, "no such device");
+        let other = Failure::from_daemon_on(
+            std::path::Path::new("/tmp/sv.sock"),
+            5,
+            "no such device",
+            None,
+        );
         assert_eq!(other.code, 5);
         assert_eq!(
             other.to_string(),
@@ -476,7 +515,7 @@ mod tests {
     /// user to the usage, as the same refusal does on a direct session, not to the daemon's log.
     #[test]
     fn a_usage_refusal_from_the_daemon_takes_the_usage_step() {
-        let failure = Failure::from_daemon(1, "cannot interpret \"-30\" for control volume");
+        let failure = Failure::from_daemon(1, "cannot interpret \"-30\" for control volume", None);
         assert_eq!(failure.code, 1);
         assert_eq!(failure.next, next_step(Kind::Usage));
         assert!(!failure.to_string().contains("daemon logs"), "{failure}");
@@ -485,7 +524,7 @@ mod tests {
     /// An error the daemon answered with keeps the daemon's own code and words.
     #[test]
     fn a_daemon_error_keeps_the_code_it_came_with() {
-        let failure = Failure::from_daemon(5, "no such device");
+        let failure = Failure::from_daemon(5, "no such device", None);
         assert_eq!(failure.code, 5);
         assert_eq!(
             failure.to_string(),
@@ -493,20 +532,30 @@ mod tests {
         );
     }
 
+    /// The daemon's refusal for a missing configuration file gives its own step: none is added.
+    #[test]
+    fn a_missing_config_refusal_gets_no_step_of_its_own() {
+        let words = svolder_ipc::socket::daemon_version::config_missing_refusal("/x/config.toml");
+        let failure = Failure::from_daemon(1, words.clone(), Some(Reason::ReadOnly));
+        assert_eq!(failure.code, 1);
+        assert_eq!(failure.to_string(), words);
+        assert!(!failure.to_string().contains("--help"), "{failure}");
+    }
+
     /// The daemon's words for a device it has not found yet send the user to the device, not to
     /// the daemon's log alone; code 3 from anything else keeps the generic step.
     #[test]
     fn a_device_not_found_yet_is_told_to_check_the_device() {
-        let failure = Failure::from_daemon(3, "amp has not been found yet");
+        let failure = Failure::from_daemon(3, "amp has not been found yet", None);
         assert_eq!(failure.code, 3);
         assert_eq!(
             failure.to_string(),
             "amp has not been found yet. svolderd keeps looking: check that it is on and in \
              range (`svolder daemon logs`)"
         );
-        let lost = Failure::from_daemon(3, "device not connected");
+        let lost = Failure::from_daemon(3, "device not connected", None);
         assert_eq!(lost.next, next_step(Kind::DaemonError));
-        let other = Failure::from_daemon(5, "amp has not been found yet");
+        let other = Failure::from_daemon(5, "amp has not been found yet", None);
         assert_eq!(other.next, next_step(Kind::DaemonError));
     }
 
@@ -514,10 +563,26 @@ mod tests {
     /// words, together.
     #[test]
     fn only_code_3_with_the_not_found_yet_words_is_a_device_not_found_yet() {
-        assert!(Failure::from_daemon(3, svolder_ipc::not_found_yet("amp")).is_not_found_yet());
-        assert!(Failure::from_daemon(3, "amp has not been found yet").is_not_found_yet());
-        assert!(!Failure::from_daemon(3, "device not connected").is_not_found_yet());
-        assert!(!Failure::from_daemon(5, "amp has not been found yet").is_not_found_yet());
+        assert!(
+            Failure::from_daemon(3, svolder_ipc::not_found_yet("amp"), None).is_not_found_yet()
+        );
+        assert!(Failure::from_daemon(3, "amp has not been found yet", None).is_not_found_yet());
+        assert!(!Failure::from_daemon(3, "device not connected", None).is_not_found_yet());
+        assert!(!Failure::from_daemon(5, "amp has not been found yet", None).is_not_found_yet());
         assert!(!Failure::of(Kind::Dropped, "the link dropped").is_not_found_yet());
+    }
+
+    /// A daemon that sends the reason is read by it, whatever its words say; the words are only
+    /// read when it sent none.
+    #[test]
+    fn the_reason_decides_before_the_words() {
+        let by_reason = Failure::from_daemon(3, "some new words", Some(Reason::NotFoundYet));
+        assert!(by_reason.is_not_found_yet());
+        assert_eq!(by_reason.next, NOT_FOUND_STEP);
+        let lost =
+            Failure::from_daemon(3, "amp has not been found yet", Some(Reason::NotConnected));
+        assert!(!lost.is_not_found_yet());
+        let unknown = Failure::from_daemon(3, "x has not been found yet", Some(Reason::Unknown));
+        assert!(!unknown.is_not_found_yet());
     }
 }

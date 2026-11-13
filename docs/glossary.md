@@ -98,6 +98,16 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Scanner**: the one shared listening window for devices that are looked for.
 - **Reload**: reading the configuration again without restarting (`SIGHUP`, or after an edit).
 - **Adoption**: taking over a listening socket a systemd socket unit already holds.
+- **Feature**: a name in the `features` list of the daemon's `version` answer (`walk`, `autoeq`,
+  `device_crud`, ...). A front end asks for the one its work needs and says `svolder daemon restart`
+  when a daemon lacks it.
+- **Reason**: the word an error answer carries beside its text (`busy`, `read_only`,
+  `no_such_job`, ...), which a front end matches on instead of reading the message.
+- **Job**: long work the daemon runs for a request and answers with an id at once: a device walk,
+  an AutoEq preview or import. Its states go to every `follow` stream of its family, a late
+  follower getting the last ones first.
+- **Walk**: finding, naming and writing a new device as one state machine (scan, pick, name,
+  passphrase, write). The daemon runs it when one is running; a front end only draws it.
 
 ## Volume rules
 
@@ -233,7 +243,9 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Theme menu**: the frame's menu behind the menu button: a Theme row, the theme's own rows, then
   Device and Sign out. The **picker** is the sheet of one card per theme that the Theme row and
   the reserved key open.
-- **Reserved key**: `T`, which opens the picker from any theme; no theme may bind it.
+- **Reserved key**: `T`, which opens the picker from any theme when nothing covers the page (over an open
+  question, a popup or a theme's own sheet it does nothing; in the picker it closes it); no theme
+  may bind it.
 - **Paper**: the page's second theme: squared paper, a printed serif, a pencil and blue ink.
   [Paper](design/web-paper.md) describes it. **Dark paper** is its dark scheme, charcoal with chalk
   print, chosen from its menu or with `?theme=paper.dark`.
@@ -285,10 +297,10 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Declared hop**: a hop of the signal path after the DAC that the owner names in the
   configuration, with a kind (amp, headphones, speakers or other), because no reading finds it. A
   **linked hop** is one tied to a configured device, such as an amp. `svolder hops` writes both.
-- **Facts part**: the part named `facts`, the Device fold-out at the foot of a card: product, unit,
-  firmware builds, profile, link, signal, and a table of every reading the daemon holds, named or
-  not. Closed by default; its ages are written by the page from stamps, so it is sent only when a
-  fact or a reading changes.
+- **Facts part**: the part named `facts`: product, unit, firmware builds, profile, link, signal,
+  and every reading the daemon holds, named or not. The Devices popup draws it on a device's page
+  (the facts, and *All readings* folded under the graphs); its ages are written by the page from
+  stamps, so it is sent only when a fact or a reading changes.
 - **Strip**: the bar along the bottom, one bar a second of what the device reported.
 - **Knob** and **dial**: the volume control, drawn by the theme from the model and moved by the script.
 - **Pairing code**, **link code**: one-use codes that sign a browser in; a code to type, and a code
@@ -318,7 +330,7 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
   altogether (no drawing, no frames asked for), leaving Now playing the whole band at a lower
   height.
 - **Visualizer delay**: how far behind the sound the card draws, the median of the last 2 s of each
-  frame's time against the page's clock; the Device fold-out shows it while the card runs.
+  frame's time against the page's clock; Ember's Device fold-out shows it while the card runs.
 - **Sink label**: the line `Playing to <sink>` on the card when the captured sink is not this
   page's DAC, so the picture is never taken for the DAC's own.
 - **Resting page**: a page that has been hidden for 2 s (`GRACE_MS`, `visible.js`). It closes its

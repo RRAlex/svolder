@@ -7,7 +7,7 @@
 // request for that field and value that it can still own (svolder keeps no record of who changed
 // what). Pure: the model, the log and the time in.
 
-import { MINE_MS } from './act.js';
+import { MINE_MS } from '../../core/act.js';
 
 /** Changes of one field this close to each other (ms) are one change: its `from` is the first's. */
 export const RUN_MS = 3000;

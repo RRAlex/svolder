@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use svolder_profiles::convert::{frequency_text, gain_text};
-use svolder_profiles::tone::fit::Fit;
+use svolder_profiles::tone::apo::Correction;
+use svolder_profiles::tone::fit::{Fit, PREVIEW_POINTS, Preview};
 use svolder_profiles::tone::preset::{self, SWITCHED_TO_EQ, Write};
-use svolder_profiles::tone::response::{self, F_MAX, F_MIN};
+use svolder_profiles::tone::response::{self, BandParams, F_MAX, F_MIN};
 use svolder_profiles::{Convert, EqMode, EqParam, EqSpec, db_tables};
 use svolder_proto::FunctionId;
 
@@ -65,8 +66,8 @@ pub struct TargetView {
     /// The correction's response in dB, without its preamp, at [`TARGET_POINTS`] log-spaced
     /// frequencies.
     grid: Vec<f64>,
-    /// What the header says of the fit: `fit 0.9 dB`.
-    pub header: String,
+    /// The correction, for the fit of the bands on the device.
+    correction: Correction,
     /// The side pane's heading: where the correction came from and how many filters it has.
     pub source: String,
     /// One line per filter: `LSC 105 +6.0 0.70`.
@@ -92,7 +93,7 @@ impl TargetView {
         let count = correction.filters.len();
         Some(TargetView {
             grid,
-            header: format!("fit {:.1} dB", fit.rms_db),
+            correction: correction.clone(),
             source: format!(
                 "{} · {count} filter{}",
                 imported.origin.as_deref().unwrap_or("Imported"),
@@ -114,6 +115,28 @@ impl TargetView {
             preamp: format!("Preamp {} dB", gain_text(correction.preamp_db)),
             fit: fit.line(),
         })
+    }
+
+    /// The preview of the correction against `filters`, the bands on the device now, on the
+    /// points the web reads it on: the one call the page's overlay makes ([`Preview::of_bands`],
+    /// whose miss is [`fit::miss`](svolder_profiles::tone::fit::miss)), so both say one figure.
+    fn preview(&self, filters: &[BandParams]) -> Preview {
+        let grid = response::log_freqs(PREVIEW_POINTS);
+        Preview::of_bands(&self.correction, filters, &grid)
+    }
+
+    /// What the header says of the fit of `filters`: `fit 0.9 dB`.
+    pub fn header(&self, filters: &[BandParams]) -> String {
+        let rms = self.preview(filters).fit.map_or(0.0, |fit| fit.rms_db);
+        format!("fit {rms:.1} dB")
+    }
+
+    /// The side pane's fit line for `filters` ([`Fit::line`]'s words, of the bands on the
+    /// device).
+    pub fn fit_line(&self, filters: &[BandParams]) -> String {
+        self.preview(filters)
+            .fit_line()
+            .unwrap_or_else(|| self.fit.clone())
     }
 
     /// The correction's response in dB at `hz`, read off the kept points, or `None` outside

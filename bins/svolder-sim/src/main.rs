@@ -67,6 +67,11 @@ struct Args {
     /// Passphrase: four digits, or `none`.
     #[arg(long, default_value = "1234")]
     passphrase: String,
+    /// Advertise these four digits as the code instead of the passphrase the device holds, as
+    /// an adapter holding an old advertisement of a device whose code was changed would: a
+    /// central that keys its session from the advertisement is refused.
+    #[arg(long, value_name = "DIGITS")]
+    advertised_passphrase: Option<String>,
     /// Seed all fault controls active.
     #[arg(long)]
     faults: bool,
@@ -149,6 +154,38 @@ fn seed_readings(args: &Args, device: &mut FakeDevice) -> Result<(), String> {
     Ok(())
 }
 
+/// What the device advertises: its own manufacturer data, with the code `--advertised-passphrase`
+/// names in place of the one it holds.
+fn advertised(
+    args: &Args,
+    device: &FakeDevice,
+    unit: UnitId,
+) -> Result<svolder_proto::ManufacturerData, Box<dyn std::error::Error>> {
+    let mut manufacturer = device.manufacturer_data();
+    if let Some(advertised) = args.advertised_passphrase.as_deref() {
+        let advertised = code_of(advertised)?;
+        manufacturer.encrypted_passphrase =
+            Passphrase::encrypt(advertised.encoded(), Passphrase::advert_key(unit));
+    }
+    Ok(manufacturer)
+}
+
+/// The passphrase `text` says: four digits, or `none`.
+fn code_of(text: &str) -> Result<Passphrase, Box<dyn std::error::Error>> {
+    if text == "none" {
+        return Ok(Passphrase::NONE);
+    }
+    let digits: Vec<u8> = text
+        .chars()
+        .filter_map(|c| c.to_digit(10).map(|n| n as u8))
+        .collect();
+    let digits: [u8; 4] = digits
+        .as_slice()
+        .try_into()
+        .map_err(|_| "passphrase must be four digits or `none`")?;
+    Ok(Passphrase::from_digits(digits)?)
+}
+
 // One thread runs every task, so the writes bluetoothd hands over as separate D-Bus calls start
 // in the order they arrived: on several threads two writes that arrive together race, and the
 // device can apply the later one first, as no real unit would.
@@ -162,20 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| format!("no profile {}", args.profile))?
         .clone();
     let unit: UnitId = args.unit.parse()?;
-    let passphrase = match args.passphrase.as_str() {
-        "none" => Passphrase::NONE,
-        digits => {
-            let d: Vec<u8> = digits
-                .chars()
-                .filter_map(|c| c.to_digit(10).map(|n| n as u8))
-                .collect();
-            let arr: [u8; 4] = d
-                .as_slice()
-                .try_into()
-                .map_err(|_| "passphrase must be four digits or `none`")?;
-            Passphrase::from_digits(arr)?
-        }
-    };
+    let passphrase = code_of(&args.passphrase)?;
     let mut device = seed_device(&args, &profile, unit, passphrase);
     if let Err(e) = seed_readings(&args, &mut device) {
         eprintln!("svolder-sim: {e}");
@@ -185,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("{NO_SCALED_METER}");
         std::process::exit(2);
     }
-    let manufacturer_bytes = device.manufacturer_data().to_bytes().to_vec();
+    let manufacturer_bytes = advertised(&args, &device, unit)?.to_bytes().to_vec();
     let device = Arc::new(Mutex::new(device));
 
     peripheral::run(&args, device, manufacturer_bytes).await
@@ -194,6 +218,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--advertised-passphrase` puts its code in the advertisement while the device keeps the
+    /// one `--passphrase` gave it; without it the advertisement carries the device's own.
+    #[test]
+    fn the_advertised_passphrase_is_advertised_and_not_held() {
+        let reg = svolder_profiles::Registry::builtin().expect("the built-in profiles");
+        let profile = reg.get("gungnir2-v2").expect("a built-in profile").clone();
+        let unit: UnitId = "0102030405060708".parse().expect("a unit id");
+        let held = Passphrase::from_digits([1, 2, 3, 4]).expect("digits");
+        for (flags, said) in [
+            (&["--advertised-passphrase", "9999"][..], [9, 9, 9, 9]),
+            (&[][..], [1, 2, 3, 4]),
+        ] {
+            let mut argv = vec!["svolder-sim", "--adapter", "hci0"];
+            argv.extend_from_slice(flags);
+            let args = Args::parse_from(argv);
+            let device = seed_device(&args, &profile, unit, held);
+            let advert = advertised(&args, &device, unit).expect("an advertisement");
+            assert_eq!(advert.passphrase().digits(), said, "{flags:?}");
+            assert_eq!(
+                device.manufacturer_data().passphrase().digits(),
+                [1, 2, 3, 4]
+            );
+        }
+    }
 
     /// The fake device the simulator serves, for the profile named.
     fn fake(profile: &str) -> FakeDevice {

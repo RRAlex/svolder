@@ -367,3 +367,128 @@ fn the_url_default_comes_from_the_environment_and_the_file_wins() {
         .to_string();
     assert!(err.contains("SVOLDER_WEB_URL"), "{err}");
 }
+
+/// `SVOLDER_WEB_ENABLED` and `SVOLDER_MCP_ENABLED` turn a server on with no file at all, and
+/// change only the default: an `enabled` in the file wins either way.
+#[test]
+fn the_enabled_defaults_come_from_the_environment_and_the_file_wins() {
+    let env = ListenDefaults {
+        web_enabled: Some("1".to_string()),
+        mcp_enabled: Some("1".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::parse_with_listen_defaults("", &env).unwrap();
+    assert!(c.web.enabled && c.mcp.enabled);
+    // A table with other keys and no `enabled` still takes the default.
+    let text = "[web]\nguest = \"read\"\n[mcp]\nwrites = true\n";
+    let c = Config::parse_with_listen_defaults(text, &env).unwrap();
+    assert!(c.web.enabled && c.mcp.enabled);
+    let text = "[web]\nenabled = false\n[mcp]\nenabled = false\n";
+    let c = Config::parse_with_listen_defaults(text, &env).unwrap();
+    assert!(!c.web.enabled && !c.mcp.enabled, "the file's false wins");
+    let off = ListenDefaults {
+        web_enabled: Some("0".to_string()),
+        mcp_enabled: Some("0".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::parse_with_listen_defaults("", &off).unwrap();
+    assert!(!c.web.enabled && !c.mcp.enabled);
+    let text = "[web]\nenabled = true\n[mcp]\nenabled = true\n";
+    let c = Config::parse_with_listen_defaults(text, &off).unwrap();
+    assert!(c.web.enabled && c.mcp.enabled, "the file's true wins");
+    // One variable switches one server.
+    let web_only = ListenDefaults {
+        web_enabled: Some("1".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::parse_with_listen_defaults("", &web_only).unwrap();
+    assert!(c.web.enabled && !c.mcp.enabled);
+}
+
+/// The switch reads 1 and 0 and the usual words, whatever their case; anything else is refused
+/// by the variable's name, unless the file decides and the variable is never read.
+#[test]
+fn the_enabled_switch_takes_one_zero_and_the_usual_words() {
+    let with = |value: &str| ListenDefaults {
+        web_enabled: Some(value.to_string()),
+        mcp_enabled: Some(value.to_string()),
+        ..ListenDefaults::default()
+    };
+    for on in ["1", "true", "TRUE", "yes", "on", " 1 "] {
+        let c = Config::parse_with_listen_defaults("", &with(on)).unwrap();
+        assert!(c.web.enabled && c.mcp.enabled, "{on:?}");
+    }
+    for off in ["0", "false", "No", "off"] {
+        let c = Config::parse_with_listen_defaults("", &with(off)).unwrap();
+        assert!(!c.web.enabled && !c.mcp.enabled, "{off:?}");
+    }
+    let err =
+        Config::parse_with_listen_defaults("[mcp]\nenabled = false\n", &with("maybe")).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "config: SVOLDER_WEB_ENABLED \"maybe\" must be 1 or 0 (true, false, yes, no, on \
+         and off are read too)"
+    );
+    let err =
+        Config::parse_with_listen_defaults("[web]\nenabled = false\n", &with("maybe")).unwrap_err();
+    assert!(err.to_string().contains("SVOLDER_MCP_ENABLED"), "{err}");
+    let decided = "[web]\nenabled = true\n[mcp]\nenabled = false\n";
+    let c = Config::parse_with_listen_defaults(decided, &with("maybe")).unwrap();
+    assert!(c.web.enabled && !c.mcp.enabled);
+}
+
+/// A server the environment turns on is judged as one the file turns on: `auth = "none"` on the
+/// wildcard address the environment also gives is refused.
+#[test]
+fn a_server_the_environment_enables_is_checked_for_open_auth() {
+    let env = ListenDefaults {
+        web: Some("0.0.0.0:8738".to_string()),
+        web_enabled: Some("1".to_string()),
+        ..ListenDefaults::default()
+    };
+    let err = Config::parse_with_listen_defaults("[web]\nauth = \"none\"\n", &env).unwrap_err();
+    assert!(err.to_string().contains("SVOLDER_WEB_LISTEN"), "{err}");
+}
+
+/// The Connections writer compares with what the environment made of the file: turning off a
+/// server the environment turned on writes `enabled = false`, and turning it on again `true`.
+#[test]
+fn turning_off_a_server_the_environment_enabled_writes_false() {
+    let dir = temp_dir("config-writer-env");
+    let path = dir.join("config.toml");
+    let env = ListenDefaults {
+        web_enabled: Some("1".to_string()),
+        ..ListenDefaults::default()
+    };
+    Config::update_web_with(&path, &env, |web| web.enabled = false).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\nenabled = false\n"), "{text}");
+    assert!(
+        !Config::parse_with_listen_defaults(&text, &env)
+            .unwrap()
+            .web
+            .enabled
+    );
+    Config::update_web_with(&path, &env, |web| web.enabled = true).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\nenabled = true\n"), "{text}");
+}
+
+/// A file that is not there reads as an empty one, so the environment's defaults reach a
+/// first start that has written nothing; with none set it is [`Config::default`].
+#[test]
+fn a_missing_file_takes_the_environments_defaults() {
+    let dir = temp_dir("config-missing-env");
+    let path = dir.join("config.toml");
+    let env = ListenDefaults {
+        web: Some("0.0.0.0:8738".to_string()),
+        web_enabled: Some("1".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::load_from_with(&path, &env).unwrap();
+    assert!(c.web.enabled && !c.mcp.enabled);
+    assert_eq!(c.web.listen.to_string(), "0.0.0.0:8738");
+    let none = Config::load_from_with(&path, &ListenDefaults::default()).unwrap();
+    assert_eq!(none, Config::default());
+    assert!(!path.exists(), "a load writes nothing");
+}

@@ -108,7 +108,7 @@ async fn open(
 ) -> Opened {
     match tokio::time::timeout(OPEN_WITHIN, asked).await {
         Ok(Ok(events)) => Opened::Stream(events),
-        Ok(Err(IpcError::Protocol(_))) => Opened::Refused,
+        Ok(Err(IpcError::Protocol(_) | IpcError::Refused(_))) => Opened::Refused,
         Ok(Err(_)) => Opened::Failed,
         Err(_) => Opened::Mute,
     }

@@ -74,6 +74,10 @@ pub struct ControlDef {
     /// order or polarity describes, so a change asks first.
     #[serde(default)]
     pub asks_on_change: bool,
+    /// Any control with a numeric reading: it is one of the device's key readings, the few a
+    /// front end graphs first.
+    #[serde(default)]
+    pub key_reading: bool,
     /// Action only: how many slots it has, numbered from 1. Wider than the byte it ends up in,
     /// so a file that asks for 256 is told so.
     pub slots: Option<u16>,

@@ -209,7 +209,7 @@ pub fn draw(
     // A list longer than the block shows the rows round the focused one, and says on the
     // border which way the rest lie.
     let shown = usize::from(inner.height);
-    let top = widgets::scroll::scroll_start(app.devices.rows.len(), shown, app.selected);
+    let top = widgets::scroll::scroll_start(app.devices.rows.len(), shown, app.selected());
     let (words, word_hits) = widgets::actions::actions_title(
         &ACTIONS,
         (top > 0).then_some(MORE_UP.trim()),
@@ -230,7 +230,7 @@ pub fn draw(
         inner,
         top,
         shown,
-        app.selected,
+        app.selected(),
         theme,
     );
     push_list_hits(hits, app, body, inner, top, &words, &word_hits);
@@ -281,7 +281,7 @@ fn list_lines(
             .map(|(index, row)| {
                 device_line(
                     row,
-                    index == app.selected,
+                    index == app.selected(),
                     row.name == app.session.device_name,
                     Fields {
                         name: name_width,
@@ -331,7 +331,7 @@ fn push_list_hits(
             height: 1,
         };
         hits.push(row.intersection(inner), Hit::ListRow(index));
-        if index == app.selected {
+        if index == app.selected() {
             hits.select(Selected::Devices, index, row.intersection(inner));
         }
     }
@@ -426,10 +426,19 @@ fn editor_line(
         EditorRow::Passphrase => {
             spans.push(Span::raw("‹ "));
             spans.push(Span::styled(
-                editor.passphrase.shown(),
+                editor.passphrase.drawn(),
                 theme.style(Role::SelectName),
             ));
             spans.push(Span::raw(" ›"));
+            if focused && editor.passphrase.on_code() {
+                spans.push(Span::styled(
+                    match editor.passphrase.is_revealed() {
+                        true => "  Tab hides it",
+                        false => "  Tab shows it",
+                    },
+                    theme.style(Role::Faint),
+                ));
+            }
         }
         EditorRow::Profile => {
             spans.push(Span::raw("‹ "));

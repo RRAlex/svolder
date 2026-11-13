@@ -7,8 +7,9 @@
 // first screen, `#sg-shelf`, the slim bar, `#sg-slim`, and the Now playing bar, `#sg-now`, which
 // shows the player); a part of the shown device draws the sections that show it. The stream's state fades or stills the page.
 //
-// A section in use is not drawn again under the person's hand: `hold(name, true)` keeps it, and
-// what came meanwhile is drawn from the newest model when `hold(name, false)` lets it go.
+// A section in use is not drawn again under the person's hand: `freeze(name, true)` keeps it, and
+// what came meanwhile is drawn from the newest model when `freeze(name, false)` lets it go. The
+// holds on a section are counted by `core.freeze.keeper`.
 //
 // A hop chosen that is no longer on the line (a linked amp unplugged, a declared hop removed, the
 // player quit) and a device switch give the choice back to the shown device.
@@ -51,89 +52,9 @@ function focusId(box) {
 }
 
 /**
- * A counted hold of the section `name`, for gestures and open lists that may overlap: held from the
- * first `take()` and let go at the `drop()` that matches the last. `around(fn)` runs `fn` with a
- * hold taken and gives it back if `fn` throws. `dropLater()` gives one back on the next task,
- * unless `reset()` came first. `reset()` lets go of every hold at once (the shown device was
- * replaced). `hand({ pending, ms })` is the hold of a thing in the hand (a scale): `grip()` on every
- * move or key, `letGo()` when the hand is away, which gives the hold back once `pending()` (a
- * promise: the writes not yet answered) is settled and `ms` have passed, unless a new grip came
- * meanwhile (a slow answer must not release a hold the next gesture took).
- */
-export function keeper(live, name) {
-  let holds = 0;
-  /** Counts the resets: a give-back planned before one is for a hold the reset has let go. */
-  let epoch = 0;
-  const keep = {
-    take() {
-      holds++;
-      live.hold(name, true);
-    },
-    drop() {
-      holds = Math.max(0, holds - 1);
-      if (holds === 0) live.hold(name, false);
-    },
-    dropLater() {
-      const planned = epoch;
-      setTimeout(() => {
-        if (epoch === planned) keep.drop();
-      }, 0);
-    },
-    around(fn) {
-      keep.take();
-      try {
-        return fn();
-      } catch (error) {
-        keep.drop();
-        throw error;
-      }
-    },
-    reset() {
-      epoch++;
-      holds = 0;
-      live.hold(name, false);
-    },
-    hand({ pending, ms }) {
-      let held = false;
-      let generation = 0;
-      let heldIn = 0;
-      let timer = null;
-      return {
-        grip() {
-          generation++;
-          clearTimeout(timer);
-          if (held) return;
-          held = true;
-          heldIn = epoch;
-          keep.take();
-        },
-        letGo() {
-          clearTimeout(timer);
-          const mine = generation;
-          timer = setTimeout(async () => {
-            await pending();
-            if (generation !== mine || !held) return;
-            held = false;
-            if (heldIn === epoch) keep.drop();
-          }, ms);
-        },
-        /** The hold was reset from outside: forget it, and any release on its way. */
-        forget() {
-          generation++;
-          clearTimeout(timer);
-          held = false;
-        },
-        stop: () => clearTimeout(timer),
-      };
-    },
-  };
-  return keep;
-}
-
-/**
  * Keep the page in `root` up to date for `core`, until `signal` aborts. `view` is what the
  * sections draw by: `{ state, chosen, hops(), flow, motion(), asked, now }`. Returns `{ drawAll, draw,
- * hold, held, onSwitch, onReading, stop }`.
+ * freeze, frozen, onSwitch, onReading, stop }`.
  */
 export function createLive({ core, root, signal, view }) {
   const store = core.model;
@@ -353,7 +274,7 @@ export function createLive({ core, root, signal, view }) {
     draw,
 
     /** Hold the section `name` (`on`) or let it go: what came while it was held is drawn now. */
-    hold(name, on) {
+    freeze(name, on) {
       if (on) {
         holding.add(name);
         return;
@@ -363,7 +284,7 @@ export function createLive({ core, root, signal, view }) {
       if (stale.has(name)) draw(name);
     },
 
-    held: (name) => holding.has(name),
+    frozen: (name) => holding.has(name),
 
     /** Hear a switch to another shown device until the page goes: what was asked of the old one is
      * not asked of this one. */

@@ -180,9 +180,26 @@ pub fn spawn_daemon_isolated_with_profiles(
     profiles: &[(&str, &str)],
     envs: &[(&str, &str)],
 ) -> (ChildGuard, PathBuf) {
+    spawn_isolated(Some(config), profiles, envs)
+}
+
+/// [`spawn_daemon_isolated`] with no configuration file at the path the daemon reads, as a
+/// container's first start is.
+pub fn spawn_daemon_isolated_without_file(envs: &[(&str, &str)]) -> (ChildGuard, PathBuf) {
+    spawn_isolated(None, &[], envs)
+}
+
+fn spawn_isolated(
+    config: Option<&str>,
+    profiles: &[(&str, &str)],
+    envs: &[(&str, &str)],
+) -> (ChildGuard, PathBuf) {
     let dir = temp_dir();
     let socket = dir.join("svolder.sock");
-    let path = write_config(&dir, config);
+    let path = match config {
+        Some(config) => write_config(&dir, config),
+        None => dir.join("config.toml"),
+    };
     if !profiles.is_empty() {
         let overrides = dir.join("profiles");
         std::fs::create_dir(&overrides).expect("create the profiles directory");
@@ -301,6 +318,11 @@ fn daemon_command(dir: &Path, stderr: Option<Stdio>) -> Command {
         .env("SVOLDER_TRANSPORT", "fake")
         .env("SVOLDER_HOST", "off")
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .env_remove("SVOLDER_FAKE_PROFILE")
         .env_remove("SVOLDER_FAKE_UNIT")
         .env_remove("SVOLDER_FAKE_FIRMWARE")

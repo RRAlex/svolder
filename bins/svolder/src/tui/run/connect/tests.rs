@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use svolder_ipc::McpStatus;
+use svolder_ipc::config::ListenDefaults;
 use svolder_ipc::token::{self, Store, TokenSource};
 
 use crate::tui::app::ConnChange;
@@ -54,7 +55,8 @@ async fn a_change_writes_only_its_key_then_reloads_and_asks_again() {
     .await;
 
     let text = std::fs::read_to_string(&path).expect("the file reads");
-    let config = Config::parse(&text).expect("the file parses");
+    let config = Config::parse_with_listen_defaults(&text, &ListenDefaults::default())
+        .expect("the file parses");
     assert!(config.mcp.writes && !config.mcp.enabled);
     assert_eq!(
         text.lines().count(),

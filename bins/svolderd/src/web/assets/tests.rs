@@ -62,11 +62,13 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "themes/ember/driver.js",
         "themes/ember/tone-motion.js",
         "core/tone-curve.js",
+        "core/plot.js",
         "core/tone-drag.js",
         "core/point-drag.js",
         "core/table.js",
         "themes/ember/tone-graph.js",
         "themes/ember/keys.js",
+        "themes/ember/key-table.js",
         "themes/ember/facts.js",
         "themes/ember/playing.js",
         "themes/ember/tone-editor.js",
@@ -76,14 +78,24 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "core/store.js",
         "core/stream.js",
         "core/actions.js",
+        "core/write.js",
+        "core/computer-actions.js",
+        "core/device-actions.js",
+        "core/device-config-actions.js",
+        "core/volume-actions.js",
+        "core/host-actions.js",
+        "core/navigation.js",
         "core/prefs.js",
         "core/scheme.js",
         "core/lifecycle.js",
         "core/analysis.js",
-        "core/hold.js",
+        "core/repeat.js",
         "core/title.js",
         "core/viz-model.js",
         "core/registry.js",
+        "core/modal.js",
+        "core/router.js",
+        "core/phone.js",
         "core/climb.js",
         "core/tone-note.js",
         "core/words.js",
@@ -94,8 +106,16 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "themes/ember/smoke-notes.js",
         "core/visible.js",
         "core/contract.js",
+        "core/driver.js",
+        "core/freeze.js",
         "core/computer.js",
         "core/ask.js",
+        "core/html.js",
+        "core/inline-ask.js",
+        "core/list.js",
+        "core/keys.js",
+        "core/menu-rows.js",
+        "core/act.js",
         "themes/ember/visualizer.js",
         "themes/ember/viz-colour.js",
         "themes/ember/viz-pref.js",
@@ -122,6 +142,64 @@ fn the_core_and_embers_files_are_served_by_their_paths() {
     }
     for name in ["smoke.js", "themes/ember/../../core/api.js"] {
         assert!(Assets::Embedded.get(name).is_none(), "{name}");
+    }
+}
+
+/// Every file of a popup is served: a popup's files are loaded by `import()` when it first opens,
+/// so one that is on disk and not in the list would be a 404 in a release build, found only by
+/// the person who opens the popup. The folder is read as it is on disk.
+#[test]
+fn every_popup_file_on_disk_is_served() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("the popups folder") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("web");
+    let mut files = Vec::new();
+    walk(&web.join("core/popups"), &mut files);
+    let names: Vec<String> = files
+        .iter()
+        .map(|path| {
+            path.strip_prefix(&web)
+                .expect("under web/")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    for name in [
+        "core/popups/frame.js",
+        "core/popups/popups.js",
+        "core/popups/sample/draw.js",
+        "core/popups/sample/wire.js",
+    ] {
+        assert!(names.iter().any(|one| one == name), "{name} is on disk");
+    }
+    for name in &names {
+        // The check-only sample is read from a development directory, never embedded.
+        if name.starts_with("core/popups/sample/") {
+            assert!(
+                Assets::Embedded.get(name).is_none(),
+                "{name} is not in the binary"
+            );
+            let dir = Assets::Dir(web.clone());
+            assert!(dir.get(name).is_some(), "{name} is served from a directory");
+            continue;
+        }
+        let asset = Assets::Embedded
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} is under web/core/popups and not in ASSETS"));
+        assert_eq!(asset.mime, "text/javascript; charset=utf-8", "{name}");
+        assert_eq!(
+            &*asset.bytes,
+            std::fs::read(web.join(name)).expect("the file").as_slice(),
+            "{name}"
+        );
     }
 }
 
@@ -469,4 +547,21 @@ fn the_peak_words_clear_the_axis_labels() {
     let plot = &css[css.find(".eqg .plot {").expect("the plot's rule")..];
     let plot = &plot[..plot.find('}').unwrap()];
     assert!(plot.contains("top: 12px"), "room above the plot: {plot}");
+}
+
+/// The walk page says the daemon's idle bound in words; the words and the constant are held
+/// together here.
+#[test]
+fn the_walk_page_names_the_idle_bound_the_daemon_keeps() {
+    let walk = include_str!("../../../web/core/popups/devices/walk.js");
+    let minutes = svolder_ipc::WALK_IDLE_BOUND.as_secs() / 60;
+    let words = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    ];
+    let said = format!("{} minutes", words[minutes as usize - 1]);
+    let flat = walk.replace("'\n    + '", "");
+    assert!(
+        flat.contains(&said),
+        "walk.js says {said:?}, the daemon's bound"
+    );
 }

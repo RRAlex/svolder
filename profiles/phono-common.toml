@@ -10,6 +10,7 @@ id = [2]
 key = "input"
 label = "Input"
 kind = "select"
+key_reading = true
 
 [[control]]
 id = [4]

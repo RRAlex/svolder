@@ -60,6 +60,9 @@ export function dbText(db) {
 /** A frequency in Hz: whole above 100, one decimal below, no trailing zero. */
 export const hzText = (f) => `${Number(f.toFixed(f < 100 ? 1 : 0))} Hz`;
 
+/** The frequency in words: kHz from 1000 (`6.3 kHz`), else `hzText`. */
+export const hzWords = (hz) => (hz >= 1000 ? `${fixedEven(hz / 1000, 1)} kHz` : hzText(hz));
+
 /** A gain with its sign and a true minus; no sign on zero. */
 export const gainText = (g) => `${g > 0 && g.toFixed(1) !== '0.0' ? '+' : ''}${dbText(g)} dB`;
 
@@ -91,3 +94,7 @@ export function fixedEven(value, digits) {
   const last = down.at(-1);
   return sign + (Number(last) % 2 === 0 ? down : up);
 }
+
+/** The words of the step `raw` of a level (`{ lo, texts }`: the volume, a slider): the model's
+ * own words for it, its number where the model has none. */
+export const stepWords = (level, raw) => level?.texts?.[raw - level.lo] ?? String(raw);

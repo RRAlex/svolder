@@ -17,10 +17,12 @@ use svolder_profiles::Profile;
 use svolder_profiles::tone::preset::Preset;
 
 use crate::device::Command;
-use crate::handler::{ACTOR_DEADLINE, Daemon, actor_gone, actor_silent, silence};
-use crate::log;
+use crate::handler::{
+    ACTOR_DEADLINE, ConfigEdit, ConfigWriteError, Daemon, actor_gone, actor_silent, silence,
+};
 use crate::recall::{Applied, Recalled};
 use crate::writer::{Glided, Mode, Options, Origin, Outcome, Planned, Recalling};
+use svolder_ipc::CODE_LINK;
 
 /// One device's live state as the web UI follows it: its feed (profile, readings, link) and the
 /// writer's climb.
@@ -56,6 +58,16 @@ pub trait Fleet: Send + Sync + 'static {
     /// Answer one request the way the socket's server would.
     async fn request(&self, request: Request) -> Response;
 
+    /// The events a request for which [`Request::is_stream`] holds turns into, as the socket's
+    /// server would serve them, or the answer that refuses it: how the web and MCP follow a
+    /// family's jobs. The one method of the fleet for every family; the default refuses.
+    async fn stream(&self, _request: Request) -> Result<BoxStream<'static, Event>, Box<Response>> {
+        Err(Box::new(Response::error(
+            CODE_LINK,
+            "no daemon".to_string(),
+        )))
+    }
+
     /// Recall the preset `name` among `fitting` on `device` through the device's writer, so the
     /// tone-control writes other front ends send meanwhile wait for it: the preset and its plan,
     /// and how the recall ended; or why it could not be planned.
@@ -90,10 +102,7 @@ pub trait Fleet: Send + Sync + 'static {
 
     /// End `device`'s wait between connect attempts: try it now.
     async fn wake(&self, _device: &DeviceInfo) -> Response {
-        Response::Error {
-            code: 3,
-            message: "no daemon".to_string(),
-        }
+        Response::error(CODE_LINK, "no daemon".to_string())
     }
 
     /// The profile of that name, as the daemon's registry holds it.
@@ -135,14 +144,44 @@ pub trait Fleet: Send + Sync + 'static {
         None
     }
 
-    /// The configuration file as it reads now. An error says only that it could not be read:
-    /// the detail may quote a secret, so it stays in the daemon's log.
-    fn config(&self) -> Result<Config, String>;
+    /// The configuration the daemon holds: the file as of its last reload or last write. A hand
+    /// edit shows after the next reload. An error says only that it could not be had. The
+    /// snapshot is shared, never copied: a call costs a reference count.
+    fn config(&self) -> Result<Arc<Config>, String>;
 
     /// The configuration file the daemon reads, for a front end that writes presets into it;
     /// none for a fleet with no file of its own.
     fn config_path(&self) -> Option<std::path::PathBuf> {
         None
+    }
+
+    /// The configuration the daemon holds from its last reload, for a write of `what` that
+    /// checks names against it; refused with why when the file cannot be written.
+    async fn config_for_write(&self, _what: &str) -> Result<Arc<Config>, ConfigWriteError> {
+        Err(ConfigWriteError::Unknown)
+    }
+
+    /// The words that say the daemon's configuration file changed since its last reload (a hand
+    /// edit it has not taken), or `None` while it did not; a fleet with no file of its own has
+    /// nothing to say.
+    async fn config_changed_words(&self) -> Option<String> {
+        None
+    }
+
+    /// Run `edit` on the configuration file off the async threads, then have the daemon reload.
+    async fn edit_config(&self, _edit: ConfigEdit) -> Result<(), ConfigWriteError> {
+        Err(ConfigWriteError::Unknown)
+    }
+
+    /// Save `preset` as the user's preset `name` (over an existing one when `force`), then have
+    /// the daemon reload; answers with the name as the file spells it.
+    async fn save_preset(
+        &self,
+        _name: &str,
+        _preset: Preset,
+        _force: bool,
+    ) -> Result<String, ConfigWriteError> {
+        Err(ConfigWriteError::Unknown)
     }
 }
 
@@ -158,10 +197,7 @@ impl Fleet for Unavailable {
     }
 
     async fn request(&self, _request: Request) -> Response {
-        Response::Error {
-            code: 3,
-            message: "no daemon".to_string(),
-        }
+        Response::error(CODE_LINK, "no daemon".to_string())
     }
 
     async fn recall(
@@ -174,18 +210,15 @@ impl Fleet for Unavailable {
     }
 
     async fn glide(&self, _device: &DeviceInfo, _key: &str, _raw: i64) -> Glided {
-        Glided::Refused(Response::Error {
-            code: 3,
-            message: "no daemon".to_string(),
-        })
+        Glided::Refused(Response::error(CODE_LINK, "no daemon".to_string()))
     }
 
     fn profile(&self, _device: &DeviceInfo) -> Option<Profile> {
         None
     }
 
-    fn config(&self) -> Result<Config, String> {
-        Ok(Config::default())
+    fn config(&self) -> Result<Arc<Config>, String> {
+        Ok(Arc::default())
     }
 }
 
@@ -243,14 +276,11 @@ impl DaemonFleet {
         };
         let response = match tokio::time::timeout(ACTOR_DEADLINE, done).await {
             Ok(Ok(Outcome::Done(response))) => response,
-            Ok(Ok(Outcome::Superseded)) => Response::Error {
-                code: 3,
-                message: format!("a later {what} on {} took this one's place", device.name),
-            },
-            Ok(Ok(Outcome::Cancelled(why))) => Response::Error {
-                code: 3,
-                message: why.to_string(),
-            },
+            Ok(Ok(Outcome::Superseded)) => Response::error(
+                CODE_LINK,
+                format!("a later {what} on {} took this one's place", device.name),
+            ),
+            Ok(Ok(Outcome::Cancelled(why))) => Response::error(CODE_LINK, why.to_string()),
             Ok(Err(_)) => actor_gone(&device.name),
             Err(_) => actor_silent(&device.name, ACTOR_DEADLINE),
         };
@@ -287,7 +317,14 @@ impl Fleet for DaemonFleet {
     async fn request(&self, request: Request) -> Response {
         match self.daemon() {
             Ok(daemon) => daemon.handle_from(self.origin, request).await,
-            Err(message) => Response::Error { code: 3, message },
+            Err(message) => Response::error(CODE_LINK, message),
+        }
+    }
+
+    async fn stream(&self, request: Request) -> Result<BoxStream<'static, Event>, Box<Response>> {
+        match self.daemon() {
+            Ok(daemon) => svolder_ipc::Handler::stream(&*daemon, request).await,
+            Err(message) => Err(Box::new(Response::error(CODE_LINK, message))),
         }
     }
 
@@ -297,7 +334,7 @@ impl Fleet for DaemonFleet {
     async fn glide(&self, device: &svolder_ipc::DeviceInfo, key: &str, raw: i64) -> Glided {
         let handle = match self.daemon() {
             Ok(daemon) => daemon.resolve(Some(&device.name)),
-            Err(message) => return Glided::Refused(Response::Error { code: 3, message }),
+            Err(message) => return Glided::Refused(Response::error(CODE_LINK, message)),
         };
         let handle = match handle {
             Ok(handle) => handle,
@@ -316,7 +353,7 @@ impl Fleet for DaemonFleet {
     async fn submit(&self, device: &DeviceInfo, command: Command, options: Options) -> Outcome {
         let handle = match self.daemon() {
             Ok(daemon) => daemon.resolve(Some(&device.name)),
-            Err(message) => return Outcome::Done(Response::Error { code: 3, message }),
+            Err(message) => return Outcome::Done(Response::error(CODE_LINK, message)),
         };
         let handle = match handle {
             Ok(handle) => handle,
@@ -333,7 +370,7 @@ impl Fleet for DaemonFleet {
     async fn wake(&self, device: &DeviceInfo) -> Response {
         match self.daemon() {
             Ok(daemon) => daemon.dispatch(Some(&device.name), Command::Wake).await,
-            Err(message) => Response::Error { code: 3, message },
+            Err(message) => Response::error(CODE_LINK, message),
         }
     }
 
@@ -425,20 +462,35 @@ impl Fleet for DaemonFleet {
         Some(self.daemon().ok()?.host().frames()?.events())
     }
 
-    fn config(&self) -> Result<Config, String> {
-        let daemon = self.daemon()?;
-        Config::load_from(daemon.config_path()).map_err(|e| {
-            // The detail can quote a line of the file, a secret among them.
-            log::error(&format!(
-                "{}: {}: {e}",
-                self.origin.word(),
-                daemon.config_path().display()
-            ));
-            "the daemon's configuration could not be read; see its log".to_string()
-        })
+    fn config(&self) -> Result<Arc<Config>, String> {
+        Ok(self.daemon()?.config_snapshot())
     }
 
     fn config_path(&self) -> Option<std::path::PathBuf> {
         Some(self.daemon().ok()?.config_path().to_path_buf())
+    }
+
+    async fn config_for_write(&self, what: &str) -> Result<Arc<Config>, ConfigWriteError> {
+        let daemon = self.daemon().map_err(|_| ConfigWriteError::Unknown)?;
+        daemon.config_for_write(what).await
+    }
+
+    async fn config_changed_words(&self) -> Option<String> {
+        self.daemon().ok()?.config_changed_words().await
+    }
+
+    async fn edit_config(&self, edit: ConfigEdit) -> Result<(), ConfigWriteError> {
+        let daemon = self.daemon().map_err(|_| ConfigWriteError::Unknown)?;
+        daemon.edit_then_reload(edit).await
+    }
+
+    async fn save_preset(
+        &self,
+        name: &str,
+        preset: Preset,
+        force: bool,
+    ) -> Result<String, ConfigWriteError> {
+        let daemon = self.daemon().map_err(|_| ConfigWriteError::Unknown)?;
+        daemon.save_preset(name, preset, force).await
     }
 }

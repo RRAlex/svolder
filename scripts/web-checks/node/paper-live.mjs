@@ -1,17 +1,19 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // Node harness for the theme Paper's sheet and what keeps it up to date (themes/paper/draw/sheet.js,
-// live.js, act.js, place.js): the title, the card and the footer drawn from every fixture page
+// live.js, place.js): the title, the card and the footer drawn from every fixture page
 // with no `style` attribute and every word escaped; which sections a change of the store draws
 // again; a held section waiting for the newest model; the stream's state fading and stilling the
 // sheet; readings heard until the mount ends; the log of what this page asked; the marks put in
 // place through the style object. A small fake page stands in for the browser. Run: node paper-live.mjs
+import { FRAME_KEYS } from '../../../bins/svolderd/web/core/keys.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
-import { MINE_MS, createAct } from '../../../bins/svolderd/web/themes/paper/act.js';
+import { MINE_MS, createAct } from '../../../bins/svolderd/web/core/act.js';
 import { SECTIONS, esc, sheet } from '../../../bins/svolderd/web/themes/paper/draw/sheet.js';
-import { PARTS_OF, createLive, keeper } from '../../../bins/svolderd/web/themes/paper/live.js';
+import { keeper } from '../../../bins/svolderd/web/core/freeze.js';
+import { PARTS_OF, createLive } from '../../../bins/svolderd/web/themes/paper/live.js';
 import { place } from '../../../bins/svolderd/web/themes/paper/place.js';
 
 let n = 0;
@@ -138,6 +140,9 @@ await ok('the_footer_says_version_date_keys_and_the_way_in_or_out', () => {
   const out = SECTIONS.foot(page, page.device, view());
   assert.ok(out.includes('svolder 0.30.1 &middot; 30 October'), out);
   assert.ok(out.includes('<span class="p-keys">T for themes</span>'), out);
+  // with the frame's own list, as the mount gives it: every key that works, `?` among them
+  assert.ok(SECTIONS.foot(page, page.device, view({ keys: FRAME_KEYS })).includes('<span class="p-keys">'
+    + 'T for themes &middot; Space for play or pause &middot; ? for help</span>'));
   assert.ok(out.includes('<button type="button" class="p-w" data-go="sign-out">sign out</button> &middot; Paper'), out);
   const plain = pageOf('dac');
   assert.ok(SECTIONS.foot(plain, plain.device, view()).endsWith('<span class="p-right">Paper</span>'));
@@ -238,17 +243,17 @@ await ok('a_held_section_waits_and_is_drawn_from_the_newest_model_when_released'
     const { live, store } = rig();
     live.drawAll();
     drawn.tone.length = 0;
-    live.hold('tone', true);
-    assert.equal(live.held('tone'), true);
+    live.freeze('tone', true);
+    assert.equal(live.frozen('tone'), true);
     store.applyPart(store.shown(), 'tone', { mode: 'first' });
     store.applyPart(store.shown(), 'tone', { mode: 'second' });
     store.replace({ ...store.page(), device: { ...store.device(), tone: { mode: 'third' } } });
     assert.equal(drawn.tone.length, 0, 'nothing is drawn under the hand');
-    live.hold('tone', false);
-    assert.equal(live.held('tone'), false);
+    live.freeze('tone', false);
+    assert.equal(live.frozen('tone'), false);
     assert.deepEqual(drawn.tone, [{ mode: 'third' }], 'once, from the model as it is now');
-    live.hold('tone', true);
-    live.hold('tone', false);
+    live.freeze('tone', true);
+    live.freeze('tone', false);
     assert.equal(drawn.tone.length, 1, 'a hold with nothing missed draws nothing');
   } finally {
     done();
@@ -266,26 +271,26 @@ await ok('a_slow_answer_does_not_release_a_hold_the_next_gesture_took', async ()
   hand.grip();
   hand.letGo();
   await pause(25);
-  assert.equal(live.held('controls'), true, 'the write is unanswered: still held');
+  assert.equal(live.frozen('controls'), true, 'the write is unanswered: still held');
   // a new drag starts while the first release waits for its answer
   hand.grip();
   answer();
   await pause(25);
-  assert.equal(live.held('controls'), true, 'the first answer must not release the new hand');
+  assert.equal(live.frozen('controls'), true, 'the first answer must not release the new hand');
   pending = Promise.resolve();
   hand.letGo();
   await pause(25);
-  assert.equal(live.held('controls'), false, 'the last hand let go: released once');
+  assert.equal(live.frozen('controls'), false, 'the last hand let go: released once');
   // a release waiting when the hold was reset from outside does nothing
   hand.grip();
   hand.letGo();
   keep.reset();
   hand.forget();
   await pause(25);
-  assert.equal(live.held('controls'), false);
+  assert.equal(live.frozen('controls'), false);
   keep.take();
   await pause(25);
-  assert.equal(live.held('controls'), true, 'a later hold is not undone by the forgotten release');
+  assert.equal(live.frozen('controls'), true, 'a later hold is not undone by the forgotten release');
   keep.drop();
 });
 
@@ -293,10 +298,10 @@ await ok('a_hold_taken_around_a_call_is_given_back_if_it_throws', () => {
   const { live } = rig();
   const keep = keeper(live, 'tone');
   assert.equal(keep.around(() => 7), 7);
-  assert.equal(live.held('tone'), true);
+  assert.equal(live.frozen('tone'), true);
   keep.release();
   assert.throws(() => keep.around(() => { throw new Error('no list'); }), /no list/);
-  assert.equal(live.held('tone'), false);
+  assert.equal(live.frozen('tone'), false);
 });
 
 await ok('another_device_shown_tells_the_switchers_once_and_lets_a_reset_release_the_holds', () => {
@@ -311,10 +316,10 @@ await ok('another_device_shown_tells_the_switchers_once_and_lets_a_reset_release
   keep.take();
   store.replace(pageOf('dac'));
   assert.equal(told, 0, 'the same device replaced is not a switch');
-  assert.equal(live.held('presets'), true);
+  assert.equal(live.frozen('presets'), true);
   store.replace({ ...pageOf('dac'), shown: 'another-one' });
   assert.equal(told, 1);
-  assert.equal(live.held('presets'), false, 'the old device\'s holds are gone');
+  assert.equal(live.frozen('presets'), false, 'the old device\'s holds are gone');
   store.replace({ ...pageOf('dac'), shown: 'another-one' });
   assert.equal(told, 1, 'and it is told only once');
 });
@@ -346,7 +351,7 @@ await ok('a_gesture_that_ends_with_a_form_open_leaves_a_form_only_hold_so_a_lost
   keep.around(() => 1); // the Save-as form is open
   keep.take(); // a drag in hand, then let go
   keep.drop();
-  assert.equal(live.held('presets'), true, 'the form still holds its section');
+  assert.equal(live.frozen('presets'), true, 'the form still holds its section');
   store.setState('lost');
   assert.equal(root.sheetEl.inert, true, 'the form is no gesture: the lost sheet is out of reach');
   store.setState('open');
@@ -356,28 +361,28 @@ await ok('a_gesture_that_ends_with_a_form_open_leaves_a_form_only_hold_so_a_lost
   keep.drop();
   assert.equal(root.sheetEl.inert, true, 'and the form alone does not');
   keep.release();
-  assert.equal(live.held('presets'), false);
+  assert.equal(live.frozen('presets'), false);
 });
 
 await ok('a_state_change_during_a_hold_neither_stills_the_sheet_nor_leaves_the_section_stale', () => {
   const { live, store, root } = rig();
   live.drawAll();
   const before = root.boxes.volume.innerHTML;
-  live.hold('volume', true);
+  live.freeze('volume', true);
   store.setState('waiting');
   store.emit('volume', { raw: 99 });
   assert.equal(root.sheetEl.inert, false, 'a gesture in hand is not cut short by the sheet turning inert');
   assert.ok(root.sheetEl.named.has('waiting'), 'the sheet still shows it waits');
   assert.equal(root.boxes.volume.innerHTML, before, 'nothing is drawn under the hand');
   store.setState('resting');
-  live.hold('volume', false);
+  live.freeze('volume', false);
   assert.equal(root.sheetEl.inert, false);
   assert.ok(root.boxes.volume.innerHTML.includes('aria-valuenow="99"'), 'the newest reading is shown');
   // The sheet that turned inert during the hold is inert as soon as the hold ends.
-  live.hold('volume', true);
+  live.freeze('volume', true);
   store.setState('lost');
   assert.equal(root.sheetEl.inert, false);
-  live.hold('volume', false);
+  live.freeze('volume', false);
   assert.equal(root.sheetEl.inert, true, 'the sheet is out of reach once the hand lets go');
 });
 

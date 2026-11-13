@@ -33,6 +33,17 @@ moving while the music is silent or paused (the road rolls at its cruise speed, 
 scene needs 30 draws a second to look smooth (the road rolls 4.2 rows a second, so under 30 draws a second the steps show).
 Calm and Still are slower than that already and nothing in them rolls. A desktop keeps its level's own pace.
 
+## The tone overlay
+
+The overlay is drawn from the model's `tone.overlay` (`axis.js` `gapColumns`, `draw/road.js`
+`drawTarget` and `tintGap`, `tune-wire.js` `overlay()`). While the shown device's tone view carries
+`tone.overlay` and the EQ is on, the EQ line ends in `fit 0.9 dB`, the daemon's RMS (`hud.js`), the
+target is a faint dotted line behind the mountains on the tuning map's own frequency axis and gain
+window (held above the horizon), and each floor column that at least half of a gap span covers is
+tinted `--nd-warn` under its heat. The line and the tint are one layer the budget drops second,
+after the wet road and before the density; the `nooverlay` switch turns it off. None on the computer
+side, in a dull scene, or while a drag of a band is unsettled (the tint only).
+
 ## The frame budget
 
 A phone, or a slow browser, must stay able to open the menu. The budget (`budget.js`, `BUDGET`) is
@@ -48,14 +59,19 @@ or fewer than `minFps` (24) draws a second for `lowForS` (3 s) while the scene a
 the cap's rate). Each step takes one of, in order:
 
 1. the wet road, held off for `wetHeldS` (180 s);
-2. the density, by `step` (0.75) each time, down to 1 backing pixel per CSS pixel;
-3. the cap: at most `fps` (30) draws a second, whatever Motion asks.
+2. the tone overlay (the target's ghost ridge and the floor's tint), only while an imported preset
+   is on (`setOverlay`; with none a step skips it), held off for `overlayHeldS` (60 s). It costs far
+   less than the wet road (about 0.2 ms of a 3.5 ms draw in Chromium, `nightdrive_timing.py`
+   `what_a_draw_costs_with_the_overlay`), so it goes after it, and before the density, which every
+   layer pays for;
+3. the density, by `step` (0.75) each time, down to 1 backing pixel per CSS pixel;
+4. the cap: at most `fps` (30) draws a second, whatever Motion asks.
 
 **The way back.** A mean under `calmMs` (6 ms) for `upAfterS` (10 s) lifts one step, in the reverse
-order (the cap, then the density, then the wet road once its 180 s are over). A pause between two
-draws longer than `gapS` (3 s), a hidden tab for example, restarts the window and the clock of the
-way back, which are not evidence of anything. After the low-rate trigger the way back stays shut
-for `heldS` (60 s), since drawing was not what was slow.
+order (the cap, then the density, then the overlay once its 60 s are over, then the wet road once
+its 180 s are over). A pause between two draws longer than `gapS` (3 s), a hidden tab for example,
+restarts the window and the clock of the way back, which are not evidence of anything. After the
+low-rate trigger the way back stays shut for `heldS` (60 s), since drawing was not what was slow.
 
 **Finding the limits fast.** Choosing Full from Calm or Still (`probe()`) lifts the cap, unless a step-down on the rate is
 holding it, and measures for `probeS` (2 s, and again after each step it takes) in short spans: after `probeLookS` (0.5 s) of
@@ -118,6 +134,7 @@ Name layers after it, separated by commas, to turn them off one at a time and fi
 | `noridge` | the mountains |
 | `nodash` | the dash along the bottom |
 | `nohud` | the top line, the volume and the EQ line |
+| `nooverlay` | the tone overlay: the target's ghost ridge and the tint under the gap |
 | `nomood` | the mood: the night, the sun, the heat and the road's speed stay as they were, with no flare and no wave |
 | `nowet` | the wet road |
 | `noembers` | the embers |
@@ -179,47 +196,38 @@ link also drops the query, so open the link once, then the address with the quer
 - A bubble is not focusable; the sheet's band table is the keyboard path.
 - Canvas 2D only. A coloured mesh of mountains in WebGL is not built.
 
-## What Night drive found missing in the core
+## What Night drive needs of the core
 
-Night drive was built on the core alone. It found these gaps; each was fixed in the core (or, where
-it was the theme's own, in the theme) in its own commit, before the theme depended on it:
+Night drive is built on the core alone. Nine parts of the core and its checks exist for it:
 
-1. **The core's analysis handed out the frames as text, and the decoding, smoothing and beat schedule
-   lived in Ember's `viz-model.js`, which no other theme may import.** `viz-model.js` is now
-   `core/viz-model.js`; Ember's visualizer imports it from the core, and its behaviour is unchanged.
-2. **`canvasLoop` ran no loop under reduced motion and drew at every frame**, so a theme could
-   not offer Full under reduced motion nor a slow level without waking at the screen's rate. It takes
-   `reduced: 'theme'` (the loop runs and the theme reads `loop.reduced`) and `pace()` (the least
-   milliseconds between draws; 100 or more is waited on a timer, then one frame; `dt` is held to
-   twice the pace and never under a tenth of a second). The defaults leave every other theme as it was.
-3. **`canvasLoop` waits on a timer only for a pace of 100 ms or more**, so a pace of 33 ms, the
-   30 a second cap, drew at every frame. Night drive keeps its cap itself (`keepFrame`, `motion.js`),
-   leaving the frames in between undrawn and carrying their time. No core change was made; a later
-   theme that wants a short pace needs the same or a core timer for 16 to 99 ms.
-4. **The frame's menu capped its height by `innerHeight` and the picker's sheet by an auto grid row**,
-   so on a phone the last rows were out of reach and a pinched page's menu ran past the screen.
-   `menu.js` caps by the visual viewport, and the picker is one `minmax(0, 1fr)` row in a `100dvh`
-   border-box sheet with `touch-action: pan-y` and contained overscroll on the scrolling lists.
-5. **The picker had no close button.** On a phone with no keyboard and no gesture for a tap
-   outside the sheet, the picker could only be left by choosing a theme. It has a close button at its
-   top right (`.pclose`), reached by the arrows and Tab after the cards.
-6. **Space was no key of any theme.** A page with a music player had no key for play and pause. Space
-   is the frame's second reserved key, in every theme: alone, not a repeat, with the focus not in a
-   field or on a control Space activates, and no menu, picker or modal dialog open (the sheet counts),
-   it posts one press of `pause` or `play` through `core.actions.press`. The contract's key checks
-   cover all four themes.
-7. **The tab's title, the held `−` and `+`, the menu button's place and the connection's words were
-   each a theme's own.** `core.title`, `core.hold` and the frame's one button rectangle, opaque
-   backdrop and 44 px size are the core's, and the conventions every theme keeps are listed in
-   [web-themes.md](web-themes.md). The theme's hold, its `T` and its button follow them from the first
-   commit.
-8. **The link word beside the device's name (a theme gap, found by the contract's
-   `the_link_state_is_in_words_beside_the_name`).** Night drive's top line showed only the card's
-   title at the right. It now puts the device's link word beside the name while the link is not on
-   (`Gungnir 2 · not connected · USB 1 · 48 kHz`), and the contract's words check covers Night drive
-   too.
-9. **A check gap, not a core gap.** The contract's menu-button check asked for `scrollY > 0`, which
-   a page that never scrolls cannot give. It accepts a page that does not scroll where the button
-   is pinned.
+1. **`core/viz-model.js` holds the decoding, smoothing and beat schedule of the frames**, so a
+   theme other than Ember can read the analysis; Ember's visualizer imports it from the core too.
+2. **`canvasLoop` takes `reduced: 'theme'`** (the loop runs under reduced motion and the theme
+   reads `loop.reduced`) **and `pace()`** (the least milliseconds between draws; 100 or more is
+   waited on a timer, then one frame; `dt` is held to twice the pace and never under a tenth of a
+   second), so a theme can offer Full under reduced motion and a slow level that does not wake at
+   the screen's rate. The defaults draw at every frame.
+3. **`canvasLoop` waits on a timer only for a pace of 100 ms or more.** Night drive keeps its 30 a
+   second cap itself (`keepFrame`, `motion.js`), leaving the frames in between undrawn and carrying
+   their time; a theme that wants a short pace needs the same or a core timer for 16 to 99 ms.
+4. **The frame's menu caps its height by the visual viewport** (`menu.js`), and the picker is one
+   `minmax(0, 1fr)` row in a `100dvh` border-box sheet with `touch-action: pan-y` and contained
+   overscroll on the scrolling lists, so on a phone the last rows are in reach and a pinched page's
+   menu stays on the screen.
+5. **The picker has a close button** at its top right (`.pclose`), reached by the arrows and Tab
+   after the cards, for a phone with no keyboard and no gesture for a tap outside the sheet.
+6. **Space is the frame's second reserved key, in every theme**: alone, not a repeat, with the focus
+   not in a field or on a control Space activates, and no menu, picker or modal dialog open (the
+   sheet counts), it posts one press of `pause` or `play` through `core.actions.press`. The
+   contract's key checks cover all four themes.
+7. **`core.title`, `core.repeat` and the frame's one button rectangle, opaque backdrop and 44 px
+   size** are the core's: the tab's title, the held `−` and `+`, the menu button's place and the
+   connection's words are not each a theme's own. The conventions every theme keeps are listed in
+   [web-themes.md](web-themes.md).
+8. **The link word beside the device's name.** Night drive's top line puts it beside the name while
+   the link is not on (`Gungnir 2 · not connected · USB 1 · 48 kHz`), and the contract's
+   `the_link_state_is_in_words_beside_the_name` covers Night drive too.
+9. **The contract's menu-button check accepts a page that does not scroll** where the button is
+   pinned; it does not ask for `scrollY > 0`.
 
 [Back to Night drive](web-nightdrive.md), [back to web themes](web-themes.md).

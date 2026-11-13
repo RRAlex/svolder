@@ -1,9 +1,12 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// What every theme must present, as data: the controls and actions a device's model offers and
-// the facts it holds. The contract checks read a theme's test driver against these lists: for each
-// target the driver must reach it and operate it, for each fact it must reach it and show the
-// model's words (see the checks' own README). Plain data in and out, no DOM.
+// What the page must present, as data: the controls and actions a device's model offers and the
+// facts it holds. The contract checks read a test driver against these lists: for each target the
+// theme's driver must reach it and operate it, for each fact a driver must reach it and show the
+// model's words (see the checks' own README). The facts are two lists with two drivers: the
+// theme's facts (`themeFactsOf`), which every theme shows itself and its own driver answers for,
+// and the device's facts (`deviceFactsOf`), which the core's driver (driver.js) answers for.
+// Plain data in and out, no DOM.
 //
 // A target names one thing a person can use:
 //   { control: key }             the volume, its mute, every control of the device (a choice, a
@@ -95,25 +98,31 @@ export function computerTargetsOf(page) {
 }
 
 /**
- * The facts `device` holds, each by the label the Device section gives it: Product, Unit (when
- * the viewer may see it), Firmware, DSP, Profile, Link, Signal, Passphrase (when the device has
- * a note on it) and the id of every reading row; then Cover, when the computer's player has a
- * cover for the track (shown as a picture whose address carries the cover's version). `[]` for a
- * device with no facts and no cover.
+ * The facts of `device` that belong to the device's page, each by the label the Device section
+ * gives it: Product, Unit (when the viewer may see it), Firmware, DSP, Profile, Link, Signal,
+ * Passphrase (when the device has a note on it) and the id of every reading row. `[]` for a
+ * device with no facts.
  */
-export function factsOf(device) {
+export function deviceFactsOf(device) {
   const labels = [];
   const facts = device?.facts;
-  if (facts) {
-    labels.push('Product');
-    if (facts.unit) labels.push('Unit');
-    labels.push('Firmware', 'DSP', 'Profile', 'Link', 'Signal');
-    if (facts.passphrase_note !== null && facts.passphrase_note !== undefined) {
-      labels.push('Passphrase');
-    }
-    for (const row of facts.rows ?? []) labels.push(row.id);
+  if (!facts) return labels;
+  labels.push('Product');
+  if (facts.unit) labels.push('Unit');
+  labels.push('Firmware', 'DSP', 'Profile', 'Link', 'Signal');
+  if (facts.passphrase_note !== null && facts.passphrase_note !== undefined) {
+    labels.push('Passphrase');
   }
-  const cover = device?.playing?.track?.cover;
-  if (cover !== null && cover !== undefined) labels.push('Cover');
+  for (const row of facts.rows ?? []) labels.push(row.id);
   return labels;
+}
+
+/**
+ * The facts of `device` that every theme shows itself, each by its label: Cover, when the
+ * computer's player has a cover for the track (shown as a picture whose address carries the
+ * cover's version). `[]` without one. No label here is a label of `deviceFactsOf`.
+ */
+export function themeFactsOf(device) {
+  const cover = device?.playing?.track?.cover;
+  return cover === null || cover === undefined ? [] : ['Cover'];
 }

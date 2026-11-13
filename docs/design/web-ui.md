@@ -43,11 +43,11 @@ reaches a handler unchecked:
    `default-src 'none'`, everything else `'self'` (images also `data:`), no framing.
 
 The routes are the page (`/`, `?device=NAME`), the sign-in (`/login`, `/pair`, `/logout`,
-`/api/v1/session`), the assets and the manifest, then under `/api/v1/devices/{device}/`: `screen`,
-`parts/{part}`, `model`, `strip`, `events` (the stream) and the writes, `/api/v1/fleet` and
-`/api/v1/host` (JSON models, the first in the page), and under `/api/v1/host/` the computer's side:
-`cover`, `press` and `frames` ([Now playing](#now-playing)). `docs/usage` tells scripts to use the
-CLI, the socket, MQTT or MCP: this API is shaped for the page and promised to nobody.
+`/api/v1/session`), the assets and the manifest, then under `/api/v1/devices/{device}/`: `model`,
+`strip`, `series` and the writes; `/api/v1/devices` with a device's `edit`, `remove` and `default`
+(the configured devices, a writer's); `/api/v1/events` (the stream), `/api/v1/fleet` and
+`/api/v1/host` (JSON models); and under `/api/v1/host/` the computer's side: `cover`, `press` and
+`frames` ([Now playing](#now-playing)). Scripts use the CLI, the socket, MQTT or MCP, not this API.
 
 ## Sign-in and tokens
 
@@ -123,10 +123,9 @@ server-sent stream of JSON events per page: `device` is the device shown (`model
 `follow` the others it keeps live, `needs` what else it draws from. It opens with `retry: 2000` and
 the page's `model`, then the shown device's `volume`, each slider's `level`, its `meters` (with
 `needs=meters`) and its `strip` of the last five minutes, and the same components of each followed
-device, so a page that reconnects catches up. Then it sends only what changed, comparing each
-part's JSON with what it last sent (`Sent`, in `events/device.rs`; one task per device, one for the
-fleet and the host in `events/page.rs`). Every event but `model`, `fleet` and `host` names its
-`device`:
+device, so a page that reconnects catches up. Then it sends only what changed, comparing each part's
+JSON with what it last sent (`Sent`, in `events/device.rs`; one task per device, one for the fleet
+and the host in `events/page.rs`). Every event but `model`, `fleet` and `host` names its `device`:
 
 - `model`: the shown device's shape changed, so the whole model again; `device` the same for a
   followed device (`{device, data}`);
@@ -138,8 +137,8 @@ fleet and the host in `events/page.rs`). Every event but `model`, `fleet` and `h
   playing](#now-playing)), and the `facts` part only when `Facts::key` changes (see the Device part
   below), at most once a second (`FACTS_AFTER`);
 - `strip`: the shown device's bars of each second not sent yet; a keep-alive every 15 s;
-- `fleet`: the devices' links or families, the list, or the hops changed; `host` (with
-  `needs=host`): the computer's player changed, with or without a device.
+- `fleet`: the links, families, list or hops changed (an entry's `key` is an opaque hash of its
+  unit, kept through a rename); `host` (with `needs=host`): the player, route or controls changed.
 
 A write answers with the parts it changed (`parts`) and the words of its toast (`toast`).
 
@@ -175,13 +174,14 @@ its readings; the stream tells the page with a `svolder-lost` event when it drop
 `playing.js` the Now playing card's counting and its buttons, `visualizer.js` the visualizer card
 and `core/visible.js` whether something is on show ([web-visualizer.md](web-visualizer.md)),
 `tone-editor.js` the steppers that repeat while held and the band editor, and `keys.js` the desktop
-keys (arrows for the volume, `m`, `0`, `f`, `p`, `v`, `?`; none while a field has focus or with a
-modifier) and the key list. The page is a frame ([frame.md](frame.md); `templates/page.html`: the theme's root,
+keys (arrows for the volume, `m`, `0`, `f`, `p`, `v`, `A`; none in a field or with a modifier),
+bound from its [key table](key-table.md); `?` is the frame's and opens Help. The page is a
+frame ([frame.md](frame.md); `templates/page.html`: the theme's root,
 the page's model and the list of themes as data) that starts the core (`core/boot.js`) and mounts
 the theme Ember (`themes/ember/ember.js`), which draws every part from the model (`draw/`) and
 follows the store (`live.js`); htmx is its swap engine only (one htmx file is vendored). Every
-write is a core action (`core/actions.js`), which toasts a refusal and reads the device again. The
-modules register nothing when imported: each exports an `install…` call that `ember.js` makes,
+write is a core action (`core/actions.js`, joined from one file per domain, see
+[web-themes](web-themes.md)), which toasts a refusal and reads the device again. The modules register nothing when imported: each exports an `install…` call that `ember.js` makes,
 its listeners ended by the mount's signal.
 
 The Device part lists every reading the daemon holds, named or not, and an amp changes some ten
@@ -194,24 +194,24 @@ old until the next send. The table never holds a function of the `Sensitive` cla
 passphrase's, for the owner and for a guest alike: the encoded code is reversible, so no remote
 view lists it. A device whose profile offers no identify (the Mesh Card) has no button.
 
-`facts.js` owns the Device fold-out's page side. The part is a native
-`<details class="device-facts">`, closed as drawn; the script opens it from `localStorage`
-(`svolder.facts`, every access in try/catch, the page whole without it), keeps it open across a
-swap of its part, and writes the ages in place once a second from the `data-heard-at` stamps
-against the part's `data-now`, the daemon's clock when the part was made, so a clock skew between
-browser and daemon never shows. Opening the fold-out reads the model afresh, so the table is
-current when someone looks. The signal's words come from the server
+The facts and the readings are drawn by the core, on a device's page in the Devices popup
+(devices-popup.md), whichever theme is mounted. The ages are written in place once a second from
+the `data-heard-at` stamps against the part's `data-now`, the daemon's clock when the part was made,
+so a clock skew between browser and daemon never shows; a page that opens reads the model afresh, so
+the table is current when someone looks. The signal's words come from the server
 (`Signal::describe`), and the script re-words their age with the same thresholds (`node/facts.mjs`
 holds the two to the daemon's edges). The Identify button is the core's `identify`, which says the
-daemon's gap (`data-gap`) in a toast.
+daemon's gap (`data-gap`) in a toast. Ember's own `Device` fold-out (`facts.js`, its open state kept
+under `svolder.facts`) holds what Ember shows for playing, `Visualizer delay`, and `Device
+settings…`.
 
 The CSP shapes the code. There is no inline script and no `style=` attribute in any template
 (positions are SVG attributes, components set custom properties through the CSSOM, which the CSP
 allows), htmx is configured by a `<meta name="htmx-config">` with `allowEval` and `allowScriptTags`
 off, and there is no `hx-on`. Assets are `include_bytes!`ed in `assets.rs`'s `FILES` and in each
-theme's `files` (`themes.rs`; a name absent from both is never served); `SVOLDER_WEB_ASSETS=<dir>`
-reads a directory on every request instead, so styles and scripts can be edited with no rebuild
-(a template, or a file a list does not name, still needs one).
+theme's `files` (`themes.rs`; a name absent from both is never served; the check-only sample
+popup only from a `SVOLDER_WEB_ASSETS` directory); `SVOLDER_WEB_ASSETS=<dir>` reads a directory on
+every request instead, so styles and scripts need no rebuild (a template or an unlisted file does).
 
 ## Now playing
 

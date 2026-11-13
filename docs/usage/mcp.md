@@ -19,13 +19,17 @@ is the reference for every `[mcp]` key, the refusals and the `svolder mcp token`
 
 ### Turning it on
 
-The server is off unless `config.toml` turns it on; without an `[mcp]` section, or with
-`enabled = false`, the daemon opens no port:
+The server is off until something turns it on; without an `[mcp]` section, or with
+`enabled = false`, the daemon opens no port. `svolder mcp on` turns it on (and `svolder mcp off`
+off again, see ["mcp on, mcp off"](#mcp-on-mcp-off)), which writes this to `config.toml`:
 
 ```toml
 [mcp]
 enabled = true
 ```
+
+`SVOLDER_MCP_ENABLED=1` in the daemon's environment turns it on where the file has no `enabled`
+key, for a container's compose file; an `enabled` in the file wins.
 
 The defaults are `listen = "127.0.0.1:8737"` (this machine only), `auth = "token"`, `writes = false`
 (read-only), no `max_volume_db`, and empty `origins` and `hosts`. Run `svolder daemon restart`, or
@@ -46,12 +50,13 @@ way. `svolder doctor` has an "MCP server" row for the same state.
 
 ### In Docker
 
-The compose file gives the container the host's network, and the image listens on every interface
-by default (`SVOLDER_MCP_LISTEN=0.0.0.0:8737`), so the only steps are `enabled = true` under `[mcp]`
-in `config.toml` under `config/svolder`, then `docker compose restart svolder`, and the token,
-`docker exec svolder svolder mcp token`. A native `svolderd` on the same machine must not serve
-8737 too. A `listen` in the file still wins. See ["The MCP server in the container"](daemon.md#the-mcp-server-in-the-container)
-under "The daemon".
+The compose file gives the container the host's network, and the image listens on every interface by
+default (`SVOLDER_MCP_LISTEN=0.0.0.0:8737`), so the only steps are turning it on (`docker exec
+svolder svolder mcp on`, or `SVOLDER_MCP_ENABLED: "1"` in the compose file's `environment:`, or
+`enabled = true` under `[mcp]` in `config.toml` under `config/svolder` and `docker compose restart
+svolder`) and the token, `docker exec svolder svolder mcp token`. A native `svolderd` on the same
+machine must not serve 8737 too. A `listen` in the file still wins. See ["The MCP server in the
+container"](daemon.md#the-mcp-server-in-the-container) under "The daemon".
 
 ### The token
 
@@ -289,6 +294,43 @@ listener; `enabled = false` closes the port. An address that cannot be bound, or
 be had, is logged without the token and shown by `svolder daemon status` as
 `mcp: cannot listen on ADDR: WHY`; the daemon keeps serving its socket and its devices, and the next
 reload tries again.
+
+### mcp on, mcp off
+
+Turns the MCP server on or off, as ["web on, web off"](web-ui.md#web-on-web-off) does the web UI:
+a running daemon writes `enabled` under `[mcp]` in the file it reads and reloads, which starts or
+stops the listener at once, and the verb prints `mcp: listening on 127.0.0.1:8737 (token,
+read-only)` or `mcp: off`; with no daemon the verb writes the key itself and prints
+`mcp: on in PATH`. The refusals, the exit codes and what `SVOLDER_MCP_ENABLED` changes are the
+web UI's.
+
+```
+Turn the MCP server on: `[mcp] enabled = true`, which a running daemon acts on at once
+
+Usage: svolder mcp on [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+```
+Turn the MCP server off: `[mcp] enabled = false`, which a running daemon acts on at once
+
+Usage: svolder mcp off [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
 
 ### mcp token
 

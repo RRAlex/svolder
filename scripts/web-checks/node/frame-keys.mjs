@@ -1,11 +1,14 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// Node harness for the frame's reserved key (core/frame.js `reservedKey`) and the two helpers the
-// theme Ember's keys ask the menu (core/menu.js `menuOwns`, `inMenu`): `T` is the frame's unless a
+// Node harness for the frame's reserved keys (core/frame.js `reservedKey` for `T`, `helpKey` for
+// `?`) and the two helpers the
+// theme Ember's keys ask the menu (core/menu.js `menuOwns`, `inMenu`, which a theme asks as
+// `core.frame.menuOwns` and `core.frame.inMenu`): `T` is the frame's unless a
 // field it would type into has the focus or a modifier is held. Fake nodes stand in for the
 // browser's. Run: node frame-keys.mjs
 import assert from 'node:assert/strict';
-import { playPauseOf, reservedKey, spaceKey } from '../../../bins/svolderd/web/core/frame.js';
+import { helpKey, playPauseOf, reservedKey, spaceKey } from '../../../bins/svolderd/web/core/frame.js';
+import { RESERVED } from '../../../bins/svolderd/web/core/keys.js';
 import { inMenu, menuOwns } from '../../../bins/svolderd/web/core/menu.js';
 
 let n = 0;
@@ -82,6 +85,22 @@ ok('space_presses_the_button_the_players_state_calls_for_and_nothing_without_a_p
   assert.equal(playPauseOf({ host: { buttons: true, track: null } }), null, 'nothing loaded');
   assert.equal(playPauseOf({ host: null }), null);
   assert.equal(playPauseOf({ device: { playing: { buttons: true, track: { status: 'paused' } } }, host: { buttons: true, track: { status: 'playing' } } }), 'play', 'the device\'s player first');
+});
+
+ok('the_question_mark_is_the_frames_under_the_rule_of_t', () => {
+  const button = node('button');
+  assert.equal(helpKey(key('?', button)), true);
+  assert.equal(helpKey(key('?', button, { shiftKey: true })), true, 'Shift is how most keyboards type it');
+  assert.equal(helpKey(key('?', node('body'))), true);
+  assert.equal(helpKey({ key: '?' }), true, 'no target at all');
+  for (const tag of ['input', 'textarea', 'select']) assert.equal(helpKey(key('?', node(tag))), false, tag);
+  assert.equal(helpKey(key('?', node('div', { editable: true }))), false, 'contenteditable');
+  for (const mods of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+    assert.equal(helpKey(key('?', button, mods)), false, JSON.stringify(mods));
+  }
+  for (const other of ['/', 't', 'T', 'h', 'F1', '??']) assert.equal(helpKey(key(other, button)), false, other);
+  assert.equal(reservedKey(key('?', button)), false, 'the picker\'s key stays T alone');
+  assert.deepEqual(RESERVED, ['T', 't', '?', ' '], 'no key table may bind them');
 });
 
 console.log(`${n} frame-keys checks passed`);

@@ -522,10 +522,16 @@ def run():
         b.press('ArrowDown')
         check('  ArrowDown reaches the Arrange row', kb()['focus'] == 'menu-arrange', kb())
         b.press('ArrowDown')
+        check('  ArrowDown reaches the Devices row', kb()['focus'] == 'menu-popup-devices', kb())
+        b.press('ArrowDown')
+        check('  ArrowDown reaches the EQ library row', kb()['focus'] == 'menu-popup-eq-library', kb())
+        b.press('ArrowDown')
+        check('  ArrowDown reaches the Help row', kb()['focus'] == 'menu-popup-help', kb())
+        b.press('ArrowDown')
         check('  ArrowDown wraps to the Theme row', kb()['focus'] == 'menu-theme', kb())
         b.press('End')
-        check('  End lands on the Arrange row (the last the arrows reach)',
-              kb()['focus'] == 'menu-arrange', kb())
+        check('  End lands on the Help row (the last the arrows reach)',
+              kb()['focus'] == 'menu-popup-help', kb())
         b.press('Home')
         check('  Home lands on the Theme row', kb()['focus'] == 'menu-theme', kb())
         b.press('Escape')

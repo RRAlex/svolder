@@ -25,3 +25,21 @@ export const BAND_COLUMN = Uint8Array.from({ length: BANDS }, (_, i) => Math.min
   COLUMNS - 1,
   Math.max(0, Math.floor(axisX(bandCentreHz(i), 1) * COLUMNS)),
 ));
+
+/** The floor's columns a run of the daemon's gap `spans` (`[from_hz, to_hz]`) covers: `out[i]` is 1 for a
+ * column that at least half of a span lies over, else 0. Nothing is judged here: a column is only
+ * as covered as the spans say. */
+export function gapColumns(spans, out = new Uint8Array(COLUMNS)) {
+  out.fill(0);
+  for (const span of spans ?? []) {
+    const [from, to] = span ?? [];
+    if (!(Number.isFinite(from) && Number.isFinite(to) && from > 0 && to > from)) continue;
+    const lo = axisX(Math.max(from, F_MIN), 1) * COLUMNS;
+    const hi = axisX(Math.min(to, F_MAX), 1) * COLUMNS;
+    for (let i = Math.max(0, Math.floor(lo)); i < Math.min(COLUMNS, Math.ceil(hi)); i++) {
+      const covered = Math.min(hi, i + 1) - Math.max(lo, i);
+      if (covered >= 0.5) out[i] = 1;
+    }
+  }
+  return out;
+}

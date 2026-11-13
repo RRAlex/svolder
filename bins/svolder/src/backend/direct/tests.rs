@@ -5,6 +5,7 @@ use svolder_ble::SessionConfig;
 
 use super::test_support::*;
 use super::*;
+use svolder_ipc::{CODE_LINK, CODE_TIMEOUT};
 
 /// The `passphrase` verb's own path over the fake device, and what the setter it ends
 /// with does for a session the device has already turned down.
@@ -767,7 +768,7 @@ async fn a_step_with_no_reading_to_step_from_is_refused_with_code_4() {
     for value in ["up", "down"] {
         match backend.set("volume", value, 1, false).await {
             Err(WriteError::Refused {
-                code: 4,
+                code: CODE_TIMEOUT,
                 message,
                 next,
             }) => {
@@ -780,7 +781,9 @@ async fn a_step_with_no_reading_to_step_from_is_refused_with_code_4() {
     backend.session = None;
     match backend.set("volume", "up", 1, false).await {
         Err(WriteError::Refused {
-            code: 3, message, ..
+            code: CODE_LINK,
+            message,
+            ..
         }) => {
             assert_eq!(message, "no session was opened for this verb");
         }
@@ -1207,6 +1210,7 @@ async fn a_control_on_the_passphrase_function_is_refused_by_the_direct_send() {
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     });
     let (mut backend, _gate) = fake_backend_over(profile, Duration::from_secs(5)).await;

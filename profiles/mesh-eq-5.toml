@@ -16,6 +16,7 @@ id = [6]
 key = "sample_rate"
 label = "Sample rate"
 kind = "readout"
+key_reading = true
 values = { 0 = "—", 1 = "44.1 kHz", 2 = "48 kHz", 3 = "88.2 kHz", 4 = "96 kHz", 5 = "176.4 kHz", 6 = "192 kHz", 7 = "352.8 kHz", 8 = "384 kHz" }
 
 [[control]]
@@ -23,6 +24,7 @@ id = [10]
 key = "volume"
 label = "Volume"
 kind = "level"
+key_reading = true
 range = [0, 127]
 unit = "dB"
 convert = { table = "dac-attenuation-db" }

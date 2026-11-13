@@ -429,6 +429,15 @@ fn the_line_names_the_error_and_the_volume_to_lower_only_for_a_real_boost() {
         result(1.0, 1.0, 523.0, 0.0).line(),
         "fit 1.0 dB RMS · worst 1.0 dB at 523 Hz"
     );
+    // the web's reading of a frequency: a whole number of hertz has no `.0`
+    assert_eq!(
+        result(1.0, 1.0, 20.0, 0.0).line(),
+        "fit 1.0 dB RMS · worst 1.0 dB at 20 Hz"
+    );
+    assert_eq!(
+        result(1.0, 1.0, 95.3, 0.0).line(),
+        "fit 1.0 dB RMS · worst 1.0 dB at 95.3 Hz"
+    );
 }
 
 #[test]

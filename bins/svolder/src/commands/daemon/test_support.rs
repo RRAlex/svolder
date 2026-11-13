@@ -111,6 +111,9 @@ impl Handler for StoppingDaemon {
                 mcp_token: None,
                 web: None,
                 web_token: None,
+                features: Vec::new(),
+                config_changed: false,
+                config_missing: false,
             },
             _ => Response::Ack,
         }
@@ -202,6 +205,9 @@ impl Handler for FakeDaemon {
                     guest: svolder_ipc::config::WebGuest::None,
                 }),
                 web_token: None,
+                features: Vec::new(),
+                config_changed: false,
+                config_missing: false,
             },
             Request::Devices => Response::Devices {
                 devices: vec![
@@ -219,6 +225,7 @@ impl Handler for FakeDaemon {
                         passphrase_note: None,
                         refused: false,
                         recalled: None,
+                        key_readings: Vec::new(),
                     },
                     DeviceInfo {
                         signal: None,
@@ -234,6 +241,7 @@ impl Handler for FakeDaemon {
                         passphrase_note: None,
                         refused: false,
                         recalled: None,
+                        key_readings: Vec::new(),
                     },
                 ],
             },

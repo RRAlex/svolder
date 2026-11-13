@@ -207,7 +207,7 @@ impl App {
                 // A reading slipping in above the focused one moves it down a row: the focus
                 // goes with it.
                 if self.screen == Screen::Telemetry && focused.is_some_and(|f| *slot.key() < f) {
-                    self.selected += 1;
+                    self.cursor = super::ControlsCursor::Row(self.cursor.row() + 1);
                 }
                 let mut rate = RateEstimate::default();
                 rate.sample(now);
@@ -294,7 +294,7 @@ impl App {
         }
         if self.screen == Screen::Telemetry {
             let row = focused.and_then(|id| self.readings.values.keys().position(|had| *had == id));
-            self.selected = row.unwrap_or(0);
+            self.set_selected(row.unwrap_or(0));
         }
         // A tone control the new readings say nothing about has no curve left to warn about.
         self.tone_read();

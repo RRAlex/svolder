@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{Client, McpStatus, MqttStatus, Request, Response, TokenInfo, WebStatus};
+use crate::{Client, McpStatus, MqttStatus, Reason, Request, Response, TokenInfo, WebStatus};
 
 /// How a daemon's version stands against this svolder's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +82,39 @@ pub fn mismatch_line(daemon: &str, own: &str) -> Option<String> {
 /// The command that brings a daemon up to this svolder's version.
 pub const RESTART_COMMAND: &str = "svolder daemon restart";
 
+/// The command that has a daemon read its configuration file again and apply it.
+pub const RELOAD_COMMAND: &str = "svolder daemon reload";
+
+/// The line that says the daemon's configuration file changed since its last reload, and how to
+/// reload: `status`, `doctor`, the TUI and the web page all give these words. `path` is the file
+/// as the daemon names it (a container's daemon reads another file than this svolder's).
+pub fn config_changed_line(path: &str) -> String {
+    format!("config: {path} changed since the last reload: {RELOAD_COMMAND} (or SIGHUP)")
+}
+
+/// The line that says the daemon's configuration file is gone: the daemon keeps the configuration
+/// it runs and refuses a reload until the file is back. Every front end gives these words.
+pub fn config_missing_line(path: &str) -> String {
+    format!(
+        "config: {path} is missing: the daemon keeps its running configuration; restore the file, \
+         then {RELOAD_COMMAND}"
+    )
+}
+
+/// What the daemon says when it refuses a reload or a write because its configuration file is
+/// gone. It already says the step, so a front end adds none ([`is_config_missing_refusal`]).
+pub fn config_missing_refusal(path: &str) -> String {
+    format!(
+        "{path} is missing: the daemon keeps its running configuration; restore the file, then \
+         try again"
+    )
+}
+
+/// Whether `text` is [`config_missing_refusal`]'s.
+pub fn is_config_missing_refusal(text: &str) -> bool {
+    text.contains(" is missing: the daemon keeps its running configuration; restore the file")
+}
+
 /// Whether `text` is a version number as the daemon reports one, rather than the words a client
 /// puts in its place when the daemon did not answer one.
 pub fn is_version(text: &str) -> bool {
@@ -105,6 +138,74 @@ pub struct DaemonInfo {
     pub web: Option<WebStatus>,
     /// Where its web UI's token comes from and its tail, when it says.
     pub web_token: Option<TokenInfo>,
+    /// What it says it supports; empty for a daemon too old to list any.
+    pub features: Vec<String>,
+    /// Whether its configuration file changed since the last reload (a hand edit it has not
+    /// taken); false for a daemon too old to say.
+    pub config_changed: bool,
+    /// Whether its configuration file is gone (`config_changed` is then true too); false for a
+    /// daemon too old to say.
+    pub config_missing: bool,
+}
+
+impl DaemonInfo {
+    /// Whether the daemon lists `feature` (one of the `FEATURE_*` constants) as supported. Every
+    /// front-end question of whether the daemon can do something goes through here; a daemon
+    /// that listed nothing supports nothing. It answers for the daemon that sent this `version`
+    /// answer: ask again after a restart.
+    pub fn supports(&self, feature: &str) -> bool {
+        self.features.iter().any(|f| f == feature)
+    }
+
+    /// The line that says the daemon's configuration file changed since its last reload, or is
+    /// missing, naming the file as the daemon does; `None` while it did not (and for a daemon too
+    /// old to say).
+    pub fn config_changed_words(&self) -> Option<String> {
+        let path = self.config.as_deref().unwrap_or("its config.toml");
+        match (self.config_changed, self.config_missing) {
+            (_, true) => Some(config_missing_line(path)),
+            (true, false) => Some(config_changed_line(path)),
+            (false, false) => None,
+        }
+    }
+}
+
+/// The reason an error answer has: the `reason` it carries, or, for a 0.32.x daemon, which sent
+/// none, the one its words for a link that is away give (the old text match, kept for one release
+/// like [`is_unknown_request`] and gone with it after 0.33.x).
+pub fn reason_of(code: u8, message: &str, reason: Option<Reason>) -> Option<Reason> {
+    match (code, reason) {
+        (_, Some(reason)) => Some(reason),
+        (crate::CODE_LINK, None) if message == crate::NOT_CONNECTED => Some(Reason::NotConnected),
+        (crate::CODE_LINK, None) if message.ends_with(crate::NOT_FOUND_YET) => {
+            Some(Reason::NotFoundYet)
+        }
+        _ => None,
+    }
+}
+
+/// Whether an error answer `code` and `message` says the daemon, described by `info` (its
+/// `version` answer, when it could be had), does not know the request kind `cmd` (the request's
+/// wire name, such as `identify`).
+///
+/// A daemon since 0.33.0 answers [`crate::CODE_UNKNOWN_REQUEST`], and one that lists
+/// [`crate::FEATURE_UNKNOWN_REQUEST_CODE`] never answers the old words. The text match is the
+/// fallback for a 0.32.x daemon, which answered code 1 with serde's own `unknown variant` words
+/// and listed no features; it goes away after 0.33.x, when no such daemon is left to meet.
+pub fn is_unknown_request(info: Option<&DaemonInfo>, code: u8, message: &str, cmd: &str) -> bool {
+    match code {
+        crate::CODE_UNKNOWN_REQUEST => true,
+        crate::CODE_USAGE
+            if info.is_some_and(|info| info.supports(crate::FEATURE_UNKNOWN_REQUEST_CODE)) =>
+        {
+            false
+        }
+        crate::CODE_USAGE => {
+            message.starts_with("bad request: ")
+                && message.contains(&format!("unknown variant `{cmd}`"))
+        }
+        _ => false,
+    }
 }
 
 /// How long a front end gives a daemon to answer the request for its own version.
@@ -150,6 +251,9 @@ pub async fn version_on(client: &mut Client) -> Result<VersionReply, Unanswered>
             mcp_token,
             web,
             web_token,
+            features,
+            config_changed,
+            config_missing,
         }) => Ok(VersionReply {
             info: DaemonInfo {
                 version,
@@ -159,6 +263,9 @@ pub async fn version_on(client: &mut Client) -> Result<VersionReply, Unanswered>
                 mcp_token,
                 web,
                 web_token,
+                features,
+                config_changed,
+                config_missing,
             },
             log,
         }),

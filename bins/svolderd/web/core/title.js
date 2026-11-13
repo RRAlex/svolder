@@ -27,9 +27,10 @@ export function statusOf(page, state) {
   return TITLE.connected;
 }
 
-/** The title of the device `name` with its `status` and the `more` words after it. */
+/** The title of the device `name` with its `status` and the `more` words after it; with no
+ * device, the `more` words alone before the program's name. */
 export function titleOf({ name, status, more = [] }) {
-  if (!name) return TITLE.app;
+  if (!name) return more.length > 0 ? `${more.join(' · ')} — ${TITLE.app}` : TITLE.app;
   return `${name} · ${status}${more.map((word) => ` · ${word}`).join('')} — ${TITLE.app}`;
 }
 

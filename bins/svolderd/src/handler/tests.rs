@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::writer::Glided;
+use svolder_ipc::{CODE_LINK, CODE_USAGE, Reason};
 
 /// A daemon with no devices over the fake transport, whose socket and files are paths
 /// nothing reads: only its MQTT bridge is asked about.
@@ -21,6 +22,7 @@ pub(super) fn daemon() -> Daemon {
         PathBuf::from("/nonexistent/config.toml"),
         PathBuf::from("/nonexistent/profiles"),
         PathBuf::from("/nonexistent/svolder.sock"),
+        Config::default(),
     )
 }
 
@@ -73,11 +75,20 @@ async fn a_reload_after_the_stop_began_starts_no_bridge() {
 /// A device handle whose actor answers every command with an acknowledgement after `delay`
 /// and stays up for as long as the handle does.
 fn slow_device(name: &str, delay: Duration) -> Arc<DeviceHandle> {
+    answering_device(name, move |_| delay)
+}
+
+/// A device handle whose actor answers each command with an acknowledgement after the delay
+/// `delay_of` gives for it, and stays up for as long as the handle does.
+fn answering_device(
+    name: &str,
+    delay_of: impl Fn(&Command) -> Duration + Send + 'static,
+) -> Arc<DeviceHandle> {
     let (commands, mut inbox) =
         tokio::sync::mpsc::channel::<(Command, oneshot::Sender<Response>)>(4);
     tokio::spawn(async move {
-        while let Some((_, reply)) = inbox.recv().await {
-            tokio::time::sleep(delay).await;
+        while let Some((command, reply)) = inbox.recv().await {
+            tokio::time::sleep(delay_of(&command)).await;
             let _ = reply.send(Response::Ack);
         }
     });
@@ -166,6 +177,7 @@ async fn a_scan_window_is_held_to_the_maximum() {
         PathBuf::from("/nonexistent/config.toml"),
         PathBuf::from("/nonexistent/profiles"),
         PathBuf::from("/nonexistent/svolder.sock"),
+        Config::default(),
     );
     for window in [
         Duration::from_secs(5),
@@ -181,6 +193,44 @@ async fn a_scan_window_is_held_to_the_maximum() {
     );
 }
 
+/// A scan that hears a configured device it holds no link to feeds that device's signal: the
+/// strength it was heard at, and a point of its signal series.
+#[tokio::test]
+async fn a_scan_that_hears_a_configured_device_feeds_its_signal() {
+    let daemon = daemon();
+    let recorder = Arc::new(WindowRecorder(std::sync::Mutex::new(Vec::new())));
+    let transport: Arc<dyn Transport> = recorder;
+    let handle = device::spawn(
+        Arc::clone(&transport),
+        Arc::new(Registry::builtin().expect("the built-in profiles load")),
+        amp_entry("0102030405060708"),
+        Arc::new(crate::scanner::Scanner::new(transport)),
+    )
+    .expect("the actor starts");
+    let handle = Arc::new(handle);
+    daemon
+        .devices
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .devices = vec![Arc::clone(&handle)];
+    assert!(handle.describe().signal.is_none());
+    daemon.scan(Duration::from_millis(100)).await;
+    let signal = handle
+        .describe()
+        .signal
+        .expect("the scan's hearing is the device's signal");
+    assert_eq!(signal.dbm, -50);
+    match handle.readings(60) {
+        Response::Readings { signal, .. } => {
+            assert_eq!(
+                signal.iter().map(|(_, dbm)| *dbm).collect::<Vec<_>>(),
+                [-50.0]
+            );
+        }
+        other => panic!("readings: {other:?}"),
+    }
+}
+
 /// A default naming no configured device is refused with the CLI's sentence, even when one
 /// device is running, rather than answered by that device.
 #[tokio::test]
@@ -192,7 +242,7 @@ async fn a_dangling_default_is_refused_even_with_one_device() {
         set.default_device = Some("ghost".to_string());
     }
     let refused = daemon.resolve(None).err().expect("refused");
-    assert_eq!(refused.code, 1);
+    assert_eq!(refused.code, CODE_USAGE);
     assert_eq!(
         refused.message,
         svolder_ipc::config::dangling_default_message("ghost")
@@ -242,7 +292,13 @@ async fn ask_within_spends_one_deadline_on_the_send_and_the_reply() {
         .await;
     let took = started.elapsed();
     assert!(
-        matches!(response, Response::Error { code: 4, .. }),
+        matches!(
+            response,
+            Response::Error {
+                code: CODE_TIMEOUT,
+                ..
+            }
+        ),
         "got {response:?}"
     );
     assert_eq!(took, Duration::from_secs(5), "answered at {took:?}");
@@ -314,7 +370,13 @@ async fn history_refuses_an_unknown_device_and_is_empty_for_a_quiet_one() {
         })
         .await;
     assert!(
-        matches!(refused, Response::Error { code: 2, .. }),
+        matches!(
+            refused,
+            Response::Error {
+                code: CODE_NOT_FOUND,
+                ..
+            }
+        ),
         "got {refused:?}"
     );
 
@@ -441,7 +503,12 @@ async fn a_write_for_a_device_whose_writer_has_stopped_says_it_is_not_running() 
     let response = daemon
         .handle_from(crate::writer::Origin::Socket, band_write())
         .await;
-    let Response::Error { code: 3, message } = &response else {
+    let Response::Error {
+        code: CODE_LINK,
+        message,
+        ..
+    } = &response
+    else {
         panic!("got {response:?}");
     };
     assert!(message.contains("is not running"), "{message}");
@@ -462,7 +529,12 @@ async fn a_write_an_actor_never_answers_is_answered_when_the_deadline_passes() {
     let response = daemon
         .handle_from(crate::writer::Origin::Socket, band_write())
         .await;
-    let Response::Error { code: 4, message } = &response else {
+    let Response::Error {
+        code: CODE_TIMEOUT,
+        message,
+        ..
+    } = &response
+    else {
         panic!("got {response:?}");
     };
     assert!(message.contains("did not answer"), "{message}");
@@ -697,9 +769,36 @@ async fn a_recalled_request_for_an_unknown_device_is_refused() {
         )
         .await;
     assert!(
-        matches!(answer, Response::Error { code: 2, .. }),
+        matches!(
+            answer,
+            Response::Error {
+                code: CODE_NOT_FOUND,
+                ..
+            }
+        ),
         "{answer:?}"
     );
+}
+
+/// The client's default bound is never shorter than what the daemon may take for one request: a
+/// write waits its deadline to be handed over and again for the answer, and a recall waits the
+/// actor deadline for its plan and for its end.
+#[test]
+fn the_clients_default_bound_outlasts_the_daemons_worst_case() {
+    let worst = (ACTOR_DEADLINE * 2).max(crate::writer::WRITE_DEADLINE * 2);
+    assert!(svolder_ipc::DEFAULT_REQUEST_TIMEOUT > worst);
+}
+
+/// The version answer lists the features from the one list.
+#[tokio::test]
+async fn version_lists_the_features() {
+    let daemon = daemon().shared();
+    let Response::Version { features, .. } =
+        daemon.handle_from(Origin::Socket, Request::Version).await
+    else {
+        panic!("no version");
+    };
+    assert_eq!(features, svolder_ipc::FEATURES);
 }
 
 /// A `[web]` section turns the web UI on, a reload that turns it off closes it, and `version`
@@ -889,10 +988,7 @@ async fn web_codes_come_from_the_running_web_ui() {
     let off = daemon.handle_from(Origin::Socket, Request::WebPair).await;
     assert_eq!(
         off,
-        Response::Error {
-            code: 1,
-            message: svolder_ipc::WEB_OFF.to_string()
-        }
+        Response::error(CODE_USAGE, svolder_ipc::WEB_OFF.to_string())
     );
     let on = svolder_ipc::config::WebConfig {
         enabled: true,
@@ -928,10 +1024,7 @@ async fn a_link_code_is_asked_about_without_being_spent() {
         .await;
     assert_eq!(
         off,
-        Response::Error {
-            code: 1,
-            message: svolder_ipc::WEB_OFF.to_string()
-        }
+        Response::error(CODE_USAGE, svolder_ipc::WEB_OFF.to_string())
     );
     let on = svolder_ipc::config::WebConfig {
         enabled: true,
@@ -963,12 +1056,14 @@ async fn a_link_code_is_asked_about_without_being_spent() {
 /// reloads.
 pub(super) fn daemon_over(config: PathBuf, profiles: PathBuf) -> Daemon {
     let base = daemon();
+    let held = Config::load_from(&config).unwrap_or_default();
     Daemon::new(
         Arc::clone(&base.transport),
         read(&base.registry).clone(),
         config,
         profiles,
         PathBuf::from("/nonexistent/svolder.sock"),
+        held,
     )
 }
 
@@ -1085,10 +1180,7 @@ async fn identify_on_a_waiting_device_is_not_connected_and_keeps_the_wait() {
     let answer = daemon.handle(Request::Identify { device: None }).await;
     assert_eq!(
         answer,
-        Response::Error {
-            code: 3,
-            message: "device not connected".into()
-        }
+        Response::error(CODE_LINK, "device not connected").with_reason(Reason::NotConnected)
     );
     // A command that woke the device would have it scanning again by now, and its wait started
     // over from the full step.
@@ -1246,6 +1338,284 @@ async fn a_unit_configured_twice_gets_one_actor_at_start_and_at_reload() {
     daemon.reload_all().await.expect("the reload goes through");
     let names: Vec<String> = daemon.devices().iter().map(|d| d.name.clone()).collect();
     assert_eq!(names, ["dac"]);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A device file with one unit, for the tests that reload against the stop.
+fn one_device_file(tag: &str) -> (std::path::PathBuf, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("svolderd-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("profiles")).unwrap();
+    let config = dir.join("config.toml");
+    std::fs::write(
+        &config,
+        "[[device]]\nname = \"dac\"\nudid = \"0102030405060708\"\n",
+    )
+    .unwrap();
+    (dir, config)
+}
+
+/// A reload that waits behind another (its turn at `reloading` comes after the stop) starts no
+/// actor: the stop marks the device set first, `reload_all` refuses once it is marked, and nothing
+/// is left running that `shutdown` never asked to close.
+#[tokio::test]
+async fn a_reload_that_meets_the_stop_starts_no_actor() {
+    let (dir, config) = one_device_file("reload-stop");
+    let daemon = daemon_over(config, dir.join("profiles")).shared();
+    let turn = daemon.reloading.lock().await;
+    let waiting = tokio::spawn({
+        let daemon = Arc::clone(&daemon);
+        async move { daemon.reload_all().await }
+    });
+    daemon.shutdown().await;
+    drop(turn);
+    let answer = waiting.await.expect("the reload ends");
+    assert!(
+        answer.is_err(),
+        "a reload after the stop is refused: {answer:?}"
+    );
+    let refused = daemon.handle(Request::Reload).await;
+    assert!(
+        matches!(
+            &refused,
+            Response::Error {
+                reason: Some(Reason::Stopping),
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
+    assert!(
+        daemon.devices().is_empty(),
+        "no actor started after the stop"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A reconcile after the stop starts no actor either, and one that was past its start when the
+/// stop came does not publish what it started: it asks that actor to close and leaves the set
+/// as the stop found it.
+#[tokio::test(start_paused = true)]
+async fn a_reconcile_after_or_across_the_stop_publishes_no_actor() {
+    let (dir, config) = one_device_file("reconcile-stop");
+    let loaded = Config::load_from(&config).unwrap();
+    let after = daemon_over(config.clone(), dir.join("profiles")).shared();
+    after.shutdown().await;
+    after.reconcile(&loaded).await;
+    assert!(after.devices().is_empty(), "no actor after the stop");
+
+    // `dac` is new and starts first; `slow` is kept and its `Configure` takes a second, during
+    // which the stop comes.
+    let across = daemon_over(config, dir.join("profiles")).shared();
+    across
+        .devices
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .devices = vec![slow_device("slow", Duration::from_secs(1))];
+    let mut both = loaded.clone();
+    let mut slow = both.devices[0].clone();
+    slow.name = "slow".into();
+    both.devices.push(slow);
+    let reconciling = tokio::spawn({
+        let across = Arc::clone(&across);
+        async move { across.reconcile(&both).await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    across.shutdown().await;
+    reconciling.await.expect("the reconcile ends");
+    let names: Vec<String> = across.devices().iter().map(|d| d.name.clone()).collect();
+    assert_eq!(
+        names,
+        ["slow"],
+        "the actor started across the stop was not published"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A daemon over a fake transport the test keeps, holding one actor, `slow`, whose `Configure`
+/// takes most of a command deadline and whose other answers come at once; and a configuration
+/// that names a new device, `dac`, before it.
+fn daemon_with_a_slow_configure(
+    tag: &str,
+) -> (
+    PathBuf,
+    Arc<svolder_ble::FakeTransport>,
+    Arc<Daemon>,
+    Config,
+) {
+    let (dir, config) = one_device_file(tag);
+    let mut both = Config::load_from(&config).unwrap();
+    let mut slow = both.devices[0].clone();
+    slow.name = "slow".into();
+    both.devices.push(slow);
+    let registry = Arc::new(Registry::builtin().expect("the built-in profiles load"));
+    let profile = registry.get("gungnir2-v2").expect("a built-in").clone();
+    let fake = Arc::new(svolder_ble::FakeTransport::from_profile(
+        &profile,
+        "0102030405060708".parse().expect("a valid unit id"),
+        3,
+        svolder_proto::Passphrase::from_text("1234").expect("four digits"),
+    ));
+    let daemon = Daemon::new(
+        Arc::clone(&fake) as Arc<dyn Transport>,
+        registry,
+        config,
+        dir.join("profiles"),
+        PathBuf::from("/nonexistent/svolder.sock"),
+        Config::default(),
+    )
+    .shared();
+    written(&daemon.devices).devices = vec![answering_device("slow", |command| match command {
+        Command::Configure(_) => Duration::from_secs(50),
+        _ => Duration::ZERO,
+    })];
+    (dir, fake, daemon, both)
+}
+
+/// Wait, on the paused clock, until `fake` has had one link opened.
+async fn linked_once(fake: &svolder_ble::FakeTransport) {
+    for _ in 0..500 {
+        if fake.connects() == 1 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the started actor never linked");
+}
+
+/// The stop closes an actor a reconcile started and has not published yet: the reconcile is
+/// still held up behind a kept actor's `Configure` when `shutdown` returns, and by then the new
+/// actor has released its link.
+#[tokio::test(start_paused = true)]
+async fn shutdown_closes_an_actor_a_reconcile_in_flight_started() {
+    let (dir, fake, daemon, both) = daemon_with_a_slow_configure("stop-owns");
+    let reconciling = tokio::spawn({
+        let daemon = Arc::clone(&daemon);
+        async move { daemon.reconcile(&both).await }
+    });
+    linked_once(&fake).await;
+    daemon.shutdown().await;
+    assert!(!reconciling.is_finished(), "the reconcile is still held up");
+    assert_eq!(
+        (fake.connects(), fake.releases()),
+        (1, 1),
+        "the stop closed the actor the reconcile started"
+    );
+    let names = reconciling.await.expect("the reconcile ends");
+    assert!(names.is_empty(), "it published nothing: {names:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A reconcile whose task is dropped before any stop takes its actors off the `starting` list
+/// and lets their handles go; an actor whose handle is gone closes its link by itself.
+#[tokio::test(start_paused = true)]
+async fn an_actor_of_a_dropped_reconcile_is_off_the_list_and_closes_itself() {
+    let (dir, fake, daemon, both) = daemon_with_a_slow_configure("stop-owns-aborted");
+    let reconciling = tokio::spawn({
+        let daemon = Arc::clone(&daemon);
+        async move { daemon.reconcile(&both).await }
+    });
+    linked_once(&fake).await;
+    reconciling.abort();
+    assert!(reconciling.await.is_err(), "the reconcile was aborted");
+    assert!(read(&daemon.devices).starting.is_empty());
+    for _ in 0..500 {
+        if fake.releases() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!((fake.connects(), fake.releases()), (1, 1));
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The six seconds the daemon gives an actor beyond the farewell bound is the number the
+/// restart wait (`LOCK_WAIT`) adds up.
+#[test]
+fn the_shutdown_margin_is_the_one_the_restart_wait_assumes() {
+    assert_eq!(SHUTDOWN_MARGIN, svolder_ipc::ACTOR_STOP_MARGIN);
+    assert_eq!(
+        SHUTDOWN_DEADLINE,
+        svolder_ble::FAREWELL_BOUND + svolder_ipc::ACTOR_STOP_MARGIN
+    );
+}
+
+/// The bounded waits of the daemon's stop are the ones the restart wait adds up (`LOCK_WAIT` in
+/// the `svolder` binary, `docs/design/jobs.md`): the stop in `Daemon::shutdown` waits on exactly
+/// these, and `main` settles the transport and ends its runtime with exactly these. A new bounded
+/// wait added to either fails here until it is a named step of the sum.
+#[test]
+fn the_stop_has_the_steps_the_restart_wait_adds_up() {
+    let handler = include_str!("../handler.rs");
+    let body = handler
+        .split("pub async fn shutdown(&self) {")
+        .nth(1)
+        .and_then(|rest| rest.split("\n    }\n").next())
+        .expect("Daemon::shutdown");
+    let mut bounds: Vec<&str> = body
+        .split(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+        .filter(|w| w.ends_with("BOUND") || w.ends_with("DEADLINE") || w.ends_with("WAIT"))
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    assert_eq!(
+        bounds,
+        ["JOB_STOP_BOUND", "SHUTDOWN_DEADLINE", "WRITE_SETTLE_BOUND"],
+        "a bounded wait in Daemon::shutdown is a step of LOCK_WAIT"
+    );
+    assert_eq!(body.matches("tokio::time::timeout(").count(), 1);
+
+    let main = include_str!("../main.rs");
+    // The hangup reloader outlives the stop's mark, so an actor its reload started is closed by
+    // the stop and not dropped with the task. A tripwire on `main`'s wiring, read from its text:
+    // no test runs `main`'s stop, and the behaviour is pinned on `reconcile` and `shutdown` by
+    // `shutdown_closes_an_actor_a_reconcile_in_flight_started`.
+    let stop = main.find("daemon.shutdown().await").expect("the stop");
+    let abort = main.find("reloader.abort()").expect("the reloader's end");
+    assert!(stop < abort, "the reloader is aborted after the stop");
+    assert_eq!(main.matches(".settle(").count(), 1);
+    assert!(main.contains("transport.settle(svolder_ble::CLOSE_GRACE)"));
+    assert_eq!(main.matches("shutdown_timeout(").count(), 1);
+    assert!(main.contains("shutdown_timeout(svolder_ipc::RUNTIME_STOP_BOUND)"));
+}
+
+/// A device's row lists its key readings in order: the signal strength alone until the daemon
+/// has seen the device and knows its profile, then the signal strength and the readings the
+/// profile marks.
+#[tokio::test(start_paused = true)]
+async fn a_devices_row_lists_the_key_readings_signal_first() {
+    let (dir, config) = one_device_file("key-readings");
+    let daemon = daemon_over(config, dir.join("profiles")).shared();
+    let silent: Arc<dyn Transport> = Arc::new(WindowRecorder(std::sync::Mutex::new(Vec::new())));
+    let unseen = Arc::new(
+        device::spawn(
+            Arc::clone(&silent),
+            daemon.registry(),
+            amp_entry("1112131415161718"),
+            Arc::new(crate::scanner::Scanner::new(silent)),
+        )
+        .expect("the actor starts"),
+    );
+    assert_eq!(unseen.describe().key_readings, ["signal"]);
+
+    daemon.reload_all().await.expect("the reload goes through");
+    let rows = || async {
+        match daemon.handle(Request::Devices).await {
+            Response::Devices { devices } => devices,
+            other => panic!("{other:?}"),
+        }
+    };
+    for _ in 0..500 {
+        if rows().await[0].connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        rows().await[0].key_readings,
+        ["signal", "sample_rate", "volume", "input"]
+    );
     daemon.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }

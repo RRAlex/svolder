@@ -129,6 +129,7 @@ fn a_readout_the_profile_names_on_the_firmware_family_is_drawn_once() {
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     });
     let mut app = app_on(profile);

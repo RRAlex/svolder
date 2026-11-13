@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::ffi::OsStr;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::DirBuilderExt;
 use std::time::{Duration, SystemTime};
@@ -133,15 +134,17 @@ fn the_private_directory_is_short_and_private() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// The demo's TUI process turns the host's audio off whatever the caller said, since its
-/// controls would change the user's own volume and players, and reads its homes from the
-/// directory. (Its daemon runs a fake host instead.)
+/// The demo's TUI process reaches no host audio of its own whatever the caller said, since its
+/// controls would change the user's own volume and players: `fake` leaves it the daemon's
+/// simulated host, in memory, and `svolder_host::host_unreached` is true for it. It reads its homes
+/// from the directory.
 #[test]
 fn the_demo_environment_has_no_host_and_its_own_homes() {
     let dir = Path::new("/tmp/sd-abcdef");
     let env = isolated_env(dir);
     let get = |name: &str| env.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone());
-    assert_eq!(get("SVOLDER_HOST"), Some(PathBuf::from("off")));
+    assert_eq!(get("SVOLDER_HOST"), Some(PathBuf::from("fake")));
+    assert!(svolder_host::is_fake(Some(OsStr::new("fake"))));
     assert_eq!(get("SVOLDER_TRANSPORT"), Some(PathBuf::from("fake")));
     assert_eq!(get("XDG_CONFIG_HOME"), Some(dir.join("config")));
     assert_eq!(get("XDG_STATE_HOME"), Some(dir.join("state")));
@@ -454,7 +457,7 @@ fn the_tui_environment_follows_the_host_option() {
         Some(dir.join("no-systemctl"))
     );
     let (set, unset) = tui_env(dir, None);
-    assert_eq!(value(&set, "SVOLDER_HOST"), Some(PathBuf::from("off")));
+    assert_eq!(value(&set, "SVOLDER_HOST"), Some(PathBuf::from("fake")));
     assert_eq!(unset, ["SVOLDER_SOCKET"]);
     assert_eq!(value(&set, "PIPEWIRE_RUNTIME_DIR"), None);
 }

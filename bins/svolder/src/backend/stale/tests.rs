@@ -223,6 +223,9 @@ impl svolder_ipc::Handler for Stalls {
                 mcp_token: None,
                 web: None,
                 web_token: None,
+                features: Vec::new(),
+                config_changed: false,
+                config_missing: false,
             },
             Request::Devices if self.devices_answered => Response::Devices {
                 devices: Vec::new(),
@@ -301,6 +304,9 @@ impl svolder_ipc::Handler for Slow {
                 mcp_token: None,
                 web: None,
                 web_token: None,
+                features: Vec::new(),
+                config_changed: false,
+                config_missing: false,
             },
             Request::Devices => Response::Devices {
                 devices: Vec::new(),
@@ -416,4 +422,43 @@ async fn a_preset_reload_that_fails_or_has_no_daemon_is_quiet() {
     reload_if_reads(daemon.socket.clone(), &path).await;
     assert_eq!(daemon.reloads(), 1, "it was asked");
     reload_if_reads(dir.0.join("none.sock"), &path).await;
+}
+
+/// A write of a file the daemon says is gone is refused in the daemon's missing-file words, and
+/// only then: not with the file there, not for a file the daemon does not read, not when the
+/// daemon does not call the file missing.
+#[tokio::test]
+async fn a_write_of_a_file_the_daemon_misses_is_refused() {
+    let (dir, path, _config) = config_naming(&["fake"]);
+    let daemon = daemon_reading(&path).await;
+    daemon.config_missing(true);
+    assert_eq!(
+        refusal_if_missing(&daemon.socket, &path).await,
+        None,
+        "the file is there"
+    );
+
+    std::fs::remove_file(&path).expect("the file is removed");
+    let words = refusal_if_missing(&daemon.socket, &path)
+        .await
+        .expect("refused");
+    assert!(
+        svolder_ipc::socket::daemon_version::is_config_missing_refusal(&words),
+        "{words}"
+    );
+    assert!(words.contains(&*path.to_string_lossy()), "{words}");
+
+    let other = dir.0.join("other.toml");
+    assert_eq!(
+        refusal_if_missing(&daemon.socket, &other).await,
+        None,
+        "another file"
+    );
+
+    daemon.config_missing(false);
+    assert_eq!(
+        refusal_if_missing(&daemon.socket, &path).await,
+        None,
+        "the daemon does not miss it"
+    );
 }

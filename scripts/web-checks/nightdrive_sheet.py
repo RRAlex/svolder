@@ -62,7 +62,7 @@ def the_sheet_opens(b, d):
           opened and got['role'] == 'dialog' and got['modal'] == 'true' and got['inside'] is True, got)
     check('  the scene and the dash under it are out of reach',
           got['scene'] is True and got['layer'] is True, got)
-    check('  its sections run Mode, Input, Bands, Presets, Controls, Facts', got['sections'] == ['nd-mode', 'nd-input', 'nd-bands', 'nd-presets', 'nd-controls', 'nd-facts'], got)
+    check('  its sections run Mode, Input, Bands, Presets, Controls, Device settings', got['sections'] == ['nd-mode', 'nd-input', 'nd-bands', 'nd-presets', 'nd-controls', 'nd-facts'], got)
     boxes = b.page("""(() => { const r = (id) => { const e = document.getElementById(id).getBoundingClientRect();
       return [e.left, e.top, e.right, e.bottom]; };
       const d = document.getElementById('nd-dialog').getBoundingClientRect();
@@ -610,9 +610,19 @@ def the_sheet_guest():
         time.sleep(0.8)
         b.page(REC)
         opened = sheet_open(b)
-        live = b.page("[...document.querySelectorAll('#nd-dialog button:not([aria-disabled=true])')].map((x) => x.id)")
-        check('a_guests_sheet_is_inert_in_a_browser: every key of a guest\'s sheet but the cross and the facts\' fold is aria-disabled',
-              opened and live == ['nd-sheet-x', 'nd-facts-fold'], live)
+        live = b.page("[...document.querySelectorAll('#nd-dialog button:not([aria-disabled=true]):not([data-act=device-settings])')]"
+                      ".map((x) => x.id)")
+        check('a_guests_sheet_is_inert_in_a_browser: every key of a guest\'s sheet but the cross and the foot is aria-disabled',
+              opened and live == ['nd-sheet-x'], live)
+        # the foot is navigation: *Devices…* is live and opens the read-only popup
+        foot = '#nd-dialog [data-act=device-settings]'
+        check('a_guests_sheet_foot_opens_the_read_only_popup: it reads Devices…',
+              b.page(f"document.querySelector('{foot}')?.textContent.trim()") == 'Devices…')
+        click_el(b, foot)
+        check('a_guests_sheet_foot_opens_the_read_only_popup: a tap opens the Devices popup',
+              poll(lambda: b.page("!!document.querySelector('[id^=popup-devices]')"), 8.0) is True)
+        b.press('Escape')
+        time.sleep(0.4)
         # the core is asked each time (a tap is never swallowed by the page): its actions are wrapped to say so
         b.page("""(() => { window.__asked = []; for (const name of ['setMode', 'setBand', 'recallPreset', 'setControl']) {
           const was = __core.actions[name]; __core.actions[name] = (...a) => { window.__asked.push(name); return was(...a); }; }
@@ -649,47 +659,21 @@ def click_in(b, selector):
     click_el(b, selector)
 
 
-def the_facts_unfold_and_the_choice_survives_a_reload(b, d):
+def the_sheet_foot_opens_the_devices_page(b, d):
     calm_start(b, d)
     sheet_open(b)
-    state = b.page("""(() => { const f = document.getElementById('nd-facts-body'); const h = document.getElementById('nd-facts-fold');
-      return { hidden: f.hidden, expanded: h.getAttribute('aria-expanded'), stored: localStorage.getItem('svolder.theme.nightdrive.facts') }; })()""")
-    check('the_facts_start_folded: the facts are folded and nothing is stored', state == {'hidden': True, 'expanded': 'false', 'stored': None}, state)
-    click_el(b, '#nd-facts-fold')
-    state = b.page("""(() => ({ hidden: document.getElementById('nd-facts-body').hidden,
-      stored: localStorage.getItem('svolder.theme.nightdrive.facts'), firmware: !!document.querySelector('#nd-spec [data-fact=Firmware]'),
-      rows: document.querySelectorAll('#nd-readings tr').length }))()""")
-    check('the_facts_unfold_and_the_choice_survives_a_reload: the title unfolds the spec and the readings and the choice is kept',
-          state['hidden'] is False and state['stored'] == '"open"' and state['firmware'] and state['rows'] > 3, state)
-    b.goto(f'{d.url}?theme=nightdrive', settle=1.0)
-    b.page(BOOT_THEME)
-    sheet_open(b)
-    check('  a reload finds them open', b.page("document.getElementById('nd-facts-body').hidden") is False)
-    click_el(b, '#nd-facts-fold')
-    check('  and folded again', b.page("document.getElementById('nd-facts-body').hidden") is True
-          and b.page("localStorage.getItem('svolder.theme.nightdrive.facts')") == '"closed"')
-    # the readings show their ages while the sheet is open
-    click_el(b, '#nd-facts-fold')
-    ages = b.page("[...document.querySelectorAll('#nd-readings td.nd-age')].map((e) => e.textContent).slice(0, 3)")
-    check('  the readings say how long ago they were heard', len(ages) == 3 and all(a for a in ages), ages)
+    got = b.page("""(() => ({ foot: [...document.querySelectorAll('#nd-facts [data-act]')].map((x) => [x.dataset.act, x.textContent]),
+      facts: document.querySelectorAll('#nd-dialog [data-fact]:not(.nd-faults *), #nd-spec, #nd-readings, #nd-identify, #nd-facts-fold').length }))()""")
+    check('the_sheet_foot_opens_the_devices_page: the sheet ends in `Device settings…` and draws no fact, no readings and no Identify',
+          got['foot'] == [['device-settings', 'Device settings…']] and got['facts'] == 0, got)
+    click_in(b, '#nd-facts [data-act=device-settings]')
+    opened = poll(lambda: b.page("__core.router.state().popup") == 'devices', 8.0)
+    page = b.page("__core.router.state().page")
+    check('  the button opens the Devices popup, over the sheet, at the page of the sheet\'s device',
+          opened is True and page == 'd-' + b.page('__core.model.shown()'), [opened, page])
+    b.press('Escape')
+    check('  Escape closes the popup', poll(lambda: b.page("__core.router.state().popup") is None, 5.0))
     check('  no page error', errors(b) == [], errors(b)[:3])
-
-
-def identify_says_the_daemons_words(b, d):
-    calm_start(b, d)
-    sheet_open(b)
-    if b.page("document.getElementById('nd-facts-body').hidden"):
-        click_el(b, '#nd-facts-fold')
-    b.page('window.__posts.length = 0')
-    b.page("document.getElementById('nd-identify').scrollIntoView({ block: 'center' })")
-    time.sleep(0.2)
-    click_el(b, '#nd-identify')
-    poll(lambda: [u for u, _, _ in b.page('window.__posts') if u.endswith('/identify')], 4.0)
-    sent = [u for u, _, _ in b.page('window.__posts') if u.endswith('/identify')]
-    toast = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.textContent)"), 3.0)
-    check('identify_says_the_daemons_words: Identify posts once and the popup is the core\'s words',
-          len(sent) == 1 and toast and any('Identify sent' in t or 'wait' in t for t in toast), [sent, toast])
-    click_in(b, '#nd-facts-fold')
 
 
 def write_each_control(b, d, tag):
@@ -855,7 +839,7 @@ def an_amp_shown_alone_keeps_the_music_and_its_gauges():
               b.page("document.querySelector('.nd-scene').dataset.tune"))
         sheet_open(b)
         got = b.page("[...document.querySelectorAll('#nd-dialog section')].map((s) => s.id)")
-        check('  its sheet has Controls and the facts and no band table', 'nd-controls' in got and 'nd-facts' in got and 'nd-bands' not in got, got)
+        check('  its sheet has Controls and the foot and no band table', 'nd-controls' in got and 'nd-facts' in got and 'nd-bands' not in got, got)
         scales = b.page("[...document.querySelectorAll('#nd-meters .nd-mscale')].map((e) => [e.dataset.key, !!e.querySelector('.nd-needle'), !!e.querySelector('.nd-zone')])")
         check('an_amp_shows_its_meters_in_the_sheet: a scale with a needle and a shaded share for each channel', len(scales) == 2 and all(x[1] and x[2] for x in scales), scales)
         words = b.page("[...document.querySelectorAll('#nd-meters [data-meter]')].map((e) => e.textContent)")
@@ -915,8 +899,7 @@ def the_sheet(b, d):
     the_band_hold(b, d)
     the_mode_and_loudness(b, d)
     the_presets(b, d)
-    the_facts_unfold_and_the_choice_survives_a_reload(b, d)
-    identify_says_the_daemons_words(b, d)
+    the_sheet_foot_opens_the_devices_page(b, d)
     every_control_writes(b, d)
     the_sheet_holds(b, d)
     the_sheet_list()

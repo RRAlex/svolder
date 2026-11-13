@@ -951,8 +951,8 @@ await ok('a_diamond_drag_with_the_eq_off_lifts_the_dim_and_a_flip_lets_go_of_the
   abort.abort();
 });
 
-/** The sheet's point steppers over a real core: `repeat` is the core's hold stood in for, so the test says when the
- * hold steps and when it ends. */
+/** The sheet's point steppers over a real core: `repeat` is the core's press-and-hold repeat stood in for, so the test says when it
+ * steps and when it ends. */
 function steppers(rig, state = 'live') {
   const listeners = {};
   const wrap = {
@@ -963,7 +963,7 @@ function steppers(rig, state = 'live') {
   const holds = {};
   const core = {
     ...rig.core,
-    hold: { repeat(event, opts) { holds.opts = opts; holds.ended = 0; opts.onStart?.(); opts.step(opts.el); return { end: () => { holds.ended += 1; opts.onEnd(); } }; } },
+    repeat(event, opts) { holds.opts = opts; holds.ended = 0; opts.onStart?.(); opts.step(opts.el); return { end: () => { holds.ended += 1; opts.onEnd(); } }; },
   };
   wireBands({
     core, live: { onSwitch() {}, onReading() {} }, sheet: { body: () => null, wrap, keep: { take() {}, drop() {}, dropLater() {} }, isOpen: () => false },
@@ -1037,6 +1037,40 @@ await ok('a_point_stepper_pressed_while_the_stream_is_waiting_or_lost_steps_noth
     assert.equal(writes(rig).length, 0, `and no stray final write while ${state}`);
     abort.abort();
   }
+});
+
+const overlayDevice = (overlay, mode = 'eq') => ({
+  ...RIG_DAC,
+  tone: toneOf({ mode, overlay, bands: { rows: [] } }),
+});
+const servedOverlay = (more = {}) => ({
+  name: 'Imp', target: Array.from({ length: 181 }, () => 4), fit: Array.from({ length: 181 }, () => 0),
+  gap: [[600, 1500]], gap_db: 2, rms_db: 0.9, worst_db: 4, worst_hz: 1000, ...more,
+});
+
+await ok('the_overlay_is_the_devices_target_on_the_mountains_axis_and_the_daemons_spans_as_columns', async () => {
+  const rig = computerRig({ side: 'dac', device: overlayDevice(servedOverlay()) });
+  const { tune, abort } = mount(rig, { up: false });
+  const shown = tune.overlay();
+  near(shown.y(640), map.yOfDb(4), 1e-6);
+  assert.equal(shown.y, tune.overlay().y, 'the same function while nothing changes');
+  assert.equal(shown.cols.length, 24);
+  const lit = [...shown.cols].map((v, i) => (v ? i : null)).filter((i) => i !== null);
+  assert.ok(lit.length > 0 && lit.length < 24, lit.join());
+  abort.abort();
+});
+
+await ok('the_overlay_is_none_off_eq_without_a_target_and_on_the_computer_side', async () => {
+  for (const device of [overlayDevice(servedOverlay(), 'flat'), overlayDevice(undefined), overlayDevice(servedOverlay({ target: [] }))]) {
+    const rig = computerRig({ side: 'dac', device });
+    const { tune, abort } = mount(rig, { up: false });
+    assert.equal(tune.overlay(), null);
+    abort.abort();
+  }
+  const rig = computerRig({ side: 'computer', device: overlayDevice(servedOverlay()) });
+  const { tune, abort } = mount(rig, { up: false });
+  assert.equal(tune.overlay(), null, 'the computer has no fit');
+  abort.abort();
 });
 
 console.log(`nightdrive-tune.mjs: ${n} passed`);

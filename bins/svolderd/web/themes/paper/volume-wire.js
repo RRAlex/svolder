@@ -131,7 +131,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
       gripped = true;
       device = store.shown();
       if (climbing(v)) core.actions.stopClimb();
-      live.hold('volume', true);
+      live.freeze('volume', true);
       const onNeedle = Boolean(event.target.closest?.('#p-needle'));
       // A press on the needle keeps its distance from the pointer, so it does not jump.
       offset = onNeedle ? fractionOf(v, shownRaw(v, view)) - at : 0;
@@ -144,7 +144,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
     onEnd() {
       if (!gripped) return;
       gripped = false;
-      live.hold('volume', false);
+      live.freeze('volume', false);
       box.querySelector('#p-needle')?.focus({ preventScroll: true });
     },
   });
@@ -156,7 +156,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
     clearTimeout(timer);
     if (!gripped) return;
     gripped = false;
-    live.hold('volume', false);
+    live.freeze('volume', false);
   });
 
   sliderKeys(box, {

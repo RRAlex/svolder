@@ -371,6 +371,7 @@ mod tests {
             mutes_output: false,
             powers_output: false,
             asks_on_change: false,
+            key_reading: false,
             reads: Vec::new(),
         }
     }

@@ -213,7 +213,7 @@ async fn the_passphrase_step_is_a_row_that_opens_on_the_code() {
             " The four digits the phone app shows, `auto` to have svolder read the code from ",
             " the device, or `none` for a device with no passphrase.                         ",
             "                                                                                ",
-            " > ‹ ____ ›                                                                     ",
+            " > ‹ ____ ›  Tab shows the code                                                 ",
         ],
         &[FOOTER_STEPPING],
     );
@@ -363,6 +363,54 @@ async fn what_is_being_waited_for_is_named_under_the_step() {
             " ⠋ listening…                                                                   ",
         ],
         &[FOOTER],
+    );
+}
+
+/// The devices a scan has heard so far are listed under its wait, in the order they were heard.
+#[tokio::test]
+async fn the_devices_heard_so_far_are_listed_under_the_wait() {
+    let mut step = showing(FakeEffects::healthy().with_scan(vec![]), Step::Scan).await;
+    step.wait_for(Some("listening…".into()));
+    step.heard = vec![
+        "Bifrost 3  0102030405060708  -41 dBm".into(),
+        "Gungnir 2  0807060504030201  -58 dBm".into(),
+    ];
+    assert_frame(
+        &frame(&step, 80, 24),
+        &[
+            " Find the device                                                                ",
+            RULE,
+            " Listening takes up to 15 s.                                                    ",
+            "                                                                                ",
+            " ▶ Scan                                                                         ",
+            "                                                                                ",
+            " ⠋ listening…                                                                   ",
+            "   Bifrost 3  0102030405060708  -41 dBm                                         ",
+            "   Gungnir 2  0807060504030201  -58 dBm                                         ",
+        ],
+        &[FOOTER],
+    );
+}
+
+/// Devices heard past what the screen has room for are counted, and the row that answers the
+/// step and the spinner stay where they were: nothing moves as the rows arrive.
+#[tokio::test]
+async fn devices_heard_past_the_room_are_counted_and_move_nothing() {
+    let mut step = showing(FakeEffects::healthy().with_scan(vec![]), Step::Scan).await;
+    step.wait_for(Some("listening…".into()));
+    let bare = text(&frame(&step, 80, 12));
+    step.heard = (0..9).map(|n| format!("Unit {n}")).collect();
+    let full = text(&frame(&step, 80, 12));
+    let at = |rows: &[String], what: &str| rows.iter().position(|row| row.contains(what));
+    assert_eq!(at(&bare, "▶ Scan"), at(&full, "▶ Scan"), "{full:#?}");
+    assert_eq!(
+        at(&bare, "listening…"),
+        at(&full, "listening…"),
+        "{full:#?}"
+    );
+    assert!(
+        full.iter().any(|row| row.contains("more heard")),
+        "{full:#?}"
     );
 }
 

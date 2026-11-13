@@ -45,6 +45,11 @@ pub struct LiveEffects {
 }
 
 impl LiveEffects {
+    /// The daemon socket this run resolves to.
+    pub(crate) fn socket(&self) -> &Path {
+        &self.socket
+    }
+
     /// Look the host over and answer with the effects a wizard over it has.
     ///
     /// The wizard reads and writes the configuration at `path`.

@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: Device request
+description: A device svolder does not know yet
+labels: [enhancement]
+body:
+  - type: input
+    id: product
+    attributes:
+      label: Product name
+    validations:
+      required: true
+  - type: textarea
+    id: advertised
+    attributes:
+      label: What the device advertises over Bluetooth
+      description: If you can see it, for example from `bluetoothctl` (its name, services and manufacturer data). Leave it empty if you cannot.
+      render: shell
+  - type: textarea
+    id: control
+    attributes:
+      label: What you would like to control
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: Please do not attach files from, or taken out of, the manufacturer's app.

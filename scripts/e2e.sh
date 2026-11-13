@@ -20,6 +20,9 @@ SIGNAL_UNIT="${SVOLDER_E2E_SIGNAL_UNIT:-0102030405060709}"
 # The unit id the Loki Max section's simulator advertises: a fresh id for the reason SIGNAL_UNIT
 # gives, since BlueZ keeps the ManufacturerData of a simulator it has heard before.
 LOKI_UNIT=010203040506070a
+# The unit id the walk section's simulator advertises: a fresh id for the reason SIGNAL_UNIT gives,
+# and one the daemon's configuration lacks, so the walk is what adds it.
+WALK_UNIT=010203040506070b
 # The passphrase the peripheral is started with, which the live tests encode frames for.
 PASSPHRASE=1234
 # A directory holding prebuilt `svolder` and `svolderd` (target/dist/aarch64, say) to drive in place
@@ -52,6 +55,9 @@ DAEMON_SOCKET=
 # The file the signal section's `watch` writes its readings to, removed however the run ends.
 # Empty until that section starts.
 SIGNAL_OUT=
+# The walk section's follow of the page's events stream: the curl that holds it open, stopped
+# however the run ends. Empty until that section starts it.
+WALK_EVENTS_PID=
 
 # Every svolder/svolderd this script runs keeps its state (last_adapter and the rest of
 # DeviceState) here rather than the host's own ~/.local/state/svolder, the same way DAEMON_DIR
@@ -157,6 +163,7 @@ cleanup() {
   # ended: the hand probe that SVOLDER_E2E_KEEP_SIM leaves the sim for could not reach a
   # peripheral that a daemon is still connected to. Neither step may fail here, or the sim
   # below it would be left on the air.
+  if [ -n "$WALK_EVENTS_PID" ]; then kill "$WALK_EVENTS_PID" 2>/dev/null || true; fi
   stop_daemon || true
   if [ -n "$DAEMON_DIR" ]; then rm -rf "$DAEMON_DIR" || true; fi
   if [ "$status" != 0 ] && { [ -s "$SIM_LOG" ] || [ -s "$DAEMON_LOG" ]; }; then
@@ -663,6 +670,100 @@ out=$(daemon_cli get volume --json 2>&1) || fail "daemon get volume exited non-z
 ran_over_the_daemon "$out" "get volume after the web write"
 grep -q '"raw":90,' <<<"$out" || fail "the volume the web UI wrote did not reach the device: $out"
 
+# The walk's helpers, over the web UI at $WEB_ADDR, reading the walk's states from the file
+# $WALK_EVENTS a background curl of the page's events stream (`needs=walk`) writes. A state's keys
+# come in alphabetical order, so the greps look for a key, never for the key that follows it.
+# POST $2 (JSON, or empty) to the walk route $1; prints the body, fails unless the status is $3. The
+# states the stream carried before it are marked, so the waits below read only the ones after.
+walk_post() {
+  local reply code
+  WALK_MARK=$(walk_count)
+  reply=$(curl -s -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
+    -H "Origin: http://$WEB_ADDR" --data "$2" "http://$WEB_ADDR/api/v1/walk$1") \
+    || fail "curl to the walk route $1 exited non-zero"
+  code=$(tail -n1 <<<"$reply")
+  [ "$code" = "$3" ] || fail "the walk route $1 answered $code (expected $3): $reply"
+  sed '$d' <<<"$reply"
+}
+# How many walk states the stream has carried.
+walk_count() {
+  { grep -A1 '^event: walk' "$WALK_EVENTS" || true; } | { grep -c '^data:' || true; }
+}
+# The walk's last state on the stream, once one has come since the last walk_post (none before).
+walk_last() {
+  local states
+  states=$({ grep -A1 '^event: walk' "$WALK_EVENTS" || true; } | { grep '^data:' || true; })
+  [ "$(grep -c '^data:' <<<"$states" || true)" -gt "${WALK_MARK:-0}" ] || return 0
+  tail -n1 <<<"$states"
+}
+# Wait, up to $2 seconds, for the walk's last state to be one that waits at the step $1 (a step, or
+# steps separated by `|`); prints it.
+walk_waits_at() {
+  local last
+  for _ in $(seq $(($2 * 4))); do
+    last=$(walk_last)
+    if grep -q '"phase":"waiting"' <<<"$last" && grep -qE "\"step\":\"($1)\"" <<<"$last"; then
+      printf '%s\n' "$last"
+      return 0
+    fi
+    grep -qE '"kind":"(done|failed|cancelled)"' <<<"$last" && fail "the walk ended waiting for $1: $last"
+    sleep 0.25
+  done
+  fail "the walk did not wait at $1 within $2 s: $(walk_last)"
+}
+# The seconds since $1 (date +%s%N), to one decimal.
+since() {
+  awk -v from="$1" -v now="$(date +%s%N)" 'BEGIN { printf "%.1f", (now - from) / 1e9 }'
+}
+# Follow the page's events stream with `needs=walk` into $WALK_EVENTS, in the background.
+walk_follow() {
+  WALK_MARK=0
+  curl -sN -H "Origin: http://$WEB_ADDR" "http://$WEB_ADDR/api/v1/events?needs=walk" >"$WALK_EVENTS" &
+  WALK_EVENTS_PID=$!
+}
+# Stop following it.
+walk_unfollow() {
+  kill "$WALK_EVENTS_PID" 2>/dev/null || true
+  wait "$WALK_EVENTS_PID" 2>/dev/null || true
+  WALK_EVENTS_PID=
+}
+
+# A walk while the daemon holds the sim's link: its first prompt is the warning naming the linked
+# device, its scan marks that device's row as configured, and the link is still up after the scan,
+# with no `link lost` in the daemon's log since the walk started. Whether a held link survives a
+# scan is what this answers on these two controllers.
+echo "e2e: a walk while a device is linked warns, marks it, and leaves its link up"
+WALK_EVENTS="$RUN_DIR/walk-linked.txt"
+walk_follow
+LOG_MARK=$(wc -l <"$DAEMON_LOG")
+JOB=$(walk_post "" "" 200 | sed -n 's/.*"job":\([0-9]*\).*/\1/p')
+[ -n "$JOB" ] || fail "the linked walk's start answered no job"
+state=$(walk_waits_at linked 10)
+grep -q '"body":\["e2e has a link' <<<"$state" || fail "the warning does not name the linked device: $state"
+walk_post "/$JOB/answer" '{"choice":0}' 204 >/dev/null
+walk_waits_at scan 10 >/dev/null
+walk_post "/$JOB/answer" '{"choice":0}' 204 >/dev/null
+# A linked device may not advertise while it is connected: then the scan hears nothing and asks
+# again, which is said, and the link's survival is still what is checked.
+state=$(walk_waits_at 'pick|scan' 30)
+if grep -q '"step":"pick"' <<<"$state"; then
+  grep -qi "\"configured\":\"e2e\"[^}]*\"unit\":\"$UNIT\"" <<<"$state" \
+    || fail "the scan did not mark the linked device's row as configured: $state"
+  echo "e2e: the walk's scan heard the linked device and marked it configured"
+else
+  echo "e2e: the walk's scan did not hear the linked device (it does not advertise while linked)"
+fi
+walk_post "/$JOB/cancel" '' 204 >/dev/null
+walk_unfollow
+LINK_LOST=$(tail -n +"$((LOG_MARK + 1))" "$DAEMON_LOG" | grep -c 'e2e: link lost' || true)
+out=$(daemon_cli devices 2>&1) || out=''
+if [ "$LINK_LOST" = 0 ] && grep 'e2e' <<<"$out" | grep -q 'connected' \
+  && ! grep 'e2e' <<<"$out" | grep -q 'disconnected'; then
+  echo "e2e: the linked device's link survived the walk's scan"
+else
+  fail "the linked device's link did not survive the walk's scan ($LINK_LOST link lost): $out"
+fi
+
 echo "e2e: daemon watch"
 # `watch` runs until something stops it, so `timeout` is what ends it: 124 is the timeout
 # doing that and 0 is the CLI having ended first; any other code is the CLI failing. Spelled
@@ -816,6 +917,81 @@ sleep 3
 REFRESH_SEEN=$(( $(refresh_frames) - REFRESH_BEFORE ))
 [ "$REFRESH_SEEN" = 1 ] \
   || fail "the sim saw $REFRESH_SEEN refresh frames after a silent recall (expected exactly 1)"
+stop_daemon || fail "the daemon's socket was still there 5s after the daemon was killed"
+stop_sim
+
+# --- the device walk, over the daemon's web routes -------------------------------------------
+# A daemon whose configuration names only the first sim's unit, which is off the air now, walks to
+# a sim it does not know: a scan, the pick, a name, then the passphrase test. The sim advertises a
+# code it does not hold, so `auto` is refused and the walk asks for the passphrase; a wrong code is
+# refused, the right one written, and the reload connects the device. The walk's states come on the
+# page's events stream (`needs=walk`), which a background curl writes to a file; each step answers
+# through a POST and waits for the walk's next state that waits for an answer (the helpers are in
+# the daemon section).
+echo "e2e: the walk adds a device the configuration lacks"
+SIM_UNIT="$WALK_UNIT" SIM_EXTRA="--trace --profile gungnir2-v2 --advertised-passphrase 9999" start_sim
+DAEMON_UNIT="$UNIT" start_daemon
+WEB_ADDR=$(daemon_cli daemon status 2>&1 | sed -n 's/^web: listening on \([0-9.]*:[0-9]*\) .*/\1/p')
+[ -n "$WEB_ADDR" ] || fail "daemon status named no web UI address for the walk"
+WALK_EVENTS="$RUN_DIR/walk-events.txt"
+walk_follow
+WALK_STARTED=$(date +%s%N)
+JOB=$(walk_post "" "" 200 | sed -n 's/.*"job":\([0-9]*\).*/\1/p')
+[ -n "$JOB" ] || fail "the walk's start answered no job"
+walk_waits_at scan 10 >/dev/null
+t=$(date +%s%N)
+walk_post "/$JOB/answer" '{"choice":0}' 204 >/dev/null
+state=$(walk_waits_at pick 30)
+WALK_SCAN_S=$(since "$t")
+# The pick's choice is the walk unit's place among the rows heard; a row spells its unit id in
+# capitals.
+AT=$(sed 's/.*"rows":\[\(.*\)\].*/\1/' <<<"$state" | grep -oi '"unit":"[0-9a-f]*"' \
+  | grep -in "\"$WALK_UNIT\"" | cut -d: -f1 | sed -n 1p || true)
+[ -n "$AT" ] || fail "the walk's scan did not hear $WALK_UNIT: $state"
+walk_post "/$JOB/answer" "{\"choice\":$((AT - 1))}" 204 >/dev/null
+walk_waits_at name 10 >/dev/null
+t=$(date +%s%N)
+walk_post "/$JOB/answer" '{"text":"walked"}' 204 >/dev/null
+state=$(walk_waits_at passphrase 90)
+WALK_AUTO_S=$(since "$t")
+grep -q '"connect":{"outcome":"refused"}' <<<"$state" \
+  || fail "the walk asked for the passphrase without a refused test of auto: $state"
+t=$(date +%s%N)
+walk_post "/$JOB/answer" '{"text":"4321"}' 204 >/dev/null
+state=$(walk_waits_at passphrase 90)
+WALK_WRONG_S=$(since "$t")
+grep -q '"refusal":{[^}]*"kind":"passphrase"' <<<"$state" || fail "a wrong code was not refused: $state"
+grep -q '4321' "$WALK_EVENTS" && fail "the walk's states quote the code that was typed"
+t=$(date +%s%N)
+walk_post "/$JOB/answer" '{"text":"1234"}' 204 >/dev/null
+DONE=
+for _ in $(seq 360); do
+  last=$(walk_last)
+  if grep -q '"kind":"done"' <<<"$last"; then DONE="$last"; break; fi
+  grep -qE '"kind":"(failed|cancelled)"' <<<"$last" && fail "the walk ended without the device: $last"
+  sleep 0.25
+done
+[ -n "$DONE" ] || fail "the walk did not end within 90 s of the right code: $(walk_last)"
+WALK_RIGHT_S=$(since "$t")
+grep -q '"name":"walked"' <<<"$DONE" || fail "the walk's end does not name the device it wrote: $DONE"
+grep -qi "\"unit\":\"$WALK_UNIT\"" <<<"$DONE" || fail "the walk wrote another unit: $DONE"
+grep -q 'name = "walked"' "$DAEMON_DIR/svolder/config.toml" \
+  || fail "the configuration file has no block for the walked device"
+t=$(date +%s%N)
+WALKED=
+for _ in $(seq 60); do
+  out=$(daemon_cli devices 2>&1) || out=''
+  if grep -q 'walked' <<<"$out" && grep 'walked' <<<"$out" | grep -q 'connected' \
+    && ! grep 'walked' <<<"$out" | grep -q 'disconnected'; then
+    WALKED=1
+    break
+  fi
+  sleep 1
+done
+[ -n "$WALKED" ] || fail "the walked device was not connected within 60 s of the walk's end: $out"
+echo "e2e: the walk: scan ${WALK_SCAN_S} s, auto refused ${WALK_AUTO_S} s, wrong code ${WALK_WRONG_S} s," \
+  "right code and write ${WALK_RIGHT_S} s, connected $(since "$t") s later, $(since "$WALK_STARTED") s in all"
+walk_unfollow
 stop_daemon || fail "the daemon's socket was still there 5s after the daemon was killed"
 stop_sim
 

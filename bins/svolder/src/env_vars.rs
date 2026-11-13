@@ -235,7 +235,9 @@ const ENV_VARS: &[EnvVar] = &[
         dev_only: false,
         what: "`off` keeps `svolder tui` away from the host's own audio for that process, \
                whatever `[tui] host_audio` says: no `wpctl`, no `pw-record`, no `pw-play`, no session bus. \
-               `svolder host eq apply` and `remove` refuse with it set. For `svolderd`, `off` \
+               `fake` reaches the same nothing for `svolder tui`, which then follows the daemon's \
+               fake host if it is joined to one (the demo does). \
+               `svolder host eq apply` and `remove` refuse with either set. For `svolderd`, `off` \
                turns the host service off (no player watcher, no `pw-dump`, no cover reads), \
                whatever `[host] enabled` says, and `fake` runs a fake player, a fake route and a \
                bundled cover in its place, for demos and checks. Unset by default.",
@@ -273,6 +275,16 @@ const ENV_VARS: &[EnvVar] = &[
                unset.",
     },
     EnvVar {
+        name: "SVOLDER_WEB_ENABLED",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "Whether the web UI runs when `config.toml` has no `[web] enabled` key (an `enabled` \
+               in the file wins): `1` turns it on, `0` leaves it off; `true`, `false`, `yes`, \
+               `no`, `on` and `off` are read too, and another value is refused by name. For a \
+               container's compose file, which turns the page on with no configuration file \
+               written. Unset by default, which is off; an empty value counts as unset.",
+    },
+    EnvVar {
         name: "SVOLDER_WEB_URL",
         read_by: "svolder, svolderd",
         dev_only: false,
@@ -292,6 +304,14 @@ const ENV_VARS: &[EnvVar] = &[
                as unset.",
     },
     EnvVar {
+        name: "SVOLDER_MCP_ENABLED",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "Whether the MCP server runs when `config.toml` has no `[mcp] enabled` key (an \
+               `enabled` in the file wins), read as `SVOLDER_WEB_ENABLED` is. Unset by default, \
+               which is off; an empty value counts as unset.",
+    },
+    EnvVar {
         name: "SVOLDER_WEB_ASSETS",
         read_by: "svolderd",
         dev_only: true,
@@ -309,11 +329,13 @@ const ENV_VARS: &[EnvVar] = &[
     },
     EnvVar {
         name: "SVOLDER_AUTOEQ_URL",
-        read_by: "svolder",
+        read_by: "svolderd",
         dev_only: true,
-        what: "The `results/` directory `eq search` and `eq import --autoeq` read AutoEq's index \
-               and files from, in place of AutoEq's repository on raw.githubusercontent.com: a \
-               mirror, or a local server in tests. Default is AutoEq's own.",
+        what: "The `results/` directory the daemon reads AutoEq's index and files from (for `eq \
+               search`, `eq import --autoeq`, the TUI's search and the web page's library, which \
+               all ask it), in place of AutoEq's repository on raw.githubusercontent.com: a \
+               mirror, or a local server in tests. Read once, when the daemon starts. Default is \
+               AutoEq's own.",
     },
     EnvVar {
         name: "SVOLDER_SCREENSHOTS_AUTOEQ_URL",

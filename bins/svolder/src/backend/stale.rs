@@ -62,7 +62,9 @@ async fn check(g: &Globals<'_>, config: &Config, path: &Path) -> Option<String> 
     }
     let mut client = Client::connect(&socket).await.ok()?;
     let shown = path.display();
-    let reply = client.request(Request::Reload).await;
+    let reply = client
+        .request_within(Request::Reload, Some(svolder_ipc::RELOAD_TIMEOUT))
+        .await;
     Some(match reply {
         Ok(Response::Reloaded { .. }) => format!("svolderd re-read {shown}"),
         Ok(Response::Error { message, .. }) => {
@@ -89,8 +91,24 @@ pub async fn reload_if_reads(socket: PathBuf, path: &Path) {
         return;
     }
     if let Ok(mut client) = Client::connect(&socket).await {
-        let _ = client.request(Request::Reload).await;
+        let _ = client
+            .request_within(Request::Reload, Some(svolder_ipc::RELOAD_TIMEOUT))
+            .await;
     }
+}
+
+/// The daemon's words for a configuration file that is gone, when the daemon listening on
+/// `socket` reads `path`, `path` is not there and the daemon says so: a writer that wrote the file
+/// now would start it from the template, and the reload that follows would drop every device.
+/// `None` where there is no daemon, it reads another file, or the file is there.
+pub async fn refusal_if_missing(socket: &Path, path: &Path) -> Option<String> {
+    if path.exists() {
+        return None;
+    }
+    let info = svolder_ipc::socket::daemon_version::version_within(socket, ASK_WAIT).await?;
+    let reads = info.config.as_deref()?;
+    (info.config_missing && same_file(Path::new(reads), path))
+        .then(|| svolder_ipc::socket::daemon_version::config_missing_refusal(reads))
 }
 
 /// `path` as the note writes it: `~` for the home directory it is under, the path as it is

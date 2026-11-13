@@ -1,8 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The list of the devices svolder drives, opened by the name of the shown device on the line (as
-// the frame's Device row does): a pick shows that device through the core. Nothing to open for a
-// fleet of one.
+// The list of the devices svolder drives, opened by the name of the shown device on the line: a
+// pick shows that device through the core. Nothing to open for a fleet of one.
 
 import { openList } from './lists.js';
 import { WORDS } from './words.js';

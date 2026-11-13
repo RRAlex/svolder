@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The private API the page reads and writes, under `api/v1/`: the page's JSON models (a
-//! device's, the fleet's and the computer's player) and a device's strip.
+//! device's, the fleet's and the computer's player), a device's strip and its series.
 //! Scripts use the CLI, the socket, MQTT or MCP; nothing here is promised to stay.
 
 use axum::Router;
@@ -15,7 +15,7 @@ use svolder_ipc::host::HostView;
 use svolder_ipc::{Config, DeviceInfo, Request, Response as Answer};
 
 use super::model::{self, HostModel};
-use super::router::{bare, devices, error};
+use super::router::{bare, devices, error, refusal};
 use super::view::{self, Access, Snapshot};
 use super::{Viewer, Web, viewer};
 use crate::device::Feed;
@@ -25,6 +25,7 @@ use crate::writer::ClimbView;
 pub(crate) fn routes() -> Router<Web> {
     Router::new()
         .route("/api/v1/devices/{device}/strip", get(strip))
+        .route("/api/v1/devices/{device}/series", get(series))
         .route("/api/v1/devices/{device}/model", get(device_model))
         .route("/api/v1/fleet", get(fleet))
         .route("/api/v1/host", get(host))
@@ -238,6 +239,142 @@ async fn strip(
             "the daemon kept no readings for this device",
         ),
     }
+}
+
+/// The most ids one `series` request may name, each once: more than any profile has readings to
+/// graph, so one answer holds at most this many series of the ring's 1800 points.
+pub(super) const SERIES_IDS_MAX: usize = 32;
+
+/// What `series` takes.
+#[derive(serde::Deserialize)]
+struct SeriesAsked {
+    /// The ids, separated by commas; the device's key readings when not given.
+    ids: Option<String>,
+    secs: Option<u64>,
+}
+
+/// One series of a `series` answer.
+#[derive(serde::Serialize)]
+struct SeriesModel {
+    /// The id as the daemon names it: `signal`, or a control's key.
+    id: String,
+    /// The unit of the points, where the route knows one: `dBm` for the signal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<&'static str>,
+    /// How the samples of one bin were joined.
+    aggregate: svolder_profiles::history::Aggregate,
+    /// `[unix milliseconds, value]`, oldest first. A control's series starts with its newest
+    /// point from before the span, which held when the span began, and its values are raw
+    /// readings, a bool 0 or 1; the signal's has only what was heard inside the span.
+    points: Vec<(u64, f64)>,
+}
+
+/// The series of a device's readings over the last `secs` seconds (the ring's half hour when
+/// not given, and at most that), from the daemon's ring, which keeps one point a second:
+/// `?ids=signal,volume` names them, each `signal` (the signal strengths heard, in dBm) or the
+/// key of a control of the device's profile, in any letter case; without `ids` the device's key
+/// readings are answered. An id that names neither is listed in `refused` and the rest are
+/// served; a series the ring has no point of is served empty. An id asked more than once is
+/// answered once, and more than [`SERIES_IDS_MAX`] distinct ids are a 400 that says so, so one
+/// request never costs more than that many series of the ring. Open to whoever may read the
+/// page, as the strip is.
+async fn series(
+    State(web): State<Web>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Query(asked): Query<SeriesAsked>,
+) -> Response {
+    if let Err(refused) = reader(&web, &headers) {
+        return refused;
+    }
+    let device = match load_live(&web, &name) {
+        Ok(device) => device,
+        Err(refused) => return refused,
+    };
+    let secs = asked
+        .secs
+        .unwrap_or(svolder_ipc::READINGS_SPAN_SECS)
+        .clamp(1, svolder_ipc::READINGS_SPAN_SECS);
+    // Each id once, the first of its spellings, in the order asked: a repeat adds nothing to
+    // the answer, and the distinct ids are few enough to compare with each other.
+    let mut ids: Vec<String> = Vec::new();
+    let asked_ids = match asked.ids.as_deref() {
+        Some(ids) => ids.split(',').map(str::trim).map(str::to_string).collect(),
+        None => device.info.key_readings.clone(),
+    };
+    for id in asked_ids {
+        if id.is_empty() || ids.iter().any(|had| had.eq_ignore_ascii_case(&id)) {
+            continue;
+        }
+        if ids.len() == SERIES_IDS_MAX {
+            return error(
+                StatusCode::BAD_REQUEST,
+                format!("one request names at most {SERIES_IDS_MAX} ids"),
+            );
+        }
+        ids.push(id);
+    }
+    let (now_ms, bin_ms, kept, link, signal) = match web
+        .fleet
+        .request(Request::Readings {
+            device: Some(device.info.name.clone()),
+            span_secs: secs,
+        })
+        .await
+    {
+        Answer::Readings {
+            now_ms,
+            bin_ms,
+            series,
+            link,
+            signal,
+            ..
+        } => (now_ms, bin_ms, series, link, signal),
+        // The device went since it was loaded, or the daemon is stopping: its own words.
+        other => return refusal(other),
+    };
+    let profile = device.feed.profile.as_deref();
+    let (mut series, mut refused) = (Vec::new(), Vec::new());
+    for id in ids {
+        if id.eq_ignore_ascii_case(svolder_ipc::SERIES_SIGNAL) {
+            series.push(SeriesModel {
+                id: svolder_ipc::SERIES_SIGNAL.to_string(),
+                unit: Some("dBm"),
+                aggregate: svolder_profiles::history::Aggregate::Last,
+                points: signal.clone(),
+            });
+            continue;
+        }
+        let Some((profile, control)) =
+            profile.and_then(|profile| Some((profile, profile.control_by_key(&id)?)))
+        else {
+            refused.push(id);
+            continue;
+        };
+        let found = kept
+            .iter()
+            .find(|series| series.key.as_deref() == Some(control.key.as_str()));
+        series.push(SeriesModel {
+            id: control.key.clone(),
+            unit: None,
+            aggregate: found.map_or_else(
+                || svolder_profiles::history::aggregate_of(profile, control.id),
+                |series| series.aggregate,
+            ),
+            points: found
+                .map(|series| series.points.clone())
+                .unwrap_or_default(),
+        });
+    }
+    axum::Json(serde_json::json!({
+        "now_ms": now_ms,
+        "bin_ms": bin_ms,
+        "secs": secs,
+        "series": series,
+        "refused": refused,
+        "link": link,
+    }))
+    .into_response()
 }
 
 /// The strip of `device` over `secs` seconds, from the daemon's ring; `None` while it has no

@@ -347,7 +347,7 @@ pub fn props_of(dump: &str) -> Option<LiveNode> {
         .flatten()
     {
         let pairs = props["params"].as_array().map(Vec::as_slice).unwrap_or(&[]);
-        for pair in pairs.chunks_exact(2) {
+        for pair in pairs.as_chunks::<2>().0 {
             if let (Some(name), Some(value)) = (pair[0].as_str(), pair[1].as_f64())
                 && name.contains(':')
             {

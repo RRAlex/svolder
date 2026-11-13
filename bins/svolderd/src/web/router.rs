@@ -89,6 +89,10 @@ async fn guard(State(web): State<Web>, request: Request, next: Next) -> Response
 /// `request`, when it may go on: its `Host` is one the server answers to, and a POST names an
 /// allowed `Origin` (403, nothing said), carries JSON (415) and at most [`MAX_BODY`] of it
 /// (413). The body of a POST is read here, within the cap, and handed on whole.
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
 async fn admitted(web: &Web, request: Request) -> Result<Request, Response> {
     let host = request
         .headers()
@@ -118,12 +122,17 @@ async fn admitted(web: &Web, request: Request) -> Result<Request, Response> {
     let (parts, body) = request.into_parts();
     // The head has its timeout in the loop; the body gets the same, so a body that trickles or
     // stops cannot hold a connection.
-    let read = axum::body::to_bytes(body, MAX_BODY);
+    // The one path that takes a file has a larger cap of its own.
+    let cap = match parts.uri.path() == super::writes::UPLOAD_PATH {
+        true => super::writes::UPLOAD_BODY_MAX,
+        false => MAX_BODY,
+    };
+    let read = axum::body::to_bytes(body, cap);
     match tokio::time::timeout(crate::http::HEADER_TIMEOUT, read).await {
         Ok(Ok(bytes)) => Ok(Request::from_parts(parts, Body::from(bytes))),
         Ok(Err(e)) if too_long(&e) => Err(error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "a request's body is at most 16 KiB",
+            format!("a request's body is at most {} KiB", cap / 1024),
         )),
         Ok(Err(_)) => Err(error(
             StatusCode::BAD_REQUEST,
@@ -512,6 +521,60 @@ pub(crate) fn bare(status: StatusCode) -> Response {
 pub(crate) fn error(status: StatusCode, message: impl Into<String>) -> Response {
     let mut response = axum::Json(serde_json::json!({ "error": message.into() })).into_response();
     *response.status_mut() = status;
+    response
+}
+
+/// The status a daemon's refusal is answered under, by its reason: 422 for what the request
+/// asked wrongly, 404 for what is not there, 502 for AutoEq's repository out of reach, 409 for what cannot be done now, 503 while the
+/// daemon stops, and 500 for a failure and for a reason this build does not know. A refusal
+/// that gives no reason is judged by its `code`: 404 for a device nothing configures (a selector
+/// that matches none, as when a device is removed while a request for it is under way), 503 for
+/// no link or no daemon, 500 for the rest.
+pub(crate) fn status_of(reason: Option<svolder_ipc::Reason>, code: u8) -> StatusCode {
+    use svolder_ipc::Reason;
+    let Some(reason) = reason else {
+        return match code {
+            svolder_ipc::CODE_NOT_FOUND => StatusCode::NOT_FOUND,
+            svolder_ipc::CODE_LINK => StatusCode::SERVICE_UNAVAILABLE,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+    };
+    match reason {
+        Reason::Taken | Reason::Invalid | Reason::BadName => StatusCode::UNPROCESSABLE_ENTITY,
+        Reason::Missing | Reason::NoSuchJob | Reason::NotListed => StatusCode::NOT_FOUND,
+        Reason::Unreachable => StatusCode::BAD_GATEWAY,
+        Reason::ReadOnly
+        | Reason::FileBusy
+        | Reason::Busy
+        | Reason::NotConnected
+        | Reason::NotFoundYet
+        | Reason::NotWaiting => StatusCode::CONFLICT,
+        Reason::Stopping => StatusCode::SERVICE_UNAVAILABLE,
+        Reason::Internal | Reason::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// A daemon's answer that is not what a route asked for, as the route's: its words as `error`
+/// and its reason, when it gives one, as `reason`, under [`status_of`] its reason and code; a
+/// 500 for an answer of another kind, which is not printed.
+pub(crate) fn refusal(answer: svolder_ipc::Response) -> Response {
+    let svolder_ipc::Response::Error {
+        code,
+        message,
+        reason,
+    } = answer
+    else {
+        return error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the daemon gave an answer of another kind",
+        );
+    };
+    let mut body = serde_json::json!({ "error": message });
+    if let Some(reason) = reason {
+        body["reason"] = serde_json::json!(reason);
+    }
+    let mut response = axum::Json(body).into_response();
+    *response.status_mut() = status_of(reason, code);
     response
 }
 

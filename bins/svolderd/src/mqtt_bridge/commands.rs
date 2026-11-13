@@ -23,6 +23,7 @@ use crate::device::Command;
 use crate::log;
 use crate::recall::{self, Recalled};
 use crate::writer::{Glided, Mode, Options, Origin, Outcome, Planned, Recalling, not_running};
+use svolder_ipc::CODE_LINK;
 
 impl BridgeTask {
     /// Act on one message from a subscription: a command for one of the devices, or a
@@ -340,10 +341,7 @@ impl BridgeTask {
                 ));
                 return;
             }
-            Outcome::Cancelled(why) => Response::Error {
-                code: 3,
-                message: why.to_string(),
-            },
+            Outcome::Cancelled(why) => Response::error(CODE_LINK, why.to_string()),
         };
         match &response {
             Response::Error { message, .. } => log::warn(&format!(

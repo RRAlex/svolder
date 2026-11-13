@@ -23,6 +23,9 @@ pub struct DevicesScreen {
     pub default_device: Option<String>,
     /// The device being edited over the list, while one is.
     pub editor: Option<DeviceEditor>,
+    /// The record the editor last opened on: what a save is measured against, whatever the list
+    /// has been refreshed to since.
+    pub opened: Option<DeviceConfig>,
     /// The device a removal is waiting to be confirmed for, while one is.
     pub confirm: Option<String>,
 }

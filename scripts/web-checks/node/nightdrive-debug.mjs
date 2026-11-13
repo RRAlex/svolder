@@ -29,7 +29,7 @@ ok('the_switches_are_comma_separated_and_a_wrong_word_is_named_not_obeyed', () =
   const got = debugOf('?theme=nightdrive&nd-debug=noglow,NoFloor, dpr1,fast');
   assert.deepEqual([...got.off].sort(), ['dpr1', 'nofloor', 'noglow']);
   assert.deepEqual(got.unknown, ['fast']);
-  assert.deepEqual(Object.keys(SWITCHES).sort(), ['dpr1', 'noembers', 'nodash', 'nofloor', 'noglow', 'nohaze', 'nohud', 'nomood', 'noridge', 'nosky', 'nowet'].sort());
+  assert.deepEqual(Object.keys(SWITCHES).sort(), ['dpr1', 'noembers', 'nodash', 'nofloor', 'noglow', 'nohaze', 'nohud', 'nomood', 'nooverlay', 'noridge', 'nosky', 'nowet'].sort());
 });
 
 ok('the_rate_is_the_draws_of_the_last_second_not_the_one_asked_for', () => {

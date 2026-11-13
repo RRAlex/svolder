@@ -173,9 +173,9 @@ fn a_click_on_a_level_bar_focuses_its_row_and_sets_the_cell() {
                 area
             }
         );
-        app.selected = 0;
+        app.set_selected(0);
         let writes = carry(&mut app, action);
-        assert_eq!(app.selected, row, "{key} row focused");
+        assert_eq!(app.selected(), row, "{key} row focused");
         let wanted = match key {
             "volume" => value_at(mid, area, 0, 127),
             _ => marker_at(mid, area, 1, 127),
@@ -191,7 +191,7 @@ fn a_click_on_a_level_bar_focuses_its_row_and_sets_the_cell() {
         let _ = release(&mut app, Some((area, mid)));
         answer(&mut app);
         // Left of the bar is the label: it focuses.
-        app.selected = 0;
+        app.set_selected(0);
         let label = click(&hits, &app, area.x - 1, area.y);
         assert_eq!(label, Some(MouseAction::Focus(Pane::Controls, row)));
     }

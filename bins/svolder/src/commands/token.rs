@@ -17,10 +17,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use svolder_ipc::token::{self, Agreement, Store, Token};
-use svolder_ipc::{Client, Config, Request, Response, TokenInfo, socket};
+use svolder_ipc::{Client, Config, Request, Response, Server, TokenInfo, socket};
 
 use crate::backend::Globals;
 use crate::cli::McpCommand;
+use crate::commands::server_switch;
 
 /// Where this command looks for the token: the environment's value and the state home.
 struct Site {
@@ -46,6 +47,8 @@ enum Daemon {
 /// Carry out one of the `mcp` sub-commands.
 pub(crate) async fn mcp(g: &Globals<'_>, command: McpCommand) -> Result<ExitCode, String> {
     match command {
+        McpCommand::On => server_switch::run(g, Server::Mcp, true).await,
+        McpCommand::Off => server_switch::run(g, Server::Mcp, false).await,
         McpCommand::Token { rotate } => token(g, Store::MCP, rotate).await,
     }
 }
@@ -159,7 +162,10 @@ async fn reload(daemon: &Daemon, socket: &Path) -> String {
         return "no daemon is running, so none uses the new token yet".to_string();
     }
     let said = match Client::connect(socket).await {
-        Ok(mut client) => match client.request(Request::Reload).await {
+        Ok(mut client) => match client
+            .request_within(Request::Reload, Some(svolder_ipc::RELOAD_TIMEOUT))
+            .await
+        {
             Ok(Response::Reloaded { .. }) => {
                 return "the daemon now accepts only the new token".into();
             }

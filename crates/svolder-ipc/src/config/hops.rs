@@ -10,7 +10,7 @@ use svolder_profiles::tone::preset::{NAME_MAX, NameError, checked_name, same_nam
 use toml_edit::{ArrayOfTables, DocumentMut, Table, Value};
 
 use super::edit::{blocks_mut, detached, edit_file, hand_on, prefix_of, push_block, set_key};
-use super::{Config, ConfigError};
+use super::{Config, ConfigError, missing, vanished};
 
 /// What a declared hop is, from `kind` in its `[[hop]]` block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -147,7 +147,7 @@ impl Config {
             }
             let table = hops_mut(doc)?
                 .get_mut(at)
-                .ok_or_else(|| ConfigError::Parse(format!("hop {id:?} went missing")))?;
+                .ok_or_else(|| vanished("hop", id))?;
             write_hop(table, hop);
             Ok(())
         })
@@ -165,9 +165,7 @@ impl Config {
     ) -> Result<(), ConfigError> {
         edit_file(path, |doc| {
             let held = Config::parse(&doc.to_string())?;
-            let old = held
-                .hop(id)
-                .ok_or_else(|| ConfigError::Parse(format!("no hop named {id:?} is configured")))?;
+            let old = held.hop(id).ok_or_else(|| missing("hop", id))?;
             let hop = written(&change(old)?)?;
             let at = hop_at(doc, id)?;
             if let Some((clash_at, clash)) = hop_named(doc, hop.id())
@@ -177,7 +175,7 @@ impl Config {
             }
             let table = hops_mut(doc)?
                 .get_mut(at)
-                .ok_or_else(|| ConfigError::Parse(format!("hop {id:?} went missing")))?;
+                .ok_or_else(|| vanished("hop", id))?;
             write_hop(table, &hop);
             Ok(())
         })
@@ -284,12 +282,15 @@ fn hop_named(doc: &DocumentMut, id: &str) -> Option<(usize, String)> {
 fn hop_at(doc: &DocumentMut, id: &str) -> Result<usize, ConfigError> {
     hop_named(doc, id)
         .map(|(at, _)| at)
-        .ok_or_else(|| ConfigError::Parse(format!("no hop named {id:?} is configured")))
+        .ok_or_else(|| missing("hop", id))
 }
 
 /// What a hop writer, and the parse of the file, refuse an id another block carries with.
 pub(super) fn hop_taken(id: &str) -> ConfigError {
-    ConfigError::Parse(format!("a hop named {id:?} is already configured"))
+    ConfigError::Taken {
+        kind: "hop",
+        name: id.to_string(),
+    }
 }
 
 /// Why `why` makes no name for a hop, in words.

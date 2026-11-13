@@ -16,7 +16,6 @@ use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 use svolder_ipc::{ColorDepth, Config, TuiConfig};
 
-use svolder_autoeq::{Entry, Index, Refresh};
 use svolder_host::fake::{FakeCapture, FakePlayers, FakeSink};
 use svolder_host::{Block, NoBus, NowPlaying, Players, SinkState, Status};
 
@@ -33,7 +32,6 @@ use super::connect::TokenSite;
 use super::devices::relisted;
 use super::host::Connect;
 use super::input::take_intent;
-use super::jobs::Hands;
 use super::{Adding, Backend, Failure, Flow, HostLink, Look, Open, Opener, OwnedGlobals, Watching};
 
 /// How long a reconnect attempt is given for a case that wants it to give up.
@@ -298,7 +296,10 @@ pub(super) fn watching(backend: Backend, app: App, device: Option<&str>) -> Watc
         app: Box::new(app),
         device: device.map(str::to_string),
         feed_open: true,
+        reload_owed: None,
         daemon_version: None,
+        view_ask: None,
+        view_off: false,
         web_code: None,
         web_check: None,
         web_copy: None,
@@ -399,12 +400,17 @@ pub(super) fn never_opens() -> impl Open {
     |_: OwnedGlobals| async { Err(Failure::of(Kind::Dropped, "this case opens no device")) }
 }
 
+/// A daemon socket no machine has: `--socket` beats `SVOLDER_SOCKET`, the runtime directory and
+/// the configuration, so a write that reaches for a daemon finds none, whatever the environment
+/// names. A path under `/run/user` could be a real one, and a long one cannot be connected to.
+const NO_SOCKET: &str = "/nonexistent-svolder-test/svolder.sock";
+
 /// The command line a case opens under, as `-v` was or was not typed.
 pub(super) fn globals(verbose: bool) -> OwnedGlobals {
     OwnedGlobals {
         transport: "fake".into(),
         adapter: None,
-        socket: None,
+        socket: Some(NO_SOCKET.into()),
         device: None,
         verbose,
     }
@@ -571,35 +577,6 @@ pub(in crate::tui) fn drawn_turn<B: ratatui::backend::Backend>(
     super::look::arm_effects(app, &mut look.effects, &areas, &look.theme, now);
     app.host.spectrum_on_screen = areas.spectrum.is_some();
     (shown, areas)
-}
-
-/// Hands that answer from what a case sets, and count what they were asked.
-#[derive(Default)]
-pub(super) struct FakeHands {
-    /// The index text lines `index` answers with, `None` for a failed fetch.
-    pub index_lines: Option<Vec<String>>,
-    /// The text `download` answers with, `None` for a failure.
-    pub text: Option<String>,
-    /// The policies `index` was asked for.
-    pub fetched: Mutex<Vec<Refresh>>,
-}
-
-impl Hands for FakeHands {
-    fn index(&self, refresh: Refresh) -> Result<Index, String> {
-        self.fetched.lock().expect("the fetch log").push(refresh);
-        match &self.index_lines {
-            Some(lines) => Ok(Index {
-                entries: svolder_autoeq::parse_index(&lines.join("\n")),
-                fetched: std::time::UNIX_EPOCH,
-                note: None,
-            }),
-            None => Err("no network".into()),
-        }
-    }
-
-    fn download(&self, _: &Entry) -> Result<String, String> {
-        self.text.clone().ok_or_else(|| "no network".to_string())
-    }
 }
 
 /// An opener over `path`, which opens nothing.

@@ -815,18 +815,22 @@ for label, web in [('a guest', 'guest = "read"'), ('a page with writes off',
               s['title'] == 'Test Pressing' and s['presses'] == [] and s['verdict'] == 'untouched',
               s)
         check(f'  and the card posts nothing', s['posts'] == [], s['posts'])
-        # the key list is theirs too: the keys they have (v, A, T and ?), none that write
+        # Help is theirs too, with the keys they have (v, A, T and ?), none that write
         b.press('?')
-        keys = b.ev("""(() => { const k = document.getElementById('keys');
-          return k ? { shown: !k.hidden, keys: [...k.querySelectorAll('dt')]
-            .map((d) => d.textContent.trim()), hint: !!document.querySelector('.kh2'),
-            vShown: getComputedStyle(k.querySelector('dt.kviz')).display !== 'none' }
-            : null; })()""")
-        check(f'  and ? opens a list of the keys {label} has: v, A, T and ?, none that write',
-              keys is not None and keys['shown'] and keys['keys'] == ['v', 'A', 'T', '?']
+        keys = None
+        for _ in range(40):
+            keys = b.ev("""(() => { const p = document.getElementById('popup-help');
+          if (p?.querySelector('.fp-box')?.dataset.state !== 'ready') return null;
+          return { keys: [...p.querySelectorAll('[data-key]')].map((r) => r.dataset.key),
+            hint: !!document.querySelector('.kh2') }; })()""")
+            if keys is not None:
+                break
+            time.sleep(0.1)
+        check(f'  and ? opens Help with the keys {label} has: v, A, T and ?, none that write',
+              keys is not None and keys['keys'] == ['look', 'arrange', 'themes', 'help']
               and keys['hint'],
               keys)
-        check('  with the v row shown, since the screen has the card', keys['vShown'], keys)
+        b.press('Escape')
     finally:
         b.close()
         ro.stop()
@@ -853,11 +857,18 @@ try:
     s = state(b)
     check('with no host the page has no card at all', s['band'] is None and s['title'] is None, s)
     b.press('?')
-    shown = b.ev("""(() => { const k = document.getElementById('keys');
-      return { open: !k.hidden, v: [...k.querySelectorAll('dt.kviz, dd.kviz')]
-        .map((e) => getComputedStyle(e).display) }; })()""")
-    check('the key list of a page with no card leaves out the v row',
-          shown['open'] and shown['v'] == ['none', 'none'], shown)
+    shown = None
+    for _ in range(40):
+        shown = b.ev("""(() => { const p = document.getElementById('popup-help');
+      if (p?.querySelector('.fp-box')?.dataset.state !== 'ready') return null;
+      return { keys: [...p.querySelectorAll('[data-key]')].map((r) => r.dataset.key),
+        hint: !!document.querySelector('.kh2') }; })()""")
+        if shown is not None:
+            break
+        time.sleep(0.1)
+    check('the Help of a page with no card leaves out the v row',
+          shown is not None and 'look' not in shown['keys'] and 'arrange' in shown['keys'], shown)
+    b.press('Escape')
 finally:
     b.close()
     off.stop()

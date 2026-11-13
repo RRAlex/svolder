@@ -188,6 +188,7 @@ fn meter_control(id: FunctionId, channel: &str, range: Option<(i64, i64)>) -> Co
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     }
 }

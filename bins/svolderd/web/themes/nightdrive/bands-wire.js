@@ -26,7 +26,7 @@ export function wireBands({
   core, live, sheet, view, signal,
 }) {
   const store = core.model;
-  const { BAND_PARAM } = core.drag;
+  const { BAND_PARAM } = core.eq.bands;
   const { keep } = sheet;
   const wrap = sheet.wrap;
   const inert = () => inertOf(store.page());
@@ -112,7 +112,7 @@ export function wireBands({
   /** The hand that steps the computer's points for the steppers (the core's burst: each step a live write, the last
    * value once as the final one when the hold ends; it follows the point through a re-sort and ends if the point is
    * removed). */
-  const stepper = core.drag.pointDrag({ points: () => [], usable: () => canStep() });
+  const stepper = core.eq.points({ points: () => [], usable: () => canStep() });
   const offComputer = core.computer.on(({ type }) => {
     // a flip, or the point stepped removed by another front end: the hold is over (never on to the point that took its number)
     if (type === 'flip') hold?.end();
@@ -149,7 +149,7 @@ export function wireBands({
     hold?.end();
     const target = store.shown();
     holding = true;
-    hold = core.hold.repeat(event, {
+    hold = core.repeat(event, {
       root: wrap,
       el: first,
       step: (el) => holding && stepOnce(el, target, true),

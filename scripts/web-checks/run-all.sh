@@ -125,6 +125,16 @@ fi
 
 missing=()
 command -v node >/dev/null || missing+=("node")
+# Without jsdom the harnesses that need a page skip (node/dom.mjs), and a skip fails the gate:
+# WEB_CHECK_ALLOW_NO_JSDOM=1 lets it start and lets them pass, each saying SKIPPED in its row.
+if ! node -e 'require("jsdom")' 2>/dev/null; then
+    if [ "${WEB_CHECK_ALLOW_NO_JSDOM:-}" = 1 ]; then
+        echo "web-checks: jsdom is missing and WEB_CHECK_ALLOW_NO_JSDOM=1: the node harnesses that" \
+            "need a page are SKIPPED, not run" >&2
+    else
+        missing+=("jsdom for node (apt package node-jsdom; WEB_CHECK_ALLOW_NO_JSDOM=1 skips its harnesses)")
+    fi
+fi
 [ -x /usr/bin/time ] || missing+=("/usr/bin/time (install it: sudo apt install time)")
 command -v python3 >/dev/null || missing+=("python3")
 python3 -I -c 'import websockets' 2>/dev/null || missing+=("python3-websockets (apt package)")
@@ -364,8 +374,8 @@ run_pool() {
 # the long browser checks are not left for the end. A check not listed counts as 60.
 declare -A weight=(
     [nightdrive_theme]=570 [signal_theme]=450 [paper]=300 [visualizer]=240 [effects_menu]=160
-    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15
-    [completeness]=100 [playing]=140 [tone_note]=120 [contract]=150 [frame_button]=140
+    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=80 [popups]=60 [devices_popup]=120 [eq_library]=120 [menu_theme_row]=60 [tone_overlay]=60 [contrast]=150 [phone_sweep]=175
+    [completeness]=100 [playing]=140 [tone_note]=120 [contract]=150 [frame_button]=140 [keys]=140
     [nightdrive_sheet]=175 [arrange]=110 [tone_drag]=80 [core_rows]=75 [computer_core]=45 [computer_ember]=170 [computer_paper]=150 [computer_signal]=170 [sweep]=300
     [notes]=300 [effects_cycle]=200 [scroll]=200 [sources]=150 [smoke_page]=200
     [smoke_core]=200 [haze]=300 [touch]=100 [tone_touch]=100
@@ -383,11 +393,11 @@ by_weight() {
 # A retuned look number (node/look-values.mjs) fails node-model alone: the tests written for the
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
-for name in effects facts model sources notes director keep tone-curve tone-drag playing viz \
-    core-store core-stream core-actions core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-hold ember-parts \
-    level-write toast frame-keys switch ember-order contract \
-    paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes paper-fold \
-    signal-line signal-draw nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls signal-controls; do
+for name in effects facts model sources notes director keep tone-curve plot tone-drag playing viz \
+    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-help dom-skip core-keys theme-keys ember-parts ember-keys \
+    level-write toast frame-keys core-modal core-router switch ember-order contract \
+    paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes \
+    signal-line signal-draw nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-keys signal-controls; do
     node_entries+=("node-$name|node/$name.mjs|")
 done
 node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|")
@@ -404,14 +414,15 @@ node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|")
 # "Pace asserts left in the pool" lists the rest.
 serial_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick notes sources nightdrive_timing)
 
+# contrast and phone_sweep (the sweeps, minutes of wall time each) are in the full gate only
 if [ "$quick" -eq 1 ]; then
     browser_checks=(effects_menu effects_layout tone_note knob_click tone_drag playing \
-        device_presets reduced_motion visualizer arrange contract frame_button space_key ember_link core_rows computer_core computer_ember computer_paper computer_signal paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
+        device_presets reduced_motion visualizer arrange contract frame_button keys space_key modal popups devices_popup eq_library menu_theme_row tone_overlay ember_link core_rows computer_core computer_ember computer_paper computer_signal paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
         computer_nightdrive)
 else
     browser_checks=(smoke_core smoke_page effects_menu effects_layout sources notes sweep haze \
         scroll tone_note knob_click tone_drag playing device_presets reduced_motion visualizer \
-        arrange contract frame_button space_key ember_link core_rows computer_core computer_ember computer_paper computer_signal paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
+        arrange contract frame_button keys space_key modal popups devices_popup eq_library menu_theme_row tone_overlay contrast phone_sweep ember_link core_rows computer_core computer_ember computer_paper computer_signal paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
         computer_nightdrive)
 fi
 entries=()

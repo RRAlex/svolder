@@ -59,15 +59,15 @@ impl Block {
     /// `spectrum`. A sample that is not a number counts as silence.
     pub fn of(spectrum: &mut Spectrum, interleaved: &[f32]) -> Self {
         let sample = |s: f32| if s.is_finite() { s } else { 0.0 };
-        let frames = interleaved.chunks_exact(CHANNELS);
+        let (frames, _) = interleaved.as_chunks::<CHANNELS>();
         let mono: Vec<f32> = frames
-            .clone()
+            .iter()
             .map(|f| (sample(f[0]) + sample(f[1])) / 2.0)
             .collect();
         Self {
             bands: spectrum.bands(&mono),
-            left: level(frames.clone().map(|f| sample(f[0]))),
-            right: level(frames.map(|f| sample(f[1]))),
+            left: level(frames.iter().map(|f| sample(f[0]))),
+            right: level(frames.iter().map(|f| sample(f[1]))),
         }
     }
 }
@@ -136,7 +136,7 @@ impl PwRecord {
     }
 
     /// A capture through the `pw-record` [`PW_RECORD_ENV`] names, else `pw-record` on `PATH`;
-    /// `None` when [`host_off`](crate::host_off) says host audio is off for this process.
+    /// `None` when [`host_unreached`](crate::host_unreached) says host audio is off for this process.
     pub fn from_env() -> Option<Self> {
         program_from_env().map(Self::new)
     }
@@ -199,7 +199,7 @@ impl PwFrames {
     }
 
     /// A capture through the `pw-record` [`PW_RECORD_ENV`] names, else `pw-record` on `PATH`;
-    /// `None` when [`host_off`](crate::host_off) says host audio is off for this process.
+    /// `None` when [`host_unreached`](crate::host_unreached) says host audio is off for this process.
     pub fn from_env() -> Option<Self> {
         program_from_env().map(Self::new)
     }
@@ -226,7 +226,7 @@ impl FrameCapture for PwFrames {
 
 /// The `pw-record` [`PW_RECORD_ENV`] names, else `pw-record`; `None` when host audio is off.
 fn program_from_env() -> Option<OsString> {
-    if crate::host_off() {
+    if crate::host_unreached() {
         return None;
     }
     Some(
@@ -344,8 +344,9 @@ fn read_blocks(mut output: impl Read, blocks: &mpsc::Sender<Block>) {
     let mut bytes = vec![0u8; FRAMES * CHANNELS * size_of::<f32>()];
     let mut samples = vec![0.0f32; FRAMES * CHANNELS];
     while output.read_exact(&mut bytes).is_ok() {
-        for (sample, raw) in samples.iter_mut().zip(bytes.chunks_exact(size_of::<f32>())) {
-            *sample = f32::from_ne_bytes(raw.try_into().expect("four bytes to a sample"));
+        let (raws, _) = bytes.as_chunks::<{ size_of::<f32>() }>();
+        for (sample, raw) in samples.iter_mut().zip(raws) {
+            *sample = f32::from_ne_bytes(*raw);
         }
         match blocks.try_send(Block::of(&mut spectrum, &samples)) {
             Ok(()) | Err(TrySendError::Full(_)) => {}
@@ -363,8 +364,9 @@ fn read_frames(mut output: impl Read, frames: &mpsc::Sender<Frame>) {
     let mut bytes = vec![0u8; step * CHANNELS * size_of::<f32>()];
     let mut samples = vec![0.0f32; step * CHANNELS];
     while output.read_exact(&mut bytes).is_ok() {
-        for (sample, raw) in samples.iter_mut().zip(bytes.chunks_exact(size_of::<f32>())) {
-            *sample = f32::from_ne_bytes(raw.try_into().expect("four bytes to a sample"));
+        let (raws, _) = bytes.as_chunks::<{ size_of::<f32>() }>();
+        for (sample, raw) in samples.iter_mut().zip(raws) {
+            *sample = f32::from_ne_bytes(*raw);
         }
         for mut frame in analyser.push(&samples) {
             frame.capture_ms = unix_ms();

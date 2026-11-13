@@ -97,6 +97,7 @@ fn daemon_failure(what: String, next: String) -> Failure {
         code: Kind::DaemonError.code(),
         what,
         next,
+        reason: None,
     }
 }
 

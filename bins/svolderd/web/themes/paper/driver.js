@@ -78,7 +78,8 @@ function findComputer(target) {
 /** The element a target is, as the sheet draws it, or nothing. */
 function find(target) {
   if (target === 'Cover') return one('#p-playing .p-cover img');
-  if (typeof target === 'string') return one(`td[data-fact="${q(target)}"]`);
+  // the device's facts are the Devices popup's, drawn by the core: the core's driver answers them
+  if (typeof target === 'string') return null;
   if ('computer' in target) return findComputer(target);
   if ('control' in target) {
     const key = q(target.control);
@@ -90,7 +91,9 @@ function find(target) {
         ?? one(`[data-act="choice-list"][data-key="${key}"]`);
       case 'toggle': return one(`[data-act="toggle"][data-key="${key}"]`);
       case 'slider': return one(`.p-scale[role="slider"][data-key="${key}"]`);
-      case 'readout': return one(`[data-readout="${key}"]`);
+      // a readout of the controls is a line; one of the power part is a note in the margin
+      case 'readout': return one(`[data-readout="${key}"]`)
+        ?? one(`.pn[data-note="power-${key}"]`);
       default: return null;
     }
   }
@@ -106,6 +109,14 @@ function find(target) {
     return one(`[data-act="transport"][data-button="${q(target.transport)}"]`);
   }
   return null;
+}
+
+/** The words a margin note shows for the readout `control`: the note writes the readout's label,
+ * a colon and its words (notes.js), and the words are what the sheet says of it. */
+function noteWords(note, control) {
+  const text = note.textContent.trim();
+  const label = `${String(control.label).toLowerCase()}: `;
+  return text.startsWith(label) ? text.slice(label.length) : text;
 }
 
 /** A tap on `element`. */
@@ -150,17 +161,9 @@ async function toward(target, raw) {
 /** Whether a switch is in the state `on` says. */
 const stands = (element, on) => element.getAttribute('aria-pressed') === String(on);
 
-/** Open `The device` when `target` is drawn inside it folded away, as a person taps its heading. */
-async function unfold(target) {
-  if (!find(target)?.closest('#p-device-body[hidden]')) return;
-  tap(one('[data-act="device-fold"]'));
-  await settle();
-}
-
 /** Scroll to `target` and say whether it is drawn and in view; looked for again after the
  * scroll, which a section drawn again may have replaced. */
 async function seen(target) {
-  await unfold(target);
   find(target)?.scrollIntoView({ block: 'center' });
   await settle();
   const element = find(target);
@@ -266,7 +269,6 @@ export const driver = {
     const element = find(target);
     if (!element) return null;
     if (target === 'Cover') return element.getAttribute('src');
-    if (typeof target === 'string') return element.textContent;
     if ('computer' in target) {
       if (target.computer === 'volume') return one('#p-volume-text')?.textContent || one('.p-num')?.textContent || null;
       if (target.computer === 'point' && target.param !== 'type') return element.value;
@@ -283,6 +285,9 @@ export const driver = {
         const now = [...document.querySelectorAll(
           `[data-act="choice"][data-key="${q(target.control)}"].on`)][0];
         return (now ?? element).textContent;
+      }
+      if (kind === 'readout' && element.matches('.pn')) {
+        return noteWords(element, controlOf(target.control).control);
       }
       return element.textContent.trim();
     }

@@ -181,10 +181,7 @@ impl Handler for Fake {
                 device: "fake".into(),
                 values: vec![vo("10", "volume")],
             },
-            _ => Response::Error {
-                code: 1,
-                message: "no".into(),
-            },
+            _ => Response::error(CODE_USAGE, "no"),
         }
     }
 

@@ -11,7 +11,9 @@
 
 use std::process::ExitCode;
 
-use super::{Host, NOTHING_HEARD, Radio, daemon_lines, health_lines};
+use svolder_walk::NOTHING_HEARD;
+
+use super::{Host, Radio, daemon_lines, health_lines};
 
 /// Print the summary and answer with the code the run earns.
 pub async fn summary<E: Host + Radio>(effects: &E) -> ExitCode {

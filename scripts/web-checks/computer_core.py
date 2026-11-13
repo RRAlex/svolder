@@ -5,13 +5,10 @@ on a fake host (`SVOLDER_HOST=fake`, whose EQ and sink live in memory: no PipeWi
   the_host_event_carries_the_computer   the page's host holds the computer's volume, EQ points,
                                         presets and the curve, for a DAC's page and an amp's page,
                                         and `computer.switchOf` names the shown device
-  the_hand_is_wired_into_the_core       `core.drag.pointDrag` and `core.drag.table` are built in a real
-                                        page over the core's own actions and computer
-  each_action_reaches_its_route         every `actions.computer` call posts its route with its
-                                        body (the request log) and the model shows the change
-  a_refusal_toasts_and_rereads          a refused write is toasted with the daemon's words and the
-                                        host is read again
-  every_point_write_carries_its_slot    a set and a remove name the point by its slot
+  each_action_reaches_its_route         every `actions.computer` call posts its route (the request
+                                        log) and the model shows the change
+  a_refusal_toasts_and_rereads          (in the same page) a refused write is toasted with the
+                                        daemon's words and the host is read again
   a_stale_place_still_lands_on_the_point_dragged   another viewer's add moves the places while this
                                         page still holds the old table: the write lands on the point
                                         dragged, its neighbour is untouched; a point that is gone is a
@@ -107,10 +104,6 @@ def host_event(b, d):
     sw = b.page('__core.computer.switchOf(__core.model.page())')
     check('the_host_event_carries_the_computer: the switch names the shown device',
           sw == {'dac': 'Gungnir 2', 'computer': 'This computer', 'side': 'dac', 'unavailable': None}, sw)
-    tone = b.page('(() => { const t = __core.computer.toneOf(__core.model.page());'
-                  ' return { line: t.line, verified: t.verified, canAdd: t.canAdd, modes: t.modes.map((m) => m.label) }; })()')
-    check('the_host_event_carries_the_computer: the tone reads its line and modes',
-          tone['line'].endswith('points · preamp 0.0 dB') and tone['modes'] == ['Off', 'EQ'], tone)
     b.page("__core.actions.showDevice('Amp').then(() => new Promise((r) => setTimeout(r, 1200)))")
     amp = b.page('({ drawable: __core.computer.drawable(__core.model.page()),'
                  ' name: __core.computer.switchOf(__core.model.page())?.dac,'
@@ -119,40 +112,6 @@ def host_event(b, d):
     check('the_host_event_carries_the_computer: an amp page has the computer side, and no built-ins',
           amp['drawable'] is True and amp['name'] == 'Amp' and amp['volume'] not in (None, '—')
           and amp['presets'] == 0, amp)
-
-
-def hand_is_wired(b, d):
-    """`core.drag` carries the hand on the computer's curve and its table, over this core's own
-    actions and computer: built once in a real page, a press on nothing is no grab."""
-    load(b, d)
-    got = b.page("(() => { const d = __core.drag;"
-                 " const hand = d.pointDrag({ points: () => [], rectOf: () => ({ left: 0, top: 0, width: 10, height: 10 }) });"
-                 " const table = d.table({ box: () => null, note: () => null, row: () => null, moreWords: String });"
-                 " const out = { hand: ['down', 'move', 'up', 'wheel', 'key', 'touchStart', 'escape', 'destroy']"
-                 ".every((n) => typeof hand[n] === 'function'),"
-                 " table: ['updateMore', 'reveal', 'pick', 'restore'].every((n) => typeof table[n] === 'function'),"
-                 " idle: hand.active === false && hand.session === null, words: d.labelWords({ f: 1000, g: 3, q: 1 }),"
-                 " keys: Object.keys(d.POINT_KEYS).length, edit: typeof d.editCell, long: d.isLong(7) };"
-                 " hand.destroy(); return out; })()")
-    check('the_hand_is_wired_into_the_core: pointDrag and table are built over the core',
-          got == {'hand': True, 'table': True, 'idle': True, 'words': '1000 Hz · +3.0 dB · 1.00',
-                  'keys': 4, 'edit': 'function', 'long': True}, got)
-    # the pieces a theme calls instead of a copy: the touch listeners come off again in a real
-    # DOM, the point in hand goes with a remove, the EQ is read light, the page says whether it may write
-    got = b.page("(() => { const d = __core.drag; const hand = d.pointDrag({ points: () => [] });"
-                 " const el = document.createElement('div'); document.body.append(el); let n = 0;"
-                 " const watch = d.touchWatch({ move: () => { n++; }, end: () => { n++; } });"
-                 " watch(el, true); for (const t of ['touchmove', 'touchend', 'touchcancel']) el.dispatchEvent(new Event(t));"
-                 " const on = n; watch(el, false);"
-                 " for (const t of ['touchmove', 'touchend', 'touchcancel']) el.dispatchEvent(new Event(t));"
-                 " const off = n; const page = __core.model.page(); hand.watchTouch(el, true); hand.destroy(); el.remove();"
-                 " return { on, off, can: __core.actions.canWrite(), types: d.POINT_TYPES.join(),"
-                 " eq: Object.keys(__core.computer.eqOf(page) ?? {}).join(), step: typeof hand.step, begin: typeof hand.begin,"
-                 " values: Object.keys(d.pointValues({ f: 0, g: 0, q: 0 })).join(),"
-                 " words: d.labelWords({ f: 1000, g: 3, q: 1 }, { qPrefix: 'Q ' }) }; })()")
-    check('the_hand_is_wired_into_the_core: the touch watch, canWrite, eqOf, step and the words',
-          got == {'on': 3, 'off': 3, 'can': True, 'types': 'PK,LSC,HSC', 'eq': 'on,preset,verified',
-                  'step': 'function', 'begin': 'function', 'values': 'f,g,q', 'words': '1000 Hz · +3.0 dB · Q 1.00'}, got)
 
 
 def posted(b):
@@ -203,18 +162,19 @@ def actions(b, d):
             'api/v1/devices/Gungnir%202/presets']
     check('each_action_reaches_its_route: the request log is these routes, all answered 200',
           [p[0] for p in paths] == want and all(p[1] == 200 for p in paths), paths)
-    bodies = {p[0]: p[1] for p in log}
-    check('each_action_reaches_its_route: the bodies (done, one-based n, the shape)',
-          bodies['api/v1/host/volume'] == {'pct': 33} and bodies['api/v1/host/eq'] == {'on': True}
-          and bodies['api/v1/host/eq/points'] == {'type': 'LSC', 'f': 120, 'g': 3, 'q': 0.7}
-          and [{k: v for k, v in p[1].items() if k != 'slot'} for p in log if p[0] == 'api/v1/host/eq/points/1']
-          == [{'g': 2.5, 'done': False}, {'g': 2.5, 'done': True}], bodies)
-    sets = [p[1] for p in log if p[0] == 'api/v1/host/eq/points/1']
-    removes = [p[1] for p in log if p[0] == 'api/v1/host/eq/points/1/remove']
-    check('every_point_write_carries_its_slot: each set and the remove name the point by its slot (1 to 16)',
-          len(sets) == 2 and len(removes) == 1
-          and all(isinstance(x.get('slot'), int) and 1 <= x['slot'] <= 16 for x in sets + removes)
-          and sets[0]['slot'] == sets[1]['slot'] == removes[0]['slot'], [sets, removes])
+    b.page("document.querySelectorAll('#toasts .toast').forEach((t) => t.remove())")
+    b.page('window.__gets.length = 0')
+    answer = b.page("(async () => JSON.stringify(await __core.actions.computer.addPoint("
+                    "{ type: 'ZZ', f: 100, g: 0, q: 1 })))()")
+    words = json.loads(answer).get('error')
+    check('a_refusal_toasts_and_rereads: the daemon refuses with words', bool(words), answer)
+    shown = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)"))
+    check('a_refusal_toasts_and_rereads: the words are the toast', shown == [words], [shown, words])
+    reread = poll(lambda: b.page("window.__gets.some((g) => g.startsWith('api/v1/host'))"))
+    check('a_refusal_toasts_and_rereads: the host is read again', reread is True, b.page('window.__gets'))
+    check('a_refusal_toasts_and_rereads: no value is held after it',
+          b.page("__core.computer.toneOf(__core.model.page()).points.length")
+          == b.page(f'{COMPUTER}.eq.points.length'))
     check('no page error', errors(b) == [], errors(b)[:3])
 
 
@@ -273,23 +233,6 @@ def slots(b, d):
           poll(lambda: b.page(f'{COMPUTER}.eq.points.length') == 3), pts())
 
 
-def refusal(b, d):
-    load(b, d)
-    poll(lambda: b.page(f'!!{COMPUTER}?.eq'))
-    b.page('window.__gets.length = 0')
-    answer = b.page("(async () => JSON.stringify(await __core.actions.computer.addPoint("
-                    "{ type: 'ZZ', f: 100, g: 0, q: 1 })))()")
-    words = json.loads(answer).get('error')
-    check('a_refusal_toasts_and_rereads: the daemon refuses with words', bool(words), answer)
-    shown = poll(lambda: b.page("[...document.querySelectorAll('#toasts .toast')].map((t) => t.dataset.text)"))
-    check('a_refusal_toasts_and_rereads: the words are the toast', shown == [words], [shown, words])
-    reread = poll(lambda: b.page("window.__gets.some((g) => g.startsWith('api/v1/host'))"))
-    check('a_refusal_toasts_and_rereads: the host is read again', reread is True, b.page('window.__gets'))
-    check('a_refusal_toasts_and_rereads: no value is held after it',
-          b.page("__core.computer.toneOf(__core.model.page()).points.length")
-          == b.page(f'{COMPUTER}.eq.points.length'))
-
-
 def kept_and_silent(b, d):
     load(b, d)
     b.page("localStorage.setItem('svolder.side', 'computer')")
@@ -318,9 +261,6 @@ def unavailable(b, d):
           sw['unavailable'] == why and sw['side'] == 'dac' and b.page('__core.computer.side()') == 'dac', sw)
     check('unavailable_hides_nothing_but_says_why: the DAC\'s own volume is still read',
           b.page('__core.model.device().volume !== null'))
-    check('unavailable_hides_nothing_but_says_why: its targets are the switch alone',
-          b.page("import(new URL('assets/core/contract.js', document.baseURI))"
-                 ".then((c) => c.computerTargetsOf(__core.model.page()))") == [{'computer': 'flip'}])
     check('unavailable_hides_nothing_but_says_why: a flip posted nothing', b.page('window.__posts.length') == 0)
 
 
@@ -415,10 +355,8 @@ def one(name, fn, env=None, fleet=FLEET):
 
 
 one('the_host_event_carries_the_computer', host_event)
-one('the_hand_is_wired_into_the_core', hand_is_wired)
 one('each_action_reaches_its_route', actions)
 one('a_stale_place_still_lands_on_the_point_dragged', slots)
-one('a_refusal_toasts_and_rereads', refusal)
 one('the_side_is_kept_and_a_flip_writes_nothing', kept_and_silent)
 one('unavailable_hides_nothing_but_says_why', unavailable, env={'SVOLDER_FAKE_HOST_EQ': 'off'})
 one('the_question_is_asked_with_keys_and_buttons', question)

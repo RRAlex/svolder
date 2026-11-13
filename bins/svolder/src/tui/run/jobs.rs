@@ -1,130 +1,154 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The slow work the preset list asks of the loop: fetching the AutoEq index and downloading one
-//! file.
+//! The slow work the preset list asks of the loop: AutoEq's searches and imports, which the
+//! daemon does.
 //!
-//! Each runs on a task of its own, so no frame and no key waits on a network or a service
-//! manager; what it ends with arrives on a channel the loop reads, as a
-//! [`Done`]. What the jobs reach is behind [`Hands`], so a test puts a
-//! fake where the network and PipeWire would be.
+//! Each runs on a task of its own, so no frame and no key waits on the daemon, which may be
+//! fetching AutoEq's index (10 to 60 s) or a file; what a task ends with arrives on a channel the
+//! loop reads, as a [`Done`]. A search question waits out a pause in the typing first
+//! ([`Jobs::due`]): the loop wakes at that moment and sends the last question asked, and a newer
+//! question replaces the one waiting. A question that is sent stops the one still in flight,
+//! whose answer would be dropped anyway.
 
-use std::sync::Arc;
+use std::path::PathBuf;
 
-use svolder_autoeq::{AutoEqError, Client, Entry, Index, Refresh};
-use svolder_ipc::config::{RefreshWeeks, cache_home};
+use futures::future::BoxFuture;
+use svolder_ipc::socket::daemon_version::RESTART_COMMAND;
+use svolder_ipc::{AutoEqTarget, AutoEqVariant, IpcError, Response};
 use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
+use tokio::time::Instant;
 
+use crate::autoeq::{self, NEEDS_DAEMON};
 use crate::tui::boxes::presets::Done;
+use crate::tui::boxes::presets::search::{Ask, DEBOUNCE};
 
-/// What the jobs reach: AutoEq's repository.
-pub(in crate::tui) trait Hands: Send + Sync {
-    /// The index, fetched or read from the cache as `refresh` says. Blocks.
-    fn index(&self, refresh: Refresh) -> Result<Index, String>;
-    /// One measurement's parametric EQ text. Blocks.
-    fn download(&self, entry: &Entry) -> Result<String, String>;
-}
+/// A request to the daemon that has not been sent: its future does nothing until it is awaited.
+pub(in crate::tui) type Call = BoxFuture<'static, Result<Response, IpcError>>;
 
-/// The network.
-struct Live;
-
-/// The client the TUI uses: `SVOLDER_AUTOEQ_URL` or AutoEq's repository, cached where the CLI
-/// caches it.
-fn client() -> Client {
-    Client::from_env(cache_home().join("svolder").join("autoeq"))
-}
-
-impl Hands for Live {
-    fn index(&self, refresh: Refresh) -> Result<Index, String> {
-        client().index(refresh).map_err(|e| e.to_string())
-    }
-
-    fn download(&self, entry: &Entry) -> Result<String, String> {
-        client().download(entry).map_err(|e| match e {
-            AutoEqError::Status { status: 404, .. } => format!(
-                "{} is listed but its file is not there: pick another measurement",
-                entry.name
-            ),
-            other => other.to_string(),
-        })
-    }
-}
-
-/// Nothing: what a loop that reaches no network is left with, which says so rather than ever
-/// reaching for one.
-struct Idle;
-
-/// What [`Idle`] says to every job.
-const NOTHING: &str = "this session reaches no network";
-
-impl Hands for Idle {
-    fn index(&self, _: Refresh) -> Result<Index, String> {
-        Err(NOTHING.to_string())
-    }
-
-    fn download(&self, _: &Entry) -> Result<String, String> {
-        Err(NOTHING.to_string())
-    }
+/// A search question waiting out the typing.
+pub(super) struct Due {
+    /// When it is sent.
+    at: Instant,
+    /// The request that asks it, or nothing when the session holds no daemon.
+    call: Option<Call>,
+    /// The question.
+    ask: Ask,
 }
 
 /// The jobs in flight and the channel their ends come back on.
 pub(in crate::tui) struct Jobs {
-    /// What the jobs reach.
-    hands: Arc<dyn Hands>,
     /// Where a job sends what it ended with.
     done: mpsc::UnboundedSender<Done>,
     /// What the jobs ended with, in the order they ended.
     pub(super) ended: mpsc::UnboundedReceiver<Done>,
+    /// The search question that waits for the typing to pause.
+    pub(super) due: Option<Box<Due>>,
+    /// The search question in flight, which the next one stops.
+    searching: Option<AbortHandle>,
 }
 
 impl Default for Jobs {
-    /// Jobs that reach nothing.
     fn default() -> Jobs {
-        Jobs::over(Arc::new(Idle))
+        let (done, ended) = mpsc::unbounded_channel();
+        Jobs {
+            done,
+            ended,
+            due: None,
+            searching: None,
+        }
     }
 }
 
-/// When the index is fetched again: at once for `refresh`, else as `weeks` say.
-pub(super) fn policy(refresh: bool, weeks: RefreshWeeks) -> Refresh {
-    match (refresh, weeks) {
-        (true, _) => Refresh::Now,
-        (false, RefreshWeeks::Never) => Refresh::Never,
-        (false, RefreshWeeks::Weeks(weeks)) => Refresh::AfterWeeks(weeks),
-    }
+/// What a job says when the loop holds no daemon: AutoEq is the daemon's.
+fn no_daemon() -> String {
+    format!("{NEEDS_DAEMON}: none is running; {RESTART_COMMAND} starts one")
 }
 
 impl Jobs {
-    /// Jobs that reach AutoEq's repository and this machine.
-    pub(in crate::tui) fn live() -> Jobs {
-        Jobs::over(Arc::new(Live))
+    /// Ask the daemon the question `ask` by sending `call` (none: this session holds no daemon),
+    /// after the typing pauses when `soon`.
+    pub(super) fn search(&mut self, call: Option<Call>, ask: Ask, soon: bool) {
+        match soon {
+            true => {
+                self.due = Some(Box::new(Due {
+                    at: Instant::now() + DEBOUNCE,
+                    call,
+                    ask,
+                }));
+            }
+            false => {
+                self.due = None;
+                self.send(call, ask);
+            }
+        }
     }
 
-    /// Jobs that reach `hands`.
-    pub(in crate::tui) fn over(hands: Arc<dyn Hands>) -> Jobs {
-        let (done, ended) = mpsc::unbounded_channel();
-        Jobs { hands, done, ended }
+    /// When the waiting question is sent, if one waits.
+    pub(super) fn due_at(&self) -> Option<Instant> {
+        self.due.as_ref().map(|due| due.at)
     }
 
-    /// Fetch the index.
-    pub(super) fn index(&self, refresh: Refresh) {
-        let (hands, done) = (self.hands.clone(), self.done.clone());
-        tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || hands.index(refresh))
-                .await
-                .unwrap_or_else(|e| Err(format!("the fetch stopped: {e}")));
-            let _ = done.send(Done::Index(result));
+    /// Whether a search question is in flight.
+    #[cfg(test)]
+    pub(super) fn is_searching(&self) -> bool {
+        self.searching
+            .as_ref()
+            .is_some_and(|task| !task.is_finished())
+    }
+
+    /// Stop the questions of a search box that is gone: the one waiting for the typing is never
+    /// sent, and the one in flight is dropped with its connection.
+    pub(super) fn stop_search(&mut self) {
+        self.due = None;
+        if let Some(earlier) = self.searching.take() {
+            earlier.abort();
+        }
+    }
+
+    /// Send the question that was waiting for the typing to pause.
+    pub(super) fn send_due(&mut self) {
+        if let Some(due) = self.due.take() {
+            self.send(due.call, due.ask);
+        }
+    }
+
+    /// Ask now, on a task of its own, in place of the question in flight.
+    fn send(&mut self, call: Option<Call>, ask: Ask) {
+        if let Some(earlier) = self.searching.take() {
+            earlier.abort();
+        }
+        let done = self.done.clone();
+        let task = tokio::spawn(async move {
+            let result = match call {
+                Some(call) => autoeq::search_answer(call.await).map_err(|refused| refused.line()),
+                None => Err(no_daemon()),
+            };
+            let _ = done.send(Done::Searched(ask, result));
         });
+        self.searching = Some(task.abort_handle());
     }
 
-    /// Download one measurement's file.
-    pub(super) fn download(&self, entry: Entry) {
-        let (hands, done) = (self.hands.clone(), self.done.clone());
+    /// Have the daemon at `socket` import `variant` as the preset `name` for `target`. The import
+    /// is not stopped by the next question: it ends in a saved preset or a refusal.
+    pub(super) fn import(
+        &self,
+        socket: Option<PathBuf>,
+        variant: AutoEqVariant,
+        name: String,
+        target: AutoEqTarget,
+    ) {
+        let done = self.done.clone();
+        let asked = name.clone();
         tokio::spawn(async move {
-            let wanted = entry.clone();
-            let result = tokio::task::spawn_blocking(move || hands.download(&wanted))
-                .await
-                .unwrap_or_else(|e| Err(format!("the download stopped: {e}")));
-            let _ = done.send(Done::Download(entry, result));
+            let result = match socket {
+                Some(socket) => autoeq::import(&socket, variant, Some(name), false, target, None)
+                    .await
+                    .map_err(|refused| refused.line()),
+                None => Err(no_daemon()),
+            };
+            let _ = done.send(Done::Imported(asked, result));
         });
     }
 }
@@ -133,6 +157,14 @@ impl Jobs {
 pub(super) async fn next(ended: &mut mpsc::UnboundedReceiver<Done>) -> Done {
     match ended.recv().await {
         Some(done) => done,
+        None => std::future::pending().await,
+    }
+}
+
+/// The moment the waiting question is sent; never, while none waits.
+pub(super) async fn due(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
         None => std::future::pending().await,
     }
 }

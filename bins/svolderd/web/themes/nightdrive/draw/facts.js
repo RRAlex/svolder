@@ -1,21 +1,12 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The device's facts: a spec table, every reading the device holds with how long ago it was heard, and
-// Identify, under a title that folds them away (folded unless the person opened them); and the faults an
-// amp reports, each with its advice. Pure: the model in, markup out; the ages are written once here and
-// kept current by facts-wire.js.
+// The faults an amp reports, each with its advice, and the foot of the sheet, *Device settings…*
+// (the device's facts and readings are the Devices popup's page, drawn by the core). Pure: the model
+// in, markup out.
 
-import { ageWords } from '../../../core/words.js';
 import { SHEET } from '../words.js';
 import { esc } from './esc.js';
 import { button } from './modes.js';
-
-/** A row of the spec table: its label, then its value in the cell that names the fact. */
-const row = (label, value, attrs = '', cls = '') => `<tr><th scope="row">${esc(label)}</th>`
-  + `<td data-fact="${esc(label)}"${cls ? ` class="${cls}"` : ''}${attrs}>${value}</td></tr>`;
-
-/** The seconds from `heardAt` to `nowMs`, both by the daemon's clock. */
-const since = (nowMs, heardAt) => (nowMs - heardAt) / 1000;
 
 /** The faults the device reports: the facts' rows of the fault family (ids `230.…`: over-current,
  * over-temperature) with their value, and the advice of the card's faults. Nothing for none. */
@@ -30,43 +21,13 @@ export function drawFaults(device) {
     + `${tips ? `<ul class="nd-advice">${tips}</ul>` : ''}`;
 }
 
-/** The facts of `device`, folded unless `open`; nothing for a device that holds none. `inert` (a guest, a page
- * whose writes are off) draws Identify quiet. */
-export function drawFacts(device, open = false, inert = Boolean(device?.inert)) {
-  const f = device?.facts;
-  if (!f) return '';
-  const age = f.signal_age;
-  const heard = age
-    ? ` data-head="${esc(age.head)}" data-heard-at="${esc(age.heard_at_ms)}"${age.live ? ' data-live' : ''}`
-    : '';
-  const spec = [
-    row('Product', esc(SHEET.product(f.product, f.product_id))),
-    f.unit ? row('Unit', esc(f.unit), '', 'mono') : '',
-    row('Firmware', esc(f.firmware)),
-    row('DSP', f.dsp == null ? SHEET.unknown : esc(f.dsp)),
-    row('Profile', esc(f.profile)),
-    row('Link', esc(f.link)),
-    row('Signal', esc(f.signal), heard),
-    f.passphrase_note == null ? '' : row('Passphrase', esc(f.passphrase_note), '', 'warn'),
-  ].join('');
-  const readings = (f.rows ?? []).map((r) => {
-    const when = r.heard_at_ms == null
-      ? `<td class="nd-age">${SHEET.unknown}</td>`
-      : `<td class="nd-age" data-heard-at="${esc(r.heard_at_ms)}">${esc(SHEET.ago(
-        ageWords(since(f.now_ms, r.heard_at_ms))))}</td>`;
-    return `<tr><th scope="row">${esc(r.label)}</th><td data-fact="${esc(r.id)}">${esc(r.value)}</td>${when}</tr>`;
-  }).join('');
-  const identify = f.identify_offered
-    ? `<div class="nd-set">${button('identify', SHEET.identify, !f.identify || inert,
-      ' id="nd-identify"', 'nd-btn')}</div><p class="nd-note">${esc(SHEET.identifyNote)}</p>`
-    : '';
-  return `<h2 class="nd-lbl nd-foldhead"><button type="button" id="nd-facts-fold" class="nd-fold" `
-    + `data-act="facts-fold" aria-expanded="${open}" aria-controls="nd-facts-body">`
-    + `<span class="nd-caret" aria-hidden="true">${open ? '▾' : '▸'}</span>`
-    + `${esc(SHEET.factsTitle(device.name))}</button> <span class="nd-note">`
-    + `${esc(open ? SHEET.factsHide : SHEET.factsShow)}</span></h2>`
-    + `<div id="nd-facts-body"${open ? '' : ' hidden'}>`
-    + `<table id="nd-spec" class="nd-spec" data-now="${esc(f.now_ms)}"><tbody>${spec}</tbody></table>`
-    + `<h2 class="nd-lbl">${esc(SHEET.readings)}</h2>`
-    + `<table id="nd-readings" class="nd-spec"><tbody>${readings}</tbody></table>${identify}</div>`;
+/** The foot of the sheet: *Device settings…*, which opens the device's page in the Devices popup,
+ * where the core draws the device's facts, its readings and, for a writer, *Identify*. A viewer
+ * who may not write (`inert`: a guest, a page whose writes are off) is offered *Devices…*: the
+ * same page, read-only; it is the way to the device list on this theme. */
+export function drawFoot(device, inert = Boolean(device?.inert)) {
+  if (!device?.url) return '';
+  const word = inert ? SHEET.deviceFacts : SHEET.deviceSettings;
+  return `<div class="nd-set">${button('device-settings', word, false,
+    ` data-device="${esc(device.url)}"`, 'nd-btn')}</div>`;
 }

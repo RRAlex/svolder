@@ -168,7 +168,12 @@ impl IntroSound {
             return None;
         }
         let dir = svolder_ipc::socket::path::private_dir().ok()?;
-        IntroSound::planned(tui, svolder_host::host_off(), on_path("pw-play"), &dir)
+        IntroSound::planned(
+            tui,
+            svolder_host::host_unreached(),
+            on_path("pw-play"),
+            &dir,
+        )
     }
 
     /// A sound that plays through `player`, from a file in `dir`.

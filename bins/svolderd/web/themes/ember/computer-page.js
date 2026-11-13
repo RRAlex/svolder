@@ -81,7 +81,7 @@ export function patch() {
  * inside the plot. */
 export function placeLabel(s) {
   const rect = s.plot.getBoundingClientRect();
-  const at = ember.core.drag.markersIn(tone()?.markers.filter((m) => m.n === s.n), rect)[0];
+  const at = ember.core.eq.points.markersIn(tone()?.markers.filter((m) => m.n === s.n), rect)[0];
   const words = s.words();
   if (!at || !words) return;
   s.label.textContent = words;
@@ -94,12 +94,14 @@ export function placeLabel(s) {
   s.label.style.setProperty('--ly', place.y.toFixed(1));
 }
 
+/** The core's touch watch of each `touch` (`{ move, end }`): one per handlers' pair, so the
+ * listeners added to a plot are the ones taken off it. */
+const watches = new WeakMap();
+
 /** The touch listeners a drag by finger needs on its plot: `touch.move` and `touch.end`. */
 function watchTouch(plot, touch, on) {
-  const call = on ? 'addEventListener' : 'removeEventListener';
-  plot[call]('touchmove', touch.move, { passive: false });
-  plot[call]('touchend', touch.end);
-  plot[call]('touchcancel', touch.end);
+  if (!watches.has(touch)) watches.set(touch, ember.core.eq.points.touchWatch(touch));
+  watches.get(touch)(plot, on);
 }
 
 /** A drag begins on the core's session `s`: its label, the grab cursor and the lit marker. */

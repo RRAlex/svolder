@@ -127,26 +127,8 @@ function find(target) {
   return null;
 }
 
-/** The Device fold-out's details element. */
-const fold = () => document.querySelector('#part-facts .device-facts');
-
-/** The row of the Device section's list whose label is `label`, or the reading row of id
- * `label`: its value element. */
-function factCell(label) {
-  for (const row of document.querySelectorAll('#part-facts .facts dl.readout')) {
-    if (row.querySelector('dt')?.textContent === label) return row.querySelector('dd');
-  }
-  for (const row of document.querySelectorAll('#part-facts .readings tbody tr')) {
-    if (row.querySelector('td.id')?.textContent === label) return row.querySelector('td.val');
-  }
-  return null;
-}
-
 /** The cover of the track, the one fact the Now playing card shows. */
 const COVER = '#part-playing .np-cover img';
-
-/** Whether `label` names a fact, not a target. */
-const isFact = (label) => typeof label === 'string';
 
 /** A click on `element`, as a press of its button or a key's click on it. */
 function press(element) {
@@ -211,18 +193,8 @@ async function seen(target) {
     const img = document.querySelector(COVER);
     return Boolean(img) && taken(img) && onScreen(img);
   }
-  if (isFact(target)) {
-    const details = fold();
-    if (!details) return false;
-    if (!details.open) {
-      press(details.querySelector('summary'));
-      await settle();
-    }
-    factCell(target)?.scrollIntoView({ block: 'center' });
-    await settle();
-    const cell = factCell(target);
-    return Boolean(cell) && taken(cell) && onScreen(cell);
-  }
+  // the device's facts are the Devices popup's, drawn by the core: the core's driver answers them
+  if (typeof target === 'string') return false;
   if ('band' in target) {
     // The band's row shows the band; a person opens its editor to see the parameter.
     find(target)?.scrollIntoView({ block: 'center' });
@@ -395,7 +367,7 @@ export const driver = {
 
   shown(target) {
     if (target === 'Cover') return document.querySelector(COVER)?.getAttribute('src') ?? null;
-    if (isFact(target)) return factCell(target)?.textContent ?? null;
+    if (typeof target === 'string') return null;
     const element = find(target);
     if (!element) return null;
     if ('computer' in target) return shownComputer(target, element);

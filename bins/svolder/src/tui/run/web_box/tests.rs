@@ -13,6 +13,7 @@ use crate::tui::boxes::web_box::WebBox;
 
 use super::super::test_support::*;
 use super::super::*;
+use svolder_ipc::CODE_USAGE;
 
 fn network() -> WebStatus {
     WebStatus::Listening {
@@ -150,10 +151,7 @@ async fn a_daemon_that_cannot_say_is_not_asked_again_about_that_link() {
     web_box::checked(&mut shown, (code.clone(), None), Instant::now());
     assert!(shown.web_code.is_none(), "no answer replaced the link");
     assert!(web_box::checking(&shown, Instant::now()));
-    let error = Some(Response::Error {
-        code: 1,
-        message: "unknown request".into(),
-    });
+    let error = Some(Response::error(CODE_USAGE, "unknown request"));
     web_box::checked(&mut shown, (code, error), Instant::now());
     assert!(shown.web_code.is_none(), "an error replaced the link");
     assert!(!web_box::checking(&shown, Instant::now()));
@@ -308,10 +306,13 @@ async fn a_pairing_code_lands_and_an_off_web_ui_says_how_to_turn_it_on() {
     assert!(said.contains("the web UI is off"), "{said}");
 }
 
-/// Web UI and Reach write `[web]` in the file and have the daemon reload, keeping the port.
+/// The Web UI row's listen address is written in the file with a reload, keeping the port; its
+/// on/off is the daemon's switch while one runs, so the file is not written behind it, and a
+/// daemon that cannot switch is told to restart, never written around.
 #[tokio::test]
-async fn the_web_rows_write_their_keys_and_reload() {
+async fn the_web_rows_write_their_keys_and_switch_through_the_daemon() {
     let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&["server_switch"]);
     let opener = opener_on_nothing(path.clone());
     let (mut look, _) = look_over(&state_home());
     let watching = taken(
@@ -321,17 +322,59 @@ async fn the_web_rows_write_their_keys_and_reload() {
         &mut look,
     )
     .await;
-    let _ = taken(
+    let watching = taken(
         Intent::Connection(ConnChange::WebEnabled(true)),
         &opener,
         watching,
         &mut look,
     )
     .await;
-    let config = svolder_ipc::Config::load_from(&path).unwrap();
-    assert!(config.web.enabled);
+    let watching = taken(
+        Intent::Connection(ConnChange::McpEnabled(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let config =
+        svolder_ipc::Config::load_from_with(&path, &svolder_ipc::config::ListenDefaults::default())
+            .unwrap();
+    assert!(
+        !config.web.enabled,
+        "the file was written behind the daemon's switch"
+    );
     assert_eq!(config.web.listen, "0.0.0.0:8738".parse().unwrap());
-    assert_eq!(daemon.reloads(), 2);
+    assert_eq!(
+        daemon.reloads(),
+        1,
+        "only the listen address is a file write"
+    );
+    assert_eq!(
+        daemon.switches(),
+        [
+            (svolder_ipc::Server::Web, true),
+            (svolder_ipc::Server::Mcp, true)
+        ]
+    );
+
+    // A daemon that lists no `server_switch` is refused in words; the file stays as it was.
+    daemon.lists_features(&[]);
+    let mut watching = watching;
+    watching.app.dismiss_toast();
+    let watching = taken(
+        Intent::Connection(ConnChange::WebEnabled(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let said = watching
+        .app
+        .toast()
+        .map(|toast| toast.text.clone())
+        .unwrap_or_default();
+    assert!(said.contains("svolder daemon restart"), "{said}");
+    assert_eq!(daemon.switches().len(), 2);
 }
 
 /// Copying the link sends it by OSC 52; the box asks for no code while it is closed.

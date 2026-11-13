@@ -22,7 +22,7 @@ fn svolder(args: &[&str], xdg: &std::path::Path) -> (Option<i32>, String, String
         .env("SVOLDER_UNITDIR", xdg.join("units"))
         .env("XDG_CONFIG_HOME", xdg)
         .env("XDG_STATE_HOME", xdg)
-        .env_remove("SVOLDER_SOCKET")
+        .env("SVOLDER_SOCKET", "/nonexistent-svolder-test/svolder.sock")
         .args(args)
         .output()
         .expect("the binary runs");

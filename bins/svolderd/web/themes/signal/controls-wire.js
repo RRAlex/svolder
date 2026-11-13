@@ -24,12 +24,13 @@ const STEPPERS = '[data-act="band"][data-step], [data-act="loudness"][data-step]
 const LET_GO_MS = 250;
 
 /** Wire the shelf's controls in `root` until `signal` aborts; `keep` is the shelf's count of holds and
- * `release()` gives one back once the press that closed a list is over (press.js). */
+ * `release()` gives one back once the press that closed a list is over
+ * (`core.freeze.createRelease`). */
 export function wireControls({
   root, core, live, act, view, keep, release, signal,
 }) {
   const box = root.querySelector('#sg-shelf');
-  const { BAND_PARAM } = core.drag;
+  const { BAND_PARAM } = core.eq.bands;
   const controlOf = (key) => (view.device()?.controls ?? []).find((c) => c.key === key);
   const inert = () => Boolean(view.device()?.inert);
 
@@ -217,7 +218,7 @@ export function wireControls({
     const first = event.target.closest?.(STEPPERS);
     if (!first || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     hold?.end();
-    hold = core.hold.repeat(event, {
+    hold = core.repeat(event, {
       root,
       el: first,
       step: stepOnce,

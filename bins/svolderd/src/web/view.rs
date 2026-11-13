@@ -31,7 +31,7 @@ pub(crate) use facts::Facts;
 pub(crate) use host::{Playing, playing_of};
 pub(crate) use meters::{Meters, PowerView};
 pub(crate) use strip::{Past, Strip, last_second, strip};
-pub(crate) use tone::{Bands, Presets, Tone};
+pub(crate) use tone::{Bands, POINTS, Presets, Tone};
 
 use std::collections::BTreeMap;
 
@@ -230,7 +230,9 @@ pub(crate) fn spans(text: &str) -> Vec<Span> {
         .collect()
 }
 
-/// The card for a daemon whose configuration names no device.
+/// The card for a daemon whose configuration names no device. The page takes the same words when
+/// its last device is removed while it is open (`NO_DEVICES` in `web/core/stream.js`); a test holds
+/// the two together.
 pub(crate) fn no_devices() -> Card {
     Card {
         kind: "dim",
@@ -283,6 +285,18 @@ pub(crate) fn segment(name: &str) -> String {
 /// `name` in hex: what an element id that names the device is made of.
 pub(crate) fn dom(name: &str) -> String {
     name.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+/// An opaque key of a device's unit that stays the same while the device is renamed: a hash under
+/// a random key of this run, so a viewer who may not read units cannot work the unit back from it.
+/// It is the same for the same unit within a run and means nothing across runs.
+pub(crate) fn key(unit: &str) -> String {
+    use std::hash::{BuildHasher, RandomState};
+    static STATE: std::sync::OnceLock<RandomState> = std::sync::OnceLock::new();
+    format!(
+        "{:016x}",
+        STATE.get_or_init(RandomState::new).hash_one(unit)
+    )
 }
 
 /// The link pill of the device `info` describes.

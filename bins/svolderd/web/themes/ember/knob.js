@@ -292,7 +292,7 @@ class Knob extends HTMLElement {
       button.addEventListener('pointerdown', (event) => {
         if (event.button !== 0 || !this.live()) return;
         hold?.end();
-        hold = ember.core.hold.repeat(event, {
+        hold = ember.core.repeat(event, {
           root: this,
           el: button,
           step: press,

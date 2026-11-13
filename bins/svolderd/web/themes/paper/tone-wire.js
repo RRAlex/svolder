@@ -11,7 +11,6 @@
 
 import { wireGraph } from './graph.js';
 import { closeList, closeOf, openList } from './lists.js';
-import { keeper } from './live.js';
 import { WORDS } from './words.js';
 
 /** Wire the tone of the sheet in `root` until `signal` aborts. */
@@ -21,10 +20,10 @@ export function wireTone({
   const box = root.querySelector('#p-tone');
   if (!box) return;
   const store = core.model;
-  const { BAND_PARAM } = core.drag;
+  const { BAND_PARAM } = core.eq.bands;
 
   // A drag and an open list may hold the section together: it is let go when both are done.
-  const keep = keeper(live, 'tone');
+  const keep = core.freeze.keeper(live, 'tone');
 
   live.onSwitch(() => {
     closeList();

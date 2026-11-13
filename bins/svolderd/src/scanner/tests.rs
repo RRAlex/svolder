@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::StreamExt;
+use svolder_ble::Advertisements;
 use svolder_profiles::Registry;
 
 use super::*;
@@ -274,14 +275,102 @@ async fn the_scan_verb_and_a_listen_take_turns() {
     let air = OnAir::new(&[(AMP, None)]);
     let scanner = scanner_on(&air);
     let started = Instant::now();
-    let (_scan, _amp) = tokio::join!(scanner.scan(Duration::from_secs(2)), async {
+    let (_scan, _amp) = tokio::join!(scanner.scan_each(Duration::from_secs(2), &|_| {}), async {
         tokio::time::sleep(Duration::from_millis(500)).await;
         scanner.sight(unit(AMP)).await
     });
-    let (began, _) = air.listens()[0];
+    // The verb's scan is a listen of its own, first; the shared one comes after it.
+    let listens = air.listens();
+    assert_eq!(listens.len(), 2, "{listens:?}");
+    let (began, _) = listens[1];
     assert!(
         began - started >= Duration::from_secs(2),
         "the listen began during the verb's scan"
+    );
+}
+
+/// An actor that waits for its device while the `scan` verb listens is answered by the verb's
+/// listen, once it has stopped, rather than by a listen of its own after it: the verb's scan is
+/// a listen that hears every device.
+#[tokio::test(start_paused = true)]
+async fn an_actor_waiting_during_a_scan_is_answered_by_it() {
+    let air = OnAir::new(&[(AMP, Some(Duration::ZERO)), (DAC, Some(Duration::ZERO))]);
+    let scanner = scanner_on(&air);
+    let started = Instant::now();
+    let window = Duration::from_secs(2);
+    let (scan, amp) = tokio::join!(scanner.scan_each(window, &|_| {}), async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let heard = scanner.sight(unit(AMP)).await;
+        (heard, started.elapsed())
+    });
+    assert!(matches!(amp.0, Ok(Some(_))), "{:?}", amp.0);
+    assert!(
+        amp.1 >= window,
+        "the answer went out while the verb's scan still listened: {:?}",
+        amp.1
+    );
+    let listens = air.listens();
+    assert_eq!(listens.len(), 1, "one listen, the verb's: {listens:?}");
+    assert_eq!(
+        listens[0].0, started,
+        "the listen that answered was the verb's"
+    );
+    let units: Vec<UnitId> = scan
+        .expect("the scan runs")
+        .iter()
+        .map(Advertisement::unit_id)
+        .collect();
+    assert_eq!(units, [unit(AMP), unit(DAC)], "each unit once, as heard");
+}
+
+/// A scan cancelled part-way (a walk's cancel, a daemon stop) still answers the waiting actors it
+/// heard, rather than dropping their senders.
+#[tokio::test(start_paused = true)]
+async fn a_scan_dropped_mid_window_still_answers_the_actors_it_heard() {
+    let air = OnAir::new(&[(AMP, Some(Duration::ZERO))]);
+    let scanner = scanner_on(&air);
+    let window = Duration::from_secs(5);
+    let (cut, amp) = tokio::join!(
+        tokio::time::timeout(Duration::from_secs(1), scanner.scan_each(window, &|_| {})),
+        async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            scanner.sight(unit(AMP)).await
+        }
+    );
+    assert!(cut.is_err(), "the scan was cut off");
+    assert!(matches!(amp, Ok(Some(_))), "{amp:?}");
+}
+
+/// The verb's scan hands each unit over the first time it is heard, while it still listens.
+#[tokio::test(start_paused = true)]
+async fn the_scan_hands_each_new_unit_over_as_it_is_heard() {
+    let air = OnAir::new(&[
+        (AMP, Some(Duration::ZERO)),
+        (DAC, Some(Duration::from_millis(1200))),
+    ]);
+    let scanner = scanner_on(&air);
+    let started = Instant::now();
+    let times = Mutex::new(Vec::new());
+    let heard = scanner
+        .scan_each(Duration::from_secs(3), &|advert: &Advertisement| {
+            times
+                .lock()
+                .unwrap()
+                .push((advert.unit_id(), started.elapsed()));
+        })
+        .await
+        .expect("the scan runs");
+    let times = times.into_inner().unwrap();
+    assert_eq!(heard.len(), 2);
+    assert_eq!(
+        times.iter().map(|(unit, _)| *unit).collect::<Vec<_>>(),
+        [unit(AMP), unit(DAC)]
+    );
+    assert_eq!(times[0].1, Duration::ZERO, "the amp at once");
+    assert!(
+        times[1].1 >= Duration::from_millis(1200) && times[1].1 < Duration::from_secs(3),
+        "the dac as it came on the air: {:?}",
+        times[1].1
     );
 }
 

@@ -23,6 +23,10 @@
 #   - a step that runs `docker build -f .../Dockerfile ... ctx` does not stage into `ctx/` every
 #     source the Dockerfile's `COPY` lines name (the release image is built from a context of
 #     its own, so a new COPY source must be copied there too);
+#   - a job with an `if:` of its own anywhere up its `needs` chain (release.yml's `test`, skipped when
+#     the commit is proven) has no `if:` of its own that holds `!cancelled()`, `!failure()` and
+#     `needs.<need>.result` for each direct need on such a chain: the implicit success() looks at
+#     the whole chain, so a skipped ancestor would skip it silently;
 #   - a `make` target a step runs, or a packaging/ or scripts/ file it names, does not exist.
 import glob
 import os
@@ -100,6 +104,31 @@ def context_errors(run, dockerfile):
     return errors
 
 
+def skip_errors(jobs):
+    """The jobs downstream of a conditional job (directly or further up) that do not say what a
+    skipped ancestor means: the implicit success() looks at the whole chain, not only the direct needs."""
+    def needs_of(job):
+        n = (job or {}).get("needs") or []
+        return [n] if isinstance(n, str) else list(n)
+
+    def tainted(name, seen=()):
+        """The job has an `if:` of its own, or an ancestor has."""
+        job = jobs.get(name) or {}
+        if job.get("if") or name in seen:
+            return bool(job.get("if"))
+        return any(tainted(n, seen + (name,)) for n in needs_of(job))
+
+    errors = []
+    for name, job in jobs.items():
+        bad = [n for n in needs_of(job) if tainted(n)]
+        cond = str(job.get("if", ""))
+        for need in bad:
+            for want in ("!cancelled()", "!failure()", f"needs.{need}.result"):
+                if want not in cond:
+                    errors.append(f"job `{name}` has `{need}` upstream with an `if:` somewhere above it, but its own `if:` lacks `{want}`")
+    return errors
+
+
 def check(path, targets):
     errors = []
     with open(path, encoding="utf-8") as f:
@@ -112,6 +141,7 @@ def check(path, targets):
         return ["no jobs"]
 
     errors += trigger_errors(doc, os.path.basename(path))
+    errors += skip_errors(doc["jobs"])
 
     for n, line in enumerate(text.splitlines(), 1):
         m = USES.match(line)
@@ -217,13 +247,30 @@ def self_test():
         if bool(context_errors(run, dockerfile)) == ok:
             print(f"workflow-check: self-test: context case {run!r} should {'pass' if ok else 'fail'}")
             bad += 1
+    good = "!cancelled() && !failure() && needs.t.result == 'skipped'"
+    skip_cases = [
+        ({"t": {"if": "x"}, "i": {"needs": ["t"], "if": good}}, True),
+        ({"t": {}, "i": {"needs": ["t"]}}, True),
+        ({"t": {"if": "x"}, "i": {"needs": "t"}}, False),
+        ({"t": {"if": "x"}, "i": {"needs": ["t"], "if": "needs.t.result == 'skipped'"}}, False),
+        ({"t": {"if": "x"}, "i": {"needs": ["t"], "if": good.replace("!failure() && ", "")}}, False),
+        ({"t": {"if": "x"}, "i": {"needs": ["t"], "if": good.replace("needs.t.result", "needs.u.result")}}, False),
+        ({"t": {"if": "x"}, "i": {"needs": ["t"], "if": good}, "m": {"needs": "i"}}, False),
+        ({"t": {"if": "x"}, "i": {"needs": ["t"], "if": good},
+          "m": {"needs": "i", "if": "!cancelled() && !failure() && needs.i.result == 'success'"}}, True),
+        ({"b": {}, "i": {"needs": ["b"]}}, True),
+    ]
+    for jobs, ok in skip_cases:
+        if bool(skip_errors(jobs)) == ok:
+            print(f"workflow-check: self-test: skip case {jobs!r} should {'pass' if ok else 'fail'}")
+            bad += 1
     for text, ok in cases:
         got = not trigger_errors(yaml.safe_load(text))
         if got != ok:
             print(f"workflow-check: self-test: {text!r} should {'pass' if ok else 'fail'}")
             bad += 1
     if not bad:
-        print(f"workflow-check: self-test: {len(cases)} trigger cases agree")
+        print(f"workflow-check: self-test: {len(cases)} trigger cases and {len(skip_cases)} skip cases agree")
     return 1 if bad else 0
 
 

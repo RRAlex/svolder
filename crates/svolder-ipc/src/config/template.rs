@@ -33,7 +33,10 @@ impl Config {
              # uses while the key is absent, so uncommenting a line on its own changes nothing. (In the\n\
              # container image the defaults of `listen` and `url` come from SVOLDER_WEB_LISTEN,\n\
              # SVOLDER_MCP_LISTEN and SVOLDER_WEB_URL; a `listen` written here wins over them, so\n\
-             # a loopback one makes the server unreachable from outside the container.)\n\
+             # a loopback one makes the server unreachable from outside the container. The\n\
+             # default of the web UI's and the MCP server's `enabled` comes from\n\
+             # SVOLDER_WEB_ENABLED and SVOLDER_MCP_ENABLED where they are set; an `enabled`\n\
+             # written here wins.)\n\
              \n\
              schema = 1\n",
         );
@@ -296,7 +299,7 @@ impl Config {
              # [[hop]]\n\
              # device = \"vali\"\n",
         );
-        out.push_str("\n# The AutoEq index `svolder eq search` reads, kept in the cache directory.\n[autoeq]\n");
+        out.push_str("\n# The AutoEq index svolderd fetches for every front end, kept in its cache directory.\n[autoeq]\n");
         commented(
             &mut out,
             "Weeks (1 to 99) before the cached index is fetched again, or \"never\".",

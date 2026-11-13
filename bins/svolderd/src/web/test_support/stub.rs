@@ -14,6 +14,7 @@ use crate::fleet::{Fleet, Watched};
 use crate::recall::Recalled;
 use crate::web::router::router;
 use crate::writer::{ClimbView, Glided};
+use svolder_ipc::CODE_LINK;
 
 /// The readings of a device that had a link: the volume at step 40.
 pub(crate) fn had_a_link(profile: &svolder_profiles::Profile) -> Vec<svolder_proto::Message> {
@@ -54,6 +55,7 @@ impl Stub {
             passphrase_note: None,
             refused: false,
             recalled: None,
+            key_readings: Vec::new(),
         };
         let feed = Feed {
             heard_at: Default::default(),
@@ -188,10 +190,18 @@ impl Fleet for Stub {
     }
 
     async fn request(&self, _request: svolder_ipc::Request) -> svolder_ipc::Response {
-        svolder_ipc::Response::Error {
-            code: 3,
-            message: "no daemon".to_string(),
-        }
+        svolder_ipc::Response::error(CODE_LINK, "no daemon".to_string())
+    }
+
+    async fn stream(
+        &self,
+        _request: svolder_ipc::Request,
+    ) -> Result<futures::stream::BoxStream<'static, svolder_ipc::Event>, Box<svolder_ipc::Response>>
+    {
+        Err(Box::new(svolder_ipc::Response::error(
+            CODE_LINK,
+            "no daemon".to_string(),
+        )))
     }
 
     async fn recall(
@@ -204,10 +214,10 @@ impl Fleet for Stub {
     }
 
     async fn glide(&self, _device: &svolder_ipc::DeviceInfo, _key: &str, _raw: i64) -> Glided {
-        Glided::Refused(svolder_ipc::Response::Error {
-            code: 3,
-            message: "no daemon".to_string(),
-        })
+        Glided::Refused(svolder_ipc::Response::error(
+            CODE_LINK,
+            "no daemon".to_string(),
+        ))
     }
 
     fn profile(&self, _device: &svolder_ipc::DeviceInfo) -> Option<svolder_profiles::Profile> {
@@ -224,8 +234,8 @@ impl Fleet for Stub {
         })
     }
 
-    fn config(&self) -> Result<svolder_ipc::Config, String> {
-        Ok(svolder_ipc::Config::default())
+    fn config(&self) -> Result<Arc<svolder_ipc::Config>, String> {
+        Ok(Arc::default())
     }
 }
 

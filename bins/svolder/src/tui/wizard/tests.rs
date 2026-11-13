@@ -717,7 +717,7 @@ async fn a_partial_code_is_refused_on_the_step_without_asking_the_wizard() {
         rows[22]
     );
     assert!(
-        rows.iter().any(|row| row.starts_with(" > ‹ 12__ ›")),
+        rows.iter().any(|row| row.starts_with(" > ‹ ••__ ›")),
         "the digits typed are not there to go on from: {rows:?}"
     );
     assert_eq!(
@@ -764,7 +764,7 @@ async fn the_arrows_step_the_passphrase_row_and_enter_answers_with_it() {
     ];
     let (_, rows) = walked(&mut wizard, script).await;
     assert!(
-        rows.iter().any(|row| row.starts_with(" > ‹ 7___ ›")),
+        rows.iter().any(|row| row.starts_with(" > ‹ •___ ›")),
         "{rows:?}"
     );
 }

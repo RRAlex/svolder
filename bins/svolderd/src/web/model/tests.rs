@@ -24,6 +24,7 @@ use crate::web::test_support::{web_over, web_with};
 use crate::web::view::test_support::{OPEN, info, read, shot, tone_on};
 use crate::web::view::{self, Access, screen};
 use crate::writer::Glided;
+use svolder_ipc::CODE_LINK;
 
 /// A guest: reads, writes nothing.
 const GUEST: Access = Access {
@@ -101,10 +102,7 @@ impl Fleet for Listed {
             Request::Devices => Response::Devices {
                 devices: self.devices.clone(),
             },
-            _ => Response::Error {
-                code: 3,
-                message: "no daemon".to_string(),
-            },
+            _ => Response::error(CODE_LINK, "no daemon".to_string()),
         }
     }
 
@@ -118,18 +116,15 @@ impl Fleet for Listed {
     }
 
     async fn glide(&self, _device: &DeviceInfo, _key: &str, _raw: i64) -> Glided {
-        Glided::Refused(Response::Error {
-            code: 3,
-            message: "no daemon".to_string(),
-        })
+        Glided::Refused(Response::error(CODE_LINK, "no daemon".to_string()))
     }
 
     fn profile(&self, device: &DeviceInfo) -> Option<Profile> {
         Some(profile_named(&device.profile))
     }
 
-    fn config(&self) -> Result<Config, String> {
-        Ok(self.config.clone())
+    fn config(&self) -> Result<Arc<Config>, String> {
+        Ok(Arc::new(self.config.clone()))
     }
 }
 

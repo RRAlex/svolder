@@ -369,7 +369,7 @@ impl PwCliSession {
     /// or there is no `pw-cli` to run.
     pub fn from_env() -> Option<Self> {
         Self::resolve(
-            crate::host_off(),
+            crate::host_unreached(),
             std::env::var_os(PW_CLI_ENV).as_deref(),
             PwDump::from_env()?,
         )

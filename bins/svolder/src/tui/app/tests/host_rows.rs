@@ -33,12 +33,12 @@ fn host_press(app: &mut App, code: KeyCode) -> Vec<Intent> {
 fn host_audio_off_brings_a_cursor_on_a_host_row_back_to_the_last_row() {
     let mut app = hosted(0.54);
     let own = app.rows().len();
-    app.selected = own;
+    app.set_selected(own);
     assert_eq!(app.host_row(), Some(HostRow::Transport));
     let mut tui = app.tui.clone();
     tui.host_audio = false;
     app.set_look(&tui, &Effects::new(false, &tui.effects));
-    assert_eq!(app.selected, own - 1, "the cursor was left past the rows");
+    assert_eq!(app.selected(), own - 1, "the cursor was left past the rows");
     assert!(
         app.selected_control().is_some(),
         "no row carries the cursor"
@@ -55,7 +55,7 @@ fn the_host_group_keeps_transport_only() {
     for _ in 0..own + 3 {
         host_press(&mut app, KeyCode::Down);
     }
-    assert_eq!(app.selected, own);
+    assert_eq!(app.selected(), own);
     assert_eq!(app.host_row(), Some(HostRow::Transport));
     assert_eq!(app.selected_control(), None, "a device row is selected too");
 
@@ -65,7 +65,7 @@ fn the_host_group_keeps_transport_only() {
         host_press(&mut off, KeyCode::Down);
     }
     assert_eq!(
-        off.selected,
+        off.selected(),
         own - 1,
         "the keys went past the device's rows"
     );
@@ -81,7 +81,7 @@ fn on_the_computer(volume: f32) -> App {
     ));
     app.flip_side();
     assert!(app.on_computer());
-    app.selected = row_of(&app, "volume");
+    app.set_selected(row_of(&app, "volume"));
     app
 }
 
@@ -91,7 +91,7 @@ fn on_the_computer(volume: f32) -> App {
 #[test]
 fn the_computer_volume_steps_one_percent_and_never_above_100() {
     let mut app = on_the_computer(0.54);
-    let volume = app.selected;
+    let volume = app.selected();
     assert_eq!(
         host_press(&mut app, KeyCode::Right),
         [Intent::HostVolume(55)]
@@ -130,7 +130,7 @@ fn the_computer_volume_steps_one_percent_and_never_above_100() {
 
     let mut dac = hosted(0.54);
     dac.host.computer.eq = app.host.computer.eq.clone();
-    dac.selected = row_of(&dac, "volume");
+    dac.set_selected(row_of(&dac, "volume"));
     assert_eq!(host_press(&mut dac, KeyCode::Right), [set("volume", "up")]);
 }
 
@@ -165,7 +165,7 @@ fn the_transport_rows_keys_move_between_the_buttons_and_press_one() {
     let mut app = hosted(0.54);
     app.host
         .found_bus(Some(so_what(svolder_host::Status::Playing)), app.now);
-    app.selected = app.rows().len();
+    app.set_selected(app.rows().len());
     assert_eq!(app.host_row(), Some(HostRow::Transport));
     for _ in 0..3 {
         assert_eq!(host_press(&mut app, KeyCode::Right), []);
@@ -187,7 +187,7 @@ fn the_transport_rows_keys_move_between_the_buttons_and_press_one() {
 fn a_press_with_no_player_sends_nothing_and_says_so() {
     let mut app = hosted(0.54);
     app.host.found_bus(None, app.now);
-    app.selected = app.rows().len();
+    app.set_selected(app.rows().len());
     assert_eq!(host_press(&mut app, KeyCode::Enter), []);
     assert_eq!(
         app.toast().map(|toast| toast.text.as_str()),
@@ -204,7 +204,7 @@ fn enter_turns_a_toggle_as_space_does() {
         .iter()
         .position(|row| row.control.key == "mute")
         .expect("a mute row");
-    app.selected = mute;
+    app.set_selected(mute);
     let space = host_press(&mut app, KeyCode::Char(' '));
     assert!(!space.is_empty());
     assert_eq!(host_press(&mut app, KeyCode::Enter), space);
@@ -224,4 +224,47 @@ fn a_click_on_a_transport_button_focuses_it_and_presses_it() {
     assert_eq!(app.host.button(), Button::Play);
     app.tui.host_audio = false;
     assert_eq!(app.click_transport(3), []);
+}
+
+/// The Controls cursor is one value: from each state, each way of moving it lands on the state
+/// the table names, and the row under a switch line is never lost.
+#[test]
+fn the_controls_cursor_moves_between_a_row_and_the_switch_line_by_table() {
+    use super::super::ControlsCursor::{Row, Target};
+    let mut app = hosted(0.54);
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq(true, &[]));
+    assert!(app.switch_offered(), "the switch is laid out");
+    let volume = row_of(&app, "volume");
+    assert!(volume > 0, "a row above the volume row to step through");
+    type Move = fn(&mut App);
+    let moves: [(&str, Move); 4] = [
+        ("Up", |a| drop(host_press(a, KeyCode::Up))),
+        ("Down", |a| drop(host_press(a, KeyCode::Down))),
+        ("click the row", |a| a.focus(Pane::Controls, 0)),
+        ("settle", |a| a.settle_switch()),
+    ];
+    // (start, move, the state it lands on)
+    let table = [
+        (Row(volume), "Up", Target { over: volume }),
+        (Target { over: volume }, "Down", Row(volume)),
+        (Target { over: volume }, "Up", Row(volume - 1)),
+        (Row(volume - 1), "Down", Target { over: volume }),
+        (Row(0), "Up", Row(0)),
+        (Target { over: volume }, "click the row", Row(0)),
+        (Target { over: volume }, "settle", Target { over: volume }),
+    ];
+    for (start, name, want) in table {
+        app.cursor = start;
+        let (_, step) = moves
+            .iter()
+            .find(|(n, _)| *n == name)
+            .expect("a named move");
+        step(&mut app);
+        assert_eq!(app.cursor, want, "{start:?} then {name}");
+    }
+    // The switch going away takes the cursor off the line, back onto the row it sat over.
+    app.cursor = Target { over: volume };
+    app.host.computer.eq = None;
+    app.settle_switch();
+    assert_eq!(app.cursor, Row(volume), "settle_switch keeps the row");
 }

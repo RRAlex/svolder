@@ -5,8 +5,10 @@
 //!
 //! [`Wizard`] walks nine steps — the host's health, the fixes svolder can
 //! apply itself, a scan, the device, its name, its passphrase, the adapter that hears it best,
-//! the daemon, and what was written. It renders each step as a [`Prompt`] and applies what an
-//! answer asks for through [`Effects`], which is the whole of what it can do to the machine.
+//! the daemon, and what was written. The scan, the device, its name and its passphrase are the
+//! device walk of the `svolder_walk` crate, which the daemon runs too; the wizard embeds it with
+//! effects over this machine. It renders each step as a [`Prompt`] and applies what an answer
+//! asks for through [`Effects`], which is the whole of what it can do to the machine.
 //!
 //! Nothing here prints: a front end may be drawing on the alternate screen, so the core hands
 //! out [`Prompt`]s and only [`cli`] and [`summary()`] put words on a terminal.
@@ -15,14 +17,16 @@
 //! - `effects`: what the wizard can do to the machine it runs on, in three seams.
 //! - `fake`: a machine the wizard can be walked over without touching this one.
 //! - [`live`]: the wizard against the machine it is running on.
+//! - `local`: the device walk's effects over the wizard's own.
+//! - `remote`: the device walk as a client of the daemon's, whenever a daemon runs.
 //! - `summary`: the wizard with nobody to ask, printed once.
 
-use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use svolder_ipc::checks::{self, Fix, Outcome};
-use svolder_ipc::{Config, DeviceConfig, ScanEntry};
+use svolder_ipc::{Config, DeviceConfig};
+use svolder_walk::{Configured, DeviceWalk, WalkError, Walked};
 
 use crate::backend::Globals;
 use crate::commands::daemon::install::{CONTAINER_DAEMON, Service};
@@ -34,10 +38,17 @@ mod effects;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod live;
+mod local;
+mod remote;
+pub(crate) mod signals;
 mod summary;
 
 pub use effects::{Effects, Files, Host, Radio};
+use local::Local;
+use remote::{Answered, RemoteWalk};
 pub use summary::summary;
+pub use svolder_ipc::Connect;
+pub use svolder_walk::{Given, Prompt, Step, Takes};
 
 /// What `svolder setup` does, and what bare `svolder` does with nothing configured.
 ///
@@ -56,7 +67,12 @@ pub async fn setup(g: &Globals<'_>, note: Option<String>) -> ExitCode {
         Ok(effects) => effects,
         Err(failure) => return failure.report(),
     };
-    walked(g, Wizard::new(effects).noting(note)).await
+    let socket = effects.socket().to_path_buf();
+    let mut wizard = Wizard::new(effects).noting(note);
+    if let Err(failure) = wizard.attach(&socket).await {
+        return failure.report();
+    }
+    walked(g, wizard).await
 }
 
 /// The wizard from its scan on, for the callers that have already shown what the host looks
@@ -66,7 +82,12 @@ pub async fn adding(g: &Globals<'_>, given: Given) -> ExitCode {
         Ok(effects) => effects,
         Err(failure) => return failure.report(),
     };
-    walked(g, Wizard::starting_at(effects, Step::Scan, given)).await
+    let socket = effects.socket().to_path_buf();
+    let mut wizard = Wizard::starting_at(effects, Step::Scan, given);
+    if let Err(failure) = wizard.attach(&socket).await {
+        return failure.report();
+    }
+    walked(g, wizard).await
 }
 
 /// Walk `wizard` where the user can see it: the TUI wizard on a terminal, and the plain prompts
@@ -146,14 +167,6 @@ pub fn on_a_terminal() -> bool {
     std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
 }
 
-/// What a scan that heard nothing says.
-const NOTHING_HEARD: &str = "Nothing answered: power the device on and close the phone app, \
-                             which holds its only connection.";
-
-/// What a device whose product no profile covers says on its line, with what picking it leads
-/// to.
-const UNKNOWN_PRODUCT: &str = "unknown product — choose a profile";
-
 /// The first step's last choice, which leaves the walk with nothing configured.
 pub const LATER: &str = "Later: open svolder without a device";
 
@@ -162,33 +175,6 @@ const HEALTH_CHOICES: [&str; 2] = ["Continue", LATER];
 
 /// What the plain walk ends with when it is left for later.
 pub const OPEN_AGAIN: &str = "Run svolder again to open the interface.";
-
-/// The steps the wizard walks, in the order it walks them.
-///
-/// A step that has nothing to ask is not walked: a healthy host skips [`Step::Fixes`], a
-/// device that connects on the advertised passphrase skips [`Step::Passphrase`], and a machine
-/// with one adapter skips [`Step::Adapter`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Step {
-    /// What the host checks say about this machine.
-    Health,
-    /// The fixes svolder may apply itself, as one confirmation.
-    Fixes,
-    /// Listening for devices in range.
-    Scan,
-    /// Which of the devices heard to configure.
-    Pick,
-    /// What to call it.
-    Name,
-    /// The four digits the device wants, when it turned the first connection away.
-    Passphrase,
-    /// Which adapter hears it best.
-    Adapter,
-    /// Whether to install the user service.
-    Daemon,
-    /// What was written.
-    Done,
-}
 
 /// What the machine the wizard runs on makes of a background service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -202,87 +188,25 @@ pub struct Platform {
     pub container: bool,
 }
 
-/// How a device answered a connection attempt.
-///
-/// A refusal is not a failure: it is the device asking for its passphrase, which is a question
-/// the wizard has a step for. Everything else that can stop a connection is a [`Failure`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Connect {
-    /// The device let the session in.
-    Accepted,
-    /// The device turned the passphrase away.
-    Refused,
-}
-
-/// What the command line already answered, so the wizard asks for it with that in place.
-///
-/// `svolder add --name NAME` with no unit id is someone who has already said what to call the
-/// device; the wizard offers it as the default rather than asking as though nothing was said.
-#[derive(Debug, Clone, Default)]
-pub struct Given {
-    /// What to call the device, as `--name` said.
-    pub name: Option<String>,
-    /// The profile to use, as `--profile` said.
-    pub profile: Option<String>,
-    /// The passphrase to connect with, as `--passphrase` said.
-    pub passphrase: Option<String>,
-}
-
-/// One step as something to show and something to answer.
-///
-/// A prompt with choices takes the number of one of them; a prompt with none takes a line of
-/// text, and its last body line is the default an empty line stands for.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Prompt {
-    /// Which step this is.
-    pub step: Step,
-    /// The one line that says what is being asked.
-    pub title: String,
-    /// What the reader needs to answer it.
-    pub body: Vec<String>,
-    /// What can be chosen, in the order they are offered.
-    pub choices: Vec<String>,
-    /// Which choice an empty answer takes.
-    pub default: usize,
-}
-
 /// The guided first run, as far as it has got.
+///
+/// The steps from the scan to the write are the device walk ([`DeviceWalk`]), which this
+/// embeds with effects over this machine's own radio and file; the wizard walks the host's
+/// health and fixes before it, and the adapter, the daemon and what was written after it.
 pub struct Wizard<E: Effects> {
-    /// What this wizard may do to the machine.
-    effects: E,
-    /// Which step it is on.
+    /// The device walk, which holds what this wizard may do to the machine.
+    walk: DeviceWalk<Local<E>>,
+    /// Which step it is on: [`Step::Scan`] stands for the whole of the walk, whose own step
+    /// [`Wizard::walk`] holds.
     step: Step,
     /// The steps it came through, most recent last, for [`Wizard::back`].
     visited: Vec<Step>,
-    /// What the command line already answered.
-    given: Given,
     /// What the host checks said, once they have been asked.
     outcomes: Option<Vec<Outcome>>,
     /// What applying the fixes did, in the order they were applied.
     applied: Vec<String>,
-    /// What the last scan heard.
-    seen: Vec<ScanEntry>,
-    /// What opening a backend for that scan had to say.
-    notices: Vec<String>,
-    /// Whether a scan has run, so that hearing nothing is an answer rather than a start.
-    scanned: bool,
-    /// How many scans in a row have failed outright, which is what a run gives up after.
-    scan_failures: u8,
     /// Whether the daemon has been told to read the file, which happens once a run.
     reloaded: bool,
-    /// Which of [`Wizard::seen`] is being configured.
-    picked: Option<usize>,
-    /// Whether the pick step is on its second question, the profile for a product no profile
-    /// covers.
-    choosing_profile: bool,
-    /// The profile to write, when one was chosen or given.
-    profile: Option<String>,
-    /// What to call the device.
-    name: Option<String>,
-    /// The passphrase to connect with and to write: `auto`, `none`, or four digits.
-    passphrase: String,
-    /// The device that was written.
-    added: Option<DeviceConfig>,
     /// How well each adapter heard the device, best first.
     grades: Vec<Grade>,
     /// The adapter that was written.
@@ -299,6 +223,30 @@ pub struct Wizard<E: Effects> {
     /// What to say above the first step's own lines, such as a daemon told to read the file
     /// again.
     opening: Option<String>,
+    /// The walk the daemon runs for this front end, when a daemon runs: it stands in for
+    /// [`Wizard::walk`], which then asks nothing.
+    remote: Option<RemoteWalk>,
+    /// What the command line called the device, offered at the name step of a walk the daemon
+    /// runs (the daemon's walk takes no given answers).
+    given_name: Option<String>,
+    /// What stopped the run, in words, beside [`Wizard::stopped`]'s code.
+    stopped_why: Option<String>,
+    /// The device the daemon's walk wrote, as the block this side shows (no passphrase).
+    added_remotely: Option<DeviceConfig>,
+    /// What `--profile` said, answered at the daemon's profile question or, for a product no
+    /// question is asked about, written after the walk.
+    given_profile: Option<String>,
+    /// What `--passphrase` said (never the default `auto`), answered at the daemon's passphrase
+    /// step or written after the walk.
+    given_code: Option<String>,
+    /// The signals this run leaves the daemon's walk by, held while a walk runs.
+    signals: Option<signals::Signals>,
+    /// What the daemon's walk could not do of the given answers, said on the last step.
+    after_note: Option<String>,
+    /// Whether the given profile was answered at the walk's question.
+    profile_given: bool,
+    /// Whether the given code was answered at the walk's passphrase step.
+    code_given: bool,
 }
 
 impl<E: Effects> Wizard<E> {
@@ -307,26 +255,29 @@ impl<E: Effects> Wizard<E> {
         Wizard::starting_at(effects, Step::Health, Given::default())
     }
 
-    /// The wizard from `step`, with whatever the command line already answered.
+    /// The wizard from `step`, with whatever the command line already answered. Any step of
+    /// the device walk starts the walk at its scan.
     pub fn starting_at(effects: E, step: Step, given: Given) -> Wizard<E> {
         Wizard {
-            effects,
-            step,
+            given_name: given.name.clone(),
+            given_profile: given.profile.clone(),
+            given_code: given
+                .passphrase
+                .clone()
+                .filter(|code| code != svolder_walk::AUTO),
+            after_note: None,
+            signals: None,
+            profile_given: false,
+            code_given: false,
+            walk: DeviceWalk::new(Local(effects), given, Configured::LeaveOut),
+            step: match is_walk_step(step) {
+                true => Step::Scan,
+                false => step,
+            },
             visited: Vec::new(),
             outcomes: None,
             applied: Vec::new(),
-            seen: Vec::new(),
-            notices: Vec::new(),
-            scanned: false,
-            scan_failures: 0,
             reloaded: false,
-            picked: None,
-            choosing_profile: false,
-            profile: given.profile.clone(),
-            name: None,
-            passphrase: given.passphrase.clone().unwrap_or_else(|| AUTO.to_string()),
-            given,
-            added: None,
             grades: Vec::new(),
             adapter: None,
             installed: None,
@@ -334,7 +285,75 @@ impl<E: Effects> Wizard<E> {
             finished: false,
             later: false,
             opening: None,
+            remote: None,
+            stopped_why: None,
+            added_remotely: None,
         }
+    }
+
+    /// Hand the walk to the daemon on `socket` when one runs, and keep it local when none does.
+    ///
+    /// A daemon is the one writer of the devices and the one that scans for them, so with one
+    /// running the scan, the passphrase test and the write are its: the front end draws what the
+    /// walk asks and sends the answers, and the adapter step is skipped (the daemon opened its
+    /// adapter at start and a reload does not reopen it). A daemon that cannot walk is refused
+    /// in words, never written around. A wizard standing at the scan starts the daemon's walk
+    /// here, so a walk already running is refused before anything is drawn; one that begins at
+    /// the host checks starts it on reaching the scan.
+    pub async fn attach(&mut self, socket: &std::path::Path) -> Result<(), Failure> {
+        let runs =
+            crate::reach::daemon_runs(socket, svolder_ipc::FEATURE_WALK, "walk a device").await?;
+        if !runs {
+            return Ok(());
+        }
+        let mut remote = RemoteWalk::new(socket.to_path_buf());
+        if self.walking() {
+            remote.begin().await?;
+        }
+        // The daemon reloads itself when its walk writes, so there is nothing to tell it.
+        self.reloaded = true;
+        self.remote = Some(remote);
+        // A real run counts the signals that end it; the unit tests install no handler.
+        #[cfg(not(test))]
+        {
+            self.signals = Some(signals::Signals::listen());
+        }
+        Ok(())
+    }
+
+    /// Count `presses` as the signals that leave the walk, in place of the process's own.
+    #[cfg(test)]
+    pub(crate) fn leaving_by(
+        &mut self,
+        presses: std::sync::Arc<crate::commands::interrupts::Presses>,
+    ) {
+        self.signals = Some(signals::Signals::scripted(presses));
+    }
+
+    /// The presses of the signals that leave a daemon's walk, when this run holds a walk the
+    /// daemon runs: a front end waits on them beside its own work and leaves on one.
+    pub fn presses(&self) -> Option<std::sync::Arc<crate::commands::interrupts::Presses>> {
+        self.signals.as_ref().map(signals::Signals::presses)
+    }
+
+    /// The lines of the devices a daemon's scan has heard so far, when the walk runs there.
+    pub(crate) fn heard(&self) -> Option<tokio::sync::watch::Receiver<Vec<String>>> {
+        self.remote.as_ref().map(RemoteWalk::heard)
+    }
+
+    /// Whether the walk runs on the daemon.
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    /// What this wizard does to the machine through.
+    fn effects(&self) -> &E {
+        &self.walk.effects().0
+    }
+
+    /// Whether the wizard is in the device walk.
+    fn walking(&self) -> bool {
+        self.step == Step::Scan
     }
 
     /// Say `note`, when there is one, above the first step's own lines.
@@ -370,8 +389,11 @@ impl<E: Effects> Wizard<E> {
         if self.finished || self.stopped.is_some() {
             return None;
         }
+        if self.walking() && self.remote.is_some() {
+            return self.remote_prompt().await;
+        }
         if self.step == Step::Health && self.outcomes.is_none() {
-            self.outcomes = Some(self.effects.checks().await);
+            self.outcomes = Some(self.effects().checks().await);
         }
         if self.step == Step::Adapter && self.grades.is_empty() {
             self.graded().await;
@@ -379,15 +401,97 @@ impl<E: Effects> Wizard<E> {
         Some(match self.step {
             Step::Health => self.health(),
             Step::Fixes => self.fixes(),
-            Step::Scan => self.scan(),
-            Step::Pick if self.choosing_profile => self.profiles(),
-            Step::Pick => self.pick(),
-            Step::Name => self.name(),
-            Step::Passphrase => self.passphrase(),
             Step::Adapter => self.adapter(),
             Step::Daemon => self.daemon(),
             Step::Done => self.done(),
+            _ => self.walk_prompt(),
         })
+    }
+
+    /// The prompt the daemon's walk shows. A walk that cannot be had stops the run, and says why
+    /// through [`Wizard::stopped_why`].
+    async fn remote_prompt(&mut self) -> Option<Prompt> {
+        let shown = self.remote.as_mut()?.prompt().await;
+        match shown {
+            Ok(mut prompt) => {
+                if prompt.step == Step::Scan {
+                    prompt.body.splice(0..0, self.applied.iter().cloned());
+                }
+                if let (Step::Name, Some(name)) = (prompt.step, self.given_name.as_deref()) {
+                    // What `--name` said is what an empty line answers, as it is on a local walk.
+                    if let Some(last) = prompt.body.last_mut() {
+                        *last = name.to_string();
+                    }
+                }
+                Some(prompt)
+            }
+            Err(failure) => {
+                self.stop(failure);
+                None
+            }
+        }
+    }
+
+    /// Whether the command line gave an answer to `prompt`, which [`Wizard::answer_given`] sends:
+    /// a front end does that under its own wait, as it does any answer, and never inside
+    /// [`Wizard::prompt`], which stays free of side effects.
+    pub fn has_given_answer(&self, prompt: &Prompt) -> bool {
+        self.remote.is_some() && self.given_answer(prompt).is_some()
+    }
+
+    /// Send the answer the command line gave to `prompt`, once. A refusal (a code the device
+    /// turned away) is said in the failure, and the step is then asked of the person.
+    pub async fn answer_given(&mut self, prompt: &Prompt) -> Result<(), Failure> {
+        let Some((choice, text)) = self.given_answer(prompt) else {
+            return Ok(());
+        };
+        let code = prompt.step == Step::Passphrase;
+        match code {
+            true => {
+                self.given_code = None;
+                self.code_given = true;
+            }
+            false => {
+                self.given_profile = None;
+                self.profile_given = true;
+            }
+        }
+        self.walked_remotely(choice, text)
+            .await
+            .map_err(|mut failure| {
+                let what = match code {
+                    true => "the passphrase given",
+                    false => "the profile given",
+                };
+                failure.what = format!("{what} was not taken: {}", failure.what);
+                failure
+            })
+    }
+
+    /// The answer the command line gave to `prompt`, as a choice and a line: the code at the
+    /// passphrase step, the profile (by name) at the profile question.
+    fn given_answer(&self, prompt: &Prompt) -> Option<(usize, Option<String>)> {
+        match prompt.step {
+            Step::Passphrase => self.given_code.clone().map(|code| (0, Some(code))),
+            Step::Pick if prompt.title == "Which profile" => {
+                let named = self.given_profile.as_deref()?;
+                let at = prompt
+                    .choices
+                    .iter()
+                    .position(|choice| choice.eq_ignore_ascii_case(named))?;
+                Some((at, None))
+            }
+            _ => None,
+        }
+    }
+
+    /// The walk's prompt, with what applying the fixes did above its scan.
+    fn walk_prompt(&self) -> Prompt {
+        let mut prompt = self.walk.prompt();
+        if prompt.step == Step::Scan {
+            prompt.body.splice(0..0, self.applied.iter().cloned());
+        }
+        prompt
     }
 
     /// Answer the current step: the number of a choice, or a line of text where the prompt
@@ -414,7 +518,7 @@ impl<E: Effects> Wizard<E> {
             Step::Fixes => {
                 if choice == 0 {
                     for fix in self.offered() {
-                        match self.effects.apply(&fix).await {
+                        match self.effects().apply(&fix).await {
                             Ok(done) => self.applied.push(done),
                             Err(why) => self.applied.push(why),
                         }
@@ -423,18 +527,110 @@ impl<E: Effects> Wizard<E> {
                 self.go(Step::Scan);
                 Ok(())
             }
-            Step::Scan => self.searched(choice).await,
-            Step::Pick if self.choosing_profile => self.chose_profile(choice),
-            Step::Pick => self.chose_device(choice),
-            Step::Name => self.named(text).await,
-            Step::Passphrase => self.coded(text).await,
             Step::Adapter => self.chose_adapter(choice).await,
             Step::Daemon => self.settled_daemon(choice).await,
             Step::Done => {
                 self.finished = true;
                 Ok(())
             }
+            _ => self.walked(choice, text).await,
         }
+    }
+
+    /// Answer the device walk's step, and go on from the walk once it is over: to the adapters
+    /// when the machine has several to choose from, else to the daemon.
+    async fn walked(&mut self, choice: usize, text: Option<String>) -> Result<(), Failure> {
+        if self.remote.is_some() {
+            return self.walked_remotely(choice, text).await;
+        }
+        match self.walk.answer(choice, text).await {
+            Ok(Walked::On) => Ok(()),
+            // A machine with one adapter has no choice to offer, so it skips the step that
+            // would grade them and never spends the seconds grading takes.
+            Ok(Walked::Added) => {
+                match self.effects().adapters().len() >= 2 {
+                    true => self.go(Step::Adapter),
+                    false => self.on_to_the_daemon().await,
+                }
+                Ok(())
+            }
+            Ok(Walked::Skipped | Walked::Cancelled) => {
+                self.on_to_the_daemon().await;
+                Ok(())
+            }
+            Err(error) => {
+                let failure = failure_of(error);
+                if self.walk.stopped() {
+                    self.stopped = Some(failure.code);
+                }
+                Err(failure)
+            }
+        }
+    }
+
+    /// [`Wizard::walked`] for the daemon's walk, which has the same ways to end. The adapter step
+    /// is never walked: there is a daemon, and it holds its adapter.
+    async fn walked_remotely(
+        &mut self,
+        choice: usize,
+        mut text: Option<String>,
+    ) -> Result<(), Failure> {
+        let Some(remote) = self.remote.as_mut() else {
+            return Ok(());
+        };
+        if remote.step() == Some(Step::Name)
+            && text.as_deref().is_some_and(|line| line.trim().is_empty())
+        {
+            text = self.given_name.clone().or(text);
+        }
+        match remote.answer(choice, text).await {
+            Ok(Answered::On) => Ok(()),
+            Ok(Answered::Refused(refusal)) => Err(remote::refusal_failure(&refusal)),
+            Ok(Answered::Added(device)) => {
+                self.added_remotely = Some(device);
+                self.write_what_was_given().await;
+                self.on_to_the_daemon().await;
+                Ok(())
+            }
+            Ok(Answered::Skipped | Answered::Cancelled) => {
+                self.on_to_the_daemon().await;
+                Ok(())
+            }
+            Err(failure) if remote.is_over() => Err(self.stop(failure)),
+            Err(failure) => Err(failure),
+        }
+    }
+
+    /// Write, as the daemon's own `update`, what the command line gave that no step of the walk
+    /// asked for: the profile of a product a profile covers, the code of a device that took
+    /// `auto`. A refusal is said on the last step, never dropped.
+    async fn write_what_was_given(&mut self) {
+        let profile = self.given_profile.take().filter(|_| !self.profile_given);
+        let code = self.given_code.take().filter(|_| !self.code_given);
+        let (Some(remote), Some(device)) = (self.remote.as_ref(), self.added_remotely.as_ref())
+        else {
+            return;
+        };
+        if profile.is_none() && code.is_none() {
+            return;
+        }
+        let op = svolder_ipc::DeviceConfigOp::Update {
+            device: device.name.clone(),
+            name: None,
+            profile: profile.map(Some),
+            passphrase: code,
+        };
+        let said = match crate::reach::device_request(remote.socket(), op).await {
+            Ok(Some(svolder_ipc::Response::DeviceConfig { .. })) => return,
+            Ok(Some(svolder_ipc::Response::Error {
+                message, reason, ..
+            })) => crate::reach::refusal_words(reason, &message),
+            Ok(_) => "the daemon did not take the profile or the passphrase".to_string(),
+            Err(failure) => failure.to_string(),
+        };
+        self.after_note = Some(format!(
+            "The profile or passphrase given was not written: {said}"
+        ));
     }
 
     /// What the next [`Wizard::prompt`] will spend time on, when it will spend any.
@@ -449,7 +645,7 @@ impl<E: Effects> Wizard<E> {
         if !self.grades.is_empty() {
             return None;
         }
-        let adapters = self.effects.adapters().len();
+        let adapters = self.effects().adapters().len();
         let seconds = adapters as u64 * GRADE_WINDOWS as u64 * GRADE_WINDOW.as_secs();
         Some(format!("grading {adapters} adapters, up to {seconds} s"))
     }
@@ -462,22 +658,45 @@ impl<E: Effects> Wizard<E> {
         self.stopped
     }
 
-    /// Whether [`Wizard::back`] would change the step: the second question of [`Step::Pick`]
-    /// goes back to its first, and otherwise there must be a step behind this one that has
-    /// not been applied — not on the first step of a walk, and not once the device has been
+    /// What stopped the run, in words, when something did and the run has more to say than the
+    /// failure it answered an answer with: a daemon's walk that could not be had or went away.
+    pub fn stopped_why(&self) -> Option<&str> {
+        self.stopped_why.as_deref()
+    }
+
+    /// Whether [`Wizard::back`] would change the step: a step inside the device walk that has
+    /// one behind it goes back to that, and otherwise there must be a step behind this one that
+    /// has not been applied — not on the first step of a walk, and not once the device has been
     /// written.
     pub fn can_go_back(&self) -> bool {
-        self.choosing_profile || (self.added.is_none() && !self.visited.is_empty())
+        if self.walking()
+            && match &self.remote {
+                Some(remote) => remote.can_go_back(),
+                None => self.walk.can_go_back(),
+            }
+        {
+            return true;
+        }
+        self.walk.added().is_none() && !self.visited.is_empty()
     }
 
     /// Go back to the step before this one.
     ///
-    /// The second question of [`Step::Pick`] goes back to its first. Once the device has been
-    /// written there is nothing to go back to: the steps behind it have all been applied, and
-    /// walking them again would write a second block for the same device.
-    pub fn back(&mut self) {
-        if self.choosing_profile {
-            self.choosing_profile = false;
+    /// Inside the device walk that is the walk's own step before, then the step the walk was
+    /// entered from. Once the device has been written there is nothing to go back to: the steps
+    /// behind it have all been applied, and walking them again would write a second block for
+    /// the same device.
+    pub async fn back(&mut self) {
+        if self.walking()
+            && let Some(remote) = self.remote.as_mut()
+        {
+            if remote.can_go_back() {
+                if let Err(failure) = remote.back().await {
+                    self.stop(failure);
+                }
+                return;
+            }
+        } else if self.walking() && self.walk.back() {
             return;
         }
         if !self.can_go_back() {
@@ -491,7 +710,13 @@ impl<E: Effects> Wizard<E> {
 
     /// The device this run added, once it has been written.
     pub fn added(&self) -> Option<&DeviceConfig> {
-        self.added.as_ref()
+        self.walk.added().or(self.added_remotely.as_ref())
+    }
+
+    /// What the device is called when nothing is typed at the name step.
+    #[cfg(test)]
+    fn default_name(&self) -> String {
+        self.walk.default_name()
     }
 
     /// Move to `step`, keeping where this came from so [`Wizard::back`] can return to it.
@@ -530,6 +755,7 @@ impl<E: Effects> Wizard<E> {
                 .collect(),
             choices: HEALTH_CHOICES.iter().map(|c| (*c).to_string()).collect(),
             default: 0,
+            takes: Takes::Choice,
         }
     }
 
@@ -551,115 +777,7 @@ impl<E: Effects> Wizard<E> {
             // Changing the machine is never what an answer nobody typed asks for, which is
             // what the `[y/N]` the `doctor` verb offers the very same fixes behind says too.
             default: 1,
-        }
-    }
-
-    /// The scan, and after a quiet one the reason a device usually stays quiet.
-    fn scan(&self) -> Prompt {
-        let mut body = self.applied.clone();
-        body.extend(self.notices.iter().cloned());
-        let mut choices = vec!["Scan".to_string()];
-        if self.scanned && self.seen.is_empty() {
-            body.push(NOTHING_HEARD.into());
-            choices = vec!["Scan again".into(), "Skip".into()];
-        } else if !self.scanned {
-            body.push(format!(
-                "Listening takes up to {} s.",
-                crate::scanning::WINDOWS as u64 * crate::scanning::WINDOW.as_secs()
-            ));
-        }
-        Prompt {
-            step: Step::Scan,
-            title: "Find the device".into(),
-            body,
-            choices,
-            default: 0,
-        }
-    }
-
-    /// One line per device heard: what it is, its unit id, how loud it was, and the profile
-    /// its advertisement matches.
-    fn pick(&self) -> Prompt {
-        Prompt {
-            step: Step::Pick,
-            title: "Which device".into(),
-            body: self.notices.clone(),
-            choices: self.seen.iter().map(|entry| self.row(entry)).collect(),
-            default: 0,
-        }
-    }
-
-    /// One device as the line that offers it.
-    fn row(&self, entry: &ScanEntry) -> String {
-        let product = self.product(entry).unwrap_or("unknown");
-        let signal = entry
-            .rssi
-            .map(|rssi| format!("  {rssi} dBm"))
-            .unwrap_or_default();
-        let profile = self
-            .matched(entry)
-            .map(|profile| profile.name.clone())
-            .or_else(|| self.profile.clone())
-            .unwrap_or_else(|| UNKNOWN_PRODUCT.to_string());
-        format!("{product}  {}{signal}  {profile}", entry.unit)
-    }
-
-    /// The profiles this build knows, for a device whose product none of them covers.
-    fn profiles(&self) -> Prompt {
-        let names = self.profile_names();
-        let body = match self.picked_entry() {
-            Some(entry) => vec![format!(
-                "{} advertises product {}, which no profile covers.",
-                entry.unit, entry.product_id
-            )],
-            None => Vec::new(),
-        };
-        let choices = match names.is_empty() {
-            true => vec!["Continue".to_string()],
-            false => names,
-        };
-        Prompt {
-            step: Step::Pick,
-            title: "Which profile".into(),
-            body,
-            choices,
-            default: 0,
-        }
-    }
-
-    /// What to call the device, with the name it advertises as the default.
-    fn name(&self) -> Prompt {
-        Prompt {
-            step: Step::Name,
-            title: "What to call it".into(),
-            body: vec![
-                "Enter takes the name below; type another to use that instead.".into(),
-                self.default_name(),
-            ],
-            choices: Vec::new(),
-            default: 0,
-        }
-    }
-
-    /// The four digits the device wants, `auto` to read the code from the device, or `none`
-    /// for a device with no passphrase.
-    ///
-    /// The last line is what an empty one answers with, as it is on every step that takes a
-    /// typed line: a device with no passphrase is configured with [`NONE`].
-    fn passphrase(&self) -> Prompt {
-        Prompt {
-            step: Step::Passphrase,
-            title: "The device wants its passphrase".into(),
-            body: vec![
-                "It turned the connection away, which is what a device with a passphrase does."
-                    .into(),
-                "The four digits the phone app shows, `auto` to have svolder read the code from \
-                 the device, or `none` for a device with no passphrase."
-                    .into(),
-                NONE.into(),
-            ],
-            choices: Vec::new(),
-            default: 0,
+            takes: Takes::Choice,
         }
     }
 
@@ -687,12 +805,13 @@ impl<E: Effects> Wizard<E> {
                 false => graded,
             },
             default: 0,
+            takes: Takes::Choice,
         }
     }
 
     /// What to do about the daemon on this machine.
     fn daemon(&self) -> Prompt {
-        let p = self.effects.platform();
+        let p = self.effects().platform();
         let choices = match Service::of(p.nixos, p.container, p.systemd) {
             Service::Install => vec!["Install the user service".into(), "Skip".into()],
             _ => vec!["Continue".to_string()],
@@ -700,9 +819,10 @@ impl<E: Effects> Wizard<E> {
         Prompt {
             step: Step::Daemon,
             title: "The background service".into(),
-            body: daemon_lines(&self.effects),
+            body: daemon_lines(self.effects()),
             choices,
             default: 0,
+            takes: Takes::Choice,
         }
     }
 
@@ -713,9 +833,12 @@ impl<E: Effects> Wizard<E> {
     /// place. [`next_command`] is what a front end with nowhere of its own to go says.
     fn done(&self) -> Prompt {
         let mut body = Vec::new();
-        match self.added.as_ref() {
+        match self.added() {
             Some(device) => body.push(format!("Added {} ({}).", device.name, device.udid)),
             None => body.push("No device was added.".into()),
+        }
+        if let Some(note) = self.after_note.as_deref() {
+            body.push(note.to_string());
         }
         if let Some(adapter) = self.adapter.as_deref() {
             body.push(format!("Set adapter = {adapter:?}."));
@@ -732,66 +855,8 @@ impl<E: Effects> Wizard<E> {
             body,
             choices: vec!["Finish".into()],
             default: 0,
+            takes: Takes::Choice,
         }
-    }
-
-    /// Listen again, or give up on finding a device and go on to the daemon.
-    ///
-    /// A scan that cannot run at all — no adapter, a bus that will not answer — is not a quiet
-    /// room, and answering the same step again asks the same adapter the same thing: after
-    /// [`SCAN_ATTEMPTS`] of them in a row the run ends on the last reason given.
-    async fn searched(&mut self, choice: usize) -> Result<(), Failure> {
-        if self.scanned && self.seen.is_empty() && choice == 1 {
-            self.on_to_the_daemon().await;
-            return Ok(());
-        }
-        let heard = match self.effects.scan().await {
-            Ok(heard) => heard,
-            Err(failure) => {
-                self.scan_failures += 1;
-                return Err(match self.scan_failures >= SCAN_ATTEMPTS {
-                    true => self.stop(failure),
-                    false => failure,
-                });
-            }
-        };
-        self.scan_failures = 0;
-        // A unit that is configured is not offered again: a second block for it would be a
-        // second actor on one device, and the file refuses it.
-        let taken: Vec<(String, svolder_proto::UnitId)> = self
-            .effects
-            .taken_units()
-            .into_iter()
-            .filter_map(|(name, unit)| Some((name, unit.parse().ok()?)))
-            .collect();
-        let named = |entry: &ScanEntry| {
-            let unit = entry.unit.parse::<svolder_proto::UnitId>().ok()?;
-            taken
-                .iter()
-                .find(|(_, held)| *held == unit)
-                .map(|(name, _)| name.clone())
-        };
-        let mut left_out = Vec::new();
-        let mut offered = Vec::new();
-        for entry in heard.entries {
-            match named(&entry) {
-                Some(name) => left_out.push(format!("{name} ({})", entry.unit)),
-                None => offered.push(entry),
-            }
-        }
-        self.seen = offered;
-        self.notices = heard.notices;
-        if !left_out.is_empty() {
-            self.notices.push(format!(
-                "Left out, already configured: {}.",
-                left_out.join(", ")
-            ));
-        }
-        self.scanned = true;
-        if !self.seen.is_empty() {
-            self.go(Step::Pick);
-        }
-        Ok(())
     }
 
     /// Move on to the daemon step, telling a daemon that is running to read the file once.
@@ -813,118 +878,22 @@ impl<E: Effects> Wizard<E> {
     /// it could not write) has written its device all the same, and its front end calls this as
     /// it ends. A run that wrote nothing tells the daemon nothing.
     pub async fn tell_the_daemon(&mut self) {
-        if self.added.is_some() && !self.reloaded {
+        if self.added().is_some() && !self.reloaded {
             self.reloaded = true;
-            self.effects.reload_daemon().await;
+            self.effects().reload_daemon().await;
         }
     }
 
-    /// Take the device this choice names; a product no profile covers asks which profile to
-    /// read it through before going on.
-    fn chose_device(&mut self, choice: usize) -> Result<(), Failure> {
-        let Some(entry) = self.seen.get(choice) else {
-            return Err(out_of_range(choice));
-        };
-        let unmatched = self.matched(entry).is_none();
-        self.picked = Some(choice);
-        if unmatched && self.profile.is_none() {
-            self.choosing_profile = true;
-            return Ok(());
+    /// Leave the run: a walk the daemon still runs for this front end is cancelled (this
+    /// client's own, never another's), and a device written locally is the daemon's to know of.
+    /// Every front end calls this as its walk ends, however it ends.
+    pub async fn leave(&mut self) {
+        if let Some(remote) = self.remote.as_mut() {
+            remote.leave().await;
         }
-        self.go(Step::Name);
-        Ok(())
-    }
-
-    /// Read the device through the profile this choice names, or through none when the build
-    /// has no profiles to offer.
-    fn chose_profile(&mut self, choice: usize) -> Result<(), Failure> {
-        let names = self.profile_names();
-        if !names.is_empty() {
-            let name = names.get(choice).ok_or_else(|| out_of_range(choice))?;
-            self.profile = Some(name.clone());
-        }
-        self.choosing_profile = false;
-        self.go(Step::Name);
-        Ok(())
-    }
-
-    /// Name the device and try to reach it; a device that turns the connection away is asked
-    /// for its passphrase instead.
-    async fn named(&mut self, text: Option<String>) -> Result<(), Failure> {
-        let typed = text.unwrap_or_default();
-        let name = match typed.trim() {
-            "" => self.default_name(),
-            name => name.to_string(),
-        };
-        if name.is_empty() {
-            return Err(Failure::of(Kind::Usage, "a device needs a name"));
-        }
-        if self
-            .effects
-            .taken_names()
-            .iter()
-            .any(|taken| taken.eq_ignore_ascii_case(&name))
-        {
-            return Err(Failure::of(
-                Kind::Usage,
-                format!("a device named {name:?} is already configured"),
-            ));
-        }
-        self.name = Some(name);
-        let entry = self.picked_entry().cloned().ok_or_else(no_device)?;
-        let passphrase = self.passphrase.clone();
-        match self.effects.try_connect(&entry, &passphrase).await? {
-            Connect::Accepted => self.wrote().await,
-            Connect::Refused => {
-                self.go(Step::Passphrase);
-                Ok(())
-            }
-        }
-    }
-
-    /// Try the code that was typed; a device that turns this one away too is said to have,
-    /// and the step is asked again.
-    async fn coded(&mut self, text: Option<String>) -> Result<(), Failure> {
-        let code = passphrase_text(text.as_deref().unwrap_or_default())?;
-        let entry = self.picked_entry().cloned().ok_or_else(no_device)?;
-        match self.effects.try_connect(&entry, &code).await? {
-            Connect::Accepted => {
-                self.passphrase = code;
-                self.wrote().await
-            }
-            Connect::Refused => {
-                let mut refused =
-                    Failure::of(Kind::Refused, format!("the device did not accept {code}"));
-                // `auto` was the step's own way out of a lost code, so what follows its refusal
-                // is what comes after it.
-                if code == AUTO {
-                    refused.next = crate::recovery::REFUSED_UNDER_AUTO.to_string();
-                }
-                Err(refused)
-            }
-        }
-    }
-
-    /// Write the device and go on: a machine with one adapter has no choice to offer, so it
-    /// skips the step that would grade them and never spends the seconds grading takes.
-    async fn wrote(&mut self) -> Result<(), Failure> {
-        let entry = self.picked_entry().cloned().ok_or_else(no_device)?;
-        let device = DeviceConfig {
-            name: self.name.clone().unwrap_or_default(),
-            udid: entry.unit.clone(),
-            profile: self.profile.clone(),
-            passphrase: self.passphrase.clone(),
-            inputs: BTreeMap::new(),
-        };
-        if let Err(why) = self.effects.write_device(&device).await {
-            return Err(self.stop(Failure::of(Kind::ConfigUnreadable, why)));
-        }
-        self.added = Some(device);
-        match self.effects.adapters().len() >= 2 {
-            true => self.go(Step::Adapter),
-            false => self.on_to_the_daemon().await,
-        }
-        Ok(())
+        // The default action of each signal is back once the walk is over.
+        self.signals = None;
+        self.tell_the_daemon().await;
     }
 
     /// Grade the adapters against the device that was written, best first.
@@ -932,11 +901,12 @@ impl<E: Effects> Wizard<E> {
     /// A tie goes to the adapter the list starts with, which is the one `doctor`'s own grade
     /// row names, so the two never send the reader to different adapters.
     async fn graded(&mut self) {
-        let Some(udid) = self.picked_entry().map(|entry| entry.unit.clone()) else {
+        let Some(udid) = self.walk.picked().map(|entry| entry.unit.clone()) else {
             return;
         };
-        self.grades = self.effects.grade(&udid).await;
-        self.grades.sort_by(|a, b| b.seen.cmp(&a.seen));
+        self.grades = self.effects().grade(&udid).await;
+        self.grades
+            .sort_by_key(|grade| std::cmp::Reverse(grade.seen));
     }
 
     /// Write the adapter this choice names.
@@ -948,10 +918,10 @@ impl<E: Effects> Wizard<E> {
             let adapter = self
                 .grades
                 .get(choice)
-                .ok_or_else(|| out_of_range(choice))?
+                .ok_or_else(|| usage(format!("there is no choice {}", choice + 1)))?
                 .adapter
                 .clone();
-            if let Err(why) = self.effects.write_adapter(&adapter) {
+            if let Err(why) = self.effects().write_adapter(&adapter) {
                 return Err(self.stop(Failure::of(Kind::ConfigUnreadable, why)));
             }
             self.adapter = Some(adapter);
@@ -962,9 +932,9 @@ impl<E: Effects> Wizard<E> {
 
     /// Install the user units where this machine keeps them and the answer asked for it.
     async fn settled_daemon(&mut self, choice: usize) -> Result<(), Failure> {
-        let p = self.effects.platform();
+        let p = self.effects().platform();
         if choice == 0 && Service::of(p.nixos, p.container, p.systemd) == Service::Install {
-            match self.effects.install_daemon().await {
+            match self.effects().install_daemon().await {
                 Ok(done) => self.installed = Some(done),
                 Err(why) => return Err(self.stop(Failure::of(Kind::DaemonError, why))),
             }
@@ -980,62 +950,44 @@ impl<E: Effects> Wizard<E> {
     /// the run ends on it rather than asking the same step of the same unwritable file forever.
     fn stop(&mut self, failure: Failure) -> Failure {
         self.stopped = Some(failure.code);
+        self.stopped_why = Some(failure.to_string());
         failure
     }
+}
 
-    /// The device being configured, as the scan reported it.
-    fn picked_entry(&self) -> Option<&ScanEntry> {
-        self.picked.and_then(|at| self.seen.get(at))
-    }
+/// Whether `step` is one the device walk walks.
+fn is_walk_step(step: Step) -> bool {
+    matches!(
+        step,
+        Step::Linked | Step::Scan | Step::Pick | Step::Name | Step::Passphrase
+    )
+}
 
-    /// What the device behind a scan row is called: the name the scan gave it, else the name
-    /// [`svolder_profiles::Registry::product_name`] gives its product id — which is how a product
-    /// the codec's table does not know is named after the profile made for it.
-    fn product<'e>(&'e self, entry: &'e ScanEntry) -> Option<&'e str> {
-        entry
-            .product
-            .as_deref()
-            .or_else(|| self.effects.registry()?.product_name(entry.product_id))
-    }
-
-    /// The profile this build reads a device advertising this product through.
-    fn matched(&self, entry: &ScanEntry) -> Option<&svolder_profiles::Profile> {
-        self.effects
-            .registry()
-            .and_then(|registry| registry.select(entry.product_id, entry.firmware))
-    }
-
-    /// Every profile this build knows, in the order the registry lists them.
-    fn profile_names(&self) -> Vec<String> {
-        self.effects
-            .registry()
-            .map(|registry| registry.names().iter().map(|n| (*n).to_string()).collect())
-            .unwrap_or_default()
-    }
-
-    /// The profile that was chosen or given for a product the registry does not match.
-    fn chosen(&self) -> Option<&svolder_profiles::Profile> {
-        self.effects.registry()?.get(self.profile.as_deref()?)
-    }
-
-    /// What the device is called when nothing is typed: the name the command line gave, else
-    /// the product it advertises, else the product the profile it is read through describes,
-    /// else its unit id.
-    fn default_name(&self) -> String {
-        if let Some(name) = self.given.name.as_deref() {
-            return name.to_string();
+/// The failure a refusal of the device walk is on this front end, with the exit code its kind
+/// has; a refused code is named back to the person who typed it.
+fn failure_of(error: WalkError<Failure>) -> Failure {
+    match error {
+        WalkError::Effect(failure) => failure,
+        WalkError::Refused { code } => {
+            let mut refused = Failure::of(
+                Kind::Refused,
+                format!("the device did not accept {}", code.expose()),
+            );
+            // `auto` was the step's own way out of a lost code, so what follows its refusal is
+            // what comes after it.
+            if code.expose() == svolder_walk::AUTO {
+                refused.next = crate::recovery::REFUSED_UNDER_AUTO.to_string();
+            }
+            refused
         }
-        let Some(entry) = self.picked_entry() else {
-            return String::new();
-        };
-        if let Some(product) = self.product(entry) {
-            return product.to_string();
-        }
-        self.matched(entry)
-            .or_else(|| self.chosen())
-            .map(|profile| profile.display.clone())
-            .unwrap_or_else(|| entry.unit.clone())
+        WalkError::NoDevice => Failure::of(Kind::NothingInRange, "no device has been picked"),
+        other => usage(other.words(|failure| failure.to_string())),
     }
+}
+
+/// A failure the user can fix by answering differently: exit 1.
+fn usage(message: impl Into<String>) -> Failure {
+    Failure::of(Kind::Usage, message)
 }
 
 /// The health rows as the lines that show them, as `doctor` prints them.
@@ -1066,36 +1018,6 @@ fn a_step_of_its_own(command: &str) -> bool {
     command == checks::SETUP || command == checks::DAEMON_INSTALL
 }
 
-/// How many scans that could not run at all a guided run makes before it gives up.
-const SCAN_ATTEMPTS: u8 = 3;
-
-/// The passphrase key a typed answer means: four digits are themselves, `auto` is the code the
-/// advertisement carries, and an empty line — or the word the step offers as what an empty line
-/// stands for — is a device with no passphrase.
-fn passphrase_text(typed: &str) -> Result<String, Failure> {
-    let typed = typed.trim();
-    if typed.is_empty() || typed.eq_ignore_ascii_case(NONE) {
-        return Ok(NONE.to_string());
-    }
-    if typed.eq_ignore_ascii_case(AUTO) {
-        return Ok(AUTO.to_string());
-    }
-    if typed.len() == 4 && typed.chars().all(|c| c.is_ascii_digit()) {
-        return Ok(typed.to_string());
-    }
-    Err(Failure::of(
-        Kind::Usage,
-        "a code is four digits, or `auto`, or `none`",
-    ))
-}
-
-/// What the passphrase is before a device has said otherwise: whatever the advertisement
-/// carries.
-const AUTO: &str = "auto";
-
-/// What a device with no passphrase is configured with.
-const NONE: &str = "none";
-
 /// What to do about the daemon on this machine, as the lines that say it.
 ///
 /// The guided run shows these under its question and the non-interactive summary prints them
@@ -1124,16 +1046,6 @@ pub fn daemon_lines<H: Host>(effects: &H) -> Vec<String> {
             "  [daemon] autospawn = false in config.toml turns that off.".to_string(),
         ],
     }
-}
-
-/// A choice that is not one of the ones offered.
-fn out_of_range(choice: usize) -> Failure {
-    Failure::of(Kind::Usage, format!("there is no choice {}", choice + 1))
-}
-
-/// A step that needs a device reached one without: nothing was picked to configure.
-fn no_device() -> Failure {
-    Failure::of(Kind::NothingInRange, "no device has been picked")
 }
 
 #[cfg(test)]

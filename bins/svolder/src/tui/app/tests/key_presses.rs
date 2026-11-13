@@ -13,20 +13,20 @@ fn down_moves_the_selection_and_stops_at_the_last_row() {
     for _ in 0..10 {
         press(&mut app, KeyCode::Down);
     }
-    assert_eq!(app.selected, last);
+    assert_eq!(app.selected(), last);
     press(&mut app, KeyCode::Up);
-    assert_eq!(app.selected, last - 1);
+    assert_eq!(app.selected(), last - 1);
     for _ in 0..10 {
         press(&mut app, KeyCode::Up);
     }
-    assert_eq!(app.selected, 0, "and stops at the first");
+    assert_eq!(app.selected(), 0, "and stops at the first");
 }
 
 #[test]
 fn right_on_a_select_sends_the_next_value_and_left_the_previous() {
     let mut app = app();
     hear(&mut app, vo("2", Some("input"), json!(1), "1"));
-    assert_eq!(app.selected, 0, "the Input row starts focused");
+    assert_eq!(app.selected(), 0, "the Input row starts focused");
     assert_eq!(press(&mut app, KeyCode::Right), vec![set("input", "2")]);
     assert!(
         press(&mut app, KeyCode::Left).is_empty(),
@@ -44,12 +44,12 @@ fn right_on_a_select_sends_the_next_value_and_left_the_previous() {
 fn left_and_right_on_a_level_or_toggle_row_of_the_controls_pane() {
     let mut app = app();
     hear(&mut app, vo("10", Some("volume"), json!(100), "100"));
-    app.selected = row_of(&app, "volume");
+    app.set_selected(row_of(&app, "volume"));
     assert_eq!(press(&mut app, KeyCode::Right), vec![set("volume", "up")]);
     assert_eq!(press(&mut app, KeyCode::Left), vec![set("volume", "down")]);
 
     hear(&mut app, vo("5", Some("mute"), json!(false), "off"));
-    app.selected = row_of(&app, "mute");
+    app.set_selected(row_of(&app, "mute"));
     assert_eq!(press(&mut app, KeyCode::Right), vec![set("mute", "on")]);
     hear(&mut app, vo("5", Some("mute"), json!(true), "on"));
     assert_eq!(press(&mut app, KeyCode::Left), vec![set("mute", "off")]);
@@ -59,11 +59,11 @@ fn left_and_right_on_a_level_or_toggle_row_of_the_controls_pane() {
 fn space_on_a_toggle_flips_it() {
     let mut app = app();
     hear(&mut app, vo("5", Some("mute"), json!(false), "off"));
-    app.selected = row_of(&app, "mute");
+    app.set_selected(row_of(&app, "mute"));
     assert_eq!(ch(&mut app, ' '), vec![set("mute", "on")]);
     hear(&mut app, vo("5", Some("mute"), json!(true), "on"));
     assert_eq!(ch(&mut app, ' '), vec![set("mute", "off")]);
-    app.selected = row_of(&app, "volume");
+    app.set_selected(row_of(&app, "volume"));
     assert!(ch(&mut app, ' ').is_empty(), "a level has nothing to flip");
 }
 
@@ -71,7 +71,7 @@ fn space_on_a_toggle_flips_it() {
 fn space_flips_nothing_while_another_pane_is_focused() {
     let mut app = app();
     hear(&mut app, vo("5", Some("mute"), json!(false), "off"));
-    app.selected = row_of(&app, "mute");
+    app.set_selected(row_of(&app, "mute"));
     press(&mut app, KeyCode::Tab);
     assert_eq!(app.pane, Pane::Tone);
     assert!(
@@ -90,7 +90,7 @@ fn space_flips_nothing_while_another_pane_is_focused() {
 #[test]
 fn plus_and_minus_nudge_volume_wherever_the_selection_is() {
     let mut app = app();
-    app.selected = row_of(&app, "input");
+    app.set_selected(row_of(&app, "input"));
     assert_eq!(ch(&mut app, '+'), vec![set("volume", "up")]);
     assert_eq!(ch(&mut app, '-'), vec![set("volume", "down")]);
     app.pane = Pane::Status;
@@ -104,7 +104,7 @@ fn plus_and_minus_nudge_volume_wherever_the_selection_is() {
 #[test]
 fn m_toggles_mute_from_any_row() {
     let mut app = app();
-    app.selected = row_of(&app, "volume");
+    app.set_selected(row_of(&app, "volume"));
     assert_eq!(ch(&mut app, 'm'), vec![set("mute", "on")]);
     hear(&mut app, vo("5", Some("mute"), json!(true), "on"));
     assert_eq!(ch(&mut app, 'm'), vec![set("mute", "off")]);
@@ -114,7 +114,7 @@ fn m_toggles_mute_from_any_row() {
 #[test]
 fn i_flips_phase_and_o_flips_nos_from_any_row() {
     let mut app = app();
-    app.selected = row_of(&app, "volume");
+    app.set_selected(row_of(&app, "volume"));
     assert_eq!(ch(&mut app, 'i'), vec![set("phase", "on")]);
     assert_eq!(ch(&mut app, 'o'), vec![set("nos", "on")]);
     hear(&mut app, vo("3", Some("phase"), json!(true), "on"));
@@ -214,9 +214,9 @@ fn b_is_dimmed_where_the_profile_offers_no_identify() {
         },
     ];
     ch(&mut listing, 'd');
-    listing.selected = 0;
+    listing.set_selected(0);
     assert!(!keys::available(identify(), &listing));
-    listing.selected = 1;
+    listing.set_selected(1);
     assert!(keys::available(identify(), &listing));
 }
 
@@ -225,7 +225,7 @@ fn b_is_dimmed_where_the_profile_offers_no_identify() {
 #[test]
 fn equals_raises_the_volume_like_plus() {
     let mut app = app();
-    app.selected = row_of(&app, "input");
+    app.set_selected(row_of(&app, "input"));
     assert_eq!(ch(&mut app, '='), vec![set("volume", "up")]);
     app.pane = Pane::Status;
     assert_eq!(ch(&mut app, '='), ch(&mut app, '+'));
@@ -285,10 +285,10 @@ fn shift_arrows_on_the_tone_screen_are_the_frequency_and_q_keys() {
         "an uppercase letter is still the letter on the tone screen"
     );
 
-    device.selected = 0;
+    device.set_selected(0);
     device.key(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
-    assert_eq!(device.selected, 1, "Shift+↓ is ↓ on the device screen");
-    device.selected = row_of(&device, "volume");
+    assert_eq!(device.selected(), 1, "Shift+↓ is ↓ on the device screen");
+    device.set_selected(row_of(&device, "volume"));
     assert_eq!(
         device.key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)),
         vec![set("volume", "up")],
@@ -451,7 +451,7 @@ fn zero_centres_the_balance_from_anywhere_on_the_device_screen() {
         (Pane::Status, 0),
     ] {
         app.pane = pane;
-        app.selected = row;
+        app.set_selected(row);
         app.frame_flags.touched_row = None;
         assert_eq!(
             ch(&mut app, '0'),
@@ -570,7 +570,7 @@ fn telemetry_arrows_step_the_entries_no_control_sets_by_key() {
     hear(&mut app, raw_vo("7.1", "u16", 65_535));
     hear(&mut app, vo("10", Some("volume"), json!(109), "109"));
     ch(&mut app, 't');
-    assert_eq!(app.selected, 0, "the lowest id starts focused");
+    assert_eq!(app.selected(), 0, "the lowest id starts focused");
     assert_eq!(
         press(&mut app, KeyCode::Right),
         vec![Intent::Raw {
@@ -599,7 +599,7 @@ fn telemetry_arrows_step_the_entries_no_control_sets_by_key() {
         "a control with a key of its own is not nudged raw"
     );
     press(&mut app, KeyCode::Down);
-    assert_eq!(app.selected, 2, "and the list stops at its last entry");
+    assert_eq!(app.selected(), 2, "and the list stops at its last entry");
 }
 
 /// The uppercase letters turn a mode of the TUI's own, which the loop writes to the
@@ -677,7 +677,7 @@ fn b_identifies_on_controls_and_on_the_devices_row() {
     }
     app.devices.rows = vec![row("bifrost"), row("gungnir")];
     ch(&mut app, 'd');
-    app.selected = 0;
+    app.set_selected(0);
     assert_eq!(
         ch(&mut app, 'b'),
         vec![Intent::Identify(Some("bifrost".into()))]

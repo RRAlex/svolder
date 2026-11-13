@@ -39,7 +39,7 @@ use ratatui::Terminal;
 
 use svolder_ble::BleError;
 use svolder_host::Block;
-use svolder_ipc::{Config, TuiConfig};
+use svolder_ipc::{Config, DeviceConfigOp, TuiConfig};
 use svolder_profiles::Registry;
 
 use crate::backend::{
@@ -84,8 +84,8 @@ use connect::daemon_answered;
 use connect::{Reconnect, daemon_answers_within, daemon_back, recv_reconnect, recv_version};
 use devices::{
     Added, RELIST_BOUND, RELIST_PERIOD, Removed, Switched, add_device, relist_held, relisted,
-    relisting, remove_device, switch, switch_device, switch_via, update_device, written,
-    written_preset,
+    relisting, remove_device, switch, switch_device, switch_via, update_device, write_device,
+    written, written_preset,
 };
 #[cfg(test)]
 use events::execute;
@@ -134,6 +134,13 @@ pub(super) const INPUT_ENDED: &str = "the terminal input ended";
 
 /// How often the daemon is asked how its servers stand while the Connect category shows.
 const CONNECT_POLL: Duration = Duration::from_secs(2);
+
+/// How often a daemon session asks the daemon whether its configuration file changed since its
+/// last reload, whichever screen shows.
+const CONFIG_POLL: Duration = match cfg!(test) {
+    true => Duration::from_millis(300),
+    false => Duration::from_secs(60),
+};
 
 /// Whether the Settings box is open on the Connect category.
 fn connect_shown(app: &App) -> bool {
@@ -204,6 +211,8 @@ where
     M: MouseCapture,
 {
     let mut end = run_turns(parts).await;
+    // a reload a Settings write still owes goes out whichever way the loop ended
+    look::flush_owed(&mut end.watching).await;
     let watching = &mut end.watching;
     watching.host.stop_capture(&mut watching.app);
     end
@@ -219,12 +228,15 @@ struct Timers {
     relist: tokio::time::Interval,
     /// Asks the daemon how its servers stand while the Connect category shows.
     conn_poll: tokio::time::Interval,
+    /// Asks the daemon whether its configuration file changed since its last reload, while a
+    /// daemon session runs, so an edit made in another terminal reaches this one.
+    config_poll: tokio::time::Interval,
     /// Asks the daemon whether the link the Web UI box shows is still open.
     web_poll: tokio::time::Interval,
 }
 
 impl Timers {
-    /// The five clocks, the ticks running at `period`.
+    /// The six clocks, the ticks running at `period`.
     fn new(period: Duration) -> Self {
         // A tick only ages what's on screen, so ticks missed while a write was in flight are worth
         // nothing: the next one is a period from here, not a burst of the ones gone by.
@@ -240,11 +252,17 @@ impl Timers {
         // While the Web UI box shows a link, the daemon is asked each second whether a browser
         // has used it.
         let web_poll = delayed(web_box::CHECK_PERIOD);
+        // The first look at the file's state is the one the session's start makes, so this clock
+        // starts a period from now.
+        let mut config_poll =
+            tokio::time::interval_at(tokio::time::Instant::now() + CONFIG_POLL, CONFIG_POLL);
+        config_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         Self {
             period,
             ticks,
             relist,
             conn_poll,
+            config_poll,
             web_poll,
         }
     }
@@ -577,6 +595,9 @@ where
                 why: Some(why),
             };
         }
+        let owed = watching.reload_owed.as_ref().map(|owed| owed.0);
+        watching.settle_search();
+        let search_due = watching.jobs.due_at();
         tokio::select! {
             event = seams.events.next() => {
                 watching = match on_terminal_event(event, &mut seams, watching, &mut look, &mut turns).await {
@@ -638,6 +659,16 @@ where
             _ = turns.timers.conn_poll.tick(), if connect_shown(&watching.app) && watching.daemon_version.is_none() => {
                 watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
             }
+            // A hand edit of the file made elsewhere is told on this slower clock, whichever
+            // screen shows; a direct session has no daemon to ask, and `ask_daemon` says nothing.
+            _ = turns.timers.config_poll.tick(), if watching.app.session.daemon && watching.daemon_version.is_none() => {
+                watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
+            }
+            // Settings wrote `[tui]` or `[autoeq]` and the writes paused: a daemon that reads this
+            // file reloads once, so the file's change is not the daemon's to announce.
+            _ = tokio::time::sleep_until(owed.unwrap_or_else(tokio::time::Instant::now)), if owed.is_some() => {
+                look::send_owed(&mut watching);
+            }
             answer = computer::answered(&mut watching.computer.answers),
                 if watching.computer.answers.is_some() =>
             {
@@ -654,6 +685,10 @@ where
                 watching.app.host.computer.eq = Some(view);
                 watching.app.follow_point(&before);
                 watching.app.note_computer_view();
+            }
+            // The typing paused: the last search question goes to the daemon.
+            () = jobs::due(search_due), if search_due.is_some() => {
+                watching.jobs.send_due();
             }
             done = jobs::next(&mut watching.jobs.ended) => {
                 watching = match on_job_done(done, &mut seams, watching, &mut look, &mut turns).await {

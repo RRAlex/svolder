@@ -95,6 +95,25 @@ views:
           - type: heading
             heading: Tone control
             icon: mdi:tune-vertical
+            badges:
+              # The computer's EQ, from the second device `This computer`: a badge in the heading, so
+              # the grid keeps its place, tapped to turn the EQ on or off. It shows only while that
+              # switch exists, so without the computer side the view is as it was.
+              - type: entity
+                entity: switch.this_computer_eq
+                name: Computer EQ
+                icon: mdi:equalizer
+                state_content:
+                  - name
+                  - state
+                tap_action:
+                  action: toggle
+                visibility:
+                  - condition: state
+                    entity: switch.this_computer_eq
+                    state:
+                      - "on"
+                      - "off"
           - type: tile
             entity: select.gungnir_tone_control_mode
             name: Mode

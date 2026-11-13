@@ -2,16 +2,33 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A theme presents everything a device offers, on every kind of device (design 4.6), in Chromium.
 One fake daemon holds the fleet: a Gungnir 2 with a fake player (a DAC), `fake-amp` with a signal,
-`fake-five`, `fake-mono` and the Loki Max (slots and settings). For each device, shown by the
+`fake-five`, `fake-mono`, the Loki Max (slots and settings) and an Aegir 2 (the one with a power
+switch). For each device, shown by the
 page's own device switch, and for every theme the page lists:
   - every target of `targetsOf(device)` (core/contract.js) is reached by the theme's test driver
     and operated, and the model route then reports the change (a readout is not operated: what
     the driver shows equals the model's words); each operation sends one write request;
-  - every fact of `factsOf(device)` is reached and shown with the model's words; the cover of the
-    track is one (shown as a picture whose address is `api/v1/host/cover?v=<version>`).
+  - every fact of `deviceFactsOf(device)` (the facts and the reading rows of the device's page in
+    the Devices popup) is reached and shown with the model's words through the core's driver
+    (`core.driver`, which is given the device by its url, opens the popup at that page and reads
+    its cells), whichever theme is mounted; the popup is closed after the ages step;
+  - every fact of `themeFactsOf(device)` (the cover of the track, shown as a picture whose address
+    is `api/v1/host/cover?v=<version>`) is reached and shown through the theme's own driver
+    (`core.theme.driver`); the fake host's player has a cover on every device, so an empty list
+    fails.
+What there is to prove is held on every theme and device, so a pass with less to do fails: the
+page lists targets, the computer's side lists targets, and on the Gungnir 2 the player has its
+buttons and a track, the three transport targets and the cover are listed.
+Once per theme, on its first device with reading rows (the facts are on show in the popup after
+the pass above): the ages step. Every cell that carries `data-heard-at` (the readings' ages and the
+signal's, the attribute `core.clock.tickAges` reads) has words, and 2.2 s later at
+least one reading's age that stayed in place says other words (a cell drawn again is not counted:
+only the ticker writes into a cell in place).
 The Gungnir 2 is put into Loudness first, so the strength has its target; the Loki Max's slots are
-saved over and recalled (a slot's effect is the bands it brings back), the amp's power is turned
-off and on again.
+saved over and recalled (a slot's effect is the bands it brings back); the Aegir's power switch is
+turned off and on again on every theme (the three fake amps have none: their targets are the
+player's three buttons); the readouts of its power part are held on every theme too (Paper writes
+them as notes in the margin, where its driver reads them).
 Usage: python3 completeness.py [chromium]"""
 import json
 import os
@@ -39,8 +56,9 @@ def check(name, cond, detail=''):
 # While iterating on one theme: WEB_CHECK_THEMES=paper limits the pass to the named themes.
 ONLY = set(filter(None, os.environ.get('WEB_CHECK_THEMES', '').split(',')))
 FLEET = [('fake-amp', 'Amp', '1112131415161718'), ('fake-five', 'Five', '2122232425262728'),
-         ('fake-mono', 'Mono', '3132333435363738'), ('lokimax', 'Loki Max', '4142434445464748')]
-DEVICES = ['Gungnir 2', 'Amp', 'Five', 'Mono', 'Loki Max']
+         ('fake-mono', 'Mono', '3132333435363738'), ('lokimax', 'Loki Max', '4142434445464748'),
+         ('aegir2', 'Aegir', '5152535455565758')]
+DEVICES = ['Gungnir 2', 'Amp', 'Five', 'Mono', 'Loki Max', 'Aegir']
 # the page records every write it posts
 HOOK = ("window.__posts = []; const f = window.fetch; window.fetch = (...a) => {"
         " if (!(a[1] && a[1].method === 'POST')) return f(...a);"
@@ -50,6 +68,9 @@ BOOT = """import(new URL('assets/core/boot.js', document.baseURI)).then(async (m
   await m.mounted; window.__core = m.core; window.__driver = m.core.theme.driver;
   window.__contract = await import(new URL('assets/core/contract.js', document.baseURI));
   return m.core.theme.id; })"""
+# the two lists of facts of the shown device: the device's own and the theme's
+DEVICE_FACTS = '__contract.deviceFactsOf(__core.model.device())'
+THEME_FACTS = '__contract.themeFactsOf(__core.model.device())'
 # how a kind of target is ordered: what changes the mode or the power comes after what needs them
 RANK = {'control': 0, 'loudness': 1, 'band': 2, 'preset': 3, 'mode': 4, 'slot': 5, 'setting': 6,
         'transport': 7}
@@ -78,6 +99,8 @@ class Run:
 
     def __init__(self, b, d, name, theme):
         self.b, self.d, self.name, self.theme = b, d, name, theme
+        # the device as the page's addresses name it: what the core's driver is told
+        self.url = name.replace(' ', '%20')
 
     def label(self, target):
         return f'{self.theme} / {self.name} / {json.dumps(target)}'
@@ -90,6 +113,15 @@ class Run:
 
     def shown(self, target):
         return self.b.page(f'__driver.shown({json.dumps(target)})')
+
+    def reach_device_fact(self, label):
+        """The core's driver, told which device's fact is meant."""
+        return self.b.page(f'__core.driver.reach({json.dumps(label)}, '
+                           f'{{device: {json.dumps(self.url)}}})')
+
+    def shown_device_fact(self, label):
+        return self.b.page(f'__core.driver.shown({json.dumps(label)}, '
+                           f'{{device: {json.dumps(self.url)}}})')
 
     def page_shows(self, expression):
         """Wait until the page's own model says `expression`: a gesture reads what the page shows,
@@ -255,11 +287,10 @@ def shape(words):
     return re.sub(r'\d+(\.\d+)?', '#', words)
 
 
-def facts(run, dev):
-    """Every fact is reached and shown with the model's words (a moment is given for a device that
-    is still reporting what it was asked to do; a reading that moves on its own, a meter, is held
-    to its shape)."""
-    labels = run.b.page('__contract.factsOf(__core.model.device())')
+def facts(run, dev, labels, reach, shown, whose):
+    """Every fact of `labels` is reached by `reach` and shown by `shown` with the model's words (a
+    moment is given for a device that is still reporting what it was asked to do; a reading that
+    moves on its own, a meter, is held to its shape). `whose` names the list and its driver."""
     unwritten = {'Product', 'Unit', 'Firmware', 'DSP', 'Profile', 'Link', 'Signal', 'Passphrase'}
 
     def words(label, f):
@@ -280,53 +311,86 @@ def facts(run, dev):
     def matches(label):
         f = run.model()['facts']
         want = str(words(label, f))
-        shown = run.shown(label)
-        if shown is None:
+        said = shown(label)
+        if said is None:
             return False
         if label in unwritten:
             # the page adds words to some (the product's number, the signal's age)
-            return shown == want or shown.startswith(want)
-        return shown == want or (label in volatile and shape(shown) == shape(want))
+            return said == want or said.startswith(want)
+        return said == want or (label in volatile and shape(said) == shape(want))
 
-    # a reading that changes while the model is looked at is held to its shape
-    samples = []
-    for _ in range(4):
-        samples.append({r['id']: r['value'] for r in run.model()['facts']['rows']})
-        time.sleep(0.25)
-    volatile = {i for i in samples[0] if len({sample.get(i) for sample in samples}) > 1}
-    if dev.get('meters'):
-        # an amp's meters move on their own, though they may hold still for a moment
-        volatile |= {r['id'] for r in dev['facts']['rows'] if r['label'].startswith('Meter')}
+    # a reading that changes while the model is looked at is held to its shape (looked at only
+    # when the list holds a reading)
+    volatile = set()
+    if {r['id'] for r in dev['facts']['rows']} & set(labels):
+        samples = []
+        for _ in range(4):
+            samples.append({r['id']: r['value'] for r in run.model()['facts']['rows']})
+            time.sleep(0.25)
+        volatile = {i for i in samples[0] if len({sample.get(i) for sample in samples}) > 1}
+        if dev.get('meters'):
+            # an amp's meters move on their own, though they may hold still for a moment
+            volatile |= {r['id'] for r in dev['facts']['rows'] if r['label'].startswith('Meter')}
     bad = []
     for label in labels:
-        if not run.reach(label):
+        if not reach(label):
             bad.append((label, 'not reached'))
         elif not poll(lambda: matches(label), 4.0):
-            bad.append((label, run.shown(label), str(words(label, run.model()['facts']))))
-    check(f'{run.theme} / {run.name}: all {len(labels)} facts are reached and shown with the '
-          'model\'s words', not bad, bad[:6])
+            bad.append((label, shown(label), str(words(label, run.model()['facts']))))
+    check(f'{run.theme} / {run.name}: {whose}: all {len(labels)} are reached and shown with the '
+          'model\'s words', bool(labels) and not bad, bad[:6])
 
 
-FIRST = {}  # per device: the per-kind target counts and the fact count of the first theme listed
+def device_facts(run, dev):
+    """The device's facts, through the core's driver: every device of the fleet has some."""
+    labels = run.b.page(DEVICE_FACTS)
+    facts(run, dev, labels, run.reach_device_fact, run.shown_device_fact,
+          'device facts (the core\'s driver)')
 
 
-def same_counts(run, name, theme, targets):
-    """Every theme lists the same targets and facts as the first theme listed."""
-    counts = {}
-    for target in targets:
-        counts[kind_of(target)] = counts.get(kind_of(target), 0) + 1
-    counts['facts'] = len(run.b.page('__contract.factsOf(__core.model.device())'))
-    first = FIRST.setdefault(name, (theme, counts))
-    for kind in sorted(set(counts) | set(first[1])):
-        check(f'{theme} / {name}: {kind} count equals {first[0]}\'s',
-              counts.get(kind, 0) == first[1].get(kind, 0),
-              f'{theme} {counts.get(kind, 0)}, {first[0]} {first[1].get(kind, 0)}')
+def theme_facts(run, dev):
+    """The theme's facts, through the theme's own driver: the fake host's player has a cover on
+    every device of the fleet, so a list with nothing in it fails."""
+    labels = run.b.page(THEME_FACTS)
+    facts(run, dev, labels, run.reach, run.shown, 'theme facts (the theme\'s driver)')
+
+
+AGED = set()  # the themes whose ages were looked at
+# every cell that carries the stamp it was heard at, kept with its words for the second look
+AGES_FIRST = ("(window.__ages = [...document.querySelectorAll('[data-heard-at]')]"
+              ".map((cell) => [cell, cell.textContent])).map(([, text]) => text)")
+# the cells still in place (a section drawn again brings new ones): their words then and now,
+# and whether the cell is the signal's
+AGES_AGAIN = ("window.__ages.filter(([cell]) => cell.isConnected)"
+              ".map(([cell, text]) => [text, cell.textContent, cell.hasAttribute('data-head')])")
+SECONDS = re.compile(r'^\d+ s ago$')
+
+
+def ages_step(run):
+    """The ages on show step with the clock: every stamped cell has words, and a reading's age in
+    seconds that stayed in place says other words 2.2 s later. A look during which the section was
+    drawn again, or which found no age in seconds, is taken again (three looks at most)."""
+    first, stepped, looked = [], [], []
+    for _ in range(3):
+        first = run.b.page(AGES_FIRST)
+        time.sleep(2.2)
+        again = run.b.page(AGES_AGAIN)
+        looked = [(was, now) for was, now, signal in again if not signal and SECONDS.match(was)]
+        stepped = [(was, now) for was, now in looked if was != now]
+        if stepped:
+            break
+    check(f'{run.theme} / {run.name}: every age on show has words ({len(first)} stamped cells)',
+          len(first) > 0 and all(text.strip() for text in first), first[:8])
+    check(f'{run.theme} / {run.name}: the ages step ({len(stepped)} of {len(looked)} readings\' '
+          'ages in seconds said other words 2.2 s later, in place)', len(stepped) > 0,
+          [looked[:6], first[:6]])
 
 
 def one_device(b, d, name, theme):
-    url = name.replace(' ', '%20')
-    b.page(f"__core.actions.showDevice('{url}').then(() => new Promise((r) => setTimeout(r, 900)))")
+    """Every target and fact of the device `name` on `theme`."""
     run = Run(b, d, name, theme)
+    b.page(f"__core.actions.showDevice('{run.url}')"
+           ".then(() => new Promise((r) => setTimeout(r, 900)))")
     dev = run.model()
     targets = b.page('__contract.targetsOf(__core.model.device())')
     targets.sort(key=lambda t: RANK[kind_of(t)])
@@ -334,7 +398,11 @@ def one_device(b, d, name, theme):
     targets.sort(key=lambda t: t.get('control') == (dev.get('power') or {}).get('key'))
     print(f'{theme} / {name}: {len(targets)} targets')
     check(f'{theme} / {name}: the page lists targets', len(targets) > 0)
-    same_counts(run, name, theme, targets)
+    if name == 'Aegir':
+        # the fleet's one device with a power switch: its branch runs on every theme
+        check(f'{theme} / {name}: the model has a power, and the page lists its switch',
+              bool(dev.get('power')) and any(t.get('control') == dev['power']['key'] for t in targets),
+              dev.get('power'))
     if name == 'Gungnir 2':
         # the DAC with the host fake has a player to press: transport coverage must not drop
         # silently (the contract lists the buttons only with buttons and a track)
@@ -344,9 +412,10 @@ def one_device(b, d, name, theme):
               and bool(playing.get('track')), playing)
         check(f'{theme} / {name}: the transport targets are listed (previous, play or pause, next)',
               len(shown) == 3 and shown[0] == 'previous' and shown[2] == 'next', shown)
-        # the fake host carries a cover: the contract lists it, and every theme shows it
+        # the fake host carries a cover: the contract lists it among the theme's facts, and every
+        # theme shows it
         check(f'{theme} / {name}: the cover is a fact (the host\'s picture for the track)',
-              'Cover' in b.page('__contract.factsOf(__core.model.device())'), playing.get('track'))
+              'Cover' in b.page(THEME_FACTS), playing.get('track'))
     for target in targets:
         reached = run.reach(target)
         check(f'{run.label(target)}: reached', reached is True, reached)
@@ -357,18 +426,27 @@ def one_device(b, d, name, theme):
         except Exception as error:  # a driver that throws fails the target, the run goes on
             check(f'{run.label(target)}: operated', False, str(error)[:300])
     computer_targets(run)
-    facts(run, run.model())
+    device_facts(run, run.model())
+    if theme not in AGED and run.model()['facts']['rows']:
+        AGED.add(theme)
+        ages_step(run)
+    # the device's facts are the Devices popup's: it is closed before the theme's own fact (the
+    # cover) is looked for on the page behind it
+    b.page("(__core.router.close(), new Promise((resolve) => setTimeout(resolve, 400)))")
+    check(f'{theme} / {name}: the popup the facts were reached in is closed',
+          b.page('__core.router.state().popup') is None, b.page('__core.router.state()'))
+    theme_facts(run, run.model())
 
 
 def computer_targets(run):
-    """The computer's side on this device (any kind, an amp too): the page lists the same targets
-    on every theme (they are the core's data), and a theme with a driver for them reaches each."""
+    """The computer's side on this device (any kind, an amp too): the page lists targets and the
+    theme's driver reaches each (that the list starts with the switch is contract.py's, on every
+    theme)."""
     b = run.b
     expr = ("import(new URL('assets/core/contract.js', document.baseURI))"
             ".then((c) => c.computerTargetsOf(__core.model.page()))")
     targets = poll(lambda: b.page(expr), 6.0)
-    check(f'{run.theme} / {run.name}: the computer\'s side lists its targets, the switch first',
-          bool(targets) and targets[0] == {'computer': 'flip'} and len(targets) > 5, targets)
+    check(f'{run.theme} / {run.name}: the computer\'s side lists targets', bool(targets), targets)
     b.page('__driver.operate({computer: "flip"}, {side: "computer"})')
     # the list is read again before each target: a remove or a preset changes what follows it
     done = []
@@ -393,13 +471,15 @@ try:
     listed = [t['id'] for t in b.page('__core.registry.list()')]
     check('the page lists the themes the checks go through', listed == ['ember', 'paper', 'signal', 'nightdrive'], listed)
     check('WEB_CHECK_THEMES names only listed themes', ONLY <= set(listed), sorted(ONLY - set(listed)))
-    for theme in [t for t in listed if not ONLY or t in ONLY]:
+    themes = [t for t in listed if not ONLY or t in ONLY]
+    for theme in themes:
         # the Gungnir 2 starts in Loudness, where the strength has its target
         assert d.post('Gungnir 2', 'eq/mode', {'mode': 'loudness'})[0] == 200
         b.goto(f'{d.url}?theme={theme}&effects=off', settle=1.5)
         check(f'{theme}: the page mounts it', b.page(BOOT) == theme)
         for name in DEVICES:
             one_device(b, d, name, theme)
+        check(f'{theme}: a device with reading rows had its ages looked at', theme in AGED)
     check('no page error', b.errors == [], b.errors[:3])
 finally:
     b.close()

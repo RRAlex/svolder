@@ -443,4 +443,48 @@ ok('a_start_from_a_kept_tier_begins_there_and_is_corrected_by_the_measuring', ()
   assert.ok(at < 4, `${at} s`);
 });
 
+ok('the_overlay_layer_goes_second_after_the_wet_road_and_only_while_one_is_wanted', () => {
+  const b = createBudget();
+  b.size(390, 844, 3);
+  assert.equal(b.overlay, false, 'not wanted, not drawn');
+  b.setOverlay(true);
+  assert.equal(b.overlay, true);
+  let at = feed(b, 60, 30, 0).at;
+  assert.equal(b.wet, false, 'the wet road goes first');
+  assert.equal(b.overlay, true);
+  assert.equal(b.step, 0);
+  at = feed(b, 60, 30, at).at;
+  assert.equal(b.overlay, false, 'the overlay goes second');
+  assert.equal(b.step, 0, 'before the density');
+  at = feed(b, 60, 30, at).at;
+  assert.equal(b.step, 1, 'then the density');
+  assert.equal(b.overlay, false);
+});
+
+ok('a_step_down_with_no_overlay_wanted_skips_the_layer', () => {
+  const b = createBudget();
+  b.size(390, 844, 3);
+  const at = feed(b, 60, 30, 0).at;
+  assert.equal(b.wet, false);
+  feed(b, 60, 30, at);
+  assert.equal(b.step, 1, 'the density, not a layer nobody asked for');
+});
+
+ok('the_overlay_comes_back_after_the_density_and_before_the_wet_road', () => {
+  const b = createBudget();
+  b.size(390, 844, 3);
+  b.setOverlay(true);
+  let at = 0;
+  for (let i = 0; i < 3; i++) at = feed(b, 60, 30, at).at;
+  assert.deepEqual([b.wet, b.overlay, b.step], [false, false, 1]);
+  const seen = [];
+  for (let i = 0; i < 600 * 60 && !(b.wet && b.overlay); i++) {
+    at += 1 / 60;
+    b.sample(2, at);
+    const state = `${b.step}${b.overlay ? 'o' : '-'}${b.wet ? 'w' : '-'}`;
+    if (seen.at(-1) !== state) seen.push(state);
+  }
+  assert.deepEqual(seen, ['1--', '0--', '0o-', '0ow'], seen.join(' '));
+});
+
 console.log(`${n} budget checks passed`);

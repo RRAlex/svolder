@@ -1,106 +1,66 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The desktop keys and the key list: `?` opens the list, which closes by itself, and the keys act
-// on the knob, the balance slider, the tone mode and the presets, never while a text field has
-// the focus, with a modifier, or in the frame's menu, and none that writes while the sections are
-// being arranged. `v` changes the visualizer's look and `A` starts Arrange mode.
+// The desktop keys. They are the theme's key table (key-table.js): this module gives each key
+// of the page its `run` and binds the table through `core.keys.bind`, so a key acts only when
+// nothing else owns it (a modal, a text field, a modifier, the frame's menu) and only while its
+// `when` holds (none that writes for a guest, with the link down or while the sections are
+// being arranged; `v` only where the screen has a visualizer card). The Help popup lists them.
 //
-// ember.js calls `installKeys` where its listeners stand; the list's own markup is the shell's
-// (draw/shell.js).
+// ember.js calls `installKeys` where its listeners stand and gives `TABLE` to the frame as the
+// mounted instance's `keys`.
 
-import { inMenu, menuOwns } from '../../core/menu.js';
-import { ember, mine } from './bind.js';
+import { ember } from './bind.js';
 import { arranging, openArrange } from './arrange.js';
+import { dragging as computerHeld } from './computer.js';
+import { KEYS } from './key-table.js';
+import { dragging as toneHeld } from './tone-graph.js';
 import { cycleLook, hasBand } from './visualizer.js';
 
-// The key list closes by itself 6 s after it opens, and at once on any key, click, scroll, wheel
-// or touch (it is a passive list: nothing in it is used, so a click on it closes it too).
-const KEYS_MS = 6000;
-let keysTimer = 0;
-/** Show the key list (or hide it), whose own timer is restarted or cleared. */
-function showKeys(list, shown) {
-  clearTimeout(keysTimer);
-  list.hidden = !shown;
-  if (!shown) return;
-  // The visualizer's look is listed only where the screen has a card to change.
-  for (const row of list.querySelectorAll('.kviz')) row.hidden = !hasBand();
-  keysTimer = setTimeout(() => showKeys(list, false), KEYS_MS);
-}
-/** Hide the key list when it is open. */
-function dismissKeys() {
-  const list = document.getElementById('keys');
-  if (list && !list.hidden) showKeys(list, false);
-}
-
-/** Whether a key press is for a text field or carries a modifier: none of the desktop keys act. */
-function typingIn(event) {
-  return event.target.matches?.('input, textarea, select') || event.ctrlKey
-    || event.metaKey || event.altKey;
-}
-/** Whether a key press is the frame's menu's own (open, or the keys that open it). */
-const inEffectsMenu = (event) => menuOwns(event);
-
-export function installKeys() {
-  for (const kind of ['click', 'wheel', 'touchstart']) {
-    document.addEventListener(kind, (event) => {
-      // A key in the frame's menu makes a click of its own (detail 0): that is not a pointer.
-      if (kind === 'click' && event.detail === 0 && inMenu(event.target)) return;
-      dismissKeys();
-    }, mine({ capture: true, passive: true }));
-  }
-  window.addEventListener('scroll', dismissKeys, mine({ capture: true, passive: true }));
-
-  // Any key but a modifier on its own (it comes before the key it modifies) closes the list; a
-  // `?` that the keys below act on toggles it instead. It runs in the capture phase: the dial
-  // stops the keys it takes (arrows, Page Up/Down, Home) before they reach the document.
-  document.addEventListener('keydown', (event) => {
-    const key = event.key;
-    if (inEffectsMenu(event)) return;
-    if (!['Shift', 'Control', 'Alt', 'Meta', 'AltGraph'].includes(key)
-      && (key !== '?' || typingIn(event))) dismissKeys();
-  }, mine({ capture: true }));
-
-  // The desktop keys: none while a text field has focus or with a modifier; arrows on a
-  // focused control are that control's.
-  document.addEventListener('keydown', (event) => {
-    const key = event.key;
-    if (typingIn(event) || inEffectsMenu(event)) return;
-    // A held key repeats only for the arrows: a held m would flap the mute.
-    if (event.repeat && key !== 'ArrowLeft' && key !== 'ArrowRight') return;
-    const list = document.getElementById('keys');
-    if (key === '?') {
-      if (list) showKeys(list, list.hidden);
-      return;
-    }
-    if (key === 'Escape') dismissKeys();
-    // The look of the visualizer is the page's own, not a write: a guest and a lost link have it.
-    if (key === 'v') {
-      cycleLook();
-      return;
-    }
-    // Arranging is the page's own too, and nothing below it is for a page being arranged.
-    if (key === 'A' || key === 'a') {
-      openArrange();
-      return;
-    }
-    if (arranging()) return;
-    const body = document.body.classList;
-    if (body.contains('lost') || body.contains('guest') || !body.contains('writes')) return;
-    const knob = document.querySelector('sv-knob');
-    const own = event.target.closest?.('sv-knob, sv-slider, .seg, .presets, .bands, .bedit');
+/** What each key of the page does, by the `id` of its entry in the table. A key that writes names
+ * no device: the action's default target, the device on show, is the one. */
+const RUNS = {
+  /** One step of the volume, unless the focus is on a control that has arrows of its own. */
+  volume(event) {
+    if (event.target.closest?.('sv-knob, sv-slider, .seg, .presets, .bands, .bedit')) return;
+    document.querySelector('sv-knob')?.step(event.key === 'ArrowRight' ? 1 : -1);
+    event.preventDefault();
+  },
+  mute: () => document.querySelector('sv-knob')?.toggleMute(),
+  centre: () => ember.core.actions.setControl('balance', { value: 0 }),
+  // The look of the visualizer is the page's own, not a write: a guest and a lost link have it.
+  look: () => cycleLook(),
+  flat() {
     const flat = document.querySelector('#part-tone .opt[data-mode="flat"]');
-    if ((key === 'ArrowLeft' || key === 'ArrowRight') && !own && knob) {
-      knob.step(key === 'ArrowRight' ? 1 : -1);
-      event.preventDefault();
-    } else if (key === 'm' && knob?.dataset.mute) {
-      knob.toggleMute();
-    } else if (key === '0' && document.querySelector('sv-slider[data-key="balance"]')) {
-      ember.core.actions.setControl('balance', { value: 0 });
-    } else if (key === 'f' && flat && flat.getAttribute('aria-pressed') !== 'true') {
-      ember.core.actions.setMode('flat');
-    } else if (key === 'p') {
-      (document.querySelector('.pre[aria-pressed="true"]') ?? document.querySelector('.pre'))
-        ?.focus();
-    }
-  }, mine());
+    if (flat && flat.getAttribute('aria-pressed') !== 'true') ember.core.actions.setMode('flat');
+  },
+  preset: () => (document.querySelector('.pre[aria-pressed="true"]')
+    ?? document.querySelector('.pre'))?.focus(),
+  // Arranging is the page's own too.
+  arrange: () => openArrange(),
+};
+
+/** Ember's key table as it is bound: the entries of key-table.js, each key of the page with its
+ * `run`. */
+export const TABLE = KEYS.map((entry) => (
+  RUNS[entry.id] ? { ...entry, run: RUNS[entry.id] } : entry));
+
+/** What the page shows now, for the table's `when` (key-table.js names each fact). */
+function facts() {
+  const knob = document.querySelector('sv-knob');
+  return {
+    lost: document.body.classList.contains('lost'),
+    arranging: arranging(),
+    held: toneHeld() || computerHeld(),
+    viz: hasBand(),
+    knob: knob !== null,
+    mute: Boolean(knob?.dataset.mute),
+    balance: document.querySelector('sv-slider[data-key="balance"]') !== null,
+    flat: document.querySelector('#part-tone .opt[data-mode="flat"]') !== null,
+    presets: document.querySelector('.pre') !== null,
+  };
+}
+
+/** Bind the table: the keys of the page act from now on, until the theme is unmounted. */
+export function installKeys() {
+  ember.core.keys.bind(TABLE, { signal: ember.signal, ctx: facts });
 }

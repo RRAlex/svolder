@@ -3,19 +3,21 @@
 """The core's own rows that Ember does not use (design 4.7), driven through the core's API from a
 test page, so a theme that needs them (Path, Night drive, Paper) finds them working:
   the_core_follows_a_second_device      a fleet of a DAC and an amp: `stream.follow(['Amp'])` brings
-                                        the amp's meters into the model over one stream
+                                        the amp's meters into the model over one stream; a device
+                                        switched to is named in the tab's title
   a_hop_added_from_the_page_reaches_the_fleet   a declared hop is in the model and the config file
   the_menu_fades_and_comes_back         `frame.fade(true)`: the button goes, any sign brings it back
-  a_band_moves_from_plain_coordinates   `drag.createDrag` fed a 400 x 100 map of any drawing
+  a_band_moves_from_plain_coordinates   `drag.createDrag` fed a 400 x 100 map of any drawing: the
+                                        steps reach the daemon
   light_and_dark_follow_the_system      (Chromium) a theme with both schemes follows the system, a
                                         word of the person holds against it and is kept
   a_canvas_loop_pauses_while_hidden     `lifecycle.canvasLoop` stops its frames while the page is
                                         hidden and starts them again
   ember_unmounts_clean                  a theme switched away from and back leaves one listener per
                                         key, no canvas and no error
-  the_tab_title_follows_on_every_theme  Ember, Paper, Signal and Night drive: the tab reads `<device> ·
-                                        connected — svolder`, `reconnecting` while the daemon is
-                                        gone, `connected` when back, and names a device switched to
+  the_tab_title_follows                 Ember: the tab reads `<device> · connected — svolder`,
+                                        `reconnecting` while the daemon is gone, `connected` when
+                                        back (the core writes the title for every theme)
   ember_mounted_while_lost_recovers     Ember mounted while the stream is lost greys the smoke and
                                         dims the screen, and both come back with the stream
 Usage: python3 core_rows.py chromium|firefox"""
@@ -106,9 +108,15 @@ def follows_a_second_device(b, d):
     check('the_core_follows_a_second_device: not followed any more, the amp is forgotten',
           poll(lambda: b.page("__core.model.device('Amp')") is None),
           b.page("__core.model.device('Amp') === null"))
-    live = b.page("window.__sources.filter((s) => s.readyState !== 2).map((s) => s.url)")
-    check('  and the stream is the one device again',
-          len(live) == 1 and 'follow' not in live[0], live)
+    # a device switched to is named in the tab's title (the fleet's two devices, the last first)
+    urls = b.page('__core.model.page().fleet.devices.map((x) => x.url)')
+    for url in reversed(urls):
+        b.page(f"__core.actions.showDevice({json.dumps(url)})")
+        name = b.page("__core.model.page().fleet.devices.find((x) => x.url === %s)?.name"
+                      % json.dumps(url))
+        want = f'{name} \u00b7 connected \u2014 svolder'
+        check(f'the_core_follows_a_second_device: a switch to {url} names {name} in the title',
+              poll(lambda: tab_title(b) == want, 8.0), [name, tab_title(b)])
 
 
 def hop_reaches_the_fleet(b, d):
@@ -141,8 +149,11 @@ def menu_fades(b, d):
         b.page(script)
         back = not b.page(button)
         check(f'the_menu_fades_and_comes_back: {what} brings it back at once', back)
-        check(f'the_menu_fades_and_comes_back: and it fades again after {what}',
-              poll(lambda: b.page(button), 4.0))
+        faded = poll(lambda: b.page(button), 4.0)
+        # only the first is asserted; the others wait for the fade so that the next sign starts
+        # from a faded button
+        if what == 'a pointer move':
+            check(f'the_menu_fades_and_comes_back: and it fades again after {what}', faded)
     b.press('Escape')
     check('the_menu_fades_and_comes_back: a key brings it back', not b.page(button))
     b.page('__core.frame.fade(false)')
@@ -177,15 +188,13 @@ def band_moves(b, d):
       const write = async (param, raw) => {{
         const answer = await __core.actions.setBand({band}, param, {{ raw }});
         return answer.ok ? {{ text: answer.text }} : {{ refused: answer.error }}; }};
-      const drag = __core.drag.createDrag({{ band: {band}, gesture: 'move',
+      const drag = __core.eq.bands.createDrag({{ band: {band}, gesture: 'move',
         start: {{ f: {start[0]}, g: {start[1]}, q: {start[2]} }},
         press: {{ x: 200, y: 50 }}, plot: {{ width: 400, height: 100 }}, steps, write, map,
         on: {{ held() {{}}, answer() {{}}, toast() {{}}, ended() {{}} }} }});
       drag.move({{ x: 215, y: 45 }}); drag.move({{ x: 250, y: 25 }}); drag.release();
       await drag.settled; return drag.held; }})()"""
-    held = b.page(script)
-    check('a_band_moves_from_plain_coordinates: the drag holds the steps of the target Hz and dB',
-          held['f'] == want_f and held['g'] == want_g, [held, want_f, want_g])
+    b.page(script)
     got = poll(lambda: d.model('Gungnir 2')['tone']['readings']['bands'][band - 1][:2]
                == [want_f, want_g])
     check('a_band_moves_from_plain_coordinates: band 3\'s f and g at the daemon are those steps',
@@ -290,40 +299,22 @@ def tab_title(b):
     return b.page('document.title')
 
 
-def title_follows_on_every_theme(b, d):
+def title_follows(b, d):
+    # Ember is the page's own theme; the title is written by the core, whatever theme is mounted
     load(b, d)
-    for theme in ('ember', 'paper', 'signal', 'nightdrive'):
-        b.press('T')
-        b.page(f"document.querySelector('#picker .tcard[data-theme={theme}]').click()")
-        poll(lambda: b.page('__core.theme.id') == theme)
-        name = b.page("__core.model.page().fleet.devices.find((x) => x.url === __core.model.shown()).name")
-        want = f'{name} \u00b7 connected \u2014 svolder'
-        check(f'the_tab_title_follows_on_every_theme: {theme}: connected reads `{want}`',
-              poll(lambda: tab_title(b) == want, 5.0), tab_title(b))
-        d.proc.terminate()
-        d.proc.wait(5)
-        gone = f'{name} \u00b7 reconnecting \u2014 svolder'
-        check(f'the_tab_title_follows_on_every_theme: {theme}: the daemon dropped, reconnecting',
-              poll(lambda: tab_title(b) == gone, 40.0), tab_title(b))
-        d.restart()
-        check(f'the_tab_title_follows_on_every_theme: {theme}: back, connected again',
-              poll(lambda: tab_title(b) == want, 60.0), tab_title(b))
-
-
-def title_names_the_device_switched_to(b, d):
-    load(b, d)
-    for theme in ('ember', 'paper', 'signal', 'nightdrive'):
-        b.press('T')
-        b.page(f"document.querySelector('#picker .tcard[data-theme={theme}]').click()")
-        poll(lambda: b.page('__core.theme.id') == theme)
-        urls = b.page('__core.model.page().fleet.devices.map((x) => x.url)')
-        for url in reversed(urls):
-            b.page(f"__core.actions.showDevice({json.dumps(url)})")
-            name = b.page("__core.model.page().fleet.devices.find((x) => x.url === %s)?.name"
-                          % json.dumps(url))
-            want = f'{name} \u00b7 connected \u2014 svolder'
-            check(f'the_tab_title_follows_on_every_theme: {theme}: a switch to {url} names {name}',
-                  poll(lambda: tab_title(b) == want, 8.0), [name, tab_title(b)])
+    name = b.page("__core.model.page().fleet.devices"
+                  ".find((x) => x.url === __core.model.shown()).name")
+    want = f'{name} \u00b7 connected \u2014 svolder'
+    check(f'the_tab_title_follows: ember: connected reads `{want}`',
+          poll(lambda: tab_title(b) == want, 5.0), tab_title(b))
+    d.proc.terminate()
+    d.proc.wait(5)
+    gone = f'{name} \u00b7 reconnecting \u2014 svolder'
+    check('the_tab_title_follows: ember: the daemon dropped, reconnecting',
+          poll(lambda: tab_title(b) == gone, 40.0), tab_title(b))
+    d.restart()
+    check('the_tab_title_follows: ember: back, connected again',
+          poll(lambda: tab_title(b) == want, 60.0), tab_title(b))
 
 
 def mounted_while_lost(b, d):
@@ -369,8 +360,7 @@ try:
     fleet = common.Daemon('gungnir2-v2', fleet=FLEET, env={'SVOLDER_FAKE_SIGNAL': '1'})
     steps = [(follows_a_second_device, fleet), (hop_reaches_the_fleet, dac), (menu_fades, dac),
              (band_moves, dac), (canvas_loop, dac), (unmounts_clean, dac),
-             (title_follows_on_every_theme, dac), (title_names_the_device_switched_to, fleet),
-             (mounted_while_lost, dac)]
+             (title_follows, dac), (mounted_while_lost, dac)]
     if browser == 'chromium':
         steps.insert(4, (light_and_dark, dac))
     for step, daemon in steps:

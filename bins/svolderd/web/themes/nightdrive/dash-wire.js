@@ -1,15 +1,15 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The dash drawn from the model and the hands on it: `−` and `+` (a press steps once and a held one
-// repeats through the core's hold; the wheel and `↑` `↓` do the same from the scene, volume-keys.js), `MUTE`,
-// the input's chips and list, the transport and `DEVICE ▴`.
+// repeats through `core.repeat`; the wheel and `↑` `↓` do the same from the scene,
+// volume-keys.js), `MUTE`, the input's chips and list, the transport and `DEVICE ▴`.
 // Every write goes through `core.actions` (the cap, the pacing, the refusals and the glide stay
 // where they are) and is logged by `act`. A viewer who may not write taps the same keys and the
 // core says why nothing happens.
 //
 // A step is asked as `view.asked = { raw, at }` before it is posted, so the reading that answers it
 // is not taken for another hand's (hud-wire.js); a raise starts from the step asked while it is
-// fresh. The dash is held (`live.hold`) while a key is pressed or a list is open, so a reading
+// fresh. The dash is frozen (`live.freeze`) while a key is pressed or a list is open, so a reading
 // never replaces the key under the finger; what came meanwhile is drawn when the hand lets go.
 //
 // With the computer as the side shown (the switch: two keys by the menu button on a desktop, in the scene's top column
@@ -34,7 +34,7 @@ const TICK_MS = 1000;
 
 /**
  * Wire the dash in `root` (`#nd-dash`) to `core` and `view` until `signal` aborts. `live` is
- * `createLive`'s handle (`hold`/`release`), `act` the write log. Returns `{ draw(page) }`.
+ * `createLive`'s handle (`freeze`/`thaw`), `act` the write log. Returns `{ draw(page) }`.
  */
 export function wireDash({
   root, core, live, act, view, signal,
@@ -181,7 +181,7 @@ export function wireDash({
 
   // The same steps from the scene: the wheel over the big number, and `↑` `↓` when nothing has the focus.
   const volumeKeys = wireVolumeKeys({
-    page, nudge, writable, wheelSteps: core.drag.wheelSteps, signal,
+    page, nudge, writable, wheelSteps: core.eq.bands.wheelSteps, covered: () => core.frame.covered(), signal,
   });
 
   // A reading that is not the answer to the step asked is another hand's: the next step starts from it.
@@ -204,15 +204,15 @@ export function wireDash({
   });
   signal.addEventListener('abort', offModel, { once: true });
 
-  // A held `−` or `+` is the core's hold: one step at the press and, after a pause, steps at a steady
-  // pace. The dash is held while a key is down, so a reading does not replace the key under the
-  // finger; the hold also ends when the pointer leaves the key.
+  // A held `−` or `+` is the core's repeat: one step at the press and, after a pause, steps at a
+  // steady pace. The dash is frozen while a key is down, so a reading does not replace the key
+  // under the finger; the repeat also ends when the pointer leaves the key.
   dash.addEventListener('pointerdown', (event) => {
     const el = event.target.closest?.(STEPS);
     if (!el || !event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     hold?.end();
     const target = store.shown();
-    hold = core.hold.repeat(event, {
+    hold = core.repeat(event, {
       root: dash,
       el,
       step: (at) => nudge(at.dataset.act === 'volume-up' ? 1 : -1, target),
@@ -221,10 +221,10 @@ export function wireDash({
       // No time cap, as the volume of Signal: a held key runs until the release, the window's blur, a
       // hidden page, a move with no button down, a lost stream or the cap on the volume itself.
       cap: Infinity,
-      onStart: () => live.hold('dash'),
+      onStart: () => live.freeze('dash'),
       onEnd: () => {
         hold = null;
-        live.release('dash');
+        live.thaw('dash');
       },
       signal,
     });
@@ -242,13 +242,13 @@ export function wireDash({
   doc.addEventListener('pointercancel', over, { capture: true, signal });
   function giveBack() {
     if (!pressed) {
-      setTimeout(() => live.release('dash'), 0);
+      setTimeout(() => live.thaw('dash'), 0);
       return;
     }
     const done = () => {
       doc.removeEventListener('pointerup', done, true);
       doc.removeEventListener('pointercancel', done, true);
-      setTimeout(() => live.release('dash'), 0);
+      setTimeout(() => live.thaw('dash'), 0);
     };
     doc.addEventListener('pointerup', done, { capture: true, signal });
     doc.addEventListener('pointercancel', done, { capture: true, signal });
@@ -290,7 +290,7 @@ export function wireDash({
           return;
         }
         if (closeOf(el)) return;
-        live.hold('dash');
+        live.freeze('dash');
         openList({
           opener: el,
           label: c.label ?? 'Input',
@@ -339,5 +339,5 @@ export function wireDash({
     closeList();
   }, { once: true });
 
-  return { draw };
+  return { draw, volumeKey: (event) => volumeKeys.key(event) };
 }

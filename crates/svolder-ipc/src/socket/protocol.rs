@@ -12,6 +12,23 @@
 
 use serde::{Deserialize, Serialize};
 
+mod autoeq;
+mod device_config;
+mod host_eq;
+mod jobs;
+mod server_switch;
+mod walk;
+
+pub use autoeq::{
+    AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, AutoEqGroup, AutoEqMeasurement, AutoEqOp, AutoEqPreview,
+    AutoEqSaved, AutoEqSearch, AutoEqTarget, AutoEqVariant,
+};
+pub use device_config::{ConfiguredDevice, DeviceConfigOp, PassphraseKind, ProfileChoice};
+pub use host_eq::HostEqOp;
+pub use jobs::{JOB_RESULT_MAX_BYTES, JobEvent, JobId, JobState};
+pub use server_switch::Server;
+pub use walk::{Connect, ConnectFailure, WALK_IDLE_BOUND, WalkOp};
+
 /// One reading, carrying everything a front end needs to print it as text or JSON: the
 /// function it came from, the profile's name and label for it, the raw wire value, and the
 /// converted value with its unit when the control has one.
@@ -80,7 +97,17 @@ pub struct DeviceInfo {
     /// daemon too old to keep one
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal: Option<crate::socket::signal::Signal>,
+    /// the ids of the device's key readings, the few a front end graphs first, in order:
+    /// [`SERIES_SIGNAL`] always first, then the keys of the controls the device's profile marks
+    /// (`key_reading`); each is an id the daemon keeps a series for. Empty from a daemon too
+    /// old to say
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_readings: Vec<String>,
 }
+
+/// The id of a device's signal-strength series, in dBm: the first of every device's key
+/// readings. No control can be keyed so (the profile format reserves the key).
+pub const SERIES_SIGNAL: &str = "signal";
 
 /// One device seen in a scan (the `scan` verb's row).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,6 +127,105 @@ pub struct ScanEntry {
     #[serde(default)]
     pub rssi: Option<i16>,
 }
+
+impl ScanEntry {
+    /// The row an advertisement makes: what its manufacturer data says, the signal strength it
+    /// was heard at, and the product named as `registry` names it, so a product the codec does
+    /// not know is named by its profile. Every scan row, the daemon's and a front end's, is
+    /// built here.
+    pub fn from_advert(
+        manufacturer: &svolder_proto::ManufacturerData,
+        rssi: Option<i16>,
+        registry: &svolder_profiles::Registry,
+    ) -> ScanEntry {
+        ScanEntry {
+            unit: manufacturer.unit_id.to_string(),
+            product_id: manufacturer.product_id,
+            product: registry
+                .product_name(manufacturer.product_id)
+                .map(str::to_string),
+            firmware: manufacturer.firmware_build,
+            passphrase: manufacturer.passphrase().is_well_formed(),
+            rssi,
+        }
+    }
+}
+
+/// The longest the daemon waits for a device on one step of a command: to hand it to the device's
+/// actor, and then for the actor's answer, each; a fleet recall waits it for its plan and again for
+/// its end. The daemon's own deadlines are this number, and [`DEFAULT_REQUEST_TIMEOUT`]'s is
+/// derived from it.
+pub const COMMAND_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The longest a daemon takes to answer one request, which it answers in its own words when a
+/// device is silent: two [`COMMAND_DEADLINE`]s (hand-over and answer, or a recall's plan and end).
+pub const COMMAND_WORST_CASE: std::time::Duration = COMMAND_DEADLINE.saturating_mul(2);
+
+/// How long a front end waits for the reply to a `reload`. A reload reconciles the devices one at
+/// a time, each of which may take a [`COMMAND_DEADLINE`] with a stuck actor, so it can take that
+/// many deadlines plus one; this covers nine stuck devices.
+pub const RELOAD_TIMEOUT: std::time::Duration = COMMAND_DEADLINE.saturating_mul(10);
+
+/// The longest the daemon waits for its jobs to end as it stops: each looks at its stop flag
+/// between steps, so this only runs out for work stuck inside one step, and the stop goes on.
+pub const JOB_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// What the daemon gives each actor beyond the farewell bound to close its session as it stops.
+pub const ACTOR_STOP_MARGIN: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// The longest the daemon waits, as it stops, for the MQTT bridge to say `offline` and
+/// disconnect: the broker's own wait and a moment.
+pub const BRIDGE_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// The longest the daemon waits, as it stops, for a configuration write already under way to
+/// finish: a write waits at most two seconds for the file's lock and then writes.
+pub const WRITE_SETTLE_BOUND: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The longest the daemon waits for threads of blocking work as its runtime ends.
+pub const RUNTIME_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How long [`crate::Client::request`] waits for a reply: [`COMMAND_WORST_CASE`] and a margin, so
+/// the daemon's words always arrive before this bound, which is only the net against a daemon
+/// that says nothing.
+pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration =
+    COMMAND_WORST_CASE.saturating_add(std::time::Duration::from_secs(5));
+
+/// The `cmd` of every [`Request`] kind, in the enum's order. The server tells a kind it does not
+/// have from a malformed one of a kind it has by this list; a test reads the enum's own source
+/// and fails when a variant is missing from it.
+pub const REQUEST_CMDS: &[&str] = &[
+    "devices",
+    "state",
+    "get",
+    "set",
+    "raw",
+    "history",
+    "readings",
+    "recalled",
+    "web_pair",
+    "web_link",
+    "web_link_open",
+    "eq_show",
+    "eq_set",
+    "eq_mode",
+    "passphrase",
+    "identify",
+    "scan",
+    "subscribe",
+    "reload",
+    "version",
+    "stop",
+    "host",
+    "host_press",
+    "host_volume",
+    "host_mute",
+    "host_eq",
+    "host_frames",
+    "walk",
+    "auto_eq",
+    "device_config",
+    "server_switch",
+];
 
 /// A request from a front end. `device` selects a configured device (name, product name, or
 /// unit-id prefix); `None` means the single/default device.
@@ -280,98 +406,74 @@ pub enum Request {
     /// runs), holding the daemon's capture of the default sink for as long as the connection
     /// lives. A daemon from before it, or one with no host audio, answers an error instead.
     HostFrames,
-}
-
-/// One change of the computer's EQ, as a `host_eq` request carries it. Point indexes count from
-/// 1, as the bands of a tone control do.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum HostEqOp {
-    /// Turn the EQ on or off; off keeps the points
-    Mode {
-        /// whether the EQ is on
-        on: bool,
+    /// One step of the device walk: stop one of its jobs by id, or follow them. The ops that
+    /// start work come with the walk
+    Walk {
+        /// what to do
+        op: WalkOp,
     },
-    /// Recall a preset by name: a saved one, or a built-in of the shown device
-    Preset {
-        /// the preset's name
-        name: String,
-        /// the shown device, whose own built-ins the name is looked up in
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device: Option<String>,
-        /// yes to the question a preset that a device plays too asks: that device is flattened
-        /// first
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        confirm: bool,
+    /// One step of AutoEq: stop one of its jobs by id, or follow them. The ops that start work
+    /// come with AutoEq
+    AutoEq {
+        /// what to do
+        op: AutoEqOp,
     },
-    /// Put a correction the caller read on the computer, under a name
-    Apply {
-        /// the name it is shown under
-        name: String,
-        /// where it came from, when it came from a catalogue
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        origin: Option<String>,
-        /// the preamp and the filters
-        correction: svolder_profiles::tone::apo::Correction,
-        /// the sink to put it in front of, when not the default one
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        sink: Option<String>,
+    /// List, add, change or remove a configured device, or make one the default; answered with
+    /// the configured devices as they stand after it. The daemon writes its configuration file
+    /// and reloads it
+    DeviceConfig {
+        /// what to do
+        op: DeviceConfigOp,
     },
-    /// Change one point; `done` is false while a drag goes on and true on its last value
-    Set {
-        /// the point, from 1; not looked at when `slot` is given
-        index: u8,
-        /// the slot (1 to 16) the sender holds for the point, as the host view lists it. When
-        /// given, the daemon changes the point in that slot, whatever place the table lists it
-        /// in now, and refuses the request when no point holds the slot; absent means the
-        /// point is the one at `index`
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        slot: Option<u8>,
-        /// `PK`, `LSC` or `HSC`
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        kind: Option<String>,
-        /// frequency in Hz
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        f: Option<f64>,
-        /// gain in dB
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        g: Option<f64>,
-        /// Q
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        q: Option<f64>,
-        /// whether this is the last value of the drag; absent means it is
-        #[serde(default = "done_by_default")]
-        done: bool,
-    },
-    /// Add a point
-    Add {
-        /// `PK`, `LSC` or `HSC`
-        kind: String,
-        /// frequency in Hz
-        f: f64,
-        /// gain in dB
-        g: f64,
-        /// Q
-        q: f64,
-    },
-    /// Remove a point
-    Remove {
-        /// the point, from 1; not looked at when `slot` is given
-        index: u8,
-        /// the slot (1 to 16) the sender holds for the point; as for `Set`
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        slot: Option<u8>,
-    },
-    /// Save the points as a preset of the user's, under a name
-    SaveAs {
-        /// the new preset's name
-        name: String,
+    /// Turn the web UI or the MCP server on or off; answered with where both stand after it.
+    /// The daemon writes the server's `enabled` in its configuration file and reloads it
+    ServerSwitch {
+        /// which server
+        server: Server,
+        /// on or off
+        enabled: bool,
     },
 }
 
-/// A `set` that does not say it goes on is the last of its drag.
-fn done_by_default() -> bool {
-    true
+impl Request {
+    /// Whether the server answers the request with a stream of events rather than one
+    /// response: a subscription, the host's frames, and the follow op of each family of jobs.
+    /// The server and a client branch on this and never on the kind.
+    pub fn is_stream(&self) -> bool {
+        match self {
+            Request::Subscribe { .. } | Request::HostFrames => true,
+            Request::Walk { op } => op.is_stream(),
+            Request::AutoEq { op } => op.is_stream(),
+            _ => false,
+        }
+    }
+
+    /// Whether a stream opens with a `Response::Ack` under the request's id, before its first
+    /// event, so a client knows the daemon took the request even when no event comes for a
+    /// while. A subscription and the host's frames send none, so their wire is unchanged.
+    pub fn stream_acks(&self) -> bool {
+        self.is_stream() && !matches!(self, Request::Subscribe { .. } | Request::HostFrames)
+    }
+
+    /// Whether a client waits for the daemon's first line before it takes the connection for an
+    /// open stream: every stream but a subscription, which is answered with nothing and may stay
+    /// silent until something changes.
+    pub fn stream_waits(&self) -> bool {
+        self.is_stream() && !matches!(self, Request::Subscribe { .. })
+    }
+
+    /// The wire name of the request's kind, such as `host_frames`: what a message about the
+    /// request calls it.
+    pub fn cmd(&self) -> String {
+        serde_json::to_value(self)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("cmd")
+                    .and_then(|cmd| cmd.as_str().map(String::from))
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// The longest window a daemon listens for on a `scan` request. A longer one asked for is
@@ -395,9 +497,114 @@ pub fn not_found_yet(device: &str) -> String {
     format!("{device}{NOT_FOUND_YET}")
 }
 
+/// The code of the [`Response::Error`] for a request the daemon refuses to act on: a value it
+/// cannot read, a control that is read-only, a request that is known but malformed, or a device
+/// that has no such function. The CLI leaves with it as its exit code.
+pub const CODE_USAGE: u8 = 1;
+
+/// The code of the [`Response::Error`] for a device that was not found: a selector that names no
+/// configured device or several, or a link attempt that found nothing.
+pub const CODE_NOT_FOUND: u8 = 2;
+
+/// The code of the [`Response::Error`] for a link that is not there: the device is not
+/// connected, the connection failed, or the device has not been found yet.
+pub const CODE_LINK: u8 = 3;
+
+/// The code of the [`Response::Error`] for a request that went unanswered in time: the device did
+/// not confirm, an actor did not answer, or there was no reading to judge a change from.
+pub const CODE_TIMEOUT: u8 = 4;
+
 /// The code of the [`Response::Error`] a daemon answers a computer request with while the
 /// computer's controls cannot be used: its message is `computer controls unavailable: <why>`.
 pub const CODE_COMPUTER_UNAVAILABLE: u8 = 6;
+
+/// The code of the [`Response::Error`] a daemon answers a request kind it does not know with, so
+/// a front end tells a daemon too old for a request from one that refused it.
+pub const CODE_UNKNOWN_REQUEST: u8 = 7;
+
+/// The feature a daemon lists when its errors carry a [`Reason`] where one applies.
+pub const FEATURE_REASONS: &str = "reasons";
+
+/// The feature a daemon lists when it answers a request kind it does not know with
+/// [`CODE_UNKNOWN_REQUEST`]; one that lists it never answers that with serde's words under code 1.
+pub const FEATURE_UNKNOWN_REQUEST_CODE: &str = "unknown_request_code";
+
+/// The feature a daemon lists when it takes the `device_config` requests ([`DeviceConfigOp`]):
+/// while it runs, a front end adds, changes and removes a configured device through it and
+/// writes no `[[device]]` block itself.
+pub const FEATURE_DEVICE_CRUD: &str = "device_crud";
+
+/// The feature a daemon lists when it takes the `server_switch` request: while it runs, a front
+/// end turns the web UI and the MCP server on and off through it.
+pub const FEATURE_SERVER_SWITCH: &str = "server_switch";
+
+/// The feature a daemon lists when it runs the device walk ([`WalkOp`]'s `start`, `answer` and
+/// `back`): while it runs, a front end adds a device through the daemon's walk rather than its
+/// own.
+pub const FEATURE_WALK: &str = "walk";
+/// The feature a daemon lists when it takes the AutoEq ops (`auto_eq` search, preview, import and
+/// upload): while it runs, it is the one process that reaches AutoEq's repository.
+pub const FEATURE_AUTOEQ: &str = "autoeq";
+
+/// Everything this build's daemon supports, as its `version` answer lists it: the one place the
+/// list is kept. A front end asks through `DaemonInfo::supports`.
+pub const FEATURES: &[&str] = &[
+    FEATURE_REASONS,
+    FEATURE_UNKNOWN_REQUEST_CODE,
+    FEATURE_DEVICE_CRUD,
+    FEATURE_SERVER_SWITCH,
+    FEATURE_WALK,
+    FEATURE_AUTOEQ,
+];
+
+/// Why a [`Response::Error`] happened, in a word a front end can match on instead of the
+/// message's text. A front end built before a reason existed ignores the field, and one that
+/// meets a reason it does not know reads [`Reason::Unknown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reason {
+    /// The daemon holds the device but has never found it; it keeps looking.
+    NotFoundYet,
+    /// The daemon holds no link to the device now.
+    NotConnected,
+    /// The request names a job the daemon does not hold: it never ran one by that id, or has
+    /// forgotten it.
+    NoSuchJob,
+    /// The work asked for is already going on, and the daemon runs one of it at a time.
+    Busy,
+    /// The daemon failed in a way a front end can only report.
+    Internal,
+    /// The name asked for is already used by another block of the same kind (a preset, a device,
+    /// a hop).
+    Taken,
+    /// The block the request names is not in the configuration.
+    Missing,
+    /// The configuration file cannot be written: it is read-only, or the daemon has no file of
+    /// its own.
+    ReadOnly,
+    /// Another writer held the configuration file's lock until the wait ran out; asking again
+    /// may work.
+    FileBusy,
+    /// The text cannot be a name: blank, too long, a control character, or one the daemon keeps
+    /// for itself (a built-in preset's).
+    BadName,
+    /// The configuration the write would make is not valid: it does not parse, or two devices
+    /// ask for one unit.
+    Invalid,
+    /// The daemon is stopping and starts nothing.
+    Stopping,
+    /// The job named is not waiting for an answer: it is working on the last one, or it has
+    /// ended.
+    NotWaiting,
+    /// The measurement asked for is not in the AutoEq index, or its file is not there (404).
+    NotListed,
+    /// AutoEq's repository could not be reached, or what it sent could not be used: the fetch
+    /// failed or ran out of time, the file was too large or not text, or no index was had.
+    Unreachable,
+    /// A reason a later daemon gives that this build does not know.
+    #[serde(other)]
+    Unknown,
+}
 
 /// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no
 /// link to the device. A front end that reads exactly these words knows the device is away, and
@@ -405,8 +612,8 @@ pub const CODE_COMPUTER_UNAVAILABLE: u8 = 6;
 pub const NOT_CONNECTED: &str = "device not connected";
 
 /// The words a daemon answers a web code request with while its web UI is off, naming the fix.
-pub const WEB_OFF: &str = "the web UI is off: turn it on in the TUI's Settings, Connect, Web UI, \
-                           or set [web] enabled = true and run svolder daemon restart";
+pub const WEB_OFF: &str = "the web UI is off: `svolder web on` turns it on, and so does the TUI's \
+                           Settings, Connect, Web UI";
 
 /// Response to a request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -454,6 +661,12 @@ pub enum Response {
         recalls: Vec<RecallOut>,
         /// the link's changes in the span and the one before them, oldest first
         link: Vec<LinkChange>,
+        /// the signal strengths the daemon heard from the device in the span, in dBm, as
+        /// `(unix milliseconds, dBm)`, oldest first, none from before the span. The daemon hears
+        /// one when a listen of its own catches the device's advertisement, so there is none
+        /// while a link is up. Empty from a daemon too old to keep them
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        signal: Vec<(u64, f64)>,
     },
     /// A pairing code, and how long it lasts.
     WebPair {
@@ -481,6 +694,34 @@ pub enum Response {
     },
     /// The reply to a no-wait `set`/`raw` and to `passphrase`.
     Ack,
+    /// The reply to a request that starts a job: the job's id, which the family's stream names
+    /// in every event of the job. A front end built before jobs never sends such a request.
+    Job {
+        /// the job's id
+        job: JobId,
+    },
+    /// The reply to an `auto_eq` search.
+    AutoEqSearch(Box<AutoEqSearch>),
+    /// The reply to an `auto_eq` upload: the preset that was saved.
+    AutoEqSaved(AutoEqSaved),
+    /// The reply to a `device_config` request: the configured devices, in the file's order, as
+    /// they stand after the op, and the profiles an op takes.
+    DeviceConfig {
+        /// one entry per `[[device]]` block
+        devices: Vec<ConfiguredDevice>,
+        /// every profile a device can be pinned to, by ascending name: what an `add` or an
+        /// `update` takes as its `profile`, and nothing else. Empty from a daemon built before
+        /// the list, and when the profiles cannot be read, which refuses every pin too.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        profiles: Vec<ProfileChoice>,
+    },
+    /// The reply to a `server_switch` request: where the two servers stand after it.
+    ServerSwitch {
+        /// the web UI
+        web: WebStatus,
+        /// the MCP server
+        mcp: McpStatus,
+    },
     /// The reply to `identify`.
     Identify {
         /// the name of the device the daemon resolved the request to
@@ -525,6 +766,19 @@ pub enum Response {
         /// token; present only while the web UI runs with a token, and only in this reply
         #[serde(default, skip_serializing_if = "Option::is_none")]
         web_token: Option<TokenInfo>,
+        /// what the daemon supports beyond the basics, by name ([`FEATURES`]); absent from a
+        /// daemon too old to list any, which reads as supporting none
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        features: Vec<String>,
+        /// whether the configuration file's modification time differs from the one the daemon's
+        /// snapshot was read at, which is a hand edit not yet reloaded; absent when it does not,
+        /// and from a daemon too old to say, which reads as unchanged
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        config_changed: bool,
+        /// whether the configuration file the daemon read is gone (`config_changed` stands too);
+        /// absent while it is there, and from a daemon too old to say
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        config_missing: bool,
     },
     /// The reply to `stop`, sent before the daemon ends its accept loop.
     Stopping,
@@ -536,6 +790,9 @@ pub enum Response {
         code: u8,
         /// error message
         message: String,
+        /// why it happened, where the daemon says; absent from a daemon too old to
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<Reason>,
     },
     /// The reply to a `host_eq` preset recall that is asked about, not refused: the preset is
     /// also played by connected devices, and would play twice. Nothing was changed. Yes sends
@@ -837,6 +1094,10 @@ pub enum Event {
     /// One analysed frame of what the computer plays, about 30 a second while the capture runs.
     /// Only on a `HostFrames` stream.
     HostFrame(crate::host::FrameView),
+    /// A change in a job of the device walk. Only on a `walk` follow stream.
+    Walk(JobEvent),
+    /// A change in a job of AutoEq. Only on an `auto_eq` follow stream.
+    AutoEq(JobEvent),
     /// A kind this build does not know, from a peer newer than it.
     #[serde(other)]
     Unknown,
@@ -910,6 +1171,36 @@ pub fn raw_json(m: &svolder_proto::Message) -> serde_json::Value {
         serde_json::Value::from(b)
     } else {
         serde_json::Value::from(m.value.to_string())
+    }
+}
+
+impl Response {
+    /// An error answer with `code` (one of the `CODE_*` constants) and `message`, and no reason.
+    pub fn error(code: u8, message: impl Into<String>) -> Response {
+        Response::Error {
+            code,
+            message: message.into(),
+            reason: None,
+        }
+    }
+
+    /// The answer to a request kind this build does not know, `cmd` being its wire name:
+    /// [`CODE_UNKNOWN_REQUEST`] and words that name it.
+    pub fn unknown_request(cmd: &str) -> Response {
+        Response::error(CODE_UNKNOWN_REQUEST, format!("unknown request `{cmd}`"))
+    }
+
+    /// This answer with `reason` as the reason it is an error; any other answer is unchanged.
+    #[must_use]
+    pub fn with_reason(self, reason: Reason) -> Response {
+        match self {
+            Response::Error { code, message, .. } => Response::Error {
+                code,
+                message,
+                reason: Some(reason),
+            },
+            other => other,
+        }
     }
 }
 

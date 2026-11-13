@@ -9,9 +9,9 @@ and makes the line the page: each hop on it is something the sound passes throug
 hop boxes it and opens what that hop offers underneath. It is dark only, on a warm near-black
 ground, in the system's own type. It is plain ES modules with no build step, in
 `bins/svolderd/web/themes/signal/`, and one entry in `bins/svolderd/src/web/themes.rs`. It is built
-on the core alone: no file of Ember's or Paper's was touched, and the two gaps it found in the core
-were fixed in the core (the last section). [Web themes](web-themes.md) says what a theme is; [the
-frame](frame.md) says what the page keeps for itself.
+on the core alone: it shares no file with Ember or Paper, and what it needs of the core is in
+the last section. [Web themes](web-themes.md) says what a theme is; [the frame](frame.md) says what
+the page keeps for itself.
 
 In this theme's words, **the signal path** is the line. The word *Signal* alone is the theme's name
 and, in the device's facts, the strength of the Bluetooth link; the two are never mixed.
@@ -19,10 +19,10 @@ and, in the device's facts, the strength of the Bluetooth link; the two are neve
 ## What the line says
 
 The page never pretends to know more than it does. A hop svolder reads is a solid dot with live
-facts under its name. A hop the owner declared (`svolder hops`, or the menu's Add device… row) is
-a plain ring with the owner's own words in italics. After the DAC the sound is real but svolder
-knows the next hops only because it was told, so the line runs on there, thinner, dimmer and
-slower, and never stops.
+facts under its name. A hop the owner declared (`svolder hops`, or the menu's Add to the chain… row)
+is a plain ring with the owner's own words in italics. After the DAC the sound is real but svolder
+knows the next hops only because it was told, so the line runs on there, thinner, dimmer and slower,
+and never stops.
 
 The hops, left to right, are:
 
@@ -50,13 +50,13 @@ quiet line, `the computer is not watched`. With more than seven hops a label is 
 
 **An amp on its own.** An amp that no hop links has its own line: the player and the computer
 greyed (no flow), a plain ring `a DAC svolder does not drive`, then the amp boxed. Linking it from a
-DAC's Add device… sheet puts it after that DAC; Unlink returns it to standing alone.
+DAC's Add to the chain… sheet puts it after that DAC; Unlink returns it to standing alone.
 
-A linked amp shown on its own page (through the device list, the menu's Device row or
-`?device=`) does not claim a digital path from the computer to the amp. The line runs the player and
-the computer greyed (no flow, as above), then the DAC the hop names, a live amber dot that shows that
-device when chosen (as the device list does), then the amp boxed. The stretch from the DAC to the
-amp is the thin one. When the DAC is not listed the amp stands alone.
+A linked amp shown on its own page (through the device list, the Devices popup's *Show on the page*
+or `?device=`) does not claim a digital path from the computer to the amp. The line runs the player
+and the computer greyed (no flow, as above), then the DAC the hop names, a live amber dot that shows
+that device when chosen (as the device list does), then the amp boxed. The stretch from the DAC to
+the amp is the thin one. When the DAC is not listed the amp stands alone.
 
 **The colour of a stretch.** The stretch up to the DAC is thick, and its dots move 16 px
 every 1.1 s; after the DAC it is thinner, smaller and slower, 16 px every 1.6 s. A stretch the host EQ
@@ -100,9 +100,9 @@ where the band table needs the width), for a DAC: the band table (typed values w
 for each, one device step a tap) with the input under it, beside the **mode** (it heads this
 column), the presets (Save as, Rename and Delete with their questions in place), the controls
 (balance and sliders as scales, toggles as pills) and a Loki Max's slots and settings; and under
-both, across the full width, the device's facts, folded by
-default, with Identify under them. The fold is kept as the theme's preference `facts` (`open` or
-`closed`), works when storage is refused, and a guest may open it. Every focusable control carries a
+both, across the full width, `Device settings…`, which opens the device's page in the Devices
+popup (the facts and Identify are that page's); a viewer who may not write reads `Devices…`: the
+same page, read-only. Every focusable control carries a
 scroll margin so focus never lands under the slim bar or the Now playing bar.
 
 **Mode and Loudness.** The mode is one chip for each mode the device has. While Loudness is on its
@@ -138,13 +138,13 @@ and writes to nothing that is gone.
 
 - **The DAC.** The volume large with `−`, Mute and `+` (Ember's order; a device with no mute key has
   `−` and `+`), and a thin track with its knob and the cap mark that can be dragged or keyed; the
-  tone curve with a draggable point for each band (through `core.drag`); on a phone the mode is
+  tone curve with a draggable point for each band (through `core.eq`); on a phone the mode is
   under the curve. The input and the mode are chips (a longer list of inputs is one chip that
   opens a list), the input under the band table and the mode heading the middle column of the
   shelf. The shelf is below. While the device is muted the large number reads `−∞` with
   its unit `dB`, the Mute button reads Unmute and is pressed, and the slider's value text says
   `muted`; the slim bar and the line's volume words say `−∞ dB` too. A held `−` or `+` steps at once
-  and, after 380 ms, every 70 ms (the core's hold, `core.hold`, the same as Ember's knob). The
+  and, after 380 ms, every 70 ms (the core's `core.repeat`, the same as Ember's knob). The
   hold ends at the release, a cancelled or lost pointer, the window losing focus, the page hidden,
   the stream lost, another device shown, or the button leaving the page; the open area is held
   while it lasts so a reading does not replace the button.
@@ -154,8 +154,18 @@ and writes to nothing that is gone.
   that point's band, else the band nearest the fingers' midpoint; the page neither zooms nor scrolls
   while the two are down. The transport buttons (here and in the Now playing bar) are inline SVG
   shapes in the button's colour, so no font can swap them for a picture.
+  While an imported preset is on and the EQ is on, the curve carries the daemon's `tone.overlay`
+  (`core.plot.overlayShapes`): the target as a dotted line (`sg-target`, `--frame-graph-target`),
+  under the curve the gap as a wash over the daemon's spans only (`sg-gap`, `--frame-graph-gap`),
+  and the fit in words under the frequencies (`sg-fit`, `fit 0.9 dB`; its title and a hidden `sg-sr`
+  sentence say the worst miss and what the shapes are). None in Flat or Loudness
+  or without an imported preset; a held point drops the gap and the words. The computer's graph
+  has none.
 - **A live amp.** Its power, its switches, its meters with the class A share shaded, its
-  faults (the fault family's rows, over-current and over-temperature), its facts, Identify and Unlink. Every write names the amp's own URL
+  faults (the fault family's rows, over-current and over-temperature), Identify and Unlink (its
+  facts are the Devices popup's). Identify stays in the amp's area because that area is where the
+  amp that is not the shown device is worked, and the popup is a separate place to reach it from.
+  Every write names the amp's own URL
   (`{ device: url }`), so choosing a hop never switches the shown device, and the DAC's volume
   keeps being written to the DAC while the amp is chosen. The amp's readings come from the stream
   once it follows the amp; until the first reading the area says `Reading the amp…`.
@@ -172,13 +182,13 @@ and writes to nothing that is gone.
   format, the other streams and the path's verdict. Where the controls are not drawn (not served,
   unavailable) the hop opens those facts alone. Choosing the hop writes nothing.
 
-**The Add device… sheet.** The frame's menu has Signal's row, `Add device…`, offered while a device
-is shown; it opens a sheet that asks what comes after the device: Amp, Headphones, Speakers or
-Other, a name and an optional note. Forkbeard amps the daemon lists that no hop links come first as
-`<name> (connected)`; picking one links it. A name with a space and a slash is kept whole. While the
-sheet stands the page behind it is `inert`, Tab stays inside it, and Escape or Cancel sends nothing;
-when it closes the focus goes back to what had it, else the menu button. A viewer who may not write
-gets the core's refusal instead of the sheet.
+**The Add to the chain… sheet.** The frame's menu has Signal's row, `Add to the chain…`, offered
+while a device is shown; it opens a sheet that asks what comes after the device: Amp, Headphones,
+Speakers or Other, a name and an optional note. Forkbeard amps the daemon lists that no hop links
+come first as `<name> (connected)`; picking one links it. A name with a space and a slash is kept
+whole. While the sheet stands the page behind it is `inert`, Tab stays inside it, and Escape or
+Cancel sends nothing; when it closes the focus goes back to what had it, else the menu button. A
+viewer who may not write gets the core's refusal instead of the sheet.
 
 **The tab's title.** It is the core's (`core.title`, [web-themes.md](web-themes.md)), the same for
 every theme: `<device> · connected — svolder`, or `reconnecting` while the stream is lost,
@@ -199,7 +209,7 @@ first and the core took it over.
   open area, but the controls stay live: the daemon's own refusals apply.
 - **A refused write.** The core's toast, and the device is read again.
 - **A guest or a read-only viewer.** Every control is drawn, inert, and a tap toasts the core's
-  words. That includes the Add device… sheet and every edit of a hop, which post nothing.
+  words. That includes the Add to the chain… sheet and every edit of a hop, which post nothing.
 
 ## The phone
 
@@ -211,10 +221,9 @@ menu button is the frame's, at 44 px (Signal sets `--frame-btn-size`), and the s
 margin so the button and its touch area never cover a hop or a dot. Signal anchors the button with
 `fixed`, so it is placed against the window at every width (8 px from the top and right, on a
 solid backdrop of Signal's ground) and keeps its place as the page scrolls, in the pinned strip on a
-phone. The first
-screen is the volume and the curve with the mode under it; the shelf follows in one column, opening
-with the input, then the presets, then the band table, the rest and the facts. A change across 720
-px draws the page again in the other order. Nothing
+phone. The first screen is the volume and the curve with the mode under it; the shelf follows in
+one column, opening with the input, then the presets, then the band table, the rest and
+`Device settings…`. A change across 720 px draws the page again in the other order. Nothing
 scrolls sideways at 360, 390 or 719 px, with a 40-character declared hop, a device named with a
 space and a slash, or six hops after the DAC, and every control is 44 px.
 
@@ -247,10 +256,10 @@ allows. Browser storage is only through `core.prefs`, under `svolder.theme.signa
 | --- | --- |
 | `signal.js` | the registration, the mount, what each kind of hop opens |
 | `line.js` | the hop list from the model (pure), the choice that survives a redraw, the followed URLs |
-| `live.js` | draws the sections, keeps them current, holds one while a hand is on it |
+| `live.js` | draws the sections, keeps them current, holds one while a hand is on it (the holds are counted by `core.freeze.keeper`) |
 | `draw/` | one file per section: `line.js` (the wire, dots, labels, box, strip, the loop), `volume.js`, `tone.js`, `choices.js`, `playing.js`, `shelf.js`, `facts.js`, `amp.js`, `hop.js`, `player.js`, `computer.js`, `card.js`, and the small `word.js`, `esc.js` |
-| `*-wire.js`, `strip-wire.js`, `gestures.js`, `lists.js`, `ask.js`, `device-list.js`, `press.js` | the hands: what a tap, a drag, a key, a list or a question does |
-| `slim.js`, `fold.js`, `place.js`, `words.js`, `presets.js`, `act.js` | the slim bar, the facts' fold, pure maths and fixed words, the log of what this page asked |
+| `*-wire.js`, `strip-wire.js`, `gestures.js`, `lists.js`, `ask.js` (the core's list and inline ask in Signal's classes and words), `device-list.js` | the hands: what a tap, a drag, a key, a list or a question does |
+| `slim.js`, `place.js`, `words.js`, `presets.js` | the slim bar, pure maths and fixed words |
 | `driver.js`, `preview.js`, `style.css` | the test driver, the picker's picture, the tokens and every section |
 
 Pure modules take the model and return text or numbers; drawing modules return markup; wiring
@@ -265,76 +274,66 @@ daemon's and the core's.
 - **Node** (`scripts/web-checks/node/`): `signal-line.mjs` (the hop list: order, linked and
   declared, an amp on its own, the AutoEq ring, a choice that falls back, trouble) and
   `signal-draw.mjs` (every section from every fixture, guests quiet, the computer read only, the
-  fold with storage that refuses, the card, no `style=`).
+  shelf's `Device settings…`, the card, no `style=`).
 - **Browser** (`signal_theme.py`, Chromium and Firefox): the line's order, sizes and spacing,
   choosing by click and keys, the dots moving, holding and standing still, the first screen, the
   shelf, the mode's place at 1280 and 390 px, Loudness's round buttons, held steppers, the slim
-  bar, a linked amp and where its writes go, the menu's Add device… row and its sheet against
+  bar, a linked amp and where its writes go, the menu's Add to the chain… row and its sheet against
   `svolder hops list`, the tab's title, edits, moves and removes, the player and computer areas,
   the states, the phone strip, the menu button clear of it and fixed against the window (Paper
   and Ember keep page placement), no sideways scroll with long names, and contrast.
 - **The contract and completeness passes** run Signal through its driver. The driver chooses the
   hop that holds a control before it reaches for it (an amp's control is written through the amp's
-  hop), unfolds the facts, and reads values back from what the page draws. The completeness pass
-  also asserts that every theme lists as many targets of each kind, and as many facts, as the first
-  theme listed, on every kind of device.
-- **Mutation runners**: `node/mutate_signal.sh` (thirteen mutants of the sources, the last three
+  hop) and reads values back from what the page draws. The completeness pass also asserts that every
+  theme lists as many targets of each kind as the first theme listed, on every kind of device; the
+  device's facts are reached through the core's driver on the Devices popup's page.
+- **Mutation runners**: `node/mutate_signal.sh` (twelve mutants of the sources, the last three
   the mode kept on a desktop's first screen, a Loudness chip without its round buttons and the menu
-  row offered with no device; the first ten: the line dropping the
-  hops after the DAC, a declared hop drawn live, a gone hop staying chosen, the facts starting open,
+  row offered with no device; the first nine: the line dropping the
+  hops after the DAC, a declared hop drawn live, a gone hop staying chosen,
   the computer hop gaining a write, a strip that does not centre, a linked amp losing its DAC, an
   amp's faults picked by their words, a muted volume's word, a transport icon shown to readers)
   and `mutate_signal.py` (fifteen mutants of the page: an amp write without the amp's URL, dots
-  that ignore reduced motion, a slim bar that never pins, an Add device row that opens for a
+  that ignore reduced motion, a slim bar that never pins, an Add to the chain row that opens for a
   guest, a held plus or band stepper that never repeats, a menu button that follows the page on a
   phone, a missing mode under the curve, a plain tab title, a strip that does not centre, and
   others; a mutant is killed only by a check it
   names, so a flake in another check cannot pass for a kill). A guest's
   post cannot be mutated in Signal because the core refuses it first, so that mutant opens the sheet
   for a guest instead. A full browser run takes about 75 minutes.
-- **Stills**: `make signal-shots` draws a DAC at desktop width, with the linked amp chosen and with a
-  declared hop chosen, a lost link, the Add device sheet, the linked amp shown on its own page, a
-  tablet at 768 px, and the phone at rest and scrolled, into ten PNGs.
+- **Stills**: `make signal-shots` draws a DAC at desktop width, with the linked amp chosen and with
+  a declared hop chosen, a lost link, the Add to the chain sheet, the linked amp shown on its own
+  page, a tablet at 768 px, and the phone at rest and scrolled, into ten PNGs.
 
 ## Known limits
 
 - A fault card is covered by node tests only: the fake devices cannot report a fault.
-- Signal keeps near-copies of Paper's gesture, list and preset modules. Sharing them through the
-  core is a later piece of work.
+- Signal keeps near-copies of Paper's gesture, list and preset modules; they are not shared through
+  the core.
 
-## What Signal found missing in the core
+## What Signal needs of the core
 
-Signal was built on the core alone and found two gaps in 0.31.0's page model, both fixed in the
-daemon before the theme used them, one miss in 0.31.0's shutdown, fixed in the final pass, and one
-in the frame, fixed when the phone's button was tried by hand:
+Signal is built on the core alone. Two parts of the page model, one of the shutdown and one of the
+frame exist for it:
 
-1. **The model's `host` carried the track and the path's words but not the route.** The computer's
-   facts were only words. `host.route` is now the route's facts, read from the daemon's host view:
-   `sink` (`words`, `rate_hz`, `format`, `volume_pct`, `muted`), `player_rate_hz`, `host_eq`,
-   `eq_preset`, `eq_autoeq` and `others_mixing`; it is `null` while the route is not read, which
-   the daemon does for an amp's page (no path, no hold on the computer).
-2. **The daemon never read the computer EQ's saved state, so no front end could name the applied
-   AutoEq preset.** It now reads that state (the file the computer EQ command writes, found through
-   one function the command line and the daemon share). `eq_preset` is the preset's name and is set
-   only while the state is on, the route has the host EQ on, and the state's target is this route's
-   sink; a host EQ put in by hand shows `host_eq` without a name. `eq_autoeq` is true only when the
-   state came from AutoEq. Nothing is written to the configuration.
-
-3. **The daemon stopped the computer's player before the web server on its way down.** The host's
-   last act was to publish an empty view, which every open page heard as `host: null` if its
-   stream was still open: any theme dropped its Now playing card, and Signal its player and
-   computer hops, for the whole outage. `Daemon::shutdown` now stops the servers (MCP, web) before
-   the host, so a page keeps the last line it heard, dimmed, while the stream is lost. This was
-   also the cause of a lost-stream check that failed now and then (`dots stand still`).
-
-4. **The frame could only place the menu button in page coordinates.** On a phone Signal's strip
-   is pinned at the top, so the button had to be put back over its slot at every scroll. The
-   frame's `anchor(el, { fixed })` takes a boolean, or a function asked at each placing, and
-   places the button against the window (the frame carries the class `fixed`; see
-   [the frame](frame.md)). Signal passes `fixed: () => view.phone()`; Ember and Paper call
-   `anchor(el)` as before and are unchanged.
-
-Building the rest of Signal (the line, the strip, the sheet, the states, the checks) found no
-further gap in the core.
+1. **The model's `host.route` holds the route's facts**, read from the daemon's host view: `sink`
+   (`words`, `rate_hz`, `format`, `volume_pct`, `muted`), `player_rate_hz`, `host_eq`, `eq_preset`,
+   `eq_autoeq` and `others_mixing`. It is `null` while the route is not read, which the daemon does
+   for an amp's page (no path, no hold on the computer).
+2. **The daemon reads the computer EQ's saved state**, the file the computer EQ command writes,
+   found through one function the command line and the daemon share, so a front end can name the
+   applied AutoEq preset. `eq_preset` is the preset's name and is set only while the state is on,
+   the route has the host EQ on, and the state's target is this route's sink; a host EQ put in by
+   hand shows `host_eq` without a name. `eq_autoeq` is true only when the state came from AutoEq.
+   Nothing is written to the configuration.
+3. **`Daemon::shutdown` stops the servers (MCP, web) before the host.** The host's last act is to
+   publish an empty view, which an open page would hear as `host: null`; because the servers are
+   already down, a page keeps the last line it heard, dimmed, while the stream is lost, and no
+   theme drops its Now playing card, nor Signal its player and computer hops.
+4. **The frame's `anchor(el, { fixed })` takes a boolean, or a function asked at each placing**, and
+   places the menu button against the window (the frame carries the class `fixed`; see
+   [the frame](frame.md)). On a phone Signal's strip is pinned at the top, so the button stays over
+   its slot at every scroll. Signal passes `fixed: () => view.phone()`; Ember and Paper call
+   `anchor(el)` and place it in page coordinates.
 
 [Back to web themes](web-themes.md).

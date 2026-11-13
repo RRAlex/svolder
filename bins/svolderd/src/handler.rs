@@ -22,6 +22,8 @@ use svolder_profiles::tone::preset::Preset;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::BroadcastStream;
 
+use self::autoeq::AutoEqService;
+use self::walk::WalkService;
 use crate::device::{self, Command, DeviceHandle, Refused};
 use crate::fleet::DaemonFleet;
 use crate::host::{FramesEvent, HostMode, HostService};
@@ -34,15 +36,21 @@ use crate::mqtt_bridge::Bridge;
 use crate::scanner::Scanner;
 use crate::web::WebServer;
 use crate::writer::{Mode, Origin, Outcome};
+use svolder_ipc::{
+    CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_USAGE, JOB_STOP_BOUND, Reason, WRITE_SETTLE_BOUND,
+};
+
+/// What a reload that meets the daemon's stop says.
+const STOPPING: &str = "the daemon is stopping";
 
 /// The longest a request waits for an actor, and for a write, the time it spends in the writer's
 /// line behind other writes or a recall too. An actor answers a command it cannot carry out
 /// rather than holding it, so this only ever fires for one that is genuinely stuck or a line
 /// that is long; a write that times out may still reach the device afterwards.
-pub(crate) const ACTOR_DEADLINE: Duration = Duration::from_secs(60);
+pub(crate) const ACTOR_DEADLINE: Duration = svolder_ipc::COMMAND_DEADLINE;
 /// What an actor is given beyond [`svolder_ble::FAREWELL_BOUND`] to finish closing: the
 /// disconnect itself and the write spacing before it.
-const SHUTDOWN_MARGIN: Duration = Duration::from_secs(6);
+const SHUTDOWN_MARGIN: Duration = svolder_ipc::ACTOR_STOP_MARGIN;
 /// The longest the daemon waits for one actor to close its session as it exits. An actor asked
 /// to stop mid-connect spends up to the farewell bound reclaiming the attempt and closing, so
 /// the wait is that bound and a margin, which keeps the actor's answer ahead of the settle step
@@ -62,6 +70,12 @@ pub struct Daemon {
     registry: RwLock<Arc<Registry>>,
     /// The configuration file a reload re-reads.
     config_path: PathBuf,
+    /// The configuration as of the last reload, which every request reads.
+    snapshot: RwLock<config_write::Held>,
+    /// Counts the reads of the file that may become the snapshot ([`config_write::ticket`]).
+    reads: Arc<std::sync::atomic::AtomicU64>,
+    /// How long a write waits for the reload it asks for.
+    reload_wait: Duration,
     /// The directory a reload re-reads user profiles from.
     profiles_dir: PathBuf,
     /// Held for the whole of a reload. Two of them — a hangup and a request, or two requests
@@ -80,6 +94,13 @@ pub struct Daemon {
     mcp: Slot<McpServer>,
     /// The web UI, while `[web]` turns it on.
     web: Slot<WebServer>,
+    /// The device walk's jobs.
+    walk: WalkService,
+    /// AutoEq's jobs.
+    autoeq: AutoEqService,
+    /// Held (read) by a configuration write for as long as its blocking thread runs; the stop
+    /// takes the write side, so it waits for writes under way.
+    writes: Arc<tokio::sync::RwLock<()>>,
     /// The computer's player, cover and route, kept once for every front end.
     host: HostService,
     /// Where the host's sources come from; a daemon is made with [`HostMode::Off`] and `main`
@@ -105,22 +126,52 @@ struct BridgeSlot {
     stopping: bool,
 }
 
-/// The devices a request resolves against: the running actors, and the name of the one a
-/// request that selects none acts on.
+/// The devices a request resolves against: the running actors, the name of the one a request
+/// that selects none acts on, the actors a reload in flight has started and not yet published,
+/// the walk's passphrase test while one runs, and whether the daemon's own stop has begun, after
+/// which no actor or probe is started or published. The stop asks the actors of both lists and
+/// the probe to close, so it reaches every actor that runs: each is started and entered in its
+/// list or slot in one step under this lock, which the stop's mark is set under too.
 #[derive(Default)]
 struct DeviceSet {
     devices: Vec<Arc<DeviceHandle>>,
     default_device: Option<String>,
+    starting: Vec<Arc<DeviceHandle>>,
+    /// The walk's passphrase test, while one runs (see `probe`).
+    probe: Option<Arc<DeviceHandle>>,
+    stopping: bool,
+}
+
+/// The actors one [`Daemon::reconcile`] started, for as long as they are in the set's `starting`
+/// list. Letting go of it takes them off the list, unless the daemon's stop has begun: from then
+/// on they are the stop's to close, whether the reconcile ends, publishes nothing or is dropped
+/// half way.
+struct Unpublished<'a> {
+    set: &'a RwLock<DeviceSet>,
+    started: Vec<Arc<DeviceHandle>>,
+}
+
+impl Drop for Unpublished<'_> {
+    fn drop(&mut self) {
+        let mut set = written(self.set);
+        if !set.stopping {
+            set.starting
+                .retain(|s| !self.started.iter().any(|mine| Arc::ptr_eq(mine, s)));
+        }
+    }
 }
 
 impl Daemon {
     /// A handler with no devices yet; [`Daemon::reconcile`] starts the ones the config names.
+    /// `config` is the file as the caller read it, which the snapshot holds until the first
+    /// reload or write.
     pub fn new(
         transport: Arc<dyn Transport>,
         registry: Arc<Registry>,
         config_path: PathBuf,
         profiles_dir: PathBuf,
         socket: PathBuf,
+        config: Config,
     ) -> Self {
         let scanner = Arc::new(Scanner::new(Arc::clone(&transport)));
         Daemon {
@@ -128,6 +179,12 @@ impl Daemon {
             transport,
             scanner,
             registry: RwLock::new(registry),
+            snapshot: RwLock::new(config_write::Held::first(
+                config,
+                config_write::file_stamp(&config_path),
+            )),
+            reads: Arc::default(),
+            reload_wait: config_write::RELOAD_WAIT,
             config_path,
             profiles_dir,
             reloading: tokio::sync::Mutex::new(()),
@@ -135,6 +192,9 @@ impl Daemon {
             bridge: std::sync::Mutex::new(BridgeSlot::default()),
             mcp: Slot::default(),
             web: Slot::default(),
+            walk: WalkService::new(),
+            autoeq: AutoEqService::new(None),
+            writes: Arc::default(),
             host: HostService::idle(),
             host_mode: HostMode::Off,
             web_codes: Arc::default(),
@@ -182,15 +242,41 @@ impl Daemon {
     /// Every reload comes through here, a hangup's as much as a request's, and they are taken
     /// one at a time: a reload reads the running device set and writes the next one, so two
     /// at once would each reconcile against a set the other was replacing.
+    ///
+    /// A reload that comes after the daemon's stop began (or waited for its turn past it) is
+    /// refused and starts nothing.
     pub async fn reload_all(&self) -> Result<Vec<String>, String> {
         let _reloading = self.reloading.lock().await;
+        if self.is_stopping() {
+            return Err(STOPPING.to_string());
+        }
         // Both files are read before either is acted on, so a profile that will not parse
         // leaves the devices exactly as they were rather than reporting a failure over a
         // device set it has already changed.
-        let config = Config::load_from(&self.config_path)
-            .map_err(|e| format!("{}: {e}", self.config_path.display()))?;
-        let registry = Registry::with_user_dir(&self.profiles_dir)
-            .map_err(|e| format!("{}: {e}", self.profiles_dir.display()))?;
+        let (config_path, profiles_dir) = (self.config_path.clone(), self.profiles_dir.clone());
+        let reads = Arc::clone(&self.reads);
+        let held = config_write::held_stamp(self);
+        let (generation, stamp, config, registry) = tokio::task::spawn_blocking(move || {
+            let generation = config_write::ticket(&reads);
+            let stamp = config_write::file_stamp(&config_path);
+            // A file that was read once and is gone is not an empty configuration: the devices
+            // stay as they are until it is back.
+            if held.is_some() && config_write::gone(&config_path) {
+                return Err(config_write::missing_refusal(&config_path));
+            }
+            let config = Config::load_from(&config_path)
+                .map_err(|e| format!("{}: {e}", config_path.display()))?;
+            // A deletion between the look and the read is not an empty configuration either.
+            if held.is_some() && config_write::gone(&config_path) {
+                return Err(config_write::missing_refusal(&config_path));
+            }
+            let registry = Registry::with_user_dir(&profiles_dir)
+                .map_err(|e| format!("{}: {e}", profiles_dir.display()))?;
+            Ok::<_, String>((generation, stamp, config, registry))
+        })
+        .await
+        .map_err(|_| "the configuration read stopped".to_string())??;
+        self.hold_snapshot(config.clone(), generation, stamp);
         for warning in config.warnings() {
             log::warn(&warning);
         }
@@ -377,12 +463,14 @@ impl Daemon {
     ) -> Response {
         match self.web.with(|server| server.map(make)) {
             Some(Ok((code, secs))) => answer(code, secs),
-            Some(Err(message)) => Response::Error { code: 1, message },
-            None => Response::Error {
-                code: 1,
-                message: svolder_ipc::WEB_OFF.to_string(),
-            },
+            Some(Err(message)) => Response::error(CODE_USAGE, message),
+            None => Response::error(CODE_USAGE, svolder_ipc::WEB_OFF.to_string()),
         }
+    }
+
+    /// Whether the daemon's stop has begun ([`Daemon::shutdown`] marks it first).
+    pub(crate) fn is_stopping(&self) -> bool {
+        read(&self.devices).stopping
     }
 
     /// Bring the running actors in line with `config`, and take the default device from it.
@@ -394,6 +482,12 @@ impl Daemon {
     /// already running, so a device with only its settings changed keeps its link.
     ///
     /// Answers with the name of every device now running, in the order the file names them.
+    ///
+    /// It does not set the config snapshot: only `reload_all` and a write do.
+    ///
+    /// Once the daemon's stop has begun it starts no actor, and an actor it started before the
+    /// mark and has not yet published is not published: [`Daemon::shutdown`] asks it to close
+    /// with the actors the set holds, and waits for it.
     pub async fn reconcile(&self, config: &Config) -> Vec<String> {
         let running = self.devices();
         let registry = Arc::clone(&read(&self.registry));
@@ -403,6 +497,12 @@ impl Daemon {
         // handle, so it does not read as an actor nobody wants.
         let mut kept: Vec<Arc<DeviceHandle>> = Vec::new();
         let mut stopped: Vec<Arc<DeviceHandle>> = Vec::new();
+        // The actors this call started, which only the set's `starting` list holds beside it
+        // until the set is written.
+        let mut started = Unpublished {
+            set: &self.devices,
+            started: Vec::new(),
+        };
         for wanted in &config.devices {
             match running
                 .iter()
@@ -425,8 +525,9 @@ impl Daemon {
                         self.stop(handle).await;
                         stopped.push(Arc::clone(handle));
                     }
-                    if let Some(started) = self.start(wanted, &registry) {
-                        next.push(started);
+                    if let Some(handle) = self.start_unpublished(wanted, &registry) {
+                        started.started.push(Arc::clone(&handle));
+                        next.push(handle);
                     }
                 }
             }
@@ -445,9 +546,28 @@ impl Daemon {
             ));
         }
         let names = next.iter().map(|handle| handle.name.clone()).collect();
-        let mut set = written(&self.devices);
-        set.devices = next;
-        set.default_device = config.default_device.clone();
+        let published = {
+            let mut set = written(&self.devices);
+            match set.stopping {
+                true => false,
+                false => {
+                    set.devices = next;
+                    set.default_device = config.default_device.clone();
+                    set.starting
+                        .retain(|s| !started.started.iter().any(|mine| Arc::ptr_eq(mine, s)));
+                    true
+                }
+            }
+        };
+        if !published {
+            for handle in &started.started {
+                log::info(&format!(
+                    "{}: started as the daemon began to stop, which closes it",
+                    handle.name
+                ));
+            }
+            return Vec::new();
+        }
         names
     }
 
@@ -474,8 +594,22 @@ impl Daemon {
         self.stop.notified().await;
     }
 
-    /// Stop the servers, then the computer's player, then the MQTT bridge, then ask every actor
-    /// to close its session, so the radio is released before the daemon exits.
+    /// Stop the jobs, then the servers, then the computer's player, then the MQTT bridge, then
+    /// ask every actor (the walk's probe among them) to close its session, so the radio is
+    /// released before the daemon exits; last, wait for a configuration write already under way,
+    /// so the end of the runtime never cuts one.
+    ///
+    /// The longest this takes is the sum of its waits: [`JOB_STOP_BOUND`], then the servers (which
+    /// stop at once) and the bridge ([`svolder_ipc::BRIDGE_STOP_BOUND`], bounded inside
+    /// `stop_bridge`), then [`SHUTDOWN_DEADLINE`] for the actors (they are asked at once), then
+    /// [`WRITE_SETTLE_BOUND`]; `main` adds the transport's settle and
+    /// [`svolder_ipc::RUNTIME_STOP_BOUND`] after it. `svolder daemon restart` waits for all of it
+    /// (`LOCK_WAIT`). A step with a bound that is added here or in `main` enters `LOCK_WAIT` and
+    /// `docs/design/jobs.md`. `the_stop_has_the_steps_the_restart_wait_adds_up` is a tripwire for
+    /// the two bodies, not for what they call: a bound inside a called function is found by
+    /// reading what each step calls. The wait for writes covers the ones the daemon started, not
+    /// one a socket connection sends after it. The socket's lock is held to the end of the
+    /// process, so the sum is what a new daemon waits for.
     ///
     /// The servers (MCP, web) go before the player's source, so no open page is told on the
     /// way down that the computer is no longer watched. The bridge goes before the actors, while
@@ -484,15 +618,73 @@ impl Daemon {
     /// its own deadline — asking them one at a time could let an unreachable device delay the
     /// exit past a service manager's SIGKILL, leaving its session open.
     pub async fn shutdown(&self) {
+        // Marked before anything else: a reload from here on starts no actor, and one in flight
+        // does not publish the actors it started (see [`Daemon::reconcile`]).
+        written(&self.devices).stopping = true;
+        // The jobs go first: they may hold the transport or a request of a front end, and no
+        // server or actor below should be waited on behind them.
+        let (walk, autoeq) = futures::join!(
+            self.walk.shutdown(JOB_STOP_BOUND),
+            self.autoeq.shutdown(JOB_STOP_BOUND)
+        );
+        if walk + autoeq > 0 {
+            log::error(&format!(
+                "shutdown: {} job(s) did not stop within {} s and were given up on",
+                walk + autoeq,
+                JOB_STOP_BOUND.as_secs()
+            ));
+        }
         self.mcp.stop().await;
         self.web.stop().await;
         self.host.stop();
         self.stop_bridge().await;
-        let devices = self.devices();
+        // The actors the set holds, the ones a reload in flight started and the walk's probe:
+        // with the mark set, none of them grows.
+        let devices: Vec<Arc<DeviceHandle>> = {
+            let set = read(&self.devices);
+            set.devices
+                .iter()
+                .chain(&set.starting)
+                .chain(&set.probe)
+                .cloned()
+                .collect()
+        };
         let asks = devices
             .iter()
             .map(|device| self.ask_within(device, Command::Shutdown, SHUTDOWN_DEADLINE));
         futures::future::join_all(asks).await;
+        // A write holds a read of this for as long as its blocking thread runs, so taking the
+        // write side waits for those threads.
+        let _ = tokio::time::timeout(WRITE_SETTLE_BOUND, self.writes.write()).await;
+    }
+
+    /// Start the actor for one configured device and enter it in the set's `starting` list,
+    /// in one step under the set's lock; nothing is started once the daemon's stop has begun,
+    /// nor for the unit the walk's passphrase test holds.
+    fn start_unpublished(
+        &self,
+        config: &DeviceConfig,
+        registry: &Arc<Registry>,
+    ) -> Option<Arc<DeviceHandle>> {
+        let mut set = written(&self.devices);
+        if set.stopping {
+            return None;
+        }
+        if set
+            .probe
+            .as_ref()
+            .is_some_and(|probe| probe::same_unit(&probe.udid, &config.udid))
+        {
+            log::info(&format!(
+                "{}: the walk's passphrase test holds {}, so no actor starts for it until the \
+                 test ends",
+                config.name, config.udid
+            ));
+            return None;
+        }
+        let handle = self.start(config, registry)?;
+        set.starting.push(Arc::clone(&handle));
+        Some(handle)
     }
 
     /// Start the actor for one configured device, or report why it could not start.
@@ -540,7 +732,10 @@ impl Daemon {
     /// a configured name, a product name, or a unit-id prefix, none case-sensitive; no match
     /// or more than one is an error rather than a guess.
     pub(crate) fn resolve(&self, selector: Option<&str>) -> Result<Arc<DeviceHandle>, Refused> {
-        let unresolved = |message: String| Refused { code: 2, message };
+        let unresolved = |message: String| Refused {
+            code: CODE_NOT_FOUND,
+            message,
+        };
         let set = read(&self.devices);
         let Some(selector) = selector else {
             if let Some(name) = set.default_device.as_deref()
@@ -550,7 +745,7 @@ impl Daemon {
                     .any(|d| d.name.eq_ignore_ascii_case(name))
             {
                 return Err(Refused {
-                    code: 1,
+                    code: CODE_USAGE,
                     message: svolder_ipc::config::dangling_default_message(name),
                 });
             }
@@ -627,34 +822,40 @@ impl Daemon {
     /// longer than [`MAX_SCAN_WINDOW`] is listened for that long.
     async fn scan(&self, window: Duration) -> Response {
         let window = window.min(MAX_SCAN_WINDOW);
-        let mut adverts = match self.scanner.scan(window).await {
+        let adverts = match self.listen_all(window, &|_| {}).await {
             Ok(adverts) => adverts,
             Err(e) => {
-                return Response::Error {
-                    code: crate::device::code_for(&e),
-                    message: e.to_string(),
-                };
+                return Response::error(crate::device::code_for(&e), e.to_string());
             }
         };
         let registry = Arc::clone(&read(&self.registry));
-        let mut entries: Vec<ScanEntry> = Vec::new();
-        while let Some(a) = adverts.next().await {
-            let unit = a.unit_id().to_string();
-            if entries.iter().any(|e| e.unit == unit) {
-                continue;
-            }
-            entries.push(ScanEntry {
-                unit,
-                product_id: a.manufacturer.product_id,
-                product: registry
-                    .product_name(a.manufacturer.product_id)
-                    .map(str::to_string),
-                firmware: a.firmware_build(),
-                passphrase: a.manufacturer.passphrase().is_well_formed(),
-                rssi: a.rssi,
-            });
-        }
+        let entries = adverts
+            .iter()
+            .map(|a| ScanEntry::from_advert(&a.manufacturer, a.rssi, &registry))
+            .collect();
         Response::Scan { entries }
+    }
+
+    /// One listen of `window` that hears every device ([`Scanner::scan_each`]): `each` is
+    /// handed each unit the first time it is heard, and a configured device it hears takes the
+    /// hearing as its signal ([`DeviceHandle::heard_on_air`]).
+    pub(crate) async fn listen_all(
+        &self,
+        window: Duration,
+        each: &(dyn Fn(&svolder_ble::Advertisement) + Send + Sync),
+    ) -> Result<Vec<svolder_ble::Advertisement>, svolder_ble::BleError> {
+        let feed = |advert: &svolder_ble::Advertisement| {
+            let device = read(&self.devices)
+                .devices
+                .iter()
+                .find(|device| device.sends(advert))
+                .cloned();
+            if let Some(device) = device {
+                device.heard_on_air(advert);
+            }
+            each(advert);
+        };
+        self.scanner.scan_each(window, &feed).await
     }
 
     /// One device's events, with the lag notices a slow subscriber earns dropped.
@@ -704,13 +905,13 @@ impl Daemon {
             Request::Recalled { name, .. }
                 if name.chars().count() > svolder_profiles::tone::preset::NAME_MAX =>
             {
-                Response::Error {
-                    code: 1,
-                    message: format!(
+                Response::error(
+                    CODE_USAGE,
+                    format!(
                         "a preset's name is at most {} characters",
                         svolder_profiles::tone::preset::NAME_MAX
                     ),
-                }
+                )
             }
             Request::Recalled { device, name } => match self.resolve(device.as_deref()) {
                 Ok(device) => {
@@ -734,11 +935,8 @@ impl Daemon {
             Request::WebLinkOpen { code } => {
                 match self.web.with(|server| server.map(|s| s.link_open(&code))) {
                     Some(Ok(open)) => Response::WebLinkOpen { open },
-                    Some(Err(message)) => Response::Error { code: 1, message },
-                    None => Response::Error {
-                        code: 1,
-                        message: svolder_ipc::WEB_OFF.to_string(),
-                    },
+                    Some(Err(message)) => Response::error(CODE_USAGE, message),
+                    None => Response::error(CODE_USAGE, svolder_ipc::WEB_OFF.to_string()),
                 }
             }
             Request::EqShow { device } => self.dispatch(device.as_deref(), Command::EqShow).await,
@@ -807,18 +1005,33 @@ impl Daemon {
             }
             Request::Reload => match self.reload_all().await {
                 Ok(devices) => Response::Reloaded { devices },
-                Err(message) => Response::Error { code: 1, message },
+                Err(message) => {
+                    let refused = Response::error(CODE_USAGE, message);
+                    match self.is_stopping() {
+                        true => refused.with_reason(Reason::Stopping),
+                        false => refused,
+                    }
+                }
             },
-            Request::Version => Response::Version {
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                mqtt: Some(self.mqtt_status()),
-                mcp: Some(self.mcp.status()),
-                config: Some(self.config_path.display().to_string()),
-                log: crate::log::target(),
-                mcp_token: self.mcp.token_info(),
-                web: Some(self.web.status()),
-                web_token: self.web.token_info(),
-            },
+            Request::Version => {
+                let (config_changed, config_missing) = self.config_state().await;
+                Response::Version {
+                    config_changed,
+                    config_missing,
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    mqtt: Some(self.mqtt_status()),
+                    mcp: Some(self.mcp.status()),
+                    config: Some(self.config_path.display().to_string()),
+                    log: crate::log::target(),
+                    mcp_token: self.mcp.token_info(),
+                    web: Some(self.web.status()),
+                    web_token: self.web.token_info(),
+                    features: svolder_ipc::FEATURES
+                        .iter()
+                        .map(|f| (*f).to_string())
+                        .collect(),
+                }
+            }
             Request::Stop => {
                 // The accept loop is woken here and the reply is written by the connection
                 // task as this returns. What the wake starts is the ordinary exit — every
@@ -834,26 +1047,30 @@ impl Daemon {
             Request::HostVolume { pct } => self.host_volume(pct).await,
             Request::HostMute { muted } => self.host_mute(muted).await,
             Request::HostEq { op } => self.host_eq(origin, op).await,
-            // The server answers `Subscribe` through `subscribe`, never here.
-            Request::Subscribe { .. } => Response::Error {
-                code: 1,
-                message: "subscribe is not a request/response verb".to_string(),
-            },
-            // And `HostFrames` through `host_frames`.
-            Request::HostFrames => Response::Error {
-                code: 1,
-                message: "host_frames is not a request/response verb".to_string(),
-            },
+            Request::Walk { op } => {
+                let me = self.me.get().and_then(std::sync::Weak::upgrade);
+                self.walk.handle(op, origin, me)
+            }
+            Request::AutoEq { op } => self.autoeq_op(origin, op).await,
+            Request::DeviceConfig { op } => self.device_config(op).await,
+            Request::ServerSwitch { server, enabled } => self.server_switch(server, enabled).await,
+            // The server answers `Subscribe` through `stream`, never here.
+            Request::Subscribe { .. } => Response::error(
+                CODE_USAGE,
+                "subscribe is not a request/response verb".to_string(),
+            ),
+            // And `HostFrames` the same.
+            Request::HostFrames => Response::error(
+                CODE_USAGE,
+                "host_frames is not a request/response verb".to_string(),
+            ),
         }
     }
 
     /// Press `button`, one of `previous`, `play`, `pause` and `next`, on the followed player:
     /// an acknowledgement when the player took it, an error saying why not otherwise.
     async fn host_press(&self, button: &str) -> Response {
-        let refuse = |message: &str| Response::Error {
-            code: 1,
-            message: message.to_string(),
-        };
+        let refuse = |message: &str| Response::error(CODE_USAGE, message.to_string());
         let Some(button) = Button::ALL
             .into_iter()
             .find(|candidate| candidate.method().eq_ignore_ascii_case(button))
@@ -885,14 +1102,11 @@ impl Daemon {
         let answer = device.writer.submit(origin, command, Mode::Ordered);
         match tokio::time::timeout(ACTOR_DEADLINE, answer).await {
             Ok(Ok(Outcome::Done(response))) => response,
-            Ok(Ok(Outcome::Superseded)) => Response::Error {
-                code: 3,
-                message: format!("a newer write to {} took this one's place", device.name),
-            },
-            Ok(Ok(Outcome::Cancelled(why))) => Response::Error {
-                code: 3,
-                message: why.to_string(),
-            },
+            Ok(Ok(Outcome::Superseded)) => Response::error(
+                CODE_LINK,
+                format!("a newer write to {} took this one's place", device.name),
+            ),
+            Ok(Ok(Outcome::Cancelled(why))) => Response::error(CODE_LINK, why.to_string()),
             Ok(Err(_)) => actor_gone(&device.name),
             Err(_) => actor_silent(&device.name, ACTOR_DEADLINE),
         }
@@ -909,11 +1123,39 @@ impl Handler for Daemon {
         self.events_of_devices(device, false)
     }
 
-    async fn subscribe_with_host(&self, device: Option<String>) -> BoxStream<'static, Event> {
+    async fn stream(&self, request: Request) -> Result<BoxStream<'static, Event>, Box<Response>> {
+        match request {
+            Request::Subscribe { device, host } => Ok(match host {
+                true => self.subscribe_with_host(device).await,
+                false => self.subscribe(device).await,
+            }),
+            Request::HostFrames => self
+                .host_frames()
+                .await
+                .map_err(|message| Box::new(Response::error(CODE_USAGE, message))),
+            Request::Walk { op } => self.walk.stream(op),
+            Request::AutoEq { op } => self.autoeq.stream(op),
+            other => Err(Box::new(Response::error(
+                CODE_USAGE,
+                format!("{} is not a stream", other.cmd()),
+            ))),
+        }
+    }
+}
+
+impl Daemon {
+    /// The stream of a subscription that asked for the host's view too (`host: true`).
+    pub(crate) async fn subscribe_with_host(
+        &self,
+        device: Option<String>,
+    ) -> BoxStream<'static, Event> {
         self.events_of_devices(device, true)
     }
 
-    async fn host_frames(&self) -> Result<BoxStream<'static, Event>, String> {
+    /// The stream of a `HostFrames` request: the daemon's capture state and its analysed
+    /// frames, held for as long as the stream lives; an error in words when there is no host
+    /// audio.
+    pub(crate) async fn host_frames(&self) -> Result<BoxStream<'static, Event>, String> {
         let hold = self
             .host
             .frames()
@@ -982,18 +1224,15 @@ impl Daemon {
 
 /// The answer for a device whose actor has stopped, which only happens as the daemon exits.
 pub(crate) fn actor_gone(name: &str) -> Response {
-    Response::Error {
-        code: 3,
-        message: format!("device {name} is not running"),
-    }
+    Response::error(CODE_LINK, format!("device {name} is not running"))
 }
 
 /// The answer for an actor that did not respond within the deadline it was given.
 pub(crate) fn actor_silent(name: &str, deadline: Duration) -> Response {
-    Response::Error {
-        code: 4,
-        message: format!("device {name} did not answer within {deadline:?}"),
-    }
+    Response::error(
+        CODE_TIMEOUT,
+        format!("device {name} did not answer within {deadline:?}"),
+    )
 }
 
 /// The words of [`actor_silent`], for a caller that wants them as text.
@@ -1004,8 +1243,19 @@ pub(crate) fn silence(name: &str) -> String {
     }
 }
 
+mod autoeq;
 mod computer;
+mod config_write;
+mod device_config;
+mod jobs;
+mod probe;
+mod server_switch;
+mod walk;
+pub(crate) use config_write::file_stamp;
+pub use config_write::{ConfigEdit, ConfigWriteError};
 
+#[cfg(test)]
+mod families_tests;
 #[cfg(test)]
 mod host_tests;
 #[cfg(test)]

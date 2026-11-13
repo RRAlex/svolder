@@ -8,8 +8,11 @@
 // core's `view.computer` holds what is drawn (core/computer.js); this is markup only. Pure.
 
 import {
-  POINTS, VIEW_HEIGHT, VIEW_WIDTH, linePath, logFreqs, responseDb, yOf,
+  POINTS, VIEW_HEIGHT, VIEW_WIDTH, logFreqs, responseDb,
 } from '../../../core/tone-curve.js';
+import {
+  curveD, frame, path, zeroLine,
+} from '../../../core/plot.js';
 import { ROWS_SHOWN } from '../../../core/computer.js';
 import { gainText, hzText, qText } from '../../../core/words.js';
 import { WORDS } from '../words.js';
@@ -39,7 +42,7 @@ export const valueWords = { f: hzText, g: gainText, q: qText };
 const pointWords = (p) => `Point ${p.n}: ${p.type} ${hzText(p.f)}, ${gainText(p.g)}, Q ${qText(p.q)}`;
 
 /** The curve's path in the plot's own box. */
-export const curvePath = (response) => linePath(response.map(yOf));
+export const curvePath = curveD;
 
 /** One row of the table: its number, the type word that opens the list, the three values to type
  * into or step, and the `×` that removes it (the lone point is set flat). */
@@ -65,10 +68,8 @@ function graph(t, quiet, selected) {
       + ` aria-valuenow="${p.g}" aria-valuetext="${esc(gainText(p.g))}"${quiet ? ' aria-disabled="true"' : ''}></button>`;
   }).join('');
   const on = t.modes.find((m) => m.on)?.name === 'eq';
-  return `<div id="p-graph" class="p-graph"><svg viewBox="0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}"`
-    + ' preserveAspectRatio="none" aria-hidden="true">'
-    + `<path class="p-zero" d="M0 ${yOf(0)}H${VIEW_WIDTH}"/>`
-    + `<path class="p-curve${on ? '' : ' faint'}" d="${curvePath(t.response)}"/></svg>${points}</div>`;
+  const drawn = zeroLine('p-zero') + path(curveD(t.response), `p-curve${on ? '' : ' faint'}`);
+  return `<div id="p-graph" class="p-graph">${frame(drawn)}${points}</div>`;
 }
 
 /** What the mode's words say beyond the mode: the model's own note, and that the EQ's state is

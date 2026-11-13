@@ -24,7 +24,11 @@
 //! the real runtime directory's PipeWire socket and session bus by `PIPEWIRE_RUNTIME_DIR` and
 //! `DBUS_SESSION_BUS_ADDRESS`. `--web` has the daemon serve the web UI on a port of its own, so
 //! a browser or a phone can try the themes.
-
+//!
+//! Without `--host` the host is simulated by the daemon (`SVOLDER_HOST=fake`: a player, a route,
+//! a computer volume and a computer EQ with presets, in memory, run by no process and no bus),
+//! and the TUI, which reaches no host of its own there, follows that daemon's host as the web page
+//! does, so the Target row flips to a computer both of them see.
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{IsTerminal, Read};
@@ -325,6 +329,7 @@ impl Demo {
                     code: Kind::AutospawnFailed.code(),
                     what,
                     next: format!("The demo daemon's log is {}", log.display()),
+                    reason: None,
                 }
                 .into());
             }
@@ -471,8 +476,10 @@ fn no_daemon_holds(dir: &Path) -> bool {
 
 /// Point this process at the demo's homes, so it reads and writes nothing of the user's: the
 /// configuration, state and runtime directory under `dir`, a `systemctl` and unit directory that are not there, no
-/// radio, no host audio (whose controls would change the user's own volume and players) unless
-/// `--host` asked for it, and no socket but the one it is given.
+/// radio, no host audio of its own (whose controls would change the user's own volume and players)
+/// unless `--host` asked for it, and no socket but the one it is given. Without `--host` the
+/// TUI follows the daemon's simulated host (`SVOLDER_HOST=fake`: a simulated computer volume, EQ
+/// and player, in memory), so the computer's controls work and touch nothing.
 fn isolate(dir: &Path, host: Option<&Reach>) {
     // SAFETY: `Demo::start` is called from `main` before the runtime or any other thread is
     // started, so nothing else reads or writes the environment while this does.
@@ -488,7 +495,7 @@ fn isolate(dir: &Path, host: Option<&Reach>) {
 }
 
 /// What [`isolate`] does to this process's environment: the variables it sets, and the ones it
-/// removes. With the host on `SVOLDER_HOST` is removed instead of set to `off`, and [`host_env`]
+/// removes. With the host on `SVOLDER_HOST` is removed instead of set to `fake`, and [`host_env`]
 /// is added.
 fn tui_env(dir: &Path, host: Option<&Reach>) -> (Vec<(&'static str, PathBuf)>, Vec<&'static str>) {
     let mut unset = vec!["SVOLDER_SOCKET"];
@@ -516,7 +523,7 @@ fn isolated_env(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         ("SVOLDER_UNITDIR", dir.join("units")),
         ("SVOLDER_ADAPTER", PathBuf::from("hci-none")),
         ("SVOLDER_TRANSPORT", PathBuf::from("fake")),
-        ("SVOLDER_HOST", PathBuf::from("off")),
+        ("SVOLDER_HOST", PathBuf::from("fake")),
     ]
 }
 

@@ -6,9 +6,9 @@
 // roll toward the viewer and a floor that is not rolling is drawn the same twice, and the wet road thins
 // the ground. The canvas is a recorder, no DOM. Run: node nightdrive-floor.mjs
 import assert from 'node:assert/strict';
-import { COLUMNS } from '../../../bins/svolderd/web/themes/nightdrive/axis.js';
+import { COLUMNS, axisX, gapColumns } from '../../../bins/svolderd/web/themes/nightdrive/axis.js';
 import { CAMERA } from '../../../bins/svolderd/web/themes/nightdrive/camera.js';
-import { FLOOR, drawRoad, heatLevel, waveAt } from '../../../bins/svolderd/web/themes/nightdrive/draw/road.js';
+import { FLOOR, GAP_ALPHA, drawRoad, heatLevel, waveAt } from '../../../bins/svolderd/web/themes/nightdrive/draw/road.js';
 import {
   RAMP, RAMP_COOL, RAMP_WARM, STEPS, heatColours, heatIndex, heatOf, rampFor,
 } from '../../../bins/svolderd/web/themes/nightdrive/draw/heat.js';
@@ -305,6 +305,36 @@ ok('a_wave_runs_down_the_floor_from_the_horizon_and_fades', () => {
   const calm = cells(draw(under(), { dull: false, look: { ...NEUTRAL, wave: 1, since: 0.3 } }));
   const flat = cells(draw(under(), { dull: false, look: NEUTRAL }));
   assert.ok(calm.some((c, i) => c.alpha > flat[i].alpha + 0.1), 'a cell in the front glows');
+});
+
+ok('the_gap_columns_are_those_half_covered_by_a_span_of_the_daemon', () => {
+  const none = gapColumns([]);
+  assert.equal(none.length, COLUMNS);
+  assert.ok(none.every((v) => v === 0));
+  const cols = gapColumns([[600, 1500]]);
+  const at = (hz) => Math.floor(axisX(hz, 1) * COLUMNS);
+  assert.ok(cols[at(900)] === 1, 'the middle of the span');
+  assert.equal(cols[at(100)], 0);
+  assert.equal(cols[at(8000)], 0);
+  // a span too narrow to cover half a column marks none; two spans mark both; nonsense is skipped
+  assert.ok(gapColumns([[1000, 1010]]).every((v) => v === 0));
+  const two = gapColumns([[100, 300], [5000, 9000], [null, 5], [900, 100]]);
+  assert.ok(two[at(200)] === 1 && two[at(7000)] === 1 && two.filter(Boolean).length >= 2);
+  assert.ok(gapColumns([[1, 1e9]]).every((v) => v === 1), 'a span past the axis covers every column');
+});
+
+ok('the_ground_is_tinted_only_in_the_gap_columns_and_not_in_a_dull_scene_or_without_an_overlay', () => {
+  const tint = (frame) => draw(floorOf(() => 0.3), frame).filter((e) => e.op === 'fill' && e.style === PALETTE.gapTint);
+  assert.equal(tint({ dull: false }).length, 0);
+  assert.equal(tint({ dull: false, overlay: { y: () => 0, cols: null } }).length, 0, 'no spans, no tint');
+  const cols = new Uint8Array(COLUMNS);
+  for (const i of [3, 4, 5, 10]) cols[i] = 1;
+  const log = tint({ dull: false, overlay: { y: () => 0, cols } });
+  assert.equal(log.length, 2 * STRIPS, 'two runs of columns a strip');
+  assert.ok(log.every((e) => e.alpha === GAP_ALPHA));
+  // a run of three columns is a path of 2 x (3 + 1) corners, a run of one 2 x (1 + 1)
+  assert.deepEqual(log.slice(0, 2).map((e) => e.pts.length), [8, 4]);
+  assert.equal(tint({ dull: true, overlay: { y: () => 0, cols } }).length, 0);
 });
 
 console.log(`${n} floor checks passed`);

@@ -6,6 +6,7 @@
 //!
 //! `curve_fixture` (tests only) writes the numbers the page's `tone-curve.js` is held to.
 
+use svolder_profiles::tone::fit::{GAP_DB, Preview};
 use svolder_profiles::tone::preset::{self, On, Preset};
 use svolder_profiles::{EqMode, EqParam, EqSpec, tone::response, units};
 
@@ -17,7 +18,7 @@ use super::{Snapshot, minus};
 mod curve_fixture;
 
 /// How many points the curve has: log-spaced, 20 Hz to 20 kHz.
-const POINTS: usize = 181;
+pub(crate) const POINTS: usize = svolder_profiles::tone::fit::PREVIEW_POINTS;
 /// The curve's y range, ± dB.
 const RANGE_DB: f64 = 13.0;
 
@@ -58,6 +59,53 @@ pub(crate) struct Curve {
     pub(crate) markers: Vec<Marker>,
     /// Each band's frequency, gain and Q as raw steps, `None` where not read.
     pub(crate) band_readings: Vec<[Option<i64>; 3]>,
+    /// The imported preset the curve is drawn against, while one is on the device (or loaded
+    /// with changes): the TUI's rule.
+    pub(crate) overlay: Option<Overlay>,
+}
+
+/// An imported preset's correction drawn against the device's curve: the target, the fit and
+/// where the fit misses, on the curve's own 181 points.
+#[derive(Debug)]
+pub(crate) struct Overlay {
+    /// The preset's name.
+    pub(crate) name: String,
+    /// Where it came from, as the preset remembers it.
+    pub(crate) origin: Option<String>,
+    /// The correction's target and the miss of the bands standing on the device.
+    pub(crate) preview: Preview,
+    /// The least the fit may miss by, in dB, before the gap between them counts.
+    pub(crate) gap_db: f64,
+}
+
+/// The overlay of the imported preset standing on the device, `None` while the standing preset
+/// is not imported: the one that is on, or the one last recalled while the bands differ from it.
+/// The fit, the gap and the miss are those of the bands on the device now (`bands`, every one
+/// read), so an edited band moves them as it moves the curve; `None` while a band is unread.
+fn overlay(
+    s: &Snapshot,
+    eq: &EqSpec,
+    raw: impl Fn(FunctionId) -> Option<i64>,
+    bands: Option<&[response::BandParams]>,
+) -> Option<Overlay> {
+    let listed = s.presets.iter().map(|(p, _)| p);
+    let recalled = s.info.recalled.as_deref();
+    let standing = match preset::on(eq, raw, listed.clone(), recalled) {
+        On::Preset(p) => p,
+        On::Custom => {
+            let name = recalled?;
+            listed.clone().find(|p| preset::same_name(&p.name, name))?
+        }
+        On::Unread => return None,
+    };
+    let source = standing.source.as_ref()?;
+    let preview = Preview::of_bands(&source.correction, bands?, &response::log_freqs(POINTS));
+    Some(Overlay {
+        name: standing.name.clone(),
+        origin: source.origin.clone(),
+        preview,
+        gap_db: GAP_DB,
+    })
 }
 
 /// One band's marker.
@@ -209,6 +257,7 @@ pub(crate) fn tone(s: &Snapshot, eq: &EqSpec) -> Tone {
             peak_db,
             markers,
             band_readings,
+            overlay: overlay(s, eq, raw, bands.as_deref()),
         },
         note,
         loud,
@@ -242,6 +291,9 @@ pub(crate) struct PresetStatus {
 pub(crate) struct PresetRow {
     pub(crate) name: String,
     pub(crate) built_in: bool,
+    /// Whether it was imported (AutoEq, a file): its bands are fitted, and are not overwritten
+    /// by the device's curve.
+    pub(crate) imported: bool,
     pub(crate) on: bool,
     /// What its recall and its delete post: `{"name": …}`.
     pub(crate) json: String,
@@ -296,6 +348,7 @@ pub(crate) fn presets(s: &Snapshot, eq: &EqSpec) -> Presets {
         .map(|(p, built_in)| PresetRow {
             name: p.name.clone(),
             built_in: *built_in,
+            imported: p.is_imported(),
             on: on_name
                 .as_deref()
                 .is_some_and(|n| preset::same_name(n, &p.name)),

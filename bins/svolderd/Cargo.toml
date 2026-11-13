@@ -24,9 +24,11 @@ svolder-proto.workspace = true
 svolder-profiles.workspace = true
 svolder-ble.workspace = true
 svolder-ipc.workspace = true
+svolder-walk.workspace = true
 svolder-fake.workspace = true
 svolder-host.workspace = true
 svolder-mqtt.workspace = true
+svolder-autoeq = { workspace = true, features = ["net"] }
 rmcp.workspace = true
 serde_json.workspace = true
 hyper.workspace = true
@@ -44,14 +46,26 @@ tokio-stream.workspace = true
 # `dup2` to hand a bound socket to a spawned daemon on descriptor 3, the way a service manager
 # does.
 libc.workspace = true
+rumqttd = { workspace = true, optional = true }
 
 [dev-dependencies]
+# The loopback AutoEq server the service's tests point the daemon's client at.
+svolder-autoeq = { workspace = true, features = ["test-server"] }
 # The MQTT integration tests run a broker in this process on 127.0.0.1 and watch it with a
 # client of their own.
 rumqttc.workspace = true
-rumqttd.workspace = true
 # The Ember fixture test reads the page's model back; `float_roundtrip` keeps every number exact
 # to its last bit, as the browser's parser does. The daemon's own parsing is unchanged.
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 # `test-util` is what lets an actor's close grace run out on a paused clock.
 tokio = { workspace = true, features = ["test-util"] }
+
+[features]
+# The in-process MQTT broker (rumqttd) the MQTT integration tests run against: about 60 crates no
+# other build needs. `make check` builds with --all-features, so it runs those tests; a plain
+# `cargo test` leaves them and the broker out.
+broker-tests = ["dep:rumqttd"]
+
+[[test]]
+name = "mqtt"
+required-features = ["broker-tests"]

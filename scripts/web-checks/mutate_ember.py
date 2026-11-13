@@ -64,11 +64,11 @@ MUTATIONS = {
         (C, 'returnTo: control.id', 'returnTo: null')],
      ['the_same_preset_on_both_asks_and_yes_flattens_the_dac']),
     'the open question lets the other keys through': ('browser', [
-        ('core/ask.js', "        } else {\n          event.stopImmediatePropagation();\n        }\n",
-         "        }\n")],
+        ('core/modal.js', "    event.stopImmediatePropagation();\n    // a key of a text composition",
+         "    // a key of a text composition")],
      ['the_open_question_owns_the_keyboard']),
     'the theme picker opens behind the open question': ('browser', [
-        ('core/frame.js', "    if (core.ask?.opened()) return;\n", "")],
+        ('core/frame.js', "    if (modal.key(event)) return;\n", "    modal.key(event);\n")],
      ['the_open_question_owns_the_keyboard']),
     'the preset chips have no ids': ('browser', [
         (D, "${attr('id', `pre-${index}`)}", '')],

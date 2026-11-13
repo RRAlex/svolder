@@ -28,12 +28,13 @@ futures = { workspace = true }
 svolder-ble.workspace = true
 svolder-ipc.workspace = true
 svolder-host.workspace = true
-svolder-autoeq.workspace = true
+svolder-walk.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tachyonfx.workspace = true
 libc.workspace = true
 qrcode.workspace = true
+rumqttd = { workspace = true, optional = true }
 
 [dev-dependencies]
 # `test-util` is what lets the TUI's loop tests run on a paused clock.
@@ -41,8 +42,17 @@ tokio = { workspace = true, features = ["test-util"] }
 # `daemon status`'s MQTT line is tested against a daemon bridged to a broker running in the
 # test process on 127.0.0.1, watched with a client of the test's own.
 rumqttc.workspace = true
-rumqttd.workspace = true
+# The README screenshots (tui::screenshots, an #[ignore] test) download one AutoEq file with the
+# HTTP client, which no build of `svolder` itself links; the stub daemon's AutoEq search reads an
+# index the same way the daemon does.
+svolder-autoeq = { workspace = true, features = ["net"] }
 # The README screenshots (tui::screenshots, an #[ignore] test): font coverage for the raster.
 ab_glyph.workspace = true
 # The seeded signal the fake device plays, for the screenshots' meters and the host's level.
 svolder-fake.workspace = true
+
+[features]
+# The in-process MQTT broker (rumqttd) the MQTT integration tests run against: about 60 crates no
+# other build needs. `make check` builds with --all-features, so it runs those tests; a plain
+# `cargo test` leaves them and the broker out.
+broker-tests = ["dep:rumqttd"]

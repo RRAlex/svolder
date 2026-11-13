@@ -18,7 +18,7 @@ use svolder_profiles::tone::preset::same_name;
 
 use crate::backend::{Failure, Globals};
 use crate::cli::HopsCommand;
-use crate::commands::device::{config_failure, reload_daemon_for_presets};
+use crate::commands::device::{config_failure, refuse_if_daemon_misses, reload_daemon_for_presets};
 use crate::recovery::Kind;
 
 /// Carry out one of the `hops` sub-commands; a bare `hops` lists.
@@ -200,6 +200,7 @@ async fn add(
 ) -> Result<(), Failure> {
     let kind = kind_of(kind)?;
     let (config, path) = loaded()?;
+    refuse_if_daemon_misses(g, &config, &path).await?;
     let hop = Hop {
         what: HopWhat::Declared { kind, name },
         note,
@@ -224,6 +225,7 @@ async fn link(
     after: Option<String>,
 ) -> Result<(), Failure> {
     let (config, path) = loaded()?;
+    refuse_if_daemon_misses(g, &config, &path).await?;
     let Some(configured) = config
         .devices
         .iter()
@@ -261,6 +263,7 @@ async fn link(
 /// the file holds under the writer's lock.
 async fn edit(g: &Globals<'_>, id: &str, change: Change) -> Result<(), Failure> {
     let (config, path) = loaded()?;
+    refuse_if_daemon_misses(g, &config, &path).await?;
     let old = config.hop(id).ok_or_else(|| no_such_hop(id))?;
     let kind = change.kind.as_deref().map(kind_of).transpose()?;
     let mut linked_refusal = None;
@@ -305,6 +308,7 @@ async fn edit(g: &Globals<'_>, id: &str, change: Change) -> Result<(), Failure> 
 /// Take the hop `id` out.
 async fn remove(g: &Globals<'_>, id: &str) -> Result<(), Failure> {
     let (config, path) = loaded()?;
+    refuse_if_daemon_misses(g, &config, &path).await?;
     let id = config.hop(id).map(Hop::id).ok_or_else(|| no_such_hop(id))?;
     Config::remove_hop(&path, id).map_err(config_failure)?;
     written(g, &config, &path, &format!("removed hop {id:?}")).await;
@@ -320,6 +324,7 @@ async fn move_to(g: &Globals<'_>, id: &str, position: usize) -> Result<(), Failu
         ));
     };
     let (config, path) = loaded()?;
+    refuse_if_daemon_misses(g, &config, &path).await?;
     let id = config.hop(id).map(Hop::id).ok_or_else(|| no_such_hop(id))?;
     Config::move_hop(&path, id, to).map_err(config_failure)?;
     written(

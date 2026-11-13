@@ -7,29 +7,27 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { targetsOf } from '../../../bins/svolderd/web/core/contract.js';
-import { responseDb, yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
+import { POINTS, logFreqs, responseDb, yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
 import { ampScreen, metersInPlace } from '../../../bins/svolderd/web/themes/signal/draw/amp.js';
 import { declaredScreen, editForm, hopTools, moves, plusSheet, unlinkedAmps } from '../../../bins/svolderd/web/themes/signal/draw/hop.js';
 import { choices, modeRow } from '../../../bins/svolderd/web/themes/signal/draw/choices.js';
 import { HOP_PX, line, slide, strip } from '../../../bins/svolderd/web/themes/signal/draw/line.js';
 import { drawShelf } from '../../../bins/svolderd/web/themes/signal/draw/shelf.js';
-import { createFold } from '../../../bins/svolderd/web/themes/signal/fold.js';
-import { keeper } from '../../../bins/svolderd/web/themes/signal/live.js';
+import { keeper } from '../../../bins/svolderd/web/core/freeze.js';
 import { drawSlim, volumeWords } from '../../../bins/svolderd/web/themes/signal/slim.js';
 import { card, stateCard } from '../../../bins/svolderd/web/themes/signal/draw/card.js';
 import {
   computerFacts, computerMode, computerOpen, computerPoints, computerPresets, computerScreen, computerShelf,
   computerVolume, fractionOf, plain,
 } from '../../../bins/svolderd/web/themes/signal/draw/computer.js';
-import { createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { createComputer, createPending } from '../../../bins/svolderd/web/core/computer.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import { playerScreen } from '../../../bins/svolderd/web/themes/signal/draw/player.js';
 import { drawPlaying, transport } from '../../../bins/svolderd/web/themes/signal/draw/playing.js';
 import { curvePath, heldGraph, pointsOf, toneBox } from '../../../bins/svolderd/web/themes/signal/draw/tone.js';
 import { volumeBox } from '../../../bins/svolderd/web/themes/signal/draw/volume.js';
 import { hopsOf, shelves, shownHopId } from '../../../bins/svolderd/web/themes/signal/line.js';
-import { bound } from '../../../bins/svolderd/web/themes/signal/driver.js';
-import { openers, theme } from '../../../bins/svolderd/web/themes/signal/signal.js';
+import { menuRows, openers, theme } from '../../../bins/svolderd/web/themes/signal/signal.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -37,7 +35,7 @@ const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/ember-parts.json', import.meta.url), 'utf8'));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const pageOf = (name) => clone(fixture.cases.find((c) => c.name === name).page);
-const view = { asked: null, now: 0, facts: { open: false }, phone: () => false };
+const view = { asked: null, now: 0, phone: () => false };
 
 /** The start tags of `html` named `tag`, each as its attributes (and `text`: what follows up to the
  * next tag). */
@@ -57,7 +55,7 @@ const everything = (page) => {
   const d = page.device;
   const hop = { id: `device:${page.shown}`, kind: 'device', url: page.shown };
   return [volumeBox(d, view), toneBox(d), choices(d), modeRow(d), drawPlaying(page, 1_700_000_100_000),
-    openers.device(page, hop, view), drawShelf(page, d, view), drawShelf(page, d, { facts: { open: true } }),
+    openers.device(page, hop, view), drawShelf(page, d, view), drawShelf(page, d, { phone: () => false }),
     drawSlim([{ id: hop.id, name: d.name, live: true }, { id: 'hop:1', name: 'HD 650', live: false }],
       hop.id, hop.id, volumeWords(d))].join('');
 };
@@ -218,8 +216,9 @@ ok('a_guests_controls_are_drawn_inert', () => {
   for (const c of guests) {
     const page = pageOf(c.name);
     const html = everything(page);
-    // the fold of the facts and the slim bar's hops only read and move about the page: a guest has them
-    const buttons = tags(html, 'button').filter((b) => b['data-act'] !== 'facts-fold' && !('data-slim' in b));
+    // the slim bar's hops only read and move about the page: a guest has them
+    // and the foot (*Devices…*) is navigation: it opens the read-only page
+    const buttons = tags(html, 'button').filter((b) => !('data-slim' in b) && b['data-act'] !== 'device-settings');
     for (const b of buttons) {
       assert.equal(b['aria-disabled'], 'true', `${c.name}: ${b['data-act'] ?? b.id} is inert`);
       assert.ok(classes(b).includes('quiet'), `${c.name}: ${b['data-act'] ?? b.id} is quiet`);
@@ -408,36 +407,21 @@ ok('the_band_table_has_typed_values_and_steppers', () => {
   assert.ok(tags(inert, 'button').filter((b) => b['data-act'] === 'band').every((b) => b['aria-disabled'] === 'true'));
 });
 
-ok('the_facts_start_folded', () => {
+ok('the_shelf_ends_in_device_settings_or_for_a_reader_device_and_draws_no_fact', () => {
   const page = pageOf('dac');
-  const folded = drawShelf(page, page.device, view);
-  const toggle = tags(folded, 'button').find((b) => b.id === 'sg-facts-fold');
-  assert.equal(toggle['aria-expanded'], 'false');
-  assert.equal(toggle['aria-controls'], 'sg-facts-body');
-  assert.match(folded, /<div id="sg-facts-body" hidden>/, 'the body is hidden');
-  assert.ok(folded.includes('data-fact="Firmware"'), 'the facts are drawn, folded');
-  assert.ok(tags(folded, 'button').some((b) => b.id === 'sg-identify'), 'Identify is under it');
-  const open = drawShelf(page, page.device, { ...view, facts: { open: true } });
-  assert.equal(tags(open, 'button').find((b) => b.id === 'sg-facts-fold')['aria-expanded'], 'true');
-  assert.match(open, /<div id="sg-facts-body">/);
-});
-
-ok('the_fold_is_kept_as_open_or_closed_and_works_without_storage', () => {
-  const kept = new Map();
-  const prefs = { get: (name, fallback) => kept.get(name) ?? fallback, set: (name, value) => kept.set(name, value) };
-  const fold = createFold(() => prefs);
-  assert.equal(fold.open, false);
-  assert.equal(fold.toggle(), true);
-  assert.equal(kept.get('facts'), 'open');
-  assert.equal(createFold(() => prefs).open, true, 'a reload reads it');
-  fold.toggle();
-  assert.equal(kept.get('facts'), 'closed');
-  const refusing = { get() { throw new Error('no storage'); }, set() { throw new Error('no storage'); } };
-  const bare = createFold(() => refusing);
-  assert.equal(bare.open, false);
-  assert.equal(bare.toggle(), true);
-  assert.equal(bare.open, true, 'kept in memory');
-  assert.equal(createFold(() => null).open, false);
+  const html = drawShelf(page, page.device, view);
+  const word = tags(html, 'button').find((b) => b['data-act'] === 'device-settings');
+  assert.ok(word, 'the word is on the shelf');
+  assert.equal(word['data-device'], page.device.url, 'it names the shelf\'s device');
+  assert.ok(html.includes('Device settings…'));
+  for (const gone of ['data-fact', 'sg-spec', 'sg-readings', 'All readings', 'id="sg-identify"',
+    'sg-facts-fold', 'sg-facts-body']) assert.ok(!html.includes(gone), gone);
+  for (const name of ['dac-guest', 'dac-readonly']) {
+    const quiet = pageOf(name);
+    const foot = drawShelf(quiet, quiet.device, view);
+    assert.ok(foot.includes('data-act="device-settings"') && foot.includes('>Devices…<'), `${name}: a reader's way in`);
+    assert.ok(!foot.includes('Device settings'), `${name}: the other word`);
+  }
 });
 
 ok('a_loki_max_shows_its_slots_and_settings', () => {
@@ -495,7 +479,7 @@ ok('a_hold_given_back_before_a_reset_does_not_count_after_it', () => {
   globalThis.setTimeout = (fn) => { queued.push(fn); return 0; };
   try {
     const calls = [];
-    const keep = keeper({ hold: (name, on) => calls.push([name, on]) }, 'shelf');
+    const keep = keeper({ freeze: (name, on) => calls.push([name, on]) }, 'shelf');
     keep.take();
     keep.dropLater();
     keep.reset();
@@ -605,12 +589,12 @@ ok('the_amp_has_its_power_once_per_page_and_the_shelf_leaves_it_out', () => {
   const { page, hop } = linkedAmp();
   const device = page.followed[hop.url];
   const opened = openers.device(page, hop, view);
-  const shelf = drawShelf(page, device, view, { power: true, identify: true });
+  const shelf = drawShelf(page, device, view, { power: true });
   assert.equal(count(opened + shelf, 'id', 'sg-power'), 1);
   assert.equal(count(opened + shelf, 'id', 'sg-pt-power_meters'), 1);
   assert.equal(count(opened + shelf, 'data-readout', 'warming_up'), 1);
   assert.equal(count(opened + shelf, 'id', 'sg-identify') + count(opened + shelf, 'id', 'sg-amp-identify'), 1);
-  assert.ok(shelf.includes('id="sg-facts-fold"'), 'the facts stay on the shelf');
+  assert.ok(shelf.includes('data-act="device-settings"'), 'the foot stays on the shelf');
   assert.ok(drawShelf(page, device, view).includes('id="sg-power"'), 'a shelf without the option draws it');
 });
 
@@ -619,7 +603,7 @@ ok('an_amps_controls_are_inert_for_a_viewer_who_may_not_write', () => {
     const { page, hop } = linkedAmp();
     mine(page);
     const html = openers.device(page, hop, view) + shelvesOf(page, hop);
-    for (const b of tags(html, 'button').filter((x) => x['data-act'] !== 'facts-fold')) {
+    for (const b of tags(html, 'button').filter((t) => t['data-act'] !== 'device-settings')) {
       assert.equal(b['aria-disabled'], 'true', `${b['data-act']} is inert`);
     }
     assert.ok(tags(html, 'button').some((b) => b['data-act'] === 'amp-unlink'), 'Unlink is drawn, inert');
@@ -679,10 +663,10 @@ function shelvesOf(page, hop) {
   return shelves.device(page, hop, view);
 }
 
-ok('an_amps_shelf_is_its_facts_and_not_its_power', () => {
+ok('an_amps_shelf_is_its_foot_and_not_its_power_or_identify', () => {
   const { page, hop } = linkedAmp();
   const html = shelvesOf(page, hop);
-  assert.ok(html.includes('id="sg-facts-fold"') && !html.includes('id="sg-power"') && !html.includes('id="sg-identify"'));
+  assert.ok(html.includes('data-act="device-settings"') && !html.includes('id="sg-power"') && !html.includes('id="sg-identify"'));
   assert.equal(shelvesOf({ ...page, followed: {} }, hop), '', 'a followed amp not read yet has no shelf');
 });
 
@@ -1010,27 +994,31 @@ ok('a_linked_amp_shown_alone_draws_a_grey_way_in_then_a_thin_stretch_from_the_da
 
 
 ok('the_menu_row_adds_a_device_while_a_device_is_shown', () => {
-  const [row] = theme.menuRows();
-  assert.deepEqual([row.id, row.elementId, row.kind, row.label], ['add-device', 'menu-add-device', 'action', 'Add device…']);
-  assert.equal(row.available(), false, 'not mounted');
-  const was = { ...bound };
-  try {
-    let ran = 0;
-    bound.add = () => { ran++; };
-    bound.core = { model: { shown: () => null } };
-    assert.equal(row.available(), false, 'no device shown');
-    bound.core = { model: { shown: () => 'Gungnir 2' } };
-    bound.canAdd = () => false;
-    assert.equal(row.available(), false, 'the sheet cannot open');
-    bound.canAdd = () => true;
-    assert.equal(row.available(), true, 'a device shown');
-    row.run();
-    assert.equal(ran, 1);
-    bound.add = null;
-    assert.equal(row.available(), false, 'unmounted');
-  } finally {
-    Object.assign(bound, was);
-  }
+  // the row is the mount's: it reads the mount's line and core, and no module state
+  assert.equal(theme.menuRows, undefined, 'the theme object gives no rows: the mounted instance does');
+  let ran = 0;
+  let can = false;
+  let shown = null;
+  const stop = new AbortController();
+  const [row] = menuRows({
+    core: { model: { shown: () => shown } },
+    hops: { add: () => { ran++; }, canAdd: () => can },
+    signal: stop.signal,
+  });
+  assert.deepEqual([row.id, row.elementId, row.kind, row.label], ['add-device', 'menu-add-device', 'action', 'Add to the chain…']);
+  can = true;
+  assert.equal(row.available(), false, 'no device shown');
+  shown = 'Gungnir 2';
+  can = false;
+  assert.equal(row.available(), false, 'the sheet cannot open');
+  can = true;
+  assert.equal(row.available(), true, 'a device shown');
+  row.run();
+  assert.equal(ran, 1);
+  stop.abort();
+  assert.equal(row.available(), false, 'unmounted');
+  row.run();
+  assert.equal(ran, 1, 'and it opens nothing');
   assert.ok(!theme.menuButton.fixed, 'the theme itself does not name the placing');
 });
 
@@ -1063,8 +1051,8 @@ function side({ computer = computerModel(), guest = false, route = ROUTE, chosen
   page.host.computer = computer;
   if (guest) page.viewer = { signed_in: false, guest: true, writes: false, read_only: null };
   const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
-  const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
-  const core = createComputer({ store, storage: memory(), holds });
+  const pending = createPending({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
+  const core = createComputer({ store, storage: memory(), pending });
   if (chosen === 'computer') core.flip('computer');
   const v = { ...view, computer: core, phone: () => false };
   const hop = { id: 'computer', kind: 'computer' };
@@ -1287,12 +1275,45 @@ ok('the_dacs_page_without_a_computer_is_untouched', () => {
   // a page whose host holds no computer model draws the DAC's screen and no computer controls
   const page = hosted();
   const store = createStore(page, { signedOut: () => {}, fetch: async () => ({ status: 200, json: async () => ({}) }) });
-  const core = createComputer({ store, storage: memory(), holds: createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
+  const core = createComputer({ store, storage: memory(), pending: createPending({ store, fetch: async () => ({ status: 200, json: async () => ({}) }) }) });
   core.flip('computer');
   const v = { ...view, computer: core, phone: () => false };
   assert.equal(core.side(), 'dac');
   assert.ok(openers.computer(page, { id: 'computer' }, v).includes('id="sg-route"'));
   assert.equal(shelves.computer(page, { id: 'computer' }, v), '');
+});
+
+/** The daemon's overlay on the 181 points: the target 4 dB up, the fit meeting it but for 600-1500 Hz. */
+const overlayOn = (gap) => {
+  const hzs = logFreqs(POINTS);
+  return {
+    name: 'Imp', target: hzs.map(() => 4), fit: hzs.map((hz) => (hz > 500 && hz < 2000 ? 0 : 4)),
+    gap, gap_db: 2, rms_db: 0.93, worst_db: 4, worst_hz: 1000,
+  };
+};
+const withOverlay = (name, overlay, mode) => {
+  const page = pageOf(name);
+  Object.assign(page.device.tone, { overlay }, mode ? { mode } : {});
+  return page;
+};
+
+ok('an_overlay_is_drawn_under_the_curve_with_the_fit_in_words', () => {
+  const html = toneBox((withOverlay("dac", overlayOn([[600, 1500]]))).device);
+  assert.equal((html.match(/<path class="sg-gap"/g) ?? []).length, 1);
+  assert.equal((html.match(/<path class="sg-target"/g) ?? []).length, 1);
+  assert.ok(html.indexOf('sg-gap') < html.indexOf('sg-target')
+    && html.indexOf('sg-target') < html.indexOf('class="sg-curve"'));
+  assert.match(html, /<span class="sg-fit" title="fit 0\.9 dB, worst 4\.0 dB at 1\.0 kHz\.[^"]*" aria-hidden="true">fit 0\.9 dB<\/span>/);
+  assert.match(html, /<span class="[a-z-]*sr">fit 0\.9 dB, worst 4\.0 dB at 1\.0 kHz\. The dotted line is the target; the shade is where the bands miss it by more than 2 dB\.<\/span>/);
+});
+
+ok('an_overlay_without_a_span_fills_nothing_and_none_or_another_mode_draws_none', () => {
+  assert.doesNotMatch(toneBox((withOverlay("dac", overlayOn([]))).device), /sg-gap/);
+  const plain = toneBox((pageOf("dac")).device);
+  assert.doesNotMatch(plain, /sg-gap|sg-target|sg-fit/);
+  for (const mode of ['flat', 'loudness']) {
+    assert.doesNotMatch(toneBox((withOverlay("dac", overlayOn([[600, 1500]]), mode)).device), /sg-gap|sg-target|sg-fit/);
+  }
 });
 
 console.log(`signal-draw.mjs: ${n} passed`);

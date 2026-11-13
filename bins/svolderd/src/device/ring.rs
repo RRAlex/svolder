@@ -4,13 +4,14 @@
 //! The last half hour of one device's readings: every status the actor publishes and the whole
 //! state recorded at each connect, binned by the
 //! second ([`Window::DAEMON`]), which a front end's graphs and the web UI's strip start from,
-//! and the presets recalled on it.
+//! and the presets recalled on it, and each signal strength a listen of the daemon's heard from
+//! the device, which is kept whether or not a link is up.
 
 use std::time::{Duration, Instant};
 
 use svolder_ipc::{RecallOut, SeriesOut};
 use svolder_profiles::Profile;
-use svolder_profiles::history::{Readings, Window};
+use svolder_profiles::history::{Aggregate, Readings, Series, Window};
 use svolder_proto::{Message, Value};
 
 /// One device's recent readings.
@@ -19,6 +20,8 @@ pub struct Ring {
     readings: Readings,
     /// The presets recalled, oldest first, and when.
     recalls: std::collections::VecDeque<(Instant, String)>,
+    /// The signal strengths heard, in dBm.
+    signal: Series,
 }
 
 impl Default for Ring {
@@ -26,11 +29,49 @@ impl Default for Ring {
         Ring {
             readings: Readings::new(Window::DAEMON),
             recalls: std::collections::VecDeque::new(),
+            signal: Series::new(Aggregate::Last, Window::DAEMON),
         }
     }
 }
 
+/// The samples of `series` at or before `span` before `now`, at the wall clock `now_ms` stands
+/// for at `now`: the newest one from before the span first, at its own time, which says what
+/// held when the span began, then the ones inside it.
+fn points_out(series: &Series, now: Instant, now_ms: u64, span: Duration) -> Vec<(u64, f64)> {
+    let mut points: Vec<(u64, f64)> = Vec::new();
+    let mut carried = None;
+    for (at, value) in series.samples() {
+        let Some(age) = now.checked_duration_since(at) else {
+            continue;
+        };
+        let ms = u64::try_from(age.as_millis()).unwrap_or(u64::MAX);
+        let point = (now_ms.saturating_sub(ms), value);
+        if age <= span {
+            points.push(point);
+        } else {
+            carried = Some(point);
+        }
+    }
+    points.splice(0..0, carried);
+    points
+}
+
 impl Ring {
+    /// Note a signal strength of `dbm` heard at `at`.
+    pub fn heard_signal(&mut self, dbm: i16, at: Instant) {
+        self.signal.push(at, f64::from(dbm));
+    }
+
+    /// The signal strengths heard within `span` before `now`, in dBm, at wall-clock times.
+    /// Unlike a reading's series it carries no point from before the span: a setting holds
+    /// until it changes, a strength heard earlier says nothing of the span.
+    pub fn signal_out(&self, now: Instant, now_ms: u64, span: Duration) -> Vec<(u64, f64)> {
+        let mut points = points_out(&self.signal, now, now_ms, span);
+        let oldest = now_ms.saturating_sub(u64::try_from(span.as_millis()).unwrap_or(u64::MAX));
+        points.retain(|(at_ms, _)| *at_ms >= oldest);
+        points
+    }
+
     /// Note that the preset `name` was recalled at `at`; recalls older than half an hour go, and
     /// the oldest past the window's capacity.
     pub fn recalled(&mut self, name: &str, at: Instant) {
@@ -96,21 +137,7 @@ impl Ring {
         self.readings
             .iter()
             .filter_map(|(id, series)| {
-                let mut points: Vec<(u64, f64)> = Vec::new();
-                let mut carried = None;
-                for (at, value) in series.samples() {
-                    let Some(age) = now.checked_duration_since(at) else {
-                        continue;
-                    };
-                    let ms = u64::try_from(age.as_millis()).unwrap_or(u64::MAX);
-                    let point = (now_ms.saturating_sub(ms), value);
-                    if age <= span {
-                        points.push(point);
-                    } else {
-                        carried = Some(point);
-                    }
-                }
-                points.splice(0..0, carried);
+                let points = points_out(series, now, now_ms, span);
                 (!points.is_empty()).then(|| SeriesOut {
                     id: id.to_string(),
                     key: profile

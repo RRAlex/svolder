@@ -49,6 +49,18 @@
   --frame-on-accent: var(--nd-night);
   --frame-scrim: rgba(5, 3, 10, .72);
   --frame-shadow: 0 12px 32px rgba(0, 0, 0, .55);
+  --frame-toast-shadow: 0 14px 34px -12px rgba(0, 0, 0, .8);
+  --frame-field-bg: rgba(5, 3, 10, .6);
+  --frame-field-border: var(--nd-cyan);
+  --frame-danger: var(--nd-bad);
+  --frame-ok: var(--nd-cyan-ink);
+  --frame-warn: var(--nd-warn);
+  --frame-graph-series: var(--nd-cyan);
+  --frame-graph-grid: var(--nd-hair);
+  --frame-graph-target: var(--nd-pink-ink);
+  --frame-graph-gap: color-mix(in srgb, var(--nd-warn) 38%, transparent);
+  --frame-graph-compare: var(--nd-warn);
+  --frame-offline: var(--nd-dim);
   --frame-font: var(--nd-sans);
 }
 
@@ -171,7 +183,14 @@
   color: var(--nd-cyan-ink); text-shadow: 0 0 6px var(--nd-cyan); white-space: nowrap;
 }
 .nd-eq b { color: #fff; font-weight: 500; }
+.nd-sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 .nd-gains { letter-spacing: .06em; color: var(--nd-mid); text-shadow: none; margin-left: .6em; }
+.nd-fit {
+  letter-spacing: .06em; color: var(--frame-graph-target); text-shadow: none; margin-left: .6em;
+  text-transform: none;
+}
 
 /* ---- the fade: opacity only, so the HUD stays in the tab order and the accessibility tree ---- */
 
@@ -410,19 +429,6 @@
   position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
   background: var(--nd-pink); box-shadow: 0 0 8px var(--nd-pink);
 }
-.nd-foldhead { display: flex; align-items: baseline; gap: 10px; }
-.nd-fold {
-  padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit;
-  text-transform: inherit; cursor: pointer;
-}
-.nd-fold:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
-.nd-caret { display: inline-block; width: 1.2em; }
-.nd-spec { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 10px; }
-.nd-spec th { color: var(--nd-dim); font-weight: 400; text-align: left; padding: 3px 12px 3px 0; white-space: nowrap; }
-.nd-spec td { padding: 3px 4px; word-break: break-word; }
-.nd-spec td.nd-age { color: var(--nd-dim); text-align: right; white-space: nowrap; }
-.nd-spec td.warn { color: var(--nd-warn); }
-.nd-spec td.mono { font-family: var(--nd-mono); }
 #nd-faults, #nd-facts { grid-column: 1 / -1; }
 .nd-meter { display: grid; grid-template-columns: 24px 1fr 70px; align-items: center; gap: 12px; margin: 10px 0; }
 .nd-chan { color: var(--nd-dim); }
@@ -537,11 +543,8 @@
   .nd-scale { height: 44px; }
   .nd-v { height: 44px; width: 6em; font-size: 15px; }
   .nd-input { min-height: 44px; }
-  /* the device's controls and facts: a value that writes its centre and the facts' fold are 44 px to the hand, and the fold's
-     heading wraps instead of running past the edge */
+  /* the device's controls: a value that writes its centre is 44 px to the hand */
   .nd-link { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; }
-  .nd-fold { min-height: 44px; text-align: left; overflow-wrap: anywhere; }
-  .nd-foldhead { flex-wrap: wrap; align-items: center; gap: 0 10px; }
   /* a band is a block: its three values one under another, each named */
   .nd-bandtable, .nd-bandtable tbody { display: block; }
   .nd-bandtable thead { display: none; }
@@ -637,7 +640,7 @@
   .nd-right { text-align: center; }
   .nd-left { overflow-wrap: anywhere; }
   .nd-eq { white-space: normal; text-align: center; font-size: calc(var(--nd-hud) * .92); letter-spacing: .1em; }
-  .nd-gains { margin-left: .3em; letter-spacing: .04em; }
+  .nd-gains, .nd-fit { margin-left: .3em; letter-spacing: .04em; }
   .nd-debug { top: 150px; }
   .nd-eq { order: 1; }
   .nd-vol { order: 2; margin-top: 6px; }

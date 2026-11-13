@@ -306,6 +306,7 @@ mod tests {
             mutes_output: false,
             powers_output: false,
             asks_on_change: false,
+            key_reading: false,
             reads: Vec::new(),
         });
         let err = parse(&p, "not_a_real_control", "ON", None).unwrap_err();
@@ -370,6 +371,7 @@ mod tests {
             mutes_output: false,
             powers_output: false,
             asks_on_change: false,
+            key_reading: false,
             reads: Vec::new(),
         });
         let parsed = parse(&p, "volume", "-5.0", Some(-10.0)).expect("clamped to -10 dB");

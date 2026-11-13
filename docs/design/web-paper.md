@@ -4,25 +4,23 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -->
 # Paper
 
-Paper is the page's second theme, shipped in 0.31.2. It draws the same model as Ember as a sheet of
-squared paper: a printed serif for the device's own words, a pencil for what you may change and
-for what needs care, and blue ink for handwritten notes about what the numbers mean. It has a
-light paper and a dark one. It is plain ES modules with no build step, in
-`bins/svolderd/web/themes/paper/`, and one entry in `bins/svolderd/src/web/themes.rs`. It is built
-on the core alone: no file of Ember's was touched, and the few gaps it found in the core were
-fixed in the core (the last section). [Web themes](web-themes.md) says what a theme is; [the
-frame](frame.md) says what the page keeps for itself.
+Paper draws the same model as Ember as a sheet of squared paper: a printed serif for the device's
+own words, a pencil for what you may change and for what needs care, and blue ink for handwritten
+notes about what the numbers mean. It has a light paper and a dark one. It is plain ES modules with
+no build step, in `bins/svolderd/web/themes/paper/`, and one entry in
+`bins/svolderd/src/web/themes.rs`. It is built on the core alone: it shares no file with Ember,
+and what it needs of the core is in the last section. [Web themes](web-themes.md) says what a theme
+is; [the frame](frame.md) says what the page keeps for itself.
 
 ## The files
 
 | File | What it holds |
 | --- | --- |
 | `paper.js` | the registration, the menu rows, the mount: wires the sections to the store |
-| `live.js` | `createLive`: draws the sections, keeps them current, holds one while a hand is on it |
+| `live.js` | `createLive`: draws the sections, keeps them current, holds one while a hand is on it (the holds are counted by `core.freeze.keeper`) |
 | `draw/` | one file per section: `sheet.js` (the skeleton, title, footer, `SECTIONS`), `volume.js`, `tone.js`, `controls.js`, `presets.js`, `playing.js`, `amp.js`, `device.js`, `notes.js`, and the small `word.js`, `esc.js` |
-| `*-wire.js`, `graph.js`, `lists.js`, `ask.js`, `gestures.js` | the hands: what a tap, a drag, a key, a list or a question does |
+| `*-wire.js`, `graph.js`, `lists.js`, `ask.js`, `gestures.js` | the hands: what a tap, a drag, a key, a list or a question does (`lists.js` and `ask.js` give the core's list and inline ask Paper's classes and words) |
 | `ruler.js`, `changes.js`, `notes.js`, `marks.js`, `words.js`, `place.js` | pure maths and words: the ruler, the last change, the notes, where they sit, every fixed word |
-| `act.js` | `createAct`: sends a write through the core and logs what this page asked |
 | `driver.js` | the test driver |
 | `preview.js` | the picture on Paper's picker card |
 | `style.css` | the tokens, the sheet, every section, the phone |
@@ -45,16 +43,15 @@ title, a card, the volume, two columns, the notes band, the device and a footer.
 - **Columns.** Left: the tone, the amp's power, the meters. Right: the controls, Now playing, the
   presets, the device's presets. Each starts with a small mono label in capitals.
 - **Notes band.** The handwritten notes (below).
-- **The device.** A heading that is a button (underlined like the other written words, with
-  `aria-expanded` and `aria-controls`), and under it, folded until the person opens it, a table of
-  facts (product, unit, firmware, DSP, profile, link, signal, passphrase), every reading with the
-  age it was heard, and `identify`. The folded part stays in the page (`hidden`), so the ages keep
-  ticking. The last choice is held in memory (`fold.js`), so it works when storage is refused, and
-  is also the theme's preference `deviceOpen` in the core's store for Paper (the same one that
-  keeps the scheme), so it survives redraws, device switches and reloads. A guest may fold it too,
-  since it changes nothing on the device. The test driver unfolds it before it reaches a fact.
-- **Footer.** `svolder <version> · <day month>`, `T for themes · Space for play or pause` taken from the core's key list, and
-  `sign out · Paper` (a guest sees `sign in · Paper`).
+- **The device.** One written word, `Device settings…`, which opens the device's page in the
+  Devices popup (`core.popups.openDevice`), where the core draws the facts (product, unit,
+  firmware, DSP, profile, link, signal, passphrase), every reading with the age it was heard, and
+  `Identify`. The sheet draws none of them. A viewer who may not write (a guest, a page
+  whose writes are off) reads `Devices…` and gets the page read-only.
+- **Footer.** `svolder <version> · <day month>`, `T for themes · Space for play or pause · ? for
+  help` taken from the core's key list (`core.keys.listed(core.keys.frame)`: every key that
+  works for this viewer and no other, so a guest reads no Space), and `sign out · Paper` (a
+  guest sees `sign in · Paper`).
 
 At 720 px and wider the columns are 1.4 to 1 with a 40 px gap. Under 720 px the page is one
 column: the volume is a large italic number over a shorter ruler, the notes follow the section
@@ -76,7 +73,8 @@ and marks them `aria-disabled`. A tap sends nothing and shows the core's toast (
 change this`, or the read-only words).
 
 Paper binds no page keys except `T`. Every control is reached by Tab; the needle, the scales and
-the graph's points are sliders with their own arrow keys.
+the graph's points are sliders with their own arrow keys. Its key table (`key-table.js`) lists
+those and the keys of a cell, a paper list and a question, each under its widget.
 
 | Kind | How Paper writes it |
 | --- | --- |
@@ -120,7 +118,7 @@ The tone section plots the EQ's curve in an SVG that uses the core's plot box
 (`viewBox="0 0 1000 260"`), so the core's maps turn a pointer into a frequency and a gain. The
 0 dB line is dashed, the curve is a 2 px print stroke, and each band is a round button, a point.
 
-The drag is the core's: `core.drag` (`createDrag`, `grab`) with the write adapter in
+The drag is the core's: `core.eq.bands` (`createDrag`, `grab`) with the write adapter in
 `core/tone-drag.js` (`bandSteps`, `BAND_PARAM`, `bandWriter`). A drag moves the band's frequency
 and gain; the wheel on a point steps its Q; the arrow keys step the frequency (left, right) and
 the gain (down, up). A touch grabs a point only from its own 44 px area, so the page still
@@ -132,6 +130,13 @@ way the test driver reaches every band.
 
 While a point is held, the tone section is drawn from the held graph and a tone update waits;
 released, it is drawn from the newest state.
+
+While an imported preset is on and the EQ is on, the daemon's `tone.overlay` is drawn in the plot
+(`core.plot.overlayShapes`): the target as a dotted print line (`p-target`, `--frame-graph-target`)
+and, under the curve, the gap as a wash of the brown (`p-gap`, `--frame-graph-gap`) over the
+daemon's spans only, with the fit in italics under the graph at the right (`p-fit`, `fit 0.9 dB`,
+its title and a hidden `p-sr` sentence say the worst miss and what the shapes are). None in Flat, in
+Loudness or without an imported preset; a held point drops the gap and the words.
 
 ## The lists and the questions
 
@@ -208,7 +213,7 @@ EQ`, `preset Warm` and so on. The rules:
 - when several fields change together one is told, in a fixed order: preset, mode, control,
   volume, mute.
 
-The log of what this page asked is the last fifty requests in `act.js`, each with the time it was
+The log of what this page asked is the last fifty requests in the core's `act.js`, each with the time it was
 asked and answered and whether the answer was good. svolder keeps no record of who changed what,
 so a change from another tab within 3 s of the same ask can read `from this browser`.
 
@@ -290,8 +295,8 @@ meta for each scheme and the toast's shadow token are described in [the frame](f
   date, only the characters the faces carry), `paper-live.mjs` (the skeleton, the store's events,
   held sections, the log, `place`), `paper-ruler.mjs` (the ruler's maths, the volume section),
   `paper-draw.mjs` (every section from every fixture, guests quiet, the transport, the amp, the
-  facts, the card), `paper-notes.mjs` (the notes, the red order, the last change), `paper-fold.mjs`
-  (the fold of The device, with storage that refuses).
+  the `Device settings…` word, the card),
+  `paper-notes.mjs` (the notes, the red order, the last change).
 - **Browser** (`paper.py`, Chromium and Firefox): the button, the menu and Auto, dark from the first
   byte, the needle's value against its place, drags and keys, the cap, a reading from elsewhere
   during a drag, the controls, the presets and their questions, the transport, the amp, the
@@ -314,31 +319,24 @@ meta for each scheme and the toast's shadow token are described in [the frame](f
 - **Stills**: `make paper-shots` draws the DAC and an amp at desktop and phone width, light and
   dark, into eight PNGs.
 
-## What Paper found missing in the core
+## What Paper needs of the core
 
-Paper was built on the core alone, and building it found seven gaps in 0.31.0's core. They were
-fixed in the core, in their own commits, before Paper's sections used them:
+Paper is built on the core alone. Seven parts of the core exist for it:
 
-1. **The track's album was only inside `source`.** An album may contain the separator, so Paper
-   could not split it out. `album` is now a field of the host's track and of the model's `track`.
-2. **One browser colour per theme, and `color-scheme` ignored a chosen scheme.** A dark paper
-   needs a dark browser bar. A theme has `theme_color_dark`, the page carries a `theme-color` for
-   each scheme, and the core's `chromeOf` and `paintChrome` keep the metas in step with the
-   scheme.
-3. **A switch wrote the cookie with the old theme's scheme,** so dark paper reloaded light first.
-   A switch now rewrites the choice from the mounted theme's own scheme.
-4. **At boot the stored scheme overrode the scheme the server painted** (`?theme=paper.dark`, a
-   cookie). The painted scheme is now the choice at boot.
-5. **The toast's shadow was a value made for a dark page.** It is now `--frame-toast-shadow`, and a
-   test fails if the frame draws with anything but tokens.
-6. **The band steps and the write adapter a drag needs lived in Ember's `tone-graph.js`.**
-   `bandSteps`, `BAND_PARAM` and `bandWriter` are now in `core/tone-drag.js`. Ember keeps its own
-   copies, as no Ember file was touched this release (a known issue).
-7. **No font for a serif or a hand.** Crimson Pro and Caveat are served from `fonts/` and
-   declared in `frame.css`.
-
-Building the rest of Paper (the ruler, the notes, the controls, the checks) found no further gap
-in the core.
+1. **`album` is a field of the host's track and of the model's `track`**: an album may contain the
+   separator, so it cannot be split out of `source`.
+2. **One browser colour per scheme.** A dark paper needs a dark browser bar. A theme has
+   `theme_color_dark`, the page carries a `theme-color` for each scheme, and the core's `chromeOf`
+   and `paintChrome` keep the metas in step with the scheme.
+3. **A switch rewrites the choice from the mounted theme's own scheme**, so dark paper reloads dark.
+4. **The painted scheme is the choice at boot** (`?theme=paper.dark`, a cookie); the stored scheme
+   does not override it.
+5. **The toast's shadow is `--frame-toast-shadow`**, a token, and a test fails if the frame draws
+   with anything but tokens.
+6. **The band steps and the write adapter a drag needs are in `core/tone-drag.js`**: `bandSteps`,
+   `BAND_PARAM` and `bandWriter`. Ember keeps its own copies (a known issue).
+7. **A serif and a hand font.** Crimson Pro and Caveat are served from `fonts/` and declared in
+   `frame.css`.
 
 ## The computer's side
 

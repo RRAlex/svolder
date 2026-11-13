@@ -1278,6 +1278,10 @@ fn connection_lines(
             theme.style(Role::Warn),
         );
     }
+    if let Some(words) = &app.overlays.conn.config_changed {
+        say("", dim);
+        say(words, theme.style(Role::Warn));
+    }
     match setting {
         Setting::McpStatus => {
             say("", dim);

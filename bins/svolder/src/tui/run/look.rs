@@ -90,7 +90,80 @@ pub(in crate::tui) struct Look {
     pub(in crate::tui) sync: FrameSync,
 }
 
+/// How long after the last Settings write a daemon that reads the file is told to reload.
+pub(in crate::tui) const SETTINGS_RELOAD_AFTER: Duration = match cfg!(test) {
+    true => Duration::from_millis(200),
+    false => Duration::from_secs(1),
+};
+
+/// A Settings write changed the file: a daemon that reads it is to be told to reload once the
+/// writes pause (each further write moves the time on), so the file its own snapshot was read
+/// from is not left behind and the `config.toml changed` notice never rises for the TUI's own
+/// change.
+pub(in crate::tui) fn reload_soon(watching: &mut super::Watching, path: &Path) {
+    watching.reload_owed = Some(Box::new((
+        tokio::time::Instant::now() + SETTINGS_RELOAD_AFTER,
+        path.to_path_buf(),
+    )));
+}
+
+/// Send the reload a Settings write is owed, to the daemon behind `watching` when it reads that
+/// file, and ask the daemon how it stands after it. Both run in a task of their own, which the
+/// loop never waits on: a daemon that stalls in its reload cannot stop the TUI drawing. The
+/// answer comes back through the loop's version receiver, replacing an ask that was in flight
+/// (it may have been made before the reload). Nothing is said of a daemon that reads another
+/// file, of a direct session or of a failed reload.
+pub(in crate::tui) fn send_owed(watching: &mut super::Watching) {
+    let Some(owed) = watching.reload_owed.take() else {
+        return;
+    };
+    let path = owed.1;
+    let Some(backend) = watching.backend.as_ref() else {
+        return;
+    };
+    let (Some(socket), Some(ask)) = (backend.daemon_socket(), backend.daemon_version_request())
+    else {
+        return;
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        crate::backend::reload_if_reads(socket, &path).await;
+        let _ = tx.send(ask.await);
+    });
+    watching.daemon_version = Some(rx);
+}
+
+/// How long the reload a Settings write still owes is given when the TUI ends.
+const OWED_AT_EXIT: Duration = Duration::from_secs(2);
+
+/// The loop is ending with a reload still owed: send it, within [`OWED_AT_EXIT`], so the next
+/// run is not left to find the TUI's own change announced as a hand edit.
+pub(in crate::tui) async fn flush_owed(watching: &mut super::Watching) {
+    let Some(owed) = watching.reload_owed.take() else {
+        return;
+    };
+    let path = owed.1;
+    if let Some(socket) = watching
+        .backend
+        .as_ref()
+        .and_then(crate::backend::Backend::daemon_socket)
+    {
+        let _ = tokio::time::timeout(OWED_AT_EXIT, crate::backend::reload_if_reads(socket, &path))
+            .await;
+    }
+}
+
+/// The file's modification time, `None` when it cannot be read.
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 impl Look {
+    /// The configuration file a change is written to.
+    pub(in crate::tui) fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// The look `tui` asks for on a terminal that reported `detected`, with colour refused or
     /// not, saving every change to `path`.
     pub(in crate::tui) fn new(
@@ -156,11 +229,11 @@ impl Look {
         change: &TuiChange,
         app: &mut App,
         mouse: &mut M,
-    ) {
+    ) -> bool {
         if let TuiChange::Mouse(on) = change {
             if mouse.set_mouse(*on).is_err() {
                 app.warn("mouse capture did not change: the terminal refused");
-                return;
+                return false;
             }
             app.mouse = *on;
         }
@@ -170,18 +243,29 @@ impl Look {
         // screen change earns marks here too; the Settings box is drawn in the theme's own
         // colours and shows the change on the next frame, so a change made in it sweeps nothing.
         app.frame_flags.screen_changed |= change.sweeps() && app.overlays.settings.is_none();
-        if let Err(e) = Config::update_tui(&self.path, |tui| change.apply(tui)) {
-            app.warn(format!("settings not saved: {e}"));
+        let before = modified(&self.path);
+        match Config::update_tui(&self.path, |tui| change.apply(tui)) {
+            Ok(()) => modified(&self.path) != before,
+            Err(e) => {
+                app.warn(format!("settings not saved: {e}"));
+                false
+            }
         }
     }
 
     /// Take the AutoEq refresh `weeks` into the app and write it to `[autoeq]` of the file, the
     /// way [`Look::change`] writes `[tui]`: it applies whether or not the file could be written,
-    /// and a file that could not be is said in a toast.
-    pub(super) fn change_autoeq(&mut self, weeks: RefreshWeeks, app: &mut App) {
+    /// and a file that could not be is said in a toast. Both answer whether the file was changed
+    /// (an unchanged file is left as it was, and owes the daemon nothing).
+    pub(super) fn change_autoeq(&mut self, weeks: RefreshWeeks, app: &mut App) -> bool {
         app.presets.autoeq_weeks = weeks;
-        if let Err(e) = Config::update_autoeq(&self.path, |autoeq| autoeq.refresh_weeks = weeks) {
-            app.warn(format!("settings not saved: {e}"));
+        let before = modified(&self.path);
+        match Config::update_autoeq(&self.path, |autoeq| autoeq.refresh_weeks = weeks) {
+            Ok(()) => modified(&self.path) != before,
+            Err(e) => {
+                app.warn(format!("settings not saved: {e}"));
+                false
+            }
         }
     }
 

@@ -18,7 +18,7 @@ use serde::Deserialize;
 use svolder_ipc::Config;
 use svolder_profiles::tone::preset;
 
-use super::config_edit::{config_file, conflict, edit_then_reload};
+use super::config_edit::{config_for, conflict, edit_then_reload, save_preset};
 use super::tone::{eq_of, raw_of};
 use super::{with_parts, writable};
 use crate::web::Web;
@@ -55,6 +55,9 @@ struct SaveWrite {
     name: String,
     /// `"computer"` saves the computer EQ's points instead of the device's bands.
     from: Option<String>,
+    /// Write the device's bands over the user's preset of that name (the TUI's `u`).
+    #[serde(default)]
+    force: bool,
 }
 
 /// Save the device's bands, mode and loudness as a new preset, or, with `"from": "computer"`,
@@ -83,16 +86,21 @@ async fn save(
             );
         }
     };
-    let (path, config) = match config_file(&web, "presets").await {
-        Ok(found) => found,
-        Err(refused) => return refused,
-    };
-    let names = config.presets.iter().map(|p| p.name.as_str());
-    let wanted = match preset::new_name(&asked.name, names, None) {
-        Ok(wanted) => wanted.to_string(),
-        Err(why) => return refused_name(why),
-    };
+    if asked.force
+        && let Err(refused) = overwritable(&web, &asked.name, from_computer).await
+    {
+        return refused;
+    }
     if from_computer {
+        let config = match config_for(&web, "presets").await {
+            Ok(found) => found,
+            Err(refused) => return refused,
+        };
+        let names = config.presets.iter().map(|p| p.name.as_str());
+        let wanted = match preset::new_name(&asked.name, names, None) {
+            Ok(wanted) => wanted.to_string(),
+            Err(why) => return refused_name(why),
+        };
         let op = svolder_ipc::HostEqOp::SaveAs {
             name: wanted.clone(),
         };
@@ -106,17 +114,40 @@ async fn save(
         Ok(found) => found,
         Err(refused) => return refused,
     };
-    let Some(saved) = preset::from_readings(&eq, |id| raw_of(&device, id), wanted.clone()) else {
+    let Some(saved) = preset::from_readings(&eq, |id| raw_of(&device, id), asked.name.clone())
+    else {
         return error(
             StatusCode::CONFLICT,
             "the tone control has not been read yet",
         );
     };
-    let edit = move |path: &FilePath| Config::add_preset(path, &saved);
-    if let Err(refused) = edit_then_reload(&web, path, conflict, edit).await {
-        return refused;
-    }
+    let wanted = match save_preset(&web, &asked.name, saved, asked.force).await {
+        Ok(wanted) => wanted,
+        Err(refused) => return refused,
+    };
     answer(&web, &name, &wanted).await
+}
+
+/// Whether the preset called `name` may be written over with the device's bands, in the TUI's
+/// refusals: a built-in (422), the computer's side, an imported preset (422).
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
+async fn overwritable(web: &Web, name: &str, from_computer: bool) -> Result<(), Response> {
+    if preset::is_builtin(name.trim()) {
+        return Err(refused_name(preset::builtin_update_refusal(name.trim())));
+    }
+    if from_computer {
+        return Err(error(StatusCode::CONFLICT, preset::COMPUTER_UPDATE_REFUSAL));
+    }
+    let config = config_for(web, "presets").await?;
+    match preset::find(&config.presets, name) {
+        Some(existing) if existing.is_imported() => Err(refused_name(
+            preset::imported_update_refusal(&existing.name),
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// What `presets/rename` takes.
@@ -149,7 +180,7 @@ async fn rename(
             ),
         );
     }
-    let (path, config) = match config_file(&web, "presets").await {
+    let config = match config_for(&web, "presets").await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -166,7 +197,7 @@ async fn rename(
     };
     let to = new.clone();
     let edit = move |path: &FilePath| Config::rename_preset(path, &old, &to);
-    if let Err(refused) = edit_then_reload(&web, path, conflict, edit).await {
+    if let Err(refused) = edit_then_reload(&web, conflict, edit).await {
         return refused;
     }
     answer(&web, &name, &new).await
@@ -201,7 +232,7 @@ async fn delete(
             ),
         );
     }
-    let (path, config) = match config_file(&web, "presets").await {
+    let config = match config_for(&web, "presets").await {
         Ok(found) => found,
         Err(refused) => return refused,
     };
@@ -213,7 +244,7 @@ async fn delete(
     };
     let taken = gone.clone();
     let edit = move |path: &FilePath| Config::remove_preset(path, &taken);
-    if let Err(refused) = edit_then_reload(&web, path, conflict, edit).await {
+    if let Err(refused) = edit_then_reload(&web, conflict, edit).await {
         return refused;
     }
     answer(&web, &name, &gone).await

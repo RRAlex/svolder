@@ -115,14 +115,8 @@ export const SHEET = Object.freeze({
   saveList: 'Save the bands to',
   builtIn: 'Built in',
   faults: 'Faults',
-  factsTitle: (name) => `The ${name}`,
-  factsShow: 'show the facts',
-  factsHide: 'hide',
-  readings: 'All readings',
-  identify: 'Identify',
-  identifyNote: 'Asks the unit to show itself, so you can tell it from the others.',
-  ago: (age) => `${age} ago`,
-  product: (name, id) => name ?? `product ${id}`,
+  deviceSettings: 'Device settings…',
+  deviceFacts: 'Devices…',
 });
 
 /** The amp's gauges in the dash. */

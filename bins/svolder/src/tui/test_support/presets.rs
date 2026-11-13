@@ -6,11 +6,11 @@
 //! helpers that echo a load back the way the device does. They sit apart from the TUI's other
 //! shared helpers because only the preset-related tests use them.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crossterm::event::KeyCode;
 use serde_json::json;
-use svolder_autoeq::Index;
+use svolder_autoeq::Entry;
 use svolder_ipc::{TuiConfig, ValueObject};
 use svolder_profiles::tone::preset::{self, Preset, PresetBand};
 use svolder_profiles::{EqMode, EqParam, EqSpec};
@@ -18,7 +18,8 @@ use svolder_proto::FunctionId;
 
 use crate::backend::Update;
 use crate::tui::app::{App, Intent, Screen};
-use crate::tui::boxes::presets::{Step, entries};
+use crate::tui::boxes::presets::search::Ask;
+use crate::tui::boxes::presets::{Done, Step, done, entries};
 use crate::tui::test_support::{press_from as press, profile_named};
 
 /// One reading of a function no control names, as a backend hands it over.
@@ -214,17 +215,13 @@ pub(in crate::tui) const PEQ: &str = "Preamp: -3.0 dB\n\
     Filter 1: ON LSC Fc 105 Hz Gain 5.0 dB Q 0.70\n\
     Filter 2: ON PK Fc 3000 Hz Gain -3.0 dB Q 2.00\n";
 
-/// An AutoEq index of these index lines, fetched on 2026-07-01.
-pub(in crate::tui) fn index_of(lines: &[&str]) -> Index {
-    Index {
-        entries: svolder_autoeq::parse_index(&lines.join("\n")),
-        fetched: std::time::UNIX_EPOCH + Duration::from_secs(1_782_864_000),
-        note: None,
-    }
+/// The measurements these AutoEq index lines list.
+pub(in crate::tui) fn index_of(lines: &[&str]) -> Vec<Entry> {
+    svolder_autoeq::parse_index(&lines.join("\n"))
 }
 
 /// Two headphones, the first measured by two sources.
-pub(in crate::tui) fn two_headphones() -> Index {
+pub(in crate::tui) fn two_headphones() -> Vec<Entry> {
     index_of(&[
         "- [Sennheiser HD 650](./oratory1990/over-ear/Sennheiser%20HD%20650) by oratory1990",
         "- [Sennheiser HD 650](./crinacle/GRAS%2043AG-7%20over-ear/Sennheiser%20HD%20650) by crinacle on GRAS 43AG-7",
@@ -232,11 +229,44 @@ pub(in crate::tui) fn two_headphones() -> Index {
     ])
 }
 
-/// The list, on the tone-control screen, open on the search box with the index already held.
-pub(in crate::tui) fn searching(index: Index) -> App {
+/// The last search question among `intents`.
+pub(in crate::tui) fn last_ask(intents: &[Intent]) -> Ask {
+    intents
+        .iter()
+        .rev()
+        .find_map(|intent| match intent {
+            Intent::AutoEqSearch { ask, .. } => Some(ask.clone()),
+            _ => None,
+        })
+        .expect("a search question was asked")
+}
+
+/// Answer `ask` as the daemon would for an index listing `entries` (the same grouping), through
+/// the loop's own fold, and hand back the intents that asks for.
+pub(in crate::tui) fn answer(app: &mut App, entries: &[Entry], ask: &Ask) -> Vec<Intent> {
+    let found = crate::test_support::autoeq_script::answer_of(entries, &ask.query);
+    done(app, Done::Searched(ask.clone(), Ok(found)))
+}
+
+/// The list, on the tone-control screen, open on the search box whose first question (the empty
+/// query's, which loads the index) the daemon has answered for `entries`.
+pub(in crate::tui) fn searching(entries: &[Entry]) -> App {
     let mut app = resting("gungnir2-v2", EqMode::Eq);
-    app.presets.autoeq = Some(std::sync::Arc::new(index));
     press(&mut app, KeyCode::Char('p'));
-    press(&mut app, KeyCode::Char('a'));
+    let intents = press(&mut app, KeyCode::Char('a'));
+    let first = last_ask(&intents);
+    answer(&mut app, entries, &first);
     app
+}
+
+/// Type `text` into the open search box, one key at a time, and answer the last question those
+/// keys asked, as the loop's debounce would send it. Returns every intent the keys made.
+pub(in crate::tui) fn search_typing(app: &mut App, entries: &[Entry], text: &str) -> Vec<Intent> {
+    let mut intents = Vec::new();
+    for letter in text.chars() {
+        intents.extend(press(app, KeyCode::Char(letter)));
+    }
+    let last = last_ask(&intents);
+    answer(app, entries, &last);
+    intents
 }

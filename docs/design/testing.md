@@ -15,7 +15,8 @@ live" lists where each module's tests are.
 
 - **`make check`**: the whole ordinary gate: build tools present, format, clippy with warnings
   denied, the safety list, the documentation check, dependency licences, source headers, the
-  build-deps self-test and every test. Run it before every commit meant to stay and before a merge.
+  network boundary, the build-deps self-test and every test. Run it before every commit meant to
+  stay and before a merge.
 - **`make test`**: the workspace's tests alone, in a scratch environment. Run it while iterating on
   Rust.
 - **`make safety-tests`**: every test the safety list names still exists. Run it after touching a
@@ -74,6 +75,29 @@ web tokens unset, and the AutoEq catalogue pointed at a closed port. The run fai
 test leaves anything in its temporary directory. A test that reached for the user's real files
 would find a scratch copy instead, so no test can read or change a person's configuration.
 
+The in-process MQTT broker (`rumqttd`, about 175 crates svolder-mqtt would otherwise build) is an
+optional dependency behind the `broker-tests` feature of `svolder-mqtt`, `svolderd` and `svolder`.
+Four groups of tests need it and run only with `--features broker-tests`: svolder-mqtt's `client`
+tests, svolderd's `mqtt` integration tests, two unit tests in svolderd's `mqtt_bridge/tests.rs` and
+the one `daemon status` test in svolder's `backend.rs`. `make test`, `make check` and both CI jobs
+pass `--all-features`, so they run them. A plain `cargo test` builds without the broker and passes
+without running them, so it can pass with a broken broker test: finish with `make test`.
+
+### What `make audit` does
+
+`make audit` runs `cargo audit --deny warnings` against `Cargo.lock`, allowing the two known
+unmaintained warnings by id (paste, RUSTSEC-2024-0436; ttf-parser, RUSTSEC-2026-0192) and failing
+on any other advisory or warning. It needs the network and `cargo-audit`, writes the advisory
+database to `~/.cargo/advisory-db`, and is not part of `make check`.
+
+### The minimum-compiler job
+
+`Cargo.toml` promises `rust-version = "1.93"`, and the local `make check` runs on it. CI's `test`
+job in `check.yml` runs `make check` on Rust 1.99.1, the compiler the release builds use. Its
+`minimum` job runs `make test` on 1.93.1: it proves the workspace builds and its tests pass on the
+minimum compiler, with every feature on. It runs no lints, since clippy's lint set moves with the
+compiler.
+
 ## The fake device and the transport
 
 `svolder-fake`'s `FakeDevice` (`crates/svolder-fake/src/device.rs`) answers real protocol frames in
@@ -118,16 +142,16 @@ directory behind.
 `svolder-sim` (`bins/svolder-sim`) serves the fake device as a real BLE peripheral: it advertises
 the service and manufacturer data and answers writes over GATT, so the CLI and the daemon can be
 driven over a radio with no hardware. Its flags choose the device (`--profile`, `--unit`,
-`--firmware`, `--passphrase`), seed faults (`--faults`), play a signal (`--signal`, for a profile
-whose meters have a scale such as `fake-amp`), report a Loki Max's bands on the short id form
-(`--loki-reports short`) or not at all after a recall (`--silent-recall`), report a change only
-(`--quiet-same`), start with USB, S/PDIF lock and a sample rate of its own and change them from stdin
-(`--usb`, `--spdif-locked`, `--sample-rate`; `usb 1`, `spdif 0`, `rate 44100`), print every decoded
-frame (`--trace`), lay the
-advertisement out as an older device does (`--layout legacy`) and answer pairing
-(`--accept-pairing`, which must never run on a host that also has a Bluetooth central of its own on
-the same adapters).
-It needs an adapter (`--adapter`).
+`--firmware`, `--passphrase`, and `--advertised-passphrase`, which is opt-in and changes only the
+code the device advertises, not the one it checks), seed faults (`--faults`), play a signal
+(`--signal`, for a profile whose meters have a scale such as `fake-amp`), report a Loki Max's bands
+on the short id form (`--loki-reports short`) or not at all after a recall (`--silent-recall`),
+report a change only (`--quiet-same`), start with USB, S/PDIF lock and a sample rate of its own and
+change them from stdin (`--usb`, `--spdif-locked`, `--sample-rate`; `usb 1`, `spdif 0`,
+`rate 44100`), print every decoded frame (`--trace`), lay the advertisement out as an older device
+does (`--layout legacy`) and answer pairing (`--accept-pairing`, which must never run on a host
+that also has a Bluetooth central of its own on the same adapters). It needs an adapter
+(`--adapter`).
 
 The device reports the tone-control mode on a change only: a Command equal to the mode it holds is
 stored and answered with nothing, found by the profile's tone-control role so every parametric-EQ
@@ -240,13 +264,27 @@ fake daemon). The script, the styles and the smoke need a real browser and are c
   waking, the menu button and `T`, `?theme=`, a guest), `completeness.py` for every control and fact
   on every kind of device in the fake fleet, and `core_rows.py` for what the core holds for themes
   to come. They go through each theme's test driver and judge what the fake daemon received and
-  what the theme showed, never a pixel. [Web themes](web-themes.md) says why. Paper adds six node
+  what the theme showed, never a pixel. [Web themes](web-themes.md) says why. The core's stack of
+  modals and its router of the history are held by `node/core-modal.mjs` and `node/core-router.mjs`
+  on a jsdom page (the apt package `node-jsdom`) and by `modal.py` in each browser, in every theme:
+  no key acts behind a modal, and Back steps a popup without changing the shown device. A harness
+  that needs jsdom skips loudly where it is missing (`SKIPPED`, exit 77, a failure for the gate)
+  and passes only under `WEB_CHECK_ALLOW_NO_JSDOM=1`, under which the whole node list passes on
+  a machine without jsdom; `node/dom.mjs` says when a harness uses a jsdom page. Paper adds six node
   harnesses (`paper-*.mjs`: tokens and contrast, words, the live sheet, the ruler, every section from
   every fixture, the notes), `paper.py` in both browsers (dark from the first byte, the needle's
   value against its place, drags, the cap, a held section, the questions, no sideways scroll at
   390 px, the notes), and two mutation runners; [web-paper.md](web-paper.md#the-checks-and-the-mutants)
   lists them. `WEB_CHECK_THEMES` limits the contract passes to the themes it names and fails on a
   name the page does not list.
+- **The sweeps** hold what the other checks leave to the eye. `contrast.py` computes WCAG 2.2
+  contrast from the colours the browser draws for the page, the menu and every listed popup, in
+  every theme and scheme (a picture ground is sampled); `phone_sweep.py` loads the same states at
+  360, 390 and 768 px and reads sideways scroll, cut elements and small controls. Each keeps a
+  baseline of today's failures (a new or worse one fails) and fails on a state it did not reach or
+  a planted fault it misses. Full gate only; blind to canvas text, hover, animation, forced colours.
+  `make routes-doc-check` ties the daemon's routes, the fields of the devices, series,
+  walk and AutoEq routes and their writer gate to the table in [web-ui.md](../usage/web-ui.md).
 - **Arrange mode** has `node/ember-order.mjs` (the order's rules) and `arrange.py` (every section
   into every zone, keys, touch, Reset, Escape, the order across a reload).
 - **Mutation runners** (`mutate_*.py`, `node/mutate_*.sh`) edit a copy of the page's files and must
@@ -268,14 +306,24 @@ tools needed (node, two browsers, geckodriver, a few Python packages) and the ti
 
 ## Other gates `make check` runs
 
-- `make license-check` (`scripts/check-licenses.py`) fails when a dependency's licence is not
-  compatible with GPL-3.0-or-later.
+- `make license-check` (`scripts/check-licenses.py`) fails on a licence GPL-3.0-or-later cannot use.
 - `make spdx-check` (`scripts/spdx-check.sh`) fails when a source file lacks its SPDX header; a
   test (`bins/svolder/tests/spdx_check.rs`) proves the checker on small trees.
-- `make deps-test` (`scripts/build-deps-test.sh`) is the self-test of the script that tells a
-  contributor which build tools are missing on their distribution.
-- `bins/svolder/tests/makefile.rs` reads the Makefile's choices off a dry run, so nothing is built
-  or installed.
+- `make network-check` fails when `cargo tree -p svolder -e normal -i ureq` or `-i rustls` prints
+  anything: only `svolderd` may link an HTTP client or TLS (the CLI and the TUI ask the daemon for
+  AutoEq). It fails closed: only "nothing to print" or "did not match any packages" is clean.
+  `make network-check-test` runs it on `svolderd` (`NETWORK_CHECK_PKG=svolderd`), which links both.
+- `make unit-check` runs `systemd-analyze --user verify` on the filled-in `svolderd.service` and
+  `svolderd.socket`, plain and with `svolderd-filesystem.conf` as a drop-in; output naming our units
+  fails it. It also compares the drop-in block in `docs/usage/daemon.md` with that file, and prints
+  `SKIPPED` for the verify half where `systemd-analyze` is missing.
+- `make deps-test` (`scripts/build-deps-test.sh`) self-tests the script that names missing tools.
+- `make release-dry-run` (`scripts/release-dry-run.sh`; before a tag, not part of `make check`)
+  builds the packages, installs the amd64 `.deb` in a clean container, then starts the container
+  image under the compose file a release attaches, on the fake device, and checks its log, `add`,
+  `status`, `web off` then `on` and the log size cap. Its containers and image are named
+  `svolder-dryrun-<random>` and removed at exit.
+- `bins/svolder/tests/makefile.rs` reads the Makefile's choices off a dry run; nothing is built.
 
 ## Principles
 

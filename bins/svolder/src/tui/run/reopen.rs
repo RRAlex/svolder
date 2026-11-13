@@ -35,7 +35,7 @@ impl<O: Open> Opener<O> {
     /// it: `[tui] host_audio` is on and `SVOLDER_HOST=off` does not hold it off. The setting is
     /// the session's own when one is being replaced (`keep`), else the one the TUI started with.
     fn shows_host(&self, keep: Option<&Kept>) -> bool {
-        keep.map_or(self.tui.host_audio, |keep| keep.host_audio) && !svolder_host::host_off()
+        keep.map_or(self.tui.host_audio, |keep| keep.host_audio) && !svolder_host::host_held_off()
     }
 
     /// Open `backend`'s update feed, with the daemon's host view on it when `host`.
@@ -150,6 +150,7 @@ impl<O: Open> Opener<O> {
             app.host.daemon = None;
             app.mascot = keep.mascot.reopened();
             app.session.daemon_version_warned = keep.daemon_version_warned;
+            app.session.config_changed_told = keep.config_changed_told;
             app.overlays.held_accents = keep.held_accents;
             if keep.unit.is_some() && keep.unit == app.session.unit {
                 app.readings.histories = keep.histories;
@@ -196,11 +197,14 @@ impl<O: Open> Opener<O> {
             app.warn(warnings.join("; "));
         }
         Ok(Watching {
+            reload_owed: None,
             backend: Some(backend),
             app: Box::new(app),
             device: name.map(str::to_string),
             feed_open: true,
             daemon_version,
+            view_ask: None,
+            view_off: false,
             web_code: None,
             web_check: None,
             web_copy: None,
@@ -384,6 +388,7 @@ impl<O: Open> Opener<O> {
             app.host.daemon = None;
             app.mascot = keep.mascot.reopened();
             app.session.daemon_version_warned = keep.daemon_version_warned;
+            app.session.config_changed_told = keep.config_changed_told;
             app.overlays.held_accents = keep.held_accents;
             if waited.is_some() {
                 app.screen = keep.screen;
@@ -395,11 +400,14 @@ impl<O: Open> Opener<O> {
         let daemon_version = connect::ask_daemon(backend.as_ref());
         let _ = relisted(&self.path, &mut app);
         Watching {
+            reload_owed: None,
             backend,
             app: Box::new(app),
             device: waited,
             feed_open,
             daemon_version,
+            view_ask: None,
+            view_off: false,
             web_code: None,
             web_check: None,
             web_copy: None,

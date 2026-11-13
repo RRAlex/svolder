@@ -14,6 +14,7 @@ id = [2]
 key = "input"
 label = "Input"
 kind = "select"
+key_reading = true
 values = { 1 = "USB 1", 2 = "USB 2", 3 = "Optical", 4 = "Coaxial", 5 = "BNC", 6 = "AES" }
 
 [[control]]

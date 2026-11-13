@@ -100,3 +100,21 @@ fn backspace_off_the_code_leaves_the_kept_digits_alone() {
     row.step(-1);
     assert_eq!(row.shown(), "12__");
 }
+
+/// The digits are drawn masked until `Tab` shows them; showing is not a change of the row, and a
+/// code that was sent is hidden again.
+#[test]
+fn the_code_is_masked_until_tab_shows_it() {
+    let mut row = PassphraseRow::code();
+    for digit in "12".chars() {
+        row.type_digit(digit);
+    }
+    assert_eq!(row.drawn(), "••__");
+    let before = row.clone();
+    assert!(row.key(KeyCode::Tab));
+    assert_eq!(row.drawn(), "12__");
+    assert_eq!(row, before, "showing the code changed the row");
+    row.forget_digits();
+    row.type_digit('7');
+    assert_eq!(row.drawn(), "•___", "a spent code stayed on show");
+}

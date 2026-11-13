@@ -40,10 +40,6 @@ export const core = createCore({
 });
 switcher = createSwitcher({ core, window, root: document.getElementById('theme') });
 
-// The entry the page opened on knows its device, so a step back to it shows that device whatever
-// its address says.
-history.replaceState({ device: core.model.shown() }, '', location.href);
-
 /**
  * Spend a link the page was opened with, and on a guest's page ask the session once: a browser
  * signed in that arrives from another site sends no Strict cookie, so it is served as a guest

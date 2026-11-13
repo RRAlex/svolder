@@ -116,6 +116,8 @@ profile's Theme.
 - the tone control: its mode, the preset list, and the loudness strength while the mode is
   `loudness`;
 - the input readouts, with the output's mute, NOS filter and phase switches beneath them;
+- the computer's EQ on or off, a badge in the Tone control heading, "Computer EQ  Off", that shows only while `This computer` is
+  there (tap it to switch);
 - the bands while the mode is `eq`, each its gain on a slider and its frequency and Q stepped
   with buttons: on a screen 1024 px wide or more they share one row, sharing its width, and on a
   narrower one they stack, one section per band.

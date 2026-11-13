@@ -84,7 +84,7 @@ Architecture: $deb_arch
 Maintainer: the svolder authors
 Homepage: $homepage
 Installed-Size: $size
-Depends: bluez, dbus
+Depends: bluez, dbus, ca-certificates
 Recommends: pipewire-bin, wireplumber
 Section: sound
 Priority: optional
@@ -130,7 +130,7 @@ URL: $homepage
 BuildArch: x86_64
 # The binaries are static: there is no shared library for rpm to find a dependency in.
 AutoReqProv: no
-Requires: bluez, dbus
+Requires: bluez, dbus, ca-certificates
 Recommends: pipewire-utils, wireplumber
 
 %description

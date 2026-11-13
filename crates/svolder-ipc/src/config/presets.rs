@@ -7,11 +7,13 @@
 use std::path::Path;
 
 use svolder_profiles::tone::apo::SourceFilter;
-use svolder_profiles::tone::preset::{Preset, PresetBand, checked_name, new_name, same_name};
+use svolder_profiles::tone::preset::{
+    NameRefusal, Preset, PresetBand, checked_name, new_name, same_name,
+};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
 
 use super::edit::{blocks_mut, detached, edit_file, hand_on, prefix_of, push_block, set_key};
-use super::{Config, ConfigError};
+use super::{Config, ConfigError, missing, vanished};
 
 impl Config {
     /// The preset named `name`, matching case and the blanks round it aside
@@ -83,7 +85,7 @@ impl Config {
             checked_new(doc, &preset.name, own.as_deref())?;
             let table = presets_mut(doc)?
                 .get_mut(at)
-                .ok_or_else(|| ConfigError::Parse(format!("preset {name:?} went missing")))?;
+                .ok_or_else(|| vanished("preset", name))?;
             write_preset(table, preset);
             Ok(())
         })
@@ -102,7 +104,7 @@ impl Config {
             checked_new(doc, new, own.as_deref())?;
             let table = presets_mut(doc)?
                 .get_mut(at)
-                .ok_or_else(|| ConfigError::Parse(format!("preset {old:?} went missing")))?;
+                .ok_or_else(|| vanished("preset", old))?;
             let mut nothing = String::new();
             set_key(table, &mut nothing, "name", Value::from(new));
             Ok(())
@@ -151,12 +153,15 @@ fn named_preset(doc: &DocumentMut, name: &str) -> Option<(usize, String)> {
 fn preset_at(doc: &DocumentMut, name: &str) -> Result<usize, ConfigError> {
     named_preset(doc, name)
         .map(|(at, _)| at)
-        .ok_or_else(|| ConfigError::Parse(format!("no preset named {name:?} is configured")))
+        .ok_or_else(|| missing("preset", name))
 }
 
 /// What a preset writer refuses a name another block already carries with.
 pub(super) fn preset_taken(name: &str) -> ConfigError {
-    ConfigError::Parse(format!("a preset named {name:?} is already configured"))
+    ConfigError::Taken {
+        kind: "preset",
+        name: name.to_string(),
+    }
 }
 
 /// The names of the `[[preset]]` blocks of `doc`, without the blanks round them.
@@ -178,14 +183,14 @@ fn preset_names(doc: &DocumentMut) -> Vec<String> {
 fn checked_new(doc: &DocumentMut, name: &str, renaming: Option<&str>) -> Result<(), ConfigError> {
     new_name(name, preset_names(doc), renaming)
         .map(|_| ())
-        .map_err(|why| ConfigError::Parse(why.to_string()))
+        .map_err(ConfigError::Name)
 }
 
 /// `text` as a writer puts a preset's name in the file, without the blanks round it, or the
 /// error saying why it is no name ([`checked_name`]): a writer refuses it itself rather than
 /// leave it to the parse of the whole file, whose error is about the file.
 fn written_name(text: &str) -> Result<&str, ConfigError> {
-    checked_name(text).map_err(|why| ConfigError::Parse(why.to_string()))
+    checked_name(text).map_err(|why| ConfigError::Name(NameRefusal::Name(why)))
 }
 
 /// `preset` with its name as a writer puts it in the file ([`written_name`]).

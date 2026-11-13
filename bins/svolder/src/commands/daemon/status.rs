@@ -18,7 +18,7 @@ use svolder_ipc::{Client, DeviceInfo, McpStatus, MqttStatus, Request, Response, 
 use crate::backend::{ASK_WAIT, Globals};
 use crate::recovery::Failure;
 
-use super::logs::{JOURNAL, LogSaid, NOT_A_FILE};
+use super::logs::{CONTAINER_LOG, JOURNAL, LogSaid, NOT_A_FILE};
 use super::{Ctl, OWN_VERSION, SERVICE_UNIT, SOCKET_UNIT, resolved_socket, systemd_manages};
 
 /// What the daemon is doing: the units, the daemon's own version, its MQTT bridge, its MCP
@@ -76,13 +76,14 @@ async fn status_lines(
     let mut said = LogSaid::Unsaid;
     match Client::connect(socket).await {
         Ok(mut client) => match tokio::time::timeout(ASK_WAIT, version(&mut client)).await {
-            Ok((version, mqtt, mcp, web, logs_to)) => {
-                said = LogSaid::of(&version, logs_to);
-                lines.push(format!("daemon: {version} on {}", socket.display()));
-                lines.extend(daemon_version::mismatch_line(&version, OWN_VERSION));
-                lines.extend(mqtt.as_ref().map(mqtt_line));
-                lines.extend(mcp.as_ref().map(McpStatus::line));
-                lines.extend(web.as_ref().map(WebStatus::line));
+            Ok(told) => {
+                said = LogSaid::of(&told.version, told.log);
+                lines.push(format!("daemon: {} on {}", told.version, socket.display()));
+                lines.extend(daemon_version::mismatch_line(&told.version, OWN_VERSION));
+                lines.extend(told.config_changed);
+                lines.extend(told.mqtt.as_ref().map(mqtt_line));
+                lines.extend(told.mcp.as_ref().map(McpStatus::line));
+                lines.extend(told.web.as_ref().map(WebStatus::line));
                 match tokio::time::timeout(ASK_WAIT, devices(&mut client)).await {
                     Ok(device_lines) => lines.extend(device_lines),
                     Err(_) => lines.push(format!("devices: no answer within {ASK_WAIT:?}")),
@@ -107,6 +108,9 @@ async fn status_lines(
             lines.push("log: the journal".to_string());
         }
         LogSaid::Path(reported) => lines.push(format!("log: {reported}")),
+        LogSaid::NoFile if ctl.container && !systemd_manages(&units) => {
+            lines.push(format!("log: {CONTAINER_LOG}"));
+        }
         LogSaid::NoFile => lines.push(format!("log: {NOT_A_FILE}")),
         LogSaid::Unsaid if !systemd_manages(&units) => {
             lines.push(format!("log: {}", log.display()));
@@ -141,20 +145,38 @@ fn also_running(running: &[RunningDaemon], socket: &Path, listen: Option<&Path>)
         .collect()
 }
 
-/// The daemon's version, or what it said instead, and where its MQTT bridge, its MCP server and
-/// its web UI stand when it says, and where it logs: a daemon too old to have one says nothing.
-pub(super) async fn version(
-    client: &mut Client,
-) -> (
-    String,
-    Option<MqttStatus>,
-    Option<McpStatus>,
-    Option<WebStatus>,
-    Option<String>,
-) {
+/// What a daemon said of itself: its version, or what it said instead, where its MQTT bridge, its
+/// MCP server and its web UI stand, where it logs, and whether its file changed since the last
+/// reload. A daemon too old to have one of them says nothing of it.
+pub(super) struct Said {
+    pub(super) version: String,
+    pub(super) mqtt: Option<MqttStatus>,
+    pub(super) mcp: Option<McpStatus>,
+    pub(super) web: Option<WebStatus>,
+    pub(super) log: Option<String>,
+    /// The line that says the configuration file changed, when it did.
+    pub(super) config_changed: Option<String>,
+}
+
+/// Ask `client` for what the daemon says of itself.
+pub(super) async fn version(client: &mut Client) -> Said {
     match daemon_version::version_on(client).await {
-        Ok(VersionReply { info, log }) => (info.version, info.mqtt, info.mcp, info.web, log),
-        Err(why) => (why.to_string(), None, None, None, None),
+        Ok(VersionReply { info, log }) => Said {
+            config_changed: info.config_changed_words(),
+            version: info.version,
+            mqtt: info.mqtt,
+            mcp: info.mcp,
+            web: info.web,
+            log,
+        },
+        Err(why) => Said {
+            version: why.to_string(),
+            mqtt: None,
+            mcp: None,
+            web: None,
+            log: None,
+            config_changed: None,
+        },
     }
 }
 

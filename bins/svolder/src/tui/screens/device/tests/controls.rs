@@ -156,7 +156,7 @@ fn the_mode_rows_arrows_are_in_the_accent_focused_or_not() {
     let mut app = mockup_app();
     // Off the Input row and off the Tone pane's own focus, so neither row's own selected
     // style — the accent among it too — is what colours these arrows.
-    app.selected = 1;
+    app.set_selected(1);
     app.pane = Pane::Status;
     let buffer = frame_with_theme(&app, 80, 24, &theme);
     let y = u16::try_from(
@@ -206,7 +206,7 @@ fn the_selected_rows_cursor_carries_the_accent_colour() {
 fn the_selected_row_is_reversed_to_the_panes_inner_right_edge() {
     let theme = Theme::new(true);
     let mut app = mockup_app();
-    app.selected = 0; // Input, a short row
+    app.set_selected(0); // Input, a short row
     let buffer = frame_with_theme(&app, 80, 24, &theme);
     let cells = row_cells(&buffer, "Input");
     let border = cells
@@ -340,7 +340,7 @@ fn a_focused_controls_row_is_selected_across_the_pane() {
         );
         app.settle();
         for (selection, label) in [(0, "Input"), (4, "Volume")] {
-            app.selected = selection;
+            app.set_selected(selection);
             let buffer = frame(&app, width, height);
             let cells = controls_row_cells(&buffer, label);
             let last = last_character(&cells);
@@ -542,11 +542,12 @@ fn switch_app() -> App {
         &[("PK", 1000.0, 0.0, 1.0)],
     ));
     let volume = app.volume().expect("a volume").id;
-    app.selected = app
-        .rows()
-        .iter()
-        .position(|row| row.control.id == volume)
-        .expect("the volume row");
+    app.set_selected(
+        app.rows()
+            .iter()
+            .position(|row| row.control.id == volume)
+            .expect("the volume row"),
+    );
     app
 }
 
@@ -589,21 +590,21 @@ fn the_switch_is_a_row_above_volume_whose_arrows_pick_the_side() {
 #[test]
 fn the_switch_is_reached_going_down_as_well_as_up() {
     let mut app = switch_app();
-    let volume = app.selected;
+    let volume = app.selected();
     assert!(volume > 0, "a row above Volume");
-    app.selected = volume - 1;
+    app.set_selected(volume - 1);
     assert!(!app.switch_focused());
     press(&mut app, KeyCode::Down);
     assert!(app.switch_focused(), "↓ from the row above lands on Target");
-    assert_eq!(app.selected, volume);
+    assert_eq!(app.selected(), volume);
     press(&mut app, KeyCode::Down);
     assert!(!app.switch_focused());
-    assert_eq!(app.selected, volume);
+    assert_eq!(app.selected(), volume);
     press(&mut app, KeyCode::Up);
     assert!(app.switch_focused());
     press(&mut app, KeyCode::Up);
     assert!(!app.switch_focused());
-    assert_eq!(app.selected, volume - 1);
+    assert_eq!(app.selected(), volume - 1);
 }
 
 /// The switch has a cursor of its own: moving onto it from Volume and off it again each name the
@@ -734,10 +735,10 @@ fn the_unavailable_reason_is_not_focusable() {
             .any(|row| row.contains("Target") && row.contains("unavailable")),
         "{rows:?}"
     );
-    let before = app.selected;
+    let before = app.selected();
     press(&mut app, KeyCode::Up);
     assert!(!app.switch_focused());
-    assert_ne!(app.selected, before, "↑ moves to the row above instead");
+    assert_ne!(app.selected(), before, "↑ moves to the row above instead");
 }
 
 /// At 80 columns the device's name is cut and the switch stays on its own line above the bar.

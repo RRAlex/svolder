@@ -13,7 +13,9 @@ use crossterm::event::Event;
 use futures::Stream;
 use ratatui::Terminal;
 
-use svolder_ipc::{Config, DeviceConfig};
+use svolder_ipc::{
+    Config, ConfiguredDevice, DeviceConfig, DeviceConfigOp, PassphraseKind, Response,
+};
 
 use crate::backend::{Backend, Failure};
 use crate::recovery::Kind;
@@ -121,7 +123,14 @@ where
     watching.app.frame_flags.screen_changed = true;
     let added = match end {
         WizardEnd::Quit | WizardEnd::Later => None,
+        WizardEnd::Signalled => return Added::Ends(wizard::SIGNALLED, None),
         WizardEnd::Added(device) => Some(device.name),
+        // The daemon's walk that could not be had, or went away, is a notice on the screen it
+        // was opened from: the TUI's own session is the daemon's client too, and carries on.
+        WizardEnd::Stopped { why, .. } if wizard.is_remote() => {
+            watching.app.warn(why);
+            None
+        }
         WizardEnd::Stopped { code, why } => return Added::Ends(code, Some(why)),
     };
     if let Err(e) = relisted(&opener.path, &mut watching.app) {
@@ -160,11 +169,40 @@ pub(super) async fn update_device<O: Open>(
     screen: &mut dyn Shown,
 ) -> Switched {
     let renamed = watches(watching, name) && !device.name.eq_ignore_ascii_case(name);
-    let written = written(
-        opener,
-        watching,
-        Config::update_device(&opener.path, name, device),
-    )
+    // Only what the person changed is sent: the record the editor opened on may be older than
+    // what another front end wrote since, and a field left alone must stay as that left it.
+    let opened = watching
+        .app
+        .devices
+        .opened
+        .iter()
+        .chain(watching.app.devices.configured.iter())
+        .find(|record| record.name.eq_ignore_ascii_case(name))
+        .cloned();
+    let op = DeviceConfigOp::Update {
+        device: name.to_string(),
+        name: opened
+            .as_ref()
+            .is_none_or(|was| was.name != device.name)
+            .then(|| device.name.clone()),
+        profile: opened
+            .as_ref()
+            .is_none_or(|was| was.profile != device.profile)
+            .then(|| device.profile.clone()),
+        passphrase: opened
+            .as_ref()
+            .is_none_or(|was| was.passphrase != device.passphrase)
+            .then(|| device.passphrase.clone()),
+    };
+    let written = write_device(opener, watching, look, screen, op, |path| {
+        // The daemon's view never carries a code, so a block it shows as `set` is not a file's.
+        if device.passphrase == "set" {
+            return Err(svolder_ipc::ConfigError::Parse(
+                "the daemon went away: open the editor again".into(),
+            ));
+        }
+        Config::update_device(path, name, device)
+    })
     .await;
     let mut switched = Switched::Stayed;
     if written && renamed {
@@ -212,7 +250,14 @@ pub(super) async fn remove_device<O: Open>(
     screen: &mut dyn Shown,
 ) -> Removed {
     let watched = watches(watching, name);
-    if !written(opener, watching, Config::remove_device(&opener.path, name)).await {
+    let op = DeviceConfigOp::Remove {
+        device: name.to_string(),
+    };
+    let wrote = write_device(opener, watching, look, screen, op, |path| {
+        Config::remove_device(path, name)
+    })
+    .await;
+    if !wrote {
         return Removed::Kept;
     }
     if !watched {
@@ -273,6 +318,121 @@ fn watches(watching: &Watching, name: &str) -> bool {
         .is_some_and(|watched| watched.eq_ignore_ascii_case(name))
 }
 
+/// Write a device change through the daemon's `device_config` op while one runs, and through the
+/// file's own writer when none does; a daemon that cannot take the op is refused in words and
+/// nothing is written behind it. A write in flight is shown as a wait; a refusal is worded from
+/// its typed reason. Says whether the change was written.
+pub(super) async fn write_device<O: Open>(
+    opener: &Opener<O>,
+    watching: &mut Watching,
+    look: &Look,
+    screen: &mut dyn Shown,
+    op: DeviceConfigOp,
+    local: impl FnOnce(&Path) -> Result<(), svolder_ipc::ConfigError>,
+) -> bool {
+    let socket = daemon_socket(opener, watching);
+    let mut wait = Wait::new("saving…".to_string());
+    let sent = wait
+        .on(
+            crate::reach::device_request(&socket, op),
+            watching,
+            look,
+            screen,
+            Interrupted::Carry,
+        )
+        .await;
+    match sent {
+        Some(Ok(None)) => written(opener, watching, local(&opener.path)).await,
+        Some(Ok(Some(Response::DeviceConfig { devices, .. }))) => {
+            // The daemon wrote the file and reloaded: nothing is left to tell it.
+            if let Some(backend) = watching.backend.as_mut() {
+                refresh_note(backend, &mut watching.app).await;
+            }
+            ask_again(watching);
+            relist(opener, watching);
+            apply_view(&mut watching.app, &devices);
+            true
+        }
+        Some(Ok(Some(Response::Error {
+            message, reason, ..
+        }))) => {
+            let words = crate::reach::refusal_words(reason, &message);
+            watching.app.warn(words);
+            false
+        }
+        Some(Ok(Some(other))) => {
+            watching
+                .app
+                .warn(format!("the daemon sent an unexpected reply: {other:?}"));
+            false
+        }
+        Some(Err(failure)) => {
+            watching.app.notify_failure(&failure);
+            false
+        }
+        None => false,
+    }
+}
+
+/// Take the daemon's view of the configured devices into `app`: the records the editor edits, the
+/// default, and the list's rows. A passphrase is only ever its kind (`auto`, `none`, `set`), as
+/// the daemon never reads one back; what a record holds besides (its input names) is kept from
+/// the record it replaces.
+pub(super) fn apply_view(app: &mut App, devices: &[ConfiguredDevice]) {
+    let configured: Vec<DeviceConfig> = devices
+        .iter()
+        .map(|device| DeviceConfig {
+            name: device.name.clone(),
+            udid: device.unit.clone(),
+            profile: device.profile.clone(),
+            passphrase: match device.passphrase {
+                PassphraseKind::None => "none",
+                PassphraseKind::Set => "set",
+                _ => "auto",
+            }
+            .to_string(),
+            inputs: app
+                .devices
+                .configured
+                .iter()
+                .find(|had| had.udid.eq_ignore_ascii_case(&device.unit))
+                .map(|had| had.inputs.clone())
+                .unwrap_or_default(),
+        })
+        .collect();
+    let rows: Vec<_> = configured
+        .iter()
+        .map(
+            |device| match app.devices.rows.iter().find(|had| had.name == device.name) {
+                Some(had) => had.clone(),
+                None => crate::backend::DeviceRow {
+                    name: device.name.clone(),
+                    ..Default::default()
+                },
+            },
+        )
+        .collect();
+    app.devices.rows = rows;
+    app.devices.default_device = devices
+        .iter()
+        .find(|device| device.default)
+        .map(|device| device.name.clone());
+    app.devices.configured = configured;
+    if app.screen == Screen::Devices {
+        app.set_selected(app.selected().min(app.devices.rows.len().saturating_sub(1)));
+    }
+}
+
+/// The socket of the daemon this session talks to, or the one this run resolves to when the
+/// session is direct.
+pub(super) fn daemon_socket<O: Open>(opener: &Opener<O>, watching: &Watching) -> PathBuf {
+    if let Some(socket) = watching.backend.as_ref().and_then(Backend::daemon_socket) {
+        return socket;
+    }
+    let configured = Config::load_from(&opener.path).ok().and_then(|c| c.socket);
+    svolder_ipc::socket::path::resolve(opener.globals.socket.as_deref(), configured.as_deref())
+}
+
 /// Report what a write to the configuration file came to, tell whatever holds the devices to
 /// read the file again, and take what it now says into the app.
 ///
@@ -298,6 +458,7 @@ pub(super) async fn written<O: Open>(
         // The daemon judged the passphrase again as it took the entry in.
         refresh_note(backend, &mut watching.app).await;
     }
+    ask_again(watching);
     relist(opener, watching);
     true
 }
@@ -320,8 +481,17 @@ pub(super) async fn written_preset<O: Open>(
     if let Some(socket) = watching.backend.as_ref().and_then(Backend::daemon_socket) {
         crate::backend::reload_if_reads(socket, &opener.path).await;
     }
+    ask_again(watching);
     relist(opener, watching);
     true
+}
+
+/// Ask the daemon how it stands after a write of this session's, so the `config changed` line
+/// and its once-per-change toast follow the reload the write caused. An ask in flight is kept.
+pub(super) fn ask_again(watching: &mut Watching) {
+    if watching.daemon_version.is_none() {
+        watching.daemon_version = super::connect::ask_daemon(watching.backend.as_ref());
+    }
 }
 
 /// Show what is on disk again, noticing a file that cannot be read.
@@ -358,7 +528,7 @@ pub(super) fn relisted(path: &Path, app: &mut App) -> Result<(), svolder_ipc::Co
     app.presets.saved = config.presets;
     app.tone.target_cache.clear();
     if app.screen == Screen::Devices {
-        app.selected = app.selected.min(app.devices.rows.len().saturating_sub(1));
+        app.set_selected(app.selected().min(app.devices.rows.len().saturating_sub(1)));
     }
     Ok(())
 }
@@ -374,6 +544,52 @@ pub(super) fn relisting(watching: &Watching) -> bool {
             .is_some_and(Backend::lists_held_devices)
 }
 
+/// What the daemon's list ask came to.
+pub(super) enum ViewAnswer {
+    /// The configured devices.
+    Devices(Vec<svolder_ipc::ConfiguredDevice>),
+    /// The daemon cannot list them (it lacks `device_crud`).
+    TooOld,
+    /// Anything else: a busy file, a restart, a timeout.
+    Failed,
+}
+
+/// Take in the daemon's list of the configured devices when its ask has answered, and start the
+/// next ask. Nothing is awaited: a daemon that is slow or too old costs the loop nothing, and one
+/// that said it cannot list is not asked again.
+fn take_view(watching: &mut Watching) {
+    use futures::FutureExt;
+    if let Some(ask) = watching.view_ask.as_mut() {
+        match ask.now_or_never() {
+            None => return,
+            Some(answer) => {
+                watching.view_ask = None;
+                match answer {
+                    Ok(ViewAnswer::Devices(devices)) => apply_view(&mut watching.app, &devices),
+                    // Only a daemon that cannot list turns the list off; any other failure is
+                    // tried again at the next relist.
+                    Ok(ViewAnswer::TooOld) => watching.view_off = true,
+                    Ok(ViewAnswer::Failed) | Err(_) => {}
+                }
+            }
+        }
+    }
+    if watching.view_off {
+        return;
+    }
+    let Some(socket) = watching.backend.as_ref().and_then(Backend::daemon_socket) else {
+        return;
+    };
+    watching.view_ask = Some(tokio::spawn(async move {
+        match crate::reach::device_request(&socket, DeviceConfigOp::List).await {
+            Ok(Some(Response::DeviceConfig { devices, .. })) => ViewAnswer::Devices(devices),
+            Err(failure) if crate::reach::is_too_old(&failure) => ViewAnswer::TooOld,
+            // No daemon any more is the session's own business: nothing to list, no word of it.
+            _ => ViewAnswer::Failed,
+        }
+    }));
+}
+
 /// Ask the daemon holding the devices how each of them is doing now, and take what it says into
 /// the rows the list shows.
 ///
@@ -383,6 +599,9 @@ pub(super) fn relisting(watching: &Watching) -> bool {
 /// facts. An answer that fails, or does not come within [`RELIST_BOUND`],
 /// leaves the list as it was: the list is only looking, and the next ask is a period away.
 pub(super) async fn relist_held(watching: &mut Watching) {
+    // The configured devices as the daemon holds them: asked in a task of its own, taken here
+    // once it has answered, so this never waits on the version ask or the list.
+    take_view(watching);
     let Some(backend) = watching.backend.as_ref() else {
         return;
     };
@@ -638,19 +857,23 @@ async fn land_over<O: Open>(
 
 /// Watch `fresh` in place of what is watched, which it replaces whole: it draws as this session
 /// does rather than as the configuration file did when the TUI started, so a setting changed
-/// since is kept, and it takes over the host the session reaches.
+/// since is kept, and it takes over the host the session reaches and the reload a Settings write
+/// owes.
 fn take_over(watching: &mut Watching, mut fresh: Watching, look: &Look) {
     fresh.app.set_look(&look.tui, &look.effects);
     fresh.app.mascot.capable = look.mascot_capable();
     fresh.host = std::mem::take(&mut watching.host);
     fresh.jobs = std::mem::take(&mut watching.jobs);
     fresh.computer = std::mem::take(&mut watching.computer);
+    // A reload a Settings write still owes is the session's, not the device's: it goes out from
+    // the device now watched, at the time it was due.
+    fresh.reload_owed = watching.reload_owed.take();
     *watching = fresh;
 }
 
 /// A wait the loop draws while it lasts: `words` behind a spinner that turns at its own step,
 /// reading the screen's input for the keys that give up.
-struct Wait {
+pub(super) struct Wait {
     words: String,
     began: tokio::time::Instant,
     ticks: tokio::time::Interval,
@@ -667,7 +890,7 @@ struct Wait {
 
 impl Wait {
     /// A wait that says `words`, its first frame due at once.
-    fn new(words: String) -> Wait {
+    pub(super) fn new(words: String) -> Wait {
         let mut ticks = tokio::time::interval(spinner::STEP);
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         Wait {
@@ -690,7 +913,7 @@ impl Wait {
     /// dropped where it stands and the answer is `None`; with [`Interrupted::Carry`] the work is
     /// seen through and answers as it would have. Every other event is dropped. A read error is
     /// dropped like any other event, and [`STOP_AFTER_ERRORS`] of them in a row end the reading.
-    async fn on<T>(
+    pub(super) async fn on<T>(
         &mut self,
         work: impl Future<Output = T>,
         watching: &mut Watching,

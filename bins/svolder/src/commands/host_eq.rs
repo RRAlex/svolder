@@ -89,9 +89,11 @@ async fn eq_op(socket: &Path, op: HostEqOp) -> Result<(), Failure> {
         .map_err(|e| Failure::of(crate::recovery::Kind::NoDaemon, e.to_string()))?;
     match client.request(Request::HostEq { op }).await {
         Ok(Response::Ack) => Ok(()),
-        Ok(Response::Error { code, message }) => {
-            Err(Failure::from_daemon_on(socket, code, message))
-        }
+        Ok(Response::Error {
+            code,
+            message,
+            reason,
+        }) => Err(Failure::from_daemon_on(socket, code, message, reason)),
         Ok(other) => Err(Failure::of(
             crate::recovery::Kind::DaemonError,
             format!("the daemon answered {other:?}"),
@@ -110,6 +112,7 @@ fn child_needs_a_daemon() -> Failure {
         code: 1,
         what: "in a container the computer EQ runs with the daemon".to_string(),
         next: "start svolderd, then try again".to_string(),
+        reason: None,
     }
 }
 

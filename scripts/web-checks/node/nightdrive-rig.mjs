@@ -4,7 +4,7 @@
 // computer side and actions, with a fake post, read, question and storage. Not a test: nightdrive-hud.mjs,
 // nightdrive-tune.mjs and nightdrive-draw.mjs import it.
 import { createActions } from '../../../bins/svolderd/web/core/actions.js';
-import { POINT_TYPES, createComputer, createHolds } from '../../../bins/svolderd/web/core/computer.js';
+import { POINT_TYPES, createComputer, createPending } from '../../../bins/svolderd/web/core/computer.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import {
   POINT_KEYS, labelWords, markersIn, pointDrag, pointValues, touchWatch,
@@ -64,41 +64,38 @@ export function computerRig({
     signedOut: () => {},
     fetch: async () => ({ status: 200, json: async () => ({ device }) }),
   });
-  const holds = createHolds({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
+  const pending = createPending({ store, fetch: async () => ({ status: 200, json: async () => ({ computer }) }) });
   const storage = memory();
   storage.setItem('svolder.side', side);
-  const computerCore = createComputer({ store, storage, holds });
+  const computerCore = createComputer({ store, storage, pending });
   const actions = createActions({
     store,
     post: async (path, body) => { posts.push([path, body]); return reply ? reply(path, body) : { status: 200, ok: true }; },
     toast: (text) => toasts.push(text),
     history: { pushState: () => {} },
     location: { assign: () => {} },
-    holds,
+    pending,
     ask: async (question) => { questions.push(question); return answer; },
     computer: computerCore,
   });
   const toast = (text) => toasts.push(text);
-  // core.drag as the core builds it (core.js): the gestures, the hand on the computer's curve and its table
-  const drag = {
-    ...toneDrag,
-    pointDrag: (options) => pointDrag({
-      actions, computer: computerCore, toast, ...options,
-    }),
-    labelWords,
-    pointValues,
-    markersIn,
-    POINT_KEYS,
-    POINT_TYPES,
-    touchWatch,
-    table: (options) => createTable({ computer: computerCore, ...options }),
-    editCell,
-    isLong,
+  // core.eq as the core builds it (core.js): the bands' drag, the hand on the computer's curve and
+  // the points' table
+  const eq = {
+    bands: toneDrag,
+    points: Object.assign(
+      (options) => pointDrag({ actions, computer: computerCore, toast, ...options }),
+      { pointValues, markersIn, POINT_KEYS, touchWatch },
+    ),
+    table: Object.assign(
+      (options) => createTable({ computer: computerCore, ...options }),
+      { editCell, labelWords, POINT_TYPES, isLong },
+    ),
   };
   const core = {
-    model: store, computer: computerCore, actions, drag, curve, words, frame: { toast }, prefs: { get: (k, d) => d },
+    model: store, computer: computerCore, actions, eq, curve, words, frame: { toast, covered: () => false }, prefs: { get: (k, d) => d },
   };
   return {
-    core, store, holds, posts, toasts, questions, storage,
+    core, store, pending, posts, toasts, questions, storage,
   };
 }

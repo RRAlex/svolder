@@ -9,6 +9,8 @@ default the tree's), SVOLDERD (a daemon binary, default target/debug/svolderd), 
 import asyncio
 import atexit
 import base64
+import functools
+import http.server
 import json
 import os
 import re
@@ -18,6 +20,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 
@@ -104,14 +107,51 @@ def reap(proc, secs=10):
         pass
 
 
+# The address every check's daemon reaches AutoEq at unless the check says another: a port nothing
+# listens on, so no daemon of a check ever reaches the real host (SVOLDER_AUTOEQ_URL, the
+# `results/` directory).
+NO_AUTOEQ = 'http://127.0.0.1:9/results/'
+AUTOEQ_FIXTURE = f'{REPO}/scripts/web-checks/fixtures/autoeq'
+
+
+class AutoEqFixture:
+    """A loopback server (port 0) for AutoEq's `results/` directory, served from the folder under
+    scripts/web-checks/fixtures/autoeq/: a daemon given `url` as its SVOLDER_AUTOEQ_URL reads the
+    small INDEX.md and the ParametricEQ.txt files there and nothing else. `requests` is every path
+    asked for, in order."""
+
+    def __init__(self, root=AUTOEQ_FIXTURE):
+        requests = self.requests = []
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                super().do_GET()
+
+            def log_message(self, *_):
+                pass
+
+        self._server = http.server.ThreadingHTTPServer(
+            ('127.0.0.1', 0), functools.partial(Handler, directory=root))
+        self.url = f'http://127.0.0.1:{self._server.server_address[1]}/results/'
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    def stop(self):
+        self._server.shutdown()
+        self._server.server_close()
+
+
 class Daemon:
     """A fake daemon with its web UI on a free loopback port, homes under one temp dir. `host` is
     the daemon's SVOLDER_HOST: `off` (the default: no player, no card on the page) or `fake` (a
     fake player with a cover, and a route on a Schiit sink named for the device). `drop()` takes
-    the first device off the air on the check's own cue."""
+    the first device off the air on the check's own cue. `blank` configures no device at all (the
+    fake first device is still on the air, unconfigured), the first success of a fresh install.
+    Every daemon runs with its own HOME, no adapter (`hci-none`), no systemctl and no AutoEq
+    server (`SVOLDER_AUTOEQ_URL` on the discard port), whatever the check's `env` adds."""
 
     def __init__(self, profile='gungnir2-v2', env=None, name='Gungnir 2', web='auth = "none"',
-                 more=(), host='off', fleet=()):
+                 more=(), host='off', fleet=(), blank=False):
         self.dir = scratch('daemon-')
         self.port = free_port()
         home = self.dir
@@ -125,11 +165,13 @@ class Daemon:
         with open(f'{home}/config/svolder/config.toml', 'w') as f:
             others = ''.join(f'[[device]]\nname = "{n}"\nudid = "{u}"\npassphrase = "1234"\n\n'
                              for n, u in more)
-            f.write(f'schema = 1\n\n[[device]]\nname = "{name}"\nudid = "0102030405060708"\n'
-                    f'passphrase = "1234"\n\n{others}[web]\nenabled = true\n'
+            first = '' if blank else (f'[[device]]\nname = "{name}"\nudid = "0102030405060708"\n'
+                                      'passphrase = "1234"\n\n')
+            f.write(f'schema = 1\n\n{first}{others}[web]\nenabled = true\n'
                     f'listen = "127.0.0.1:{self.port}"\n{web}\n')
         environ = {
-            'PATH': os.environ['PATH'], 'HOME': os.environ['HOME'],
+            'PATH': os.environ['PATH'], 'HOME': home,
+            'SVOLDER_ADAPTER': 'hci-none', 'SVOLDER_SYSTEMCTL': f'{home}/no-systemctl',
             'XDG_CONFIG_HOME': f'{home}/config', 'XDG_STATE_HOME': f'{home}/state',
             'XDG_DATA_HOME': f'{home}/data', 'XDG_CACHE_HOME': f'{home}/cache',
             'XDG_RUNTIME_DIR': f'{home}/run', 'SVOLDER_TRANSPORT': 'fake',
@@ -152,6 +194,7 @@ class Daemon:
         self.player_gone_file = f'{home}/player-gone'
         environ['SVOLDER_FAKE_COVER_GONE_FILE'] = self.cover_gone_file
         environ['SVOLDER_FAKE_PLAYER_GONE_FILE'] = self.player_gone_file
+        environ['SVOLDER_AUTOEQ_URL'] = NO_AUTOEQ
         environ.update(env or {})
         self.log = open(f'{home}/daemon.log', 'w')
         self._cmd = [SVOLDERD, '--socket', f'{home}/run/svolder.sock', '--config',
@@ -173,6 +216,8 @@ class Daemon:
                 tail = seen.read()[-400:]
             self.stop()
             raise RuntimeError(f'daemon did not answer; its log ended: {tail}')
+        if blank:
+            return
         # wait for a reading in the device's model: a volume step, or a meter with a fraction
         dev = urllib.request.quote(name)
         for _ in range(100):
@@ -216,6 +261,45 @@ class Daemon:
         its stdout, or the failure's words."""
         run = subprocess.run([SVOLDER, *args], env=self._environ, capture_output=True, text=True, timeout=30)
         return run.stdout if run.returncode == 0 else f'exit {run.returncode}: {run.stderr}'
+
+    def socket(self, request):
+        """One request over the daemon's own socket (a client that is no browser: its walks are of
+        the origin `socket`), as a JSON line; the response's JSON."""
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.settimeout(10)
+            sock.connect(f'{self.dir}/run/svolder.sock')
+            sock.sendall(json.dumps({'id': 1, 'request': request}).encode() + b'\n')
+            line = b''
+            while not line.endswith(b'\n'):
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                line += chunk
+        return json.loads(line or b'{}').get('response', {})
+
+    def walk_states(self, wait=1.5):
+        """Where each device walk stands, from the page stream's replay (`needs=walk`, as a signed-in
+        viewer): `{job: {kind, origin?, step?}}`, the last state of each job it replays (up to 16
+        ended ones and the one running)."""
+        found = {}
+        # curl reads the stream for `wait` seconds and hands over what it got
+        run = subprocess.run(['curl', '-sN', '--max-time', str(wait), f'{self.url}api/v1/events?needs=walk'],
+                             capture_output=True, text=True, timeout=wait + 10)
+        event = None
+        for line in run.stdout.splitlines():
+            if line.startswith('event:'):
+                event = line[6:].strip()
+            elif line.startswith('data:') and event == 'walk':
+                try:
+                    data = json.loads(line[5:])
+                except ValueError:
+                    continue
+                state = data['state']
+                payload = state.get('payload') or {}
+                found[data['job']] = {'kind': state['kind'], 'origin': payload.get('origin'),
+                                      'step': (payload.get('prompt') or {}).get('step'),
+                                      'phase': payload.get('phase')}
+        return found
 
     def drop(self):
         """Take the first device off the air now, as a device out of reach: its link is cut and it
@@ -427,6 +511,24 @@ class Chromium:
                                                    'button': 'left', 'clickCount': 1})
         self.sleep(0.2)
 
+    def drag(self, x0, y0, x1, y1):
+        """Press the left button at one point, move, and let go at another."""
+        mouse = lambda kind, x, y, **more: self.send('Input.dispatchMouseEvent', {
+            'type': kind, 'x': x, 'y': y, 'button': 'left', **more})
+        mouse('mouseMoved', x0, y0, button='none')
+        mouse('mousePressed', x0, y0, buttons=1, clickCount=1)
+        mouse('mouseMoved', (x0 + x1) / 2, (y0 + y1) / 2, buttons=1)
+        mouse('mouseMoved', x1, y1, buttons=1)
+        mouse('mouseReleased', x1, y1, clickCount=1)
+        self.sleep(0.2)
+
+    def wheel(self, x, y, dy):
+        """Turn the wheel by `dy` px with the pointer at a point."""
+        self.send('Input.dispatchMouseEvent', {'type': 'mouseMoved', 'x': x, 'y': y})
+        self.send('Input.dispatchMouseEvent', {'type': 'mouseWheel', 'x': x, 'y': y,
+                                               'deltaX': 0, 'deltaY': dy})
+        self.sleep(0.4)
+
     def resize(self, w, h):
         self.size = (w, h)
         self.loop.run_until_complete(self._apply_metrics())
@@ -635,6 +737,24 @@ class Firefox:
             {'type': 'pointerMove', 'duration': 0, 'origin': 'viewport', 'x': int(x), 'y': int(y)},
             {'type': 'pointerDown', 'button': 0}, {'type': 'pointerUp', 'button': 0}]}]})
         self.sleep(0.2)
+
+    def drag(self, x0, y0, x1, y1):
+        """Press the left button at one point, move, and let go at another."""
+        at = lambda x, y, ms: {'type': 'pointerMove', 'duration': ms, 'origin': 'viewport',
+                               'x': int(x), 'y': int(y)}
+        self._post('/actions', {'actions': [{'type': 'pointer', 'id': 'mouse',
+                                             'parameters': {'pointerType': 'mouse'}, 'actions': [
+            at(x0, y0, 0), {'type': 'pointerDown', 'button': 0},
+            at((x0 + x1) / 2, (y0 + y1) / 2, 60), at(x1, y1, 60),
+            {'type': 'pointerUp', 'button': 0}]}]})
+        self.sleep(0.2)
+
+    def wheel(self, x, y, dy):
+        """Turn the wheel by `dy` px with the pointer at a point."""
+        self._post('/actions', {'actions': [{'type': 'wheel', 'id': 'wheel', 'actions': [
+            {'type': 'scroll', 'origin': 'viewport', 'x': int(x), 'y': int(y),
+             'deltaX': 0, 'deltaY': int(dy), 'duration': 0}]}]})
+        self.sleep(0.4)
 
     def resize(self, w, h):
         self.size = (w, h)

@@ -10,6 +10,7 @@
 
 mod common;
 
+#[cfg(feature = "broker-tests")]
 #[path = "../../../crates/svolder-mqtt/tests/support/broker.rs"]
 mod broker;
 
@@ -20,6 +21,7 @@ use std::time::Duration;
 use svolder_ipc::{Client, DeviceInfo, Reply, Request, RequestLine, Response, ValueObject};
 
 use common::{TempDir, TempPath, WATCH_DEADLINE, Watcher};
+use svolder_ipc::{CODE_LINK, CODE_USAGE};
 
 /// How long the daemon-backed case may take before it is a failure rather than a hang. Longer
 /// than [`WATCH_DEADLINE`], so a watching case reports its own failure rather than timing out.
@@ -27,6 +29,7 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long the MQTT status case may take: a broker that has to start (a minute at the worst)
 /// and four daemons, each given [`WATCH_DEADLINE`] to reach the line it waits for.
+#[cfg(feature = "broker-tests")]
 const MQTT_TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// The config the daemon under test reads: the fake device's own unit id, named `fake`.
@@ -296,6 +299,7 @@ fn the_fake_transport_runs_a_direct_session() {
 /// own: off with no section, connecting while no broker answers — with the wait before the next
 /// attempt — and connected, read-only or taking commands. The broker is the in-process one on
 /// 127.0.0.1, and the one that does not answer is a port nothing listens on there.
+#[cfg(feature = "broker-tests")]
 #[tokio::test]
 async fn daemon_status_says_where_the_mqtt_bridge_stands() {
     let svolderd = common::daemon_binary();
@@ -568,6 +572,11 @@ async fn watch_over_the_daemon_prints_the_snapshot() {
             .env("XDG_STATE_HOME", &empty.0)
             .env_remove("SVOLDER_TRANSPORT")
             .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
             .arg("-v")
             .arg("--socket")
             .arg(&daemon.socket)
@@ -620,6 +629,11 @@ async fn watch_over_the_daemon_leaves_with_zero_on_ctrl_c() {
             .env("XDG_CACHE_HOME", &empty.0)
             .env_remove("SVOLDER_TRANSPORT")
             .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
             .arg("--socket")
             .arg(&daemon.socket)
             .arg("watch")
@@ -710,6 +724,11 @@ async fn a_device_the_daemon_has_not_found_yet_says_so_and_what_to_check() {
                 .env("XDG_DATA_HOME", &home.0)
                 .env("XDG_RUNTIME_DIR", &home.0)
                 .env_remove("SVOLDER_SOCKET")
+                .env_remove("SVOLDER_WEB_ENABLED")
+                .env_remove("SVOLDER_MCP_ENABLED")
+                .env_remove("SVOLDER_WEB_LISTEN")
+                .env_remove("SVOLDER_MCP_LISTEN")
+                .env_remove("SVOLDER_WEB_URL")
                 .env_remove("SVOLDER_TRANSPORT")
                 .arg("--socket")
                 .arg(&socket)
@@ -929,6 +948,11 @@ fn a_profile_key_on_the_passphrase_function_does_not_load() {
         .env("SVOLDER_UNITDIR", guard.0.join("units"))
         .env("XDG_CONFIG_HOME", &guard.0)
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .args(["set", "danger", "1"])
         .output()
         .expect("the binary runs");
@@ -960,6 +984,11 @@ fn a_write_the_passphrase_rejects_names_the_next_step() {
         .env("SVOLDER_UNITDIR", guard.0.join("units"))
         .env("XDG_CONFIG_HOME", &guard.0)
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .args(["set", "input", "2"])
         .output()
         .expect("the binary runs");
@@ -999,6 +1028,11 @@ fn a_configured_code_that_does_not_match_is_said_on_stderr() {
             .env("SVOLDER_UNITDIR", guard.0.join("units"))
             .env("XDG_CONFIG_HOME", &guard.0)
             .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
             .args(args)
             .output()
             .expect("the binary runs");
@@ -1085,6 +1119,11 @@ async fn devices_under_ble_reads_the_config_and_never_asks_a_daemon() {
                 .env("XDG_DATA_HOME", &config_dir)
                 .env("XDG_RUNTIME_DIR", &config_dir)
                 .env_remove("SVOLDER_SOCKET")
+                .env_remove("SVOLDER_WEB_ENABLED")
+                .env_remove("SVOLDER_MCP_ENABLED")
+                .env_remove("SVOLDER_WEB_LISTEN")
+                .env_remove("SVOLDER_MCP_LISTEN")
+                .env_remove("SVOLDER_WEB_URL")
                 .env_remove("SVOLDER_TRANSPORT")
                 .arg("--socket")
                 .arg(&socket_arg)
@@ -1132,6 +1171,11 @@ async fn devices_refuses_an_unknown_transport() {
                 .env("XDG_DATA_HOME", &config_dir)
                 .env("XDG_RUNTIME_DIR", &config_dir)
                 .env_remove("SVOLDER_SOCKET")
+                .env_remove("SVOLDER_WEB_ENABLED")
+                .env_remove("SVOLDER_MCP_ENABLED")
+                .env_remove("SVOLDER_WEB_LISTEN")
+                .env_remove("SVOLDER_MCP_LISTEN")
+                .env_remove("SVOLDER_WEB_URL")
                 .env_remove("SVOLDER_TRANSPORT")
                 .args(["--transport", "nope", "devices"])
                 .output()
@@ -1179,6 +1223,11 @@ async fn devices_over_the_daemon_with_none_configured_prints_the_hint() {
             .env("XDG_RUNTIME_DIR", &dir)
             .env_remove("SVOLDER_MQTT_PASSWORD")
             .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
             .arg("--socket")
             .arg(&socket)
             .arg("--config")
@@ -1207,14 +1256,11 @@ async fn devices_over_the_daemon_with_none_configured_prints_the_hint() {
     .expect("test timed out");
 }
 
-/// Taking a device out of the configuration tells the daemon to re-read the file, and the
-/// answer says which devices it holds now.
-///
-/// The daemon reads a configuration file of its own, so what it holds afterwards is its own
-/// business; what this case is about is that the running daemon was told at all, rather than
-/// left holding a device the file no longer names until something restarted it.
+/// Taking a device out of the configuration is the running daemon's own write: the verb sends
+/// the removal as a `device_config` op and says it went through the daemon, rather than writing
+/// the file behind it and telling it to read it again.
 #[tokio::test]
-async fn removing_a_device_tells_the_running_daemon_to_re_read_the_file() {
+async fn removing_a_device_is_the_running_daemons_own_write() {
     let svolderd = common::daemon_binary();
     tokio::time::timeout(TEST_TIMEOUT, async {
         let daemon = start_daemon(&svolderd, &[]).await;
@@ -1230,6 +1276,11 @@ async fn removing_a_device_tells_the_running_daemon_to_re_read_the_file() {
             .env("XDG_STATE_HOME", &home.0)
             .env_remove("SVOLDER_TRANSPORT")
             .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
             .arg("--socket")
             .arg(&daemon.socket)
             .args(["remove", "fake"])
@@ -1238,7 +1289,7 @@ async fn removing_a_device_tells_the_running_daemon_to_re_read_the_file() {
         let err = String::from_utf8_lossy(&out.stderr);
         assert_eq!(out.status.code(), Some(0), "err={err}");
         assert!(err.contains("removed fake"), "{err}");
-        assert!(err.contains("the daemon now holds"), "{err}");
+        assert!(err.contains("through the daemon"), "{err}");
     })
     .await
     .expect("test timed out");
@@ -1297,6 +1348,11 @@ fn svolder_fake(args: &[&str]) -> (Option<i32>, String, String) {
         .env("SVOLDER_UNITDIR", empty.0.join("units"))
         .env("XDG_CONFIG_HOME", &empty.0)
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -1351,6 +1407,11 @@ fn svolder(socket: &Path, args: &[&str]) -> (Option<i32>, String, String) {
         .env("XDG_RUNTIME_DIR", &empty.0)
         .env_remove("SVOLDER_TRANSPORT")
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .arg("-v")
         .arg("--socket")
         .arg(socket)
@@ -1464,6 +1525,7 @@ fn stub_response(request: &Request, listed: bool) -> Response {
                 passphrase_note: None,
                 refused: false,
                 recalled: None,
+                key_readings: Vec::new(),
             }],
         },
         // Answers with the window it was asked for as the one device's unit, so a case can read
@@ -1479,14 +1541,11 @@ fn stub_response(request: &Request, listed: bool) -> Response {
             }],
         },
         // The link is down, as the `devices` answer says.
-        Request::Identify { .. } => Response::Error {
-            code: 3,
-            message: svolder_ipc::NOT_CONNECTED.into(),
-        },
-        other => Response::Error {
-            code: 1,
-            message: format!("the stub daemon does not answer {other:?}"),
-        },
+        Request::Identify { .. } => Response::error(CODE_LINK, svolder_ipc::NOT_CONNECTED),
+        other => Response::error(
+            CODE_USAGE,
+            format!("the stub daemon does not answer {other:?}"),
+        ),
     }
 }
 
@@ -1524,11 +1583,22 @@ async fn start_daemon(svolderd: &Path, envs: &[(&str, &str)]) -> ChildGuard {
 /// [`start_daemon`] on a configuration file of the case's own, with every home the daemon
 /// could reach for pointed into its own directory.
 async fn start_daemon_on(svolderd: &Path, text: &str, envs: &[(&str, &str)]) -> ChildGuard {
+    start_daemon_with(svolderd, text, envs, "config.toml").await
+}
+
+/// [`start_daemon_on`] with the configuration file at `file` under the daemon's directory.
+async fn start_daemon_with(
+    svolderd: &Path,
+    text: &str,
+    envs: &[(&str, &str)],
+    file: &str,
+) -> ChildGuard {
     let dir = temp_path(".daemon");
     // Creating the directory rather than creating it if absent keeps a reused name loud.
     std::fs::create_dir(&dir).expect("create the daemon's directory");
     let socket = dir.join("svolder.sock");
-    let config = dir.join("config.toml");
+    let config = dir.join(file);
+    std::fs::create_dir_all(config.parent().expect("a parent")).expect("the config's directory");
     std::fs::write(&config, text).expect("write the test config");
     let mut command = Command::new(svolderd);
     for key in [
@@ -1556,6 +1626,11 @@ async fn start_daemon_on(svolderd: &Path, text: &str, envs: &[(&str, &str)]) -> 
         .env("XDG_RUNTIME_DIR", &dir)
         .env_remove("SVOLDER_MQTT_PASSWORD")
         .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
         .arg("--socket")
         .arg(&socket)
         .arg("--config")
@@ -1593,6 +1668,53 @@ async fn start_daemon_on(svolderd: &Path, text: &str, envs: &[(&str, &str)]) -> 
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("the daemon never connected to the fake device");
+}
+
+/// A daemon that read its file once and finds it deleted keeps its configuration, and a CLI write
+/// that would recreate the file from the template (`hops add`) is refused in its missing-file
+/// words, exit 1, leaving no file. The CLI reads the very file the daemon does (`XDG_CONFIG_HOME`
+/// is the daemon's directory).
+#[tokio::test]
+async fn a_hops_write_is_refused_while_the_daemon_says_its_file_is_missing() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let daemon = start_daemon_with(&svolderd, CONFIG, &[], "svolder/config.toml").await;
+        let file = daemon.dir.join("svolder").join("config.toml");
+        std::fs::remove_file(&file).expect("the file is deleted");
+        let out = Command::new(env!("CARGO_BIN_EXE_svolder"))
+            .env("SVOLDER_HOST", "off")
+            .env("SVOLDER_ADAPTER", "hci-none")
+            .env("SVOLDER_SYSTEMCTL", daemon.dir.join("no-systemctl"))
+            .env("SVOLDER_WIREPLUMBER", daemon.dir.join("no-wireplumber"))
+            .env("SVOLDER_UNITDIR", daemon.dir.join("units"))
+            .env("XDG_CONFIG_HOME", &daemon.dir)
+            .env("XDG_STATE_HOME", &daemon.dir)
+            .env("XDG_DATA_HOME", &daemon.dir)
+            .env("XDG_RUNTIME_DIR", &daemon.dir)
+            .env_remove("SVOLDER_TRANSPORT")
+            .env_remove("SVOLDER_SOCKET")
+            .env_remove("SVOLDER_WEB_ENABLED")
+            .env_remove("SVOLDER_MCP_ENABLED")
+            .env_remove("SVOLDER_WEB_LISTEN")
+            .env_remove("SVOLDER_MCP_LISTEN")
+            .env_remove("SVOLDER_WEB_URL")
+            .arg("--socket")
+            .arg(&daemon.socket)
+            .args(["hops", "add", "--kind", "amp", "myhop"])
+            .output()
+            .expect("the binary runs");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "err={err}");
+        assert!(
+            err.contains(
+                "is missing: the daemon keeps its running configuration; restore the file"
+            ),
+            "err={err}"
+        );
+        assert!(!file.exists(), "the refused write left a file");
+    })
+    .await
+    .expect("test timed out");
 }
 
 #[test]

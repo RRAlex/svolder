@@ -143,7 +143,7 @@ fn duplicate_preset_names_are_refused_case_insensitively() {
     let text = format!("{}\n{}", three_band_block("mine"), three_band_block("MINE"));
     let err = Config::parse(&text).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("\"MINE\"") && m.contains("already configured")),
+        matches!(&err, ConfigError::Taken { kind: "preset", name } if name == "MINE"),
         "{err:?}"
     );
 }
@@ -194,7 +194,7 @@ fn the_preset_writers_refuse_a_name_longer_than_forty_characters() {
     ] {
         let err = wrote.unwrap_err();
         assert!(
-            matches!(&err, ConfigError::Parse(m) if m.contains("at most 40 characters")),
+            matches!(&err, ConfigError::Name(m) if m.to_string().contains("at most 40 characters")),
             "{what}: {err:?}"
         );
         assert_eq!(
@@ -274,7 +274,7 @@ fn the_preset_writers_trim_a_name_and_refuse_a_blank_or_control_one() {
         ] {
             let err = wrote.unwrap_err();
             assert!(
-                matches!(&err, ConfigError::Parse(m) if m.contains(words)),
+                matches!(&err, ConfigError::Name(m) if m.to_string().contains(words)),
                 "{what} {name:?}: {err:?}"
             );
             assert_eq!(
@@ -311,7 +311,7 @@ fn a_block_spelled_with_blanks_round_its_name_is_found_by_the_name_it_loads_as()
     three.name = "Padded".into();
     let err = Config::add_preset(&path, &three).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("\"padded\"") && m.contains("already")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("\"padded\"") && m.to_string().contains("already")),
         "{err:?}"
     );
     Config::update_preset(&path, "padded", &three).unwrap();
@@ -406,15 +406,15 @@ fn presets_are_added_updated_renamed_and_removed_without_touching_the_rest() {
 
     assert!(matches!(
         Config::remove_preset(&path, "nobody"),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Missing { kind: "preset", .. })
     ));
     assert!(matches!(
         Config::update_preset(&path, "nobody", &warm),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Missing { kind: "preset", .. })
     ));
     assert!(matches!(
         Config::rename_preset(&path, "nobody", "x"),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Missing { kind: "preset", .. })
     ));
 }
 
@@ -468,7 +468,7 @@ fn add_and_rename_refuse_a_built_ins_name_and_a_name_already_taken() {
     flat.name = "Flat".into();
     let err = Config::add_preset(&path, &flat).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("built-in")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("built-in")),
         "{err:?}"
     );
     assert_eq!(
@@ -483,12 +483,12 @@ fn add_and_rename_refuse_a_built_ins_name_and_a_name_already_taken() {
 
     let err = Config::rename_preset(&path, "second", "HD650 WARM").unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("already exists")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("already exists")),
         "{err:?}"
     );
     let err = Config::rename_preset(&path, "second", "flat").unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("built-in")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("built-in")),
         "{err:?}"
     );
 
@@ -511,7 +511,7 @@ fn update_preset_refuses_a_name_another_preset_already_carries_but_not_its_own()
     clash.name = "HD650 warm".into();
     let err = Config::update_preset(&path, "second", &clash).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("already exists")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("already exists")),
         "{err:?}"
     );
 
@@ -531,7 +531,7 @@ fn update_preset_refuses_a_built_ins_name() {
     flat.name = "Flat".into();
     let err = Config::update_preset(&path, "HD650 warm", &flat).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("built-in")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("built-in")),
         "{err:?}"
     );
 }
@@ -641,7 +641,7 @@ fn custom_is_refused_as_a_new_name_and_an_old_one_still_loads() {
     custom.name = "Custom".into();
     let err = Config::add_preset(&path, &custom).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("stands for a curve no preset matches")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("stands for a curve no preset matches")),
         "{err:?}"
     );
     std::fs::write(&path, three_band_block("custom")).unwrap();
@@ -677,7 +677,7 @@ fn a_legacy_custom_block_can_be_updated_under_its_own_name() {
     curve.name = "custom".into();
     let err = Config::update_preset(&path, "mine", &curve).unwrap_err();
     assert!(
-        matches!(&err, ConfigError::Parse(m) if m.contains("stands for a curve no preset matches")),
+        matches!(&err, ConfigError::Name(m) if m.to_string().contains("stands for a curve no preset matches")),
         "{err:?}"
     );
 }

@@ -206,3 +206,277 @@ async fn the_version_warning_follows_the_version_met() {
     );
     watching.close().await;
 }
+
+/// The toast for a configuration file that changed since the daemon's last reload.
+const CHANGED_TOAST: &str =
+    "config: /home/u/config.toml changed since the last reload: svolder daemon reload (or SIGHUP)";
+
+/// A daemon that says its file changed is told once per change: the toast comes with the first
+/// answer, not again while the daemon goes on saying it (nor on a device reopened on it), and
+/// again once an answer of unchanged has gone between.
+#[tokio::test]
+async fn a_changed_config_is_toasted_once_per_change() {
+    use crate::test_support::stub_daemon::stub_daemon;
+
+    let daemon = stub_daemon().await;
+    let opener = daemon_opener(&daemon.socket, Duration::from_secs(1));
+    let mut watching = opener
+        .reopen(None, None)
+        .await
+        .expect("the stub daemon answers");
+    let own = std::path::Path::new("config.toml");
+    let answer = |changed: bool| {
+        let mut info = said(env!("CARGO_PKG_VERSION"));
+        info.config = Some("/home/u/config.toml".into());
+        info.config_changed = changed;
+        Some(info)
+    };
+
+    daemon_answered(&mut watching, answer(false), own);
+    assert!(watching.app.toast().is_none());
+    assert!(watching.app.overlays.conn.config_changed.is_none());
+
+    daemon_answered(&mut watching, answer(true), own);
+    assert_eq!(
+        watching.app.toast().map(|toast| toast.text.as_str()),
+        Some(CHANGED_TOAST)
+    );
+    assert_eq!(
+        watching.app.overlays.conn.config_changed.as_deref(),
+        Some(CHANGED_TOAST),
+        "the Connect line stands"
+    );
+    watching.app.dismiss_toast();
+    daemon_answered(&mut watching, answer(true), own);
+    assert!(watching.app.toast().is_none(), "told twice for one change");
+    assert!(watching.app.overlays.conn.config_changed.is_some());
+
+    // A device opened on the same daemon carries on what was told.
+    let mut next = opener
+        .reopen_keeping(None, Some(Kept::of(&watching.app)))
+        .await
+        .expect("the stub daemon answers");
+    daemon_answered(&mut next, answer(true), own);
+    assert!(next.app.toast().is_none(), "told again on a reopen");
+
+    daemon_answered(&mut watching, answer(false), own);
+    assert!(watching.app.overlays.conn.config_changed.is_none());
+    daemon_answered(&mut watching, answer(true), own);
+    assert_eq!(
+        watching.app.toast().map(|toast| toast.text.as_str()),
+        Some(CHANGED_TOAST),
+        "the next change is told"
+    );
+    // A daemon that did not answer says nothing and forgets the line, but is not told as new.
+    daemon_answered(&mut watching, None, own);
+    assert!(watching.app.overlays.conn.config_changed.is_none());
+    watching.close().await;
+    next.close().await;
+}
+
+/// The loop asks a daemon session on its own slow clock, whichever screen shows, so an edit
+/// made in another terminal reaches it; a direct session has no daemon to ask.
+#[tokio::test]
+async fn the_loop_asks_the_daemon_on_a_slow_clock_for_a_changed_config() {
+    use crate::test_support::stub_daemon::stub_daemon;
+
+    let daemon = stub_daemon().await;
+    daemon.version(env!("CARGO_PKG_VERSION"));
+    let opener = daemon_opener(&daemon.socket, Duration::from_secs(1));
+    let session = opener
+        .reopen(None, None)
+        .await
+        .expect("the stub daemon answers");
+    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+    let edited = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        daemon.config_changed(true);
+    };
+    let (adder, mut mouse, mut title) = (nothing_to_add(), SpyMouse::default(), title());
+    let (end, ()) = tokio::join!(
+        event_loop(LoopParts {
+            opener: &opener,
+            adder: &adder,
+            watching: session,
+            terminal: &mut terminal,
+            events: quit_after(Duration::from_millis(1_000)),
+            mouse: &mut mouse,
+            title: &mut title,
+            look: look(),
+        }),
+        edited
+    );
+    assert!(
+        end.watching.app.overlays.conn.config_changed.is_some(),
+        "the slow ask never reached the session"
+    );
+    assert!(end.watching.app.session.config_changed_told);
+    end.watching.close().await;
+}
+
+/// A `[tui]` write of the Settings box that changed the file has a daemon that reads it reload
+/// once the writes pause (a run of quick changes sends one), so the change is not left for the
+/// daemon to announce as a hand edit; a daemon that reads another file is left alone, and so is
+/// a change that wrote nothing (a refused mouse toggle, a value the file already had).
+#[tokio::test]
+async fn a_settings_write_has_the_daemon_reload_once_and_only_when_it_changed_the_file() {
+    use crate::test_support::stub_daemon::stub_daemon;
+    use crate::tui::app::TuiChange;
+    use crate::tui::run::look::{reload_soon, send_owed};
+
+    for (reads_ours, reloads) in [(true, 1), (false, 0)] {
+        let daemon = stub_daemon().await;
+        let path = scratch_config();
+        let named = match reads_ours {
+            true => path.display().to_string(),
+            false => "/elsewhere/config.toml".to_string(),
+        };
+        daemon.says(None, Some(&named));
+        let opener = daemon_opener(&daemon.socket, Duration::from_secs(1));
+        let mut watching = opener
+            .reopen(None, None)
+            .await
+            .expect("the stub daemon answers");
+        let mut look = Look::new(
+            svolder_ipc::TuiConfig::default(),
+            true,
+            svolder_ipc::ColorDepth::Ansi16,
+            path.clone(),
+        );
+        let mut mouse = SpyMouse::default();
+        for on in [true, false, true] {
+            let wrote = look.change(&TuiChange::Effects(on), &mut watching.app, &mut mouse);
+            assert!(wrote, "a change of the effects writes the file");
+            reload_soon(&mut watching, look.path());
+        }
+        assert_eq!(
+            daemon.reloads(),
+            0,
+            "nothing is sent while the writes go on"
+        );
+        send_owed(&mut watching);
+        send_owed(&mut watching);
+        let info = recv_version(&mut watching.daemon_version).await;
+        assert!(info.is_some(), "the ask after the reload answers");
+        assert_eq!(daemon.reloads(), reloads, "reads our file: {reads_ours}");
+        assert!(watching.reload_owed.is_none());
+
+        // the same value again leaves the file untouched: no write, so nothing owed
+        let again = look.change(&TuiChange::Effects(true), &mut watching.app, &mut mouse);
+        assert!(!again, "an unchanged file is not a write");
+        watching.close().await;
+    }
+}
+
+/// A mouse toggle the terminal refuses writes nothing and owes the daemon nothing.
+#[tokio::test]
+async fn a_refused_mouse_toggle_owes_no_reload() {
+    use crate::tui::app::TuiChange;
+
+    let mut look = look();
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let mut watching = watching(backend, app, None);
+    let mut mouse = RefusingMouse;
+    assert!(!look.change(&TuiChange::Mouse(true), &mut watching.app, &mut mouse));
+    watching.close().await;
+}
+
+/// The reload a Settings write owes runs in a task of its own: a daemon that is slow to answer
+/// it does not stop the loop, which ends on time, and a direct session has no daemon to tell or
+/// to ask: nothing is sent, asked or toasted.
+#[tokio::test]
+async fn the_owed_reload_never_holds_the_loop_and_a_direct_session_asks_nothing() {
+    use crate::test_support::stub_daemon::stub_daemon;
+    use crate::tui::run::look::reload_soon;
+
+    let daemon = stub_daemon().await;
+    daemon.delays_reloads(Duration::from_secs(30));
+    let path = scratch_config();
+    daemon.says(None, Some(&path.display().to_string()));
+    let opener = daemon_opener(&daemon.socket, Duration::from_secs(1));
+    let mut session = opener
+        .reopen(None, None)
+        .await
+        .expect("the stub daemon answers");
+    reload_soon(&mut session, &path);
+    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+    let (adder, mut mouse, mut meter) = (nothing_to_add(), SpyMouse::default(), title());
+    let started = std::time::Instant::now();
+    let end = event_loop(LoopParts {
+        opener: &opener,
+        adder: &adder,
+        watching: session,
+        terminal: &mut terminal,
+        events: quit_after(Duration::from_millis(2_000)),
+        mouse: &mut mouse,
+        title: &mut meter,
+        look: look(),
+    })
+    .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "the loop waited for the daemon's reload: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(daemon.reloads(), 1, "the reload was sent");
+    end.watching.close().await;
+
+    // a reload still owed when the loop ends is sent, whichever way it ended
+    let daemon = stub_daemon().await;
+    let path = scratch_config();
+    daemon.says(None, Some(&path.display().to_string()));
+    let opener = daemon_opener(&daemon.socket, Duration::from_secs(1));
+    let mut session = opener
+        .reopen(None, None)
+        .await
+        .expect("the stub daemon answers");
+    reload_soon(&mut session, &path);
+    session.reload_owed.as_mut().expect("owed").0 += Duration::from_secs(60);
+    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+    let end = event_loop(LoopParts {
+        opener: &opener,
+        adder: &adder,
+        watching: session,
+        terminal: &mut terminal,
+        events: quit_after(Duration::from_millis(300)),
+        mouse: &mut mouse,
+        title: &mut meter,
+        look: look(),
+    })
+    .await;
+    assert_eq!(daemon.reloads(), 1, "the owed reload went out at the end");
+    end.watching.close().await;
+
+    // a direct session
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let mut watching = watching(backend, app, None);
+    reload_soon(&mut watching, &path);
+    crate::tui::run::look::send_owed(&mut watching);
+    assert!(watching.reload_owed.is_none());
+    assert!(
+        watching.daemon_version.is_none(),
+        "a direct session asked a daemon"
+    );
+    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+    let end = event_loop(LoopParts {
+        opener: &opener_over(never_opens()),
+        adder: &adder,
+        watching,
+        terminal: &mut terminal,
+        events: quit_after(Duration::from_millis(800)),
+        mouse: &mut mouse,
+        title: &mut meter,
+        look: look(),
+    })
+    .await;
+    assert!(end.watching.daemon_version.is_none());
+    assert!(
+        end.watching.app.toast().is_none(),
+        "a direct session was toasted"
+    );
+    end.watching.close().await;
+}

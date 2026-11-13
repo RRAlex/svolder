@@ -585,7 +585,7 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::ToggleOf(i) => intent(app.flip_row(i)),
         Hit::SelectPrev(i) => intent(app.step_row(i, -1)),
         Hit::SelectNext(i) => intent(app.step_row(i, 1)),
-        Hit::PaneHeader(pane) => Some(MouseAction::Focus(pane, app.selected)),
+        Hit::PaneHeader(pane) => Some(MouseAction::Focus(pane, app.selected())),
         Hit::Band(i) | Hit::Point(i) => Some(MouseAction::Band(i)),
         Hit::PointField(point, field) => Some(MouseAction::PointField { point, field }),
         Hit::Side(side) => Some(MouseAction::Target(Some(side))),

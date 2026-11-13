@@ -15,9 +15,6 @@ import { paintChrome } from './scheme.js';
 /** How long a style sheet or a script may take to load before the theme counts as not starting. */
 const LOAD_MS = 5000;
 
-/** What the daemon is asked to send for `theme`, as a string that is the same for the same asks. */
-const needsOf = (theme) => [...(theme?.needs ?? [])].sort().join(',');
-
 /** The switch of themes over `root` (the element themes are drawn into) for `core`. */
 export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
   const document = window.document;
@@ -143,11 +140,9 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
       scheme?.mode() ?? 'auto');
   }
 
-  /** The theme `id` goes on show, with its files in place; with `reopen`, the stream is asked
-   * again when the new theme needs other feeds than the last. Throws when not even the fallback
-   * can start. */
-  async function mount(id, reopen) {
-    const before = needsOf(core.theme);
+  /** The theme `id` goes on show, with its files in place (the core's bind has the stream ask for
+   * what the new theme needs). Throws when not even the fallback can start. */
+  async function mount(id) {
     current = await mountTheme({
       registry: core.registry, id, root, core, toast: core.frame.toast, prepare: load,
     });
@@ -155,7 +150,6 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
     announce(current.id);
     dropFiles(current.id);
     settle();
-    if (reopen && needsOf(core.theme) !== before) core.stream.open();
     return current;
   }
 
@@ -171,6 +165,8 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
     // preferences and scheme are let go with it.
     core.scheme?.stop();
     core.theme = null;
+    core.mounted = null;
+    core.stream.want('theme');
     core.prefs = null;
     core.scheme = null;
     failed = true;
@@ -194,7 +190,7 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
       const listed = wanted !== null && wanted !== undefined && core.registry.get(wanted);
       if (asked !== null && !listed) core.frame.toast(`There is no theme “${asked}”.`);
       try {
-        await mount(requested, false);
+        await mount(requested);
       } catch (error) {
         fail(error);
         return null;
@@ -226,21 +222,25 @@ export function createSwitcher({ core, window, root, timeoutMs = LOAD_MS }) {
           return;
         }
         core.frame.closeMenu(false);
-        core.frame.closePicker();
+        core.modal.closeAll();
+        // The old theme's wants end and the new one's begin as one change: one reopen at most.
+        const settled = core.stream.batch();
         try {
-          await before?.unmount();
-        } catch (error) {
-          console.warn('svolder: the theme did not unmount cleanly', error);
-        }
-        root.replaceChildren();
-        current = null;
-        core.frame.fade(false);
-        core.frame.anchor(null);
-        try {
-          await mount(id, true);
+          try {
+            await before?.unmount();
+          } catch (error) {
+            console.warn('svolder: the theme did not unmount cleanly', error);
+          }
+          root.replaceChildren();
+          current = null;
+          core.frame.fade(false);
+          core.frame.anchor(null);
+          await mount(id);
         } catch (error) {
           fail(error);
           return;
+        } finally {
+          settled();
         }
         core.frame.dismissToast(FAILED_TOAST);
         if (current.id !== id) keep(current.id);

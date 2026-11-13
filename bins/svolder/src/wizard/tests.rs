@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use async_trait::async_trait;
+use svolder_ipc::ScanEntry;
 use svolder_ipc::checks::State;
 use svolder_profiles::Registry;
+use svolder_walk::{AUTO, NONE, SCAN_ATTEMPTS, UNKNOWN_PRODUCT, passphrase_text};
 
 use super::fake::{FakeEffects, seen, seen_product, walk_to};
 use super::*;
@@ -112,7 +114,7 @@ async fn a_written_device_is_not_walked_back_over_and_its_reload_stands() {
     wizard.answer(0, Some("dac".into())).await.unwrap();
 
     assert_eq!(wizard.prompt().await.unwrap().step, Step::Adapter);
-    wizard.back();
+    wizard.back().await;
     assert_eq!(
         wizard.prompt().await.unwrap().step,
         Step::Adapter,
@@ -123,7 +125,7 @@ async fn a_written_device_is_not_walked_back_over_and_its_reload_stands() {
     assert_eq!(fx.written_adapter(), Some("hci0".into()));
     assert_eq!(fx.reloads(), 1);
 
-    wizard.back();
+    wizard.back().await;
     assert_eq!(wizard.prompt().await.unwrap().step, Step::Daemon);
     assert_eq!(fx.reloads(), 1, "a step nobody walked again sent a reload");
 }
@@ -291,7 +293,7 @@ async fn an_unknown_product_offers_the_profile_list_and_writes_the_one_chosen() 
         "{profiles:?}"
     );
     // Going back from the profiles is the device list again, not the step before it.
-    wizard.back();
+    wizard.back().await;
     assert_eq!(wizard.prompt().await.unwrap().choices, pick.choices);
     wizard.answer(0, None).await.unwrap();
 
@@ -574,13 +576,13 @@ async fn going_back_returns_to_the_step_before_and_stops_once_the_device_is_writ
         FakeEffects::healthy().with_scan(vec![seen_product("0102030405060708", "Bifrost 3", -40)]);
     let mut wizard = Wizard::new(fx.clone());
     walk_to(&mut wizard, Step::Name).await;
-    wizard.back();
+    wizard.back().await;
     assert_eq!(wizard.prompt().await.unwrap().step, Step::Pick);
     wizard.answer(0, None).await.unwrap();
     wizard.answer(0, Some("dac".into())).await.unwrap();
 
     let after = wizard.prompt().await.unwrap().step;
-    wizard.back();
+    wizard.back().await;
     assert_eq!(
         wizard.prompt().await.unwrap().step,
         after,

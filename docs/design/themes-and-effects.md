@@ -92,9 +92,21 @@ Device section holds (the design says no theme points to another for a missing p
 control and action (`{control: key}` for the volume, its mute, each control, the power switch and
 what is under it; `{band, param}`; `{mode}`; `{loudness: true}`; `{preset: name}`; `{slot: n}`;
 `{setting: name}`; `{transport: button}`, only when the viewer has the buttons and there is a
-track: no track, nothing to operate) and `factsOf(device)` the labels of the facts (Product,
-Unit, Firmware, DSP, Profile, Link, Signal, Passphrase when there is a note, and the id of every
-reading row).
+track: no track, nothing to operate). The facts are two lists that share no label:
+`deviceFactsOf(device)` is the labels of the device's own facts (Product, Unit, Firmware, DSP,
+Profile, Link, Signal, Passphrase when there is a note, and the id of every reading row) and
+`themeFactsOf(device)` the facts every theme shows itself (Cover, when the player has one for the
+track).
+
+Two drivers answer for them. The theme's facts are the theme's driver's (`core.theme.driver`). The
+device's facts are the core's driver's (`core/driver.js`, reached as `core.driver`):
+`reach(label, { device })` and `shown(label, { device })`, where `device` is the url of the device
+meant, named at every call. The facts are drawn by the core on the device's page of the Devices
+popup, so the driver opens the popup at that page through the router (and *All readings* for a
+reading row) and reads the cell, whichever theme is mounted; it refuses (`false`, `null`, no
+throw) a label that is not one of that device's facts, a call that names no device and a viewer
+the router turns away. A theme owes only its own list. Like a theme's driver it is test surface:
+the checks call it, the page's own code never does.
 
 A theme exports a `driver` (Ember's is `driver.js`) that the checks use to prove it: `reach(target)`
 shows a control or a fact the way a person would (scrolling, opening a fold) and says whether it is
@@ -102,10 +114,12 @@ there; `operate(target, change)` does what a person does to it (`{step: ±1}`, `
 `{on}`, `{apply: true}`, `{recall: true}`, `{save: true}` or nothing); `shown(target)` is the words
 the theme shows for it; `state()` says `{lost, waiting, resting, toasts}`. A driver acts on the
 theme's own DOM and never calls a core action itself, so what the check sees at the daemon went
-through the theme's own handlers. Checked by `contract.mjs` (the lists), `contract.py` (a short
+through the theme's own handlers. Checked by `contract.mjs` (the lists), `core-driver.mjs` (the
+core's driver, over fake theme drivers), `contract.py` (a short
 pass per theme: volume, mute, a band, a preset, a device that goes away and comes back, a refused
 write, a page that rests and wakes, the menu button and `T`, `?theme=`, and the same as a guest),
-`completeness.py` (every target and fact on a DAC, an amp, a five-meter amp, a mono amp and the Loki
+`completeness.py` (every target, every device fact through the core's driver and every theme fact
+through the theme's, on a DAC, an amp, a five-meter amp, a mono amp and the Loki
 Max) and `core_rows.py` (what the core holds for the themes to come: a second device followed, a
 declared hop, the menu's fade, a band moved from plain coordinates, light and dark, a canvas loop
 that pauses, a theme that unmounts clean).
@@ -271,8 +285,8 @@ and float readbacks, never a screenshot; screenshots of the smoke are for tuning
   `Agitation`, `SettleWatch`, `NoteGate`, `drawShade`), `smoke-notes.js`.
 - Engine and runtime: `smoke-engine.js`, `smoke.js`.
 - The menu: `bins/svolderd/web/core/menu.js` (rows, keys), `frame.js` (the button, the fade, the key
-  `T`), `picker.js` (the picker of themes) and `frame.css`; Ember's rows are `menuRows` in `ember.js`
-  (the effects' from `effects.js`, then the Arrange row).
+  `T`), `picker.js` (the picker of themes) and `frame.css`; Ember's rows are `menuRows` in
+  `ember.js`, given by its mounted instance (the effects' from `effects.js`, then the Arrange row).
 - Arrange mode: `order.js`, `sections.js`, `arrange.js` in the same folder.
 - The contract: `bins/svolderd/web/core/contract.js`; Ember's test driver: `driver.js` in its folder.
 - Checks: node harnesses `scripts/web-checks/node/director.mjs`, `model.mjs`, `notes.mjs`,

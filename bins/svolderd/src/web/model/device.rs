@@ -412,6 +412,10 @@ pub(crate) struct ToneModel {
     pub(crate) readings: ReadingsModel,
     /// The bands' curve in dB at 181 log-spaced frequencies from 20 Hz to 20 kHz.
     pub(crate) response: Option<Vec<f64>>,
+    /// The imported preset on the device (or loaded with changes) against the curve; left out
+    /// for any other preset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) overlay: Option<OverlayModel>,
     pub(crate) peak: Option<PeakModel>,
     pub(crate) markers: Vec<MarkerModel>,
     pub(crate) bands: Option<BandsModel>,
@@ -437,6 +441,33 @@ pub(crate) struct ReadingsModel {
 pub(crate) struct PeakModel {
     pub(crate) db: f64,
     pub(crate) words: String,
+}
+
+/// An imported preset's correction drawn against the curve: on the curve's own grid.
+#[derive(Debug, Serialize)]
+pub(crate) struct OverlayModel {
+    /// the preset's name
+    pub(crate) name: String,
+    /// where it came from
+    pub(crate) origin: Option<String>,
+    /// the correction's response in dB, without its preamp
+    pub(crate) target: Vec<f64>,
+    /// the fit's response in dB
+    pub(crate) fit: Option<Vec<f64>>,
+    /// the runs where the fit misses the target by more than `gap_db`, as `[from_hz, to_hz]`
+    pub(crate) gap: Vec<[f64; 2]>,
+    /// how far the fit may miss before the gap counts, in dB
+    pub(crate) gap_db: f64,
+    /// the root-mean-square miss in dB over 20 Hz to 10 kHz
+    pub(crate) rms_db: Option<f64>,
+    /// the largest miss in dB
+    pub(crate) worst_db: Option<f64>,
+    /// where the largest miss is, in Hz
+    pub(crate) worst_hz: Option<f64>,
+    /// the correction's preamp in dB
+    pub(crate) preamp_db: f64,
+    /// how far the fit boosts at most, in dB (the volume to lower by)
+    pub(crate) peak_db: f64,
 }
 
 /// One band's point: its frequency and the level it sits at.
@@ -486,6 +517,26 @@ pub(super) fn tone(tone: &Tone, bands: Option<&Bands>) -> ToneModel {
             mode: tone.mode,
         },
         response: curve.response.clone(),
+        overlay: curve.overlay.as_ref().map(|overlay| {
+            let preview = &overlay.preview;
+            OverlayModel {
+                name: overlay.name.clone(),
+                origin: overlay.origin.clone(),
+                target: preview.target.clone(),
+                fit: preview.fit.as_ref().map(|fit| fit.response.clone()),
+                gap: preview
+                    .fit
+                    .iter()
+                    .flat_map(|fit| fit.gap.iter().map(|span| [span.from_hz, span.to_hz]))
+                    .collect(),
+                gap_db: overlay.gap_db,
+                rms_db: preview.fit.as_ref().map(|fit| fit.rms_db),
+                worst_db: preview.fit.as_ref().map(|fit| fit.worst_db),
+                worst_hz: preview.fit.as_ref().map(|fit| fit.worst_hz),
+                preamp_db: preview.preamp_db,
+                peak_db: preview.peak_db,
+            }
+        }),
         peak: curve
             .peak_db
             .zip(curve.peak.as_ref())
@@ -541,6 +592,8 @@ pub(crate) struct StatusModel {
 pub(crate) struct PresetRowModel {
     pub(crate) name: String,
     pub(crate) built_in: bool,
+    /// Whether it was imported: an overwrite with the device's curve is refused.
+    pub(crate) imported: bool,
     pub(crate) on: bool,
     /// What its recall and its delete post.
     pub(crate) json: String,
@@ -562,6 +615,7 @@ impl From<&Presets> for PresetsModel {
                 .map(|row| PresetRowModel {
                     name: row.name.clone(),
                     built_in: row.built_in,
+                    imported: row.imported,
                     on: row.on,
                     json: row.json.clone(),
                     rename_json: row.rename_json.clone(),

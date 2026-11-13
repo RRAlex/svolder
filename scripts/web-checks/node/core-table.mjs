@@ -7,7 +7,9 @@
 // Run: node core-table.mjs
 import assert from 'node:assert/strict';
 import { ROWS_SHOWN } from '../../../bins/svolderd/web/core/computer.js';
+import { createModals } from '../../../bins/svolderd/web/core/modal.js';
 import { createTable, editCell, isLong } from '../../../bins/svolderd/web/core/table.js';
+import { page } from './dom.mjs';
 
 let n = 0;
 const ok = async (name, fn) => { await fn(); n++; console.log('ok', name); };
@@ -154,7 +156,7 @@ await ok('a_typed_cell_writes_on_enter_and_puts_the_text_back_on_escape_or_leavi
     n: 2, param: 'g', shown: '+3.0 dB',
     cell: async (...args) => { calls.push(['cell', ...args]); return { ok: true }; },
     restore: () => calls.push(['restore']), after: () => calls.push(['after']), ...over,
-  });
+  }).listen();
   const a = input('4,5');
   flow(a);
   const event = await a.key('Enter');
@@ -185,8 +187,13 @@ await ok('a_typed_cell_writes_on_enter_and_puts_the_text_back_on_escape_or_leavi
   // a write that throws still lets the theme draw what waited
   calls.length = 0;
   const e = input('1');
-  flow(e, { cell: async () => { throw new Error('down'); } });
-  await assert.rejects(() => e.key('Enter'));
+  const failing = editCell(e, {
+    n: 2, param: 'g', shown: '+3.0 dB', cell: async () => { throw new Error('down'); },
+    restore: () => calls.push(['restore']), after: () => calls.push(['after']),
+  });
+  failing.listen();
+  await e.key('Enter');
+  await assert.rejects(() => failing.written);
   assert.deepEqual(calls, [['restore'], ['after']]);
 });
 
@@ -197,9 +204,67 @@ await ok('a_typed_cell_is_read_before_the_theme_puts_the_old_text_back', async (
     n: 2, param: 'g', shown: '+3.0 dB',
     cell: async (...args) => { calls.push(args); return { ok: true }; },
     restore: () => { field.value = '+3.0 dB'; },
-  });
+  }).listen();
   await field.key('Enter');
   assert.deepEqual(calls, [[2, 'g', '4,5', '+3.0 dB']], 'what was typed, not the text put back');
+});
+
+await ok('a_typed_cell_attaches_no_key_listener_and_key_takes_enter_and_escape_alone', async () => {
+  const calls = [];
+  const field = input('4,5');
+  const flow = editCell(field, {
+    n: 2, param: 'g', shown: '+3.0 dB', cell: async (...args) => { calls.push(args); return { ok: true }; },
+  });
+  assert.equal(field.heard.keydown, undefined, 'no keydown listener of its own');
+  assert.equal(flow.key({ key: 'a' }), false);
+  assert.equal(flow.key({ key: 'Tab' }), false);
+  assert.equal(flow.key({ key: 'Enter', preventDefault() {} }), true);
+  assert.equal(flow.key({ key: 'Enter', preventDefault() {} }), false, 'over: nothing twice');
+  await flow.written;
+  assert.deepEqual(calls, [[2, 'g', '4,5', '+3.0 dB']]);
+});
+
+await ok('inside_a_modal_of_the_real_stack_enter_writes_and_escape_puts_the_text_back_and_the_modal_stays', async () => {
+  const p = page('<div id="pop"><input id="cell" value="4,5"></div><button id="o">o</button>');
+  const { window, document } = p;
+  const modals = createModals({ document, fallback: () => document.getElementById('o') });
+  window.addEventListener('keydown', (event) => modals.key(event), true);
+  const field = document.getElementById('cell');
+  const calls = [];
+  let flow = null;
+  modals.open({ el: document.getElementById('pop'), focus: () => field, onKey: (event) => flow?.key(event) === true });
+  const start = (over = {}) => {
+    calls.length = 0;
+    flow = editCell(field, {
+      n: 2, param: 'g', shown: '+3.0 dB',
+      cell: async (...args) => { calls.push(['cell', ...args]); return { ok: true }; },
+      restore: () => calls.push(['restore']), after: () => calls.push(['after']), ...over,
+    });
+  };
+  start();
+  const enter = p.key('Enter', { on: field });
+  assert.equal(enter.defaultPrevented, true);
+  await flow.written;
+  assert.deepEqual(calls, [['restore'], ['cell', 2, 'g', '4,5', '+3.0 dB'], ['after']]);
+  assert.equal(modals.opened(), true, 'Enter does not close the modal');
+  start();
+  const escape = p.key('Escape', { on: field });
+  assert.equal(escape.defaultPrevented, false);
+  assert.deepEqual(calls, [['restore'], ['after']], 'Escape puts the old text back');
+  assert.equal(modals.opened(), true, 'and leaves the modal open');
+  p.key('Escape', { on: field });
+  assert.equal(modals.opened(), false, 'with no flow, the next Escape closes the modal');
+});
+
+await ok('escape_in_the_field_never_reaches_the_page_even_once_the_flow_is_over', async () => {
+  const field = input('4,5');
+  const flow = editCell(field, { n: 2, param: 'g', shown: 'x', cell: async () => ({ ok: true }) });
+  flow.listen();
+  await field.key('Enter');
+  await flow.written;
+  const event = await field.key('Escape');
+  assert.equal(event.stopped, true, 'as the old listener did');
+  assert.equal(flow.key({ key: 'Escape', stopPropagation() {} }), false, 'but no longer the modal\'s to swallow');
 });
 
 console.log(`core-table.mjs: ${n} passed`);

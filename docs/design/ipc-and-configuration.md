@@ -17,11 +17,12 @@ Everything that is not a device reading is one JSON object per line, in both dir
 (`crates/svolder-ipc/src/socket/protocol.rs`). A front end sends a `RequestLine` (an id and a
 `Request`, tagged by `cmd`) and gets back a `Reply::Response` carrying the same id. A
 `Request::Subscribe` turns the connection into a stream of `Reply::Event`s: `Status`, `Connection`,
-`Fault`, `Error`, `Recalled`, `Climb` and `Host`; a `HostFrames` request turns its connection into
-a stream of `HostCapture` and `HostFrame` instead. The requests are the verbs: `Devices`, `State`,
-`Get`, `Set`, `Raw`, the `Eq*` family, `Passphrase`, `Identify`, `Scan`, `History`, `Readings`,
-`Recalled`, `WebPair`, `WebLink`, `WebLinkOpen`, `Reload`, `Version`, `Stop`, `Host`, `HostPress`
-and `HostFrames`.
+`Fault`, `Error`, `Recalled`, `Climb` and `Host`; a `HostFrames` request turns its connection into a
+stream of `HostCapture` and `HostFrame` instead, and the follow op of each family of jobs into a
+stream of that family's job events (see [jobs.md](jobs.md)). The requests are the
+verbs: `Devices`, `State`, `Get`, `Set`, `Raw`, the `Eq*` family, `Passphrase`, `Identify`, `Scan`,
+`History`, `Readings`, `Recalled`, `WebPair`, `WebLink`, `WebLinkOpen`, `Reload`, `Version`, `Stop`,
+`Host`, `HostPress`, `HostFrames` and the families `HostEq`, `Walk` and `AutoEq`.
 
 The host's view crosses the wire as `HostView` (`crates/svolder-ipc/src/host.rs`): whether the
 daemon watches the host at all, the followed player's `PlayingView` and the `RouteFacts` read out of
@@ -40,10 +41,10 @@ The capture crosses the wire on its own request, `HostFrames`, answered with eve
 `sink` or `why` when they apply) once and on each change, and `Event::HostFrame(FrameView)` (`t`,
 `left` and `right` as 240 bytes each, `levels`, `beat`, `bpm`, `phase`) while it runs; the
 connection holds the daemon's capture for its life ([host-capture.md](host-capture.md)). A handler
-that has no frames (`Handler::host_frames` defaults to an error, as does a daemon from before the
-request) answers an error `Response` and the connection serves on; `Client::host_frames` returns it
-as an error. A client from before the events skips them as events it does not know. Both new types
-are in `crates/svolder-ipc/src/host.rs`; none of their fields is required of a later peer.
+that has no frames (`Handler::stream` refuses `HostFrames` by default, as does a daemon from before
+the request) answers an error `Response` and the connection serves on; `Client::host_frames` returns
+it as an error. A client from before the events skips them as events it does not know. Both new
+types are in `crates/svolder-ipc/src/host.rs`; none of their fields is required of a later peer.
 
 The verdict on the route is one pure function, `path_line`, in the same module, called by whoever
 knows the device: it takes the daemon's `RouteFacts` and the device's own readings (`DacFacts`: its
@@ -78,13 +79,13 @@ the web word it, and `SignalSource::word` the one word for a source. A source a 
 decodes as `SignalSource::Unknown` (`#[serde(other)]`), worded `unknown`, so an older client still
 reads the whole answer.
 
-The server (`crates/svolder-ipc/src/socket/server.rs`) is generic over a `Handler` trait with two
-methods, `handle` and `subscribe`; the daemon's `Daemon` implements it. `bind` creates the socket's
+The server (`crates/svolder-ipc/src/socket/server.rs`) is generic over a `Handler` trait with
+`handle`, `subscribe` and `stream`; the daemon's `Daemon` implements it. `bind` creates the socket's
 directory, refuses to start if a live daemon answers on the path, clears a stale socket file, and
 leaves the file at mode 0600. `serve_bound` removes the file at the end only when its inode is still
 the one it bound; `serve_on` serves a listener a service manager handed over and never removes the
-file. `Client` (`socket/client.rs`) is the other half: `connect`, one `request` at a time, and
-`subscribe`. `is_running` is a connect and nothing more.
+file. `Client` (`socket/client.rs`) is the other half: `connect`, one `request` at a time,
+`subscribe` and `stream`. `is_running` is a connect and nothing more.
 
 Both ends read lines through `LineReader` (`socket/lines.rs`), which holds at most `MAX_LINE` (1
 MiB) of one. A longer line is answered as a bad request and read no further, and a line that is not
@@ -107,9 +108,91 @@ daemon running until it is restarted. So the protocol tolerates what it does not
 added after the first release is `#[serde(default)]` (and `skip_serializing_if` where absence keeps
 the old meaning); a peer ignores a field it does not know; a reply or event kind it does not know
 decodes as `Unknown` and is skipped; a request kind a daemon does not know is answered with an error
-and the connection stays open. There is no handshake. `Request::Version` and `daemon_version::skew`
+and the connection stays open. `Request::Version` and `daemon_version::skew`
 (`crates/svolder-ipc/src/socket/daemon_version.rs`) let a front end notice the difference and say
 `svolder daemon restart` (`RESTART_COMMAND`) rather than fail.
+
+There is a small handshake in the same answer. The `version` reply lists `features`, the names of
+what the daemon supports beyond the basics (`FEATURES` in `socket/protocol.rs`, the one list; today
+`reasons`, `unknown_request_code`, `device_crud`, `server_switch`
+([server-switch.md](server-switch.md)), `walk` ([device-walk.md](device-walk.md)) and `autoeq`
+([autoeq.md](autoeq.md))). A daemon too old to list any leaves the field out, which decodes as none.
+A front end asks `DaemonInfo::supports(feature)` to decide between the daemon, the local path (no
+daemon) and "restart the daemon" (one that lacks the feature). The `identify` check for a daemon too
+old to know the request is the first: it asks whether the daemon lists `unknown_request_code` (it
+answers that with code 7), and reads serde's words only of a 0.32.x daemon that lists nothing, as
+the one-release fallback in `daemon_version::is_unknown_request`.
+
+### Error codes and reasons
+
+An `Error` answer carries a `code`, the CLI's exit code for a verb the daemon answered. The codes
+have names (`CODE_*` in `socket/protocol.rs`):
+
+| code | name | means |
+|---|---|---|
+| 1 | `CODE_USAGE` | refused: an unreadable value, a read-only control, a malformed request |
+| 2 | `CODE_NOT_FOUND` | the selector matches no device or several; a link attempt found nothing |
+| 3 | `CODE_LINK` | the link is not there: not connected, the connection failed, not found yet |
+| 4 | `CODE_TIMEOUT` | no answer in time, or no reading to judge a change from |
+| 6 | `CODE_COMPUTER_UNAVAILABLE` | the computer's controls cannot be used |
+| 7 | `CODE_UNKNOWN_REQUEST` | the daemon does not know this request kind |
+
+5 is the exit code for a fault the device reports and is not a daemon code. A line the daemon
+cannot decode as a request is code 1, except one whose `cmd` is a kind it does not have, which is
+code 7; the connection stays open either way. A daemon before 0.33.0 answered the unknown kind with
+code 1 and serde's `unknown variant` words, and `daemon_version::is_unknown_request` still reads
+that, as does `reason_of` the old not-connected and not-found-yet words: both fallbacks are kept
+for one release and go after 0.33.x.
+
+An `Error` may also carry a `reason`, a word for why it happened that a front end matches instead of
+the message's text: `not_found_yet`, `not_connected`, `no_such_job`, `busy`, `internal`, and for a
+refused write of the configuration file `taken`, `missing`, `read_only`, `file_busy`, `bad_name` and
+`invalid`, and `stopping` for a start or a configuration write while the daemon stops, today. One
+mapping in the daemon turns every refusal of a configuration write into its reason
+(`ConfigError::reason`, `ConfigWriteError::reason`), and every socket answer built from one carries
+it.
+The field is left out when there is none, a front end that does not know it ignores it, and a reason
+this build does not know decodes as `Unknown` (`#[serde(other)]`). A daemon lists `reasons` in its
+features. `Response::error` and `.with_reason` build the answers, so a new field does not touch
+every site. The older families of requests answer without a reason.
+
+### The request timeout
+
+`Client::request` waits `DEFAULT_REQUEST_TIMEOUT` for the reply and fails with `IpcError::Timeout`
+after it. The bound is derived, not chosen: the daemon waits at most `COMMAND_DEADLINE` (60 s,
+named in `svolder-ipc` and used by the daemon's own deadlines) to hand a command to a device's actor
+and as long again for its answer, and a recall waits it for its plan and for its end, so one request
+takes at most `COMMAND_WORST_CASE` (two deadlines) before the daemon answers in its own words. The
+default is that and a 5 s margin (125 s): the net against a daemon that says nothing, never shorter
+than the daemon may legitimately take. A test pins the relation.
+
+A recall and a built-in setting are the requests that run several writes, and they only come through
+the daemon's in-process fleet (the web UI and MCP), which waits the deadline for the plan and for
+the end however many steps there are and then answers with the batch still running. The socket's
+`host_eq` preset recall with `confirm` runs several writes too: it flattens each device that plays
+the preset, write by write, and the front end sends it with the default bound (a later release
+scales the bound with the devices). A `reload` is the other exception among socket requests: the
+daemon reconciles its devices one after another, each of which may take a deadline when its actor is
+stuck, so it can take as many deadlines as there are devices plus one. The front ends send it with
+`RELOAD_TIMEOUT` (ten deadlines, enough for nine stuck devices). A request that should wait for more
+passes its own bound: `Client::request_within(request, Some(bound))`, or `None` to wait as long as
+the daemon takes. Replies are matched by id, so a request cut off leaves the connection usable and
+the late reply is passed over by the next request; a late reply to a line the server could not read
+carries id 0 and is taken by the next request as its own. Only a request cut off mid-write leaves
+the connection unusable.
+
+### Streams, jobs and long requests
+
+A request answered with events is a stream, served by one path (`Request::is_stream`,
+`Handler::stream`, `Client::stream`); long work is a daemon job with an id, and a front end sends a
+long request on a connection of its own. That mechanism, the family envelopes (`Walk`, `AutoEq`)
+and the shutdown order are in [jobs.md](jobs.md).
+
+### The configured devices
+
+While a daemon runs it is the one writer of the `[[device]]` blocks and of `default_device`, through
+the `device_config` request (feature `device_crud`); its ops, answers and refusals are in
+[device-walk.md](device-walk.md#the-configured-devices), beside the walk that adds a device with it.
 
 ## The configuration file
 
@@ -274,9 +357,12 @@ a token. A check that altered what it checked would report on its own work.
 
 ## Where the code and tests live
 
-- Protocol, server, client, lines: `crates/svolder-ipc/src/socket/protocol.rs`, `server.rs`,
+- Protocol, server, client, lines: `crates/svolder-ipc/src/socket/protocol.rs` (the families in
+  `crates/svolder-ipc/src/socket/protocol/walk.rs`, `autoeq.rs`, `jobs.rs`, `host_eq.rs` and
+  `device_config.rs`, whose handler is `bins/svolderd/src/handler/device_config.rs`), `server.rs`,
   `client.rs`, `lines.rs`; tests in the `protocol/tests.rs` and `lines/tests.rs` beside them and in
   `server.rs`.
+- The daemon's jobs: see [jobs.md](jobs.md).
 - Socket paths and adoption: `crates/svolder-ipc/src/socket/path.rs`; tests in
   `crates/svolder-ipc/tests/adoption.rs`.
 - Configuration: `crates/svolder-ipc/src/config.rs` and `crates/svolder-ipc/src/config/`; tests in

@@ -1,15 +1,15 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The popups at the bottom right: a stack made on first use, each popup with its own timer and
+// The toasts at the bottom right: a stack made on first use, each toast with its own timer and
 // fade. The page, the components and the effects say things through `toast` and take them away
 // with `dismissToast`.
 
-/** How many popups show at once: a fifth pushes the oldest timed one out. */
+/** How many toasts show at once: a fifth pushes the oldest timed one out. */
 const TOASTS_MAX = 4;
-/** How long a popup stays (ms), unless its caller says otherwise. */
+/** How long a toast stays (ms), unless its caller says otherwise. */
 const TOAST_MS = 2200;
 
-/** The stack the popups live in, made on first use: fixed at the bottom right, out of the flow. */
+/** The stack the toasts live in, made on first use: fixed at the bottom right, out of the flow. */
 function toastStack() {
   let stack = document.getElementById('toasts');
   if (!stack) {
@@ -22,13 +22,13 @@ function toastStack() {
   return stack;
 }
 
-/** Take popup `box` off the stack at once, its timer with it. */
+/** Take toast `box` off the stack at once, its timer with it. */
 function drop(box) {
   clearTimeout(box.hideTimer);
   box.remove();
 }
 
-/** Take popup `box` off the stack, after its fade. */
+/** Take toast `box` off the stack, after its fade. */
 function leave(box) {
   clearTimeout(box.hideTimer);
   box.dataset.leaving = 'true';
@@ -37,12 +37,12 @@ function leave(box) {
 }
 
 /**
- * Show `text` as a popup at the bottom right for `ms` (2.2 s), with a button `action` =
- * {label, href} when given. Popups stack, the newest at the bottom, four at most (a fifth pushes
+ * Show `text` as a toast at the bottom right for `ms` (2.2 s), with a button `action` =
+ * {label, href} when given. Toasts stack, the newest at the bottom, four at most (a fifth pushes
  * out the oldest that has a timer and is not already leaving, never one kept with `ms` 0); the
- * `key`, the text unless given, names a popup, and a new popup replaces the one of its key
- * instead of stacking; the same words again, with no button, leave the popup standing and
- * start its time over (the same words twice show once, as one popup); `ms` 0 keeps it until
+ * `key`, the text unless given, names a toast, and a new toast replaces the one of its key
+ * instead of stacking; the same words again, with no button, leave the toast standing and
+ * start its time over (the same words twice show once, as one toast); `ms` 0 keeps it until
  * `dismissToast` takes it away.
  */
 export function toast(text, action, { key = text, ms = TOAST_MS } = {}) {
@@ -80,7 +80,7 @@ export function toast(text, action, { key = text, ms = TOAST_MS } = {}) {
   return box;
 }
 
-/** Take away the popup of `key`, if it is still up. */
+/** Take away the toast of `key`, if it is still up. */
 export function dismissToast(key) {
   const box = [...(document.getElementById('toasts')?.children ?? [])].find(
     (one) => one.dataset.key === key,

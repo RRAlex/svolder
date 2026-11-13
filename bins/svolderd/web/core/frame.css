@@ -348,8 +348,12 @@
 
 /* The frame: what the page draws over every theme (the menu's button and its menu, the picker of
    themes, the popups). A theme sets the `--frame-*` tokens on `:root` to dress them in its own
-   colours and shapes; the values here are the ones it gets when it sets none. The theme itself is
-   drawn into `#theme`, below the frame, and never touches the frame's nodes. */
+   colours and shapes; the values here are the ones it gets when it sets none. Every theme sets
+   every colour among them, in each scheme it has (`make theme-css-check`). The theme itself is
+   drawn into `#theme`, below the frame, and never touches the frame's nodes.
+   The last three lines are what a popup needs beside the rest: an input field, danger, ok and
+   warn, a graph (its series, its grid, its target) and a device that is not there. Their defaults
+   are no theme's: they read on a light page and on a dark one. */
 
 :root {
   --frame-btn-size: 30px; --frame-btn-bg: transparent; --frame-btn-fg: #ada396;
@@ -364,6 +368,11 @@
   --frame-shadow: 0 12px 32px rgba(0, 0, 0, .45);
   --frame-toast-shadow: 0 14px 34px -12px rgba(0, 0, 0, .8);
   --frame-toast-lift: 64px;
+  --frame-field-bg: rgba(128, 128, 128, .12); --frame-field-border: rgba(128, 128, 128, .55);
+  --frame-danger: #e0352b; --frame-ok: #1e8c3c; --frame-warn: #b36b00;
+  --frame-graph-series: #2f7fd6; --frame-graph-grid: rgba(128, 128, 128, .28);
+  --frame-graph-target: #808080; --frame-graph-gap: rgba(128, 128, 128, .3);
+  --frame-graph-compare: #808080; --frame-offline: #808080;
 }
 
 /* the theme's root sits under the frame: its own stacking context, so nothing a theme draws can
@@ -413,16 +422,18 @@
 /* the menu under the button */
 #frame .fxpop {
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; min-width: 200px;
+  width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box;
   display: grid; gap: 2px; padding: 6px; border-radius: var(--frame-radius);
   background: var(--frame-surface); border: 1px solid var(--frame-line);
   box-shadow: var(--frame-shadow); font-family: var(--frame-font); color: var(--frame-ink);
   overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
 }
-#frame .fxh { padding: 6px 12px 4px; font: 500 12.5px/1.3 var(--frame-font); color: var(--frame-faint); }
+#frame .fxh { padding: 6px 12px 4px; font: 500 12.5px/1.3 var(--frame-font); color: var(--frame-dim); }
 #frame .fxpop [role^=menuitem] {
   display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px;
   border-radius: 10px; border: 0; background: none; text-align: left; cursor: pointer;
   font: 500 14.5px/1.2 var(--frame-font); color: var(--frame-ink); text-decoration: none;
+  white-space: nowrap;
 }
 #frame .fxpop [role^=menuitem]:hover { background: var(--frame-hover); }
 #frame .fxpop [aria-disabled=true] { color: var(--frame-faint); cursor: default; }
@@ -444,7 +455,7 @@
     var(--frame-accent);
   border-color: var(--frame-accent);
 }
-#frame .fxpop .mgo { margin-left: auto; color: var(--frame-faint); }
+#frame .fxpop .mgo { margin-left: auto; color: var(--frame-dim); }
 #frame .fxpop .mkey {
   margin-left: auto; font: 500 11px/1 var(--frame-font); color: var(--frame-dim);
   border: 1px solid var(--frame-line); border-radius: 6px; padding: 3px 6px;
@@ -548,7 +559,357 @@
 }
 .ask .ask-yes { background: var(--frame-accent); border-color: var(--frame-accent); color: var(--frame-on-accent); }
 .ask .ask-button:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
-/* centred on a phone */
-@media (max-width: 600px) {
+/* the inline ask (core/inline-ask.js) a popup draws in place: a name field, or a question that
+   asks once. A theme passes its own classes and does not use these. */
+.fi-askbox {
+  display: grid; gap: 10px; padding: 12px 14px; border-radius: calc(var(--frame-radius) * .75);
+  background: var(--frame-hover); border: 1px solid var(--frame-line);
+  font-family: var(--frame-font); color: var(--frame-ink);
+}
+.fi-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fi-input {
+  flex: 1 1 12em; min-height: var(--frame-tap); box-sizing: border-box; padding: 0 12px;
+  border-radius: 10px; border: 1px solid var(--frame-field-border); background: var(--frame-field-bg);
+  color: var(--frame-ink); font: 400 14px var(--frame-font);
+}
+/* a field the person left wrong, once they have acted on it */
+.fi-input:user-invalid { border-color: var(--frame-danger); }
+.fi-question { margin: 0; font: 500 14px/1.4 var(--frame-font); text-wrap: balance; }
+.fi-set { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fi-btn {
+  min-height: var(--frame-tap); min-width: 80px; padding: 0 18px; border-radius: 999px;
+  border: 1px solid var(--frame-line-strong); background: transparent; color: var(--frame-ink);
+  font: 500 14px var(--frame-font); cursor: pointer;
+}
+.fi-btn.danger { border-color: var(--frame-danger); color: var(--frame-danger); }
+.fi-btn:focus-visible, .fi-input:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
+.fi-btn:disabled, .fi-btn[aria-disabled="true"] { opacity: .5; cursor: default; }
+.fi-btn[aria-pressed="true"] { border-color: var(--frame-accent); color: var(--frame-accent); }
+.fi-form fieldset { text-align: start; display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.fi-form legend { padding: 0; margin: 0 0 2px; width: 100%; text-align: start; font: 500 13px/1.4 var(--frame-font); color: var(--frame-dim); }
+.fi-form label { display: inline-flex; align-items: center; gap: 8px; min-height: var(--frame-tap); font: 400 14px var(--frame-font); color: var(--frame-ink); }
+.fi-form input[type="radio"] { width: 18px; height: 18px; margin: 0; accent-color: var(--frame-accent); }
+.fi-form input[type="radio"]:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
+.fi-form [hidden] { display: none; }
+/* the list (core/list.js) a popup opens next to a chip: a panel of options, placed by the list */
+.fi-list {
+  position: absolute; z-index: 90; display: grid; gap: 2px; min-width: 160px; max-height: 60vh;
+  overflow: auto; padding: 6px; border-radius: var(--frame-radius); box-sizing: border-box;
+  background: var(--frame-surface); border: 1px solid var(--frame-line); box-shadow: var(--frame-shadow);
+  font-family: var(--frame-font); color: var(--frame-ink);
+}
+.fi-opt {
+  min-height: var(--frame-tap); padding: 0 12px; border: 0; border-radius: 10px; text-align: left;
+  background: none; color: var(--frame-ink); font: 500 14px var(--frame-font); cursor: pointer;
+}
+.fi-opt:hover { background: var(--frame-hover); }
+.fi-opt.on { color: var(--frame-accent); }
+.fi-opt:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
+/* a popup (core/popups/frame.js): a veil over everything and a titled box on it, with a side list
+   beside the page. Every popup is drawn with these classes and has no colour of its own. */
+.fp {
+  position: fixed; inset: 0; height: 100vh; height: 100dvh; box-sizing: border-box; z-index: 60;
+  display: grid; place-items: center; grid-template: minmax(0, 1fr) / minmax(0, 1fr); padding: 16px;
+  background: var(--frame-scrim); font-family: var(--frame-font); color: var(--frame-ink);
+  /* a scroll container that scrolls nothing: only such a box keeps a wheel over the veil from
+     scrolling the page under it */
+  overflow: hidden; overscroll-behavior: contain;
+}
+.fp:focus { outline: none; }
+.fp [hidden] { display: none !important; }
+.fp-box {
+  display: flex; flex-direction: column; width: min(760px, 100%); max-height: 100%; min-height: 0;
+  box-sizing: border-box; overflow: hidden; border-radius: var(--frame-radius);
+  background: var(--frame-surface); border: 1px solid var(--frame-line);
+  box-shadow: var(--frame-shadow);
+  /* how the box comes in is a theme's to say (`--frame-popup-in`, an animation, set inside
+     `@media (prefers-reduced-motion: no-preference)`); without the token it stands at once. The
+     box is one element while the popup stands, so it comes in once an opening */
+  animation: var(--frame-popup-in, none);
+}
+.fp-head {
+  display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 20px; flex: none;
+  border-bottom: 1px solid var(--frame-line);
+}
+.fp-title {
+  flex: 1; min-width: 0; margin: 0; font: 600 18px/1.3 var(--frame-font); overflow-wrap: anywhere;
+}
+.fp-close {
+  width: 44px; height: 44px; flex: none; padding: 0; display: grid; place-items: center;
+  box-sizing: border-box; border-radius: var(--frame-btn-radius); cursor: pointer;
+  font: 400 20px/1 var(--frame-font); color: var(--frame-btn-fg); background: var(--frame-btn-bg);
+  border: 1px solid var(--frame-btn-border);
+}
+.fp-close:hover { color: var(--frame-btn-fg-hover); border-color: var(--frame-btn-border-hover); }
+.fp-body {
+  display: grid; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); flex: 1; min-height: 0;
+}
+.fp-single .fp-body { grid-template-columns: minmax(0, 1fr); }
+.fp-side {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px; min-height: 0; overflow-y: auto;
+  border-right: 1px solid var(--frame-line); overscroll-behavior: contain;
+}
+.fp-entry {
+  display: flex; align-items: center; gap: 8px;
+  min-height: var(--frame-tap); flex: none; padding: 0 12px; border: 0; border-radius: 10px;
+  text-align: left; background: none; color: var(--frame-dim); font: 500 14px var(--frame-font);
+  cursor: pointer;
+}
+/* a tag stands at the entry's far end */
+.fp-entry > .fp-tag { margin-left: auto; }
+/* a break in the side list, before an entry that starts a group */
+.fp-rule {
+  flex: none; width: auto; height: 1px; margin: 6px 4px; border: 0; background: var(--frame-line);
+}
+.fp-entry:hover { background: var(--frame-hover); }
+.fp-entry.on {
+  color: var(--frame-ink); background: var(--frame-hover);
+  box-shadow: inset 3px 0 0 var(--frame-accent);
+}
+/* the page pane is the popup's place for lists (core/list.js): positioned, so a list's panel is
+   placed in what the pane scrolls and goes with it */
+.fp-page {
+  position: relative; min-width: 0; min-height: 0; padding: 16px 20px; overflow-y: auto;
+  overscroll-behavior: contain; font: 400 14px/1.5 var(--frame-font);
+}
+.fp-page > :first-child { margin-top: 0; }
+/* the last child of the pane's own: an open list's panel comes after it and moves nothing */
+.fp-page > :nth-last-child(1 of :not(.fi-list)) { margin-bottom: 0; }
+/* a panel is never taller than the pane shows; a longer list scrolls in its panel */
+.fp-page > .fi-list { max-height: min(60vh, calc(100% - 8px)); }
+/* the way back from a page to the list: only the phone layout shows it */
+.fp-back {
+  display: none; align-items: center; min-height: var(--frame-tap); margin: 0 0 8px;
+  padding: 0 12px 0 4px;
+  border: 0; border-radius: 10px; background: none; color: var(--frame-dim);
+  font: 500 14px var(--frame-font); cursor: pointer;
+}
+/* what every popup draws (popups/frame.js: keycap, dot, tag, heading, row): one class each,
+   dressed by the tokens alone */
+.fp-key {
+  display: inline-block; min-width: 1.4em; box-sizing: border-box; padding: 3px 6px;
+  border: 1px solid var(--frame-line-strong); border-radius: 6px; text-align: center;
+  white-space: nowrap; font: 500 12px/1.2 var(--frame-mono); color: var(--frame-ink);
+}
+/* a state dot: full for on and for warn, a ring for off, so the state is not the colour alone */
+.fp-dot {
+  display: inline-block; flex: none; width: 8px; height: 8px; box-sizing: border-box;
+  border-radius: 50%; border: 2px solid var(--frame-offline);
+}
+.fp-dot.on { border-color: var(--frame-ok); background: var(--frame-ok); }
+.fp-dot.warn { border-color: var(--frame-warn); background: var(--frame-warn); }
+.fp-tag {
+  display: inline-block; flex: none; padding: 2px 6px; border-radius: 999px;
+  border: 1px solid var(--frame-line-strong); color: var(--frame-dim);
+  font: 600 10.5px/1.3 var(--frame-font); letter-spacing: .04em;
+}
+.fp-heading {
+  margin: 18px 0 6px; color: var(--frame-dim); font: 600 12px/1.3 var(--frame-font);
+  letter-spacing: .04em;
+}
+.fp-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 0;
+  padding: 6px 0; border-bottom: 1px solid var(--frame-line);
+}
+/* rows as one list of terms and what each says (popups/frame.js `rows`) */
+.fp-rows { margin: 0; padding: 0; }
+.fp-row-label { flex: none; color: var(--frame-dim); }
+.fp-row-value {
+  min-width: 0; margin: 0; text-align: right; overflow-wrap: anywhere; color: var(--frame-ink);
+  font-variant-numeric: tabular-nums;
+}
+/* a graph's box (an svg, or a box holding one) and the three strokes a graph is drawn with */
+.fp-graph {
+  display: block; width: 100%; box-sizing: border-box; border-radius: 10px;
+  border: 1px solid var(--frame-line); background: var(--frame-field-bg);
+}
+.fp-graph-grid { fill: none; stroke: var(--frame-graph-grid); stroke-width: 1; }
+.fp-graph-series { fill: none; stroke: var(--frame-graph-series); stroke-width: 2; }
+.fp-graph-target {
+  fill: none; stroke: var(--frame-graph-target); stroke-width: 1.5; stroke-dasharray: 4 3;
+}
+/* a gap: where a fit misses its target, a shaded area; and a second measurement's target */
+.fp-graph-gap { fill: var(--frame-graph-gap); stroke: none; }
+.fp-graph-compare {
+  fill: none; stroke: var(--frame-graph-compare); stroke-width: 1.5; stroke-dasharray: 1 3;
+  stroke-linecap: round;
+}
+/* the Devices popup (popups/devices/draw.js): a device's block is its name, its state line and
+   its key graphs; one that is not connected is dimmed by the tokens for dim words and for what
+   is offline, never by an opacity */
+.fpd-device { margin: 0 0 22px; }
+.fpd-device:last-child { margin-bottom: 0; }
+.fpd-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.fpd-name { margin: 0; font: 600 15px/1.3 var(--frame-font); color: var(--frame-ink); }
+.fpd-state {
+  display: flex; align-items: center; gap: 6px; margin: 2px 0 10px; color: var(--frame-dim);
+  font: 400 13px/1.4 var(--frame-font);
+}
+.fpd-graphs {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 12px 16px;
+}
+.fpd-graph { margin: 0; min-width: 0; }
+.fpd-graph-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin: 0 0 4px; font: 500 12.5px/1.3 var(--frame-font); color: var(--frame-dim);
+}
+.fpd-graph-last {
+  color: var(--frame-ink); font-variant-numeric: tabular-nums; text-align: right;
+  overflow-wrap: anywhere;
+}
+.fpd-plot { height: 56px; overflow: hidden; }
+.fpd-spark { display: block; width: 100%; height: 100%; }
+.fpd-spark-line {
+  fill: none; stroke: var(--frame-graph-series); stroke-width: 2; stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.fpd-spark-dot { fill: var(--frame-graph-series); }
+.fpd-graph-range {
+  margin: 2px 0 0; font: 400 11.5px/1.3 var(--frame-font); color: var(--frame-dim);
+  font-variant-numeric: tabular-nums;
+}
+.fpd-graph .fp-note { font-size: 12.5px; }
+.fpd-away .fpd-name, .fpd-away .fpd-graph-last { color: var(--frame-dim); }
+.fpd-away .fpd-spark-line { stroke: var(--frame-offline); }
+.fpd-away .fpd-spark-dot { fill: var(--frame-offline); }
+.fpd-show { margin: 0; }
+/* a device's facts: the settings' rows (`fp-row`), a unit id in the mono face, the passphrase note in
+   the warning ink, and Identify with the words that say what it does or why it is off */
+.fpd-mono { font-family: var(--frame-mono); }
+.fpd-warn { color: var(--frame-warn); }
+.fpd-identify { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0 0; }
+/* the All readings disclosure of a device's page (popups/devices/readings.js): the summary is
+   the control, and the table under it wraps its words, so nothing scrolls sideways */
+.fpd-readings { margin: 14px 0 0; }
+.fpd-readings-title { cursor: pointer; }
+.fpd-readings-title:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
+.fpd-readings-table { width: 100%; margin: 8px 0 0; border-collapse: collapse; }
+.fpd-readings-table caption { padding: 0 0 6px; text-align: start; color: var(--frame-dim); }
+.fpd-readings-table th, .fpd-readings-table td {
+  padding: 4px 10px 4px 0;
+  border-top: 1px solid var(--frame-line);
+  text-align: start; vertical-align: top; font-weight: inherit; overflow-wrap: anywhere;
+}
+.fpd-readings-table thead th, .fpd-reading-age { color: var(--frame-dim); }
+.fpd-reading-age { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* the Devices popup's *+ Add a device* page (popups/devices/walk.js): the daemon's prompt, its
+   rows heard and its controls, in the frame's tokens; the choices stack at the phone width */
+.fpw { display: grid; gap: 12px; }
+.fpw > div { min-width: 0; }
+.fpw .fp-heading { margin: 0 0 4px; }
+.fpw-line { margin: 0 0 4px; font: 400 14px/1.45 var(--frame-font); color: var(--frame-ink); }
+.fpw-default { font-weight: 600; }
+.fpw-subheading { margin: 0 0 6px; font: 500 12.5px/1.3 var(--frame-font); color: var(--frame-dim); }
+.fpw-rows { list-style: none; margin: 0; padding: 0; }
+.fpw-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 6px 0;
+  border-top: 1px solid var(--frame-line); font: 400 14px/1.4 var(--frame-font);
+  color: var(--frame-ink); overflow-wrap: anywhere;
+}
+.fpw-row:first-child { border-top: 0; }
+.fpw-product { font-weight: 600; }
+.fpw-unit { font-family: var(--frame-mono); font-size: 12.5px; color: var(--frame-dim); }
+.fpw-signal { color: var(--frame-dim); font-variant-numeric: tabular-nums; }
+.fpw-controls { display: grid; gap: 12px; }
+.fpw-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+/* the daemon's choices keep its column spacing (a unit, a signal, a profile) */
+.fpw-choice {
+  text-align: start; height: auto; padding-block: 8px; overflow-wrap: anywhere; white-space: pre-wrap;
+}
+/* the warning is drawn as one: an accent bar in the warning ink beside its title and body */
+.fpw-warning { border-inline-start: 3px solid var(--frame-warn); padding-inline-start: 10px; }
+.fpw-label { flex: 1 0 100%; }
+.fpw-field { flex: 1 1 14em; min-width: 0; }
+.fpw-field[readonly] { color: var(--frame-dim); }
+.fpw-more { margin: 0; }
+.fpw-status:empty, .fpw-refusal:empty { display: none; }
+.fpw-ended, .fpw-added { font: 400 14px/1.45 var(--frame-font); color: var(--frame-ink); }
+.fpw-ended.fp-failed { color: var(--frame-danger); }
+.fpw-added { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.fp-note { margin: 0; color: var(--frame-dim); }
+/* a note under a list stands off it */
+.fp-rows + .fp-note { margin-top: 12px; }
+/* a link that leaves the page */
+.fp-page a { color: var(--frame-accent); text-underline-offset: 2px; }
+.fp-page a:focus-visible {
+  outline: 2px solid var(--frame-accent); outline-offset: 2px; border-radius: 4px;
+}
+.fp-note.fp-failed { color: var(--frame-danger); }
+/* the Overview's line that config.toml changed since the last reload: the ink of the theme's own
+ * surface and an accent edge, so it reads in every theme without its own colours */
+.fp-note.fp-config {
+  margin: 0 0 12px; padding: 8px 12px; color: var(--frame-ink); background: var(--frame-hover);
+  border-inline-start: 3px solid var(--frame-accent); border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.fp-live { color: var(--frame-dim); font-family: var(--frame-mono); }
+.fp-close:focus-visible, .fp-back:focus-visible {
+  outline: 2px solid var(--frame-accent); outline-offset: 2px;
+}
+.fp-entry:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
+/* the pane takes the focus while it scrolls (popups/frame.js) */
+.fp-page:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
+/* the EQ library popup (popups/eq-library/draw.js): the search field, the headphones as disclosures
+   of their measurements, the preview's graph and key, the import and upload forms and the saved
+   rows, dressed by the tokens alone */
+.fpe-label { flex: 1 1 100%; font: 500 13px/1.4 var(--frame-font); color: var(--frame-dim); }
+.fpe-search, .fpe-import, .fpe-upload { margin: 0 0 8px; }
+.fpe-fields { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fpe-meta { font-size: 12.5px; }
+.fpe-results { display: grid; gap: 4px; margin: 8px 0 0; }
+.fpe-group { border-bottom: 1px solid var(--frame-line); padding: 2px 0 6px; }
+.fpe-group-name {
+  display: flex; align-items: center; gap: 10px; min-height: var(--frame-tap); cursor: pointer;
+  color: var(--frame-ink); font: 600 14px/1.3 var(--frame-font); list-style: none;
+}
+.fpe-group-name::-webkit-details-marker { display: none; }
+/* the disclosure's marker: a flex summary draws none of its own */
+.fpe-group-name::before {
+  content: ""; flex: none; width: 6px; height: 6px; margin: 0 4px 0 2px;
+  border-right: 2px solid var(--frame-dim); border-bottom: 2px solid var(--frame-dim);
+  transform: rotate(-45deg);
+}
+.fpe-group[open] > .fpe-group-name::before { transform: rotate(45deg); }
+.fpe-group-name:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
+.fpe-count { margin-left: auto; color: var(--frame-dim); font: 400 12.5px var(--frame-font); }
+.fpe-variants { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+.fpe-variant { display: inline-flex; align-items: center; gap: 8px; }
+.fpe-preview { margin: 14px 0 0; }
+.fpe-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.fpe-chip-on { color: var(--frame-dim); font: 500 13px var(--frame-font); }
+.fpe-plot { height: 180px; margin: 0 0 8px; overflow: hidden; }
+.fpe-svg { display: block; width: 100%; height: 100%; }
+.fpe-svg .fp-graph-target, .fpe-svg .fp-graph-series, .fpe-svg .fp-graph-compare {
+  vector-effect: non-scaling-stroke;
+}
+.fpe-svg .fp-graph-grid { vector-effect: non-scaling-stroke; }
+.fpe-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 8px; padding: 0; list-style: none; }
+.fpe-key { display: inline-flex; align-items: center; gap: 6px; color: var(--frame-dim); font: 400 12.5px var(--frame-font); }
+.fpe-swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--frame-graph-series); }
+.fpe-swatch.target { border-top: 2px dashed var(--frame-graph-target); }
+.fpe-swatch.compare { border-top: 2px dotted var(--frame-graph-compare); }
+.fpe-swatch.gap { height: 8px; border: 0; background: var(--frame-graph-gap); }
+.fpe-rows { margin: 0; padding: 0; list-style: none; }
+.fpe-row { padding: 8px 0; border-bottom: 1px solid var(--frame-line); }
+.fpe-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.fpe-row-name { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; color: var(--frame-ink); font-weight: 500; }
+.fpe-row.on .fpe-row-name { color: var(--frame-accent); }
+.fpe-where { color: var(--frame-dim); font: 400 12.5px var(--frame-font); }
+.fpe-why { margin: 4px 0 0; font-size: 12.5px; }
+.fpe-ask { margin: 6px 0 0; }
+.fpe-ask:empty { display: none; }
+.fpe-saved-words:empty { display: none; }
+.fpe-lower { margin-top: 8px; color: var(--frame-warn); }
+/* centred on a phone (the core's PHONE_MAX_PX, core/phone.js), where a popup fills the screen and
+   shows its list or its page, never both */
+@media (max-width: 719px) {
   .toasts { left: 50%; right: auto; transform: translateX(-50%); align-items: center; }
+  .fp { padding: 0; }
+  .fp-box { width: 100%; height: 100%; border: 0; border-radius: 0; }
+  .fp-body { grid-template-columns: minmax(0, 1fr); }
+  .fp-side { border-right: 0; }
+  .fp-at-list .fp-page, .fp-at-page .fp-side { display: none; }
+  .fp-back { display: inline-flex; }
+  .fpw-choice { flex: 1 1 100%; }
 }

@@ -5,6 +5,7 @@ use svolder_ipc::Response;
 
 use super::*;
 use crate::test_support::stub_daemon::{CANONICAL, stub_daemon};
+use svolder_ipc::{CODE_LINK, CODE_USAGE};
 
 /// A daemon that answers `identify` with `reply`, and the words the verb makes of it.
 async fn said_over(reply: Response) -> Result<String, Failure> {
@@ -39,10 +40,10 @@ async fn a_sent_request_says_sent_and_a_repeat_says_to_wait() {
 #[tokio::test]
 async fn a_device_that_is_down_says_when_the_daemon_tries_again() {
     let daemon = stub_daemon().await;
-    daemon.identifies(Response::Error {
-        code: 3,
-        message: "device not connected".into(),
-    });
+    daemon.identifies(
+        Response::error(CODE_LINK, "device not connected")
+            .with_reason(svolder_ipc::Reason::NotConnected),
+    );
     daemon.canonical_waits(12);
     let mut backend = Backend::stub_remote(&daemon.socket).await;
     let failure = identify_on(&mut backend).await.expect_err("not connected");
@@ -64,7 +65,45 @@ async fn identify_against_an_old_daemon_says_restart() {
         "this daemon is too old to identify; restart it"
     );
     assert_eq!(failure.next, "Run `svolder daemon restart`");
-    assert_eq!(failure.code, 1);
+    assert_eq!(failure.code, 7);
+}
+
+/// A 0.32.7 daemon says it does not know the request as code 1 and serde's words, and says the
+/// link is away in words alone; both are still read, as a daemon since 0.33.0 says them with a
+/// code and a reason.
+#[tokio::test]
+async fn a_0_32_7_daemon_is_read_by_its_words() {
+    let old = said_over(Response::error(
+        CODE_USAGE,
+        "bad request: unknown variant `identify`, expected one of `devices`, `state`",
+    ))
+    .await
+    .expect_err("an old daemon does not know the request");
+    assert_eq!(old.what, "this daemon is too old to identify; restart it");
+
+    let daemon = stub_daemon().await;
+    daemon.identifies(Response::error(CODE_LINK, "device not connected"));
+    daemon.canonical_waits(12);
+    let mut backend = Backend::stub_remote(&daemon.socket).await;
+    let away = identify_on(&mut backend).await.expect_err("not connected");
+    daemon.stop().await;
+    assert_eq!(away.what, "device not connected, next attempt in 12 s");
+}
+
+/// The old-daemon decision comes from what the daemon lists: serde's words under code 1 read as
+/// "too old" only from a daemon that lists no features, and are a plain refusal from one that
+/// lists the unknown-request code.
+#[tokio::test]
+async fn the_old_daemon_decision_follows_what_the_daemon_lists() {
+    let words = "bad request: unknown variant `identify`, expected one of `devices`, `state`";
+    let daemon = stub_daemon().await;
+    daemon.identifies(Response::error(CODE_USAGE, words));
+    daemon.lists_features(&[svolder_ipc::FEATURE_UNKNOWN_REQUEST_CODE]);
+    let mut backend = Backend::stub_remote(&daemon.socket).await;
+    let refused = identify_on(&mut backend).await.expect_err("a refusal");
+    daemon.stop().await;
+    assert_eq!(refused.what, words);
+    assert_ne!(refused.next, "Run `svolder daemon restart`");
 }
 
 /// A direct session sends one frame and says so; a repeat inside the gap sends none.
@@ -114,6 +153,7 @@ async fn a_device_the_daemon_has_not_found_says_not_connected_with_the_wait() {
         code: 3,
         what: "b has not been found yet".into(),
         next: String::new(),
+        reason: None,
     };
     let none = not_connected(failure, Some("c"), &other);
     assert_eq!(none.what, "device not connected", "no wait is known");
@@ -135,10 +175,7 @@ async fn the_words_carry_the_name_the_daemon_answered_with() {
 /// daemon's words and with a usage code, not the not-connected words.
 #[tokio::test]
 async fn a_device_that_offers_no_identify_says_so() {
-    let refusal = Response::Error {
-        code: 1,
-        message: "fake offers no identify".into(),
-    };
+    let refusal = Response::error(CODE_USAGE, "fake offers no identify");
     let failure = said_over(refusal).await.expect_err("refused");
     assert_eq!(failure.code, 1);
     assert_eq!(failure.what, "fake offers no identify");
@@ -196,6 +233,7 @@ fn the_wait_comes_from_the_device_the_daemon_names() {
         code: 3,
         what: "b has not been found yet".into(),
         next: String::new(),
+        reason: None,
     };
     let said = not_connected(failure, None, &rows);
     assert_eq!(said.what, "device not connected, next attempt in 12 s");

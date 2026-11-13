@@ -21,13 +21,13 @@
 //                amp-wire.js, hops-wire.js, device-list.js, lists.js, ask.js   the hands on them
 //   slim.js      the bar that pins at the top when the line scrolls away
 //   strip-wire.js the finger on the phone's strip (the line under 720 px, drawn by draw/line.js)
-//   act.js       the log of what this page asked of the device
 //   words.js     the fixed words and the small lines worked out from the model
 //   driver.js    the test driver the contract and completeness checks drive
 //   preview.js   the picture of the theme in the frame's menu and picker
 
+import { PHONE_MAX_PX } from '../../core/phone.js';
 import { registerTheme } from '../../core/registry.js';
-import { createAct } from './act.js';
+import { createAct } from '../../core/act.js';
 import { ampScreen, viaScreen } from './draw/amp.js';
 import { declaredScreen, hopTools } from './draw/hop.js';
 import { card, heldCard, stateCard } from './draw/card.js';
@@ -39,23 +39,22 @@ import { modeRow } from './draw/choices.js';
 import { toneBox } from './draw/tone.js';
 import { volumeBox } from './draw/volume.js';
 import { inertPage } from './draw/word.js';
+import { wireFacts } from './facts-wire.js';
 import { wireAmp } from './amp-wire.js';
 import { wireCard } from './card-wire.js';
 import { wireComputer } from './computer-wire.js';
 import { openDevices } from './device-list.js';
 import { wireControls } from './controls-wire.js';
-import { wireFacts } from './facts-wire.js';
 import { wireHops } from './hops-wire.js';
 import { bound, driver } from './driver.js';
-import { createFold } from './fold.js';
-import { createLive, keeper } from './live.js';
+import { createLive } from './live.js';
 import {
   deviceOf, followedUrls, hopsOf, openers, shelves, shownHopId, sideOf,
 } from './line.js';
 import { HOPS } from './words.js';
+import { KEYS, ZONES } from './key-table.js';
 import { wirePlaying } from './playing-wire.js';
 import { wirePresets } from './presets-wire.js';
-import { createRelease } from './press.js';
 import { preview } from './preview.js';
 import { wireSlim } from './slim.js';
 import { wireStrip } from './strip-wire.js';
@@ -149,13 +148,13 @@ shelves.computer = (page, _hop, view) => {
     : '';
 };
 
-/** The shelf of a device hop: the rest of what the model has of the device. An amp's power and
- * Identify are in its area. */
+/** The shelf of a device hop: the rest of what the model has of the device. An amp's power is in
+ * its area. */
 shelves.device = (page, hop, view) => {
   const family = familyOf(page, hop);
   if (family === 'amp') {
     const device = modelOf(page, hop);
-    return device ? drawShelf(page, device, view, { power: true, identify: true }) : '';
+    return device ? drawShelf(page, device, view, { power: true }) : '';
   }
   return hop.url === page.shown && page.device && family in SCREENS
     ? drawShelf(page, page.device, view, { choices: true, phone: view.phone() }) : '';
@@ -171,7 +170,8 @@ const SKELETON = '<div id="signal" class="sg"><div class="sg-bandwrap"><span cla
   + '<div id="sg-open" class="sg-open"></div><div id="sg-shelf" class="sg-shelf"></div>'
   + '<footer id="sg-now" class="sg-now"></footer><div id="sg-sheet" class="sg-sheetwrap" hidden></div></div>';
 
-/** Mount Signal on `root`: draw the page, follow the model; returns the way to unmount. */
+/** Mount Signal on `root`: draw the page, follow the model; returns the mounted instance (the way
+ * to unmount, the row this mount gives the frame's menu and the theme's key table). */
 function mount(root, core, { signal }) {
   root.innerHTML = SKELETON;
   bound.core = core;
@@ -186,8 +186,8 @@ function mount(root, core, { signal }) {
     watchVisible: core.lifecycle.watchVisible,
     matchMedia: (query) => window.matchMedia(query),
   });
-  // Under 720 px the line is the strip of P7b; the same hops and the same listbox, drawn for the width.
-  const narrow = window.matchMedia('(max-width: 719px)');
+  // On a phone the line is the strip of P7b; the same hops and the same listbox, drawn for the width.
+  const narrow = window.matchMedia(`(max-width: ${PHONE_MAX_PX}px)`);
   const view = {
     phone: () => narrow.matches,
     state: core.model.state(),
@@ -213,8 +213,6 @@ function mount(root, core, { signal }) {
      * clock the drawing goes by (ms). */
     asked: null,
     now: Date.now(),
-    /** Whether the device's facts are open (kept in the preferences, and in memory). */
-    facts: createFold(() => core.prefs),
     flow,
     /** The dashes move while the player plays and the stream is open, and while the band is on
      * show (the loop's own rule); otherwise the loop is not running. */
@@ -302,14 +300,14 @@ function mount(root, core, { signal }) {
   }, { signal });
 
   // One count of the holds on the open area, for the knob, a point and an open list together.
-  const keep = keeper(live, 'open');
+  const keep = core.freeze.keeper(live, 'open');
   wireVolume({ root, core, live, act, view, keep, signal });
   wirePlaying({ root, core, act, signal });
   wireCard({ root, core, act, signal });
   // The shelf's own count of holds, for what is typed, asked or open in it.
-  const shelfKeep = keeper(live, 'shelf');
+  const shelfKeep = core.freeze.keeper(live, 'shelf');
   wireTone({ root, core, live, act, keep, shelfKeep, signal });
-  const release = createRelease(root.ownerDocument, shelfKeep, signal);
+  const release = core.freeze.createRelease(root.ownerDocument, shelfKeep, signal);
   wireAmp({ root, core, live, act, view, keep, signal });
   root.querySelector('#sg-open').addEventListener('click', (event) => {
     if (!event.target.closest?.('[data-act="show-device"]')) return;
@@ -317,12 +315,10 @@ function mount(root, core, { signal }) {
     if (hop) core.actions.showDevice(hop.url);
   }, { signal });
   const hops = wireHops({ root, core, live, view, keep, signal });
-  bound.add = hops.add;
-  bound.canAdd = hops.canAdd;
   wireControls({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wirePresets({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wireComputer({ root, core, live, act, view, keep, shelfKeep, release, signal });
-  wireFacts({ root, core, live, view, signal });
+  wireFacts({ root, core, signal });
   wireStrip({ band, hops: view.hops, chosen: () => view.chosen, choose: view.choose, signal });
   wireSlim({ bar: root.querySelector('#sg-slim'), band: root.querySelector('.sg-bandwrap'),
     // a tap on the DAC before a linked amp shows the DAC, as a tap on the line does
@@ -346,41 +342,50 @@ function mount(root, core, { signal }) {
   // never has to chase the page as it scrolls.
   core.frame.anchor(slot, { fixed: true });
   live.drawAll();
-  return function unmount() {
-    bound.core = null;
-    bound.add = null;
-    bound.canAdd = null;
-    for (const stop of stopFollowing) stop();
-    core.stream.follow([]);
-    loop.stop();
-    live.stop();
-    core.frame.anchor(null);
-    root.replaceChildren();
+  // Signal has no key of the whole page: binding the table binds none, and says at once when an
+  // entry cannot be read.
+  core.keys.bind(KEYS, { signal });
+  return {
+    menuRows: () => menuRows({ core, hops, signal }),
+    keys: KEYS,
+    zones: ZONES,
+    unmount() {
+      bound.core = null;
+      for (const stop of stopFollowing) stop();
+      core.stream.follow([]);
+      loop.stop();
+      live.stop();
+      core.frame.anchor(null);
+      root.replaceChildren();
+    },
   };
 }
 
-/** The theme's row in the frame's menu: Add device…, the sheet of what comes after the device. */
-function menuRows() {
+/** The row a mount of Signal gives the frame's menu: Add to the chain…, the sheet of what comes
+ * after the device. `hops` is the mount's line (`add()` opens the sheet, `canAdd()` says whether it
+ * can) and `signal` the mount's: the row is not offered once the mount has gone. */
+export function menuRows({ core, hops, signal }) {
   return [{
     kind: 'action',
     id: 'add-device',
     label: HOPS.addMenu,
     elementId: 'menu-add-device',
-    available: () => Boolean(bound.add && bound.canAdd?.() && bound.core?.model.shown()),
-    run: () => bound.add?.(),
+    available: () => Boolean(!signal.aborted && hops.canAdd() && core.model.shown()),
+    run: () => {
+      if (!signal.aborted) hops.add();
+    },
   }];
 }
 
 /** The theme as the registry lists it: it asks the daemon for the meters and the computer's
- * player; dark only, no effects; the frame's menu has its Add device row; its menu button is the
- * ink circle over the line band's top right. */
+ * player; dark only, no effects; the frame's menu has its Add to the chain row; its menu button
+ * is the ink circle over the line band's top right. */
 export const theme = {
   id: 'signal',
   label: 'Signal',
   needs: ['meters', 'host'],
   schemes: ['dark'],
   menuButton: { icon: 'ink', label: 'Menu' },
-  menuRows,
   preview,
   driver,
   mount,

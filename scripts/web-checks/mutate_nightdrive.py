@@ -137,14 +137,14 @@ MUTATIONS = {
         (SHEET, ['the_sheet', 'the_presets'], ['  Keep deletes nothing']),
         (SHEET, ['the_sheet', 'a_slot_save_asks_first'], ['  Keep writes nothing']),
     ], [
-        (N + 'ask.js', "    if (answer === yes) send();\n    else if (answer === no && !sending) handle.close();",
+        ('core/inline-ask.js', "    if (answer === yes) send();\n    else if (answer === no && !sending) handle.close();",
          "    if (answer === yes) send();\n    else if (answer === no && !sending) send();"),
     ]),
     'a question sends before the answer': ([
         (SHEET, ['the_sheet', 'the_presets'], ['  Keep deletes nothing']),
         (SHEET, ['the_sheet', 'a_slot_save_asks_first'], ['a_slot_save_asks_first: choosing a slot asks in place and sends nothing yet']),
     ], [
-        (N + 'ask.js', "  handle.box.addEventListener('click', (event) => {\n    const answer = answerOf(event);\n    if (answer === yes) send();",
+        ('core/inline-ask.js', "  handle.box.addEventListener('click', (event) => {\n    const answer = answerOf(event);\n    if (answer === yes) send();",
          "  go();\n  handle.box.addEventListener('click', (event) => {\n    const answer = answerOf(event);\n    if (answer === yes) send();"),
     ]),
     'a second tap on the input chip writes': ([
@@ -164,9 +164,9 @@ MUTATIONS = {
         (THEME, ['the_tuning', 'the_tuning_guest'], ['a_guest_tap_on_the_mountains_says_why']),
         (SHEET, ['the_sheet', 'the_sheet_guest'], ['a_guests_sheet_is_inert_in_a_browser']),
     ], [
-        ('core/actions.js', "      toast(SIGN_IN_WORDS, SIGN_IN);\n      return { ok: false, status: 0, error: SIGN_IN_WORDS };",
+        ('core/write.js', "      toast(SIGN_IN_WORDS, SIGN_IN);\n      return { ok: false, status: 0, error: SIGN_IN_WORDS };",
          "      toast(SIGN_IN_WORDS, SIGN_IN);"),
-        ('core/actions.js', "      toast(why);\n      return { ok: false, status: 0, error: why };", "      toast(why);"),
+        ('core/write.js', "      toast(why);\n      return { ok: false, status: 0, error: why };", "      toast(why);"),
     ]),
     'an amp\'s meters are heard as a part': ([
         (SHEET, ['the_sheet', 'an_amps_meters_move_live_on_the_sheet'],
@@ -212,7 +212,7 @@ MUTATIONS = {
     'Space toggles play while the theme menu is open': ([
         ('space_key.py', None, ['(nightdrive) with the menu open and the focus on the page space presses nothing']),
     ], [
-        ('core/frame.js', "if (spaceKey(event) && !menu.opened() &&", "if (spaceKey(event) &&"),
+        ('core/frame.js', "const covered = () => menu.opened() || sheet();", "const covered = () => sheet();"),
     ]),
     'the faded dash rests at a tenth': ([
         (THEME, ['the_dash_fade'], ['the_dash_fades_to_a_fifth_with_the_hud']),

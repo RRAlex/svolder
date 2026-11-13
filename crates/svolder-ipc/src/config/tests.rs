@@ -38,6 +38,8 @@ mod template;
 mod writers;
 // the config home and scratch homes
 mod paths;
+// the refusals a caller matches on
+mod errors;
 
 /// A device with nothing but a name and a udid.
 fn device(name: &str, udid: &str) -> DeviceConfig {

@@ -361,7 +361,7 @@ impl App {
         }
         self.devices
             .rows
-            .get(self.selected)
+            .get(self.selected())
             .map(|row| vec![Intent::Identify(Some(row.name.clone()))])
             .unwrap_or_default()
     }
@@ -418,8 +418,7 @@ impl App {
     pub(crate) fn settle_on(&mut self, screen: Screen) {
         self.enter(screen);
         self.focus_memory = FocusMemory::default();
-        self.selected = 0;
-        self.switch_focus = false;
+        self.set_selected(0);
         self.leave_target();
         self.frame_flags.navigated = false;
     }
@@ -447,8 +446,8 @@ impl App {
     /// the reading the row shows, since its rows are a live list a new reading can slip into.
     fn remember_row(&mut self) {
         match self.screen {
-            Screen::Device => self.focus_memory.device = self.selected,
-            Screen::Devices => self.focus_memory.devices = self.selected,
+            Screen::Device => self.focus_memory.device = self.selected(),
+            Screen::Devices => self.focus_memory.devices = self.selected(),
             Screen::Telemetry => self.focus_memory.reading = self.telemetry_focus(),
             Screen::Tone | Screen::Settings | Screen::Setup => {}
         }
@@ -469,8 +468,7 @@ impl App {
             ),
             Screen::Tone | Screen::Settings | Screen::Setup => (0, 1),
         };
-        self.selected = row.min(len.saturating_sub(1));
-        self.switch_focus = false;
+        self.set_selected(row.min(len.saturating_sub(1)));
         self.leave_target();
     }
 
@@ -483,8 +481,7 @@ impl App {
 
     /// Move the focused row of a list `len` long, and ask for nothing.
     pub(super) fn move_row(&mut self, delta: isize, len: usize) -> Vec<Intent> {
-        self.selected = stepped(self.selected, delta, len);
-        self.switch_focus = false;
+        self.set_selected(stepped(self.selected(), delta, len));
         Vec::new()
     }
 

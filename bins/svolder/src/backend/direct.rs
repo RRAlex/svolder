@@ -14,12 +14,10 @@ use svolder_ble::{
 };
 use svolder_ipc::{
     Config, DeviceConfig, PassphraseNote, ScanEntry, Signal, SignalSource, ValueObject,
-    passphrase_verdict,
+    passphrase_from, passphrase_verdict, profile_for_advert,
 };
 use svolder_profiles::roles;
-use svolder_profiles::{
-    EqMode, EqParam, Profile, ProfileError, Registry, apply_input_labels, describe, intent,
-};
+use svolder_profiles::{EqMode, EqParam, Profile, ProfileError, Registry, describe, intent};
 use svolder_proto::function::PASSPHRASE;
 use svolder_proto::{FunctionId, Message, Passphrase, ProtoError, UnitId, Value, ValueType};
 use tokio::task::JoinHandle;
@@ -28,7 +26,7 @@ use super::{
     DeviceRow, Failure, Globals, Identified, Update, WriteError, bad_request, config_error,
     no_link, refused, usage,
 };
-use crate::commands::device::{Selected, collect_unique, profile_for, select_device};
+use crate::commands::device::{Selected, collect_unique, select_device};
 use crate::recovery::Kind;
 
 /// The two direct transports a verb can open.
@@ -193,10 +191,7 @@ impl DirectBackend {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        let code = match self.passphrase.as_str() {
-            "auto" => Ok(session.advertisement().manufacturer.passphrase()),
-            text => Passphrase::from_text(text),
-        };
+        let code = passphrase_from(&self.passphrase, &session.advertisement().manufacturer);
         if let Ok(code) = code {
             session.set_passphrase(code);
         }
@@ -984,14 +979,11 @@ fn configured_profile(
     chosen: Option<&DeviceConfig>,
     advert: &Advertisement,
 ) -> Profile {
-    let mut profile = chosen
-        .and_then(|d| d.profile.as_deref())
-        .and_then(|name| registry.get(name).cloned())
-        .unwrap_or_else(|| profile_for(registry, advert));
-    if let Some(device) = chosen {
-        apply_input_labels(&mut profile, &device.inputs);
+    let (product_id, firmware) = (advert.manufacturer.product_id, advert.firmware_build());
+    match chosen {
+        Some(device) => device.profile_for(registry, product_id, firmware),
+        None => profile_for_advert(registry, product_id, firmware),
     }
-    profile
 }
 
 /// What the configuration says the device's passphrase is, `auto` where it says nothing.
@@ -1005,10 +997,8 @@ fn configured_passphrase(
     chosen: Option<&DeviceConfig>,
     advert: &Advertisement,
 ) -> Result<Passphrase, String> {
-    match chosen.map(|d| d.passphrase.as_str()) {
-        None | Some("auto") => Ok(advert.manufacturer.passphrase()),
-        Some(text) => Passphrase::from_text(text).map_err(|e| e.to_string()),
-    }
+    let setting = chosen.map_or("auto", |device| device.passphrase.as_str());
+    passphrase_from(setting, &advert.manufacturer).map_err(|e| e.to_string())
 }
 
 /// The unix wall clock in milliseconds.

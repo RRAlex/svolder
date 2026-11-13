@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::FutureExt;
-use svolder_ble::{Advertisement, Advertisements, BleError, Listening, Transport};
+use svolder_ble::{Advertisement, BleError, Listening, Transport};
 use svolder_proto::{Passphrase, UnitId};
 use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
@@ -132,10 +132,109 @@ impl Scanner {
             .map_err(|e| e.to_string())
     }
 
-    /// Every device heard within `window`, for the `scan` verb, in its turn on the radio.
-    pub async fn scan(&self, window: Duration) -> Result<Advertisements, BleError> {
+    /// One listen of `window` that hears every device, in its turn on the radio, for the `scan`
+    /// verb and a walk's scan: each unit's first advertisement goes to `each` the moment it is
+    /// heard, and all of them, in the order heard, are the answer once the window is over. It
+    /// listens the whole window.
+    ///
+    /// The actors waiting for their device are listened for too: one whose device it hears is
+    /// answered once the listen has stopped, so the connect that answer lets go of runs on an
+    /// adapter that is no longer scanning. One it does not hear waits for the shared listen that
+    /// follows, as it waited for this one's turn on the radio before.
+    ///
+    /// `each` is called from inside the listen, between the radio's reports: it answers at once
+    /// and never waits.
+    pub async fn scan_each(
+        &self,
+        window: Duration,
+        each: &(dyn Fn(&Advertisement) + Send + Sync),
+    ) -> Result<Vec<Advertisement>, BleError> {
         let _radio = self.radio.lock().await;
-        self.transport.scan(window).await
+        let sweep = Sweep {
+            shared: &self.shared,
+            heard: Mutex::new(Vec::new()),
+            answers: Mutex::new(Vec::new()),
+            each,
+        };
+        let outcome = AssertUnwindSafe(self.transport.listen(window, &sweep))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                Err(BleError::Connection(
+                    "the scan stopped on an internal error".to_string(),
+                ))
+            });
+        let heard = std::mem::take(&mut *locked(&sweep.heard));
+        // The sweep's answers go out as it drops, here and on a scan that is cancelled mid-window.
+        drop(sweep);
+        outcome.map(|()| heard)
+    }
+}
+
+/// One listen of the `scan` verb or a walk: every device, and the actors waiting for theirs.
+struct Sweep<'a> {
+    shared: &'a Shared,
+    /// Each unit's first advertisement, in the order heard.
+    heard: Mutex<Vec<Advertisement>>,
+    /// The answers for the waiting actors it heard, sent once the listen has stopped.
+    answers: Mutex<Vec<(oneshot::Sender<Heard>, Advertisement)>>,
+    each: &'a (dyn Fn(&Advertisement) + Send + Sync),
+}
+
+impl Drop for Sweep<'_> {
+    /// Answers the waiting actors the listen heard, whether it ran its window out or was dropped
+    /// part-way (a cancelled walk): the listen has stopped by the time the fields drop.
+    fn drop(&mut self) {
+        let answers = std::mem::take(&mut *locked(&self.answers));
+        for (answer, advert) in answers {
+            let _ = answer.send(Ok(Some(advert)));
+        }
+    }
+}
+
+impl Listening for Sweep<'_> {
+    /// A unit not heard yet, or one an actor waits for.
+    fn wants(&self, unit: UnitId) -> bool {
+        let new = !locked(&self.heard)
+            .iter()
+            .any(|advert| advert.unit_id() == unit);
+        new || locked(&self.shared.waiting)
+            .list
+            .iter()
+            .any(|waiter| waiter.unit == unit && !waiter.answer.is_closed())
+    }
+
+    fn heard(&self, advert: &Advertisement) {
+        let unit = advert.unit_id();
+        let theirs: Vec<Waiter> = {
+            let mut waiting = locked(&self.shared.waiting);
+            let (theirs, rest) = std::mem::take(&mut waiting.list)
+                .into_iter()
+                .partition(|waiter| waiter.unit == unit);
+            waiting.list = rest;
+            theirs
+        };
+        locked(&self.answers).extend(
+            theirs
+                .into_iter()
+                .map(|waiter| (waiter.answer, advert.clone())),
+        );
+        let new = {
+            let mut heard = locked(&self.heard);
+            let new = !heard.iter().any(|seen| seen.unit_id() == unit);
+            if new {
+                heard.push(advert.clone());
+            }
+            new
+        };
+        if new {
+            (self.each)(advert);
+        }
+    }
+
+    /// Never before its window: the verb lists every device it can hear.
+    fn done(&self) -> bool {
+        false
     }
 }
 

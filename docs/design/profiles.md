@@ -64,8 +64,24 @@ A `[[control]]` is one function:
 - `only_while` ties a boolean readout to another boolean control, `auto_off` makes the session write
   false whenever the device reports the readout true.
 - The four safety flags, described below.
+- `key_reading = true` marks a control as one of the device's key readings, the few a front end
+  graphs first (below).
 - `reads` lists further function ids a status is read as the control from (below).
 - `kind = "action"` is a command, not a control (below).
+
+**Key readings.** A profile says which of its readings someone watches: a DAC's sample rate, volume
+and input, a preamp's input and volume, an amp's meters and its warm-up state. Never a setting that
+only changes when someone changes it (a tone band, a filter), and never a reading no control names,
+which cannot carry the mark. The mark is a flag on the control, as the safety flags are, and not a
+list in the profile's header: it travels with the control through `extends`, a child that restates
+a control restates the mark, and a base need not name keys only its children define. Any kind of
+control with a numeric reading takes it; an action and a control whose value is bytes are refused.
+`Profile::key_readings` lists the marked keys in the order of the controls, so the order is each
+product's own (a Gungnir 2 lists sample rate, volume, input; a Mimir volume, sample rate, input).
+The daemon puts the signal strength before them, since every device has it: a `devices` row
+carries `key_readings`, `signal` first (`SERIES_SIGNAL`, a key no control can have), then the profile's, and each is an id
+the daemon keeps a half hour of ([the daemon](daemon.md)). `tests/builtin.rs` pins every shipped
+profile's set.
 
 The `[eq]` table describes the tone control: the function family `id`, the band centres, the
 frequency scale of each side of a centre, the gain and Q ranges. Its use is in

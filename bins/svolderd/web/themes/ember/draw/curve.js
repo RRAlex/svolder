@@ -8,6 +8,7 @@
 import {
   linePath, POINTS, xOf, yOf,
 } from '../../../core/tone-curve.js';
+import { fitWords, overlayNote, overlayShapes } from '../../../core/plot.js';
 import { fixedEven } from '../../../core/words.js';
 
 /** The area's closing: down to 0 dB and back along it. */
@@ -20,6 +21,8 @@ const CLOSE = 'L1000.0 130.0L0.0 130.0Z';
  * - `ghost`: the bands' curve in Flat and Loudness, `null` without it;
  * - `ys`: the line's 181 y values, comma-separated;
  * - `peak`: `{ y, words }` of the summed peak, or `null`;
+ * - `overlay`: while the EQ is on and `tone.overlay` is served, the target's dotted line and the
+ *   gap's shaded paths (`target`, `gap`, markup) the fit's words (`fit 0.9 dB`) and `note`, the same in a sentence (the worst miss, what the shapes are), else `null`;
  * - `markers`: `[{ band, x, y }]`, a point per band at the level the model says.
  */
 export function curve(tone) {
@@ -37,6 +40,9 @@ export function curve(tone) {
     area: path ? `${path}${CLOSE}` : '',
     ghost,
     ys: line ? line.map((y) => fixedEven(y, 1)).join(',') : '',
+    overlay: mode === 'eq' && tone.overlay
+      ? { ...overlayShapes(tone.overlay, { target: 'tgt', gap: 'gap' }), words: fitWords(tone.overlay), note: overlayNote(tone.overlay) }
+      : null,
     peak: tone.peak ? { y: fixedEven(yOf(tone.peak.db), 1), words: tone.peak.words } : null,
     markers: tone.markers.map((m) => ({
       band: m.band, x: fixedEven(xOf(m.hz), 1), y: fixedEven(yOf(m.db), 1),

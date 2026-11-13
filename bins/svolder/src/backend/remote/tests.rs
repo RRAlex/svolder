@@ -232,6 +232,7 @@ fn a_reported_device_becomes_a_row_carrying_its_link_state() {
         passphrase_note: None,
         refused: false,
         recalled: None,
+        key_readings: Vec::new(),
     };
     assert_eq!(
         device_row(&info),
@@ -463,4 +464,74 @@ async fn a_backend_opened_without_connecting_holds_no_readings_and_asks_for_none
         .expect("connects");
     assert!(remote.state().is_empty());
     assert!(daemon.asked_for().is_empty(), "a state read was sent");
+}
+
+/// A long request goes over a connection of its own: it is answered while the connection every
+/// read and write goes over is held by a request the daemon never answers, and the reply the
+/// held one waits for does not take the long one's place.
+#[tokio::test]
+async fn a_long_request_is_answered_while_the_request_connection_is_held() {
+    tokio::time::timeout(DEADLINE, async {
+        let daemon = stub_daemon().await;
+        let mut backend = RemoteBackend::open(&daemon.socket, None, true)
+            .await
+            .expect("the stub daemon answers");
+        daemon.mutes_snapshots();
+        let long = backend.long_request(Request::Devices, Some(Duration::from_secs(2)));
+        let held = backend.write(Request::State { device: None });
+        tokio::pin!(held);
+        tokio::select! {
+            () = async { let _ = (&mut held).await; } => panic!("the muted request was answered"),
+            answer = long => {
+                let answer = answer.expect("the long request is answered");
+                assert!(matches!(answer, Response::Devices { .. }), "{answer:?}");
+            }
+        }
+    })
+    .await
+    .expect("the case finished in time");
+}
+
+/// A stream is opened on a connection of its own: the host frames come while the request
+/// connection answers, and a stream the daemon does not serve is its refusal.
+#[tokio::test]
+async fn a_stream_opens_on_its_own_connection_and_a_refused_one_is_an_error() {
+    tokio::time::timeout(DEADLINE, async {
+        let daemon = stub_daemon().await;
+        daemon.frames(svolder_ipc::host::CaptureView {
+            state: svolder_ipc::host::CaptureKind::Running,
+            sink: None,
+            why: None,
+        });
+        let mut backend = RemoteBackend::open(&daemon.socket, None, true)
+            .await
+            .expect("the stub daemon answers");
+        let mut frames = backend
+            .open_stream(Request::HostFrames)
+            .await
+            .expect("the stub gives frames");
+        assert!(matches!(frames.next().await, Some(Event::HostCapture(_))));
+        let answered = backend
+            .write(Request::Set {
+                device: None,
+                key: "mute".into(),
+                value: "on".into(),
+                step: 1,
+                no_wait: true,
+            })
+            .await;
+        assert!(answered.is_ok(), "the request connection is free");
+
+        let refused = backend
+            .open_stream(Request::AutoEq {
+                op: svolder_ipc::AutoEqOp::Follow,
+            })
+            .await;
+        let Err(error) = refused else {
+            panic!("the stub streams no AutoEq job");
+        };
+        assert!(error.to_string().contains("auto_eq"), "{error}");
+    })
+    .await
+    .expect("the case finished in time");
 }

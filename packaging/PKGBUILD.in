@@ -11,7 +11,7 @@ pkgdesc="@SUMMARY@"
 arch=('x86_64' 'aarch64')
 url='https://github.com/RRAlex/svolder'
 license=('GPL-3.0-or-later')
-depends=('bluez' 'dbus')
+depends=('bluez' 'dbus' 'ca-certificates')
 optdepends=("pipewire: the computer's sound level and spectrum (pw-record), the live computer EQ (pw-cli, pw-dump, pipewire), the intro sound (pw-play)"
             "wireplumber: the computer's volume and the EQ's route (wpctl, wireplumber)")
 provides=('svolder')

@@ -35,7 +35,7 @@ Each says how a part works now and the principles behind it.
 - [The web page's visualizer](design/web-visualizer.md): the looks, cost, the sink label, timing.
 - [Dragging the curve's points](design/web-curve-dragging.md): the Response graph under a mouse and
   a finger: grab reach, the axis hold, Q by wheel, right drag and pinch, the swap hold.
-- [Web themes](design/web-themes.md), [the frame](design/frame.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md): the contract.
+- [Web themes](design/web-themes.md), [the frame](design/frame.md), [the key table](design/key-table.md), [popups](design/popups.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md): the contract.
 - [Themes and effects](design/themes-and-effects.md): Ember's effects, the smoke, Arrange mode.
 - [The capture file](design/capture.md): what `svolder capture` records, the scrub, and the daemon
   it stops and brings back.
@@ -98,12 +98,11 @@ asks.
 
 Dependencies run strictly downwards in this list; nothing depends on a binary.
 
-Each crate's `lib.rs` has a table of its groups. In `svolder-ipc` they are `socket/`, `config/`
-and `checks/`, with `clock`, `error`, `passphrase_note` and `token` at the root because several
-groups use them. In `svolder-profiles` the tone control's maths is `tone/` (`preset`, `response`,
-`fit`, `apo`), the conversions are `convert`, `units`, `db_tables`, `codec` and `meter`, the
-histories are `history`, the device rules are `roles` and `safety`, and the profiles themselves are
-`model`, `registry`, `builtin` and `schema`.
+Each crate's `lib.rs` has a table of its groups. `svolder-ipc` has `socket/`, `config/` and
+`checks/`, with `clock`, `error`, `passphrase_note` and `token` at the root as several use them.
+`svolder-profiles` has the tone control's maths in `tone/` (`preset`, `response`, `fit`, `apo`),
+the conversions (`convert`, `units`, `db_tables`, `codec`, `meter`), `history`, the device rules
+(`roles`, `safety`) and the profiles themselves (`model`, `registry`, `builtin`, `schema`).
 
 | Crate | Owns | Depends on |
 | --- | --- | --- |
@@ -113,12 +112,13 @@ histories are `history`, the device rules are `roles` and `safety`, and the prof
 | `svolder-ble` | The `Transport` and `Link` traits, the per-device `Session` (connect, refresh, set-and-confirm, reconnect), `DeviceState`, the BlueZ transport, the fake transport and a frame tap (a transport decorator that records every frame sent and received). | proto, profiles, fake |
 | `svolder-host` | The computer's own audio: the default sink's volume, MPRIS players (track, cover, position), the route to the sink out of `pw-dump`, the sink's monitor as a spectrum, the computer EQ: its PipeWire config, the live chain and its controller. Each source sits behind a trait with a fake. | profiles |
 | `svolder-ipc` | The socket group (`socket/`: the protocol `Request`, `Response`, `Event`, its server and client, socket paths, the daemon version check), the configuration file model and writers, bearer tokens, the host health checks `doctor` runs. | proto, profiles, host |
+| `svolder-walk` | The device walk (scan, pick, name, passphrase test, write) as one state machine over effects a front end or the daemon supplies, its serde `Prompt` and `Step`, and the state a daemon's walk publishes. | proto, profiles, ipc |
 | `svolder-mqtt` | Home Assistant over MQTT as pure functions (topics, discovery configs, payloads, command parsing) and the one broker client. | proto, profiles |
 | `svolder-autoeq` | The AutoEq catalogue: search, cache and download over HTTPS. | nothing |
 
-The binaries sit above: `svolder` uses proto, profiles, ble, ipc, host and autoeq (fake only in
-tests); `svolderd` uses proto, profiles, ble, ipc, host and mqtt; `svolder-sim` uses proto, profiles
-and fake.
+The binaries sit above: `svolder` uses proto, profiles, ble, ipc, host, walk and autoeq (fake only
+in tests); `svolderd` uses proto, profiles, ble, ipc, host, walk and mqtt; `svolder-sim` uses
+proto, profiles and fake.
 
 Two splits are worth knowing because they repeat:
 

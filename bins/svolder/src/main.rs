@@ -3,6 +3,7 @@
 
 //! `svolder`: Schiit Forkbeard control from the terminal.
 //!
+//! - [`autoeq`]: the calls the front ends make of the daemon's AutoEq service.
 //! - [`backend`]: where a device verb runs: a daemon that holds it, or a session of its own.
 //! - [`cli`]: the command line's definition: every flag, verb and sub-verb clap parses.
 //! - [`clock`]: a moment as UTC text.
@@ -19,6 +20,7 @@
 //! - [`which`]: finding a program to run, by path or on `PATH`.
 //! - [`wizard`]: the guided first run, one state machine and the front ends that drive it.
 
+mod autoeq;
 mod backend;
 mod cli;
 mod clock;
@@ -27,6 +29,7 @@ mod env_vars;
 mod format;
 mod front_door;
 mod qr;
+mod reach;
 mod recovery;
 mod scanning;
 mod state;

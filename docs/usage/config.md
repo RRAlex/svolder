@@ -8,6 +8,25 @@ SPDX-License-Identifier: GPL-3.0-or-later
 The `config` verbs: where the configuration file lives, how to show it, and the commented template
 that `config template` prints. Back to the [usage index](README.md).
 
+## A hand edit waits for the reload
+
+The daemon holds the configuration as of its last reload, or of the last write it made itself, and
+every request (the socket, the web page, the MCP tools) reads that, not the file. Nothing watches
+the file: a hand edit of `config.toml` takes effect at the next reload, which a SIGHUP, `svolder
+daemon reload`, `systemctl --user reload svolderd` or, in a container, `docker compose kill -s HUP
+svolder` starts, and which a write the daemon makes itself (a verb, the TUI, the web page) starts
+as well, reading the whole file as it then is.
+
+When the file's modification time differs from the one the daemon read it at, the daemon says so,
+and never applies anything on its own: `svolder daemon status` prints `config: PATH changed since
+the last reload: svolder daemon reload (or SIGHUP)`, `svolder doctor` grades its daemon check `!`
+with those words and the fix `svolder daemon reload`, which it prints and never runs, the TUI shows
+the line on every row of the Connect category and raises a toast once for each change, and the
+Devices popup's Overview in the web UI opens with it, for a signed-in writer only. The comparison
+is the time alone: an older file put back counts as a change, and a file that appeared or went
+too. A reload the file refuses (it does not parse) leaves the line standing and the refusal goes to
+whoever asked for the reload.
+
 ## config
 
 Inspect the configuration file, or print the template a new one starts from. None of the three
@@ -121,7 +140,13 @@ Example:
 ```
 $ svolder config template
 # The svolder configuration. Every key below is commented out at the value svolder
-# uses while the key is absent, so uncommenting a line on its own changes nothing.
+# uses while the key is absent, so uncommenting a line on its own changes nothing. (In the
+# container image the defaults of `listen` and `url` come from SVOLDER_WEB_LISTEN,
+# SVOLDER_MCP_LISTEN and SVOLDER_WEB_URL; a `listen` written here wins over them, so
+# a loopback one makes the server unreachable from outside the container. The
+# default of the web UI's and the MCP server's `enabled` comes from
+# SVOLDER_WEB_ENABLED and SVOLDER_MCP_ENABLED where they are set; an `enabled`
+# written here wins.)
 
 schema = 1
 
@@ -179,7 +204,7 @@ schema = 1
 # Whether the server runs at all.
 # enabled = false
 
-# The address it listens on; the default is loopback only.
+# The address it listens on; the default is loopback only (0.0.0.0 in the container image, from SVOLDER_MCP_LISTEN).
 # listen = "127.0.0.1:8737"
 
 # "token" asks for a bearer token (`svolder mcp token` prints it); "none" is for a loopback listen only.
@@ -207,7 +232,7 @@ schema = 1
 # Whether the daemon serves the web UI.
 # enabled = false
 
-# The address it listens on; the default is this computer only.
+# The address it listens on; the default is this computer only (0.0.0.0 in the container image, from SVOLDER_WEB_LISTEN).
 # listen = "127.0.0.1:8738"
 
 # "token" asks a browser to sign in (`svolder web` opens one signed in); "none" is for a loopback listen only.
@@ -289,7 +314,7 @@ schema = 1
 # [[hop]]
 # device = "vali"
 
-# The AutoEq index `svolder eq search` reads, kept in the cache directory.
+# The AutoEq index svolderd fetches for every front end, kept in its cache directory.
 [autoeq]
 
 # Weeks (1 to 99) before the cached index is fetched again, or "never".

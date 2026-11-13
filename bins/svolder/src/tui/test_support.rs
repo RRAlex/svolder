@@ -255,6 +255,7 @@ pub(crate) fn with_overcurrent(mut profile: Profile) -> Profile {
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     });
     profile
@@ -387,7 +388,7 @@ pub(super) fn app_showing_on(profile: &str, screen: Screen) -> App {
     ];
     app.show(screen);
     match screen {
-        Screen::Device => app.selected = 1,
+        Screen::Device => app.set_selected(1),
         Screen::Tone => hear_band_zero(&mut app),
         Screen::Telemetry => hear_two_raws(&mut app),
         Screen::Devices | Screen::Settings | Screen::Setup => {}

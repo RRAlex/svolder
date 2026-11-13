@@ -13,11 +13,19 @@ rust-version.workspace = true
 
 [dependencies]
 rumqttc.workspace = true
+rumqttd = { workspace = true, optional = true }
 serde_json.workspace = true
 svolder-host.workspace = true
 svolder-proto.workspace = true
 svolder-profiles.workspace = true
 tokio.workspace = true
 
-[dev-dependencies]
-rumqttd.workspace = true
+[features]
+# The in-process MQTT broker (rumqttd) the bridge's integration tests run against: about 60 crates
+# no other build needs. `make check` builds with --all-features, so it runs those tests; a plain
+# `cargo test` leaves them and the broker out.
+broker-tests = ["dep:rumqttd"]
+
+[[test]]
+name = "client"
+required-features = ["broker-tests"]

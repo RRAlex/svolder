@@ -42,6 +42,13 @@ pub(super) fn routes() -> Router<Web> {
 fn refusal(why: ConfigError) -> Response {
     match why {
         ConfigError::Parse(words) => error(StatusCode::UNPROCESSABLE_ENTITY, words),
+        ConfigError::Name(refusal) => error(StatusCode::UNPROCESSABLE_ENTITY, refusal.to_string()),
+        refused @ (ConfigError::Taken { .. }
+        | ConfigError::Missing { .. }
+        | ConfigError::Vanished { .. }
+        | ConfigError::UnitTwice { .. }) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, refused.to_string())
+        }
         other => error(StatusCode::CONFLICT, other.to_string()),
     }
 }
@@ -99,7 +106,7 @@ async fn written(
     path: std::path::PathBuf,
     edit: impl FnOnce(&FilePath) -> Result<(), ConfigError> + Send + 'static,
 ) -> Response {
-    match edit_then_reload(web, path.clone(), refusal, edit).await {
+    match edit_then_reload(web, refusal, edit).await {
         Ok(()) => answer(web, &path).await,
         Err(refused) => refused,
     }

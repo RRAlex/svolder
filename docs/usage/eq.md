@@ -364,11 +364,21 @@ svolder: a preset's name cannot hold a control character, such as a newline or a
 
 Import an Equalizer APO parametric EQ file — the text AutoEq writes as
 `<headphone> ParametricEQ.txt` — as a preset that fits every tone control, whatever its band count.
-Configuration only: no device is opened. The file holds a `Preamp:` line and
+No device is opened. The file holds a `Preamp:` line and
 `Filter n: ON PK|LSC|HSC Fc … Hz Gain … dB Q …` lines; a BOM, CRLF line ends, `OFF` filters,
 comments and keywords in any case are accepted, a filter of another kind (a low-pass, a slope-given
 shelf, a bandwidth in octaves) is skipped and counted, and a line that cannot be read refuses the
 file with its line number.
+
+While a daemon runs it is the one writer of the configuration, so `eq import FILE` sends the file's
+text to it and it saves the preset (a daemon older than this svolder says to run `svolder daemon
+restart`); with no daemon the command writes the file itself. `--transport ble` and
+`fake` never ask a daemon, so they write the file too.
+
+While the daemon says the file it reads is gone, `eq save` and `eq import` are refused in its words
+(`PATH is missing: the daemon keeps its running configuration; restore the file, then try again`,
+exit 1), as a write would start a new file from the template and the reload after it would drop
+every device.
 
 The preset is named after the file without its extension and without a trailing ` ParametricEQ`,
 unless `--name` says another; the name keeps the rules of `eq save`, a longer default is cut at 40
@@ -376,22 +386,33 @@ characters, and a name already in use is refused unless `--force` replaces that 
 built-in's name is refused even with `--force`.
 
 `--autoeq HEADPHONE` takes the correction from AutoEq's published results instead of a file (see "eq
-search" below): the name is looked for in this order: the query as written (blanks round it
-dropped), then ignoring case, so `Melomania 1` and `Melomania 1+` are each importable by their full
-name, and names that differ only in case (`DT 770 Pro (32 Ohm)`, `(32 ohm)`) are one headphone whose
-measurements are merged; then a name that is exactly the query compared as letters and digits, and
-last the way `eq search` matches it.
+search" below). Only the daemon reaches AutoEq: the command asks it to search, then to download and
+save, so it needs `svolderd` running. With none, it says `AutoEq needs svolderd, which fetches it:
+no daemon answers on SOCKET` and names `svolder daemon restart`; a daemon older than this svolder
+says to restart it and exits 7; `--transport ble` and `fake` open no daemon, so they refuse it too.
+Importing a file needs no network and works either way.
+
+The name is looked for among the headphones the daemon's search finds, in this order: the one with
+a measurement named as the query is written (blanks round it dropped), then ignoring case, so
+`Melomania 1` and `Melomania 1+` are each importable by their full name; then the one whose name
+reads the same as the query compared as letters and digits; and last every headphone the search
+matches. Names that differ only in case (`DT 770 Pro (32 Ohm)`, `(32 ohm)`) are one headphone whose
+measurements are merged; a name that differs otherwise (`Melomania 1`, `Melomania 1+`, or `Koss UR
+20`, `UR20`, which `eq search` lists as one headphone) is a headphone of its own, and a query that
+is not exactly one spelling lists them and asks for the full name.
 
 `--measured-by` first narrows several candidates to the headphones that source measured; when a
 headphone's name is exactly the query, or else exactly one headphone is left, the measurement of the
-source `--measured-by SOURCE` names (in any case; the recommended one by default) is downloaded,
-read like a file, and saved under the headphone's name, with the origin
+source `--measured-by SOURCE` names (in any case; the recommended one by default) is downloaded by
+the daemon, read like a file, and saved under the headphone's name, with the origin
 `AutoEq · <source> · <form>[ · <rig>]`. When several headphones match, they are listed and the
 command exits with the usage code, saving nothing. A download that fails (no network, a measurement
 the index lists but the server lacks, a file over 64 KiB; `--measured-by` is suggested only when
-another source measured the headphone) says what happened and names `svolder eq import FILE` as the
-way out. Exactly one of `FILE` and `--autoeq` is given, and `--measured-by` goes with `--autoeq`
-only.
+another source measured the headphone) says what happened, in the daemon's words, and names
+`svolder eq import FILE` as the way out. The preset is saved for the library, which no side owns:
+the daemon is told the computer as the side, so a correction of more than 16 filters is refused.
+Exactly one of `FILE` and `--autoeq` is given, and `--measured-by` goes with `--autoeq` only.
+Ctrl-C or a closed terminal during `--autoeq` cancels the daemon's job and leaves with 130.
 
 ```
 Import an Equalizer APO parametric EQ file, or an AutoEq headphone, as a preset
@@ -457,9 +478,12 @@ left flat on its window's centre. Anything else is fitted.
 
 Look a headphone up in AutoEq's index of corrections (`results/INDEX.md` of the project's
 repository, about 850 KB; AutoEq is a separate project whose published results svolder reads only
-when you ask it to, and svolder ships none of its data). Configuration and network only: no device
-is opened. Names and query words compare as lowercase letters and digits, so `hd650` finds `HD 650`
-and `athm50x` finds `ATH-M50x`; every word of the query must appear in the name.
+when you ask it to, and svolder ships none of its data). The daemon does the searching and the
+fetching, so the command needs `svolderd` running: with none it says `AutoEq needs svolderd, which
+fetches it: no daemon answers on SOCKET` and names `svolder daemon restart`, and `--transport ble`
+and `fake`, which open no daemon, refuse it. No device is opened. Names and query words compare as
+lowercase letters and digits, so `hd650` finds `HD 650` and `athm50x` finds `ATH-M50x`; every word
+of the query must appear in the name. A query is at most 60 characters.
 
 Headphones are ranked exact name first, then names that start with the query, then names where the
 query's first word starts one of the name's words (`Sennheiser HD 600` before `Denon AH-D600` for
@@ -488,29 +512,41 @@ Options:
 
 Each line is a headphone, the recommended measurement as `source · form[ · rig]`, and `+N more` when
 AutoEq has others, with the names padded to one column; `--all` prints one line per measurement
-instead. A text listing stops at 30 lines with `… N more: narrow the search`; `--json` prints one
-object per line (`name`, `source`, `form`, `rig`, `more`) and is not capped. `--refresh` with no
-query only fetches the index again. A `--refresh` that fails while a cached copy exists still prints
-the results from the copy, says so on standard error, and exits 1.
+instead. Names that read the same as letters and digits are one headphone, whoever measured it. A
+text listing stops at 30 lines with `… N more: narrow the search`; `--json` prints one object per
+line (`name`, `source`, `form`, `rig`, `more`) and is capped only by the daemon, which answers
+with at most 200 headphones (the text line says how many more there were). `--refresh` with no
+query only fetches the index again, and says how many measurements it lists. A `--refresh` that
+fails while a cached copy exists still prints the results from the copy, says so on standard
+error, and exits 1.
 
 ```
 $ svolder eq search hd650
 Sennheiser HD 650  oratory1990 · over-ear  +6 more
 ```
 
-The index is cached in `$XDG_CACHE_HOME/svolder/autoeq/INDEX.md`
-(`~/.cache/svolder/autoeq/INDEX.md`), written atomically, and fetched again when the file is older
-than `[autoeq] refresh_weeks` (1 to 99 weeks, or `"never"`; 13 by default) or when `--refresh` says
-so. When a refresh fails and a cached copy exists, the copy is used and standard error says
-`using the index from 2026-07-01 (refresh failed: …)`; with no copy and no network the command
-refuses and names `svolder eq import FILE`.
+The index is the daemon's: it caches it in `$XDG_CACHE_HOME/svolder/autoeq/INDEX.md` of the
+daemon's own user (`~/.cache/svolder/autoeq/INDEX.md`), written atomically, and fetches it again
+when the file is older than `[autoeq] refresh_weeks` (1 to 99 weeks, or `"never"`; 13 by default)
+or when `--refresh` says so. The daemon reads `refresh_weeks` from its configuration at each
+request, so a change takes effect with the next search; `SVOLDER_AUTOEQ_URL` and the cache
+directory are read once, when the daemon starts, so a mirror needs a restart. When a refresh fails
+and a cached copy exists, the copy is used and standard error says `using the index from
+2026-07-01 (refresh failed: …)`; with no copy and no network the command refuses and names
+`svolder eq import FILE`.
 
-Transfers have a 10 s connect timeout, a 60 s limit for the index (8 MiB at most) and 20 s for a
-file (64 KiB at most), follow at most 5 redirects, send `User-Agent: svolder/<version>`, honour the
-proxy environment, refuse a redirect from https to http, and verify TLS against the operating
-system's certificate store. Text from the index only ever becomes percent-encoded components of a
-URL, never a local path. `SVOLDER_AUTOEQ_URL` replaces the base address
+The daemon's transfers have a 10 s connect timeout, a 60 s limit for the index (8 MiB at most) and
+20 s for a file (64 KiB at most), follow at most 5 redirects, send `User-Agent: svolder/<version>`,
+honour the proxy environment, refuse a redirect from https to http, and verify TLS against the
+operating system's certificate store. Text from the index only ever becomes percent-encoded
+components of a URL, never a local path. `SVOLDER_AUTOEQ_URL` replaces the base address
 (`https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/`), for a mirror.
+
+The same service answers the TUI's `a` search and the web page's AutoEq library (search, preview,
+import): `svolderd` is the one process that reaches the internet, and the `svolder` binary links no
+HTTP client. In a container the cache is `/config/cache/svolder/autoeq`, in the `/config` volume
+(the image sets `XDG_CACHE_HOME=/config/cache`), and the image carries `ca-certificates` to verify
+TLS.
 
 ### eq rename
 

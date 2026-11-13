@@ -210,6 +210,31 @@ impl Default for Drawn {
     }
 }
 
+/// Where the keys are in the focused list: on a row, or on the Controls pane's switch line, which
+/// sits over the row it remembers (the one carrying the volume). One value, so a row index that
+/// is stale while the switch has the keys cannot be written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlsCursor {
+    /// On row `n`.
+    Row(usize),
+    /// On the switch line over row `over`, the row the cursor returns to when it leaves.
+    Target { over: usize },
+}
+
+impl ControlsCursor {
+    /// The row the cursor is on, or the one the switch line sits over.
+    pub fn row(self) -> usize {
+        match self {
+            Self::Row(row) | Self::Target { over: row } => row,
+        }
+    }
+
+    /// Whether the cursor is on the switch line.
+    pub fn on_target(self) -> bool {
+        matches!(self, Self::Target { .. })
+    }
+}
+
 /// Everything one key press can move, for the cases that press a key and ask what changed.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,13 +296,11 @@ pub struct App {
     pub pane: Pane,
     /// Whether the volume and the tone control shown are the device's or the computer's.
     pub side: Side,
-    /// Whether the keys are on the Controls pane's switch line, which sits over the row
-    /// `selected` names (the volume). On the tone screen the switch is [`ToneRow::Target`].
-    pub switch_focus: bool,
     /// What the last frame drew, for keys to know which rows exist.
     pub drawn: Drawn,
-    /// The focused row of the focused list.
-    pub selected: usize,
+    /// The focused row of the focused list; on the Controls pane it may instead be the switch
+    /// line over a row ([`ControlsCursor`]). On the tone screen the switch is [`ToneRow::Target`].
+    pub cursor: ControlsCursor,
     /// The rows the screens not being shown were left on.
     pub(crate) focus_memory: FocusMemory,
     /// The tone control's edit: the focused band and row, the edit line, the mode `f` and the
@@ -334,6 +357,16 @@ pub struct App {
 }
 
 impl App {
+    /// The focused row of the focused list; the row a switch line sits over counts.
+    pub fn selected(&self) -> usize {
+        self.cursor.row()
+    }
+
+    /// Put the cursor on row `row`, off the switch line.
+    pub fn set_selected(&mut self, row: usize) {
+        self.cursor = ControlsCursor::Row(row);
+    }
+
     /// An app on `profile`, watching `device_name`, drawn as `tui` asks.
     ///
     /// Nothing animates on an app until [`App::set_look`] has said what the terminal can show:
@@ -366,9 +399,8 @@ impl App {
             screen: Screen::Device,
             pane: Pane::Controls,
             side: Side::Dac,
-            switch_focus: false,
             drawn: Drawn::default(),
-            selected: 0,
+            cursor: ControlsCursor::Row(0),
             focus_memory: FocusMemory::default(),
             size: DEFAULT_SIZE,
             overlays: Overlays {
@@ -390,6 +422,7 @@ impl App {
             breathing: false,
             peak_hold: false,
             devices: DevicesScreen {
+                opened: None,
                 rows: devices,
                 configured: Vec::new(),
                 default_device: None,
@@ -400,7 +433,8 @@ impl App {
                 saved: Vec::new(),
                 preset_list: None,
                 device_list: None,
-                autoeq: None,
+                ask_seq: 0,
+                landed: None,
                 autoeq_weeks: RefreshWeeks::default(),
                 loaded_preset: None,
                 computer_flattened: None,
@@ -426,6 +460,7 @@ impl App {
                 daemon: false,
                 daemon_version: None,
                 daemon_version_warned: None,
+                config_changed_told: false,
                 join_hint: None,
                 passphrase_note: None,
                 facts: None,
@@ -558,8 +593,7 @@ impl App {
         // Host audio switched off takes the Host group's rows away, so a Controls cursor on one
         // of them comes back to the last row there still is.
         if self.screen == Screen::Device {
-            self.selected = self.selected.min(self.controls_len().saturating_sub(1));
-            self.switch_focus = false;
+            self.set_selected(self.selected().min(self.controls_len().saturating_sub(1)));
         }
     }
 
@@ -677,7 +711,7 @@ impl App {
     pub(crate) fn snapshot_for_test(&self) -> Moved {
         Moved {
             screen: self.screen,
-            selected: self.selected,
+            selected: self.selected(),
             band: self.tone.band,
             tone_row: self.tone.row,
             pane: self.pane,

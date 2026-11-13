@@ -19,7 +19,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::view::{REST_GLOW, Screen};
-pub(crate) use computer::{ComputerModel, SavedPresets};
+pub(crate) use computer::ComputerModel;
 pub(crate) use device::{CardModel, LinkModel, PlayingModel};
 use device::{
     ControlModel, DevicePresetsModel, FactsModel, MetersModel, PowerModel, PresetsModel, ToneModel,

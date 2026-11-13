@@ -30,6 +30,7 @@ pub(crate) fn info(name: &str) -> DeviceInfo {
         passphrase_note: None,
         refused: false,
         recalled: None,
+        key_readings: Vec::new(),
     }
 }
 

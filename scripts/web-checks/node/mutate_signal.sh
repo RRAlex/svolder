@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Mutates a copy of the theme Signal's sources (line.js, fold.js, words.js, draw/line.js, draw/computer.js, draw/player.js, draw/volume.js, draw/playing.js);
+# Mutates a copy of the theme Signal's sources (line.js, words.js, draw/line.js, draw/computer.js, draw/player.js, draw/volume.js, draw/playing.js);
 # Signal's node harnesses (signal-*.mjs, run from the copy's own tree, so they import the mutated
 # files) must fail each time (a harness that fails on the mutated copy while the unmutated copy passes
 # is a kill: the harnesses are deterministic, with no browser and no timing). Run by hand, slow: bash scripts/web-checks/node/mutate_signal.sh
@@ -24,7 +24,6 @@ done <<'LIST'
 the line drops the hops after the DAC|line.js|  hops.push(...after.map(afterHop));|  void after.map(afterHop);
 a declared hop is drawn live|line.js|live: linked === true,|live: true,
 a hop that disappears stays chosen|line.js|if (chosen && hops.some((hop) => hop.id === chosen)) return chosen;|if (chosen) return chosen;
-the facts start open|fold.js|get('facts', 'closed') === 'open'|get('facts', 'open') === 'open'
 the computer's facts gain a write|draw/computer.js|const head = `<h2 class="sg-lbl">${esc(COMPUTER.title)}</h2>`;|const head = `<h2 class="sg-lbl">${esc(COMPUTER.title)}</h2><button type="button" data-act="mute">x</button>`;
 a point's dot stands off the curve|draw/computer.js|  const dots = tone.markers.map(fractionOf);|  const dots = tone.points.map((p) => ({ n: p.n, x: 0.5, y: 0.1 }));
 the lone point loses its remove|draw/computer.js|  const remove = `<button type="button" class="sg-prm|  const remove = point.n > 1 && `<button type="button" class="sg-prm
@@ -41,7 +40,7 @@ a muted volume says the word|draw/volume.js|num: muted ? WORDS.silence : said.nu
 a transport icon is not hidden from the readers|draw/playing.js|fill="currentColor" aria-hidden="true"|fill="currentColor"
 the mode stays on a desktop's first screen|signal.js|${view.phone() ? modeRow(device) : ''}|${modeRow(device)}
 the loudness chip loses its round buttons|draw/choices.js|'sg-st sg-rb'|'sg-st'
-the menu row is offered when the sheet cannot open|signal.js|available: () => Boolean(bound.add && bound.canAdd?.() && bound.core?.model.shown()),|available: () => Boolean(bound.add && bound.core?.model.shown()),
+the menu row is offered when the sheet cannot open|signal.js|available: () => Boolean(!signal.aborted && hops.canAdd() && core.model.shown()),|available: () => Boolean(!signal.aborted && core.model.shown()),
 a guest's buttons are not quiet|draw/word.js|export const inertPage = (page) => !mayWrite(page);|export const inertPage = () => false;
 the player's verdict names the computer|draw/player.js|esc(plain(path.words))|esc(path.words)
 the player's path names the computer|draw/player.js|esc(plain(hop.detail ?? ''))|esc(hop.detail ?? '')

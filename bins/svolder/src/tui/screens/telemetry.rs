@@ -113,14 +113,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut 
     let inner = block.inner(body);
     let (label_width, graph_width) = columns_of(inner.width, app.tui.graphs);
     let data_height = usize::from(inner.height).saturating_sub(1);
-    let start = widgets::scroll::scroll_start(rows.len(), data_height, app.selected);
+    let start = widgets::scroll::scroll_start(rows.len(), data_height, app.selected());
     let visible: Vec<usize> = (start..rows.len()).take(data_height).collect();
 
     let mut lines = vec![column_header(label_width, graph_width, theme)];
     lines.extend(rows.iter().enumerate().skip(start).take(data_height).map(
         |(index, (id, reading))| {
             let row = Row {
-                focused: index == app.selected,
+                focused: index == app.selected(),
                 label_width,
                 graph_width,
             };
@@ -139,7 +139,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut 
         list,
         start,
         data_height,
-        app.selected,
+        app.selected(),
         theme,
     );
     // The window says on the pane's right border, beside its first and last rows, which way
@@ -159,7 +159,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut 
             height: 1,
         };
         hits.push(row.intersection(inner), Hit::ListRow(index));
-        if index == app.selected {
+        if index == app.selected() {
             hits.select(Selected::Telemetry, index, row.intersection(inner));
         }
     }

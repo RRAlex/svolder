@@ -212,7 +212,7 @@ fn a_taller_reading_list_than_its_terminal_scrolls_to_keep_the_selection_visible
     }
     app.now = now;
     app.screen = Screen::Telemetry;
-    app.selected = 29;
+    app.set_selected(29);
     let rows = text(&frame(&app, 80, 24));
     let last = rows
         .iter()
@@ -269,7 +269,7 @@ fn a_list_longer_than_the_pane_marks_which_way_the_hidden_readings_are() {
         (at(titles + 1), at(bottom - 1))
     };
 
-    app.selected = 0;
+    app.set_selected(0);
     let (first, last) = marks(&app);
     assert_eq!(
         first.0, "│",
@@ -281,7 +281,7 @@ fn a_list_longer_than_the_pane_marks_which_way_the_hidden_readings_are() {
         "the rows below are not marked"
     );
 
-    app.selected = 29;
+    app.set_selected(29);
     let (first, last) = marks(&app);
     assert_eq!(
         first,
@@ -332,7 +332,7 @@ fn an_unlabelled_row_is_yellow_and_a_fast_rate_cell_is_green() {
 fn the_selected_row_is_bold_and_its_fast_rate_cell_stays_green() {
     let mut app = mockup_app();
     // Ids sort 6, 7.3, 9, 12.1.2, 210.2.1, 240.1: index 2 is "9", the fast one.
-    app.selected = 2;
+    app.set_selected(2);
     let buffer = frame(&app, 80, 24);
     let id_cell = buffer.cell((4, 6)).expect("the fast row's id cell");
     assert!(
@@ -422,6 +422,7 @@ fn a_label_longer_than_its_column_is_cut_with_an_ellipsis_and_the_fixed_columns_
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     });
     let tui = TuiConfig {
@@ -567,7 +568,7 @@ fn long_app(selected: usize) -> App {
     }
     app.now = base;
     app.screen = Screen::Telemetry;
-    app.selected = selected;
+    app.set_selected(selected);
     app
 }
 
@@ -644,7 +645,7 @@ fn graph_app() -> App {
     feed(&mut app, vo("101", json!("hello"), "str"), base);
     app.now = base + Duration::from_secs(60);
     app.screen = Screen::Telemetry;
-    app.selected = 0;
+    app.set_selected(0);
     app
 }
 

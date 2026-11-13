@@ -9,8 +9,8 @@ pinch do to a band, and why each rule is what it is. The curve's maths is in
 [the tone control](tone-control-and-presets.md#the-curve-in-the-page).
 
 A boomy or harsh track sends the listener to the curve: at a desk with a mouse, on the couch with a
-phone, they pull a band by ear until it sounds right, without typing a number. The TUI has dragged
-points since 0.3.1; the page does since 0.27.0. What the graph shows is what the device gets, and a
+phone, they pull a band by ear until it sounds right, without typing a number. Both the TUI and
+the page drag points. What the graph shows is what the device gets, and a
 phone page still scrolls past the graph.
 
 **Where a point sits.** At its band's own frequency and gain, as in the TUI, and not on the summed
@@ -154,7 +154,22 @@ the press, tap, touch, wheel and key methods the hand has:
 The core also has `actions.canWrite()` (pure: may this page write), `computer.eqOf(page)` and
 `computer.view().eq` (the EQ's mode, preset and whether it is confirmed, with no curve worked
 out), `core.curve.VIEW_WIDTH` and `VIEW_HEIGHT` (the graph's viewBox) and
-`core.drag.POINT_TYPES`.
+`core.eq.table.POINT_TYPES`.
+
+## Which themes keep it
+
+Ember (`tone_drag.py`, `tone_touch.py`) and Signal (`signal_theme.py`: `a_point_drag_sets_a_band`,
+`a_pinch_sets_the_q`) keep it. Night drive keeps the drag, the wheel and the pinch on its mountains,
+and a diamond for Q (`nightdrive_theme.py`: `a_bubble_is_grabbed_at_dpr_2`,
+`dragging_a_diamond_sets_q`, `a_pinch_sets_the_q_of_the_band_nearest_the_fingers`). Paper has the
+drag and the wheel (`paper.py`) and no pinch yet. Ember has no design page of its own: its overlay
+is `.eqg .tgt`, `.gap` and `.fitt` in `themes/ember/style.css`, drawn by `draw/curve.js` and
+`draw/parts.js`.
+
+An imported preset's overlay (the target and the gap) lies under the points and takes no pointer
+(`pointer-events: none`): a press reaches the point, as `tone_overlay.py` checks. While a drag has
+not settled the gap and the fit's words are left out (they are the daemon's, of the bands before
+the drag), and the target stays.
 
 Not in it: adding or removing bands, changing a band's filter type, moving several bands at once, an
 undo history (`Esc` ends a drag where it is), dragging by keyboard (the steppers and typed values

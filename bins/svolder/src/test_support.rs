@@ -7,7 +7,9 @@
 //! A helper that several modules' tests use lives in the narrowest `test_support` module that
 //! covers them all; this is the one for the whole crate.
 
+pub(crate) mod autoeq_script;
 pub(crate) mod stub_daemon;
+pub(crate) mod walk_script;
 
 #[path = "../../../crates/svolder-host/tests/common/script.rs"]
 mod script;

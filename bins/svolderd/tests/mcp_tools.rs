@@ -935,15 +935,21 @@ async fn a_gain_select_asks_when_raised() {
 #[tokio::test]
 async fn a_broken_configuration_is_never_quoted_to_the_client() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let rig = rig("").await;
+        let mut rig = rig("").await;
         std::fs::write(
             rig._child.config_path(),
             "schema = 1\n[mqtt]\nhost = \"b\"\npassword = hunter2-secret\nport = =\n",
         )
         .expect("break the config");
+        // The tools read what the daemon holds, not the file: a hand edit counts at the next
+        // reload, and a reload of a broken file fails and leaves the held configuration.
+        let reloaded = rig.client.request(Request::Reload).await;
+        assert!(
+            matches!(reloaded, Ok(Response::Error { .. })),
+            "{reloaded:?}"
+        );
         let reply = rig.call(Kind::Newer, "list_presets", json!({})).await;
-        let text = error_text(&reply);
-        assert!(text.contains("could not be read"), "{text}");
+        let text = reply.to_string();
         assert!(!text.contains("hunter2"), "{text}");
         assert!(!text.contains("mqtt"), "{text}");
     })

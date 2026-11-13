@@ -130,19 +130,13 @@ export const SHELF = {
   saveBands: 'Save the bands to\u2026',
   saveList: 'Save the bands to',
   builtIn: 'Built in',
-  factsTitle: (name) => `The ${name}`,
-  factsShow: 'show the facts',
-  factsHide: 'hide',
-  readings: 'All readings',
-  identify: 'Identify',
-  identifyNote: 'Asks the unit to show itself, so you can tell it from the others.',
-  ago: (age) => `${age} ago`,
-  product: (name, id) => name ?? `product ${id}`,
+  deviceSettings: 'Device settings\u2026',
+  deviceFacts: 'Devices\u2026',
 };
 
 /** The `+` of the line, the sheet it opens and the open area of a hop the person declared. */
 export const HOPS = {
-  addMenu: 'Add device…',
+  addMenu: 'Add to the chain…',
   addNote: 'an amp, headphones, speakers',
   sheetTitle: (dac) => `After the ${dac}`,
   what: 'What is it',

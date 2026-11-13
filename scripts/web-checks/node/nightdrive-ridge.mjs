@@ -6,7 +6,7 @@
 // Run: node nightdrive-ridge.mjs
 import assert from 'node:assert/strict';
 import { BANDS } from '../../../bins/svolderd/web/core/viz-model.js';
-import { drawRidge } from '../../../bins/svolderd/web/themes/nightdrive/draw/road.js';
+import { GHOST_ALPHA, drawRidge, drawTarget } from '../../../bins/svolderd/web/themes/nightdrive/draw/road.js';
 import {
   RIDGE, driftSwell, ridgeHeights, smoothUnits,
 } from '../../../bins/svolderd/web/themes/nightdrive/ridge.js';
@@ -152,6 +152,46 @@ ok('a_very_wide_scene_is_drawn_whole', () => {
   drawRidge(g, { w: wide, h: H, H: 0.56 * H, dpr: 1 }, new Float32Array(BANDS), { dull: false, swell: 0.1 });
   assert.equal(ys.length, wide / RIDGE.step, 'a segment for every sample');
   assert.ok(ys.every(Number.isFinite), 'no NaN past the old fixed size');
+});
+
+/** A canvas that keeps the path of each stroke, with its style, alpha and dash. */
+function pen() {
+  const log = [];
+  const state = { globalAlpha: 1, strokeStyle: '', lineWidth: 1, dash: null };
+  let path = [];
+  const g = new Proxy(state, {
+    get(target, name) {
+      if (name in target) return target[name];
+      if (name === 'beginPath') return () => { path = []; };
+      if (name === 'moveTo' || name === 'lineTo') return (x, y) => { path.push([x, y]); };
+      if (name === 'setLineDash') return (d) => { target.dash = d; };
+      if (name === 'stroke') return () => log.push({ pts: path.slice(), style: target.strokeStyle, alpha: target.globalAlpha, dash: target.dash });
+      return () => {};
+    },
+    set(target, name, value) { target[name] = value; return true; },
+  });
+  return { g, log };
+}
+
+ok('the_target_is_a_faint_dotted_line_on_the_overlays_own_heights_held_above_the_horizon', () => {
+  const geo = { w: W, h: H, H: 0.56 * H, dpr: 1 };
+  const { g, log } = pen();
+  drawTarget(g, geo, { y: (x) => (x < W / 2 ? 100 : geo.H + 80) });
+  assert.equal(log.length, 1);
+  const [line] = log;
+  assert.equal(line.alpha, GHOST_ALPHA);
+  assert.ok(line.dash.length === 2 && line.dash[0] < line.dash[1], 'dotted');
+  assert.equal(line.pts[0][0], 0);
+  assert.ok(line.pts.at(-1)[0] >= W - 6);
+  assert.ok(line.pts.every(([, y]) => y <= geo.H), 'never below the horizon');
+  assert.ok(line.pts.some(([, y]) => y === 100) && line.pts.some(([, y]) => y === geo.H));
+});
+
+ok('no_overlay_draws_no_target', () => {
+  const { g, log } = pen();
+  drawTarget(g, { w: W, h: H, H: 0.56 * H, dpr: 1 }, null);
+  drawTarget(g, { w: W, h: H, H: 0.56 * H, dpr: 1 }, undefined);
+  assert.equal(log.length, 0);
 });
 
 console.log(`${n} ridge checks passed`);

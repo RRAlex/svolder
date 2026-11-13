@@ -8,9 +8,11 @@
 // tell the last change); the stream's state fades or stills the sheet and rewrites the title's
 // line.
 //
-// A section in use is not redrawn under the person's hand: a gesture or an open list `hold`s it,
-// and the change that came meanwhile is drawn from the newest model once the hold ends, never
-// from the copy at the hold's start. Every draw ends by putting the marks in their places
+// A section in use is not redrawn under the person's hand: a gesture or an open list freezes it,
+// and the change that came meanwhile is drawn from the newest model once the freeze ends, never
+// from the copy at the freeze's start (the holds on a section are counted by
+// `core.freeze.keeper`).
+// Every draw ends by putting the marks in their places
 // (place.js) and telling the frame to follow the button to its slot.
 
 import { QUICK, SECTIONS } from './draw/sheet.js';
@@ -29,7 +31,7 @@ export const PARTS_OF = {
   presets: ['presets'],
   'device-presets': ['device_presets'],
   playing: ['playing'],
-  device: ['facts'],
+  device: [],
   notes: '*',
   foot: [],
 };
@@ -54,90 +56,10 @@ function renumbered(id, from, to) {
   return found && Number(found[2]) === from ? `${found[1]}${to}${found[3]}` : null;
 }
 
-/** A counted hold of the section `name`, for gestures and open lists that may overlap: it is held
- * from the first `take()` and let go at the `drop()` that matches the last (a gesture's); `around(fn)`
- * runs `fn` with a list's or form's hold taken (`release()` gives it back, and does when `fn` throws). `reset()` lets go of every hold at once (the
- * shown device was replaced). `hand({ pending, ms })` is the hold of a thing in the hand (a scale):
- * `grip()` on every move or key, `letGo()` when the hand is away, which gives the hold back once
- * `pending()` (a promise: the writes not yet answered) is settled and `ms` have passed, unless a
- * new grip came meanwhile (a slow answer must not release a hold the next gesture took). */
-export function keeper(live, name) {
-  /** The holds of gestures and the holds of open lists and forms, counted apart: a list or a form
-   * does not keep a still sheet usable, a gesture in hand does. */
-  let gestures = 0;
-  let asks = 0;
-  const note = () => {
-    if (gestures + asks === 0) live.hold(name, false);
-    else live.hold(name, true, gestures > 0);
-  };
-  const keep = {
-    take() {
-      gestures++;
-      note();
-    },
-    drop() {
-      gestures = Math.max(0, gestures - 1);
-      note();
-    },
-    /** Hold the section for an open list or form (`release()` gives it back, when it closes). */
-    around(fn) {
-      asks++;
-      note();
-      try {
-        return fn();
-      } catch (error) {
-        keep.release();
-        throw error;
-      }
-    },
-    release() {
-      asks = Math.max(0, asks - 1);
-      note();
-    },
-    reset() {
-      gestures = 0;
-      asks = 0;
-      live.hold(name, false);
-    },
-    hand({ pending, ms }) {
-      let held = false;
-      let generation = 0;
-      let timer = null;
-      return {
-        grip() {
-          generation++;
-          clearTimeout(timer);
-          if (held) return;
-          held = true;
-          keep.take();
-        },
-        letGo() {
-          clearTimeout(timer);
-          const mine = generation;
-          timer = setTimeout(async () => {
-            await pending();
-            if (generation !== mine || !held) return;
-            held = false;
-            keep.drop();
-          }, ms);
-        },
-        /** The hold was reset from outside: forget it, and any release on its way. */
-        forget() {
-          generation++;
-          clearTimeout(timer);
-          held = false;
-        },
-        stop: () => clearTimeout(timer),
-      };
-    },
-  };
-  return keep;
-}
-
 /**
  * Keep the sheet in `root` up to date for `core`, until `signal` aborts. `view` is the facts about
  * the screen the sections draw by (`{ phone, state, coarse, now }`), which this keeps current
- * where it knows (`state`). Returns `{ drawAll, draw, hold, held, onReading, stop }`.
+ * where it knows (`state`). Returns `{ drawAll, draw, freeze, frozen, onReading, stop }`.
  */
 export function createLive({ core, root, signal, view }) {
   const store = core.model;
@@ -305,7 +227,7 @@ export function createLive({ core, root, signal, view }) {
 
     /** Hold the section `name` (`on`) or let it go: what came while it was held is drawn now.
      * `gesture` says a gesture is part of the hold (not only an open list or form). */
-    hold(name, on, gesture = true) {
+    freeze(name, on, gesture = true) {
       if (on) {
         holding.add(name);
         if (gesture) gesturing.add(name);
@@ -319,7 +241,7 @@ export function createLive({ core, root, signal, view }) {
       if (stale.has(name)) draw(name);
     },
 
-    held: (name) => holding.has(name),
+    frozen: (name) => holding.has(name),
 
     /** Hear the shown device being replaced by another, until the sheet goes. */
     onSwitch(fn) {

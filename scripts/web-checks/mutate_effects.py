@@ -28,6 +28,7 @@ CONTRACT_NODE = ['node', 'scripts/web-checks/node/contract.mjs']
 CONTRACT = ['python3', S + 'contract.py', 'chromium']
 COMPLETE = ['python3', S + 'completeness.py', 'chromium']
 ROWS = ['python3', S + 'core_rows.py', 'chromium']
+TONE_DRAG = ['node', 'scripts/web-checks/node/tone-drag.mjs']
 
 M = [
     (
@@ -103,9 +104,9 @@ M = [
     ),
     (
         'page keys read inside the menu',
-        'themes/ember/keys.js',
-        'if (typingIn(event) || inEffectsMenu(event)) return;',
-        'if (typingIn(event)) return;',
+        'core/keys.js',
+        'if (event.target?.closest?.(TYPING) || menuOwns(event)) return;',
+        'if (event.target?.closest?.(TYPING)) return;',
         MENU
     ),
     (
@@ -123,38 +124,24 @@ M = [
         MENU
     ),
     (
-        'menu click closes the ? list',
-        'themes/ember/keys.js',
-        "if (kind === 'click' && event.detail === 0 && inMenu(event.target)) return;",
-        '',
-        MENU
-    ),
-    (
-        'menu key closes the ? list',
-        'themes/ember/keys.js',
-        "    if (inEffectsMenu(event)) return;\n    if (!['Shift',",
-        "    if (!['Shift',",
-        MENU
-    ),
-    (
         'menu: the Theme row does not open the picker',
-        'core/menu.js',
-        '      run: openPicker,\n',
-        '      run() {},\n',
+        'core/menu-rows.js',
+        '      picture: true, run: run.picker,\n',
+        '      picture: true, run() {},\n',
         MENU
     ),
     (
         'picker: Escape does nothing',
-        'core/picker.js',
+        'core/modal.js',
         "    if (event.key === 'Escape') {",
         '    if (false) {',
         MENU
     ),
     (
         'picker: the keys reach the page',
-        'core/picker.js',
-        '    event.stopPropagation();\n  }\n\n  return { open',
-        '  }\n\n  return { open',
+        'core/modal.js',
+        '    event.stopImmediatePropagation();\n    // a key of a text composition',
+        '    // a key of a text composition',
         MENU
     ),
     (
@@ -282,9 +269,9 @@ M = [
     ),
     (
         'arrange: the keys that write reach a page being arranged',
-        'themes/ember/keys.js',
-        '    if (arranging()) return;\n',
-        '',
+        'themes/ember/key-table.js',
+        'ctx.canWrite === true && ctx.lost !== true && ctx.arranging !== true;',
+        'ctx.canWrite === true && ctx.lost !== true;',
         ARRANGE
     ),
     (
@@ -465,8 +452,8 @@ M = [
     (
         'contract: the core loses a member',
         'core/core.js',
-        '    clock,\n    frame: null,',
-        '    frame: null,',
+        '    clock,\n    // the section keeper',
+        '    // the section keeper',
         CONTRACT
     ),
     (
@@ -512,9 +499,9 @@ M = [
         CONTRACT
     ),
     (
-        'driver: the Device fold-out is not opened',
-        'themes/ember/driver.js',
-        "press(details.querySelector('summary'));",
+        'driver: the core\'s driver does not open All readings',
+        'core/driver.js',
+        'details.open = true;',
         'void details;',
         COMPLETE
     ),
@@ -562,7 +549,7 @@ M = [
     ),
     (
         'actions: a hop is added by the edit route',
-        'core/actions.js',
+        'core/host-actions.js',
         "add: (hop) => hopWrite('api/v1/hops', hop),",
         "add: (hop) => hopWrite('api/v1/hops/edit', hop),",
         ROWS
@@ -593,7 +580,7 @@ M = [
         'core/tone-drag.js',
         'const db = map.dbAt(at.y);',
         'const db = map.dbAt(at.x);',
-        ROWS
+        TONE_DRAG
     ),
     (
         'ember: its listeners outlive its mount',
@@ -610,7 +597,7 @@ def run(name, f, old, new, cmd):
         web = f'{root}/bins/svolderd/web'
         shutil.copytree(common.WEB, web)
         os.makedirs(f'{root}/scripts/web-checks/node')
-        for harness in ('effects', 'ember-order', 'contract'):
+        for harness in ('effects', 'ember-order', 'contract', 'tone-drag'):
             shutil.copy(f'{S}node/{harness}.mjs', f'{root}/scripts/web-checks/node/{harness}.mjs')
         os.makedirs(f'{root}/scripts/web-checks/node/fixtures')
         shutil.copy(f'{S}node/fixtures/ember-parts.json',

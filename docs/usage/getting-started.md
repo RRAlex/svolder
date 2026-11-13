@@ -59,6 +59,14 @@ configured device and its state (a device the daemon is waiting to try again for
 as in `not connected, next attempt in 15 s`), and the next command to run, then exits 0 without
 asking anything. Prompts appear only on a terminal, on every verb this reference documents.
 
+Where a daemon is running, the walk that finds, names and writes a device is the daemon's: the
+wizard (`svolder setup`, `svolder add` with no unit id, the TUI's `n`) and the web page's
+*+ Add a device* only draw it, so a walk started in one is refused in the others with where it
+runs, and leaving a front end ends the walk it started and no other. Only while no daemon answers
+on the socket (a first `svolder setup` before one is installed, say) does the wizard run the walk
+in its own process and write the file itself. A daemon older than this svolder cannot walk and is
+told to `svolder daemon restart`. See ["setup"](cli.md#setup) for the steps.
+
 `svolder --help` groups every verb by what a new user needs first, what everyone runs daily, what
 changes the configured devices, what looks after the daemon, and what takes something apart:
 
@@ -90,8 +98,8 @@ Devices:
 
 Daemon:
   daemon      Check, install or control the background service
-  mcp         The MCP server's bearer token
-  web         Open the web UI, or print a link, a code or its token
+  mcp         Turn the MCP server on or off, or print its bearer token
+  web         Open the web UI, turn it on or off, or print a code or its token
 
 Diagnostics:
   inspect     Connect, refresh, and print everything the device sends

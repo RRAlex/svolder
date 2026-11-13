@@ -262,9 +262,9 @@ fn the_editor_draws_the_passphrase_row_in_each_of_its_states() {
     assert_eq!(
         shown,
         [
-            "│           │ ▶ Passphrase  ‹ ____ ›                               │           │",
-            "│           │ ▶ Passphrase  ‹ 4___ ›                               │           │",
-            "│           │ ▶ Passphrase  ‹ 42__ ›                               │           │",
+            "│           │ ▶ Passphrase  ‹ ____ ›  Tab shows it                 │           │",
+            "│           │ ▶ Passphrase  ‹ •___ ›  Tab shows it                 │           │",
+            "│           │ ▶ Passphrase  ‹ ••__ ›  Tab shows it                 │           │",
             "│           │ ▶ Passphrase  ‹ auto ›                               │           │",
             "│           │ ▶ Passphrase  ‹ none ›                               │           │",
         ]
@@ -611,7 +611,7 @@ fn crowded(count: usize, focused: usize) -> App {
         .map(|at| row(&format!("dev{at:02}"), Some("Gungnir 2"), Some(true)))
         .collect();
     let mut a = app(rows);
-    a.selected = focused;
+    a.set_selected(focused);
     a
 }
 
@@ -719,7 +719,7 @@ fn a_long_device_list_fades_with_the_distance_from_the_focus() {
     let theme = theme_for("amber", ColorDepth::TrueColor);
     for selected in [0, 33] {
         let mut app = app(rows.clone());
-        app.selected = selected;
+        app.set_selected(selected);
         let plain = frame_with_theme(&app, 80, 24, &theme);
         app.list_fade = true;
         let faded = frame_with_theme(&app, 80, 24, &theme);
@@ -758,7 +758,7 @@ fn the_current_badge_stays_distinct_on_the_focused_row() {
         let theme = Theme::from_config(&TuiConfig::default(), monochrome, ColorDepth::Ansi16);
         for (focused, badge_reversed) in [(1, false), (0, true)] {
             let mut app = app(daemon_rows());
-            app.selected = focused;
+            app.set_selected(focused);
             let buffer = frame_with_theme(&app, 80, 24, &theme);
             let y = text(&buffer)
                 .iter()

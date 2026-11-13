@@ -11,7 +11,7 @@ import { createActions } from '../../../bins/svolderd/web/core/actions.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import * as contract from '../../../bins/svolderd/web/core/contract.js';
 
-const { factsOf, targetsOf } = contract;
+const { deviceFactsOf, targetsOf, themeFactsOf } = contract;
 
 let n = 0;
 const ok = async (name, fn) => { await fn(); n++; console.log('ok', name); };
@@ -226,28 +226,79 @@ await ok('targets_name_every_control_and_action_the_model_offers', async () => {
   }
 });
 
-await ok('facts_name_what_the_device_section_shows', async () => {
-  const dac = factsOf(byName.dac.page.device);
+/** Every fact of `device` in the order the page lists them, worked out here from the model
+ * alone: the Device section's labels, the reading rows' ids, then the cover. */
+function everyFact(device) {
+  const labels = [];
+  const facts = device?.facts;
+  if (facts) {
+    labels.push('Product', ...(facts.unit ? ['Unit'] : []), 'Firmware', 'DSP', 'Profile', 'Link',
+      'Signal');
+    if (facts.passphrase_note !== null && facts.passphrase_note !== undefined) {
+      labels.push('Passphrase');
+    }
+    labels.push(...(facts.rows ?? []).map((row) => row.id));
+  }
+  const cover = device?.playing?.track?.cover;
+  return cover === null || cover === undefined ? labels : [...labels, 'Cover'];
+}
+
+await ok('device_facts_name_what_the_device_section_shows', async () => {
+  const dac = deviceFactsOf(byName.dac.page.device);
   assert.deepEqual(dac.slice(0, 7), ['Product', 'Unit', 'Firmware', 'DSP', 'Profile', 'Link',
     'Signal']);
   assert.ok(dac.includes('12.3.3'), 'a reading row is named by its id');
   assert.equal(dac.length, 7 + byName.dac.page.device.facts.rows.length);
   assert.equal(dac.includes('Passphrase'), false);
-  const noUnit = factsOf({ facts: { ...byName.dac.page.device.facts, unit: undefined } });
+  const noUnit = deviceFactsOf({ facts: { ...byName.dac.page.device.facts, unit: undefined } });
   assert.equal(noUnit.includes('Unit'), false, 'a guest sees no unit id');
-  const noted = factsOf({ facts: { ...byName.dac.page.device.facts, passphrase_note: 'Wrong code' } });
-  assert.ok(noted.includes('Passphrase'));
-  assert.deepEqual(factsOf(null), []);
-  assert.deepEqual(factsOf({}), []);
+  const noted = deviceFactsOf({
+    facts: { ...byName.dac.page.device.facts, passphrase_note: 'Wrong code' },
+  });
+  assert.deepEqual(noted.slice(6, 8), ['Signal', 'Passphrase'], 'the note comes after the signal');
+  assert.deepEqual(deviceFactsOf(null), []);
+  assert.deepEqual(deviceFactsOf({}), []);
+  const guest = deviceFactsOf(byName['dac-guest'].page.device);
+  assert.equal(guest.includes('Unit'), byName['dac-guest'].page.device.facts.unit !== undefined);
+  // The cover is the theme's to show: it is never a fact of the device's page.
+  const playing = { track: { cover: 'abc123' } };
+  assert.deepEqual(deviceFactsOf({ playing }), []);
+  assert.equal(deviceFactsOf({ ...byName.dac.page.device, playing }).includes('Cover'), false);
+});
+
+await ok('theme_facts_name_what_stays_in_every_theme', async () => {
   // The cover of the track is a fact when the player has one, and only then.
   const playing = { track: { cover: 'abc123' } };
-  assert.deepEqual(factsOf({ playing }), ['Cover']);
-  assert.deepEqual(factsOf({ ...byName.dac.page.device, playing }).slice(-1), ['Cover']);
-  assert.equal(factsOf({ playing: { track: { cover: null } } }).includes('Cover'), false);
-  assert.equal(factsOf({ playing: { track: {} } }).includes('Cover'), false);
-  assert.equal(factsOf({ playing: { track: null } }).includes('Cover'), false);
-  const guest = factsOf(byName['dac-guest'].page.device);
-  assert.equal(guest.includes('Unit'), byName['dac-guest'].page.device.facts.unit !== undefined);
+  assert.deepEqual(themeFactsOf({ playing }), ['Cover']);
+  assert.deepEqual(themeFactsOf({ ...byName.dac.page.device, playing }), ['Cover'],
+    'no fact of the Device section is the theme\'s');
+  assert.deepEqual(themeFactsOf({ playing: { track: { cover: null } } }), []);
+  assert.deepEqual(themeFactsOf({ playing: { track: {} } }), []);
+  assert.deepEqual(themeFactsOf({ playing: { track: null } }), []);
+  assert.deepEqual(themeFactsOf(byName.dac.page.device), [], 'a device with no track has none');
+  assert.deepEqual(themeFactsOf(null), []);
+  assert.deepEqual(themeFactsOf({}), []);
+});
+
+await ok('the_two_lists_share_no_label_and_together_are_every_fact_in_order', async () => {
+  assert.equal('factsOf' in contract, false, 'the facts are asked for as two lists, never as one');
+  let covers = 0;
+  let sections = 0;
+  const withCover = (device) => ({ ...device, playing: { track: { cover: 'abc123' } } });
+  for (const { name, page } of fixture.cases) {
+    for (const device of [page.device, page.device && withCover(page.device)]) {
+      const mine = themeFactsOf(device);
+      const theirs = deviceFactsOf(device);
+      assert.deepEqual(mine.filter((label) => theirs.includes(label)), [],
+        `${name}: a fact is in both lists`);
+      assert.deepEqual([...theirs, ...mine], everyFact(device),
+        `${name}: the device's facts, then the theme's, are every fact in order`);
+      covers += mine.length;
+      sections += theirs.length > 0 ? 1 : 0;
+    }
+  }
+  assert.ok(covers > 0, 'a case has a cover');
+  assert.ok(sections > 10, 'the cases have facts');
 });
 
 await ok('every_target_maps_to_one_action_request', async () => {

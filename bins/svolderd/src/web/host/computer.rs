@@ -86,7 +86,7 @@ fn question(message: String, name: &str, devices: &[String]) -> Response {
 fn answer(said: Answer) -> Response {
     match said {
         Answer::Ack => ok(),
-        Answer::Error { code, message } if code == CODE_COMPUTER_UNAVAILABLE => {
+        Answer::Error { code, message, .. } if code == CODE_COMPUTER_UNAVAILABLE => {
             error(StatusCode::SERVICE_UNAVAILABLE, message)
         }
         Answer::Error { message, .. } => error(StatusCode::CONFLICT, message),

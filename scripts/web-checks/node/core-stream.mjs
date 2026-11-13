@@ -100,7 +100,6 @@ function rig({ page = pageOf('Gungnir%202', dac()), needs = ['meters', 'host'], 
   const watching = { stops: 0 };
   const stream = createStream({
     store,
-    needs,
     EventSource: FakeSource,
     fetch: sessionFetch ?? (async () => ({
       json: async () => session ?? { signed_in: true, guest: false },
@@ -114,6 +113,7 @@ function rig({ page = pageOf('Gungnir%202', dac()), needs = ['meters', 'host'], 
     show: (url) => actions.showDevice(url, { push: false }),
     doc,
   });
+  stream.want('theme', { needs });
   // A real watch says it is on show at once when the page is.
   if (visible === 'visible') watcher.onShow();
   return { store, stream, actions, exits, classes, lost, watching, watcher: () => watcher, source: () => FakeSource.all.at(-1) };
@@ -363,6 +363,19 @@ await ok('an_event_for_a_device_no_longer_followed_is_dropped', () => {
   assert.equal(store.part('power', 'Amp'), null);
 });
 
+await ok('the_first_device_that_appears_on_the_no_device_page_is_taken_up', async () => {
+  const page = pageOf(null, null, { card: { kind: 'dim', title: 'No devices' } });
+  const { store, stream, source } = rig({ page, read: () => ({ device: dac(), strip: null }) });
+  stream.open();
+  source().send('fleet', { devices: [], hops: [] });
+  await flush();
+  assert.equal(store.shown(), null, 'an empty fleet leaves the card');
+  source().send('fleet', { devices: [{ url: 'Gungnir%202' }, { url: 'Amp' }], hops: [] });
+  await flush();
+  assert.equal(store.shown(), 'Gungnir%202', 'the first device of the fleet is shown');
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters,host');
+});
+
 await ok('a_device_the_page_holds_but_the_stream_does_not_follow_is_not_changed', () => {
   const page = pageOf('Gungnir%202', dac(), { followed: { Amp: amp() } });
   const { store, stream, source } = rig({ page });
@@ -543,6 +556,198 @@ await ok('closing_ends_the_stream_its_reopening_and_what_it_still_asked', async 
   assert.deepEqual(late.exits, { out: 0, reload: 0 });
   late.store.replace(pageOf('Amp', amp()));
   assert.equal(FakeSource.all.length, 1, 'a closed stream does not follow a switch');
+});
+
+await ok('two_owners_ask_for_the_union_of_their_feeds_and_devices', () => {
+  const { stream, source } = rig({ needs: [] });
+  stream.open();
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202');
+  stream.want('theme', { needs: ['meters'], follow: ['Amp'] });
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters&follow=Amp');
+  stream.want('devices', { needs: ['meters', 'host'], follow: ['Amp', 'Other'] });
+  assert.equal(source().url,
+    'api/v1/events?device=Gungnir%202&needs=meters,host&follow=Amp,Other', 'each word once');
+  assert.deepEqual(stream.followed(), ['Amp', 'Other']);
+  assert.equal(FakeSource.all.filter((s) => !s.closed).length, 1, 'one stream is open');
+});
+
+await ok('one_owner_releasing_leaves_the_other_owners_feeds', () => {
+  const page = pageOf('Gungnir%202', dac(), { followed: { Amp: amp(), Other: amp() } });
+  const { store, stream, source } = rig({ page, needs: [] });
+  stream.open();
+  stream.want('theme', { needs: ['meters'], follow: ['Amp'] });
+  const release = stream.want('devices', { needs: ['host'], follow: ['Other'] });
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters,host&follow=Amp,Other');
+  const before = source();
+  release();
+  assert.notEqual(source(), before);
+  assert.equal(before.closed, true);
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters&follow=Amp');
+  assert.deepEqual(stream.followed(), ['Amp']);
+  assert.equal(store.device('Other'), null, 'a device nobody follows any more is forgotten');
+  assert.notEqual(store.device('Amp'), null, 'the one another owner follows is kept');
+});
+
+await ok('a_want_that_changes_nothing_reopens_nothing', () => {
+  const { stream, source } = rig({ needs: [] });
+  stream.open();
+  stream.want('theme', { needs: ['meters'], follow: ['Amp'] });
+  const count = FakeSource.all.length;
+  stream.want('theme', { needs: ['meters'], follow: ['Amp'] });
+  assert.equal(FakeSource.all.length, count, 'the same want again');
+  stream.want('devices', { needs: ['meters'], follow: ['Amp'] });
+  assert.equal(FakeSource.all.length, count, 'a second owner asking what the union holds');
+  const release = stream.want('popup', { needs: [], follow: [] });
+  release();
+  assert.equal(FakeSource.all.length, count, 'an owner that asked for nothing');
+  assert.equal(source().closed, false);
+});
+
+await ok('a_release_is_idempotent_and_never_drops_a_newer_want_of_the_owner', () => {
+  const { stream, source } = rig({ needs: [] });
+  stream.open();
+  const first = stream.want('devices', { follow: ['Amp'] });
+  const second = stream.want('devices', { follow: ['Other'] });
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&follow=Other', 'the newer replaces');
+  first();
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&follow=Other', 'the old release is a no-op');
+  second();
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202');
+  const count = FakeSource.all.length;
+  second();
+  first();
+  assert.equal(FakeSource.all.length, count, 'a release twice does nothing');
+});
+
+await ok('a_want_changed_while_waking_keeps_waiting_and_while_resting_or_lost_opens_nothing', async () => {
+  const { store, stream, source, watcher } = rig({ needs: [] });
+  stream.want('theme', { needs: ['meters'] });
+  stream.open();
+  watcher().onHide();
+  const resting = FakeSource.all.length;
+  stream.want('devices', { follow: ['Amp'] });
+  assert.equal(FakeSource.all.length, resting, 'a resting page opens nothing');
+  watcher().onShow();
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters&follow=Amp');
+  assert.equal(store.state(), 'waiting');
+  const woken = source();
+  const release = stream.want('popup', { follow: ['Other'] });
+  assert.notEqual(source(), woken, 'a changed union opens the stream again');
+  assert.equal(store.state(), 'waiting', 'and the wait goes on');
+  advance(WAIT_MS - 1);
+  assert.equal(store.state(), 'waiting', 'for the new stream');
+  advance(1);
+  assert.equal(store.state(), 'open');
+  // a lost link opens nothing until its reopen, on the union then
+  source().send('error');
+  await flush();
+  const lost = FakeSource.all.length;
+  release();
+  assert.equal(FakeSource.all.length, lost, 'nothing opens while the link is lost');
+  advance(REOPEN_MS);
+  assert.equal(FakeSource.all.length, lost + 1);
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters&follow=Amp');
+});
+
+await ok('signals_follow_and_a_second_owners_follow_sit_side_by_side', () => {
+  const page = pageOf('Gungnir%202', dac(), { followed: { Amp: amp(), Other: amp() } });
+  const { store, stream, source } = rig({ page, needs: [] });
+  stream.want('theme', { needs: ['meters', 'host'] });
+  stream.open();
+  stream.want('devices', { follow: ['Other'] });
+  stream.follow(['Amp']);
+  assert.equal(source().url,
+    'api/v1/events?device=Gungnir%202&needs=meters,host&follow=Amp,Other');
+  stream.follow([]);
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters,host&follow=Other',
+    'the theme clearing its follow leaves the popup\'s device');
+  assert.notEqual(store.device('Other'), null);
+  stream.follow(['Amp']);
+  stream.want('devices', { follow: [] });
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters,host&follow=Amp',
+    'the popup leaving leaves the theme\'s line');
+  stream.want('theme', { needs: ['meters'] });
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=meters',
+    'a theme\'s own want replaces its follow too');
+});
+
+await ok('a_fleet_that_prunes_a_device_prunes_it_from_every_owner', () => {
+  const page = pageOf('Gungnir%202', dac(), { followed: { Amp: amp(), Other: amp() } });
+  const { stream, source } = rig({ page, needs: [] });
+  stream.open();
+  stream.follow(['Amp']);
+  stream.want('devices', { follow: ['Amp', 'Other'] });
+  const before = FakeSource.all.length;
+  source().send('fleet', { devices: [{ url: 'Gungnir%202' }, { url: 'Other' }], hops: [] });
+  assert.deepEqual(stream.followed(), ['Other']);
+  assert.equal(FakeSource.all.length, before + 1, 'one reopen');
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&follow=Other');
+});
+
+await ok('the_strip_feed_is_a_need_and_nothing_wanting_it_does_not_receive_it', () => {
+  const plain = rig({ needs: ['meters'] });
+  plain.stream.open();
+  const got = [];
+  plain.store.on('strip', (d) => got.push(d));
+  plain.source().send('strip', { device: 'Gungnir%202', bars: [] });
+  assert.deepEqual(got, [], 'no owner asked for the strip');
+  plain.stream.want('devices', { needs: ['strip'] });
+  assert.equal(plain.source().url, 'api/v1/events?device=Gungnir%202&needs=meters,strip');
+  plain.source().send('strip', { device: 'Gungnir%202', bars: [] });
+  assert.equal(got.length, 1, 'an owner that asked for it receives it');
+  assert.equal(streamUrl({ device: 'A', needs: ['strip'] }), 'api/v1/events?device=A&needs=strip');
+});
+
+await ok('the_same_feeds_in_another_order_or_repeated_reopen_nothing', () => {
+  const { stream } = rig({ needs: [] });
+  stream.open();
+  stream.want('theme', { needs: ['host', 'meters'], follow: ['Amp', 'Other'] });
+  const count = FakeSource.all.length;
+  stream.want('theme', { needs: ['meters', 'host'], follow: ['Other', 'Amp'] });
+  assert.equal(FakeSource.all.length, count, 'a reorder is no change');
+  stream.want('devices', { needs: ['meters'], follow: ['Amp'] });
+  const release = stream.want('devices', { needs: ['meters'], follow: ['Amp'] });
+  release();
+  stream.want('devices', { needs: ['meters'], follow: ['Amp'] });
+  assert.equal(FakeSource.all.length, count, 'an owner released and added again with the same feeds');
+});
+
+await ok('a_device_that_leaves_the_fleet_for_an_event_is_followed_again_when_it_returns', () => {
+  const page = pageOf('Gungnir%202', dac(), { followed: { Amp: amp(), Other: amp() } });
+  const { stream, source } = rig({ page, needs: [] });
+  stream.open();
+  stream.follow(['Amp']);
+  stream.want('devices', { follow: ['Amp', 'Other'] });
+  const both = { devices: [{ url: 'Gungnir%202' }, { url: 'Amp' }, { url: 'Other' }], hops: [] };
+  source().send('fleet', both);
+  source().send('fleet', { devices: [{ url: 'Gungnir%202' }, { url: 'Amp' }], hops: [] });
+  assert.deepEqual(stream.followed(), ['Amp']);
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&follow=Amp');
+  const before = FakeSource.all.length;
+  source().send('fleet', both);
+  assert.deepEqual(stream.followed(), ['Amp', 'Other'], 'no new want was made');
+  assert.equal(FakeSource.all.length, before + 1, 'one reopen');
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&follow=Amp,Other');
+});
+
+await ok('a_hold_opens_the_union_once_when_it_ends', () => {
+  const { stream, source } = rig({ needs: [] });
+  stream.open();
+  stream.want('theme', { needs: ['meters'], follow: ['Amp'] });
+  const count = FakeSource.all.length;
+  const end = stream.batch();
+  stream.follow([]);
+  stream.want('theme', { needs: ['host'] });
+  stream.follow(['Other']);
+  assert.equal(FakeSource.all.length, count, 'nothing opens while held');
+  end();
+  assert.equal(FakeSource.all.length, count + 1, 'one open for the whole change');
+  assert.equal(source().url, 'api/v1/events?device=Gungnir%202&needs=host&follow=Other');
+  end();
+  const back = stream.batch();
+  stream.want('theme', { needs: ['host'], follow: ['Other'] });
+  back();
+  assert.equal(FakeSource.all.length, count + 1, 'a batch that changed nothing opens nothing');
 });
 
 console.log(`${n} core-stream checks passed`);

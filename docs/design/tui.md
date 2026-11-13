@@ -383,8 +383,8 @@ place (`decoration/transition.rs`), so a test can say what a frame draws.
 - The start and the terminal: `start.rs` (claim the terminal, play the intro beside the open),
   `waiting.rs` (the keys that give up, and the spinner's clock), `terminal.rs` (raw mode, undone on
   every exit); tests in `start/tests.rs`, `waiting/tests.rs` and `terminal/tests.rs`.
-- The setup wizard on the terminal: `wizard.rs` (the keys and the walk) and `screens/wizard.rs`
-  (one step drawn); tests in `wizard/tests.rs` and `screens/wizard/tests.rs`.
+- The setup wizard: `wizard.rs` (keys; a daemon's walk: [device-walk.md](device-walk.md)),
+  `screens/wizard.rs`; tests: `wizard/{tests,remote_tests}.rs`, `screens/wizard/tests.rs`.
 - Clicks and hovers: `mouse.rs`, the hit map each screen fills as it draws; tests in
   `mouse/tests.rs`.
 - Boxes: `boxes/` (`editor.rs`, `edit_line.rs`, `presets.rs` and `presets/`, `connections.rs`,

@@ -14,9 +14,11 @@ use tokio::net::{UnixListener, UnixStream};
 use crate::error::IpcError;
 use crate::socket::client;
 use crate::socket::lines::{Line, LineReader, MAX_LINE};
-use crate::socket::protocol::{Reply, Request, RequestLine, Response, to_line};
+use crate::socket::protocol::{
+    CODE_USAGE, REQUEST_CMDS, Reply, Request, RequestLine, Response, to_line,
+};
 
-/// Handles requests and subscriptions for one daemon.
+/// Handles requests and streams for one daemon.
 #[async_trait::async_trait]
 pub trait Handler: Send + Sync + 'static {
     /// Answer one request/response verb.
@@ -26,21 +28,31 @@ pub trait Handler: Send + Sync + 'static {
         &self,
         device: Option<String>,
     ) -> futures::stream::BoxStream<'static, crate::socket::protocol::Event>;
-    /// The stream of a subscription that asked for the host's view too (`host: true`). A
-    /// handler with no host to show gives the plain stream.
-    async fn subscribe_with_host(
+    /// The stream a request for which [`Request::is_stream`] holds turns its connection into,
+    /// or the answer that refuses it, which the connection then goes on after as for any
+    /// request. This is the one way the server serves a stream: it asks here for every such
+    /// request and never by the request's kind.
+    ///
+    /// The default serves a subscription through [`Handler::subscribe`], whether or not it
+    /// asked for the host's view (a handler with no host has nothing more to show), and refuses
+    /// every other stream: the host's frames as a daemon with no host audio does, any other as
+    /// one that does not stream it.
+    async fn stream(
         &self,
-        device: Option<String>,
-    ) -> futures::stream::BoxStream<'static, crate::socket::protocol::Event> {
-        self.subscribe(device).await
-    }
-    /// The stream of a `HostFrames` request: the daemon's capture state and its analysed frames,
-    /// held for as long as the stream lives. The default is an error, which is what a handler
-    /// with no host audio, and a daemon from before it, answer.
-    async fn host_frames(
-        &self,
-    ) -> Result<futures::stream::BoxStream<'static, crate::socket::protocol::Event>, String> {
-        Err("this daemon has no host frames".to_string())
+        request: Request,
+    ) -> Result<futures::stream::BoxStream<'static, crate::socket::protocol::Event>, Box<Response>>
+    {
+        match request {
+            Request::Subscribe { device, .. } => Ok(self.subscribe(device).await),
+            Request::HostFrames => Err(Box::new(Response::error(
+                CODE_USAGE,
+                "this daemon has no host frames",
+            ))),
+            other => Err(Box::new(Response::error(
+                CODE_USAGE,
+                format!("this daemon does not stream `{}`", other.cmd()),
+            ))),
+        }
     }
 }
 
@@ -240,8 +252,8 @@ async fn bind_listener(path: &Path) -> Result<UnixListener, IpcError> {
 
 /// Serve one accepted connection until the client disconnects.
 ///
-/// A `Subscribe` or a `HostFrames` request switches the connection to writing the handler's
-/// event stream; a `select!` races each event against the next incoming line so that the
+/// A request for which [`Request::is_stream`] holds switches the connection to writing the
+/// handler's event stream; a `select!` races each event against the next incoming line so that the
 /// client's EOF (or an error reading it) ends the loop and drops the event stream, rather than
 /// leaving a task parked on it forever. Any further line sent while subscribed is ignored,
 /// however long, since the connection has become an event stream from the client's point of
@@ -288,29 +300,37 @@ async fn serve_connection<H: Handler>(stream: UnixStream, handler: Arc<H>) -> Re
         let req: RequestLine = match serde_json::from_str(&line) {
             Ok(req) => req,
             Err(e) => {
-                refuse(&mut write, id_of(&line), format!("bad request: {e}")).await?;
+                let id = id_of(&line);
+                match unknown_request(&line) {
+                    Some(cmd) => {
+                        let reply = Reply::Response {
+                            id,
+                            response: Response::unknown_request(&cmd),
+                        };
+                        write.write_all(to_line(&reply)?.as_bytes()).await?;
+                    }
+                    None => refuse(&mut write, id, format!("bad request: {e}")).await?,
+                }
                 continue;
             }
         };
         match req.request {
-            Request::Subscribe { device, host } => {
-                let events = match host {
-                    true => handler.subscribe_with_host(device).await,
-                    false => handler.subscribe(device).await,
-                };
-                return stream_events(&mut lines, &mut write, req.id, events).await;
-            }
-            Request::HostFrames => match handler.host_frames().await {
-                Ok(events) => return stream_events(&mut lines, &mut write, req.id, events).await,
-                // A refusal is an answer, and the connection goes on as for any request.
-                Err(message) => {
-                    let reply = Reply::Response {
-                        id: req.id,
-                        response: Response::Error { code: 1, message },
-                    };
-                    write.write_all(to_line(&reply)?.as_bytes()).await?;
+            request if request.is_stream() => {
+                let acks = request.stream_acks();
+                match handler.stream(request).await {
+                    Ok(events) => {
+                        return stream_events(&mut lines, &mut write, req.id, acks, events).await;
+                    }
+                    // A refusal is an answer, and the connection goes on as for any request.
+                    Err(response) => {
+                        let reply = Reply::Response {
+                            id: req.id,
+                            response: *response,
+                        };
+                        write.write_all(to_line(&reply)?.as_bytes()).await?;
+                    }
                 }
-            },
+            }
             other => {
                 let response = handler.handle(other).await;
                 let line = to_line(&Reply::Response {
@@ -325,13 +345,24 @@ async fn serve_connection<H: Handler>(stream: UnixStream, handler: Arc<H>) -> Re
 
 /// Write `events` to the client under request `id` until the stream ends or the client goes
 /// away: a `select!` races each event against the next incoming line so that the client's EOF
-/// (or an error reading it) ends the loop and drops the event stream.
+/// (or an error reading it) ends the loop and drops the event stream. With `acks` the stream
+/// opens with an acknowledgement under the same id.
 async fn stream_events<R: tokio::io::AsyncBufRead + Unpin>(
     lines: &mut LineReader<R>,
     write: &mut tokio::net::unix::OwnedWriteHalf,
     id: u64,
+    acks: bool,
     mut events: futures::stream::BoxStream<'static, crate::socket::protocol::Event>,
 ) -> Result<(), IpcError> {
+    if acks {
+        let reply = Reply::Response {
+            id,
+            response: Response::Ack,
+        };
+        if write.write_all(to_line(&reply)?.as_bytes()).await.is_err() {
+            return Ok(()); // client gone
+        }
+    }
     loop {
         tokio::select! {
             event = events.next() => {
@@ -366,10 +397,20 @@ async fn refuse(
 ) -> Result<(), IpcError> {
     let reply = Reply::Response {
         id,
-        response: Response::Error { code: 1, message },
+        response: Response::error(CODE_USAGE, message),
     };
     write.write_all(to_line(&reply)?.as_bytes()).await?;
     Ok(())
+}
+
+/// The request kind `line` names when it is one this build does not have: a JSON line whose
+/// `request` has a string `cmd` that is not in [`REQUEST_CMDS`]. A line that is no JSON, names no
+/// `cmd`, or names a kind this build has with a field missing or unreadable is a malformed
+/// request, not an unknown one.
+fn unknown_request(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let cmd = value.get("request")?.get("cmd")?.as_str()?;
+    (!REQUEST_CMDS.contains(&cmd)).then(|| cmd.to_string())
 }
 
 /// The correlation id a line carries: its own `id` when the line is JSON with a numeric one,
@@ -409,6 +450,136 @@ mod tests {
         .expect("test timed out");
     }
 
+    /// Every kind the `Request` enum declares is in [`REQUEST_CMDS`] (read from the enum's source),
+    /// and every entry is a kind serde knows (so a rename or alias cannot leave the list naming
+    /// what the enum no longer decodes): a variant added without its entry would be refused as
+    /// unknown.
+    #[test]
+    fn the_request_kinds_list_is_the_enums() {
+        let source = include_str!("protocol.rs");
+        let body = source
+            .split("pub enum Request {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .expect("the Request enum");
+        let declared: Vec<String> = body
+            .lines()
+            .filter(|l| l.starts_with("    ") && !l.starts_with("     "))
+            .filter_map(|l| l.trim().split(|c: char| !c.is_alphanumeric()).next())
+            .filter(|w| w.starts_with(|c: char| c.is_ascii_uppercase()))
+            .map(|w| {
+                let mut out = String::new();
+                for (at, c) in w.chars().enumerate() {
+                    if c.is_ascii_uppercase() && at > 0 {
+                        out.push('_');
+                    }
+                    out.push(c.to_ascii_lowercase());
+                }
+                out
+            })
+            .collect();
+        assert_eq!(
+            declared, REQUEST_CMDS,
+            "REQUEST_CMDS is the enum's kinds in order"
+        );
+        for cmd in REQUEST_CMDS {
+            let line = format!("{{\"id\":1,\"request\":{{\"cmd\":\"{cmd}\"}}}}");
+            assert_eq!(unknown_request(&line), None, "{cmd}");
+            // Test code may read serde's words: a kind serde knows never fails as unknown.
+            let probe = serde_json::from_value::<Request>(serde_json::json!({ "cmd": cmd }));
+            let unknown = probe
+                .err()
+                .is_some_and(|e| e.to_string().starts_with("unknown variant"));
+            assert!(!unknown, "{cmd} is not a kind of Request");
+        }
+        assert_eq!(
+            unknown_request("{\"request\":{\"cmd\":\"zzz\"}}"),
+            Some("zzz".into())
+        );
+    }
+
+    /// A request kind the server does not know is answered with its own code, and a known kind
+    /// with a field it cannot read keeps the usage code.
+    #[tokio::test]
+    async fn an_unknown_request_has_its_own_code_and_a_malformed_one_keeps_usage() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let server = start_server(Arc::new(Fake::new())).await;
+            let stream = UnixStream::connect(&server.path).await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut lines = BufReader::new(read).lines();
+            let mut next = async move |write: &mut tokio::net::unix::OwnedWriteHalf, line: &str| {
+                write.write_all(line.as_bytes()).await.unwrap();
+                let answer = lines.next_line().await.unwrap().expect("an answer");
+                serde_json::from_str::<Reply>(&answer).expect("a reply line")
+            };
+            let unknown = next(&mut write, "{\"id\":7,\"request\":{\"cmd\":\"nope\"}}\n").await;
+            let Reply::Response {
+                id: 7,
+                response: Response::Error { code, message, .. },
+            } = unknown
+            else {
+                panic!("an error answer, got {unknown:?}");
+            };
+            assert_eq!(code, CODE_UNKNOWN_REQUEST);
+            assert!(message.contains("`nope`"), "{message}");
+            let malformed = next(
+                &mut write,
+                "{\"id\":8,\"request\":{\"cmd\":\"state\",\"device\":5}}\n",
+            )
+            .await;
+            assert!(
+                matches!(
+                    &malformed,
+                    Reply::Response {
+                        id: 8,
+                        response: Response::Error {
+                            code: CODE_USAGE,
+                            ..
+                        }
+                    }
+                ),
+                "got {malformed:?}"
+            );
+            // No tag at all, or one that is no string: malformed, not unknown.
+            for line in [
+                "{\"id\":10,\"request\":{}}\n",
+                "{\"id\":11,\"request\":{\"cmd\":5}}\n",
+                "{\"id\":12}\n",
+            ] {
+                let answer = next(&mut write, line).await;
+                assert!(
+                    matches!(
+                        &answer,
+                        Reply::Response {
+                            response: Response::Error {
+                                code: CODE_USAGE,
+                                ..
+                            },
+                            ..
+                        }
+                    ),
+                    "{line} got {answer:?}"
+                );
+            }
+            let missing = next(&mut write, "{\"id\":9,\"request\":{\"cmd\":\"set\"}}\n").await;
+            assert!(
+                matches!(
+                    &missing,
+                    Reply::Response {
+                        id: 9,
+                        response: Response::Error {
+                            code: CODE_USAGE,
+                            ..
+                        }
+                    }
+                ),
+                "got {missing:?}"
+            );
+        })
+        .await
+        .expect("test timed out");
+    }
+
     /// A line the server cannot parse earns an `Error` response, not a closed connection:
     /// the client is told what was wrong and the next request is answered as usual.
     #[tokio::test]
@@ -431,7 +602,7 @@ mod tests {
             // Not JSON at all: nothing to correlate the complaint with, so id 0.
             let first = next(&mut write, "not json\n").await;
             assert!(
-                matches!(&first, Reply::Response { id: 0, response: Response::Error { code: 1, message } }
+                matches!(&first, Reply::Response { id: 0, response: Response::Error { code: CODE_USAGE, message, .. } }
                     if message.starts_with("bad request: ")),
                 "got {first:?}"
             );
@@ -444,7 +615,7 @@ mod tests {
                     &second,
                     Reply::Response {
                         id: 7,
-                        response: Response::Error { code: 1, .. }
+                        response: Response::Error { code: CODE_UNKNOWN_REQUEST, .. }
                     }
                 ),
                 "got {second:?}"
@@ -495,7 +666,12 @@ mod tests {
             let first: Reply = serde_json::from_str(&lines.next_line().await.unwrap().unwrap())
                 .expect("a reply line");
             let Reply::Response {
-                response: Response::Error { code: 1, message },
+                response:
+                    Response::Error {
+                        code: CODE_USAGE,
+                        message,
+                        ..
+                    },
                 ..
             } = &first
             else {
@@ -541,7 +717,7 @@ mod tests {
             )
             .expect("a reply line");
             assert!(
-                matches!(&first, Reply::Response { response: Response::Error { code: 1, message }, .. }
+                matches!(&first, Reply::Response { response: Response::Error { code: CODE_USAGE, message, .. }, .. }
                     if message.contains("UTF-8")),
                 "got {first:?}"
             );
@@ -632,6 +808,7 @@ mod tests {
                             passphrase_note: None,
                             refused: false,
                             recalled: None,
+                            key_readings: Vec::new(),
                         })
                         .collect(),
                 },
@@ -1003,7 +1180,11 @@ mod tests {
             futures::stream::pending().boxed()
         }
 
-        async fn host_frames(&self) -> Result<futures::stream::BoxStream<'static, Event>, String> {
+        async fn stream(
+            &self,
+            request: Request,
+        ) -> Result<futures::stream::BoxStream<'static, Event>, Box<Response>> {
+            assert_eq!(request, Request::HostFrames);
             let events = futures::stream::iter(vec![
                 Event::HostCapture(crate::host::CaptureView {
                     state: crate::host::CaptureKind::Starting,
@@ -1105,6 +1286,241 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             panic!("the server kept the stream after the client went");
+        })
+        .await
+        .expect("test timed out");
+    }
+
+    /// A handler for the stream and long-request tests: the family follow streams are served,
+    /// one of them is refused, and a `Scan` is held until the test lets it go.
+    struct Streams {
+        release: Arc<tokio::sync::Notify>,
+        /// Told when a `Scan` has reached the handler.
+        entered: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl Handler for Streams {
+        async fn handle(&self, request: Request) -> Response {
+            match request {
+                Request::Scan { .. } => {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                    Response::Scan { entries: vec![] }
+                }
+                _ => Response::Ack,
+            }
+        }
+
+        async fn subscribe(
+            &self,
+            _device: Option<String>,
+        ) -> futures::stream::BoxStream<'static, Event> {
+            futures::stream::pending().boxed()
+        }
+
+        async fn stream(
+            &self,
+            request: Request,
+        ) -> Result<futures::stream::BoxStream<'static, Event>, Box<Response>> {
+            match request {
+                Request::Walk { .. } => Ok(futures::stream::iter(vec![
+                    Event::Walk(JobEvent {
+                        job: 1,
+                        state: JobState::Started,
+                    }),
+                    Event::Walk(JobEvent {
+                        job: 1,
+                        state: JobState::Done {
+                            payload: serde_json::Value::Null,
+                        },
+                    }),
+                ])
+                .boxed()),
+                _ => Err(Box::new(
+                    Response::error(CODE_USAGE, "nothing to follow").with_reason(Reason::NoSuchJob),
+                )),
+            }
+        }
+    }
+
+    async fn next_reply(
+        lines: &mut tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
+    ) -> Reply {
+        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap()
+    }
+
+    /// A stream the handler gives for a follow request goes out under the request's id,
+    /// opened with an acknowledgement, and ends with the connection when the stream does.
+    #[tokio::test]
+    async fn a_new_stream_opens_with_an_ack_and_then_its_events() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let release = Arc::new(tokio::sync::Notify::new());
+            let server = start_server(Arc::new(Streams {
+                release,
+                entered: Arc::default(),
+            }))
+            .await;
+            let stream = UnixStream::connect(&server.path).await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut lines = BufReader::new(read).lines();
+            let follow = to_line(&RequestLine {
+                id: 7,
+                request: Request::Walk { op: WalkOp::Follow },
+            })
+            .unwrap();
+            write.write_all(follow.as_bytes()).await.unwrap();
+            assert_eq!(
+                next_reply(&mut lines).await,
+                Reply::Response {
+                    id: 7,
+                    response: Response::Ack
+                }
+            );
+            for state in [
+                JobState::Started,
+                JobState::Done {
+                    payload: serde_json::Value::Null,
+                },
+            ] {
+                assert_eq!(
+                    next_reply(&mut lines).await,
+                    Reply::Event {
+                        id: 7,
+                        event: Event::Walk(JobEvent { job: 1, state })
+                    }
+                );
+            }
+            assert!(
+                lines.next_line().await.unwrap().is_none(),
+                "the stream ended"
+            );
+        })
+        .await
+        .expect("test timed out");
+    }
+
+    /// A stream the handler refuses is answered with its refusal, reason kept, and the
+    /// connection goes on as for any request.
+    #[tokio::test]
+    async fn a_refused_stream_is_an_answer_and_the_connection_goes_on() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let release = Arc::new(tokio::sync::Notify::new());
+            let server = start_server(Arc::new(Streams {
+                release,
+                entered: Arc::default(),
+            }))
+            .await;
+            let stream = UnixStream::connect(&server.path).await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut lines = BufReader::new(read).lines();
+            let follow = to_line(&RequestLine {
+                id: 1,
+                request: Request::AutoEq {
+                    op: AutoEqOp::Follow,
+                },
+            })
+            .unwrap();
+            write.write_all(follow.as_bytes()).await.unwrap();
+            assert_eq!(
+                next_reply(&mut lines).await,
+                Reply::Response {
+                    id: 1,
+                    response: Response::error(CODE_USAGE, "nothing to follow")
+                        .with_reason(Reason::NoSuchJob)
+                }
+            );
+            let ask = to_line(&RequestLine {
+                id: 2,
+                request: Request::Devices,
+            })
+            .unwrap();
+            write.write_all(ask.as_bytes()).await.unwrap();
+            assert_eq!(
+                next_reply(&mut lines).await,
+                Reply::Response {
+                    id: 2,
+                    response: Response::Ack
+                }
+            );
+        })
+        .await
+        .expect("test timed out");
+    }
+
+    /// A handler that serves no streams of its own refuses a stream request it was handed, and
+    /// serves the two that exist through `subscribe` and its own refusal of the frames.
+    #[tokio::test]
+    async fn the_default_stream_serves_subscribe_and_refuses_the_rest() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let fake = Fake::new();
+            assert!(
+                fake.stream(Request::Subscribe {
+                    device: None,
+                    host: true
+                })
+                .await
+                .is_ok()
+            );
+            let Err(frames) = fake.stream(Request::HostFrames).await else {
+                panic!("no frames to give");
+            };
+            assert!(
+                matches!(&*frames, Response::Error { code: CODE_USAGE, message, .. }
+                if message.contains("no host frames")),
+                "{frames:?}"
+            );
+            let Err(walk) = fake.stream(Request::Walk { op: WalkOp::Follow }).await else {
+                panic!("no walk to follow");
+            };
+            assert!(
+                matches!(
+                    *walk,
+                    Response::Error {
+                        code: CODE_USAGE,
+                        ..
+                    }
+                ),
+                "{walk:?}"
+            );
+        })
+        .await
+        .expect("test timed out");
+    }
+
+    /// A request that takes long on one connection holds up nothing on another: the second
+    /// connection is answered while the first still waits, and the first is answered when its
+    /// work ends.
+    #[tokio::test]
+    async fn a_long_request_on_one_connection_does_not_hold_up_another() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let release = Arc::new(tokio::sync::Notify::new());
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let server = start_server(Arc::new(Streams {
+                release: Arc::clone(&release),
+                entered: Arc::clone(&entered),
+            }))
+            .await;
+            let mut slow = crate::socket::client::Client::connect(&server.path)
+                .await
+                .unwrap();
+            let long = tokio::spawn(async move {
+                slow.request_within(Request::Scan { window_ms: 1 }, None)
+                    .await
+            });
+            entered.notified().await;
+            let mut other = crate::socket::client::Client::connect(&server.path)
+                .await
+                .unwrap();
+            let quick = other
+                .request_within(Request::Devices, Some(Duration::from_secs(2)))
+                .await
+                .expect("answered while the long request waits");
+            assert_eq!(quick, Response::Ack);
+            assert!(!long.is_finished(), "the long request is still waiting");
+            release.notify_one();
+            let answer = long.await.unwrap().unwrap();
+            assert!(matches!(answer, Response::Scan { .. }), "{answer:?}");
         })
         .await
         .expect("test timed out");

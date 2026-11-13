@@ -352,3 +352,81 @@ async fn a_direct_tui_never_shows_the_eq_on_with_no_chain() {
     assert!(!seen.on);
     assert!(chain.calls().is_empty(), "looking writes nothing");
 }
+
+/// Under `SVOLDER_HOST=fake` (the demo) the loop reaches nothing of the host itself and follows the
+/// daemon's simulated one: the Target row flips to the computer on what the daemon's view says,
+/// and the volume, the mute and every EQ change go to the daemon, never to a sink or a controller
+/// of the loop's own.
+#[tokio::test]
+async fn under_a_fake_host_the_computer_is_the_daemons_and_the_loop_reaches_nothing() {
+    let (daemon, _path, mut watching) = on_a_daemon().await;
+    watching.reach_host_as(false, true);
+    assert!(watching.app.host_shown() && watching.app.asks_host());
+    assert!(watching.host.reaches_nothing());
+    assert!(
+        watching.computer.control.is_none(),
+        "no controller of its own"
+    );
+    assert_eq!(
+        watching.app.host.computer.unavailable(),
+        None,
+        "no reason given"
+    );
+
+    // What the daemon's simulated computer says: a volume and an EQ with a point on.
+    watching.app.host.fold_daemon(
+        svolder_ipc::host::HostView {
+            available: true,
+            volume: Some(svolder_ipc::host::HostVolume {
+                pct: 40,
+                muted: false,
+                sink: "Simulated sink".into(),
+            }),
+            eq: Some(*crate::tui::test_support::computer_eq(
+                true,
+                &[("PK", 1000.0, 2.0, 1.0)],
+            )),
+            ..Default::default()
+        },
+        std::time::Instant::now(),
+    );
+    assert!(watching.app.switch_offered(), "the Target row is offered");
+    watching.app.flip_side();
+    assert!(
+        watching.app.on_computer(),
+        "the Target row flips to the computer"
+    );
+
+    volume(&mut watching, 41);
+    mute(&mut watching);
+    for op in [
+        HostEqOp::Mode { on: false },
+        gain(1, 3.0),
+        HostEqOp::Add {
+            kind: "PK".into(),
+            f: 500.0,
+            g: 1.0,
+            q: 1.0,
+        },
+        HostEqOp::Remove {
+            index: 1,
+            slot: None,
+        },
+        HostEqOp::Preset {
+            name: "Simulated".into(),
+            device: None,
+            confirm: false,
+        },
+    ] {
+        eq(&mut watching, op);
+    }
+    tokio::time::timeout(WITHIN, async {
+        while daemon.host_eq_ops().len() < 5 || daemon.host_volume_ops().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the daemon got every request");
+    assert_eq!(daemon.host_volume_ops(), ["volume 41", "muted true"]);
+    watching.close().await;
+}

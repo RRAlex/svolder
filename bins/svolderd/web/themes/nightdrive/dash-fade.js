@@ -33,7 +33,7 @@ export function wireDashFade({
   let deaf = false;
 
   const panel = () => win.matchMedia(PANEL).matches;
-  const kept = () => live.held('dash') || dash.querySelector(':focus-visible') !== null || over;
+  const kept = () => live.frozen('dash') || dash.querySelector(':focus-visible') !== null || over;
 
   function set(on) {
     dimmed = on;

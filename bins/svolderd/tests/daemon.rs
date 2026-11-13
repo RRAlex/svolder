@@ -16,6 +16,7 @@ use common::{
     CONFIG, POLL, POLLS, STEP_BUDGET, TEST_TIMEOUT, connect, daemon, spawn_daemon,
     spawn_daemon_with_env, spawn_daemon_with_piped_stderr, wait_until_connected,
 };
+use svolder_ipc::{CODE_NOT_FOUND, CODE_USAGE};
 
 #[tokio::test]
 async fn state_and_set_work_over_the_daemon() {
@@ -87,7 +88,13 @@ async fn restricted_raw_is_refused_by_the_daemon() {
             .await
             .unwrap();
         assert!(
-            matches!(&refused, Response::Error { code: 1, .. }),
+            matches!(
+                &refused,
+                Response::Error {
+                    code: CODE_USAGE,
+                    ..
+                }
+            ),
             "got {refused:?}"
         );
         // A following state read still answers: the refusal touched nothing.
@@ -120,7 +127,7 @@ async fn raw_set_of_the_passphrase_function_is_refused_by_the_daemon() {
             .await
             .unwrap();
         assert!(
-            matches!(&refused, Response::Error { code: 1, message }
+            matches!(&refused, Response::Error { code: CODE_USAGE, message, .. }
                 if message.contains("function 250 changes the passphrase")),
             "got {refused:?}"
         );
@@ -155,7 +162,7 @@ async fn set_up_on_a_control_that_cannot_be_stepped_is_a_usage_error() {
             .await
             .unwrap();
         assert!(
-            matches!(&refused, Response::Error { code: 1, message } if message == "control mute has no range to step through"),
+            matches!(&refused, Response::Error { code: CODE_USAGE, message, .. } if message == "control mute has no range to step through"),
             "got {refused:?}"
         );
         let unknown = client
@@ -169,7 +176,7 @@ async fn set_up_on_a_control_that_cannot_be_stepped_is_a_usage_error() {
             .await
             .unwrap();
         assert!(
-            matches!(&unknown, Response::Error { code: 1, message } if message.starts_with("no control named nope; this device has: ")),
+            matches!(&unknown, Response::Error { code: CODE_USAGE, message, .. } if message.starts_with("no control named nope; this device has: ")),
             "got {unknown:?}"
         );
         let stepped = client
@@ -689,7 +696,13 @@ async fn history_over_the_daemon_reports_the_connection() {
             .await
             .unwrap();
         assert!(
-            matches!(refused, Response::Error { code: 2, .. }),
+            matches!(
+                refused,
+                Response::Error {
+                    code: CODE_NOT_FOUND,
+                    ..
+                }
+            ),
             "got {refused:?}"
         );
     })

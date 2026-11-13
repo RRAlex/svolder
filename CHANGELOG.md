@@ -8,6 +8,117 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.33.0
+
+- **A Devices popup on the web page**: the menu's *Devices…* row lists every configured device with
+  a dot (connected or not) and the tag *Shown* on the one the page shows. **Overview** graphs every
+  device's key readings over the last 30 minutes at once (signal strength first, then what the
+  profile marks). A device's own page has its settings (name, profile, passphrase: Automatic, None
+  or a 4-digit code, Make default), its facts, *Identify*, **All readings** and *Remove…*, each
+  saved by its own control; *Show on the page* switches the shown device while the popup stays open.
+  The four themes' Device fold-outs keep one line, *Device settings…* (*Devices…* for a reader),
+  that opens it. A guest, or a viewer of a page with `[web] writes` off, gets the same popup
+  read-only.
+- **Add a device from the web**: **+ Add a device** at the end of the Devices popup runs the walk of
+  `svolder setup` and the terminal's `n`, step by step: a warning first when a device is connected,
+  the devices heard as they are heard, the name, the 4-digit passphrase when the device needs one,
+  then the device's page. Reloading the page mid-walk takes it up where it stands; a walk started
+  from the terminal shows read-only. The menu's `Device: <name> ›` row is gone.
+- **AutoEq through the daemon**: `svolderd` is the only process that reaches AutoEq, and `svolder`
+  links no HTTP client or TLS. The web page has an **EQ library…** popup (for a viewer who may
+  write): search, group the headphones with their measurements, preview a correction for the device
+  on show or the computer (target, fit, where it misses, how far to lower the volume), compare two
+  measurements, save it as a preset, import a parametric EQ file, and write a device's curve over a
+  preset of your own. With an imported preset on, each theme's tone graph shows its target, the
+  places the bands miss it by more than 2 dB and the fit (`fit 0.9 dB`), and the fit follows a band
+  you edit (the TUI's tone header too). `svolder eq search`, `eq import --autoeq` and the TUI's `a`
+  ask the daemon; with none running, or under `--transport ble` or `fake`, they say AutoEq needs
+  svolderd. Headphone names that read the same as letters and digits (`Koss UR 20`, `Koss UR20`) are
+  one headphone.
+- **A Help popup**: the menu's *Help…* row, or `?` in every theme (a guest too), lists the keys of
+  what has the focus, the keys that work everywhere, and the daemon's version (once signed in). It
+  replaces Ember's key card. Night drive's `↑` and `↓` do nothing for a guest.
+- **The TUI and the CLI on the daemon**: with `svolderd` running, `svolder setup`, `svolder add` and
+  the TUI's `n` run the device walk on the daemon (no Adapter step, a warning naming a device that
+  holds a link, a walk running elsewhere is refused with where it started). The TUI's device editor,
+  removal, default and the Web UI and MCP rows, and the CLI's `add UNIT` and `remove`, are the
+  daemon's writes; a daemon too old for them is told to `svolder daemon restart` (exit 7). Ctrl-C,
+  SIGTERM or a dropped ssh session cancel the walk that run started and leave with 130. The TUI's
+  add-a-device scan lists devices as they are heard, and its AutoEq search box never waits for the
+  daemon. Pairing codes are masked (`Tab` shows them) and never read back.
+- **`config.toml` changed or missing**: `svolder daemon reload` makes the running daemon read the
+  file and the profiles again. The daemon says when the file changed since its last reload (`svolder
+  daemon status`, `svolder doctor`, the TUI, the Overview) and a hand edit takes effect at `svolder
+  daemon reload` or SIGHUP, never on its own. A deleted file is told as missing, and every write the
+  daemon is asked for is refused in those words instead of making a fresh file that would drop every
+  device; `daemon reload` refuses and keeps the running configuration.
+- **First run in a container**: `docker exec -it svolder svolder setup` and `docker exec -it svolder
+  svolder` are the way in, with `docker logs -f svolder`. `svolder web on|off` and `svolder mcp
+  on|off` switch the servers (a running daemon applies it at once; with none the verb writes
+  `config.toml`); `SVOLDER_WEB_ENABLED=1` and `SVOLDER_MCP_ENABLED=1` do it from the environment,
+  and a missing `config.toml` takes the environment's defaults. The compose file caps the log at
+  three files of 10 MB, `svolder daemon logs` points to `docker logs` or `podman logs`, and the
+  packages and image install `ca-certificates`.
+- **Smaller changes**: a popup closes from outside only when the press and the release are both
+  beside its box, and the page does not scroll under it; the browser tab's title names the open
+  popup; an inline question is read to a screen reader with its answer. Signal's menu row *Add
+  device…* reads *Add to the chain…* (devices are added from the Devices popup). Popup headings and
+  Signal's lesser words read at a higher contrast. The web page is built for Firefox 140 and
+  Chromium 142 or later. A page that showed "No devices" takes up the first device added. A device's
+  name is checked when written (not blank, at most 40 characters). The daemon keeps a device's
+  signal strengths for half an hour. Profiles can mark key readings, which `svolder devices --json`
+  carries as `key_readings`. A daemon stopping during a reload closes every device it started, and
+  `svolderd.service` allows 60 s to stop.
+- **Security and community files**: `SECURITY.md` (private reports through GitHub's advisory form),
+  `CODE_OF_CONDUCT.md`, issue forms and a pull request template.
+- For contributors: the socket's `version` answer lists `features`, errors carry a typed `reason`,
+  an unknown request answers code 7, and jobs (walk, AutoEq) have a registry with a stream and
+  replay for late subscribers; while it runs the daemon is the one writer of the configured devices
+  (`[[device]]`, `default_device`). The new `svolder-walk` crate holds the walk. The web core gained
+  the modal stack, the history router, the key table, the popup frame and its shared parts; `make
+  routes-doc-check` holds the routes to `docs/usage/web-ui.md`, `make network-check` joins `make
+  check`, `make tui-hangup-check` (a pty run) is new, and new browser checks cover contrast, phone
+  widths, popups and keys (the web checks need the apt package `node-jsdom`).
+
+## 0.32.7
+
+- **Doctor on a laptop's Bluetooth switch**: when the platform's own Bluetooth switch
+  (`thinkpad_bluetooth`, `dell-bluetooth` and the like) is blocked, `doctor` says
+  `sudo rfkill unblock bluetooth` for a soft block, or that a hardware switch or the firmware blocks
+  it, in place of `bluetoothctl power on`.
+- **Rootless Docker and Podman**: `svolder web --qr` and the pair link treat the address of
+  slirp4netns or pasta (10.0.2.x behind 10.0.2.2) like a bridge address: they refuse it and ask for
+  `[web] url`. The daemon docs say to use `ports:` and `[web] url` under rootless Docker.
+- **A computer side in the demo**: `make demo-computer`, and `svolder tui --demo` without `--host`,
+  now show a simulated computer in the TUI's Target row (volume, mute, EQ points and presets), which
+  the web page shares, so a change in one shows in the other. Your real audio stays untouched.
+- **A sandboxed `svolderd.service`**: the unit now refuses new privileges, set-id files, personality
+  changes, real-time scheduling and new namespaces, allows one native system-call architecture, and
+  limits sockets to Unix, IPv4, IPv6 and netlink. An opt-in drop-in,
+  `systemd/svolderd-filesystem.conf`, also makes the file system read-only except the config, state
+  and runtime directories; it needs systemd 254 and a host that allows user namespaces, and it is
+  not proven end to end yet. See "The unit's sandbox" in `docs/usage/daemon.md`.
+- **Toolchain and audit**: for contributors, release builds and the `check` workflow use Rust
+  1.99.1, `rust-version` stays 1.93, and a `minimum` CI job builds and tests on 1.93.1. `make audit`
+  runs `cargo audit` and allows only the `paste` and `ttf-parser` unmaintained warnings, by id; it
+  needs the network and cargo-audit and is not part of `make check`. The release image has
+  cargo-auditable, and `make static` builds with it, so the shipped binaries carry their dependency
+  list.
+- **Test broker and unit-check**: for contributors, the MQTT test broker sits behind a
+  `broker-tests` feature in svolder-mqtt, svolderd and svolder; `make check` and `make test` enable
+  it, and a plain `cargo test` no longer builds about 175 extra crates for svolder-mqtt.
+  `make unit-check` verifies the shipped units offline with `systemd-analyze --user verify` where
+  `systemd-analyze` is installed (the target prints SKIPPED for that step otherwise) and is part of
+  `make check`. A flaky unit test that swept the scratch directory is fixed.
+
+## 0.32.6
+
+- **Faster CI**: the release run skips its test job when `check.yml` already passed on the tagged
+  commit (push main, wait for `check.yml` to pass, then push the tag), and `make check` skips its
+  private-bus test run where the system bus already has no BlueZ, as on GitHub's runners.
+- **Home Assistant dashboard: Computer EQ**: `dashboard.yaml` has a small on/off badge for the
+  computer's EQ in the Tone control heading, shown only while the `This computer` entities exist.
+
 ## 0.32.5
 
 Fixes from a first user's Raspberry Pi 4 and Docker set-up.

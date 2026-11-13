@@ -15,6 +15,7 @@ use crate::device::Command;
 use crate::fleet::Unavailable;
 use crate::recall::{Applied, Recalled};
 use crate::writer::{Options, Outcome};
+use svolder_ipc::{CODE_LINK, CODE_TIMEOUT};
 
 /// What runs with the key of a read.
 type ReadHook = Box<dyn Fn(&str) + Send>;
@@ -129,6 +130,7 @@ impl Fleet for Scripted {
             passphrase_note: None,
             refused: false,
             recalled: self.recalled.lock().unwrap().clone(),
+            key_readings: Vec::new(),
         })
     }
 
@@ -137,18 +139,13 @@ impl Fleet for Scripted {
             std::future::pending::<()>().await;
         }
         match request {
-            Request::Get { .. } if self.failing_reads.lock().unwrap().is_some() => {
-                Response::Error {
-                    code: 3,
-                    message: self.failing_reads.lock().unwrap().clone().unwrap(),
-                }
-            }
+            Request::Get { .. } if self.failing_reads.lock().unwrap().is_some() => Response::error(
+                CODE_LINK,
+                self.failing_reads.lock().unwrap().clone().unwrap(),
+            ),
             Request::Get { key, .. } => match self.read_hooked(&key) {
                 Some(raw) => Response::Value(reading(&key, raw)),
-                None => Response::Error {
-                    code: 4,
-                    message: format!("no value reported yet for {key}"),
-                },
+                None => Response::error(CODE_TIMEOUT, format!("no value reported yet for {key}")),
             },
             Request::Set { key, value, .. } => {
                 self.sets.lock().unwrap().push((key.clone(), value.clone()));
@@ -194,7 +191,7 @@ impl Fleet for Scripted {
             | Request::HostEq { .. }) => {
                 self.host_sent.lock().unwrap().push(request.clone());
                 if let Some(message) = self.host_error.lock().unwrap().clone() {
-                    return Response::Error { code: 3, message };
+                    return Response::error(CODE_LINK, message);
                 }
                 let mut view = self.host.lock().unwrap();
                 let volume = view.volume.get_or_insert_with(Default::default);
@@ -304,11 +301,11 @@ impl Fleet for Scripted {
         }
     }
 
-    fn config(&self) -> Result<Config, String> {
-        Ok(Config {
+    fn config(&self) -> Result<std::sync::Arc<Config>, String> {
+        Ok(std::sync::Arc::new(Config {
             presets: self.presets.lock().unwrap().clone(),
             ..Config::default()
-        })
+        }))
     }
 }
 
@@ -1454,10 +1451,10 @@ async fn mcp_identify_is_refused_for_a_profile_that_offers_none() {
 #[tokio::test]
 async fn mcp_identify_says_so_when_the_device_is_down() {
     let fleet = scripted("gungnir2-v2", &[]);
-    *fleet.identify.lock().unwrap() = Some(Response::Error {
-        code: 3,
-        message: svolder_ipc::NOT_CONNECTED.to_string(),
-    });
+    *fleet.identify.lock().unwrap() = Some(
+        Response::error(CODE_LINK, svolder_ipc::NOT_CONNECTED)
+            .with_reason(svolder_ipc::Reason::NotConnected),
+    );
     let reply = run(&fleet, None, call("identify", json!({})), false).await;
     assert!(is_error(&reply));
     assert!(

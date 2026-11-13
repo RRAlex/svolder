@@ -1306,6 +1306,30 @@ fn a_preset_row_posts_its_name_as_json() {
     assert_eq!(row.rename_json, r#"{"from":"Say \"hi\" <b>"}"#);
 }
 
+/// A preset's row says whether the preset was imported, which the EQ library reads to refuse an
+/// overwrite with the device's curve.
+#[test]
+fn a_preset_row_says_whether_it_was_imported() {
+    use svolder_profiles::tone::apo::Correction;
+    let p = profile_named("gungnir2-v2");
+    let info = info("Gungnir 2");
+    let mut fitting = preset::fitting(p.eq.as_ref().unwrap(), &[]);
+    fitting[1].0 = preset::from_computer(
+        "From a file",
+        Correction {
+            preamp_db: -3.0,
+            filters: Vec::new(),
+        },
+    );
+    let s = screen(&Snapshot {
+        presets: &fitting,
+        ..shot(&info, &p, &[])
+    });
+    let rows = s.presets.unwrap().rows;
+    assert!(rows[1].imported);
+    assert!(!rows[0].imported);
+}
+
 /// The tone part's mode track and loudness stepper are in the model, and a guest's are inert. The
 /// presets part posts a recall from each row, and offers rename, delete and save only on the
 /// user's rows and only where the configuration can be written (`ember-parts.mjs` holds the case
@@ -2040,4 +2064,30 @@ fn the_builtin_the_bands_match_is_lit_and_no_slot_is() {
     assert_eq!(lit(&bands_at(&p, [15, 15, 15, 15, 15, 16])), (vec![], 0));
     assert_eq!(lit(&flat[..5]), (vec![], 0));
     assert_eq!(lit(&[]), (vec![], 0));
+}
+
+/// The words of the card for no device are in the page's script too (`core/stream.js`, the card a
+/// page takes when its last device is removed while it is open): the two are the same words.
+#[test]
+fn the_no_devices_card_words_are_the_ones_the_page_takes_when_the_last_device_goes() {
+    let card = no_devices();
+    let stream = include_str!("../../../web/core/stream.js");
+    assert!(stream.contains(&format!("title: '{}'", card.title)));
+    assert!(stream.contains(&format!("detail: '{}'", card.detail)));
+    for span in spans(&card.detail) {
+        assert!(
+            stream.contains(&format!("code: {}, text: '{}'", span.code, span.text)),
+            "{span:?}"
+        );
+    }
+}
+
+/// A device's key stays the same for its unit, differs between units, and does not carry the unit.
+#[test]
+fn a_devices_key_follows_its_unit_and_hides_it() {
+    let unit = "AA:BB:CC:DD:EE:FF";
+    assert_eq!(super::key(unit), super::key(unit));
+    assert_ne!(super::key(unit), super::key("AA:BB:CC:DD:EE:00"));
+    assert!(!super::key(unit).to_lowercase().contains("aabbcc"));
+    assert_eq!(super::key(unit).len(), 16);
 }

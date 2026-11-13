@@ -108,17 +108,11 @@ export const WORDS = {
   /** The amp: the power line's lead, the meters' heading. */
   powerLead: 'Power: ',
   metersLabel: 'Meters',
-  /** The device's facts and the card's words. */
-  deviceLabel: 'The device',
-  deviceShow: 'show the facts',
-  deviceHide: 'hide',
-  readingsLabel: 'All readings',
-  identify: 'identify',
-  identifyNote: 'Asks the unit to show itself, so you can tell it from the others.',
+  /** The line that opens the device's page in the Devices popup, and the card's words. */
+  deviceSettings: 'Device settings…',
+  deviceFacts: 'Devices…',
   tryNow: 'try now',
   retryIn: (secs) => (secs > 0 ? `trying again in ${secs} s` : 'trying again now'),
-  product: (name, id) => name ?? `product ${id}`,
-  ago: (age) => `${age} ago`,
   /** The key list's line: `T for themes`. */
   keyHint: (k) => `${k.key} for ${k.words.toLowerCase()}`,
   /** What the hand writes where an arrow is drawn (for the ear), and its minus sign. */

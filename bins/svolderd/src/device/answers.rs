@@ -8,28 +8,25 @@
 //! CLI turns into its exit codes.
 
 use svolder_ble::BleError;
-use svolder_ipc::Response;
+use svolder_ipc::{CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_USAGE, Reason, Response};
 use svolder_profiles::ProfileError;
 
 /// The exit code the CLI maps each link failure to, as a response code.
 pub fn code_for(err: &BleError) -> u8 {
     match err {
-        BleError::NotFound => 2,
+        BleError::NotFound => CODE_NOT_FOUND,
         BleError::Connection(_)
         | BleError::Bootloader
         | BleError::PassphraseRejected
-        | BleError::Adapter(_) => 3,
-        BleError::Timeout(_) => 4,
-        BleError::Proto(_) | BleError::Profile(_) => 1,
+        | BleError::Adapter(_) => CODE_LINK,
+        BleError::Timeout(_) => CODE_TIMEOUT,
+        BleError::Proto(_) | BleError::Profile(_) => CODE_USAGE,
     }
 }
 
 /// One link failure as a response.
 pub(crate) fn error_for(err: &BleError) -> Response {
-    Response::Error {
-        code: code_for(err),
-        message: err.to_string(),
-    }
+    Response::error(code_for(err), err.to_string())
 }
 
 /// A request turned away before any frame was built, carrying the code and words the
@@ -44,17 +41,14 @@ pub struct Refused {
 
 impl From<Refused> for Response {
     fn from(refused: Refused) -> Response {
-        Response::Error {
-            code: refused.code,
-            message: refused.message,
-        }
+        Response::error(refused.code, refused.message)
     }
 }
 
 /// A request the daemon could not make sense of.
 pub fn usage(message: impl Into<String>) -> Refused {
     Refused {
-        code: 1,
+        code: CODE_USAGE,
         message: message.into(),
     }
 }
@@ -71,8 +65,5 @@ pub(super) fn no_eq() -> Response {
 
 /// The answer for anything that would need a link the actor does not have.
 pub(super) fn not_connected() -> Response {
-    Response::Error {
-        code: 3,
-        message: svolder_ipc::NOT_CONNECTED.to_string(),
-    }
+    Response::error(CODE_LINK, svolder_ipc::NOT_CONNECTED).with_reason(Reason::NotConnected)
 }

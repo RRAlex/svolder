@@ -14,7 +14,8 @@ use svolder_ipc::{Event, Response};
 use svolder_proto::Message;
 use tokio::sync::oneshot;
 
-use super::{Actor, Command, Commands};
+use super::{Actor, Command, Commands, FirstAttempt};
+use crate::locks::locked;
 use crate::log;
 
 /// How long the actor waits between failed discover-and-connect attempts, one step per
@@ -78,6 +79,8 @@ impl Actor {
             match self.attempt(rx).await {
                 AttemptEnd::Stop => return false,
                 AttemptEnd::Connected => {
+                    let refused = locked(&self.info).refused;
+                    self.report_first(FirstAttempt::Connected { refused });
                     self.record_state();
                     self.set_connected(true);
                     self.last_failure = None;
@@ -94,6 +97,8 @@ impl Actor {
                     return true;
                 }
                 AttemptEnd::Failed(message) => {
+                    let heard = self.advert.is_some();
+                    self.report_first(FirstAttempt::Failed { heard });
                     let wait =
                         RETRY_SCHEDULE[(self.failures as usize).min(RETRY_SCHEDULE.len() - 1)];
                     self.log_failure(&message, wait);
@@ -109,6 +114,13 @@ impl Actor {
                     }
                 }
             }
+        }
+    }
+
+    /// Say how the first attempt ended, to a probe's caller, once.
+    fn report_first(&mut self, end: FirstAttempt) {
+        if let Some(first) = self.first_attempt.take() {
+            let _ = first.send(end);
         }
     }
 

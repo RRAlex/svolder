@@ -8,7 +8,7 @@ use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::process::ExitCode;
 
-use svolder_ipc::{Config, ValueObject};
+use svolder_ipc::{Config, FEATURE_AUTOEQ, ValueObject, socket};
 use svolder_profiles::tone::apo;
 use svolder_profiles::tone::preset::{self, Imported, NameRefusal, Preset};
 use svolder_profiles::{EqSpec, Profile, ProfileError};
@@ -18,7 +18,9 @@ use crate::recovery::Kind;
 
 use super::device_presets;
 use super::eq::{current_raw, partial_failure_line, send_plan, write_count};
-use super::{ask, config_failure, open, opened, reload_daemon_for_presets};
+use super::{
+    ask, config_failure, open, opened, refuse_if_daemon_misses, reload_daemon_for_presets,
+};
 
 /// List every preset the configuration and the built-ins offer, one line or JSON object each,
 /// built-ins first. A text listing with a device that is known shows the presets that fit its
@@ -514,6 +516,7 @@ async fn do_save(
             code: 4,
             what: "not every tone-control reading has arrived yet".to_string(),
             next: crate::recovery::INSPECT.to_string(),
+            reason: None,
         }
         .report());
     };
@@ -529,6 +532,9 @@ async fn do_save(
     }
     if let Some(found) = config.preset(name).filter(|_| !force) {
         return Ok(name_failure(NameRefusal::Taken(found.name.clone()), "").report());
+    }
+    if let Err(failure) = refuse_if_daemon_misses(g, &config, &path).await {
+        return Ok(failure.report());
     }
     let exists = config.preset(name).is_some();
     let result = match exists {
@@ -648,7 +654,11 @@ pub async fn eq_import(
     name: Option<&str>,
     force: bool,
 ) -> Result<ExitCode, String> {
-    let parsed = match read_correction(file) {
+    let text = match read_text(file) {
+        Ok(text) => text,
+        Err(failure) => return Ok(failure.report()),
+    };
+    let parsed = match parse_text(file, &text) {
         Ok(parsed) => parsed,
         Err(failure) => return Ok(failure.report()),
     };
@@ -661,12 +671,58 @@ pub async fn eq_import(
         Ok(config) => config,
         Err(e) => return Ok(config_failure(e).report()),
     };
+    // While a daemon runs it is the one writer: the file goes through it. With none, this
+    // process writes the file itself.
+    if !matches!(g.transport, "ble" | "fake") {
+        let socket = socket::path::resolve(g.socket, config.socket.as_deref());
+        match crate::reach::daemon_runs(&socket, FEATURE_AUTOEQ, "save an imported preset").await {
+            Ok(true) => {
+                return Ok(
+                    match crate::autoeq::upload(&socket, text, &named, force).await {
+                        Ok(saved) => {
+                            report_saved(&path, &saved);
+                            ExitCode::SUCCESS
+                        }
+                        Err(refused) => super::autoeq::refusal(&refused, false).report(),
+                    },
+                );
+            }
+            Ok(false) => {}
+            Err(failure) => return Ok(failure.report()),
+        }
+    }
     let skipped = parsed.notes.len();
     let imported = Imported {
         origin: None,
         correction: parsed.correction,
     };
     Ok(import_and_report(g, &config, &path, &named, imported, skipped, force).await)
+}
+
+/// Say what the daemon saved, and one fit line per tone control: the preamp and the fits come
+/// from the preset as the configuration file at `path` now holds it, which the daemon wrote. A
+/// daemon that writes another file leaves the preset unfound here, and the line leaves out what
+/// only the preset can tell.
+pub(super) fn report_saved(path: &Path, saved: &svolder_ipc::AutoEqSaved) {
+    let config = Config::load_from(path).ok();
+    let imported = config
+        .as_ref()
+        .and_then(|config| config.preset(&saved.name))
+        .and_then(|found| found.source.clone());
+    eprintln!(
+        "svolder: {}",
+        saved_line(
+            &saved.name,
+            saved.filters,
+            imported.as_ref().map(|i| i.correction.preamp_db),
+            saved.skipped
+        )
+    );
+    if let (Some(config), Some(imported)) = (&config, &imported) {
+        for line in fit_lines(config, imported) {
+            eprintln!("svolder: {line}");
+        }
+    }
 }
 
 /// Save `imported` as the preset `name` ([`save_imported`]), print what was saved and one fit
@@ -685,13 +741,16 @@ pub(super) async fn import_and_report(
         imported.correction.filters.len(),
         imported.correction.preamp_db,
     );
+    if let Err(failure) = refuse_if_daemon_misses(g, config, path).await {
+        return failure.report();
+    }
     let saved = match save_imported(config, path, name, imported, force) {
         Ok(saved) => saved,
         Err(failure) => return failure.report(),
     };
     eprintln!(
         "svolder: {}",
-        saved_line(&saved.name, filters, preamp, skipped)
+        saved_line(&saved.name, filters, Some(preamp), skipped)
     );
     if let Some(imported) = &saved.source {
         for line in fit_lines(config, imported) {
@@ -733,21 +792,40 @@ pub(crate) fn save_imported(
 /// The correction in the file `file`, or why it cannot be read: not there, not text, more than
 /// [`apo::MAX_BYTES`] long, or refused by [`apo::parse`] with its line.
 pub(crate) fn read_correction(file: &Path) -> Result<apo::Parsed, Failure> {
+    let text = read_text(file)?;
+    parse_text(file, &text)
+}
+
+/// The text of the file `file`: not there, not text, or more than [`apo::MAX_BYTES`] long is
+/// refused.
+fn read_text(file: &Path) -> Result<String, Failure> {
     let shown = file.display();
     let unreadable = |why: String| Failure::of(Kind::Usage, format!("cannot read {shown}: {why}"));
     let mut bytes = Vec::new();
     std::fs::File::open(file)
         .and_then(|f| f.take(apo::MAX_BYTES as u64 + 1).read_to_end(&mut bytes))
         .map_err(|e| unreadable(e.to_string()))?;
-    let text = String::from_utf8(bytes).map_err(|_| unreadable("it is not UTF-8 text".into()))?;
-    apo::parse(&text).map_err(|e| Failure::of(Kind::Usage, format!("{shown}: {e}")))
+    String::from_utf8(bytes).map_err(|_| unreadable("it is not UTF-8 text".into()))
+}
+
+/// The correction `text`, read from `file`, holds, or [`apo::parse`]'s refusal with the file's name.
+fn parse_text(file: &Path, text: &str) -> Result<apo::Parsed, Failure> {
+    apo::parse(text).map_err(|e| Failure::of(Kind::Usage, format!("{}: {e}", file.display())))
 }
 
 /// What a saved import says: `imported "Sennheiser HD 650" (10 filters, preamp -6.1 dB, 1
-/// skipped)`.
-pub(crate) fn saved_line(name: &str, filters: usize, preamp: f64, skipped: usize) -> String {
+/// skipped)`. A preamp the saver cannot tell is left out.
+pub(crate) fn saved_line(
+    name: &str,
+    filters: usize,
+    preamp: Option<f64>,
+    skipped: usize,
+) -> String {
     let plural = if filters == 1 { "" } else { "s" };
-    let mut line = format!("imported {name:?} ({filters} filter{plural}, preamp {preamp:.1} dB");
+    let mut line = format!("imported {name:?} ({filters} filter{plural}");
+    if let Some(preamp) = preamp {
+        line.push_str(&format!(", preamp {preamp:.1} dB"));
+    }
     if skipped > 0 {
         line.push_str(&format!(", {skipped} skipped"));
     }

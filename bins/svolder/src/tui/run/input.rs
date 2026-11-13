@@ -26,9 +26,12 @@ fn press_through_daemon(watching: &mut Watching, button: svolder_host::Button) {
 fn read_presets<O: Open>(opener: &Opener<O>, watching: &mut Watching) {
     match Config::load_from(&opener.path) {
         Ok(config) => presets::reread(&mut watching.app, config.presets),
-        Err(e) => watching
-            .app
-            .notify_failure(&Failure::of(Kind::ConfigUnreadable, e.to_string())),
+        Err(e) => {
+            watching.app.presets.landed = None;
+            watching
+                .app
+                .notify_failure(&Failure::of(Kind::ConfigUnreadable, e.to_string()));
+        }
     }
 }
 
@@ -59,7 +62,9 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
         // A setting is neither a write nor anything the device has heard of: it changes how
         // this loop draws, and is saved where a hand edit would have put it.
         Intent::Tui(change) => {
-            look.change(&change, &mut watching.app, mouse);
+            if look.change(&change, &mut watching.app, mouse) {
+                super::look::reload_soon(&mut watching, look.path());
+            }
             // With capture off, a drag button's release goes to the terminal instead, so let
             // the drag go where it last was.
             let let_go = curve_drag::capture_off(&mut watching.app);
@@ -68,13 +73,19 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             send(let_go, &mut watching).await;
         }
         // The refresh applies whether or not it can be saved, as a `[tui]` change does.
-        Intent::AutoEqRefresh(weeks) => look.change_autoeq(weeks, &mut watching.app),
+        Intent::AutoEqRefresh(weeks) => {
+            if look.change_autoeq(weeks, &mut watching.app) {
+                super::look::reload_soon(&mut watching, look.path());
+            }
+        }
         Intent::Connection(change) => {
             Box::pin(connect::changed(
                 opener,
                 &mut watching,
                 &look.token_site,
                 &change,
+                look,
+                screen,
             ))
             .await;
         }
@@ -118,11 +129,15 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             }
         }
         Intent::DefaultDevice(name) => {
-            written(
-                opener,
-                &mut watching,
-                Config::set_default_device(&opener.path, name.as_deref()),
-            )
+            let op = match &name {
+                Some(device) => DeviceConfigOp::SetDefault {
+                    device: device.clone(),
+                },
+                None => DeviceConfigOp::ClearDefault,
+            };
+            write_device(opener, &mut watching, look, screen, op, |path| {
+                Config::set_default_device(path, name.as_deref())
+            })
             .await;
         }
         // The preset list writes the library into the file this session reads, and tells a
@@ -145,13 +160,23 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
         }
         // The list shows the file as it stands when it opens, whatever wrote it since.
         Intent::ReadPresets => read_presets(opener, &mut watching),
-        Intent::AutoEqIndex { refresh } => {
-            let weeks = Config::load_from(&opener.path)
-                .map(|config| config.autoeq.refresh_weeks)
-                .unwrap_or_default();
-            watching.jobs.index(jobs::policy(refresh, weeks));
+        Intent::AutoEqSearch { ask, soon } => {
+            let call = watching.backend.as_ref().and_then(|backend| {
+                let request = crate::autoeq::search_op(&ask.query, ask.refresh);
+                let within = Some(crate::autoeq::SEARCH_WAIT);
+                let call = backend.daemon_long_request(request, within)?;
+                Some(Box::pin(call) as jobs::Call)
+            });
+            watching.jobs.search(call, ask, soon);
         }
-        Intent::AutoEqDownload(entry) => watching.jobs.download(entry),
+        Intent::AutoEqImport {
+            variant,
+            name,
+            target,
+        } => {
+            let socket = watching.backend.as_ref().and_then(Backend::daemon_socket);
+            watching.jobs.import(socket, *variant, name, target);
+        }
         Intent::HostEq(op) => computer::eq(&mut watching, *op),
         Intent::MoveToDac(name) => computer::move_to_dac(&mut watching, name),
         // The computer's volume and mute: a request to the daemon when joined to one, else the

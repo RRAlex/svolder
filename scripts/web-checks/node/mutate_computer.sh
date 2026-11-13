@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Mutates a copy of the core's computer writes (core/actions.js) and the helpers they use (words,
-# steps, the hand ranges, the question); core-computer.mjs and core-words.mjs (run from the copy's
-# own tree, so they import the mutated file) must fail each time. The harness is deterministic,
-# with no browser and no timing. Run by hand: bash scripts/web-checks/node/mutate_computer.sh
+# Mutates a copy of the core's computer writes (core/computer-actions.js and the write.js and
+# actions.js beside it) and the helpers they use (words, steps, the hand ranges, the question);
+# core-computer.mjs and core-words.mjs (run from the copy's own tree, so they import the mutated
+# file) must fail each time. The harness is deterministic, with no browser and no timing. Run by
+# hand: bash scripts/web-checks/node/mutate_computer.sh
 # A line is `name|file|from|to`. MUTANT_ONLY=<regex> runs only the mutants whose name matches.
 H=$(dirname "$(readlink -f "$0")")
 ROOT=$(dirname "$(dirname "$(dirname "$H")")")
@@ -23,46 +24,46 @@ while IFS='|' read -r name file from to; do
   names+=("$name")
   echo "$name|$file|$from|$to" >> "$D/list"
 done <<'LIST'
-a point set drops its slot from the body|actions.js|slot === undefined ? { ...body, done } : { ...body, done, slot }|{ ...body, done }
-a point remove drops its slot from the body|actions.js|slot === undefined ? {} : { slot }|{}
-a point set sends its place as the slot|actions.js|{ ...body, done, slot }|{ ...body, done, slot: at }
-a 409 for a moved point does not end the drag|actions.js|ended: Boolean(result.moved) && !done,|ended: false,
-a 409 for a moved point is toasted in the daemon's words|actions.js|const said = moved ? POINT_MOVED : why;|const said = why;
-a remove of a point that moved is toasted in the daemon's words|actions.js|movedPoint(answer) ? { ...answer, error: POINT_MOVED, moved: true } : answer|answer
-a cell equal to the point's own value is written|actions.js|typedValue === current) {|false) {
-a cell equal to the cell's own text is written|actions.js|typedValue === parse(shown ?? '')|false
-a cell typed past the hand range is not held to it|actions.js|Math.min(high, Math.max(low, typedValue))|typedValue
-a cell that is not a number writes on|actions.js|const value = readTyped(typed, low, high);|const value = readTyped(typed, low, high) ?? 0;
+a point set drops its slot from the body|computer-actions.js|slot === undefined ? { ...body, done } : { ...body, done, slot }|{ ...body, done }
+a point remove drops its slot from the body|computer-actions.js|slot === undefined ? {} : { slot }|{}
+a point set sends its place as the slot|computer-actions.js|{ ...body, done, slot }|{ ...body, done, slot: at }
+a 409 for a moved point does not end the drag|computer-actions.js|ended: Boolean(result.moved) && !done,|ended: false,
+a 409 for a moved point is toasted in the daemon's words|computer-actions.js|const said = moved ? POINT_MOVED : why;|const said = why;
+a remove of a point that moved is toasted in the daemon's words|computer-actions.js|movedPoint(answer) ? { ...answer, error: POINT_MOVED, moved: true } : answer|answer
+a cell equal to the point's own value is written|computer-actions.js|typedValue === current) {|false) {
+a cell equal to the cell's own text is written|computer-actions.js|typedValue === parse(shown ?? '')|false
+a cell typed past the hand range is not held to it|computer-actions.js|Math.min(high, Math.max(low, typedValue))|typedValue
+a cell that is not a number writes on|computer-actions.js|const value = readTyped(typed, low, high);|const value = readTyped(typed, low, high) ?? 0;
 a step goes against its key|tone-drag.js|return Math.sign(table[at] - point[param]) === delta ? table[at] : null;|return table[at];
-a guest can write|actions.js|  if (viewer?.guest) return false;|  void viewer;
-a page whose writes are off can write|actions.js|  return viewer?.writes !== false;|  return true;
-a refusal does not turn a guest away|actions.js|refuse: () => turnedAway(),|refuse: () => null,
+a guest can write|write.js|  if (viewer?.guest) return false;|  void viewer;
+a page whose writes are off can write|write.js|  return viewer?.writes !== false;|  return true;
+a refusal does not turn a guest away|actions.js|refuse: () => writes.turnedAway(),|refuse: () => null,
 a question forgets where the focus returns|ask.js|const back = () => (open.returnTo ? document.getElementById(open.returnTo) : null);|const back = () => null;
-a point removed that moved loses its flag|actions.js|error: POINT_MOVED, moved: true }|error: POINT_MOVED }
+a point removed that moved loses its flag|computer-actions.js|error: POINT_MOVED, moved: true }|error: POINT_MOVED }
 a typed k with no number reads as zero|words.js|body !== '' && Number.isFinite(number)|Number.isFinite(number)
-a comma that may be thousands is only a decimal mark|actions.js|const thousands = thousandsReading(typed);|const thousands = null;
-a comma is thousands when the decimal reading is in range too|actions.js|if (inside(decimal) !== inside(thousands)) return inside(decimal) ? decimal : thousands;|if (!inside(thousands)) return decimal; return thousands;
-a comma the range cannot settle is guessed|actions.js|  return { error: `Write ${decimal} or ${kilo}.` };|  return decimal;
-a comma the range cannot settle is refused without the way to write it|actions.js|`Write ${decimal} or ${kilo}.`|'Not a number.'
+a comma that may be thousands is only a decimal mark|computer-actions.js|const thousands = thousandsReading(typed);|const thousands = null;
+a comma is thousands when the decimal reading is in range too|computer-actions.js|if (inside(decimal) !== inside(thousands)) return inside(decimal) ? decimal : thousands;|if (!inside(thousands)) return decimal; return thousands;
+a comma the range cannot settle is guessed|computer-actions.js|  return { error: `Write ${decimal} or ${kilo}.` };|  return decimal;
+a comma the range cannot settle is refused without the way to write it|computer-actions.js|`Write ${decimal} or ${kilo}.`|'Not a number.'
 a thousands reading keeps its commas|words.js|bare.replaceAll(',', '')|bare
 a thousands reading takes a group of two digits|words.js|(,\d{3})+|(,\d{2,3})+
 a thousands reading is every comma number|words.js|/^[+-]?[1-9]\d{0,2}(,\d{3})+$/.test(bare) ? |/^[+-]?\d+,\d+$/.test(bare) ? 
 a thousands reading takes a group that starts with 0|words.js|/^[+-]?[1-9]\d{0,2}(,\d{3})+$/.test(bare) ? |/^[+-]?\d{1,3}(,\d{3})+$/.test(bare) ? 
-a comma out of range both ways is asked again|actions.js|if (!inside(decimal)) return decimal;|
+a comma out of range both ways is asked again|computer-actions.js|if (!inside(decimal)) return decimal;|
 a typed comma is not a point|words.js|.replace(',', '.')|
 a gain's minus is a hyphen|words.js|`−${text}`|`-${text}`
 the hand's gain range is wider than the daemon's|computer.js|g: [-12, 12, 1]|g: [-24, 24, 1]
 the steps take their top frequency from a literal|tone-drag.js|if (f.at(-1) < fHigh) f.push(fHigh);|
 a question's focus is not given again after the answer|ask.js|queueMicrotask(again);|void again;
-a cell is not rounded to its field's places|actions.js|const typedValue = round(value, places);|const typedValue = value;
-a cell of a field with no hand range is not refused|actions.js|!HAND[param]) return { ok: false, status: 0, error: REFUSED };|false) return { ok: false, status: 0, error: REFUSED };
+a cell is not rounded to its field's places|computer-actions.js|const typedValue = round(value, places);|const typedValue = value;
+a cell of a field with no hand range is not refused|computer-actions.js|!HAND[param]) return { ok: false, status: 0, error: REFUSED };|false) return { ok: false, status: 0, error: REFUSED };
 the most points ignores the model's|computer.js|export const maxPoints = (eq) => eq?.max ?? POINTS_MAX;|export const maxPoints = () => POINTS_MAX;
-a full table is added to anyway|actions.js|if (count >= max) return|if (count > max) return
-an added point is placed by the model's frequencies, not the held ones|actions.js|(_, i) => currentOf(i + 1));|(_, i) => ({ ...(modelPoints()[i] ?? FLAT_POINT) }));
-a preset change does not read the list again|actions.js|if (answer.ok) held.resync();|if (false) held.resync();
-a large nudge steps by one|actions.js|return computerActions.setVolume(at + delta);|return computerActions.setVolume(at + 1);
-a nudge before the first read writes|actions.js|      if (at === null) return|      if (false) return
-mute writes what it is already|actions.js|return muteLane(!muted);|return muteLane(muted);
+a full table is added to anyway|computer-actions.js|if (count >= max) return|if (count > max) return
+an added point is placed by the model's frequencies, not the held ones|computer-actions.js|(_, i) => currentOf(i + 1));|(_, i) => ({ ...(modelPoints()[i] ?? FLAT_POINT) }));
+a preset change does not read the list again|computer-actions.js|if (answer.ok) held.resync();|if (false) held.resync();
+a large nudge steps by one|computer-actions.js|return computerActions.setVolume(at + delta);|return computerActions.setVolume(at + 1);
+a nudge before the first read writes|computer-actions.js|      if (at === null) return|      if (false) return
+mute writes what it is already|computer-actions.js|return muteLane(!muted);|return muteLane(muted);
 the point in hand does not follow a re-sort|computer.js|picked.n === extra.from) picked.n = extra.to;|picked.n === extra.from) picked.n = picked.n;
 the point in hand stays when another device is shown|computer.js|if (picked.device !== shown|if (false
 the device's side has a tone|computer.js|const tone = lazy(() => (on ? computer.toneOf(page) : null));|const tone = lazy(() => computer.toneOf(page));
@@ -116,8 +117,8 @@ the label's words drop the Q prefix|point-drag.js|· ${qPrefix}${qText(point.q)}
 the values of raw steps read the gain's table for the Q|point-drag.js|q: steps.q[raws.q],|q: steps.q[raws.g],
 a session's values are unknown as it begins|point-drag.js|: began && pointValues(startOf(steps, began), steps);|: null;
 a session's words ignore the options|point-drag.js|labelWords(now, options)|labelWords(now)
-a removed point stays in hand|actions.js|if (at === n) computer.repick(null);|if (at === n) void computer;
-a removal puts the other points out of hand|actions.js|if (at === n) computer.repick(null);|if (at !== n) computer.repick(null);
+a removed point stays in hand|computer-actions.js|if (at === n) computer.repick(null);|if (at === n) void computer;
+a removal puts the other points out of hand|computer-actions.js|if (at === n) computer.repick(null);|if (at !== n) computer.repick(null);
 the eq's mode ignores the one being changed|computer.js|        on: holds.get('mode')?.value ?? eq.on,|        on: eq.on,
 the eq has no preset|computer.js|        preset: eq.preset ?? null,|        preset: null,
 the eq is always confirmed|computer.js|        verified: !eq.running_unknown,|        verified: true,
@@ -131,9 +132,9 @@ a step on no point says it stepped|point-drag.js|    if (!point) return false; /
 a step answers true whatever it did|point-drag.js|    return stepBurst(n, param, delta, hold);|    return (stepBurst(n, param, delta, hold), true);
 a pick the core changed is not heard by the theme|point-drag.js|    if (type === 'picked') {|    if (false) {
 a repick says nothing|computer.js|      notify('picked', { n });|      void n;
-a removed point in hand is not said|actions.js|if (at === n) computer.repick(null);|if (at === n) computer.pick(null);
-a point after a removed one keeps its number|actions.js|computer.repick(at - 1);|computer.repick(at);
-a failed remove changes the pick|actions.js|const at = result.ok ? computer?.picked() ?? null : null;|const at = computer?.picked() ?? null;
+a removed point in hand is not said|computer-actions.js|if (at === n) computer.repick(null);|if (at === n) computer.pick(null);
+a point after a removed one keeps its number|computer-actions.js|computer.repick(at - 1);|computer.repick(at);
+a failed remove changes the pick|computer-actions.js|const at = result.ok ? computer?.picked() ?? null : null;|const at = computer?.picked() ?? null;
 a begin does not look for its point before it ends the burst|point-drag.js|    if (!pointOf(options.n)) return null;|    void options;
 a begin ignores the gesture|point-drag.js|launch(s, gesture, press, startOf(steps, point));|launch(s, 'move', press, startOf(steps, point));
 a begin ignores the fingers|point-drag.js|      touchIds,|      touchIds: null,

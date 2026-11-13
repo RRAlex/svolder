@@ -237,3 +237,68 @@ async fn save_as_from_the_computer_keeps_every_point() {
     assert_eq!(call(&web, bad).await.status, Code::UNPROCESSABLE_ENTITY);
     dac.stop().await;
 }
+
+/// `force` writes the device's bands over the user's preset of that name, under the spelling the
+/// request gives; a save without `force` is still refused as taken.
+#[tokio::test]
+async fn a_forced_save_writes_over_the_users_preset() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    let url = "/api/v1/devices/dac/presets";
+    assert_eq!(
+        call(&web, post(url, r#"{"name":"Mine"}"#)).await.status,
+        Code::OK
+    );
+    let taken = call(&web, post(url, r#"{"name":"mine"}"#)).await;
+    assert_eq!(taken.status, Code::UNPROCESSABLE_ENTITY, "{}", taken.body);
+    // Move a band, then write over.
+    let band = post(
+        "/api/v1/devices/dac/eq/bands/1",
+        r#"{"param":"g","step":1}"#,
+    );
+    assert_eq!(call(&web, band).await.status, Code::OK);
+    let before = config(&dac);
+    let reply = call(&web, post(url, r#"{"name":"mine","force":true}"#)).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(said["name"], "mine", "{said}");
+    assert_ne!(config(&dac), before, "the bands were written over");
+    assert_eq!(config(&dac).matches("[[preset]]").count(), 1);
+    assert!(config(&dac).contains("name = \"mine\""), "{}", config(&dac));
+    dac.stop().await;
+}
+
+/// A built-in, an imported preset and the computer's side are not written over, in the TUI's
+/// refusals, and the file is left as it was.
+#[tokio::test]
+async fn a_forced_save_refuses_a_builtin_an_imported_preset_and_the_computer() {
+    let dac = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    let url = "/api/v1/devices/dac/presets";
+    let from_pc = r#"{"name":"From PC","from":"computer"}"#;
+    assert_eq!(call(&web, post(url, from_pc)).await.status, Code::OK);
+    let before = config(&dac);
+    for (body, status, words) in [
+        (
+            r#"{"name":"Warm","force":true}"#,
+            Code::UNPROCESSABLE_ENTITY,
+            "Warm is built in: save the curve under a new name",
+        ),
+        (
+            r#"{"name":"from pc","force":true}"#,
+            Code::UNPROCESSABLE_ENTITY,
+            "From PC is imported: save the curve under a new name",
+        ),
+        (
+            r#"{"name":"From PC","from":"computer","force":true}"#,
+            Code::CONFLICT,
+            "the computer's points are saved as a new preset",
+        ),
+    ] {
+        let reply = call(&web, post(url, body)).await;
+        assert_eq!(reply.status, status, "{body}: {}", reply.body);
+        assert!(reply.body.contains(words), "{body}: {}", reply.body);
+    }
+    assert_eq!(config(&dac), before);
+    dac.stop().await;
+}

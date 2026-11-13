@@ -12,7 +12,6 @@
 
 import { dragAlong, sliderKeys } from './gestures.js';
 import { closeList, closeOf, openList } from './lists.js';
-import { keeper } from './live.js';
 import { place } from './place.js';
 import { rawAt } from './ruler.js';
 
@@ -27,7 +26,7 @@ export function wireControls({
   const box = root.querySelector('#p-controls');
   if (!box) return;
   const store = core.model;
-  const keep = keeper(live, 'controls');
+  const keep = core.freeze.keeper(live, 'controls');
   const controlOf = (key) => (store.device()?.controls ?? []).find((c) => c.key === key);
   const inert = () => Boolean(store.device()?.inert);
 
@@ -148,7 +147,6 @@ export function wireControls({
   live.onSwitch(() => {
     closeList();
     for (const w of writers.values()) w.next = null;
-    hand.forget();
     gripped = null;
     keep.reset();
   });

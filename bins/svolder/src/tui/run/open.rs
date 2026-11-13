@@ -139,6 +139,7 @@ async fn joined(socket: &std::path::Path, device: Option<&str>) -> Result<Opened
                 socket.display()
             ),
             next: "Start the daemon, or `svolder tui --demo`, and join its socket".to_string(),
+            reason: None,
         }),
         other => other,
     }

@@ -22,6 +22,10 @@ use crate::tone::apo::{Correction, FilterKind};
 use crate::tone::preset::PresetBand;
 use crate::tone::response::{BandParams, Grid, PEAK_SHOWN_DB, correction_db, log_freqs, peak_db};
 
+mod preview;
+
+pub use preview::{FitCurve, GAP_DB, GapSpan, Preview};
+
 /// How many log-spaced points from 20 Hz to 20 kHz the target is sampled at.
 const POINTS: usize = 256;
 /// Up to this frequency the fit weighs every point fully; above it, [`HIGH_WEIGHT`].
@@ -66,19 +70,50 @@ impl Fit {
     /// The fit as one line: `fit 0.9 dB RMS · worst 2.4 dB at 8.0 kHz`, with
     /// ` · lower volume 3.5 dB` after it when the bands boost by at least [`PEAK_SHOWN_DB`].
     pub fn line(&self) -> String {
-        let at = match self.worst_hz < 1000.0 {
-            true => format!("{} Hz", frequency_text(self.worst_hz)),
-            false => format!("{:.1} kHz", self.worst_hz / 1000.0),
-        };
-        let mut line = format!(
-            "fit {:.1} dB RMS · worst {:.1} dB at {at}",
-            self.rms_db, self.worst_db
-        );
-        if self.peak_db >= PEAK_SHOWN_DB {
-            line.push_str(&format!(" · lower volume {:.1} dB", self.peak_db));
-        }
-        line
+        fit_words(self.rms_db, self.worst_db, self.worst_hz, self.peak_db)
     }
+}
+
+/// How many log-spaced points (20 Hz to 20 kHz) a front end reads a preview's fit on, so the page
+/// and the terminal say one figure.
+pub const PREVIEW_POINTS: usize = 181;
+
+/// The words of a fit: `fit 0.9 dB RMS · worst 2.4 dB at 8.0 kHz`, a frequency below 1 kHz in
+/// hertz as the web reads it (`20 Hz`, `95.3 Hz`), with ` · lower volume 3.5 dB` after them when
+/// the bands boost by at least [`PEAK_SHOWN_DB`].
+pub fn fit_words(rms_db: f64, worst_db: f64, worst_hz: f64, peak_db: f64) -> String {
+    let at = match worst_hz < 1000.0 {
+        true => {
+            let text = frequency_text(worst_hz);
+            format!("{} Hz", text.strip_suffix(".0").unwrap_or(&text))
+        }
+        false => format!("{:.1} kHz", worst_hz / 1000.0),
+    };
+    let mut line = format!("fit {rms_db:.1} dB RMS · worst {worst_db:.1} dB at {at}");
+    if peak_db >= PEAK_SHOWN_DB {
+        line.push_str(&format!(" · lower volume {peak_db:.1} dB"));
+    }
+    line
+}
+
+/// How far a summed response `total` misses `target` on `freqs` over 20 Hz to 10 kHz: the
+/// root-mean-square miss, the largest miss (a magnitude) and where it is. The one measure a fit
+/// ends with and a preview of bands already on a device reads.
+pub fn miss(freqs: &[f64], target: &[f64], total: &[f64]) -> (f64, f64, f64) {
+    let (mut sum, mut count) = (0.0, 0usize);
+    let (mut worst_db, mut worst_hz) = (0.0f64, freqs.first().copied().unwrap_or(0.0));
+    for ((&f, &want), &got) in freqs.iter().zip(target).zip(total) {
+        if f > TRUSTED_HZ {
+            break;
+        }
+        let error = (got - want).abs();
+        sum += error * error;
+        count += 1;
+        if error > worst_db {
+            (worst_db, worst_hz) = (error, f);
+        }
+    }
+    ((sum / count.max(1) as f64).sqrt(), worst_db, worst_hz)
 }
 
 /// Fits `correction` to the bands of `eq`: peaking filters on the device's steps.
@@ -520,22 +555,10 @@ impl<'a> Search<'a> {
     fn finish(&self, steps: &[Steps]) -> Fit {
         let bands = self.bands_at(steps);
         let total = self.total(&bands);
-        let (mut sum, mut count) = (0.0, 0usize);
-        let (mut worst_db, mut worst_hz) = (0.0f64, self.freqs[0]);
-        for (i, &f) in self.freqs.iter().enumerate() {
-            if f > TRUSTED_HZ {
-                break;
-            }
-            let error = (total[i] - self.target[i]).abs();
-            sum += error * error;
-            count += 1;
-            if error > worst_db {
-                (worst_db, worst_hz) = (error, f);
-            }
-        }
+        let (rms_db, worst_db, worst_hz) = miss(&self.freqs, &self.target, &total);
         Fit {
             peak_db: peak_db(&bands),
-            rms_db: (sum / count.max(1) as f64).sqrt(),
+            rms_db,
             worst_db,
             worst_hz,
             bands: bands

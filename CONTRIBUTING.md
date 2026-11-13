@@ -9,6 +9,9 @@ page, and the crates under them. [docs/architecture.md](docs/architecture.md) is
 fit together and where each kind of change goes; [docs/glossary.md](docs/glossary.md) explains the
 words svolder uses in its own sense. Read the map first.
 
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md); a security problem goes to
+the private report form [SECURITY.md](SECURITY.md) describes, never to a public issue.
+
 ## Build
 
 The build needs Rust 1.93 or later, a C compiler, `make`, and libdbus's development files, found
@@ -80,6 +83,11 @@ variable needs `make docs-env`, which regenerates that file's table from the bui
 | `make e2e` | after a change to the transport, the session, the scanner, the daemon's reconnect or the simulator | two Bluetooth controllers; not part of `make check` |
 | `make docs-check-merge` | before a merge to main | `python3` |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | before a merge, and after editing a doc comment | nothing |
+
+`make test` passes `--all-features`, which turns on `broker-tests`: the MQTT tests that need the
+in-process broker (svolder-mqtt `client`, svolderd `mqtt`, two svolderd `mqtt_bridge` unit tests and
+one svolder `backend` test) run only then, as in `make check` and both CI jobs. A plain `cargo test`
+passes without running them, so run `make test` before committing.
 
 `make check` does not run the web checks, `make e2e` or the soak, so a machine without browsers or
 controllers can still run the ordinary gate. The quick web gate refuses after a smoke file changed,

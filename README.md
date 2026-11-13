@@ -37,6 +37,32 @@ every first run as a test:
 
 ## Screenshots
 
+### Web
+
+<img src="docs/images/web-phone.webp" width="32%" alt="The web UI on a phone, the first screen: the
+svolder wordmark and the connected pill, the folded Now playing line (cover, title and artist, a
+pause button, a next button and a thin progress bar), a Gungnir 2's knob at −24.1 dB with its −,
+Mute and + buttons and the clipping-risk note, the visualizer card with its bars, and the top of its
+controls, Phase invert"> <img src="docs/images/web-desktop.webp" width="66%" alt="The web UI on a
+desktop: the Now playing band across the top, with the cover, the title, the transport, the time and
+the signal path on the left and the visualizer on the right; below it the same Gungnir 2 with the
+knob, its buttons and its controls on the left and the tone control in EQ mode on the right with its
+curve, the band table and the preset list; and under the footer a strip of recent volume bars with
+the marks of a Warm and a Sennheiser HD 800 S recall">
+
+### Web themes on a phone
+
+<img src="docs/images/web-phone-paper.webp" width="32%" alt="Paper on a phone: squared paper with a
+serif Gungnir 2 title, the volume −26.1 dB in red with a ruler, written controls (− quieter, mute,
+louder +), the tone graph with its five bands and the first rows of the band table"> <img
+src="docs/images/web-phone-signal.webp" width="32%" alt="Signal on a phone, scrolled: the signal path as a
+strip along the top with PipeWire, the Gungnir 2 chosen and an amp, then the tone graph, the mode,
+the input and the presets, with the Now playing bar pinned at the bottom"> <img
+src="docs/images/web-phone-nightdrive.webp" width="32%" alt="Night drive on a phone: a striped sun
+over a dusk sky, the live spectrum as cyan mountains and a floor of lit cells rolling toward you, the
+volume −26.1 dB as a large neon number under the device line and the EQ gains, and under the scene
+the strip with − Mute +, the input, the track, the transport and Device">
+
 ### Terminal
 
 <img src="docs/images/dac.webp" width="100%" alt="The device screen of a Gungnir 2: its controls
@@ -63,32 +89,6 @@ a percentage beside each, five minutes of their mirrored history, and the host's
 width="49%" alt="The Devices screen listing a Gungnir and an Aegir 2, both connected">
 
 <sub>Text versions: [telemetry](docs/images/telemetry.txt), [devices](docs/images/devices.txt)</sub>
-
-### Web
-
-<img src="docs/images/web-phone.webp" width="32%" alt="The web UI on a phone, the first screen: the
-svolder wordmark and the connected pill, the folded Now playing line (cover, title and artist, a
-pause button, a next button and a thin progress bar), a Gungnir 2's knob at −24.1 dB with its −,
-Mute and + buttons and the clipping-risk note, the visualizer card with its bars, and the top of its
-controls, Phase invert"> <img src="docs/images/web-desktop.webp" width="66%" alt="The web UI on a
-desktop: the Now playing band across the top, with the cover, the title, the transport, the time and
-the signal path on the left and the visualizer on the right; below it the same Gungnir 2 with the
-knob, its buttons and its controls on the left and the tone control in EQ mode on the right with its
-curve, the band table and the preset list; and under the footer a strip of recent volume bars with
-the marks of a Warm and a Sennheiser HD 800 S recall">
-
-### Web themes on a phone
-
-<img src="docs/images/web-phone-paper.webp" width="32%" alt="Paper on a phone: squared paper with a
-serif Gungnir 2 title, the volume −26.1 dB in red with a ruler, written controls (− quieter, mute,
-louder +), the tone graph with its five bands and the first rows of the band table"> <img
-src="docs/images/web-phone-signal.webp" width="32%" alt="Signal on a phone, scrolled: the signal path as a
-strip along the top with PipeWire, the Gungnir 2 chosen and an amp, then the tone graph, the mode,
-the input and the presets, with the Now playing bar pinned at the bottom"> <img
-src="docs/images/web-phone-nightdrive.webp" width="32%" alt="Night drive on a phone: a striped sun
-over a dusk sky, the live spectrum as cyan mountains and a floor of lit cells rolling toward you, the
-volume −26.1 dB as a large neon number under the device line and the EQ gains, and under the scene
-the strip with − Mute +, the input, the track, the transport and Device">
 
 ## Install
 
@@ -186,6 +186,8 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
 - [Known issues](docs/known-issues.md), [the protocol](docs/protocol.md) and
   [the architecture](docs/architecture.md): limits, the wire format and how the code fits.
 - [CONTRIBUTING.md](CONTRIBUTING.md): build, test and propose a change; add a device.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md): how we behave, and how to
+  report a security problem privately.
 
 ## Licence
 

@@ -88,8 +88,29 @@ struct Args {
     verbose: bool,
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// Runs the daemon on a runtime built by hand, so the end of the runtime can be bounded, which
+/// `#[tokio::main]` cannot. Dropping a runtime waits for every `spawn_blocking` thread with no
+/// limit, and a job's blocking step that does not look at its stop flag would hold
+/// `svolder daemon stop` for as long as the step takes; after [`svolder_ipc::RUNTIME_STOP_BOUND`]
+/// the process exits and the thread goes with it. A configuration write is not cut by that:
+/// `Daemon::shutdown` waits for those first.
+fn main() -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("svolderd: cannot start the async runtime: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let code = runtime.block_on(run());
+    runtime.shutdown_timeout(svolder_ipc::RUNTIME_STOP_BOUND);
+    code
+}
+
+async fn run() -> ExitCode {
     let args = Args::parse();
     log::init(args.verbose);
 
@@ -102,17 +123,33 @@ async fn main() -> ExitCode {
     // a transport or binds its socket; `hangup_stream` says what that ordering is for.
     let hangups = hangup_stream();
 
-    let (config, registry, profiles_dir) = match load(&args) {
+    let (config, registry, profiles_dir, stamp) = match load(&args) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    // Kept alive to the end of `main`, so the lock inside is held for the life of the process.
     let claimed = match claim_socket(&args, &config, &registry, handed_over).await {
         Ok(claimed) => claimed,
         Err(code) => return code,
     };
-    let started = start(&args, &config, registry, profiles_dir, hangups, &claimed).await;
-    serve_until_stopped(claimed.listener, &claimed.path, &claimed.transport, started).await
+    let started = start(
+        &args,
+        &config,
+        registry,
+        profiles_dir,
+        stamp,
+        hangups,
+        &claimed,
+    )
+    .await;
+    let code =
+        serve_until_stopped(claimed.listener, &claimed.path, &claimed.transport, started).await;
+    // The socket's lock outlives the runtime: `main` still waits up to `RUNTIME_STOP_BOUND` for
+    // blocking threads after this returns, and a new daemon must not start while they run. The
+    // process's end closes the file.
+    if let Some(lock) = claimed.lock {
+        std::mem::forget(lock);
+    }
+    code
 }
 
 /// What `start` leaves running beside the accept loop.
@@ -126,17 +163,28 @@ struct Started {
 /// only daemon there, the transport and the listener.
 struct Claimed {
     path: PathBuf,
-    /// Held until the process ends; closing the file releases the lock.
-    _lock: Option<std::fs::File>,
+    /// Held until the process ends (`run` keeps it past the runtime's end); closing the file
+    /// releases the lock.
+    lock: Option<std::fs::File>,
     transport: Arc<dyn Transport>,
     listener: Listener,
     /// The path a handed-over listener is bound to, when it has one.
     adopted_at: Option<PathBuf>,
 }
 
+/// What the first read gives: the configuration, the profile registry, the folder of the user's
+/// own profiles, and the configuration file's time from just before it was read.
+type Loaded = (
+    Config,
+    Arc<Registry>,
+    PathBuf,
+    Option<std::time::SystemTime>,
+);
+
 /// Read the configuration, report its warnings, and build the profile registry, handing back the
 /// folder of the user's own profiles it read.
-fn load(args: &Args) -> Result<(Config, Arc<Registry>, PathBuf), ExitCode> {
+fn load(args: &Args) -> Result<Loaded, ExitCode> {
+    let stamp = handler::file_stamp(&args.config);
     let config = match Config::load_from(&args.config) {
         Ok(config) => config,
         Err(e) => {
@@ -155,7 +203,7 @@ fn load(args: &Args) -> Result<(Config, Arc<Registry>, PathBuf), ExitCode> {
             return Err(ExitCode::from(1));
         }
     };
-    Ok((config, registry, profiles_dir))
+    Ok((config, registry, profiles_dir, stamp))
 }
 
 /// Decide the socket path, take the lock for it, open the transport, refuse if another daemon
@@ -225,11 +273,24 @@ async fn claim_socket(
     };
     Ok(Claimed {
         path,
-        _lock: lock,
+        lock,
         transport,
         listener,
         adopted_at,
     })
+}
+
+/// The AutoEq client: `SVOLDER_AUTOEQ_URL` or AutoEq's own repository, and the cache home's
+/// `svolder/autoeq`, read once. The transport is the daemon's (the flag or its environment
+/// variable), so a fake daemon never reaches the internet however it was told.
+fn autoeq_client(args: &Args, configured: Option<String>) -> svolder_autoeq::Client {
+    svolder_autoeq::Client::for_transport(
+        &args.transport,
+        configured,
+        svolder_ipc::config::cache_home()
+            .join("svolder")
+            .join("autoeq"),
+    )
 }
 
 /// Build the daemon on the claimed socket, bring its devices, bridge and servers up, and start
@@ -239,6 +300,7 @@ async fn start(
     config: &Config,
     registry: Arc<Registry>,
     profiles_dir: PathBuf,
+    stamp: Option<std::time::SystemTime>,
     hangups: Option<Signal>,
     claimed: &Claimed,
 ) -> Started {
@@ -248,8 +310,16 @@ async fn start(
         args.config.clone(),
         profiles_dir,
         claimed.path.clone(),
+        config.clone(),
     )
+    .with_config_stamp(stamp)
     .with_host_mode(host::HostMode::from_env())
+    // The repository and the cache, read once: `SVOLDER_AUTOEQ_URL` or AutoEq's own, and the
+    // cache home's `svolder/autoeq`.
+    .with_autoeq(autoeq_client(
+        args,
+        std::env::var("SVOLDER_AUTOEQ_URL").ok(),
+    ))
     .shared();
     daemon.reconcile(config).await;
     daemon.host_to(&config.host);
@@ -319,8 +389,11 @@ async fn serve_until_stopped(
         Listener::Bound(bound) => serve_bound(bound, Arc::clone(&daemon), until_stopped).await,
     };
     health.abort();
-    reloader.abort();
+    // The hangup reloader is left running into the stop: a reload it has under way is refused or
+    // publishes nothing once the stop is marked, and the actors it started are the stop's to
+    // close. Aborting it first would drop such an actor's handle before the stop could ask it.
     daemon.shutdown().await;
+    reloader.abort();
     // Whatever the transport is still taking off the radio (a connection an actor cut short a
     // connect attempt on) runs on a task of its own, and the runtime is about to stop: the
     // last thing the daemon does is give that work the same grace a session gives it.

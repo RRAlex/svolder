@@ -163,11 +163,16 @@ async fn outcomes_over(g: &Globals<'_>, dev: bool, connect: bool, path: &Path) -
     let mut reported = None;
     let mut reported_web = None;
     if let Some(path) = version_asked_of(daemon.as_deref(), g.transport)
-        && let Some((version, mcp, web)) = daemon_answer(path).await
+        && let Some(info) = daemon_answer(path).await
     {
-        grade_daemon_version(&mut outcomes, &version);
-        reported = mcp;
-        reported_web = web;
+        grade_daemon_version(&mut outcomes, &info.version);
+        grade_config_changed(
+            &mut outcomes,
+            info.config_changed_words(),
+            info.config_missing,
+        );
+        reported = info.mcp;
+        reported_web = info.web;
     }
     let env_token = std::env::var_os(token::Store::MCP.env_var).is_some_and(|v| !v.is_empty());
     outcomes.extend(mcp_row(
@@ -194,11 +199,10 @@ fn version_asked_of<'a>(probed: Option<&'a Path>, transport: &str) -> Option<&'a
 /// How long the doctor waits for the daemon's version.
 const DAEMON_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// The version of the daemon answering on `socket` and where its MCP server and its web UI
-/// stand, or `None` when nothing answers within a few seconds or what answers is no version.
-async fn daemon_answer(socket: &Path) -> Option<(String, Option<McpStatus>, Option<WebStatus>)> {
-    let info = svolder_ipc::socket::daemon_version::version_within(socket, DAEMON_WAIT).await?;
-    Some((info.version, info.mcp, info.web))
+/// What the daemon answering on `socket` says of itself in its version reply, or `None` when
+/// nothing answers within a few seconds or what answers is no version.
+async fn daemon_answer(socket: &Path) -> Option<svolder_ipc::socket::daemon_version::DaemonInfo> {
+    svolder_ipc::socket::daemon_version::version_within(socket, DAEMON_WAIT).await
 }
 
 /// The row for the web UI, when `[web]` turns it on or the daemon reports it running.
@@ -425,6 +429,44 @@ fn grade_daemon_version(outcomes: &mut [Outcome], daemon: &str) {
     }
 }
 
+/// Grade the daemon check for a configuration file that changed since the daemon's last reload
+/// (`words` is the daemon's line for it, when it says so): a `!` with the words, joined to the
+/// reasons the check already had, and the verb that reloads when the check had no fix of its own.
+/// The fix is offered and never applied by the doctor, since a reload changes the devices. A file
+/// that is `missing` has no fix: a reload of it is refused until the file is back, and the rows
+/// that would write a new one (the template, the setup) lose theirs.
+fn grade_config_changed(outcomes: &mut [Outcome], words: Option<String>, missing: bool) {
+    let Some(words) = words else {
+        return;
+    };
+    if missing {
+        // Writing a file from the template, or running the setup, and then reloading would drop
+        // every device the daemon holds: the way back is the file, restored.
+        for row in outcomes
+            .iter_mut()
+            .filter(|o| o.check == checks::CONFIG || o.check == CONFIG_FILE)
+        {
+            row.fix = None;
+        }
+    }
+    let Some(row) = outcomes.iter_mut().find(|o| o.check == checks::DAEMON) else {
+        return;
+    };
+    row.reason = match row.state {
+        State::Pass | State::Note => words,
+        State::Warn | State::Fail => format!("{}; {words}", row.reason),
+    };
+    if matches!(row.state, State::Pass | State::Note) {
+        row.state = State::Warn;
+    }
+    if row.fix.is_none() && !missing {
+        row.fix = Some(Fix {
+            command: daemon_version::RELOAD_COMMAND.to_string(),
+            applies_itself: false,
+        });
+    }
+}
+
 /// Whether the fixes can be offered at all, and whether the guided first run among them can be
 /// walked.
 ///
@@ -535,7 +577,7 @@ async fn grade_row_for(g: &Globals<'_>, config: &Config, adapters: &[String]) ->
     // Best first, as the wizard's own adapter step offers them, so the two never read the same
     // grades in two orders. The sort is stable, so adapters that caught the device equally
     // often keep the order the host reports them in — which is the tie the row's fix breaks to.
-    grades.sort_by(|a, b| b.seen.cmp(&a.seen));
+    grades.sort_by_key(|grade| std::cmp::Reverse(grade.seen));
     let configured = config
         .adapter
         .as_deref()

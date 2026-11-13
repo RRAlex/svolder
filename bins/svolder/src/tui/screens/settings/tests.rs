@@ -1495,6 +1495,9 @@ fn daemon_with_config(config: Option<&str>) -> DaemonInfo {
         mcp_token: None,
         web: None,
         web_token: None,
+        features: Vec::new(),
+        config_changed: false,
+        config_missing: false,
     }
 }
 
@@ -2867,4 +2870,50 @@ fn the_box_says_how_to_use_the_link_as_a_terminal_link() {
     let rows = shown(&app);
     assert!(rows.contains("Ctrl+click"), "{rows}");
     assert!(rows.contains("Shift+right-click copies"), "{rows}");
+}
+
+/// While the daemon says its file changed since the last reload, every Connect row's text says
+/// so in the daemon's words with the way to reload, and it goes once the daemon says unchanged.
+#[test]
+fn a_changed_config_is_a_line_on_every_connect_row() {
+    let mut app = connect_app();
+    let (own, file) = (std::path::PathBuf::from("/x/c.toml"), "/x/c.toml");
+    let mut info = daemon_with_config(Some(file));
+    info.config_changed = true;
+    app.overlays.conn.daemon_said(&info, &own);
+    for setting in CATEGORIES[CONNECT].1 {
+        select(&mut app, *setting);
+        let words = right_words(&app);
+        let line = format!(
+            "config: {file} changed since the last reload: svolder daemon reload (or SIGHUP)"
+        );
+        assert!(words.contains(&line), "{setting:?}: {words}");
+    }
+
+    // A deleted file is told in the daemon's words for it, not as a change to reload.
+    info.config_missing = true;
+    app.overlays.conn.daemon_said(&info, &own);
+    for setting in CATEGORIES[CONNECT].1 {
+        select(&mut app, *setting);
+        let words = right_words(&app);
+        assert!(
+            words.contains(&format!("config: {file} is missing:")),
+            "{setting:?}: {words}"
+        );
+        assert!(
+            !words.contains("changed since the last reload"),
+            "{setting:?}: {words}"
+        );
+    }
+
+    info.config_changed = false;
+    info.config_missing = false;
+    app.overlays.conn.daemon_said(&info, &own);
+    for setting in CATEGORIES[CONNECT].1 {
+        select(&mut app, *setting);
+        assert!(
+            !right_words(&app).contains("changed since the last reload"),
+            "{setting:?}"
+        );
+    }
 }

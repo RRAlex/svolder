@@ -32,6 +32,7 @@ fn level(range: (i64, i64), convert: Option<Convert>, unit: Option<&str>) -> Con
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     }
 }

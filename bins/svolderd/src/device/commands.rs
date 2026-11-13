@@ -17,6 +17,7 @@ use svolder_proto::{FunctionId, Message, ProtoError, Value, ValueType};
 use super::answers::{Refused, error_for, no_eq, not_connected, usage, usage_error};
 use super::{Actor, Command};
 use crate::log;
+use svolder_ipc::{CODE_LINK, CODE_TIMEOUT, CODE_USAGE, Reason};
 
 impl Actor {
     /// Run one command against the session. Every command answers immediately when the link
@@ -167,10 +168,8 @@ impl Actor {
     /// The answer for a read of a device the daemon has never found: code 3, in words that say
     /// the daemon is still looking, which a front end tells from a link that was lost.
     pub(super) fn not_found(&self) -> Response {
-        Response::Error {
-            code: 3,
-            message: svolder_ipc::not_found_yet(&self.name),
-        }
+        Response::error(CODE_LINK, svolder_ipc::not_found_yet(&self.name))
+            .with_reason(Reason::NotFoundYet)
     }
 
     /// Every reading the device has confirmed.
@@ -235,10 +234,7 @@ impl Actor {
         };
         match self.state_of().get(control.id) {
             Some(m) => Response::Value(self.value_object(m)),
-            None => Response::Error {
-                code: 4,
-                message: format!("no value reported yet for {key}"),
-            },
+            None => Response::error(CODE_TIMEOUT, format!("no value reported yet for {key}")),
         }
     }
 
@@ -266,7 +262,7 @@ impl Actor {
         roles::relative_step(&self.profile, key, current, delta)
             .map_err(|e| usage(e.to_string()))?
             .ok_or_else(|| Refused {
-                code: 4,
+                code: CODE_TIMEOUT,
                 message: format!("no current value for {key}"),
             })
     }
@@ -303,10 +299,8 @@ impl Actor {
 /// exactly the same terms the CLI's own two gates use: the firmware-update family, and the
 /// passphrase function, which only `Command::Passphrase` may address.
 pub(super) fn refuse(id: FunctionId) -> Option<Response> {
-    id.refusal().map(|refusal| Response::Error {
-        code: 1,
-        message: refusal.to_string(),
-    })
+    id.refusal()
+        .map(|refusal| Response::error(CODE_USAGE, refusal.to_string()))
 }
 
 /// The command a `raw` request asks for, parsed exactly as the CLI parses it.

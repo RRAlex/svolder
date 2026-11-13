@@ -1,149 +1,202 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The AutoEq verbs: `eq search`, and `eq import --autoeq`, which downloads a headphone's
-//! correction and saves it as an imported preset. Config and network only, never a device.
+//! The AutoEq verbs: `eq search`, and `eq import --autoeq`, which has the daemon download a
+//! headphone's correction and save it as an imported preset.
+//!
+//! Only `svolderd` reaches AutoEq's repository: these verbs ask it (see [`crate::autoeq`]), and
+//! with no daemon, or under `--transport ble` or `fake`, which open none, they say so.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use svolder_autoeq::{AutoEqError, Client, Entry, Index, Refresh, exact, search};
-use svolder_ipc::Config;
-use svolder_ipc::config::{RefreshWeeks, cache_home};
-use svolder_profiles::tone::apo;
-use svolder_profiles::tone::preset::{self, Imported};
+use svolder_ipc::socket::daemon_version::{RESTART_COMMAND, is_config_missing_refusal};
+use svolder_ipc::{
+    AutoEqGroup, AutoEqMeasurement, AutoEqTarget, AutoEqVariant, Config, FEATURE_AUTOEQ, Reason,
+    socket,
+};
 
+use crate::autoeq::{self, NEEDS_DAEMON, Refused};
 use crate::backend::{Failure, Globals};
 use crate::recovery::Kind;
 
 use super::config_failure;
-use super::presets::import_and_report;
 
 /// The most lines a text search prints before it asks for a narrower one.
 const MAX_LINES: usize = 30;
 
-/// The client the verbs use: `SVOLDER_AUTOEQ_URL` or AutoEq's repository, cached under the
-/// cache home's `svolder/autoeq`.
-fn client() -> Client {
-    Client::from_env(cache_home().join("svolder").join("autoeq"))
+/// The socket of the daemon that serves AutoEq, or why there is none: a run that opens no
+/// daemon of its own (`--transport ble` or `fake`), nothing listening, or a daemon that does not
+/// have the feature. `what` is the verb's work, for a daemon that is too old to do it.
+pub(super) async fn daemon(
+    g: &Globals<'_>,
+    config: &Config,
+    what: &str,
+) -> Result<PathBuf, Failure> {
+    if matches!(g.transport, "ble" | "fake") {
+        return Err(Failure {
+            next: "Drop `--transport`, so the verb asks the daemon".into(),
+            ..Failure::of(
+                Kind::Usage,
+                format!(
+                    "{NEEDS_DAEMON}: `--transport {}` opens no daemon",
+                    g.transport
+                ),
+            )
+        });
+    }
+    let socket = socket::path::resolve(g.socket, config.socket.as_deref());
+    match crate::reach::daemon_runs(&socket, FEATURE_AUTOEQ, what).await? {
+        true => Ok(socket),
+        false => Err(Failure {
+            next: format!(
+                "Start it with `{RESTART_COMMAND}`, or import a file with `svolder eq import FILE`"
+            ),
+            ..Failure::of(
+                Kind::NoDaemon,
+                format!("{NEEDS_DAEMON}: no daemon answers on {}", socket.display()),
+            )
+        }),
+    }
 }
 
-/// A failure of the network side, with the step that follows it. `others` says the headphone
-/// has measurements from another source, which `--measured-by` can pick.
-fn network_failure(error: &AutoEqError, others: bool) -> Failure {
-    let mut failure = Failure::of(Kind::Usage, error.to_string());
-    failure.next = match (error, others) {
-        (AutoEqError::Status { status: 404, .. }, true) => {
-            "That measurement is listed but its file is not there: pick another source with \
-             `--measured-by`, or import a file with `svolder eq import FILE`"
+/// What a refused call leaves with: an interrupt (Ctrl-C, a closed terminal) cancelled the job and
+/// exits 130 with a line saying so, as the walk does; any other refusal is [`refusal`]'s.
+pub(super) fn refusal_exit(refused: &Refused, others: bool) -> ExitCode {
+    match refused.interrupted {
+        true => {
+            eprintln!();
+            eprintln!("svolder: {}", refused.message);
+            ExitCode::from(130)
         }
-        (AutoEqError::Status { status: 404, .. }, false) => {
-            "That measurement is listed but its file is not there: import a file with \
-             `svolder eq import FILE`"
-        }
-        _ => "Retry later, or import a file with `svolder eq import FILE`",
+        false => refusal(refused, others).report(),
     }
-    .to_string();
+}
+
+/// A refusal of the daemon's AutoEq service, with the step that follows it. `others` says the
+/// headphone has measurements from another source, which `--measured-by` can pick.
+pub(super) fn refusal(refused: &Refused, others: bool) -> Failure {
+    if refused.too_old {
+        return Failure {
+            next: format!("Run `{RESTART_COMMAND}`"),
+            ..Failure::of(Kind::DaemonTooOld, refused.message.clone())
+        };
+    }
+    let mut failure = Failure::of(Kind::Usage, refused.message.clone());
+    failure.next = match (refused.reason, others) {
+        (Some(Reason::NotListed), true) => "Pick another source with `--measured-by`, or import a \
+             file with `svolder eq import FILE`"
+            .to_string(),
+        (Some(Reason::NotListed), false) => {
+            "Import a file with `svolder eq import FILE`".to_string()
+        }
+        (Some(Reason::Unreachable), _) => {
+            "Retry later, or import a file with `svolder eq import FILE`".to_string()
+        }
+        (Some(Reason::Taken), _) => {
+            "Pick another with `--name`, or pass `--force` to replace it".to_string()
+        }
+        (Some(Reason::BadName), _) => "Pick another with `--name`".to_string(),
+        _ if is_config_missing_refusal(&refused.message) => String::new(),
+        _ => failure.next,
+    };
     failure
 }
 
-/// The index, fetched or read from the cache as the config's `[autoeq] refresh_weeks` says, or
-/// at once when `refresh`. A refresh that failed with a cached copy in hand is said on stderr.
-async fn load_index(config: &Config, refresh: bool) -> Result<Index, Failure> {
-    let policy = match (refresh, config.autoeq.refresh_weeks) {
-        (true, _) => Refresh::Now,
-        (false, RefreshWeeks::Never) => Refresh::Never,
-        (false, RefreshWeeks::Weeks(weeks)) => Refresh::AfterWeeks(weeks),
-    };
-    let client = client();
-    let index = tokio::task::spawn_blocking(move || client.index(policy))
-        .await
-        .map_err(|e| Failure::of(Kind::Usage, format!("the index fetch stopped: {e}")))?
-        .map_err(|e| network_failure(&e, false))?;
-    if let Some(note) = &index.note {
-        eprintln!("svolder: {note}");
-    }
-    Ok(index)
+/// A headphone `headphone` can mean: its name and the measurements that count as its own.
+struct Candidate<'a> {
+    /// The name the daemon's group gives it.
+    name: &'a str,
+    /// Its measurements, AutoEq's recommended one first.
+    variants: Vec<&'a AutoEqMeasurement>,
 }
 
-/// `source · form[ · rig]`: what tells two measurements of one headphone apart.
-fn measurement(entry: &Entry) -> String {
-    let origin = entry.origin();
-    origin
-        .strip_prefix("AutoEq · ")
-        .unwrap_or(&origin)
-        .to_string()
-}
-
-/// The matches of `query` grouped by headphone name, each group in AutoEq's order. Names that
-/// are equal ignoring case are one headphone, and their measurements share a group.
-fn grouped(matches: Vec<&Entry>) -> Vec<Vec<&Entry>> {
-    let mut groups: Vec<Vec<&Entry>> = Vec::new();
-    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for entry in matches {
-        match at.entry(entry.name.to_lowercase()) {
-            std::collections::hash_map::Entry::Occupied(found) => groups[*found.get()].push(entry),
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(groups.len());
-                groups.push(vec![entry]);
-            }
-        }
-    }
-    groups
-}
-
-/// The headphones `headphone` can mean, as groups of measurements, narrowest reading first:
-/// the literal name (trimmed, case-sensitive, then trimmed, ignoring case), then the names that
-/// read the same as the query once only letters and digits count, then the names that hold it.
-/// `measured_by`, when given, drops the groups that source did not measure, unless that would
+/// The headphones `headphone` can mean among the `groups` a search for it found, narrowest
+/// reading first: the measurements named as the query is written (blanks round it dropped) or,
+/// failing that, the same ignoring case; then the headphones whose name reads the same as the
+/// query once only letters and digits count; then every headphone the search found. Spellings
+/// that differ in case are one headphone, whoever wrote them, and one that differs otherwise
+/// (`Melomania 1` and `Melomania 1+`, which the daemon's search lists as one group) is a
+/// headphone of its own: a name that is not exact never picks one spelling silently.
+/// `measured_by`, when given, drops the headphones that source did not measure, unless that would
 /// leave none, so the caller can still say which sources there are.
 fn candidates<'a>(
-    entries: &'a [Entry],
+    groups: &'a [AutoEqGroup],
     headphone: &str,
     measured_by: Option<&str>,
-) -> Vec<Vec<&'a Entry>> {
+) -> Vec<Candidate<'a>> {
     let literal = headphone.trim();
-    let mut found: Vec<&'a Entry> = entries
-        .iter()
-        .filter(|entry| entry.name.trim() == literal)
-        .collect();
+    let folded = literal.to_lowercase();
+    // Each group's measurements told apart by the spelling of the name in any case.
+    let spellings = |keep: &dyn Fn(&AutoEqGroup) -> bool| -> Vec<Candidate<'a>> {
+        let mut found: Vec<Candidate<'a>> = Vec::new();
+        for group in groups.iter().filter(|group| keep(group)) {
+            let first = found.len();
+            for m in &group.variants {
+                let spelled = m.variant.name.trim().to_lowercase();
+                match found[first..]
+                    .iter_mut()
+                    .find(|candidate| candidate.name.trim().to_lowercase() == spelled)
+                {
+                    Some(candidate) => candidate.variants.push(m),
+                    None => found.push(Candidate {
+                        name: &m.variant.name,
+                        variants: vec![m],
+                    }),
+                }
+            }
+        }
+        found
+    };
+    let mut found: Vec<Candidate<'a>> = spellings(&|group| {
+        group
+            .variants
+            .iter()
+            .any(|m| m.variant.name.trim() == literal)
+    });
     if found.is_empty() {
-        let folded = literal.to_lowercase();
-        found = entries
-            .iter()
-            .filter(|entry| entry.name.trim().to_lowercase() == folded)
-            .collect();
+        found = spellings(&|group| {
+            group
+                .variants
+                .iter()
+                .any(|m| m.variant.name.trim().to_lowercase() == folded)
+        });
     }
-    if !found.is_empty() {
-        // The literal step only picks which headphone: every spelling of its name that differs
-        // in case is the same headphone, and its measurements all count.
-        let folded = found[0].name.trim().to_lowercase();
-        found = entries
-            .iter()
-            .filter(|entry| entry.name.trim().to_lowercase() == folded)
-            .collect();
-    }
+    // Only the spelling asked for, with its case variants, is the headphone.
+    found.retain(|candidate| {
+        let name = candidate.name.trim();
+        name == literal || name.to_lowercase() == folded
+    });
     if found.is_empty() {
         // A name that is exactly the query wins over longer names that hold it.
-        found = exact(entries, headphone);
+        let plain: String = headphone
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect();
+        found = spellings(&|group| group.key == plain);
     }
     if found.is_empty() {
-        found = search(entries, headphone);
+        found = spellings(&|_| true);
     }
-    let groups = grouped(found);
     let Some(source) = measured_by else {
-        return groups;
+        return found;
     };
-    let measured: Vec<Vec<&Entry>> = groups
+    let measured: Vec<Candidate<'a>> = found
         .iter()
-        .filter(|group| {
-            group
+        .filter(|candidate| {
+            candidate
+                .variants
                 .iter()
-                .any(|entry| entry.source.eq_ignore_ascii_case(source.trim()))
+                .any(|m| m.variant.source.eq_ignore_ascii_case(source.trim()))
         })
-        .cloned()
+        .map(|candidate| Candidate {
+            name: candidate.name,
+            variants: candidate.variants.clone(),
+        })
         .collect();
     match measured.is_empty() {
-        true => groups,
+        true => found,
         false => measured,
     }
 }
@@ -152,6 +205,7 @@ fn candidates<'a>(
 /// recommended measurement and how many others there are, or per measurement with `all`.
 /// With no query, `refresh` only refreshes the index.
 pub async fn eq_search(
+    g: &Globals<'_>,
     query: &[String],
     all: bool,
     refresh: bool,
@@ -175,20 +229,29 @@ pub async fn eq_search(
         }
         .report());
     }
-    let index = match load_index(&config, refresh).await {
-        Ok(index) => index,
+    let socket = match daemon(g, &config, "search AutoEq").await {
+        Ok(socket) => socket,
         Err(failure) => return Ok(failure.report()),
     };
+    let found = match autoeq::search(&socket, &query, refresh).await {
+        Ok(found) => found,
+        Err(refused) => return Ok(refusal(&refused, false).report()),
+    };
+    if let Some(note) = &found.note {
+        eprintln!("svolder: {note}");
+    }
+    let refresh_failed = refresh && found.note.is_some();
     if query.trim().is_empty() {
-        let headphones = grouped(index.entries.iter().collect()).len();
-        if index.note.is_none() {
-            eprintln!("svolder: refreshed the AutoEq index ({headphones} headphones)");
+        if found.note.is_none() {
+            eprintln!(
+                "svolder: refreshed the AutoEq index ({} measurements)",
+                found.measurements
+            );
             return Ok(ExitCode::SUCCESS);
         }
         return Ok(outcome(true));
     }
-    let found = search(&index.entries, &query);
-    if found.is_empty() {
+    if found.groups.is_empty() {
         let failure = Failure::of(Kind::Usage, format!("no headphone matches {query:?}"));
         return Ok(Failure {
             next: "Try fewer words; `hd650` finds `HD 650`".into(),
@@ -196,48 +259,56 @@ pub async fn eq_search(
         }
         .report());
     }
-    let groups = grouped(found);
-    let rows: Vec<(&Entry, usize)> = match all {
-        true => groups
+    let rows: Vec<(&svolder_ipc::AutoEqMeasurement, usize)> = match all {
+        true => found
+            .groups
             .iter()
-            .flat_map(|group| group.iter().map(|entry| (*entry, 0)))
+            .flat_map(|group| group.variants.iter().map(|m| (m, 0)))
             .collect(),
-        false => groups
+        false => found
+            .groups
             .iter()
-            .map(|group| (group[0], group.len() - 1))
+            .filter_map(|group| Some((group.variants.first()?, group.variants.len() - 1)))
             .collect(),
     };
     if json {
-        for (entry, more) in &rows {
+        for (m, more) in &rows {
             let row = serde_json::json!({
-                "name": entry.name,
-                "source": entry.source,
-                "form": entry.form,
-                "rig": entry.rig,
+                "name": m.variant.name,
+                "source": m.variant.source,
+                "form": m.variant.form,
+                "rig": m.variant.rig,
                 "more": more,
             });
             println!("{row}");
         }
-        return Ok(outcome(refresh && index.note.is_some()));
+        return Ok(outcome(refresh_failed));
     }
     let width = rows
         .iter()
         .take(MAX_LINES)
-        .map(|(entry, _)| entry.name.chars().count())
+        .map(|(m, _)| m.variant.name.chars().count())
         .max()
         .unwrap_or(0);
-    for (entry, more) in rows.iter().take(MAX_LINES) {
-        let name = &entry.name;
+    for (m, more) in rows.iter().take(MAX_LINES) {
+        let name = &m.variant.name;
         let pad = " ".repeat(width - name.chars().count());
+        let words = &m.words;
         match more {
-            0 => println!("{name}{pad}  {}", measurement(entry)),
-            more => println!("{name}{pad}  {}  +{more} more", measurement(entry)),
+            0 => println!("{name}{pad}  {words}"),
+            more => println!("{name}{pad}  {words}  +{more} more"),
         }
     }
-    if rows.len() > MAX_LINES {
-        println!("… {} more: narrow the search", rows.len() - MAX_LINES);
+    // Rows past the cut are measurements with `--all` and headphones without it; the daemon's own
+    // cut (`more`) is always headphones.
+    let left = rows.len().saturating_sub(MAX_LINES) + if all { 0 } else { found.more };
+    if left > 0 {
+        println!("… {left} more: narrow the search");
     }
-    Ok(outcome(refresh && index.note.is_some()))
+    if all && found.more > 0 {
+        println!("… {} more headphones: narrow the search", found.more);
+    }
+    Ok(outcome(refresh_failed))
 }
 
 /// Success, or the failure of a `--refresh` that fell back on the cached index (the note about
@@ -257,10 +328,13 @@ fn outcome(refresh_failed: bool) -> ExitCode {
 }
 
 /// `eq import --autoeq HEADPHONE [--measured-by SOURCE] [--name NAME] [--force]`: find the one
-/// headphone `headphone` names, download the correction of the measurement `measured_by` picks
-/// (the recommended one by default) and save it like a file import, with the origin AutoEq
-/// gives it. Several headphones, or a source that did not measure it, are listed with the usage
-/// code.
+/// headphone `headphone` names, have the daemon download the correction of the measurement
+/// `measured_by` picks (the recommended one by default) and save it like a file import, with the
+/// origin AutoEq gives it. Several headphones, or a source that did not measure it, are listed
+/// with the usage code.
+///
+/// The preset goes to the library, which no side of the EQ owns; the daemon is told the computer
+/// as the side, which only bounds a correction to the filters the computer takes.
 pub async fn eq_import_autoeq(
     g: &Globals<'_>,
     headphone: &str,
@@ -273,11 +347,18 @@ pub async fn eq_import_autoeq(
         Ok(config) => config,
         Err(e) => return Ok(config_failure(e).report()),
     };
-    let index = match load_index(&config, false).await {
-        Ok(index) => index,
+    let socket = match daemon(g, &config, "import from AutoEq").await {
+        Ok(socket) => socket,
         Err(failure) => return Ok(failure.report()),
     };
-    let groups = candidates(&index.entries, headphone, measured_by);
+    let found = match autoeq::search(&socket, headphone, false).await {
+        Ok(found) => found,
+        Err(refused) => return Ok(refusal(&refused, false).report()),
+    };
+    if let Some(note) = &found.note {
+        eprintln!("svolder: {note}");
+    }
+    let groups = candidates(&found.groups, headphone, measured_by);
     let group = match groups.as_slice() {
         [] => {
             let failure = Failure::of(Kind::Usage, format!("no headphone matches {headphone:?}"));
@@ -291,7 +372,7 @@ pub async fn eq_import_autoeq(
         many => {
             let mut what = format!("{headphone:?} matches {} headphones:", many.len());
             for group in many.iter().take(MAX_LINES) {
-                what.push_str(&format!("\n  {}", group[0].name));
+                what.push_str(&format!("\n  {}", group.name));
             }
             if many.len() > MAX_LINES {
                 what.push_str(&format!("\n  … {} more", many.len() - MAX_LINES));
@@ -304,61 +385,56 @@ pub async fn eq_import_autoeq(
             .report());
         }
     };
-    let entry = match measured_by {
-        None => group[0],
-        Some(source) => match group
+    let measurement = match measured_by {
+        None => group.variants.first().copied(),
+        Some(source) => group
+            .variants
             .iter()
-            .find(|entry| entry.source.eq_ignore_ascii_case(source.trim()))
-        {
-            Some(entry) => *entry,
-            None => {
-                let mut sources: Vec<&str> = Vec::new();
-                for entry in group.iter() {
-                    if !sources.contains(&entry.source.as_str()) {
-                        sources.push(&entry.source);
-                    }
-                }
-                let failure = Failure::of(
-                    Kind::Usage,
-                    format!(
-                        "{source:?} has no measurement of {}; the sources are {}",
-                        group[0].name,
-                        sources.join(", ")
-                    ),
-                );
-                return Ok(Failure {
-                    next: "Pick one with `--measured-by`".into(),
-                    ..failure
-                }
-                .report());
+            .copied()
+            .find(|m| m.variant.source.eq_ignore_ascii_case(source.trim())),
+    };
+    let Some(measurement) = measurement else {
+        let mut sources: Vec<&str> = Vec::new();
+        for m in &group.variants {
+            if !sources.contains(&m.variant.source.as_str()) {
+                sources.push(&m.variant.source);
             }
-        },
-    };
-    let others = group.iter().any(|other| other.source != entry.source);
-    let client = client();
-    let wanted = entry.clone();
-    let text = tokio::task::spawn_blocking(move || client.download(&wanted))
-        .await
-        .map_err(|e| format!("the download stopped: {e}"))?;
-    let text = match text {
-        Ok(text) => text,
-        Err(error) => return Ok(network_failure(&error, others).report()),
-    };
-    let parsed = match apo::parse(&text) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            let what = format!("the file for {} is not a parametric EQ: {e}", entry.name);
-            return Ok(Failure::of(Kind::Usage, what).report());
         }
+        let failure = Failure::of(
+            Kind::Usage,
+            format!(
+                "{:?} has no measurement of {}; the sources are {}",
+                measured_by.unwrap_or_default(),
+                group.name,
+                sources.join(", ")
+            ),
+        );
+        return Ok(Failure {
+            next: "Pick one with `--measured-by`".into(),
+            ..failure
+        }
+        .report());
     };
-    let named = match name {
-        Some(name) => name.to_string(),
-        None => preset::default_name(&entry.name),
+    let others = group
+        .variants
+        .iter()
+        .any(|other| other.variant.source != measurement.variant.source);
+    let variant: AutoEqVariant = measurement.variant.clone();
+    // Ctrl-C (and a closed terminal) cancels this job on the daemon while it is waited for.
+    let signals = crate::wizard::signals::Signals::listen();
+    let saved = match autoeq::import(
+        &socket,
+        variant,
+        name.map(str::to_string),
+        force,
+        AutoEqTarget::Computer,
+        Some(signals.presses()),
+    )
+    .await
+    {
+        Ok(saved) => saved,
+        Err(refused) => return Ok(refusal_exit(&refused, others)),
     };
-    let skipped = parsed.notes.len();
-    let imported = Imported {
-        origin: Some(entry.origin()),
-        correction: parsed.correction,
-    };
-    Ok(import_and_report(g, &config, &path, &named, imported, skipped, force).await)
+    super::presets::report_saved(&path, &saved);
+    Ok(ExitCode::SUCCESS)
 }

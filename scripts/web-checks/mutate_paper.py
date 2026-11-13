@@ -30,7 +30,7 @@ PAGE = {
         (P + 'live.js', "view.state in STILL && gesturing.size === 0;", "view.state in STILL && holding.size === 0;"),
     ],
     'act logs nothing': [
-        (P + 'act.js', "entries.push(entry);", ""),
+        ('core/act.js', "entries.push(entry);", ""),
     ],
     'a meter\'s needle stands at its class-A share': [
         (P + 'draw/amp.js', 'data-at="${m.fraction.toFixed(5)}"',

@@ -19,6 +19,7 @@ pub(in crate::tui) struct Kept {
     pub(super) host_audio: bool,
     pub(super) mascot: crate::tui::decoration::mascot::Mascot,
     pub(super) daemon_version_warned: Option<String>,
+    pub(super) config_changed_told: bool,
     /// The accent colours of the user's own the Settings box holds as stops.
     pub(super) held_accents: svolder_ipc::FamilyAccents,
     /// The device's unit id and the histories its readings built, which a reopen of the same
@@ -39,6 +40,7 @@ impl Kept {
             host_audio: app.tui.host_audio,
             mascot: app.mascot.clone(),
             daemon_version_warned: app.session.daemon_version_warned.clone(),
+            config_changed_told: app.session.config_changed_told,
             held_accents: app.overlays.held_accents.clone(),
             unit: app.session.unit.clone(),
             histories: app.readings.histories.clone(),
@@ -128,7 +130,15 @@ pub(in crate::tui) struct Watching {
     /// connection answers, over its own socket so the draw loop never waits on it. Taken the
     /// moment it answers, so the arm reading it stops being polled; a direct session, and a
     /// daemon's connection before the answer, both leave this `None`.
+    /// When a daemon that reads the file is to be told to reload after a Settings write, and the
+    /// file: moved on by each further write ([`super::look::reload_soon`]).
+    pub(super) reload_owed: Option<Box<(tokio::time::Instant, std::path::PathBuf)>>,
     pub(super) daemon_version: Option<tokio::sync::oneshot::Receiver<Option<DaemonInfo>>>,
+    /// The daemon's list of the configured devices, asked in a task of its own so the loop never
+    /// waits on it, while it is on its way; `None` is the answer of a daemon that cannot give it.
+    pub(super) view_ask: Option<tokio::task::JoinHandle<super::devices::ViewAnswer>>,
+    /// Whether the daemon said it cannot list devices, so it is not asked again this session.
+    pub(super) view_off: bool,
     /// A web code asked of the daemon, while it is on its way.
     pub(super) web_code: Option<tokio::sync::oneshot::Receiver<super::web_box::Asked>>,
     /// A check on whether the link on show is still open, asked of the daemon, while it is on
@@ -160,29 +170,46 @@ pub(in crate::tui) struct Watching {
 impl Watching {
     /// Reach the host this session runs on, for the loop to follow from its first turn — or
     /// nothing of it at all under `SVOLDER_HOST=off`, which the app is told so its Settings row
-    /// can say why.
+    /// can say why. Under `SVOLDER_HOST=fake` the loop reaches nothing of its own either, and
+    /// the host is the daemon's simulated one, which the daemon's feed brings.
     pub(in crate::tui) fn reach_host(&mut self) {
-        let held_off = svolder_host::host_off();
+        self.reach_host_as(
+            svolder_host::host_held_off(),
+            svolder_host::host_unreached(),
+        );
+    }
+
+    /// [`Watching::reach_host`] with what the environment says passed in: `held_off` for
+    /// `SVOLDER_HOST=off`, `unreached` for `off` or `fake`.
+    pub(super) fn reach_host_as(&mut self, held_off: bool, unreached: bool) {
         self.app.host.held_off = held_off;
         self.app.host.linked = !held_off;
-        self.host = HostLink::session(held_off);
-        self.jobs = jobs::Jobs::live();
+        self.host = HostLink::session(unreached);
         let direct = self
             .backend
             .as_ref()
             .is_some_and(|backend| backend.daemon_socket().is_none());
-        *self.computer = match (held_off, direct) {
+        *self.computer = match (unreached, direct) {
             (false, true) => ComputerLink::live(),
             _ => ComputerLink::none(),
         };
         if held_off {
             self.app.host.computer.why =
                 Some("computer controls unavailable: host audio is off".to_string());
-        } else if direct {
+        } else if direct && !unreached {
             self.app.host.computer.eq = self.computer.view().map(Box::new);
             self.app.host.computer.why = self.computer.why.clone();
         }
         self.app.settle_switch();
+    }
+
+    /// Leave no search question behind a box that has closed: whatever the closing was (`Esc`, a
+    /// switch of device or side), the loop calls this each turn, and the question waiting out the
+    /// typing is dropped and the one in flight stopped.
+    pub(super) fn settle_search(&mut self) {
+        if !crate::tui::boxes::presets::search::showing(&self.app) {
+            self.jobs.stop_search();
+        }
     }
 
     /// Say that the device did not come back: the app's values can no longer be updated, so the

@@ -34,14 +34,14 @@ impl App {
 
     /// The reading the telemetry screen has focused, if it has any.
     pub(super) fn telemetry_focus(&self) -> Option<FunctionId> {
-        self.readings.values.keys().nth(self.selected).copied()
+        self.readings.values.keys().nth(self.selected()).copied()
     }
 
     /// Nudge the focused telemetry entry by one raw step, held inside what its wire type
     /// can hold. An entry a writable control names is left to that control's own keys, and a
     /// meter is only read.
     fn step_raw(&self, delta: i64) -> Vec<Intent> {
-        let Some((id, reading)) = self.readings.values.iter().nth(self.selected) else {
+        let Some((id, reading)) = self.readings.values.iter().nth(self.selected()) else {
             return Vec::new();
         };
         if self
@@ -79,7 +79,7 @@ impl App {
             KeyCode::Enter => self
                 .devices
                 .rows
-                .get(self.selected)
+                .get(self.selected())
                 .map(|device| vec![Intent::SwitchDevice(device.name.clone())])
                 .unwrap_or_default(),
             KeyCode::Char('n') => vec![Intent::NewDevice],

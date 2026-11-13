@@ -77,6 +77,17 @@ impl History {
             .collect()
     }
 
+    /// The newest change, which says how the link stands.
+    pub(super) fn newest(&self) -> Option<LinkChange> {
+        self.ring.back().copied()
+    }
+
+    /// [`History::record`], for a test outside the actor.
+    #[cfg(test)]
+    pub(crate) fn record_for_test(&mut self, at_ms: u64, connected: bool) {
+        self.record(at_ms, connected);
+    }
+
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.ring.len()

@@ -386,7 +386,8 @@ impl Default for RawMqtt {
 #[derive(serde::Deserialize)]
 #[serde(default)]
 struct RawMcp {
-    enabled: bool,
+    /// Absent leaves the choice to `SVOLDER_MCP_ENABLED`, and to off without it.
+    enabled: Option<bool>,
     listen: String,
     auth: McpAuth,
     writes: bool,
@@ -401,7 +402,7 @@ impl Default for RawMcp {
     fn default() -> Self {
         let d = McpConfig::default();
         RawMcp {
-            enabled: d.enabled,
+            enabled: None,
             listen: String::new(),
             auth: d.auth,
             writes: d.writes,
@@ -417,7 +418,8 @@ impl Default for RawMcp {
 #[derive(serde::Deserialize)]
 #[serde(default)]
 struct RawWeb {
-    enabled: bool,
+    /// Absent leaves the choice to `SVOLDER_WEB_ENABLED`, and to off without it.
+    enabled: Option<bool>,
     listen: String,
     auth: WebAuth,
     writes: bool,
@@ -434,7 +436,7 @@ impl Default for RawWeb {
     fn default() -> Self {
         let d = WebConfig::default();
         RawWeb {
-            enabled: d.enabled,
+            enabled: None,
             listen: String::new(),
             auth: d.auth,
             writes: d.writes,
@@ -462,9 +464,12 @@ fn is_named(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
-/// The addresses `[web]` and `[mcp]` listen on when the file has no `listen` key, in place of
-/// loopback: `SVOLDER_WEB_LISTEN` and `SVOLDER_MCP_LISTEN`, which the container image sets so a
-/// published port reaches the server. A blank value counts as unset.
+/// What the environment gives `[web]` and `[mcp]` where the file has no key of its own. The
+/// addresses they listen on, in place of loopback: `SVOLDER_WEB_LISTEN` and `SVOLDER_MCP_LISTEN`,
+/// which the container image sets so a published port reaches the server. Whether they run at
+/// all, in place of off: `SVOLDER_WEB_ENABLED` and `SVOLDER_MCP_ENABLED`, so a container's
+/// compose file turns a server on with no configuration file written. A key in the file wins
+/// over its variable, and a blank value counts as unset.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListenDefaults {
     /// The web UI's default address.
@@ -473,16 +478,22 @@ pub struct ListenDefaults {
     pub mcp: Option<String>,
     /// The web UI's default `url` (`SVOLDER_WEB_URL`), the address links and QR codes carry.
     pub web_url: Option<String>,
+    /// The web UI's default `enabled` (`SVOLDER_WEB_ENABLED`), as the variable spells it.
+    pub web_enabled: Option<String>,
+    /// The MCP server's default `enabled` (`SVOLDER_MCP_ENABLED`), as the variable spells it.
+    pub mcp_enabled: Option<String>,
 }
 
 impl ListenDefaults {
-    /// Read the two variables.
+    /// Read the variables.
     pub fn from_env() -> ListenDefaults {
         let read = |name: &str| std::env::var(name).ok().filter(|v| is_named(v));
         ListenDefaults {
             web: read("SVOLDER_WEB_LISTEN"),
             mcp: read("SVOLDER_MCP_LISTEN"),
             web_url: read("SVOLDER_WEB_URL"),
+            web_enabled: read("SVOLDER_WEB_ENABLED"),
+            mcp_enabled: read("SVOLDER_MCP_ENABLED"),
         }
     }
 }
@@ -509,6 +520,26 @@ fn listen_address(
         ))
     })?;
     Ok((address, from_env))
+}
+
+/// Whether a table is on: its own `enabled` key, else the environment's default, else off. The
+/// variable reads `1`, `true`, `yes` and `on` as on and `0`, `false`, `no` and `off` as off,
+/// in any case; another value is refused by the variable's name.
+fn enabled_switch(
+    own: Option<bool>,
+    env_default: Option<&str>,
+    env_name: &str,
+) -> Result<bool, ConfigError> {
+    let Some(text) = env_default.filter(|_| own.is_none()) else {
+        return Ok(own.unwrap_or(false));
+    };
+    match text.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(ConfigError::Parse(format!(
+            "{env_name} {text:?} must be 1 or 0 (true, false, yes, no, on and off are read too)"
+        ))),
+    }
 }
 
 /// The refusal of `auth = "none"` on an address that is not loopback, or `Ok`. An address the
@@ -575,8 +606,8 @@ impl Config {
         let socket = raw.socket.filter(|value| is_named(value));
         let tui = tui(raw.tui)?;
         let mqtt = mqtt(raw.mqtt)?;
-        let mcp = mcp(raw.mcp, listen.mcp.as_deref())?;
-        let web = web(raw.web, listen.web.as_deref(), listen.web_url.as_deref())?;
+        let mcp = mcp(raw.mcp, listen)?;
+        let web = web(raw.web, listen)?;
         let autoeq = AutoEqConfig {
             refresh_weeks: parse_refresh_weeks(raw.autoeq.refresh_weeks.as_ref())?,
         };
@@ -618,11 +649,11 @@ fn devices(
             .map_err(|_| ConfigError::Parse(format!("device {}: bad udid {:?}", d.name, d.udid)))?;
         if let Some(first) = Config::device_for_unit_in(&devices, &unit) {
             if strict {
-                return Err(ConfigError::Parse(unit_twice(
-                    &first.name,
-                    &d.name,
-                    &d.udid,
-                )));
+                return Err(ConfigError::UnitTwice {
+                    first: first.name.clone(),
+                    second: d.name,
+                    udid: d.udid,
+                });
             }
             dropped.push(unit_dropped(&first.name, &d.name, &d.udid));
             continue;
@@ -647,15 +678,6 @@ fn devices(
         });
     }
     Ok((devices, dropped))
-}
-
-/// Why a file with two `[[device]]` blocks for one unit is refused: a unit is configured once,
-/// since a second block would be a second actor on the same device.
-fn unit_twice(first: &str, second: &str, udid: &str) -> String {
-    format!(
-        "devices {first:?} and {second:?} are both configured for unit {udid}; \
-         a unit is configured once, so remove one of the two blocks"
-    )
 }
 
 /// What the daemon and the commands warn with when they load a file that has a unit twice.
@@ -814,16 +836,21 @@ fn mqtt(raw: RawMqtt) -> Result<MqttConfig, ConfigError> {
 }
 
 /// The `[mcp]` table: the listen address, its auth, the volume cap, origins and hosts.
-fn mcp(raw: RawMcp, env_listen: Option<&str>) -> Result<McpConfig, ConfigError> {
+fn mcp(raw: RawMcp, env: &ListenDefaults) -> Result<McpConfig, ConfigError> {
+    let enabled = enabled_switch(
+        raw.enabled,
+        env.mcp_enabled.as_deref(),
+        "SVOLDER_MCP_ENABLED",
+    )?;
     let (listen, from_env) = listen_address(
         &raw.listen,
-        env_listen,
+        env.mcp.as_deref(),
         "SVOLDER_MCP_LISTEN",
         "mcp",
         McpConfig::default().listen,
     )?;
     if raw.auth == McpAuth::None {
-        refuse_open_auth("mcp", "SVOLDER_MCP_LISTEN", listen, from_env, raw.enabled)?;
+        refuse_open_auth("mcp", "SVOLDER_MCP_LISTEN", listen, from_env, enabled)?;
     }
     if let Some(cap) = raw.max_volume_db
         && !cap.is_finite()
@@ -845,7 +872,7 @@ fn mcp(raw: RawMcp, env_listen: Option<&str>) -> Result<McpConfig, ConfigError> 
         .map(|host| mcp_host(host))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(McpConfig {
-        enabled: raw.enabled,
+        enabled,
         listen,
         auth: raw.auth,
         writes: raw.writes,
@@ -858,20 +885,22 @@ fn mcp(raw: RawMcp, env_listen: Option<&str>) -> Result<McpConfig, ConfigError> 
 
 /// The `[web]` table: the listen address, its auth, the guest level, the volume cap, the
 /// public URL, hosts and origins.
-fn web(
-    raw: RawWeb,
-    env_listen: Option<&str>,
-    env_url: Option<&str>,
-) -> Result<WebConfig, ConfigError> {
+fn web(raw: RawWeb, env: &ListenDefaults) -> Result<WebConfig, ConfigError> {
+    let enabled = enabled_switch(
+        raw.enabled,
+        env.web_enabled.as_deref(),
+        "SVOLDER_WEB_ENABLED",
+    )?;
+    let env_url = env.web_url.as_deref();
     let (listen, from_env) = listen_address(
         &raw.listen,
-        env_listen,
+        env.web.as_deref(),
         "SVOLDER_WEB_LISTEN",
         "web",
         WebConfig::default().listen,
     )?;
     if raw.auth == WebAuth::None {
-        refuse_open_auth("web", "SVOLDER_WEB_LISTEN", listen, from_env, raw.enabled)?;
+        refuse_open_auth("web", "SVOLDER_WEB_LISTEN", listen, from_env, enabled)?;
     }
     let guest = match raw.guest.trim().to_ascii_lowercase().as_str() {
         "none" => WebGuest::None,
@@ -907,7 +936,7 @@ fn web(
         .map(|origin| web_origin(origin))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(WebConfig {
-        enabled: raw.enabled,
+        enabled,
         listen,
         auth: raw.auth,
         writes: raw.writes,

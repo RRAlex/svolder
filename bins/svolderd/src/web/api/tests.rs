@@ -354,6 +354,52 @@ async fn the_tone_controls_are_inert_for_a_viewer_who_may_not_write() {
     dac.stop().await;
 }
 
+/// A guest and a page with writes off read what the read-only Devices popup draws from: the fleet,
+/// a device's model (its facts with the unit empty for the guest only, and no identify) and the
+/// key series; the writer's device list stays refused.
+#[tokio::test]
+async fn a_reader_reads_what_the_read_only_devices_popup_needs() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let guests = web_with(
+        WebConfig {
+            enabled: true,
+            guest: WebGuest::Read,
+            ..WebConfig::default()
+        },
+        Arc::clone(&dac.fleet),
+        Some("a-test-token-0123456789abcdefghijklmn"),
+    );
+    let writes_off = web(
+        WebConfig {
+            writes: false,
+            ..open()
+        },
+        Arc::clone(&dac.fleet),
+    );
+    for (who, web, unit_shown) in [("guest", &guests, false), ("writes off", &writes_off, true)] {
+        let fleet = call(web, get("/api/v1/fleet")).await;
+        assert_eq!(fleet.status, Code::OK, "{who}: {}", fleet.body);
+        assert!(fleet.body.contains("\"dac\""), "{who}: {}", fleet.body);
+        let model = call(web, get("/api/v1/devices/dac/model")).await;
+        assert_eq!(model.status, Code::OK, "{who}: {}", model.body);
+        let said: serde_json::Value = serde_json::from_str(&model.body).unwrap();
+        let facts = &said["device"]["facts"];
+        assert!(!facts.is_null(), "{who}: {said}");
+        let unit = facts["unit"].as_str().unwrap_or_default();
+        assert_eq!(!unit.is_empty(), unit_shown, "{who}: unit {unit:?}");
+        assert_eq!(facts["identify"], false, "{who}: {facts}");
+        let series = call(web, get("/api/v1/devices/dac/series")).await;
+        assert_eq!(series.status, Code::OK, "{who}: {}", series.body);
+        let list = call(web, get("/api/v1/devices")).await;
+        assert!(
+            matches!(list.status, Code::UNAUTHORIZED | Code::FORBIDDEN),
+            "{who}: {}",
+            list.body
+        );
+    }
+    dac.stop().await;
+}
+
 /// The strip's JSON in the page cannot close its `<script>` element, whatever a mark says, and
 /// reads back as the same text.
 #[test]
@@ -402,4 +448,212 @@ async fn the_link_part_holds_no_menu_button() {
     keys.sort_unstable();
     assert_eq!(keys, ["state", "word"]);
     device.stop().await;
+}
+
+/// The ids of an answer's series, in order.
+fn series_ids(said: &serde_json::Value) -> Vec<String> {
+    said["series"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no series in {said}"))
+        .iter()
+        .map(|series| series["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// The series route answers the ids asked for from the daemon's ring, in the order asked, by
+/// the key the profile gives each; an id that names nothing is listed as refused and the rest
+/// are served. With no ids it answers the device's key readings.
+#[tokio::test]
+async fn the_series_route_serves_the_ids_it_knows_and_names_the_rest() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    let reply = call(
+        &web,
+        get("/api/v1/devices/dac/series?ids=volume,bogus,signal,Sample_Rate,10&secs=600"),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(series_ids(&said), ["volume", "signal", "sample_rate"]);
+    assert_eq!(said["refused"], serde_json::json!(["bogus", "10"]));
+    assert_eq!(said["secs"], 600);
+    assert_eq!(said["bin_ms"], 1000);
+    assert!(said["now_ms"].as_u64().is_some_and(|ms| ms > 0), "{said}");
+    let volume = &said["series"][0];
+    let points = volume["points"].as_array().expect("points");
+    assert!(!points.is_empty(), "the connect's state is in the ring");
+    assert!(points[0][0].as_u64().is_some() && points[0][1].is_number());
+    assert_eq!(volume["aggregate"], "max");
+    assert_eq!(said["series"][1]["unit"], "dBm");
+    assert!(said["link"].is_array(), "{said}");
+
+    let reply = call(&web, get("/api/v1/devices/dac/series")).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(
+        series_ids(&said),
+        ["signal", "sample_rate", "volume", "input"],
+        "the key readings, signal first"
+    );
+    assert_eq!(said["refused"], serde_json::json!([]));
+    assert_eq!(said["secs"], 1800, "the ring's half hour when not given");
+
+    let reply = call(&web, get("/api/v1/devices/dac/series?secs=999999")).await;
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(said["secs"], 1800, "at most what the ring keeps");
+    let reply = call(&web, get("/api/v1/devices/nobody/series?ids=signal")).await;
+    assert_eq!(reply.status, Code::NOT_FOUND, "{}", reply.body);
+    dac.stop().await;
+}
+
+/// The series are open to whoever may read the page, as the strip is: a guest reads them, and
+/// a visitor who is neither signed in nor a guest gets a 401 with nothing said.
+#[tokio::test]
+async fn the_series_route_is_open_to_a_reader() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let token = "a-test-token-0123456789abcdefghijklmn";
+    let guests = web_with(
+        WebConfig {
+            enabled: true,
+            guest: WebGuest::Read,
+            ..WebConfig::default()
+        },
+        Arc::clone(&dac.fleet),
+        Some(token),
+    );
+    let closed = web_with(
+        WebConfig {
+            enabled: true,
+            ..WebConfig::default()
+        },
+        Arc::clone(&dac.fleet),
+        Some(token),
+    );
+    for path in [
+        "/api/v1/devices/dac/series?ids=signal",
+        "/api/v1/devices/dac/strip",
+    ] {
+        assert_eq!(call(&guests, get(path)).await.status, Code::OK, "{path}");
+        let reply = call(&closed, get(path)).await;
+        assert_eq!(reply.status, Code::UNAUTHORIZED, "{path}");
+        assert!(reply.body.is_empty(), "{path}: {}", reply.body);
+    }
+    dac.stop().await;
+}
+
+/// One request cannot ask for more than the ring holds: an id asked twice, in any letter case,
+/// is answered once, and more distinct ids than the cap are refused with the cap in words. The
+/// span is held to the ring's half hour, and the answer says the span it covers.
+#[tokio::test]
+async fn the_series_route_answers_each_id_once_and_caps_their_number() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let web = web(open(), Arc::clone(&dac.fleet));
+    let reply = call(
+        &web,
+        get("/api/v1/devices/dac/series?ids=volume,VOLUME,signal,volume,Signal,bogus,BOGUS"),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(series_ids(&said), ["volume", "signal"]);
+    assert_eq!(said["refused"], serde_json::json!(["bogus"]));
+
+    let many = |count: usize| {
+        let ids: Vec<String> = (0..count).map(|n| format!("id{n}")).collect();
+        format!("/api/v1/devices/dac/series?ids={}", ids.join(","))
+    };
+    let reply = call(&web, get(&many(super::SERIES_IDS_MAX))).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let reply = call(&web, get(&many(super::SERIES_IDS_MAX + 1))).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
+    assert!(
+        reply
+            .body
+            .contains(&format!("at most {} ids", super::SERIES_IDS_MAX)),
+        "{}",
+        reply.body
+    );
+    // The same id eight thousand times is one id, and one series.
+    let repeated = format!(
+        "/api/v1/devices/dac/series?ids={}",
+        vec!["volume"; 8000].join(",")
+    );
+    let reply = call(&web, get(&repeated)).await;
+    assert_eq!(reply.status, Code::OK);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert_eq!(series_ids(&said), ["volume"]);
+    assert!(
+        reply.body.len() < 64 * 1024,
+        "{} bytes for one series",
+        reply.body.len()
+    );
+    dac.stop().await;
+}
+
+/// A fleet over a daemon whose devices are all removed just before it answers a `readings`
+/// request: what a route meets when a device goes between its own look-up and the daemon's.
+struct Vanishing {
+    inner: Arc<dyn crate::fleet::Fleet>,
+    daemon: Arc<crate::handler::Daemon>,
+}
+
+#[async_trait::async_trait]
+impl crate::fleet::Fleet for Vanishing {
+    fn resolve(&self, selector: Option<&str>) -> Result<svolder_ipc::DeviceInfo, String> {
+        self.inner.resolve(selector)
+    }
+
+    async fn request(&self, request: svolder_ipc::Request) -> svolder_ipc::Response {
+        if matches!(request, svolder_ipc::Request::Readings { .. }) {
+            self.daemon.reconcile(&svolder_ipc::Config::default()).await;
+        }
+        self.inner.request(request).await
+    }
+
+    async fn recall(
+        &self,
+        device: &svolder_ipc::DeviceInfo,
+        name: &str,
+        fitting: Vec<svolder_profiles::tone::preset::Preset>,
+    ) -> Result<(crate::recall::Recalled, svolder_ipc::Response), String> {
+        self.inner.recall(device, name, fitting).await
+    }
+
+    async fn glide(
+        &self,
+        device: &svolder_ipc::DeviceInfo,
+        key: &str,
+        raw: i64,
+    ) -> crate::writer::Glided {
+        self.inner.glide(device, key, raw).await
+    }
+
+    fn profile(&self, device: &svolder_ipc::DeviceInfo) -> Option<svolder_profiles::Profile> {
+        self.inner.profile(device)
+    }
+
+    fn watch(&self, device: &svolder_ipc::DeviceInfo) -> Option<crate::fleet::Watched> {
+        self.inner.watch(device)
+    }
+
+    fn config(&self) -> Result<Arc<svolder_ipc::Config>, String> {
+        self.inner.config()
+    }
+}
+
+/// A device removed between the route's look-up and the daemon's answer is a 404 in the
+/// daemon's words, as a device that was never there is: not a failure of the server.
+#[tokio::test]
+async fn a_device_removed_mid_request_is_a_404_on_the_series_route() {
+    let dac = fake_daemon("gungnir2-v2", "dac").await;
+    let fleet = Arc::new(Vanishing {
+        inner: Arc::clone(&dac.fleet),
+        daemon: Arc::clone(&dac.daemon),
+    });
+    let web = web(open(), fleet);
+    let reply = call(&web, get("/api/v1/devices/dac/series?ids=signal")).await;
+    assert_eq!(reply.status, Code::NOT_FOUND, "{}", reply.body);
+    let said: serde_json::Value = serde_json::from_str(&reply.body).unwrap();
+    assert!(said["error"].is_string(), "{said}");
+    dac.stop().await;
 }

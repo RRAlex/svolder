@@ -366,6 +366,7 @@ fn two_presses_before_the_echo_move_two_steps() {
         code: 3,
         what: "the device is not answering".into(),
         next: "try again".into(),
+        reason: None,
     });
     assert_eq_set(&press(&mut app, KeyCode::Right), 1, "g", step(102));
 
@@ -740,6 +741,7 @@ fn a_profile_that_names_the_loudness_control_is_set_by_key() {
         mutes_output: false,
         powers_output: false,
         asks_on_change: false,
+        key_reading: false,
         reads: Vec::new(),
     });
     let mut app = App::new(

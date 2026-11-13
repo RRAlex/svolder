@@ -337,3 +337,19 @@ fn a_pinned_profile_the_list_does_not_hold_is_offered_as_it_stands() {
         AUTOMATIC
     );
 }
+
+/// `Tab` on the passphrase row shows the masked code and hides it again.
+#[test]
+fn tab_shows_the_code_on_the_passphrase_row() {
+    let mut app = editing();
+    focus(&mut app, EditorRow::Passphrase);
+    for digit in ['4', '8', '2', '1'] {
+        key(&mut app, KeyCode::Char(digit));
+    }
+    let drawn = |app: &App| app.devices.editor.as_ref().unwrap().passphrase.drawn();
+    assert_eq!(drawn(&app), "••••");
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(drawn(&app), "4821");
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(drawn(&app), "••••");
+}

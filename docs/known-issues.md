@@ -151,6 +151,11 @@ that branch rather than listed here.
   three-fid fault holds a connect until the 2 s drain bound (`crates/svolder-ble/src/session.rs`
   `awaited`). A `set` made just after a device comes back on waits for the refresh's burst the
   same way, up to that bound, before it goes out.
+- [observed, with Bifrost 3 testing] **A held link's survival of a device walk's scan is known on
+  dongles only.** On two TP-Link UB500 dongles the link the daemon held survived the walk's
+  10-second scan with no `link lost`, and the held simulator was not heard (it does not advertise
+  while linked); the onboard MediaTek adapter and a real device have not been tried
+  (`scripts/e2e.sh`, `bins/svolderd/src/handler/probe.rs`).
 - [trade-off] **A refusal is handled differently from the app.** svolder keeps the link when the
   device refuses the passphrase and reports the refusal, where the app disconnects when the
   advertised passcode does not match the stored one. A device on `auto` is the one exception, once
@@ -205,6 +210,28 @@ that branch rather than listed here.
 
 ### Daemon
 
+- [bug] **Renaming or removing a device leaves its hops, and a rename drops the link.** A `[[hop]]`
+  that links a device or sits `after` it is not renamed or removed with it, so the file then loads
+  with the warning that the hop names no configured device; `default_device` is carried along, hops
+  are not. Devices are matched by their configured name, so a rename through the daemon, the TUI's
+  editor or the web page stops the device's actor and starts one under the new name: the link drops
+  and is made again (`crates/svolder-ipc/src/config/devices.rs`, `bins/svolderd/src/handler.rs`).
+- [bug] **A hand-edited passphrase of the wrong TOML type is quoted back.** With `passphrase = 4321`
+  in `config.toml` (a number, not a string), every device write fails with the parser's words, which
+  quote the line and so the code, on the socket and as the web page's 422; the same goes for a
+  `digits` of the wrong type in a `passphrase` request, echoed in serde's words to the hand-written
+  client that sent it. A write's own answer never shows a passphrase back; only a parse failure of
+  the file or of a request does (`crates/svolder-ipc/src/config/edit.rs`,
+  `crates/svolder-ipc/src/socket/server.rs`).
+- [bug] **A CLI write run with `--transport ble` or `fake` beside a daemon ignores a missing
+  `config.toml`.** The CLI refuses a write while the daemon says its file is missing, but a run with
+  a direct transport skips that ask, so `svolder hops add --transport ble ...` recreates the file
+  from the template and the daemon's next reload takes it as the whole configuration, dropping every
+  device; the TUI's own writes (see the TUI) are not asked either
+  (`bins/svolder/src/commands/device.rs`, `bins/svolder/src/backend/stale.rs`).
+- [bug] **A walk whose front end died holds the walk slot for up to 10 minutes.** A front end that
+  dies without cancelling its walk leaves it running until the 10-minute idle bound, and another
+  front end cannot start a walk until then (`bins/svolderd/src/handler/walk.rs`).
 - [limit] **An MCP client that cannot ask the user gets `confirm`.** A volume rise of more than
   6 dB, a higher gain or mode, an unmute, a power-on and any change of a control that asks on every
   change (the Lyr 5's pre-out, the Loki Max's mode), a Loki Max built-in setting that raises a band
@@ -214,6 +241,19 @@ that branch rather than listed here.
   `"confirm": true`, which the daemon then honours without being able to check that the user was
   asked. Leave `[mcp] writes` off, or set `max_volume_db`, for such a client
   (`bins/svolderd/src/mcp/tools.rs`).
+- [limit] **In a container the web and MCP token lives in the writable layer, and the container is
+  judged by its marker files.** The token a fresh container generates is kept under
+  `/tmp/.local/state/svolder`, so it changes at every recreate (keep it under `/config`, as
+  `docs/usage/daemon.md` shows); and `daemon logs` and `daemon status` take a daemon for
+  containerised by `/.dockerenv`, `/run/.containerenv` or pid 1's cgroup, so one that logs to a file
+  inside a container is still read as a file. Under host networking the container's name cannot be
+  read from inside, so the sentences say `<container>` (`crates/svolder-ipc/src/checks/live.rs`).
+- [limit] **A device that is away between attempts has no steady signal series.** The series has one
+  point per advertisement a connect attempt or a scan heard, so a connected device has none after
+  its connect and one that is away has none at all until a scan or a walk hears it; a periodic
+  listen would fill it. A hearing by the `scan` verb or a walk updates the device's `signal` and its
+  series, and the MQTT feed's `signal` follows at the actor's next hearing
+  (`bins/svolderd/src/device/publish.rs`, `bins/svolderd/src/device.rs`).
 - [trade-off] **MCP judges a built-in setting against the floors it read at call
   time.** A band that another front end lowers after the call and before the writer applies the
   setting is raised back, and was judged against the earlier floor, so a rise can land larger than
@@ -262,9 +302,55 @@ that branch rather than listed here.
   response can differ from the curve drawn. The computer EQ refuses only a filter that is not
   stable in those coefficients, never one that is merely noisy
   (`crates/svolder-host/src/eq/manage.rs`).
+- [trade-off] **The unit's filesystem drop-in is opt-in.** `systemd/svolderd-filesystem.conf` is
+  not installed by `svolder daemon install` or the packages until it is proven on a host where
+  user namespaces work (systemd 254 and later): still missing are a run showing a write outside
+  the allowed paths fail, a first start with no `~/.local/state/svolder`, and the daemon's web,
+  IPC and EQ writes working under it (`systemd/svolderd-filesystem.conf`).
+- [limit] **Where unprivileged user namespaces are restricted, the filesystem settings do
+  nothing, silently.** With `kernel.apparmor_restrict_unprivileged_userns=1` (Ubuntu 26.04) a
+  user unit's mount-namespace settings (`ProtectSystem` and the rest of the drop-in) are accepted
+  and have no effect, and nothing says so; a `doctor` line could
+  (`systemd/svolderd-filesystem.conf`).
+- [trade-off] **The daemon tells a changed configuration by `config.toml`'s timestamp alone.** An
+  edit of a user profile in the profiles folder, which a reload reads too, is not told. A change
+  that lands within the same filesystem timestamp tick as the daemon's last read is never told:
+  milliseconds on ext4 and xfs, one to two seconds on vfat and some FUSE or 9p mounts. The
+  Overview's web line is read when it opens, at a fleet event, at a wake and every 10 seconds while
+  one stands, so a hand edit made while it is open and no line stands shows at the next of those
+  (`bins/svolderd/src/handler/config_write.rs`).
+- [trade-off] **A switch variable is read by the daemon alone.** With `SVOLDER_WEB_ENABLED=1` and no
+  `enabled` in the file, `svolder web on` writes nothing, so removing the variable later turns the
+  page off again; a verb run with another environment than the daemon's (a host CLI against a
+  container's socket) goes through the daemon, whose environment decides. A switch value that is not
+  1, 0, true, false, yes, no, on or off stops the daemon at its start (exit 1, the variable named),
+  as a bad `SVOLDER_WEB_LISTEN` does, so a container under `restart: unless-stopped` restarts in a
+  loop. A daemon that listens on another socket than the one the verb resolves cannot be told from
+  no daemon: the verb writes its own file and says nothing answers on that socket
+  (`bins/svolder/src/commands/server_switch.rs`, `bins/svolderd/src/handler/server_switch.rs`).
+- [trade-off] **`daemon stop` waits the full request time for a silent daemon.** `svolder daemon
+  stop` sends its `Stop` on the default request timeout, 65 seconds, so a daemon that takes the line
+  and says nothing holds the verb that long (`bins/svolder/src/commands/daemon/lifecycle.rs`).
+- [trade-off] **A device can be pinned to a base profile.** The profile lists of the web page, the
+  wizard and the TUI's editor offer the base profiles (`dac-common`, `amp-common`, `mesh-eq-5`),
+  which have no product id, marked `base`, and the daemon accepts any registry name
+  (`known_profile`) (`bins/svolderd/src/handler/device_config.rs`).
+- [trade-off] **A deleted `config.toml` is only offered back.** While the file is missing the daemon
+  keeps its running configuration and says to restore the file and reload; to start afresh with no
+  file, run `svolder daemon restart`, which reads a missing file as an empty configuration
+  (`crates/svolder-ipc/src/socket/daemon_version.rs`, `crates/svolder-ipc/src/config.rs`).
 
 ### CLI
 
+- [bug] **`eq import --autoeq` refuses a correction of more than 16 filters.** The import names the
+  computer as its side, so the computer's 16-filter limit applies, where a library entry may hold up
+  to 63 filters. AutoEq's published files have ten filters, so only a mirror or a hand-made index
+  trips it (`bins/svolderd/src/handler/autoeq.rs`).
+- [bug] **A too-old daemon is worded three ways.** `svolder web`'s answer for a daemon that serves
+  no web UI says it is older than this svolder and names the restart; AutoEq, the walk and `web
+  on|off` say `the daemon (VERSION) cannot ..., which this svolder asks it to`; and the identify
+  check says `this daemon is too old to identify; restart it` (`bins/svolder/src/commands/web.rs`,
+  `bins/svolder/src/reach.rs`, `bins/svolder/src/backend/remote.rs`).
 - [limit] **The process manager's pid file is written after the old chain stops.** `host eq apply`
   tries the runtime directory before anything of the chain that is on is touched, but the pid it
   keeps there is only known once the new chain starts; a runtime directory that fills up between
@@ -277,11 +363,19 @@ that branch rather than listed here.
   observes and starts nothing, so it cannot put the daemon down to measure properly; the Devices
   row beside it says outright when the daemon holds a device, which is the reader's cue
   (`bins/svolder/src/commands/doctor.rs`).
+- [limit] **A laptop's Bluetooth switch counts against a USB dongle.** `doctor` takes a blocked
+  platform switch (one not named `hciN`, such as `thinkpad_bluetooth`) as blocking every adapter,
+  including a dongle chosen with `adapter = "hciN"`, though the switch may govern only the
+  laptop's own radio; the dongle then reads as blocked when it is not. It is rare, and the
+  switch's name is all the kernel gives to go on (`crates/svolder-ipc/src/checks.rs`, `block_of`).
 - [limit] **Two Ctrl-Cs a millisecond apart can count as one.** Signals that arrive before
   `watch`'s receiving task has read the one before are delivered once (Tokio coalesces them, as
   the kernel does a standard signal still pending), so two presses within about a millisecond
   can stop the loop and leave the release waited for, until a third press gives up on it
   (`bins/svolder/src/commands/device/watch.rs`).
+- [limit] **`svolder setup` offers no web or MCP step.** The wizard walks the device, its name, the
+  passphrase and the daemon; the web page and MCP are turned on afterwards with `svolder web on`,
+  `svolder mcp on` or the TUI's Settings (`bins/svolder/src/wizard.rs`).
 - [trade-off] **`svolder set` is outside the volume's glide.** `svolder set volume max`, a raw
   number above three quarters of the range and `svolder raw` on the volume write that step at
   once, as does `svolder set volume up --step N` that lands above three quarters with N of 4 or
@@ -290,12 +384,6 @@ that branch rather than listed here.
   (`bins/svolder/src/commands/device/values.rs`). The keys' and wheel's pace keeps its own credit,
   apart from the bar's glide, so bar drags interleaved with wheel notches can approach twice the
   glide's rate (`bins/svolder/src/tui/app/glide.rs`).
-- [trade-off] **A plain-prompt wizard stopped by Ctrl-C leaves the daemon unreloaded.** The
-  wizard's plain prompts, which a walk falls back to where the TUI cannot claim the terminal,
-  leave Ctrl-C to end the process, so a walk stopped that way on the Adapter step, its device
-  written, does not tell a running daemon to re-read the file as every other way out of a walk
-  does; the daemon learns of the device at its next reload or restart
-  (`bins/svolder/src/wizard/cli.rs`).
 - [trade-off] **The wizard's Adapter step takes seconds per adapter.** The wizard's Adapter step
   grades the adapters one after another, so that each count is what that adapter heard alone, for
   `GRADE_WINDOWS × GRADE_WINDOW` (five 1-second windows) each: on a host with three dongles,
@@ -312,9 +400,34 @@ that branch rather than listed here.
   the DAC flat, and the message says how to put the curve back (`svolder eq load NAME`, or `Enter`
   on it in the presets box) (`bins/svolder/src/commands/host_eq/verbs.rs`,
   `bins/svolder/src/tui/boxes/presets/computer.rs`).
+- [trade-off] **A walk with no daemon lists no rows while it listens.** The local walk's scan screen
+  shows "listening…" and then the result, because the scan answers all at once; only a daemon's walk
+  lists the rows heard so far (`bins/svolder/src/wizard.rs`, `bins/svolder/src/tui/wizard.rs`).
+- [trade-off] **A preset list's fit reads a finer grid than the previews.** The CLI's and the TUI's
+  preset lists take each imported preset's fit as found, on its own 256-point grid, while the
+  previews, the overlay and the TUI's tone header measure the gap on 181 points, so a line and a
+  header can differ by a hair (`crates/svolder-profiles/src/tone/fit.rs`).
+- [debt] **Most CLI paths read any failed connect as no daemon.** `svolder_ipc::is_running` is a
+  bare connect, so a socket that is there but cannot be opened (another user's, a path too long)
+  reads as no daemon for `svolder devices`, the reload after a CLI write, the capture hand-over and
+  the summary, which then go on without it; `web on|off` tells the two apart through
+  `Client::connect_if_any` and names the socket (`crates/svolder-ipc/src/socket/client.rs`,
+  `bins/svolder/src/commands/device.rs`, `bins/svolder/src/commands/device/devices.rs`,
+  `bins/svolder/src/commands/capture/handover.rs`).
 
 ### TUI
 
+- [bug] **The TUI writes presets and some settings itself while a daemon runs.** `i` (a file
+  import), `u`, rename and delete of a user preset write `config.toml` in the TUI's own process and
+  then ask the daemon to reload; so do the Connect keys for the listen address, MCP writes and the
+  MQTT keys (only the Web UI and MCP on/off keys go through the daemon). With `config.toml` deleted
+  these writes recreate it from the template, and the reload drops every device. A preset import
+  that meets a name another front end took in the same moment shows the daemon's `taken` as a toast,
+  with no prompt to rename (`bins/svolder/src/tui/run/input.rs`,
+  `bins/svolder/src/tui/run/connect.rs`).
+- [bug] **A hand edit followed by a delete gives no toast for the missing file.** The once-only
+  toast is keyed on the daemon's `config_changed`, which stays true from "changed" to "missing", so
+  the second word shows in the Connect rows only (`bins/svolder/src/tui/run/connect.rs`).
 - [limit] **Over SSH in a VTE terminal a pairing code and the MCP token cannot reach the local
   clipboard.** VTE (GNOME Terminal, Ptyxis) ignores OSC 52, and only the Web UI box's link is a
   terminal hyperlink (OSC 8), so a code or token copied in a session with no display has no route
@@ -328,10 +441,6 @@ that branch rather than listed here.
   attached over SSH) makes the copy tools run against that session's clipboard, which is the
   computer's, not the one you sit at, and the note says `copied with xclip` without naming it
   (`bins/svolder/src/tui/clipboard.rs`).
-- [limit, with 0.33.0] **The TUI shows "computer controls unavailable" under `make demo-computer`.**
-  The demo's fake device is flipped to the computer in the web page, but the TUI has no simulated
-  computer side to talk to, so its Target row says the computer's controls are unavailable; a
-  simulated computer side is planned for 0.33.0 (`bins/svolder/src/tui/app/side.rs`).
 - [trade-off] **A tone edit waits out another front end's preset recall.** While a recall from
   Home Assistant or MCP is running on the daemon, a tone-control edit from the TUI waits for it to
   finish, and the TUI waits with it, redrawing and reading keys again only once the write is
@@ -375,9 +484,23 @@ that branch rather than listed here.
   opened.** Joined to a daemon, `n` on the computer's side sends the save and the list on screen
   does not refresh; closing and opening it (`p`) shows the new name
   (`bins/svolder/src/tui/run/computer.rs`).
+- [trade-off] **The tone screen shades the gap per column at its own width.** Its header reads the
+  daemon's 181-point spans, so at a span's edge the shade and the web page's can differ by a column;
+  the second-source overlay, the marks for where a preset lives and the comparison are the web
+  page's alone (`bins/svolder/src/tui/screens/tone/fit.rs`).
 
 ### Web UI
 
+- [bug] **Some controls are faint or small.** Hairline edges of buttons and fields, in the pages and
+  the popups alike, fall under 3:1 in all four themes (291 pairs held in the contrast baseline,
+  Chromium), and 186 targets on the theme pages, none in a popup, are under 24 px or cut by an
+  ancestor at phone width: hairline edges of active controls in all four themes, the graph's gap
+  wash against its plot, Paper's dark red note, a guest's dimmed Signal table heads, Ember's 23 px
+  `button.viz-graph` and 14 px `button.np-fold`, Paper's 20 px band steppers, Signal's slide
+  carousel cut at its edge, Night drive's `nd-time`; Night drive's rotated pink `dB` label stands
+  over its pink neon line at 1.0:1 where they cross. Text a canvas or a pattern paints, and Ember's
+  text over its smoke, the sweep cannot measure (`scripts/web-checks/contrast-baseline.json`,
+  `scripts/web-checks/phone-baseline.json`).
 - [limit] **Plain HTTP sends the sign-in over the network.** On a listen address off loopback the
   cookie, the token typed on the sign-in page and the pairing code cross the network in the
   clear; svolderd speaks no TLS, which a reverse proxy adds (`bins/svolderd/src/web.rs`).
@@ -406,6 +529,22 @@ that branch rather than listed here.
   page's graph, a finger put down away from every point is the page's, and once the browser has
   begun to scroll for it a second finger cannot take the touch back; put both fingers down
   together, or the first on a point, to pinch the Q (`bins/svolderd/web/themes/ember/tone-graph.js`).
+- [bug] **An open list does not move when the window narrows.** A phone turned with a list open
+  scrolls the popup's pane sideways, by up to 198 px, until the list closes
+  (`bins/svolderd/web/core/list.js`).
+- [bug] **A page left on a walk across a daemon restart keeps its old controls.** The page learns
+  of the new run only from a walk event of that run; until one comes its controls stay, and a press
+  names the old run, which the daemon refuses as `no_such_job`; the page then rests on its idle card
+  with no word that the daemon restarted. A writer switched to read-only on the add page leaves
+  their walk running until it ends or hits the 10-minute idle bound
+  (`bins/svolderd/web/core/popups/devices/walk-wire.js`).
+- [trade-off] **The Devices popup words some readings as numbers.** A choice's raw value (the input)
+  and a readout's (the sample rate) have no words in the page's model, so their range under a graph
+  and in its text alternative is drawn as numbers, and the readings table shows the daemon's words
+  with the raw figure (`63 (−26.1 dB)`) where the strip shows `−26.1 dB`; only a connected device's
+  last reading is worded. The series route could send each series' value names, and a table row a
+  key and a raw value (`bins/svolderd/web/core/popups/devices/draw.js`,
+  `bins/svolderd/src/web/model/device.rs`).
 - [trade-off] **The web UI's endpoints are private to its page.** Everything under `api/v1/` is
   shaped for the page and may change in any release; scripts use the CLI, the socket, MQTT or MCP
   (`bins/svolderd/src/web/api.rs`).
@@ -426,7 +565,21 @@ that branch rather than listed here.
   software (llvmpipe, SwiftShader) passes the page's check for Smoke, so the page offers it and
   runs it, and the simulation then loads a processor core; pick Glow in the effects menu there
   (`bins/svolderd/web/themes/ember/smoke.js`).
-
+- [trade-off] **The Devices popup follows a change made elsewhere at its 10-second re-read.** A
+  profile, passphrase or default changed in another tab or the TUI reaches a device's page when the
+  page reads the list again (every 10 seconds, or at once when the change moves the family, the
+  link's word or a hop), and a resting tab sees it when it wakes. The ages in the facts count from
+  the page's own clock, and the daemon sends unchanged readings about once a minute, so an age can
+  be up to about two minutes behind (`bins/svolderd/web/core/popups/devices/wire.js`,
+  `bins/svolderd/src/web/view/facts.rs`).
+- [trade-off] **Removing a device moves the page behind its popup without a word.** The page falls
+  to the fleet's first device, the Overview names the device removed, and no toast says so; with the
+  last device removed every theme shows its no-device card, whose look has not been checked by eye
+  (`bins/svolderd/web/core/stream.js`).
+- [trade-off] **A cancelled AutoEq download runs out its thread.** A preview or import that is
+  cancelled stops waiting at once, but a download already under way runs on its blocking thread to
+  its limit (20 seconds for a correction, 60 for the index), since the HTTP client has no cancel
+  (`bins/svolderd/src/handler/autoeq.rs`, `crates/svolder-autoeq/src/client.rs`).
 ## Maintainer notes
 
 ### Bluetooth and sessions
@@ -447,6 +600,19 @@ that branch rather than listed here.
 
 ### Daemon and IPC
 
+- [bug] **A probe dropped unfinished starts no actor until the next reload.** A probe future dropped
+  by a runtime shutdown frees the slot but does not start the device's actor; one whose `Shutdown`
+  is not answered within `SHUTDOWN_DEADLINE` also leaves the slot, so the walk's writes go on and
+  the actor starts while the probe's session is still closing, and only a wedged actor reaches it. A
+  unit whose spawn failed at a reload is retried, and logged, at every probe end; `start_unwatched`
+  appends the actor it starts to the set, so the order differs from the file's until the next reload
+  (`bins/svolderd/src/handler/probe.rs`, `bins/svolderd/src/handler.rs`).
+- [bug] **A deletion between the missing-file check and the write still makes a template file.** The
+  daemon refuses a write when the file it read is gone, but the check runs outside the file's lock,
+  so a deletion between the check and the write, with another writer holding the lock, recreates the
+  file from the template; the CLI's guard asks the daemon once per write and has the same window. A
+  core writer that refuses a missing file under the lock would close it
+  (`bins/svolderd/src/handler/config_write.rs`, `crates/svolder-ipc/src/config/edit.rs`).
 - [trade-off] **`Client::request` skips a mismatched response id.** `Client::request`'s reply loop
   skips a `Reply::Response` whose id does not match the pending request (`_ => continue`) rather
   than reporting a protocol desync. Every caller today awaits each request to its end on its
@@ -471,6 +637,42 @@ that branch rather than listed here.
   read off the host task, so a front end sees a new track with `cover: null` and then the same
   track with the picture's hash; the cover's box is fixed, so nothing moves, and waiting for the
   read would delay every track change (`bins/svolderd/src/host.rs`).
+- [trade-off] **A stream replays every ended job to a follower that opens or lags.** A family
+  replays the last state of up to 16 ended jobs, results included (512 KiB each), and a `progress`
+  payload has no bound, so a subscriber that lagged reads states it already had; states are
+  idempotent, and a front end must not count events. `stop_all` aborts a job given up on after its
+  bound, but a `spawn_blocking` thread it left runs on until it looks at its flag, and the runtime's
+  stop bound ends the process regardless; the bounded end is covered by the unit tests of the job
+  bound, not by a process-level test (`bins/svolderd/src/handler/jobs.rs`,
+  `crates/svolder-ipc/src/socket/protocol.rs`).
+- [trade-off] **A client's wait for the first line of a stream has no bound of its own.**
+  `Client::stream` waits as long as the caller lets it; the TUI wraps the open in a timeout
+  (`OPEN_WITHIN`), and the CLI's whole connect-and-request sequences in their own, not in
+  `Client::request_within`, because their bound covers more than one request
+  (`crates/svolder-ipc/src/socket/client.rs`, `bins/svolder/src/tui/run/host/frames.rs`).
+- [debt] **The hop and preset write routes answer without a `reason` and keep their own status
+  table.** The device and series routes share one refusal table and carry a `reason`; the hop and
+  preset routes answer from a `ConfigWriteError` with statuses the page's checks pin (409 for a
+  preset's refusals), and folding them in changes those answers. The older request families (state,
+  set, devices) answer without a reason, and only not-found-yet and not-connected carry one; a bad
+  request of any kind other than `device_config` echoes serde's words
+  (`bins/svolderd/src/web/writes/config_edit.rs`, `crates/svolder-ipc/src/socket/server.rs`).
+- [debt] **The daemon sends the `strip` events to every stream.** The `needs` parse knows `meters`,
+  `host` and `walk` and ignores `strip`, so every stream gets the strip whether or not it asked, and
+  the page drops them client-side; the series route's `secs` over the ring's half hour is held to it
+  and not refused (`bins/svolderd/src/web/events.rs`, `bins/svolderd/src/web/events/device.rs`,
+  `bins/svolderd/src/web/api.rs`).
+- [debt] **Fits run inline on the runtime thread in three places.** The page model, a recall and the
+  MCP tools call `preset::on`, `matches` or `fit_for` on the thread they run on; AutoEq's own jobs
+  and previews fit in `spawn_blocking` behind a semaphore (`bins/svolderd/src/web/view/tone.rs`,
+  `bins/svolderd/src/recall.rs`, `bins/svolderd/src/mcp/tools.rs`).
+- [debt] **A reconcile dropped before any stop lets its new actors go.** Their handles drop and each
+  actor closes its link by itself, unawaited; only the stop waits for actors
+  (`bins/svolderd/src/handler.rs`).
+- [debt, with 0.34.0] **Front ends know the missing-config refusal only by its words.** The wire
+  carries `read_only` or no reason for it, so a front end matches the text; a
+  `Reason::ConfigMissing` would let it match the reason (`crates/svolder-ipc/src/error.rs`,
+  `bins/svolderd/src/handler/config_write.rs`).
 - [test, with Bifrost 3 testing] **The shared listen is proven on fakes and on one device.** Every
   actor looks for its device through one `Scanner`: the listen that runs hears every device
   looked for while it runs, answers each the moment it is heard (the one that leaves nobody
@@ -483,6 +685,10 @@ that branch rather than listed here.
   early answer's connect may end the adapter's LE scan and leave the other device unheard in that
   window (`bins/svolderd/src/scanner.rs`,
   `crates/svolder-ble/src/bluez/transport.rs`).
+- [test] **The walk's fleet turn has no test of its own.** `walk_turn` in the events page, the fleet
+  event after a walk that wrote a device, is covered through the route tests of the walk's events;
+  the device shows within a second anyway, by the page's second tick
+  (`bins/svolderd/src/web/events/page.rs`).
 
 ### CLI
 
@@ -526,7 +732,6 @@ that branch rather than listed here.
   the word "Status", dropping the wire's Command/Status distinction; harmless today because
   `ValueObject`, the only thing this renders, represents a device's reported readings and never
   carries a Command (`bins/svolder/src/format.rs`).
-
 ### TUI: device screen
 
 - [trade-off] **A history graph's columns are recomputed every frame.** `graph::columns` walks
@@ -565,6 +770,12 @@ that branch rather than listed here.
   changes five `draw` signatures for a function that cannot disagree with itself, and `render`'s
   `assert_bordered` cases compare what `frame_areas` reports with the cells drawn
   (`bins/svolder/src/tui/render.rs`).
+- [trade-off] **The TUI's reload after its own write is not awaited at quit.** `send_owed` does not
+  keep its task's handle, so a quit within a few milliseconds of the send, while the task is still
+  in the version ask, drops the reload at runtime shutdown, and the next ask announces the TUI's own
+  change as a hand edit. The 60-second poll of the file is 300 ms under `cfg(test)` so the loop test
+  sees a second ask; no test runs the real period (`bins/svolder/src/tui/run/look.rs`,
+  `bins/svolder/src/tui/run.rs`).
 
 ### Profiles and presets
 
@@ -588,17 +799,25 @@ that branch rather than listed here.
   preset is `on`. Routing those calls through the pure-Rust `libm` crate would make every build
   agree, but no test could show it short of running the suite under musl
   (`crates/svolder-profiles/src/tone/fit.rs`, `crates/svolder-profiles/src/tone/response.rs`).
+- [trade-off] **Key readings come in each product's own order.** `Profile::key_readings` gives
+  `sample_rate volume input` for the Gungnir 2 (v2), Yggdrasil and Bifrost 3, `volume sample_rate
+  input` for the Mimir, `volume sample_rate` for the Mesh Card and Eitr 2, `input sample_rate` for
+  the Gungnir 2 (v1), and the Kraken's `meter_1 meter_2 warming_up meter_3 meter_4 meter_5`; making
+  them equal moves controls in the profile files or gives the mark an order of its own, and moves
+  the rows of every front end's readings table (`crates/svolder-profiles/src/model.rs`,
+  `crates/svolder-profiles/tests/builtin.rs`).
 
 ### Web page
 
-- [debt, with 0.33.0] **Ember keeps its own `watchTouch`.** The tone graph's touch listeners in
-  `themes/ember/computer-page.js` are a copy of the core's `touchWatch`; it works, and the next
-  Ember change moves it onto the core (`bins/svolderd/web/themes/ember/computer-page.js`).
-- [bug, with 0.33.0] **A preset reloaded under the same name mid-drag is missed.** The page's
+- [bug] **A preset reloaded under the same name mid-drag is missed.** The page's
   drag follows the wire view by preset name, so a preset reloaded with the same name while a point
   is held is not seen as a change; the same preset maps each slot to the same filter, so the drag
   still writes the right one. A generation counter on the wire view would close it (the name
   compare is in `bins/svolderd/web/core/computer.js`).
+- [limit] **Chromium's Back button skips history entries pushed without a user gesture.** A popup
+  opened by code, not from a tap or a key, would not be stepped by phone Back, and the checks'
+  `history.back()` does not show it; every popup opens from a gesture, and the router says so in the
+  console when a push has none (`bins/svolderd/web/core/router.js`).
 - [debt, with Ember] **Ember keeps its own band step reading and writer chain.** `bandSteps` and
   `bandWriter` moved to the core for Paper, and Ember's `tone-graph.js` still reads its steps and
   writes its bands through its own chain (it uses the core's `BAND_PARAM`)
@@ -606,7 +825,7 @@ that branch rather than listed here.
 - [trade-off] **The `ember-parts` fixture is 4.25 MB.** It holds the markup of every part of every
   device kind, so the node check compares the browser-drawn page with the daemon's own drawing
   byte for byte; a smaller fixture would prove less (`scripts/web-checks/node/fixtures/ember-parts.json`).
-- [debt, with 0.33.0] **The theme style check is name-based, and a theme script that timed out may
+- [debt] **The theme style check is name-based, and a theme script that timed out may
   still run.** `theme-css-check.py` finds the frame's selectors by their names, so a theme that
   styles one through another selector is not seen; a theme script that timed out is given up on,
   but the browser can still run it when it arrives late
@@ -619,6 +838,63 @@ that branch rather than listed here.
   daemon's path verdicts ("PipeWire is on USB 2") into the page's words with regular expressions,
   so a reworded verdict falls through unchanged. The real fix is a structured verdict from the
   daemon, a wire change (`bins/svolderd/web/themes/signal/draw/computer.js`).
+- [debt] **The router's history has a few narrow edges.** The next `popstate` after a close counts
+  as the router's own, so a Back of the person still in flight when Escape lands can step one entry
+  too far, onto another device or off the page; a switch under a staying popup can leave two entries
+  that name one device, and Back between them reads that device again and shows nothing new; an
+  entry pushed by code that bypasses the router has no place; a page loaded on an entry the router
+  did not write starts a new chain, so Back across documents can show the device before a *Show on
+  the page*; the carried devices live in `sessionStorage`, so a tab that cannot write it forgets
+  them at a reload; a fleet that lists no device replaces the model without telling `shown`, so the
+  address still names the dropped device; a push the router delays behind its own step back is
+  judged for a gesture a few milliseconds late (`bins/svolderd/web/core/router.js`,
+  `bins/svolderd/web/core/stream.js`).
+- [debt] **A theme can reach members meant for the frame.** `core.modal.key`, `core.popups.add`,
+  `core.router.register`, `core.stream.open` and `close`, `core.stream.want('theme', …)` and
+  `core.popups.listed` are on the one `core` every theme mounts with; a narrower object for a theme
+  is a larger change than any popup needs. A popup added by hand with `core.popups.add` (the checks'
+  sample) has no menu row and no viewer gate (`bins/svolderd/web/core/registry.js`,
+  `bins/svolderd/web/core/popups/popups.js`).
+- [debt] **Theme code kept in copies.** The three themes' gesture files are clones that differ by
+  little more than one variable name; Signal's and Paper's `draw/tone.js` export `curvePath` and
+  `shadePath` as aliases of `plot.js`'s `curveD` and `fillD` because the wires and five node checks
+  import them by those names; the three `controls-wire.js` spell `c.texts?.[raw - c.lo] ??
+  String(raw)` where `core.words.stepWords` says the same; Ember reads the body classes `writes` and
+  `guest` in five places instead of `core.actions.canWrite()`; Ember's `menuRows` is the module's
+  function over its singleton and not rows built from the mount's scope as Signal's and Night
+  drive's are (`bins/svolderd/web/themes/`, `bins/svolderd/web/themes/ember/ember.js`).
+- [debt] **Night drive's sheet and Signal's Add device sheet are not on the modal stack.** A popup
+  opened over one makes it inert but leaves it standing behind
+  (`bins/svolderd/web/themes/nightdrive/sheet-wire.js`,
+  `bins/svolderd/web/themes/signal/hops-wire.js`).
+- [debt] **The popup frame has a few unhandled corners.** `put` over a place that holds an open
+  list's opener or an ask's own place leaves the list or ask held with its opener or box gone (only
+  `draw`, `loading` and `failed` close them), and a wire that puts over such a place closes them
+  itself; in a place for lists a panel with room neither under nor over its chip stands against the
+  pane's bottom, over the chip; `reach` reads the pane's overflow after a draw, a `put` and a size
+  change of the box, so content that grows by other means is seen at the next draw; a radio group at
+  an end of a popup is one Tab stop for the browser and several for the stack; a viewer's rights are
+  read from the model, and a change that reaches the page by another event would not close a popup
+  (`bins/svolderd/web/core/popups/frame.js`, `bins/svolderd/web/core/list.js`,
+  `bins/svolderd/web/core/modal.js`, `bins/svolderd/web/core/popups/popups.js`).
+- [debt] **A few core parts keep hidden coupling.** `freeze.js` gives an open list's hold back
+  before a gesture's without being told which is which, which no theme reads today; `createLive`
+  reads a reading that names no device as the shown device's (`bins/svolderd/web/core/freeze.js`,
+  `bins/svolderd/web/core/keys.js`).
+- [debt] **Help's Here and its About depend on the page's own state.** Here is read at every `show`,
+  so a theme that draws the focused control again while Help stands leaves it showing the page's
+  keys alone; About names `location.host`, which behind a proxy is the proxy's address, not the
+  daemon's listen address (`bins/svolderd/web/core/popups/help/wire.js`,
+  `bins/svolderd/web/themes/nightdrive/key-table.js`).
+- [debt] **The computer's model read names the shown device.** `api/v1/host?device=` is a read, not
+  an action, so a Devices popup that acts on the computer for another device still sees the host's
+  model for the shown one until that read takes a device (`bins/svolderd/web/core/computer.js`).
+- [debt] **The Devices popup names every listed device in its want, and `FILE_MAX` repeats a daemon
+  limit.** The want is `follow=A,B,C` with the shown device included (the daemon follows a device
+  once, so only the name is redundant); the EQ library page's 64 KiB upload limit repeats
+  `apo::MAX_BYTES`, and the daemon still refuses past it, so a change of the limit needs both
+  (`bins/svolderd/web/core/popups/devices/wire.js`,
+  `bins/svolderd/web/core/popups/eq-library/wire.js`).
 
 ### Simulator and fake transport
 
@@ -638,14 +914,26 @@ that branch rather than listed here.
   device alone: each added device is seeded for its profile with the code `1234` and firmware `3`
   and never drops its link. `SVOLDER_FAKE_SIGNAL` is the exception: it plays on the meters of
   every device that has them (`crates/svolder-ble/src/fake/fleet.rs`).
+- [debt] **The fake's scan hears every unit at once.** The picture of the walk's pick is a moment of
+  listening; a daemon knob that slows the fake's scan would let a browser see it
+  (`crates/svolder-ble/src/fake/fleet.rs`).
 
 ### Tests and tooling
 
 - [limit] **`cargo audit` warns about two unmaintained crates and finds no vulnerability.** `paste`
-  comes in through nalgebra (the EQ's curve fitting), and `ttf-parser` through `ab_glyph`, a
-  dev-dependency of `bins/svolder` for the README screenshots; both are flagged as unmaintained,
-  neither has an advisory against it, and svolder cannot replace either, so they are watched at
-  each dependency refresh (`Cargo.lock`).
+  (RUSTSEC-2024-0436) comes in through simba, nalgebra's numeric layer (the EQ's curve fitting, in
+  `svolder-profiles`), and `ttf-parser` (RUSTSEC-2026-0192) through `owned_ttf_parser` and
+  `ab_glyph`, a dev-dependency of `bins/svolder` for the README screenshots; neither has an
+  advisory against it, and svolder cannot replace either. `make audit` allows exactly these two
+  ids and fails on any other advisory or warning; they are watched at each dependency refresh
+  (`Cargo.lock`).
+- [limit] **nalgebra stays at 0.34.** `levenberg-marquardt` 0.15.0, the latest, pins nalgebra 0.34,
+  so 0.35 waits for it; `generic-array` 0.14.7 (0.14.9 is out) and `matchit` 0.8.4 (0.8.6 is out)
+  are held by their dependents too (`crates/svolder-profiles/Cargo.toml`).
+- [observed] **The Rust 1.99.1 and cargo-auditable paths are unproven until CI runs.** The release
+  image's cargo-auditable 0.7.7 and the 1.99.1 toolchain of the `check` workflow have not run
+  until CI or `make build-image` does; `make audit` writes its advisory database to
+  `~/.cargo/advisory-db` (`Makefile`, `.github/workflows/check.yml`).
 - [observed] **The `playing` check of Ember fails now and then in Firefox.** In the runs of
   0.31.2 it failed three times, with a 2 px overflow of the title marquee under load, a
   geckodriver websocket 405 and a websockets `InvalidMessage`, and each time passed when run alone;
@@ -667,11 +955,25 @@ that branch rather than listed here.
   = 5071.56, 0.002 % over; the same check passed 45 of 45 three times run alone, and no smoke
   file had changed. The bound is not loosened; running `sources.py` again in that browser passes
   (`scripts/web-checks/sources.py`).
+- [observed] **The cause of a flaky MCP test is inferred.**
+  `a_reload_that_turns_mcp_off_closes_the_port` flaked once, and the cause, a foreign process taking
+  the freed port, is inferred and not reproduced; the test asks whether the MCP server answers
+  (`bins/svolderd/tests/mcp.rs`).
 - [trade-off] **Firefox's Content Security Policy reports are not seen.** `make web-shots` fails on
   any uncaught error Chromium or Firefox logs while a page loads, and `make web-checks` on every
   error a script or a click raises after the load in both (`scripts/web-checks/`); both fail on any
   Content Security Policy report Chromium logs, and Firefox writes none in this mode. The policy is
   the daemon's one header, so Chromium's check stands for both (`scripts/web-shots.sh`).
+- [debt] **The style and routes checks read code by pattern.** `theme-css-check.py` holds the
+  frame's selectors, imports, key listeners and device-aware calls to what a pattern sees: an import
+  path built elsewhere and handed to `import()`, a key looked up in a map (`KEY_STEPS[event.key]`),
+  a listener reached through a call's result or an event name put together, an options object built
+  before a call, a `{ device }` nested in an argument and a `post` to a device route in a popup's
+  file go unseen; a theme sheet's own `@media` breakpoints are literals, the non-colour frame tokens
+  (`--frame-mono`, `--frame-radius`, `--frame-tap`, `--frame-toast-lift`) are not checked, and its
+  self-test takes about 37 seconds. `routes-doc-check.py` reads a call's body only as an object
+  literal at the call, lists the walk's follow stream as one row, and ties no check to the IPC ops
+  (`server_switch`, `daemon reload`) (`scripts/theme-css-check.py`, `scripts/routes-doc-check.py`).
 - [test, with hardware] **An unnamed run takes BlueZ's first adapter, which no dongle test can steer.** With no
   `--adapter`, no configured `adapter` and no remembered one, the transport opens the first adapter
   BlueZ lists, which on a machine with a built-in controller need not be the one that hears the
@@ -679,3 +981,23 @@ that branch rather than listed here.
 - [test, with 0.34.0] **The happy path of `tui::run` and `tui::wizard::setup` through a real terminal is
   untested.** The refusals and the choice of front end are tested over a `Claim` seam; a real
   `Guard` cannot be built in a unit test (`bins/svolder/src/tui/terminal.rs`).
+- [test] **The browser checks leave some paths to node or by hand.** `popups.py` presses Tab forward
+  only (Shift+Tab on a hidden control is node's), and the drag-ending Escape on Ember's curve is not
+  pressed; Ember's `0`, `f` and `v` keys are held by the `keys.py` spy alone; `keys.py` cannot count
+  a handler property or a listener added in a state it never enters; `completeness.py` compares no
+  counts between themes; the Devices popup's `reach()` on a pane the wire puts, the timed re-read,
+  "not connected since HH:MM", a rename and a drop are node only (the fake cannot bring a dropped
+  device back without a restart); `eq_library.py` proves a fit gap only where the fixture's
+  measurement has one, so a preview with no gap or no boost is node's; the walk's wrong passphrase
+  and a scan that takes time need a fake knob (`svolder-sim --advertised-passphrase` has it for the
+  radio); whether Escape reaches the stack while a native `<select>` list is open has not been tried
+  in a browser; a wheel over the veil in Firefox and a list placed beside classic scrollbars have
+  not been looked at by hand (`scripts/web-checks/popups.py`, `scripts/web-checks/keys.py`,
+  `scripts/web-checks/completeness.py`).
+- [test] **Some harness upkeep is by hand.** `mutate_computer.sh` is not in `SHELL_RUNNERS` of
+  `snippets.py`, so its 140 snippets rot unseen; `ember-parts.json`, the fixture the node check
+  compares against, carries a key card cut out by a regular expression, and nothing regenerates it
+  from the server; `keys.py` adds a hop `HD 650` to its own daemon and removes it, and a check that
+  dies between leaves it there (a temporary home, so nothing outlives the run); `make network-check`
+  asks about the host target only (`scripts/web-checks/snippets.py`,
+  `scripts/web-checks/node/fixtures/ember-parts.json`).

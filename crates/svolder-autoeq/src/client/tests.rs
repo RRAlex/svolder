@@ -1,142 +1,18 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::*;
+
+const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
+use crate::test_server::{Reply, Server};
 
 const INDEX: &str = "This is a list.\n\n\
 - [Sennheiser HD 650](./oratory1990/over-ear/Sennheiser%20HD%20650) by oratory1990\n\
 - [Sennheiser HD 650](./crinacle/GRAS%2043AG-7%20over-ear/Sennheiser%20HD%20650) by crinacle on GRAS 43AG-7\n";
 
 const PEQ: &str = "Preamp: -6.1 dB\nFilter 1: ON PK Fc 1000 Hz Gain 2.0 dB Q 1.00\n";
-
-/// What the test server answers one request with.
-enum Reply {
-    Ok(Vec<u8>),
-    Status(u16),
-    Redirect(String),
-    /// Reads the request and then says nothing until the test ends.
-    Silent,
-    /// A 200 with a body of this many bytes, written until the client hangs up.
-    Flood(usize),
-}
-
-/// A 127.0.0.1 HTTP/1.1 server answering each request by `route(path)`, closing after one
-/// response. It records every request line and header.
-struct Server {
-    url: String,
-    seen: Arc<Mutex<Vec<String>>>,
-    hits: Arc<AtomicUsize>,
-    stop: Arc<AtomicBool>,
-    addr: std::net::SocketAddr,
-}
-
-impl Server {
-    fn start(route: impl Fn(&str) -> Reply + Send + Sync + 'static) -> Server {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let hits = Arc::new(AtomicUsize::new(0));
-        let stop = Arc::new(AtomicBool::new(false));
-        let route = Arc::new(route);
-        let (seen2, hits2, stop2) = (seen.clone(), hits.clone(), stop.clone());
-        thread::spawn(move || {
-            for stream in listener.incoming() {
-                if stop2.load(Ordering::SeqCst) {
-                    break;
-                }
-                let Ok(stream) = stream else { continue };
-                let (route, seen, hits, stop) =
-                    (route.clone(), seen2.clone(), hits2.clone(), stop2.clone());
-                thread::spawn(move || serve(stream, &*route, &seen, &hits, &stop));
-            }
-        });
-        Server {
-            url: format!("http://{addr}/results/"),
-            seen,
-            hits,
-            stop,
-            addr,
-        }
-    }
-
-    fn hits(&self) -> usize {
-        self.hits.load(Ordering::SeqCst)
-    }
-
-    fn requests(&self) -> Vec<String> {
-        self.seen.lock().unwrap().clone()
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        let _ = TcpStream::connect(self.addr);
-    }
-}
-
-fn serve(
-    mut stream: TcpStream,
-    route: &dyn Fn(&str) -> Reply,
-    seen: &Mutex<Vec<String>>,
-    hits: &AtomicUsize,
-    stop: &AtomicBool,
-) {
-    let mut head = Vec::new();
-    let mut byte = [0u8; 1];
-    while !head.ends_with(b"\r\n\r\n") {
-        match stream.read(&mut byte) {
-            Ok(1) => head.push(byte[0]),
-            _ => return,
-        }
-    }
-    let head = String::from_utf8_lossy(&head).into_owned();
-    let path = head
-        .lines()
-        .next()
-        .and_then(|line| line.split(' ').nth(1))
-        .unwrap_or("/")
-        .to_string();
-    hits.fetch_add(1, Ordering::SeqCst);
-    seen.lock()
-        .unwrap()
-        .extend(head.lines().map(str::to_string));
-    let head_of = |status: &str, extra: &str, len: usize| {
-        format!("HTTP/1.1 {status}\r\n{extra}Content-Length: {len}\r\nConnection: close\r\n\r\n")
-    };
-    match route(&path) {
-        Reply::Ok(body) => {
-            let _ = stream.write_all(head_of("200 OK", "", body.len()).as_bytes());
-            let _ = stream.write_all(&body);
-        }
-        Reply::Status(code) => {
-            let _ = stream.write_all(head_of(&format!("{code} Nope"), "", 0).as_bytes());
-        }
-        Reply::Redirect(to) => {
-            let extra = format!("Location: {to}\r\n");
-            let _ = stream.write_all(head_of("302 Found", &extra, 0).as_bytes());
-        }
-        Reply::Silent => {
-            while !stop.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(20));
-            }
-        }
-        Reply::Flood(total) => {
-            let _ = stream.write_all(head_of("200 OK", "", total).as_bytes());
-            let chunk = [b'x'; 8192];
-            let mut sent = 0;
-            while sent < total && stream.write_all(&chunk).is_ok() {
-                sent += chunk.len();
-            }
-        }
-    }
-}
 
 fn short() -> Limits {
     Limits {
@@ -404,4 +280,37 @@ fn an_https_base_never_follows_a_redirect_to_http() {
     assert!(secure.agent(Duration::from_secs(1)).config().https_only());
     let plain = Client::new("http://127.0.0.1:9/".into(), dir.cache(), short());
     assert!(!plain.agent(Duration::from_secs(1)).config().https_only());
+}
+
+/// A cache directory that cannot be written does not lose the index just fetched: it comes back
+/// with a note.
+#[test]
+fn an_unwritable_cache_still_returns_the_fetched_index() {
+    let server = index_server();
+    let dir = dir();
+    std::fs::create_dir_all(&dir.0).unwrap();
+    // The cache directory's place is a file, so it cannot be created.
+    let blocked = dir.0.join("cache");
+    std::fs::write(&blocked, "x").unwrap();
+    let client = Client::new(server.url.clone(), blocked.join("autoeq"), short());
+    let index = client.index(Refresh::Never).expect("the fetched index");
+    assert_eq!(index.entries.len(), 2);
+    assert!(
+        index
+            .note
+            .as_deref()
+            .is_some_and(|n| n.starts_with("not cached")),
+        "{:?}",
+        index.note
+    );
+}
+
+/// Under the fake transport the default base is this machine's own, where nothing listens; the
+/// real one is AutoEq's repository over HTTPS.
+#[test]
+fn the_fake_transport_never_defaults_to_the_internet() {
+    assert!(is_loopback(default_base(true)));
+    assert!(default_base(false).starts_with("https://"));
+    let client = Client::new(default_base(true).to_string(), dir().cache(), short());
+    assert!(client.index(Refresh::Never).is_err());
 }

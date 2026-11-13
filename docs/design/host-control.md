@@ -229,7 +229,7 @@ the screen is the DAC page's layout, an amp's too, and flipping back restores it
   reads `—`; a level above 100 % shows as read with the dial at its end.
 - **Tone control.** Mode `Off | EQ`. The curve's points are tapped on (an empty spot adds a PK),
   dragged (frequency and gain) and set for Q by the wheel, a right drag or a pinch: the core's hand
-  (`core.drag.pointDrag`) makes the gestures and a flip ends them; `computer.js` forwards the
+  (`core.eq.points`) makes the gestures and a flip ends them; `computer.js` forwards the
   events. While a point is dragged the part's swap waits (`keep.js`) and `computer-page.js` moves
   the curve and cells; the part is drawn again from the host's model when the writes are answered.
   The point in hand has a `-` and `+` per value (`computer-steps.js`): a hold repeats, a final write
@@ -272,7 +272,7 @@ add word's place stays when it goes.
 
 The hands are `computer-wire.js` (the drawing is `draw/computer.js`, `draw/volume.js` reuses the
 DAC's ruler through `percentVolume` in `ruler.js`). A point is dragged on the graph through the core's
-`core.drag.pointDrag` hand; a tap on an empty spot adds a PK at that place (on a full table it says `16 is the most`);
+`core.eq.points` hand; a tap on an empty spot adds a PK at that place (on a full table it says `16 is the most`);
 the arrow keys step a focused point and the wheel its Q, each a burst with one last value; a cell takes typed text (held to the
 hand ranges) or the up and down keys; the type word opens Paper's list. The row and the mark of the
 point in hand are drawn selected. A flip ends a drag through `computer.track` (the last value is

@@ -306,8 +306,8 @@ pub(super) async fn execute(
         | Intent::RenamePreset(..)
         | Intent::RemovePreset(_)
         | Intent::ReadPresets
-        | Intent::AutoEqIndex { .. }
-        | Intent::AutoEqDownload(_)
+        | Intent::AutoEqSearch { .. }
+        | Intent::AutoEqImport { .. }
         | Intent::HostEq(_)
         | Intent::MoveToDac(_)
         | Intent::Tui(_)

@@ -11,10 +11,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use svolder_ble::BleError;
-use svolder_ipc::socket::daemon_version::{self, DaemonInfo};
+use svolder_ipc::socket::daemon_version::{self, DaemonInfo, is_unknown_request, reason_of};
 use svolder_ipc::{
-    Client, DeviceInfo, Event, IpcError, LinkChange, NOT_CONNECTED, PassphraseNote, Request,
-    Response, ScanEntry, SeriesOut, ValueObject,
+    CODE_LINK, CODE_UNKNOWN_REQUEST, CODE_USAGE, Client, DeviceInfo, Event, IpcError, LinkChange,
+    NOT_CONNECTED, PassphraseNote, Reason, Request, Response, ScanEntry, SeriesOut, ValueObject,
 };
 use svolder_profiles::{Profile, Registry};
 
@@ -31,26 +31,25 @@ const TOO_OLD_TO_IDENTIFY: &str = "this daemon is too old to identify; restart i
 /// The step that follows [`TOO_OLD_TO_IDENTIFY`].
 const TOO_OLD_STEP: &str = "Run `svolder daemon restart`";
 
-/// Whether `message` is a daemon's refusal of the `identify` request as one it does not know.
-fn is_unknown_request(message: &str) -> bool {
-    message.starts_with("bad request: ") && message.contains("`identify`")
-}
-
 /// The failure a daemon's reply earns when it is not the answer a write asked for: the code and
 /// words it refused with, which become this process's exit code unchanged, a reply of another
 /// kind, or a connection that failed.
 fn write_failure<E: std::fmt::Display>(reply: Result<Response, E>) -> WriteError {
     match reply {
-        Ok(Response::Error { code, message }) => {
-            let next = crate::recovery::daemon_step(code, &message);
+        Ok(Response::Error {
+            code,
+            message,
+            reason,
+        }) => {
+            let next = crate::recovery::daemon_step(code, &message, reason);
             refused(code, next, message)
         }
         Ok(other) => refused(
-            3,
+            CODE_LINK,
             next_step(Kind::DaemonError),
             format!("the daemon sent an unexpected reply: {other:?}"),
         ),
-        Err(e) => refused(3, next_step(Kind::DaemonError), e.to_string()),
+        Err(e) => refused(CODE_LINK, next_step(Kind::DaemonError), e.to_string()),
     }
 }
 
@@ -381,15 +380,47 @@ impl RemoteBackend {
         };
         match self.client.request(ask).await {
             Ok(Response::Identify { device, sent }) => Ok(Identified { device, sent }),
-            Ok(Response::Error { code: 1, message }) if is_unknown_request(&message) => {
-                Err(refused(1, TOO_OLD_STEP, TOO_OLD_TO_IDENTIFY))
+            Ok(Response::Error {
+                code: CODE_UNKNOWN_REQUEST,
+                ..
+            }) => Err(refused(
+                CODE_UNKNOWN_REQUEST,
+                TOO_OLD_STEP,
+                TOO_OLD_TO_IDENTIFY,
+            )),
+            Ok(
+                answer @ Response::Error {
+                    code: CODE_USAGE, ..
+                },
+            ) => {
+                // Only a code-1 answer can be a 0.32.x daemon's: ask whether the daemon says
+                // unknown requests with code 7, so one that does is never read by its words.
+                let info =
+                    daemon_version::version_within(&self.socket, daemon_version::VERSION_WAIT)
+                        .await;
+                let words = match &answer {
+                    Response::Error { message, .. } => message.as_str(),
+                    _ => "",
+                };
+                match is_unknown_request(info.as_ref(), CODE_USAGE, words, "identify") {
+                    true => Err(refused(
+                        CODE_UNKNOWN_REQUEST,
+                        TOO_OLD_STEP,
+                        TOO_OLD_TO_IDENTIFY,
+                    )),
+                    false => Err(write_failure(Ok::<_, IpcError>(answer))),
+                }
             }
-            Ok(Response::Error { code: 3, message }) if message == NOT_CONNECTED => {
+            Ok(Response::Error {
+                code,
+                message,
+                reason,
+            }) if reason_of(code, &message, reason) == Some(Reason::NotConnected) => {
                 let wait = self.retry_in_secs(device.as_deref()).await;
-                Err(write_failure(Ok::<_, IpcError>(Response::Error {
-                    code: 3,
-                    message: crate::format::link_down(NOT_CONNECTED, wait),
-                })))
+                Err(write_failure(Ok::<_, IpcError>(
+                    Response::error(CODE_LINK, crate::format::link_down(NOT_CONNECTED, wait))
+                        .with_reason(Reason::NotConnected),
+                )))
             }
             failed => Err(write_failure(failed)),
         }
@@ -424,7 +455,14 @@ impl RemoteBackend {
     /// the middle of a session, not while opening one.
     pub(super) async fn reload(&self) -> Result<Vec<String>, Failure> {
         let mut client = connect_to(&self.socket).await?;
-        match request(&mut client, &self.socket, Request::Reload).await? {
+        match request_within(
+            &mut client,
+            &self.socket,
+            Request::Reload,
+            Some(svolder_ipc::RELOAD_TIMEOUT),
+        )
+        .await?
+        {
             Response::Reloaded { devices } => Ok(devices),
             other => Err(unexpected(&other)),
         }
@@ -467,14 +505,29 @@ impl RemoteBackend {
         }
     }
 
-    /// A future that opens the daemon's frames of the host's capture on a connection of their
-    /// own (owned, so it can be spawned): a stream of `HostCapture` and `HostFrame` events that
-    /// holds the daemon's capture for as long as it lives, or why it could not be had.
-    pub(super) fn host_frames(
+    /// A future that opens the stream `request` asks for (any request for which
+    /// [`Request::is_stream`] holds) on a connection of its own (owned, so it can be spawned),
+    /// so the request connection every read and write goes over is never held by it: the
+    /// daemon's events as they come, or why the stream could not be had.
+    pub(super) fn open_stream(
         &self,
+        request: Request,
     ) -> impl Future<Output = Result<BoxStream<'static, Event>, IpcError>> + Send + 'static {
         let socket = self.socket.clone();
-        async move { Client::connect(&socket).await?.host_frames().await }
+        async move { Client::connect(&socket).await?.stream(request).await }
+    }
+
+    /// A future that sends `request` to the daemon on a connection of its own (owned, so it can
+    /// be spawned) and waits for the reply as long as `within` allows (`None`: as long as the
+    /// daemon takes), for a request that runs long on purpose: nothing else the front end sends
+    /// waits behind it.
+    pub(super) fn long_request(
+        &self,
+        request: Request,
+        within: Option<Duration>,
+    ) -> impl Future<Output = Result<Response, IpcError>> + Send + 'static {
+        let socket = self.socket.clone();
+        async move { svolder_ipc::request_on_own_connection(&socket, request, within).await }
     }
 
     /// Subscribe to this device's events over a connection of the feed's own.
@@ -564,6 +617,9 @@ impl RemoteBackend {
                 // The frames of the capture come only on a frames connection.
                 | Event::HostCapture(_)
                 | Event::HostFrame(_)
+                // A family's job stream comes only on a connection of its own.
+                | Event::Walk(_)
+                | Event::AutoEq(_)
                 | Event::Unknown => continue,
             }
         }
@@ -686,10 +742,29 @@ async fn request(
     socket: &Path,
     request: Request,
 ) -> Result<Response, Failure> {
-    match client.request(request).await {
-        Ok(Response::Error { code, message }) => {
-            Err(Failure::from_daemon_on(socket, code, message))
-        }
+    request_within(
+        client,
+        socket,
+        request,
+        Some(svolder_ipc::DEFAULT_REQUEST_TIMEOUT),
+    )
+    .await
+}
+
+/// [`request`] with the wait `within` bounds it, for a request that may take longer than the
+/// default (a reload).
+async fn request_within(
+    client: &mut Client,
+    socket: &Path,
+    request: Request,
+    within: Option<Duration>,
+) -> Result<Response, Failure> {
+    match client.request_within(request, within).await {
+        Ok(Response::Error {
+            code,
+            message,
+            reason,
+        }) => Err(Failure::from_daemon_on(socket, code, message, reason)),
         Ok(response) => Ok(response),
         Err(e) => Err(Failure::of(Kind::DaemonError, e.to_string())),
     }

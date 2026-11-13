@@ -5,8 +5,10 @@
 //!
 //! A running daemon says where that is (a file, or the journal); one that says nothing is read
 //! from the journal where systemd manages it and from the file a daemon nobody installed writes
-//! otherwise. The reader runs on this process's own streams, so a follow ends when the user ends
-//! it, and on a terminal each line is coloured on its way through.
+//! otherwise. In a container with no systemd, a daemon that writes no file is heard in the
+//! container's own log, which only the host reads: the verb says so, names the runtimes' commands
+//! and reads nothing. The reader runs on this process's own streams, so a follow ends when the
+//! user ends it, and on a terminal each line is coloured on its way through.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, IsTerminal, Write};
@@ -111,8 +113,8 @@ pub async fn logs(g: &Globals<'_>, follow: bool) -> Result<(), Failure> {
 async fn reported_log(socket: &Path) -> LogSaid {
     let ask = async {
         let mut client = Client::connect(socket).await.ok()?;
-        let (version, _, _, _, log) = version(&mut client).await;
-        Some(LogSaid::of(&version, log))
+        let told = version(&mut client).await;
+        Some(LogSaid::of(&told.version, told.log))
     };
     tokio::time::timeout(ASK_WAIT, ask)
         .await
@@ -151,6 +153,26 @@ impl LogSaid {
 /// What `status` prints after `log:` for a daemon that writes no file.
 pub(super) const NOT_A_FILE: &str = "not a file (stderr is a terminal or a pipe)";
 
+/// What `status` prints after `log:` in a container, for a daemon that writes no file: what it
+/// says is on its stderr, which a container's runtime keeps as the container's log, read on
+/// the host. The two commands are the usual runtimes'; a daemon started by hand in a container
+/// writes to that terminal.
+pub(super) const CONTAINER_LOG: &str = "not a file; in a container, the container's own log \
+                                        (`docker logs <container>` or `podman logs <container>` \
+                                        on the host)";
+
+/// What `logs` says in a container in place of reading: where a daemon that writes no file is
+/// heard, with the commands of the usual runtimes, following when `follow`.
+fn container_log(follow: bool) -> String {
+    let flag = if follow { "-f " } else { "" };
+    format!(
+        "svolder: the daemon does not log to a file; in a container what it says is the \
+         container's own log, read on the host: `docker logs {flag}<container>` for Docker, \
+         `podman logs {flag}<container>` for Podman (the compose file names the container \
+         `svolder`)"
+    )
+}
+
 /// Whether `daemon logs` colours: only on a terminal, and never with `NO_COLOR` set.
 fn wants_color(stdout_is_terminal: bool, no_color: Option<&OsStr>) -> bool {
     stdout_is_terminal && no_color.is_none()
@@ -170,8 +192,20 @@ struct ReadPlan {
 
 /// What reads the log a running daemon `reported`, else the journal when systemd manages the
 /// daemon, else the file `log`. A daemon that said it writes no file earns a note ahead of the
-/// fallback's banner. An error is the line saying there is nothing to read yet.
+/// fallback's banner. An error is the line saying there is nothing to read yet, or, in a
+/// container where systemd does not manage the daemon and the daemon writes no file (it said
+/// so, or said nothing and the fallback file is not there), the line naming the container's
+/// log.
 fn read_plan(ctl: &Ctl, log: &Path, reported: &LogSaid, follow: bool) -> Result<ReadPlan, String> {
+    let no_file = match reported {
+        LogSaid::NoFile => true,
+        LogSaid::Unsaid => !log.exists(),
+        LogSaid::Path(_) => false,
+    };
+    // Where systemd manages the daemon its log is the journal, in a container too.
+    if ctl.container && no_file && !systemd_manages(&ctl.units()) {
+        return Err(container_log(follow));
+    }
     let fallback = || match systemd_manages(&ctl.units()) {
         true => LogSource::Journal,
         false => LogSource::File(log.to_path_buf()),

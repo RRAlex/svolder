@@ -11,8 +11,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// The words a lock still held when the wait runs out fails with.
-pub(super) const BUSY: &str = "another svolder is writing this file";
+use crate::error::BUSY;
 
 /// A lock, held for as long as this lives: dropping it closes the file and lets the lock go.
 #[derive(Debug)]

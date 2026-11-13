@@ -68,6 +68,9 @@ pub struct DeviceEditor {
     pub profiles: Vec<String>,
     /// The passphrase row: which of `none`, `auto` and a code it is on, and the digits typed.
     pub passphrase: PassphraseRow,
+    /// The passphrase row as it opened: a save that finds it unchanged writes no passphrase,
+    /// whatever the row can show of one the daemon never reads back.
+    pub opened: PassphraseRow,
     /// Where the cursor sits in the name being typed, in characters from its start.
     pub caret: usize,
 }
@@ -177,7 +180,12 @@ pub(in crate::tui) fn open(app: &mut App) {
         app.warn(nothing_configured(&name));
         return;
     };
-    let passphrase = PassphraseRow::from_file(&device.passphrase);
+    // A code the daemon holds is shown as a code with no digits: it is never read back.
+    let passphrase = match device.passphrase.as_str() {
+        "set" => PassphraseRow::code(),
+        text => PassphraseRow::from_file(text),
+    };
+    app.devices.opened = Some(device.clone());
     app.devices.editor = Some(DeviceEditor {
         original: device.name.clone(),
         default: app
@@ -189,6 +197,7 @@ pub(in crate::tui) fn open(app: &mut App) {
         caret: device.name.chars().count(),
         device,
         row: 0,
+        opened: passphrase.clone(),
         passphrase,
     });
 }
@@ -202,7 +211,7 @@ pub(in crate::tui) fn ask(app: &mut App) {
 fn selected(app: &App) -> Option<String> {
     app.devices
         .rows
-        .get(app.selected)
+        .get(app.selected())
         .map(|device| device.name.clone())
 }
 
@@ -272,6 +281,9 @@ pub(in crate::tui) fn key(app: &mut App, code: KeyCode) -> Vec<Intent> {
         KeyCode::Left => editor.step(-1),
         KeyCode::Right => editor.step(1),
         KeyCode::Char(' ') if editor.focused() == EditorRow::Default => editor.step(1),
+        KeyCode::Tab if editor.focused() == EditorRow::Passphrase => {
+            editor.passphrase.key(KeyCode::Tab);
+        }
         KeyCode::Char(letter) => editor.typed(letter),
         KeyCode::Backspace => editor.erase(),
         KeyCode::Home => editor.caret = 0,
@@ -303,12 +315,16 @@ fn save(app: &mut App) -> Vec<Intent> {
         app.warn(name_taken(&name));
         return Vec::new();
     }
-    let passphrase = match editor.passphrase.text() {
-        Ok(passphrase) => passphrase,
-        Err(why) => {
-            app.warn(why);
-            return Vec::new();
-        }
+    let passphrase = match editor.passphrase == editor.opened {
+        // Untouched: the device keeps the passphrase it has.
+        true => editor.device.passphrase.clone(),
+        false => match editor.passphrase.text() {
+            Ok(passphrase) => passphrase,
+            Err(why) => {
+                app.warn(why);
+                return Vec::new();
+            }
+        },
     };
     let device = DeviceConfig {
         name,

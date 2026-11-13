@@ -256,52 +256,22 @@ const sectionOf = (name, section) => {
   return { page, device: page.device, html: SECTIONS[section](page, page.device ?? null, view) };
 };
 
-ok('every_fact_is_on_the_sheet', () => {
+ok('the_sheet_ends_in_device_settings_or_for_a_reader_device_and_draws_no_fact', () => {
   let checked = 0;
   for (const c of fixture.cases) {
     const page = clone(c.page);
-    const f = page.device?.facts;
-    if (!f) continue;
+    if (!page.device?.facts) continue;
     const html = SECTIONS.device(page, page.device, view);
-    const facts = new Map(tags(html, 'td').filter((t) => 'data-fact' in t)
-      .map((t) => [unescape(t['data-fact']), t]));
-    const want = ['Product', 'Firmware', 'DSP', 'Profile', 'Link', 'Signal'];
-    if (f.unit) want.push('Unit');
-    if (f.passphrase_note !== null && f.passphrase_note !== undefined) want.push('Passphrase');
-    for (const r of f.rows) want.push(r.id);
-    for (const label of want) {
-      checked++;
-      assert.ok(facts.has(label), `${c.name}: ${label}`);
-    }
-    assert.equal(facts.has('Unit'), Boolean(f.unit), `${c.name}: Unit only when present`);
-    assert.equal(facts.has('Passphrase'), f.passphrase_note !== null && f.passphrase_note !== undefined);
-    assert.equal(unescape(facts.get('Product').text), f.product ?? `product ${f.product_id}`, c.name);
-    assert.equal(unescape(facts.get('DSP').text), f.dsp == null ? '—' : String(f.dsp), c.name);
-    assert.ok(html.includes('>The device<') && html.includes('id="p-spec"') && html.includes('>All readings<'));
-    const ident = tags(html, 'button').filter((b) => b['data-act'] === 'identify');
-    assert.equal(ident.length, f.identify_offered ? 1 : 0, c.name);
-    assert.equal(html.includes('Asks the unit to show itself, so you can tell it from the others.'),
-      Boolean(f.identify_offered), c.name);
+    const words = tags(html, 'button').filter((b) => b['data-act'] === 'device-settings');
+    const writer = !page.viewer?.guest && page.viewer?.writes !== false;
+    assert.equal(words.length, 1, `${c.name}: the word for every viewer: the popup is a reader's too`);
+    assert.equal(words[0].text, writer ? 'Device settings…' : 'Devices…', c.name);
+    for (const gone of ['data-fact', 'p-spec', 'p-readings', 'All readings', 'data-act="identify"',
+      'p-device-body', 'device-fold']) assert.ok(!html.includes(gone), `${c.name}: ${gone}`);
+    checked++;
   }
-  assert.ok(checked > 150, `${checked} facts`);
-  const heard = pageOf('dac-facts-heard');
-  const hh = SECTIONS.device(heard, heard.device, view);
-  assert.ok(/class="p-age"[^>]*data-heard-at="1700000010000"/.test(hh), 'heard age');
-  assert.ok(hh.includes('product 9'), 'a product the app does not name');
-});
-
-ok('the_device_is_folded_unless_the_view_says_it_is_open', () => {
-  const page = pageOf('dac-facts-heard');
-  for (const open of [false, true]) {
-    const html = SECTIONS.device(page, page.device, { ...view, deviceOpen: open });
-    const fold = tags(html, 'button').find((b) => b['data-act'] === 'device-fold');
-    assert.ok(fold, 'a heading button');
-    assert.equal(fold['aria-expanded'], String(open));
-    assert.equal(fold['aria-controls'], 'p-device-body');
-    assert.ok(html.includes('<div id="p-device-body"'), 'the body');
-    assert.equal(html.includes('<div id="p-device-body" hidden>'), !open, `hidden when folded (open=${open})`);
-    assert.ok(html.includes('id="p-spec"') && html.includes('id="p-readings"'), 'facts stay in the markup');
-  }
+  assert.ok(checked > 20, `${checked} cases`);
+  assert.equal(SECTIONS.device(pageOf('dac'), null, view), '', 'no device, no word');
 });
 
 ok('the_amp_draws_power_and_a_needle_per_meter', () => {
@@ -431,8 +401,8 @@ ok('a_guests_sheet_has_no_underlined_word', () => {
     if (!page.device) continue;
     for (const [name, draw] of Object.entries(SECTIONS)) {
       const html = draw(page, page.device, view);
-      // The fold of `The device` changes nothing on the device: a guest may open it.
-      for (const b of tags(html, 'button').filter((t) => 'data-act' in t && t['data-act'] !== 'device-fold')) {
+      // the foot opens the read-only page: navigation, not inert
+      for (const b of tags(html, 'button').filter((t) => 'data-act' in t && t['data-act'] !== 'device-settings')) {
         words++;
         assert.equal(b['aria-disabled'], 'true', `${c.name} ${name} ${b['data-act']}`);
         assert.ok((b.class ?? '').split(' ').includes('quiet'), `${c.name} ${name} ${b['data-act']}`);
@@ -604,6 +574,39 @@ ok('every_dot_sits_on_the_curve_shelves_included', () => {
   });
   // the LSC at 105 Hz (+5.5 dB) is not at its written gain
   assert.ok(Math.abs(Number(dots[0]['data-y']) - yOf(5.5) / 260) > 0.005, 'a shelf is drawn on the line');
+});
+
+/** The daemon's overlay on the 181 points: the target 4 dB up, the fit meeting it but for 600-1500 Hz. */
+const overlayOn = (gap) => {
+  const hzs = logFreqs(POINTS);
+  return {
+    name: 'Imp', target: hzs.map(() => 4), fit: hzs.map((hz) => (hz > 500 && hz < 2000 ? 0 : 4)),
+    gap, gap_db: 2, rms_db: 0.93, worst_db: 4, worst_hz: 1000,
+  };
+};
+const withOverlay = (name, overlay, mode) => {
+  const page = pageOf(name);
+  Object.assign(page.device.tone, { overlay }, mode ? { mode } : {});
+  return page;
+};
+
+ok('an_overlay_is_drawn_under_the_curve_with_the_fit_in_words', () => {
+  const html = ((p) => SECTIONS.tone(p, p.device, view))(withOverlay("dac", overlayOn([[600, 1500]])));
+  assert.equal((html.match(/<path class="p-gap"/g) ?? []).length, 1);
+  assert.equal((html.match(/<path class="p-target"/g) ?? []).length, 1);
+  assert.ok(html.indexOf('p-gap') < html.indexOf('p-target')
+    && html.indexOf('p-target') < html.indexOf('class="p-curve"'));
+  assert.match(html, /<span class="p-fit" title="fit 0\.9 dB, worst 4\.0 dB at 1\.0 kHz\.[^"]*" aria-hidden="true">fit 0\.9 dB<\/span>/);
+  assert.match(html, /<span class="[a-z-]*sr">fit 0\.9 dB, worst 4\.0 dB at 1\.0 kHz\. The dotted line is the target; the shade is where the bands miss it by more than 2 dB\.<\/span>/);
+});
+
+ok('an_overlay_without_a_span_fills_nothing_and_none_or_another_mode_draws_none', () => {
+  assert.doesNotMatch(((p) => SECTIONS.tone(p, p.device, view))(withOverlay("dac", overlayOn([]))), /p-gap/);
+  const plain = ((p) => SECTIONS.tone(p, p.device, view))(pageOf("dac"));
+  assert.doesNotMatch(plain, /p-gap|p-target|p-fit/);
+  for (const mode of ['flat', 'loudness']) {
+    assert.doesNotMatch(((p) => SECTIONS.tone(p, p.device, view))(withOverlay("dac", overlayOn([[600, 1500]]), mode)), /p-gap|p-target|p-fit/);
+  }
 });
 
 console.log(`paper-draw: ${n} passed`);

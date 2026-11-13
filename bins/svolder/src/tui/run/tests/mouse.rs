@@ -444,9 +444,11 @@ async fn a_left_click_on_the_painted_squirrel_plays_the_hop() {
     assert_eq!(end.code, 1, "{:?}", end.why);
     // The hop was started, not "still playing when the loop ends": the loop clocks the mascot
     // with the real `Instant`, so how long the hop has played by then depends on the machine.
-    assert_eq!(
-        end.watching.app.mascot.last_visit(),
-        Some(What::Trick(Trick::Hop))
-    );
+    // The loop reads the real date, and on a quiet day (looks.rs) the squirrel plays no trick.
+    let (month, day) = svolder_ipc::clock::local_month_day(std::time::SystemTime::now());
+    let quiet = crate::tui::decoration::mascot::looks::Season::on(month, day)
+        .is_some_and(crate::tui::decoration::mascot::looks::Season::quiet);
+    let hop = (!quiet).then_some(What::Trick(Trick::Hop));
+    assert_eq!(end.watching.app.mascot.last_visit(), hop);
     end.watching.close().await;
 }

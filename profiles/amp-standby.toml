@@ -18,5 +18,6 @@ id = [4]
 key = "warming_up"
 label = "Warming up"
 kind = "readout"
+key_reading = true
 value_type = "bool"
 only_while = "power"

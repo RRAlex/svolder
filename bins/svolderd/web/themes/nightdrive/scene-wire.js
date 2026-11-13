@@ -9,7 +9,7 @@
 import { BANDS, VizModel } from '../../core/viz-model.js';
 import { COLUMNS } from './axis.js';
 import {
-  FLOOR, crossings, drawRidge, drawRoad,
+  FLOOR, crossings, drawRidge, drawRoad, drawTarget,
 } from './draw/road.js';
 import { drawEmbers, drawHaze, drawWet } from './draw/mood.js';
 import { drawBubbles, drawDiamonds } from './draw/tune.js';
@@ -196,6 +196,7 @@ export function wireScene({
       if (frame.look.wet > 0.01 && !frame.dull) reflect(frame);
     }
     road.clearRect(0, 0, geo.w, geo.h);
+    if (frame.overlay) drawTarget(road, geo, frame.overlay);
     if (!off.has('noridge')) drawRidge(road, geo, slow, frame);
     if (!off.has('nofloor')) drawRoad(road, geo, floor, frame);
     if (frame.look.haze > 0.01 && !frame.dull) drawHaze(road, geo, frame.look.haze, frame.look.mood);
@@ -264,8 +265,12 @@ export function wireScene({
     swell = driftSwell(swell, dt, view.motion);
     tune.step(dt, ms);
     const kick = dull ? 0 : Math.max(0, 1 - (ms - kickAt) / KICK_MS);
+    // the overlay of an imported preset: the target's ghost ridge and the gap's tint, one layer the budget can drop
+    const served = dull || flatMood(kind) || off.has('nooverlay') ? null : tune.overlay();
+    budget.setOverlay(served !== null);
     const frame = {
       t: seconds,
+      overlay: budget.overlay ? served : null,
       kick,
       dull,
       flat: flatMood(kind),
@@ -363,6 +368,7 @@ export function wireScene({
         capped: budget.capped,
         step: budget.step,
         wet: budget.wet,
+        overlay: budget.overlay,
       };
     },
     sky: () => ({

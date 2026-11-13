@@ -332,7 +332,7 @@ fn a_key_the_menu_does_not_take_never_reaches_the_screen() {
         let mut app = open();
         let before = (
             app.screen,
-            app.selected,
+            app.selected(),
             app.tui.clone(),
             app.notices.show_advice,
         );
@@ -342,7 +342,7 @@ fn a_key_the_menu_does_not_take_never_reaches_the_screen() {
         assert_eq!(
             (
                 app.screen,
-                app.selected,
+                app.selected(),
                 app.tui.clone(),
                 app.notices.show_advice
             ),
