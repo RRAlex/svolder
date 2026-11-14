@@ -58,9 +58,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use svolder_ipc::MqttStatus;
 use svolder_ipc::config::MqttConfig;
-use svolder_mqtt::{Client, Link, Settings, topics};
+use svolder_ipc::{MqttProblem, MqttStatus};
+use svolder_mqtt::{Client, Link, Settings, Trouble, topics};
 use svolder_profiles::Profile;
 use svolder_profiles::tone::preset::Preset;
 use svolder_proto::FunctionId;
@@ -190,28 +190,38 @@ impl Bridge {
     }
 
     /// Where the bridge stands, as `version` reports it: connecting, with the whole seconds
-    /// until the next attempt while it waits between attempts, or connected.
+    /// until the next attempt while it waits between attempts, in trouble when the last attempt
+    /// failed in a way that has words, or connected.
     pub fn status(&self) -> MqttStatus {
         let host = self.config.host.clone().unwrap_or_default();
         let port = self.config.port;
-        match *self.link.borrow() {
-            Link::Connecting => MqttStatus::Connecting {
-                host,
-                port,
-                retry_in_secs: None,
-            },
-            Link::Waiting { retry_at } => {
-                let left = retry_at.saturating_duration_since(Instant::now());
-                MqttStatus::Connecting {
+        let link = *self.link.borrow();
+        let (trouble, retry_in_secs) = match link {
+            Link::Connected => {
+                return MqttStatus::Connected {
                     host,
                     port,
-                    retry_in_secs: Some(left.as_secs() + u64::from(left.subsec_nanos() > 0)),
-                }
+                    commands: self.config.commands,
+                };
             }
-            Link::Connected => MqttStatus::Connected {
+            Link::Connecting { after } => (after, None),
+            Link::Waiting { retry_at, trouble } => {
+                let left = retry_at.saturating_duration_since(Instant::now());
+                let secs = left.as_secs() + u64::from(left.subsec_nanos() > 0);
+                (Some(trouble), Some(secs))
+            }
+        };
+        match trouble.and_then(|trouble| problem(trouble, port)) {
+            Some(problem) => MqttStatus::Trouble {
                 host,
                 port,
-                commands: self.config.commands,
+                problem,
+                retry_in_secs,
+            },
+            None => MqttStatus::Connecting {
+                host,
+                port,
+                retry_in_secs,
             },
         }
     }
@@ -262,6 +272,21 @@ fn password(from_env: Option<String>, configured: Option<&str>) -> Option<String
     from_env
         .filter(|p| !p.is_empty())
         .or_else(|| configured.map(str::to_string))
+}
+
+/// The port MQTT over TLS conventionally uses, which svolder does not speak.
+const TLS_PORT: u16 = 8883;
+
+/// The words-bearing problem a failed attempt on `port` comes to, or `None` for a failure that
+/// has none. A broker that accepts and then closes the connection on the TLS port is a TLS
+/// port spoken to in plain text; elsewhere it is simply not usable.
+fn problem(trouble: Trouble, port: u16) -> Option<MqttProblem> {
+    match trouble {
+        Trouble::LoginRefused => Some(MqttProblem::Refused),
+        Trouble::Dropped if port == TLS_PORT => Some(MqttProblem::Tls),
+        Trouble::Unreachable | Trouble::Dropped => Some(MqttProblem::Unreachable),
+        Trouble::Other => None,
+    }
 }
 
 /// `host:port`, the way the log and `daemon status` name the broker.

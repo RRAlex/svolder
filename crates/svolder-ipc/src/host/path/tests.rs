@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use crate::host::HostView;
+use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
 
 /// The device the routes below end in.
 fn dac() -> DacFacts {
@@ -38,7 +40,7 @@ fn stream() -> StreamFacts {
 }
 
 /// A route that leaves the signal alone, found by the player's pid.
-fn clean() -> RouteFacts {
+pub(in crate::host) fn clean() -> RouteFacts {
     RouteFacts {
         sink: Some(schiit_sink()),
         player: Some(stream()),
@@ -266,12 +268,14 @@ fn not_this_dac_gives_no_verdict() {
     assert_eq!(
         line.verdict,
         Verdict::NotThisDac {
-            sink: "Built-in Audio".into()
+            sink: "Built-in Audio".into(),
+            by_player: false
         }
     );
+    assert_eq!(line.words, vec!["→ Built-in Audio".to_string()]);
     assert_eq!(
-        line.words,
-        vec!["the computer plays to Built-in Audio".to_string()]
+        line.sentence().as_deref(),
+        Some("the computer plays to Built-in Audio")
     );
     assert!(line.hops.is_empty());
 
@@ -280,7 +284,7 @@ fn not_this_dac_gives_no_verdict() {
     let line = path_line(&route, &dac());
     assert_eq!(
         line.words,
-        vec!["the computer plays to alsa_output.pci-0000_00_1f.3.analog-stereo".to_string()]
+        vec!["→ alsa_output.pci-0000_00_1f.3.analog-stereo".to_string()]
     );
 }
 
@@ -295,10 +299,15 @@ fn a_player_playing_elsewhere_gives_no_verdict() {
     assert_eq!(
         line.verdict,
         Verdict::NotThisDac {
-            sink: "LG TV".into()
+            sink: "LG TV".into(),
+            by_player: true
         }
     );
-    assert_eq!(line.words, vec!["the player plays to LG TV".to_string()]);
+    assert_eq!(line.words, vec!["player → LG TV".to_string()]);
+    assert_eq!(
+        line.sentence().as_deref(),
+        Some("the player plays to LG TV")
+    );
     assert!(line.hops.is_empty());
 }
 
@@ -576,41 +585,6 @@ fn a_sink_of_another_maker_is_not_the_dac() {
     assert!(!sink_is_dac(&sink, &dac()));
 }
 
-#[test]
-fn a_view_without_what_it_lacks_is_a_short_line() {
-    let line = serde_json::to_string(&HostView::default()).unwrap();
-    assert_eq!(line, r#"{"available":false,"now_ms":0}"#);
-    let back: HostView = serde_json::from_str("{}").unwrap();
-    assert_eq!(back, HostView::default());
-}
-
-#[test]
-fn a_view_round_trips() {
-    let view = HostView {
-        available: true,
-        playing: Some(PlayingView {
-            title: "Song".into(),
-            artist: "Artist".into(),
-            album: "Album".into(),
-            player: "Spotify".into(),
-            status: "playing".into(),
-            length_us: Some(200_000_000),
-            progress: Some(Progress {
-                position_us: 5_000_000,
-                rate_milli: 1000,
-                read_at_ms: 99,
-            }),
-            cover: Some("0123456789abcdef".into()),
-        }),
-        route: Some(clean()),
-        now_ms: 1_700_000_000_000,
-        volume: None,
-        eq: None,
-    };
-    let back: HostView = serde_json::from_str(&serde_json::to_string(&view).unwrap()).unwrap();
-    assert_eq!(back, view);
-}
-
 /// A sample rate's label in hertz.
 #[test]
 fn a_rate_label_is_read_in_hertz() {
@@ -819,32 +793,4 @@ fn only_a_dac_with_a_reading_per_port_is_judged_by_its_ports() {
     let mut device = dac();
     device.input = Some("USB 1".into());
     assert_eq!(path_line(&clean(), &device).verdict, Verdict::Untouched);
-}
-
-/// A frame survives the trip through its wire form, and a wire frame whose bands are not
-/// 240 a channel is no frame.
-#[test]
-fn a_frame_view_makes_the_frame_it_came_from() {
-    let mut frame = svolder_host::Frame {
-        capture_ms: 1_700_000_000_123,
-        left: [0; 240],
-        right: [0; 240],
-        levels: [1, 2, 3, 4],
-        beat: true,
-        bpm: Some(118),
-        phase: 200,
-    };
-    frame.left[0] = 255;
-    frame.right[239] = 17;
-    let view = FrameView::from(&frame);
-    assert_eq!(
-        (view.t, view.left.len(), view.right.len()),
-        (frame.capture_ms, 240, 240)
-    );
-    assert_eq!(view.to_frame(), Some(frame));
-    let short = FrameView {
-        left: vec![0; 239],
-        ..view
-    };
-    assert_eq!(short.to_frame(), None);
 }

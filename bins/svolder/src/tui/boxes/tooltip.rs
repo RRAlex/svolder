@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, MouseEvent, MouseEventKind};
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph};
@@ -71,7 +72,7 @@ pub fn hover(app: &mut App, hits: &HitMap, event: &MouseEvent, now: Instant) {
     if let Some(tooltip) = app.pointer.tooltip.as_mut() {
         tooltip.age(now);
     }
-    if event.kind != MouseEventKind::Moved || !app.mouse || app.modal_open() {
+    if event.kind != MouseEventKind::Moved || !app.tips_allowed() {
         app.pointer.tooltip = None;
         return;
     }
@@ -115,7 +116,7 @@ pub fn settle(app: &mut App, stands: bool) {
 /// and keeps the tooltip on the answer.
 pub(crate) fn standing(app: &App, hits: &HitMap) -> Option<Vec<String>> {
     let tooltip = app.pointer.tooltip?;
-    if !app.mouse || app.modal_open() {
+    if !app.tips_allowed() {
         return None;
     }
     let (x, y) = tooltip.at;
@@ -138,13 +139,60 @@ fn area(screen: Rect, at: (u16, u16), lines: &[String]) -> Rect {
 
 /// Where the tooltip goes as [`area`] puts it, unless that meets `avoid` (the toast's box): then
 /// on the pointer's other side, and nowhere when that side meets it too or has no room.
+#[cfg(test)]
 fn place(screen: Rect, at: (u16, u16), lines: &[String], avoid: Option<Rect>) -> Option<Rect> {
-    let preferred = area(screen, at, lines);
-    let Some(avoid) = avoid.filter(|avoid| preferred.intersects(*avoid)) else {
-        return Some(preferred);
-    };
+    place_clear(screen, at, lines, avoid, &|_| 0)
+}
+
+/// [`area`] that also keeps clear of what is read: `covered` counts the cells of a rectangle
+/// that show a value. The box goes where [`area`] would unless that covers some; then on the
+/// pointer's other side if that covers none, then at the same two heights pushed to the right
+/// edge, and where every place covers some, on the one that covers the fewest (the first of them
+/// on a tie). None of them may meet `avoid`.
+fn place_clear(
+    screen: Rect,
+    at: (u16, u16),
+    lines: &[String],
+    avoid: Option<Rect>,
+    covered: &dyn Fn(Rect) -> usize,
+) -> Option<Rect> {
     let (width, height) = size(screen, lines);
-    let other = match preferred.y > at.1 {
+    let preferred = area(screen, at, lines);
+    let missing = |rect: &Rect| avoid.is_none_or(|avoid| !rect.intersects(avoid));
+    let mut best: Option<(usize, Rect)> = None;
+    let consider = |rect: Rect, best: &mut Option<(usize, Rect)>| {
+        if missing(&rect) {
+            let cost = covered(rect);
+            if best.is_none_or(|(least, _)| cost < least) {
+                *best = Some((cost, rect));
+            }
+        }
+    };
+    consider(preferred, &mut best);
+    let other = other_side(screen, at, preferred, width, height);
+    if let Some(other) = other {
+        consider(other, &mut best);
+    }
+    if best.is_none() || best.is_some_and(|(cost, _)| cost == 0) {
+        return best.map(|(_, rect)| rect);
+    }
+    // Every base place covers a value: try the right edge at both heights.
+    let right = screen.right().saturating_sub(width);
+    for rect in [Some(preferred), other].into_iter().flatten() {
+        consider(boxed(screen, right, rect.y, width, height), &mut best);
+    }
+    best.map(|(_, rect)| rect)
+}
+
+/// The box on the pointer's other side than `preferred`, where there is room for the whole box.
+fn other_side(
+    screen: Rect,
+    at: (u16, u16),
+    preferred: Rect,
+    width: u16,
+    height: u16,
+) -> Option<Rect> {
+    match preferred.y > at.1 {
         // Drawn below: try above, where there is room for the whole box.
         true => {
             at.1.checked_sub(height)
@@ -157,8 +205,51 @@ fn place(screen: Rect, at: (u16, u16), lines: &[String], avoid: Option<Rect>) ->
             (below.saturating_add(height) <= screen.bottom())
                 .then(|| boxed(screen, at.0, below, width, height))
         }
-    };
-    other.filter(|rect| !rect.intersects(avoid))
+    }
+}
+
+/// The targets that show a value somebody reads: rows, levels, toggles, selects, list rows,
+/// band and point fields, the Mode and Loudness halves and the transport buttons.
+fn shows_value(hit: Hit) -> bool {
+    matches!(
+        hit,
+        Hit::Row(..)
+            | Hit::Level(_)
+            | Hit::LevelBar(_)
+            | Hit::ToggleOf(_)
+            | Hit::SelectPrev(_)
+            | Hit::SelectNext(_)
+            | Hit::ListRow(_)
+            | Hit::BandField(..)
+            | Hit::PointField(..)
+            | Hit::Mode
+            | Hit::ModePrev
+            | Hit::ModeNext
+            | Hit::Loudness
+            | Hit::LoudnessBar
+            | Hit::Transport(_)
+    )
+}
+
+/// How many cells of `rect` in `buffer` hold text inside a target that shows a value, leaving
+/// out the targets the pointer at `at` is on.
+fn cells_read(buffer: &Buffer, hits: &HitMap, at: (u16, u16), rect: Rect) -> usize {
+    let rect = rect.intersection(buffer.area);
+    let mut seen = std::collections::HashSet::new();
+    for (area, hit) in hits.entries() {
+        if !shows_value(hit) || area.contains(Position { x: at.0, y: at.1 }) {
+            continue;
+        }
+        let part = area.intersection(rect);
+        for y in part.top()..part.bottom() {
+            for x in part.left()..part.right() {
+                if !buffer[(x, y)].symbol().trim().is_empty() {
+                    seen.insert((x, y));
+                }
+            }
+        }
+    }
+    seen.len()
 }
 
 /// The cells a box of `lines` takes, at most the screen's.
@@ -188,8 +279,9 @@ fn boxed(screen: Rect, left: u16, y: u16, width: u16, height: u16) -> Rect {
     }
 }
 
-/// Draw `lines` as a tooltip for a pointer at `at`, over everything but `avoid` (the toast's
-/// box), and return the box, or `None` where neither side of the pointer misses `avoid`.
+/// Draw `lines` as a tooltip for a pointer at `at`, clear of the values `hits` shows where a
+/// place can be found (see [`place_clear`]) and over everything but `avoid` (the toast's box),
+/// and return the box, or `None` where neither side of the pointer misses `avoid`.
 ///
 /// The box takes the raised shade with the theme's primary text and no border; where no raised
 /// shade is painted (16 colours, monochrome, the theme background off) it is reverse video.
@@ -200,8 +292,14 @@ pub fn draw(
     lines: &[String],
     theme: &Theme,
     avoid: Option<Rect>,
+    hits: &HitMap,
 ) -> Option<Rect> {
-    let rect = place(screen, at, lines, avoid)?;
+    let rect = {
+        let buffer = frame.buffer_mut();
+        place_clear(screen, at, lines, avoid, &|rect| {
+            cells_read(buffer, hits, at, rect)
+        })?
+    };
     frame.render_widget(Clear, rect);
     let mut style = theme.style(Role::Text);
     style = match theme.surface(Surface::Raised) {
@@ -263,6 +361,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
             lines(&[&format!("Point {}", point + 1), "the wheel steps the gain"])
         }
         Hit::Curve => lines(&["Response curve", "drag · right-drag widens · wheel sets Q"]),
+        Hit::Divider => lines(&["Pane divider", "drag · double-click resets · < > nudge"]),
         Hit::Transport(button) => {
             let name = Button::ALL.get(button)?.method();
             lines(&[name, "the player on this computer"])
@@ -292,6 +391,8 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         | Hit::SettingCategory(_)
         | Hit::MenuEntry(_)
         | Hit::MenuOutside
+        | Hit::PresetRow(_)
+        | Hit::PresetEnd(_)
         | Hit::Mascot
         | Hit::Toast => None,
     }

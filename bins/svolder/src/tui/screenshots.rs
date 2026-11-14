@@ -9,6 +9,8 @@
 //!
 //! Compiled for tests only: nothing here reaches the binary.
 
+mod mascot;
+
 mod raster;
 
 mod scenes;
@@ -27,9 +29,9 @@ use svolder_profiles::tone::apo::{self, Correction};
 
 use crate::tui::screenshots::raster::fonts;
 use crate::tui::screenshots::raster::{Palette, Raster, RawStream, write_ppm};
-use crate::tui::screenshots::scenes::{Still, animation, still};
+use crate::tui::screenshots::scenes::{Still, animation, still, still_sized};
 use crate::tui::screenshots::text::{AnimationTwin, HostDetails, guard, still_twin};
-use crate::tui::screenshots::world::{PRESET, World, measurement};
+use crate::tui::screenshots::world::{PRESET, World, measurement, stand_in};
 
 /// Where the pictures, their twins and the cached correction are written: `target/screenshots`
 /// of the workspace, wherever cargo puts its build output.
@@ -147,5 +149,39 @@ fn generate_into(out: &Path) -> Result<(), String> {
 fn generate() {
     if let Err(why) = generate_into(&out_dir()) {
         panic!("screenshots: {why}");
+    }
+}
+
+/// The device screen at 80, 120 and 200 columns, and at 120 and 200 with the divider dragged, as PPM
+/// files in the divider folder of the screenshots output, each name starting with `after-`
+/// (renamed by hand for a before and an after of a layout change). Offline: the stand-in correction is worn.
+#[test]
+#[ignore = "draws the divider's pictures: cargo test -p svolder --bin svolder -- --ignored divider_shots"]
+fn divider_shots() {
+    let tag = "after";
+    let out = out_dir().join("divider");
+    std::fs::create_dir_all(&out).expect("the output folder");
+    let correction = stand_in();
+    let mut raster = Raster::new(
+        fonts::load_system()
+            .map_err(|m| m.message())
+            .expect("fonts"),
+        scenes_palette(&correction),
+    );
+    for (name, size, split) in [
+        ("80", (80, 24), None),
+        ("120", (120, 30), None),
+        ("200", (200, 40), None),
+        ("120-dragged", (120, 30), Some(0.7)),
+        ("200-dragged", (200, 40), Some(0.7)),
+    ] {
+        let shot = still_sized(&correction, Still::Dac, size, |app| {
+            if let Some(split) = split {
+                app.tui.device_split = split;
+            }
+        });
+        let ppm = out.join(format!("{tag}-{name}.ppm"));
+        let image = raster.paint(&shot.buffer, name).expect("painted");
+        write_ppm(&ppm, &image).expect("written");
     }
 }

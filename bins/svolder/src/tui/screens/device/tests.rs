@@ -36,9 +36,12 @@ use crate::tui::widgets;
 use crate::tui::widgets::rows::BALANCE_MARK;
 
 use super::{
-    CONTROLS_WIDTH, cell_window, cells, cut_cells, fault_line, frames_of, header_height, logo_of,
-    now_playing_room, path_row, row_style, tone_lines,
+    art_box, art_reserved, art_slot, cell_window, cells, cut_cells, fault_line, frames_of,
+    header_height, logo_of, now_playing_room, path_row, row_style, tone_lines,
 };
+
+/// Columns the Controls pane takes at 80 columns: half of them, the least either pane keeps.
+const CONTROLS_WIDTH: u16 = super::split::MIN_SIDE;
 
 // the header row
 mod header;
@@ -50,6 +53,8 @@ mod bars;
 mod tone_pane;
 // the Status pane
 mod status;
+// the cover art beside the Status pane's rows
+mod art;
 // the Host group
 mod host_group;
 // meter rows

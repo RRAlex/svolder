@@ -17,7 +17,7 @@ use svolder_proto::FunctionId;
 
 use ratatui::Frame;
 
-use crate::tui::app::{App, METER_PERIOD, Screen, TuiChange};
+use crate::tui::app::{App, METER_PERIOD, Screen, TuiChange, divider};
 use crate::tui::boxes::toast;
 use crate::tui::boxes::tooltip;
 use crate::tui::decoration::effects::{self, Effects};
@@ -237,6 +237,9 @@ impl Look {
             }
             app.mouse = *on;
         }
+        // The split is the app's to move while a drag or a nudge holds it, and the loop's to
+        // write: it is carried over so a change of something else does not put it back.
+        self.tui.device_split = app.tui.device_split;
         change.apply(&mut self.tui);
         self.redraw(app);
         // A palette or a depth is every colour on the screen at once, which is what the sweep a
@@ -245,6 +248,40 @@ impl Look {
         app.frame_flags.screen_changed |= change.sweeps() && app.overlays.settings.is_none();
         let before = modified(&self.path);
         match Config::update_tui(&self.path, |tui| change.apply(tui)) {
+            Ok(()) => modified(&self.path) != before,
+            Err(e) => {
+                app.warn(format!("settings not saved: {e}"));
+                false
+            }
+        }
+    }
+
+    /// Write the split of the device screen the app holds, which a drag or a burst of nudges moved,
+    /// to `[tui]` of the file once its write is due `now` ([`divider::due`]).
+    ///
+    /// The split applies whether or not it can be saved: a file that could not be written is
+    /// said in a toast, as a Settings change says it. Answers whether the file was changed.
+    pub(super) fn save_split(&mut self, app: &mut App, now: Instant) -> bool {
+        match divider::due(app, now) {
+            Some(fraction) => self.write_split(fraction, app),
+            None => false,
+        }
+    }
+
+    /// Write the split a loop that is ending still owes.
+    pub(super) fn save_split_owed(&mut self, app: &mut App) -> bool {
+        match divider::owed(app) {
+            Some(fraction) => self.write_split(fraction, app),
+            None => false,
+        }
+    }
+
+    /// Take `fraction` as the split of the session's own `[tui]` table and write it to the file,
+    /// in the one key it changes.
+    fn write_split(&mut self, fraction: f64, app: &mut App) -> bool {
+        self.tui.device_split = fraction;
+        let before = modified(&self.path);
+        match Config::update_tui(&self.path, |tui| tui.device_split = fraction) {
             Ok(()) => modified(&self.path) != before,
             Err(e) => {
                 app.warn(format!("settings not saved: {e}"));

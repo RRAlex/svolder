@@ -6,40 +6,6 @@
 
 use super::*;
 
-/// The Tone pane's Loudness bar is drawn as wide as the Controls pane's volume bar, from the
-/// smallest screen to the wide and tall tiers, and a press reaches every cell of it.
-#[test]
-fn the_loudness_bar_is_as_wide_as_the_volume_bar() {
-    let app = mockup_app();
-    let theme = Theme::new(false);
-    for (width, height) in [(80, 24), (100, 30), (120, 24), (160, 40)] {
-        let mut terminal =
-            Terminal::new(TestBackend::new(width, height)).expect("a test terminal opens");
-        let mut hits = HitMap::default();
-        terminal
-            .draw(|f| {
-                render::draw(f, &app, &theme, &mut hits);
-            })
-            .expect("the frame draws");
-        let buffer = terminal.backend().buffer().clone();
-        let volume = hits.bar_area(Hit::LevelBar(4)).expect("the volume bar");
-        let loudness = hits.bar_area(Hit::LoudnessBar).expect("the loudness bar");
-        assert!(volume.width > 5, "{width}x{height}: volume {volume:?}");
-        assert_eq!(loudness.width, volume.width, "{width}x{height}");
-        // The mockup's loudness reads 0: every cell of the bar is track, then the value.
-        for x in loudness.x..loudness.right() {
-            assert_eq!(
-                buffer[(x, loudness.y)].symbol(),
-                "░",
-                "{width}x{height} at {x}"
-            );
-            assert_eq!(hits.hit_at(x, loudness.y), Some(&Hit::LoudnessBar));
-        }
-        assert_eq!(buffer[(loudness.right(), loudness.y)].symbol(), " ");
-        assert_eq!(buffer[(loudness.right() + 1, loudness.y)].symbol(), "0");
-    }
-}
-
 #[test]
 fn a_wide_converted_value_keeps_its_bar_and_stays_inside_the_pane() {
     let mut app = mockup_app();
@@ -52,11 +18,11 @@ fn a_wide_converted_value_keeps_its_bar_and_stays_inside_the_pane() {
     let rows = text(&screen(&app));
     assert_eq!(
         rows[8],
-        "│   Volume       █63/127┃░  -26.1 dB ││ ▶ 1   40.0 Hz    +0.0 dB   4.3         │"
+        "│   Volume       ██63/127░┃░  -26.1 dB ││ ▶ 1   40.0 Hz    +0.0 dB   4.3       │"
     );
     assert_eq!(
         rows[10],
-        "│   Balance      L ────┃──── R  0    ││   3    632 Hz    +0.0 dB   4.3         │",
+        "│   Balance      L ─────┃───── R  0    ││   3    632 Hz    +0.0 dB   4.3       │",
         "the balance track is as wide as the bar"
     );
 }
@@ -154,14 +120,14 @@ fn the_raw_value_is_written_inside_the_volume_bar() {
     );
     app.settle();
     let cells = row_cells(&frame_with_theme(&app, 80, 24, &theme), "Volume");
-    let bar: Vec<&ratatui::buffer::Cell> = cells[17..26].iter().collect();
+    let bar: Vec<&ratatui::buffer::Cell> = cells[17..28].iter().collect();
     let drawn: String = bar.iter().map(|cell| cell.symbol()).collect();
     assert_eq!(
-        drawn, "█63/127┃░",
+        drawn, "██63/127░┃░",
         "the raw value is not centred in the bar"
     );
-    // 63 of 127 fills four of the nine cells: "63/" is over the fill, "127" is not.
-    for cell in &bar[1..4] {
+    // 63 of 127 fills five of the eleven cells: "63/" is over the fill, "127" is not.
+    for cell in &bar[2..5] {
         assert!(
             cell.modifier.contains(Modifier::REVERSED),
             "{:?} over the fill is not a hole in the bar",
@@ -169,7 +135,7 @@ fn the_raw_value_is_written_inside_the_volume_bar() {
         );
         assert_ne!(cell.fg, Color::Reset, "{:?} has no shade", cell.symbol());
     }
-    for cell in &bar[4..7] {
+    for cell in &bar[5..8] {
         assert!(!cell.modifier.contains(Modifier::REVERSED));
         assert_eq!(Some(cell.fg), theme.style(Role::Text).fg);
     }
@@ -256,11 +222,7 @@ fn a_focused_balance_or_loudness_row_keeps_its_track_in_its_own_colours() {
         .iter()
         .filter(|cell| matches!(cell.symbol(), "█" | "░"))
         .collect();
-    assert_eq!(
-        loudness.len(),
-        10,
-        "the loudness bar, as wide as the volume bar"
-    );
+    assert_eq!(loudness.len(), 21, "the loudness bar, to its pane's edge");
     assert!(
         loudness
             .iter()
@@ -279,24 +241,24 @@ fn a_focused_bar_still_reads_in_monochrome() {
     let mut app = mockup_app();
     app.set_selected(4); // Volume
     let cells = row_cells(&frame_with_theme(&app, 80, 24, &theme), "Volume");
-    let drawn: String = cells[17..27].iter().map(|cell| cell.symbol()).collect();
-    assert_eq!(drawn, "█109/127┃░");
+    let drawn: String = cells[17..29].iter().map(|cell| cell.symbol()).collect();
+    assert_eq!(drawn, "██109/127┃░ ");
     assert!(!cells[17].modifier.contains(Modifier::REVERSED));
     assert!(
-        cells[18].modifier.contains(Modifier::REVERSED),
+        cells[19].modifier.contains(Modifier::REVERSED),
         "the 1 of 109"
     );
     assert!(cells[4].modifier.contains(Modifier::REVERSED), "the label");
 }
 
 /// A bar too short for the raw value over its range is drawn without it rather than cut:
-/// a level whose range runs to seven digits, on a pane whose bar is ten cells long.
+/// a level whose range runs to nine digits, on a pane whose bar is twelve cells long.
 #[test]
 fn a_bar_too_short_for_its_raw_value_is_drawn_without_it() {
     let mut profile = profile_named("gungnir2-v2");
     for control in &mut profile.controls {
         if control.key == "volume" {
-            control.range = Some((0, 1_000_000));
+            control.range = Some((0, 100_000_000));
         }
     }
     let mut app = app_on(profile);
@@ -307,7 +269,7 @@ fn a_bar_too_short_for_its_raw_value_is_drawn_without_it() {
     app.settle();
     let cells: String = row_chars(&screen(&app), "Volume").into_iter().collect();
     assert!(
-        !cells.contains("109/1000000") && cells.contains("░░░░░░░░░░"),
+        !cells.contains("109/100000000") && cells.contains("░░░░░░░░░░"),
         "|{cells}|"
     );
 }
@@ -320,7 +282,7 @@ fn cutting_app() -> App {
     app
 }
 
-/// Where the volume row is drawn on the 80×24 mockup screen, and its bar: eleven cells
+/// Where the volume row is drawn on the 80×24 mockup screen, and its bar: thirteen cells
 /// from [`VALUE_COLUMN`] with the converted value `0.0 dB` beside it.
 const VOLUME_ROW: u16 = 8;
 
@@ -328,7 +290,7 @@ const VOLUME_ROW: u16 = 8;
 const VOLUME_BAR: u16 = 11;
 
 /// The Controls pane's volume bar shows the clipping-risk zone while the curve boosts in
-/// EQ mode: a +6 dB band clips past step 109, which on an eleven-cell bar is its last two
+/// EQ mode: a +6 dB band clips past step 109, which on a thirteen-cell bar is its last two
 /// cells — red at full volume, dim red below it — with the tick on the cell before them,
 /// at true colour and at 16 colours.
 #[test]
@@ -362,16 +324,15 @@ fn the_volume_bar_shows_the_zone_while_the_curve_boosts_in_eq_mode() {
 
         // At 63, well below step 109, the tick is in the warn role.
         let quiet = frame_with_theme(&boosting(63, 2), 80, 24, &theme);
-        // The value beside this bar, `-26.1 dB`, is a cell wider, so the bar is nine cells and
-        // step 109's cell is the seventh.
-        let quiet_tick_x = VALUE_COLUMN + 6;
+        // The bar is as long at every reading, so step 109's cell is the same ninth one.
+        let quiet_tick_x = VALUE_COLUMN + 8;
         let tick = quiet
             .cell((quiet_tick_x, VOLUME_ROW))
             .expect("the tick's cell");
         assert_eq!(tick.symbol(), "┃", "{depth:?}");
         assert_eq!(Some(tick.fg), theme.style(Role::Warn).fg, "{depth:?}");
         assert!(!tick.modifier.contains(Modifier::BOLD), "{depth:?}");
-        for x in VALUE_COLUMN + 7..VALUE_COLUMN + 9 {
+        for x in VALUE_COLUMN + 9..VALUE_COLUMN + 11 {
             let cell = quiet.cell((x, VOLUME_ROW)).expect("a bar cell");
             assert_eq!(cell.symbol(), "░", "{depth:?}: column {x}");
             assert_eq!(Some(cell.fg), ground.fg, "{depth:?}: column {x}");
@@ -484,5 +445,142 @@ fn the_volume_bar_has_no_zone_in_flat_or_loudness_mode_or_for_a_cut() {
                 assert_ne!(cell.symbol(), "┃", "{depth:?}, {what}: a tick at {x}");
             }
         }
+    }
+}
+
+/// Draws the mockup at `width`x24 with the split at `split` and returns the hit map and buffer.
+fn drawn_at(width: u16, split: f64) -> (HitMap, Buffer) {
+    let mut app = mockup_app();
+    app.tui.device_split = split;
+    let theme = Theme::new(false);
+    let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("a test terminal opens");
+    let mut hits = HitMap::default();
+    terminal
+        .draw(|f| {
+            render::draw(f, &app, &theme, &mut hits);
+        })
+        .expect("the frame draws");
+    (hits, terminal.backend().buffer().clone())
+}
+
+/// The Controls pane's bars grow with the pane: at 120 and 200 columns, and with the divider
+/// dragged, the volume bar is wider than the fixed caps it had, and the longer the pane the
+/// longer the bar.
+#[test]
+fn the_volume_bar_grows_with_its_pane() {
+    let widths: Vec<u16> = [(80, 0.5), (120, 0.5), (200, 0.5), (200, 0.7)]
+        .into_iter()
+        .map(|(width, split)| {
+            let (hits, _) = drawn_at(width, split);
+            hits.bar_area(Hit::LevelBar(4))
+                .expect("the volume bar")
+                .width
+        })
+        .collect();
+    assert!(
+        widths[0] < widths[1] && widths[1] < widths[2] && widths[2] < widths[3],
+        "{widths:?}"
+    );
+    assert!(widths[1] > 25 && widths[2] > 25, "{widths:?}");
+}
+
+/// The balance track stretches with the volume bar, keeps its centre mark centred, and its
+/// reading stays right after it.
+#[test]
+fn the_balance_track_stretches_and_stays_centred() {
+    for (width, split) in [(80, 0.5), (120, 0.5), (200, 0.5), (200, 0.7)] {
+        let (hits, buffer) = drawn_at(width, split);
+        let volume = hits.bar_area(Hit::LevelBar(4)).expect("the volume bar");
+        let balance = hits.bar_area(Hit::LevelBar(5)).expect("the balance track");
+        // The track is the bar held to an odd count, so the centre mark is exactly central.
+        let odd = volume.width - 1 + volume.width % 2;
+        assert_eq!(balance.width, odd, "{width}/{split}");
+        assert_eq!(balance.width % 2, 1, "{width}/{split}");
+        let mark: Vec<u16> = (balance.x..balance.right())
+            .filter(|x| buffer[(*x, balance.y)].symbol() == BALANCE_MARK)
+            .collect();
+        assert_eq!(mark.len(), 1, "{width}/{split}: {mark:?}");
+        let at = mark[0] - balance.x;
+        assert!(
+            at == balance.width / 2,
+            "{width}/{split}: mark {at} of {}",
+            balance.width
+        );
+    }
+}
+
+/// The Tone pane's Loudness bar runs to its own pane's edge, keeping its reading whole.
+#[test]
+fn the_loudness_bar_reaches_its_panes_edge() {
+    for (width, split) in [(120, 0.5), (200, 0.5), (200, 0.7), (200, 0.3)] {
+        let (hits, buffer) = drawn_at(width, split);
+        let loudness = hits.bar_area(Hit::LoudnessBar).expect("the loudness bar");
+        // The reading is a space and up to three digits; the pane keeps its padding and border
+        // after that, so the bar's end plus four cells is the most it may take.
+        let tail: String = (loudness.right()..width)
+            .map(|x| buffer[(x, loudness.y)].symbol())
+            .collect();
+        let gap = tail
+            .trim_start()
+            .trim_start_matches(|c: char| c.is_ascii_digit());
+        assert!(
+            gap.trim().starts_with('│') || gap.trim().is_empty(),
+            "{width}/{split}: {tail:?}"
+        );
+        let blanks = tail.chars().take_while(|c| *c != '│').count();
+        assert!(
+            blanks <= 8,
+            "{width}/{split}: bar stops short of the edge: {tail:?}"
+        );
+    }
+}
+
+/// A bar's width depends on its pane alone: whatever the volume reads, at either end of its range
+/// and across the -10 dB step where the readout gains a character, the volume and balance bars
+/// keep their width, and so does every other row's.
+#[test]
+fn the_bars_width_does_not_follow_the_reading() {
+    let widths_at = |raw: i64| {
+        let mut app = mockup_app();
+        hear(&mut app, vec![vo("10", Some("volume"), json!(raw), "")]);
+        app.settle();
+        let (hits, _) = {
+            let theme = Theme::new(false);
+            let mut terminal =
+                Terminal::new(TestBackend::new(120, 24)).expect("a test terminal opens");
+            let mut hits = HitMap::default();
+            terminal
+                .draw(|f| {
+                    render::draw(f, &app, &theme, &mut hits);
+                })
+                .expect("the frame draws");
+            (hits, ())
+        };
+        (
+            hits.bar_area(Hit::LevelBar(4))
+                .expect("the volume bar")
+                .width,
+            hits.bar_area(Hit::LevelBar(5))
+                .expect("the balance track")
+                .width,
+        )
+    };
+    let first = widths_at(0);
+    for raw in 0..=127 {
+        assert_eq!(widths_at(raw), first, "volume {raw}");
+    }
+}
+
+/// The balance mark stands exactly on the middle cell of its track, at even and odd pane widths.
+#[test]
+fn the_balance_mark_is_exactly_central_at_every_pane_width() {
+    for width in 90..=130 {
+        let (hits, buffer) = drawn_at(width, 0.5);
+        let track = hits.bar_area(Hit::LevelBar(5)).expect("the balance track");
+        assert_eq!(track.width % 2, 1, "{width}: {track:?}");
+        let mark = (track.x..track.right())
+            .position(|x| buffer[(x, track.y)].symbol() == BALANCE_MARK)
+            .expect("the mark");
+        assert_eq!(mark, usize::from(track.width / 2), "{width}");
     }
 }

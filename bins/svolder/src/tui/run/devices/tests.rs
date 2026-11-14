@@ -260,17 +260,29 @@ async fn an_edited_device_is_written_by_the_daemon_and_the_list_is_its_view() {
     );
     watching.close().await;
 }
-/// The preset list's writes take the device editor's path: each is written through its
-/// configuration writer into the file this session reads, a daemon that reads that file is told
-/// to read it again, and the list is drawn from what is on disk.
+/// Take `intent`, then the end of the preset write it queued, as the loop's own arm folds it.
+async fn written_through<O: Open>(
+    intent: Intent,
+    opener: &Opener<O>,
+    mut watching: Watching,
+) -> Watching {
+    watching = carried_on(taken(intent, opener, watching).await);
+    let done = crate::tui::run::jobs::next(&mut watching.jobs.ended).await;
+    let intents = folded(done, opener, &mut watching);
+    assert!(intents.is_empty(), "a preset write asked for more writes");
+    watching
+}
+/// While a daemon runs the preset list's writes are the daemon's: each is a `preset_write` op,
+/// the daemon writes the file and reloads, and the list is drawn from what is on disk. Each
+/// intent only queues the write; the loop is not held for it.
 #[tokio::test]
-async fn the_preset_lists_writes_reach_the_file_the_daemon_and_the_list() {
+async fn the_preset_lists_writes_are_the_daemons_and_the_list_follows() {
     use svolder_profiles::EqMode;
     use svolder_profiles::tone::preset::{Preset, PresetBand};
 
     let daemon = stub_daemon().await;
     let path = config_naming(&["gungnir"]);
-    daemon.says(None, path.to_str());
+    daemon.applies_preset_ops_to(&path);
     let opener = opener_on(path.clone(), never_opens());
     let backend = Backend::stub_remote(&daemon.socket).await;
     let app = app_for(&backend);
@@ -319,6 +331,8 @@ async fn the_preset_lists_writes_reach_the_file_the_daemon_and_the_list() {
     for (reloads, (intent, wanted)) in (1..).zip(steps) {
         let what = format!("{intent:?}");
         watching = carried_on(taken(intent, &opener, watching).await);
+        let done = crate::tui::run::jobs::next(&mut watching.jobs.ended).await;
+        assert!(folded(done, &opener, &mut watching).is_empty());
         assert_eq!(on_disk(&path), wanted, "{what}: the file");
         let listed: Vec<(String, f64)> = watching
             .app
@@ -337,22 +351,61 @@ async fn the_preset_lists_writes_reach_the_file_the_daemon_and_the_list() {
         );
     }
     assert_eq!(
+        daemon.preset_ops().len(),
+        4,
+        "every write was the daemon's: {:?}",
+        daemon.preset_ops()
+    );
+    assert_eq!(
         named(&path),
         ["gungnir"],
         "a preset write touched the devices"
     );
     watching.close().await;
 }
-/// A daemon that reads another file, or names none, is not told to reload when a preset is
-/// written: the write reaches the file and the list, and nothing is said.
+/// The daemon is the one writer: a name it refuses is a notice in the words it gives, which are
+/// the core's, and nothing is written behind its back.
 #[tokio::test]
-async fn a_preset_write_does_not_reload_a_daemon_that_reads_another_file() {
-    use svolder_profiles::EqMode;
-    use svolder_profiles::tone::preset::{Preset, PresetBand};
+async fn a_name_the_daemon_refuses_is_its_words_and_nothing_is_written_behind_it() {
+    use svolder_ipc::Reason;
+    use svolder_profiles::tone::preset;
 
     let daemon = stub_daemon().await;
     let path = config_naming(&["gungnir"]);
-    let other = config_naming(&["gungnir"]);
+    let words = preset::new_name("evening", ["Evening"], None)
+        .unwrap_err()
+        .to_string();
+    daemon.refuses_preset_ops(
+        Response::error(svolder_ipc::CODE_USAGE, words.clone()).with_reason(Reason::Taken),
+    );
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let watching = watching(backend, app, None);
+    let watching = written_through(
+        Intent::RenamePreset("Evening".into(), "evening".into()),
+        &opener,
+        watching,
+    )
+    .await;
+    assert_eq!(toast_of(&watching).as_deref(), Some(words.as_str()));
+    assert!(
+        Config::load_from(&path).unwrap().presets.is_empty(),
+        "the loop wrote the file itself"
+    );
+    assert_eq!(daemon.preset_ops().len(), 1);
+    watching.close().await;
+}
+/// A daemon from before `preset_write` is refused in words, and the loop writes nothing behind
+/// it: not the file, and not a request it would not understand.
+#[tokio::test]
+async fn a_daemon_without_preset_write_is_refused_in_words_and_nothing_is_written() {
+    use svolder_profiles::EqMode;
+    use svolder_profiles::tone::preset::Preset;
+
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&["device_crud"]);
+    let path = config_naming(&["gungnir"]);
     let opener = opener_on(path.clone(), never_opens());
     let backend = Backend::stub_remote(&daemon.socket).await;
     let app = app_for(&backend);
@@ -360,31 +413,129 @@ async fn a_preset_write_does_not_reload_a_daemon_that_reads_another_file() {
     let preset = Preset {
         name: "evening".into(),
         source: None,
+        bands: 0,
+        mode: EqMode::Eq,
+        loudness: 0,
+        band: Vec::new(),
+    };
+    for intent in [
+        Intent::SavePreset(preset.clone()),
+        Intent::UpdatePreset("evening".into(), preset.clone()),
+        Intent::RenamePreset("evening".into(), "night".into()),
+        Intent::RemovePreset("evening".into()),
+    ] {
+        let what = format!("{intent:?}");
+        watching = written_through(intent, &opener, watching).await;
+        let said = toast_of(&watching).unwrap_or_default();
+        assert!(said.contains("cannot write presets"), "{what}: {said}");
+        assert!(
+            Config::load_from(&path).unwrap().presets.is_empty(),
+            "{what}"
+        );
+    }
+    assert!(
+        daemon.preset_ops().is_empty(),
+        "a request went to a daemon that lacks it"
+    );
+    watching.close().await;
+}
+/// With no daemon the loop's own writers do the work, as the CLI's do, still off the loop: each
+/// of the four reaches the file and the list, and a name the file refuses is a notice.
+#[tokio::test(start_paused = true)]
+async fn without_a_daemon_the_four_writes_are_made_in_process() {
+    use svolder_profiles::EqMode;
+    use svolder_profiles::tone::preset::{Preset, PresetBand};
+
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let path = config_naming(&["gungnir"]);
+    let opener = opener_on(path.clone(), never_opens());
+    let mut watching = watching(backend, app, None);
+    let curve = |name: &str, g: f64| Preset {
+        name: name.into(),
+        source: None,
         bands: 5,
         mode: EqMode::Eq,
         loudness: 0,
         band: vec![
             PresetBand {
                 f: 1000.0,
-                g: 1.0,
+                g,
                 q: 1.0
             };
             5
         ],
     };
-    for reads in [other.to_str(), None] {
-        daemon.says(None, reads);
-        watching = carried_on(taken(Intent::SavePreset(preset.clone()), &opener, watching).await);
-        assert_eq!(daemon.reloads(), 0, "{reads:?}: the daemon was told");
-        watching =
-            carried_on(taken(Intent::RemovePreset("evening".into()), &opener, watching).await);
-        assert_eq!(daemon.reloads(), 0, "{reads:?}: the daemon was told");
+    let listed = |watching: &Watching| -> Vec<(String, f64)> {
+        watching
+            .app
+            .presets
+            .saved
+            .iter()
+            .map(|p| (p.name.clone(), p.band[0].g))
+            .collect()
+    };
+    for (intent, wanted) in [
+        (Intent::SavePreset(curve("one", 2.0)), vec![("one", 2.0)]),
+        (
+            Intent::UpdatePreset("one".into(), curve("one", -1.0)),
+            vec![("one", -1.0)],
+        ),
+        (
+            Intent::RenamePreset("one".into(), "two".into()),
+            vec![("two", -1.0)],
+        ),
+        (Intent::RemovePreset("two".into()), vec![]),
+    ] {
+        let what = format!("{intent:?}");
+        watching = written_through(intent, &opener, watching).await;
+        let wanted: Vec<(String, f64)> = wanted
+            .into_iter()
+            .map(|(n, g)| (n.to_string(), g))
+            .collect();
+        assert_eq!(listed(&watching), wanted, "{what}");
+        assert_eq!(toast_of(&watching), None, "{what}");
     }
-    assert!(
-        watching.app.presets.saved.is_empty(),
-        "the list is not the file"
-    );
-    assert_eq!(watching.app.toast().map(|t| t.text.clone()), None);
+    watching = written_through(Intent::SavePreset(curve("a", 1.0)), &opener, watching).await;
+    watching = written_through(Intent::SavePreset(curve("A", 1.0)), &opener, watching).await;
+    let said = toast_of(&watching).expect("a taken name is a notice");
+    assert!(said.contains('A') || said.contains('a'), "{said}");
+    assert_eq!(listed(&watching).len(), 1);
+    watching.close().await;
+}
+/// Two writes queued back to back reach the daemon in the order they were queued.
+#[tokio::test]
+async fn writes_queued_back_to_back_reach_the_daemon_in_order() {
+    use svolder_ipc::PresetOp;
+
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir"]);
+    daemon.applies_preset_ops_to(&path);
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, None);
+    let intents = [
+        Intent::RemovePreset("a".into()),
+        Intent::RenamePreset("b".into(), "c".into()),
+        Intent::RemovePreset("c".into()),
+    ];
+    for intent in intents {
+        watching = carried_on(taken(intent, &opener, watching).await);
+    }
+    for _ in 0..3 {
+        let done = crate::tui::run::jobs::next(&mut watching.jobs.ended).await;
+        let _ = folded(done, &opener, &mut watching);
+    }
+    let asked: Vec<String> = daemon
+        .preset_ops()
+        .into_iter()
+        .map(|op| match op {
+            PresetOp::Delete { name } => format!("delete {name}"),
+            PresetOp::Rename { from, to } => format!("rename {from} {to}"),
+            PresetOp::Save { .. } | PresetOp::Update { .. } => "save".to_string(),
+        })
+        .collect();
+    assert_eq!(asked, ["delete a", "rename b c", "delete c"]);
     watching.close().await;
 }
 /// Opening the preset list reads the file again, so a preset another front end wrote since
@@ -455,14 +606,12 @@ async fn a_preset_write_the_file_refuses_is_a_notice() {
     let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
     let path = config_naming(&["gungnir"]);
     let opener = opener_on(path.clone(), never_opens());
-    let watching = carried_on(
-        taken(
-            Intent::RenamePreset("nobody".into(), "somebody".into()),
-            &opener,
-            watching(backend, app, None),
-        )
-        .await,
-    );
+    let watching = written_through(
+        Intent::RenamePreset("nobody".into(), "somebody".into()),
+        &opener,
+        watching(backend, app, None),
+    )
+    .await;
     let notice = watching
         .app
         .toast()
@@ -2784,5 +2933,91 @@ async fn a_failed_list_ask_is_tried_again_at_the_next_relist() {
     super::take_view(&mut watching);
     assert!(!watching.view_off, "one failed ask turned the list off");
     assert!(watching.view_ask.is_some(), "no new ask was started");
+    watching.close().await;
+}
+
+/// A daemon that reads another configuration file is not written to: each of the preset list's
+/// writes is refused in the words the other writes use, nothing is queued and nothing sent.
+#[tokio::test]
+async fn a_daemon_reading_another_file_is_sent_no_preset_write() {
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir"]);
+    daemon.applies_preset_ops_to(&path);
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let mut watching = watching(backend, app, None);
+    watching.app.overlays.conn.elsewhere = Some("/other/config.toml".into());
+    for intent in [
+        Intent::RenamePreset("a".into(), "b".into()),
+        Intent::RemovePreset("a".into()),
+    ] {
+        watching = carried_on(taken(intent, &opener, watching).await);
+        assert_eq!(
+            toast_of(&watching).as_deref(),
+            Some("read-only here: the daemon reads /other/config.toml")
+        );
+        assert!(
+            watching.jobs.ended.try_recv().is_err(),
+            "a write was queued"
+        );
+    }
+    assert!(daemon.preset_ops().is_empty());
+    watching.close().await;
+}
+
+/// `u` on a preset another front end deleted says it is gone, with a daemon and without one, and
+/// writes nothing.
+#[tokio::test(start_paused = true)]
+async fn an_update_of_a_preset_that_is_gone_is_refused_with_and_without_a_daemon() {
+    use svolder_profiles::EqMode;
+    use svolder_profiles::tone::preset::Preset;
+
+    let curve = Preset {
+        name: "gone".into(),
+        source: None,
+        bands: 5,
+        mode: EqMode::Eq,
+        loudness: 0,
+        band: vec![
+            svolder_profiles::tone::preset::PresetBand {
+                f: 1000.0,
+                g: 1.0,
+                q: 1.0
+            };
+            5
+        ],
+    };
+    // With a daemon: the stub applies the op as the daemon's writers do.
+    let daemon = stub_daemon().await;
+    let path = config_naming(&["gungnir"]);
+    daemon.applies_preset_ops_to(&path);
+    let opener = opener_on(path.clone(), never_opens());
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let app = app_for(&backend);
+    let held = watching(backend, app, None);
+    let held = written_through(
+        Intent::UpdatePreset("gone".into(), curve.clone()),
+        &opener,
+        held,
+    )
+    .await;
+    let said = toast_of(&held).expect("a refusal");
+    assert!(said.contains("gone"), "{said}");
+    assert!(Config::load_from(&path).unwrap().presets.is_empty());
+    held.close().await;
+    // Without one.
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let path = config_naming(&["gungnir"]);
+    let opener = opener_on(path.clone(), never_opens());
+    let watching = written_through(
+        Intent::UpdatePreset("gone".into(), curve),
+        &opener,
+        watching(backend, app, None),
+    )
+    .await;
+    let said = toast_of(&watching).expect("a refusal");
+    assert!(said.contains("gone"), "{said}");
+    assert!(Config::load_from(&path).unwrap().presets.is_empty());
     watching.close().await;
 }

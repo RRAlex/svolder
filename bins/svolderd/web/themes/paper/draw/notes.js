@@ -77,7 +77,7 @@ export function notes(page, device, view) {
   return own
     .map((n, i) => `<span class="pn t${tiltOf(n.id)}${n.red ? ' red' : ''}" data-note="${esc(n.id)}"`
       + ` data-n="${i}"`
-      + ` data-about="${esc(n.about)}"${n.id === 'track' ? trackData(p, p.track, now, n.text) : ''}>`
+      + ` data-about="${esc(n.about)}"${n.title ? ` title="${esc(n.title)}"` : ''}${n.id === 'track' ? trackData(p, p.track, now, n.text) : ''}>`
       + `${ink(n.text)}</span>`)
     .join('');
 }

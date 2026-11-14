@@ -31,7 +31,7 @@ pub mod payload;
 pub(crate) mod test_support;
 pub mod topics;
 
-pub use client::{Client, ClientEvent, Link, Settings};
+pub use client::{Client, ClientEvent, Link, Settings, Trouble};
 pub use command::{ParsedCommand, parse as parse_command};
 pub use discovery::{
     CLEARING_PAYLOAD, Device, DiscoveryEntry, EQ_MODE_KEY, configs as discovery_configs,

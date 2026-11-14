@@ -109,6 +109,18 @@ impl Computer {
     }
 }
 
+/// The cover art of the track the daemon follows, as the app holds it.
+#[derive(Debug, Clone, Default)]
+pub struct Cover {
+    /// The cover's name (a hash) while the track has one: what the art is asked for by.
+    pub hash: Option<String>,
+    /// The terminal's cell size in pixels `(width, height)` while the art is drawn, which the
+    /// layout sizes the picture's box by; `None` with the art off.
+    pub font: Option<(u16, u16)>,
+    /// The picture, sized for its box and ready to draw, for the track the daemon follows.
+    pub picture: Option<crate::tui::art::Picture>,
+}
+
 /// What the TUI knows of the host's own audio.
 #[derive(Debug, Clone)]
 pub struct Host {
@@ -130,6 +142,9 @@ pub struct Host {
     /// What the followed player plays, or `None` with no player on the bus. The daemon's player
     /// while [`Host::daemon`] is set, else the one the loop's own watcher follows.
     pub playing: Option<NowPlaying>,
+    /// The cover art of the daemon's followed track: what it is named by, what the layout sizes
+    /// its box by and the picture itself.
+    pub cover: Box<Cover>,
     /// What the joined daemon says of the host while it says its host side is available. Set,
     /// the daemon is the authority for the player, the transport and the path, and the loop's
     /// own watcher of the players stands aside; `None` on a direct session and on a daemon with
@@ -173,6 +188,7 @@ impl Host {
             asked: None,
             bus: false,
             playing: None,
+            cover: Box::default(),
             daemon: None,
             marquee: Marquee::new(now),
             button: 0,
@@ -302,6 +318,7 @@ impl Host {
             if self.daemon.take().is_some() {
                 self.lost_bus();
             }
+            self.cover.hash = None;
             *self.computer = Computer {
                 why: Some(DAEMON_HOST_OFF.to_string()),
                 ..Computer::default()
@@ -323,6 +340,10 @@ impl Host {
             route: view.route.map(Box::new),
         });
         self.bus = true;
+        self.cover.hash = view
+            .playing
+            .as_ref()
+            .and_then(|playing| playing.cover.clone());
         self.fold_playing(view.playing.map(now_playing_of), now);
     }
 
@@ -341,6 +362,7 @@ impl Host {
     pub fn lost_bus(&mut self) {
         self.bus = false;
         self.playing = None;
+        self.cover.hash = None;
     }
 
     /// The words the `Now playing` row says of the followed player's track, `Title — Artist`,

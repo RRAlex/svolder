@@ -136,6 +136,7 @@ impl Config {
     ///
     /// An id no block carries is refused, and so is renaming onto another hop's id; renaming a
     /// block to the id it has, or to another spelling of it, is no collision.
+    #[cfg(test)]
     pub fn update_hop(path: &Path, id: &str, hop: &Hop) -> Result<(), ConfigError> {
         let hop = &written(hop)?;
         edit_file(path, |doc| {
@@ -155,7 +156,7 @@ impl Config {
 
     /// Change the hop whose id is `id` in the file at `path`: `change` gets the hop as the file
     /// holds it once the file's lock is taken, and returns the hop to write over it, as
-    /// [`Config::update_hop`] takes it. A change made from a hop read before the lock would
+    /// `Config::update_hop` takes it. A change made from a hop read before the lock would
     /// write back what another writer changed in between; this one cannot. An id no block
     /// carries is refused, and so is what `change` refuses.
     pub fn edit_hop(

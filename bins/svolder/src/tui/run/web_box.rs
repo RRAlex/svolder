@@ -17,8 +17,9 @@ use super::Look;
 use super::Watching;
 use super::look::{Browser, Copier};
 use crate::commands::web::{LOGIN_FRAGMENT, lan_here, local_base, open_link, phone_base};
+use crate::tui::boxes::connections::GuestView;
 use crate::tui::boxes::connections::{Modal, osc52};
-use crate::tui::boxes::web_box::Code;
+use crate::tui::boxes::web_box::{Code, Page};
 use crate::tui::clipboard::{self, Tried};
 
 /// What a copy for the box came out as, with what it copied: said when it arrives.
@@ -168,12 +169,31 @@ fn listens(conn: &crate::tui::boxes::connections::Connections) -> (SocketAddr, S
     }
 }
 
-/// Take a code answer in: a link is shown with the base a phone reaches (this computer's, marked
-/// as such, when a phone cannot reach it), a pairing code as it is; a refusal is said, and a
-/// link that could not be replaced goes, so it is not asked for again. Answers whether a code
-/// came in.
-pub(super) fn answered(watching: &mut Watching, (link, answer): Asked, now: Instant) -> bool {
-    let conn = &watching.app.overlays.conn;
+/// Where a phone opens the page, for the listen address now.
+struct Reached {
+    /// The base a phone reaches, or this computer's own when none is found.
+    base: String,
+    /// Whether the base is this computer's because none a phone reaches was found.
+    local: bool,
+    /// Why a wildcard listen has no address a phone reaches, when that is why.
+    unreachable: Option<String>,
+    /// The listen addresses it was made for: the file's and the daemon's.
+    made_for: (SocketAddr, SocketAddr),
+}
+
+impl Reached {
+    /// The page's link: the base with no code, which never ends.
+    fn page(&self) -> Page {
+        Page {
+            url: self.base.clone(),
+            local: self.local,
+            made_for: self.made_for,
+        }
+    }
+}
+
+/// Where a phone opens the page, from the listen addresses `conn` holds.
+fn reached(conn: &crate::tui::boxes::connections::Connections) -> Reached {
     let made_for = listens(conn);
     let (_, listen) = made_for;
     let phone = phone_base(conn.web.url.as_deref(), listen, lan_here());
@@ -186,6 +206,99 @@ pub(super) fn answered(watching: &mut Watching, (link, answer): Asked, now: Inst
         .filter(|_| listen.ip().is_unspecified())
         .cloned();
     let base = phone.unwrap_or_else(|_| local_base(listen));
+    Reached {
+        base,
+        local,
+        unreachable,
+        made_for,
+    }
+}
+
+/// Make the page the guest QR draws for the listen address now, when the guest view is on and
+/// the box has none for it yet.
+fn refresh_page(watching: &mut Watching) {
+    if watching.app.overlays.conn.guest_view() != GuestView::Open {
+        return;
+    }
+    let listening = listens(&watching.app.overlays.conn);
+    let Some(Modal::Web(web)) = &watching.app.overlays.conn.modal else {
+        return;
+    };
+    if web
+        .page
+        .as_ref()
+        .is_some_and(|page| page.made_for == listening)
+    {
+        return;
+    }
+    let page = reached(&watching.app.overlays.conn).page();
+    if let Some(Modal::Web(web)) = watching.app.overlays.conn.modal.as_mut() {
+        web.page = Some(Box::new(page));
+    }
+}
+
+/// The daemon's status came in: the guest page is made for it, and a box opened before it came in
+/// that has no link asks for one now, once, as one opened after it does.
+pub(super) fn status_in(watching: &mut Watching) {
+    refresh_page(watching);
+    let conn = &watching.app.overlays.conn;
+    let listening = conn.daemon_up == Some(true)
+        && matches!(
+            conn.web_status,
+            Some(svolder_ipc::WebStatus::Listening { .. })
+        );
+    let wants = match &conn.modal {
+        Some(Modal::Web(web)) => listening && web.link.is_none() && !web.auto_asked,
+        _ => false,
+    };
+    if wants {
+        if let Some(Modal::Web(web)) = watching.app.overlays.conn.modal.as_mut() {
+            web.auto_asked = true;
+        }
+        ask(watching, true);
+    }
+}
+
+/// What a restart of the web server did to the codes on show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Dropped {
+    /// No code was on show or on its way.
+    Nothing,
+    /// A link was on show or on its way: a fresh one is asked for.
+    Link,
+    /// A pairing code was on show: it is gone, and not asked for again.
+    Pairing,
+}
+
+/// The web server restarted because the guest view was switched: the codes it minted are gone, so
+/// a link on show, or one on its way from the old server, is asked for again and a pairing code
+/// on show goes. The caller words it.
+pub(super) fn server_restarted(watching: &mut Watching) -> Dropped {
+    let (link, pair) = match &watching.app.overlays.conn.modal {
+        Some(Modal::Web(web)) => (
+            web.link.is_some() || watching.web_code.is_some(),
+            web.pair.is_some(),
+        ),
+        _ => return Dropped::Nothing,
+    };
+    if !link && !pair {
+        return Dropped::Nothing;
+    }
+    forget_codes(watching);
+    if link {
+        ask(watching, true);
+        return Dropped::Link;
+    }
+    Dropped::Pairing
+}
+
+/// Take a code answer in: a link is shown with the base a phone reaches (this computer's, marked
+/// as such, when a phone cannot reach it), a pairing code as it is; a refusal is said, and a
+/// link that could not be replaced goes, so it is not asked for again. Answers whether a code
+/// came in.
+pub(super) fn answered(watching: &mut Watching, (link, answer): Asked, now: Instant) -> bool {
+    let reach = reached(&watching.app.overlays.conn);
+    let base = reach.base.clone();
     let code = match answer {
         Some(Response::WebLink {
             code,
@@ -214,15 +327,16 @@ pub(super) fn answered(watching: &mut Watching, (link, answer): Asked, now: Inst
         match link {
             true => {
                 web.link = Some(code);
-                web.link_for = Some(made_for);
-                web.link_local = local;
+                web.link_for = Some(reach.made_for);
+                web.link_local = reach.local;
                 web.link_replaced = std::mem::take(&mut web.link_replacing);
                 web.link_unwatched = false;
+                web.page = Some(Box::new(reach.page()));
             }
             false => web.pair = Some(code),
         }
     }
-    if link && let Some(why) = unreachable {
+    if link && let Some(why) = reach.unreachable {
         watching.app.warn(why);
     }
     true
@@ -267,6 +381,7 @@ pub(super) fn forget_codes(watching: &mut Watching) {
 /// Once a second while the box is open: a link that has ended, or that was made for another
 /// listen address than the one now, is replaced.
 pub(super) fn tick(watching: &mut Watching, now: Instant) {
+    refresh_page(watching);
     let listening = listens(&watching.app.overlays.conn);
     let stale = match &watching.app.overlays.conn.modal {
         Some(Modal::Web(web)) => web

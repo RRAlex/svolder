@@ -396,3 +396,22 @@ fn the_web_store_has_its_own_variable_and_file() {
     assert!(refused.0.contains("SVOLDER_WEB_TOKEN"), "{refused}");
     assert_eq!(base64url(&[0xfb, 0xff]), "-_8");
 }
+
+/// The decoder is the encoder's inverse for every length, and refuses what no encoder writes.
+#[test]
+fn base64url_decode_inverts_the_encoder() {
+    for len in 0..70usize {
+        let bytes: Vec<u8> = (0..len).map(|i| (i * 37 + 11) as u8).collect();
+        assert_eq!(
+            base64url_decode(&base64url(&bytes)).as_deref(),
+            Some(&bytes[..])
+        );
+    }
+    assert_eq!(
+        base64url_decode("_9j_").as_deref(),
+        Some(&[0xff, 0xd8, 0xff][..])
+    );
+    for bad in ["A", "AAAAA", "AA==", "A+A=", "AB", "AAB", "!!!!", "AA AA"] {
+        assert_eq!(base64url_decode(bad), None, "{bad}");
+    }
+}

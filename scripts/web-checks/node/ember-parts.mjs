@@ -833,6 +833,15 @@ ok('with_no_player_the_card_is_one_quiet_line', () => {
   }
 });
 
+ok('a_sound_elsewhere_has_short_words_and_the_whole_sentence_as_a_tooltip', () => {
+  const html = drawn('playing-guest-other-sink', 'playing');
+  assert.ok(html.includes('title="the computer plays to Bose Speakers"'), html);
+  assert.ok(html.includes('<span aria-hidden="true">\u2192 Bose Speakers</span><span class="np-sr">the computer plays to Bose Speakers</span>'), html);
+  assert.ok(!html.includes('role="img" aria-label="the computer'), html);
+  const plain = drawn('playing-changed-route', 'playing');
+  assert.ok(!plain.includes('np-verdict" title'), plain);
+});
+
 ok('the_verdict_chip_comes_before_the_hops', () => {
   const html = drawn('playing-changed-route', 'playing');
   assert.ok(html.indexOf('np-verdict') < html.indexOf('np-hop'), html);

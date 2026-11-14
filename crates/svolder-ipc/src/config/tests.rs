@@ -36,8 +36,6 @@ mod web;
 mod template;
 // the file's mode, locks and failed saves
 mod writers;
-// the config home and scratch homes
-mod paths;
 // the refusals a caller matches on
 mod errors;
 

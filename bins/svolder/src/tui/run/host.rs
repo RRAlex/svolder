@@ -155,6 +155,8 @@ pub(in crate::tui) struct HostLink {
     pub(super) refusals: Option<mpsc::UnboundedReceiver<String>>,
     /// Where the tasks that press through the daemon say it refused.
     refuse: Option<mpsc::UnboundedSender<String>>,
+    /// The cover art of the track the daemon follows, fetched and sized off the loop.
+    pub(super) art: Box<crate::tui::art::Art>,
 }
 
 impl HostLink {

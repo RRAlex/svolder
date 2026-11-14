@@ -110,3 +110,61 @@ fn a_password_without_a_user_name_is_not_sent() {
     };
     assert!(options(&settings).credentials().is_none());
 }
+
+#[test]
+fn a_connect_failure_is_told_apart_by_what_the_broker_or_the_network_said() {
+    use rumqttc::{ConnectReturnCode, ConnectionError};
+    use std::io::{Error, ErrorKind};
+
+    for code in [
+        ConnectReturnCode::BadUserNamePassword,
+        ConnectReturnCode::NotAuthorized,
+    ] {
+        assert_eq!(
+            Trouble::of(&ConnectionError::ConnectionRefused(code)),
+            Trouble::LoginRefused
+        );
+    }
+    assert_eq!(
+        Trouble::of(&ConnectionError::ConnectionRefused(
+            ConnectReturnCode::ServiceUnavailable
+        )),
+        Trouble::Other
+    );
+    assert_eq!(
+        Trouble::of(&ConnectionError::Io(Error::from(
+            ErrorKind::ConnectionRefused
+        ))),
+        Trouble::Unreachable
+    );
+    assert_eq!(
+        Trouble::of(&ConnectionError::Io(Error::other(
+            "failed to lookup address"
+        ))),
+        Trouble::Unreachable
+    );
+    // A peer that accepts the connection and then closes it or says nothing: the shape of a
+    // TLS port spoken to in plain text.
+    for kind in [
+        ErrorKind::UnexpectedEof,
+        ErrorKind::ConnectionReset,
+        ErrorKind::BrokenPipe,
+    ] {
+        assert_eq!(
+            Trouble::of(&ConnectionError::Io(Error::from(kind))),
+            Trouble::Dropped,
+            "{kind:?}"
+        );
+    }
+    assert_eq!(
+        Trouble::of(&ConnectionError::NetworkTimeout),
+        Trouble::Dropped
+    );
+    // A broker that closes on the connect packet without an answer.
+    assert_eq!(
+        Trouble::of(&ConnectionError::MqttState(
+            rumqttc::StateError::ConnectionAborted
+        )),
+        Trouble::Dropped
+    );
+}

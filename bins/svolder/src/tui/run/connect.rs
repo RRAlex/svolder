@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use svolder_ipc::token::{self, Store, Token, TokenError};
 use svolder_ipc::{
-    Config, DEFAULT_REQUEST_TIMEOUT, FEATURE_SERVER_SWITCH, McpStatus, Request, Response, Server,
-    WebStatus,
+    Config, DEFAULT_REQUEST_TIMEOUT, FEATURE_GUEST_SWITCH, FEATURE_MQTT_SET, FEATURE_SERVER_SWITCH,
+    McpStatus, MqttOp, MqttStatus, Request, Response, Server, WebGuest, WebStatus,
 };
 
 use super::{
@@ -176,19 +176,16 @@ pub(super) async fn changed<O: Open>(
         watching.app.warn(words);
         return;
     }
-    // Turning the web UI or the MCP server on or off while a daemon runs is its switch, which
-    // writes the file and starts or stops the server itself; no other writer is behind it.
-    if let Some((server, enabled)) = switch_of(change) {
+    // Turning the web UI or the MCP server on or off, or the web UI's guest view, while a daemon
+    // runs is its switch, which writes the file and applies it itself; no other writer is behind
+    // it.
+    if let Some(switch) = switch_of(change) {
         let socket = super::devices::daemon_socket(opener, watching);
         // The daemon's version and then its reload can take seconds: shown as a wait.
-        let mut wait = super::devices::Wait::new(format!(
-            "turning the {} {}…",
-            server.table(),
-            if enabled { "on" } else { "off" }
-        ));
+        let mut wait = super::devices::Wait::new(switch.waiting());
         let sent = wait
             .on(
-                switch_through(&socket, server, enabled),
+                switch_through(&socket, switch.clone()),
                 watching,
                 look,
                 screen,
@@ -199,6 +196,16 @@ pub(super) async fn changed<O: Open>(
             Ok(Some(line)) => {
                 super::devices::ask_again(watching);
                 reread(watching, site);
+                if let ConnChange::WebGuest(read) = change {
+                    guest_switched(opener, watching, *read);
+                }
+                if matches!(switch, Switch::Mqtt(_)) {
+                    // The rows show what the file holds, which the daemon has just written.
+                    match Config::load_from(&opener.path) {
+                        Ok(config) => watching.app.take_config(&config),
+                        Err(e) => watching.app.warn(format!("configuration not read: {e}")),
+                    }
+                }
                 if let Some(line) = line {
                     watching.app.warn(line);
                 }
@@ -214,19 +221,119 @@ pub(super) async fn changed<O: Open>(
     let wrote = match (change.is_mcp(), change.is_web()) {
         (true, _) => Config::update_mcp(&opener.path, |mcp| change.apply_mcp(mcp)),
         (_, true) => Config::update_web(&opener.path, |web| change.apply_web(web)),
-        (false, false) => Config::update_mqtt(&opener.path, |mqtt| change.apply_mqtt(mqtt)),
+        (false, false) => Config::update_mqtt_noting(&opener.path, |mqtt| change.apply_mqtt(mqtt))
+            .map(|tightened| {
+                if tightened {
+                    watching
+                        .app
+                        .notify("config.toml was readable by others: now 0600");
+                }
+            }),
     };
-    if super::written(opener, watching, wrote).await {
+    let written = super::written(opener, watching, wrote).await;
+    if written && !change.is_mcp() && !change.is_web() {
+        // A daemon may have started since the socket was tried and read the file before this
+        // write; it is told, as the guest switch's file write tells it.
+        let socket = super::devices::daemon_socket(opener, watching);
+        crate::backend::reload_if_reads(socket, &opener.path).await;
+    }
+    if written && matches!(change, ConnChange::WebGuest(_)) {
+        // A daemon may have started since the socket was tried and read the file before this
+        // write; the guest view must reach it, as `guest off` is a revocation.
+        let socket = super::devices::daemon_socket(opener, watching);
+        crate::backend::reload_if_reads(socket, &opener.path).await;
+    }
+    if written {
         // `written` asked the daemon again after its reload
         reread(watching, site);
+        if matches!(change, ConnChange::WebGuest(true))
+            && watching.app.overlays.conn.web.auth != svolder_ipc::config::WebAuth::None
+        {
+            watching.app.warn(GUEST_ON_WARNING);
+        }
     }
 }
 
-/// The server and the state a change is the daemon's switch for: only the two on/off keys.
-fn switch_of(change: &ConnChange) -> Option<(Server, bool)> {
+/// What the status line says once when the guest view opens.
+const GUEST_ON_WARNING: &str =
+    "guest view on: anyone on your network can look at the devices, read-only";
+
+/// The daemon switched the guest view: the file's `[web]` is taken in, the sign-in codes the
+/// restarted web server dropped are asked for again, and turning the view on says who can look.
+fn guest_switched<O: Open>(opener: &Opener<O>, watching: &mut Watching, read: bool) {
+    match Config::load_from(&opener.path) {
+        Ok(config) => watching.app.take_config(&config),
+        Err(e) => watching.app.warn(format!("configuration not read: {e}")),
+    }
+    let dropped = super::web_box::server_restarted(watching);
+    let pairing = dropped == super::web_box::Dropped::Pairing;
+    // Under `auth = "none"` no view is read-only: the daemon's own line says so instead.
+    let read = read && watching.app.overlays.conn.web.auth != svolder_ipc::config::WebAuth::None;
+    // The one toast slot holds the newest word, so the restart's note rides on the warning.
+    match (read, dropped) {
+        (true, _) if pairing => watching.app.warn(format!(
+            "{GUEST_ON_WARNING}; the pairing code ended: p makes a new one"
+        )),
+        (true, _) => watching.app.warn(GUEST_ON_WARNING),
+        (false, super::web_box::Dropped::Link) => watching
+            .app
+            .notify("the web server restarted: a fresh sign-in link is shown"),
+        (false, _) if pairing => watching
+            .app
+            .notify("the web server restarted: the pairing code ended; p makes a new one"),
+        (false, _) => {}
+    }
+}
+
+/// A change the daemon has a switch for.
+#[derive(Clone)]
+enum Switch {
+    /// One key of `[mqtt]`.
+    Mqtt(MqttOp),
+    /// A server on or off.
+    Server(Server, bool),
+    /// The web UI's guest read view on or off.
+    Guest(bool),
+}
+
+impl Switch {
+    /// What the wait says while the daemon answers.
+    fn waiting(&self) -> String {
+        match *self {
+            Switch::Mqtt(_) => "saving the MQTT setting…".to_string(),
+            Switch::Server(server, enabled) => format!(
+                "turning the {} {}…",
+                server.table(),
+                if enabled { "on" } else { "off" }
+            ),
+            Switch::Guest(read) => {
+                format!(
+                    "turning the guest view {}…",
+                    if read { "on" } else { "off" }
+                )
+            }
+        }
+    }
+}
+
+/// The switch a change is: the two on/off keys and the guest view.
+fn switch_of(change: &ConnChange) -> Option<Switch> {
     match change {
-        ConnChange::WebEnabled(on) => Some((Server::Web, *on)),
-        ConnChange::McpEnabled(on) => Some((Server::Mcp, *on)),
+        ConnChange::WebEnabled(on) => Some(Switch::Server(Server::Web, *on)),
+        ConnChange::McpEnabled(on) => Some(Switch::Server(Server::Mcp, *on)),
+        ConnChange::WebGuest(read) => Some(Switch::Guest(*read)),
+        ConnChange::MqttEnabled(on) => Some(Switch::Mqtt(MqttOp::Enabled { enabled: *on })),
+        ConnChange::MqttCommands(on) => Some(Switch::Mqtt(MqttOp::Commands { commands: *on })),
+        ConnChange::MqttHost(host) => Some(Switch::Mqtt(MqttOp::Host {
+            value: host.clone(),
+        })),
+        ConnChange::MqttPort(port) => Some(Switch::Mqtt(MqttOp::Port { value: *port })),
+        ConnChange::MqttUsername(name) => Some(Switch::Mqtt(MqttOp::Username {
+            value: name.clone(),
+        })),
+        ConnChange::MqttPassword(secret) => Some(Switch::Mqtt(MqttOp::Password {
+            value: secret.as_ref().map(|s| s.expose().to_string()),
+        })),
         _ => None,
     }
 }
@@ -234,28 +341,75 @@ fn switch_of(change: &ConnChange) -> Option<(Server, bool)> {
 /// Send the switch to the daemon on `socket` when one runs: `Ok(None)` with none (the caller
 /// writes the file), `Ok(Some(None))` once the server stands as asked, `Ok(Some(Some(line)))`
 /// with the daemon's own line when it does not, and the words of a refusal otherwise: a daemon
-/// that cannot switch is told to restart, and nothing is written behind it.
-async fn switch_through(
-    socket: &Path,
-    server: Server,
-    enabled: bool,
-) -> Result<Option<Option<String>>, String> {
-    match crate::reach::daemon_runs(socket, FEATURE_SERVER_SWITCH, "switch its servers").await {
+/// that cannot switch is told to restart, and nothing is written behind it. A guest view stands
+/// as asked when the web UI listens with that mode, or is off (the key is written all the same).
+async fn switch_through(socket: &Path, switch: Switch) -> Result<Option<Option<String>>, String> {
+    let (feature, what, request) = match switch.clone() {
+        Switch::Mqtt(op) => (
+            FEATURE_MQTT_SET,
+            "change its MQTT settings",
+            Request::MqttSet { op },
+        ),
+        Switch::Server(server, enabled) => (
+            FEATURE_SERVER_SWITCH,
+            "switch its servers",
+            Request::ServerSwitch { server, enabled },
+        ),
+        Switch::Guest(read) => (
+            FEATURE_GUEST_SWITCH,
+            "switch the guest view",
+            Request::GuestSwitch { read },
+        ),
+    };
+    match crate::reach::daemon_runs(socket, feature, what).await {
         Ok(false) => return Ok(None),
         Ok(true) => {}
         Err(failure) => return Err(failure.to_string()),
     }
-    let request = Request::ServerSwitch { server, enabled };
     let reply =
         svolder_ipc::request_on_own_connection(socket, request, Some(DEFAULT_REQUEST_TIMEOUT))
             .await;
     match reply {
-        Ok(Response::ServerSwitch { web, mcp }) => {
-            let (line, standing) = match server {
-                Server::Web => (web.line(), matches!(web, WebStatus::Listening { .. })),
-                Server::Mcp => (mcp.line(), matches!(mcp, McpStatus::Listening { .. })),
+        Ok(Response::MqttSet { status, tightened }) => {
+            let stands = match &switch {
+                Switch::Mqtt(MqttOp::Enabled { enabled }) => {
+                    matches!(status, MqttStatus::Off) != *enabled
+                }
+                _ => true,
             };
-            Ok(Some((standing != enabled).then_some(line)))
+            let mut said = Vec::new();
+            if !stands {
+                said.push(crate::commands::daemon::status::mqtt_line(&status));
+            }
+            if tightened {
+                said.push("the config file was readable by others: now 0600".to_string());
+            }
+            Ok(Some((!said.is_empty()).then(|| said.join("; "))))
+        }
+        Ok(Response::ServerSwitch { web, mcp }) => {
+            let (stands, line) = match switch {
+                Switch::Mqtt(_) => {
+                    return Err("the daemon sent an unexpected reply".to_string());
+                }
+                Switch::Server(Server::Web, enabled) => (
+                    matches!(web, WebStatus::Listening { .. }) == enabled,
+                    web.line(),
+                ),
+                Switch::Server(Server::Mcp, enabled) => (
+                    matches!(mcp, McpStatus::Listening { .. }) == enabled,
+                    mcp.line(),
+                ),
+                Switch::Guest(read) => {
+                    let asked = if read { WebGuest::Read } else { WebGuest::None };
+                    let stands = match &web {
+                        WebStatus::Listening { guest, .. } => *guest == asked,
+                        WebStatus::Off => true,
+                        _ => false,
+                    };
+                    (stands, web.line())
+                }
+            };
+            Ok(Some((!stands).then_some(line)))
         }
         Ok(Response::Error { message, .. }) => Err(message),
         Ok(other) => Err(format!("the daemon sent an unexpected reply: {other:?}")),
@@ -412,6 +566,10 @@ pub(super) fn daemon_answered(
     own_config: &std::path::Path,
 ) {
     if let Some(info) = &info {
+        watching
+            .host
+            .art
+            .daemon_serves(info.supports(svolder_ipc::FEATURE_HOST_COVER));
         watching.app.overlays.conn.daemon_said(info, own_config);
         match (
             &watching.app.overlays.conn.config_changed,
@@ -439,6 +597,7 @@ pub(super) fn daemon_answered(
     }
     watching.app.session.daemon_version = version;
     watching.daemon_version = None;
+    super::web_box::status_in(watching);
 }
 
 /// Whether a daemon answers on `socket` within `window`, looking again after a pause that

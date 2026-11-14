@@ -377,6 +377,327 @@ async fn the_web_rows_write_their_keys_and_switch_through_the_daemon() {
     assert_eq!(daemon.switches().len(), 2);
 }
 
+/// The guest change is the daemon's `guest_switch` while one runs, with no file write behind it
+/// and none for a reload; a daemon that lacks it is told to restart, and nothing is written. The
+/// change is also a `[web]` key, which a session with no daemon writes into the file itself.
+#[tokio::test]
+async fn the_guest_change_switches_through_the_daemon_and_is_a_web_key() {
+    let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&["guest_switch"]);
+    daemon.says_web(Some(network()), None);
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+    let watching = taken(
+        Intent::Connection(ConnChange::WebGuest(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert_eq!(daemon.guest_switches(), [true]);
+    assert_eq!(daemon.reloads(), 0, "the daemon reloads itself");
+    let config =
+        svolder_ipc::Config::load_from_with(&path, &svolder_ipc::config::ListenDefaults::default())
+            .unwrap();
+    assert_eq!(
+        config.web.guest,
+        WebGuest::None,
+        "no write behind the daemon"
+    );
+
+    daemon.lists_features(&[]);
+    let mut watching = watching;
+    watching.app.dismiss_toast();
+    let watching = taken(
+        Intent::Connection(ConnChange::WebGuest(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let said = watching
+        .app
+        .toast()
+        .map(|toast| toast.text.clone())
+        .unwrap_or_default();
+    assert!(said.contains("svolder daemon restart"), "{said}");
+    assert_eq!(daemon.guest_switches(), [true]);
+    let config =
+        svolder_ipc::Config::load_from_with(&path, &svolder_ipc::config::ListenDefaults::default())
+            .unwrap();
+    assert_eq!(
+        config.web.guest,
+        WebGuest::None,
+        "no write around an old daemon"
+    );
+
+    let change = ConnChange::WebGuest(true);
+    assert!(change.is_web() && !change.is_mcp());
+    let mut web = svolder_ipc::config::WebConfig::default();
+    change.apply_web(&mut web);
+    assert_eq!(web.guest, WebGuest::Read);
+}
+
+/// The Web UI box on a daemon that listens, with a sign-in link and/or a pairing code on show.
+async fn box_with_codes(
+    link: bool,
+    pair: bool,
+) -> (
+    crate::test_support::stub_daemon::StubServer,
+    std::path::PathBuf,
+    Watching,
+) {
+    let (daemon, path, mut watching) = on_a_daemon().await;
+    daemon.lists_features(&["guest_switch"]);
+    daemon.says_web(Some(network()), None);
+    watching.app.overlays.conn.daemon_up = Some(true);
+    watching.app.overlays.conn.web_status = Some(network());
+    let code = |text: &str| crate::tui::boxes::web_box::Code {
+        text: text.into(),
+        until: Instant::now() + Duration::from_secs(90),
+    };
+    watching.app.overlays.conn.modal = Some(Modal::Web(WebBox {
+        link: link.then(|| code("http://192.168.1.20:8738/#login=old")),
+        pair: pair.then(|| code("482913")),
+        ..WebBox::default()
+    }));
+    (daemon, path, watching)
+}
+
+/// A guest switch restarts the web server, which drops the codes it minted: a link on show is
+/// asked for again (the box shows no dead QR meanwhile), a pairing code on show goes with a word,
+/// and with none on show nothing is asked.
+#[tokio::test]
+async fn a_guest_switch_replaces_the_sign_in_codes_the_restart_dropped() {
+    let (_daemon, path, watching) = box_with_codes(true, false).await;
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+    let mut watching = taken(
+        Intent::Connection(ConnChange::WebGuest(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(watching.web_code.is_some(), "no fresh link was asked for");
+    let Some(Modal::Web(web)) = &watching.app.overlays.conn.modal else {
+        panic!("closed")
+    };
+    assert!(web.link.is_none(), "the dead link stayed on show");
+    assert!(
+        said(&watching).contains("a fresh sign-in link"),
+        "{}",
+        said(&watching)
+    );
+    web_box::settle(&mut watching).await;
+    assert!(shown_link(&watching).text.ends_with(STUB_LINK_CODE));
+
+    let (_daemon, path, watching) = box_with_codes(false, true).await;
+    let opener = opener_on_nothing(path.clone());
+    let watching = taken(
+        Intent::Connection(ConnChange::WebGuest(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        watching.web_code.is_none(),
+        "a pairing code is not asked for again"
+    );
+    let Some(Modal::Web(web)) = &watching.app.overlays.conn.modal else {
+        panic!("closed")
+    };
+    assert!(web.pair.is_none() && web.link.is_none());
+    assert!(
+        said(&watching).contains("pairing code ended"),
+        "{}",
+        said(&watching)
+    );
+
+    let (_daemon, path, watching) = box_with_codes(false, false).await;
+    let opener = opener_on_nothing(path);
+    let watching = taken(
+        Intent::Connection(ConnChange::WebGuest(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        watching.web_code.is_none(),
+        "a link was asked for with none on show"
+    );
+    assert!(
+        !said(&watching).contains("restarted"),
+        "{}",
+        said(&watching)
+    );
+}
+
+/// Turning the guest view on with a pairing code on show keeps the word that the code ended; a link
+/// ask in flight at the switch is dropped and asked again, so the old server's answer is never
+/// drawn.
+#[tokio::test]
+async fn the_guest_on_warning_keeps_the_pairing_note_and_a_stale_ask_is_dropped() {
+    let (_daemon, path, watching) = box_with_codes(false, true).await;
+    let opener = opener_on_nothing(path);
+    let (mut look, _) = look_over(&state_home());
+    let watching = taken(
+        Intent::Connection(ConnChange::WebGuest(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let words = said(&watching);
+    assert!(words.contains("anyone on your network"), "{words}");
+    assert!(words.contains("pairing code ended"), "{words}");
+
+    let (_daemon, path, mut watching) = box_with_codes(false, false).await;
+    let (old_tx, old_rx) = tokio::sync::oneshot::channel();
+    watching.web_code = Some(old_rx);
+    let opener = opener_on_nothing(path);
+    let mut watching = taken(
+        Intent::Connection(ConnChange::WebGuest(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        old_tx.send((true, None)).is_err(),
+        "the old server's ask was kept"
+    );
+    assert!(watching.web_code.is_some(), "no fresh ask was made");
+    web_box::settle(&mut watching).await;
+    assert!(shown_link(&watching).text.ends_with(STUB_LINK_CODE));
+}
+
+/// Turning the guest view on says once, in the status line, who can look; the fresh link is
+/// still asked for.
+#[tokio::test]
+async fn turning_the_guest_view_on_says_who_can_look() {
+    let (_daemon, path, watching) = box_with_codes(true, false).await;
+    let opener = opener_on_nothing(path);
+    let (mut look, _) = look_over(&state_home());
+    let watching = taken(
+        Intent::Connection(ConnChange::WebGuest(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        said(&watching).contains("anyone on your network"),
+        "{}",
+        said(&watching)
+    );
+    assert!(watching.web_code.is_some());
+}
+
+/// A box opened before the daemon's status arrives asks for its link when the status says the web
+/// UI listens, once; with the box opened on a status that has not come in, nothing was asked.
+#[tokio::test]
+async fn a_box_opened_before_the_status_arrives_makes_its_link_then() {
+    let (daemon, path, mut watching) = on_a_daemon().await;
+    daemon.says_web(Some(network()), None);
+    watching.app.overlays.conn.daemon_up = None;
+    watching.app.overlays.conn.web_status = None;
+    watching.app.overlays.conn.modal = Some(Modal::Web(WebBox::default()));
+    assert!(watching.web_code.is_none());
+    watching.daemon_version = super::super::connect::ask_daemon(watching.backend.as_ref());
+    let info = recv_version(&mut watching.daemon_version).await;
+    daemon_answered(&mut watching, info, &path);
+    assert!(watching.web_code.is_some(), "no link was asked for");
+    web_box::settle(&mut watching).await;
+    assert!(shown_link(&watching).text.ends_with(STUB_LINK_CODE));
+    // Once: a later status with no link on show does not ask again.
+    if let Some(Modal::Web(web)) = watching.app.overlays.conn.modal.as_mut() {
+        web.link = None;
+    }
+    watching.daemon_version = super::super::connect::ask_daemon(watching.backend.as_ref());
+    let info = recv_version(&mut watching.daemon_version).await;
+    daemon_answered(&mut watching, info, &path);
+    assert!(watching.web_code.is_none(), "asked a second time");
+    watching.close().await;
+}
+
+/// The guest page is made once the guest view is on and the web UI listens, for the listen
+/// address now, and made again when the address changes.
+#[tokio::test]
+async fn the_guest_page_follows_the_listen_address() {
+    let (_daemon, _path, mut watching) = box_with_codes(false, false).await;
+    watching.app.overlays.conn.web.guest = WebGuest::Read;
+    watching.app.overlays.conn.web.url = Some("https://svolder.home.lan/".into());
+    watching.app.overlays.conn.web_status = Some(WebStatus::Listening {
+        listen: "0.0.0.0:8738".parse().unwrap(),
+        auth: WebAuth::Token,
+        writes: true,
+        guest: WebGuest::Read,
+    });
+    web_box::tick(&mut watching, Instant::now());
+    let page = |watching: &Watching| match &watching.app.overlays.conn.modal {
+        Some(Modal::Web(web)) => web.page.clone(),
+        _ => panic!("closed"),
+    };
+    let first = page(&watching).expect("a page");
+    assert_eq!(first.url, "https://svolder.home.lan/");
+    assert!(!first.local);
+    watching.app.overlays.conn.web.url = None;
+    watching.app.overlays.conn.web.listen = "10.1.2.3:9000".parse().unwrap();
+    watching.app.overlays.conn.web_status = Some(WebStatus::Listening {
+        listen: "10.1.2.3:9000".parse().unwrap(),
+        auth: WebAuth::Token,
+        writes: true,
+        guest: WebGuest::Read,
+    });
+    web_box::tick(&mut watching, Instant::now());
+    assert_eq!(page(&watching).unwrap().url, "http://10.1.2.3:9000/");
+}
+
+/// With no daemon behind the session, the guest change is written into the file by the session
+/// itself, on and off, and nothing else in it moves.
+#[tokio::test]
+async fn the_guest_change_with_no_daemon_writes_the_file() {
+    let (backend, _gate, app) = fake(Duration::from_secs(5)).await;
+    let mut watching = watching(backend, app, None);
+    let path = scratch_config();
+    Config::update_mcp(&path, |_| {}).expect("the scratch config is made");
+    std::fs::write(&path, Config::template()).expect("the template is written");
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+    let read = |path: &std::path::Path| {
+        svolder_ipc::Config::load_from_with(path, &svolder_ipc::config::ListenDefaults::default())
+            .unwrap()
+    };
+    watching = taken(
+        Intent::Connection(ConnChange::WebGuest(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let on = read(&path);
+    assert_eq!(on.web.guest, WebGuest::Read);
+    assert!(!on.web.enabled);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("guest = \"read\""), "{text}");
+    assert!(
+        said(&watching).contains("anyone on your network"),
+        "{}",
+        said(&watching)
+    );
+    let _ = taken(
+        Intent::Connection(ConnChange::WebGuest(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert_eq!(read(&path).web.guest, WebGuest::None);
+}
+
 /// Copying the link sends it by OSC 52; the box asks for no code while it is closed.
 #[tokio::test]
 async fn the_link_is_copied_and_no_code_is_asked_for_while_the_box_is_closed() {

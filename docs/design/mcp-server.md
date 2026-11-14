@@ -155,7 +155,7 @@ the profile. Nothing a tool returns is something an outside party chose.
 - The server: `bins/svolderd/src/mcp.rs`, tests in `bins/svolderd/src/mcp/tests.rs`.
 - The tools: `bins/svolderd/src/mcp/tools.rs`, tests in `bins/svolderd/src/mcp/tools/tests.rs`.
 - The shared HTTP loop and host list: `bins/svolderd/src/http.rs`.
-- The config: `McpConfig` in `crates/svolder-ipc/src/config.rs`; tokens in
+- The config: `McpConfig` in `crates/svolder-ipc/src/config/net_config.rs`; tokens in
   `crates/svolder-ipc/src/token.rs`.
 - End to end over HTTP against the fake transport: `bins/svolderd/tests/mcp.rs`,
   `bins/svolderd/tests/mcp_tools.rs`, `bins/svolderd/tests/mcp_walkthrough.rs`.

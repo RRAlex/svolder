@@ -42,6 +42,8 @@ mod mouse;
 mod curve;
 // the pointer at rest and the web link
 mod pointer;
+// the bar between the device screen's two panes
+mod divider;
 // the daemon version toasts
 mod toasts;
 // waiting for a device
@@ -202,4 +204,36 @@ fn config_with_fake() -> PathBuf {
     )
     .expect("the scratch config takes a device");
     path
+}
+
+/// A repaint asked for clears the screen and makes the next frame write every cell it has, even
+/// where the frame is the one the terminal already showed: what a sixel picture the terminal
+/// keeps under cells that read the same is cleared by.
+#[test]
+fn a_repaint_makes_the_next_frame_write_every_cell_again() {
+    let mut terminal =
+        Terminal::new(ratatui::backend::TestBackend::new(10, 2)).expect("a terminal");
+    let draw = |terminal: &mut Terminal<ratatui::backend::TestBackend>| {
+        terminal
+            .draw(|frame| {
+                frame.render_widget(ratatui::widgets::Paragraph::new("hello"), frame.area())
+            })
+            .expect("a frame");
+    };
+    let screen = |terminal: &Terminal<ratatui::backend::TestBackend>| {
+        let buffer = terminal.backend().buffer();
+        (0..5)
+            .map(|x| buffer[(x, 0)].symbol().to_string())
+            .collect::<String>()
+    };
+    draw(&mut terminal);
+    assert_eq!(screen(&terminal), "hello");
+    super::repaint(&mut terminal);
+    assert_eq!(screen(&terminal), "     ", "the screen was not cleared");
+    draw(&mut terminal);
+    assert_eq!(
+        screen(&terminal),
+        "hello",
+        "the frame did not write what the terminal lacked"
+    );
 }

@@ -309,7 +309,7 @@ action's ids overlap no control's, so neither can move a control that asks on ev
 - Import: `tone/apo.rs` (tests in `tone/apo/tests.rs`), `tone/fit.rs` (tests in
   `tone/fit/tests.rs`), all in `crates/svolder-profiles/src/`.
 - The catalogue: `crates/svolder-autoeq/src/client.rs`, `index.rs`, with tests beside them.
-- `[[preset]]` in the configuration: `crates/svolder-ipc/src/config/parse.rs`, `config/presets.rs`;
+- `[[preset]]` in the configuration: `crates/svolder-ipc/src/config/parse/blocks.rs`, `config/presets.rs`;
   tests in `config/tests/`.
 - The daemon's recall: `bins/svolderd/src/recall.rs`, `bins/svolderd/src/writer.rs`; tests in
   `bins/svolderd/src/writer/tests.rs`.

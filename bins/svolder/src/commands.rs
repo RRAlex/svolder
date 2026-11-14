@@ -35,6 +35,7 @@ pub(crate) mod hops;
 pub(crate) mod host_eq;
 pub(crate) mod identify;
 pub(crate) mod interrupts;
+pub(crate) mod mqtt;
 pub(crate) mod profiles;
 pub(crate) mod server_switch;
 pub(crate) mod token;

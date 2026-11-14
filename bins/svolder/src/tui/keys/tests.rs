@@ -192,6 +192,13 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     app.flip_side();
                 }
             }
+            if hint.label == "< > |" {
+                // the bar's keys act on the bar the last frame drew
+                app.drawn.split.set(Some(crate::tui::app::divider::Split {
+                    band: ratatui::layout::Rect::new(0, 2, 100, 18),
+                    gap: 0,
+                }));
+            }
             if hint.label.ends_with("on Target") {
                 // the switch row's own keys act with the keys on it
                 app.focus_switch();

@@ -66,7 +66,7 @@ async fn cover(State(web): State<Web>, headers: HeaderMap, Query(asked): Query<A
     let mut response = match fresh {
         true => bare(StatusCode::NOT_MODIFIED),
         false => {
-            let mut response = Body::from(cover.bytes).into_response();
+            let mut response = Body::from(cover.bytes.clone()).into_response();
             response
                 .headers_mut()
                 .insert(header::CONTENT_TYPE, HeaderValue::from_static(cover.mime));

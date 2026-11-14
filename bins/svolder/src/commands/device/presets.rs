@@ -8,7 +8,7 @@ use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::process::ExitCode;
 
-use svolder_ipc::{Config, FEATURE_AUTOEQ, ValueObject, socket};
+use svolder_ipc::{Config, PresetOp, ValueObject};
 use svolder_profiles::tone::apo;
 use svolder_profiles::tone::preset::{self, Imported, NameRefusal, Preset};
 use svolder_profiles::{EqSpec, Profile, ProfileError};
@@ -18,9 +18,7 @@ use crate::recovery::Kind;
 
 use super::device_presets;
 use super::eq::{current_raw, partial_failure_line, send_plan, write_count};
-use super::{
-    ask, config_failure, open, opened, refuse_if_daemon_misses, reload_daemon_for_presets,
-};
+use super::{ask, config_failure, open, opened, refuse_if_daemon_misses, write_preset};
 
 /// List every preset the configuration and the built-ins offer, one line or JSON object each,
 /// built-ins first. A text listing with a device that is known shows the presets that fit its
@@ -536,12 +534,11 @@ async fn do_save(
     if let Err(failure) = refuse_if_daemon_misses(g, &config, &path).await {
         return Ok(failure.report());
     }
-    let exists = config.preset(name).is_some();
-    let result = match exists {
-        true => Config::update_preset(&path, name, &preset),
-        false => Config::add_preset(&path, &preset),
+    let op = PresetOp::Save {
+        preset: Box::new(preset.clone()),
+        force: config.preset(name).is_some(),
     };
-    match result {
+    match write_preset(g, &config, &path, op).await {
         Ok(()) => {
             eprintln!(
                 "svolder: saved {} ({} bands) to {}",
@@ -549,10 +546,9 @@ async fn do_save(
                 preset.bands,
                 path.display()
             );
-            reload_daemon_for_presets(g, &config, &path).await;
             Ok(ExitCode::SUCCESS)
         }
-        Err(e) => Ok(config_failure(e).report()),
+        Err(failure) => Ok(failure.report()),
     }
 }
 
@@ -582,13 +578,16 @@ pub async fn eq_rename(g: &Globals<'_>, old: &str, new: &str) -> ExitCode {
     let Some(old) = config.preset(old).map(|found| found.name.as_str()) else {
         return no_such_preset(old).report();
     };
-    match Config::rename_preset(&path, old, new) {
+    let op = PresetOp::Rename {
+        from: old.to_string(),
+        to: new.to_string(),
+    };
+    match write_preset(g, &config, &path, op).await {
         Ok(()) => {
             eprintln!("svolder: renamed {old:?} to {new:?} in {}", path.display());
-            reload_daemon_for_presets(g, &config, &path).await;
             ExitCode::SUCCESS
         }
-        Err(e) => config_failure(e).report(),
+        Err(failure) => failure.report(),
     }
 }
 
@@ -633,13 +632,15 @@ pub async fn eq_delete(g: &Globals<'_>, name: &str, yes: bool) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    match Config::remove_preset(&path, name) {
+    let op = PresetOp::Delete {
+        name: name.to_string(),
+    };
+    match write_preset(g, &config, &path, op).await {
         Ok(()) => {
             eprintln!("svolder: removed preset {name:?} from {}", path.display());
-            reload_daemon_for_presets(g, &config, &path).await;
             ExitCode::SUCCESS
         }
-        Err(e) => config_failure(e).report(),
+        Err(failure) => failure.report(),
     }
 }
 
@@ -671,26 +672,6 @@ pub async fn eq_import(
         Ok(config) => config,
         Err(e) => return Ok(config_failure(e).report()),
     };
-    // While a daemon runs it is the one writer: the file goes through it. With none, this
-    // process writes the file itself.
-    if !matches!(g.transport, "ble" | "fake") {
-        let socket = socket::path::resolve(g.socket, config.socket.as_deref());
-        match crate::reach::daemon_runs(&socket, FEATURE_AUTOEQ, "save an imported preset").await {
-            Ok(true) => {
-                return Ok(
-                    match crate::autoeq::upload(&socket, text, &named, force).await {
-                        Ok(saved) => {
-                            report_saved(&path, &saved);
-                            ExitCode::SUCCESS
-                        }
-                        Err(refused) => super::autoeq::refusal(&refused, false).report(),
-                    },
-                );
-            }
-            Ok(false) => {}
-            Err(failure) => return Ok(failure.report()),
-        }
-    }
     let skipped = parsed.notes.len();
     let imported = Imported {
         origin: None,
@@ -725,8 +706,8 @@ pub(super) fn report_saved(path: &Path, saved: &svolder_ipc::AutoEqSaved) {
     }
 }
 
-/// Save `imported` as the preset `name` ([`save_imported`]), print what was saved and one fit
-/// line per tone control ([`saved_line`], [`fit_lines`]), and tell a running daemon to reload.
+/// Save `imported` as the preset `name`, print what was saved and one fit
+/// line per tone control ([`saved_line`], [`fit_lines`]), through the daemon or the file's own writer.
 /// `skipped` is how many lines of the source the parser left out.
 pub(super) async fn import_and_report(
     g: &Globals<'_>,
@@ -744,10 +725,19 @@ pub(super) async fn import_and_report(
     if let Err(failure) = refuse_if_daemon_misses(g, config, path).await {
         return failure.report();
     }
-    let saved = match save_imported(config, path, name, imported, force) {
-        Ok(saved) => saved,
+    let (saved, exists) = match imported_preset(config, name, imported, force) {
+        Ok(made) => made,
         Err(failure) => return failure.report(),
     };
+    // A daemon that reads this file is the one writer and reloads itself; with none, the file's
+    // own writer writes it.
+    let op = PresetOp::Save {
+        preset: Box::new(saved.clone()),
+        force: exists,
+    };
+    if let Err(failure) = write_preset(g, config, path, op).await {
+        return failure.report();
+    }
     eprintln!(
         "svolder: {}",
         saved_line(&saved.name, filters, Some(preamp), skipped)
@@ -757,36 +747,26 @@ pub(super) async fn import_and_report(
             eprintln!("svolder: {line}");
         }
     }
-    reload_daemon_for_presets(g, config, path).await;
     ExitCode::SUCCESS
 }
 
-/// Save `imported` as the preset `name`, trimmed, in the configuration file at `path`, and
-/// return it. `config` is the file as loaded, which says what names are taken.
-///
-/// A name [`preset::checked_name`] refuses, a built-in's name and `custom` are refused outright. A
-/// name another preset carries is refused unless `force`, which replaces a user preset, a preset of
-/// bands included, and never a built-in. The caller tells a running daemon to reload.
-pub(crate) fn save_imported(
+/// The preset `imported` makes under `name` (trimmed), and whether the library already holds that
+/// name. A name [`preset::new_name`] refuses, a built-in's name and `custom` are refused
+/// outright; a name another preset carries is refused unless `force`, which replaces a user
+/// preset and never a built-in. Nothing is written.
+fn imported_preset(
     config: &Config,
-    path: &Path,
     name: &str,
     imported: Imported,
     force: bool,
-) -> Result<Preset, Failure> {
+) -> Result<(Preset, bool), Failure> {
     let name = match preset::new_name(name, config.presets.iter().map(|p| p.name.as_str()), None) {
         Ok(name) => name,
         Err(NameRefusal::Taken(_)) if force => name.trim(),
         Err(refusal) => return Err(name_failure(refusal, "pick another with --name")),
     };
     let exists = config.preset(name).is_some();
-    let preset = Preset::imported(name, imported);
-    match exists {
-        true => Config::update_preset(path, name, &preset),
-        false => Config::add_preset(path, &preset),
-    }
-    .map_err(config_failure)?;
-    Ok(preset)
+    Ok((Preset::imported(name, imported), exists))
 }
 
 /// The correction in the file `file`, or why it cannot be read: not there, not text, more than

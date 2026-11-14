@@ -436,10 +436,9 @@ pub(super) fn daemon_socket<O: Open>(opener: &Opener<O>, watching: &Watching) ->
 /// Report what a write to the configuration file came to, tell whatever holds the devices to
 /// read the file again, and take what it now says into the app.
 ///
-/// Every write the device list makes goes through here (the preset list's through
-/// [`written_preset`]), so a refusal is a
-/// notice rather than a crash or a silent no-op, and the screen always shows what is on disk
-/// rather than what was asked for.
+/// Every write the device list makes goes through here (the preset list's land through
+/// [`preset_landed`]), so a refusal is a notice rather than a crash or a silent no-op, and the
+/// screen always shows what is on disk rather than what was asked for.
 pub(super) async fn written<O: Open>(
     opener: &Opener<O>,
     watching: &mut Watching,
@@ -463,27 +462,12 @@ pub(super) async fn written<O: Open>(
     true
 }
 
-/// [`written`] for the preset list: the file is the record, and a daemon is told to read it
-/// again only when its `version` reply names this very file, so its MQTT bridge offers the new
-/// list. A daemon that reads another file, a failed reload and a direct session all pass
-/// without a word.
-pub(super) async fn written_preset<O: Open>(
-    opener: &Opener<O>,
-    watching: &mut Watching,
-    wrote: Result<(), svolder_ipc::ConfigError>,
-) -> bool {
-    if let Err(e) = wrote {
-        watching
-            .app
-            .notify_failure(&Failure::of(Kind::ConfigUnreadable, e.to_string()));
-        return false;
-    }
-    if let Some(socket) = watching.backend.as_ref().and_then(Backend::daemon_socket) {
-        crate::backend::reload_if_reads(socket, &opener.path).await;
-    }
+/// What the loop does when a write of the preset library has ended, whichever way: ask the
+/// daemon how it stands, so the `config changed` line follows the reload the write caused, and
+/// show what is on disk again, which is the record whatever the write came to.
+pub(super) fn preset_landed<O: Open>(opener: &Opener<O>, watching: &mut Watching) {
     ask_again(watching);
     relist(opener, watching);
-    true
 }
 
 /// Ask the daemon how it stands after a write of this session's, so the `config changed` line
@@ -689,30 +673,11 @@ pub(super) async fn switch_via<O: Open>(
         .holding
         .clone()
         .map(|holding| (watching.app.session.device_name.clone(), holding));
-    // Closing one device and opening another holds the loop, and nothing takes the capture's
-    // blocks meanwhile: it is stopped, and the frame after the switch starts it again where it
-    // is still wanted.
-    watching.host.stop_capture(&mut watching.app);
-    let shown = target
-        .clone()
-        .unwrap_or_else(|| watching.app.session.device_name.clone());
-    let mut wait = Wait::new(format!("opening {shown}…"));
-    if let Some(backend) = watching.backend.take() {
-        // A give-up here leaves the close running to its end and no open to come, so the
-        // toast says what is still going on.
-        wait.after_give_up = Some(format!(
-            "closing {}…",
-            previous
-                .clone()
-                .unwrap_or_else(|| watching.app.session.device_name.clone())
-        ));
-        wait.on(backend.close(), watching, look, screen, Interrupted::Carry)
-            .await;
-    }
-    watching.feed_open = false;
-    if wait.gave_up {
+    let Some(mut wait) =
+        close_current(watching, previous.as_ref(), target.as_ref(), look, screen).await
+    else {
         return Switched::GaveUp;
-    }
+    };
     let Some(opened) = install(
         opener,
         watching,
@@ -776,39 +741,11 @@ pub(super) async fn switch_via<O: Open>(
             Holding::Waiting { since } => Some((name.clone(), *since)),
             Holding::Nothing { .. } => None,
         });
-        match waited.filter(|_| target != previous) {
-            // A wait that was interrupted by a switch that failed resumes, saying why, on the
-            // daemon this switch used. With none there to hold, nothing is left to wait on, and
-            // the Devices screen says why this switch failed.
-            Some((device, since)) => {
-                let mut globals = opener.globals.clone();
-                globals.device = Some(device.clone());
-                globals.verbose = false;
-                let held = opener
-                    .open
-                    .hold(socket.clone(), globals, Some(device.clone()), &opener.path)
-                    .await;
-                match held {
-                    Some(held) => {
-                        let landing = Landing::Waiting {
-                            device,
-                            since,
-                            held: Some(Box::new(held)),
-                        };
-                        land_over(opener, watching, landing, look).await;
-                        watching.app.notify_failure(&why);
-                    }
-                    None => {
-                        let landing = Landing::Devices { why: Some(why) };
-                        land_over(opener, watching, landing, look).await;
-                    }
-                }
-            }
-            None => {
-                let landing = Landing::Devices { why: Some(why) };
-                land_over(opener, watching, landing, look).await;
-            }
-        }
+        // A wait that was interrupted by a switch that failed resumes, saying why, on the
+        // daemon this switch used. With none there to hold, nothing is left to wait on, and
+        // the Devices screen says why this switch failed.
+        let waited = waited.filter(|_| target != previous);
+        resume_wait(opener, watching, waited, socket, why, look).await;
         return Switched::Stayed;
     }
     if target == previous {
@@ -840,6 +777,82 @@ pub(super) async fn switch_via<O: Open>(
         }
     }
     Switched::Stayed
+}
+
+/// Close the device that is watched, under a wait named for the one to open. `None` when the
+/// close was given up on.
+async fn close_current(
+    watching: &mut Watching,
+    previous: Option<&String>,
+    target: Option<&String>,
+    look: &Look,
+    screen: &mut dyn Shown,
+) -> Option<Wait> {
+    // Closing one device and opening another holds the loop, and nothing takes the capture's
+    // blocks meanwhile: it is stopped, and the frame after the switch starts it again where it
+    // is still wanted.
+    watching.host.stop_capture(&mut watching.app);
+    let shown = target
+        .cloned()
+        .unwrap_or_else(|| watching.app.session.device_name.clone());
+    let mut wait = Wait::new(format!("opening {shown}…"));
+    if let Some(backend) = watching.backend.take() {
+        // A give-up here leaves the close running to its end and no open to come, so the
+        // toast says what is still going on.
+        wait.after_give_up = Some(format!(
+            "closing {}…",
+            previous
+                .cloned()
+                .unwrap_or_else(|| watching.app.session.device_name.clone())
+        ));
+        wait.on(backend.close(), watching, look, screen, Interrupted::Carry)
+            .await;
+    }
+    watching.feed_open = false;
+    if wait.gave_up {
+        return None;
+    }
+    Some(wait)
+}
+
+/// Resume the wait for `waited` (its device and since when), saying why the switch failed, on the
+/// daemon `socket` names; with none to resume, or none to hold, land on the Devices screen with
+/// `why`.
+async fn resume_wait<O: Open>(
+    opener: &Opener<O>,
+    watching: &mut Watching,
+    waited: Option<(String, std::time::SystemTime)>,
+    socket: Option<PathBuf>,
+    why: Failure,
+    look: &Look,
+) {
+    let held = match &waited {
+        Some((device, _)) => {
+            let mut globals = opener.globals.clone();
+            globals.device = Some(device.clone());
+            globals.verbose = false;
+            opener
+                .open
+                .hold(socket, globals, Some(device.clone()), &opener.path)
+                .await
+        }
+        None => None,
+    };
+    match (waited, held) {
+        (Some((device, since)), Some(held)) => {
+            let landing = Landing::Waiting {
+                device,
+                since,
+                held: Some(Box::new(held)),
+            };
+            land_over(opener, watching, landing, look).await;
+            watching.app.notify_failure(&why);
+        }
+        _ => {
+            let landing = Landing::Devices { why: Some(why) };
+            land_over(opener, watching, landing, look).await;
+        }
+    }
 }
 
 /// Put what `landing` names in place of what is watched, as an open that did succeed would: the

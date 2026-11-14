@@ -270,7 +270,9 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme, hits: &mut HitMap) -> F
     let standing = tooltip::standing(app, hits);
     let tooltip_stands = standing.is_some();
     let tooltip = match (app.pointer.tooltip.filter(|held| held.shown), standing) {
-        (Some(held), Some(lines)) => tooltip::draw(frame, area, held.at, &lines, theme, toast),
+        (Some(held), Some(lines)) => {
+            tooltip::draw(frame, area, held.at, &lines, theme, toast, hits)
+        }
         _ => None,
     };
     match modal {

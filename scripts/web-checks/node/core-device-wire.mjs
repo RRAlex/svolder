@@ -450,7 +450,7 @@ await ok('a_passphrase_change_on_the_device_that_is_playing_asks_once_and_keep_h
 });
 
 await ok('a_card_whose_sound_goes_elsewhere_is_no_device_that_is_playing', async () => {
-  const r = rig({ playing: true, path: { class: 'other', words: 'the computer plays to Gungnir 2' } });
+  const r = rig({ playing: true, path: { class: 'other', words: '→ Gungnir 2', title: 'the computer plays to Gungnir 2' } });
   await r.open('d-B');
   await r.click(settingId('passphrase', 'change'));
   await r.choose('none');

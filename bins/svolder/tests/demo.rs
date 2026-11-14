@@ -25,29 +25,6 @@ use common::TempPath;
 /// How long a step of a case may take: starting a daemon, finding a process, one ending.
 const STEP: Duration = Duration::from_secs(20);
 
-/// The `svolder` a case runs.
-///
-/// The demo starts the `svolderd` that stands beside the `svolder` it runs from. With
-/// `SVOLDER_TEST_PREBUILT=1` that is the `svolder` under test, whose sibling the workspace build
-/// made. Otherwise it is a copy of it placed beside the private daemon build, so the demo finds
-/// that daemon and nothing is built into `target/debug`. The copy is made once per process, under
-/// a temporary name renamed into place, so a copy another run is executing is never written to.
-fn svolder_under_test() -> PathBuf {
-    static EXE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    EXE.get_or_init(|| {
-        let own = PathBuf::from(env!("CARGO_BIN_EXE_svolder"));
-        if std::env::var("SVOLDER_TEST_PREBUILT").as_deref() == Ok("1") {
-            return own;
-        }
-        let beside = common::daemon_binary().with_file_name("svolder");
-        let staged = beside.with_extension(format!("{}.tmp", std::process::id()));
-        std::fs::copy(&own, &staged).expect("copy svolder beside the private daemon");
-        std::fs::rename(&staged, &beside).expect("put the copy in place");
-        beside
-    })
-    .clone()
-}
-
 /// A `svolder tui --demo` on a terminal of its own, and the case's home.
 struct Demo {
     /// The `script` that holds the terminal; its child is the TUI.
@@ -76,7 +53,7 @@ impl Demo {
             eprintln!("skipped: script(1) is not installed, so there is no pseudo-terminal");
             return None;
         }
-        let svolder = svolder_under_test();
+        let svolder = common::svolder_with_daemon();
         let home = TempPath(std::env::temp_dir().join(format!(
             "svolder-demo-test-{}-{}-{:?}",
             std::process::id(),

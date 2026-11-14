@@ -291,7 +291,24 @@ fn a_dac_on_the_usb_port_the_computer_is_not_on_is_no_clean_line() {
     );
 }
 
-/// A computer that plays to another sink gives one sentence and no hops.
+/// A player routed to another sink says `player → NAME`, and its title the whole sentence.
+#[test]
+fn a_player_routed_elsewhere_says_so() {
+    let mut facts = route("Schiit Gungnir 2");
+    facts.player_match = PlayerMatch::Elsewhere {
+        sink: "LG TV".into(),
+    };
+    let view = host(Some(track_view()), Some(facts));
+    let path = card_on(&view, Some("2"), OPEN)
+        .and_then(|card| card.path)
+        .expect("a path");
+    assert_eq!(path.class, "other");
+    assert_eq!(path.words, "player \u{2192} LG TV");
+    assert_eq!(path.title, "the player plays to LG TV");
+    assert!(path.hops.is_empty());
+}
+
+/// A computer that plays to another sink gives short words, the whole sentence as the title, and no hops.
 #[test]
 fn a_sound_that_goes_elsewhere_says_so() {
     let view = host(Some(track_view()), Some(route("Schiit Bifrost 3")));
@@ -299,7 +316,8 @@ fn a_sound_that_goes_elsewhere_says_so() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(path.class, "other");
-    assert_eq!(path.words, "the computer plays to Schiit Bifrost 3");
+    assert_eq!(path.words, "→ Schiit Bifrost 3");
+    assert_eq!(path.title, "the computer plays to Schiit Bifrost 3");
     assert!(path.hops.is_empty());
 }
 

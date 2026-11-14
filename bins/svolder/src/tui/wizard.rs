@@ -21,8 +21,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{
-    Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
-    MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use futures::{FutureExt, Stream, StreamExt};
 use ratatui::Terminal;
@@ -1011,7 +1010,8 @@ async fn setup_on<E: Effects>(
             return Err(wizard);
         }
     };
-    let mut events = EventStream::new();
+    guard.picker = super::art::probe_for(&config.tui);
+    let mut events = super::art::filter::events();
     let end = event_loop(
         &mut guard.terminal,
         &mut events,

@@ -202,6 +202,9 @@ pub struct Guard {
     pub terminal: ManuallyDrop<ratatui::DefaultTerminal>,
     /// This terminal's mouse capture.
     pub mouse: Mouse,
+    /// What the terminal draws, once it has been asked ([`super::art::probe_for`]): `None` where
+    /// nothing was asked, for cover art that is off.
+    pub picker: Option<ratatui_image::picker::Picker>,
 }
 
 impl Guard {
@@ -227,6 +230,7 @@ impl Guard {
         let mut guard = Guard {
             terminal,
             mouse: Mouse::default(),
+            picker: None,
         };
         guard.mouse.set_mouse(mouse)?;
         title::emit(&title::push_title());

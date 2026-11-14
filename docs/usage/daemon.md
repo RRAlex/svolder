@@ -724,6 +724,10 @@ docker logs -f svolder
   `enabled = true` under `[web]` (or `[mcp]`), reloads, and the verb prints
   `web: listening on 0.0.0.0:8738 (token, writes)`; `web off` and `mcp off` turn it off again. No
   restart is needed either way. `svolder web token` prints the token the sign-in page takes.
+- `svolder mqtt on`, `svolder mqtt set host|port|username VALUE` and `svolder mqtt password` set up
+  the Home Assistant bridge the same way (see ["MQTT and Home Assistant"](mqtt.md)); a compose file
+  can set `SVOLDER_MQTT_ENABLED`, `SVOLDER_MQTT_HOST`, `SVOLDER_MQTT_PORT`, `SVOLDER_MQTT_USERNAME`
+  and `SVOLDER_MQTT_PASSWORD` instead.
 - `docker logs -f svolder` follows the daemon's log, where its warnings go: the daemon writes to
   the container's own log, which only the host reads (`podman logs` under Podman). Inside the
   container `svolder daemon logs` reads nothing and says so, naming both commands, and
@@ -913,7 +917,9 @@ effect at once (`svolder daemon restart` stops and starts the daemon and sends n
 `version` (`{"cmd":"version"}`) answers `{"result":"version","version":"...","mqtt":{...}}`: the
 daemon's own package version, and where its MQTT bridge stands — `{"state":"off"}`,
 `{"state":"connecting","host":"...","port":1883}` (with `"retry_in_secs"` while it waits between
-attempts), or `{"state":"connected","host":"...","port":1883,"commands":false}` — both of which
+attempts), `{"state":"trouble","host":"...","port":1883,"problem":"refused"}` (`problem` is
+`refused`, `unreachable` or `tls`; with `"retry_in_secs"` as `connecting` has it), or
+`{"state":"connected","host":"...","port":1883,"commands":false}` — all of which
 `daemon status` (below) prints. The reply also carries `"mcp":{...}` for the MCP server:
 `{"state":"off"}`, `{"state":"listening","listen":"127.0.0.1:8737","auth":"token","writes":false}`
 (the address as bound, so a configured port 0 shows the one the system chose) or
@@ -1082,7 +1088,10 @@ removes the unit files.
 Unit states when systemd manages the daemon, the socket otherwise; the daemon's own version, its
 MQTT bridge, its MCP server, its web UI and the devices it holds either way. The bridge's line
 follows the daemon's: `mqtt: off`, `mqtt: connecting to HOST:PORT` — with `(retry in N s)` while it
-waits between attempts — or `mqtt: connected to HOST:PORT (read-only)` or `(commands on)` (see
+waits between attempts — `mqtt: not connected to HOST:PORT: WHY` once an attempt failed in a way
+with words (`the broker refused the login (check username and password)`, `not reachable`,
+`port 8883 is TLS, which svolder does not speak`) — or `mqtt: connected to HOST:PORT (read-only)`
+or `(commands on)` (see
 ["MQTT and Home Assistant"](mqtt.md#mqtt-and-home-assistant)); a daemon too old to report one gets
 no such line, and a state a newer daemon reports that this `svolder` does not know reads
 `mqtt: unknown`.
@@ -1157,7 +1166,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.33.0 on /run/user/1000/svolder.sock
+daemon: 0.34.0 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)

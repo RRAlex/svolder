@@ -149,15 +149,16 @@ function changeWords(c) {
 
 /**
  * The notes of the sheet for `device` on `page`, in the order they are written: `[{ id, about,
- * text, red }]`. `change` is the last change (changes.js) or `null`; `coarse` says a phone (a touch
- * screen) for `from this phone`; `clockNowMs` is the daemon's clock now for the track's time (the
- * part's own time, else; no time into the track when neither is a number).
+ * text, red, title }]`; `title` is the whole sentence behind a short note, else empty. `change` is
+ * the last change (changes.js) or `null`; `coarse` says a phone (a touch screen) for `from this
+ * phone`; `clockNowMs` is the daemon's clock now for the track's time (the part's own time, else;
+ * no time into the track when neither is a number).
  */
 export function notesOf(page, device, { change = null, coarse = false, clockNowMs } = {}) {
   const notes = [];
-  const add = (id, about, text, redKey = null, redText = null) => {
+  const add = (id, about, text, redKey = null, redText = null, title = '') => {
     if (text !== null && text !== undefined && text !== '') {
-      notes.push({ id, about, text: handed(text), redKey, redText: redText && handed(redText) });
+      notes.push({ id, about, text: handed(text), redKey, redText: redText && handed(redText), title });
     }
   };
 
@@ -183,7 +184,7 @@ export function notesOf(page, device, { change = null, coarse = false, clockNowM
   const p = device?.playing ?? page?.host ?? null;
   if (p?.path) {
     const { text, red } = pathWords(p.path);
-    add('path', 'playing', text, red ? 'path' : null, red);
+    add('path', 'playing', text, red ? 'path' : null, red, p.path.title ?? '');
   }
   const track = p?.track;
   if (track) {
@@ -216,5 +217,6 @@ export function notesOf(page, device, { change = null, coarse = false, clockNowM
     about: n.about,
     text: n.id === redId && n.redText ? n.redText : n.text,
     red: n.id === redId,
+    title: n.title,
   }));
 }

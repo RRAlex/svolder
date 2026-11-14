@@ -219,6 +219,6 @@ client.
   `crates/svolder-mqtt/tests/client.rs`.
 - The bridge: `bins/svolderd/src/mqtt_bridge.rs` and its children in `mqtt_bridge/`, tests in
   `bins/svolderd/src/mqtt_bridge/tests.rs` and `bins/svolderd/tests/mqtt.rs`.
-- Configuration: `MqttConfig` in `crates/svolder-ipc/src/config.rs`; the status `daemon status`
-  prints is `MqttStatus` in `crates/svolder-ipc/src/socket/protocol.rs`.
+- Configuration: `MqttConfig` in `crates/svolder-ipc/src/config/net_config.rs`; the status `daemon status`
+  prints is `MqttStatus` in `crates/svolder-ipc/src/socket/protocol/status.rs`.
 - Home Assistant files: `contrib/home-assistant/` (a dashboard and themes).

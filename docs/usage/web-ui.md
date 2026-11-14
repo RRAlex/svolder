@@ -144,7 +144,12 @@ button, and every write answers 401. The header's Sign in button opens the sign-
 from `svolder web` or `svolder web --qr` signs the guest's browser in from the guest's page. The
 default `guest = "none"` shows a visitor the sign-in page and answers the API 401 with nothing in
 the body. With `auth = "none"` there are no guests, since every visitor is signed in, and the config
-says so (`web.guest = "read" has no effect with web.auth = "none"`).
+says so (`web.guest = "read" has no effect with web.auth = "none"`). `svolder web guest on` and
+`svolder web guest off` set the key and apply it to a running daemon (see
+["web guest on, web guest off"](#web-guest-on-web-guest-off)). The TUI's Web UI box
+has the same switch, a Guest view row (`g` is its key), and, while the view is on, draws a second QR
+code of the plain page beside the sign-in one for a phone to open (see the TUI's ["The Web UI
+box"](tui.md#the-web-ui-box)).
 
 ### Writes and the volume
 
@@ -230,9 +235,10 @@ each hop (the player's stream, the computer's sink, the DAC's own input and samp
 rate, both at 100 % and not muted, no host EQ, nothing else mixing in, and the rate the DAC reads
 equal to the one the computer sends. Otherwise it names what changes it (`resampled 44.1 → 48 kHz`,
 `computer volume 54 %`, `host EQ on`, `DAC reads 44.1 kHz`) or what it could not read (`DAC rate not
-read`, `DAC input not read`), and when the computer plays to another sink it says so (`the
-computer plays to Speakers`). Until the daemon has read the route (the first read is under way, or
-`pw-dump` is missing) the line says `route not read`. While the DAC listens to an input the
+read`, `DAC input not read`), and when the computer plays to another sink it says so in
+short (`→ Speakers`, or `player → Speakers` for a player routed elsewhere; the whole sentence, `the
+computer plays to Speakers`, is the line's tooltip). Until the daemon has read the route (the first
+read is under way, or `pw-dump` is missing) the line says `route not read`. While the DAC listens to an input the
 computer does not feed (Optical, Coaxial, AES or BNC) the line says `the DAC listens to Optical` and
 gives no verdict, since the computer's stream is not what the DAC plays. So does a Gungnir 2 or a
 Yggdrasil on one USB port while the computer is on the other (`the DAC listens to USB 1 · the
@@ -1190,6 +1196,7 @@ Usage: svolder web [OPTIONS]
 Commands:
   on     Turn the web UI on: `[web] enabled = true`, which a running daemon acts on at once
   off    Turn the web UI off: `[web] enabled = false`, which a running daemon acts on at once
+  guest  Let visitors without a sign-in read the web UI's device screens, or not: `[web] guest`
   pair   Print a six-digit code that signs in one browser within five minutes
   token  Print the token the web UI's sign-in page takes, and nothing else
   help   Print this message or the help of the given subcommand(s)
@@ -1218,8 +1225,8 @@ it back)``. A page the daemon's answer still shows as it was, because its reload
 longer than the five seconds the write waits, exits 1 with `web: off ([web] enabled = true is
 written and the daemon has not acted on it: svolder daemon status)`. A daemon that refuses the
 write (a read-only file, a file that does not parse, a daemon that is stopping) exits 1 with its
-words. A daemon too old to make the switch is not written around: `the daemon (VERSION) cannot
-switch its servers, which this svolder asks it to: svolder daemon restart`.
+words. A daemon too old to make the switch is not written around: ``the daemon (VERSION) cannot
+switch its servers, which this svolder asks it to. Run `svolder daemon restart` ``.
 
 With no daemon (no socket, or one nothing listens on) the verb writes the key itself, prints
 `web: on in PATH` (the configuration file), and says on standard error `svolder: nothing answers
@@ -1248,6 +1255,72 @@ Options:
 Turn the web UI off: `[web] enabled = false`, which a running daemon acts on at once
 
 Usage: svolder web off [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+### web guest on, web guest off
+
+Lets visitors without a sign-in read the page, or stops it: `guest = "read"` or `guest = "none"`
+under `[web]` (see "Guest read"). It is the same switch as `web on`: with a daemon running, the
+daemon writes the key in the configuration file it reads and reloads, and the running page serves
+the new mode at once, with no restart. The verb prints the line `svolder daemon status` has for the
+page, which says `guest read` while guests may look, and exits 0 when the page stands as asked.
+A page that is off is not a failure: the key is written and a note on standard error says that no
+one sees it until `svolder web on`. A page the answer still shows with the old mode exits 1 with
+`... ([web] guest = "read" is written and the daemon has not acted on it: svolder daemon status)`;
+a daemon that refuses the write exits 1 with its words, and a daemon too old to have the request is
+not written around: ``the daemon (VERSION) cannot switch the guest view, which this svolder asks it
+to. Run `svolder daemon restart` ``.
+
+With no daemon the verb writes `guest` itself, prints `web guest: on in PATH`, and says on standard
+error that the mode applies with the next daemon (a daemon that started meanwhile and reads the
+file is told to reload). With `auth = "none"` there are no guests: `guest on` still exits 0, with a
+note on standard error that every visitor is signed in and the guest view changes nothing.
+
+```
+`[web] guest = "read"`, which a running daemon acts on at once
+
+Usage: svolder web guest on [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+```
+`[web] guest = "none"`, which a running daemon acts on at once
+
+Usage: svolder web guest off [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+```
+Let visitors without a sign-in read the web UI's device screens, or not: `[web] guest`
+
+Usage: svolder web guest [OPTIONS] <COMMAND>
+
+Commands:
+  on    `[web] guest = "read"`, which a running daemon acts on at once
+  off   `[web] guest = "none"`, which a running daemon acts on at once
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device

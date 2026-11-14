@@ -100,8 +100,10 @@ const POLL: Duration = Duration::from_millis(20);
 const STALE_AFTER: Duration = Duration::from_secs(60);
 
 /// What a demo daemon inherits of this process's environment, and nothing besides: the fake
-/// device's profile, faults, meter signal, Loki Max report form and silent recall, and the locale.
-const PASSED_ON: [&str; 8] = [
+/// device's profile, faults, meter signal, Loki Max report form and silent recall, where the EQ
+/// library reads AutoEq from, the files that cue the fake player's cover to go or to change with
+/// the track, and the locale.
+const PASSED_ON: [&str; 11] = [
     "PATH",
     "LANG",
     "LC_ALL",
@@ -110,6 +112,9 @@ const PASSED_ON: [&str; 8] = [
     "SVOLDER_FAKE_SIGNAL",
     "SVOLDER_FAKE_LOKI_REPORTS",
     "SVOLDER_FAKE_SILENT_RECALL",
+    "SVOLDER_FAKE_COVER_GONE_FILE",
+    "SVOLDER_FAKE_COVER_NEXT_FILE",
+    "SVOLDER_AUTOEQ_URL",
 ];
 
 /// What a daemon with the host on inherits besides [`PASSED_ON`]: the home (for the players' cover
@@ -240,11 +245,9 @@ impl Demo {
         }
         let config = self.dir.join("config").join("svolder");
         std::fs::DirBuilder::new().mode(0o700).create(&config)?;
-        if self.host.is_some() {
-            std::fs::DirBuilder::new()
-                .mode(0o700)
-                .create(self.dir.join("cache"))?;
-        }
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(self.dir.join("cache"))?;
         std::fs::write(config.join("config.toml"), config_text(self.web_port))
     }
 
@@ -507,7 +510,7 @@ fn tui_env(dir: &Path, host: Option<&Reach>) -> (Vec<(&'static str, PathBuf)>, V
         .filter(|(name, _)| host.is_none() || *name != "SVOLDER_HOST")
         .collect();
     if let Some(reach) = host {
-        set.extend(host_env(dir, reach));
+        set.extend(host_env(reach));
     }
     (set, unset)
 }
@@ -518,6 +521,7 @@ fn isolated_env(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         ("XDG_CONFIG_HOME", dir.join("config")),
         ("XDG_STATE_HOME", dir.join("state")),
         ("XDG_DATA_HOME", dir.join("data")),
+        ("XDG_CACHE_HOME", dir.join("cache")),
         ("XDG_RUNTIME_DIR", dir.to_path_buf()),
         ("SVOLDER_SYSTEMCTL", dir.join("no-systemctl")),
         ("SVOLDER_UNITDIR", dir.join("units")),
@@ -528,13 +532,12 @@ fn isolated_env(dir: &Path) -> Vec<(&'static str, PathBuf)> {
 }
 
 /// What `--host` sets besides [`isolated_env`] without `SVOLDER_HOST`: the real PipeWire socket
-/// and session bus for the host tools, the computer EQ kept as a process of the demo's own (a
-/// systemd unit would land in the user's real unit directory), and a cache of the demo's own.
-fn host_env(dir: &Path, reach: &Reach) -> Vec<(&'static str, PathBuf)> {
+/// and session bus for the host tools, and the computer EQ kept as a process of the demo's own (a
+/// systemd unit would land in the user's real unit directory).
+fn host_env(reach: &Reach) -> Vec<(&'static str, PathBuf)> {
     let mut env = vec![
         ("PIPEWIRE_RUNTIME_DIR", reach.pipewire_runtime.clone()),
         ("SVOLDER_HOST_EQ_MANAGER", PathBuf::from("process")),
-        ("XDG_CACHE_HOME", dir.join("cache")),
     ];
     if let Some(bus) = &reach.bus {
         env.push(("DBUS_SESSION_BUS_ADDRESS", PathBuf::from(bus)));
@@ -553,7 +556,7 @@ fn daemon_env(dir: &Path, host: Option<&Reach>) -> Vec<(&'static str, OsString)>
         .collect();
     match host {
         Some(reach) => env.extend(
-            host_env(dir, reach)
+            host_env(reach)
                 .into_iter()
                 .map(|(name, value)| (name, value.into_os_string())),
         ),

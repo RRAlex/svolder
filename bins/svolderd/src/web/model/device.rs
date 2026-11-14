@@ -786,6 +786,8 @@ pub(crate) struct PathModel {
     /// `ok`, `changed`, `other` or `unknown`.
     pub(crate) class: &'static str,
     pub(crate) words: String,
+    /// The whole sentence behind short words, for a tooltip; empty when there is none.
+    pub(crate) title: String,
     pub(crate) hops: Vec<HopModel>,
 }
 
@@ -817,6 +819,7 @@ impl From<&Playing> for PlayingModel {
             path: playing.path.as_ref().map(|path| PathModel {
                 class: path.class,
                 words: path.words.clone(),
+                title: path.title.clone(),
                 hops: path
                     .hops
                     .iter()

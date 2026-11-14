@@ -14,8 +14,8 @@
 # ca-certificates comes from the live archive first: the snapshot is served over HTTPS.
 # Builds run as the caller's uid, so the toolchain is world-readable and CARGO_HOME is set
 # per run to a writable path.
-FROM ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
-ARG RUST_VERSION=1.99.1
+FROM ubuntu:26.04@sha256:065aa8626841f16057b78b027b464cd59c4fac36c204c72dcbf48d66f5fa8a96
+ARG RUST_VERSION=1.100.0
 ARG SNAPSHOT=20261002T000000Z
 ARG CARGO_ABOUT_VERSION=0.9.2
 ARG CARGO_AUDITABLE_VERSION=0.7.7

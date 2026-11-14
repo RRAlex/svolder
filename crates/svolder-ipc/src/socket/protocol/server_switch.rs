@@ -13,6 +13,13 @@
 //! servers stand after the reload, or with an error whose [`Reason`](super::Reason) is
 //! `invalid` (the file would not parse with the key written), `read_only`, `file_busy` or
 //! `stopping`.
+//!
+//! `Request::GuestSwitch { read }` is the same switch for `[web] guest`: `read = true` writes
+//! `guest = "read"`, `false` writes `guest = "none"`, and the reload makes the running web
+//! server serve the new mode. It is a request of its own, listed as
+//! [`FEATURE_GUEST_SWITCH`](super::FEATURE_GUEST_SWITCH), so a daemon without it answers an
+//! unknown kind and never reads a `guest` field as part of a server switch. Its answer and
+//! refusals are the server switch's; the web state in the answer carries the guest mode.
 
 use serde::{Deserialize, Serialize};
 

@@ -140,9 +140,9 @@ pub(crate) struct Beat {
 }
 
 /// One frame of a timeline.
-struct Frame {
+pub(super) struct Frame {
     ms: u64,
-    pose: Pose,
+    pub(super) pose: Pose,
 }
 
 /// The frame showing `elapsed` into `frames`, which loop when `looping` and otherwise hold the
@@ -271,7 +271,7 @@ impl Frame {
 }
 
 /// The longship at `x`, rowing: its two frames alternate with `step`.
-fn ship(step: usize, x: i32) -> Frame {
+pub(super) fn ship(step: usize, x: i32) -> Frame {
     let layers = if step % 2 == 1 {
         vec![
             part_at("ship_head", 0, 1),

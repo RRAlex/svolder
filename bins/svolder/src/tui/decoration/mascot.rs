@@ -11,6 +11,7 @@
 //! - [`brain`]: what the squirrel is doing and where, from the views it is shown.
 //! - [`codes`]: the codes typed into the help overlay and the Esc menu, and the matcher.
 //! - [`draw`]: drawing the squirrel in half blocks.
+//! - [`fx`]: the entrances and exits, as pixels over progress.
 //! - [`looks`]: what the squirrel wears and how it is coloured.
 //! - [`sheet`]: the sprite sheet: layers of one letter per pixel.
 //! - [`tricks`]: the squirrel's tricks, states and dances as poses over time.
@@ -18,6 +19,7 @@
 mod brain;
 pub(crate) mod codes;
 pub(crate) mod draw;
+pub(crate) mod fx;
 pub(crate) mod looks;
 pub(crate) mod sheet;
 pub(crate) mod tricks;
@@ -130,6 +132,8 @@ pub(crate) struct View {
     pub presses: u32,
     /// Whether the screen shown is the one the squirrel lives on.
     pub screen_is_home: bool,
+    /// Whether a box, the help overlay or a typed field has the keys: nothing enters then.
+    pub keys_held: bool,
 }
 
 impl View {
@@ -149,6 +153,7 @@ impl View {
             playing: None,
             presses: 0,
             screen_is_home: true,
+            keys_held: false,
         }
     }
 }
@@ -168,6 +173,8 @@ pub(crate) struct Showing {
     pub pose: Pose,
     pub place: Place,
     pub paint: Paint,
+    /// The entrance or exit the squirrel is in the middle of, if any.
+    pub fx: Option<fx::Fx>,
     /// The time since the session began, which the costume's animated colours turn on.
     pub elapsed: Duration,
 }

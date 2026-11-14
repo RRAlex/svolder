@@ -46,6 +46,16 @@ pub(super) fn edit_file(
     path: &Path,
     edit: impl FnOnce(&mut DocumentMut) -> Result<(), ConfigError>,
 ) -> Result<(), ConfigError> {
+    edit_file_private(path, |doc| edit(doc).map(|()| false)).map(|_| ())
+}
+
+/// [`edit_file`] for an edit that says whether it put a secret in the file (`true`): a file that
+/// others can read is then written at 0600 (the temporary file is opened with it, so the secret
+/// is never in a readable file). Answers whether the mode was tightened.
+pub(super) fn edit_file_private(
+    path: &Path,
+    edit: impl FnOnce(&mut DocumentMut) -> Result<bool, ConfigError>,
+) -> Result<bool, ConfigError> {
     make_parent(path)?;
     let _lock = lock(path)?;
     let (text, existed) = match std::fs::read_to_string(path) {
@@ -58,14 +68,22 @@ pub(super) fn edit_file(
     let mut doc = text
         .parse::<DocumentMut>()
         .map_err(|e| ConfigError::Parse(e.to_string()))?;
-    edit(&mut doc)?;
+    let secret = edit(&mut doc)?;
     let written = doc.to_string();
     Config::parse(&written)?;
     if existed && written == text {
-        return Ok(());
+        return Ok(false);
     }
     refuse_read_only(path)?;
-    write_atomically(path, &written)
+    let readable = secret && existed && readable_by_others(path);
+    write_atomically_as(path, &written, readable)?;
+    Ok(readable)
+}
+
+/// Whether group or others can read or write the file at `path`.
+fn readable_by_others(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o077 != 0)
 }
 
 /// Refuse a file whose owner cannot write it (`chmod 444`): a configuration made read-only is
@@ -123,6 +141,11 @@ pub(super) fn lock(path: &Path) -> Result<Option<flock::Held>, ConfigError> {
 /// temporary one. A symbolic `path` is replaced by the regular file the rename leaves there,
 /// not written through.
 pub(super) fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigError> {
+    write_atomically_as(path, text, false)
+}
+
+/// [`write_atomically`], with the mode narrowed to the owner's bits when `private`.
+fn write_atomically_as(path: &Path, text: &str, private: bool) -> Result<(), ConfigError> {
     use std::io::Write;
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 
@@ -145,6 +168,10 @@ pub(super) fn write_atomically(path: &Path, text: &str) -> Result<(), ConfigErro
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
     let io_error = |e| ConfigError::Io(path.to_path_buf(), e);
+    let mode = match private {
+        true => Some(mode.unwrap_or(0o600) & 0o700),
+        false => mode,
+    };
     let (tmp, mut file) = create_tmp(path, mode).map_err(io_error)?;
     let written = file
         .write_all(text.as_bytes())

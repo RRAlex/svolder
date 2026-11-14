@@ -521,7 +521,7 @@ fn the_settings_row_turns_the_quit_question() {
     ch(&mut app, 's');
     app.overlays.settings = Some(crate::tui::app::SettingsBox {
         category: 2,
-        row: 1,
+        row: 2,
     });
     assert_eq!(
         settings::current(app.overlays.settings.expect("the box is open")),

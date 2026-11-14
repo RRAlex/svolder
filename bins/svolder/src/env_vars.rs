@@ -173,6 +173,14 @@ const ENV_VARS: &[EnvVar] = &[
                test drops it on its own cue. Unset by default.",
     },
     EnvVar {
+        name: "SVOLDER_FAKE_COVER_NEXT_FILE",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "A path: with `SVOLDER_HOST=fake`, the fake player moves to a second track, with \
+               a second cover, the moment a file appears there, so a test changes the track on \
+               its own cue. `svolder tui --demo` passes it on to its daemon. Unset by default.",
+    },
+    EnvVar {
         name: "SVOLDER_FAKE_PLAYER_GONE_FILE",
         read_by: "svolderd",
         dev_only: true,
@@ -248,6 +256,39 @@ const ENV_VARS: &[EnvVar] = &[
         dev_only: false,
         what: "The MQTT broker's password, in place of `[mqtt] password`, so the password need \
                not sit in the config file. Unset by default; an empty value counts as unset.",
+    },
+    EnvVar {
+        name: "SVOLDER_MQTT_ENABLED",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "Whether the MQTT bridge runs when `config.toml` has no `[mqtt] enabled` key (an \
+               `enabled` in the file wins): `1` turns it on, `0` leaves it off; `true`, `false`, \
+               `yes`, `no`, `on` and `off` are read too, and another value is refused by name. \
+               The bridge also needs a host. Unset by default, which is off; an empty value \
+               counts as unset.",
+    },
+    EnvVar {
+        name: "SVOLDER_MQTT_HOST",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "The MQTT broker's host when `config.toml` has no `[mqtt] host` (a `host` in the \
+               file wins). Unset by default; an empty value counts as unset.",
+    },
+    EnvVar {
+        name: "SVOLDER_MQTT_PORT",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "The MQTT broker's port when `config.toml` has no `[mqtt] port` (a `port` in the \
+               file wins), from 1 to 65535; another value is refused by name. Unset by default, \
+               which is 1883; an empty value counts as unset.",
+    },
+    EnvVar {
+        name: "SVOLDER_MQTT_USERNAME",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "The MQTT broker's username when `config.toml` has no `[mqtt] username` (a \
+               `username` in the file wins). With no username the daemon sends no password \
+               either. Unset by default; an empty value counts as unset.",
     },
     EnvVar {
         name: "SVOLDER_MCP_TOKEN",
@@ -335,7 +376,8 @@ const ENV_VARS: &[EnvVar] = &[
                search`, `eq import --autoeq`, the TUI's search and the web page's library, which \
                all ask it), in place of AutoEq's repository on raw.githubusercontent.com: a \
                mirror, or a local server in tests. Read once, when the daemon starts. Default is \
-               AutoEq's own.",
+               AutoEq's own, or under `SVOLDER_TRANSPORT=fake` (demos, tests) an address nothing \
+               listens on, where AutoEq is off and says so; `make demo*` sets AutoEq's own.",
     },
     EnvVar {
         name: "SVOLDER_SCREENSHOTS_AUTOEQ_URL",

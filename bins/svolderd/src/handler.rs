@@ -1054,6 +1054,10 @@ impl Daemon {
             Request::AutoEq { op } => self.autoeq_op(origin, op).await,
             Request::DeviceConfig { op } => self.device_config(op).await,
             Request::ServerSwitch { server, enabled } => self.server_switch(server, enabled).await,
+            Request::GuestSwitch { read } => self.guest_switch(read).await,
+            Request::MqttSet { op } => self.mqtt_set(op).await,
+            Request::PresetWrite { op } => self.preset_write(op).await,
+            Request::HostCover { hash, offset } => self.host_cover(&hash, offset),
             // The server answers `Subscribe` through `stream`, never here.
             Request::Subscribe { .. } => Response::error(
                 CODE_USAGE,
@@ -1065,6 +1069,16 @@ impl Daemon {
                 "host_frames is not a request/response verb".to_string(),
             ),
         }
+    }
+
+    /// One chunk of the cover the host holds now, when `hash` is its hash: any other hash, with
+    /// no art, is not found, and the bytes are served from the daemon's cache, never from disk
+    /// or the network.
+    fn host_cover(&self, hash: &str, offset: u64) -> Response {
+        let Some(cover) = self.host.cover(hash) else {
+            return Response::error(CODE_NOT_FOUND, "no cover with that hash".to_string());
+        };
+        svolder_ipc::cover_chunk(hash, &cover, offset)
     }
 
     /// Press `button`, one of `previous`, `play`, `pause` and `next`, on the followed player:
@@ -1248,14 +1262,18 @@ mod computer;
 mod config_write;
 mod device_config;
 mod jobs;
+mod mqtt_set;
+mod preset_write;
 mod probe;
 mod server_switch;
 mod walk;
-pub(crate) use config_write::file_stamp;
 pub use config_write::{ConfigEdit, ConfigWriteError};
+pub(crate) use config_write::{file_stamp, imported_overwrite};
 
 #[cfg(test)]
 mod families_tests;
+#[cfg(test)]
+mod host_cover_tests;
 #[cfg(test)]
 mod host_tests;
 #[cfg(test)]

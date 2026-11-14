@@ -355,7 +355,10 @@ function playing(device, page, { oob } = {}) {
   const prog = '<div class="np-prog"><span class="np-t np-el"></span><span class="np-bar"><i></i></span><span class="np-t np-len"></span></div>';
   const path = p.path;
   const hops = path ? path.hops.map((h) => `<span class="np-hop${h.changes ? ' changes' : ''}"><b>${esc(h.label)}</b> ${esc(h.detail)}</span>`).join('') : '';
-  const words = path ? `<span class="np-verdict">${esc(path.words)}</span>${hops}` : '';
+  const verdict = path?.title
+    ? `<span aria-hidden="true">${esc(path.words)}</span><span class="np-sr">${esc(path.title)}</span>`
+    : (path ? esc(path.words) : '');
+  const words = path ? `<span class="np-verdict"${attr('title', path.title || null)}>${verdict}</span>${hops}` : '';
   return `${root} ${np} ${head} ${prog} <p class="np-path${path ? ` ${esc(path.class)}` : ''}">${words}</p> </div> </section>`;
 }
 

@@ -254,6 +254,32 @@ fn a_box_opening_hides_it_and_none_shows_while_one_is_open() {
 }
 
 #[test]
+fn none_shows_with_the_tooltips_setting_off() {
+    let mut app = app();
+    let hits = hits_of(&app);
+    let at = cell_of(&hits, Hit::Tab(Screen::Tone));
+    let t0 = Instant::now();
+    assert!(rest(&mut app, &hits, at, t0, DELAY));
+
+    app.tui.tooltips = false;
+    assert!(visible(&app, &hits).is_none());
+    let stands = standing(&app, &hits).is_some();
+    settle(&mut app, stands);
+    assert!(app.pointer.tooltip.is_none());
+    hover(&mut app, &hits, &moved(at.0, at.1), t0);
+    assert!(app.pointer.tooltip.is_none());
+    assert!(!app.tooltip_pending(), "no wait is asked of the loop");
+    app.tick(t0 + DELAY);
+    assert!(visible(&app, &hits).is_none());
+
+    app.tui.tooltips = true;
+    assert!(
+        rest(&mut app, &hits, at, t0, DELAY),
+        "back on, it shows again"
+    );
+}
+
+#[test]
 fn none_shows_with_mouse_capture_off() {
     let mut app = app();
     let hits = hits_of(&app);
@@ -369,7 +395,15 @@ fn look_in(theme: &Theme) -> (Color, ratatui::style::Modifier, Color) {
     let text = lines(&["connected"]);
     terminal
         .draw(|frame| {
-            draw(frame, screen, (10, 5), &text, theme, None);
+            draw(
+                frame,
+                screen,
+                (10, 5),
+                &text,
+                theme,
+                None,
+                &HitMap::default(),
+            );
         })
         .expect("the frame draws");
     let cell = terminal
@@ -885,4 +919,82 @@ fn the_loudness_tooltips_match_their_clicks() {
         clicked(&app, &hits, word),
         Some(MouseAction::ToggleTone(_))
     ));
+}
+
+/// A tooltip never covers a value being read: it goes above where below would, at the right edge
+/// where both would, and on the place that covers the fewest where nowhere is clear.
+#[test]
+fn a_tooltip_keeps_clear_of_the_values_being_read() {
+    let screen = Rect::new(0, 0, 80, 24);
+    let two = vec!["Label".to_string(), "how to use it".to_string()];
+    let (width, height) = size(screen, &two);
+    let below = Rect::new(10, 6, width, height);
+    let above = Rect::new(10, 3, width, height);
+    let edge = |y| Rect::new(80 - width, y, width, height);
+    // Values at rows `rows` of columns `cols`, as the cells a rectangle covers of them.
+    let reading = |rows: std::ops::Range<u16>, cols: std::ops::Range<u16>| {
+        move |rect: Rect| {
+            let mut count = 0;
+            for y in rect.top()..rect.bottom() {
+                for x in rect.left()..rect.right() {
+                    count += usize::from(rows.contains(&y) && cols.contains(&x));
+                }
+            }
+            count
+        }
+    };
+    // Nothing read: the usual place.
+    assert_eq!(
+        place_clear(screen, (10, 5), &two, None, &|_| 0),
+        Some(below)
+    );
+    // The row below holds a value under the box: above.
+    let under = reading(6..8, 0..80);
+    assert_eq!(
+        place_clear(screen, (10, 5), &two, None, &under),
+        Some(above)
+    );
+    // Both sides hold values at the left, the right is clear: the right edge, on the first side.
+    let left = reading(3..8, 0..40);
+    assert_eq!(
+        place_clear(screen, (10, 5), &two, None, &left),
+        Some(edge(6))
+    );
+    // Nowhere is clear: the place that covers the fewest, the first on a tie.
+    let all = reading(3..8, 0..80);
+    assert_eq!(place_clear(screen, (10, 5), &two, None, &all), Some(below));
+    let heavy_below = |rect: Rect| match rect.y {
+        6 => 9,
+        3 => 4,
+        _ => 7,
+    };
+    assert_eq!(
+        place_clear(screen, (10, 5), &two, None, &heavy_below),
+        Some(above)
+    );
+    // A toast still rules out a place, whatever it covers.
+    let toast = Rect::new(0, 3, 80, 2);
+    assert_eq!(
+        place_clear(screen, (10, 5), &two, Some(toast), &under),
+        Some(below)
+    );
+}
+
+/// On the real Controls pane a tooltip's box covers none of the other rows' text.
+#[test]
+fn a_tooltip_on_a_control_row_covers_no_other_value() {
+    let mut app = app();
+    let theme = Theme::new(false);
+    let (plain, hits) = drawn(&app, &theme);
+    let at = cell_of(&hits, Hit::Row(Pane::Controls, 1));
+    let t0 = Instant::now();
+    assert!(rest(&mut app, &hits, at, t0, DELAY));
+    let (_, hits) = drawn(&app, &theme);
+    let area = Rect::new(0, 0, plain.area.width, plain.area.height);
+    let lines = visible(&app, &hits).expect("it shows");
+    let rect = place_clear(area, at, &lines, None, &|rect| {
+        cells_read(&plain, &hits, at, rect)
+    })
+    .expect("a place");
+    assert_eq!(cells_read(&plain, &hits, at, rect), 0, "{rect:?}");
 }

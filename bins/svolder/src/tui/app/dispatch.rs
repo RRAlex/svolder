@@ -7,7 +7,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::glide;
+use super::{divider, glide};
 use crate::tui::boxes::edit_line;
 use crate::tui::boxes::editor;
 use crate::tui::boxes::{device_presets, presets};
@@ -36,9 +36,13 @@ impl App {
             true => {
                 self.pointer.climb = None;
                 self.pointer.bar_drag = None;
+                divider::release(self);
                 Vec::new()
             }
-            false => glide::stop(self),
+            false => {
+                divider::release(self);
+                glide::stop(self)
+            }
         };
         intents.extend(self.pressed(key));
         // A box open over the screen takes the mouse, so a drag it opened over would never see
@@ -46,6 +50,7 @@ impl App {
         if self.modal_open() {
             self.pointer.curve_drag = None;
             self.pointer.bar_drag = None;
+            divider::release(self);
             // A box over the screen is not where the climb can be watched or stopped.
             self.pointer.climb = None;
         }
@@ -435,6 +440,7 @@ impl App {
             // The curve a drag holds a point of is not on the screen any more, nor the bar.
             self.pointer.curve_drag = None;
             self.pointer.bar_drag = None;
+            divider::release(self);
             // The climb is on a bar the new screen does not show.
             self.pointer.climb = None;
         }

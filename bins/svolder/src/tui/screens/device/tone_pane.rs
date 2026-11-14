@@ -56,15 +56,9 @@ pub(super) struct TonePane {
 /// row per band — every one of them a row the pane's cursor reaches and the arrows change.
 ///
 /// `max_width` is the pane's own interior width, its border and padding already taken off, so a
-/// focused row's highlight never runs past it. The loudness bar is drawn `bar` cells across, the
-/// width of the Controls pane's bars, as far as the row has room for it and its value.
-pub(super) fn tone_lines(
-    app: &App,
-    eq: &EqSpec,
-    theme: &Theme,
-    max_width: usize,
-    bar: usize,
-) -> TonePane {
+/// focused row's highlight never runs past it. The loudness bar is drawn across all the row has
+/// room for besides its value.
+pub(super) fn tone_lines(app: &App, eq: &EqSpec, theme: &Theme, max_width: usize) -> TonePane {
     if app.on_computer() {
         return computer_lines(app, theme, max_width);
     }
@@ -79,7 +73,7 @@ pub(super) fn tone_lines(
     );
     let focused = app.tone.row == ToneRow::Loudness;
     let room = max_width.saturating_sub(LOUDNESS_BAR_AT + LOUDNESS_VALUE);
-    let loudness_bar = bar.min(room).max(1);
+    let loudness_bar = room.max(1);
     let spans = loudness_spans(app, eq, theme, TONE_FIELD, focused, loudness_bar);
     let loudness = tone_row(spans, focused, app, theme, max_width);
     // A blank line sets the band table off from the rows above it.

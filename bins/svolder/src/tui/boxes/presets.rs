@@ -90,6 +90,27 @@ pub struct PresetsBox {
     pub computer_flattened: Option<String>,
 }
 
+impl PresetsBox {
+    /// Whether the preset list is open on its presets, rather than on a prompt or a question.
+    pub fn choosing(&self) -> bool {
+        self.preset_list
+            .as_ref()
+            .is_some_and(|list| matches!(list.step, Step::Choosing))
+    }
+}
+
+/// Focus row `row` of the preset list, or its last row for one past the end: what a click on a
+/// row or on a `more` word of its border does before anything else.
+pub fn focus(app: &mut App, row: usize) {
+    let Some(eq) = app.preset_spec() else {
+        return;
+    };
+    let last = entries(app, &eq).len().saturating_sub(1);
+    if let Some(list) = app.presets.preset_list.as_mut() {
+        list.row = row.min(last);
+    }
+}
+
 /// The preset list, while it is open.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PresetList {
@@ -162,6 +183,8 @@ pub enum Done {
     /// The daemon's import of a measurement under the preset name `0`: the preset it saved, or why it
     /// did not.
     Imported(String, Result<AutoEqSaved, String>),
+    /// A write of the preset library ended: done, or why it was not.
+    PresetWritten(Result<(), String>),
 }
 
 /// Fold what a job ended with into the app, and answer with the writes it asks for.
@@ -172,6 +195,12 @@ pub(crate) fn done(app: &mut App, done: Done) -> Vec<Intent> {
             Vec::new()
         }
         Done::Imported(name, result) => import::imported(app, &name, result),
+        Done::PresetWritten(result) => {
+            if let Err(words) = result {
+                app.warn(words);
+            }
+            Vec::new()
+        }
     }
 }
 

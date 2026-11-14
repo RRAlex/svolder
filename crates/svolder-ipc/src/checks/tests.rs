@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use super::bluetooth::NOPLUGIN;
+use super::environment::WIREPLUMBER_DROP_IN;
 use super::*;
+use crate::checks::processes::RunningDaemon;
+use std::path::PathBuf;
 
 /// The socket path every test resolves to.
 fn sock() -> &'static Path {

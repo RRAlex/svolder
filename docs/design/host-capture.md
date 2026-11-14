@@ -161,6 +161,6 @@ capture; a client from before them skips the events.
 `bins/svolderd/src/host.rs` and `host/capture.rs`, `host/synthetic.rs`; tests in
 `bins/svolderd/src/host/capture/tests.rs` and `bins/svolderd/src/handler/host_tests.rs`. The web
 route is `bins/svolderd/src/web/host/frames.rs` with its tests beside it; the wire types are in
-`crates/svolder-ipc/src/host.rs` and the request in `crates/svolder-ipc/src/socket/`. The TUI's
+`crates/svolder-ipc/src/host/views.rs` and the request in `crates/svolder-ipc/src/socket/`. The TUI's
 side is `frames.rs` beside `bins/svolder/src/tui/run/host.rs`, tested in `host/joined.rs` against
 the stub daemon (`test_support/stub_daemon.rs`, `frames(..)`) and in `host/tests.rs`.

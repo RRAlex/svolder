@@ -484,6 +484,19 @@ static HINTS: &[KeyHint] = &[
         toggles: None,
         long: None,
     },
+    // The bar between the Controls and Tone panes, which the mouse drags: `<` and `>` nudge it a
+    // few columns, `|` puts it back to an even split. At exactly 80 columns the
+    // panes are 40 and 40, so they move nothing.
+    KeyHint {
+        code: KeyCode::Char('>'),
+        label: "< > |",
+        does: "pane divider",
+        screens: &[Screen::Device],
+        when: When::HasEq,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
     // The preset list, from the tone-control screen and from the device screen's Tone pane, or the
     // device's own presets from the device screen: a box of its own over either, which names its
     // own keys on itself.

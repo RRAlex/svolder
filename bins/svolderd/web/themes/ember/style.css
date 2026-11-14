@@ -627,6 +627,10 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
   border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
 }
 .np-hop + .np-hop::before { content: "→ "; color: var(--faint); }
+/* the whole sentence behind short verdict words, for a screen reader only */
+.np-sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 /* a hop that does not fit stays for a screen reader, out of sight; the dots chip ends the row */
 .np-cut {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;

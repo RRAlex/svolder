@@ -504,9 +504,9 @@ mod tests {
     /// The default bound outlasts the daemon's worst case for one request, and by a margin.
     #[test]
     fn the_default_bound_outlasts_the_daemons_worst_case() {
-        assert!(DEFAULT_REQUEST_TIMEOUT > crate::COMMAND_WORST_CASE);
+        assert!(DEFAULT_REQUEST_TIMEOUT > crate::socket::protocol::COMMAND_WORST_CASE);
         assert_eq!(
-            crate::COMMAND_WORST_CASE,
+            crate::socket::protocol::COMMAND_WORST_CASE,
             crate::COMMAND_DEADLINE * 2,
             "hand-over and answer"
         );

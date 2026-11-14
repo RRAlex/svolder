@@ -8,6 +8,7 @@
 //! [`run()`].
 //!
 //! - [`app`]: the state: the readings heard, what is focused, and the intents keys turn into.
+//! - [`art`]: the cover art of the track playing: the terminal probe, the fetch and the picture.
 //! - [`audio_level`]: how loud what is playing is, for everything that follows a level.
 //! - [`boxes`]: the boxes opened over a screen, each one's state and logic.
 //! - [`clipboard`]: copying text out of the TUI by every way that reaches the user's clipboard.
@@ -29,6 +30,7 @@
 //! - [`wizard`]: the setup wizard on the terminal.
 
 pub mod app;
+mod art;
 mod audio_level;
 mod boxes;
 mod clipboard;

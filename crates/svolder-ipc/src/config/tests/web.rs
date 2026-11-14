@@ -229,9 +229,10 @@ fn the_template_names_every_web_key_and_parses_back_to_the_defaults() {
     assert_eq!(Config::parse(&template).unwrap().web, WebConfig::default());
 }
 
-/// The Web box's writer sets `enabled` and `listen` and nothing else, keeping the comments.
+/// The Web box's writer sets `enabled`, `listen` and `guest` and nothing else, keeping the
+/// comments.
 #[test]
-fn update_web_writes_only_enabled_and_listen() {
+fn update_web_writes_only_enabled_listen_and_guest() {
     let dir = temp_dir("config-writer");
     let path = dir.join("config.toml");
     std::fs::write(&path, Config::template()).unwrap();
@@ -248,10 +249,14 @@ fn update_web_writes_only_enabled_and_listen() {
     assert!(web.enabled);
     assert_eq!(web.listen, "0.0.0.0:8738".parse().unwrap());
     assert!(web.writes, "writes is not the box's to change");
-    assert_eq!(web.guest, WebGuest::None);
+    assert_eq!(web.guest, WebGuest::Read);
     assert!(
         text.contains("# Whether the page may change a device"),
         "{text}"
+    );
+    assert!(
+        text.contains("guest = \"read\"\n"),
+        "lower case, as the parser reads it: {text}"
     );
     assert_eq!(text.lines().count(), before.lines().count());
     let untouched = std::fs::read_to_string(&path).unwrap();
@@ -491,4 +496,40 @@ fn a_missing_file_takes_the_environments_defaults() {
     let none = Config::load_from_with(&path, &ListenDefaults::default()).unwrap();
     assert_eq!(none, Config::default());
     assert!(!path.exists(), "a load writes nothing");
+}
+
+/// The guest switch's writer: `guest = "read"` on, `guest = "none"` off, the file byte for byte
+/// when the key already stands as asked, and every comment and other key kept.
+#[test]
+fn update_web_writes_guest_on_and_off_and_nothing_when_unchanged() {
+    let dir = temp_dir("config-writer-guest");
+    let path = dir.join("config.toml");
+    let hand = "# my notes\nschema = 1\n\n[web]\n# the page\nenabled = true\nlisten = \"127.0.0.1:9000\" # here\n";
+    std::fs::write(&path, hand).unwrap();
+    // Off already: asking for off writes nothing.
+    Config::update_web(&path, |web| web.guest = WebGuest::None).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), hand);
+    Config::update_web(&path, |web| web.guest = WebGuest::Read).unwrap();
+    let on = std::fs::read_to_string(&path).unwrap();
+    assert!(on.contains("guest = \"read\""), "{on}");
+    for kept in [
+        "# my notes",
+        "# the page",
+        "listen = \"127.0.0.1:9000\" # here",
+    ] {
+        assert!(on.contains(kept), "{kept}: {on}");
+    }
+    assert_eq!(Config::parse(&on).unwrap().web.guest, WebGuest::Read);
+    // On already: asking for on writes nothing.
+    Config::update_web(&path, |web| web.guest = WebGuest::Read).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), on);
+    Config::update_web(&path, |web| web.guest = WebGuest::None).unwrap();
+    let off = std::fs::read_to_string(&path).unwrap();
+    assert!(off.contains("guest = \"none\""), "{off}");
+    assert_eq!(Config::parse(&off).unwrap().web.guest, WebGuest::None);
+    assert!(
+        off.contains("# my notes") && off.contains("# the page"),
+        "{off}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -255,7 +255,7 @@ fn a_word_for_a_switch_is_tomls_own_error() {
     }
 }
 
-/// The table holds the seventeen keys in the order the template lists them.
+/// The table holds the nineteen keys in the order the template lists them.
 #[test]
 fn the_table_lists_the_keys_in_template_order() {
     let names: Vec<&str> = TUI_SETTINGS.iter().map(|key| key.key).collect();
@@ -268,6 +268,7 @@ fn the_table_lists_the_keys_in_template_order() {
             "monochrome",
             "theme_background",
             "mouse",
+            "tooltips",
             "intro",
             "intro_effect",
             "intro_sound",
@@ -276,6 +277,7 @@ fn the_table_lists_the_keys_in_template_order() {
             "confirm_quit",
             "host_audio",
             "visualizer",
+            "cover_art",
             "graphs",
             "graph_span",
             "link_span",
@@ -367,7 +369,7 @@ fn entries_compare_and_print_by_their_key() {
     assert_eq!(format!("{MOUSE:?}"), "TuiSetting(mouse)");
 }
 
-/// Every field of [`TuiConfig`] is a plain key in [`TUI_SETTINGS`] or one of the three that keep
+/// Every field of [`TuiConfig`] is a plain key in [`TUI_SETTINGS`] or one of the four that keep
 /// their own writers.
 #[test]
 fn every_tui_config_field_is_covered() {
@@ -385,7 +387,7 @@ fn every_tui_config_field_is_covered() {
         .collect();
     fields.sort_unstable();
     let mut covered: Vec<&str> = TUI_SETTINGS.iter().map(|key| key.key).collect();
-    covered.extend(["accents", "spectrum", "effects"]);
+    covered.extend(["accents", "spectrum", "effects", "device_split"]);
     covered.sort_unstable();
     assert_eq!(
         fields, covered,

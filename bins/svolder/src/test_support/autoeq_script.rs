@@ -74,8 +74,6 @@ struct Inner {
     searches: Vec<(String, bool)>,
     /// The import ops that arrived, in order.
     imports: Vec<AutoEqOp>,
-    /// The `(text, name, force)` of each upload that arrived.
-    uploads: Vec<(String, String, bool)>,
     /// How an import ends.
     ending: Ending,
     /// The jobs still waiting for the case to finish them.
@@ -115,7 +113,6 @@ impl Default for AutoEqScript {
                 entries: Vec::new(),
                 searches: Vec::new(),
                 imports: Vec::new(),
-                uploads: Vec::new(),
                 ending: Ending::Fails("no ending was scripted".into(), Reason::Internal),
                 waiting: Vec::new(),
                 last: BTreeMap::new(),
@@ -216,11 +213,6 @@ impl AutoEqScript {
         self.inner.lock().expect("the script").imports.clone()
     }
 
-    /// The `(text, name, force)` of each upload that arrived.
-    pub(crate) fn uploads(&self) -> Vec<(String, String, bool)> {
-        self.inner.lock().expect("the script").uploads.clone()
-    }
-
     /// How many follow streams were opened.
     pub(crate) fn follows(&self) -> usize {
         self.follows.load(std::sync::atomic::Ordering::SeqCst)
@@ -292,9 +284,8 @@ impl AutoEqScript {
                 let _ = held.wait_for(|held| !*held).await;
                 Response::Job { job }
             }
-            AutoEqOp::Upload { text, name, force } => {
-                let mut inner = self.inner.lock().expect("the script");
-                inner.uploads.push((text, name, force));
+            AutoEqOp::Upload { .. } => {
+                let inner = self.inner.lock().expect("the script");
                 match inner.ending.clone() {
                     Ending::Saved(saved) => Response::AutoEqSaved(saved),
                     Ending::Fails(message, reason) => {

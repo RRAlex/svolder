@@ -409,6 +409,9 @@ await ok('empty_and_failed_and_loading_have_their_words_and_each_refusal_reads_a
   const busy = refusalWords('search', { reason: 'busy' });
   assert.match(busy, /busy/, 'busy reads as words a person reads');
   assert.match(refusalWords('search', { reason: 'unreachable' }), /AutoEq could not be reached/);
+  const off = 'AutoEq is off for the fake device; set SVOLDER_AUTOEQ_URL to turn it on';
+  assert.equal(refusalWords('search', { reason: 'unreachable', error: off }), off, 'the daemon\'s words for AutoEq being off stand');
+  assert.match(refusalWords('search', { reason: 'unreachable', error: 'could not fetch x' }), /AutoEq could not be reached/);
   r.window.close();
 });
 

@@ -8,7 +8,7 @@
 
 import { BANDS } from '../../../core/viz-model.js';
 import { COLUMNS } from '../axis.js';
-import { CAMERA } from '../camera.js';
+import { CAMERA, farRow } from '../camera.js';
 import { PALETTE, cellColour, unitOf } from './palette.js';
 import { GHOST } from './tune.js';
 import { heatColours, heatIndex } from './heat.js';
@@ -65,7 +65,7 @@ function drawSide(g, geo, frac, dull) {
   const { w, h, H } = geo;
   const { half, side, sideStep, rows, spread } = CAMERA;
   const far = depth(0);
-  const yFar = H + (h - H) / far;
+  const yFar = farRow(h, H);
   g.strokeStyle = dull ? PALETTE.dullGrid : PALETTE.grid;
   g.lineWidth = unitOf(w);
   for (let x = -side; x <= side; x += sideStep) {

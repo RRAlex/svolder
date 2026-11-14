@@ -25,6 +25,9 @@ use crate::recovery::{Kind, next_step};
 /// verb asks before every output: a best-effort nicety that never holds a verb up for long.
 const NOTE_WAIT: Duration = Duration::from_secs(1);
 
+/// How long a whole cover is given to arrive: eight chunks at most, one connection.
+const COVER_WAIT: Duration = Duration::from_secs(10);
+
 /// What a front end says of a daemon that does not know the identify request.
 const TOO_OLD_TO_IDENTIFY: &str = "this daemon is too old to identify; restart it";
 
@@ -502,6 +505,37 @@ impl RemoteBackend {
                 .await
                 .ok()
                 .flatten()
+        }
+    }
+
+    /// A future that reads the daemon's cover with `hash` chunk by chunk over one connection of
+    /// its own (owned, so it can be spawned): the picture, or `None` for a daemon that does not
+    /// know the request, a hash that is no longer the current cover's, a bad chunk, or no
+    /// whole picture within [`COVER_WAIT`].
+    pub(super) fn host_cover(
+        &self,
+        hash: &str,
+    ) -> impl Future<Output = Option<svolder_host::cover::Cover>> + Send + 'static {
+        let socket = self.socket.clone();
+        let hash = hash.to_string();
+        async move {
+            let read = async {
+                let mut client = Client::connect(&socket).await.ok()?;
+                let mut reader = svolder_ipc::CoverReader::new(&hash);
+                loop {
+                    let answer = client
+                        .request(Request::HostCover {
+                            hash: hash.clone(),
+                            offset: reader.next_offset(),
+                        })
+                        .await
+                        .ok()?;
+                    if let Some(cover) = reader.push(answer).ok()? {
+                        return Some(cover);
+                    }
+                }
+            };
+            tokio::time::timeout(COVER_WAIT, read).await.ok().flatten()
         }
     }
 

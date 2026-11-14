@@ -19,7 +19,7 @@ use svolder_profiles::tone::preset;
 use crate::tui::app::App;
 use crate::tui::boxes::presets::search::{self, SearchBox};
 use crate::tui::boxes::presets::{self, Entry, FilePrompt, NameLine, PresetList, Question, Step};
-use crate::tui::mouse::{HitMap, Selected};
+use crate::tui::mouse::{Hit, HitMap, Selected};
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::scroll::{MORE_DOWN, MORE_UP};
 use crate::tui::widgets::{self, CURSOR_WIDTH};
@@ -257,8 +257,17 @@ fn draw_list(
     }
     widgets::surfaces::modal_ground(frame, box_area, theme);
     frame.render_widget(Paragraph::new(lines).block(block), box_area);
+    let inner = Block::bordered().inner(box_area);
+    for (at, index) in (top..top + shown).enumerate() {
+        let line = Rect {
+            y: inner.y + u16::try_from(at).unwrap_or(u16::MAX),
+            height: 1,
+            ..inner
+        };
+        hits.push(line.intersection(inner), Hit::PresetRow(index));
+    }
+    push_ends(hits, box_area, (top > 0, top + shown < entries.len()));
     if !entries.is_empty() {
-        let inner = Block::bordered().inner(box_area);
         let at = Rect {
             y: inner.y + u16::try_from(row - top).unwrap_or(0),
             height: 1,
@@ -276,6 +285,29 @@ fn draw_list(
         theme,
     );
     box_area
+}
+
+/// Record the `more ↑` and `more ↓` words the borders of `box_area` show as hits, for the ends
+/// that `(above, below)` say have rows hidden. The words end one cell inside their corner.
+fn push_ends(hits: &mut HitMap, box_area: Rect, (above, below): (bool, bool)) {
+    let word = |text: &str, y: u16| {
+        let width = u16::try_from(widgets::text::cells(text)).unwrap_or(u16::MAX);
+        Rect {
+            x: box_area.right().saturating_sub(width.saturating_add(1)),
+            y,
+            width,
+            height: 1,
+        }
+    };
+    if above {
+        hits.push(word(MORE_UP, box_area.y), Hit::PresetEnd(true));
+    }
+    if below {
+        hits.push(
+            word(MORE_DOWN, box_area.bottom().saturating_sub(1)),
+            Hit::PresetEnd(false),
+        );
+    }
 }
 
 /// One preset's row: the cursor, `●` for the one that is on, its name cut to the name column,

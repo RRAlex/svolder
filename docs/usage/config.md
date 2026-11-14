@@ -177,10 +177,10 @@ schema = 1
 # The broker's port.
 # port = 1883
 
-# The broker username, when it wants one.
+# The broker username, when it wants one; Home Assistant's broker does.
 # username = ""
 
-# The broker password, when it wants one; SVOLDER_MQTT_PASSWORD overrides this.
+# The broker password, when it wants one; SVOLDER_MQTT_PASSWORD overrides this. Sent only with a username.
 # password = ""
 
 # The client id to connect with; the default is svolder-, the host name and a hash of the socket.
@@ -347,6 +347,9 @@ schema = 1
 # Whether mouse capture starts on.
 # mouse = true
 
+# Whether a pointer resting on a target shows a one-line tip.
+# tooltips = true
+
 # Whether the wordmark intro plays while the device opens.
 # intro = true
 
@@ -371,6 +374,9 @@ schema = 1
 # Whether the device screen draws a spectrum of what the host plays.
 # visualizer = true
 
+# Whether the Now playing row shows the track's cover art: auto (the best the terminal draws) or off.
+# cover_art = "auto"
+
 # Whether the screens draw their graphs: Telemetry, the level history and the connection strip.
 # graphs = true
 
@@ -379,6 +385,9 @@ schema = 1
 
 # How much history the connection strip spans: 1h, 3h, 6h, 12h or 24h.
 # link_span = "12h"
+
+# The Controls pane's share of the device screen's width, from 0 to 1; each pane keeps 40 columns.
+# device_split = 0.5
 
 # Which of the animations run.
 [tui.effects]

@@ -9,24 +9,63 @@
 //! decodes. A peer ignores a field it does not know. A message kind a peer does not know
 //! (a response, an event, a reply) decodes as `Unknown` and is skipped, not fatal. A request
 //! kind a daemon does not know is answered with an error and the connection stays open.
+//!
+//! - `codes`: the error codes, the fixed messages and the feature names.
+//! - `request`: the requests a front end sends.
+//! - `status`: the readings, recall and link-change answers, token info, and the MQTT, MCP and web
+//!   statuses.
+//! - `timeouts`: the deadlines and bounds both sides wait by.
+//! - `autoeq`, `device_config`, `host_cover`, `host_eq`, `jobs`, `mqtt_set`, `preset_write`,
+//!   `server_switch`, `walk`: the request families with their own ops and answers.
 
 use serde::{Deserialize, Serialize};
 
 mod autoeq;
+mod codes;
 mod device_config;
+mod host_cover;
 mod host_eq;
 mod jobs;
+mod mqtt_set;
+mod preset_write;
+mod request;
 mod server_switch;
+mod status;
+mod timeouts;
 mod walk;
 
 pub use autoeq::{
     AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, AutoEqGroup, AutoEqMeasurement, AutoEqOp, AutoEqPreview,
     AutoEqSaved, AutoEqSearch, AutoEqTarget, AutoEqVariant,
 };
+#[cfg(test)]
+pub(crate) use codes::FEATURE_REASONS;
+pub use codes::{
+    CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_UNKNOWN_REQUEST,
+    CODE_USAGE, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER,
+    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SERVER_SWITCH, FEATURE_UNKNOWN_REQUEST_CODE,
+    FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF,
+    not_found_yet,
+};
 pub use device_config::{ConfiguredDevice, DeviceConfigOp, PassphraseKind, ProfileChoice};
+pub use host_cover::{COVER_CHUNK_BYTES, CoverReader, cover_chunk};
 pub use host_eq::HostEqOp;
 pub use jobs::{JOB_RESULT_MAX_BYTES, JobEvent, JobId, JobState};
+pub use mqtt_set::MqttOp;
+pub use preset_write::PresetOp;
+pub(crate) use request::REQUEST_CMDS;
+pub use request::Request;
 pub use server_switch::Server;
+pub use status::{
+    LinkChange, McpStatus, MqttProblem, MqttStatus, READINGS_SPAN_SECS, RecallOut, SeriesOut,
+    TokenInfo, TokenKind, WebStatus,
+};
+#[cfg(test)]
+pub(crate) use timeouts::COMMAND_WORST_CASE;
+pub use timeouts::{
+    ACTOR_STOP_MARGIN, BRIDGE_STOP_BOUND, COMMAND_DEADLINE, DEFAULT_REQUEST_TIMEOUT,
+    JOB_STOP_BOUND, MAX_SCAN_WINDOW, RELOAD_TIMEOUT, RUNTIME_STOP_BOUND, WRITE_SETTLE_BOUND,
+};
 pub use walk::{Connect, ConnectFailure, WALK_IDLE_BOUND, WalkOp};
 
 /// One reading, carrying everything a front end needs to print it as text or JSON: the
@@ -151,412 +190,6 @@ impl ScanEntry {
     }
 }
 
-/// The longest the daemon waits for a device on one step of a command: to hand it to the device's
-/// actor, and then for the actor's answer, each; a fleet recall waits it for its plan and again for
-/// its end. The daemon's own deadlines are this number, and [`DEFAULT_REQUEST_TIMEOUT`]'s is
-/// derived from it.
-pub const COMMAND_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// The longest a daemon takes to answer one request, which it answers in its own words when a
-/// device is silent: two [`COMMAND_DEADLINE`]s (hand-over and answer, or a recall's plan and end).
-pub const COMMAND_WORST_CASE: std::time::Duration = COMMAND_DEADLINE.saturating_mul(2);
-
-/// How long a front end waits for the reply to a `reload`. A reload reconciles the devices one at
-/// a time, each of which may take a [`COMMAND_DEADLINE`] with a stuck actor, so it can take that
-/// many deadlines plus one; this covers nine stuck devices.
-pub const RELOAD_TIMEOUT: std::time::Duration = COMMAND_DEADLINE.saturating_mul(10);
-
-/// The longest the daemon waits for its jobs to end as it stops: each looks at its stop flag
-/// between steps, so this only runs out for work stuck inside one step, and the stop goes on.
-pub const JOB_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// What the daemon gives each actor beyond the farewell bound to close its session as it stops.
-pub const ACTOR_STOP_MARGIN: std::time::Duration = std::time::Duration::from_secs(6);
-
-/// The longest the daemon waits, as it stops, for the MQTT bridge to say `offline` and
-/// disconnect: the broker's own wait and a moment.
-pub const BRIDGE_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(4);
-
-/// The longest the daemon waits, as it stops, for a configuration write already under way to
-/// finish: a write waits at most two seconds for the file's lock and then writes.
-pub const WRITE_SETTLE_BOUND: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// The longest the daemon waits for threads of blocking work as its runtime ends.
-pub const RUNTIME_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// How long [`crate::Client::request`] waits for a reply: [`COMMAND_WORST_CASE`] and a margin, so
-/// the daemon's words always arrive before this bound, which is only the net against a daemon
-/// that says nothing.
-pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration =
-    COMMAND_WORST_CASE.saturating_add(std::time::Duration::from_secs(5));
-
-/// The `cmd` of every [`Request`] kind, in the enum's order. The server tells a kind it does not
-/// have from a malformed one of a kind it has by this list; a test reads the enum's own source
-/// and fails when a variant is missing from it.
-pub const REQUEST_CMDS: &[&str] = &[
-    "devices",
-    "state",
-    "get",
-    "set",
-    "raw",
-    "history",
-    "readings",
-    "recalled",
-    "web_pair",
-    "web_link",
-    "web_link_open",
-    "eq_show",
-    "eq_set",
-    "eq_mode",
-    "passphrase",
-    "identify",
-    "scan",
-    "subscribe",
-    "reload",
-    "version",
-    "stop",
-    "host",
-    "host_press",
-    "host_volume",
-    "host_mute",
-    "host_eq",
-    "host_frames",
-    "walk",
-    "auto_eq",
-    "device_config",
-    "server_switch",
-];
-
-/// A request from a front end. `device` selects a configured device (name, product name, or
-/// unit-id prefix); `None` means the single/default device.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "cmd", rename_all = "snake_case")]
-pub enum Request {
-    /// List devices
-    Devices,
-    /// Get device state
-    State {
-        /// device selector
-        device: Option<String>,
-    },
-    /// Get a single value
-    Get {
-        /// device selector
-        device: Option<String>,
-        /// key to retrieve
-        key: String,
-    },
-    /// Set a value
-    Set {
-        /// device selector
-        device: Option<String>,
-        /// key to set
-        key: String,
-        /// value as string
-        value: String,
-        /// step size
-        step: i64,
-        /// don't wait for response
-        no_wait: bool,
-    },
-    /// Set by raw function ID and type
-    Raw {
-        /// device selector
-        device: Option<String>,
-        /// function ID
-        id: String,
-        /// value type
-        value_type: String,
-        /// value as string
-        value: String,
-        /// don't wait for response
-        no_wait: bool,
-    },
-    /// The connection transitions of a device within the last `span_secs` seconds, plus the
-    /// one before them: how the link has come and gone, for a front end's connection strip
-    History {
-        /// device selector
-        device: Option<String>,
-        /// how far back to look, in seconds; the daemon holds at most a day
-        span_secs: u64,
-    },
-    /// The last `span_secs` seconds of a device's readings (at most
-    /// [`READINGS_SPAN_SECS`]), its recalls and its link changes, for a front end's graphs to
-    /// start from. Each series and the link's changes begin with the newest point from before
-    /// the span, when there is one, stamped at its own time, which says what held when the span
-    /// began
-    Readings {
-        /// device selector
-        device: Option<String>,
-        /// how far back to look, in seconds
-        span_secs: u64,
-    },
-    /// Note that a front end recalled the preset `name` on a device by its own writes, so every
-    /// other front end shows it as the one that is on while the device still matches it
-    Recalled {
-        /// device selector
-        device: Option<String>,
-        /// the preset's name
-        name: String,
-    },
-    /// A pairing code for the web UI: six digits, good for one sign-in within five minutes
-    WebPair,
-    /// A link code for the web UI: one sign-in within five minutes, carried in a link's fragment
-    WebLink,
-    /// Whether a link code for the web UI is still open, which spends nothing: a front end that
-    /// shows a link asks it to learn that a browser has used the code
-    WebLinkOpen {
-        /// the code, as `web_link` answered it
-        code: String,
-    },
-    /// Show EQ state
-    EqShow {
-        /// device selector
-        device: Option<String>,
-    },
-    /// Set EQ parameter
-    EqSet {
-        /// device selector
-        device: Option<String>,
-        /// band index
-        band: usize,
-        /// parameter name
-        param: String,
-        /// parameter value
-        value: f64,
-        /// don't wait for response; absent on the wire means wait
-        #[serde(default)]
-        no_wait: bool,
-    },
-    /// Set EQ mode
-    EqMode {
-        /// device selector
-        device: Option<String>,
-        /// mode name
-        mode: String,
-        /// don't wait for response; absent on the wire means wait
-        #[serde(default)]
-        no_wait: bool,
-    },
-    /// Set passphrase
-    Passphrase {
-        /// device selector
-        device: Option<String>,
-        /// passphrase digits
-        digits: String,
-    },
-    /// Ask a device to show itself (function 200), over the link the daemon holds; at most one
-    /// frame goes out every two seconds per device
-    Identify {
-        /// device selector
-        device: Option<String>,
-    },
-    /// Scan for devices
-    Scan {
-        /// scan window in milliseconds
-        window_ms: u64,
-    },
-    /// Subscribe to device events
-    Subscribe {
-        /// device selector
-        device: Option<String>,
-        /// whether the stream also carries the host's view (`Event::Host`, once after the
-        /// connection snapshot and then on each change) and holds the daemon's route reads
-        /// open for as long as it lives; a daemon from before it ignores the field and never
-        /// sends the events
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        host: bool,
-    },
-    /// Re-read the configuration file and the profiles, reconciling the running devices with
-    /// what the file now says
-    Reload,
-    /// The version of the daemon answering
-    Version,
-    /// Stop the daemon, as a termination signal would
-    Stop,
-    /// What the daemon knows of the computer's music player and the route its sound takes to
-    /// the default sink
-    Host,
-    /// Press one of the followed player's transport buttons; answered with an acknowledgement
-    /// when the player took it
-    HostPress {
-        /// `previous`, `play`, `pause` or `next`; any other word is the daemon's error to give
-        button: String,
-    },
-    /// Set the computer's volume, 0 to 100 percent; answered with an acknowledgement once the
-    /// sink took it, and the new level arrives with the host's view
-    HostVolume {
-        /// the volume in percent, never above 100
-        pct: u8,
-    },
-    /// Mute or unmute the computer's sink; answered with an acknowledgement once the sink took
-    /// it
-    HostMute {
-        /// whether the sink is muted
-        muted: bool,
-    },
-    /// Change the computer's EQ; answered with an acknowledgement or an error with the reason.
-    /// The point indexes it carries count from 1, as the bands do
-    HostEq {
-        /// what to do
-        op: HostEqOp,
-    },
-    /// Turn the connection into a stream of the daemon's analysed audio frames
-    /// (`Event::HostCapture` once and on each change of the capture, `Event::HostFrame` while it
-    /// runs), holding the daemon's capture of the default sink for as long as the connection
-    /// lives. A daemon from before it, or one with no host audio, answers an error instead.
-    HostFrames,
-    /// One step of the device walk: stop one of its jobs by id, or follow them. The ops that
-    /// start work come with the walk
-    Walk {
-        /// what to do
-        op: WalkOp,
-    },
-    /// One step of AutoEq: stop one of its jobs by id, or follow them. The ops that start work
-    /// come with AutoEq
-    AutoEq {
-        /// what to do
-        op: AutoEqOp,
-    },
-    /// List, add, change or remove a configured device, or make one the default; answered with
-    /// the configured devices as they stand after it. The daemon writes its configuration file
-    /// and reloads it
-    DeviceConfig {
-        /// what to do
-        op: DeviceConfigOp,
-    },
-    /// Turn the web UI or the MCP server on or off; answered with where both stand after it.
-    /// The daemon writes the server's `enabled` in its configuration file and reloads it
-    ServerSwitch {
-        /// which server
-        server: Server,
-        /// on or off
-        enabled: bool,
-    },
-}
-
-impl Request {
-    /// Whether the server answers the request with a stream of events rather than one
-    /// response: a subscription, the host's frames, and the follow op of each family of jobs.
-    /// The server and a client branch on this and never on the kind.
-    pub fn is_stream(&self) -> bool {
-        match self {
-            Request::Subscribe { .. } | Request::HostFrames => true,
-            Request::Walk { op } => op.is_stream(),
-            Request::AutoEq { op } => op.is_stream(),
-            _ => false,
-        }
-    }
-
-    /// Whether a stream opens with a `Response::Ack` under the request's id, before its first
-    /// event, so a client knows the daemon took the request even when no event comes for a
-    /// while. A subscription and the host's frames send none, so their wire is unchanged.
-    pub fn stream_acks(&self) -> bool {
-        self.is_stream() && !matches!(self, Request::Subscribe { .. } | Request::HostFrames)
-    }
-
-    /// Whether a client waits for the daemon's first line before it takes the connection for an
-    /// open stream: every stream but a subscription, which is answered with nothing and may stay
-    /// silent until something changes.
-    pub fn stream_waits(&self) -> bool {
-        self.is_stream() && !matches!(self, Request::Subscribe { .. })
-    }
-
-    /// The wire name of the request's kind, such as `host_frames`: what a message about the
-    /// request calls it.
-    pub fn cmd(&self) -> String {
-        serde_json::to_value(self)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("cmd")
-                    .and_then(|cmd| cmd.as_str().map(String::from))
-            })
-            .unwrap_or_default()
-    }
-}
-
-/// The longest window a daemon listens for on a `scan` request. A longer one asked for is
-/// listened for this long, and the front end that asks says so before it does.
-pub const MAX_SCAN_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// The message of the [`Response::Error`] a daemon answers a device request with while its
-/// configuration names no device at all. A front end that reads exactly these words knows the
-/// daemon is up and empty, and says so in its own terms.
-pub const NO_DEVICES_CONFIGURED: &str = "no devices are configured";
-
-/// How the words end that a daemon answers a device request with, as code 3, for a device it has
-/// never found: [`not_found_yet`] puts the device's name before them. A front end that reads
-/// them in an answer knows the daemon is still looking for the device, which a lost link is not.
-pub const NOT_FOUND_YET: &str = " has not been found yet";
-
-/// The words for the device `device`, which the daemon has never found: its name, then
-/// [`NOT_FOUND_YET`]. The daemon says them and the front ends that read them take them apart
-/// again through this and that constant, so the two sides cannot come to differ.
-pub fn not_found_yet(device: &str) -> String {
-    format!("{device}{NOT_FOUND_YET}")
-}
-
-/// The code of the [`Response::Error`] for a request the daemon refuses to act on: a value it
-/// cannot read, a control that is read-only, a request that is known but malformed, or a device
-/// that has no such function. The CLI leaves with it as its exit code.
-pub const CODE_USAGE: u8 = 1;
-
-/// The code of the [`Response::Error`] for a device that was not found: a selector that names no
-/// configured device or several, or a link attempt that found nothing.
-pub const CODE_NOT_FOUND: u8 = 2;
-
-/// The code of the [`Response::Error`] for a link that is not there: the device is not
-/// connected, the connection failed, or the device has not been found yet.
-pub const CODE_LINK: u8 = 3;
-
-/// The code of the [`Response::Error`] for a request that went unanswered in time: the device did
-/// not confirm, an actor did not answer, or there was no reading to judge a change from.
-pub const CODE_TIMEOUT: u8 = 4;
-
-/// The code of the [`Response::Error`] a daemon answers a computer request with while the
-/// computer's controls cannot be used: its message is `computer controls unavailable: <why>`.
-pub const CODE_COMPUTER_UNAVAILABLE: u8 = 6;
-
-/// The code of the [`Response::Error`] a daemon answers a request kind it does not know with, so
-/// a front end tells a daemon too old for a request from one that refused it.
-pub const CODE_UNKNOWN_REQUEST: u8 = 7;
-
-/// The feature a daemon lists when its errors carry a [`Reason`] where one applies.
-pub const FEATURE_REASONS: &str = "reasons";
-
-/// The feature a daemon lists when it answers a request kind it does not know with
-/// [`CODE_UNKNOWN_REQUEST`]; one that lists it never answers that with serde's words under code 1.
-pub const FEATURE_UNKNOWN_REQUEST_CODE: &str = "unknown_request_code";
-
-/// The feature a daemon lists when it takes the `device_config` requests ([`DeviceConfigOp`]):
-/// while it runs, a front end adds, changes and removes a configured device through it and
-/// writes no `[[device]]` block itself.
-pub const FEATURE_DEVICE_CRUD: &str = "device_crud";
-
-/// The feature a daemon lists when it takes the `server_switch` request: while it runs, a front
-/// end turns the web UI and the MCP server on and off through it.
-pub const FEATURE_SERVER_SWITCH: &str = "server_switch";
-
-/// The feature a daemon lists when it runs the device walk ([`WalkOp`]'s `start`, `answer` and
-/// `back`): while it runs, a front end adds a device through the daemon's walk rather than its
-/// own.
-pub const FEATURE_WALK: &str = "walk";
-/// The feature a daemon lists when it takes the AutoEq ops (`auto_eq` search, preview, import and
-/// upload): while it runs, it is the one process that reaches AutoEq's repository.
-pub const FEATURE_AUTOEQ: &str = "autoeq";
-
-/// Everything this build's daemon supports, as its `version` answer lists it: the one place the
-/// list is kept. A front end asks through `DaemonInfo::supports`.
-pub const FEATURES: &[&str] = &[
-    FEATURE_REASONS,
-    FEATURE_UNKNOWN_REQUEST_CODE,
-    FEATURE_DEVICE_CRUD,
-    FEATURE_SERVER_SWITCH,
-    FEATURE_WALK,
-    FEATURE_AUTOEQ,
-];
-
 /// Why a [`Response::Error`] happened, in a word a front end can match on instead of the
 /// message's text. A front end built before a reason existed ignores the field, and one that
 /// meets a reason it does not know reads [`Reason::Unknown`].
@@ -605,15 +238,6 @@ pub enum Reason {
     #[serde(other)]
     Unknown,
 }
-
-/// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no
-/// link to the device. A front end that reads exactly these words knows the device is away, and
-/// adds when the daemon tries it again.
-pub const NOT_CONNECTED: &str = "device not connected";
-
-/// The words a daemon answers a web code request with while its web UI is off, naming the fix.
-pub const WEB_OFF: &str = "the web UI is off: `svolder web on` turns it on, and so does the TUI's \
-                           Settings, Connect, Web UI";
 
 /// Response to a request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -722,6 +346,21 @@ pub enum Response {
         /// the MCP server
         mcp: McpStatus,
     },
+    /// The reply to a `preset_write` request: the preset's name as the file now spells it (the
+    /// deleted preset's, for a delete).
+    PresetWritten {
+        /// the name
+        name: String,
+    },
+    /// The reply to an `mqtt_set` request: where the bridge stands after it.
+    MqttSet {
+        /// the MQTT bridge
+        status: MqttStatus,
+        /// whether the write narrowed a group- or world-readable configuration file to 0600
+        /// because a password went into it
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tightened: bool,
+    },
     /// The reply to `identify`.
     Identify {
         /// the name of the device the daemon resolved the request to
@@ -784,6 +423,19 @@ pub enum Response {
     Stopping,
     /// The reply to `host`: the player and the route as they stand.
     Host(crate::host::HostView),
+    /// The reply to `host_cover`: one chunk of the current cover (see [`cover_chunk`]).
+    HostCover {
+        /// the cover's hash, as the host view gave it
+        hash: String,
+        /// `image/jpeg`, `image/png` or `image/webp`
+        mime: String,
+        /// the whole picture's length in bytes, at most 4 MiB
+        total: u64,
+        /// where this chunk starts in the picture
+        offset: u64,
+        /// the chunk's bytes, unpadded base64url
+        data: String,
+    },
     /// Error response
     Error {
         /// error code
@@ -809,230 +461,6 @@ pub enum Response {
     /// A kind this build does not know, from a peer newer than it.
     #[serde(other)]
     Unknown,
-}
-
-/// The longest span a `readings` request is answered for, in seconds: what the daemon keeps.
-pub const READINGS_SPAN_SECS: u64 = 30 * 60;
-
-/// One function's readings in a `readings` answer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SeriesOut {
-    /// the function id, dotted
-    pub id: String,
-    /// the profile key, None for a function the profile does not name
-    pub key: Option<String>,
-    /// how the samples in one bin were joined
-    pub aggregate: svolder_profiles::history::Aggregate,
-    /// `(unix milliseconds, value)`, oldest first; a bool reads 0 or 1
-    pub points: Vec<(u64, f64)>,
-}
-
-/// One recall in a `readings` answer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecallOut {
-    /// when the recall started, in unix milliseconds
-    pub at_ms: u64,
-    /// the preset's name
-    pub name: String,
-}
-
-/// One change of a device's link, as the daemon saw it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinkChange {
-    /// the daemon's wall clock at the change, in unix milliseconds
-    pub at_ms: u64,
-    /// the link state from then on
-    pub connected: bool,
-}
-
-/// Where a daemon's MQTT bridge stands, as `version` reports it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum MqttStatus {
-    /// No `[mqtt]` section turns the bridge on, so the daemon opens no connection to a broker.
-    Off,
-    /// Connecting to the broker, or waiting to try it again.
-    Connecting {
-        /// the broker's host, as the config names it
-        host: String,
-        /// the broker's port
-        port: u16,
-        /// whole seconds until the next attempt, while waiting between attempts; absent while
-        /// an attempt is under way
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retry_in_secs: Option<u64>,
-    },
-    /// Connected to the broker.
-    Connected {
-        /// the broker's host, as the config names it
-        host: String,
-        /// the broker's port
-        port: u16,
-        /// whether the bridge takes commands back
-        commands: bool,
-    },
-    /// A state this client does not know, from a daemon newer than it: read as this, so the
-    /// rest of the reply still decodes.
-    #[serde(other)]
-    Unknown,
-}
-
-/// Where a daemon's MCP or web token comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TokenKind {
-    /// The server's token variable (`SVOLDER_MCP_TOKEN` or `SVOLDER_WEB_TOKEN`) in the daemon's
-    /// environment.
-    Environment,
-    /// The file the server's `token_file` (`[mcp]` or `[web]`) names.
-    File,
-    /// The file svolder generated in the daemon's state home.
-    State,
-}
-
-/// What a daemon says of the token its MCP or web server uses: where it comes from and its last
-/// three characters (none for a short token), which lets a front end tell whether it reads the
-/// same token. Never the token itself, and never anywhere but the `version` reply.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TokenInfo {
-    /// the source kind
-    pub kind: TokenKind,
-    /// the file's path, on the daemon's side, for a file source
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// the token's last three characters, or empty for a token under 16 characters
-    pub tail: String,
-}
-
-/// Where a daemon's MCP server stands, as `version` reports it.
-///
-/// Nothing here is a secret: the address, how requests prove themselves, whether writes are
-/// offered, or why the address could not be bound.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum McpStatus {
-    /// No `[mcp]` section turns the server on, so the daemon opens no port.
-    Off,
-    /// Serving on `listen`.
-    Listening {
-        /// the address the server is bound to, with the port the system chose when the config
-        /// asked for 0
-        listen: std::net::SocketAddr,
-        /// how a request proves who sent it
-        auth: crate::config::McpAuth,
-        /// whether the tools that change a device are offered
-        writes: bool,
-    },
-    /// The server is on in the config but is not serving: the address could not be bound, or
-    /// the token could not be had.
-    Failed {
-        /// the address the config asks for
-        listen: std::net::SocketAddr,
-        /// why, in words that never carry a token
-        error: String,
-    },
-    /// A state this client does not know, from a daemon newer than it: read as this, so the
-    /// rest of the reply still decodes.
-    #[serde(other)]
-    Unknown,
-}
-
-impl McpStatus {
-    /// The status as `svolder daemon status` and the daemon's log say it: `mcp: off`;
-    /// `mcp: listening on ADDR (token, read-only)`, with `no auth` for `auth = "none"` and
-    /// `writes` where the write tools are offered; `mcp: cannot listen on ADDR: WHY`; or
-    /// `mcp: unknown` for a state a newer daemon reports that this one does not know.
-    pub fn line(&self) -> String {
-        match self {
-            McpStatus::Off => "mcp: off".to_string(),
-            McpStatus::Listening {
-                listen,
-                auth,
-                writes,
-            } => format!(
-                "mcp: listening on {listen} ({}, {})",
-                match auth {
-                    crate::config::McpAuth::Token => "token",
-                    crate::config::McpAuth::None => "no auth",
-                },
-                match writes {
-                    true => "writes",
-                    false => "read-only",
-                }
-            ),
-            McpStatus::Failed { listen, error } => {
-                format!("mcp: cannot listen on {listen}: {error}")
-            }
-            McpStatus::Unknown => "mcp: unknown".to_string(),
-        }
-    }
-}
-
-/// Where a daemon's web UI stands, as `version` reports it. Nothing here is a secret.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum WebStatus {
-    /// No `[web]` section turns it on, so the daemon opens no port.
-    Off,
-    /// Serving on `listen`.
-    Listening {
-        /// the address the server is bound to, with the port the system chose when the config
-        /// asked for 0
-        listen: std::net::SocketAddr,
-        /// how a browser proves who it is
-        auth: crate::config::WebAuth,
-        /// whether the page may change a device
-        writes: bool,
-        /// what a visitor without a sign-in gets
-        guest: crate::config::WebGuest,
-    },
-    /// On in the config but not serving: the address could not be bound, or the token could
-    /// not be had.
-    Failed {
-        /// the address the config asks for
-        listen: std::net::SocketAddr,
-        /// why, in words that never carry a token
-        error: String,
-    },
-    /// A state this client does not know, from a daemon newer than it.
-    #[serde(other)]
-    Unknown,
-}
-
-impl WebStatus {
-    /// The status as `svolder daemon status` and the daemon's log say it: `web: off`;
-    /// `web: listening on ADDR (token, writes)`, with `no auth` for `auth = "none"`,
-    /// `read-only` where writes are off and `, guest read` where guests may look;
-    /// `web: cannot listen on ADDR: WHY`; or `web: unknown`.
-    pub fn line(&self) -> String {
-        match self {
-            WebStatus::Off => "web: off".to_string(),
-            WebStatus::Listening {
-                listen,
-                auth,
-                writes,
-                guest,
-            } => format!(
-                "web: listening on {listen} ({}, {}{})",
-                match auth {
-                    crate::config::WebAuth::Token => "token",
-                    crate::config::WebAuth::None => "no auth",
-                },
-                match writes {
-                    true => "writes",
-                    false => "read-only",
-                },
-                match guest {
-                    crate::config::WebGuest::Read => ", guest read",
-                    crate::config::WebGuest::None => "",
-                }
-            ),
-            WebStatus::Failed { listen, error } => {
-                format!("web: cannot listen on {listen}: {error}")
-            }
-            WebStatus::Unknown => "web: unknown".to_string(),
-        }
-    }
 }
 
 /// An event pushed to a subscriber.

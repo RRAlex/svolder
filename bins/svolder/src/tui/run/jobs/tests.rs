@@ -100,6 +100,23 @@ async fn a_newer_question_replaces_the_waiting_one_and_stops_the_one_in_flight()
     assert_eq!(sent.load(Ordering::SeqCst), 1);
 }
 
+/// The daemon's words for AutoEq being off for the fake device reach the line as they are, not as
+/// a connect error.
+#[tokio::test]
+async fn autoeq_off_is_said_in_the_daemons_words() {
+    let words = "AutoEq is off for the fake device; set SVOLDER_AUTOEQ_URL to turn it on";
+    let call: Call = Box::pin(async move {
+        Ok(Response::error(svolder_ipc::CODE_USAGE, words)
+            .with_reason(svolder_ipc::Reason::Unreachable))
+    });
+    let mut jobs = Jobs::default();
+    jobs.search(Some(call), ask(1, "hd"), false);
+    let Done::Searched(_, Err(why)) = next(&mut jobs.ended).await else {
+        panic!("the search was not refused");
+    };
+    assert_eq!(why, words);
+}
+
 /// A session with no daemon answers every job with the words that say AutoEq is the daemon's, and
 /// reaches for nothing.
 #[tokio::test]

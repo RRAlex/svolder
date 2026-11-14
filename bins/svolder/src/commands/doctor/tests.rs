@@ -1064,3 +1064,107 @@ async fn the_daemon_answer_carries_the_changed_config_words() {
     );
     let _ = std::fs::remove_file(&socket);
 }
+
+/// The MQTT row: absent while nothing turns the bridge on, the broker's own words for a bridge in
+/// trouble, a pass once it is connected, and notes on a file that cannot work.
+#[test]
+fn the_mqtt_row_grades_the_bridge_in_words() {
+    use svolder_ipc::config::MqttConfig;
+    use svolder_ipc::{MqttProblem, MqttStatus};
+    let on = MqttConfig {
+        enabled: true,
+        host: Some("ha.lan".into()),
+        username: Some("svolder".into()),
+        ..MqttConfig::default()
+    };
+    assert!(mqtt_row(&MqttConfig::default(), false, None).is_none());
+    assert!(mqtt_row(&MqttConfig::default(), false, Some(&MqttStatus::Off)).is_none());
+
+    let trouble = |problem, port| MqttStatus::Trouble {
+        host: "ha.lan".into(),
+        port,
+        problem,
+        retry_in_secs: Some(4),
+    };
+    let refused = mqtt_row(&on, false, Some(&trouble(MqttProblem::Refused, 1883))).expect("a row");
+    assert_eq!(refused.check, "MQTT bridge");
+    assert_eq!(refused.state, State::Fail);
+    assert_eq!(
+        refused.reason,
+        "ha.lan:1883: the broker refused the login (check username and password)"
+    );
+    let away = mqtt_row(&on, false, Some(&trouble(MqttProblem::Unreachable, 1883))).expect("a row");
+    assert_eq!(
+        (away.state, away.reason.as_str()),
+        (State::Fail, "ha.lan:1883: not reachable")
+    );
+    let tls = mqtt_row(&on, false, Some(&trouble(MqttProblem::Tls, 8883))).expect("a row");
+    assert_eq!(
+        (tls.state, tls.reason.as_str()),
+        (
+            State::Fail,
+            "ha.lan:8883: port 8883 is TLS, which svolder does not speak"
+        )
+    );
+
+    let up = mqtt_row(
+        &on,
+        false,
+        Some(&MqttStatus::Connected {
+            host: "ha.lan".into(),
+            port: 1883,
+            commands: false,
+        }),
+    )
+    .expect("a row");
+    assert_eq!(up.state, State::Pass);
+    assert_eq!(up.reason, "connected to ha.lan:1883 (read-only)");
+    let connecting = mqtt_row(
+        &on,
+        false,
+        Some(&MqttStatus::Connecting {
+            host: "ha.lan".into(),
+            port: 1883,
+            retry_in_secs: None,
+        }),
+    )
+    .expect("a row");
+    assert_eq!(connecting.state, State::Note);
+
+    // A daemon that says off for a section that is on has not read the file.
+    let unread = mqtt_row(&on, false, Some(&MqttStatus::Off)).expect("a row");
+    assert_eq!(unread.state, State::Warn);
+    // Nobody asked the daemon: the file alone is read for what cannot work.
+    assert_eq!(
+        mqtt_row(&on, false, None).expect("a row").state,
+        State::Note
+    );
+    let lonely = MqttConfig {
+        username: None,
+        password: Some("fake-secret".into()),
+        ..on.clone()
+    };
+    let row = mqtt_row(&lonely, false, None).expect("a row");
+    assert_eq!(row.state, State::Warn);
+    assert_eq!(
+        row.reason,
+        "a password is set and no username, so the password is not sent: svolder mqtt set username NAME"
+    );
+    assert!(!row.reason.contains("fake-secret"));
+    // The shell's own password variable counts as one.
+    let env_only = MqttConfig {
+        username: None,
+        ..on.clone()
+    };
+    assert_eq!(
+        mqtt_row(&env_only, true, None).expect("a row").state,
+        State::Warn
+    );
+    let tls_port = MqttConfig {
+        port: 8883,
+        ..on.clone()
+    };
+    let row = mqtt_row(&tls_port, false, None).expect("a row");
+    assert_eq!(row.state, State::Warn);
+    assert!(row.reason.contains("TLS"), "{}", row.reason);
+}

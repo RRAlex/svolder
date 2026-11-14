@@ -47,6 +47,7 @@ mod about {
     pub(super) const DECODE: &str =
         "Decode a captured frame (command or notification) given as hex";
     pub(super) const PROFILES: &str = "Inspect device profiles";
+    pub(super) const MQTT: &str = "Turn the MQTT bridge to Home Assistant on or off, and set its broker, username and password";
     pub(super) const MCP: &str = "Turn the MCP server on or off, or print its bearer token";
     pub(super) const WEB: &str = "Open the web UI, turn it on or off, or print a code or its token";
     pub(super) const CONFIG: &str = "Configuration paths, settings and the template";
@@ -94,6 +95,7 @@ const GROUPS: &[(&str, &[(&str, &str)])] = &[
         "Daemon",
         &[
             ("daemon", about::DAEMON),
+            ("mqtt", about::MQTT),
             ("mcp", about::MCP),
             ("web", about::WEB),
         ],
@@ -382,6 +384,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: ProfilesCommand,
     },
+    #[command(about = about::MQTT)]
+    Mqtt {
+        #[command(subcommand)]
+        command: MqttCommand,
+    },
     #[command(about = about::MCP)]
     Mcp {
         #[command(subcommand)]
@@ -662,6 +669,37 @@ pub(crate) enum ProfilesCommand {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum MqttCommand {
+    /// Turn the MQTT bridge on: `[mqtt] enabled = true`, which a running daemon acts on at once
+    On,
+    /// Turn the MQTT bridge off: `[mqtt] enabled = false`, which a running daemon acts on at once
+    Off,
+    /// Set the broker's host, port or username in `[mqtt]`
+    Set {
+        #[command(subcommand)]
+        key: MqttKey,
+    },
+    /// Set the broker's password: typed twice without echo at a terminal, else the first line of
+    /// standard input, never an argument
+    Password {
+        /// Take the password away instead of setting one
+        #[arg(long)]
+        clear: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum MqttKey {
+    /// The broker's host
+    Host { value: String },
+    /// The broker's port, 1883 unless the broker says otherwise (8883 is TLS, which svolder does
+    /// not speak)
+    Port { value: u16 },
+    /// The username the broker wants; an empty value takes it away
+    Username { value: String },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum McpCommand {
     /// Turn the MCP server on: `[mcp] enabled = true`, which a running daemon acts on at once
     On,
@@ -681,6 +719,12 @@ pub(crate) enum WebCommand {
     On,
     /// Turn the web UI off: `[web] enabled = false`, which a running daemon acts on at once
     Off,
+    /// Let visitors without a sign-in read the web UI's device screens, or not: `[web] guest`
+    Guest {
+        /// on lets guests read, off asks every visitor to sign in
+        #[command(subcommand)]
+        mode: GuestMode,
+    },
     /// Print a six-digit code that signs in one browser within five minutes
     Pair,
     /// Print the token the web UI's sign-in page takes, and nothing else
@@ -689,6 +733,14 @@ pub(crate) enum WebCommand {
         #[arg(long)]
         rotate: bool,
     },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum GuestMode {
+    /// `[web] guest = "read"`, which a running daemon acts on at once
+    On,
+    /// `[web] guest = "none"`, which a running daemon acts on at once
+    Off,
 }
 
 #[derive(Subcommand)]

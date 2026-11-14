@@ -32,8 +32,12 @@ fn an_amp_lists_its_meters_and_has_no_tone_pane() {
             pane_row(" ▶ Power        [x] on"),
             pane_row("   Power meters [x] on"),
             pane_row(""),
-            pane_row("   Meter L      ▓┃█████████████  100%"),
-            pane_row("   Meter R      ▓┃░░░░░░░░░░░░░    0%"),
+            pane_row(
+                "   Meter L      ▓▓▓▓▓┃█████████████████████████████████████████████████  100%"
+            ),
+            pane_row(
+                "   Meter R      ▓▓▓▓▓┃░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0%"
+            ),
         ],
     );
     assert!(
@@ -200,23 +204,23 @@ fn a_meter_with_a_floor_fills_from_the_floor_and_marks_the_class_a_tick() {
         .iter()
         .filter(|c| matches!(c, '█' | '░' | '┃'))
         .count();
-    // The bar is 15 cells wide on this mockup; a layout change that moved it is its own
-    // finding, not one to fold into the fill count below.
-    assert_eq!(bar_len, 15, "{cells:?}");
+    // The bar takes the rest of the 80-column pane's row, 55 cells on this mockup; a layout
+    // change that moved it is its own finding, not one to fold into the fill count below.
+    assert_eq!(bar_len, 55, "{cells:?}");
     let filled = cells.iter().filter(|&&c| c == '█').count();
-    // 1400 is 500 of the 2100 (3000 floor-subtracted to 900) left to fill: 500 * 15 / 2100
-    // truncates to 3. Pinned to that literal count, not re-derived by the bar's own
+    // 1400 is 500 of the 2100 (3000 floor-subtracted to 900) left to fill: 500 * 55 / 2100
+    // truncates to 13, the last of which the tick below stands on. Pinned to that literal count, not re-derived by the bar's own
     // truncating-divide formula, so a wrong rounding or clamp in `fill` (widgets/rows.rs) reads
     // differently here rather than reproducing itself in the expectation too.
-    assert_eq!(filled, 3, "{cells:?}");
+    assert_eq!(filled, 12, "{cells:?}");
     let tick_at = cells
         .iter()
         .position(|&c| c == '┃')
         .expect("the tick glyph");
     // The tick sits on the same fraction, mapped over one less step than the fill itself
-    // (a marker on a track, the way the balance marker sits on its track): 500 * 14 / 2100
-    // truncates to 3.
-    assert_eq!(tick_at - bar_start, 3, "{cells:?}");
+    // (a marker on a track, the way the balance marker sits on its track): 500 * 54 / 2100
+    // truncates to 12.
+    assert_eq!(tick_at - bar_start, 12, "{cells:?}");
 }
 
 #[test]
@@ -534,11 +538,14 @@ fn a_log_meters_recent_peak_is_marked_on_its_live_part() {
     let now = Instant::now();
     app.apply(Update::Status(meter(300)), now);
     app.apply(Update::Status(meter(170)), now);
-    // The bar is 15 cells: a block of 4 (a quarter, rounded), 11 live cells, the reading 170
-    // filling 5 of them, and the peak 300 (0.94 of the way up) landing on live cell 9 of the 10
-    // a marker may take, cell 13 of the bar.
+    // The bar is 55 cells: a block of 14 (a quarter, rounded), 41 live cells, the reading 170
+    // filling 18 of them, and the peak 300 (0.94 of the way up) landing on live cell 37 of the 40
+    // a marker may take, cell 51 of the bar.
     let bar = meter_bar(&app);
-    assert_eq!(bar, "▓▓▓┃█████░░░░▎░");
+    assert_eq!(
+        bar,
+        "▓▓▓▓▓▓▓▓▓▓▓▓▓┃██████████████████░░░░░░░░░░░░░░░░░░░▎░░░"
+    );
 }
 
 /// In the tall tier a log meter's block and tick are on both rows of its bar.

@@ -163,10 +163,10 @@ fn mqtt_max_volume_db_must_be_finite() {
     );
 }
 
-/// The MQTT writer sets `enabled`, `host`, `port` and `commands`, and a password in the file
-/// is neither shown to the edit closure's writes nor changed.
+/// The MQTT writer sets `enabled`, `host` and `commands` and leaves every key the edit does not
+/// change as it is, comments and the password included.
 #[test]
-fn update_mqtt_writes_only_the_changed_keys_and_never_the_password() {
+fn update_mqtt_writes_only_the_changed_keys() {
     let dir = temp_dir("config-writer");
     let path = dir.join("config.toml");
     std::fs::write(
@@ -178,7 +178,6 @@ fn update_mqtt_writes_only_the_changed_keys_and_never_the_password() {
 
     Config::update_mqtt(&path, |mqtt| {
         mqtt.host = Some("broker.example.com".into());
-        mqtt.password = Some("other-fake".into());
         mqtt.commands = true;
     })
     .unwrap();
@@ -188,8 +187,52 @@ fn update_mqtt_writes_only_the_changed_keys_and_never_the_password() {
     assert!(text.contains("host = \"broker.example.com\""), "{text}");
     assert!(text.contains("commands = true"), "{text}");
     assert!(text.contains("password = \"fake-secret\""));
-    assert!(!text.contains("other-fake"));
     assert!(!text.contains("port"), "{text}");
+}
+
+/// The username and the password are written when an edit changes them, and cleared back to the
+/// template's commented line when an edit takes them away.
+#[test]
+fn update_mqtt_writes_and_clears_the_username_and_the_password() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    Config::update_mqtt(&path, |mqtt| {
+        mqtt.host = Some("broker.example.com".into());
+        mqtt.username = Some("svolder".into());
+        mqtt.password = Some("fake-secret".into());
+    })
+    .unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\nusername = \"svolder\""), "{text}");
+    assert!(text.contains("\npassword = \"fake-secret\""), "{text}");
+    let c = Config::load_from(&path).unwrap();
+    assert_eq!(c.mqtt.password.as_deref(), Some("fake-secret"));
+
+    // A password with a quote and a backslash survives the round trip.
+    Config::update_mqtt(&path, |mqtt| mqtt.password = Some("a\"b\\c".into())).unwrap();
+    assert_eq!(
+        Config::load_from(&path).unwrap().mqtt.password.as_deref(),
+        Some("a\"b\\c")
+    );
+
+    Config::update_mqtt(&path, |mqtt| mqtt.password = None).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("a\\\"b"), "{text}");
+    assert!(text.contains("# password = \"\""), "{text}");
+    assert_eq!(Config::load_from(&path).unwrap().mqtt.password, None);
+    Config::update_mqtt(&path, |mqtt| mqtt.username = None).unwrap();
+    assert_eq!(Config::load_from(&path).unwrap().mqtt.username, None);
+}
+
+/// An edit that changes nothing leaves the file byte for byte, a password included.
+#[test]
+fn update_mqtt_with_no_change_leaves_the_file() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    let text = "schema = 1\n[mqtt]\nhost = \"h\"\nusername = \"u\"\npassword = \"p\"\n";
+    std::fs::write(&path, text).unwrap();
+    Config::update_mqtt(&path, |_| {}).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
 }
 
 /// An edit the parser would refuse (a bridge on with no host) is an error and leaves the file.
@@ -200,4 +243,113 @@ fn update_mqtt_refuses_what_would_not_parse_and_keeps_the_file() {
     std::fs::write(&path, "schema = 1\n").unwrap();
     assert!(Config::update_mqtt(&path, |mqtt| mqtt.enabled = true).is_err());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "schema = 1\n");
+}
+
+/// The container variables give the `[mqtt]` keys their defaults, and a key in the file wins.
+#[test]
+fn the_mqtt_defaults_come_from_the_environment_and_the_file_wins() {
+    let env = ListenDefaults {
+        mqtt_enabled: Some("1".to_string()),
+        mqtt_host: Some("broker.lan".to_string()),
+        mqtt_port: Some("1884".to_string()),
+        mqtt_username: Some("svolder".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::parse_with_listen_defaults("", &env).unwrap();
+    assert!(c.mqtt.enabled);
+    assert_eq!(c.mqtt.host.as_deref(), Some("broker.lan"));
+    assert_eq!(c.mqtt.port, 1884);
+    assert_eq!(c.mqtt.username.as_deref(), Some("svolder"));
+    // A table with other keys still takes them.
+    let c = Config::parse_with_listen_defaults("[mqtt]\ncommands = true\n", &env).unwrap();
+    assert!(c.mqtt.enabled && c.mqtt.commands);
+    assert_eq!(c.mqtt.host.as_deref(), Some("broker.lan"));
+    // The file wins, key by key.
+    let text = "[mqtt]\nenabled = false\nhost = \"file.lan\"\nport = 1885\nusername = \"me\"\n";
+    let c = Config::parse_with_listen_defaults(text, &env).unwrap();
+    assert!(!c.mqtt.enabled, "the file's false wins");
+    assert_eq!(c.mqtt.host.as_deref(), Some("file.lan"));
+    assert_eq!(c.mqtt.port, 1885);
+    assert_eq!(c.mqtt.username.as_deref(), Some("me"));
+    // One variable at a time, and a blank one is unset (ListenDefaults::from_env drops it).
+    let host_only = ListenDefaults {
+        mqtt_host: Some("broker.lan".to_string()),
+        ..ListenDefaults::default()
+    };
+    let c = Config::parse_with_listen_defaults("", &host_only).unwrap();
+    assert!(!c.mqtt.enabled);
+    assert_eq!(c.mqtt.port, 1883);
+    assert_eq!(c.mqtt.username, None);
+}
+
+/// A bad `SVOLDER_MQTT_ENABLED` or `SVOLDER_MQTT_PORT` is refused by the variable's name, and
+/// the password is not among the defaults the environment gives the parse.
+#[test]
+fn a_bad_mqtt_variable_is_refused_by_name() {
+    let bad = ListenDefaults {
+        mqtt_enabled: Some("maybe".to_string()),
+        ..ListenDefaults::default()
+    };
+    let err = Config::parse_with_listen_defaults("", &bad)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("SVOLDER_MQTT_ENABLED"), "{err}");
+    for port in ["abc", "0", "70000"] {
+        let bad = ListenDefaults {
+            mqtt_port: Some(port.to_string()),
+            ..ListenDefaults::default()
+        };
+        let err = Config::parse_with_listen_defaults("", &bad)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("SVOLDER_MQTT_PORT"), "{port}: {err}");
+    }
+    // An enabled bridge with no host, from the variable, names the variable.
+    let no_host = ListenDefaults {
+        mqtt_enabled: Some("1".to_string()),
+        ..ListenDefaults::default()
+    };
+    let err = Config::parse_with_listen_defaults("", &no_host)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("mqtt.host"), "{err}");
+}
+
+/// A password written into a file others can read tightens it to 0600, and says so; a file that
+/// is already private, or a write with no password in it, is left at its mode.
+#[test]
+fn a_password_write_tightens_a_readable_file_to_0600() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode =
+        |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let dir = temp_dir("config-mode");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "schema = 1\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    // No password in the edit: the mode stays.
+    let tightened = Config::update_mqtt_noting(&path, |m| m.commands = true).unwrap();
+    assert!(!tightened);
+    assert_eq!(mode(&path), 0o644);
+
+    let tightened =
+        Config::update_mqtt_noting(&path, |m| m.password = Some("fake".into())).unwrap();
+    assert!(tightened);
+    assert_eq!(mode(&path), 0o600);
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("password = \"fake\"")
+    );
+
+    // Already private: nothing to say.
+    let tightened =
+        Config::update_mqtt_noting(&path, |m| m.password = Some("other".into())).unwrap();
+    assert!(!tightened);
+    assert_eq!(mode(&path), 0o600);
+
+    // A group-writable 0660 loses group too; clearing the password never loosens.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660)).unwrap();
+    assert!(Config::update_mqtt_noting(&path, |m| m.password = Some("x".into())).unwrap());
+    assert_eq!(mode(&path), 0o600);
 }

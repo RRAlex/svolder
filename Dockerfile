@@ -4,7 +4,7 @@
 # The runtime image: the static binaries `make docker` builds into target/dist, the same bytes
 # the .deb, the .rpm and the tarball carry, with no shared library to install beside them.
 # The base image is pinned by digest, as the build container's is.
-FROM ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64
+FROM ubuntu:26.04@sha256:065aa8626841f16057b78b027b464cd59c4fac36c204c72dcbf48d66f5fa8a96
 # The user the entrypoint drops to by default (PUID/PGID override it at run time); `make docker`
 # passes the host user's uid. The base image already carries a user at 1000, so whoever holds
 # the requested uid is removed first.

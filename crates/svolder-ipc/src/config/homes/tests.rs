@@ -4,6 +4,7 @@
 //! Where the configuration lives: the config home and the scratch homes of the unit tests.
 
 use super::*;
+use crate::test_support::temp_dir;
 
 /// The config directory with the environment as inputs, so no case changes the process's own.
 #[test]

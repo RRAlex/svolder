@@ -22,6 +22,7 @@ Effects	Hue drift	off	Whether the pane borders, titles, the header rule and the 
 Effects	Rainbow scroll	off	Whether the tone curve's colours scroll slowly round the hue circle, one round trip every 20 s, rather than resting red at 20 Hz and violet at 20 kHz. On red and neon the curve's own ramp slides along its colours and back instead.	[tui.effects] spectrum_drift = false
 Effects	Transition	trace	How one screen gives way to the next: none, trace, noise or melt. Every one but none belongs to the animation layer, so Effects off plays none of them.	[tui] transition = "trace"
 Behaviour	Mouse capture	on	Whether the TUI takes the mouse. Capture stops the terminal's own text selection and copy while it is on.	[tui] mouse = true
+Behaviour	Tooltips	on	Whether a pointer resting on a key word, a row or a control for a moment shows a tip saying what it is and how to use it. It needs mouse capture on.	[tui] tooltips = true
 Behaviour	Confirm quit	on	Whether q asks Quit svolder? [Y/n] before the TUI quits. Off quits on the one q. Ctrl-C quits at once either way.	[tui] confirm_quit = true
 Behaviour	Title meter	on	Whether the terminal's title carries one bar per channel of the device's meters, else of what the host plays, while they stream.	[tui] title_meter = true
 Behaviour	Intro on launch	on	Whether the wordmark plays while the device opens. Any key skips it.	[tui] intro = true
@@ -30,6 +31,7 @@ Behaviour	Intro sound	off	Whether a short sound plays with the wordmark, through
 Behaviour	AutoEq refresh	13 weeks	How old the cached AutoEq index may get before the search fetches it again: never, or 1 to 99 weeks. Ctrl-R in the search fetches it at once whatever this says.	[autoeq] refresh_weeks
 Host audio	Host audio	on	Whether the TUI reaches the host's own audio: what plays, the sink's volume and the media player's transport. SVOLDER_HOST=off holds it off for one process whatever this says.	[tui] host_audio = true
 Host audio	Visualizer	on	Whether the device screen's Spectrum row draws what the host plays in sixteen bands. It needs host audio on.	[tui] visualizer = true
+Host audio	Cover art	auto	Whether the Now playing row shows the track's cover art, from the daemon. auto draws it as the terminal allows (the kitty graphics protocol, else sixel, else half-block cells); off draws none and asks the terminal nothing. The terminal is asked once, as the TUI starts: auto turned on later draws half-block cells until the next start.	[tui] cover_art = "auto"
 Connect	Web UI	no daemon	The web UI serves this screen's controls to a browser on this computer or your network. Enter opens its box: on and off, how far it reaches, a link or a pairing code to sign a browser in, and its token.	[web] enabled, listen
 Connect	MCP server	off	Whether the daemon serves the Model Context Protocol over HTTP, for AI assistants. Off, it opens no port. The change is written to the file and the daemon reloads.	[mcp] enabled
 Connect	MCP listen	loopback:8737	The address the MCP server listens on. Enter types one: loopback keeps the server on this machine.	[mcp] listen
@@ -40,5 +42,6 @@ Connect	MQTT bridge	off	Whether the daemon bridges its devices to an MQTT broker
 Connect	MQTT broker host	not set	The broker's host name or address. Enter types it.	[mqtt] host
 Connect	MQTT broker port	1883	The broker's port. Enter types it.	[mqtt] port
 Connect	MQTT commands	read-only	Whether the bridge takes commands back from the broker and writes them to the devices. Read-only only reports.	[mqtt] commands
-Connect	MQTT password	not set	Whether a broker password is set, as this session's environment and config file say; the daemon's own environment may differ. It is never shown and never edited here: put it in SVOLDER_MQTT_PASSWORD, or in the config file.	[mqtt] password, or SVOLDER_MQTT_PASSWORD
+Connect	MQTT username	not set	The username the broker wants. Enter types it; an empty line takes it away. With no username the daemon sends no password either, and a broker that wants a login refuses it.	[mqtt] username
+Connect	MQTT password	not set	The broker's password. Enter types it, masked (Tab shows it); Delete twice on the line clears it. Never read back. SVOLDER_MQTT_PASSWORD in the daemon's environment wins.	[mqtt] password, or SVOLDER_MQTT_PASSWORD
 Connect	MQTT status	no daemon	Where the daemon says its MQTT bridge stands. The daemon answers.	from the daemon

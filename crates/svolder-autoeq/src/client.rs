@@ -102,6 +102,12 @@ pub enum AutoEqError {
         /// Why the fetch failed.
         reason: String,
     },
+    /// The base is the discard port, the address a fake daemon is given: nothing was asked.
+    #[error("{}", off_words(*fake))]
+    Off {
+        /// Whether the transport is the fake one, whose default base this is.
+        fake: bool,
+    },
     /// The cache directory or file could not be written.
     #[error("could not write the AutoEq cache {}: {reason}", path.display())]
     Cache {
@@ -119,6 +125,18 @@ impl AutoEqError {
     }
 }
 
+/// The words for AutoEq being off: under the fake transport the address is its default, anywhere
+/// else it was given. Both start with [`crate::OFF_PREFIX`].
+fn off_words(fake: bool) -> String {
+    let prefix = crate::OFF_PREFIX;
+    match fake {
+        true => format!("{prefix} for the fake device; set SVOLDER_AUTOEQ_URL to turn it on"),
+        false => format!(
+            "{prefix}: SVOLDER_AUTOEQ_URL is the discard port; set it to AutoEq's results to turn it on"
+        ),
+    }
+}
+
 /// The words for a listed measurement whose file is not there: `<subject> is listed but its file
 /// is not there`. The caller adds its own next step.
 pub fn missing_file_words(subject: &str) -> String {
@@ -131,6 +149,8 @@ pub struct Client {
     base: String,
     cache_dir: PathBuf,
     limits: Limits,
+    /// Whether the transport is the fake one: only the words of [`AutoEqError::Off`] differ.
+    fake: bool,
 }
 
 impl Client {
@@ -144,6 +164,7 @@ impl Client {
             base,
             cache_dir,
             limits,
+            fake: false,
         }
     }
 
@@ -156,7 +177,10 @@ impl Client {
         cache_dir: PathBuf,
     ) -> Client {
         let fake = transport.trim() == "fake";
-        Client::new(base_from(configured, fake), cache_dir, Limits::default())
+        Client {
+            fake,
+            ..Client::new(base_from(configured, fake), cache_dir, Limits::default())
+        }
     }
 
     /// A client for the base URL in the environment variable `var` (unset or blank means AutoEq's
@@ -165,7 +189,21 @@ impl Client {
     pub fn from_var(var: &str, cache_dir: PathBuf) -> Client {
         let fake = std::env::var("SVOLDER_TRANSPORT").is_ok_and(|kind| kind.trim() == "fake");
         let base = base_from(std::env::var(var).ok(), fake);
-        Client::new(base, cache_dir, Limits::default())
+        Client {
+            fake,
+            ..Client::new(base, cache_dir, Limits::default())
+        }
+    }
+
+    /// Whether the base is this machine's discard port, where nothing listens: AutoEq is off, and
+    /// the index and files are refused without a request.
+    pub fn is_off(&self) -> bool {
+        let rest = self
+            .base
+            .split_once("://")
+            .map_or(&*self.base, |(_, rest)| rest);
+        let host = rest.split('/').next().unwrap_or_default();
+        matches!(host, "127.0.0.1:9" | "localhost:9" | "[::1]:9")
     }
 
     /// The base URL entries' files are under.
@@ -178,7 +216,7 @@ impl Client {
     /// A fetched index replaces the cached one atomically, and only when it holds at least one
     /// entry; one that cannot be cached is returned with a note saying so. A failed fetch with a
     /// cached copy in hand returns that copy with a note saying so; a failed fetch with none is
-    /// [`AutoEqError::NoIndex`].
+    /// [`AutoEqError::NoIndex`], or [`AutoEqError::Off`] when the client is [off](Client::is_off).
     pub fn index(&self, refresh: Refresh) -> Result<Index, AutoEqError> {
         let cached = self.read_cache();
         let stale = match &cached {
@@ -190,6 +228,7 @@ impl Client {
         }
         match self.fetch_index() {
             Ok(index) => Ok(index),
+            Err(off @ AutoEqError::Off { .. }) if cached.is_none() => Err(off),
             Err(error) => match cached {
                 Some(mut copy) => {
                     copy.note = Some(format!(
@@ -207,6 +246,9 @@ impl Client {
 
     /// The text of `entry`'s `ParametricEQ.txt`.
     pub fn download(&self, entry: &Entry) -> Result<String, AutoEqError> {
+        if self.is_off() {
+            return Err(AutoEqError::Off { fake: self.fake });
+        }
         let url = entry.peq_url(&self.base);
         self.get_text(&url, self.limits.file_total, self.limits.file_bytes)
     }
@@ -225,6 +267,9 @@ impl Client {
     }
 
     fn fetch_index(&self) -> Result<Index, AutoEqError> {
+        if self.is_off() {
+            return Err(AutoEqError::Off { fake: self.fake });
+        }
         let url = format!("{}{CACHE_FILE}", self.base);
         let text = self.get_text(&url, self.limits.index_total, self.limits.index_bytes)?;
         let entries = parse_index(&text);

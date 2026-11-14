@@ -410,7 +410,7 @@ async fn the_path_row_shows_the_verdict() {
     end.watching.close().await;
 }
 
-/// A sound that goes to another sink says so in the one sentence, with no hops after it.
+/// A sound that goes to another sink says so in the short words `→ NAME`, with no hops after it.
 #[tokio::test]
 async fn a_path_to_another_sink_says_where_the_sound_goes() {
     let daemon = stub_daemon().await;
@@ -435,8 +435,38 @@ async fn a_path_to_another_sink_says_where_the_sound_goes() {
         .flat_map(|frame| frame.lines())
         .find(|line| line.contains("Path "))
         .expect("a Path row was drawn");
-    assert!(row.contains("the computer plays to"), "{row}");
-    assert!(!row.contains('→'), "{row}");
+    assert!(row.contains("→ Built-in Audio"), "{row}");
+    assert!(!row.contains("plays to"), "{row}");
+    assert!(!row.contains("DAC"), "no hops after it: {row}");
+    end.watching.close().await;
+}
+
+/// A player routed to another sink says `player → NAME` in the Path row.
+#[tokio::test]
+async fn a_player_routed_elsewhere_says_so_in_the_path_row() {
+    let daemon = stub_daemon().await;
+    daemon.hosts(HostView {
+        route: Some(route(|route| {
+            route.player_match = PlayerMatch::Elsewhere {
+                sink: "LG TV".into(),
+            };
+        })),
+        ..view("So What", "playing")
+    });
+    let watching = joined(&daemon, TuiConfig::default(), counting(&Arc::default())).await;
+
+    let (end, frames) = drive(watching, TALL, |frames, _| async move {
+        shows(&frames, "Path").await;
+    })
+    .await;
+
+    let row = frames
+        .iter()
+        .flat_map(|frame| frame.lines())
+        .find(|line| line.contains("Path "))
+        .expect("a Path row was drawn");
+    assert!(row.contains("player \u{2192} LG TV"), "{row}");
+    assert!(!row.contains("plays to"), "{row}");
     end.watching.close().await;
 }
 
@@ -949,7 +979,7 @@ fn what_the_loop_carries_by_value_stays_small() {
         ("Host", size_of::<Host>(), 512),
         ("FromDaemon", size_of::<crate::tui::host::FromDaemon>(), 16),
         ("Kept", size_of::<Kept>(), 1400),
-        ("Watching", size_of::<Watching>(), 600),
+        ("Watching", size_of::<Watching>(), 640),
     ] {
         assert!(
             size <= bound,
@@ -1316,4 +1346,149 @@ async fn the_off_switches_never_open_the_frames_connection() {
         );
         end.watching.close().await;
     }
+}
+
+/// A picture a daemon serves as a cover.
+fn cover_of_a_picture() -> svolder_host::cover::Cover {
+    let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(96, 96, |x, y| {
+        image::Rgb([(x * 2) as u8, (y * 2) as u8, 128])
+    }));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .expect("a PNG");
+    svolder_host::cover::Cover {
+        bytes: bytes.into_inner(),
+        mime: "image/png",
+    }
+}
+
+/// A view whose track has the cover `hash`.
+fn view_with_cover(title: &str, hash: &str) -> HostView {
+    HostView {
+        playing: Some(PlayingView {
+            cover: Some(hash.into()),
+            ..playing(title, "playing")
+        }),
+        ..view(title, "playing")
+    }
+}
+
+/// Whether a frame has the Now playing row with art beside it, half-blocks the terminal here.
+fn has_art(frames: &[String]) -> bool {
+    frames
+        .iter()
+        .flat_map(|frame| frame.lines())
+        .any(|line| line.contains("Now playing:") && (line.contains('▀') || line.contains('▄')))
+}
+
+/// The cover of the track the daemon follows is fetched over the socket, drawn beside the
+/// title, and replaced when the track changes, none of it holding up a frame.
+#[tokio::test]
+async fn the_cover_of_the_track_playing_is_drawn_beside_its_title_and_follows_the_track() {
+    let daemon = stub_daemon().await;
+    daemon.version(env!("CARGO_PKG_VERSION"));
+    daemon.serves_cover("abc", cover_of_a_picture());
+    daemon.hosts(view_with_cover("So What", "abc"));
+    let mut watching = joined(&daemon, TuiConfig::default(), counting(&Arc::default())).await;
+    watching.show_art(Some(ratatui_image::picker::Picker::halfblocks()));
+
+    let served = &daemon;
+    let (end, _) = drive(watching, TALL, |frames, _| async move {
+        let daemon = served;
+        let started = Instant::now();
+        while !has_art(&drawn(&frames)) {
+            assert!(started.elapsed() < SHOWS_WITHIN, "no cover was drawn");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        // The next track has another cover.
+        daemon.serves_cover("def", cover_of_a_picture());
+        daemon.publish(svolder_ipc::Event::Host(view_with_cover(
+            "Blue in Green",
+            "def",
+        )));
+        shows(&frames, "Blue in Green").await;
+        let started = Instant::now();
+        while daemon.host_cover_asks().len() < 2 {
+            assert!(
+                started.elapsed() < SHOWS_WITHIN,
+                "the new cover was not asked for"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        // Let the picture land.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    })
+    .await;
+
+    let picture = end
+        .watching
+        .app
+        .host
+        .cover
+        .picture
+        .as_ref()
+        .expect("a picture");
+    assert_eq!(
+        picture.hash, "def",
+        "the picture of the track before is still drawn"
+    );
+    end.watching.close().await;
+}
+
+/// With `cover_art = "off"` the daemon is never asked for a cover.
+#[tokio::test]
+async fn cover_art_off_asks_the_daemon_for_nothing() {
+    let daemon = stub_daemon().await;
+    daemon.version(env!("CARGO_PKG_VERSION"));
+    daemon.serves_cover("abc", cover_of_a_picture());
+    daemon.hosts(view_with_cover("So What", "abc"));
+    let tui = TuiConfig {
+        cover_art: svolder_ipc::CoverArt::Off,
+        ..TuiConfig::default()
+    };
+    let watching = joined(&daemon, tui, counting(&Arc::default())).await;
+
+    let (end, frames) = drive(watching, TALL, |frames, _| async move {
+        shows(&frames, "Now playing: So What").await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+    })
+    .await;
+
+    assert!(!has_art(&frames));
+    assert_eq!(daemon.host_cover_asks(), Vec::<u64>::new());
+    assert!(end.watching.app.host.cover.picture.is_none());
+    end.watching.close().await;
+}
+
+/// A daemon that lists no `host_cover` (0.28 to 0.33 send hashes and cannot serve them) is not
+/// asked, once it has said what it lists.
+#[tokio::test]
+async fn a_daemon_that_cannot_serve_covers_is_not_asked() {
+    let daemon = stub_daemon().await;
+    // Daemons 0.28 to 0.33 send the hash and list no `host_cover`.
+    daemon.version("0.30.0");
+    daemon.hosts(view_with_cover("So What", "abc"));
+    let mut watching = joined(&daemon, TuiConfig::default(), counting(&Arc::default())).await;
+    watching.show_art(Some(ratatui_image::picker::Picker::halfblocks()));
+    // The version answer is what tells the loop; it is taken before the first frame is drawn.
+    let asked = watching
+        .daemon_version
+        .take()
+        .expect("the open asked the daemon's version");
+    let answer = tokio::time::timeout(Duration::from_secs(10), asked)
+        .await
+        .expect("the daemon answers")
+        .expect("the answer arrives");
+    daemon_answered(&mut watching, answer, std::path::Path::new("x"));
+
+    let (end, frames) = drive(watching, TALL, |frames, _| async move {
+        shows(&frames, "Now playing: So What").await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+    })
+    .await;
+
+    assert!(!has_art(&frames));
+    assert_eq!(daemon.host_cover_asks(), Vec::<u64>::new());
+    end.watching.close().await;
 }

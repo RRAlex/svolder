@@ -157,11 +157,18 @@ const formatWords = (sink) => [rateWords(sink.rate_hz), sink.format].filter(Bool
 export const plain = (words) => words.replace(/\bthe computer's\b/gi, "PipeWire's").replace(/\bthe computer\b/gi, 'PipeWire')
   .replace(/\bcomputer\b/gi, 'PipeWire');
 
+/** The verdict's words as markup: with a whole sentence behind them (`path.title`) the short words
+ * are hidden from a screen reader and the sentence is read in their place. */
+export const said = (path) => (path.title
+  ? `<span aria-hidden="true">${esc(plain(path.words))}</span><span class="sg-sr">${esc(plain(path.title))}</span>`
+  : esc(plain(path.words)));
+
 /** The path verdict, from the path the shown device reads (its hops' `computer` entry and the
  * words), else nothing. */
 function verdict(path) {
   if (!path?.words) return '';
-  return fact(COMPUTER.path, plain(path.words), path.class === 'ok' ? 'sg-ok' : 'sg-warn');
+  const title = path.title ? ` title="${esc(plain(path.title))}"` : '';
+  return `<dt>${esc(COMPUTER.path)}</dt><dd class="${path.class === 'ok' ? 'sg-ok' : 'sg-warn'}"${title}>${said(path)}</dd>`;
 }
 
 /** The facts of the route that are not controls: the sound card and its format, the other streams

@@ -7,18 +7,15 @@
 //! follows. A name is refused in the core's one wording ([`preset::new_name`]); a built-in is
 //! never touched; a taken name is never overwritten.
 
-use std::path::Path as FilePath;
-
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::routing::post;
 use hyper::{HeaderMap, StatusCode};
 use serde::Deserialize;
-use svolder_ipc::Config;
 use svolder_profiles::tone::preset;
 
-use super::config_edit::{config_for, conflict, edit_then_reload, save_preset};
+use super::config_edit::{config_for, delete_preset, rename_preset, save_preset};
 use super::tone::{eq_of, raw_of};
 use super::{with_parts, writable};
 use crate::web::Web;
@@ -142,11 +139,9 @@ async fn overwritable(web: &Web, name: &str, from_computer: bool) -> Result<(), 
         return Err(error(StatusCode::CONFLICT, preset::COMPUTER_UPDATE_REFUSAL));
     }
     let config = config_for(web, "presets").await?;
-    match preset::find(&config.presets, name) {
-        Some(existing) if existing.is_imported() => Err(refused_name(
-            preset::imported_update_refusal(&existing.name),
-        )),
-        _ => Ok(()),
+    match crate::handler::imported_overwrite(&config.presets, name) {
+        Some(words) => Err(refused_name(words)),
+        None => Ok(()),
     }
 }
 
@@ -171,35 +166,10 @@ async fn rename(
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    if preset::is_builtin(&asked.from) {
-        return error(
-            StatusCode::CONFLICT,
-            format!(
-                "{:?} is a built-in preset; it cannot be renamed",
-                asked.from.trim()
-            ),
-        );
-    }
-    let config = match config_for(&web, "presets").await {
-        Ok(found) => found,
+    let new = match rename_preset(&web, &asked.from, &asked.to).await {
+        Ok(new) => new,
         Err(refused) => return refused,
     };
-    let Some(old) = config.preset(&asked.from).map(|p| p.name.clone()) else {
-        return error(
-            StatusCode::NOT_FOUND,
-            format!("no preset named {:?}", asked.from.trim()),
-        );
-    };
-    let names = config.presets.iter().map(|p| p.name.as_str());
-    let new = match preset::new_name(&asked.to, names, Some(&old)) {
-        Ok(new) => new.to_string(),
-        Err(why) => return refused_name(why),
-    };
-    let to = new.clone();
-    let edit = move |path: &FilePath| Config::rename_preset(path, &old, &to);
-    if let Err(refused) = edit_then_reload(&web, conflict, edit).await {
-        return refused;
-    }
     answer(&web, &name, &new).await
 }
 
@@ -223,30 +193,10 @@ async fn delete(
         Ok(asked) => asked,
         Err(refused) => return *refused,
     };
-    if preset::is_builtin(&asked.name) {
-        return error(
-            StatusCode::CONFLICT,
-            format!(
-                "{:?} is a built-in preset; it cannot be deleted",
-                asked.name.trim()
-            ),
-        );
-    }
-    let config = match config_for(&web, "presets").await {
-        Ok(found) => found,
+    let gone = match delete_preset(&web, &asked.name).await {
+        Ok(gone) => gone,
         Err(refused) => return refused,
     };
-    let Some(gone) = config.preset(&asked.name).map(|p| p.name.clone()) else {
-        return error(
-            StatusCode::NOT_FOUND,
-            format!("no preset named {:?}", asked.name.trim()),
-        );
-    };
-    let taken = gone.clone();
-    let edit = move |path: &FilePath| Config::remove_preset(path, &taken);
-    if let Err(refused) = edit_then_reload(&web, conflict, edit).await {
-        return refused;
-    }
     answer(&web, &name, &gone).await
 }
 

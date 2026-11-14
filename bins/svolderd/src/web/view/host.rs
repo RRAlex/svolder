@@ -64,6 +64,9 @@ pub(crate) struct Path {
     pub(crate) hops: Vec<Hop>,
     /// The words of the verdict.
     pub(crate) words: String,
+    /// The whole sentence behind short words (`the computer plays to DELL S2721QS`), for a
+    /// tooltip; empty when the words say it all.
+    pub(crate) title: String,
 }
 
 /// One hop of the path.
@@ -109,7 +112,10 @@ impl Playing {
             }
         }
         if let Some(path) = &self.path {
-            key.push_str(&format!("{SEP}path={}{SEP}{}", path.class, path.words));
+            key.push_str(&format!(
+                "{SEP}path={}{SEP}{}{SEP}{}",
+                path.class, path.words, path.title
+            ));
             for hop in &path.hops {
                 key.push_str(&format!(
                     "{SEP}{}{SEP}{}{SEP}{}{SEP}{}",
@@ -146,6 +152,7 @@ pub(crate) fn playing_of(
             class: "unknown",
             hops: Vec::new(),
             words: ROUTE_NOT_READ.to_string(),
+            title: String::new(),
         }),
         _ => None,
     };
@@ -240,6 +247,7 @@ fn path(line: &PathLine) -> Path {
             })
             .collect(),
         words: line.words_line(),
+        title: line.sentence().unwrap_or_default(),
     }
 }
 

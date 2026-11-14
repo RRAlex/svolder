@@ -132,7 +132,7 @@ pub trait Fleet: Send + Sync + 'static {
     }
 
     /// The host's current cover when `hash` is its hash; never an earlier one.
-    fn host_cover(&self, _hash: &str) -> Option<Cover> {
+    fn host_cover(&self, _hash: &str) -> Option<Arc<Cover>> {
         None
     }
 
@@ -181,6 +181,18 @@ pub trait Fleet: Send + Sync + 'static {
         _preset: Preset,
         _force: bool,
     ) -> Result<String, ConfigWriteError> {
+        Err(ConfigWriteError::Unknown)
+    }
+
+    /// Rename the user's preset `from` to `to`, then have the daemon reload; answers with the
+    /// name as the file spells it.
+    async fn rename_preset(&self, _from: &str, _to: &str) -> Result<String, ConfigWriteError> {
+        Err(ConfigWriteError::Unknown)
+    }
+
+    /// Delete the user's preset `name`, then have the daemon reload; answers with the name as
+    /// the file spelled it.
+    async fn delete_preset(&self, _name: &str) -> Result<String, ConfigWriteError> {
         Err(ConfigWriteError::Unknown)
     }
 }
@@ -454,7 +466,7 @@ impl Fleet for DaemonFleet {
         })
     }
 
-    fn host_cover(&self, hash: &str) -> Option<Cover> {
+    fn host_cover(&self, hash: &str) -> Option<Arc<Cover>> {
         self.daemon().ok()?.host().cover(hash)
     }
 
@@ -492,5 +504,15 @@ impl Fleet for DaemonFleet {
     ) -> Result<String, ConfigWriteError> {
         let daemon = self.daemon().map_err(|_| ConfigWriteError::Unknown)?;
         daemon.save_preset(name, preset, force).await
+    }
+
+    async fn rename_preset(&self, from: &str, to: &str) -> Result<String, ConfigWriteError> {
+        let daemon = self.daemon().map_err(|_| ConfigWriteError::Unknown)?;
+        daemon.rename_preset(from, to).await
+    }
+
+    async fn delete_preset(&self, name: &str) -> Result<String, ConfigWriteError> {
+        let daemon = self.daemon().map_err(|_| ConfigWriteError::Unknown)?;
+        daemon.delete_preset(name).await
     }
 }

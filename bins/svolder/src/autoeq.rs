@@ -7,7 +7,7 @@
 //! The daemon is the one process that reaches AutoEq's repository (see `docs/design/autoeq.md`);
 //! this binary links no HTTP client. Each call here opens a connection of its own, so nothing
 //! else the front end sends waits behind a slow fetch, and ends in the daemon's answer or its
-//! refusal in words. `search` and `upload` are plain requests. `import` is a job: the request
+//! refusal in words. `search` is a plain request. `import` is a job: the request
 //! answers with the job's id, and the end comes on the family's follow stream, which is opened
 //! after the start (the stream tells each job's last state first, so a job that has already
 //! ended is read all the same). A call that is dropped while its job runs cancels the job.
@@ -134,25 +134,6 @@ pub(crate) fn search_op(query: &str, refresh: bool) -> Request {
 pub(crate) fn search_answer(reply: Result<Response, IpcError>) -> Result<AutoEqSearch, Refused> {
     match reply {
         Ok(Response::AutoEqSearch(found)) => Ok(*found),
-        other => Err(Refused::of(other)),
-    }
-}
-
-/// Save `text`, parametric EQ in one of the formats `svolder eq import` reads, as the imported
-/// preset `name`; `force` writes over the user's preset of that name. Reaches no network.
-pub(crate) async fn upload(
-    socket: &Path,
-    text: String,
-    name: &str,
-    force: bool,
-) -> Result<AutoEqSaved, Refused> {
-    let op = AutoEqOp::Upload {
-        text,
-        name: name.to_string(),
-        force,
-    };
-    match request(socket, op, START_WAIT).await {
-        Ok(Response::AutoEqSaved(saved)) => Ok(saved),
         other => Err(Refused::of(other)),
     }
 }

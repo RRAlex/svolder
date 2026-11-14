@@ -299,6 +299,23 @@ pub(crate) async fn reload_daemon_for_presets(g: &Globals<'_>, config: &Config, 
     }
 }
 
+/// Write one op of the preset library for a verb: through the daemon while one that reads `path`
+/// answers (it is then the one writer, judges the name and reloads itself), and through the
+/// file's own writer with none, with one that reads another file, or under a direct transport.
+pub(crate) async fn write_preset(
+    g: &Globals<'_>,
+    config: &Config,
+    path: &Path,
+    op: svolder_ipc::PresetOp,
+) -> Result<(), Failure> {
+    let socket = socket::path::resolve(g.socket, config.socket.as_deref());
+    let direct = matches!(g.transport, "ble" | "fake");
+    match !direct && crate::backend::daemon_reads(&socket, path).await {
+        true => crate::reach::preset_write(&socket, path, op).await,
+        false => crate::reach::preset_in_process(path, op),
+    }
+}
+
 /// Refuse a write of `path` that a running daemon reading it would answer with the missing-file
 /// words: the file is gone, and a write would start it from the template and the reload after it
 /// would drop every device. Exit 1 with the daemon's own words, as its refused writes do.

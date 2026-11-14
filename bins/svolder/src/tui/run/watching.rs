@@ -179,6 +179,12 @@ impl Watching {
         );
     }
 
+    /// Draw the cover art of the track the daemon follows as `picker` says the terminal does
+    /// (the probe's answer; `None` where none was asked).
+    pub(in crate::tui) fn show_art(&mut self, picker: Option<ratatui_image::picker::Picker>) {
+        *self.host.art = crate::tui::art::Art::with(picker);
+    }
+
     /// [`Watching::reach_host`] with what the environment says passed in: `held_off` for
     /// `SVOLDER_HOST=off`, `unreached` for `off` or `fake`.
     pub(super) fn reach_host_as(&mut self, held_off: bool, unreached: bool) {

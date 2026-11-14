@@ -116,7 +116,7 @@ fn the_words_are_drawn_once_the_arrival_trace_ends() {
     assert!(!effects.active(), "the trace is still running");
     assert_eq!(
         text(terminal.backend().buffer())[2],
-        "┌ Controls ───────── mute ─ 0 centre ┐┌ Tone control ────────── flat ─ presets ┐"
+        "┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐"
     );
 }
 

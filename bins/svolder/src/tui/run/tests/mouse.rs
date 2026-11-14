@@ -452,3 +452,42 @@ async fn a_left_click_on_the_painted_squirrel_plays_the_hop() {
     assert_eq!(end.watching.app.mascot.last_visit(), hop);
     end.watching.close().await;
 }
+
+/// A click on a row of the preset list loads that preset as `Enter` on it does, and the list
+/// closes.
+#[tokio::test(start_paused = true)]
+async fn a_click_on_a_preset_row_loads_it() {
+    let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
+    app.mouse = true;
+    app.show(crate::tui::app::Screen::Tone);
+    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+    let mut mouse = SpyMouse::default();
+    // The second row of the list on the 80×24 tone-control screen: `Warm`.
+    let script =
+        stream::iter(vec![key('p'), left_click(10, 10)]).chain(quit_after(Duration::from_secs(2)));
+
+    let end = event_loop(LoopParts {
+        opener: &opener_over(never_opens()),
+        adder: &nothing_to_add(),
+        watching: watching(backend, app, None),
+        terminal: &mut terminal,
+        events: script,
+        mouse: &mut mouse,
+        title: &mut title(),
+        look: look(),
+    })
+    .await;
+
+    assert_eq!(end.code, 0, "{:?}", end.why);
+    assert_eq!(
+        end.watching.app.presets.loaded_preset.as_deref(),
+        Some("Warm"),
+        "the click did not load the preset under it"
+    );
+    assert!(
+        end.watching.app.presets.preset_list.is_none(),
+        "the list is still open"
+    );
+    end.watching.close().await;
+}

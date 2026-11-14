@@ -49,7 +49,7 @@ pub struct Columns {
 impl Columns {
     /// The columns a pane whose rows have `room` columns after their cursor gives them, for
     /// rows whose longest label is `longest` characters and whose widest value beside a bar
-    /// is `widest`, with bars no longer than `bar_max`.
+    /// is `widest`.
     ///
     /// The label column takes the longest label the pane has, so every value starts in the
     /// same place, and the bar takes what is left of the row. A row too narrow for the label,
@@ -57,11 +57,11 @@ impl Columns {
     /// it is cut with `…` where it is drawn), down to [`LABEL_FLOOR`], and only then the bar,
     /// so the three stay within `room` unless the value alone is wider than the row, which no
     /// built-in profile reaches (the bar is then one cell).
-    pub fn fit(room: usize, longest: usize, widest: usize, bar_max: usize) -> Columns {
+    pub fn fit(room: usize, longest: usize, widest: usize) -> Columns {
         let wanted = longest.min(LABEL_MAX) + 1;
         let rest = room.saturating_sub(VALUE_GAP + widest);
         let field = wanted.min(rest.saturating_sub(BAR_MIN).max(LABEL_FLOOR));
-        let bar = rest.saturating_sub(field).min(bar_max.max(BAR_MIN)).max(1);
+        let bar = rest.saturating_sub(field).max(1);
         Columns { field, bar, room }
     }
 
@@ -74,6 +74,15 @@ impl Columns {
     /// Cells a bar, or a balance track, is drawn across, for the mouse hit over it.
     pub(crate) fn bar(&self) -> usize {
         self.bar
+    }
+
+    /// Cells a balance track is drawn across: [`Columns::bar`] held to an odd count, so the
+    /// centre mark has a cell of its own to stand on, exactly in the middle.
+    pub(crate) fn track(&self) -> usize {
+        match self.bar % 2 {
+            0 => self.bar.saturating_sub(1).max(1),
+            _ => self.bar,
+        }
     }
 
     /// Columns a row has in all, after its cursor.
@@ -310,14 +319,17 @@ pub fn balance_line(
     ) else {
         return plain_row(control, reading, columns);
     };
-    let at = position(eased.unwrap_or(raw), (min, max), columns.bar);
+    let track = columns.track();
+    let at = position(eased.unwrap_or(raw), (min, max), track);
     let ground = bar_ground(theme, selected);
     Line::from(vec![
         label(&control.label, columns.field),
         Span::raw("L "),
         Span::styled("─".repeat(at), ground),
         Span::styled(BALANCE_MARK, own_colours(theme.style(Role::Bar))),
-        Span::styled("─".repeat(columns.bar - 1 - at), ground),
+        Span::styled("─".repeat(track - 1 - at), ground),
+        // The cell an even bar gives up keeps the reading where the bar's width puts it.
+        Span::raw(" ".repeat(columns.bar - track)),
         Span::raw(format!(" R {text}")),
     ])
 }
@@ -348,7 +360,11 @@ pub fn bar_value(control: &Control, reading: Option<&Reading>) -> Option<String>
         // The widest text a meter row writes beside its bar.
         return control.scale().map(|_| "100%".to_string());
     }
-    let raw = reading.and_then(Reading::raw_i64)?;
+    bar_text(control, reading.and_then(Reading::raw_i64)?)
+}
+
+/// The text [`bar_value`] writes for the raw step `raw`.
+fn bar_text(control: &Control, raw: i64) -> Option<String> {
     control.range?;
     match (control.kind, control.center) {
         (ControlKind::Level, Some(_)) => units::text(control, raw).map(|text| format!("{text:>2}")),
@@ -358,6 +374,24 @@ pub fn bar_value(control: &Control, reading: Option<&Reading>) -> Option<String>
         }
         _ => None,
     }
+}
+
+/// The most cells [`bar_value`] can take for `control` at any reading its range allows: what a
+/// row reserves beside its bar so the bar's width depends on the pane alone, never on the value
+/// being read. `None` for a row with no bar text.
+pub fn widest_bar_value(control: &Control) -> Option<usize> {
+    if control.kind == ControlKind::Meter {
+        return bar_value(control, None).map(|text| text.chars().count());
+    }
+    let (min, max) = control.range?;
+    // A range wider than this is walked in strides, its two ends always included.
+    let stride = usize::try_from(max.saturating_sub(min) / 4096 + 1).unwrap_or(1);
+    (min..=max)
+        .step_by(stride)
+        .chain([max])
+        .filter_map(|raw| bar_text(control, raw))
+        .map(|text| text.chars().count())
+        .max()
 }
 
 /// `line` with the row cursor in front: `▶` on the focused row, blank on every other.

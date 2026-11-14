@@ -56,8 +56,6 @@ pub(super) struct Controls {
     /// The interior line the switch is drawn on, over the Volume row's bar or as the Host
     /// group's Volume row, where there is one.
     pub(super) switch: Option<u16>,
-    /// Cells a level's bar is drawn across, which the Tone pane's loudness bar matches.
-    pub(super) bar: usize,
 }
 
 /// The Controls pane: one row per control a user can set, then the meters the device
@@ -104,7 +102,7 @@ fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: boo
     if spectrum {
         host_labels.push(host::SPECTRUM);
     }
-    let columns = columns_of(&rows, &host_labels, room, tier);
+    let columns = columns_of(&rows, &host_labels, room);
     let mut pane = Controls {
         lines: Vec::new(),
         rows: Vec::new(),
@@ -112,7 +110,6 @@ fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: boo
         host: Vec::new(),
         spectrum: None,
         switch: None,
-        bar: columns.bar(),
     };
     // The row index a `Row`, `ToggleOf`, `Select…` or `Level` hit is keyed by: the position
     // among the writable rows only, the same order `App::rows` lists them in.
@@ -199,6 +196,7 @@ fn row_lines(
     // a row's own start: the same for every row, since a pane's rows share their columns.
     let field = u16::try_from(columns.field()).unwrap_or(0);
     let bar = u16::try_from(columns.bar()).unwrap_or(0);
+    let track = u16::try_from(columns.track()).unwrap_or(0);
     // The length a bar is drawn at, which is on its way to the value the row writes out
     // while that value is still gliding there — or the value a drag holds the bar at, which
     // is drawn at once.
@@ -244,14 +242,14 @@ fn row_lines(
                 extras.push((
                     top,
                     CURSOR_OFFSET + field + BALANCE_TRACK_OFFSET,
-                    bar,
+                    track,
                     Hit::Level(index),
                 ));
                 // The track takes a press and a drag of its own, over the row's hit.
                 extras.push((
                     top,
                     CURSOR_OFFSET + field + BALANCE_TRACK_OFFSET,
-                    bar,
+                    track,
                     Hit::LevelBar(index),
                 ));
             }
@@ -780,9 +778,9 @@ fn pane_rows(app: &App) -> Vec<Row<'_>> {
 }
 
 /// The columns `rows` share with the rows labelled `more` under them: wide enough for the
-/// longest label the pane has and the widest value any of its bars carries, with bars as long
-/// as `tier` lets them run.
-fn columns_of(rows: &[Row<'_>], more: &[&str], room: usize, tier: Tier) -> Columns {
+/// longest label the pane has and the widest value any of its bars can carry, with bars taking
+/// the rest of the row.
+fn columns_of(rows: &[Row<'_>], more: &[&str], room: usize) -> Columns {
     let longest = rows
         .iter()
         .map(|row| row.control.label.chars().count())
@@ -791,15 +789,10 @@ fn columns_of(rows: &[Row<'_>], more: &[&str], room: usize, tier: Tier) -> Colum
         .unwrap_or(0);
     let widest = rows
         .iter()
-        .filter_map(|row| widgets::rows::bar_value(row.control, row.reading))
-        .map(|value| value.chars().count())
+        .filter_map(|row| widgets::rows::widest_bar_value(row.control))
         .max()
         .unwrap_or(0);
-    let bar_max = match tier.wide {
-        true => widgets::BAR_MAX_WIDE,
-        false => widgets::BAR_MAX,
-    };
-    Columns::fit(room, longest, widest, bar_max)
+    Columns::fit(room, longest, widest)
 }
 
 /// The columns a row has for its label and value inside a pane drawn over `area`: what the

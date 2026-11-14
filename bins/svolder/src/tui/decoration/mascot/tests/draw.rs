@@ -698,3 +698,54 @@ fn the_squirrel_keeps_its_corner_under_the_spaced_band_table() {
         );
     }
 }
+
+/// A squirrel the hour called out, at `t0` + `at`, with effects `on` or off.
+fn hour_app(on: bool, at: Duration) -> (App, Instant) {
+    let mut app = app_showing(Screen::Device);
+    app.mascot.capable = true;
+    app.mascot.effects = on;
+    app.mascot.palette = "amber".into();
+    let t0 = Instant::now();
+    app.mascot.observe(&View::bare(), t0);
+    app.mascot
+        .observe(&View::bare(), t0 + Duration::from_secs(3600));
+    app.mascot
+        .observe(&View::bare(), t0 + Duration::from_secs(3600) + at);
+    (app, t0)
+}
+
+#[test]
+fn an_entrance_paints_inside_the_box_and_leaves_the_landed_frame_untouched() {
+    let theme = truecolour();
+    let landed_at = Duration::from_secs(20);
+    let (landed, _) = hour_app(true, landed_at);
+    let (plain, _) = hour_app(false, landed_at);
+    assert!(showing(&landed).fx.is_none());
+    let (with, _) = render_with(&landed, 120, 40, &theme);
+    let (without, _) = render_with(&plain, 120, 40, &theme);
+    assert_eq!(
+        with, without,
+        "an entrance that has landed leaves nothing behind"
+    );
+    // Midway the frame differs from the landed one, and only inside the squirrel's box.
+    let (mid, _) = hour_app(true, ms(600));
+    assert!(showing(&mid).fx.is_some());
+    let (during, _) = render_with(&mid, 120, 40, &theme);
+    let pane = screens::device::home_of(Rect::new(0, 0, 120, 40), &mid, &theme)
+        .expect("a home pane")
+        .rect;
+    let home = home_box(pane);
+    let mut changed = 0;
+    for y in 0..40 {
+        for x in 0..120 {
+            if cell(&during, x, y) != cell(&without, x, y) {
+                changed += 1;
+                assert!(
+                    home.contains((x, y).into()),
+                    "({x},{y}) is outside {home:?}"
+                );
+            }
+        }
+    }
+    assert!(changed > 0);
+}

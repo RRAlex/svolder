@@ -5,7 +5,8 @@
 //! own: who writes the file, and what the verb says.
 
 use svolder_ipc::{
-    CODE_USAGE, Client, Config, FEATURE_SERVER_SWITCH, McpStatus, Reason, Response, WebStatus,
+    CODE_USAGE, Client, Config, FEATURE_GUEST_SWITCH, FEATURE_SERVER_SWITCH, McpStatus, Reason,
+    Response, WebGuest, WebStatus,
 };
 
 use super::*;
@@ -297,4 +298,196 @@ async fn a_socket_this_user_may_not_open_fails_the_verb_and_writes_nothing() {
         "{said}"
     );
     assert!(!own.exists(), "nothing is written");
+}
+
+/// With a daemon that has the request, the guest switch is one `guest_switch` request and this
+/// side writes nothing; the line is the web UI's, naming the guest mode.
+#[tokio::test]
+async fn the_guest_verb_with_a_daemon_is_one_request_and_writes_nothing() {
+    let dir = temp_dir("guest-daemon");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_GUEST_SWITCH]);
+    daemon.says_web(
+        Some(WebStatus::Listening {
+            listen: ([127, 0, 0, 1], 8738).into(),
+            auth: svolder_ipc::config::WebAuth::Token,
+            writes: true,
+            guest: WebGuest::None,
+        }),
+        None,
+    );
+
+    let done = guest_switch(&daemon.socket, &own, true).await.expect("on");
+    assert_eq!(
+        done.line,
+        "web: listening on 127.0.0.1:8738 (token, writes, guest read)"
+    );
+    assert_eq!(done.notes, Vec::<String>::new());
+    let done = guest_switch(&daemon.socket, &own, false)
+        .await
+        .expect("off");
+    assert_eq!(
+        done.line,
+        "web: listening on 127.0.0.1:8738 (token, writes)"
+    );
+    assert_eq!(daemon.guest_switches(), [true, false]);
+    assert_eq!(daemon.switches(), [], "not a server switch");
+    assert_eq!(daemon.reloads(), 0);
+    assert!(!own.exists(), "the daemon is the writer");
+}
+
+/// With no daemon the verb writes `guest` in its own file and says that nothing runs yet.
+#[tokio::test]
+async fn the_guest_verb_with_no_daemon_writes_the_file_itself() {
+    let dir = temp_dir("guest-alone");
+    let own = dir.0.join("config.toml");
+    let none = fresh_socket();
+
+    let done = guest_switch(&none, &own, true).await.expect("on");
+    assert_eq!(done.line, format!("web guest: on in {}", own.display()));
+    assert_eq!(
+        done.notes,
+        [format!(
+            "nothing answers on {}: the guest mode applies with the next daemon",
+            none.display()
+        )]
+    );
+    assert_eq!(
+        Config::load_from(&own).expect("parses").web.guest,
+        WebGuest::Read
+    );
+    guest_switch(&none, &own, false).await.expect("off");
+    assert_eq!(
+        Config::load_from(&own).expect("parses").web.guest,
+        WebGuest::None
+    );
+}
+
+/// A daemon without `guest_switch` (one that has only the server switch) is named, exits 7,
+/// and nothing is sent or written.
+#[tokio::test]
+async fn the_guest_verb_names_a_daemon_without_the_request() {
+    let dir = temp_dir("guest-old");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_SERVER_SWITCH]);
+
+    let said = guest_switch(&daemon.socket, &own, true)
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        said.to_string(),
+        "the daemon (9.9.9) cannot switch the guest view, which this svolder asks it to. Run \
+         `svolder daemon restart`"
+    );
+    assert!(
+        matches!(&said, Failed::TooOld(failure) if failure.code == 7),
+        "{said}"
+    );
+    assert_eq!(daemon.guest_switches(), Vec::<bool>::new());
+    assert!(!own.exists());
+}
+
+/// The daemon's refusal is the failure in its words; an answer that leaves the guest mode as it
+/// was fails; a web UI that is off succeeds with a note, since the key is written.
+#[tokio::test]
+async fn the_guest_verb_judges_where_the_web_ui_stands() {
+    let dir = temp_dir("guest-judged");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_GUEST_SWITCH]);
+
+    daemon.says_web(Some(WebStatus::Off), None);
+    let done = guest_switch(&daemon.socket, &own, true)
+        .await
+        .expect("off page");
+    assert_eq!(done.line, "web: off");
+    assert_eq!(
+        done.notes,
+        [
+            "[web] guest = \"read\" is written; the web UI is off, so no one sees it until `svolder web on`"
+        ]
+    );
+
+    daemon.switches_late();
+    daemon.says_web(
+        Some(WebStatus::Listening {
+            listen: ([127, 0, 0, 1], 8738).into(),
+            auth: svolder_ipc::config::WebAuth::Token,
+            writes: true,
+            guest: WebGuest::None,
+        }),
+        None,
+    );
+    let said = guest_switch(&daemon.socket, &own, true)
+        .await
+        .expect_err("still none");
+    assert_eq!(
+        said.to_string(),
+        "web: listening on 127.0.0.1:8738 (token, writes) ([web] guest = \"read\" is written \
+         and the daemon has not acted on it: svolder daemon status)"
+    );
+
+    daemon.answers_switch(
+        Response::error(CODE_USAGE, "Saving the server switch is off: read-only")
+            .with_reason(Reason::ReadOnly),
+    );
+    let said = guest_switch(&daemon.socket, &own, true)
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        said.to_string(),
+        "Saving the server switch is off: read-only"
+    );
+    assert!(!own.exists());
+}
+
+/// A daemon that started just before the no-daemon write, and reads the file written, is told
+/// to reload, so `guest off` reaches it; one that reads another file is left alone.
+#[tokio::test]
+async fn the_no_daemon_guest_write_reloads_a_daemon_that_now_reads_the_file() {
+    let dir = temp_dir("guest-late");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.says(None, Some(&own.display().to_string()));
+    let done = guest_alone(&daemon.socket, &own, false).await.expect("off");
+    assert_eq!(daemon.reloads(), 1, "the late daemon re-read the file");
+    assert!(done.line.starts_with("web guest: off in "), "{}", done.line);
+
+    let other = dir.0.join("other.toml");
+    guest_alone(&daemon.socket, &other, false)
+        .await
+        .expect("off");
+    assert_eq!(daemon.reloads(), 1, "a daemon reading another file");
+}
+
+/// With `auth = "none"` every visitor is signed in, so `guest on` says it changes nothing and
+/// still succeeds, through a daemon and with none.
+#[tokio::test]
+async fn guest_on_without_sign_in_says_it_changes_nothing() {
+    let note = "web.auth = \"none\": every visitor is signed in, so the guest view changes nothing";
+    let dir = temp_dir("guest-noauth");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_GUEST_SWITCH]);
+    daemon.says_web(
+        Some(WebStatus::Listening {
+            listen: ([127, 0, 0, 1], 8738).into(),
+            auth: svolder_ipc::config::WebAuth::None,
+            writes: true,
+            guest: WebGuest::None,
+        }),
+        None,
+    );
+    let done = guest_switch(&daemon.socket, &own, true).await.expect("on");
+    assert_eq!(done.notes, [note]);
+    let done = guest_switch(&daemon.socket, &own, false)
+        .await
+        .expect("off");
+    assert_eq!(done.notes, Vec::<String>::new());
+
+    std::fs::write(&own, "schema = 1\n\n[web]\nauth = \"none\"\n").unwrap();
+    let done = guest_switch(&fresh_socket(), &own, true).await.expect("on");
+    assert!(done.notes.contains(&note.to_string()), "{:?}", done.notes);
 }

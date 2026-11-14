@@ -26,15 +26,20 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use svolder_ipc::config::RefreshWeeks;
 use svolder_ipc::config::{
-    COLORS, CONFIRM_QUIT, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT, INTRO_SOUND,
-    LINK_SPAN, MONOCHROME, MOUSE, PALETTE, THEME_BACKGROUND, TITLE_METER, TRANSITION, VISUALIZER,
+    COLORS, CONFIRM_QUIT, COVER_ART, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT,
+    INTRO_SOUND, LINK_SPAN, MONOCHROME, MOUSE, PALETTE, THEME_BACKGROUND, TITLE_METER, TOOLTIPS,
+    TRANSITION, VISUALIZER,
 };
 use svolder_ipc::token::TokenSource;
-use svolder_ipc::{FamilyAccents, McpStatus, TuiConfig, TuiSetting, TuiSettingKind};
+use svolder_ipc::{
+    FamilyAccents, McpStatus, MqttProblem, MqttStatus, TuiConfig, TuiSetting, TuiSettingKind,
+};
 use svolder_profiles::Family;
 
 use crate::tui::app::{App, EffectSwitch, SettingsBox};
-use crate::tui::boxes::connections::{Connections, Field, Modal, TokenState, TokenView};
+use crate::tui::boxes::connections::{
+    Connections, Field, GuestView, Modal, MqttView, TokenState, TokenView,
+};
 use crate::tui::boxes::web_box::{self, WebBox, WebRow};
 use crate::tui::keys;
 use crate::tui::layout_tier;
@@ -129,7 +134,9 @@ pub enum Setting {
     MqttPort,
     /// Whether the bridge takes commands from the broker.
     MqttCommands,
-    /// Whether a broker password is set; never the password.
+    /// The broker's username.
+    MqttUsername,
+    /// Whether a broker password is set, and typed here; never shown.
     MqttPassword,
     /// Where the daemon says its MQTT bridge stands.
     MqttStatus,
@@ -175,6 +182,7 @@ pub const CATEGORIES: [(&str, &[Setting]); 5] = [
         "Behaviour",
         &[
             Setting::Mouse,
+            Setting::Key(&TOOLTIPS),
             Setting::Key(&CONFIRM_QUIT),
             Setting::Key(&TITLE_METER),
             Setting::Key(&INTRO),
@@ -185,7 +193,11 @@ pub const CATEGORIES: [(&str, &[Setting]); 5] = [
     ),
     (
         "Host audio",
-        &[Setting::HostAudio, Setting::Key(&VISUALIZER)],
+        &[
+            Setting::HostAudio,
+            Setting::Key(&VISUALIZER),
+            Setting::Key(&COVER_ART),
+        ],
     ),
     (
         "Connect",
@@ -200,6 +212,7 @@ pub const CATEGORIES: [(&str, &[Setting]); 5] = [
             Setting::MqttHost,
             Setting::MqttPort,
             Setting::MqttCommands,
+            Setting::MqttUsername,
             Setting::MqttPassword,
             Setting::MqttStatus,
         ],
@@ -255,6 +268,7 @@ impl Setting {
             Setting::MqttHost => "MQTT broker host",
             Setting::MqttPort => "MQTT broker port",
             Setting::MqttCommands => "MQTT commands",
+            Setting::MqttUsername => "MQTT username",
             Setting::MqttPassword => "MQTT password",
             Setting::MqttStatus => "MQTT status",
         }
@@ -275,6 +289,7 @@ impl Setting {
                 | Setting::MqttHost
                 | Setting::MqttPort
                 | Setting::MqttCommands
+                | Setting::MqttUsername
                 | Setting::MqttPassword
                 | Setting::MqttStatus
         )
@@ -348,10 +363,14 @@ impl Setting {
                 true => "allowed".to_string(),
                 false => "read-only".to_string(),
             },
-            Setting::MqttPassword => match app.overlays.conn.mqtt.password_set {
-                true => "set".to_string(),
-                false => NOT_SET.to_string(),
-            },
+            Setting::MqttUsername => app
+                .overlays
+                .conn
+                .mqtt
+                .username
+                .clone()
+                .unwrap_or_else(|| NOT_SET.to_string()),
+            Setting::MqttPassword => password_word(&app.overlays.conn.mqtt),
             Setting::MqttStatus => mqtt_word(app),
         }
     }
@@ -428,6 +447,20 @@ fn listen_word(listen: std::net::SocketAddr) -> String {
     }
 }
 
+/// The password row's word: where the password comes from, never the password. A password the
+/// daemon cannot send for want of a username says so.
+fn password_word(mqtt: &MqttView) -> String {
+    let unsent = match mqtt.username {
+        None => " — not sent: no username",
+        Some(_) => "",
+    };
+    match (mqtt.password_in_env, mqtt.password_in_file) {
+        (true, _) => format!("from SVOLDER_MQTT_PASSWORD{unsent}"),
+        (false, true) => format!("set{unsent}"),
+        (false, false) => NOT_SET.to_string(),
+    }
+}
+
 /// The MCP status row's word.
 fn mcp_word(app: &App) -> String {
     match (&app.overlays.conn.mcp_status, app.session.daemon) {
@@ -440,17 +473,23 @@ fn mcp_word(app: &App) -> String {
     }
 }
 
-/// The MQTT status row's word: the first word of the bridge's own line.
+/// The MQTT status row's word: the state in one or two words, the trouble named where there is
+/// one (the right column has the whole line).
 fn mqtt_word(app: &App) -> String {
     match (&app.overlays.conn.mqtt_status, app.session.daemon) {
         (_, false) => "no daemon".to_string(),
         (None, true) => "…".to_string(),
-        (Some(status), _) => crate::commands::daemon::status::mqtt_line(status)
-            .trim_start_matches("mqtt: ")
-            .split(' ')
-            .next()
-            .unwrap_or_default()
-            .to_string(),
+        (Some(MqttStatus::Off), _) => "off".to_string(),
+        (Some(MqttStatus::Connecting { .. }), _) => "connecting".to_string(),
+        (Some(MqttStatus::Connected { .. }), _) => "connected".to_string(),
+        (Some(MqttStatus::Trouble { problem, .. }), _) => match problem {
+            MqttProblem::Refused => "login refused",
+            MqttProblem::Unreachable => "not reachable",
+            MqttProblem::Tls => "TLS port",
+            MqttProblem::Unknown => "trouble",
+        }
+        .to_string(),
+        (Some(MqttStatus::Unknown), _) => "unknown".to_string(),
     }
 }
 
@@ -560,10 +599,14 @@ pub fn explain(setting: Setting) -> Cow<'static, str> {
             "Whether the bridge takes commands back from the broker and writes them to the \
              devices. Read-only only reports."
         }
+        Setting::MqttUsername => {
+            "The username the broker wants. Enter types it; an empty line takes it away. With no \
+             username the daemon sends no password either, and a broker that wants a login \
+             refuses it."
+        }
         Setting::MqttPassword => {
-            "Whether a broker password is set, as this session's environment and config file \
-             say; the daemon's own environment may differ. It is never shown and never edited \
-             here: put it in SVOLDER_MQTT_PASSWORD, or in the config file."
+            "The broker's password. Enter types it, masked (Tab shows it); Delete twice on \
+             the line clears it. Never read back. SVOLDER_MQTT_PASSWORD in the daemon's environment wins."
         }
         Setting::MqttStatus => "Where the daemon says its MQTT bridge stands. The daemon answers.",
         Setting::AutoEqRefresh => {
@@ -622,6 +665,7 @@ pub fn config_line(setting: Setting, tui: &TuiConfig) -> String {
         Setting::MqttHost => "[mqtt] host".to_string(),
         Setting::MqttPort => "[mqtt] port".to_string(),
         Setting::MqttCommands => "[mqtt] commands".to_string(),
+        Setting::MqttUsername => "[mqtt] username".to_string(),
         Setting::MqttPassword => "[mqtt] password, or SVOLDER_MQTT_PASSWORD".to_string(),
         Setting::MqttStatus => "from the daemon".to_string(),
     }
@@ -848,11 +892,27 @@ fn draw_modal(
             let box_area = boxed(area, PROMPT_WIDTH, PROMPT_HEIGHT);
             let across = usize::from(box_area.width.saturating_sub(2));
             let room = across.saturating_sub(1 + PROMPT_LABEL);
-            let (shown, column) = widgets::text::typed_window(&line.text, line.caret, room);
+            // A password is a bullet a character until Tab shows it.
+            let typed = match (line.field, app.overlays.conn.password_shown) {
+                (Field::Password, false) => "•".repeat(line.text.chars().count()),
+                _ => line.text.clone(),
+            };
+            let (shown, column) = widgets::text::typed_window(&typed, line.caret, room);
             let label = match line.field {
                 Field::Listen => "Listen",
                 Field::Host => "Host",
                 Field::Port => "Port",
+                Field::Username => "User",
+                Field::Password => "Pass",
+            };
+            let keys: &[(&str, &str)] = match line.field {
+                Field::Password => &[
+                    ("Enter", "saves"),
+                    ("Tab", "shows"),
+                    ("Del Del", "clears"),
+                    ("Esc", "cancels"),
+                ],
+                _ => &[("Enter", "saves"), ("Esc", "cancels")],
             };
             let lines = vec![
                 Line::from(vec![
@@ -861,7 +921,7 @@ fn draw_modal(
                     Span::raw(shown),
                 ]),
                 Line::default(),
-                widgets::surfaces::modal_keys(&[("Enter", "saves"), ("Esc", "cancels")], theme),
+                widgets::surfaces::modal_keys(keys, theme),
             ];
             let title = format!(" {} ", line.field.title());
             let block = widgets::surfaces::modal_block(Block::bordered(), &title, app, theme);
@@ -918,9 +978,9 @@ const WEB_LINK_HINT: &str = "Ctrl+click opens it; Shift+right-click copies it";
 /// What the box says under a link that replaced one a browser used.
 const WEB_LINK_REPLACED: &str = "the last link no longer works; a fresh one is shown";
 
-/// The Web UI box: six `label · value` lines, the link's QR code below them where the box has
-/// room, the question before the token is replaced while it is up, and its keys. Answers the
-/// cells it fills.
+/// The Web UI box: seven `label · value` lines, the QR codes below them where the box has room
+/// (the sign-in link's, and the guest page's while the guest view is on), the question before
+/// the token is replaced while it is up, and its keys. Answers the cells it fills.
 fn draw_web_box(
     frame: &mut Frame,
     area: Rect,
@@ -929,8 +989,7 @@ fn draw_web_box(
     theme: &Theme,
     live_hits: &mut HitMap,
 ) -> Rect {
-    let (lines, link_lines) = web_box_lines(app, web, area, theme);
-    let width = WEB_WIDTH.min(area.width);
+    let (width, lines, link_lines) = web_box_lines(app, web, area, theme);
     let height = u16::try_from(lines.len() + 2).unwrap_or(u16::MAX);
     let box_area = boxed(area, width, height);
     let block = widgets::surfaces::modal_block(Block::bordered(), " Web UI ", app, theme);
@@ -954,48 +1013,41 @@ fn draw_web_box(
     box_area
 }
 
-/// The Web UI box's lines, and the lines the link's text fills with each one's width in cells:
-/// what a click opens.
+/// The Web UI box's width, its lines, and the lines the link's text fills with each one's width
+/// in cells: what a click opens. The box is wider than usual when two QR codes sit side by side
+/// and `area` holds that width and the lines under it.
 fn web_box_lines(
     app: &App,
     web: &WebBox,
     area: Rect,
     theme: &Theme,
-) -> (Vec<Line<'static>>, Vec<(usize, u16)>) {
-    let conn = &app.overlays.conn;
-    let across = usize::from(WEB_WIDTH.min(area.width).saturating_sub(2));
+) -> (u16, Vec<Line<'static>>, Vec<(usize, u16)>) {
+    let qrs = web_qrs(app, web);
+    if let Some(width) = side_by_side_width(&qrs).filter(|width| *width <= area.width) {
+        let (lines, link_lines, fits) = web_box_at(app, web, area, theme, width, &qrs, true);
+        if fits {
+            return (width, lines, link_lines);
+        }
+    }
+    let width = WEB_WIDTH.min(area.width);
+    let (lines, link_lines, _) = web_box_at(app, web, area, theme, width, &qrs, false);
+    (width, lines, link_lines)
+}
+
+/// The Web UI box's lines at `width`, with the QR codes `qrs` side by side or stacked, and
+/// whether the codes (or none) fit.
+fn web_box_at(
+    app: &App,
+    web: &WebBox,
+    area: Rect,
+    theme: &Theme,
+    width: u16,
+    qrs: &[Qr],
+    side: bool,
+) -> (Vec<Line<'static>>, Vec<(usize, u16)>, bool) {
+    let across = usize::from(width.saturating_sub(2));
     let room = across.saturating_sub(WEB_LABEL + 1);
-    let direct = conn.daemon_up != Some(true);
-    let ask = |code: &Option<web_box::Code>, pairing: bool, makes: &str| match (code, direct) {
-        (Some(code), _) if pairing => web_box::code_line(code, app.now),
-        (Some(code), _) => web_box::timer(code, app.now),
-        (None, true) if app.session.daemon && conn.daemon_up.is_none() => "…".to_string(),
-        (None, true) => "the daemon serves the web UI".to_string(),
-        (None, false) => makes.to_string(),
-    };
-    let token = match &conn.web_token {
-        TokenView::Present { masked, .. } => masked.clone(),
-        TokenView::Missing => "not made yet".to_string(),
-        TokenView::Unreadable(_) => "unreadable".to_string(),
-        TokenView::Unread => "…".to_string(),
-    };
-    let values = [
-        (
-            WebRow::State,
-            web_box::state_word(conn.web_status.as_ref(), conn.daemon_up, app.session.daemon),
-        ),
-        (
-            WebRow::WebUi,
-            match conn.web.enabled {
-                true => "on".to_string(),
-                false => "off".to_string(),
-            },
-        ),
-        (WebRow::Reach, web_box::reach(conn.web.listen).word()),
-        (WebRow::Link, ask(&web.link, false, "l makes one")),
-        (WebRow::Pairing, ask(&web.pair, true, "p makes one")),
-        (WebRow::Token, token),
-    ];
+    let values = web_values(app, web);
     let mut lines: Vec<Line<'static>> = Vec::new();
     // The lines the link's text fills, with each one's width in cells: what a click opens.
     let mut link_lines: Vec<(usize, u16)> = Vec::new();
@@ -1047,123 +1099,354 @@ fn web_box_lines(
                     Span::styled(part, style.add_modifier(underline)),
                 ]));
             }
-            for part in widgets::text::wrap(WEB_LINK_HINT, across.saturating_sub(2)) {
-                lines.push(Line::from(Span::styled(
-                    format!(" {part}"),
-                    theme.style(Role::Dim),
-                )));
-            }
+            lines.extend(dim_wrapped(WEB_LINK_HINT, across, theme));
             if web.link_replaced {
-                for part in widgets::text::wrap(WEB_LINK_REPLACED, across.saturating_sub(2)) {
-                    lines.push(Line::from(Span::styled(
-                        format!(" {part}"),
-                        theme.style(Role::Dim),
-                    )));
-                }
+                lines.extend(dim_wrapped(WEB_LINK_REPLACED, across, theme));
             }
         }
         if row == WebRow::Pairing && web.pair.is_some() {
-            for part in [
-                "guesses from the network can use a code up:",
-                "the link is the fallback",
-            ] {
-                lines.push(Line::from(vec![
-                    Span::raw(" ".repeat(WEB_LABEL + 1)),
-                    Span::styled(part, theme.style(Role::Dim)),
-                ]));
-            }
+            lines.extend(pairing_hint_lines(theme));
         }
     }
     if web.rotating {
-        lines.push(Line::default());
-        lines.push(Line::from(Span::styled(
-            " Replace the web token? [Y/n]",
-            theme.style(Role::Warn),
-        )));
-        lines.push(Line::from(Span::styled(
-            " every signed-in browser is signed out",
-            theme.style(Role::Warn),
-        )));
-        lines.push(widgets::surfaces::modal_keys(
-            &[("Enter/y", "replaces"), ("Esc/n/q", "cancels")],
-            theme,
-        ));
+        lines.extend(rotate_prompt_lines(theme));
     }
-    lines.extend(web_qr_lines(app, web, area, across, lines.len(), theme));
-    lines.push(Line::default());
-    lines.push(widgets::surfaces::modal_keys(
-        &[
-            ("↑↓", "rows"),
-            ("←→", "change"),
-            ("Enter", "link/code"),
-            ("l", "link"),
-            ("c", "copy"),
-        ],
-        theme,
-    ));
-    lines.push(widgets::surfaces::modal_keys(
-        &[
-            ("p", "code"),
-            ("r", "token"),
-            ("click", "link opens"),
-            ("Esc/q", "closes"),
-        ],
-        theme,
-    ));
-    (lines, link_lines)
+    let room = QrRoom {
+        height: usize::from(area.height),
+        across,
+        above: lines.len(),
+    };
+    let (qr, fits) = web_qr_lines(app, web, qrs, side, &room, theme);
+    lines.extend(qr);
+    lines.extend(web_key_lines(theme));
+    (lines, link_lines, fits)
 }
 
-/// What the Web UI box shows under its rows for a link on show: its QR code, black on white and
-/// centred, where `area` has room for it beside the `above` lines the box already holds, the
-/// words that say to widen the terminal where it has not, and on a loopback listen the words
-/// that say a phone cannot reach it. Nothing without a link on show.
-fn web_qr_lines(
-    app: &App,
-    web: &WebBox,
-    area: Rect,
-    across: usize,
-    above: usize,
-    theme: &Theme,
-) -> Vec<Line<'static>> {
+/// The value each row of the Web UI box shows, in row order.
+fn web_values(app: &App, web: &WebBox) -> [(WebRow, String); 7] {
     let conn = &app.overlays.conn;
-    let Some(link) = web.link.as_ref().filter(|link| link.until > app.now) else {
-        return Vec::new();
+    let direct = conn.daemon_up != Some(true);
+    let ask = |code: &Option<web_box::Code>, pairing: bool, makes: &str| match (code, direct) {
+        (Some(code), _) if pairing => web_box::code_line(code, app.now),
+        (Some(code), _) => web_box::timer(code, app.now),
+        (None, true) if app.session.daemon && conn.daemon_up.is_none() => "…".to_string(),
+        (None, true) => "the daemon serves the web UI".to_string(),
+        (None, false) => makes.to_string(),
     };
-    let words = |text: &str| -> Vec<Line<'static>> {
-        let mut lines = vec![Line::default()];
-        lines.extend(
-            widgets::text::wrap(text, across.saturating_sub(2))
-                .into_iter()
-                .map(|part| Line::from(Span::styled(format!(" {part}"), theme.style(Role::Dim)))),
-        );
-        lines
+    let token = match &conn.web_token {
+        TokenView::Present { masked, .. } => masked.clone(),
+        TokenView::Missing => "not made yet".to_string(),
+        TokenView::Unreadable(_) => "unreadable".to_string(),
+        TokenView::Unread => "…".to_string(),
     };
-    if web_box::reach(conn.web.listen) == web_box::Reach::ThisComputer && conn.web.url.is_none() {
-        return words("a phone cannot reach this computer's loopback: choose your network");
+    [
+        (
+            WebRow::State,
+            web_box::state_word(conn.web_status.as_ref(), conn.daemon_up, app.session.daemon),
+        ),
+        (
+            WebRow::WebUi,
+            match conn.web.enabled {
+                true => "on".to_string(),
+                false => "off".to_string(),
+            },
+        ),
+        (WebRow::Reach, web_box::reach(conn.web.listen).word()),
+        (
+            WebRow::Guest,
+            match conn.web.guest {
+                svolder_ipc::config::WebGuest::Read => "read-only".to_string(),
+                svolder_ipc::config::WebGuest::None => "off".to_string(),
+            },
+        ),
+        (WebRow::Link, ask(&web.link, false, "l makes one")),
+        (WebRow::Pairing, ask(&web.pair, true, "p makes one")),
+        (WebRow::Token, token),
+    ]
+}
+
+/// `text` wrapped to the Web UI box's width less a cell of margin each side, dimmed, with one
+/// cell of margin on the left.
+fn dim_wrapped(text: &str, across: usize, theme: &Theme) -> Vec<Line<'static>> {
+    widgets::text::wrap(text, across.saturating_sub(2))
+        .into_iter()
+        .map(|part| Line::from(Span::styled(format!(" {part}"), theme.style(Role::Dim))))
+        .collect()
+}
+
+/// The two dim lines under a pairing code, indented under the row's label.
+fn pairing_hint_lines(theme: &Theme) -> Vec<Line<'static>> {
+    [
+        "guesses from the network can use a code up:",
+        "the link is the fallback",
+    ]
+    .into_iter()
+    .map(|part| {
+        Line::from(vec![
+            Span::raw(" ".repeat(WEB_LABEL + 1)),
+            Span::styled(part, theme.style(Role::Dim)),
+        ])
+    })
+    .collect()
+}
+
+/// The question the Web UI box asks before it replaces the token, with its keys.
+fn rotate_prompt_lines(theme: &Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::default(),
+        Line::from(Span::styled(
+            " Replace the web token? [Y/n]",
+            theme.style(Role::Warn),
+        )),
+        Line::from(Span::styled(
+            " every signed-in browser is signed out",
+            theme.style(Role::Warn),
+        )),
+        widgets::surfaces::modal_keys(&[("Enter/y", "replaces"), ("Esc/n/q", "cancels")], theme),
+    ]
+}
+
+/// The blank line and the two key lines that close the Web UI box.
+fn web_key_lines(theme: &Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::default(),
+        widgets::surfaces::modal_keys(
+            &[
+                ("↑↓", "rows"),
+                ("←→", "change"),
+                ("Enter", "link/code"),
+                ("l", "link"),
+                ("c", "copy"),
+            ],
+            theme,
+        ),
+        widgets::surfaces::modal_keys(
+            &[
+                ("p", "code"),
+                ("g", "guest"),
+                ("r", "token"),
+                ("click", "link opens"),
+                ("Esc/q", "closes"),
+            ],
+            theme,
+        ),
+    ]
+}
+
+/// The caption under the sign-in QR code.
+const WEB_QR_SIGN_IN: &str = "sign in";
+/// The caption under the guest QR code: the warning, on one line.
+const WEB_QR_GUEST: &str = "guest: read-only, anyone on your network";
+/// Cells between two QR codes drawn side by side.
+const WEB_QR_GAP: usize = 2;
+
+/// A QR code the Web UI box draws, with the caption under it.
+struct Qr {
+    /// The code's half-block lines, quiet zone included.
+    code: Vec<String>,
+    /// The one line under it.
+    caption: &'static str,
+}
+
+impl Qr {
+    /// The QR code of `link` with `caption` under it; none for a link that does not fit one.
+    fn of(link: &str, caption: &'static str) -> Option<Qr> {
+        crate::qr::half_blocks(link)
+            .ok()
+            .map(|code| Qr { code, caption })
     }
-    if web.link_local {
-        return words(
+
+    /// The code's width in cells.
+    fn code_width(&self) -> usize {
+        self.code.first().map_or(0, |line| line.chars().count())
+    }
+
+    /// The cells the code and its caption take, whichever is wider.
+    fn column(&self) -> usize {
+        self.code_width().max(widgets::text::cells(self.caption))
+    }
+}
+
+/// The QR codes the box draws, in order: the sign-in link's while one is on show, the guest
+/// page's while the guest view is on and the page is known.
+fn web_qrs(app: &App, web: &WebBox) -> Vec<Qr> {
+    if reach_words(app, web).is_some() {
+        return Vec::new();
+    }
+    let sign_in = web
+        .link
+        .as_ref()
+        .filter(|link| link.until > app.now)
+        .and_then(|link| Qr::of(&link.text, WEB_QR_SIGN_IN));
+    let guest = web
+        .page
+        .as_ref()
+        .filter(|_| app.overlays.conn.guest_view() == GuestView::Open)
+        .and_then(|page| Qr::of(&page.url, WEB_QR_GUEST));
+    sign_in.into_iter().chain(guest).collect()
+}
+
+/// The words that stand in for the QR codes when a phone cannot reach the page, while a code
+/// would be drawn: a loopback listen with no `[web] url`, or no base a phone reaches.
+fn reach_words(app: &App, web: &WebBox) -> Option<&'static str> {
+    let conn = &app.overlays.conn;
+    let link_on_show = web.link.as_ref().is_some_and(|link| link.until > app.now);
+    if !link_on_show && conn.guest_view() != GuestView::Open {
+        return None;
+    }
+    if web_box::reach(conn.web.listen) == web_box::Reach::ThisComputer && conn.web.url.is_none() {
+        return Some("a phone cannot reach this computer's loopback: choose your network");
+    }
+    if web.link_local || web.page.as_ref().is_some_and(|page| page.local) {
+        return Some(
             "a phone cannot open this link: no address a phone can reach was found, so set \
              [web] url",
         );
     }
-    // The rows above, a blank, the code, a blank and the two key lines, between two borders.
-    let wanted = |code: &[String]| above + 1 + code.len() + 3 + 2;
-    match crate::qr::half_blocks(&link.text) {
-        Ok(code)
-            if wanted(&code) <= usize::from(area.height)
-                && code.iter().all(|line| line.chars().count() <= across) =>
-        {
-            let paint = Style::new().fg(Color::Black).bg(Color::White);
-            let mut lines = vec![Line::default()];
-            lines.extend(
-                code.into_iter()
-                    .map(|line| Line::from(Span::styled(line, paint)).centered()),
-            );
-            lines
-        }
-        _ => words("widen the terminal to see the QR code"),
+    None
+}
+
+/// The box width two QR codes side by side need, borders and a cell of margin each side included;
+/// none unless there are two.
+fn side_by_side_width(qrs: &[Qr]) -> Option<u16> {
+    let [first, second] = qrs else {
+        return None;
+    };
+    let cells = first.column() + WEB_QR_GAP + second.column() + 4;
+    Some(u16::try_from(cells).unwrap_or(u16::MAX).max(WEB_WIDTH))
+}
+
+/// A QR code line painted black on white, or `cells` blanks where the code has no line left.
+fn qr_row(qr: &Qr, row: usize) -> (Span<'static>, usize) {
+    match qr.code.get(row) {
+        Some(line) => (
+            Span::styled(line.clone(), Style::new().fg(Color::Black).bg(Color::White)),
+            qr.code_width(),
+        ),
+        None => (Span::raw(" ".repeat(qr.code_width())), qr.code_width()),
     }
+}
+
+/// `columns` (each a span and its width in cells) laid out in cells `column` wide each, `gap`
+/// apart, the whole centred in `across`.
+fn centred_columns(columns: Vec<(Span<'static>, usize, usize)>, across: usize) -> Line<'static> {
+    let total: usize = columns.iter().map(|(_, _, wide)| wide).sum::<usize>()
+        + WEB_QR_GAP * columns.len().saturating_sub(1);
+    let mut spans = vec![Span::raw(" ".repeat(across.saturating_sub(total) / 2))];
+    for (at, (span, cells, wide)) in columns.into_iter().enumerate() {
+        if at > 0 {
+            spans.push(Span::raw(" ".repeat(WEB_QR_GAP)));
+        }
+        let before = wide.saturating_sub(cells) / 2;
+        spans.push(Span::raw(" ".repeat(before)));
+        spans.push(span);
+        spans.push(Span::raw(" ".repeat(wide.saturating_sub(cells + before))));
+    }
+    Line::from(spans)
+}
+
+/// The room the Web UI box's QR codes have: the terminal's rows, the box's inner width and the
+/// lines the box holds above them.
+#[derive(Clone, Copy)]
+struct QrRoom {
+    /// The terminal's rows.
+    height: usize,
+    /// The box's inner width in cells.
+    across: usize,
+    /// The lines above the codes.
+    above: usize,
+}
+
+/// What the Web UI box shows under its rows: the QR codes `qrs`, black on white with a caption
+/// under each, side by side or one above the other, where `area` has room for them beside the
+/// `above` lines the box already holds; the words that say to widen the terminal where it has
+/// not, and on a loopback listen the words that say a phone cannot reach it (once, for both
+/// codes). Nothing with no QR code to draw. Answers the lines and whether they fit.
+fn web_qr_lines(
+    app: &App,
+    web: &WebBox,
+    qrs: &[Qr],
+    side: bool,
+    room: &QrRoom,
+    theme: &Theme,
+) -> (Vec<Line<'static>>, bool) {
+    let QrRoom {
+        height,
+        across,
+        above,
+    } = *room;
+    let link_on_show = web.link.as_ref().is_some_and(|link| link.until > app.now);
+    let guest = app.overlays.conn.guest_view();
+    if !link_on_show && guest == GuestView::Closed {
+        return (Vec::new(), true);
+    }
+    let words = |text: &str| -> (Vec<Line<'static>>, bool) {
+        let mut lines = vec![Line::default()];
+        lines.extend(dim_wrapped(text, across, theme));
+        (lines, true)
+    };
+    if let Some(text) = reach_words(app, web) {
+        return words(text);
+    }
+    // Under `auth = "none"` every visitor is signed in with full access: no code is drawn for a
+    // read-only view, and the box says so.
+    let note = match guest {
+        GuestView::NoEffect => {
+            words("no guest view: auth is none, so every visitor has full access").0
+        }
+        _ => Vec::new(),
+    };
+    if qrs.is_empty() {
+        return (note, true);
+    }
+    let caption = |qr: &Qr| {
+        let cells = widgets::text::cells(qr.caption);
+        (
+            Span::styled(qr.caption, theme.style(Role::Dim)),
+            cells,
+            qr.column(),
+        )
+    };
+    let mut lines = vec![Line::default()];
+    match side {
+        true => {
+            let tallest = qrs.iter().map(|qr| qr.code.len()).max().unwrap_or(0);
+            for row in 0..tallest {
+                let columns = qrs
+                    .iter()
+                    .map(|qr| {
+                        let (span, cells) = qr_row(qr, row);
+                        (span, cells, qr.column())
+                    })
+                    .collect();
+                lines.push(centred_columns(columns, across));
+            }
+            lines.push(centred_columns(qrs.iter().map(caption).collect(), across));
+        }
+        false => {
+            for (at, qr) in qrs.iter().enumerate() {
+                if at > 0 {
+                    lines.push(Line::default());
+                }
+                for row in 0..qr.code.len() {
+                    let (span, cells) = qr_row(qr, row);
+                    lines.push(centred_columns(vec![(span, cells, cells)], across));
+                }
+                lines.push(centred_columns(vec![caption(qr)], across));
+            }
+        }
+    }
+    // The rows above, the codes and captions, and the blank and two key lines, between two
+    // borders.
+    let wanted = above + lines.len() + note.len() + 3 + 2;
+    let wide = |qr: &Qr| qr.column() <= across;
+    let fits = wanted <= height && (side || qrs.iter().all(wide));
+    let (mut lines, fits) = match fits {
+        true => (lines, true),
+        false => (words("widen the terminal to see the QR code").0, false),
+    };
+    lines.extend(note);
+    (lines, fits)
 }
 
 /// The box's top border: its name, the hint at how the categories are reached, and the
@@ -1351,11 +1634,21 @@ fn connection_lines(
         }
         Setting::MqttPassword => {
             say("", dim);
-            say("Never shown, never edited here.", dim);
-            say(
-                "This session's environment and config file; the daemon's may differ.",
-                dim,
-            );
+            let mqtt = &app.overlays.conn.mqtt;
+            if mqtt.username.is_none() && mqtt.password_set {
+                say(
+                    "Not sent: MQTT 3.1.1 carries a password only with a username.",
+                    theme.style(Role::Warn),
+                );
+            }
+            if mqtt.password_in_env {
+                say(
+                    "SVOLDER_MQTT_PASSWORD is set here, and wins over the file when the daemon \
+                     has it too.",
+                    dim,
+                );
+            }
+            say("Never shown.", dim);
         }
         _ => {}
     }

@@ -16,7 +16,7 @@
 mod direct;
 pub mod launch;
 mod stale;
-pub use stale::{refusal_if_missing, reload_if_reads, reload_if_stale};
+pub use stale::{daemon_reads, refusal_if_missing, reload_if_reads, reload_if_stale};
 #[cfg(not(test))]
 mod remote;
 /// The daemon half, whose own cases serve a stand-in daemon that the TUI's cases reach for
@@ -1161,6 +1161,22 @@ impl Backend {
     ) -> Option<impl Future<Output = Option<svolder_ipc::host::HostView>> + Send + 'static> {
         let asked = self.daemon_request(Request::Host)?;
         Some(async move { host_of(asked.await) })
+    }
+
+    /// A future that reads the cover the daemon's host view names by `hash` (the bytes come over
+    /// the socket, so a TUI on another machine shows the art too), over a connection of its own
+    /// (owned, so it can be spawned): `None` for a direct session, which has no host service of
+    /// its own; inside, `None` for a daemon from before the request, a hash that is not the
+    /// current cover's any more, and no whole picture in time. The front end never reads a
+    /// cover file itself.
+    pub fn host_cover(
+        &self,
+        hash: &str,
+    ) -> Option<impl Future<Output = Option<svolder_host::cover::Cover>> + Send + 'static> {
+        match self {
+            Backend::Direct(_) => None,
+            Backend::Remote(remote) => Some(remote.host_cover(hash)),
+        }
     }
 
     /// The daemon's device list as it stands now, over a connection of this call's own, for a

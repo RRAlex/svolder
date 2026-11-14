@@ -10,6 +10,7 @@ use ratatui::buffer::{Buffer, Cell};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 
+use super::fx;
 use super::looks::Costume;
 use super::{BOX_H, BOX_W, Place, Showing};
 use crate::tui::app::{App, Screen};
@@ -211,7 +212,10 @@ pub(crate) fn paint(
     theme: &Theme,
 ) -> Vec<(Position, Cell)> {
     let clip = clip.intersection(frame.area());
-    let grid = showing.pose.pixels_wide(width);
+    let mut grid = showing.pose.pixels_wide(width);
+    if let Some(fx) = &showing.fx {
+        grid = fx::apply(fx, grid);
+    }
     let left = right + 1 - width as i32;
     let top = bottom + 1 - i32::from(ROWS);
     let offset = width as i64 - BOX_W as i64;

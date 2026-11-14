@@ -8,6 +8,7 @@ mod autoeq;
 mod device_config;
 mod families;
 mod handshake;
+mod host_cover;
 mod server_switch;
 mod walk;
 
@@ -94,6 +95,24 @@ fn the_mqtt_status_round_trips_through_a_version_reply() {
                 commands: true,
             },
             r#"{"state":"connected","host":"broker","port":1883,"commands":true}"#,
+        ),
+        (
+            MqttStatus::Trouble {
+                host: "broker".into(),
+                port: 1883,
+                problem: MqttProblem::Refused,
+                retry_in_secs: Some(4),
+            },
+            r#"{"state":"trouble","host":"broker","port":1883,"problem":"refused","retry_in_secs":4}"#,
+        ),
+        (
+            MqttStatus::Trouble {
+                host: "broker".into(),
+                port: 8883,
+                problem: MqttProblem::Tls,
+                retry_in_secs: None,
+            },
+            r#"{"state":"trouble","host":"broker","port":8883,"problem":"tls"}"#,
         ),
     ] {
         assert_eq!(serde_json::to_string(&mqtt).unwrap(), line);
@@ -1789,4 +1808,147 @@ fn config_missing_is_sent_only_when_true_and_an_older_reply_reads_there() {
         panic!("a version answer");
     };
     assert!(!config_missing);
+}
+
+/// The words a broker's trouble is told in, one place for the TUI, `daemon status` and `doctor`.
+#[test]
+fn each_mqtt_problem_has_its_words() {
+    assert_eq!(
+        MqttProblem::Refused.words(),
+        "the broker refused the login (check username and password)"
+    );
+    assert_eq!(MqttProblem::Unreachable.words(), "not reachable");
+    assert_eq!(
+        MqttProblem::Tls.words(),
+        "port 8883 is TLS, which svolder does not speak"
+    );
+    // A problem a newer daemon names reads as one this client has no words for.
+    let status: MqttStatus =
+        serde_json::from_str(r#"{"state":"trouble","host":"h","port":1,"problem":"brand_new"}"#)
+            .unwrap();
+    assert!(matches!(
+        status,
+        MqttStatus::Trouble {
+            problem: MqttProblem::Unknown,
+            ..
+        }
+    ));
+    assert_eq!(MqttProblem::Unknown.words(), "trouble reaching the broker");
+}
+
+/// An `mqtt_set` request names its op, and a password in it never shows in the `Debug` that logs
+/// and failures print.
+#[test]
+fn an_mqtt_set_request_round_trips_and_hides_the_password() {
+    for (op, line) in [
+        (
+            MqttOp::Enabled { enabled: true },
+            r#"{"cmd":"mqtt_set","op":{"op":"enabled","enabled":true}}"#,
+        ),
+        (
+            MqttOp::Commands { commands: true },
+            r#"{"cmd":"mqtt_set","op":{"op":"commands","commands":true}}"#,
+        ),
+        (
+            MqttOp::Host {
+                value: "ha.lan".into(),
+            },
+            r#"{"cmd":"mqtt_set","op":{"op":"host","value":"ha.lan"}}"#,
+        ),
+        (
+            MqttOp::Port { value: 1884 },
+            r#"{"cmd":"mqtt_set","op":{"op":"port","value":1884}}"#,
+        ),
+        (
+            MqttOp::Username { value: None },
+            r#"{"cmd":"mqtt_set","op":{"op":"username","value":null}}"#,
+        ),
+        (
+            MqttOp::Password {
+                value: Some("fake-secret".into()),
+            },
+            r#"{"cmd":"mqtt_set","op":{"op":"password","value":"fake-secret"}}"#,
+        ),
+    ] {
+        let request = Request::MqttSet { op };
+        assert_eq!(serde_json::to_string(&request).unwrap(), line);
+        let back: Request = serde_json::from_str(line).unwrap();
+        assert_eq!(back, request);
+        assert!(!format!("{request:?}").contains("fake-secret"));
+    }
+    let shown = format!(
+        "{:?}",
+        MqttOp::Password {
+            value: Some("fake-secret".into())
+        }
+    );
+    assert!(shown.contains("***"), "{shown}");
+}
+
+/// A `preset_write` request names its op: save a preset (over one of that name with `force`),
+/// rename one, delete one. The family has its own feature, and its answer carries the name as
+/// the file now spells it.
+#[test]
+fn a_preset_write_request_round_trips() {
+    let preset = svolder_profiles::tone::preset::Preset {
+        name: "Mine".into(),
+        bands: 3,
+        mode: svolder_profiles::convert::EqMode::Eq,
+        loudness: 0,
+        band: Vec::new(),
+        source: None,
+    };
+    let save = Request::PresetWrite {
+        op: PresetOp::Save {
+            preset: Box::new(preset),
+            force: true,
+        },
+    };
+    let line = serde_json::to_string(&save).unwrap();
+    assert!(
+        line.starts_with(r#"{"cmd":"preset_write","op":{"op":"save","preset":{"#),
+        "{line}"
+    );
+    assert!(line.contains(r#""force":true"#), "{line}");
+    assert_eq!(serde_json::from_str::<Request>(&line).unwrap(), save);
+    for (op, line) in [
+        (
+            PresetOp::Rename {
+                from: "Mine".into(),
+                to: "Yours".into(),
+            },
+            r#"{"cmd":"preset_write","op":{"op":"rename","from":"Mine","to":"Yours"}}"#,
+        ),
+        (
+            PresetOp::Update {
+                preset: Box::new(svolder_profiles::tone::preset::Preset {
+                    name: "Mine".into(),
+                    bands: 3,
+                    mode: svolder_profiles::convert::EqMode::Eq,
+                    loudness: 0,
+                    band: Vec::new(),
+                    source: None,
+                }),
+            },
+            r#"{"cmd":"preset_write","op":{"op":"update","preset":{"name":"Mine","bands":3,"mode":"eq","loudness":0,"band":[]}}}"#,
+        ),
+        (
+            PresetOp::Delete {
+                name: "Mine".into(),
+            },
+            r#"{"cmd":"preset_write","op":{"op":"delete","name":"Mine"}}"#,
+        ),
+    ] {
+        let request = Request::PresetWrite { op };
+        assert_eq!(serde_json::to_string(&request).unwrap(), line);
+        assert_eq!(serde_json::from_str::<Request>(line).unwrap(), request);
+    }
+    assert!(FEATURES.contains(&FEATURE_PRESET_WRITE));
+    let written = Response::PresetWritten {
+        name: "Mine".into(),
+    };
+    assert_eq!(
+        serde_json::to_string(&written).unwrap(),
+        r#"{"result":"preset_written","name":"Mine"}"#
+    );
 }

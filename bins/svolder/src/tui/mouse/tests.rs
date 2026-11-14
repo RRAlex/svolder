@@ -498,10 +498,11 @@ fn the_device_editor_and_the_removal_take_no_clicks() {
     assert_outside_closes(&app, "removal");
 }
 
-/// The preset list is answered from the keyboard too: nothing under it takes a click or the
-/// wheel, on the tone-control screen or on the device screen, and a click outside presses `Esc`.
+/// Nothing under the preset list takes a click or the wheel, on the tone-control screen or on the
+/// device screen: a click outside presses `Esc`, and inside, a click picks a row and the wheel
+/// moves the selection (`preset_tests` has the rows).
 #[test]
-fn the_preset_list_takes_no_clicks() {
+fn the_preset_list_reads_the_mouse_for_itself() {
     for screen in [Screen::Tone, Screen::Device] {
         let mut app = app_showing(screen);
         let hits = frame_hits(&app, 80, 24);
@@ -524,11 +525,25 @@ fn the_preset_list_takes_no_clicks() {
         );
         let (mx, my) = middle(&hits);
         assert_eq!(resolve(&hits, click(mx, my), &app), None, "{screen:?}");
+        let row = hits
+            .entries()
+            .find(|(_, hit)| *hit == Hit::PresetRow(0))
+            .map(|(area, _)| area)
+            .expect("the list drew its first row");
+        assert_eq!(
+            resolve(&hits, click(row.x, row.y), &app),
+            Some(MouseAction::PresetPick(0)),
+            "{screen:?}"
+        );
         let wheel = MouseEvent {
             kind: MouseEventKind::ScrollUp,
             ..click(mx, my)
         };
-        assert_eq!(resolve(&hits, wheel, &app), None, "{screen:?}");
+        assert_eq!(
+            resolve(&hits, wheel, &app),
+            Some(MouseAction::Key(KeyCode::Up)),
+            "{screen:?}"
+        );
         assert_outside_closes(&app, "preset list");
     }
 }
@@ -1320,4 +1335,75 @@ fn the_headers_connection_mouse_and_fault_marks_do_nothing_when_clicked() {
         assert_eq!(resolve(&hits, wheel(x, 0, true), &app), None);
         assert_eq!(resolve(&hits, right_click(x, 0), &app), None);
     }
+}
+
+/// The bar between the device screen's two panes is a hit across the panes' height: their two
+/// borders and the column between them in the wide tier, and nowhere where there is no room for
+/// two panes of 40 columns. A word on a border is still its own.
+#[test]
+fn the_bar_between_the_panes_is_a_hit_where_the_panes_have_room_to_move_it() {
+    let app = app();
+    let hits = frame_hits(&app, 120, 24);
+    let bar = hits.area_of(Hit::Divider).expect("the bar at 120 columns");
+    // 60 columns for the Controls pane: its border on column 59, the gap, the Tone border.
+    assert_eq!((bar.x, bar.width), (59, 3));
+    assert!(bar.height >= 15, "{bar:?}");
+    for x in 59..62 {
+        assert_eq!(hits.hit_at(x, 10), Some(&Hit::Divider), "column {x}");
+    }
+    assert_ne!(hits.hit_at(58, 10), Some(&Hit::Divider));
+    assert_ne!(hits.hit_at(62, 10), Some(&Hit::Divider));
+    let mute = hits
+        .area_of(Hit::Key(KeyCode::Char('m')))
+        .expect("the mute word");
+    assert_eq!(
+        hits.hit_at(mute.x, mute.y),
+        Some(&Hit::Key(KeyCode::Char('m')))
+    );
+    // At 80 columns the panes touch: 40 and 40, the bar their two borders.
+    let hits = frame_hits(&app, 80, 24);
+    let bar = hits.area_of(Hit::Divider).expect("the bar at 80 columns");
+    assert_eq!((bar.x, bar.width), (39, 2));
+    // Under 80 the narrow layout stays and the bar is fixed.
+    let hits = frame_hits(&app, 79, 24);
+    assert_eq!(hits.area_of(Hit::Divider), None);
+}
+
+/// A press on the bar holds it, a double-click puts it back to an even split, and while it is held
+/// a drag moves it and the left button's release lets go: the other buttons ask for nothing.
+#[test]
+fn a_press_on_the_bar_holds_it_and_a_double_click_resets_it() {
+    let mut app = app();
+    let hits = frame_hits(&app, 120, 24);
+    assert_eq!(
+        resolve(&hits, click(60, 10), &app),
+        Some(MouseAction::DividerPress { at: 60 })
+    );
+    app.pointer.double_click = true;
+    assert_eq!(
+        resolve(&hits, click(60, 10), &app),
+        Some(MouseAction::DividerReset)
+    );
+    app.pointer.double_click = false;
+    // Nothing is held yet: a drag and a release ask for nothing.
+    assert_eq!(resolve(&hits, drag(70, 10), &app), None);
+    crate::tui::app::divider::press(&mut app, 60);
+    assert_eq!(
+        resolve(&hits, drag(70, 10), &app),
+        Some(MouseAction::DividerTo { at: 70 })
+    );
+    // A drag follows the pointer off the bar and off the panes.
+    assert_eq!(
+        resolve(&hits, drag(5, 0), &app),
+        Some(MouseAction::DividerTo { at: 5 })
+    );
+    assert_eq!(resolve(&hits, right_click(60, 10), &app), None);
+    assert_eq!(
+        resolve(
+            &hits,
+            mouse_at(MouseEventKind::Up(MouseButton::Left), 70, 10),
+            &app
+        ),
+        Some(MouseAction::DividerRelease)
+    );
 }

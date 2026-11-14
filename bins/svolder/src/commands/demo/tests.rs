@@ -167,6 +167,25 @@ fn the_fake_devices_profile_faults_and_signal_reach_the_demo_daemon() {
     }
 }
 
+/// The files that cue the fake host's cover to go, or to change with the track, reach the demo
+/// daemon, so a check of the TUI's cover art drives them from outside.
+#[test]
+fn the_fake_hosts_cover_cues_reach_the_demo_daemon() {
+    for knob in [
+        "SVOLDER_FAKE_COVER_GONE_FILE",
+        "SVOLDER_FAKE_COVER_NEXT_FILE",
+    ] {
+        assert!(PASSED_ON.contains(&knob), "{knob}");
+    }
+}
+
+/// Where the demo's EQ library reads AutoEq from reaches the demo daemon, which the fake transport
+/// otherwise points at a dead address.
+#[test]
+fn the_demo_passes_the_autoeq_base_on() {
+    assert!(PASSED_ON.contains(&"SVOLDER_AUTOEQ_URL"));
+}
+
 /// The knobs that make the fake a Loki Max with the other report form, or a recall that reports
 /// nothing, reach the demo daemon, so `SVOLDER_FAKE_PROFILE=lokimax make demo` can show one.
 #[test]
@@ -285,10 +304,11 @@ fn a_plain_demo_daemon_has_the_fake_host_and_no_pipewire() {
         "PIPEWIRE_RUNTIME_DIR",
         "DBUS_SESSION_BUS_ADDRESS",
         "SVOLDER_HOST_EQ_MANAGER",
-        "XDG_CACHE_HOME",
     ] {
         assert_eq!(get(&env, absent), None, "{absent}");
     }
+    // The AutoEq index is cached in the demo's own directory, never the user's cache.
+    assert_eq!(get(&env, "XDG_CACHE_HOME"), Some(dir.join("cache").into()));
     assert_eq!(get(&env, "XDG_RUNTIME_DIR"), Some(dir.into()));
     assert_eq!(get(&env, "SVOLDER_TRANSPORT"), Some(OsString::from("fake")));
 }

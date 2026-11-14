@@ -128,6 +128,15 @@ ok('the_peak_is_said_once', () => {
   assert.ok(notesFor(none).find((x) => x.id === 'volume-0'));
 });
 
+ok('a_sound_elsewhere_gives_the_path_note_its_sentence_as_a_title', () => {
+  const page = pageOf('playing-guest-other-sink');
+  const note = notesFor(page).find((x) => x.id === 'path');
+  assert.equal(note.text, `${ARROW} Bose Speakers`);
+  assert.equal(note.title, 'the computer plays to Bose Speakers');
+  assert.match(drawNotes(page, page.device, { coarse: false }), /title="the computer plays to Bose Speakers"/);
+  assert.equal(notesFor(pageOf('playing')).find((x) => x.id === 'path').title, '');
+});
+
 ok('the_path_note_names_the_one_hop_that_changes', () => {
   const page = pageOf('playing-changed-route');
   page.device.tone.peak = null;

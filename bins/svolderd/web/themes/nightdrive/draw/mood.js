@@ -4,18 +4,21 @@
 // mirrored in the floor as thin horizontal slices that sway), the haze that lies over the far floor
 // and the foot of the mountains, and the embers. `geo` is `{ w, h, H, dpr }` in CSS pixels.
 
+import { farRow } from '../camera.js';
 import { mixRgb, rgbOf } from './palette.js';
 
 /** The wet road's slices, and how much of the way down the floor mirrors how much of the way up. */
 export const WET = Object.freeze({ slices: 32, reach: 0.85 });
 
-/** Mirror `source` (a canvas holding the scene above the horizon at the density `geo.dpr`) in the floor
- * of `g`, as thin slices that sway slowly together as one wave, the more as they are near; `wet` (0 to 1) is how strong, `t`
- * the clock in seconds. */
+/** Mirror `source` (a canvas holding the scene above the horizon at the density `geo.dpr`) in the
+ * floor of `g`, as thin slices that sway slowly together as one wave, the more as they are near;
+ * `wet` (0 to 1) is how strong, `t` the clock in seconds. Only the floor grid is wet: what would
+ * fall above its far row is cut away. */
 export function drawWet(g, source, geo, wet, t) {
   const { w, h, H, dpr } = geo;
   const depth = h - H;
   const sway = Math.sin(t * 1.6);
+  const yFar = farRow(h, H);
   for (let k = 0; k < WET.slices; k++) {
     const f0 = k / WET.slices;
     const dy = H + depth * f0;
@@ -23,9 +26,13 @@ export function drawWet(g, source, geo, wet, t) {
     const sh = dh * WET.reach;
     const sy = H - (dy - H) * WET.reach - sh;
     if (sy < 0) break;
+    const cut = Math.max(0, yFar - dy);
+    if (cut >= dh) continue;
     const wob = sway * w * 0.004 * (1 + f0 * 4);
     g.globalAlpha = wet * (1 - f0 * 0.7);
-    g.drawImage(source, 0, sy * dpr, source.width, Math.min(sh * dpr, source.height - sy * dpr), wob, dy, w, dh);
+    const top = (sy + cut * WET.reach) * dpr;
+    const rows = Math.min((sh - cut * WET.reach) * dpr, source.height - top);
+    g.drawImage(source, 0, top, source.width, rows, wob, dy + cut, w, dh - cut);
   }
   g.globalAlpha = 1;
 }

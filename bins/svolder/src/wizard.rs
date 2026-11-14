@@ -50,6 +50,10 @@ pub use summary::summary;
 pub use svolder_ipc::Connect;
 pub use svolder_walk::{Given, Prompt, Step, Takes};
 
+/// The last line of the wizard: where Home Assistant is set up, for a user who wants it.
+const HOME_ASSISTANT_LINE: &str =
+    "For Home Assistant: `svolder mqtt` or Settings, Connect in the TUI.";
+
 /// What `svolder setup` does, and what bare `svolder` does with nothing configured.
 ///
 /// On a terminal it walks the wizard; off one it prints the summary, because a run whose output
@@ -849,6 +853,7 @@ impl<E: Effects> Wizard<E> {
             body.push("The daemon:".into());
             body.extend(installed.lines().map(|line| format!("  {line}")));
         }
+        body.push(HOME_ASSISTANT_LINE.into());
         Prompt {
             step: Step::Done,
             title: "Done".into(),

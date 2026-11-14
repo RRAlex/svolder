@@ -36,10 +36,11 @@ use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseEventKind};
 use futures::future::LocalBoxFuture;
 use futures::{Stream, StreamExt};
 use ratatui::Terminal;
+use ratatui::layout::Rect;
 
 use svolder_ble::BleError;
 use svolder_host::Block;
-use svolder_ipc::{Config, DeviceConfigOp, TuiConfig};
+use svolder_ipc::{Config, DeviceConfigOp, PresetOp, TuiConfig};
 use svolder_profiles::Registry;
 
 use crate::backend::{
@@ -49,6 +50,7 @@ use crate::recovery::Kind;
 use crate::wizard::Wizard;
 
 use super::app::curve_drag;
+use super::app::divider;
 use super::app::glide;
 use super::app::{App, Holding, Intent, Screen};
 use super::boxes::edit_line;
@@ -83,9 +85,9 @@ use computer::ComputerLink;
 use connect::daemon_answered;
 use connect::{Reconnect, daemon_answers_within, daemon_back, recv_reconnect, recv_version};
 use devices::{
-    Added, RELIST_BOUND, RELIST_PERIOD, Removed, Switched, add_device, relist_held, relisted,
-    relisting, remove_device, switch, switch_device, switch_via, update_device, write_device,
-    written, written_preset,
+    Added, RELIST_BOUND, RELIST_PERIOD, Removed, Switched, add_device, preset_landed, relist_held,
+    relisted, relisting, remove_device, switch, switch_device, switch_via, update_device,
+    write_device, written,
 };
 #[cfg(test)]
 use events::execute;
@@ -403,6 +405,10 @@ where
     B: ratatui::backend::Backend,
     S: Stream<Item = std::io::Result<Event>> + Unpin,
 {
+    // A split a drag let go of, or a burst of nudges that went quiet, is written once.
+    if look.save_split(&mut watching.app, Instant::now()) {
+        look::reload_soon(&mut watching, look.path());
+    }
     // Who speaks for the player is settled before players are looked for, which is done once,
     // on the first turn host audio shows with no daemon to speak for the host.
     match_host_feed(&mut watching).await;
@@ -491,6 +497,16 @@ where
     if !hyperlink::shown(&watching.app) {
         watching.app.pointer.over_link = false;
     }
+    // A sixel picture that went or changed is cleared by a repaint of every cell: the terminal
+    // keeps its pixels under cells that read the same.
+    if let Ok(size) = seams.terminal.size()
+        && watching
+            .host
+            .art
+            .clears_before(&watching.app, Rect::new(0, 0, size.width, size.height))
+    {
+        repaint(seams.terminal);
+    }
     let cost = Instant::now();
     let drawn = seams.terminal.draw(|frame| {
         areas = render::draw(frame, &watching.app, &look.theme, &mut turns.hits);
@@ -538,9 +554,27 @@ where
         .host
         .steer_frames(&mut watching.app, watching.backend.as_ref());
     watching.host.steer(&mut watching.app);
+    if let Ok(size) = seams.terminal.size() {
+        watching.host.art.steer(
+            &mut watching.app,
+            watching.backend.as_ref(),
+            Rect::new(0, 0, size.width, size.height),
+        );
+    }
     let wanted = tick_period(&watching.app, &look.effects);
     turns.timers.retune(wanted);
     Ok(())
+}
+
+/// Make the next frame write every cell: the screen is cleared and what the terminal is held to
+/// show is forgotten. Not [`Terminal::clear`], which asks the terminal where its cursor is and
+/// waits for the answer, which a loop that reads the terminal's input must never do.
+fn repaint<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) {
+    let _ = terminal
+        .backend_mut()
+        .clear_region(ratatui::backend::ClearType::All);
+    // Both buffers blank: the last frame is forgotten, so the next one is written whole.
+    terminal.swap_buffers();
 }
 
 /// The loop [`event_loop`] runs: until it ends, each turn is the steps before a frame, the frame
@@ -564,30 +598,57 @@ where
     let LoopParts {
         opener,
         adder,
-        mut watching,
+        watching,
         terminal,
         events,
         mouse,
         title,
         mut look,
     } = parts;
+    let mut end = turn_loop(
+        Seams {
+            opener,
+            terminal,
+            events,
+            mouse,
+            title,
+        },
+        adder,
+        watching,
+        &mut look,
+    )
+    .await;
+    // A split moved a moment ago is written whichever way the loop ended.
+    if look.save_split_owed(&mut end.watching.app) {
+        look::reload_soon(&mut end.watching, look.path());
+    }
+    end
+}
+
+/// The turns of the loop, one after another, until the loop ends.
+async fn turn_loop<O, A, B, S, M>(
+    mut seams: Seams<'_, O, B, S, M>,
+    adder: &A,
+    mut watching: Watching,
+    look: &mut Look,
+) -> LoopEnd
+where
+    O: Open,
+    A: Adding,
+    B: ratatui::backend::Backend,
+    S: Stream<Item = std::io::Result<Event>> + Unpin,
+    M: MouseCapture,
+{
     let mut turns = Turns::new(tick_period(&watching.app, &look.effects));
-    let mut seams = Seams {
-        opener,
-        terminal,
-        events,
-        mouse,
-        title,
-    };
     loop {
-        watching = match before_frame(adder, &mut seams, watching, &mut look, &mut turns).await {
+        watching = match before_frame(adder, &mut seams, watching, look, &mut turns).await {
             Ok(next) => next,
             Err(end) => return end,
         };
         // A turn that brought nothing but a block the capture read draws no frame: the next
         // frame something else asks for draws what it carried.
         if !std::mem::take(&mut turns.quiet)
-            && let Err(why) = draw_frame(&mut seams, &mut watching, &mut look, &mut turns)
+            && let Err(why) = draw_frame(&mut seams, &mut watching, look, &mut turns)
         {
             return LoopEnd {
                 watching,
@@ -595,134 +656,180 @@ where
                 why: Some(why),
             };
         }
-        let owed = watching.reload_owed.as_ref().map(|owed| owed.0);
-        watching.settle_search();
-        let search_due = watching.jobs.due_at();
-        tokio::select! {
-            event = seams.events.next() => {
-                watching = match on_terminal_event(event, &mut seams, watching, &mut look, &mut turns).await {
-                    Ok(next) => next,
-                    Err(end) => return end,
-                };
-            }
-            update = next_status(watching.backend.as_mut()), if watching.feed_open => {
-                watching = match on_update(update, &mut seams, watching, &look, &mut turns).await {
-                    Ok(next) => next,
-                    Err(end) => return end,
-                };
-            }
-            _ = turns.timers.ticks.tick() => on_tick(&mut watching).await,
-            _ = turns.timers.relist.tick(), if relisting(&watching) || waiting(&watching) => {
-                watching = match on_relist(&mut seams, watching, &look, &mut turns).await {
-                    Ok(next) => next,
-                    Err(end) => return end,
-                };
-            }
-            answered = recv_reconnect(&mut watching.reconnect), if watching.reconnect.is_some() => {
-                watching = match on_daemon_back(answered, &mut seams, watching, &look, &mut turns).await {
-                    Ok(next) => next,
-                    Err(end) => return end,
-                };
-            }
-            answered = fetched(&mut watching.host_refresh), if watching.host_refresh.is_some() => {
-                watching.host_refresh = None;
-                if let Some(answered) = answered {
-                    take_fetched(&mut watching.app, answered, Instant::now());
-                }
-            }
-            version = recv_version(&mut watching.daemon_version), if watching.daemon_version.is_some() => {
-                connect::answered(&mut watching, version, &seams.opener.path, &look.token_site);
-            }
-            asked = web_box::recv(&mut watching.web_code), if watching.web_code.is_some() => {
-                watching.web_code = None;
-                if let Some(asked) = asked {
-                    web_box::take_answer(&mut watching, &mut look, asked, Instant::now());
-                }
-            }
-            checked = web_box::recv_check(&mut watching.web_check),
-                if watching.web_check.is_some() =>
-            {
-                watching.web_check = None;
-                if let Some(checked) = checked {
-                    web_box::checked(&mut watching, checked, Instant::now());
-                }
-            }
-            _ = turns.timers.web_poll.tick(), if web_box::checking(&watching, Instant::now()) => {
-                web_box::check(&mut watching, Instant::now());
-            }
-            done = web_box::recv_copy(&mut watching.web_copy), if watching.web_copy.is_some() => {
-                watching.web_copy = None;
-                web_box::copy_ended(&mut watching, done);
-            }
-            // While the Connect category shows, the daemon is asked again every few seconds:
-            // a bridge connects and a server binds after the reload that started them.
-            _ = turns.timers.conn_poll.tick(), if connect_shown(&watching.app) && watching.daemon_version.is_none() => {
-                watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
-            }
-            // A hand edit of the file made elsewhere is told on this slower clock, whichever
-            // screen shows; a direct session has no daemon to ask, and `ask_daemon` says nothing.
-            _ = turns.timers.config_poll.tick(), if watching.app.session.daemon && watching.daemon_version.is_none() => {
-                watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
-            }
-            // Settings wrote `[tui]` or `[autoeq]` and the writes paused: a daemon that reads this
-            // file reloads once, so the file's change is not the daemon's to announce.
-            _ = tokio::time::sleep_until(owed.unwrap_or_else(tokio::time::Instant::now)), if owed.is_some() => {
-                look::send_owed(&mut watching);
-            }
-            answer = computer::answered(&mut watching.computer.answers),
-                if watching.computer.answers.is_some() =>
-            {
-                watching = match on_computer_answer(*answer, &mut seams, watching, &mut look, &mut turns).await {
-                    Ok(next) => next,
-                    Err(end) => return end,
-                };
-            }
-            view = computer::next_view(&mut watching.computer.views),
-                if watching.computer.views.is_some() =>
-            {
-                turns.quiet = watching.app.host.computer.eq.as_deref() == Some(&*view);
-                let before = watching.app.computer_points();
-                watching.app.host.computer.eq = Some(view);
-                watching.app.follow_point(&before);
-                watching.app.note_computer_view();
-            }
-            // The typing paused: the last search question goes to the daemon.
-            () = jobs::due(search_due), if search_due.is_some() => {
-                watching.jobs.send_due();
-            }
-            done = jobs::next(&mut watching.jobs.ended) => {
-                watching = match on_job_done(done, &mut seams, watching, &mut look, &mut turns).await {
-                    Ok(next) => next,
-                    Err(end) => return end,
-                };
-            }
-            _ = host::tick(&mut watching.host.poll), if watching.host.polls(&watching.app) => {
-                watching.host.send(host::SinkOp::Read);
-            }
-            state = host::answer(&mut watching.host.states), if watching.host.waiting() => {
-                watching.host.answered(state, &mut watching.app);
-            }
-            () = host::redial(&mut watching.host.redial), if watching.host.redial.is_some() => {
-                watching.host.redialled(&watching.app);
-            }
-            found = host::connected(&mut watching.host.connecting), if watching.host.connecting.is_some() => {
-                watching.host.found(found, &mut watching.app);
-            }
-            change = host::next_change(&mut watching.host.changes), if watching.host.changes.is_some() => {
-                watching.host.changed(change, &mut watching.app);
-            }
-            why = host::refused(&mut watching.host.refusals),
-                if watching.host.refusals.is_some() => {
-                watching.app.notify(why);
-            }
-            block = host::next_block(&mut watching.host.capture), if watching.host.capturing() => {
-                turns.quiet = on_capture_block(block, &mut watching, &look, turns.timers.period);
-            }
-            step = host::next_frames(&mut watching.host.frames), if watching.host.listening() => {
-                turns.quiet = on_capture_frames(step, &mut watching, &look, turns.timers.period);
+        watching = match race(&mut seams, watching, look, &mut turns).await {
+            Ok(next) => next,
+            Err(end) => return end,
+        };
+    }
+}
+
+/// One turn's race: whichever of the loop's sources fires first is carried out, and what is
+/// watched afterward comes back, or how the loop ends.
+#[allow(
+    clippy::result_large_err,
+    reason = "the end carries what the loop was watching, once per run"
+)]
+async fn race<O, B, S, M>(
+    seams: &mut Seams<'_, O, B, S, M>,
+    mut watching: Watching,
+    look: &mut Look,
+    turns: &mut Turns,
+) -> Result<Watching, LoopEnd>
+where
+    O: Open,
+    B: ratatui::backend::Backend,
+    S: Stream<Item = std::io::Result<Event>> + Unpin,
+    M: MouseCapture,
+{
+    let owed = watching.reload_owed.as_ref().map(|owed| owed.0);
+    watching.settle_search();
+    let search_due = watching.jobs.due_at();
+    tokio::select! {
+        event = seams.events.next() => {
+            watching = match on_terminal_event(event, seams, watching, look, turns).await {
+                Ok(next) => next,
+                Err(end) => return Err(end),
+            };
+        }
+        update = next_status(watching.backend.as_mut()), if watching.feed_open => {
+            watching = match on_update(update, seams, watching, look, turns).await {
+                Ok(next) => next,
+                Err(end) => return Err(end),
+            };
+        }
+        _ = turns.timers.ticks.tick() => on_tick(&mut watching).await,
+        _ = turns.timers.relist.tick(), if relisting(&watching) || waiting(&watching) => {
+            watching = match on_relist(seams, watching, look, turns).await {
+                Ok(next) => next,
+                Err(end) => return Err(end),
+            };
+        }
+        answered = recv_reconnect(&mut watching.reconnect), if watching.reconnect.is_some() => {
+            watching = match on_daemon_back(answered, seams, watching, look, turns).await {
+                Ok(next) => next,
+                Err(end) => return Err(end),
+            };
+        }
+        answered = fetched(&mut watching.host_refresh), if watching.host_refresh.is_some() => {
+            watching.host_refresh = None;
+            if let Some(answered) = answered {
+                take_fetched(&mut watching.app, answered, Instant::now());
             }
         }
+        version = recv_version(&mut watching.daemon_version), if watching.daemon_version.is_some() => {
+            connect::answered(&mut watching, version, &seams.opener.path, &look.token_site);
+        }
+        asked = web_box::recv(&mut watching.web_code), if watching.web_code.is_some() => {
+            web_code_back(&mut watching, look, asked);
+        }
+        checked = web_box::recv_check(&mut watching.web_check),
+            if watching.web_check.is_some() =>
+        {
+            web_check_back(&mut watching, checked);
+        }
+        _ = turns.timers.web_poll.tick(), if web_box::checking(&watching, Instant::now()) => {
+            web_box::check(&mut watching, Instant::now());
+        }
+        done = web_box::recv_copy(&mut watching.web_copy), if watching.web_copy.is_some() => {
+            watching.web_copy = None;
+            web_box::copy_ended(&mut watching, done);
+        }
+        // While the Connect category shows, the daemon is asked again every few seconds:
+        // a bridge connects and a server binds after the reload that started them.
+        _ = turns.timers.conn_poll.tick(), if connect_shown(&watching.app) && watching.daemon_version.is_none() => {
+            watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
+        }
+        // A hand edit of the file made elsewhere is told on this slower clock, whichever
+        // screen shows; a direct session has no daemon to ask, and `ask_daemon` says nothing.
+        _ = turns.timers.config_poll.tick(), if watching.app.session.daemon && watching.daemon_version.is_none() => {
+            watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
+        }
+        // Settings wrote `[tui]` or `[autoeq]` and the writes paused: a daemon that reads this
+        // file reloads once, so the file's change is not the daemon's to announce.
+        _ = tokio::time::sleep_until(owed.unwrap_or_else(tokio::time::Instant::now)), if owed.is_some() => {
+            look::send_owed(&mut watching);
+        }
+        answer = computer::answered(&mut watching.computer.answers),
+            if watching.computer.answers.is_some() =>
+        {
+            watching = match on_computer_answer(*answer, seams, watching, look, turns).await {
+                Ok(next) => next,
+                Err(end) => return Err(end),
+            };
+        }
+        view = computer::next_view(&mut watching.computer.views),
+            if watching.computer.views.is_some() =>
+        {
+            turns.quiet = computer_view_back(&mut watching, view);
+        }
+        // The typing paused: the last search question goes to the daemon.
+        () = jobs::due(search_due), if search_due.is_some() => {
+            watching.jobs.send_due();
+        }
+        done = jobs::next(&mut watching.jobs.ended) => {
+            watching = match on_job_done(done, seams, watching, look, turns).await {
+                Ok(next) => next,
+                Err(end) => return Err(end),
+            };
+        }
+        _ = host::tick(&mut watching.host.poll), if watching.host.polls(&watching.app) => {
+            watching.host.send(host::SinkOp::Read);
+        }
+        state = host::answer(&mut watching.host.states), if watching.host.waiting() => {
+            watching.host.answered(state, &mut watching.app);
+        }
+        () = host::redial(&mut watching.host.redial), if watching.host.redial.is_some() => {
+            watching.host.redialled(&watching.app);
+        }
+        found = host::connected(&mut watching.host.connecting), if watching.host.connecting.is_some() => {
+            watching.host.found(found, &mut watching.app);
+        }
+        change = host::next_change(&mut watching.host.changes), if watching.host.changes.is_some() => {
+            watching.host.changed(change, &mut watching.app);
+        }
+        why = host::refused(&mut watching.host.refusals),
+            if watching.host.refusals.is_some() => {
+            watching.app.notify(why);
+        }
+        block = host::next_block(&mut watching.host.capture), if watching.host.capturing() => {
+            turns.quiet = on_capture_block(block, &mut watching, look, turns.timers.period);
+        }
+        step = host::next_frames(&mut watching.host.frames), if watching.host.listening() => {
+            turns.quiet = on_capture_frames(step, &mut watching, look, turns.timers.period);
+        }
+        // A step toward the cover art finished: the next frame draws what it brought.
+        done = watching.host.art.next() => {
+            watching.host.art.fold(done, &mut watching.app);
+        }
     }
+    Ok(watching)
+}
+
+/// Takes the answer to the pairing-code ask, which is no longer pending.
+fn web_code_back(watching: &mut Watching, look: &mut Look, asked: Option<web_box::Asked>) {
+    watching.web_code = None;
+    if let Some(asked) = asked {
+        web_box::take_answer(watching, look, asked, Instant::now());
+    }
+}
+
+/// Takes the answer to the web check, which is no longer pending.
+fn web_check_back(watching: &mut Watching, checked: Option<web_box::Checked>) {
+    watching.web_check = None;
+    if let Some(checked) = checked {
+        web_box::checked(watching, checked, Instant::now());
+    }
+}
+
+/// Folds a computed EQ view into the app, and whether the frame can be skipped because the view
+/// is the one already held.
+fn computer_view_back(watching: &mut Watching, view: Box<svolder_host::eq::EqView>) -> bool {
+    let quiet = watching.app.host.computer.eq.as_deref() == Some(&*view);
+    let before = watching.app.computer_points();
+    watching.app.host.computer.eq = Some(view);
+    watching.app.follow_point(&before);
+    watching.app.note_computer_view();
+    quiet
 }
 
 /// Carries out what the terminal said: a key, the pointer, a mouse action, or the end of input.
@@ -783,6 +890,7 @@ where
             send(lost, &mut watching).await;
             let lost = glide::lost(&mut watching.app, &event);
             send(lost, &mut watching).await;
+            divider::lost(&mut watching.app, &event);
             // A mouse action ends any code half typed with the keys.
             watching.app.mascot.codes.clear();
             // The present moment, which a climb a press starts counts from.
@@ -984,10 +1092,25 @@ where
     S: Stream<Item = std::io::Result<Event>> + Unpin,
     M: MouseCapture,
 {
-    let intents = presets::done(&mut watching.app, done);
     let (mut screen, opener, mouse) = seams.split(&mut turns.hits);
+    let intents = folded(done, opener, &mut watching);
     let flow = take_intents(intents, opener, watching, mouse, look, &mut screen).await;
     carried(flow, &mut turns.adding)
+}
+
+/// Fold what a job ended with into the app and answer with the writes it asks for; a write of the
+/// preset library that has ended, whichever way, also has the list read the file again.
+fn folded<O: Open>(
+    done: presets::Done,
+    opener: &Opener<O>,
+    watching: &mut Watching,
+) -> Vec<Intent> {
+    let wrote = matches!(done, presets::Done::PresetWritten(_));
+    let intents = presets::done(&mut watching.app, done);
+    if wrote {
+        preset_landed(opener, watching);
+    }
+    intents
 }
 
 /// Folds a block the host sink capture read into the app, and says whether the turn is quiet.

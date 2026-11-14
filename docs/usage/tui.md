@@ -74,6 +74,12 @@ run `svolder tui --demo --web` instead, whose TUI and web page share the daemon'
 side: your real audio is not touched, and a volume or EQ change in one shows in the other). The fake
 device list has one device per run, so there is no DAC-with-an-amplifier demo.
 
+The `make demo*` targets let the demo's EQ library search AutoEq's real repository (the one network
+fetch a demo makes, when you search or preview); `AUTOEQ_URL=<base>` names another base, and the
+demo's cache of the index is in its own private directory. Run `svolder tui --demo` by hand and the
+library says "AutoEq is off for the fake device; set SVOLDER_AUTOEQ_URL to turn it on" instead: the
+fake transport otherwise points AutoEq at an address nothing listens on.
+
 `--host` leaves the host on for the daemon and the TUI, so the fake device sits beside your computer's
 real audio: the spectrum and meters follow the default sink, the Now playing card and its transport
 drive your real media player, the Volume row on the computer's side (`C`) turns your real sink, and
@@ -233,22 +239,22 @@ sink:
 ```
  svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
-┌ Controls ───────── mute ─ 0 centre ┐┌ Tone control ────────── flat ─ presets ┐
-│ ▶ Input        ‹ 3 · Optical ›     ││   Mode      ‹ EQ ›                     │
-│   Phase invert [ ] off             ││   Loudness  ░░░░░░░░░░ 0               │
-│   NOS filter   [x] on              ││   Preset    custom                     │
-│   Mute         [ ] off             ││                                        │
-│                                    ││ Band   Freq      Gain      Q           │
-│   Volume       █109/127┃░  -6.0 dB ││ ▶ 1   40.0 Hz    +0.0 dB   4.3         │
-│                                    ││   2    160 Hz   -2.45 dB   2.1         │
-│   Balance      L ────┃───── R  0   ││   3    632 Hz    +0.0 dB   4.3         │
-│                                    ││   4   2515 Hz   +1.45 dB   1.0         │
-│   Host                             ││   5  10000 Hz    +0.0 dB   4.3         │
-│   Transport    ◀◀  ▶  ▮▮  ▶▶       ││                                        │
-│                                    ││                                        │
-│                                    ││                                        │
-│                                    ││                                        │
-└────────────────────────────────────┘└────────────────────────────────────────┘
+┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐
+│ ▶ Input        ‹ 3 · Optical ›       ││   Mode      ‹ EQ ›                   │
+│   Phase invert [ ] off               ││   Loudness  ░░░░░░░░░░░░░░░░░░░░░ 0  │
+│   NOS filter   [x] on                ││   Preset    custom                   │
+│   Mute         [ ] off               ││                                      │
+│                                      ││ Band   Freq      Gain      Q         │
+│   Volume       ██109/127┃░  -6.0 dB  ││ ▶ 1   40.0 Hz    +0.0 dB   4.3       │
+│                                      ││   2    160 Hz   -2.45 dB   2.1       │
+│   Balance      L ─────┃───── R  0    ││   3    632 Hz    +0.0 dB   4.3       │
+│                                      ││   4   2515 Hz   +1.45 dB   1.0       │
+│   Host                               ││   5  10000 Hz    +0.0 dB   4.3       │
+│   Transport    ◀◀  ▶  ▮▮  ▶▶         ││                                      │
+│                                      ││                                      │
+│                                      ││                                      │
+│                                      ││                                      │
+└──────────────────────────────────────┘└──────────────────────────────────────┘
 ┌ Status ────────────────────────────────────────────────────────────── advice ┐
 │ Sample rate 48 kHz   fw 3                                                    │
 │ Raw: 9=u8 64   9.1=u8 0   9.2=u8 1   (3 unknown functions)                   │
@@ -272,8 +278,11 @@ Controls has `mute`, `0 centre` and `refresh`, Tone control `flat` and `presets`
 key does nothing on this device is dim; a border too short for them all drops the last words, which
 their keys still reach. A click on a word presses its key.
 
-A terminal larger than 80×24 is laid out in one of two tiers on each axis rather than stretched.
-**Wide**, from 120 columns, gives the Controls pane 50 columns and its bars up to 25 cells, sets
+A terminal larger than 80×24 is laid out in one of two tiers on each axis rather than stretched
+(the bars are the exception: the Controls pane's bars and balance track, and the Tone pane's
+Loudness bar, run across what their pane has left after the label and the reading, so a wider
+terminal, or a divider dragged toward them, makes them longer at once).
+**Wide**, from 120 columns, sets
 panes side by side a column apart, keeps two cells of blank inside every pane's border, and holds
 everything below the header rule to 256 columns in the middle of the terminal — the header and its
 rule keep the full width. **Tall**, from 40 rows, adds a blank row at the top of every pane, a row
@@ -287,6 +296,19 @@ the mouse reaches whatever the tier drew, where it drew it. At any size, the Con
 groups a blank row apart — the selects and toggles, the levels, the balance, the meters, and the
 Host group — wherever it has the rows for them all and the blanks; a pane a row short of that packs
 them, so no row goes out of sight.
+
+**The divider.** On a device with a Tone pane, the Controls pane and the Tone pane share the width
+evenly — 40 and 40 at 80 columns, 60 and 59 at 120 — and the bar between them (the two borders, and
+the column between in the wide tier) moves. Drag it with the mouse, or nudge it four columns with `<`
+and `>`; `|` or a double-click on it puts it back to an even split. Each pane keeps at least 40
+columns, so the bar stops where either would have less; at exactly 80 columns, the smallest the TUI
+draws (a narrower terminal gets only the too-small notice), the panes are 40 and 40 and the bar is
+fixed. The split is saved as a fraction of the shared width, `device_split` under
+`[tui]` (0 to 1, `0.5` by default), once when the button is let go and once after a burst of nudges,
+never on every motion; each run starts from it, and a resize reads the same fraction again against
+the new width, holding both panes to 40. The split never moves with what the rows say: a `Path` line
+too long for its pane ends in `…` until the bar is moved to give it room. The help overlay names the
+keys as `< > |  pane divider`, and a pointer resting on the bar says so.
 
 A level row is one line, ending at least one blank cell short of the pane's border: its bar carries
 the raw value over its range — `109/127` above — centred on the bar's own cells, each character over
@@ -418,6 +440,8 @@ neither draws its bare number.
   device whose profile has a balance; dimmed on one that has none
 - `f` toggle the tone control's flat mode, from any row, on a device that has a Tone pane — the same
   key as on the tone-control screen (below); dimmed on a device with no tone control
+- `<` and `>` nudge the bar between the Controls and Tone panes four columns, `|` puts it back to an
+  even split (see "The divider" above); they move nothing at 80 columns, where the bar is fixed
 - `p` open the preset list over the device screen: on a device that has a Tone pane the same list
   as the tone-control screen's (see "The preset list" below), on a Loki Max its own list of device
   slots and built-in settings (see "The Loki Max's preset list" below); dimmed on a device with
@@ -571,6 +595,31 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
   speaks for the host is back. With no daemon the computer's volume, its EQ and the capture are the
   TUI's own, on the computer it runs on; joined to a daemon that speaks for the host, the computer's
   volume and EQ are the daemon's, and every change of them is a request to it.
+- **Cover art**, at the right of the Status pane beside `Now playing`, while `[tui] cover_art` is
+  `"auto"` (the default; the Settings box's **Host audio** category has the row): the cover of the
+  track the daemon follows, as tall as the pane's rows and as wide as a square of that height is in
+  your terminal's own cells. The rows are written to what the picture leaves, so it is never over a
+  value, and it goes before the title does: the rows always keep at least 64 columns, and a pane
+  with no room beyond that has no picture. It is the daemon's cover, so a TUI on another machine
+  shows it too; a direct session (no daemon) has none, and neither has a daemon older than 0.34.0,
+  which cannot send the picture. A new track clears the old picture at once and draws the next when
+  it has arrived; a track with no cover has none; a resize draws it again for the new size. A JPEG,
+  PNG or WebP cover is decoded and sized off the loop, so no frame or key ever waits on it.
+
+  How it is drawn depends on what the terminal answers when the TUI starts: it asks once, on the
+  alternate screen, before reading any key, and waits at most 100 ms for the answers. A terminal
+  that speaks the kitty graphics protocol gets the picture itself (Ghostty and kitty); one that says
+  it has sixel gets sixel (foot, and xterm started with sixel); any other, or one that does not
+  answer in time (some tmux and SSH set-ups), gets half-block cells: two pixels to a character cell,
+  in the terminal's own colours (GNOME Terminal and Ptyxis are of this kind, unless their build says
+  it has sixel). WezTerm and Konsole are not asked about kitty or sixel, as they draw those badly,
+  and get half-blocks. Inside tmux the questions and the pictures go through `allow-passthrough`,
+  which the TUI turns on for its own pane. There is no setting to force a protocol: forcing one the
+  terminal does not draw could only show garbage, so `"auto"` is the one choice and `"off"` is the
+  other, which also asks the terminal nothing. The answers are read once: a `cover_art` turned from
+  `off` to `auto` in the Settings box draws half-blocks until the next start. A terminal's answer
+  that comes late is not a key press: the TUI takes the strings terminals answer in out of its input
+  (an answer cut in two by a slow link can still show as one stray Esc).
 - **The Host group**, at the bottom of the Controls pane under a `Host` heading of its own, one row
   the Controls pane's cursor reaches under the device's own, and rows it does not reach (the
   Spectrum row in the wide and tall tiers, the Path row on a DAC joined to a daemon). The
@@ -588,8 +637,9 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     route for yet, `route not read`, both dim.
     The verdict comes first in its own colour — `untouched` (green), what changes the sound (amber:
     `resampled 44.1 → 48 kHz`, `computer volume 54 %`, `player muted`, `host EQ on`,
-    `2 other sounds mixing`, `DAC reads 44.1 kHz`), or, dim, `the computer plays to NAME` when the
-    default sink is not this DAC, `the DAC listens to Optical` when the DAC is on an input the
+    `2 other sounds mixing`, `DAC reads 44.1 kHz`), or, dim, `→ NAME` when the
+    default sink is not this DAC (`player → NAME` for a player routed elsewhere), `the DAC listens to
+    Optical` when the DAC is on an input the
     computer does not feed (`the DAC listens to USB 1 · the computer is on USB 2` for a DAC on one
     USB port while the computer is on the other), or what could not be read (`DAC input not read`,
     `both USB ports connected`); several words are
@@ -1175,12 +1225,20 @@ preset meanwhile, planned from the steps the first load asked for, as the tone s
 and `0` are. The list reads the configuration file again as it opens, so it shows what `svolder eq`
 or another front end has written since.
 
-Every change is written into the configuration file the session reads, through the writers
-`svolder eq save`, `eq rename` and `eq delete` use; a daemon that reads the same configuration file
-is then told to read it again, silently, so its MQTT bridge offers the new list (a daemon that reads
-another file is left alone); and the list is drawn from what the file says afterwards. Every key
+Every change (save, update, rename, delete, and an import from a file) is queued and made off the
+loop. While a daemon runs it is the one writer: the change is a `preset_write` request, and the
+daemon judges the name and refuses a taken one in the same words the web page and the CLI give. A
+daemon from before that request is refused in words (`svolder daemon restart`) and nothing is
+written behind it. With no daemon the session writes the configuration file itself, through the
+writers `svolder eq save`, `eq rename` and `eq delete` use. Either way the list is drawn from what
+the file says afterwards. Every key
 that is not the box's own is swallowed while it is open, and the mouse reaches nothing under it: a
-left click outside the box presses `Esc`, which closes it.
+left click outside the box presses `Esc`, which closes it. With the list on its presets the mouse
+works inside it too: a left click on a row loads that preset, as `Enter` on it does (on the
+computer's side it puts the preset on the computer), the wheel moves the focus a row a notch, as
+`↑` and `↓` do, and a click on the `more ↑` or `more ↓` of the border goes to the first or the last
+row. The name prompt, the questions, the AutoEq search and the file prompt are answered from the
+keyboard.
 
 ##### The AutoEq search (`a`)
 
@@ -1259,12 +1317,12 @@ dimmed as around the other list; an 80×24 terminal on a Loki Max whose bands re
 │ ▶ Input  —                                                                   │
 │   Mode   —                                                                   │
 │                                                                              │
-│   20 Hz  █████28/30███┌ Presets · Loki Max ─────────┐                        │
-│   120 Hz █████21/30░░░│     Preset 1                │                        │
-│   550 Hz █████17/30░░░│     Preset 2                │                        │
-│   2 kHz  █████15/30░░░│     Preset 3                │                        │
-│   6 kHz  █████15/30░░░│     Built in                │                        │
-│   20 kHz █████15/30░░░│     Flat                    │                        │
+│   20 Hz  █████████████┌ Presets · Loki Max ─────────┐█████████░░░░  10.4 dB  │
+│   120 Hz █████████████│     Preset 1                │░░░░░░░░░░░░░  3.6 dB   │
+│   550 Hz █████████████│     Preset 2                │░░░░░░░░░░░░░  0.8 dB   │
+│   2 kHz  █████████████│     Preset 3                │░░░░░░░░░░░░░  0.0 dB   │
+│   6 kHz  █████████████│     Built in                │░░░░░░░░░░░░░  0.0 dB   │
+│   20 kHz █████████████│     Flat                    │░░░░░░░░░░░░░  0.0 dB   │
 │                       │ ▶ ● Bass Boost              │                        │
 │                       │     Treble Boost            │                        │
 │                       │     Smiley                  │                        │
@@ -1509,7 +1567,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.33.0 │
+│                          v0.34.0 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1577,10 +1635,11 @@ the current one between `┤ ├`:
   fade, the Mascot switch), then the hue-drift mode, the rainbow-scroll switch and the transition
   between screens. The Effects row reads `on (inactive)` where the switch is on but the terminal
   cannot show the animation layer (below truecolor, or in monochrome), since nothing animates there.
-- **Behaviour**: mouse capture, whether `q` asks before it quits, the title meter, whether the intro
-  plays on launch, which effect builds it and whether a short sound plays with it, and how often the
-  AutoEq index is fetched again (`[autoeq] refresh_weeks`).
-- **Host audio**: whether the TUI reaches the host's own audio, and its visualizer.
+- **Behaviour**: mouse capture, whether a resting pointer shows a tooltip, whether `q` asks before
+  it quits, the title meter, whether the intro plays on launch, which effect builds it and whether a
+  short sound plays with it, and how often the AutoEq index is fetched again
+  (`[autoeq] refresh_weeks`).
+- **Host audio**: whether the TUI reaches the host's own audio, its visualizer, and the cover art.
 - **Connect** (the Connections category): the daemon's `[web]`, `[mcp]` and `[mqtt]` sections and
   what the daemon says of them, described under "Connect" below.
 
@@ -1702,10 +1761,10 @@ rows, top to bottom:
   "The Web UI box" below.
 - **MCP server**, **MCP writes** (`read-only` or `read/write`), **MQTT bridge** and **MQTT
   commands** (`read-only` or `allowed`) are switches: `␣`, `Enter` or either arrow flips one.
-- **MCP listen**, **MQTT broker host** and **MQTT broker port** open an edit line over the box on
+- **MCP listen**, **MQTT broker host**, **MQTT broker port** and **MQTT username** open an edit line over the box on
   `␣`, `Enter` or an arrow: type, `←→`/`Home`/`End`/`Backspace` edit, `Enter` saves and `Esc`
   cancels, and a value that is not an address, a host or a port 1–65535 is refused in a toast with
-  the line still up. The listen row has no list of the machine's addresses to cycle through: it is
+  the line still up (an empty username line takes the username away). The listen row has no list of the machine's addresses to cycle through: it is
   typed. It reads `loopback:8737` for the default `127.0.0.1:8737`, and the right column has the
   address whole.
 - **MCP token** reads masked, `••••••3fQ`: six dots and the token's last three characters (a token
@@ -1742,12 +1801,20 @@ rows, top to bottom:
   help overlay's `Settings` section. If the daemon cannot be told to reload after a rotation, the
   notice says so and names `svolder daemon restart`; with no daemon it says none uses the token yet.
 - **MCP status** and **MQTT status** are the daemon's own answers, as `svolder daemon status` words
-  them (`listening`, `failed`, `connecting`, `connected`, `off`; the right column has the whole
-  line). They are asked again every two seconds while the category shows, so a bridge that connects
+  them (`listening`, `failed`, `connecting`, `connected`, `off`, and for a bridge that cannot get
+  in `login refused`, `not reachable` or `TLS port`; the right column has the whole line, such as
+  `mqtt: not connected to HOST:PORT: the broker refused the login (check username and password)`). They are asked again every two seconds while the category shows, so a bridge that connects
   after a change shows it.
-- **MQTT password** reads `set` or `not set` (the file's `password` or `SVOLDER_MQTT_PASSWORD`) and
-  nothing else: it is never shown and never edited here. It reflects this session's environment and
-  config file; the daemon's own environment may differ.
+- **MQTT password** reads `not set`, `set`, `set — not sent: no username` (a password with no
+  username is never sent) or `from SVOLDER_MQTT_PASSWORD` (the variable wins over the file; with no
+  username it adds `— not sent: no username`), and never the password. `Enter` opens an edit line
+  that starts empty whatever is set, since a password is never read back: what is typed shows as a
+  bullet each, `Tab` shows and hides it, `Enter` saves it to `[mqtt] password` and `Esc` cancels. An
+  empty line keeps what is saved, and `Delete` pressed twice on the line clears the password the
+  file holds (with none it says so). A toast says what would keep a
+  saved password from being used: no username, or `SVOLDER_MQTT_PASSWORD` set here. The row
+  reflects this session's environment and config file; the daemon's own environment may differ.
+  `config.toml` is made readable by its owner alone; a file that already exists keeps its mode.
 
 A change writes only its own key of `[web]`, `[mcp]` or `[mqtt]` into `config.toml`, as the `[tui]`
 writer does for its keys (comments and every other byte stay; a value the file would refuse, such as
@@ -1768,7 +1835,7 @@ it is never announced as a hand edit; no key of the TUI reloads the daemon.
 
 #### The Web UI box
 
-`Enter` on the Connect category's Web UI row opens a box of six rows over the Settings box, titled
+`Enter` on the Connect category's Web UI row opens a box of seven rows over the Settings box, titled
 `Web UI`, with its keys on the last two lines. `↑↓` move the cursor among the rows that take a key
 (the first, State, only reports); `Esc` or `q` closes the box and forgets its codes (`q` here closes
 the box, it does not ask to quit).
@@ -1780,8 +1847,20 @@ the box, it does not ask to quit).
 - **Reach** reads `this computer` (a loopback listen address), `your network` (a wildcard one) or
   `custom (ADDR)`; either arrow moves it between the first two and keeps the port, writing
   `[web] listen`, and a custom address moves to this computer.
+- **Guest view** reads `off` or `read-only` (`[web] guest`); `Enter` or either arrow turns it, and
+  so does `g` from any row, with the daemon's `guest_switch` (the file is written and the web
+  server applied it, as `svolder web guest on` does; a session with no daemon writes the file, and
+  the view applies when a daemon starts). Turning it on says once in the status line that anyone on
+  your network can look, read-only. The web server restarts to apply it, so the sign-in link or
+  pairing code on show is gone: a link on show is replaced by a fresh one at once (a pairing code
+  is dropped with a note; `p` makes a new one). The switch is refused, as every row's write is,
+  when the daemon reads another file. The row writes the key while the web UI is off too; the
+  guest QR below follows the running daemon's own word (a `guest` edited by hand shows nothing
+  until the reload) and shows only while the web UI listens; under `auth = "none"` every visitor
+  has full access, so no guest QR is drawn and the box says so in one line.
 - **Link** is a link that signs one browser in, made when the box opens on a daemon whose web UI is
-  listening and again by `l`: the minutes and seconds it has left on the label's line (`1:52 left`,
+  listening (a box opened before the daemon's status arrived makes it when the status does) and
+  again by `l`: the minutes and seconds it has left on the label's line (`1:52 left`,
   then `ended`), and the whole link under it on lines of its own, as wide as the box's text area,
   wrapped with nothing after its last piece; under the pointer every line of it underlines. The link
   is also a terminal hyperlink (OSC 8, one link across the wrapped lines): a terminal that supports
@@ -1818,11 +1897,16 @@ the box, it does not ask to quit).
   `DISPLAY` nor `WAYLAND_DISPLAY` is set (`no desktop`: no opener is started then) or `xdg-open`
   fails.
 
-  Below the rows the box draws the link as a QR code in black on white, for a phone to scan, where
-  the terminal has the room, else `widen the terminal to see the QR code`. On a loopback listen with
+  Below the rows the box draws the link as a QR code in black on white, for a phone to scan, with
+  the caption `sign in` under it, where the terminal has the room, else `widen the terminal to see
+  the QR code`. While the guest view is on and the web UI listens, a second QR code of the plain
+  page link (no code in it, so it never ends) sits beside the first, captioned `guest: read-only,
+  anyone on your network`: the box grows past 64 columns to hold both side by side when the terminal
+  is wide enough, else the two stack, else the words above. The guest code shows with no sign-in
+  link too, and the sign-in code only while a link is on show. On a loopback listen with
   no `[web] url` it says `a phone cannot reach this computer's loopback: choose your network`, and
   where no address a phone reaches was found, `a phone cannot open this link: no address a phone can
-  reach was found, so set [web] url`.
+  reach was found, so set [web] url`; those words come once for both codes.
 
   A link signs one browser in, and a phone's camera preview of the QR code can use it up before the
   phone's browser opens it. While a link shows, the box asks the daemon about once a second (off the
@@ -1848,9 +1932,9 @@ the box, it does not ask to quit).
   them), and `l` or `p` makes new ones; a refused replace leaves them.
 
 `l` and `p` need a running daemon, which serves the page and makes the codes; without one the rows
-read `the daemon serves the web UI` and the keys say to start it. The two writes need the daemon to
+read `the daemon serves the web UI` and the keys say to start it. The three writes (Web UI, Reach, Guest view) need the daemon to
 read this session's configuration file, as every Connect row does. The box is 64 columns wide, or
-the terminal's width where that is less.
+the terminal's width where that is less, and wider when two QR codes sit side by side.
 
 ### Setup wizard
 
@@ -2098,6 +2182,8 @@ the tone-control screen, which has no clock. With capture on:
   nothing), `? help` to open the help overlay, `esc menu` or `esc back` to press `Esc`, and a word
   of a pane's top border (`mute`, `0 centre`, `presets`, `refresh`, `new`…) to press its key, a
   faint word included
+- on the device screen, drag the bar between the Controls and Tone panes to resize them, or
+  double-click it to put it back to an even split (see "The divider" above)
 - on the device screen, click the Controls pane's title to focus it, or the Tone control pane's
   title to focus that pane (the tone-control screen is the `EQ` tab and `e`); the Status pane's
   title does nothing, the pane never being focused; on the tone, telemetry, and devices screens,
@@ -2173,19 +2259,26 @@ the tone-control screen, which has no clock. With capture on:
   do; on the computer's side the wheel over the Volume row steps the computer's volume 1 %, as `←→` there do
 - on the device screen's Transport row, click a button — its glyphs or the cell either side of them
   — to press it on the host's player, focusing the row on it, as `Enter` there would
-- the device editor, a removal question, the preset list, a band's edit line and the quit question
+- the preset list, while it shows its presets, takes the mouse itself: click a row to load it, turn
+  the wheel to move the focus, click the `more ↑` or `more ↓` of its border to go to the first or
+  last row (see "The preset list" above)
+- the device editor, a removal question, the preset list's prompts and questions, a band's edit line
+  and the quit question
   are answered from the keyboard: while one is open the mouse reaches nothing under it, and a left
   click outside it presses `Esc`, which closes it or cancels what it asks — the same click closes
   the Settings box
 
 Resting the pointer on anything clickable for 0.7 seconds shows a tooltip: one or two lines, at most
 40 cells wide, saying what the target is and how to use it. It appears under the pointer's cell,
-above it near the last row, on the pointer's other side where it would meet a toast (and not at all
-where both sides do), and shifted left to stay on the screen, in the raised shade with no border
+above it near the last row or where it would cover another row's value (then at the right edge, if
+both sides would), on the pointer's other side where it would meet a toast (and not at all where
+both sides do), and shifted left to stay on the screen, in the raised shade with no border
 (reverse video where no raised shade is painted: at 16 colours, in monochrome and with the theme
 background off). While one shows, moving straight onto another target shows that one at once; a key,
 a click, a drag, the wheel, a resize, the pointer leaving its target or something else drawing over
-it hides it, and none shows while a box is open or capture is off.
+it hides it, and none shows while a box is open or capture is off. `[tui] tooltips = false` (the
+Behaviour category's Tooltips row) turns them off; the tooltips need mouse capture, so with that off
+there are none whatever this says.
 
 The targets are the tabs, `? help` and `esc …`, the words of a pane's border (the key table's
 description and key: `mute · m`), the rows of the Controls pane (with the control's label and how to
@@ -2197,9 +2290,9 @@ The Telemetry tab's, on an 80×24 terminal:
 ```
  svolder  Gungnir 2  ● connected                                       mouse:on 
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
-┌ Controls ───────── mut Telemetry · every reading · t ──────── flat ─ presets ┐
-│   Input        —                   ││   Mode      ‹ — ›                      │
-│ ▶ Phase invert [ ] —               ││   Loudness  —                          │
+┌ Controls ─────────── m Telemetry · every reading · t ──────── flat ─ presets ┐
+│   Input        —                     ││   Mode      ‹ — ›                    │
+│ ▶ Phase invert [ ] —                 ││   Loudness  —                        │
 ```
 
 ### Title meter
@@ -2315,18 +2408,18 @@ one-word description in full where the key row abbreviates it (`volume`, `freque
 │ ↑↓        move                  ␣/Enter   toggle/press                     │
 │ ←→        change                +/=/-     volume                           │
 │ m         mute                  0         centre balance                   │
-│ i         phase                 a         advice, or all clear             │
-│ o         NOS                                                              │
-│ Tab/⇧Tab  pane                  EQ                                         │
-│ f         flat on/off           1-5       band                             │
-│ p         presets (a i inside)  , . ⇧←→   frequency                        │
-│ b         identify              [ ] ⇧↑↓   Q                                │
-│ r         refresh               Enter     edit band                        │
-│ Esc       back, or the menu     0         flatten                          │
-│ c         controls              L-drag    point freq/gain                  │
-│ e         tone                  R-drag    Q, right widens                  │
-│ t         telemetry             wheel     Q on the curve                   │
-│ d         devices               2×click   edit band value                  │
+│ i         phase                 < > |     pane divider                     │
+│ o         NOS                   a         advice, or all clear             │
+│ Tab/⇧Tab  pane                                                             │
+│ f         flat on/off           EQ                                         │
+│ p         presets (a i inside)  1-5       band                             │
+│ b         identify              , . ⇧←→   frequency                        │
+│ r         refresh               [ ] ⇧↑↓   Q                                │
+│ Esc       back, or the menu     Enter     edit band                        │
+│ c         controls              0         flatten                          │
+│ e         tone                  L-drag    point freq/gain                  │
+│ t         telemetry             R-drag    Q, right widens                  │
+│ d         devices               wheel     Q on the curve                   │
 └──────────────────────────────────────────────────────────────────── more ↓ ┘
 ```
 
@@ -2476,6 +2569,21 @@ it is called it sits in the corner of the Tone pane (the Controls pane on a devi
 control), beside any rows short enough to leave that corner free; where the pane's text reaches the
 corner, it waits elsewhere. `mascot = false` under `[tui.effects]` keeps it away; so do effects off,
 16 colours and monochrome. Under a box that dims the screen it keeps its shading, in greys.
+
+After the TUI has run an hour the squirrel comes out, stretches and stays; from then on it zaps out
+and back in every half hour, counted from the moment it lands (a TUI that was stopped, with
+Ctrl-Z, skips the zap that fell due meanwhile). Each time it appears, whatever the reason (the typed code, a fault,
+a lost or returned link, power, an input switch, the hour), it comes in by one of seven entrances:
+the transporter, the Bifröst beam, sparkle noise, scanlines, lightning, a drop with a bounce and the
+longship's landing. A visitor, and the squirrel when it zaps or the code sends it away, leaves by
+the matching exit. The pick varies: it never repeats the one before, and a costume or a day leans
+toward its own (the pirate day toward the longship, Halloween toward lightning). Nothing enters while
+a box, the help overlay or a typed field has the keys: it waits, then enters when they are free,
+and an animation under way stands still until they are.
+At 256 colours, where the animation layer cannot run, the squirrel appears and goes whole, with no
+animation, and the zap still comes; with `[tui.effects]` off it stays away, as at 16 colours. The
+animations draw only the squirrel's own pixels and a few of their own inside its box; no reading is
+animated.
 
 ### Exit codes
 

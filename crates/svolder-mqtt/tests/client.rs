@@ -301,7 +301,7 @@ async fn a_broker_that_is_not_there_is_tried_again_after_two_seconds_then_four()
         .map(|w| (w.as_millis() as u64 + 500) / 1000)
         .collect();
     assert_eq!(rounded, [2, 4], "the waits were {waits:?}");
-    let Link::Waiting { retry_at } = client.link() else {
+    let Link::Waiting { retry_at, .. } = client.link() else {
         panic!("waiting between attempts, got {:?}", client.link());
     };
     assert!(retry_at > tokio::time::Instant::now());

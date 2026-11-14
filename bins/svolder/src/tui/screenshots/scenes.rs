@@ -27,7 +27,7 @@ use crate::tui::screenshots::world::{
 mod record;
 
 /// The terminal every picture is drawn on, in columns and rows.
-const SIZE: (u16, u16) = (120, 40);
+pub(in crate::tui::screenshots) const SIZE: (u16, u16) = (120, 40);
 
 /// The time between two frames of a picture: about 30 frames a second.
 const FRAME: Duration = Duration::from_millis(33);
@@ -117,6 +117,16 @@ pub(in crate::tui::screenshots) fn still_with(
     still: Still,
     tweak: impl FnOnce(&mut App),
 ) -> Shot {
+    still_sized(correction, still, SIZE, tweak)
+}
+
+/// [`still_with`] on a terminal `size` columns by rows.
+pub(in crate::tui::screenshots) fn still_sized(
+    correction: &Correction,
+    still: Still,
+    size: (u16, u16),
+    tweak: impl FnOnce(&mut App),
+) -> Shot {
     runtime().block_on(async {
         let world = World::new(correction.clone());
         let t0 = world.base;
@@ -133,7 +143,7 @@ pub(in crate::tui::screenshots) fn still_with(
         tweak(&mut app);
 
         let World { mut look, .. } = world;
-        let mut terminal = Terminal::new(TestBackend::new(SIZE.0, SIZE.1)).expect("a terminal");
+        let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).expect("a terminal");
         let mut last = None;
         for n in 0..SETTLE_TURNS {
             let now = t0 + FRAME * n;

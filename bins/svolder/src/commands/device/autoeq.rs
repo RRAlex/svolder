@@ -90,6 +90,12 @@ pub(super) fn refusal(refused: &Refused, others: bool) -> Failure {
         (Some(Reason::NotListed), false) => {
             "Import a file with `svolder eq import FILE`".to_string()
         }
+        // AutoEq is off: waiting changes nothing.
+        (Some(Reason::Unreachable), _)
+            if refused.message.starts_with(svolder_autoeq::OFF_PREFIX) =>
+        {
+            "Import a file with `svolder eq import FILE`".to_string()
+        }
         (Some(Reason::Unreachable), _) => {
             "Retry later, or import a file with `svolder eq import FILE`".to_string()
         }

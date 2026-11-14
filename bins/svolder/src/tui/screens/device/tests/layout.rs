@@ -12,24 +12,24 @@ fn the_device_screen_draws_the_controls_the_tone_summary_and_the_status() {
         &[
             " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
-            "┌ Controls ───────── mute ─ 0 centre ┐┌ Tone control ────────── flat ─ presets ┐",
-            "│ ▶ Input        ‹ 3 · Optical ›     ││   Mode      ‹ EQ ›                     │",
-            "│   Phase invert [ ] off             ││   Loudness  ░░░░░░░░░░ 0               │",
-            "│   NOS filter   [x] on              ││   Preset    custom                     │",
-            "│   Mute         [ ] off             ││                                        │",
-            "│                                    ││ Band   Freq      Gain      Q           │",
-            "│   Volume       █109/127┃░  -6.0 dB ││ ▶ 1   40.0 Hz    +0.0 dB   4.3         │",
-            "│                                    ││   2    160 Hz   -2.45 dB   2.1         │",
-            "│   Balance      L ────┃───── R  0   ││   3    632 Hz    +0.0 dB   4.3         │",
-            "│                                    ││   4   2515 Hz   +1.45 dB   1.0         │",
-            "│                                    ││   5  10000 Hz    +0.0 dB   4.3         │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "└────────────────────────────────────┘└────────────────────────────────────────┘",
+            "┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐",
+            "│ ▶ Input        ‹ 3 · Optical ›       ││   Mode      ‹ EQ ›                   │",
+            "│   Phase invert [ ] off               ││   Loudness  ░░░░░░░░░░░░░░░░░░░░░ 0  │",
+            "│   NOS filter   [x] on                ││   Preset    custom                   │",
+            "│   Mute         [ ] off               ││                                      │",
+            "│                                      ││ Band   Freq      Gain      Q         │",
+            "│   Volume       ██109/127┃░  -6.0 dB  ││ ▶ 1   40.0 Hz    +0.0 dB   4.3       │",
+            "│                                      ││   2    160 Hz   -2.45 dB   2.1       │",
+            "│   Balance      L ─────┃───── R  0    ││   3    632 Hz    +0.0 dB   4.3       │",
+            "│                                      ││   4   2515 Hz   +1.45 dB   1.0       │",
+            "│                                      ││   5  10000 Hz    +0.0 dB   4.3       │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "└──────────────────────────────────────┘└──────────────────────────────────────┘",
             "┌ Status ────────────────────────────────────────────────────────────── advice ┐",
             "│ Sample rate 48 kHz   fw 3                                                    │",
             "│ Raw: 9=u8 64   9.1=u8 0   9.2=u8 1   (3 unknown functions)                   │",
@@ -123,28 +123,28 @@ fn a_device_without_tone_control_gets_a_full_width_controls_pane() {
     );
 }
 
-/// At 126×62 — wide and tall — the Controls pane is 50 columns with longer bars, a
-/// column apart from the Tone pane; every pane keeps two cells of blank inside its border
-/// and a blank row at its top; the Controls pane's groups sit a row apart, and so do the
+/// At 126×62 — wide and tall — the two panes share the 125 columns beside their gap, the Controls
+/// pane 63 of them with longer bars, a column apart from the Tone pane; every pane keeps two cells
+/// of blank inside its border and a blank row at its top; the Controls pane's groups sit a row apart, and so do the
 /// panes and the Status pane under them, which ends on the terminal's last row.
 #[test]
 fn the_wide_and_tall_tiers_give_the_device_screen_room_and_air() {
     let rows = text(&frame(&mockup_app(), 126, 62));
     let wanted = [
-        "┌ Controls ─────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────────────────────── flat ─ presets ┐",
-        "│                                                │ │                                                                         │",
-        "│  ▶ Input        ‹ 3 · Optical ›                │ │    Mode      ‹ EQ ›                                                     │",
-        "│    Phase invert [ ] off                        │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░ 0                                     │",
-        "│    NOS filter   [x] on                         │ │    Preset    custom                                                     │",
-        "│    Mute         [ ] off                        │ │                                                                         │",
-        "│                                                │ │  Band   Freq      Gain      Q                                           │",
-        "│    Volume       ██████109/127████░┃░  -6.0 dB  │ │  ▶ 1   40.0 Hz    +0.0 dB   4.3                                         │",
-        "│                                                │ │    2    160 Hz   -2.45 dB   2.1                                         │",
-        "│    Balance      L ─────────┃────────── R  0    │ │    3    632 Hz    +0.0 dB   4.3                                         │",
+        "┌ Controls ──────────────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ────────────────────────────── flat ─ presets ┐",
+        "│                                                             │ │                                                            │",
+        "│  ▶ Input        ‹ 3 · Optical ›                             │ │    Mode      ‹ EQ ›                                        │",
+        "│    Phase invert [ ] off                                     │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │",
+        "│    NOS filter   [x] on                                      │ │    Preset    custom                                        │",
+        "│    Mute         [ ] off                                     │ │                                                            │",
+        "│                                                             │ │  Band   Freq      Gain      Q                              │",
+        "│    Volume       ████████████109/127████████░░┃░░  -6.0 dB   │ │  ▶ 1   40.0 Hz    +0.0 dB   4.3                            │",
+        "│                                                             │ │    2    160 Hz   -2.45 dB   2.1                            │",
+        "│    Balance      L ───────────────┃───────────────  R  0     │ │    3    632 Hz    +0.0 dB   4.3                            │",
     ];
     assert_eq!(&rows[3..13], wanted);
     let bottom = [
-        "└────────────────────────────────────────────────┘ └─────────────────────────────────────────────────────────────────────────┘",
+        &format!("└{}┘ └{}┘", "─".repeat(61), "─".repeat(60)),
         &" ".repeat(126),
         "┌ Status ──────────────────────────────────────────────────────────────────────────────────────────────────────────── advice ┐",
         &format!("│{}│", " ".repeat(124)),
@@ -178,7 +178,8 @@ fn a_very_wide_terminal_centres_the_body_and_keeps_the_header_full_width() {
     let chars: Vec<char> = rows[3].chars().collect();
     assert_eq!(chars[21], ' ', "the body starts before column 22");
     assert_eq!(chars[22], '┌', "the Controls pane does not open the body");
-    assert_eq!((chars[71], chars[72], chars[73]), ('┐', ' ', '┌'));
+    // 255 columns beside the gap: 128 for the Controls pane, which ends at column 149.
+    assert_eq!((chars[149], chars[150], chars[151]), ('┐', ' ', '┌'));
     assert_eq!(chars[277], '┐', "the Tone pane does not end the body");
     assert_eq!(chars[278], ' ', "the body runs past 256 columns");
     let status: Vec<char> = rows[54].chars().collect();
@@ -200,12 +201,18 @@ fn a_terminal_256_columns_wide_draws_its_body_across_the_whole_width() {
 #[test]
 fn a_terminal_short_of_both_tiers_adds_no_tier_padding_but_spaces_its_groups() {
     let rows = text(&frame(&mockup_app(), 119, 39));
-    assert!(rows[3].starts_with("┌ Controls ───────── mute ─ 0 centre ┐┌ Tone control"));
-    assert!(rows[4].starts_with("│ ▶ Input        ‹ 3 · Optical ›     ││   Mode"));
-    assert!(rows[8].starts_with("│                                    ││"));
-    assert!(rows[9].starts_with("│   Volume       █109/127┃░  -6.0 dB ││"));
-    assert!(rows[10].starts_with("│                                    ││"));
-    assert!(rows[11].starts_with("│   Balance      L ────┃───── R  0   ││"));
+    assert!(
+        rows[3].starts_with(
+            "┌ Controls ───────────────────── mute ─ 0 centre ─ refresh ┐┌ Tone control"
+        )
+    );
+    assert!(
+        rows[4].starts_with("│ ▶ Input        ‹ 3 · Optical ›                           ││   Mode")
+    );
+    assert!(rows[8].starts_with("│                                                          ││"));
+    assert!(rows[9].starts_with("│   Volume       ████████████109/127███████░░┃░░  -6.0 dB  ││"));
+    assert!(rows[10].starts_with("│                                                          ││"));
+    assert!(rows[11].starts_with("│   Balance      L ───────────────┃─────────────── R  0    ││"));
     assert!(
         rows[34].starts_with("└────"),
         "the panes and Status are a row apart"
@@ -290,8 +297,8 @@ fn each_drawn_word_has_a_hit_of_its_key() {
             .unwrap_or_else(|| panic!("no hit for {code:?}"));
         (area.x, area.y, area.width)
     };
-    assert_eq!(cell_of(KeyCode::Char('m')), (21, 2, 4));
-    assert_eq!(cell_of(KeyCode::Char('0')), (28, 2, 8));
+    assert_eq!(cell_of(KeyCode::Char('m')), (23, 2, 4));
+    assert_eq!(cell_of(KeyCode::Char('0')), (30, 2, 8));
     assert_eq!(cell_of(KeyCode::Char('f')), (64, 2, 4));
     assert_eq!(cell_of(KeyCode::Char('p')), (71, 2, 7));
     assert_eq!(hits.area_of(Hit::Key(KeyCode::Char('r'))), None);
@@ -346,4 +353,73 @@ fn the_waiting_panel_replaces_the_panes_and_the_docs_show_it() {
         [(2, 22)]
     );
     crate::tui::test_support::assert_usage_md_shows(&rows, "waiting panel mockup");
+}
+
+/// The two panes' columns on a frame `width` wide: where the Controls pane ends and the Tone pane
+/// starts, from the frames the animation layer traces.
+fn pane_columns(app: &App, width: u16) -> (u16, u16) {
+    let frames = frames_of(Rect::new(0, 0, width, 40), app);
+    let controls = frames[0].1;
+    let tone = frames[1].1;
+    (controls.width, tone.width)
+}
+
+/// The top border and the Volume row of the panes at `width` columns, as the golden rows below
+/// read them.
+fn pane_rows(app: &App, width: u16) -> Vec<String> {
+    let all = text(&frame(app, width, 24));
+    ["┌ Controls", "Volume"]
+        .map(|word| {
+            all.iter()
+                .find(|row| row.contains(word))
+                .expect("the row is drawn")
+                .clone()
+        })
+        .to_vec()
+}
+
+/// By default the two panes split the width evenly, a column apart in the wide tier: 40 and 40
+/// at 80 columns, 60 and 59 at 120, 100 and 99 at 200.
+#[test]
+fn the_default_split_is_even_at_80_120_and_200_columns() {
+    let app = mockup_app();
+    assert_eq!(pane_columns(&app, 80), (40, 40));
+    assert_eq!(pane_columns(&app, 120), (60, 59));
+    assert_eq!(pane_columns(&app, 200), (100, 99));
+}
+
+/// A split of the user's own moves the bar, and every width holds each pane to 40 columns: the
+/// same fraction is read again against each width a resize gives.
+#[test]
+fn a_chosen_split_moves_the_bar_and_is_held_to_forty_columns_at_every_width() {
+    let mut app = mockup_app();
+    app.tui.device_split = 0.3;
+    assert_eq!(pane_columns(&app, 200), (60, 139));
+    assert_eq!(pane_columns(&app, 120), (40, 79));
+    assert_eq!(pane_columns(&app, 80), (40, 40));
+    app.tui.device_split = 0.9;
+    assert_eq!(pane_columns(&app, 200), (159, 40));
+    assert_eq!(pane_columns(&app, 120), (79, 40));
+    assert_eq!(pane_columns(&app, 80), (40, 40));
+}
+
+/// The 120-column and 200-column device screens, the top border and the Volume row of each pane
+/// pair, with the default split.
+#[test]
+fn the_device_screen_at_120_and_200_columns_splits_evenly() {
+    let app = mockup_app();
+    assert_eq!(
+        pane_rows(&app, 120),
+        [
+            "┌ Controls ───────────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐",
+            "│    Volume       ███████████109/127██████░░┃░░  -6.0 dB   │ │  ▶ 1   40.0 Hz    +0.0 dB   4.3                         │",
+        ]
+    );
+    assert_eq!(
+        pane_rows(&app, 200),
+        [
+            "┌ Controls ───────────────────────────────────────────────────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────────────────────────────────────────────── flat ─ presets ┐",
+            "│    Volume       ███████████████████████████████109/127█████████████████████░░░░░░┃░░░  -6.0 dB   │ │  ▶ 1   40.0 Hz    +0.0 dB   4.3                                                                 │",
+        ]
+    );
 }

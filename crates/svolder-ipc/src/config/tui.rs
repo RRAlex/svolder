@@ -46,8 +46,8 @@ impl Config {
 }
 
 /// Write the keys of `[tui]` in which `after` differs from `before` into `doc`, and leave
-/// everything else as it was. The keys of [`TUI_SETTINGS`] go in the table's order, then `effects`,
-/// the family accents and the spectrum.
+/// everything else as it was. The keys of [`TUI_SETTINGS`] go in the table's order, then
+/// `device_split`, `effects`, the family accents and the spectrum.
 ///
 /// `before` is the table the file holds. Keys are set one at a time by [`set_key`]: an existing
 /// key keeps its place and its comments, with only the value rewritten; a key commented out at
@@ -84,6 +84,14 @@ fn write_tui(
             }
             _ => {}
         }
+    }
+    if before.device_split != after.device_split {
+        set_key_at(
+            doc,
+            &["tui"],
+            "device_split",
+            Value::from(after.device_split),
+        )?;
     }
     if before.effects != after.effects {
         write_effects(doc, before.effects, after.effects)?;

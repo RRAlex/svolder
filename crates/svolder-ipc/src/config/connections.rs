@@ -4,15 +4,16 @@
 //! The writers of the `[mcp]`, `[mqtt]` and `[web]` tables, which the TUI's Connections settings
 //! save a change with: only the keys that differ are written, in the shape a hand edit would use.
 //!
-//! No writer here ever writes the broker's password, the token file or any other key the
-//! Connections settings do not show: the keys are named one by one below.
+//! No writer here writes the token file or any other key the Connections settings do not show:
+//! the keys are named one by one below. The broker's password is written only by
+//! [`Config::update_mqtt`], when an edit changes it, and is never read back out to a client.
 
 use std::path::Path;
 
 use toml_edit::{DocumentMut, Item, Table, Value};
 
-use super::edit::{edit_file, set_key_at};
-use super::{Config, ConfigError, ListenDefaults, McpConfig, MqttConfig, WebConfig};
+use super::edit::{clear_key_at, edit_file, edit_file_private, set_key_at};
+use super::{Config, ConfigError, ListenDefaults, McpConfig, MqttConfig, WebConfig, WebGuest};
 
 impl Config {
     /// Change the `[mcp]` table of the file at `path` with `edit`, and rewrite only the keys of
@@ -32,7 +33,7 @@ impl Config {
     /// [`Config::update_mcp`] with the environment's defaults given rather than read: the table
     /// `edit` is handed has them applied, so a server the environment turned on is turned off
     /// by writing `enabled = false`.
-    pub fn update_mcp_with(
+    pub(crate) fn update_mcp_with(
         path: &Path,
         env: &ListenDefaults,
         edit: impl FnOnce(&mut McpConfig),
@@ -55,15 +56,16 @@ impl Config {
     }
 
     /// Change the `[web]` table of the file at `path` with `edit`, and rewrite only the keys of
-    /// `enabled` and `listen` that change alters, as [`Config::update_mcp`] does for `[mcp]`:
-    /// the TUI's Web box changes nothing else.
+    /// `enabled`, `listen` and `guest` that change alters, as [`Config::update_mcp`] does for
+    /// `[mcp]`: the TUI's Web box and the guest switch change nothing else. `guest` is written in
+    /// lower case, `"none"` or `"read"`, as the parser reads it.
     pub fn update_web(path: &Path, edit: impl FnOnce(&mut WebConfig)) -> Result<(), ConfigError> {
         Self::update_web_with(path, &ListenDefaults::from_env(), edit)
     }
 
     /// [`Config::update_web`] with the environment's defaults given rather than read, as
     /// [`Config::update_mcp_with`].
-    pub fn update_web_with(
+    pub(crate) fn update_web_with(
         path: &Path,
         env: &ListenDefaults,
         edit: impl FnOnce(&mut WebConfig),
@@ -78,18 +80,41 @@ impl Config {
             if before.listen != after.listen {
                 set(doc, "web", "listen", Value::from(after.listen.to_string()))?;
             }
+            if before.guest != after.guest {
+                let word = match after.guest {
+                    WebGuest::None => "none",
+                    WebGuest::Read => "read",
+                };
+                set(doc, "web", "guest", Value::from(word))?;
+            }
             Ok(())
         })
     }
 
     /// Change the `[mqtt]` table of the file at `path` with `edit`, and rewrite only the keys of
-    /// `enabled`, `host`, `port` and `commands` that change alters, as [`Config::update_mcp`]
-    /// does for `[mcp]`. The password is never written: no edit of it reaches the file.
+    /// `enabled`, `host`, `port`, `username`, `password` and `commands` that change alters, as
+    /// [`Config::update_mcp`] does for `[mcp]`. A username or password an edit takes away is
+    /// cleared back to the template's commented line.
+    ///
+    /// The file's own mode is kept, as every writer here keeps it, except that a password
+    /// written into a group- or world-accessible file narrows it to 0600; a file created here
+    /// is 0600.
     pub fn update_mqtt(path: &Path, edit: impl FnOnce(&mut MqttConfig)) -> Result<(), ConfigError> {
-        edit_file(path, |doc| {
+        Self::update_mqtt_noting(path, edit).map(|_| ())
+    }
+
+    /// [`Config::update_mqtt`] that answers whether it tightened the file's mode: a password
+    /// written into a file that group or others could read leaves it at 0600, and a front end
+    /// says so once.
+    pub fn update_mqtt_noting(
+        path: &Path,
+        edit: impl FnOnce(&mut MqttConfig),
+    ) -> Result<bool, ConfigError> {
+        edit_file_private(path, |doc| {
             let before = Config::parse(&doc.to_string())?.mqtt;
             let mut after = before.clone();
             edit(&mut after);
+            let mut secret = false;
             if before.enabled != after.enabled {
                 set(doc, "mqtt", "enabled", Value::from(after.enabled))?;
             }
@@ -101,10 +126,25 @@ impl Config {
             if before.port != after.port {
                 set(doc, "mqtt", "port", Value::from(i64::from(after.port)))?;
             }
+            for (key, was, now) in [
+                ("username", &before.username, &after.username),
+                ("password", &before.password, &after.password),
+            ] {
+                if was == now {
+                    continue;
+                }
+                match now {
+                    Some(text) => {
+                        set(doc, "mqtt", key, Value::from(text.as_str()))?;
+                        secret |= key == "password";
+                    }
+                    None => clear_key_at(doc, &["mqtt"], key, "")?,
+                }
+            }
             if before.commands != after.commands {
                 set(doc, "mqtt", "commands", Value::from(after.commands))?;
             }
-            Ok(())
+            Ok(secret)
         })
     }
 }

@@ -181,7 +181,8 @@ pub(super) async fn version(client: &mut Client) -> Said {
 }
 
 /// The bridge's line: `mqtt: off`; `mqtt: connecting to HOST:PORT`, with the wait before the
-/// next attempt while there is one; `mqtt: connected to HOST:PORT`, read-only or taking
+/// next attempt while there is one; `mqtt: not connected to HOST:PORT: WHY` where the last
+/// attempt failed in a way with words (the login refused, nothing answering, a TLS port); `mqtt: connected to HOST:PORT`, read-only or taking
 /// commands; or `mqtt: unknown` for a state a newer daemon reports that this one does not
 /// know.
 pub(crate) fn mqtt_line(status: &MqttStatus) -> String {
@@ -206,6 +207,18 @@ pub(crate) fn mqtt_line(status: &MqttStatus) -> String {
                 false => "read-only",
             }
         ),
+        MqttStatus::Trouble {
+            host,
+            port,
+            problem,
+            retry_in_secs,
+        } => match retry_in_secs {
+            Some(secs) => format!(
+                "mqtt: not connected to {host}:{port}: {} (retry in {secs} s)",
+                problem.words()
+            ),
+            None => format!("mqtt: not connected to {host}:{port}: {}", problem.words()),
+        },
         MqttStatus::Unknown => "mqtt: unknown".to_string(),
     }
 }

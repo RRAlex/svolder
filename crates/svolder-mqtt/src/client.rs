@@ -120,16 +120,62 @@ pub fn retry_delay(failures: u32) -> Duration {
     RETRY_MIN.saturating_mul(1 << doublings).min(RETRY_MAX)
 }
 
+/// What went wrong with the last attempt to reach the broker, as far as the error says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trouble {
+    /// The broker answered the connect with a refusal of the username and password (or of the
+    /// client): "bad user name or password", or "not authorized".
+    LoginRefused,
+    /// Nothing answered: the connection was refused, the host did not resolve, or no route.
+    Unreachable,
+    /// Something answered at the address and then closed the connection or went silent, which
+    /// is what a TLS port does with a client that speaks plain text.
+    Dropped,
+    /// Any other failure; the log has its words.
+    Other,
+}
+
+impl Trouble {
+    /// The trouble an error from the event loop is.
+    pub fn of(error: &rumqttc::ConnectionError) -> Trouble {
+        use rumqttc::{ConnectReturnCode, ConnectionError};
+        use std::io::ErrorKind;
+        match error {
+            ConnectionError::ConnectionRefused(
+                ConnectReturnCode::BadUserNamePassword | ConnectReturnCode::NotAuthorized,
+            ) => Trouble::LoginRefused,
+            ConnectionError::Io(e) => match e.kind() {
+                ErrorKind::UnexpectedEof
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::BrokenPipe => Trouble::Dropped,
+                _ => Trouble::Unreachable,
+            },
+            ConnectionError::MqttState(rumqttc::StateError::ConnectionAborted)
+            | ConnectionError::NetworkTimeout
+            | ConnectionError::FlushTimeout
+            | ConnectionError::NotConnAck(_) => Trouble::Dropped,
+            _ => Trouble::Other,
+        }
+    }
+}
+
 /// Where the connection stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Link {
-    /// An attempt to connect is under way.
-    Connecting,
+    /// An attempt to connect is under way; `after` is why the attempt before it failed, when
+    /// one did.
+    Connecting {
+        /// The trouble of the attempt before this one.
+        after: Option<Trouble>,
+    },
     /// The last attempt failed, or the connection dropped; the next attempt starts at
     /// `retry_at`.
     Waiting {
         /// When the next attempt starts.
         retry_at: Instant,
+        /// What went wrong.
+        trouble: Trouble,
     },
     /// Connected, with everything retained put back on the broker and every subscription
     /// renewed.
@@ -209,7 +255,7 @@ impl Client {
     pub fn start(settings: Settings) -> (Client, mpsc::UnboundedReceiver<ClientEvent>) {
         let (ops, ops_rx) = mpsc::unbounded_channel();
         let (events, events_rx) = mpsc::unbounded_channel();
-        let (link, link_rx) = watch::channel(Link::Connecting);
+        let (link, link_rx) = watch::channel(Link::Connecting { after: None });
         let task = tokio::spawn(run(settings, ops_rx, events, link));
         (
             Client {
@@ -313,7 +359,11 @@ enum Polled {
     /// The broker answered the subscription sent under `pkid`, refusing it or not.
     SubAck { pkid: u16, refused: bool },
     /// An attempt failed or the connection dropped; the next attempt starts at `retry_at`.
-    Lost { reason: String, retry_at: Instant },
+    Lost {
+        reason: String,
+        retry_at: Instant,
+        trouble: Trouble,
+    },
     /// The wait is over and the next attempt has started.
     Retrying,
 }
@@ -535,15 +585,25 @@ async fn run(
                         let _ = events.send(ClientEvent::Refused { filter });
                     }
                 }
-                Some(Polled::Lost { reason, retry_at }) => {
+                Some(Polled::Lost {
+                    reason,
+                    retry_at,
+                    trouble,
+                }) => {
                     connected = false;
                     held.unacked.reset();
-                    link.send_replace(Link::Waiting { retry_at });
+                    link.send_replace(Link::Waiting { retry_at, trouble });
                     let retry_in = retry_at.saturating_duration_since(Instant::now());
                     let _ = events.send(ClientEvent::Lost { reason, retry_in });
                 }
                 Some(Polled::Retrying) => {
-                    link.send_replace(Link::Connecting);
+                    link.send_modify(|link| {
+                        if let Link::Waiting { trouble, .. } = *link {
+                            *link = Link::Connecting {
+                                after: Some(trouble),
+                            };
+                        }
+                    });
                 }
                 // The event loop's task only ends when this one aborts it.
                 None => return,
@@ -604,6 +664,7 @@ async fn poll(mut eventloop: EventLoop, report: mpsc::UnboundedSender<Polled>) {
                     .send(Polled::Lost {
                         reason: e.to_string(),
                         retry_at,
+                        trouble: Trouble::of(&e),
                     })
                     .is_err()
                 {

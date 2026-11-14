@@ -468,17 +468,20 @@ def the_quiet_night(b, d):
     geo = b.page("""(() => { const c = document.getElementById('nd-road'); return [c.clientWidth, c.clientHeight]; })()""")
     w, h = geo
     H = 0.56 * h
+    yFar = H + (h - H) / 9  # the floor's far row, camera.js farRow: H + (h - H) / (1 + CAMERA.K), K 8
     b.page(f'({HOLD})(0.8, 60)')
     time.sleep(1.5)
     loud = {'look': b.page(LOOK), 'ear': b.page(EAR),
             'sky': b.page(f'({SEEN})("nd-sky", {w * 0.1}, {H - 10})'),
-            'mirror': b.page(f'({PIXEL})("nd-sky", {w / 2}, {H + 20})'),
+            'mirror': b.page(f'({PIXEL})("nd-sky", {w / 2}, {yFar + 12})'),
+            'gap': b.page(f'({PIXEL})("nd-sky", {w / 2}, {(H + yFar) / 2})'),
             'haze': b.page(f'({PIXEL})("nd-road", {w * 0.06}, {H + 12})')[3]}
     b.page(f'({HOLD})(0, 120)')
     time.sleep(1.5)
     quiet = {'look': b.page(LOOK), 'ear': b.page(EAR),
              'sky': b.page(f'({SEEN})("nd-sky", {w * 0.1}, {H - 10})'),
-             'mirror': b.page(f'({PIXEL})("nd-sky", {w / 2}, {H + 20})'),
+             'mirror': b.page(f'({PIXEL})("nd-sky", {w / 2}, {yFar + 12})'),
+             'gap': b.page(f'({PIXEL})("nd-sky", {w / 2}, {(H + yFar) / 2})'),
              'haze': b.page(f'({PIXEL})("nd-road", {w * 0.06}, {H + 12})')[3]}
     check('the_night_follows_the_song: the loud passage has a mood over 0.9, a dry road and no haze; the silence a mood under 0.3, '
           'a wet road and thick haze', loud['look']['mood'] > 0.9 and loud['look']['wet'] == 0 and loud['look']['haze'] == 0
@@ -487,8 +490,10 @@ def the_quiet_night(b, d):
     check('  the sky at the horizon is deeper in the quiet (the red channel 40 or more lower)',
           quiet['sky'][0] < loud['sky'][0] - 40, [quiet['sky'], loud['sky']])
     check('the_wet_road_shows_the_sun_in_the_quiet_and_not_when_loud: the sky canvas just under the horizon is sun-coloured '
-          'in the quiet and the night otherwise', quiet['mirror'][0] > 60 and loud['mirror'][0] < 25,
+          'in the quiet and the night otherwise', quiet['mirror'][0] > 30 and loud['mirror'][0] < 25,
           [quiet['mirror'], loud['mirror']])
+    check('the_wet_road_stays_off_the_strip_above_the_floor_grid: the sky canvas between the horizon and the grid\'s far row '
+          'is as dark in the quiet as when loud', quiet['gap'][0] < 25, [quiet['gap'], loud['gap']])
     check('the_haze_lies_over_the_far_floor_in_the_quiet_only: the road canvas beside the road is painted there in the quiet '
           'and clear when loud', quiet['haze'] > 80 and loud['haze'] < 15, [quiet['haze'], loud['haze']])
     # the readout's switches take each layer away

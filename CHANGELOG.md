@@ -8,6 +8,62 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.34.0
+
+- **A guest link in the terminal**: `svolder web guest on|off` turns the web page's read-only guest
+  view on or off with no hand edit, and a running daemon applies it at once (it restarts the web
+  server, so open pages reconnect). The TUI's Web UI box has a *Guest view* row (`g` from any row)
+  that does the same; while it is on, a second QR code of the plain page link sits beside the
+  sign-in code, captioned as read-only for anyone on your network. The box now makes its link as
+  soon as the daemon's status arrives.
+- **Cover art in the TUI**: the device screen's Status pane draws the cover of the track the daemon
+  follows, as the terminal allows: the kitty graphics protocol (Ghostty, kitty), else sixel (foot),
+  else half-block cells (GNOME Terminal, Ptyxis, tmux, SSH). `[tui] cover_art = "auto" | "off"` and
+  a Settings row choose; off asks the terminal nothing, and auto asks it once at start-up, waiting
+  at most about 100 ms for the answer. It needs a 0.34.0 daemon.
+- **A divider and growing bars**: the device screen's Controls and Tone panes share the width evenly
+  and the bar between them moves: drag it, nudge it with `<` and `>`, reset it with `|` or a
+  double-click (`device_split` under `[tui]`). The Volume, Balance and Loudness bars and an amp's
+  meters now run across their whole pane.
+- **Shorter Path words**: a sound that goes elsewhere reads `→ NAME` (or `player → NAME`) in the TUI
+  and the web page, which keeps the whole sentence as a tooltip.
+- **The squirrel makes entrances**: after an hour it comes out and stays, then zaps out and back in
+  every 30 minutes, and each arrival (a typed code, a fault, a lost or returned link, power, an
+  input switch) takes one of seven entrances with a matching exit. Nothing enters while a box or
+  the help has the keys; with effects off it pops in whole.
+- **Tooltips switch**: `[tui] tooltips = true` (the default) turns the TUI's hover tooltips on or
+  off, from Settings, Behaviour, Tooltips; they need mouse capture.
+- **The preset list by mouse**: click a row to load it, scroll the wheel to move the focus, click
+  `more ↑` or `more ↓` for the first or last row. The list's writes (save, update, rename, delete,
+  import) and the CLI's `eq save|import|rename|delete` now go through the daemon while one reads
+  the same file, and a taken name is refused in the web page's words; they need a 0.34.0 daemon (an
+  older one is refused with a `svolder daemon restart` hint).
+- **MQTT that makes sense**: Settings, Connect has a username row and an editable, masked password
+  row; the status says why the bridge is not connected (login refused, not reachable, TLS port
+  8883) in the TUI, `svolder daemon status` and a new `svolder doctor` row. New `svolder mqtt on|off`,
+  `mqtt set host|port|username VALUE` and `mqtt password` (no echo, never an argument);
+  `SVOLDER_MQTT_ENABLED`, `_HOST`, `_PORT` and `_USERNAME` set defaults (the file wins), and
+  `SVOLDER_MQTT_PASSWORD` still wins over the file. Writing a password makes a config.toml that
+  group or others could read 0600, and says so. `svolder setup` ends with a line pointing to
+  them.
+- **Demos with real AutoEq**: `make demo*` searches AutoEq's real repository (`AUTOEQ_URL` names
+  another base). With the fake transport and no `SVOLDER_AUTOEQ_URL`, the EQ library, `eq search`
+  and `eq import --autoeq` say AutoEq is off for the fake device instead of a connect error.
+- **Smaller changes**: lint and release builds use Rust 1.100.0 and a refreshed Ubuntu 26.04 base;
+  14 compatible crate updates.
+- For contributors: `make tui-harness` runs the real `svolder tui --demo` in a pseudo-terminal with
+  a screen parser (opt-in, about 5 s); `svolder-ipc` is split into smaller modules and 19 public
+  items narrowed (no behaviour or wire change); long functions are split; the crates are refreshed;
+  `make mascot-shots` draws a still of each entrance. New socket requests and features:
+  `guest_switch`, `host_cover`, `preset_write`, `mqtt_set`.
+
+## 0.33.1
+
+- **Night drive's wet road**: the reflection now lies only on the floor grid. The bands that
+  repeated the ridge between the horizon and the grid's far row are gone.
+- For contributors: `camera.js`'s `farRow(h, H)` is the one home of the floor's far row (the wet
+  road and the side grid use it), and the Night drive checks pin that nothing wet is drawn above it.
+
 ## 0.33.0
 
 - **A Devices popup on the web page**: the menu's *Devices…* row lists every configured device with

@@ -119,36 +119,152 @@ async fn a_refused_change_leaves_the_file_and_the_daemon_alone() {
     watching.close().await;
 }
 
-/// A change to `[mqtt]` writes only its keys and never the password the file holds.
+/// With a daemon that has `mqtt_set`, every `[mqtt]` change is the daemon's one request: this side
+/// writes nothing, and the password goes in the request and in no toast, row or `Debug`.
 #[tokio::test]
-async fn an_mqtt_change_keeps_the_password_out_of_every_write() {
+async fn with_a_daemon_the_mqtt_rows_write_through_mqtt_set() {
     let (daemon, path, watching) = on_a_daemon().await;
-    std::fs::write(
-        &path,
-        "schema = 1\n[mqtt]\nhost = \"broker.example.com\"\npassword = \"fake-secret-pass\"\n",
-    )
-    .expect("the file is written");
+    daemon.lists_features(&[svolder_ipc::FEATURE_MQTT_SET]);
+    std::fs::write(&path, "schema = 1\n[mqtt]\nusername = \"filed\"\n").unwrap();
+    let before = std::fs::read_to_string(&path).expect("the file reads");
     let opener = opener_on_nothing(path.clone());
     let (mut look, _) = look_over(&state_home());
 
-    let watching = taken(
-        Intent::Connection(ConnChange::MqttCommands(true)),
-        &opener,
-        watching,
-        &mut look,
-    )
-    .await;
+    let mut watching = watching;
+    for change in [
+        ConnChange::MqttHost("broker.example.com".into()),
+        ConnChange::MqttPort(1884),
+        ConnChange::MqttUsername(Some("svolder".into())),
+        ConnChange::MqttPassword(Some("fake-secret-pass".to_string().into())),
+        ConnChange::MqttCommands(true),
+        ConnChange::MqttEnabled(true),
+    ] {
+        watching = taken(Intent::Connection(change), &opener, watching, &mut look).await;
+    }
 
-    let text = std::fs::read_to_string(&path).expect("the file reads");
-    assert!(text.contains("commands = true") && text.contains("password = \"fake-secret-pass\""));
-    assert_eq!(daemon.reloads(), 1);
-    assert!(watching.app.overlays.conn.mqtt.password_set);
+    use svolder_ipc::MqttOp;
+    assert_eq!(
+        daemon.mqtt_ops(),
+        [
+            MqttOp::Host {
+                value: "broker.example.com".into()
+            },
+            MqttOp::Port { value: 1884 },
+            MqttOp::Username {
+                value: Some("svolder".into())
+            },
+            MqttOp::Password {
+                value: Some("fake-secret-pass".into())
+            },
+            MqttOp::Commands { commands: true },
+            MqttOp::Enabled { enabled: true },
+        ]
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the file reads"),
+        before,
+        "the daemon is the one writer"
+    );
+    assert_eq!(daemon.reloads(), 0, "the daemon reloads itself");
     let shown = watching
         .app
         .toast()
         .map(|t| t.text.clone())
         .unwrap_or_default();
-    assert!(!shown.contains("fake-secret"));
+    assert!(!shown.contains("fake-secret"), "{shown}");
+    assert!(!format!("{:?}", watching.app.overlays.conn).contains("fake-secret"));
+    watching.close().await;
+}
+
+/// With no daemon the rows write the file themselves, keep every other key, and the password is
+/// in the file and in nothing the app says; an empty change clears it.
+#[tokio::test]
+async fn with_no_daemon_the_mqtt_rows_write_the_file() {
+    let (backend, _gate, app) = fake(std::time::Duration::from_secs(2)).await;
+    let watching = watching(backend, app, None);
+    let path = scratch_config();
+    Config::update_mcp(&path, |_| {}).expect("the scratch config is made");
+    std::fs::write(&path, "schema = 1\n[mqtt]\nhost = \"broker.example.com\"\n")
+        .expect("the file is written");
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+
+    let watching = taken(
+        Intent::Connection(ConnChange::MqttUsername(Some("svolder".into()))),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let watching = taken(
+        Intent::Connection(ConnChange::MqttPassword(Some(
+            "fake-secret-pass".to_string().into(),
+        ))),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let text = std::fs::read_to_string(&path).expect("the file reads");
+    assert!(text.contains("username = \"svolder\""), "{text}");
+    assert!(text.contains("password = \"fake-secret-pass\""), "{text}");
+    assert!(text.contains("host = \"broker.example.com\""));
+    let conn = &watching.app.overlays.conn;
+    assert_eq!(conn.mqtt.username.as_deref(), Some("svolder"));
+    assert!(conn.mqtt.password_in_file);
+    assert!(!format!("{conn:?}").contains("fake-secret"));
+    let shown = watching
+        .app
+        .toast()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    assert!(!shown.contains("fake-secret"), "{shown}");
+
+    let watching = taken(
+        Intent::Connection(ConnChange::MqttPassword(None)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("fake-secret")
+    );
+    assert!(!watching.app.overlays.conn.mqtt.password_in_file);
+    watching.close().await;
+}
+
+/// A password written into a file others can read says the file is now 0600.
+#[tokio::test]
+async fn a_password_into_a_readable_file_is_said_to_tighten_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let (backend, _gate, app) = fake(std::time::Duration::from_secs(2)).await;
+    let watching = watching(backend, app, None);
+    let path = scratch_config();
+    Config::update_mcp(&path, |_| {}).expect("the scratch config is made");
+    std::fs::write(&path, "schema = 1\n").expect("the file is written");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+    let watching = taken(
+        Intent::Connection(ConnChange::MqttPassword(Some("p".to_string().into()))),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let shown = watching
+        .app
+        .toast()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    assert!(shown.contains("0600"), "{shown}");
     watching.close().await;
 }
 
@@ -696,5 +812,32 @@ async fn a_rotation_carried_out_after_a_differs_answer_replaces_nothing() {
         .map(|t| t.text.clone())
         .unwrap_or_default();
     assert!(toast.contains("not this session's token"), "{toast}");
+    watching.close().await;
+}
+
+/// A daemon that narrowed the file's mode says so in a toast, and the password is not in it.
+#[tokio::test]
+async fn a_narrowed_mode_the_daemon_reports_is_a_toast() {
+    let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&[svolder_ipc::FEATURE_MQTT_SET]);
+    daemon.tightens_on_password();
+    let opener = opener_on_nothing(path);
+    let (mut look, _) = look_over(&state_home());
+    let watching = taken(
+        Intent::Connection(ConnChange::MqttPassword(Some(
+            "fake-secret".to_string().into(),
+        ))),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    let shown = watching
+        .app
+        .toast()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    assert!(shown.contains("0600"), "{shown}");
+    assert!(!shown.contains("fake-secret"));
     watching.close().await;
 }

@@ -48,7 +48,7 @@ fn volume_cells(theme: &Theme, raw: i64, width: usize, clip: Option<i64>) -> Vec
     // The label column and the gap before a value, and nothing beside the bar: the row
     // has exactly `width` cells left for it.
     let field = volume.label.chars().count() + 1;
-    let columns = Columns::fit(field + VALUE_GAP + width, volume.label.len(), 0, width);
+    let columns = Columns::fit(field + VALUE_GAP + width, volume.label.len(), 0);
     assert_eq!(columns.bar(), width);
     let reading = volume_at(raw);
     let line = level_line(
@@ -366,6 +366,27 @@ fn bar_value_does_not_panic_on_a_centre_and_raw_at_opposite_extremes() {
     );
 }
 
+/// A bar takes the whole of what a row has left after its label column, the gap and the widest
+/// value, at the three terminal widths and with the divider dragged: and the bar grows with every column the
+/// pane gains.
+#[test]
+fn the_bar_takes_the_rest_of_the_row_at_every_pane_width() {
+    // 80 columns: a pane 37 interior columns; 120: 56; 200: 96; a divider dragged to a 150-column pane.
+    let mut last = 0;
+    for room in [37, 56, 96, 150] {
+        let columns = Columns::fit(room, 8, 8);
+        assert_eq!(columns.field(), 9, "{room}");
+        assert_eq!(columns.bar(), room - 9 - VALUE_GAP - 8, "{room}");
+        assert_eq!(
+            columns.field() + columns.bar() + VALUE_GAP + 8,
+            room,
+            "{room}"
+        );
+        assert!(columns.bar() > last, "{room}");
+        last = columns.bar();
+    }
+}
+
 /// A pane's columns never run past its interior: a long label beside a wide value gives up its
 /// own width (the label is cut with `…` where it is drawn) before the bar goes under its
 /// minimum, and a row that already fits keeps the label column its longest label asks for.
@@ -373,7 +394,7 @@ fn bar_value_does_not_panic_on_a_centre_and_raw_at_opposite_extremes() {
 fn the_label_gives_way_before_the_bar_and_the_columns_fit_where_the_value_does() {
     // A 32-column row, a 14-letter label and a 12-cell value: the old floor on the bar left the
     // three 7 columns over.
-    let columns = Columns::fit(32, 14, 12, 15);
+    let columns = Columns::fit(32, 14, 12);
     assert!(
         columns.field() + columns.bar() + VALUE_GAP + 12 <= 32,
         "label {} + bar {} + gap + value 12 run past 32 columns",
@@ -386,7 +407,7 @@ fn the_label_gives_way_before_the_bar_and_the_columns_fit_where_the_value_does()
     for room in 20..=60 {
         for longest in 1..=20 {
             for widest in 0..=14 {
-                let columns = Columns::fit(room, longest, widest, 15);
+                let columns = Columns::fit(room, longest, widest);
                 let wanted = longest.min(LABEL_MAX) + 1;
                 if wanted + VALUE_GAP + widest + BAR_MIN <= room {
                     assert_eq!(columns.field(), wanted, "{room}/{longest}/{widest}");

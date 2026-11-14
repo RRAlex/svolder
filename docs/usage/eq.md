@@ -370,9 +370,10 @@ comments and keywords in any case are accepted, a filter of another kind (a low-
 shelf, a bandwidth in octaves) is skipped and counted, and a line that cannot be read refuses the
 file with its line number.
 
-While a daemon runs it is the one writer of the configuration, so `eq import FILE` sends the file's
-text to it and it saves the preset (a daemon older than this svolder says to run `svolder daemon
-restart`); with no daemon the command writes the file itself. `--transport ble` and
+While a daemon reads the same configuration file it is the one writer, so `eq import FILE` (like
+`eq save`, `eq rename` and `eq delete`) reads and parses the file itself and asks the daemon to
+save the preset (a daemon older than 0.34.0 is refused with `svolder daemon restart`); with no
+daemon, or one that reads another file, the command writes the file itself. `--transport ble` and
 `fake` never ask a daemon, so they write the file too.
 
 While the daemon says the file it reads is gone, `eq save` and `eq import` are refused in its words
@@ -533,7 +534,8 @@ request, so a change takes effect with the next search; `SVOLDER_AUTOEQ_URL` and
 directory are read once, when the daemon starts, so a mirror needs a restart. When a refresh fails
 and a cached copy exists, the copy is used and standard error says `using the index from
 2026-07-01 (refresh failed: …)`; with no copy and no network the command refuses and names
-`svolder eq import FILE`.
+`svolder eq import FILE`. Under the fake transport with no `SVOLDER_AUTOEQ_URL`, search and import
+say `AutoEq is off for the fake device; set SVOLDER_AUTOEQ_URL to turn it on` instead.
 
 The daemon's transfers have a 10 s connect timeout, a 60 s limit for the index (8 MiB at most) and
 20 s for a file (64 KiB at most), follow at most 5 redirects, send `User-Agent: svolder/<version>`,

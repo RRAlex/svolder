@@ -48,7 +48,7 @@ use clap::Parser;
 use backend::Globals;
 use cli::{Cli, Command};
 use commands::{
-    capture, config, daemon, decode, demo, device, doctor, hops, host_eq, identify, profiles,
+    capture, config, daemon, decode, demo, device, doctor, hops, host_eq, identify, mqtt, profiles,
     token, web,
 };
 use recovery::Failure;
@@ -264,6 +264,7 @@ async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String>
             decode::run(&hex, profile.as_deref(), json).map(|()| ExitCode::SUCCESS)
         }
         Command::Profiles { command } => profiles::run(command),
+        Command::Mqtt { command } => mqtt::run(&g, command).await,
         Command::Mcp { command } => token::mcp(&g, command).await,
         Command::Web { qr, command } => web::run(&g, qr, command).await,
         Command::Config { command } => config::run(command),

@@ -304,6 +304,7 @@ async fn the_done_step_says_what_was_written() {
             " Added Bifrost 3 (0102030405060708).                                            ",
             " The daemon:                                                                    ",
             "   installed the systemd user units                                             ",
+            " For Home Assistant: `svolder mqtt` or Settings, Connect in the TUI.            ",
             " Enter opens Bifrost 3.                                                         ",
             "                                                                                ",
             " ▶ Finish                                                                       ",

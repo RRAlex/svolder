@@ -132,7 +132,13 @@ fn a_failed_refresh_falls_back_to_the_cache() {
 #[test]
 fn no_cache_and_no_network_refuses() {
     let dir = dir();
-    let client = Client::new("http://127.0.0.1:9/".into(), dir.cache(), short());
+    // A port that was free a moment ago, with nothing on it.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let client = Client::new(format!("http://127.0.0.1:{port}/"), dir.cache(), short());
     let error = client.index(Refresh::Never).unwrap_err();
     assert!(matches!(error, AutoEqError::NoIndex { .. }), "{error}");
     assert!(!dir.index_file().exists());
@@ -313,4 +319,57 @@ fn the_fake_transport_never_defaults_to_the_internet() {
     assert!(default_base(false).starts_with("https://"));
     let client = Client::new(default_base(true).to_string(), dir().cache(), short());
     assert!(client.index(Refresh::Never).is_err());
+}
+
+#[test]
+fn the_discard_port_is_off_and_says_so_without_a_fetch() {
+    let dir = dir();
+    for base in [
+        "http://127.0.0.1:9/results/",
+        "http://127.0.0.1:9/",
+        "http://localhost:9",
+    ] {
+        let client = Client::new(base.into(), dir.cache(), short());
+        assert!(client.is_off(), "{base}");
+        let error = client.index(Refresh::Now).unwrap_err();
+        assert!(matches!(error, AutoEqError::Off { .. }), "{base}: {error}");
+        assert!(error.to_string().starts_with(crate::OFF_PREFIX), "{error}");
+    }
+    // The fake device is named only under the fake transport.
+    let said = |transport| {
+        Client::for_transport(transport, Some("http://127.0.0.1:9/".into()), dir.cache())
+            .index(Refresh::Now)
+            .unwrap_err()
+            .to_string()
+    };
+    assert_eq!(
+        said("fake"),
+        "AutoEq is off for the fake device; set SVOLDER_AUTOEQ_URL to turn it on"
+    );
+    let real = said("ble");
+    assert!(real.starts_with(crate::OFF_PREFIX), "{real}");
+    assert!(
+        real.contains("discard port") && !real.contains("fake"),
+        "{real}"
+    );
+    let entry = parse_index(INDEX).remove(0);
+    let client = Client::new("http://127.0.0.1:9/".into(), dir.cache(), short());
+    assert!(matches!(
+        client.download(&entry),
+        Err(AutoEqError::Off { .. })
+    ));
+    // A real address is not off.
+    let server = index_server();
+    assert!(!Client::new(server.url.clone(), dir.cache(), short()).is_off());
+}
+
+#[test]
+fn the_off_client_still_serves_a_cached_index() {
+    let dir = dir();
+    let server = index_server();
+    Client::new(server.url.clone(), dir.cache(), short())
+        .index(Refresh::Now)
+        .unwrap();
+    let off = Client::new("http://127.0.0.1:9/".into(), dir.cache(), short());
+    assert_eq!(off.index(Refresh::Never).unwrap().entries.len(), 2);
 }

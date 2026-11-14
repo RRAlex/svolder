@@ -22,9 +22,9 @@ stream of `HostCapture` and `HostFrame` instead, and the follow op of each famil
 stream of that family's job events (see [jobs.md](jobs.md)). The requests are the
 verbs: `Devices`, `State`, `Get`, `Set`, `Raw`, the `Eq*` family, `Passphrase`, `Identify`, `Scan`,
 `History`, `Readings`, `Recalled`, `WebPair`, `WebLink`, `WebLinkOpen`, `Reload`, `Version`, `Stop`,
-`Host`, `HostPress`, `HostFrames` and the families `HostEq`, `Walk` and `AutoEq`.
+`Host`, `HostPress`, `HostCover`, `HostFrames` and the families `HostEq`, `Walk` and `AutoEq`.
 
-The host's view crosses the wire as `HostView` (`crates/svolder-ipc/src/host.rs`): whether the
+The host's view crosses the wire as `HostView` (`crates/svolder-ipc/src/host/views.rs`): whether the
 daemon watches the host at all, the followed player's `PlayingView` and the `RouteFacts` read out of
 PipeWire. `Response::Host` answers `Host`, and `HostPress` is answered `Ack` or an error;
 `Event::Host` rides a `Subscribe` stream that asked for it (`host: true`), whatever its device
@@ -44,7 +44,23 @@ connection holds the daemon's capture for its life ([host-capture.md](host-captu
 that has no frames (`Handler::stream` refuses `HostFrames` by default, as does a daemon from before
 the request) answers an error `Response` and the connection serves on; `Client::host_frames` returns
 it as an error. A client from before the events skips them as events it does not know. Both new
-types are in `crates/svolder-ipc/src/host.rs`; none of their fields is required of a later peer.
+types are in `crates/svolder-ipc/src/host/views.rs`; none of their fields is required of a later peer.
+
+The cover's bytes cross the wire on their own request, `HostCover { hash, offset }`
+(`protocol/host_cover.rs`, feature `host_cover`), so a TUI on another machine shows the art too.
+`PlayingView.cover` is the hash of the cover the daemon holds (absent while there is no art); the
+daemon finds art on disk only, never the network, and answers from its cache for the current hash
+only: any other hash, no art, or a picture past the 4 MiB bound is `CODE_NOT_FOUND`, and the front
+end asks the view again. A picture is up to 4 MiB and a socket line at most 1 MiB, so the bytes come
+in chunks of at most 512 KiB (`COVER_CHUNK_BYTES`), each `Response::HostCover { hash, mime, total,
+offset, data }` with `data` as unpadded base64url (a third bigger: about 683 KiB a line, under the
+bound with its envelope) and `mime` one of `image/jpeg`, `image/png`, `image/webp`. The largest
+cover is eight round trips on one connection; the front end asks `offset` 0, then the bytes it
+holds, until it has `total`. `CoverReader` does that bookkeeping and refuses a chunk that is not the
+next of its own cover (another hash, an offset out of turn, a changed total or type, bad base64, a
+total past the bound). The TUI never reads a cover file: `Backend::host_cover(hash)` asks the daemon
+(none for a direct session, which has no host service). The web's
+`GET /api/v1/host/cover?v=<hash>` is unchanged.
 
 The verdict on the route is one pure function, `path_line`, in the same module, called by whoever
 knows the device: it takes the daemon's `RouteFacts` and the device's own readings (`DacFacts`: its
@@ -114,9 +130,11 @@ and the connection stays open. `Request::Version` and `daemon_version::skew`
 
 There is a small handshake in the same answer. The `version` reply lists `features`, the names of
 what the daemon supports beyond the basics (`FEATURES` in `socket/protocol.rs`, the one list; today
-`reasons`, `unknown_request_code`, `device_crud`, `server_switch`
-([server-switch.md](server-switch.md)), `walk` ([device-walk.md](device-walk.md)) and `autoeq`
-([autoeq.md](autoeq.md))). A daemon too old to list any leaves the field out, which decodes as none.
+`reasons`, `unknown_request_code`, `device_crud`, `server_switch` and `guest_switch`
+([server-switch.md](server-switch.md)), `walk` ([device-walk.md](device-walk.md)), `autoeq`
+([autoeq.md](autoeq.md)), `host_cover` and `preset_write`: the TUI's and the CLI's preset writes
+(`eq save`, `import`, `rename`, `delete`), ops `save`, `update`, `rename`, `delete`, on the web
+page's writers so a name is refused in the same words). A daemon too old to list any leaves the field out, which decodes as none.
 A front end asks `DaemonInfo::supports(feature)` to decide between the daemon, the local path (no
 daemon) and "restart the daemon" (one that lacks the feature). The `identify` check for a daemon too
 old to know the request is the first: it asks whether the daemon lists `unknown_request_code` (it
@@ -357,11 +375,15 @@ a token. A check that altered what it checked would report on its own work.
 
 ## Where the code and tests live
 
-- Protocol, server, client, lines: `crates/svolder-ipc/src/socket/protocol.rs` (the families in
-  `crates/svolder-ipc/src/socket/protocol/walk.rs`, `autoeq.rs`, `jobs.rs`, `host_eq.rs` and
-  `device_config.rs`, whose handler is `bins/svolderd/src/handler/device_config.rs`), `server.rs`,
-  `client.rs`, `lines.rs`; tests in the `protocol/tests.rs` and `lines/tests.rs` beside them and in
-  `server.rs`.
+- Protocol, server, client, lines: `crates/svolder-ipc/src/socket/protocol.rs` (the requests in `protocol/request.rs`, the codes and
+  feature names in `codes.rs`, the subsystem statuses in `status.rs`, the deadlines in
+  `timeouts.rs`; the families in
+  `crates/svolder-ipc/src/socket/protocol/walk.rs`, `autoeq.rs`, `jobs.rs`, `host_eq.rs`,
+  `host_cover.rs`, `preset_write.rs` and
+  `device_config.rs`, whose handler is `bins/svolderd/src/handler/device_config.rs`), `server.rs`
+  (binding and adopting a socket in `server/listener.rs`), `client.rs`, `lines.rs`; tests in the
+  `protocol/tests.rs` and `lines/tests.rs` beside them and in `server/tests.rs`,
+  `server/tests/streams.rs` and `server/listener/tests.rs`.
 - The daemon's jobs: see [jobs.md](jobs.md).
 - Socket paths and adoption: `crates/svolder-ipc/src/socket/path.rs`; tests in
   `crates/svolder-ipc/tests/adoption.rs`.
@@ -373,5 +395,6 @@ a token. A check that altered what it checked would report on its own work.
   `socket/signal/tests.rs`.
 - Version skew: `crates/svolder-ipc/src/socket/daemon_version.rs`, tests in
   `socket/daemon_version/tests.rs`.
-- Host checks: `crates/svolder-ipc/src/checks.rs`, `checks/live.rs`, tests in `checks/tests.rs`.
+- Host checks: `crates/svolder-ipc/src/checks.rs` (the checks in `checks/bluetooth.rs`, `daemon.rs` and
+  `environment.rs`, the snapshot types in `facts.rs`), `checks/live.rs`, tests in `checks/tests.rs`.
 - The launcher chain: `bins/svolder/src/backend/launch.rs`, tests in `backend/launch/`.

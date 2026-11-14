@@ -339,6 +339,9 @@ that branch rather than listed here.
   keeps its running configuration and says to restore the file and reload; to start afresh with no
   file, run `svolder daemon restart`, which reads a missing file as an empty configuration
   (`crates/svolder-ipc/src/socket/daemon_version.rs`, `crates/svolder-ipc/src/config.rs`).
+- [trade-off] **Turning the web guest view on or off restarts the web server.** The reload sees a
+  changed `[web]` section and stops and starts the server on its address, so open event streams
+  end, and a listen port of 0 changes (`bins/svolderd/src/http_slot.rs:93`).
 
 ### CLI
 
@@ -367,7 +370,7 @@ that branch rather than listed here.
   platform switch (one not named `hciN`, such as `thinkpad_bluetooth`) as blocking every adapter,
   including a dongle chosen with `adapter = "hciN"`, though the switch may govern only the
   laptop's own radio; the dongle then reads as blocked when it is not. It is rare, and the
-  switch's name is all the kernel gives to go on (`crates/svolder-ipc/src/checks.rs`, `block_of`).
+  switch's name is all the kernel gives to go on (`crates/svolder-ipc/src/checks/bluetooth.rs`, `block_of`).
 - [limit] **Two Ctrl-Cs a millisecond apart can count as one.** Signals that arrive before
   `watch`'s receiving task has read the one before are delivered once (Tokio coalesces them, as
   the kernel does a standard signal still pending), so two presses within about a millisecond
@@ -417,17 +420,21 @@ that branch rather than listed here.
 
 ### TUI
 
-- [bug] **The TUI writes presets and some settings itself while a daemon runs.** `i` (a file
-  import), `u`, rename and delete of a user preset write `config.toml` in the TUI's own process and
-  then ask the daemon to reload; so do the Connect keys for the listen address, MCP writes and the
-  MQTT keys (only the Web UI and MCP on/off keys go through the daemon). With `config.toml` deleted
-  these writes recreate it from the template, and the reload drops every device. A preset import
-  that meets a name another front end took in the same moment shows the daemon's `taken` as a toast,
-  with no prompt to rename (`bins/svolder/src/tui/run/input.rs`,
-  `bins/svolder/src/tui/run/connect.rs`).
+- [bug] **The TUI writes some settings itself while a daemon runs.** User preset writes, the MQTT
+  keys, the Web UI and MCP on/off keys and the guest view go through the daemon, but the Connect
+  keys for the listen addresses and the other MCP and web settings, the `[tui]` and `[autoeq]`
+  rows and a device's own edits write `config.toml` in the TUI's own process and then ask the
+  daemon to reload (`bins/svolder/src/tui/run/connect.rs:220`,
+  `bins/svolder/src/tui/run/look.rs:250`, `bins/svolder/src/tui/run/devices.rs:204`).
 - [bug] **A hand edit followed by a delete gives no toast for the missing file.** The once-only
   toast is keyed on the daemon's `config_changed`, which stays true from "changed" to "missing", so
   the second word shows in the Connect rows only (`bins/svolder/src/tui/run/connect.rs`).
+- [limit] **A key pressed in the instant the terminal is resized can be lost.** The first key
+  after the window is grown or shrunk, such as a `q` or Ctrl-C, can go unread until the next input
+  (a second press reads both), and a frame at the old size can stay until the next input too. The
+  cause is in crossterm 0.29.0's unix reader (`try_read` returns at the first token of a batch of
+  readiness events); there is no upstream fix, and svolder does not vendor or fork the library for
+  it (`bins/svolder/tests/tui_pty/harness.rs:522`).
 - [limit] **Over SSH in a VTE terminal a pairing code and the MCP token cannot reach the local
   clipboard.** VTE (GNOME Terminal, Ptyxis) ignores OSC 52, and only the Web UI box's link is a
   terminal hyperlink (OSC 8), so a code or token copied in a session with no display has no route
@@ -441,6 +448,27 @@ that branch rather than listed here.
   attached over SSH) makes the copy tools run against that session's clipboard, which is the
   computer's, not the one you sit at, and the note says `copied with xclip` without naming it
   (`bins/svolder/src/tui/clipboard.rs`).
+- [trade-off] **The footer has no tooltip.** The footer is only the setup wizard's key line, which
+  has no app state and gets no mouse-move events; the main screens' key words have tooltips on
+  their pane borders (`bins/svolder/src/tui/boxes/tooltip.rs:386`).
+- [trade-off] **Cover art is drawn on the device screen's Status pane only, and some terminals
+  get half-blocks.** Other screens keep the picture but draw none. WezTerm and Konsole are never
+  asked for the kitty or sixel protocol (the image library's own exclusion), so they show
+  half-block cells; `cover_art` is read once at start, so turning it from off to auto later draws
+  half-blocks until the TUI restarts (`bins/svolder/src/tui/screens/device/art.rs`,
+  `bins/svolder/src/tui/art/probe.rs:49`).
+- [trade-off] **A replaced kitty picture stays in the terminal's memory.** The image library keeps
+  the picture's id private, so svolder sends no delete and the terminal evicts old pictures itself
+  (`bins/svolder/src/tui/art/engine.rs:204`).
+- [trade-off] **A terminal answer split across two reads can leave one stray Esc key.** The
+  answer filter waits a short time for the rest, and one that arrives later is read as an Esc
+  (`bins/svolder/src/tui/art/filter.rs:91`).
+- [trade-off] **A click far from a volume bar's level writes less than the bar's end value.** The
+  click is paced by the climb of the volume rule, so the level reaches the clicked place a step at
+  a time (`bins/svolder/src/tui/screens/device/controls.rs`).
+- [trade-off] **A Loki Max's own preset list takes no mouse.** The TUI's preset list does; the
+  device's list in its own screen answers keys only
+  (`bins/svolder/src/tui/screens/device_presets.rs`).
 - [trade-off] **A tone edit waits out another front end's preset recall.** While a recall from
   Home Assistant or MCP is running on the daemon, a tone-control edit from the TUI waits for it to
   finish, and the TUI waits with it, redrawing and reading keys again only once the write is
@@ -644,7 +672,7 @@ that branch rather than listed here.
   bound, but a `spawn_blocking` thread it left runs on until it looks at its flag, and the runtime's
   stop bound ends the process regardless; the bounded end is covered by the unit tests of the job
   bound, not by a process-level test (`bins/svolderd/src/handler/jobs.rs`,
-  `crates/svolder-ipc/src/socket/protocol.rs`).
+  `crates/svolder-ipc/src/socket/protocol/timeouts.rs`).
 - [trade-off] **A client's wait for the first line of a stream has no bound of its own.**
   `Client::stream` waits as long as the caller lets it; the TUI wraps the open in a timeout
   (`OPEN_WITHIN`), and the CLI's whole connect-and-request sequences in their own, not in
@@ -669,7 +697,7 @@ that branch rather than listed here.
 - [debt] **A reconcile dropped before any stop lets its new actors go.** Their handles drop and each
   actor closes its link by itself, unawaited; only the stop waits for actors
   (`bins/svolderd/src/handler.rs`).
-- [debt, with 0.34.0] **Front ends know the missing-config refusal only by its words.** The wire
+- [debt] **Front ends know the missing-config refusal only by its words.** The wire
   carries `read_only` or no reason for it, so a front end matches the text; a
   `Reason::ConfigMissing` would let it match the reason (`crates/svolder-ipc/src/error.rs`,
   `bins/svolderd/src/handler/config_write.rs`).
@@ -762,6 +790,13 @@ that branch rather than listed here.
   for up to one slow tick; noted as a bounded, self-correcting edge in `lap`'s doc
   (`bins/svolder/src/tui/decoration/effects/keyed.rs`, `bins/svolder/src/tui/run/look.rs`).
 
+### TUI: mascot
+
+- [trade-off] **With effects on, a lost link shows the lantern and a returned link a hop.** The
+  ship rowing out and back is kept for effects off (`Arrive`, `Depart`, `RowIn`, `RowOut`); with
+  effects on, `Brain::start` picks the lantern and the hop instead
+  (`bins/svolder/src/tui/decoration/mascot/brain.rs:649`).
+
 ### TUI: event loop and opening devices
 
 - [trade-off] **`render::frame_areas` derives the layout the screens drew.** `frame_areas` calls
@@ -776,6 +811,10 @@ that branch rather than listed here.
   change as a hand edit. The 60-second poll of the file is 300 ms under `cfg(test)` so the loop test
   sees a second ask; no test runs the real period (`bins/svolder/src/tui/run/look.rs`,
   `bins/svolder/src/tui/run.rs`).
+- [test] **A taken preset name's daemon answer is proved in loop and daemon tests only.** The TUI
+  checks a name against its own copy of the library before it sends, so the daemon's answer to a
+  taken name shows on screen only after a race; no pty case reaches it
+  (`bins/svolder/src/tui/run/input.rs:30`).
 
 ### Profiles and presets
 
@@ -930,8 +969,8 @@ that branch rather than listed here.
 - [limit] **nalgebra stays at 0.34.** `levenberg-marquardt` 0.15.0, the latest, pins nalgebra 0.34,
   so 0.35 waits for it; `generic-array` 0.14.7 (0.14.9 is out) and `matchit` 0.8.4 (0.8.6 is out)
   are held by their dependents too (`crates/svolder-profiles/Cargo.toml`).
-- [observed] **The Rust 1.99.1 and cargo-auditable paths are unproven until CI runs.** The release
-  image's cargo-auditable 0.7.7 and the 1.99.1 toolchain of the `check` workflow have not run
+- [observed] **The Rust 1.100.0 and cargo-auditable paths are unproven until CI runs.** The release
+  image's cargo-auditable 0.7.7 and the 1.100.0 toolchain of the `check` workflow have not run
   until CI or `make build-image` does; `make audit` writes its advisory database to
   `~/.cargo/advisory-db` (`Makefile`, `.github/workflows/check.yml`).
 - [observed] **The `playing` check of Ember fails now and then in Firefox.** In the runs of
@@ -978,9 +1017,10 @@ that branch rather than listed here.
   `--adapter`, no configured `adapter` and no remembered one, the transport opens the first adapter
   BlueZ lists, which on a machine with a built-in controller need not be the one that hears the
   device (`bins/svolder/src/backend/direct.rs`).
-- [test, with 0.34.0] **The happy path of `tui::run` and `tui::wizard::setup` through a real terminal is
-  untested.** The refusals and the choice of front end are tested over a `Claim` seam; a real
-  `Guard` cannot be built in a unit test (`bins/svolder/src/tui/terminal.rs`).
+- [test] **The happy path of `tui::wizard::setup` through a real terminal is untested.** The pty
+  harness drives `tui::run` in a real terminal, but no case runs the setup wizard; its refusals and
+  the choice of front end are tested over a `Claim` seam, and a real `Guard` cannot be built in a
+  unit test (`bins/svolder/src/tui/terminal.rs`).
 - [test] **The browser checks leave some paths to node or by hand.** `popups.py` presses Tab forward
   only (Shift+Tab on a hidden control is node's), and the drag-ending Escape on Ember's curve is not
   pressed; Ember's `0`, `f` and `v` keys are held by the `keys.py` spy alone; `keys.py` cannot count
@@ -994,6 +1034,9 @@ that branch rather than listed here.
   in a browser; a wheel over the veil in Firefox and a list placed beside classic scrollbars have
   not been looked at by hand (`scripts/web-checks/popups.py`, `scripts/web-checks/keys.py`,
   `scripts/web-checks/completeness.py`).
+- [observed] **Under heavy load a few pty harness cases time out now and then.** With 16 busy loops
+  running, cases such as cover-under-box, the MQTT rows and the divider failed once in a while and
+  passed on a rerun; on a normal load they are green (`bins/svolder/tests/tui_pty/cases.rs`).
 - [test] **Some harness upkeep is by hand.** `mutate_computer.sh` is not in `SHELL_RUNNERS` of
   `snippets.py`, so its 140 snippets rot unseen; `ember-parts.json`, the fixture the node check
   compares against, carries a key card cut out by a regular expression, and nothing regenerates it

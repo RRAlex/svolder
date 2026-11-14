@@ -31,6 +31,7 @@ impl Config {
     /// [`EqSpec`](svolder_profiles::EqSpec) puts [`svolder_profiles::tone::preset::builtins`]
     /// first; one with no device names the built-ins a band count would offer with
     /// [`svolder_profiles::tone::preset::builtin_names`].
+    #[cfg(test)]
     pub fn user_presets_for(&self, bands: usize) -> impl Iterator<Item = &Preset> {
         self.presets
             .iter()

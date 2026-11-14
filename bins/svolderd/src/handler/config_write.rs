@@ -56,6 +56,10 @@ pub enum ConfigWriteError {
     Off(String),
     /// A name the core refuses for a preset: taken, or not a name at all (the core's words).
     Name(NameRefusal),
+    /// A built-in preset where only the user's own can be written, in the words that say so.
+    Builtin(String),
+    /// A preset the user's library does not have, in the words that say so.
+    NoSuchPreset(String),
     /// A writer of the core refused.
     Refused(ConfigError),
     /// The blocking task of a write did not finish.
@@ -128,6 +132,9 @@ impl std::fmt::Display for ConfigWriteError {
             }
             ConfigWriteError::Off(words) => f.write_str(words),
             ConfigWriteError::Name(why) => write!(f, "{why}"),
+            ConfigWriteError::Builtin(words) | ConfigWriteError::NoSuchPreset(words) => {
+                f.write_str(words)
+            }
             ConfigWriteError::Refused(why) => write!(f, "{why}"),
             ConfigWriteError::Stopped => f.write_str("the configuration write stopped"),
             ConfigWriteError::Unchecked => f.write_str("the configuration could not be checked"),
@@ -147,7 +154,8 @@ impl ConfigWriteError {
         match self {
             ConfigWriteError::Unknown | ConfigWriteError::Off(_) => Reason::ReadOnly,
             ConfigWriteError::Name(NameRefusal::Taken(_)) => Reason::Taken,
-            ConfigWriteError::Name(_) => Reason::BadName,
+            ConfigWriteError::Name(_) | ConfigWriteError::Builtin(_) => Reason::BadName,
+            ConfigWriteError::NoSuchPreset(_) => Reason::Missing,
             ConfigWriteError::Refused(why) => why.reason(),
             ConfigWriteError::Stopped | ConfigWriteError::Unchecked => Reason::Internal,
             ConfigWriteError::Stopping => Reason::Stopping,
@@ -384,6 +392,69 @@ impl Daemon {
         self.edit_then_reload(edit).await?;
         Ok(wanted)
     }
+
+    /// Rename the user's preset `from` to `to`, and reload. A built-in is refused, so is a preset
+    /// the library does not have, and the new name is judged by the core ([`preset::new_name`])
+    /// with the preset's own name set aside, so it may take its own name in another spelling.
+    /// Answers with the name as the file now spells it. See [`Daemon::save_preset`] for what
+    /// `Ok` means.
+    pub(crate) async fn rename_preset(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<String, ConfigWriteError> {
+        if preset::is_builtin(from) {
+            return Err(ConfigWriteError::Builtin(format!(
+                "{:?} is a built-in preset; it cannot be renamed",
+                from.trim()
+            )));
+        }
+        let held = self.config_for_write("presets").await?;
+        let old = held
+            .preset(from)
+            .map(|found| found.name.clone())
+            .ok_or_else(|| no_such_preset(from))?;
+        let new = preset::new_name(to, held.presets.iter().map(|p| p.name.as_str()), Some(&old))
+            .map_err(ConfigWriteError::Name)?
+            .to_string();
+        let to = new.clone();
+        self.edit_then_reload(Box::new(move |path| Config::rename_preset(path, &old, &to)))
+            .await?;
+        Ok(new)
+    }
+
+    /// Delete the user's preset `name`, and reload. A built-in is refused, so is a preset the
+    /// library does not have. Answers with the name as the file spelled it.
+    pub(crate) async fn delete_preset(&self, name: &str) -> Result<String, ConfigWriteError> {
+        if preset::is_builtin(name) {
+            return Err(ConfigWriteError::Builtin(format!(
+                "{:?} is a built-in preset; it cannot be deleted",
+                name.trim()
+            )));
+        }
+        let held = self.config_for_write("presets").await?;
+        let gone = held
+            .preset(name)
+            .map(|found| found.name.clone())
+            .ok_or_else(|| no_such_preset(name))?;
+        let taken = gone.clone();
+        self.edit_then_reload(Box::new(move |path| Config::remove_preset(path, &taken)))
+            .await?;
+        Ok(gone)
+    }
+}
+
+/// What writing a curve read off a device over the preset called `name` is refused with when
+/// that preset is imported: the one rule the socket's save and the web page's share.
+pub(crate) fn imported_overwrite(presets: &[Preset], name: &str) -> Option<String> {
+    preset::find(presets, name)
+        .filter(|found| found.is_imported())
+        .map(|found| preset::imported_update_refusal(&found.name))
+}
+
+/// The refusal for a preset name the library does not have.
+pub(super) fn no_such_preset(name: &str) -> ConfigWriteError {
+    ConfigWriteError::NoSuchPreset(format!("no preset named {:?}", name.trim()))
 }
 
 #[cfg(test)]

@@ -63,6 +63,7 @@ mod controls;
 pub(super) mod curve_drag;
 mod devices;
 mod dispatch;
+pub(super) mod divider;
 mod focus;
 mod frame_flags;
 pub(super) mod glide;
@@ -198,6 +199,9 @@ pub struct Drawn {
     pub controls_pending: std::cell::Cell<bool>,
     /// The tone screen's switch row.
     pub tone_switch: std::cell::Cell<bool>,
+    /// Where the last device frame drew the bar between its two panes, `None` where it drew no
+    /// bar to move: another screen, one pane, or a terminal too narrow for two of 40 columns.
+    pub split: std::cell::Cell<Option<divider::Split>>,
 }
 
 impl Default for Drawn {
@@ -206,6 +210,7 @@ impl Default for Drawn {
             controls_switch: std::cell::Cell::new(true),
             controls_pending: std::cell::Cell::new(false),
             tone_switch: std::cell::Cell::new(true),
+            split: std::cell::Cell::new(None),
         }
     }
 }
@@ -265,6 +270,8 @@ pub(crate) struct Moved {
     pub(crate) help: bool,
     /// Whether a device is being edited.
     pub(crate) editing: bool,
+    /// The device screen's split, as its bits.
+    pub(crate) split: u64,
     /// Whether a removal is waiting to be confirmed.
     pub(crate) confirming: bool,
     /// Whether the preset list is open.
@@ -512,9 +519,11 @@ impl App {
             .host
             .now_playing()
             .map_or(0, |words| device::cells(&words));
-        self.host
-            .marquee
-            .advance(now, words, device::now_playing_room(self.size));
+        self.host.marquee.advance(
+            now,
+            words,
+            device::now_playing_room(self.size).saturating_sub(device::art_reserved(self)),
+        );
     }
 
     /// Note how big the terminal is: what the help overlay and the `Now playing` row's marquee
@@ -569,10 +578,16 @@ impl App {
         self.tui.host_audio && !self.host.held_off
     }
 
+    /// Whether a tooltip may show now: the `tooltips` setting is on, mouse capture is on and no
+    /// box is open.
+    pub(crate) fn tips_allowed(&self) -> bool {
+        self.tui.tooltips && self.mouse && !self.modal_open()
+    }
+
     /// Whether a tooltip waits for its delay to pass, which keeps the loop's tick short enough
     /// to show it on time.
     pub fn tooltip_pending(&self) -> bool {
-        self.pointer.tooltip.is_some_and(|tooltip| !tooltip.shown)
+        self.tips_allowed() && self.pointer.tooltip.is_some_and(|tooltip| !tooltip.shown)
     }
 
     /// How long the event loop waits between ticks.
@@ -723,6 +738,7 @@ impl App {
             menu: self.overlays.menu,
             help: self.overlays.help_open,
             editing: self.devices.editor.is_some(),
+            split: self.tui.device_split.to_bits(),
             confirming: self.devices.confirm.is_some(),
             presets: self.presets.preset_list.is_some() || self.presets.device_list.is_some(),
             edit_line: self.tone.edit_line.is_some(),

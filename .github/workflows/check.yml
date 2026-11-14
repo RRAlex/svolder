@@ -37,8 +37,8 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends build-essential pkg-config libdbus-1-dev python3-yaml dbus
           # The same compiler as the release container (packaging/Dockerfile.build).
-          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
-          rustup default 1.99.1
+          rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.100.0
       - name: Run the test suite
         run: |
           set -euo pipefail

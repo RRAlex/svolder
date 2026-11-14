@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use svolder_ipc::socket::daemon_version::{Skew, mismatch_line, skew};
-use svolder_ipc::{Event, Handler};
+use svolder_ipc::{Event, Handler, MqttProblem};
 
 use super::*;
 use crate::commands::daemon::POLL;
@@ -98,6 +98,35 @@ fn the_mqtt_line_says_where_the_bridge_stands() {
                 commands: true,
             },
             "mqtt: connected to 192.168.1.10:8883 (commands on)",
+        ),
+        (
+            MqttStatus::Trouble {
+                host: host(),
+                port: 1883,
+                problem: MqttProblem::Refused,
+                retry_in_secs: Some(8),
+            },
+            "mqtt: not connected to 192.168.1.10:1883: the broker refused the login (check \
+             username and password) (retry in 8 s)",
+        ),
+        (
+            MqttStatus::Trouble {
+                host: host(),
+                port: 1883,
+                problem: MqttProblem::Unreachable,
+                retry_in_secs: None,
+            },
+            "mqtt: not connected to 192.168.1.10:1883: not reachable",
+        ),
+        (
+            MqttStatus::Trouble {
+                host: host(),
+                port: 8883,
+                problem: MqttProblem::Tls,
+                retry_in_secs: Some(2),
+            },
+            "mqtt: not connected to 192.168.1.10:8883: port 8883 is TLS, which svolder does not \
+             speak (retry in 2 s)",
         ),
         (MqttStatus::Unknown, "mqtt: unknown"),
     ] {

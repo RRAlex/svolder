@@ -19,6 +19,7 @@ fn tui_defaults_when_the_block_is_absent() {
             monochrome: false,
             theme_background: true,
             mouse: true,
+            tooltips: true,
             intro: true,
             intro_sound: false,
             intro_effect: IntroEffect::Random,
@@ -27,9 +28,11 @@ fn tui_defaults_when_the_block_is_absent() {
             confirm_quit: true,
             host_audio: true,
             visualizer: true,
+            cover_art: CoverArt::Auto,
             graphs: true,
             graph_span: GraphSpan::M5,
             link_span: LinkSpan::H12,
+            device_split: 0.5,
             effects: EffectsConfig::default()
         }
     );
@@ -740,4 +743,112 @@ fn family_accents_are_read_and_written_by_family() {
     accents.set(Family::Amp, None);
     assert_eq!(accents.get(Family::Amp), None);
     assert_eq!(accents.get(Family::Dac), Some("#111111"));
+}
+
+/// Tooltips are on while the file says nothing, one word turns them off, and the switch is
+/// written where the template shows it and reads back as itself.
+#[test]
+fn tooltips_default_on_and_round_trip_through_the_file() {
+    assert!(Config::parse("schema = 1\n").unwrap().tui.tooltips);
+    assert!(
+        !Config::parse("schema = 1\n[tui]\ntooltips = false\n")
+            .unwrap()
+            .tui
+            .tooltips
+    );
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    Config::create_from_template(&path).unwrap();
+    let tui = TuiConfig {
+        tooltips: false,
+        ..TuiConfig::default()
+    };
+    Config::update_tui(&path, |t| *t = tui.clone()).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("shows a one-line tip.\ntooltips = false\n"),
+        "the switch was not written where the template shows it:\n{text}"
+    );
+    assert_eq!(Config::parse(&text).unwrap().tui, tui, "{text}");
+}
+
+/// The cover art is automatic while the file says nothing, each of the two words reads as its
+/// own setting, and any other word is refused with both named.
+#[test]
+fn the_cover_art_defaults_to_auto_and_reads_each_word() {
+    assert_eq!(
+        Config::parse("schema = 1\n").unwrap().tui.cover_art,
+        CoverArt::Auto
+    );
+    for (word, art) in [("auto", CoverArt::Auto), ("off", CoverArt::Off)] {
+        let text = format!("schema = 1\n[tui]\ncover_art = \"{word}\"\n");
+        assert_eq!(Config::parse(&text).unwrap().tui.cover_art, art, "{word}");
+    }
+    let error = Config::parse("schema = 1\n[tui]\ncover_art = \"sixel\"\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("tui.cover_art must be one of auto, off"),
+        "{error}"
+    );
+}
+
+/// The key is written alone, sits after the visualizer in the template, and docs/usage/config.md
+/// carries the same two lines.
+#[test]
+fn the_cover_art_is_written_alone_and_sits_after_the_visualizer() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, "schema = 1\n[tui]\nvisualizer = true\n").unwrap();
+    Config::update_tui(&path, |t| t.cover_art = CoverArt::Off).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        text, "schema = 1\n[tui]\nvisualizer = true\ncover_art = \"off\"\n",
+        "{text}"
+    );
+    let template = Config::template();
+    let block = "# Whether the Now playing row shows the track's cover art: auto (the best the \
+                 terminal draws) or off.\n# cover_art = \"auto\"\n";
+    assert!(template.contains(block), "{template}");
+    let at = |key: &str| template.find(key).unwrap();
+    assert!(at("# visualizer = ") < at("# cover_art = "));
+    assert!(at("# cover_art = ") < at("# graphs = "));
+    let usage = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/usage/config.md"),
+    )
+    .expect("docs/usage/config.md reads");
+    assert!(
+        usage.contains(block),
+        "usage/config.md's template block lacks the cover art"
+    );
+}
+
+/// The split of the device screen is an even one while the file says nothing, reads a number
+/// from 0 to 1, refuses anything else, and is written as a number where the template shows it.
+#[test]
+fn the_device_split_reads_validates_and_round_trips() {
+    assert!((Config::parse("").unwrap().tui.device_split - 0.5).abs() < f64::EPSILON);
+    for (text, split) in [("0.25", 0.25), ("1", 1.0), ("0", 0.0), ("0.512", 0.512)] {
+        let text = format!("schema = 1\n[tui]\ndevice_split = {text}\n");
+        let parsed = Config::parse(&text).unwrap().tui.device_split;
+        assert!((parsed - split).abs() < 1e-9, "{text}: {parsed}");
+    }
+    for bad in ["1.5", "-0.1", "nan", "\"half\""] {
+        let text = format!("schema = 1\n[tui]\ndevice_split = {bad}\n");
+        assert!(Config::parse(&text).is_err(), "{bad} was accepted");
+    }
+    let dir = temp_dir("config-writer");
+    let templated = dir.join("config.toml");
+    Config::create_from_template(&templated).unwrap();
+    let template = std::fs::read_to_string(&templated).unwrap();
+    assert!(template.contains("\n# device_split = 0.5\n"), "{template}");
+    Config::update_tui(&templated, |t| t.device_split = 0.512).unwrap();
+    let saved = std::fs::read_to_string(&templated).unwrap();
+    assert!(saved.contains("\ndevice_split = 0.512\n"), "{saved}");
+    assert!(!saved.contains("# device_split"), "{saved}");
+    assert!((Config::parse(&saved).unwrap().tui.device_split - 0.512).abs() < 1e-9);
+    // Back to the default, the key is written as the default's number.
+    Config::update_tui(&templated, |t| t.device_split = 0.5).unwrap();
+    let saved = std::fs::read_to_string(&templated).unwrap();
+    assert!(saved.contains("\ndevice_split = 0.5\n"), "{saved}");
 }

@@ -554,5 +554,41 @@ pub fn base64url(bytes: &[u8]) -> String {
     out
 }
 
+/// The bytes `text` stands for in the URL-safe base64 alphabet without padding, the inverse of
+/// [`base64url`]; `None` for a character outside the alphabet, padding, or a length no encoding
+/// has.
+pub fn base64url_decode(text: &str) -> Option<Vec<u8>> {
+    fn sextet(byte: u8) -> Option<u32> {
+        Some(match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return None,
+        } as u32)
+    }
+    let bytes = text.as_bytes();
+    if bytes.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3 + 2);
+    for chunk in bytes.chunks(4) {
+        let mut n = 0u32;
+        for (i, byte) in chunk.iter().enumerate() {
+            n |= sextet(*byte)? << (18 - 6 * i);
+        }
+        let whole = chunk.len() * 6 / 8;
+        // The bits past the last whole byte are the ones the encoder leaves at zero.
+        if n & ((1u32 << (24 - 8 * whole)) - 1) != 0 {
+            return None;
+        }
+        for i in 0..whole {
+            out.push((n >> (16 - 8 * i)) as u8);
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests;

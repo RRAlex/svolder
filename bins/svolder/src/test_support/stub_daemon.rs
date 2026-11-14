@@ -66,6 +66,13 @@ pub(crate) struct StubDaemon {
     device_file: Mutex<Option<PathBuf>>,
     /// What a `device_config` op is refused with instead, when a case sets it.
     device_refusal: Mutex<Option<Response>>,
+    /// The `preset_write` ops it has been sent, in order.
+    preset_ops: Mutex<Vec<svolder_ipc::PresetOp>>,
+    /// The configuration file its `preset_write` ops are applied to, as the daemon's writers do,
+    /// when a case names one.
+    preset_file: Mutex<Option<PathBuf>>,
+    /// What a `preset_write` op is refused with instead, when a case sets it.
+    preset_refusal: Mutex<Option<Response>>,
     /// How many times it has been told to read its configuration again.
     reloads: Mutex<usize>,
     /// What a `reload` is answered with instead of success, when a case sets it.
@@ -126,6 +133,14 @@ pub(crate) struct StubDaemon {
     /// The host view it answers a `host` request with and opens a host subscription with; `None`
     /// answers as a daemon too old to know the request, and sends no host event.
     host: Mutex<Option<HostView>>,
+    /// The cover it serves `host_cover` chunks of, by its hash; `None` answers as a daemon too old
+    /// to know the request.
+    host_cover: Mutex<Option<(String, svolder_host::cover::Cover)>>,
+    /// After this many `host_cover` requests the cover it holds is replaced by this one, as a
+    /// player changing track in the middle of a read does.
+    host_cover_swap: Mutex<Option<(usize, String, svolder_host::cover::Cover)>>,
+    /// The offset of each `host_cover` request, in the order they arrived.
+    host_cover_asks: Mutex<Vec<u64>>,
     /// The button of each `host_press` request, in the order they arrived.
     host_presses: Mutex<Vec<String>>,
     /// What a `host_press` request is refused with, when a case sets it.
@@ -138,8 +153,15 @@ pub(crate) struct StubDaemon {
     host_eq_refusal: Mutex<Option<String>>,
     /// The server and state of each `server_switch` request, in the order they arrived.
     switches: Mutex<Vec<(svolder_ipc::Server, bool)>>,
-    /// What a `server_switch` request is answered with instead, when a case sets it.
+    /// The state of each `guest_switch` request, in the order they arrived.
+    guest_switches: Mutex<Vec<bool>>,
+    /// What a `server_switch` or `guest_switch` request is answered with instead, when a case
+    /// sets it.
     switch_refusal: Mutex<Option<Response>>,
+    /// Whether an `mqtt_set` of a password answers that it narrowed the file's mode.
+    mqtt_tightens: Mutex<bool>,
+    /// The op of each `mqtt_set` request, in the order they arrived.
+    mqtt_ops: Mutex<Vec<svolder_ipc::MqttOp>>,
     /// Whether a `server_switch` leaves the servers as `version` says them, as a daemon whose
     /// reload has not run yet does.
     switch_stuck: Mutex<bool>,
@@ -260,6 +282,29 @@ impl Handler for StubDaemon {
                     None => Response::unknown_request("host"),
                 }
             }
+            Request::HostCover { hash, offset } => {
+                let asked = {
+                    let mut asks = self.host_cover_asks.lock().expect("the record");
+                    asks.push(offset);
+                    asks.len()
+                };
+                {
+                    let mut swap = self.host_cover_swap.lock().expect("the swap");
+                    if swap.as_ref().is_some_and(|(after, ..)| asked > *after) {
+                        let (_, hash, cover) = swap.take().expect("checked above");
+                        *self.host_cover.lock().expect("the cover") = Some((hash, cover));
+                    }
+                }
+                match self.host_cover.lock().expect("the cover").as_ref() {
+                    None => Response::unknown_request("host_cover"),
+                    Some((held, cover)) if *held == hash => {
+                        svolder_ipc::cover_chunk(&hash, cover, offset)
+                    }
+                    Some(_) => {
+                        Response::error(svolder_ipc::CODE_NOT_FOUND, "no cover with that hash")
+                    }
+                }
+            }
             Request::HostPress { button } => {
                 self.host_presses.lock().expect("the record").push(button);
                 match self.host_press_refusal.lock().expect("the refusal").clone() {
@@ -270,6 +315,7 @@ impl Handler for StubDaemon {
             Request::Walk { op } => self.walk.handle(op),
             Request::AutoEq { op } => self.autoeq.handle(op).await,
             Request::DeviceConfig { op } => self.device_config(op),
+            Request::PresetWrite { op } => self.preset_write(op),
             Request::Reload => {
                 *self.reloads.lock().expect("reloads mutex") += 1;
                 let delay = *self.reload_delay.lock().expect("the delay");
@@ -287,6 +333,7 @@ impl Handler for StubDaemon {
                 self.version_asks
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let Says {
+                    mqtt,
                     mcp,
                     config,
                     token,
@@ -295,7 +342,7 @@ impl Handler for StubDaemon {
                 } = self.says.lock().expect("the status").clone();
                 Response::Version {
                     version: self.version.lock().expect("the version").clone(),
-                    mqtt: None,
+                    mqtt,
                     mcp,
                     config,
                     log: None,
@@ -406,6 +453,47 @@ impl Handler for StubDaemon {
                     mcp: says.mcp.clone().unwrap_or(svolder_ipc::McpStatus::Off),
                 }
             }
+            Request::MqttSet { op } => {
+                self.mqtt_ops.lock().expect("the record").push(op.clone());
+                if let Some(refusal) = self.switch_refusal.lock().expect("the refusal").clone() {
+                    return refusal;
+                }
+                let mut says = self.says.lock().expect("the status");
+                if let svolder_ipc::MqttOp::Enabled { enabled } = op {
+                    says.mqtt = Some(match enabled {
+                        true => svolder_ipc::MqttStatus::Connected {
+                            host: "stub".to_string(),
+                            port: 1883,
+                            commands: false,
+                        },
+                        false => svolder_ipc::MqttStatus::Off,
+                    });
+                }
+                Response::MqttSet {
+                    status: says.mqtt.clone().unwrap_or(svolder_ipc::MqttStatus::Off),
+                    tightened: *self.mqtt_tightens.lock().expect("the flag")
+                        && matches!(op, svolder_ipc::MqttOp::Password { value: Some(_) }),
+                }
+            }
+            Request::GuestSwitch { read } => {
+                self.guest_switches.lock().expect("the record").push(read);
+                if let Some(refusal) = self.switch_refusal.lock().expect("the refusal").clone() {
+                    return refusal;
+                }
+                let mut says = self.says.lock().expect("the status");
+                if !*self.switch_stuck.lock().expect("the flag")
+                    && let Some(svolder_ipc::WebStatus::Listening { guest, .. }) = says.web.as_mut()
+                {
+                    *guest = match read {
+                        true => svolder_ipc::config::WebGuest::Read,
+                        false => svolder_ipc::config::WebGuest::None,
+                    };
+                }
+                Response::ServerSwitch {
+                    web: says.web.clone().unwrap_or(svolder_ipc::WebStatus::Off),
+                    mcp: says.mcp.clone().unwrap_or(svolder_ipc::McpStatus::Off),
+                }
+            }
             other => Response::error(CODE_USAGE, format!("{other:?} is not answered here")),
         }
     }
@@ -454,6 +542,47 @@ impl Handler for StubDaemon {
 }
 
 impl StubDaemon {
+    /// Answer a `preset_write` op: record it, apply it to the file a case named (a reload,
+    /// counted), or refuse it as the case said.
+    fn preset_write(&self, op: svolder_ipc::PresetOp) -> Response {
+        use svolder_ipc::{Config, PresetOp};
+        self.preset_ops.lock().expect("the record").push(op.clone());
+        if let Some(refusal) = self.preset_refusal.lock().expect("the refusal").clone() {
+            return refusal;
+        }
+        let Some(path) = self.preset_file.lock().expect("the file").clone() else {
+            return Response::Ack;
+        };
+        let (name, wrote) = match op {
+            PresetOp::Save { preset, force } => (
+                preset.name.clone(),
+                match force {
+                    true => Config::update_preset(&path, &preset.name, &preset),
+                    false => Config::add_preset(&path, &preset),
+                },
+            ),
+            PresetOp::Update { preset } => (
+                preset.name.clone(),
+                Config::update_preset(&path, &preset.name, &preset),
+            ),
+            PresetOp::Rename { from, to } => {
+                let wrote = Config::rename_preset(&path, &from, &to);
+                (to, wrote)
+            }
+            PresetOp::Delete { name } => {
+                let wrote = Config::remove_preset(&path, &name);
+                (name, wrote)
+            }
+        };
+        match wrote {
+            Ok(()) => {
+                *self.reloads.lock().expect("reloads mutex") += 1;
+                Response::PresetWritten { name }
+            }
+            Err(e) => Response::error(CODE_USAGE, e.to_string()).with_reason(e.reason()),
+        }
+    }
+
     /// Answer a `device_config` op: record it, apply it to the file a case named (a reload,
     /// counted), or refuse it as the case said.
     fn device_config(&self, op: svolder_ipc::DeviceConfigOp) -> Response {
@@ -624,6 +753,7 @@ pub(crate) fn mute(display: &str) -> ValueObject {
 /// What the stub's `version` answer says besides the version.
 #[derive(Clone, Default)]
 struct Says {
+    mqtt: Option<svolder_ipc::MqttStatus>,
     mcp: Option<svolder_ipc::McpStatus>,
     config: Option<String>,
     token: Option<svolder_ipc::TokenInfo>,
@@ -650,6 +780,24 @@ impl StubServer {
     pub(crate) fn refuses_device_ops(&self, answer: Response) {
         *self.handler.device_refusal.lock().expect("the refusal") = Some(answer);
         self.lists_features(&["device_crud"]);
+    }
+
+    /// Apply every `preset_write` op to the file at `path`, as the daemon's writers do (each a
+    /// reload), and list the `preset_write` feature.
+    pub(crate) fn applies_preset_ops_to(&self, path: &Path) {
+        *self.handler.preset_file.lock().expect("the file") = Some(path.to_path_buf());
+        self.lists_features(&["preset_write"]);
+    }
+
+    /// Refuse every `preset_write` op with `answer`, and list the `preset_write` feature.
+    pub(crate) fn refuses_preset_ops(&self, answer: Response) {
+        *self.handler.preset_refusal.lock().expect("the refusal") = Some(answer);
+        self.lists_features(&["preset_write"]);
+    }
+
+    /// The `preset_write` ops the daemon has been sent, in order.
+    pub(crate) fn preset_ops(&self) -> Vec<svolder_ipc::PresetOp> {
+        self.handler.preset_ops.lock().expect("the record").clone()
     }
 
     /// The `device_config` ops the daemon has been sent, in order.
@@ -751,6 +899,39 @@ impl StubServer {
         *self.handler.host.lock().expect("the host view") = Some(view);
     }
 
+    /// Serve `cover` under `hash` to `host_cover` requests from now on, as a daemon with a host
+    /// side that holds a cover does.
+    pub(crate) fn serves_cover(&self, hash: &str, cover: svolder_host::cover::Cover) {
+        {
+            let mut features = self.handler.features.lock().expect("the features");
+            if !features.iter().any(|feature| feature == "host_cover") {
+                features.push("host_cover".to_string());
+            }
+        }
+        *self.handler.host_cover.lock().expect("the cover") = Some((hash.to_string(), cover));
+    }
+
+    /// Replace the served cover by `cover` under `hash` once `after` `host_cover` requests have
+    /// been answered.
+    pub(crate) fn swaps_cover_after(
+        &self,
+        after: usize,
+        hash: &str,
+        cover: svolder_host::cover::Cover,
+    ) {
+        *self.handler.host_cover_swap.lock().expect("the swap") =
+            Some((after, hash.to_string(), cover));
+    }
+
+    /// The offset of every `host_cover` request, in order.
+    pub(crate) fn host_cover_asks(&self) -> Vec<u64> {
+        self.handler
+            .host_cover_asks
+            .lock()
+            .expect("the record")
+            .clone()
+    }
+
     /// Answer a `host_frames` request with a stream that opens with `capture` and carries what
     /// [`StubServer::sends_frame`] and [`StubServer::sends_capture`] send, as a daemon with host
     /// audio does.
@@ -830,7 +1011,31 @@ impl StubServer {
         self.handler.switches.lock().expect("the record").clone()
     }
 
-    /// Answer every `server_switch` request with `answer` from now on.
+    /// Answer every `mqtt_set` of a password as one that narrowed the config file's mode.
+    pub(crate) fn tightens_on_password(&self) {
+        *self.handler.mqtt_tightens.lock().expect("the flag") = true;
+    }
+
+    /// Every `mqtt_set` request, in order.
+    pub(crate) fn mqtt_ops(&self) -> Vec<svolder_ipc::MqttOp> {
+        self.handler.mqtt_ops.lock().expect("the record").clone()
+    }
+
+    /// Say `status` for the MQTT bridge in `version` and in every `mqtt_set` answer from now on.
+    pub(crate) fn says_mqtt(&self, status: svolder_ipc::MqttStatus) {
+        self.handler.says.lock().expect("the status").mqtt = Some(status);
+    }
+
+    /// Every `guest_switch` request, in order: whether guests were asked to read.
+    pub(crate) fn guest_switches(&self) -> Vec<bool> {
+        self.handler
+            .guest_switches
+            .lock()
+            .expect("the record")
+            .clone()
+    }
+
+    /// Answer every `server_switch` and `guest_switch` request with `answer` from now on.
     pub(crate) fn answers_switch(&self, answer: Response) {
         *self.handler.switch_refusal.lock().expect("the refusal") = Some(answer);
     }
@@ -1079,6 +1284,9 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         device_ops: Mutex::default(),
         device_file: Mutex::new(None),
         device_refusal: Mutex::new(None),
+        preset_ops: Mutex::default(),
+        preset_file: Mutex::new(None),
+        preset_refusal: Mutex::new(None),
         reloads: Mutex::default(),
         reload_error: Mutex::new(None),
         reload_delay: Mutex::new(None),
@@ -1104,13 +1312,19 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         canonical_retry: Mutex::new(None),
         identify: Mutex::new(None),
         host: Mutex::new(None),
+        host_cover: Mutex::new(None),
+        host_cover_swap: Mutex::new(None),
+        host_cover_asks: Mutex::new(Vec::new()),
         host_presses: Mutex::default(),
         host_press_refusal: Mutex::new(None),
         host_eq_ops: Mutex::default(),
         host_volume_ops: Mutex::default(),
         host_eq_refusal: Mutex::new(None),
         switches: Mutex::default(),
+        guest_switches: Mutex::default(),
         switch_refusal: Mutex::new(None),
+        mqtt_ops: Mutex::default(),
+        mqtt_tightens: Mutex::new(false),
         switch_stuck: Mutex::new(false),
         host_asked: Mutex::default(),
         host_snapshots: std::sync::atomic::AtomicUsize::new(0),

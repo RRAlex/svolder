@@ -296,7 +296,7 @@ fn the_fake_transport_runs_a_direct_session() {
 }
 
 /// `daemon status` says where the daemon's MQTT bridge stands, on the line after the daemon's
-/// own: off with no section, connecting while no broker answers — with the wait before the next
+/// own: off with no section, not reachable while no broker answers — with the wait before the next
 /// attempt — and connected, read-only or taking commands. The broker is the in-process one on
 /// 127.0.0.1, and the one that does not answer is a port nothing listens on there.
 #[cfg(feature = "broker-tests")]
@@ -311,7 +311,8 @@ async fn daemon_status_says_where_the_mqtt_bridge_stands() {
         };
         // A wait is whole seconds, counting down from the step it is at: `2 s`, then `4 s`, and
         // so on.
-        let connecting = format!("mqtt: connecting to 127.0.0.1:{away} (retry in ");
+        let connecting =
+            format!("mqtt: not connected to 127.0.0.1:{away}: not reachable (retry in ");
         let cases = [
             (CONFIG.to_string(), "mqtt: off".to_string()),
             (section(away, ""), connecting.clone()),

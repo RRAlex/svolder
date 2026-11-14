@@ -28,6 +28,8 @@ fn refused_write(why: ConfigWriteError, refuse: fn(ConfigError) -> Response) -> 
         ConfigWriteError::Name(refusal) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, refusal.to_string())
         }
+        ConfigWriteError::Builtin(words) => error(StatusCode::CONFLICT, words),
+        ConfigWriteError::NoSuchPreset(words) => error(StatusCode::NOT_FOUND, words),
         ConfigWriteError::Refused(why) => refuse(why),
         ConfigWriteError::Stopped | ConfigWriteError::Unchecked => {
             error(StatusCode::INTERNAL_SERVER_ERROR, why.to_string())
@@ -82,6 +84,32 @@ pub(super) async fn edit_then_reload(
         .edit_config(Box::new(edit))
         .await
         .map_err(|why| refused_write(why, refuse))
+}
+
+/// Rename the user's preset `from` to `to`: a built-in is a 409, a preset that is not there a
+/// 404, a name the core refuses a 422. Answers with the name as the file spells it.
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
+pub(super) async fn rename_preset(web: &Web, from: &str, to: &str) -> Result<String, Response> {
+    web.fleet
+        .rename_preset(from, to)
+        .await
+        .map_err(|why| refused_write(why, conflict))
+}
+
+/// Delete the user's preset `name`: a built-in is a 409, a preset that is not there a 404.
+/// Answers with the name as the file spelled it.
+#[allow(
+    clippy::result_large_err,
+    reason = "the refusal is the answer the handler returns as it is"
+)]
+pub(super) async fn delete_preset(web: &Web, name: &str) -> Result<String, Response> {
+    web.fleet
+        .delete_preset(name)
+        .await
+        .map_err(|why| refused_write(why, conflict))
 }
 
 /// Save `saved` as the user's preset `name`, over the user's preset of that name when `force`: a

@@ -14,8 +14,8 @@ use std::path::Path;
 
 use svolder_ipc::socket::daemon_version::{VERSION_WAIT, version_on};
 use svolder_ipc::{
-    Client, DEFAULT_REQUEST_TIMEOUT, DeviceConfigOp, FEATURE_DEVICE_CRUD, IpcError, Reason,
-    Request, Response, request_on_own_connection,
+    Client, Config, DEFAULT_REQUEST_TIMEOUT, DeviceConfigOp, FEATURE_DEVICE_CRUD,
+    FEATURE_PRESET_WRITE, IpcError, PresetOp, Reason, Request, Response, request_on_own_connection,
 };
 
 use crate::recovery::{Failure, Kind};
@@ -75,6 +75,77 @@ pub(crate) async fn device_request(
         Ok(answer) => Ok(Some(answer)),
         Err(IpcError::Refused(answer)) => Ok(Some(*answer)),
         Err(e) => Err(Failure::of(Kind::DaemonError, e.to_string())),
+    }
+}
+
+/// Send a `preset_write` op to the daemon on `socket`, when one that has the family runs:
+/// `Ok(None)` for no daemon, so the caller writes through its own path; the daemon's answer
+/// (its refusal included) otherwise. A daemon without the family is refused in words, and
+/// nothing is written behind it.
+pub(crate) async fn preset_request(
+    socket: &Path,
+    op: PresetOp,
+) -> Result<Option<Response>, Failure> {
+    if !daemon_runs(socket, FEATURE_PRESET_WRITE, "write presets").await? {
+        return Ok(None);
+    }
+    let request = Request::PresetWrite { op };
+    match request_on_own_connection(socket, request, Some(DEFAULT_REQUEST_TIMEOUT)).await {
+        Ok(answer) => Ok(Some(answer)),
+        Err(IpcError::Refused(answer)) => Ok(Some(*answer)),
+        Err(e) => Err(Failure::of(Kind::DaemonError, e.to_string())),
+    }
+}
+
+/// Carry out one write of the preset library: through the daemon on `socket`, which judges the
+/// name and says so in the words every surface uses, or, where no daemon answers there, through
+/// the file's own writer. A daemon that cannot take the op is refused in words and nothing is
+/// written.
+pub(crate) async fn preset_write(socket: &Path, file: &Path, op: PresetOp) -> Result<(), Failure> {
+    match preset_request(socket, op.clone()).await? {
+        Some(Response::PresetWritten { .. }) => Ok(()),
+        Some(Response::Error {
+            message, reason, ..
+        }) => Err(Failure::of(
+            Kind::Usage,
+            preset_refusal_words(reason, &message),
+        )),
+        Some(other) => Err(Failure::of(
+            Kind::DaemonError,
+            format!("the daemon sent an unexpected reply: {other:?}"),
+        )),
+        None => {
+            let file = file.to_path_buf();
+            tokio::task::spawn_blocking(move || preset_in_process(&file, op))
+                .await
+                .unwrap_or_else(|_| Err(Failure::of(Kind::DaemonError, "the preset write stopped")))
+        }
+    }
+}
+
+/// The preset write with no daemon to make it: the core's writers on the file, with the
+/// daemon's meaning for each op (a `save` with `force` adds a preset that is not there).
+pub(crate) fn preset_in_process(file: &Path, op: PresetOp) -> Result<(), Failure> {
+    let exists = |name: &str| Config::load_from(file).is_ok_and(|c| c.preset(name).is_some());
+    match op {
+        PresetOp::Save { preset, force } if force && exists(&preset.name) => {
+            Config::update_preset(file, &preset.name, &preset)
+        }
+        PresetOp::Save { preset, .. } => Config::add_preset(file, &preset),
+        PresetOp::Update { preset } => Config::update_preset(file, &preset.name, &preset),
+        PresetOp::Rename { from, to } => Config::rename_preset(file, &from, &to),
+        PresetOp::Delete { name } => Config::remove_preset(file, &name),
+    }
+    .map_err(|e| Failure::of(Kind::ConfigUnreadable, e.to_string()))
+}
+
+/// What a refused preset write says: the daemon's own words, which are the core's for a name
+/// (taken, blank, a built-in's) and the same ones the web page shows; a busy file and a daemon
+/// that is stopping are worded as for a device write.
+pub(crate) fn preset_refusal_words(reason: Option<Reason>, message: &str) -> String {
+    match reason {
+        Some(Reason::FileBusy | Reason::Stopping) => refusal_words(reason, message),
+        _ => message.to_string(),
     }
 }
 

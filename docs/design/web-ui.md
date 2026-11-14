@@ -21,7 +21,7 @@ the daemon, brought in line by `Daemon::web_to` on start, reload and shutdown ex
 MQTT's are ([daemon.md](daemon.md)). It listens on a port of its own, served through the hardened
 accept loop the MCP server shares (`bins/svolderd/src/http.rs`: a bound on connections, a timeout
 on the request head, a cap on its size). A port that cannot be bound or a token that cannot be had
-fails the web UI, never the daemon: `WebStatus` (`crates/svolder-ipc/src/socket/protocol.rs`) says
+fails the web UI, never the daemon: `WebStatus` (`crates/svolder-ipc/src/socket/protocol/status.rs`) says
 `Off`, `Listening` or `Failed`, `svolder daemon status` and `doctor` print it, and a reload tries
 again. The daemon has no TLS; a reverse proxy terminates it, which is why every URL the page uses
 is relative (a proxy can mount it under a path that ends in `/`).
@@ -392,7 +392,7 @@ the cookie, set only by root-level URLs with no `Path`, is scoped to that mount.
   `codes/tests.rs`, `events/tests.rs`, `writes/tests.rs`); they run a router against a fake
   daemon (`src/web/test_support.rs`). `make e2e` drives a volume write through the page over a real
   radio. The scripts and the effects are checked in a real browser: [testing.md](testing.md).
-- Configuration: `crates/svolder-ipc/src/config.rs` (`WebConfig`) and
+- Configuration: `crates/svolder-ipc/src/config/net_config.rs` (`WebConfig`) and
   `crates/svolder-ipc/src/token.rs`; the TUI's Web box is
   `bins/svolder/src/tui/boxes/web_box.rs`, and `svolder web` is
   `bins/svolder/src/commands/web.rs`.

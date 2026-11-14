@@ -266,21 +266,6 @@ async fn a_refused_follow_stream_cancels_the_job_before_the_call_returns() {
     );
 }
 
-/// An upload is saved by the daemon without any job.
-#[tokio::test]
-async fn an_upload_is_a_plain_request() {
-    let daemon = stub_daemon().await;
-    daemon.autoeq().saves("Mine", 3);
-    let saved = upload(&daemon.socket, "Preamp: -1 dB".into(), "Mine", true)
-        .await
-        .expect("saved");
-    assert_eq!(saved.filters, 3);
-    assert_eq!(
-        daemon.autoeq().uploads(),
-        [("Preamp: -1 dB".to_string(), "Mine".to_string(), true)]
-    );
-}
-
 /// A press of the caller's interrupt while the job runs cancels the job on the daemon, once, and
 /// the call ends refused: nothing is saved after the user left.
 #[tokio::test]

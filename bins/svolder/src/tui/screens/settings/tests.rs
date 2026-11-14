@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use svolder_ipc::config::TOOLTIPS;
 use svolder_ipc::{
     ColorDepth, GraphSpan, LinkSpan, TUI_SETTINGS, Transition, TuiConfig, TuiSettingKind, TuiValue,
 };
@@ -448,6 +449,7 @@ fn config_lines_write_the_table_key_and_value() {
         "[tui] colors = \"auto\""
     );
     assert_eq!(config_line(Setting::Mouse, &tui), "[tui] mouse = true");
+    assert_eq!(config_line(key("tooltips"), &tui), "[tui] tooltips = true");
     assert_eq!(config_line(key("intro"), &tui), "[tui] intro = true");
     assert_eq!(
         config_line(key("intro_sound"), &tui),
@@ -475,12 +477,12 @@ fn config_lines_write_the_table_key_and_value() {
     );
 }
 
-/// The categories group the 31 `[tui]` rows, the AutoEq refresh and the 12 Connect rows, each
+/// The categories group the 33 `[tui]` rows, the AutoEq refresh and the 13 Connect rows, each
 /// once, and every row has an explanation that with its config line fits the box at 80×24.
 #[test]
 fn every_setting_is_in_one_category_and_its_explanation_fits_the_box() {
     let all = every_setting();
-    assert_eq!(all.len(), 44);
+    assert_eq!(all.len(), 47);
     for (at, setting) in all.iter().enumerate() {
         assert!(
             !all[at + 1..].contains(setting),
@@ -1296,6 +1298,28 @@ fn the_list_fade_row_sits_after_peak_hold_and_flips() {
     );
 }
 
+/// The Behaviour category lists `Tooltips` after `Mouse capture`, and Space flips it.
+#[test]
+fn the_tooltips_row_sits_after_mouse_capture_and_flips() {
+    let behaviour = rows(2);
+    let mouse = behaviour
+        .iter()
+        .position(|row| *row == Setting::Mouse)
+        .unwrap();
+    let row = behaviour[mouse + 1];
+    assert_eq!(row.label(), "Tooltips");
+    let mut app = app();
+    select(&mut app, row);
+    assert_eq!(row.value(&app), "on");
+    assert_eq!(
+        press(&mut app, KeyCode::Char(' ')),
+        vec![Intent::Tui(TuiChange::Set(
+            &TOOLTIPS,
+            TuiValue::Bool(false)
+        ))]
+    );
+}
+
 /// The Effects category lists `Mascot` after `List fade`, among the indented switches the master
 /// turns off, and Space flips it.
 #[test]
@@ -1530,9 +1554,9 @@ const CONNECT_MOCKUP: [&str; 22] = [
     "│   MQTT broker host      not set           │  reaches, a link or a pairing    │",
     "│   MQTT broker port      1883              │  code to sign a browser in, and  │",
     "│   MQTT commands         read-only         │  its token.                      │",
-    "│   MQTT password         not set           │                                  │",
-    "│   MQTT status           off               │  [web] enabled = false, listen   │",
-    "│                                           │  = \"127.0.0.1:8738\"              │",
+    "│   MQTT username         not set           │                                  │",
+    "│   MQTT password         not set           │  [web] enabled = false, listen   │",
+    "│   MQTT status           off               │  = \"127.0.0.1:8738\"              │",
     "│                                           │                                  │",
     "│                                           │                                  │",
     "│                                           │                                  │",
@@ -1659,32 +1683,6 @@ fn the_status_rows_say_what_the_daemon_answers() {
     app.session.daemon = false;
     assert_eq!(Setting::McpStatus.value(&app), "no daemon");
     assert_eq!(Setting::MqttStatus.value(&app), "no daemon");
-}
-
-/// The password shows as set or not set and nothing more: the view cannot hold it.
-#[test]
-fn the_password_row_says_set_or_not_set_and_never_the_password() {
-    let mut config = svolder_ipc::Config::parse(
-        "schema = 1\n[mqtt]\nhost = \"broker.example.com\"\npassword = \"fake-secret-pass\"\n",
-    )
-    .expect("the config parses");
-    let mut app = connect_app();
-    app.overlays.conn.load(&config);
-    select(&mut app, Setting::MqttPassword);
-    assert_eq!(Setting::MqttPassword.value(&app), "set");
-    assert!(!format!("{:?}", app.overlays.conn).contains("fake-secret"));
-    assert!(!shown(&app).contains("fake-secret"));
-    assert!(shown(&app).contains("SVOLDER_MQTT_PASSWORD"));
-
-    config.mqtt.password = None;
-    app.overlays.conn.load(&config);
-    if std::env::var_os("SVOLDER_MQTT_PASSWORD").is_none() {
-        assert_eq!(Setting::MqttPassword.value(&app), "not set");
-    }
-    assert!(
-        press(&mut app, KeyCode::Enter).is_empty(),
-        "the password row asked for a write"
-    );
 }
 
 /// Each switch turns the other way from what the file holds, on `Space` and on either arrow.
@@ -2432,11 +2430,58 @@ fn the_web_boxs_keys_ask_for_what_their_rows_change() {
     assert!(app.overlays.conn.modal.is_none());
 }
 
+/// The Guest view row reads `off` or `read-only` from `[web] guest`; `g` anywhere in the box, and
+/// Enter or an arrow on the row, ask to turn it the other way, refused as every row's write is
+/// when the daemon reads another file.
+#[test]
+fn the_guest_row_and_g_turn_the_guest_view() {
+    let mut app = web_box_app();
+    assert!(shown(&app).contains("Guest view    off"), "{}", shown(&app));
+    let on = vec![Intent::Connection(ConnChange::WebGuest(true))];
+    assert_eq!(press(&mut app, KeyCode::Char('g')), on);
+    // Down twice from Web UI is Guest view: Reach, then the row.
+    let _ = press(&mut app, KeyCode::Down);
+    let _ = press(&mut app, KeyCode::Down);
+    for key in [KeyCode::Enter, KeyCode::Left, KeyCode::Right] {
+        assert_eq!(press(&mut app, key), on, "{key:?}");
+    }
+    app.overlays.conn.web.guest = svolder_ipc::config::WebGuest::Read;
+    assert!(
+        shown(&app).contains("Guest view    read-only"),
+        "{}",
+        shown(&app)
+    );
+    let off = vec![Intent::Connection(ConnChange::WebGuest(false))];
+    assert_eq!(press(&mut app, KeyCode::Char('g')), off);
+    assert_eq!(press(&mut app, KeyCode::Enter), off);
+    app.overlays.conn.elsewhere = Some("/elsewhere/config.toml".into());
+    assert!(press(&mut app, KeyCode::Char('g')).is_empty());
+    assert!(app.toast().is_some(), "no word about the other file");
+}
+
+/// The two key lines hold `g` and still fit the box inside 80 columns.
+#[test]
+fn the_web_boxs_key_lines_name_g_and_fit() {
+    let app = web_box_app();
+    let rows = text(&frame(&app, 80, 24));
+    let keys: Vec<&String> = rows
+        .iter()
+        .filter(|r| r.contains("rows ·") || r.contains("closes"))
+        .collect();
+    assert_eq!(keys.len(), 2, "{rows:#?}");
+    assert!(keys.iter().any(|r| r.contains("g guest")), "{keys:?}");
+    for row in keys {
+        assert_eq!(row.chars().count(), 80, "{row}");
+        assert!(row.trim_end().ends_with('│'), "{row}");
+    }
+}
+
 /// Enter on the Link row asks for a link as `l` does, and on the Pairing code row for a code as
 /// `p` does.
 #[test]
 fn enter_on_the_link_and_pairing_rows_asks_as_l_and_p_do() {
     let mut app = web_box_app();
+    let _ = press(&mut app, KeyCode::Down);
     let _ = press(&mut app, KeyCode::Down);
     let _ = press(&mut app, KeyCode::Down);
     assert_eq!(press(&mut app, KeyCode::Enter), vec![Intent::WebLink]);
@@ -2644,6 +2689,200 @@ fn the_web_box_draws_the_links_qr_code_where_it_has_room() {
     let said = "a phone cannot reach this computer's loopback: choose your";
     assert!(shown.contains(said), "{shown}");
     assert_eq!(white_cells(&frame(&loopback, 120, 60)), 0);
+}
+
+/// The Web UI box on the network at `192.168.1.20`, with the guest view `guest`, a sign-in link on
+/// show when `link`; the guest page is known when the guest view is on.
+fn web_box_guest(guest: bool, link: bool) -> App {
+    let mut app = web_box_app();
+    app.overlays.conn.web.listen = "0.0.0.0:8738".parse().unwrap();
+    app.overlays.conn.web.enabled = true;
+    app.overlays.conn.web.guest = match guest {
+        true => svolder_ipc::config::WebGuest::Read,
+        false => svolder_ipc::config::WebGuest::None,
+    };
+    app.overlays.conn.web_status = Some(svolder_ipc::WebStatus::Listening {
+        listen: "0.0.0.0:8738".parse().unwrap(),
+        auth: svolder_ipc::config::WebAuth::Token,
+        writes: true,
+        guest: app.overlays.conn.web.guest,
+    });
+    let now = app.now;
+    if let Some(Modal::Web(web)) = app.overlays.conn.modal.as_mut() {
+        if link {
+            web.link = Some(crate::tui::boxes::web_box::Code {
+                text: "http://192.168.1.20:8738/#login=abcdefghijklmnop".into(),
+                until: now + std::time::Duration::from_secs(90),
+            });
+        }
+        let listen = "0.0.0.0:8738".parse().unwrap();
+        web.page = Some(Box::new(crate::tui::boxes::web_box::Page {
+            url: "http://192.168.1.20:8738/".into(),
+            local: false,
+            made_for: (listen, listen),
+        }));
+    }
+    app
+}
+
+/// The Web UI box as it draws at `width`×`height`: its rows from the top border to the bottom
+/// one, trailing blanks off, the box's own columns only.
+fn web_box_text(app: &App, width: u16, height: u16) -> String {
+    let rows = text(&frame(app, width, height));
+    let top = rows
+        .iter()
+        .position(|row| row.contains("┌ Web UI "))
+        .expect("the box is drawn");
+    let left = rows[top].chars().position(|c| c == '┌').unwrap();
+    let right = rows[top].chars().position(|c| c == '┐').unwrap();
+    let mut out = Vec::new();
+    for row in &rows[top..] {
+        let cells: String = row.chars().skip(left).take(right + 1 - left).collect();
+        out.push(cells.trim_end().to_string());
+        if cells.starts_with('└') {
+            break;
+        }
+    }
+    out.join("\n")
+}
+
+/// The box at 80, 120 and 200 columns with the guest view off, on alone and on beside a sign-in
+/// link, and on a loopback listen, as `web_box.golden` holds them. A change to the box shows in
+/// the golden as a diff.
+fn web_box_golden_text() -> String {
+    let mut out = String::new();
+    for (width, height) in [(80, 70), (120, 46), (200, 46)] {
+        for (name, app) in [
+            ("guest off, sign-in link", web_box_guest(false, true)),
+            ("guest on alone", web_box_guest(true, false)),
+            ("guest on, sign-in link", web_box_guest(true, true)),
+        ] {
+            out.push_str(&format!("=== {width} columns: {name}\n"));
+            out.push_str(&web_box_text(&app, width, height));
+            out.push('\n');
+        }
+    }
+    let mut loopback = web_box_guest(true, true);
+    loopback.overlays.conn.web.listen = "127.0.0.1:8738".parse().unwrap();
+    out.push_str("=== 120 columns: loopback\n");
+    out.push_str(&web_box_text(&loopback, 120, 46));
+    out.push('\n');
+    out
+}
+
+#[test]
+fn the_web_box_is_the_golden_box() {
+    assert_eq!(web_box_golden_text(), include_str!("web_box.golden"));
+}
+
+/// Both codes side by side where the box can be that wide, stacked where it cannot, the words
+/// that say to widen where neither fits; each has its caption; the guest code shows with no
+/// sign-in link, and the sign-in code is not drawn without one; a guest view that is off draws
+/// no guest code.
+#[test]
+fn the_guest_qr_sits_beside_or_under_the_sign_in_qr() {
+    let both = web_box_guest(true, true);
+    let wide = text(&frame(&both, 200, 46)).join("\n");
+    assert!(wide.contains("sign in"), "{wide}");
+    assert!(
+        wide.contains("guest: read-only, anyone on your network"),
+        "{wide}"
+    );
+    let caption_row =
+        |rows: &str, needle: &str| rows.lines().position(|row| row.contains(needle)).unwrap();
+    assert_eq!(
+        caption_row(&wide, "sign in"),
+        caption_row(&wide, "guest: read-only"),
+        "side by side: one caption row"
+    );
+    let stacked = text(&frame(&both, 80, 70)).join("\n");
+    assert!(
+        caption_row(&stacked, "sign in") < caption_row(&stacked, "guest: read-only"),
+        "{stacked}"
+    );
+    let words = text(&frame(&both, 80, 30)).join("\n");
+    assert!(
+        words.contains("widen the terminal to see the QR code"),
+        "{words}"
+    );
+    assert_eq!(white_cells(&frame(&both, 80, 30)), 0);
+
+    let alone = text(&frame(&web_box_guest(true, false), 120, 46)).join("\n");
+    assert!(alone.contains("guest: read-only"), "{alone}");
+    assert!(!alone.contains("sign in"), "{alone}");
+    let off = text(&frame(&web_box_guest(false, true), 120, 46)).join("\n");
+    assert!(
+        off.contains("sign in") && !off.contains("guest: read-only"),
+        "{off}"
+    );
+    // The web server off: no page to open.
+    let mut down = web_box_guest(true, false);
+    down.overlays.conn.web_status = Some(svolder_ipc::WebStatus::Off);
+    assert_eq!(white_cells(&frame(&down, 120, 46)), 0);
+}
+
+/// The guest code follows the running daemon's status, not the file: a file edited to `read`
+/// with no reload draws none, a daemon serving guests while the file says `none` draws one, and
+/// under `auth = "none"` there is no code and one line says why.
+#[test]
+fn the_guest_qr_follows_the_daemons_status_and_not_the_file() {
+    let guest_status = |app: &mut App, guest, auth| {
+        app.overlays.conn.web_status = Some(svolder_ipc::WebStatus::Listening {
+            listen: "0.0.0.0:8738".parse().unwrap(),
+            auth,
+            writes: true,
+            guest,
+        });
+    };
+    use svolder_ipc::config::{WebAuth, WebGuest};
+    let mut edited = web_box_guest(true, false);
+    guest_status(&mut edited, WebGuest::None, WebAuth::Token);
+    let rows = text(&frame(&edited, 120, 46)).join("\n");
+    assert!(!rows.contains("guest: read-only"), "{rows}");
+    assert_eq!(white_cells(&frame(&edited, 120, 46)), 0);
+    let mut serving = web_box_guest(false, false);
+    guest_status(&mut serving, WebGuest::Read, WebAuth::Token);
+    let rows = text(&frame(&serving, 120, 46)).join("\n");
+    assert!(rows.contains("guest: read-only"), "{rows}");
+    let mut open = web_box_guest(true, true);
+    guest_status(&mut open, WebGuest::Read, WebAuth::None);
+    let rows = text(&frame(&open, 120, 46)).join("\n");
+    assert!(!rows.contains("guest: read-only"), "{rows}");
+    assert!(rows.contains("sign in"), "the sign-in code stays: {rows}");
+    assert!(rows.contains("no guest view: auth is none"), "{rows}");
+}
+
+/// The words for a loopback listen or a base no phone reaches come once, not once for each
+/// code.
+#[test]
+fn the_reach_words_come_once_for_both_codes() {
+    let mut loopback = web_box_guest(true, true);
+    loopback.overlays.conn.web.listen = "127.0.0.1:8738".parse().unwrap();
+    let rows = text(&frame(&loopback, 120, 46)).join("\n");
+    assert_eq!(rows.matches("a phone cannot reach").count(), 1, "{rows}");
+    assert_eq!(white_cells(&frame(&loopback, 120, 46)), 0);
+    // One line of words does not widen the box for two codes it does not draw.
+    assert!(
+        web_box_text(&loopback, 200, 46)
+            .lines()
+            .next()
+            .unwrap()
+            .chars()
+            .count()
+            <= 64
+    );
+    let mut local = web_box_guest(true, true);
+    if let Some(Modal::Web(web)) = local.overlays.conn.modal.as_mut() {
+        web.link_local = true;
+        web.page.as_mut().unwrap().local = true;
+    }
+    let rows = text(&frame(&local, 120, 46)).join("\n");
+    assert_eq!(
+        rows.matches("a phone cannot open this link").count(),
+        1,
+        "{rows}"
+    );
+    assert_eq!(white_cells(&frame(&local, 120, 46)), 0);
 }
 
 /// A pairing code shows in two threes with its countdown, and with it the way round a code the
@@ -2916,4 +3155,263 @@ fn a_changed_config_is_a_line_on_every_connect_row() {
             "{setting:?}"
         );
     }
+}
+
+/// A config with the broker's host and, as asked, a username and a password.
+fn mqtt_config(username: Option<&str>, password: Option<&str>) -> svolder_ipc::Config {
+    let mut text = "schema = 1\n[mqtt]\nhost = \"broker.example.com\"\n".to_string();
+    if let Some(username) = username {
+        text.push_str(&format!("username = \"{username}\"\n"));
+    }
+    if let Some(password) = password {
+        text.push_str(&format!("password = \"{password}\"\n"));
+    }
+    svolder_ipc::Config::parse(&text).expect("the config parses")
+}
+
+/// The username row says the name or `not set`; Enter types it, on what the file holds, and an
+/// empty line takes it away.
+#[test]
+fn the_username_row_types_the_name_and_an_empty_line_clears_it() {
+    let mut app = connect_app();
+    select(&mut app, Setting::MqttUsername);
+    assert_eq!(Setting::MqttUsername.value(&app), "not set");
+    assert_eq!(Setting::MqttUsername.label(), "MQTT username");
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
+    assert!(shown(&app).contains("MQTT username"), "{}", shown(&app));
+    type_text(&mut app, "svolder");
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        vec![Intent::Connection(ConnChange::MqttUsername(Some(
+            "svolder".into()
+        )))]
+    );
+
+    app.overlays
+        .conn
+        .load_with(&mqtt_config(Some("svolder"), None), false);
+    assert_eq!(Setting::MqttUsername.value(&app), "svolder");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.overlays.conn.modal,
+        Some(Modal::Editing(Line {
+            field: Field::Username,
+            text: "svolder".into(),
+            caret: 7
+        }))
+    );
+    for _ in 0..7 {
+        press(&mut app, KeyCode::Backspace);
+    }
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        vec![Intent::Connection(ConnChange::MqttUsername(None))]
+    );
+    // An unchanged name asks for nothing.
+    press(&mut app, KeyCode::Enter);
+    for _ in 0..7 {
+        press(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "svolder");
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
+}
+
+/// The password row says set, not set, set but not sent for want of a username, or that the
+/// environment's variable wins; the view cannot hold the password.
+#[test]
+fn the_password_row_says_how_it_stands() {
+    let mut app = connect_app();
+    let load = |app: &mut App, config: &svolder_ipc::Config, env: bool| {
+        app.overlays.conn.load_with(config, env);
+        Setting::MqttPassword.value(app)
+    };
+    assert_eq!(load(&mut app, &mqtt_config(None, None), false), "not set");
+    assert_eq!(
+        load(
+            &mut app,
+            &mqtt_config(Some("u"), Some("fake-secret")),
+            false
+        ),
+        "set"
+    );
+    assert_eq!(
+        load(&mut app, &mqtt_config(None, Some("fake-secret")), false),
+        "set — not sent: no username"
+    );
+    assert_eq!(
+        load(&mut app, &mqtt_config(Some("u"), Some("fake-secret")), true),
+        "from SVOLDER_MQTT_PASSWORD"
+    );
+    assert_eq!(
+        load(&mut app, &mqtt_config(Some("u"), None), true),
+        "from SVOLDER_MQTT_PASSWORD"
+    );
+    assert_eq!(
+        load(&mut app, &mqtt_config(None, None), true),
+        "from SVOLDER_MQTT_PASSWORD — not sent: no username"
+    );
+    assert!(!format!("{:?}", app.overlays.conn).contains("fake-secret"));
+    select(&mut app, Setting::MqttPassword);
+    assert!(
+        right_words(&app).contains("SVOLDER_MQTT_PASSWORD"),
+        "{}",
+        right_words(&app)
+    );
+}
+
+/// The password is typed on an empty line, masked while typed, shown with Tab, saved as one
+/// change whose `Debug` hides it, and an empty line clears a password that is set.
+#[test]
+fn the_password_is_typed_masked_shown_with_tab_and_never_read_back() {
+    let mut app = connect_app();
+    app.overlays
+        .conn
+        .load_with(&mqtt_config(Some("u"), Some("fake-secret")), false);
+    select(&mut app, Setting::MqttPassword);
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
+    assert_eq!(
+        app.overlays.conn.modal,
+        Some(Modal::Editing(Line {
+            field: Field::Password,
+            text: String::new(),
+            caret: 0
+        })),
+        "the line starts empty, the password is not read back"
+    );
+    type_text(&mut app, "hunter2");
+    let masked = shown(&app);
+    assert!(!masked.contains("hunter2"), "{masked}");
+    assert!(masked.contains("•••••••"), "{masked}");
+    assert!(
+        !format!("{:?}", app.overlays.conn).contains("hunter2"),
+        "the modal's Debug hides the password"
+    );
+    press(&mut app, KeyCode::Tab);
+    assert!(shown(&app).contains("hunter2"), "{}", shown(&app));
+    press(&mut app, KeyCode::Tab);
+    assert!(!shown(&app).contains("hunter2"));
+    let saved = press(&mut app, KeyCode::Enter);
+    assert_eq!(
+        saved,
+        vec![Intent::Connection(ConnChange::MqttPassword(Some(
+            "hunter2".to_string().into()
+        )))]
+    );
+    assert!(!format!("{saved:?}").contains("hunter2"));
+    assert!(app.overlays.conn.modal.is_none());
+
+    // An empty line keeps a password that is in the file; Delete twice clears it.
+    press(&mut app, KeyCode::Enter);
+    assert!(press(&mut app, KeyCode::Enter).is_empty());
+    let toast = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+    assert!(toast.contains("unchanged"), "{toast}");
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        press(&mut app, KeyCode::Delete).is_empty(),
+        "one Delete only asks"
+    );
+    assert!(app.overlays.conn.modal.is_some());
+    press(&mut app, KeyCode::Char('x'));
+    assert!(
+        press(&mut app, KeyCode::Delete).is_empty(),
+        "a key between takes the ask back"
+    );
+    assert_eq!(
+        press(&mut app, KeyCode::Delete),
+        vec![Intent::Connection(ConnChange::MqttPassword(None))]
+    );
+    assert!(app.overlays.conn.modal.is_none());
+    // Esc keeps it as it was.
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "typed");
+    assert!(press(&mut app, KeyCode::Esc).is_empty());
+    assert!(app.overlays.conn.modal.is_none());
+}
+
+/// An empty line with no password in the file has nothing to clear, and says so; a password
+/// saved with no username, or with the variable set, says what keeps it from being used.
+#[test]
+fn saving_a_password_says_what_would_keep_it_from_being_used() {
+    let mut app = connect_app();
+    app.overlays.conn.load_with(&mqtt_config(None, None), false);
+    select(&mut app, Setting::MqttPassword);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Delete);
+    assert!(press(&mut app, KeyCode::Delete).is_empty());
+    let toast = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+    assert!(toast.contains("no password"), "{toast}");
+
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "hunter2");
+    assert_eq!(press(&mut app, KeyCode::Enter).len(), 1);
+    let toast = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+    assert!(toast.contains("no username"), "{toast}");
+    assert!(!toast.contains("hunter2"));
+
+    app.overlays
+        .conn
+        .load_with(&mqtt_config(Some("u"), None), true);
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "hunter2");
+    assert_eq!(press(&mut app, KeyCode::Enter).len(), 1);
+    let toast = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+    assert!(toast.contains("SVOLDER_MQTT_PASSWORD"), "{toast}");
+}
+
+/// The status row says why the bridge is not connected, in the words the CLI uses.
+#[test]
+fn the_mqtt_status_row_says_the_trouble_in_words() {
+    use svolder_ipc::MqttProblem;
+    let mut app = connect_app();
+    select(&mut app, Setting::MqttStatus);
+    for (problem, port, word, line) in [
+        (
+            MqttProblem::Refused,
+            1883,
+            "login refused",
+            "the broker refused the login (check username and password)",
+        ),
+        (
+            MqttProblem::Unreachable,
+            1883,
+            "not reachable",
+            "not reachable",
+        ),
+        (
+            MqttProblem::Tls,
+            8883,
+            "TLS port",
+            "port 8883 is TLS, which svolder does not speak",
+        ),
+    ] {
+        app.overlays.conn.mqtt_status = Some(MqttStatus::Trouble {
+            host: "ha.lan".into(),
+            port,
+            problem,
+            retry_in_secs: Some(4),
+        });
+        assert_eq!(Setting::MqttStatus.value(&app), word);
+        assert!(right_words(&app).contains(line), "{}", right_words(&app));
+    }
+}
+
+/// Clearing a username the environment also gives says why it comes back.
+#[test]
+fn clearing_a_username_the_environment_gives_says_so() {
+    let mut app = connect_app();
+    app.overlays
+        .conn
+        .load_with(&mqtt_config(Some("svolder"), None), false);
+    app.overlays.conn.mqtt.username_in_env = true;
+    select(&mut app, Setting::MqttUsername);
+    press(&mut app, KeyCode::Enter);
+    for _ in 0..7 {
+        press(&mut app, KeyCode::Backspace);
+    }
+    assert_eq!(
+        press(&mut app, KeyCode::Enter),
+        vec![Intent::Connection(ConnChange::MqttUsername(None))]
+    );
+    let toast = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+    assert!(toast.contains("SVOLDER_MQTT_USERNAME"), "{toast}");
 }

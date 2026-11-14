@@ -28,7 +28,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use super::parse::PALETTES;
-use super::{ColorDepth, GraphSpan, IntroEffect, LinkSpan, Transition, TuiConfig};
+use super::{ColorDepth, CoverArt, GraphSpan, IntroEffect, LinkSpan, Transition, TuiConfig};
 
 /// One plain key of the `[tui]` table: how it is written, what the template says about it, and
 /// how the Settings box names and explains it.
@@ -179,7 +179,7 @@ const ACCENT_TEXT: &str =
 /// `accent`: one accent for every device family at once.
 ///
 /// Its label and help are shown nowhere: the Settings box has one accent row per family.
-pub static ACCENT: TuiSetting = TuiSetting {
+static ACCENT: TuiSetting = TuiSetting {
     key: "accent",
     label: "Accent",
     help: text!(ACCENT_TEXT),
@@ -248,6 +248,18 @@ pub static MOUSE: TuiSetting = TuiSetting {
     ),
     template: text!("Whether mouse capture starts on."),
     kind: switch!(mouse),
+};
+
+/// `tooltips`: whether a resting pointer shows a one-line tip.
+pub static TOOLTIPS: TuiSetting = TuiSetting {
+    key: "tooltips",
+    label: "Tooltips",
+    help: text!(
+        "Whether a pointer resting on a key word, a row or a control for a moment shows a tip \
+         saying what it is and how to use it. It needs mouse capture on."
+    ),
+    template: text!("Whether a pointer resting on a target shows a one-line tip."),
+    kind: switch!(tooltips),
 };
 
 /// `intro`: whether the wordmark intro plays while the device opens.
@@ -371,6 +383,32 @@ pub static VISUALIZER: TuiSetting = TuiSetting {
     kind: switch!(visualizer),
 };
 
+/// `cover_art`: whether the Now playing row shows the track's cover art.
+pub static COVER_ART: TuiSetting = TuiSetting {
+    key: "cover_art",
+    label: "Cover art",
+    help: text!(
+        "Whether the Now playing row shows the track's cover art, from the daemon. auto draws \
+         it as the terminal allows (the kitty graphics protocol, else sixel, else half-block \
+         cells); off draws none and asks the terminal nothing. The terminal is asked once, as \
+         the TUI starts: auto turned on later draws half-block cells until the next start."
+    ),
+    template: text!(
+        "Whether the Now playing row shows the track's cover art: auto (the best the terminal draws) or off."
+    ),
+    kind: TuiSettingKind::Word {
+        get: |tui| tui.cover_art.name(),
+        set: |tui, word| match CoverArt::named(word) {
+            Some(art) => {
+                tui.cover_art = art;
+                true
+            }
+            None => false,
+        },
+        words: || CoverArt::ALL.map(CoverArt::name).to_vec(),
+    },
+};
+
 /// `graphs`: whether the screens draw their graphs.
 pub static GRAPHS: TuiSetting = TuiSetting {
     key: "graphs",
@@ -441,13 +479,14 @@ pub static LINK_SPAN: TuiSetting = TuiSetting {
 
 /// Every plain key of the `[tui]` table, in the order the template lists them and the writer
 /// appends them.
-pub static TUI_SETTINGS: [&TuiSetting; 17] = [
+pub static TUI_SETTINGS: [&TuiSetting; 19] = [
     &PALETTE,
     &ACCENT,
     &COLORS,
     &MONOCHROME,
     &THEME_BACKGROUND,
     &MOUSE,
+    &TOOLTIPS,
     &INTRO,
     &INTRO_EFFECT,
     &INTRO_SOUND,
@@ -456,6 +495,7 @@ pub static TUI_SETTINGS: [&TuiSetting; 17] = [
     &CONFIRM_QUIT,
     &HOST_AUDIO,
     &VISUALIZER,
+    &COVER_ART,
     &GRAPHS,
     &GRAPH_SPAN,
     &LINK_SPAN,

@@ -19,7 +19,7 @@ pub enum IpcError {
     /// The peer sent something the protocol does not allow.
     #[error("protocol: {0}")]
     Protocol(String),
-    /// The peer's line ran past [`crate::socket::lines::MAX_LINE`] bytes without ending.
+    /// The peer's line ran past `MAX_LINE` bytes without ending.
     #[error(
         "the daemon's reply line is longer than {} bytes",
         crate::socket::lines::MAX_LINE

@@ -90,6 +90,13 @@ const FAKE_SINK_NODE: &str = "alsa_output.usb-Schiit_Audio_Fake-00.analog-stereo
 /// The picture the fake player's cover is.
 const BUNDLED_COVER: &[u8] = include_bytes!("../web/icon-192.png");
 
+/// The cover of the fake player's second track, and the picture that is.
+const FAKE_NEXT_ART_URL: &str = "file:///svolder-fake/cover-next.png";
+const NEXT_COVER: &[u8] = include_bytes!("../web/icon-512.png");
+
+/// The title of the fake player's second track.
+const NEXT_TITLE: &str = "Second Pressing";
+
 /// How many frames a page may fall behind before the oldest are skipped: about a quarter of a
 /// second at 30 frames a second.
 const FRAMES_BACKLOG: usize = 8;
@@ -247,6 +254,9 @@ pub(crate) struct FakeKnobs {
     pub(crate) cover_gone_file: Option<std::path::PathBuf>,
     /// A path: the fake player quits the moment a file appears there.
     pub(crate) player_gone_file: Option<std::path::PathBuf>,
+    /// A path: the fake player moves to a second track, with a second cover, the moment a file
+    /// appears there.
+    pub(crate) cover_next_file: Option<std::path::PathBuf>,
     /// The display name of the fake device, which the fake route's sink is named for.
     pub(crate) display: String,
     /// Whether the fake route changes the signal in every way it can: a quieter player, a
@@ -281,6 +291,7 @@ impl Default for FakeKnobs {
             player_gone_after: None,
             cover_gone_file: None,
             player_gone_file: None,
+            cover_next_file: None,
             display: "Gungnir 2".to_string(),
             route_changed: false,
             capture_off: false,
@@ -299,8 +310,8 @@ impl FakeKnobs {
 
     /// The knobs `knob` answers by variable name: `SVOLDER_FAKE_COVER_GONE_AFTER_MS` and
     /// `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` in milliseconds (anything else is unset),
-    /// `SVOLDER_FAKE_COVER_GONE_FILE` and `SVOLDER_FAKE_PLAYER_GONE_FILE` as paths (unset when
-    /// empty),
+    /// `SVOLDER_FAKE_COVER_GONE_FILE`, `SVOLDER_FAKE_COVER_NEXT_FILE` and
+    /// `SVOLDER_FAKE_PLAYER_GONE_FILE` as paths (unset when empty),
     /// `SVOLDER_FAKE_ROUTE=changed` for the route that alters the signal,
     /// `SVOLDER_FAKE_CAPTURE=off` for a host with no capture, `SVOLDER_FAKE_TITLE` for the
     /// fake track's title (unset when empty), `SVOLDER_FAKE_HOST_EQ` as `release` for an EQ whose
@@ -322,6 +333,7 @@ impl FakeKnobs {
             player_gone_after: millis("SVOLDER_FAKE_PLAYER_GONE_AFTER_MS"),
             cover_gone_file: path("SVOLDER_FAKE_COVER_GONE_FILE"),
             player_gone_file: path("SVOLDER_FAKE_PLAYER_GONE_FILE"),
+            cover_next_file: path("SVOLDER_FAKE_COVER_NEXT_FILE"),
             route_changed: knob("SVOLDER_FAKE_ROUTE")
                 .is_some_and(|route| route.trim().eq_ignore_ascii_case("changed")),
             capture_off: knob("SVOLDER_FAKE_CAPTURE")
@@ -391,6 +403,20 @@ impl Parts {
                 drop_cover();
             }));
         }
+        if let Some(path) = knobs.cover_next_file {
+            let players = players.clone();
+            helpers.push(tokio::spawn(async move {
+                wait_for_file(&path).await;
+                if let Some(now) = players.now_playing() {
+                    players.set(Some(NowPlaying {
+                        title: NEXT_TITLE.to_string(),
+                        art_url: Some(FAKE_NEXT_ART_URL.to_string()),
+                        track_id: Some("/org/svolder/fake/track/2".to_string()),
+                        ..now
+                    }));
+                }
+            }));
+        }
         if let Some(after) = knobs.player_gone_after {
             let players = players.clone();
             helpers.push(tokio::spawn(async move {
@@ -430,8 +456,13 @@ impl Parts {
                 computer: Some(Arc::clone(&computer)),
             })),
             covers: Arc::new(|url| {
-                (url == FAKE_ART_URL).then(|| Cover {
-                    bytes: BUNDLED_COVER.to_vec(),
+                let bytes = match url {
+                    FAKE_ART_URL => BUNDLED_COVER,
+                    FAKE_NEXT_ART_URL => NEXT_COVER,
+                    _ => return None,
+                };
+                Some(Cover {
+                    bytes: bytes.to_vec(),
                     mime: "image/png",
                 })
             }),
@@ -617,7 +648,7 @@ struct Shared {
     /// The computer's volume and EQ, while a run has them.
     computer: Mutex<Option<Arc<Computer>>>,
     /// The current cover and its hash.
-    cover: Mutex<Option<(String, Cover)>>,
+    cover: Mutex<Option<(String, Arc<Cover>)>>,
     /// Which run is the current one. Halting moves it on, and a task of an earlier run, which
     /// may get one more step in before it is ended, changes nothing (see [`Shared::current`]).
     generation: Mutex<u64>,
@@ -962,11 +993,12 @@ impl HostService {
     }
 
     /// The current cover, when `hash` is its hash; never an earlier one.
-    pub(crate) fn cover(&self, hash: &str) -> Option<Cover> {
+    /// The picture is shared, so a caller slices it outside the lock without a copy.
+    pub(crate) fn cover(&self, hash: &str) -> Option<Arc<Cover>> {
         locked(&self.shared.cover)
             .as_ref()
             .filter(|(current, _)| current == hash)
-            .map(|(_, cover)| cover.clone())
+            .map(|(_, cover)| Arc::clone(cover))
     }
 
     /// How many [`Watcher`]s are held now.
@@ -1436,7 +1468,7 @@ async fn serve(
             found = finished_cover(&mut state.covering), if state.covering.is_some() => {
                 if let Some((hash, cover)) = state.took_cover(found) {
                     shared.current(generation, || {
-                        *locked(&shared.cover) = Some((hash, cover));
+                        *locked(&shared.cover) = Some((hash, Arc::new(cover)));
                         publish(shared, state.view());
                     });
                 } else {

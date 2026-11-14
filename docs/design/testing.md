@@ -17,12 +17,14 @@ live" lists where each module's tests are.
   denied, the safety list, the documentation check, dependency licences, source headers, the
   network boundary, the build-deps self-test and every test. Run it before every commit meant to
   stay and before a merge.
-- **`make test`**: the workspace's tests alone, in a scratch environment. Run it while iterating on
-  Rust.
+- **`make test`**: the workspace's tests alone, in a scratch environment; run it while iterating.
 - **`make safety-tests`**: every test the safety list names still exists. Run it after touching a
   listed test file; it is part of `make check`.
 - **`make docs-check`**: links, anchors, process tags, code spans that name repo paths and page
   sizes (below). Run it after editing any Markdown; it is part of `make check`.
+- **`make tui-harness`**: the real `svolder tui --demo` in a pseudo-terminal, read through a screen
+  parser: start-up bytes, the Web UI box, the mouse, a resize, quit. About 5 s, opt-in; run it
+  after a change to the TUI's terminal handling or loop. See [the harness](tui-pty-harness.md).
 - **`make web-checks-task`**: the quick gate with the logic-only checks in Chromium only; the
   rung for a task or a lane end (the ladder is in the web checks' README).
 - **`make web-checks-quick`**: the node harnesses, the browser checks that leave the smoke alone
@@ -45,8 +47,8 @@ live" lists where each module's tests are.
   a bypass cannot pass for a boost (no gap, no click, the preamp at or under unity), a move, a
   live type change from a peak to a low shelf, a forced sample-rate change followed by the
   controller sending every slot again, Off, the volume and mute, and the daemon ending with its
-  chain. It prints `host-e2e: PASS`. Run it after a change to the computer
-  EQ, its chain or the daemon's computer side; it is opt-in and not part of `make check`.
+  chain. It prints `host-e2e: PASS`. Run it after a change to the computer EQ, its chain or the
+  daemon's computer side; it is opt-in and not part of `make check`.
 - **`make preamp-lab`**: the computer EQ's preamp lab, the long run (`SEED` is the first seed and
   `RUNS` how many of each profile; 5000 by default). The controller is driven through
   seeded random sequences of hand edits, preset loads, command-line applies, node restarts, rate
@@ -93,10 +95,9 @@ database to `~/.cargo/advisory-db`, and is not part of `make check`.
 ### The minimum-compiler job
 
 `Cargo.toml` promises `rust-version = "1.93"`, and the local `make check` runs on it. CI's `test`
-job in `check.yml` runs `make check` on Rust 1.99.1, the compiler the release builds use. Its
+job in `check.yml` runs `make check` on Rust 1.100.0, the compiler the release builds use. Its
 `minimum` job runs `make test` on 1.93.1: it proves the workspace builds and its tests pass on the
-minimum compiler, with every feature on. It runs no lints, since clippy's lint set moves with the
-compiler.
+minimum compiler, with every feature on. It runs no lints: clippy's lints move with the compiler.
 
 ## The fake device and the transport
 
@@ -134,8 +135,7 @@ of their own, touching nothing of the user's; the daemon's host is the fake one
 (`SVOLDER_HOST=fake`), so the demo's web page shows a Now playing card, and the TUI's own host is
 off. `--host` (which `make demo` adds, with `--web`) leaves the host on instead: the user's real
 volume, player and computer EQ, which no test ever runs with.
-`bins/svolder/tests/demo.rs` proves every way the TUI can end leaves neither the daemon nor the
-directory behind.
+`bins/svolder/tests/demo.rs` proves every way the TUI can end leaves neither daemon nor directory.
 
 ## The simulator
 
@@ -390,8 +390,8 @@ compared with what the binary draws and prints; a doc that drifts fails a test.
 - The safety list: `scripts/safety-tests.list`; the documentation check: `scripts/docs-check.py`.
 - The web checks: `scripts/web-checks/`.
 - The programs' tests that run built binaries against the fake: `bins/svolder/tests/` and
-  `bins/svolderd/tests/`; the helper that spawns the daemon is
-  `bins/svolder/tests/common/mod.rs`.
+  `bins/svolderd/tests/`; the helper that spawns the daemon is `bins/svolder/tests/common/mod.rs`.
+  The TUI in a pty: `bins/svolder/tests/tui_pty/`, with [its page](tui-pty-harness.md).
 - The one way a test writes a script it then runs: `install_script` in
   `crates/svolder-host/tests/common/script.rs`, included by each crate whose tests stand a program
   in for a real one. A `sh` writes the file, so no thread of the test process holds it open when

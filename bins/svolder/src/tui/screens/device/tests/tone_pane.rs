@@ -37,7 +37,7 @@ fn the_tone_pane_dims_its_bands_outside_eq_mode_and_says_why() {
             }
         }
         // Band 3's row, which the cursor is not on: its frequency's first digit.
-        let cell = buffer.cell((47, 10)).expect("a band cell");
+        let cell = buffer.cell((49, 10)).expect("a band cell");
         assert_eq!(cell.symbol(), "6", "mode {mode}");
         assert_eq!(
             cell.modifier.contains(Modifier::DIM),
@@ -162,7 +162,7 @@ fn preset_after_label(app: &App, width: usize) -> String {
         .clone()
         .expect("the profile has a tone control");
     let theme = truecolour_theme();
-    let line = tone_lines(app, &eq, &theme, width, widgets::BAR_MAX).lines[2].clone();
+    let line = tone_lines(app, &eq, &theme, width).lines[2].clone();
     let row: String = line
         .spans
         .iter()
@@ -209,6 +209,6 @@ fn a_device_with_no_tone_control_has_a_blank_preset_line() {
         .take()
         .expect("the profile has a tone control");
     let theme = truecolour_theme();
-    let line = tone_lines(&app, &eq, &theme, 60, widgets::BAR_MAX).lines[2].clone();
+    let line = tone_lines(&app, &eq, &theme, 60).lines[2].clone();
     assert_eq!(line.spans.iter().map(Span::width).sum::<usize>(), 0);
 }

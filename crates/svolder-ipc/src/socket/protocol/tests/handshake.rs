@@ -58,7 +58,7 @@ fn an_older_front_end_reads_the_new_version_and_error_answers() {
     .unwrap();
     assert!(
         version.contains(
-            r#""features":["reasons","unknown_request_code","device_crud","server_switch","walk","autoeq"]"#
+            r#""features":["reasons","unknown_request_code","device_crud","server_switch","guest_switch","mqtt_set","walk","autoeq","host_cover","preset_write"]"#
         ),
         "{version}"
     );
@@ -167,8 +167,12 @@ fn the_daemon_lists_its_features_from_one_place() {
             FEATURE_UNKNOWN_REQUEST_CODE,
             FEATURE_DEVICE_CRUD,
             FEATURE_SERVER_SWITCH,
+            FEATURE_GUEST_SWITCH,
+            FEATURE_MQTT_SET,
             FEATURE_WALK,
-            FEATURE_AUTOEQ
+            FEATURE_AUTOEQ,
+            FEATURE_HOST_COVER,
+            FEATURE_PRESET_WRITE
         ]
     );
     assert_eq!(FEATURE_REASONS, "reasons");

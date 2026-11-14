@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { BANDS } from '../../../bins/svolderd/web/core/viz-model.js';
 import { drawRidge, drawRoad } from '../../../bins/svolderd/web/themes/nightdrive/draw/road.js';
+import { farRow } from '../../../bins/svolderd/web/themes/nightdrive/camera.js';
 import { drawWet, WET } from '../../../bins/svolderd/web/themes/nightdrive/draw/mood.js';
 import { drawSky } from '../../../bins/svolderd/web/themes/nightdrive/draw/sky.js';
 import { drawBubbles, drawDiamonds } from '../../../bins/svolderd/web/themes/nightdrive/draw/tune.js';
@@ -100,7 +101,7 @@ ok('the_wet_roads_slices_sway_as_one_wave', () => {
     const r = recorder();
     drawWet(r.g, source, geo, 1, t);
     const offsets = r.calls.filter((c) => c.op === 'drawImage').map((c) => c.args[5]);
-    assert.ok(offsets.length >= WET.slices - 2, `slices drawn: ${offsets.length}`);
+    assert.ok(offsets.length >= WET.slices - 4, `slices drawn: ${offsets.length}`);
     for (let k = 1; k < offsets.length; k++) {
       assert.ok(Math.abs(offsets[k] - offsets[k - 1]) < 1, `t ${t}: slices ${k - 1} and ${k} differ by ${offsets[k] - offsets[k - 1]}`);
     }
@@ -108,6 +109,30 @@ ok('the_wet_roads_slices_sway_as_one_wave', () => {
     const lean = Math.sign(offsets[offsets.length - 1]);
     assert.ok(offsets.every((x) => Math.sign(x) === lean || Math.abs(x) < 1e-9), `t ${t}: slices lean both ways`);
     assert.ok(Math.abs(offsets[offsets.length - 1]) >= Math.abs(offsets[0]), 'the sway grows with nearness');
+  }
+});
+
+ok('the_wet_road_lies_only_on_the_floor_grid_never_above_its_far_row', () => {
+  // the last is a phone held upright: the scene's height h is more than the picture's (geo.v)
+  for (const [w, h, Hh] of [[1280, 800, 448], [1920, 1080, 0.56 * 1080], [390, 844, 0.56 * 700]]) {
+    const geo = { w, h, H: Hh, dpr: 2 };
+    const source = { width: w * 2, height: Hh * 2 };
+    const yFar = farRow(h, Hh);
+    const r = recorder();
+    drawWet(r.g, source, geo, 1, 1);
+    const draws = r.calls.filter((c) => c.op === 'drawImage');
+    assert.ok(draws.length > 0, `${w}x${h}: something is drawn`);
+    for (const c of draws) assert.ok(c.args[6] >= yFar - 1e-6, `${w}x${h}: slice at ${c.args[6]} above the far row ${yFar}`);
+    // below the far row the reflection is neither rescaled nor moved: every slice keeps the scale `reach` and reads
+    // the source where the mirror puts it, the cut one included
+    const dh = (h - Hh) / WET.slices + 1;
+    for (const c of draws) {
+      assert.ok(Math.abs(c.args[4] / c.args[8] - WET.reach * 2) < 1e-9, `${w}x${h}: slice at ${c.args[6]} is rescaled`);
+      const want = Hh - (c.args[6] + c.args[8] - dh - Hh) * WET.reach;
+      assert.ok(Math.abs((c.args[2] + c.args[4]) / 2 - want) < 1e-9, `${w}x${h}: slice at ${c.args[6]} reads the source bottom ${(c.args[2] + c.args[4]) / 2}, not ${want}`);
+    }
+    const first = Math.min(...draws.map((c) => c.args[6]));
+    assert.ok(first < yFar + 1, `${w}x${h}: the reflection starts at the far row (${first} vs ${yFar})`);
   }
 });
 

@@ -19,6 +19,10 @@ export function project(w, h, H, x, z) {
   return [w / 2 + (x * w * CAMERA.spread) / d, H + (h - H) / d];
 }
 
+/** The scene's y of the floor's far row (its depth 0) in a scene `h` tall whose horizon is at `H`:
+ * the grid at rest starts here. */
+export const farRow = (h, H) => H + (h - H) / (1 + CAMERA.K);
+
 /** The horizon, as a fraction of the height the picture is composed in (the scene's, less what a phone's panel
  * covers of its foot). */
 export const horizonOf = () => 0.56;

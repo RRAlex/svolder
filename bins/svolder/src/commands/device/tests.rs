@@ -402,3 +402,173 @@ fn an_autoeq_refusal_for_a_missing_file_adds_no_step() {
     assert_eq!(failure.what, refused.message);
     assert_eq!(failure.next, "");
 }
+
+/// What the preset verbs write through: the daemon while one reads the file, with its words for
+/// a refusal; the file's own writer when none does or it reads another file; and nothing, in
+/// words, for a daemon that cannot take the op.
+mod preset_verbs {
+    use super::*;
+    use crate::test_support::stub_daemon::stub_daemon;
+    use std::path::PathBuf;
+    use svolder_ipc::{PresetOp, Reason, Response};
+
+    fn globals(socket: &str) -> Globals<'_> {
+        Globals {
+            transport: "auto",
+            adapter: None,
+            socket: Some(socket),
+            device: None,
+            verbose: false,
+        }
+    }
+
+    /// A config file of this test's own, in a folder removed when the returned guard drops.
+    fn scratch(tag: &str) -> (crate::test_support::TempDir, PathBuf) {
+        let dir = crate::test_support::temp_dir(&format!("pv-{tag}"));
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "schema = 1\n").expect("a config");
+        (dir, path)
+    }
+
+    fn preset(name: &str) -> svolder_profiles::tone::preset::Preset {
+        use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
+        svolder_profiles::tone::preset::from_computer(
+            name,
+            Correction {
+                preamp_db: -1.0,
+                filters: vec![SourceFilter {
+                    kind: FilterKind::Peaking,
+                    f: 500.0,
+                    g: 1.0,
+                    q: 1.0,
+                }],
+            },
+        )
+    }
+
+    fn save(name: &str) -> PresetOp {
+        PresetOp::Save {
+            preset: Box::new(preset(name)),
+            force: false,
+        }
+    }
+
+    fn names(path: &Path) -> Vec<String> {
+        Config::load_from(path)
+            .expect("the config loads")
+            .presets
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_daemon_that_reads_the_file_makes_the_write() {
+        let daemon = stub_daemon().await;
+        let (_dir, path) = scratch("through");
+        daemon.applies_preset_ops_to(&path);
+        daemon.says(None, path.to_str());
+        let socket = daemon.socket.display().to_string();
+        let config = Config::default();
+        write_preset(&globals(&socket), &config, &path, save("one"))
+            .await
+            .expect("the daemon writes");
+        let rename = PresetOp::Rename {
+            from: "one".into(),
+            to: "two".into(),
+        };
+        write_preset(&globals(&socket), &config, &path, rename)
+            .await
+            .expect("the daemon renames");
+        assert_eq!(names(&path), ["two"]);
+        assert_eq!(daemon.preset_ops().len(), 2, "both went to the daemon");
+    }
+
+    #[tokio::test]
+    async fn an_import_goes_through_the_daemon_that_reads_the_file() {
+        use svolder_profiles::tone::preset::Imported;
+        let daemon = stub_daemon().await;
+        let (_dir, path) = scratch("import");
+        daemon.applies_preset_ops_to(&path);
+        daemon.says(None, path.to_str());
+        let socket = daemon.socket.display().to_string();
+        let imported = Imported {
+            origin: None,
+            correction: preset("x").source.expect("a source").correction,
+        };
+        let code = super::presets::import_and_report(
+            &globals(&socket),
+            &Config::default(),
+            &path,
+            "one",
+            imported,
+            0,
+            false,
+        )
+        .await;
+        assert_eq!(code, std::process::ExitCode::SUCCESS);
+        assert_eq!(names(&path), ["one"]);
+        assert_eq!(daemon.preset_ops().len(), 1, "the daemon made the write");
+    }
+
+    #[tokio::test]
+    async fn a_daemon_that_reads_another_file_is_left_alone() {
+        let daemon = stub_daemon().await;
+        let (_dir, path) = scratch("other");
+        daemon.applies_preset_ops_to(&path);
+        daemon.says(None, Some("/elsewhere/config.toml"));
+        let socket = daemon.socket.display().to_string();
+        write_preset(&globals(&socket), &Config::default(), &path, save("one"))
+            .await
+            .expect("the file is written in process");
+        assert_eq!(names(&path), ["one"]);
+        assert!(daemon.preset_ops().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_daemon_that_cannot_take_the_op_is_refused_in_words_and_nothing_is_written() {
+        let daemon = stub_daemon().await;
+        let (_dir, path) = scratch("old");
+        daemon.lists_features(&["device_crud"]);
+        daemon.says(None, path.to_str());
+        let socket = daemon.socket.display().to_string();
+        let failure = write_preset(&globals(&socket), &Config::default(), &path, save("one"))
+            .await
+            .expect_err("an old daemon");
+        assert!(
+            failure.what.contains("cannot write presets"),
+            "{}",
+            failure.what
+        );
+        assert!(names(&path).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_taken_name_is_the_daemons_words() {
+        let daemon = stub_daemon().await;
+        let (_dir, path) = scratch("taken");
+        let words = svolder_profiles::tone::preset::new_name("one", ["One"], None)
+            .unwrap_err()
+            .to_string();
+        daemon.refuses_preset_ops(
+            Response::error(svolder_ipc::CODE_USAGE, words.clone()).with_reason(Reason::Taken),
+        );
+        daemon.says(None, path.to_str());
+        let socket = daemon.socket.display().to_string();
+        let failure = write_preset(&globals(&socket), &Config::default(), &path, save("one"))
+            .await
+            .expect_err("refused");
+        assert_eq!(failure.what, words);
+    }
+
+    #[tokio::test]
+    async fn with_no_daemon_the_file_is_written_in_process() {
+        let (_dir, path) = scratch("none");
+        let none = crate::test_support::stub_daemon::fresh_socket();
+        let socket = none.display().to_string();
+        write_preset(&globals(&socket), &Config::default(), &path, save("one"))
+            .await
+            .expect("in process");
+        assert_eq!(names(&path), ["one"]);
+    }
+}

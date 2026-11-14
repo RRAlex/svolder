@@ -22,6 +22,24 @@ fn press_through_daemon(watching: &mut Watching, button: svolder_host::Button) {
     }
 }
 
+/// Queue one write of the preset library for the job that carries it out.
+///
+/// A daemon that reads another file than this session edits would take the write into its own
+/// file and leave the list looking as if it were lost: it is refused in words, as the other
+/// configuration writes are.
+fn write_preset<O: Open>(opener: &Opener<O>, watching: &mut Watching, op: PresetOp) {
+    if let Some(words) = watching.app.overlays.conn.read_only() {
+        watching.app.warn(words);
+        return;
+    }
+    let socket = super::devices::daemon_socket(opener, watching);
+    watching.jobs.write_preset(jobs::PresetJob {
+        socket,
+        file: opener.path.clone(),
+        op,
+    });
+}
+
 /// Read the presets from the configuration file again, for the list that has just opened.
 fn read_presets<O: Open>(opener: &Opener<O>, watching: &mut Watching) {
     match Config::load_from(&opener.path) {
@@ -71,6 +89,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             send(let_go, &mut watching).await;
             let let_go = glide::capture_off(&mut watching.app);
             send(let_go, &mut watching).await;
+            divider::capture_off(&mut watching.app);
         }
         // The refresh applies whether or not it can be saved, as a `[tui]` change does.
         Intent::AutoEqRefresh(weeks) => {
@@ -140,23 +159,27 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             })
             .await;
         }
-        // The preset list writes the library into the file this session reads, and tells a
-        // daemon to read it again only when that daemon reads the same file.
+        // The preset list's writes are queued: the daemon writes the library while one runs, the
+        // file's own writer does when none does, and the loop is never held for either.
         Intent::SavePreset(preset) => {
-            let wrote = Config::add_preset(&opener.path, &preset);
-            written_preset(opener, &mut watching, wrote).await;
+            let op = PresetOp::Save {
+                preset: Box::new(preset),
+                force: false,
+            };
+            write_preset(opener, &mut watching, op);
         }
-        Intent::UpdatePreset(name, preset) => {
-            let wrote = Config::update_preset(&opener.path, &name, &preset);
-            written_preset(opener, &mut watching, wrote).await;
+        Intent::UpdatePreset(name, mut preset) => {
+            preset.name = name;
+            let op = PresetOp::Update {
+                preset: Box::new(preset),
+            };
+            write_preset(opener, &mut watching, op);
         }
-        Intent::RenamePreset(old, new) => {
-            let wrote = Config::rename_preset(&opener.path, &old, &new);
-            written_preset(opener, &mut watching, wrote).await;
+        Intent::RenamePreset(from, to) => {
+            write_preset(opener, &mut watching, PresetOp::Rename { from, to });
         }
         Intent::RemovePreset(name) => {
-            let wrote = Config::remove_preset(&opener.path, &name);
-            written_preset(opener, &mut watching, wrote).await;
+            write_preset(opener, &mut watching, PresetOp::Delete { name });
         }
         // The list shows the file as it stands when it opens, whatever wrote it since.
         Intent::ReadPresets => read_presets(opener, &mut watching),
@@ -302,65 +325,45 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
         MouseAction::BandEdit(writes) => {
             let intents = watching.app.band_edit(writes);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::ToggleTone(row) => {
             let intents = watching.app.click_tone_row(row);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::PointField { point, field } => {
             let intents = watching.app.click_point_field(point, field);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::Target(side) => {
             let intents = watching.app.click_target(side);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::StepMode(dir) => {
             let intents = watching.app.step_tone_mode(dir);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::Transport(button) => {
             let intents = watching.app.click_transport(button);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
+            take_intents(intents, opener, watching, mouse, look, screen).await
+        }
+        MouseAction::PresetPick(row) => {
+            presets::focus(&mut watching.app, row);
+            take_key(
+                KeyEvent::from(crossterm::event::KeyCode::Enter),
+                opener,
+                watching,
+                mouse,
+                look,
+                screen,
+            )
+            .await
+        }
+        MouseAction::PresetGo(row) => {
+            presets::focus(&mut watching.app, row);
             Flow::Continue(watching)
         }
         MouseAction::Setting(at) => {
@@ -382,57 +385,43 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
         MouseAction::DragTo { at, curve } => {
             let intents = curve_drag::to(&mut watching.app, curve, at);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::BarPress { bar, at, area } => {
             let intents = glide::press(&mut watching.app, bar, area, at);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::BarTo { at, area } => {
             let intents = glide::to(&mut watching.app, area, at);
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::BarRelease { at, area } => {
             let intents = glide::release(&mut watching.app, area.map(|area| (area, at)));
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
+            take_intents(intents, opener, watching, mouse, look, screen).await
+        }
+        MouseAction::DividerPress { at } => {
+            divider::press(&mut watching.app, at);
+            Flow::Continue(watching)
+        }
+        MouseAction::DividerTo { at } => {
+            divider::to(&mut watching.app, at);
+            Flow::Continue(watching)
+        }
+        MouseAction::DividerRelease => {
+            divider::release(&mut watching.app);
+            Flow::Continue(watching)
+        }
+        MouseAction::DividerReset => {
+            divider::reset(&mut watching.app, Instant::now());
             Flow::Continue(watching)
         }
         MouseAction::Release { at, curve } => {
             let intents = curve_drag::release(&mut watching.app, curve.map(|curve| (curve, at)));
             watching.app.touched(&intents);
-            for intent in intents {
-                match take_intent(intent, opener, watching, mouse, look, screen).await {
-                    Flow::Continue(next) => watching = next,
-                    ended => return ended,
-                }
-            }
-            Flow::Continue(watching)
+            take_intents(intents, opener, watching, mouse, look, screen).await
         }
     }
 }

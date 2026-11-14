@@ -308,8 +308,8 @@ fn a_controls_row_never_touches_the_panes_right_border() {
     app.settle();
     let meters = app_with_meter_reading(9_000);
     for (app, label, border) in [
-        (&app, "Volume", 37),
-        (&app, "Balance", 37),
+        (&app, "Volume", 39),
+        (&app, "Balance", 39),
         (&meters, "Meter L", 79),
     ] {
         let chars = row_chars(&screen(app), label);

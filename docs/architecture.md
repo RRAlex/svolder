@@ -39,8 +39,8 @@ Each says how a part works now and the principles behind it.
 - [Themes and effects](design/themes-and-effects.md): Ember's effects, the smoke, Arrange mode.
 - [The capture file](design/capture.md): what `svolder capture` records, the scrub, and the daemon
   it stops and brings back.
-- [Testing](design/testing.md): the gates and when to run which, the fake device, the simulator,
-  end to end, the safety list, the docs check and the web checks.
+- [Testing](design/testing.md): the gates, the fake device, the simulator, end to end, the safety
+  list, the docs check, the web checks; [the TUI in a pty](design/tui-pty-harness.md).
 - [How the code is laid out](design/code-layout.md): the layout rules, the families of folders
   and why each name is what it is.
 

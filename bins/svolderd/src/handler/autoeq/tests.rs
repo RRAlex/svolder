@@ -182,6 +182,40 @@ async fn a_long_query_is_refused_and_a_dead_repository_is_unreachable() {
 }
 
 #[tokio::test]
+async fn a_search_with_autoeq_off_says_so_in_words() {
+    let dir = dir("off");
+    let config = dir.join("config.toml");
+    let loaded = svolder_ipc::Config::load_from(&config).unwrap();
+    let client = Client::for_transport(
+        "fake",
+        Some("http://127.0.0.1:9/results/".into()),
+        dir.join("cache"),
+    );
+    let daemon = daemon_over(config, dir.join("profiles"))
+        .with_autoeq(client)
+        .shared();
+    daemon.reconcile(&loaded).await;
+    let Response::Error {
+        reason, message, ..
+    } = daemon.handle(search_op("hd")).await
+    else {
+        panic!("not refused");
+    };
+    assert_eq!(reason, Some(Reason::Unreachable));
+    assert!(message.starts_with(svolder_autoeq::OFF_PREFIX), "{message}");
+    assert!(message.contains("fake device"), "{message}");
+}
+
+/// The web page recognises the daemon's words for AutoEq being off by their start; a reword of
+/// the start must change the page with it.
+#[test]
+fn the_web_page_recognises_the_off_words() {
+    let page = include_str!("../../../web/core/popups/eq-library/draw.js");
+    let quoted = format!("startsWith('{}')", svolder_autoeq::OFF_PREFIX);
+    assert!(page.contains(&quoted), "draw.js does not match {quoted}");
+}
+
+#[tokio::test]
 async fn a_daemon_given_no_client_reaches_nothing() {
     let daemon = crate::handler::tests::daemon();
     let Response::Error { reason, .. } = daemon.handle(search_op("hd")).await else {

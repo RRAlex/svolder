@@ -4,6 +4,8 @@
 //! The device screen's Controls pane: its rows, the Host group's rows under them, and the
 //! keys and clicks that step, flip and nudge them.
 
+use std::time::Instant;
+
 use crossterm::event::KeyCode;
 use svolder_host::Button;
 use svolder_ipc::host::{DacFacts, PathLine, ROUTE_NOT_READ, Verdict, path_line};
@@ -14,7 +16,7 @@ use crate::tui::boxes::{device_presets, presets};
 use crate::tui::host::{self, HostRow};
 
 use super::intent::{set, updown};
-use super::{App, Intent, Pane, Reading, Screen, Side};
+use super::{App, Intent, Pane, Reading, Screen, Side, divider};
 
 /// What the Path row says with no player to follow.
 const NOTHING_PLAYING: &str = "nothing playing";
@@ -78,8 +80,25 @@ impl App {
             KeyCode::Char('f') => self.flat(),
             KeyCode::Char('C') => self.flip_side(),
             KeyCode::Char('p') => self.open_presets(),
+            // The bar between the Controls and Tone panes, for a keyboard: nudged a few columns
+            // either way, or back to an even split.
+            KeyCode::Char('<') => self.nudge_split(-1),
+            KeyCode::Char('>') => self.nudge_split(1),
+            KeyCode::Char('|') => self.reset_split(),
             _ => Vec::new(),
         }
+    }
+
+    /// Nudge the bar between the two panes `dir` steps, which writes nothing to the device.
+    fn nudge_split(&mut self, dir: i32) -> Vec<Intent> {
+        divider::nudge(self, dir, Instant::now());
+        Vec::new()
+    }
+
+    /// Put the bar between the two panes back to an even split.
+    fn reset_split(&mut self) -> Vec<Intent> {
+        divider::reset(self, Instant::now());
+        Vec::new()
     }
 
     /// Open the preset list: the tone control's on a device that has one, the device's own on

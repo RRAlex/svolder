@@ -74,7 +74,7 @@ impl Signal {
     /// The signal in a few words for a list column: `-58 dBm`, or `-62 dBm 3 min` once it has an
     /// age to say (an advert's always, a live signal's after half a minute). It does not say
     /// where the strength was measured; [`Signal::describe`] does. `minus` is as there.
-    pub fn describe_short(&self, now_ms: u64, minus: char) -> String {
+    pub(crate) fn describe_short(&self, now_ms: u64, minus: char) -> String {
         let dbm = self.dbm_text(minus);
         let age_secs = now_ms.saturating_sub(self.heard_at_ms) / 1000;
         match self.source {
@@ -104,7 +104,7 @@ pub fn describe_signal(signal: Option<&Signal>, now_ms: u64, minus: char) -> Str
     signal.map_or_else(|| "\u{2014}".to_string(), |s| s.describe(now_ms, minus))
 }
 
-/// `signal` in the short form ([`Signal::describe_short`]), or an em dash when there is none.
+/// `signal` in the short form (`Signal::describe_short`), or an em dash when there is none.
 pub fn describe_signal_short(signal: Option<&Signal>, now_ms: u64, minus: char) -> String {
     signal.map_or_else(
         || "\u{2014}".to_string(),

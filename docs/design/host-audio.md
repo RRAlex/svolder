@@ -194,7 +194,7 @@ own captures.
 `HostService` (`bins/svolderd/src/host.rs`) is the one place the daemon touches the host, so a web
 page, a joined TUI and a script all read the same thing. While `[host] enabled` is true (and
 `SVOLDER_HOST` is not `off`), one task follows the players through `Players` and publishes a
-`HostView` (`crates/svolder-ipc/src/host.rs`) on a watch channel: `available`, the followed
+`HostView` (`crates/svolder-ipc/src/host/views.rs`) on a watch channel: `available`, the followed
 player's `PlayingView` (title, artist, album, player, status, length, progress, cover hash) and the
 route. The view is sent on change only. A bus that cannot be reached, or one that goes away, is
 `available = false`; one that went away or has not answered is looked for every 10 s.
@@ -203,9 +203,9 @@ route. The view is sent on change only. A bus that cannot be reached, or one tha
   the task that follows the player, and kept as the one current cover, named by the first 16
   lowercase hex characters of its SHA-256. `PlayingView.cover` holds that hash only when a picture
   was read, and `HostService::cover(hash)` serves the current one and no other, so a stale hash is
-  a miss. A new address clears the old cover at once. An address that gave no picture is read
-  again 1 s and then 3 s after the first read (a player may name a picture a moment before it has
-  written it), then left. A player that quits clears the cover with the track.
+  a miss (the TUI reads it with `Backend::host_cover`). A new address clears the old cover at
+  once. An address that gave no picture is read again 1 s and then 3 s later (a player may name a
+  picture before it has written it), then left. A player that quits clears the cover with the track.
 - **The route** is read out of `pw-dump` only while a `Watcher` is held: by each `Subscribe`
   connection that asked for the host (`host: true`) for its life and by the event stream of each
   web page of a DAC (an amp's page shows no path, so its stream holds none); a page hidden for 2 s
@@ -223,7 +223,8 @@ route. The view is sent on change only. A bus that cannot be reached, or one tha
   the rate the fake device reads (48 kHz, `svolder_fake::SAMPLE_RATE_HZ`), and the bundled picture
   as the cover, through the same cover path. Knobs: `SVOLDER_FAKE_COVER_GONE_AFTER_MS` and
   `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` drop its art or its player after a delay, `..._GONE_FILE`
-  (what the checks use) when the named file appears; `SVOLDER_FAKE_ROUTE=changed` makes the route
+  (what the checks use) when the named file appears, `..._COVER_NEXT_FILE` moves it to a second
+  track with a second cover then; `SVOLDER_FAKE_ROUTE=changed` makes the route
   alter the signal in every way (a quieter player and sink, a resample, the host EQ, two other sounds), for a long changed
   path line; `SVOLDER_FAKE_TITLE` names the track, for a title too long for a phone's folded line.
 - **The capture** is held, not followed: one capture runs in the daemon while a page's frames

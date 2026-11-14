@@ -104,6 +104,11 @@ pub enum Hit {
     MenuEntry(usize),
     /// The dimmed cells around the menu, which a click closes it from.
     MenuOutside,
+    /// Pick this row of the preset list, an index into its entries.
+    PresetRow(usize),
+    /// The `more ↑` (`true`) or `more ↓` (`false`) words on the preset list's border, which a
+    /// click goes to that end of the list from.
+    PresetEnd(bool),
     /// The toast, which a click dismisses and which hides what is under it from the mouse.
     Toast,
     /// The header's `● connected` / `○ disconnected` words, which a click does nothing on; a
@@ -115,6 +120,10 @@ pub enum Hit {
     FaultMark,
     /// The squirrel, which a click makes hop and the wheel does nothing on.
     Mascot,
+    /// The bar between the device screen's Controls and Tone panes, on every row of it: a left
+    /// press holds it ([`divider`](super::app::divider)) and a double-click puts it back to an
+    /// even split.
+    Divider,
 }
 
 /// What a selection the keys move through belongs to, for telling a cursor that moved within a
@@ -231,6 +240,11 @@ impl HitMap {
             .map(|(_, hit)| hit)
     }
 
+    /// Every target of the last frame with the rectangle it was drawn in, in the order drawn.
+    pub fn entries(&self) -> impl Iterator<Item = (Rect, Hit)> + '_ {
+        self.hits.iter().copied()
+    }
+
     /// Every rectangle the last frame drew `hit` in, in the order they were drawn.
     pub fn areas_of(&self, hit: Hit) -> impl Iterator<Item = Rect> + '_ {
         self.hits
@@ -283,6 +297,10 @@ pub enum MouseAction {
     Target(Option<Side>),
     /// Press this key, which is what a click on a word of a border asks for.
     Key(KeyCode),
+    /// Focus this row of the preset list and load it, the way `Enter` on it does.
+    PresetPick(usize),
+    /// Focus this row of the preset list, or the last one for a row past the end.
+    PresetGo(usize),
     /// Hold this band's point for this gesture, focusing the band: a press on the curve that
     /// grabbed it ([`curve_drag::start`]).
     Grab {
@@ -343,6 +361,20 @@ pub enum MouseAction {
         /// The cells the last frame drew the bar in.
         area: Option<Rect>,
     },
+    /// Hold the bar between the two panes for a press at column `at`.
+    DividerPress {
+        /// The column pressed.
+        at: u16,
+    },
+    /// Drag the held bar to column `at`.
+    DividerTo {
+        /// The column under the pointer, which may be past where the bar can go.
+        at: u16,
+    },
+    /// Let go of the held bar.
+    DividerRelease,
+    /// Put the bar back to an even split, as a double-click on it asks.
+    DividerReset,
     /// Let go of the point being dragged, its button released at this cell with the curve last
     /// drawn in these cells — `None` where the last frame drew none — writing where it let go
     /// ([`curve_drag::release`]).
@@ -366,7 +398,11 @@ pub fn note_press(app: &mut App, event: &MouseEvent, now: Instant) {
     }
     // A press a box swallows, or one a drag of the other button ignores, is no click: it makes
     // no double-click with the press after it.
-    if app.modal_open() || app.pointer.curve_drag.is_some() || app.pointer.bar_drag.is_some() {
+    if app.modal_open()
+        || app.pointer.curve_drag.is_some()
+        || app.pointer.bar_drag.is_some()
+        || app.pointer.divider_drag.is_some()
+    {
         app.pointer.last_press = None;
         app.pointer.double_click = false;
         return;
@@ -411,8 +447,13 @@ pub fn note_press(app: &mut App, event: &MouseEvent, now: Instant) {
 /// closes it as `Esc` does, or, with an edit line or a question open over its rows, outside that
 /// box, cancels it.
 ///
-/// The device editor, the removal question, the preset list, a band's edit line and the `q`
-/// question are answered from the keyboard: a click inside one asks for nothing, and a left
+/// The preset list is the mouse's own while it shows its presets: a left click on a row loads it
+/// as `Enter` does, the wheel moves the selection as `↑`/`↓` do, a click on the `more ↑` or
+/// `more ↓` of its border goes to the first or last row, and a left click outside the box closes
+/// it as `Esc` does. Its prompts and questions are answered from the keyboard.
+///
+/// The device editor, the removal question, the device's own presets, a band's edit line and the
+/// `q` question are answered from the keyboard: a click inside one asks for nothing, and a left
 /// click outside it presses `Esc`, which closes it or cancels what it asks, and reaches nothing
 /// under it.
 ///
@@ -479,6 +520,21 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
             _ => None,
         };
     }
+    // The preset list is clicked and scrolled while it shows its presets; a click outside it was
+    // answered above.
+    if app.presets.choosing() && !app.overlays.quitting {
+        return match (event.kind, hits.hit_at(event.column, event.row)) {
+            (MouseEventKind::Down(MouseButton::Left), Some(&Hit::PresetRow(row))) => {
+                Some(MouseAction::PresetPick(row))
+            }
+            (MouseEventKind::Down(MouseButton::Left), Some(&Hit::PresetEnd(top))) => {
+                Some(MouseAction::PresetGo(if top { 0 } else { usize::MAX }))
+            }
+            (MouseEventKind::ScrollUp, _) => Some(MouseAction::Key(KeyCode::Up)),
+            (MouseEventKind::ScrollDown, _) => Some(MouseAction::Key(KeyCode::Down)),
+            _ => None,
+        };
+    }
     // Every other modal box is answered from the keyboard: the rows under it are not to be
     // clicked out from underneath what is being answered.
     if app.modal_open() {
@@ -493,10 +549,19 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
         return None;
     }
     // A bar held is held by the left button: a press of any other does nothing meanwhile.
-    if app.pointer.bar_drag.is_some()
+    if (app.pointer.bar_drag.is_some() || app.pointer.divider_drag.is_some())
         && matches!(event.kind, MouseEventKind::Down(button) if button != MouseButton::Left)
     {
         return None;
+    }
+    if app.pointer.divider_drag.is_some() {
+        match event.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                return Some(MouseAction::DividerTo { at: at.0 });
+            }
+            MouseEventKind::Up(MouseButton::Left) => return Some(MouseAction::DividerRelease),
+            _ => {}
+        }
     }
     if let Some(bar) = app.pointer.bar_drag.as_ref().map(|drag| drag.bar) {
         match event.kind {
@@ -608,6 +673,10 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         // The setup wizard answers the clicks on its own key row.
         Hit::Footer(_) => None,
         Hit::Mascot => Some(MouseAction::Mascot),
+        Hit::Divider => Some(match app.pointer.double_click {
+            true => MouseAction::DividerReset,
+            false => MouseAction::DividerPress { at: x },
+        }),
         Hit::Mode => Some(MouseAction::ToggleTone(ToneRow::Mode)),
         Hit::ModePrev => Some(MouseAction::StepMode(-1)),
         Hit::ModeNext => Some(MouseAction::StepMode(1)),
@@ -619,6 +688,8 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::Connection | Hit::MouseMark | Hit::FaultMark => None,
         // The menu answers its own clicks.
         Hit::MenuEntry(_) | Hit::MenuOutside => None,
+        // The preset list answers its own clicks.
+        Hit::PresetRow(_) | Hit::PresetEnd(_) => None,
         // These are drawn by the Settings box alone, which answers its own clicks.
         Hit::SettingRow(_)
         | Hit::SettingPrev
@@ -663,5 +734,7 @@ fn intent(mut intents: Vec<Intent>) -> Option<MouseAction> {
     intents.pop().map(MouseAction::Intent)
 }
 
+#[cfg(test)]
+mod preset_tests;
 #[cfg(test)]
 mod tests;

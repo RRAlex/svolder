@@ -28,6 +28,8 @@ const HIDDEN: char = '•';
 const HIDDEN_RUN: usize = 6;
 /// The longest a host name or an address typed into the edit line may be.
 pub const LINE_MAX: usize = 64;
+/// The longest a password typed into the edit line may be.
+pub const PASSWORD_MAX: usize = 128;
 
 /// The `[mqtt]` keys the category shows, with the password reduced to whether it is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,8 +42,18 @@ pub struct MqttView {
     pub port: u16,
     /// Whether the bridge takes commands.
     pub commands: bool,
+    /// The broker's username.
+    pub username: Option<String>,
     /// Whether a password is set, in the file or in `SVOLDER_MQTT_PASSWORD`. Never the password.
     pub password_set: bool,
+    /// Whether the file holds a password.
+    pub password_in_file: bool,
+    /// Whether `SVOLDER_MQTT_USERNAME` names a username in this session's environment, which is
+    /// the username where the file has none.
+    pub username_in_env: bool,
+    /// Whether `SVOLDER_MQTT_PASSWORD` names one in this session's environment, which the
+    /// daemon uses over the file's when its own environment has it too.
+    pub password_in_env: bool,
 }
 
 impl Default for MqttView {
@@ -52,7 +64,11 @@ impl Default for MqttView {
             host: defaults.host,
             port: defaults.port,
             commands: defaults.commands,
+            username: defaults.username,
             password_set: false,
+            password_in_file: false,
+            username_in_env: false,
+            password_in_env: false,
         }
     }
 }
@@ -102,6 +118,10 @@ pub enum Field {
     Host,
     /// The broker's port.
     Port,
+    /// The broker's username.
+    Username,
+    /// The broker's password: masked while typed, and never filled in from what is set.
+    Password,
 }
 
 impl Field {
@@ -111,8 +131,29 @@ impl Field {
             Field::Listen => "MCP listen",
             Field::Host => "MQTT broker host",
             Field::Port => "MQTT broker port",
+            Field::Username => "MQTT username",
+            Field::Password => "MQTT password",
         }
     }
+
+    /// The most characters the line takes: a password may be longer than a host name.
+    pub fn max(self) -> usize {
+        match self {
+            Field::Password => PASSWORD_MAX,
+            _ => LINE_MAX,
+        }
+    }
+}
+
+/// What the running web server does for a visitor with no sign-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestView {
+    /// It shows a visitor the sign-in page, or none runs.
+    Closed,
+    /// It shows a visitor the read-only view.
+    Open,
+    /// The guest mode is read but `auth = "none"` signs every visitor in with full access.
+    NoEffect,
 }
 
 /// The one thing the category can have open over its rows.
@@ -127,7 +168,7 @@ pub enum Modal {
 }
 
 /// A line being typed into: its text and where the cursor sits, in characters.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Line {
     /// Which row the line edits.
     pub field: Field,
@@ -135,6 +176,21 @@ pub struct Line {
     pub text: String,
     /// The cursor, in characters from the start.
     pub caret: usize,
+}
+
+impl std::fmt::Debug for Line {
+    /// The text of a password line reads `***`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text: &dyn std::fmt::Debug = match self.field {
+            Field::Password => &"***",
+            _ => &self.text,
+        };
+        f.debug_struct("Line")
+            .field("field", &self.field)
+            .field("text", text)
+            .field("caret", &self.caret)
+            .finish()
+    }
 }
 
 /// The Connections category's state.
@@ -171,11 +227,25 @@ pub struct Connections {
     pub config_changed: Option<String>,
     /// What is open over the rows.
     pub modal: Option<Modal>,
+    /// Whether the password line shows what is typed in it (Tab) rather than a bullet each.
+    pub password_shown: bool,
+    /// Whether Delete was pressed once on the password line: a second press clears the saved
+    /// password.
+    pub password_clear_armed: bool,
 }
 
 impl Connections {
     /// Take the two sections of `config` in.
     pub fn load(&mut self, config: &Config) {
+        let env = std::env::var_os("SVOLDER_MQTT_PASSWORD").is_some_and(|v| !v.is_empty());
+        self.load_with(config, env);
+        self.mqtt.username_in_env =
+            std::env::var_os("SVOLDER_MQTT_USERNAME").is_some_and(|v| !v.is_empty());
+    }
+
+    /// [`Connections::load`] with whether `SVOLDER_MQTT_PASSWORD` names a password given rather
+    /// than read.
+    pub fn load_with(&mut self, config: &Config, password_in_env: bool) {
         self.mcp = config.mcp.clone();
         self.web = config.web.clone();
         self.mqtt = MqttView {
@@ -183,8 +253,11 @@ impl Connections {
             host: config.mqtt.host.clone(),
             port: config.mqtt.port,
             commands: config.mqtt.commands,
-            password_set: config.mqtt.password.is_some()
-                || std::env::var_os("SVOLDER_MQTT_PASSWORD").is_some_and(|v| !v.is_empty()),
+            username: config.mqtt.username.clone(),
+            password_set: config.mqtt.password.is_some() || password_in_env,
+            password_in_file: config.mqtt.password.is_some(),
+            username_in_env: self.mqtt.username_in_env,
+            password_in_env,
         };
     }
 
@@ -255,6 +328,25 @@ impl Connections {
         // A token on show is this session's own: it goes once the daemon uses another.
         if matches!(self.token_state(), TokenState::Differs { .. }) {
             self.revealed = None;
+        }
+    }
+
+    /// What the running web server does for a visitor with no sign-in, from the daemon's own
+    /// status (the file may say otherwise until a reload).
+    pub fn guest_view(&self) -> GuestView {
+        match (&self.web_status, self.daemon_up) {
+            (
+                Some(WebStatus::Listening {
+                    guest: svolder_ipc::config::WebGuest::Read,
+                    auth,
+                    ..
+                }),
+                Some(true),
+            ) => match auth {
+                svolder_ipc::config::WebAuth::None => GuestView::NoEffect,
+                _ => GuestView::Open,
+            },
+            _ => GuestView::Closed,
         }
     }
 

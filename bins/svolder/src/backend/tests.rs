@@ -296,6 +296,67 @@ async fn a_release_over_a_daemon_says_nothing() {
     assert_eq!(said, 0, "a daemon connection releases nothing");
 }
 
+/// The cover a daemon holds comes over the socket in chunks and arrives whole; another hash and
+/// a daemon from before the request give nothing.
+#[tokio::test]
+async fn a_remote_backend_reads_the_daemons_cover() {
+    use svolder_host::cover::Cover;
+    let cover = Cover {
+        bytes: (0..svolder_ipc::COVER_CHUNK_BYTES + 777)
+            .map(|i| (i * 31 + i / 5) as u8)
+            .collect(),
+        mime: "image/webp",
+    };
+    let daemon = crate::test_support::stub_daemon::stub_daemon().await;
+    let backend = Backend::stub_remote(&daemon.socket).await;
+
+    let old = backend.host_cover("abc").expect("a daemon to ask");
+    assert_eq!(old.await, None, "a daemon from before the request");
+
+    daemon.serves_cover("abc", cover.clone());
+    let got = backend.host_cover("abc").expect("a daemon to ask").await;
+    assert_eq!(got, Some(cover));
+    assert_eq!(
+        daemon.host_cover_asks(),
+        vec![0, 0, svolder_ipc::COVER_CHUNK_BYTES as u64],
+        "the old daemon's ask, then two chunks"
+    );
+    let stale = backend.host_cover("zzz").expect("a daemon to ask");
+    assert_eq!(stale.await, None, "another hash");
+}
+
+/// A cover that changes in the middle of a read is no picture at all: the next ask names a hash the
+/// daemon no longer holds, so the read fails with nothing, never a mix of the two.
+#[tokio::test]
+async fn a_cover_that_changes_mid_read_gives_nothing() {
+    use svolder_host::cover::Cover;
+    let picture = |seed: usize| Cover {
+        bytes: (0..svolder_ipc::COVER_CHUNK_BYTES * 2)
+            .map(|i| (i + seed) as u8)
+            .collect(),
+        mime: "image/png",
+    };
+    let daemon = crate::test_support::stub_daemon::stub_daemon().await;
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    daemon.serves_cover("abc", picture(1));
+    daemon.swaps_cover_after(1, "def", picture(2));
+
+    let got = backend.host_cover("abc").expect("a daemon to ask").await;
+    assert_eq!(got, None);
+    assert_eq!(
+        daemon.host_cover_asks(),
+        vec![0, svolder_ipc::COVER_CHUNK_BYTES as u64],
+        "the first chunk came, the second ask was refused, and the read stopped"
+    );
+}
+
+/// A session of this process holds no daemon's host, so there is no cover to ask for.
+#[tokio::test(start_paused = true)]
+async fn a_direct_backend_has_no_cover_to_ask_for() {
+    let (backend, _gate) = Backend::fake(Duration::from_secs(30)).await;
+    assert!(backend.host_cover("abc").is_none());
+}
+
 /// A profile with a warm-up readout that depends on the power toggle.
 fn warmup_profile() -> Profile {
     let source = "schema = 1\nname = \"t\"\n\

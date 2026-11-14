@@ -136,6 +136,29 @@ pub enum Intent {
     Quit,
 }
 
+/// A secret in flight from the edit line to the file: it reads `***` wherever it is printed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    /// The text, for the one place that writes it.
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Secret {
+    fn from(text: String) -> Secret {
+        Secret(text)
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("***")
+    }
+}
+
 /// One change the Connect category asks for, which is one key of `[mcp]`, `[mqtt]` or
 /// `[web]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,10 +177,16 @@ pub enum ConnChange {
     MqttPort(u16),
     /// Whether the bridge takes commands.
     MqttCommands(bool),
+    /// The broker's username, or `None` to take it away.
+    MqttUsername(Option<String>),
+    /// The broker's password, or `None` to take it away.
+    MqttPassword(Option<Secret>),
     /// Whether the web UI runs.
     WebEnabled(bool),
     /// The address the web UI listens on.
     WebListen(std::net::SocketAddr),
+    /// Whether visitors without a sign-in may read the web UI.
+    WebGuest(bool),
 }
 
 impl ConnChange {
@@ -178,6 +207,10 @@ impl ConnChange {
             ConnChange::MqttHost(host) => mqtt.host = Some(host.clone()),
             ConnChange::MqttPort(port) => mqtt.port = *port,
             ConnChange::MqttCommands(on) => mqtt.commands = *on,
+            ConnChange::MqttUsername(name) => mqtt.username.clone_from(name),
+            ConnChange::MqttPassword(secret) => {
+                mqtt.password = secret.as_ref().map(|secret| secret.expose().to_string());
+            }
             _ => {}
         }
     }
@@ -187,13 +220,22 @@ impl ConnChange {
         match self {
             ConnChange::WebEnabled(on) => web.enabled = *on,
             ConnChange::WebListen(listen) => web.listen = *listen,
+            ConnChange::WebGuest(read) => {
+                web.guest = match read {
+                    true => svolder_ipc::config::WebGuest::Read,
+                    false => svolder_ipc::config::WebGuest::None,
+                }
+            }
             _ => {}
         }
     }
 
     /// Whether the change is to `[web]`.
     pub(crate) fn is_web(&self) -> bool {
-        matches!(self, ConnChange::WebEnabled(_) | ConnChange::WebListen(_))
+        matches!(
+            self,
+            ConnChange::WebEnabled(_) | ConnChange::WebListen(_) | ConnChange::WebGuest(_)
+        )
     }
 
     /// Whether the change is to `[mcp]`.

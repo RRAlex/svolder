@@ -20,6 +20,8 @@ pub enum WebRow {
     WebUi,
     /// How far it listens: this computer, the network, or an address of the file's own.
     Reach,
+    /// Whether anyone on the network may open a read-only view with no sign-in.
+    Guest,
     /// A link that signs one browser in.
     Link,
     /// Six digits that sign one browser in.
@@ -30,9 +32,10 @@ pub enum WebRow {
 
 impl WebRow {
     /// The rows the cursor stops on, in order: State only reports.
-    pub const STOPS: [WebRow; 5] = [
+    pub const STOPS: [WebRow; 6] = [
         WebRow::WebUi,
         WebRow::Reach,
+        WebRow::Guest,
         WebRow::Link,
         WebRow::Pairing,
         WebRow::Token,
@@ -44,6 +47,7 @@ impl WebRow {
             WebRow::State => "State",
             WebRow::WebUi => "Web UI",
             WebRow::Reach => "Reach",
+            WebRow::Guest => "Guest view",
             WebRow::Link => "Link",
             WebRow::Pairing => "Pairing code",
             WebRow::Token => "Token",
@@ -101,6 +105,21 @@ pub struct WebBox {
     pub link_unwatched: bool,
     /// Whether the question before the token is replaced is up.
     pub rotating: bool,
+    /// The plain page link, which the guest QR draws.
+    pub page: Option<Box<Page>>,
+    /// Whether the box asked for a link of its own accord once the daemon's status came in.
+    pub auto_asked: bool,
+}
+
+/// The page a browser opens with no sign-in: the base a phone reaches and a trailing slash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Page {
+    /// The link: no code, so it never ends.
+    pub url: String,
+    /// Whether the base is this computer's because none a phone reaches was found.
+    pub local: bool,
+    /// The listen addresses it was made for: the file's and the daemon's.
+    pub made_for: (SocketAddr, SocketAddr),
 }
 
 /// How far a listen address reaches.

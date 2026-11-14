@@ -240,3 +240,26 @@ pub fn daemon_target_dir(svolder_exe: &Path) -> PathBuf {
         .expect("a target directory")
         .join("test-daemon")
 }
+
+/// The `svolder` a case runs.
+///
+/// The demo starts the `svolderd` that stands beside the `svolder` it runs from. With
+/// `SVOLDER_TEST_PREBUILT=1` that is the `svolder` under test, whose sibling the workspace build
+/// made. Otherwise it is a copy of it placed beside the private daemon build, so the demo finds
+/// that daemon and nothing is built into `target/debug`. The copy is made once per process, under
+/// a temporary name renamed into place, so a copy another run is executing is never written to.
+pub fn svolder_with_daemon() -> PathBuf {
+    static EXE: OnceLock<PathBuf> = OnceLock::new();
+    EXE.get_or_init(|| {
+        let own = PathBuf::from(env!("CARGO_BIN_EXE_svolder"));
+        if std::env::var("SVOLDER_TEST_PREBUILT").as_deref() == Ok("1") {
+            return own;
+        }
+        let beside = daemon_binary().with_file_name("svolder");
+        let staged = beside.with_extension(format!("{}.tmp", std::process::id()));
+        std::fs::copy(&own, &staged).expect("copy svolder beside the private daemon");
+        std::fs::rename(&staged, &beside).expect("put the copy in place");
+        beside
+    })
+    .clone()
+}

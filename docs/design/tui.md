@@ -273,7 +273,7 @@ on `tachyonfx`, constructed with `Effects::new(capable, config)` and re-tuned li
 Three more are drawn by the screens themselves but answer to the layer's switches, derived in one
 place (`App::set_look`, from `Effects::capable`): the glide of an eased bar, the breathing of the
 borders with the level, and the peak marker a meter holds. Each has its own switch in
-`EffectsConfig` (`crates/svolder-ipc/src/config.rs`). The layer runs only at true colour with
+`EffectsConfig` (`crates/svolder-ipc/src/config/tui_config.rs`). The layer runs only at true colour with
 colour on; `noise` and `melt` also draw at 16 colours and in monochrome.
 The spinner (`widgets/spinner.rs`) is information, not an effect, and runs whatever the layer does.
 
@@ -392,7 +392,7 @@ place (`decoration/transition.rs`), so a test can say what a frame draws.
 - Decoration: `decoration/` (`effects.rs` and `effects/`, `transition.rs`, `intro.rs` and `intro/`,
   `mascot.rs` and `mascot/`, `title.rs`); tests in `decoration/effects/tests.rs`,
   `decoration/transition/tests.rs`, `decoration/mascot/tests.rs`.
-- The `[tui]` table: `crates/svolder-ipc/src/config.rs` (`TuiConfig`, `EffectsConfig`),
+- The `[tui]` table: `crates/svolder-ipc/src/config/tui_config.rs` (`TuiConfig`, `EffectsConfig`),
   `config/tui_settings.rs`; tests in `config/tui_settings/tests.rs`.
 - Screenshots for the README are drawn from the same renderer by `tui/screenshots/` (`make
   screenshots`).

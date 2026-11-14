@@ -11,7 +11,7 @@
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime};
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::Event;
 use futures::stream::Stream;
 use svolder_ipc::Config;
 
@@ -75,7 +75,8 @@ pub(super) async fn run_on(
         Ok(guard) => guard,
         Err(failure) => return failure.report(),
     };
-    let mut events = EventStream::new();
+    guard.picker = super::art::probe_for(&config.tui);
+    let mut events = super::art::filter::events();
     let opening = opener.reopen(g.device, None);
     tokio::pin!(opening);
     // The intro draws on the terminal the open is reaching for a device behind, so it holds
@@ -339,6 +340,7 @@ where
     watching.app.set_look(&look.tui, &look.effects);
     watching.app.mascot.capable = look.mascot_capable();
     watching.reach_host();
+    watching.show_art(guard.picker.take());
     let mut title = TitleMeter::new(Box::new(TerminalTitle));
     let end = run::event_loop(run::LoopParts {
         opener,

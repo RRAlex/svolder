@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use svolder_ipc::{
-    CODE_USAGE, Config, Handler, McpStatus, Reason, Request, Response, Server, WebStatus,
+    CODE_USAGE, Config, Handler, McpStatus, Reason, Request, Response, Server, WebGuest, WebStatus,
 };
 
 use crate::handler::Daemon;
@@ -230,5 +230,149 @@ async fn a_switch_that_waits_out_the_files_lock_is_refused_as_file_busy() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), BOTH_OFF);
     drop(held);
     daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+async fn guest(daemon: &Daemon, read: bool) -> Response {
+    daemon.handle(Request::GuestSwitch { read }).await
+}
+
+/// A web UI that signs in by token, off, on a loopback port the system picks, with the token in
+/// a file in the scratch folder.
+fn web_with_token(dir: &std::path::Path) -> String {
+    let token = dir.join("web-token");
+    std::fs::write(&token, "guest-switch-token-0123456789abcdefghijkl\n").unwrap();
+    std::fs::set_permissions(&token, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    format!(
+        "schema = 1\n\n[web]\nlisten = \"127.0.0.1:0\"\nauth = \"token\"\n\
+         token_file = \"{}\"\n",
+        token.display()
+    )
+}
+
+/// The status of a `GET /api/v1/fleet` with no sign-in, which a guest may read.
+async fn guest_get(listen: std::net::SocketAddr) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let request =
+        format!("GET /api/v1/fleet HTTP/1.1\r\nHost: {listen}\r\nConnection: close\r\n\r\n");
+    let mut stream = tokio::net::TcpStream::connect(listen)
+        .await
+        .expect("connect");
+    stream.write_all(request.as_bytes()).await.expect("send");
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await.expect("read");
+    String::from_utf8_lossy(&raw)
+        .split(' ')
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("a status line")
+}
+
+/// The guest switch writes `guest = "read"` and the reload makes the running web server answer a
+/// visitor without a sign-in; switching off writes `guest = "none"` and the same visitor is
+/// refused again. The other keys and the server's enabled state stay.
+#[tokio::test]
+async fn the_guest_switch_writes_the_key_and_the_running_server_follows() {
+    let dir = std::env::temp_dir().join(format!("svolderd-gs-on-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("profiles")).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, web_with_token(&dir)).unwrap();
+    let daemon = daemon_over(path.clone(), dir.join("profiles")).shared();
+    let (web, _) = stands(switch(&daemon, Server::Web, true).await);
+    let WebStatus::Listening {
+        listen, guest: now, ..
+    } = web
+    else {
+        panic!("not listening: {web:?}");
+    };
+    assert_eq!(now, WebGuest::None);
+    assert_eq!(guest_get(listen).await, 401);
+
+    let (web, mcp) = stands(guest(&daemon, true).await);
+    let WebStatus::Listening {
+        listen, guest: now, ..
+    } = web
+    else {
+        panic!("not listening: {web:?}");
+    };
+    assert_eq!((now, mcp), (WebGuest::Read, McpStatus::Off));
+    assert_eq!(guest_get(listen).await, 200, "a guest reads after on");
+    let config = Config::load_from(&path).unwrap();
+    assert_eq!(config.web.guest, WebGuest::Read);
+    assert!(config.web.enabled);
+    assert_eq!(daemon.config_snapshot().web.guest, WebGuest::Read);
+
+    let (web, _) = stands(guest(&daemon, false).await);
+    let WebStatus::Listening {
+        listen, guest: now, ..
+    } = web
+    else {
+        panic!("not listening: {web:?}");
+    };
+    assert_eq!(now, WebGuest::None);
+    assert_eq!(guest_get(listen).await, 401, "a guest is refused after off");
+    assert_eq!(Config::load_from(&path).unwrap().web.guest, WebGuest::None);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A guest switch to where the key already stands writes nothing.
+#[tokio::test]
+async fn a_guest_switch_that_changes_nothing_leaves_the_file_byte_for_byte() {
+    let (dir, path, daemon) = daemon_on("guest-same", BOTH_OFF);
+    let (web, mcp) = stands(guest(&daemon, false).await);
+    assert_eq!((web, mcp), (WebStatus::Off, McpStatus::Off));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BOTH_OFF);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every refusal of the server switch is the guest switch's too: `invalid`, `read_only`,
+/// `file_busy` and `stopping`, with the file left as it was.
+#[tokio::test]
+async fn the_guest_switch_is_refused_for_each_reason() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, path, daemon) = daemon_on("guest-invalid", BOTH_OFF);
+    let broken = format!("{BOTH_OFF}\n[mqtt]\nhost = 5\n");
+    std::fs::write(&path, &broken).unwrap();
+    assert_eq!(refused(guest(&daemon, true).await), Reason::Invalid);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let (dir, path, daemon) = daemon_on("guest-ro", BOTH_OFF);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    assert_eq!(refused(guest(&daemon, true).await), Reason::ReadOnly);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BOTH_OFF);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let (dir, path, daemon) = daemon_on("guest-gone", BOTH_OFF);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(refused(guest(&daemon, true).await), Reason::ReadOnly);
+    assert!(!path.exists(), "the file was made again");
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let (dir, path, daemon) = daemon_on("guest-busy", BOTH_OFF);
+    let mut lock = path.clone().into_os_string();
+    lock.push(".lock");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&lock)
+        .unwrap();
+    held.lock().expect("the test takes the file's lock");
+    assert_eq!(refused(guest(&daemon, true).await), Reason::FileBusy);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BOTH_OFF);
+    drop(held);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let (dir, path, daemon) = daemon_on("guest-stopping", BOTH_OFF);
+    daemon.shutdown().await;
+    assert_eq!(refused(guest(&daemon, true).await), Reason::Stopping);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), BOTH_OFF);
     let _ = std::fs::remove_dir_all(&dir);
 }

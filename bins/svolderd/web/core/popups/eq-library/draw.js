@@ -158,8 +158,11 @@ export function refusalWords(kind, answer) {
   switch (answer?.reason) {
     case 'busy': return 'AutoEq is busy with other downloads. Try again in a moment.';
     case 'not_listed': return 'AutoEq does not list this measurement any more. Search again.';
-    case 'unreachable': return 'AutoEq could not be reached, or what it sent is not a parametric '
-      + 'EQ. Check the daemon\'s network and try again.';
+    case 'unreachable':
+      // The daemon says AutoEq is off for the fake device in words that name the way out.
+      if (own.startsWith('AutoEq is off')) return own;
+      return 'AutoEq could not be reached, or what it sent is not a parametric '
+        + 'EQ. Check the daemon\'s network and try again.';
     case 'taken': return 'A preset with this name exists already.';
     case 'bad_name': return own || 'This is not a name a preset can have.';
     case 'invalid': return own || (kind === 'upload'

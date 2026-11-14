@@ -13,7 +13,7 @@ mod broker;
 use std::time::Duration;
 
 use serde_json::Value as Json;
-use svolder_ipc::{Client, MqttStatus, Request, Response};
+use svolder_ipc::{Client, MqttProblem, MqttStatus, Request, Response};
 
 use broker::{Seen, TestBroker, Watcher};
 use common::{
@@ -738,6 +738,71 @@ async fn a_burst_on_one_topic_coalesces_to_the_latest() {
     .expect("test timed out");
 }
 
+/// A broker that refuses every connect with the return code "not authorized", on a port of its
+/// own on 127.0.0.1: what a Mosquitto that wants a login answers an anonymous client with.
+async fn refusing_broker() -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let port = listener.local_addr().expect("an address").port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut connect = [0u8; 512];
+                let _ = stream.read(&mut connect).await;
+                // CONNACK, no session, return code 5.
+                let _ = stream.write_all(&[0x20, 0x02, 0x00, 0x05]).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    port
+}
+
+/// A broker that refuses the login is reported as refusing it, in the problem the `version`
+/// reply names, not as a bridge still connecting.
+#[tokio::test]
+async fn a_broker_that_refuses_the_login_is_reported_as_refusing_it() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let port = refusing_broker().await;
+        let (child, mut client) = daemon_on(&bridged(port, ""), &[]).await;
+        let deadline = tokio::time::Instant::now() + STEP;
+        loop {
+            let answer = client
+                .request(Request::Version)
+                .await
+                .expect("a version reply");
+            let Response::Version {
+                mqtt: Some(mqtt), ..
+            } = &answer
+            else {
+                panic!("no bridge in {answer:?}");
+            };
+            if matches!(
+                mqtt,
+                MqttStatus::Trouble {
+                    problem: MqttProblem::Refused,
+                    ..
+                }
+            ) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the bridge stayed at {mqtt:?}: {}",
+                child.said()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("test timed out");
+}
+
 /// What a case wants the bridge's state to be.
 type Wanted = Box<dyn Fn(&MqttStatus) -> bool>;
 
@@ -754,7 +819,7 @@ async fn the_version_reply_says_where_the_bridge_stands() {
             (
                 bridged(away, ""),
                 Box::new(move |s| {
-                    matches!(s, MqttStatus::Connecting { host, port, retry_in_secs: Some(1..=2) }
+                    matches!(s, MqttStatus::Trouble { host, port, problem: MqttProblem::Unreachable, retry_in_secs: Some(1..=2) }
                         if host == "127.0.0.1" && *port == away)
                 }),
             ),

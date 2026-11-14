@@ -197,8 +197,8 @@ fn a_click_on_a_level_bar_focuses_its_row_and_sets_the_cell() {
     }
 }
 
-/// The Loudness bar sets its strength on the Tone pane, where it is as wide as the volume bar
-/// beside it, and in the tone-control header; its label still toggles the mode.
+/// The Loudness bar sets its strength on the Tone pane, where it runs at least as wide as the
+/// volume bar, and in the tone-control header; its label still toggles the mode.
 #[test]
 fn a_click_on_the_loudness_bar_sets_the_strength_on_both_screens() {
     for screen in [Screen::Device, Screen::Tone] {
@@ -206,17 +206,18 @@ fn a_click_on_the_loudness_bar_sets_the_strength_on_both_screens() {
         app.show(screen);
         let hits = hits_of(&app, (80, 24));
         let area = hits.bar_area(Hit::LoudnessBar).expect("the bar is drawn");
-        let width = match screen {
+        match screen {
             Screen::Device => {
                 let volume = Hit::LevelBar(row_of(&app, "volume"));
-                hits.bar_area(volume)
+                let width = hits
+                    .bar_area(volume)
                     .expect("the volume bar is drawn")
-                    .width
+                    .width;
+                assert!(width >= 5, "the volume bar is {width} cells");
+                assert!(area.width >= width, "{screen:?}: {} < {width}", area.width);
             }
-            _ => 5,
-        };
-        assert!(width >= 5, "{screen:?}: the volume bar is {width} cells");
-        assert_eq!(area.width, width, "{screen:?}");
+            _ => assert_eq!(area.width, 5, "{screen:?}"),
+        }
         let last = area.x + area.width - 1;
         let action = click(&hits, &app, last, area.y).expect("a click on the bar");
         let writes = carry(&mut app, action);
@@ -1266,4 +1267,44 @@ fn a_raise_by_several_notches_costs_that_many_steps() {
     assert!(!app.paces(&by(2), start), "two notches, a step and a half");
     assert!(app.paces(&by(1), start), "the refusal kept the credit");
     assert!(!app.paces(&by(1), start + Duration::from_millis(10)));
+}
+
+/// A click on the first, the middle and the last cell of the balance track at 200 columns,
+/// where it runs far past the 25 cells it once had, writes the value that cell stands for across
+/// the whole track (the volume's own press is paced by its climb, so the balance shows the map).
+#[test]
+fn a_click_on_the_stretched_balance_track_maps_across_its_whole_width() {
+    let app = app_at(40);
+    let hits = hits_of(&app, (200, 24));
+    let area = hits
+        .bar_area(Hit::LevelBar(row_of(&app, "balance")))
+        .expect("the balance track is drawn");
+    assert!(area.width > 60, "the track is {} cells", area.width);
+    let cells = [
+        (area.x, 1),
+        (area.x + area.width / 2, 64),
+        (area.x + area.width - 1, 127),
+    ];
+    for (x, near) in cells {
+        let mut fresh = app_at(40);
+        let action = click(&hits, &fresh, x, area.y).expect("a click on the track");
+        let writes = carry(&mut fresh, action);
+        if near == 64 {
+            // The balance already stands on the centre: the middle cell asks for no change.
+            assert!(writes.is_empty(), "{x}: {writes:?}");
+            continue;
+        }
+        assert_eq!(writes.len(), 1, "{x}: {writes:?}");
+        let text = format!("{:?}", writes[0]);
+        let wrote: i64 = text
+            .split("value: \"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .and_then(|digits| digits.parse().ok())
+            .expect("a written value");
+        assert!(
+            (wrote - near).abs() <= 2,
+            "cell {x} wrote {wrote}, wanted about {near}"
+        );
+    }
 }

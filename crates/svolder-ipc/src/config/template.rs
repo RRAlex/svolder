@@ -83,13 +83,13 @@ impl Config {
         );
         commented(
             &mut out,
-            "The broker username, when it wants one.",
+            "The broker username, when it wants one; Home Assistant's broker does.",
             "username",
             UNSET,
         );
         commented(
             &mut out,
-            "The broker password, when it wants one; SVOLDER_MQTT_PASSWORD overrides this.",
+            "The broker password, when it wants one; SVOLDER_MQTT_PASSWORD overrides this. Sent only with a username.",
             "password",
             UNSET,
         );
@@ -329,6 +329,12 @@ impl Config {
                 TuiSettingKind::Accent => commented(&mut out, &explain, key.key, UNSET),
             }
         }
+        commented(
+            &mut out,
+            "The Controls pane's share of the device screen's width, from 0 to 1; each pane keeps 40 columns.",
+            "device_split",
+            tui.device_split,
+        );
         out.push_str("\n# Which of the animations run.\n[tui.effects]\n");
         for (switch, explain, on) in [
             (

@@ -10,7 +10,7 @@
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 /// The longest line, in bytes and without its newline, either end of the socket accepts.
-pub const MAX_LINE: usize = 1024 * 1024;
+pub(crate) const MAX_LINE: usize = 1024 * 1024;
 
 /// What one read of a [`LineReader`] found.
 #[derive(Debug, PartialEq, Eq)]

@@ -78,6 +78,7 @@ impl App {
                 .map(|playing| (playing.status, playing.genre.clone())),
             presses: u32::try_from(self.notices.advice_presses).unwrap_or(u32::MAX),
             screen_is_home: self.screen == Screen::Device && self.home_has_room(),
+            keys_held: self.modal_open(),
         }
     }
 
@@ -96,6 +97,7 @@ impl App {
     pub(crate) fn observe_mascot(&mut self, now: Instant, month_day: (u8, u8)) {
         self.mascot.today = Some(month_day);
         self.mascot.palette.clone_from(&self.tui.palette);
+        self.mascot.effects = self.effects;
         let view = self.mascot_view();
         if let Some(text) = self.mascot.observe(&view, now)
             && self.mascot_on()

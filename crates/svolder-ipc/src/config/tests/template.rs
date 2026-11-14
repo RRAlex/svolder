@@ -61,7 +61,7 @@ fn the_template_uncommented_is_the_default_config() {
     assert!(Config::template().contains("# base_topic = \"svolder\""));
     assert!(Config::template().contains("# discovery_prefix = \"homeassistant\""));
     assert!(Config::template().contains(
-        "# The broker password, when it wants one; SVOLDER_MQTT_PASSWORD overrides this.\n\
+        "# The broker password, when it wants one; SVOLDER_MQTT_PASSWORD overrides this. Sent only with a username.\n\
              # password = \"\"\n"
     ));
     assert!(Config::template().contains("# max_volume_db = -10.0"));

@@ -4,15 +4,18 @@
 //! The keys of the Settings box's Connect category: what each row asks for, the line a host, a
 //! port or an address is typed into, and the question before the MCP token is replaced.
 //!
-//! Nothing here writes or reads a secret. A row asks for one [`Intent`], which the loop carries
-//! out against the configuration file, the token store and the terminal; the token's text never
-//! passes through the app except while the loop has put it there to be revealed.
+//! Nothing here writes or reads a stored secret. A row asks for one [`Intent`], which the loop
+//! carries out against the configuration file, the token store and the terminal; the token's text
+//! never passes through the app except while the loop has put it there to be revealed. The one
+//! secret that goes the other way is the broker password, typed on an empty line (masked unless
+//! Tab shows it) and handed on inside the one intent that writes it, where it reads `***` in every
+//! `Debug`; the app never holds what is already set.
 
 use crossterm::event::KeyCode;
 use svolder_ipc::token::TokenSource;
 
 use super::{App, ConnChange, Intent};
-use crate::tui::boxes::connections::{Field, LINE_MAX, Line, Modal, TokenView};
+use crate::tui::boxes::connections::{Field, Line, Modal, TokenView};
 use crate::tui::boxes::web_box::{self, WebBox, WebRow};
 use crate::tui::screens::settings::Setting;
 
@@ -63,10 +66,14 @@ impl App {
                 self.notify("v shows the token, c copies it, R replaces it");
                 return Vec::new();
             }
-            Setting::MqttPassword => {
-                self.notify("set it in SVOLDER_MQTT_PASSWORD or in the config file");
-                return Vec::new();
+            Setting::MqttUsername => {
+                return self.edit(
+                    Field::Username,
+                    conn.mqtt.username.clone().unwrap_or_default(),
+                );
             }
+            // The line starts empty whatever is set: a password is never read back.
+            Setting::MqttPassword => return self.edit(Field::Password, String::new()),
             _ => return Vec::new(),
         };
         vec![Intent::Connection(change)]
@@ -74,6 +81,8 @@ impl App {
 
     /// Open the edit line on `field`, holding `text`.
     fn edit(&mut self, field: Field, text: String) -> Vec<Intent> {
+        self.overlays.conn.password_shown = false;
+        self.overlays.conn.password_clear_armed = false;
         self.overlays.conn.modal = Some(Modal::Editing(Line::new(field, text)));
         Vec::new()
     }
@@ -147,7 +156,8 @@ impl App {
     }
 
     /// A key in the Web UI box: ↑↓ move between its rows; Enter or ←→ on Web UI turns it on or
-    /// off, ←→ on Reach moves the listen address; `l` a fresh link, `c` copies it, `p` a pairing
+    /// off, ←→ on Reach moves the listen address, Enter or ←→ on Guest view (and `g` on any row)
+    /// turns the guest view; `l` a fresh link, `c` copies it, `p` a pairing
     /// code (Enter on the Link and Pairing code rows are `l` and `p`), `r` asks before the token
     /// is replaced; Esc or `q` closes the box and forgets its codes.
     /// Every other key is swallowed.
@@ -180,6 +190,10 @@ impl App {
             }
             (KeyCode::Left | KeyCode::Right, WebRow::Reach) => {
                 ConnChange::WebListen(web_box::stepped_listen(conn.web.listen))
+            }
+            (KeyCode::Enter | KeyCode::Left | KeyCode::Right, WebRow::Guest)
+            | (KeyCode::Char('g'), _) => {
+                ConnChange::WebGuest(conn.web.guest != svolder_ipc::config::WebGuest::Read)
             }
             (KeyCode::Char('l' | 'p'), _) if !daemon => {
                 self.warn("the daemon serves the web UI: start it to make a link or a code");
@@ -256,11 +270,37 @@ impl App {
         if code == KeyCode::Enter {
             return self.saved_line();
         }
+        let on_password = matches!(
+            &self.overlays.conn.modal,
+            Some(Modal::Editing(Line {
+                field: Field::Password,
+                ..
+            }))
+        );
+        // Clearing a saved password is its own key, asked twice: Delete on the password line.
+        // Any other key takes the first ask back.
+        let armed = std::mem::take(&mut self.overlays.conn.password_clear_armed);
+        if on_password && code == KeyCode::Delete {
+            if !armed {
+                self.overlays.conn.password_clear_armed = true;
+                self.notify("Delete again clears the saved password");
+                return Vec::new();
+            }
+            self.overlays.conn.modal = None;
+            if !self.overlays.conn.mqtt.password_in_file {
+                self.notify("no password is written in the config file to clear");
+                return Vec::new();
+            }
+            return vec![Intent::Connection(ConnChange::MqttPassword(None))];
+        }
         let Some(Modal::Editing(line)) = self.overlays.conn.modal.as_mut() else {
             return Vec::new();
         };
         let len = line.text.chars().count();
         match code {
+            KeyCode::Tab if line.field == Field::Password => {
+                self.overlays.conn.password_shown = !self.overlays.conn.password_shown;
+            }
             KeyCode::Esc => self.overlays.conn.modal = None,
             KeyCode::Left => line.caret = line.caret.saturating_sub(1),
             KeyCode::Right => line.caret = (line.caret + 1).min(len),
@@ -271,7 +311,7 @@ impl App {
                 line.text.remove(at);
                 line.caret -= 1;
             }
-            KeyCode::Char(letter) if len < LINE_MAX && !letter.is_control() => {
+            KeyCode::Char(letter) if len < line.field.max() && !letter.is_control() => {
                 let at = byte_at(&line.text, line.caret);
                 line.text.insert(at, letter);
                 line.caret += 1;
@@ -288,6 +328,27 @@ impl App {
         };
         let typed = line.text.trim();
         let change = match line.field {
+            Field::Username => match typed {
+                "" if self.overlays.conn.mqtt.username.is_none() => None,
+                "" => {
+                    if self.overlays.conn.mqtt.username_in_env {
+                        self.notify(crate::commands::mqtt::USERNAME_ENV_NOTE);
+                    }
+                    Some(ConnChange::MqttUsername(None))
+                }
+                name if self.overlays.conn.mqtt.username.as_deref() == Some(name) => None,
+                name => Some(ConnChange::MqttUsername(Some(name.to_string()))),
+            },
+            Field::Password => match line.text.as_str() {
+                // An empty line keeps what is saved; Delete clears it.
+                "" => {
+                    self.overlays.conn.modal = None;
+                    self.notify("password unchanged (Delete on the empty line clears it)");
+                    return Vec::new();
+                }
+                // Spaces are the user's: a password is saved as typed.
+                password => Some(ConnChange::MqttPassword(Some(password.to_string().into()))),
+            },
             Field::Listen => match typed.parse::<std::net::SocketAddr>() {
                 Ok(listen) if listen != self.overlays.conn.mcp.listen => {
                     Some(ConnChange::McpListen(listen))
@@ -312,13 +373,29 @@ impl App {
             },
         };
         self.overlays.conn.modal = None;
+        self.overlays.conn.password_shown = false;
         if change.is_some()
             && let Some(words) = self.overlays.conn.read_only()
         {
             self.warn(words);
             return Vec::new();
         }
+        if let Some(ConnChange::MqttPassword(Some(_))) = &change {
+            self.password_saved_note();
+        }
         change.map(Intent::Connection).into_iter().collect()
+    }
+
+    /// What a password just saved still needs: a username to be sent with, and the variable that
+    /// outranks the file where the daemon has it too.
+    fn password_saved_note(&mut self) {
+        let mqtt = &self.overlays.conn.mqtt;
+        let words = match (&mqtt.username, mqtt.password_in_env) {
+            (_, true) => "password saved; SVOLDER_MQTT_PASSWORD is set and wins over it",
+            (None, false) => "password saved, but no username is set so it is not sent",
+            (Some(_), false) => return,
+        };
+        self.notify(words);
     }
 
     /// Say why the line cannot be saved, with the line still up.

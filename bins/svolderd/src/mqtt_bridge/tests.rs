@@ -1692,3 +1692,30 @@ async fn read_only_the_computer_announces_a_binary_sensor_and_subscribes_to_noth
     );
     assert!(topics.iter().all(|t| !t.contains("/switch/")));
 }
+
+#[test]
+fn a_failed_attempt_comes_to_the_problem_its_port_and_trouble_say() {
+    use svolder_mqtt::Trouble;
+    assert_eq!(
+        problem(Trouble::LoginRefused, 1883),
+        Some(MqttProblem::Refused)
+    );
+    assert_eq!(
+        problem(Trouble::LoginRefused, 8883),
+        Some(MqttProblem::Refused)
+    );
+    assert_eq!(
+        problem(Trouble::Unreachable, 1883),
+        Some(MqttProblem::Unreachable)
+    );
+    assert_eq!(
+        problem(Trouble::Unreachable, 8883),
+        Some(MqttProblem::Unreachable)
+    );
+    assert_eq!(
+        problem(Trouble::Dropped, 1883),
+        Some(MqttProblem::Unreachable)
+    );
+    assert_eq!(problem(Trouble::Dropped, 8883), Some(MqttProblem::Tls));
+    assert_eq!(problem(Trouble::Other, 1883), None);
+}

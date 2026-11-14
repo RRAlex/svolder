@@ -604,6 +604,37 @@ async fn the_fake_host_loses_its_cover_and_its_player_when_a_file_appears() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The fake player moves to a second track with a second cover on a file's appearing, which is
+/// what a check of the TUI's cover art cues a track change by: the title and the cover's hash
+/// both change, and the cover's bytes are another picture.
+#[tokio::test(start_paused = true)]
+async fn the_fake_host_changes_track_and_cover_when_a_file_appears() {
+    let dir = std::env::temp_dir().join(format!("svolder-fake-next-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temp dir");
+    let next = dir.join("next");
+    let knobs = FakeKnobs::from_knobs(|name| {
+        (name == "SVOLDER_FAKE_COVER_NEXT_FILE").then(|| next.display().to_string())
+    });
+    assert_eq!(knobs.cover_next_file, Some(next.clone()));
+    let service = HostService::idle();
+    service.run_with(Parts::fake(knobs));
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    let first = service.view().playing.expect("a player");
+    let first_cover = first.cover.clone().expect("the bundled cover");
+    let first_bytes = service.cover(&first_cover).expect("served").bytes.clone();
+
+    std::fs::write(&next, b"").expect("the file");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let second = service.view().playing.expect("still playing");
+    assert_ne!(second.title, first.title, "a new track");
+    let second_cover = second.cover.expect("a second cover");
+    assert_ne!(second_cover, first_cover, "another hash");
+    let second_bytes = service.cover(&second_cover).expect("served").bytes.clone();
+    assert_ne!(second_bytes, first_bytes, "another picture");
+    assert_eq!(service.cover(&first_cover), None, "the old hash is gone");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The knobs are plain milliseconds; anything else is unset.
 #[test]
 fn the_fake_knobs_read_milliseconds() {

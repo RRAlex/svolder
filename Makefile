@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check web-checks web-checks-quick web-checks-task paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-quick web-checks-task paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
 
 ##@ Start
 ##@ Try it
@@ -82,6 +82,28 @@ ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch6
 tui-hangup-check: deps-build ## A closed terminal during a daemon walk: no abort
 	@$(CARGO) build -p svolder -p svolderd
 	@python3 scripts/tui-hangup-check.py 3
+
+#: Starts the real `svolder tui --demo` (fake device, its own daemon, no host audio, no network) in
+#: a pseudo-terminal under temporary homes and drives it through the vt100 screen parser: start-up
+#: bytes and the terminal's answers, the Web UI box, Now playing, the mouse, a resize, quit. The
+#: cases are `#[ignore]`d in bins/svolder/tests/tui_pty, so `cargo test` stays fast. Needs nothing
+#: beyond the build.
+tui-harness: deps-build ## The real TUI in a pty: start-up, keys, mouse, resize, quit
+	@$(CARGO) build --workspace
+	@scratch=$$(mktemp -d /tmp/svh.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$scratch"' EXIT; \
+	env -u SVOLDER_MCP_TOKEN -u SVOLDER_WEB_TOKEN -u SVOLDER_WEB_ENABLED -u SVOLDER_MCP_ENABLED \
+	  -u SVOLDER_WEB_LISTEN -u SVOLDER_MCP_LISTEN -u SVOLDER_WEB_URL -u SVOLDER_MQTT_ENABLED \
+	  -u SVOLDER_MQTT_HOST -u SVOLDER_MQTT_PORT -u SVOLDER_MQTT_USERNAME -u SVOLDER_MQTT_PASSWORD \
+	  TMPDIR="$$scratch" \
+	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_TEST_PREBUILT=1 \
+	  $(CARGO) test -p svolder --test tui_pty -- --ignored || exit $$?; \
+	left=$$(find "$$scratch" -mindepth 1 -maxdepth 1 -exec basename {} \;); \
+	if [ -n "$$left" ]; then \
+	  echo 'make tui-harness: the cases left these in their temporary directory:' >&2; \
+	  echo "$$left" | sed 's/^/  /' >&2; \
+	  exit 1; \
+	fi
 
 #: Checks that the web tests catch a deliberate break: every web mutant runner, one after the other,
 #: with its kills and wall time, then a summary; fails when a mutant survives. Slow, by hand only,
@@ -420,12 +442,19 @@ clean-rust: clean-all ## clean-all, plus cargo's whole download cache
 # PROFILE=<fake profile> and SIGNAL=1 reach the fake device as SVOLDER_FAKE_PROFILE and
 # SVOLDER_FAKE_SIGNAL.
 # A knob not given is cleared from the shell's environment, so the default is the default.
-DEMO_KNOBS = env $(if $(PROFILE),SVOLDER_FAKE_PROFILE=$(PROFILE),-u SVOLDER_FAKE_PROFILE) $(if $(SIGNAL),SVOLDER_FAKE_SIGNAL=$(SIGNAL),-u SVOLDER_FAKE_SIGNAL)
+# AUTOEQ_URL=<base> is where the demo's EQ library reads AutoEq's results from (default: AutoEq's own
+# repository): the fake transport otherwise points it at a dead address, and tests and checks keep
+# that. The only network the demo uses; it fetches when you search the library.
+# An exported SVOLDER_AUTOEQ_URL wins over the default, so a run that sets it (the checks' dead
+# address) keeps it; AUTOEQ_URL= (empty) leaves AutoEq off in the demo, and says so.
+AUTOEQ_URL ?= $(or $(SVOLDER_AUTOEQ_URL),https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/)
+DEMO_KNOBS = env SVOLDER_AUTOEQ_URL='$(AUTOEQ_URL)' $(if $(PROFILE),SVOLDER_FAKE_PROFILE=$(PROFILE),-u SVOLDER_FAKE_PROFILE) $(if $(SIGNAL),SVOLDER_FAKE_SIGNAL=$(SIGNAL),-u SVOLDER_FAKE_SIGNAL)
 
 ##@ Try it
 #: Drives your computer's real volume, media player and EQ: a volume or player change stays after
 #: the demo; the computer EQ it applied is removed when it ends.
 #: PROFILE=fake-amp|fake-mono|fake-five|bifrost3|<profile>   the fake device, any name in profiles/ (default gungnir2-v2, a DAC with tone control; fake-amp, -mono, -five: 2, 1, 5 meters)
+#: AUTOEQ_URL=<base>   where the EQ library reads AutoEq from (default the exported SVOLDER_AUTOEQ_URL, else AutoEq's own repository)
 #: SIGNAL=1   a demo signal moves the meters (a profile with meters: fake-amp, fake-mono, fake-five)
 demo: deps-build ## TUI + web UI on a fake device; drives your real audio
 	$(CARGO) build --workspace
@@ -468,6 +497,12 @@ sim-app-test:
 #: Needs ffmpeg, fonts-ubuntu and fonts-dejavu-core; downloads one AutoEq file once.
 screenshots: deps-build ## Draw the README's TUI pictures into docs/images
 	@bash scripts/screenshots.sh
+
+#: Writes target/screenshots/mascot/<entrance>-{in,landed,out}.png, one trio for each of the seven
+#: entrances; needs ffmpeg, fonts-ubuntu and fonts-dejavu-core, no network.
+mascot-shots: ## Draw a still of each of the squirrel's entrances and exits
+	$(CARGO) test -q -p svolder --bin svolder -- --ignored tui::screenshots::mascot::mascot_entrances
+	@for f in target/screenshots/mascot/*.ppm; do ffmpeg -loglevel error -y -i "$$f" "$${f%.ppm}.png" || exit 1; done
 
 web-icons: ## Draw the web UI's icons from the wordmark (ffmpeg)
 	$(CARGO) test -q -p svolderd --bin svolderd -- --ignored --exact web::icons::draw

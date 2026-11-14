@@ -6,6 +6,7 @@
 
 use std::time::Instant;
 
+use super::divider::DividerDrag;
 use super::glide::{BarDrag, StepPace, VolumeClimb};
 use crate::tui::app::curve_drag::CurveDrag;
 use crate::tui::boxes::tooltip::Tooltip;
@@ -21,6 +22,12 @@ pub struct Pointer {
     /// The level bar a left press holds until its button is let go
     /// ([`glide`](super::glide)).
     pub bar_drag: Option<BarDrag>,
+    /// The bar between the Controls and Tone panes a left press holds until its button is let go
+    /// ([`divider`](super::divider)).
+    pub divider_drag: Option<DividerDrag>,
+    /// When the split of the device screen, moved and not yet saved, is due to be written to the
+    /// configuration file: the moment the bar was let go, or a quiet after the last nudge.
+    pub split_due: Option<Instant>,
     /// The Volume climbing toward a target above what it may jump
     /// to ([`glide`](super::glide)).
     pub climb: Option<VolumeClimb>,

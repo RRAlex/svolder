@@ -15,22 +15,22 @@ fn the_device_screen_draws_the_host_group_and_now_playing() {
         &[
             " svolder  Gungnir 2 · fw 3 · 0102…08  ● connected                 mouse:on 14:02",
             "─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─",
-            "┌ Controls ───────── mute ─ 0 centre ┐┌ Tone control ────────── flat ─ presets ┐",
-            "│ ▶ Input        ‹ 3 · Optical ›     ││   Mode      ‹ EQ ›                     │",
-            "│   Phase invert [ ] off             ││   Loudness  ░░░░░░░░░░ 0               │",
-            "│   NOS filter   [x] on              ││   Preset    custom                     │",
-            "│   Mute         [ ] off             ││                                        │",
-            "│                                    ││ Band   Freq      Gain      Q           │",
-            "│   Volume       █109/127┃░  -6.0 dB ││ ▶ 1   40.0 Hz    +0.0 dB   4.3         │",
-            "│                                    ││   2    160 Hz   -2.45 dB   2.1         │",
-            "│   Balance      L ────┃───── R  0   ││   3    632 Hz    +0.0 dB   4.3         │",
-            "│                                    ││   4   2515 Hz   +1.45 dB   1.0         │",
-            "│   Host                             ││   5  10000 Hz    +0.0 dB   4.3         │",
-            "│   Transport    ◀◀  ▶  ▮▮  ▶▶       ││                                        │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "│                                    ││                                        │",
-            "└────────────────────────────────────┘└────────────────────────────────────────┘",
+            "┌ Controls ─────────── mute ─ 0 centre ┐┌ Tone control ──────── flat ─ presets ┐",
+            "│ ▶ Input        ‹ 3 · Optical ›       ││   Mode      ‹ EQ ›                   │",
+            "│   Phase invert [ ] off               ││   Loudness  ░░░░░░░░░░░░░░░░░░░░░ 0  │",
+            "│   NOS filter   [x] on                ││   Preset    custom                   │",
+            "│   Mute         [ ] off               ││                                      │",
+            "│                                      ││ Band   Freq      Gain      Q         │",
+            "│   Volume       ██109/127┃░  -6.0 dB  ││ ▶ 1   40.0 Hz    +0.0 dB   4.3       │",
+            "│                                      ││   2    160 Hz   -2.45 dB   2.1       │",
+            "│   Balance      L ─────┃───── R  0    ││   3    632 Hz    +0.0 dB   4.3       │",
+            "│                                      ││   4   2515 Hz   +1.45 dB   1.0       │",
+            "│   Host                               ││   5  10000 Hz    +0.0 dB   4.3       │",
+            "│   Transport    ◀◀  ▶  ▮▮  ▶▶         ││                                      │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "│                                      ││                                      │",
+            "└──────────────────────────────────────┘└──────────────────────────────────────┘",
             "┌ Status ────────────────────────────────────────────────────────────── advice ┐",
             "│ Sample rate 48 kHz   fw 3                                                    │",
             "│ Raw: 9=u8 64   9.1=u8 0   9.2=u8 1   (3 unknown functions)                   │",
@@ -187,12 +187,12 @@ fn a_wide_sink_name_is_cut_to_the_rows_cells() {
     let buffer = screen(&on_the_computer(0.54, false, "オーディオ出力"));
     let y = u16::try_from(volume_row(&text(&buffer))).expect("a row");
     let symbol = |x: u16| buffer.cell((x, y)).expect("a cell").symbol().to_string();
-    assert_eq!(symbol(29), "オ");
-    assert_eq!(symbol(31), "ー");
-    assert_eq!(symbol(33), "デ");
-    assert_eq!(symbol(35), "…");
-    assert_eq!(symbol(36), " ", "the name ran up to the border");
-    assert_eq!(symbol(37), "│");
+    assert_eq!(symbol(30), "オ");
+    assert_eq!(symbol(32), "ー");
+    assert_eq!(symbol(34), "デ");
+    assert_eq!(symbol(36), "…");
+    assert_eq!(symbol(38), " ", "the name ran up to the border");
+    assert_eq!(symbol(39), "│");
 }
 
 #[test]
@@ -332,14 +332,14 @@ fn the_host_group_sits_under_the_devices_rows_at_80x24() {
     let theme = Theme::new(false);
     let buffer = frame_with_theme(&sinking(0.54, false, "USB DAC"), 80, 24, &theme);
     let rows = text(&buffer);
-    let pane = |row: &str| row.chars().take(38).collect::<String>();
+    let pane = |row: &str| row.chars().take(40).collect::<String>();
     assert_eq!(
         rows[10..14].iter().map(|row| pane(row)).collect::<Vec<_>>(),
         [
-            "│   Balance      L ────┃───── R  0   │",
-            "│                                    │",
-            "│   Host                             │",
-            "│   Transport    ◀◀  ▶  ▮▮  ▶▶       │",
+            "│   Balance      L ─────┃───── R  0    │",
+            "│                                      │",
+            "│   Host                               │",
+            "│   Transport    ◀◀  ▶  ▮▮  ▶▶         │",
         ]
     );
     let dim = theme.style(Role::Dim);
@@ -384,9 +384,9 @@ fn the_computer_volume_row_says_muted_and_a_boost() {
     let buffer = frame_with_theme(&on_the_computer(0.54, true, "USB DAC"), 80, 24, &theme);
     let rows = text(&buffer);
     let y = volume_row(&rows);
-    let row: String = rows[y].chars().take(38).collect();
-    assert_eq!(row, "│   Volume       ███54%░░░░  muted   │");
-    let muted = buffer.cell((29, y as u16)).expect("the word");
+    let row: String = rows[y].chars().take(40).collect();
+    assert_eq!(row, "│   Volume       ████54%░░░░  muted  … │");
+    let muted = buffer.cell((30, y as u16)).expect("the word");
     assert_eq!(muted.symbol(), "m");
     assert_eq!(
         muted.fg,
@@ -402,8 +402,8 @@ fn the_computer_volume_row_says_muted_and_a_boost() {
     let boosted = text(&screen(&on_the_computer(1.2, false, "USB DAC")));
     let y = volume_row(&boosted);
     assert_eq!(
-        boosted[y].chars().take(38).collect::<String>(),
-        "│   Volume       ███120%███  USB DAC │"
+        boosted[y].chars().take(40).collect::<String>(),
+        "│   Volume       ███120%████  USB DAC  │"
     );
 }
 
@@ -416,8 +416,8 @@ fn without_a_reading_the_computer_volume_row_reads_a_dash_dim() {
     let buffer = frame_with_theme(&app, 80, 24, &theme);
     let rows = text(&buffer);
     let y = volume_row(&rows);
-    let row: String = rows[y].chars().take(38).collect();
-    assert_eq!(row, "│   Volume       —                   │");
+    let row: String = rows[y].chars().take(40).collect();
+    assert_eq!(row, "│   Volume       —                     │");
     let dash = buffer.cell((17, y as u16)).expect("the dash");
     assert_eq!(dash.symbol(), "—");
     let dim = theme.style(Role::Dim);
@@ -571,8 +571,8 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
         .position(|row| row.contains("Spectrum"))
         .expect("the tall tier draws the row");
     assert_eq!(
-        tall[at].chars().take(38).collect::<String>(),
-        "│   Spectrum     ▁▂▃▄▄▅▆▇███████████ │"
+        tall[at].chars().take(40).collect::<String>(),
+        "│   Spectrum     ▁▂▃▃▄▅▆▆▇████████████ │"
     );
     assert!(tall[at - 1].contains("Transport"), "{tall:#?}");
     assert_eq!(landed.map(|row| row.y), u16::try_from(at).ok());
@@ -580,7 +580,7 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
     let (wide, landed) = spectrum_of(&spectral(), 130, 30);
     assert!(
         wide.iter()
-            .any(|row| row.contains("Spectrum     ▁▂▂▃▃▄▄▅▅")),
+            .any(|row| row.contains("Spectrum     ▁▁▂▂▂▃▃▃▄")),
         "{wide:#?}"
     );
     assert!(
@@ -613,8 +613,8 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
         .position(|row| row.contains("Spectrum"))
         .expect("the row with no capture");
     assert_eq!(
-        rows[at].chars().take(38).collect::<String>(),
-        "│   Spectrum     —                   │"
+        rows[at].chars().take(40).collect::<String>(),
+        "│   Spectrum     —                     │"
     );
     let dash = buffer
         .cell((16, u16::try_from(at).expect("a row")))
@@ -637,14 +637,14 @@ fn the_spectrum_row_falls_back_between_blocks() {
             .into_iter()
             .find(|row| row.contains("Spectrum"))
             .expect("the row");
-        row.chars().skip(17).take(19).collect::<String>()
+        row.chars().skip(17).take(21).collect::<String>()
     };
     let mut app = spectral();
     let landed = app.now;
     app.now = landed + host::FALL / 7;
-    assert_eq!(row(&app), "▁▁▂▂▃▄▅▆▇▇▇▇▇▇▇▇▇▇▇");
+    assert_eq!(row(&app), "▁▁▂▂▃▄▅▅▆▇▇▇▇▇▇▇▇▇▇▇▇");
     app.now = landed + host::FALL;
-    assert_eq!(row(&app), "▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁", "the row never settled");
+    assert_eq!(row(&app), "▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁", "the row never settled");
     let block = svolder_host::Block {
         bands: [1.0; svolder_host::fft::BANDS],
         left: 1.0,
@@ -653,7 +653,7 @@ fn the_spectrum_row_falls_back_between_blocks() {
     app.heard_block(&block, landed + host::FALL);
     assert_eq!(
         row(&app),
-        "███████████████████",
+        "█████████████████████",
         "the block did not land at once"
     );
 }
@@ -883,8 +883,8 @@ fn the_transport_row_lights_the_button_the_player_is_on() {
         (svolder_host::Status::Paused, 24),
     ] {
         let buffer = frame_with_theme(&transporting(status), 80, 24, &theme);
-        let row: String = text(&buffer)[13].chars().take(38).collect();
-        assert_eq!(row, "│   Transport    ◀◀  ▶  ▮▮  ▶▶       │");
+        let row: String = text(&buffer)[13].chars().take(40).collect();
+        assert_eq!(row, "│   Transport    ◀◀  ▶  ▮▮  ▶▶         │");
         for x in [17, 21, 24, 28] {
             let cell = buffer.cell((x, 13)).expect("a button");
             let on = cell.fg == accent && cell.modifier.contains(Modifier::BOLD);
@@ -1042,17 +1042,17 @@ fn the_path_row_sits_under_the_transport_with_the_verdict_first() {
     }))));
     assert_eq!(
         rows[13],
-        "│   Transport    ◀◀  ▶  ▮▮  ▶▶       ││                                        │"
+        "│   Transport    ◀◀  ▶  ▮▮  ▶▶         ││                                      │"
     );
     assert_eq!(
         rows[14],
-        "│   Path         host EQ on · playe… ││                                        │"
+        "│   Path         host EQ on · player … ││                                      │"
     );
 
     let rows = text(&screen(&daemon_hosting(gungnir_route(|_| {}))));
     assert_eq!(
         rows[14],
-        "│   Path         untouched · player… ││                                        │"
+        "│   Path         untouched · player 4… ││                                      │"
     );
 }
 
@@ -1106,7 +1106,7 @@ fn the_path_row_judges_the_usb_ports() {
 fn the_path_row_names_every_hop_after_the_verdict() {
     let app = daemon_hosting(gungnir_route(|route| route.host_eq = true));
     let line = app.host_path().expect("a path");
-    let columns = widgets::rows::Columns::fit(120, host::PATH.len(), 0, widgets::BAR_MAX);
+    let columns = widgets::rows::Columns::fit(120, host::PATH.len(), 0);
     let (row, dim) = path_row(&line, &Theme::new(false), columns);
     let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(
@@ -1196,19 +1196,26 @@ fn spectrum_cells(
 fn the_spectrum_row_ends_where_the_volume_row_does_at_any_pane_width() {
     let theme = Theme::new(false);
     for width in [80_u16, 100, 140] {
-        let (cells, volume_end) = spectrum_cells(&spectral(), width, &theme);
+        let mut app = spectral();
+        app.tui.device_split = if width == 140 { 0.36 } else { 0.0 };
+        let (cells, volume_end) = spectrum_cells(&app, width, &theme);
         let first = cells.first().expect("cells").0;
         let last = cells.last().expect("cells").0;
         assert!(
             cells.windows(2).all(|pair| pair[1].0 == pair[0].0 + 1),
             "gaps at {width}"
         );
-        assert_eq!(last, volume_end, "ends off the Volume row's end at {width}");
-        // the pane's room less the label column: the tall tier's pane at 80 and 100
-        // columns, the wide tier's at 140
+        // The Volume row's bar leaves the widest reading its range can write, so a shorter
+        // reading ends a cell or two before the Spectrum does.
+        assert!(
+            volume_end <= last && last - volume_end <= 2,
+            "ends off the Volume row's end at {width}: {last} against {volume_end}"
+        );
+        // the pane's room less the label column: the 40-column pane's at 80 and 100 columns,
+        // the wide tier's 50-column pane at 140
         let expected = match width {
             140 => 29,
-            _ => 19,
+            _ => 21,
         };
         assert_eq!(
             usize::from(last - first + 1),
@@ -1233,13 +1240,18 @@ fn a_single_loud_band_is_a_hump_across_several_columns() {
         .filter(|glyph| *glyph != "▁")
         .collect();
     assert!(lit.len() >= 3, "a spike, not a hump: {lit:?}");
-    let peak = lit.iter().position(|glyph| *glyph == "█").expect("a peak");
     let rank = |glyph: &str| {
         "▁▂▃▄▅▆▇█"
             .chars()
             .position(|c| glyph.starts_with(c))
             .expect("block")
     };
+    let top = lit.iter().map(|glyph| rank(glyph)).max().expect("a peak");
+    assert!(top >= 5, "a hump that never rises: {lit:?}");
+    let peak = lit
+        .iter()
+        .position(|glyph| rank(glyph) == top)
+        .expect("a peak");
     assert!(
         lit[..=peak]
             .windows(2)

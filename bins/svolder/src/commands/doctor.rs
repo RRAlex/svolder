@@ -19,13 +19,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use svolder_ipc::checks::{self, DAEMON_INSTALL, Fix, Outcome, Probes, SETUP, State};
-use svolder_ipc::config::{McpConfig, WebAuth, WebConfig};
+use svolder_ipc::config::{McpConfig, MqttConfig, WebAuth, WebConfig};
 use svolder_ipc::socket::daemon_version;
-use svolder_ipc::{Config, McpStatus, ScanEntry, WebStatus, socket, token};
+use svolder_ipc::{Config, McpStatus, MqttStatus, ScanEntry, WebStatus, socket, token};
 
 use crate::backend::launch;
 use crate::backend::{Backend, Globals, OwnedGlobals};
 use crate::commands::daemon::install::Installed;
+use crate::commands::daemon::status::mqtt_line;
 use crate::recovery::{Failure, Kind, next_step};
 use crate::scanning::{self, Grade, WINDOWS};
 
@@ -43,6 +44,9 @@ const CONFIG_FILE: &str = "Config file";
 
 /// Whether the MCP server can serve and does, as the row is named.
 const MCP_SERVER: &str = "MCP server";
+
+/// Whether the MQTT bridge can reach its broker and does, as the row is named.
+const MQTT_BRIDGE: &str = "MQTT bridge";
 
 /// Whether the web UI can serve and does, as the row is named.
 const WEB_UI: &str = "Web UI";
@@ -162,6 +166,7 @@ async fn outcomes_over(g: &Globals<'_>, dev: bool, connect: bool, path: &Path) -
     // listening would start the service, and a verb that bypasses the daemon has none to grade.
     let mut reported = None;
     let mut reported_web = None;
+    let mut reported_mqtt = None;
     if let Some(path) = version_asked_of(daemon.as_deref(), g.transport)
         && let Some(info) = daemon_answer(path).await
     {
@@ -173,6 +178,7 @@ async fn outcomes_over(g: &Globals<'_>, dev: bool, connect: bool, path: &Path) -
         );
         reported = info.mcp;
         reported_web = info.web;
+        reported_mqtt = info.mqtt;
     }
     let env_token = std::env::var_os(token::Store::MCP.env_var).is_some_and(|v| !v.is_empty());
     outcomes.extend(mcp_row(
@@ -180,6 +186,11 @@ async fn outcomes_over(g: &Globals<'_>, dev: bool, connect: bool, path: &Path) -
         env_token,
         &token::generated_path(token::Store::MCP),
         reported.as_ref(),
+    ));
+    outcomes.extend(mqtt_row(
+        &config.mqtt,
+        std::env::var_os("SVOLDER_MQTT_PASSWORD").is_some_and(|v| !v.is_empty()),
+        reported_mqtt.as_ref(),
     ));
     outcomes.extend(web_row(
         &config.web,
@@ -297,6 +308,86 @@ fn web_row(
             format!(
                 "on in the config, on {}; the daemon is not asked",
                 web.listen
+            ),
+        ),
+    }
+}
+
+/// The row for the MQTT bridge, when `[mqtt]` turns it on or the daemon reports it running.
+///
+/// It looks and changes nothing. It fails, in the broker's own words, on a bridge the daemon says
+/// cannot reach its broker (the login refused, nothing answering, a TLS port); it warns on a
+/// section that is on while the daemon answers that its bridge is off, on a password with no
+/// username (MQTT 3.1.1 sends a password only with one), and on port 8883, which is TLS and which
+/// svolder does not speak; and it passes once the daemon says it is connected. `env_password` is
+/// whether this shell names a password, which a daemon started from it would use.
+fn mqtt_row(
+    mqtt: &MqttConfig,
+    env_password: bool,
+    reported: Option<&MqttStatus>,
+) -> Option<Outcome> {
+    let running = matches!(
+        reported,
+        Some(
+            MqttStatus::Connecting { .. }
+                | MqttStatus::Connected { .. }
+                | MqttStatus::Trouble { .. }
+        )
+    );
+    if !mqtt.enabled && !running {
+        return None;
+    }
+    let row = |state, reason: String| {
+        Some(Outcome {
+            check: MQTT_BRIDGE,
+            state,
+            reason,
+            fix: None,
+        })
+    };
+    if let Some(MqttStatus::Trouble {
+        host,
+        port,
+        problem,
+        ..
+    }) = reported
+    {
+        return row(State::Fail, format!("{host}:{port}: {}", problem.words()));
+    }
+    if mqtt.enabled && mqtt.username.is_none() && (mqtt.password.is_some() || env_password) {
+        return row(
+            State::Warn,
+            "a password is set and no username, so the password is not sent: svolder mqtt set username NAME"
+                .to_string(),
+        );
+    }
+    if mqtt.enabled && mqtt.port == 8883 && !matches!(reported, Some(MqttStatus::Connected { .. }))
+    {
+        return row(
+            State::Warn,
+            svolder_ipc::MqttProblem::Tls.words().to_string(),
+        );
+    }
+    match reported {
+        Some(status @ MqttStatus::Connected { .. }) => row(
+            State::Pass,
+            mqtt_line(status).trim_start_matches("mqtt: ").to_string(),
+        ),
+        Some(status @ MqttStatus::Connecting { .. }) => row(
+            State::Note,
+            mqtt_line(status).trim_start_matches("mqtt: ").to_string(),
+        ),
+        Some(MqttStatus::Off) if mqtt.enabled => row(
+            State::Warn,
+            "on in the config, but the daemon has not read it: svolder daemon restart (or SIGHUP)"
+                .to_string(),
+        ),
+        _ => row(
+            State::Note,
+            format!(
+                "on in the config, for {}:{}; the daemon is not asked",
+                mqtt.host.as_deref().unwrap_or_default(),
+                mqtt.port
             ),
         ),
     }

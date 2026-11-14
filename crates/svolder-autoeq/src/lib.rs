@@ -18,6 +18,10 @@
 //! - `test_server` (feature `test-server`): a loopback HTTP server for tests that need a base
 //!   URL to give a `Client`.
 
+/// What every wording of AutoEq being off starts with: a front end that shows the daemon's words
+/// as they are (the CLI's next step, the web page) recognises them by it.
+pub const OFF_PREFIX: &str = "AutoEq is off";
+
 #[cfg(feature = "net")]
 mod client;
 mod index;

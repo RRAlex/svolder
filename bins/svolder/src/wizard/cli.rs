@@ -216,14 +216,14 @@ fn read_line(secret: bool) -> Option<String> {
 static HELD: std::sync::Mutex<Option<(i32, libc::termios)>> = std::sync::Mutex::new(None);
 
 /// A terminal with its echo off, put back as it was when this is dropped.
-struct Echo {
+pub(crate) struct Echo {
     fd: i32,
     was: libc::termios,
 }
 
 impl Echo {
     /// Turn echo off on `fd`; nothing when it is no terminal (a pipe's lines show nowhere).
-    fn off(fd: i32) -> Option<Echo> {
+    pub(crate) fn off(fd: i32) -> Option<Echo> {
         // SAFETY: `was` is only read after tcgetattr filled it in, and both calls take a plain
         // file descriptor and a struct that lives for the call.
         unsafe {
@@ -243,7 +243,7 @@ impl Echo {
 
     /// Put back the echo of a terminal that is hidden now, if one is. Safe to call from any thread
     /// and again after the drop, which then finds nothing held.
-    fn restore_held() {
+    pub(crate) fn restore_held() {
         let held = HELD.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some((fd, was)) = held {
             // SAFETY: `was` came from tcgetattr on this descriptor.

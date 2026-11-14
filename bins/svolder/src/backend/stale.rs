@@ -97,6 +97,18 @@ pub async fn reload_if_reads(socket: PathBuf, path: &Path) {
     }
 }
 
+/// Whether a daemon listening on `socket` says it reads the configuration file `path`: the
+/// writer a front end's change of that file goes through.
+pub async fn daemon_reads(socket: &Path, path: &Path) -> bool {
+    let Some(info) = svolder_ipc::socket::daemon_version::version_within(socket, ASK_WAIT).await
+    else {
+        return false;
+    };
+    info.config
+        .as_deref()
+        .is_some_and(|reads| same_file(Path::new(reads), path))
+}
+
 /// The daemon's words for a configuration file that is gone, when the daemon listening on
 /// `socket` reads `path`, `path` is not there and the daemon says so: a writer that wrote the file
 /// now would start it from the template, and the reload that follows would drop every device.

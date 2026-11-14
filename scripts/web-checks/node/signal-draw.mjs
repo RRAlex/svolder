@@ -1202,17 +1202,21 @@ ok('the_verdict_names_pipewire_never_the_computer', () => {
   assert.equal(plain('computer muted'), 'PipeWire muted');
   assert.equal(plain("the computer's sink was not read"), "PipeWire's sink was not read");
   assert.equal(plain('the computer plays to Speakers'), 'PipeWire plays to Speakers');
+  assert.equal(plain('\u2192 Speakers'), '\u2192 Speakers');
+  assert.equal(plain('player \u2192 Speakers'), 'player \u2192 Speakers');
   assert.equal(plain('the computer is on USB 2'), 'PipeWire is on USB 2');
   assert.equal(plain('computer rate not read, computer volume not read'), 'PipeWire rate not read, PipeWire volume not read');
   // the real strings of the daemon in the facts block, in every state of the route
-  for (const words of ['computer volume 54 %, computer muted', "the computer's sink was not read", 'the computer is on USB 2', 'the computer plays to X']) {
+  for (const words of ['computer volume 54 %, computer muted', "the computer's sink was not read", 'the computer is on USB 2', '\u2192 X']) {
     const page = hosted();
-    page.device.playing.path = { class: 'warn', words, hops: [] };
+    page.device.playing.path = { class: 'warn', words, hops: [], title: words.startsWith('\u2192') ? 'the computer plays to X' : '' };
     const on = side({ route: { ...ROUTE, host_eq: true, others_mixing: 2 } });
     on.page.device.playing.path = page.device.playing.path;
     const html = computerFacts(on.page) + shelves.computer(on.page, { id: 'computer', kind: 'computer' }, on.view);
     assert.ok(!/computer/i.test(html), html.match(/.{0,40}computer.{0,40}/i)?.[0]);
     assert.ok(html.includes('PipeWire') && html.includes('sg-warn'), words);
+    if (words.startsWith('\u2192')) assert.ok(html.includes('<span aria-hidden="true">\u2192 X</span><span class="sg-sr">PipeWire plays to X</span>'), html);
+    assert.ok(!html.includes('role="img" title="PipeWire'), html);
   }
   for (const route of [ROUTE, { ...ROUTE, sink: null }, null, { ...ROUTE, host_eq: false, others_mixing: 0 }]) {
     assert.ok(!/computer/i.test(computerFacts(hosted(route))));

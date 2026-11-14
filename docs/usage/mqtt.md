@@ -27,25 +27,75 @@ TLS, see "A TLS-only broker" below.
 
 ### Turning it on
 
-The TUI's Settings box has a Connect category for the bridge: it turns the bridge and its commands
-on and off, types the broker's host and port, shows whether a password is set (never the password)
-and the daemon's status line (see ["Connect"](tui.md#connect) under "Settings box"). The bridge is
-off unless `config.toml` turns it on: without an `[mqtt]` section, or with `enabled = false`, the
-daemon opens no connection to anything. Every key but `enabled` and `host` is optional:
+The bridge is off unless it is turned on: without an `[mqtt]` section, or with `enabled = false`,
+the daemon opens no connection to anything. It needs a broker `host`; everything else is optional.
+Four front doors set the same keys, and the table below says which does what.
 
 ```toml
 [mqtt]
 enabled = true
 host = "192.168.1.10"      # the broker
 port = 1883                # default
-username = "svolder"       # optional
-password = "…"             # optional; SVOLDER_MQTT_PASSWORD overrides it
+username = "svolder"       # the broker's login; Home Assistant's broker requires one
+password = "…"             # SVOLDER_MQTT_PASSWORD overrides it
 client_id = "svolder-myhost" # default: "svolder-" + the host name + a hash of the socket
 base_topic = "svolder"     # default
 discovery_prefix = "homeassistant"  # default; "" turns discovery off
 commands = false           # default
 max_volume_db = -10.0      # optional cap on a command's volume
 ```
+
+| Key | `config.toml` | TUI (Settings, Connect) | CLI | Environment |
+|---|---|---|---|---|
+| on or off | `enabled` | MQTT bridge | `svolder mqtt on`, `off` | `SVOLDER_MQTT_ENABLED` |
+| broker host | `host` | MQTT broker host | `svolder mqtt set host NAME` | `SVOLDER_MQTT_HOST` |
+| broker port | `port` | MQTT broker port | `svolder mqtt set port N` | `SVOLDER_MQTT_PORT` |
+| login name | `username` | MQTT username | `svolder mqtt set username NAME` (empty takes it away) | `SVOLDER_MQTT_USERNAME` |
+| login password | `password` | MQTT password (masked; Tab shows it; an empty line keeps it, Delete twice clears it) | `svolder mqtt password` (typed twice without echo, or the first line of standard input; `--clear`) | `SVOLDER_MQTT_PASSWORD` |
+| commands back | `commands` | MQTT commands | none | none |
+| client id, topics, cap | `client_id`, `base_topic`, `discovery_prefix`, `max_volume_db` | none | none | none |
+
+For `enabled`, `host`, `port` and `username` the file wins: the variable is the default where the
+file has no such key, as `SVOLDER_WEB_ENABLED` is for the web UI, so a container's compose file
+configures the bridge with no file written. `SVOLDER_MQTT_PASSWORD` is the other way round: set and
+not empty, it wins over the file's `password`, so a password need not sit in the file at all. The
+TUI's password row says `from SVOLDER_MQTT_PASSWORD` when this session has the variable set. A value
+the variable cannot take (`SVOLDER_MQTT_PORT=abc`, `SVOLDER_MQTT_ENABLED=maybe`) is refused by the
+variable's name.
+
+`svolder mqtt` and the TUI's MQTT rows change the key through the daemon when one runs
+(`mqtt_set`, the same write and reload `svolder web on` makes), so the bridge follows at once, and
+write the file themselves, then tell a daemon that reads it to reload, when none runs. The password goes in the daemon's request and in the file and nowhere else: never an
+argument of a command (a process's arguments are readable by every local user), never printed or
+logged, never read back out by any client, and masked while it is typed. `config.toml` is created
+readable by its owner alone (0600); a file that already exists keeps the mode it has, except that a
+configuration made group- or world-readable is narrowed to 0600 when a password is written into
+it, and the CLI or TUI says so once (a running daemon reports it in its answer, and logs it).
+
+The web UI and the MCP server have no MQTT settings.
+
+### Home Assistant's broker wants a login
+
+Home Assistant's Mosquitto broker add-on refuses a client that gives no username, and a client that
+gives a wrong one: the bridge then stays unconnected, and `svolder daemon status` says `not
+connected to HOST:PORT: the broker refused the login (check username and password)`.
+There is no default username. To give svolder one:
+
+1. In Home Assistant, Settings, People, Users: create a user for svolder (turn on "Can only log in
+   from the local network"; it needs no administrator rights). The Mosquitto add-on accepts
+   Home Assistant's own users.
+2. In Settings, Devices & services, add the MQTT integration against the same broker if it is not
+   there yet, so the entities have somewhere to appear.
+3. Here, the broker's host and the user: `svolder mqtt set host homeassistant.local`,
+   `svolder mqtt set username svolder`, then `svolder mqtt password` (type the user's password), and
+   `svolder mqtt on`. In the TUI the same rows are in Settings, Connect. A container sets
+   `SVOLDER_MQTT_ENABLED`, `SVOLDER_MQTT_HOST`, `SVOLDER_MQTT_USERNAME` and
+   `SVOLDER_MQTT_PASSWORD`.
+
+A bridge that cannot get in says so in words, in the TUI's MQTT status row, in `svolder daemon
+status` and in a `svolder doctor` row: `connected`; `the broker refused the login (check username
+and password)`; `not reachable`; `port 8883 is TLS, which svolder does not speak` (see "A TLS-only
+broker" below).
 
 `enabled = true` with no `host`, a `port` outside 1–65535, a `max_volume_db` that is not a finite
 number, an empty `base_topic`, and a `base_topic` or `discovery_prefix` that holds a `+` or a `#`
@@ -378,9 +428,13 @@ and doubling the wait each time up to 60 s; the first connect and every reconnec
 every discovery config and every device's state and availability again, then subscribe to the
 command topics if commands are on. `svolder daemon status` names where it stands, on the line after
 the daemon's own: `mqtt: off`; `mqtt: connecting to HOST:PORT` while an attempt is under way, and
-`mqtt: connecting to HOST:PORT (retry in N s)` while it waits between attempts; or
-`mqtt: connected to HOST:PORT (read-only)` or `(commands on)` (see
-["daemon status"](daemon.md#daemon-status)).
+`mqtt: connecting to HOST:PORT (retry in N s)` while it waits between attempts; `mqtt: not connected
+to HOST:PORT: WHY (retry in N s)` once an attempt has failed in a way with words (the login refused,
+nothing answering, a TLS port); or `mqtt: connected to HOST:PORT (read-only)` or `(commands on)`
+(see ["daemon status"](daemon.md#daemon-status)). A broker that answers the connect with "bad user
+name or password" or "not authorized" is a refused login; one that does not answer at all, or whose
+name does not resolve, is not reachable; and one that accepts the connection and drops it on port
+8883 is a TLS listener spoken to in plain text.
 
 The daemon's log names the broker and the client id once, as the bridge starts —
 `mqtt: connecting to HOST:PORT as ID, read-only` or `taking commands` — then says

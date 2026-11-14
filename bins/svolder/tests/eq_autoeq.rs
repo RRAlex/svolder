@@ -305,12 +305,31 @@ fn search_without_a_query_or_a_match_refuses() {
 }
 
 #[test]
-fn search_without_a_network_names_the_file_import() {
+fn search_with_autoeq_off_names_it_and_the_file_import() {
     let home = scratch_on("search-offline", "http://127.0.0.1:9/");
     let (code, out, err) = svolder(&["eq", "search", "hd650"], &home);
     assert_eq!((code, out.as_str()), (1, ""), "{err}");
-    assert!(err.contains("no cached AutoEq index"), "{err}");
+    assert!(
+        err.contains("AutoEq is off for the fake device; set SVOLDER_AUTOEQ_URL to turn it on"),
+        "{err}"
+    );
+    assert!(!err.contains("Retry later"), "{err}");
     assert!(err.contains("svolder eq import FILE"), "{err}");
+}
+
+/// A dead address that is not the discard port is a network failure, not AutoEq being off.
+#[test]
+fn search_with_a_dead_address_is_a_network_failure() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let home = scratch_on("search-dead", &format!("http://127.0.0.1:{port}/"));
+    let (code, _, err) = svolder(&["eq", "search", "hd650"], &home);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("no cached AutoEq index"), "{err}");
+    assert!(!err.contains("AutoEq is off"), "{err}");
 }
 
 /// With no daemon, or under a transport that opens none, the AutoEq verbs say AutoEq is the
@@ -758,14 +777,11 @@ fn import_file_goes_through_the_daemon_and_falls_back_to_the_file() {
     );
     assert!(server.paths().is_empty(), "{:?}", server.paths());
 
-    // A name that is taken is the daemon's refusal, in its words, and --force replaces it.
+    // A name that is taken is refused, with the way out, and --force replaces it.
     let (code, _, err) = svolder(&["eq", "import", file], &home);
     assert_eq!(code, 1, "{err}");
-    assert!(err.contains("already"), "{err}");
-    assert!(
-        err.contains("Pick another with `--name`, or pass `--force`"),
-        "{err}"
-    );
+    assert!(err.contains("already exists"), "{err}");
+    assert!(err.contains("--force"), "{err}");
     let (code, _, err) = svolder(&["eq", "import", file, "--force"], &home);
     assert_eq!(code, 0, "{err}");
 

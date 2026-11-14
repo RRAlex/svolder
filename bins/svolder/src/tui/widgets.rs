@@ -45,12 +45,8 @@ pub(super) mod text;
 pub const MISSING: &str = "—";
 /// Columns [`rows::with_cursor`] puts in front of a row.
 pub const CURSOR_WIDTH: usize = 3;
-/// The most cells a level bar, or a balance track, is drawn across.
-pub const BAR_MAX: usize = 15;
-/// The most in the wide tier, whose Controls pane is wider.
-pub const BAR_MAX_WIDE: usize = 25;
 /// Cells the tone-control screen's header draws the loudness bar across; the device screen's
-/// Tone pane draws it as wide as its Controls pane's bars.
+/// Tone pane draws it across what its own pane has room for.
 pub const LOUDNESS_WIDTH: usize = 5;
 /// What a meter marks the class-A tick with, on the cell its profile's threshold falls on, and
 /// what the volume bar marks the loudest step a boosting tone curve stays clear of clipping at

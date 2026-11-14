@@ -11,17 +11,17 @@
 //! | Module | What it holds |
 //! | --- | --- |
 //! | [`protocol`] | The requests, replies and events, and their line encoding |
-//! | [`signal`] | A device's signal strength on the wire, and the one way to word it |
-//! | [`lines`] | Reading newline-framed lines with a length limit |
+//! | `signal` | A device's signal strength on the wire, and the one way to word it |
+//! | `lines` | Reading newline-framed lines with a length limit |
 //! | [`server`] | Binding the socket and serving a handler on it |
-//! | [`client`] | Connecting to a daemon and exchanging requests |
+//! | `client` | Connecting to a daemon and exchanging requests |
 //! | [`path`] | Resolving and preparing the socket path |
 //! | [`daemon_version`] | Asking a daemon its version and judging how it compares with ours |
 
-pub mod client;
+pub(crate) mod client;
 pub mod daemon_version;
-pub mod lines;
+pub(crate) mod lines;
 pub mod path;
 pub mod protocol;
 pub mod server;
-pub mod signal;
+pub(crate) mod signal;

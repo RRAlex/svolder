@@ -7,6 +7,7 @@
 //! taller terminal shows more rows; a device with no tone control gives its Controls pane the
 //! whole width. The focused pane's title is the one drawn in the selected role.
 //!
+//! - [`art`]: the cover art beside the Status pane's rows.
 //! - [`controls`]: the Controls pane: a row per control, the meters, and the Host group.
 //! - [`header`]: the header every screen draws, over the rule that is the tab strip.
 //! - [`status`]: the Status pane: readouts, firmware, faults, advice and the host's audio.
@@ -20,6 +21,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use svolder_proto::FunctionId;
 
+use crate::tui::app::divider::Split;
 use crate::tui::app::{App, Holding, Pane, Screen};
 use crate::tui::keys::Scene;
 use crate::tui::layout_tier::{self, Tier};
@@ -29,11 +31,14 @@ use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets;
 use crate::tui::widgets::actions::Action;
 
+mod art;
 mod controls;
 mod header;
+pub(crate) mod split;
 mod status;
 mod tone_pane;
 
+pub(crate) use art::{art_box, art_reserved, art_slot};
 pub(crate) use header::{Rule, header_height, logo_of};
 pub(super) use header::{
     draw_header, header_built, header_text, host_eq_words, mark_rect, marked, mouse_span,
@@ -53,10 +58,6 @@ use status::{
 };
 use tone_pane::{LOUDNESS_BAR_AT, TonePane, tone_lines};
 
-/// Columns the Controls pane takes when a Tone pane sits beside it.
-const CONTROLS_WIDTH: u16 = 38;
-/// Columns it takes there in the wide tier.
-const CONTROLS_WIDTH_WIDE: u16 = 50;
 /// Lines the Status pane takes: two of its own inside a frame. The tall tier's blank top row
 /// comes on top of these, added where the pane is laid out.
 const STATUS_HEIGHT: u16 = 4;
@@ -152,6 +153,7 @@ pub fn draw(
     hits: &mut HitMap,
 ) -> (Vec<(FunctionId, Rect)>, Option<Rect>) {
     let (tier, [header, panes, status]) = rows_of(area, app);
+    app.drawn.split.set(None);
 
     let (line, marks) = header_built(app, theme, header);
     draw_header(
@@ -173,7 +175,22 @@ pub fn draw(
         return (Vec::new(), None);
     }
 
-    let (controls_area, tone_area) = panes_of(panes, app.profile.eq.is_some(), tier);
+    let (controls_area, tone_area) =
+        panes_of(panes, app.profile.eq.is_some(), tier, app.tui.device_split);
+    // The bar between the panes: the two borders and the column between them, drawn under every
+    // hit the panes push, so a word on a border is still its own.
+    if let Some(tone) = tone_area.filter(|_| split::movable(panes.width, tier.gap())) {
+        let bar = Rect {
+            x: controls_area.right().saturating_sub(1),
+            width: tone.x.saturating_sub(controls_area.right()) + 2,
+            ..controls_area
+        };
+        hits.push(bar, Hit::Divider);
+        app.drawn.split.set(Some(Split {
+            band: panes,
+            gap: tier.gap(),
+        }));
+    }
     let controls = controls_pane(
         app,
         theme,
@@ -184,7 +201,7 @@ pub fn draw(
     let tone = match (app.profile.eq.as_ref(), tone_area) {
         (Some(eq), Some(area)) => {
             let max_width = usize::from(tier.block().inner(area).width);
-            Some(tone_lines(app, eq, theme, max_width, controls.bar))
+            Some(tone_lines(app, eq, theme, max_width))
         }
         _ => None,
     };
@@ -376,7 +393,8 @@ fn draw_status(
     tier: Tier,
     hits: &mut HitMap,
 ) {
-    let status_width = usize::from(tier.block().inner(area).width).saturating_sub(tier.trail());
+    let art = art::slot_in(area, tier, app);
+    let status_width = status_width(area, tier, art.map(|(_, reserved)| reserved));
     pane(
         frame,
         PaneSpec {
@@ -392,6 +410,24 @@ fn draw_status(
         tier,
         hits,
     );
+    // Under a box the picture is not written: a kitty picture is sent once, in the slot's first
+    // cell, which the box's Clear would wipe unseen. The rows keep the room it will have.
+    if let (Some((slot, _)), Some(picture)) = (art, app.host.cover.picture.as_ref())
+        && !art::held(frame.area(), slot, picture, app)
+    {
+        picture
+            .sent
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        frame.render_widget(ratatui_image::Image::new(&picture.protocol), slot);
+    }
+}
+
+/// The columns the Status pane's rows are written in: the pane's interior less the trail and
+/// the `reserved` columns of the art beside them, if any.
+fn status_width(status: Rect, tier: Tier, reserved: Option<u16>) -> usize {
+    usize::from(tier.block().inner(status).width)
+        .saturating_sub(tier.trail())
+        .saturating_sub(usize::from(reserved.unwrap_or(0)))
 }
 
 /// What the panel says while the daemon has not found the device yet: its name, how long
@@ -486,24 +522,23 @@ fn rows_of(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
 
 /// How the band between the header and the Status pane is split: the Controls pane alone on a
 /// device with no tone control, and the Tone pane beside it on one that has it — a column
-/// apart in the wide tier, where the Controls pane is wider too.
-fn panes_of(panes: Rect, tone: bool, tier: Tier) -> (Rect, Option<Rect>) {
-    let width = match tier.wide {
-        true => CONTROLS_WIDTH_WIDE,
-        false => CONTROLS_WIDTH,
-    };
-    match tone {
-        true => {
-            let [left, _, right] = Layout::horizontal([
-                Constraint::Length(width),
-                Constraint::Length(tier.gap()),
-                Constraint::Min(0),
-            ])
-            .areas(panes);
-            (left, Some(right))
-        }
-        false => (panes, None),
+/// apart in the wide tier.
+///
+/// Beside each other the two share the band by `split` ([`split::controls_columns`]), each at
+/// least [`split::MIN_SIDE`] columns wide. No screen is drawn under 80 columns, which is exactly
+/// two panes of 40, so the bar can always be held to that.
+fn panes_of(panes: Rect, tone: bool, tier: Tier, split: f64) -> (Rect, Option<Rect>) {
+    if !tone {
+        return (panes, None);
     }
+    let width = split::controls_columns(split, split::shared(panes.width, tier.gap()));
+    let [left, _, right] = Layout::horizontal([
+        Constraint::Length(width),
+        Constraint::Length(tier.gap()),
+        Constraint::Min(0),
+    ])
+    .areas(panes);
+    (left, Some(right))
 }
 
 /// The bordered panes this screen draws over `area`, in the order it lays them out: the
@@ -518,7 +553,7 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
         return vec![(FrameId::Pane(Pane::Controls), body)];
     }
     let (tier, [_, panes, status]) = rows_of(area, app);
-    let (controls, tone) = panes_of(panes, app.profile.eq.is_some(), tier);
+    let (controls, tone) = panes_of(panes, app.profile.eq.is_some(), tier, app.tui.device_split);
     let mut frames = vec![(FrameId::Pane(Pane::Controls), controls)];
     frames.extend(tone.map(|area| (FrameId::Pane(Pane::Tone), area)));
     frames.push((FrameId::Pane(Pane::Status), status));
@@ -543,19 +578,11 @@ pub(crate) fn home_of(area: Rect, app: &App, theme: &Theme) -> Option<HomePane> 
         return None;
     }
     let (tier, [_, panes, _]) = rows_of(area, app);
-    let (controls, tone) = panes_of(panes, app.profile.eq.is_some(), tier);
+    let (controls, tone) = panes_of(panes, app.profile.eq.is_some(), tier, app.tui.device_split);
     let (rect, lines) = match (app.profile.eq.as_ref(), tone) {
         (Some(eq), Some(tone)) => {
             let max_width = usize::from(tier.block().inner(tone).width);
-            let bar = controls_pane(
-                app,
-                theme,
-                room(controls, tier),
-                tier,
-                height(controls, tier),
-            )
-            .bar;
-            (tone, tone_lines(app, eq, theme, max_width, bar).lines)
+            (tone, tone_lines(app, eq, theme, max_width).lines)
         }
         _ => (
             controls,
@@ -604,7 +631,11 @@ pub(crate) fn fault_line(area: Rect, app: &App) -> Option<Rect> {
     let inner = tier.block().inner(status);
     // The same width the line is written in, so a line with no room for the faults has none
     // for the pulse either.
-    let width = usize::from(inner.width).saturating_sub(tier.trail());
+    let width = status_width(
+        status,
+        tier,
+        art::slot_in(status, tier, app).map(|(_, reserved)| reserved),
+    );
     (!inner.is_empty() && faults_fit(app, width)).then_some(Rect { height: 1, ..inner })
 }
 

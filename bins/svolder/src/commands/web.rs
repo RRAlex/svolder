@@ -19,7 +19,7 @@ use svolder_ipc::token::Store;
 use svolder_ipc::{Client, Config, Request, Response, Server, WebStatus, normal_origin, socket};
 
 use crate::backend::Globals;
-use crate::cli::WebCommand;
+use crate::cli::{GuestMode, WebCommand};
 use crate::commands::{server_switch, token};
 use crate::qr;
 
@@ -38,6 +38,9 @@ pub(crate) async fn run(
         None => open(g, qr).await,
         Some(WebCommand::On) => server_switch::run(g, Server::Web, true).await,
         Some(WebCommand::Off) => server_switch::run(g, Server::Web, false).await,
+        Some(WebCommand::Guest { mode }) => {
+            server_switch::run_guest(g, matches!(mode, GuestMode::On)).await
+        }
         Some(WebCommand::Pair) => pair(g).await,
         Some(WebCommand::Token { rotate }) => token::token(g, Store::WEB, rotate).await,
     }

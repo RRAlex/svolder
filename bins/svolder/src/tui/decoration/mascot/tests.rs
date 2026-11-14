@@ -11,6 +11,8 @@ use super::{BOX_H, BOX_W, ORIGIN, sheet};
 mod brain;
 mod codes;
 mod draw;
+mod entrances;
+mod fx;
 
 #[test]
 fn every_block_parses_and_stays_inside_the_box() {
