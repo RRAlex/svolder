@@ -8,6 +8,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.34.2
+
+- **Contributors**: the daemon's fake-host test asks for the host's view until the fake host is up,
+  instead of once, so a slow runner no longer reads it before it has started.
+
 ## 0.34.1
 
 - **Contributors**: the tests that start a daemon of their own find the workspace's `svolderd` with

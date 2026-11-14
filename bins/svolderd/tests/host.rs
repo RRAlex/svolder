@@ -34,10 +34,18 @@ async fn the_fake_host_answers_over_the_socket() {
         let (mut guard, socket) = spawn_daemon_with_env(CONFIG, &[("SVOLDER_HOST", "fake")]);
         let mut client = connect(&mut guard, &socket).await;
 
-        let Response::Host(view) = client.request(Request::Host).await.expect("an answer") else {
-            panic!("not a host answer");
+        // The fake host starts beside the daemon's socket: until it has published, the view
+        // says unavailable, so the case asks again until it is up (the outer timeout bounds it).
+        let view = loop {
+            let Response::Host(view) = client.request(Request::Host).await.expect("an answer")
+            else {
+                panic!("not a host answer");
+            };
+            if view.available {
+                break view;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         };
-        assert!(view.available);
         assert_eq!(view.playing.expect("the fake player").status, "playing");
 
         let mut events = Client::connect(&socket)

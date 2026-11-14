@@ -3767,7 +3767,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "svolder"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -3799,7 +3799,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-autoeq"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "percent-encoding",
  "rustls",
@@ -3810,7 +3810,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-ble"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "async-trait",
  "btleplug",
@@ -3826,7 +3826,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-fake"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "svolder-profiles",
  "svolder-proto",
@@ -3834,7 +3834,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-host"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "async-trait",
  "dbus",
@@ -3851,7 +3851,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-ipc"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "async-trait",
  "dbus",
@@ -3870,7 +3870,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-mqtt"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "rumqttc",
  "rumqttd",
@@ -3883,7 +3883,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-profiles"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "levenberg-marquardt",
  "nalgebra",
@@ -3896,7 +3896,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-proto"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "hex",
  "serde",
@@ -3905,7 +3905,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-sim"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "bluer",
  "clap",
@@ -3921,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-walk"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3933,7 +3933,7 @@ dependencies = [
 
 [[package]]
 name = "svolderd"
-version = "0.34.1"
+version = "0.34.2"
 dependencies = [
  "askama",
  "async-trait",
