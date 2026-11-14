@@ -127,18 +127,25 @@ fn globals<'a>(transport: &'a str, socket: &'a str) -> Globals<'a> {
     }
 }
 
-/// The `svolderd` this test drives: the one the workspace build leaves in the target
-/// directory, beside the directory this test binary itself runs from.
+/// The `svolderd` this test drives: the one the workspace build leaves in the profile's
+/// directory of the target directory, the nearest folder above this test binary that holds
+/// one (the binary runs from the profile's deps folder, or with cargo's newer layout from a
+/// build folder of its crate, deeper down).
 ///
 /// `make test` builds every binary before it runs a test and says so with
 /// `SVOLDER_TEST_PREBUILT`, so a run that set it and still has no daemon is a broken build
 /// rather than a case to skip.
 fn prebuilt_daemon() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let binary = exe.parent()?.parent()?.join("svolderd");
-    if binary.is_file() {
+    let found = exe
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join("svolderd"))
+        .find(|binary| binary.is_file());
+    if let Some(binary) = found {
         return Some(binary);
     }
+    let binary = exe.parent()?.parent()?.join("svolderd");
     assert!(
         std::env::var_os("SVOLDER_TEST_PREBUILT").is_none(),
         "SVOLDER_TEST_PREBUILT is set but {} is not there",

@@ -8,6 +8,12 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.34.1
+
+- **Contributors**: the tests that start a daemon of their own find the workspace's `svolderd` with
+  cargo's newer build layout too (Rust 1.100 runs a test binary from `target/<profile>/build/`), so
+  `make check` passes on the compiler CI and the release builds use.
+
 ## 0.34.0
 
 - **A guest link in the terminal**: `svolder web guest on|off` turns the web page's read-only guest
