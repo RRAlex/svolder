@@ -1,6 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The two ways a hand moves a needle or a scale: dragging along it and the keys. Both are given an
+// The two ways a hand moves a needle, a knob or a scale: dragging along it and the keys. Both are given an
 // element that stays on the page (the section's box) and look for the thing they work on inside it
 // at the moment of the touch or the key, so the section may be drawn again between gestures.
 

@@ -87,7 +87,7 @@ CORE_STREAM = ['batch', 'close', 'follow', 'followed', 'needed', 'open', 'rename
 CORE_POPUPS = ['add', 'listed', 'names', 'openDevice']
 CORE_KEYS = ['bind', 'frame', 'listed', 'zoneOf', 'zonesOf']
 CORE_DRIVER = ['reach', 'shown']
-CORE_CLOCK = ['AGES_EVERY_MS', 'clockOffset', 'daemonClock', 'elapsedUs', 'fraction', 'tickAges', 'timeWords']
+CORE_CLOCK = ['AGES_EVERY_MS', 'clockOffset', 'daemonClock', 'daemonNow', 'elapsedUs', 'fraction', 'tickAges', 'timeWords']
 # `core.eq` (the tone control's hands) and its three parts: the band drag is the drag's own functions,
 # the point drag and the table are makers that carry their helpers. `core.drag` is its old name, pinned
 CORE_EQ = ['bands', 'points', 'table']

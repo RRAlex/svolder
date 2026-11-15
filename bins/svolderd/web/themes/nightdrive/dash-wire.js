@@ -18,16 +18,15 @@
 
 import { entryOf } from './hud.js';
 import {
-  drawDash, moveProgress, placeFills, switchKeys,
+  drawDash, markCoverFailed, moveProgress, placeFills, switchKeys,
 } from './draw/dash.js';
+import { ASK_MS, baseOf } from '../../core/volume-ask.js';
+import { pressEqKey } from './eq-key.js';
 import { inertOf } from './inert.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { wireVolumeKeys } from './volume-keys.js';
 
 const STEPS = '[data-act="volume-down"], [data-act="volume-up"]';
-
-/** How long a step asked for stays the base of the next one while the device has not said, ms. */
-const ASK_MS = 3000;
 
 /** How often the progress moves, ms. */
 const TICK_MS = 1000;
@@ -44,7 +43,7 @@ export function wireDash({
   const page = root.querySelector('#nightdrive');
   const store = core.model;
   const now = () => globalThis.performance.now();
-  let drawn = { sig: null, at: Date.now() };
+  let drawn = { sig: null };
   let hold = null;
   let shown = store.shown();
 
@@ -90,37 +89,34 @@ export function wireDash({
     const sig = sigOf(html);
     if (sig === drawn.sig) {
       // the same keys: only the progress moves, in place
-      drawn.at = at;
-      moveProgress(dash, model, at, at, true);
+      moveProgress(dash, model, at, true);
       return;
     }
     const focus = dash.contains(document.activeElement) ? document.activeElement.id : '';
     dash.innerHTML = html;
-    drawn = { sig, at };
+    drawn = { sig };
     placeFills(dash);
     if (focus) dash.querySelector(`#${CSS.escape(focus)}`)?.focus({ preventScroll: true });
   }
 
-  // A cover the daemon no longer holds is not shown, and leaves no gap.
+  // A cover the daemon no longer holds is not shown, and leaves no gap; the draws that follow leave
+  // it out until the track's cover is another one.
   dash.addEventListener('error', (event) => {
-    if (event.target.matches?.('.nd-cover img')) event.target.closest('.nd-cover').hidden = true;
+    if (!event.target.matches?.('.nd-cover img')) return;
+    event.target.closest('.nd-cover').hidden = true;
+    markCoverFailed(new URL(event.target.src).searchParams.get('v'));
   }, { capture: true, signal });
 
   // The progress moves once a second while the player plays and the page is on show.
   const timer = setInterval(() => {
     if (globalThis.document?.hidden) return;
-    moveProgress(dash, store.page(), Date.now(), drawn.at);
+    moveProgress(dash, store.page(), Date.now());
   }, TICK_MS);
   signal.addEventListener('abort', () => clearInterval(timer), { once: true });
 
   // ---- the volume ----
-  /** The step a change starts from: a raise from the step asked while it is fresh or the climb's
-   * target, a lowering from the level (a lower step ends a climb where the device is). */
-  function base(v, delta) {
-    const asked = view.asked && now() - view.asked.at < ASK_MS ? view.asked.raw : null;
-    if (delta < 0) return Math.min(asked ?? v.raw, v.raw);
-    return asked ?? (climbing(v) ? v.target : v.raw);
-  }
+  /** The step a change starts from (core/volume-ask.js). */
+  const base = (v, delta) => baseOf(v, { asked: view.asked, now: now() }, delta);
 
   async function send(step, target) {
     const mine = view.asked;
@@ -264,6 +260,10 @@ export function wireDash({
     if (el.matches(STEPS)) {
       // A press of the pointer stepped already; a click with no pointer is a key: one step.
       if (event.detail === 0) nudge(what === 'volume-up' ? 1 : -1);
+      return;
+    }
+    if (what === 'eq') {
+      pressEqKey({ core, act, inert: inert() }).catch(() => {});
       return;
     }
     if (what === 'side') {

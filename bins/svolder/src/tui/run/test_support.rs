@@ -297,6 +297,7 @@ pub(super) fn watching(backend: Backend, app: App, device: Option<&str>) -> Watc
         device: device.map(str::to_string),
         feed_open: true,
         reload_owed: None,
+        give_up_asked: false,
         daemon_version: None,
         view_ask: None,
         view_off: false,

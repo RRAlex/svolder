@@ -12,6 +12,6 @@
 /** The parts of the shown device each section shows, by the model's names. */
 export const PARTS_OF = {
   hud: ['link', 'card', 'volume', 'controls', 'tone', 'presets', 'playing'],
-  dash: ['link', 'card', 'volume', 'controls', 'power', 'playing'],
+  dash: ['link', 'card', 'volume', 'controls', 'power', 'tone', 'playing'],
   sheet: ['link', 'card', 'controls', 'power', 'tone', 'presets', 'device_presets', 'facts'],
 };

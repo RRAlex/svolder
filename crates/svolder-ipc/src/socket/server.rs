@@ -169,7 +169,7 @@ async fn serve_connection<H: Handler>(stream: UnixStream, handler: Arc<H>) -> Re
                         };
                         write.write_all(to_line(&reply)?.as_bytes()).await?;
                     }
-                    None => refuse(&mut write, id, format!("bad request: {e}")).await?,
+                    None => refuse(&mut write, id, bad_request_words(&e)).await?,
                 }
                 continue;
             }
@@ -286,3 +286,18 @@ fn id_of(line: &str) -> u64 {
 
 #[cfg(test)]
 mod tests;
+
+/// What a line that is not a request is answered with: the parser's words, less the value it
+/// found where another type was wanted (a `passphrase` request's `digits` of the wrong type
+/// must not be echoed back).
+fn bad_request_words(e: &serde_json::Error) -> String {
+    let words = e.to_string();
+    // The position suffix serde_json appends ("at line 1 column 9") is kept.
+    match words.rsplit_once(" at line ") {
+        Some((message, position)) => format!(
+            "bad request: {} at line {position}",
+            crate::error::without_value(message)
+        ),
+        None => format!("bad request: {}", crate::error::without_value(&words)),
+    }
+}

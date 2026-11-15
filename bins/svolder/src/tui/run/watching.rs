@@ -19,7 +19,7 @@ pub(in crate::tui) struct Kept {
     pub(super) host_audio: bool,
     pub(super) mascot: crate::tui::decoration::mascot::Mascot,
     pub(super) daemon_version_warned: Option<String>,
-    pub(super) config_changed_told: bool,
+    pub(super) config_changed_told: Option<bool>,
     /// The accent colours of the user's own the Settings box holds as stops.
     pub(super) held_accents: svolder_ipc::FamilyAccents,
     /// The device's unit id and the histories its readings built, which a reopen of the same
@@ -133,6 +133,9 @@ pub(in crate::tui) struct Watching {
     /// When a daemon that reads the file is to be told to reload after a Settings write, and the
     /// file: moved on by each further write ([`super::look::reload_soon`]).
     pub(super) reload_owed: Option<Box<(tokio::time::Instant, std::path::PathBuf)>>,
+    /// Whether `q` or Ctrl-C was pressed while a write of the configuration file was waited for:
+    /// the write was seen through, and the loop ends once the intent that made it is done.
+    pub(super) give_up_asked: bool,
     pub(super) daemon_version: Option<tokio::sync::oneshot::Receiver<Option<DaemonInfo>>>,
     /// The daemon's list of the configured devices, asked in a task of its own so the loop never
     /// waits on it, while it is on its way; `None` is the answer of a daemon that cannot give it.

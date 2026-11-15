@@ -16,11 +16,16 @@
 # The mutation runners (mutate_*.py, node/mutate_*.sh) are slow, by hand only, never a gate: `make tests-check` (FULL=1 for the browser ones).
 # Every check's wall, CPU and peak RSS go to target/web-checks/timing.tsv; the README has the
 # gate ladder (task, lane end, merge, milestone, release) and the lock rules.
-# The quick and task gates reuse a browser check's last pass when nothing it reads changed (the
-# result cache, fingerprint.py; WEB_CHECKS_NO_CACHE=1 runs everything); the full gate and the
-# exclusive lane always run cold. A reused check is reported as `cached`.
+# Every gate reuses a pool browser check's last pass when nothing it reads changed (the result
+# cache, fingerprint.py: the check's script and helpers, the web files its load map entry names,
+# the svolderd binary, the browsers, this file); a reused check is reported as `cached`. The
+# exclusive lane (the serial checks) and the node harnesses always run cold. The full gate runs
+# cold too under --cold (make web-checks-cold; required before a version is TAGGED), under
+# WEB_CHECKS_NO_CACHE=1, and by itself when a smoke file, the check tooling or the load map
+# changed since the last passing full gate.
 #
 # Which gate when (the coverage map, COVERAGE.md, says what each check proves and where):
+#   run-all.sh --cold   the full gate with nothing reused (make web-checks-cold): before a version is tagged;
 #   run-all.sh          the full gate (make web-checks, 47 minutes in 0.32.0 at 6 jobs): required before every merge, and whenever a smoke
 #                       file (smoke.js, smoke-model.js, smoke-director.js, smoke-engine.js,
 #                       smoke-notes.js, effects.js, under bins/svolderd/web/themes/ember/) or one
@@ -45,16 +50,19 @@ root=$(dirname "$(dirname "$here")")
 out=$root/target/web-checks/out
 timing=$root/target/web-checks/timing.tsv
 cargo=${CARGO:-cargo}
+. "$here/lockwait.sh"
 
 quick=0
 task=0
+cold=0
 refusal_only=0
 case "${1:-}" in
     "") ;;
     --quick) quick=1 ;;
     --task) quick=1; task=1 ;;
+    --cold) cold=1 ;;
     --refusal-only) quick=1; refusal_only=1 ;;
-    *) echo "usage: run-all.sh [--quick | --task]" >&2; exit 2 ;;
+    *) echo "usage: run-all.sh [--quick | --task | --cold]" >&2; exit 2 ;;
 esac
 
 # The files whose change needs the full gate: the smoke's, effects.js (it starts and stops the
@@ -69,7 +77,7 @@ smoke_files=(
     $w/effects.js
     $c/smoke_core.py $c/smoke_page.py $c/smoke_quick.py $c/smoke_probe.py $c/notes.py
     $c/notes_tune.py $c/haze.py $c/scroll.py $c/sources.py $c/sweep.py $c/touch.py
-    $c/effects_cycle.py $c/tune.py $c/common.py $c/fingerprint.py $c/gate_cache.sh $c/run-all.sh $c/COVERAGE.md $c/soak.py
+    $c/effects_cycle.py $c/tune.py $c/common.py $c/fingerprint.py $c/gate_cache.sh $c/lockwait.sh $c/gate_wait.sh $c/run-all.sh $c/COVERAGE.md $c/soak.py
     $c/mutate_smoke.py $c/mutate_notes.py $c/mutate_haze.py $c/mutate_scroll.py
     $c/mutate_sources.py $c/mutate_effects.py $c/mutate_registry.py $c/mutpool.py
     $n/director.mjs $n/effects.mjs $n/look-values.mjs $n/model.mjs $n/notes.mjs $n/sources.mjs
@@ -100,7 +108,7 @@ refuse_if_smoke_changed() {
             case $line in
                 "$f" | "$f"/*)
                     case $line in
-                        $c/common.py | $c/run-all.sh | $c/COVERAGE.md | $c/fingerprint.py | $c/gate_cache.sh)
+                        $c/common.py | $c/run-all.sh | $c/COVERAGE.md | $c/fingerprint.py | $c/gate_cache.sh | $c/lockwait.sh | $c/gate_wait.sh)
                             what="the gate's own harness changed ($line); every check reads it"
                             ;;
                         *) what="a smoke file or one of the smoke's checks changed ($line)" ;;
@@ -180,16 +188,37 @@ case $jobs_n in
     '' | *[!0-9]* | 0) echo "web-checks: WEB_CHECKS_JOBS must be a number of 1 or more" >&2; exit 2 ;;
 esac
 
-# The result cache (fingerprint.py): read on the quick and task gates only, written on every gate
-# after a pass. WEB_CHECKS_NO_CACHE=1 runs every check. The shared part of the fingerprint (the
-# binaries, the web dir, the browsers) is taken after the build below.
+# The result cache (fingerprint.py): read on every gate's pool browser checks, written after every
+# pass. The full gate reads it only when it may vouch for the reuse: --cold and WEB_CHECKS_NO_CACHE=1
+# run every check, and so does a full gate whose state (the smoke files, the check tooling, the load
+# map) differs from the last passing full gate's. The shared part of the fingerprint (the Rust
+# sources from cargo's dep-info, the tooling, the browsers) is taken after the build below.
 fpy=("python3" -I "$here/fingerprint.py")
-cache_read=0
-[ "$quick" -eq 1 ] && [ "${WEB_CHECKS_NO_CACHE:-}" != 1 ] && cache_read=1
+cache_read=1
+{ [ "${WEB_CHECKS_NO_CACHE:-}" = 1 ] || [ "$cold" -eq 1 ]; } && cache_read=0
+# state_hash PART: the hash of the smoke's files and the check tooling (tools) or of the map (map)
+state_hash() {
+    if [ "$1" = map ]; then
+        "${fpy[@]}" state "$root/$c/load-map.json"
+    else
+        local f paths=()
+        for f in "${smoke_files[@]}" "$c/touched.py"; do paths+=("$root/$f"); done
+        "${fpy[@]}" state "${paths[@]}"
+    fi
+}
+tools_state= map_state=
+if [ "$quick" -eq 0 ] && [ -z "${WEB_CHECKS_ONLY:-}" ]; then
+    tools_state=$(state_hash tools) map_state=$(state_hash map)
+    if [ "$cache_read" -eq 1 ] && [ "$("${fpy[@]}" marker get)" != "$tools_state $map_state" ]; then
+        cache_read=0
+        echo "web-checks: running cold: a smoke file, the check tooling or the load map changed since" \
+            "the last passing full gate (or there is none)" >&2
+    fi
+fi
 cache_ok=0
 cached=()
 declare -A fps=()
-CFP= CFP_SCRIPT= CFP_ENGINE=
+CFP= CCFP= CFP_SCRIPT= CFP_ENGINE=
 
 if ! "$cargo" build -q --manifest-path "$root/Cargo.toml" -p svolderd -p svolder; then
     echo "web-checks: the svolderd/svolder build failed; no check ran against a stale binary" >&2
@@ -200,15 +229,20 @@ fp_base=$("${fpy[@]}" base) || fp_base=
 [ -z "$fp_base" ] && cache_read=0
 if [ "$cache_read" -eq 1 ]; then
     echo "web-checks: result cache on (a check unchanged since its last pass is reported cached;" \
-        "WEB_CHECKS_NO_CACHE=1 runs every check)" >&2
+        "--cold or WEB_CHECKS_NO_CACHE=1 runs every check)" >&2
 fi
 
 # leftovers of earlier runs (profiles, daemon homes, web copies) go, then the old outputs; this
 # runs before any check starts, never while one runs
 mkdir -p "$out"
-find "$root/target/web-checks" -mindepth 1 -maxdepth 1 ! -name out ! -name cache -exec rm -rf {} +
+find "$root/target/web-checks" -mindepth 1 -maxdepth 1 ! -name out ! -name cache ! -name deps -exec rm -rf {} +
 printf 'check\tengine\tlane\tverdict\twall_s\tcpu_s\trss_mb\n' >"$timing"
 find "$out" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+# A full gate rewrites the load records (touched.py) from nothing, so a file a check stopped loading
+# drops out of the map it writes at the end.
+full_gate=0
+[ "$quick" -eq 0 ] && [ -z "${WEB_CHECKS_ONLY:-}" ] && full_gate=1
+[ "$full_gate" -eq 1 ] && rm -rf "$root/target/web-checks/deps"
 
 # A TERM or INT (or an early exit) stops every check that is running. Each check runs in a process
 # group of its own (setsid) whose id is kept in $out/LABEL.pgid, so the kill reaches the check's
@@ -275,8 +309,12 @@ excerpt() {
 # crashed) and counts as FAIL.
 one_check() {
     local label=$1 file=$2 fail_word=$3 start=$SECONDS verdict=ok c= last msg term= tfile
+    local launched waited=0 stamp
+    launched=$(now_ms)
     shift 3
     tfile=$out/$label.time
+    stamp=$out/$label.lock
+    rm -f "$stamp"
     lockcmd=()
     if [ -n "${lock_mode:-}" ]; then
         lockcmd=(flock "$lock_mode" "$gate_lock")
@@ -288,7 +326,10 @@ one_check() {
     # a TERM while the check is being launched is held until its pid is known, then acted on
     trap 'term=1' TERM
     rm -f "$out/$label.verdict"
-    setsid -w "${lockcmd[@]}" /usr/bin/time -f '%e %U %S %M' -o "$tfile" "$@" >"$file" 2>&1 &
+    stampcmd=()
+    [ ${#lockcmd[@]} -gt 0 ] && stampcmd=(bash "$here/lockwait.sh" stamp "$stamp")
+    setsid -w "${lockcmd[@]}" "${stampcmd[@]}" \
+        /usr/bin/time -f '%e %U %S %M' -o "$tfile" "$@" >"$file" 2>&1 &
     c=$!
     echo "$c" >"$out/$label.pgid"
     trap 'rm -f "$out/$label.pgid"; kill -TERM -- "-$c" 2>/dev/null; wait "$c" 2>/dev/null; exit 143' TERM
@@ -296,17 +337,24 @@ one_check() {
     wait "$c" || verdict=$fail_word
     rm -f "$out/$label.pgid"
     last=$(tail -n 1 "$file")
-    printf '%s %s\n' "$verdict" $((SECONDS - start)) >"$out/$label.verdict"
+    # the seconds in the verdict and the row are the check's own: the wait for the gate lock is
+    # told apart (`waited N s`)
+    waited=$(waited_secs "$launched" "$stamp")
+    printf '%s %s\n' "$verdict" $((SECONDS - start - waited)) >"$out/$label.verdict"
     if [ -n "${CFP:-}" ]; then
-        # stored only when nothing it reads changed while it ran
-        if [ "$verdict" = ok ] && [ "$("${fpy[@]}" full "$CFP_SCRIPT" "$CFP_ENGINE" 2>/dev/null)" = "$CFP" ]; then
-            "${fpy[@]}" store "$label" "$CFP"
+        # a pass is stored at the end of the gate (store_pending), when nothing it reads has changed
+        # since the check started; any other outcome drops the record
+        if [ "$verdict" = ok ]; then
+            printf '%s\t%s\t%s\t%s\n' "$label" "$CFP_SCRIPT" "${CFP_ENGINE:--}" "$CCFP" >>"$out/pending.tsv"
         else
             "${fpy[@]}" forget "$label"
         fi
     fi
     tsv_row "$label" "${lane:-pool}" "$verdict" "$tfile"
-    msg=$(printf '%-5s %-28s %4ds  %s' "$verdict" "$label" $((SECONDS - start)) "$last")
+    msg=$(printf '%-5s %-28s %4ds  %s' "$verdict" "$label" $((SECONDS - start - waited)) "$last")
+    if [ "$waited" -gt 0 ]; then
+        msg+=" (waited $waited s for the gate lock)"
+    fi
     if [ "$verdict" != ok ]; then
         msg+=$'\n'$(excerpt "$file")
     fi
@@ -337,7 +385,7 @@ cached_check() {
     esac
     printf 'ok 0\n' >"$out/$label.verdict"
     printf '%s\t%s\t%s\t%s\t0\t0.0\t0\n' "$label" "$engine" "${lane:-pool}" cached >>"$timing"
-    printf '%-5s %-28s %4ds  %s\n' cached "$label" 0 "unchanged since its last pass (WEB_CHECKS_NO_CACHE=1 runs it)"
+    printf '%-5s %-28s %4ds  %s\n' cached "$label" 0 "unchanged since its last pass (--cold or WEB_CHECKS_NO_CACHE=1 runs it)"
     cached+=("$label")
 }
 
@@ -350,7 +398,7 @@ run_pool() {
         CFP=
         if [ "$cache_ok" -eq 1 ]; then
             script=${entry#*|}
-            CFP=$("${fpy[@]}" check "${script%%|*}" "${entry##*|}" "$fp_base") || CFP=
+            CFP=$("${fpy[@]}" check "${script%%|*}" "${entry##*|}" "$fp_base" "$label") || CFP=
             fps[$label]=$CFP
             if [ "$cache_read" -eq 1 ] && [ -n "$CFP" ] && "${fpy[@]}" hit "$label" "$CFP"; then
                 cached_check "$label"
@@ -360,10 +408,12 @@ run_pool() {
         while [ "$(jobs -rp | wc -l)" -ge "$n" ]; do wait -n 2>/dev/null; done
         check_cmd "$entry"
         if [ -n "$CFP" ]; then
-            # the fingerprint again, now that the slot is free and the check is about to start
+            # what the check starts from, taken now that the slot is free: the fingerprint without the
+            # check's own web areas (the whole web dir counts), against which the end of the gate decides
+            # whether anything moved while it ran. The base is the one taken after the build.
             CFP_SCRIPT=${script%%|*} CFP_ENGINE=${entry##*|}
-            CFP=$("${fpy[@]}" full "$CFP_SCRIPT" "$CFP_ENGINE") || CFP=
-            fps[$label]=$CFP
+            CCFP=$("${fpy[@]}" check "$CFP_SCRIPT" "$CFP_ENGINE" "$fp_base") || CCFP=
+            [ -z "$CCFP" ] && CFP=
         fi
         one_check "$label" "$out/$label.out" "$pool_fail" "${CMD[@]}" &
     done
@@ -394,13 +444,13 @@ by_weight() {
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
 for name in effects facts model sources notes director keep tone-curve plot tone-drag playing viz \
-    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-help dom-skip core-keys theme-keys ember-parts ember-keys \
+    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-help dom-skip core-keys theme-keys ember-parts ember-keys \
     level-write toast frame-keys core-modal core-router switch ember-order contract \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes \
-    signal-line signal-draw nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-keys signal-controls; do
+    signal-line signal-draw nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-eqkey nightdrive-dash-clock nightdrive-keys signal-controls; do
     node_entries+=("node-$name|node/$name.mjs|")
 done
-node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|")
+node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|" "gate-wait|gate_wait.sh|")
 
 # The checks that assert a frame rate, a draw cost or a wall-clock pace (frames a second against a
 # band, a flick's speed, a velocity after wheel steps a set time apart) need the machine to
@@ -496,9 +546,9 @@ for entry in "${ordered[@]}"; do
     if [ "$word" = retry ]; then
         echo "again $label (alone)"
         lane=again lock_mode=-x
-        CFP=${fps[$label]:-}
-        script=${entry#*|} CFP_SCRIPT=${script%%|*} CFP_ENGINE=${entry##*|}
-        [ -n "$CFP" ] && { CFP=$("${fpy[@]}" full "$CFP_SCRIPT" "$CFP_ENGINE") || CFP=; }
+        # a pass that needed the alone retry (flaky) is never stored, and a stored one is dropped
+        CFP=
+        "${fpy[@]}" forget "$label"
         check_cmd "$entry"
         one_check "$label" "$out/$label.again.out" FAIL "${CMD[@]}" &
         wait $!
@@ -542,6 +592,35 @@ fi
 if [ ${#cached[@]} -gt 0 ]; then
     note+=" (${#cached[@]} cached, not run: ${cached[*]})"
 fi
+# the full gate that passed refreshes the committed map of which checks load which web files
+if [ "$full_gate" -eq 1 ] && [ "$failed" -eq 0 ]; then
+    python3 -I "$here/touched.py" --refresh --replace >&2 || echo "web-checks: could not refresh load-map.json" >&2
+    # the next full gate may reuse this one's passes while the smoke, the tooling and the map stay as
+    # they are now (the map as refreshed); not when a smoke or tooling file moved during the run
+    if [ -n "$tools_state" ] && [ "$(state_hash tools)" = "$tools_state" ]; then
+        "${fpy[@]}" marker set "$tools_state $(state_hash map)"
+    fi
+fi
+# store_pending: the passes of this gate, each under the fingerprint the next gate will compute (the
+# map as refreshed above), and only when nothing the check reads has moved since the check started:
+# the base now (the Rust sources, the tooling and the browsers as they are now, read once) must equal
+# the one taken after the build, and the check's own fingerprint (its script files and the whole web
+# dir) the one taken at its start.
+store_pending() {
+    local label script engine ccfp base_now
+    [ -r "$out/pending.tsv" ] || return 0
+    base_now=$("${fpy[@]}" base) || base_now=
+    while IFS=$'\t' read -r label script engine ccfp; do
+        [ "$engine" = - ] && engine=
+        if [ -n "$ccfp" ] && [ "$base_now" = "$fp_base" ] &&
+            [ "$("${fpy[@]}" check "$script" "$engine" "$base_now" 2>/dev/null)" = "$ccfp" ]; then
+            "${fpy[@]}" store "$label" "$("${fpy[@]}" check "$script" "$engine" "$fp_base" "$label")"
+        else
+            "${fpy[@]}" forget "$label"
+        fi
+    done <"$out/pending.tsv"
+}
+store_pending
 echo "serial lane: $serial_wall s"
 top_table
 echo "web-checks: $((total - failed)) of $total checks passed in $SECONDS s$note" \

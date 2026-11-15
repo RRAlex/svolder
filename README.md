@@ -9,8 +9,6 @@ the svolder wordmark and fly into the header of a Gungnir 2's screen, where So W
 plays; the volume steps up, then the tone-control screen shows the Sennheiser HD 800 S correction
 as one band rises">
 
-<sub>[Text version](docs/images/svolder.txt)</sub>
-
 We come in peace: svolder is a fan's homage to Schiit's engineering, and Schiit Audio has not made,
 endorsed or reviewed it (see [LEGAL.md](LEGAL.md)). If you find it useful, the best way to say
 thanks is to buy Schiit. It knows Schiit's Forkbeard DACs, preamps, amplifiers and phono stages
@@ -18,9 +16,9 @@ through a profile per model.
 
 ## Before you plug in
 
-svolder is beta software. It has been tested against a fake device and a Bluetooth simulator that
-speaks the Forkbeard protocol, and has not yet driven real Schiit hardware. Until it has, treat
-every first run as a test:
+svolder is beta software. It has been tested against a fake device, a Bluetooth simulator that
+speaks the Forkbeard protocol, and now some real Schiit devices, but not every model. Treat every
+first run on a new device as a test:
 
 - Turn the volume down before svolder connects, on the device or on the amplifier after it, and
   start low.
@@ -70,25 +68,17 @@ with the volume bar's clipping-risk zone, the host's volume, transport and spect
 control, and the status with the link history, the level's source and Now playing So What by Miles
 Davis">
 
-<sub>[Text version](docs/images/dac.txt)</sub>
-
 <img src="docs/images/tone.webp" width="100%" alt="The tone-control screen of a Gungnir 2 with the
 Sennheiser HD 800 S correction from AutoEq, measured by oratory1990, fitted to its five bands: the
 response curve, the correction's target and its filters">
-
-<sub>[Text version](docs/images/tone.txt)</sub>
 
 <img src="docs/images/amp.webp" width="100%" alt="The device screen of an Aegir 2 amplifier,
 powered on: its controls, its L and R meters as bars with a class-A block, the live part filled and
 a percentage beside each, five minutes of their mirrored history, and the host's audio">
 
-<sub>[Text version](docs/images/amp.txt)</sub>
-
 <img src="docs/images/telemetry.webp" width="49%" alt="The Telemetry screen: every reading an Aegir
 2 sends, with its type, value, age, rate and recent history"> <img src="docs/images/devices.webp"
 width="49%" alt="The Devices screen listing a Gungnir and an Aegir 2, both connected">
-
-<sub>Text versions: [telemetry](docs/images/telemetry.txt), [devices](docs/images/devices.txt)</sub>
 
 ## Install
 

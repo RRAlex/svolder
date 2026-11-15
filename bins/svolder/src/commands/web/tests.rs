@@ -143,6 +143,14 @@ fn an_off_failed_or_missing_web_ui_names_the_fix() {
             .unwrap_err()
             .contains("svolder daemon restart")
     );
+    // The words of every too-old daemon come from one helper, whatever the front end.
+    assert_eq!(
+        listening_at(None).unwrap_err(),
+        format!(
+            "{}; run svolder daemon restart",
+            crate::reach::too_old_words(None, "serve a web UI")
+        )
+    );
 }
 
 /// A link that the opener takes is opened; one it refuses, or an opener that is not there, is

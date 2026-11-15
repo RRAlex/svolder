@@ -62,7 +62,7 @@ async fn identify_against_an_old_daemon_says_restart() {
     daemon.stop().await;
     assert_eq!(
         failure.what,
-        "this daemon is too old to identify; restart it"
+        crate::reach::too_old_words(None, "identify a device")
     );
     assert_eq!(failure.next, "Run `svolder daemon restart`");
     assert_eq!(failure.code, 7);
@@ -79,7 +79,10 @@ async fn a_0_32_7_daemon_is_read_by_its_words() {
     ))
     .await
     .expect_err("an old daemon does not know the request");
-    assert_eq!(old.what, "this daemon is too old to identify; restart it");
+    assert_eq!(
+        old.what,
+        crate::reach::too_old_words(None, "identify a device")
+    );
 
     let daemon = stub_daemon().await;
     daemon.identifies(Response::error(CODE_LINK, "device not connected"));

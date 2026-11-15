@@ -222,7 +222,7 @@ MUTATIONS = {
     'the phone\'s volume keys leave the first row': ([
         (PHONE, ['the_portrait_panel'], ['  in the panel `-` `MUTE` `+` in that order and the transport on ONE row']),
     ], [
-        (N + 'style.css', "  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup) { order: 1; }", "  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup) { order: 6; }"),
+        (N + 'style.css', "  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup, #nd-eq-key) { order: 1; }", "  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup, #nd-eq-key) { order: 6; }"),
     ]),
     'the scene stops at the phone\'s panel': ([
         (PHONE, ['the_portrait_panel'], ['  the scene runs behind the panel']),

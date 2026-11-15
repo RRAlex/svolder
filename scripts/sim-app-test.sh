@@ -9,7 +9,8 @@ set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
 script=$here/sim-app.sh
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/sim-app-test.XXXXXX") || exit 1
+. "$(dirname "$(readlink -f "$0")")/tmp-base.sh"
+tmp=$(svtmp_dir sat) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/sys/hci0" "$tmp/sys/hci1"
 fails=0

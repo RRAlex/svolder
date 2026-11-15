@@ -23,8 +23,9 @@ import {
 import { createComputer, createPending } from '../../../bins/svolderd/web/core/computer.js';
 import { createStore } from '../../../bins/svolderd/web/core/store.js';
 import { playerScreen } from '../../../bins/svolderd/web/themes/signal/draw/player.js';
-import { drawPlaying, transport } from '../../../bins/svolderd/web/themes/signal/draw/playing.js';
-import { curvePath, heldGraph, pointsOf, toneBox } from '../../../bins/svolderd/web/themes/signal/draw/tone.js';
+import { drawPlaying, markCoverFailed, transport } from '../../../bins/svolderd/web/themes/signal/draw/playing.js';
+import { curveD } from '../../../bins/svolderd/web/core/plot.js';
+import { heldGraph, pointsOf, toneBox } from '../../../bins/svolderd/web/themes/signal/draw/tone.js';
 import { volumeBox } from '../../../bins/svolderd/web/themes/signal/draw/volume.js';
 import { hopsOf, shelves, shownHopId } from '../../../bins/svolderd/web/themes/signal/line.js';
 import { menuRows, openers, theme } from '../../../bins/svolderd/web/themes/signal/signal.js';
@@ -123,7 +124,7 @@ ok('the_curve_has_one_point_per_band', () => {
   assert.ok(points[0]['aria-label'].includes('40.0 Hz') && points[0]['aria-label'].includes('3.10 dB'));
   assert.ok(Math.abs(want[1].y - yOf(tone.markers[1].db) / 260) < 1e-9);
   const curve = tags(html, 'path').find((p) => classes(p).includes('sg-curve'));
-  assert.equal(curve.d, curvePath(tone.response));
+  assert.equal(curve.d, curveD(tone.response));
   assert.equal(curve.d.split('L').length, 181);
 });
 
@@ -780,6 +781,44 @@ function hosted(route = ROUTE) {
   return page;
 }
 
+/** A page whose player says it is `nowMs` by the daemon's clock, a value no other case uses. */
+const playingAt = (nowMs) => {
+  const page = hosted();
+  for (const p of [page.host, page.device?.playing]) if (p) p.now_ms = nowMs;
+  return page;
+};
+const timeIn = (html, id) => html.match(new RegExp(`id="${id}"[\\s\\S]*?<span class="sg-time">([^<]*)<`))[1];
+
+ok('a_redraw_for_another_reason_does_not_take_the_bar_time_back', () => {
+  const page = playingAt(1_700_000_200_000);
+  const t0 = 2_000_000;
+  const first = timeIn(drawPlaying(page, t0), 'sg-np');
+  // a minute on, a facts part (or a link, card, fleet or state part) draws the bar again
+  const again = timeIn(drawPlaying(page, t0 + 60_000), 'sg-np');
+  assert.notEqual(first, again);
+  assert.match(again, /^3:1\d \//, `a minute on from ${first}: ${again}`);
+});
+
+ok('a_redraw_with_the_player_hop_open_does_not_take_the_player_time_back', () => {
+  const page = playingAt(1_700_000_300_000);
+  const t0 = 3_000_000;
+  const first = timeIn(playerScreen(page, t0), 'sg-pp');
+  // a volume part on the open hop draws the player's area again
+  const again = timeIn(playerScreen(page, t0 + 60_000), 'sg-pp');
+  assert.notEqual(first, again);
+  assert.match(again, /^4:5\d \//, `a minute on from ${first}: ${again}`);
+});
+
+ok('a_new_reading_of_the_player_takes_the_time_from_it', () => {
+  const page = playingAt(1_700_000_400_000);
+  const t0 = 4_000_000;
+  drawPlaying(page, t0);
+  // the daemon says the player's position again, a minute on by its clock and ours
+  page.device.playing.now_ms += 60_000;
+  page.device.playing.track.progress = { position_us: 10_000_000, rate_milli: 1000, read_at_ms: page.device.playing.now_ms - 5000 };
+  assert.match(timeIn(drawPlaying(page, t0 + 60_000), 'sg-np'), /^0:15 \//);
+});
+
 ok('the_player_opens_the_track_and_the_verdict', () => {
   const page = hosted();
   const html = playerScreen(page, 1_700_000_100_000);
@@ -787,7 +826,7 @@ ok('the_player_opens_the_track_and_the_verdict', () => {
   assert.ok(html.includes('The Fakes'));
   assert.deepEqual(tags(html, 'button').map((b) => b['data-button']), ['previous', 'pause', 'next']);
   assert.ok(tags(html, 'button').every((b) => b['data-act'] === 'transport'));
-  assert.ok(html.includes('id="sg-pp"') && html.includes('data-drawn="1700000100000"'), 'progress moves');
+  assert.ok(html.includes('id="sg-pp"') && !html.includes('data-drawn'), 'progress moves');
   assert.ok(html.includes('0:33 / 20:00'), html);
   for (const hop of page.device.playing.path.hops) assert.ok(html.includes(`<b>${hop.label}</b>`), hop.label);
   assert.ok(html.includes('untouched') && html.includes('sg-verdict sg-ok'), 'the verdict, in its class');
@@ -908,6 +947,65 @@ ok('a_fault_on_a_connected_device_keeps_its_controls_live', () => {
   const wire = line(hops, hop.id, hop.id);
   assert.match(wire, /sg-lostring sg-t-bad/, 'a red ring at the device');
   assert.ok(wire.includes('data-flow="after"') && !wire.includes('sg-still') && !wire.includes('sg-dimmed'), 'the line goes on');
+});
+
+ok('the_players_cover_leads_a_two_part_top_and_none_leaves_no_box', () => {
+  const page = hosted();
+  page.host.track.cover = 'abc123';
+  const withCover = playerScreen(page, 1_700_000_100_000);
+  const top = withCover.slice(withCover.indexOf('<div class="sg-ptop">'));
+  assert.ok(top.startsWith('<div class="sg-ptop"><span class="sg-cover"'), 'the cover opens the top, before the words');
+  assert.ok(top.indexOf('class="sg-cover"') < top.indexOf('class="sg-pmain"'));
+  assert.ok(top.indexOf('class="sg-pmain"') < top.indexOf('class="sg-title"'));
+  assert.ok(top.indexOf('class="sg-transport"') < top.indexOf('sg-lbl sg-gap'), 'the Path list is outside the top');
+  assert.ok(!/<img[^>]*\s(width|height)=/.test(withCover), 'no small size attributes on the picture');
+  page.host.track.cover = null;
+  const without = playerScreen(page, 1_700_000_100_000);
+  assert.ok(!without.includes('sg-cover'), 'no cover, no box');
+  assert.ok(without.includes('<div class="sg-ptop"><div class="sg-pmain">'));
+});
+
+ok('a_cover_that_failed_to_load_is_not_drawn_again_until_the_cover_changes', () => {
+  const page = hosted();
+  const at = 1_700_000_100_000;
+  const bar = () => drawPlaying(page, at);
+  try {
+    page.host.track.cover = 'abc123';
+    assert.ok(playerScreen(page, at).includes('sg-cover'), 'drawn before any error');
+    markCoverFailed('abc123');
+    for (let i = 0; i < 5; i++) {
+      assert.ok(!playerScreen(page, at + i).includes('sg-cover'), `redraw ${i}: no cover in the player`);
+      assert.ok(!bar().includes('sg-cover'), `redraw ${i}: no cover in the bar`);
+    }
+    page.host.track.cover = 'def456';
+    assert.ok(playerScreen(page, at).includes('sg-cover'), 'a new cover tries again');
+    assert.ok(bar().includes('def456'), 'the bar tries the new cover');
+  } finally {
+    markCoverFailed(null);
+  }
+});
+
+ok('a_failure_is_forgotten_once_a_draw_sees_another_cover_or_none', () => {
+  const page = hosted();
+  const at = 1_700_000_100_000;
+  try {
+    page.host.track.cover = 'abc123';
+    markCoverFailed('abc123');
+    assert.ok(!drawPlaying(page, at).includes('sg-cover'), 'hidden while it is the cover');
+    page.host.track.cover = null;
+    assert.ok(!drawPlaying(page, at).includes('sg-cover'), 'no cover, no box');
+    page.host.track.cover = 'def456';
+    assert.ok(drawPlaying(page, at).includes('def456'));
+    page.host.track.cover = 'abc123';
+    assert.ok(drawPlaying(page, at).includes('abc123'), 'the first cover comes back after the others');
+    markCoverFailed('abc123');
+    page.host.track.cover = 'def456';
+    assert.ok(drawPlaying(page, at).includes('def456'));
+    page.host.track.cover = 'abc123';
+    assert.ok(playerScreen(page, at).includes('abc123'), 'another cover between forgets it too');
+  } finally {
+    markCoverFailed(null);
+  }
 });
 
 ok('player_and_computer_hops_open_their_areas', () => {

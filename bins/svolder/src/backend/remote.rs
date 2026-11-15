@@ -29,9 +29,11 @@ const NOTE_WAIT: Duration = Duration::from_secs(1);
 const COVER_WAIT: Duration = Duration::from_secs(10);
 
 /// What a front end says of a daemon that does not know the identify request.
-const TOO_OLD_TO_IDENTIFY: &str = "this daemon is too old to identify; restart it";
+fn too_old_to_identify() -> String {
+    crate::reach::too_old_words(None, "identify a device")
+}
 
-/// The step that follows [`TOO_OLD_TO_IDENTIFY`].
+/// The step that follows [`too_old_to_identify`].
 const TOO_OLD_STEP: &str = "Run `svolder daemon restart`";
 
 /// The failure a daemon's reply earns when it is not the answer a write asked for: the code and
@@ -389,7 +391,7 @@ impl RemoteBackend {
             }) => Err(refused(
                 CODE_UNKNOWN_REQUEST,
                 TOO_OLD_STEP,
-                TOO_OLD_TO_IDENTIFY,
+                too_old_to_identify(),
             )),
             Ok(
                 answer @ Response::Error {
@@ -409,7 +411,7 @@ impl RemoteBackend {
                     true => Err(refused(
                         CODE_UNKNOWN_REQUEST,
                         TOO_OLD_STEP,
-                        TOO_OLD_TO_IDENTIFY,
+                        too_old_to_identify(),
                     )),
                     false => Err(write_failure(Ok::<_, IpcError>(answer))),
                 }

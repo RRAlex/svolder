@@ -185,17 +185,17 @@ ok('signals_and_papers_tone_plots_are_what_they_were_before_the_move', () => {
   for (const [k, bands] of Object.entries(sets)) {
     const r = responseDb(bands, F);
     const want = old.curves[k];
-    assert.equal(sig.curvePath(r), want.curvePath, k);
-    assert.equal(sig.shadePath(r), want.shadePath, k);
-    assert.equal(pap.curvePath(r), want.paperPath, k);
+    assert.equal(curveD(r), want.curvePath, k);
+    assert.equal(fillD(r), want.shadePath, k);
+    assert.equal(curveD(r), want.paperPath, k);
     assert.equal(sig.plot({ id: `x-${k}`, response: r, faint: false, points: '<b></b>' }), want.plot, k);
     assert.equal(sig.plot({ id: `y-${k}`, response: r, faint: true, points: '' }), want.plotFaint, k);
   }
   const e = old.curves.empty;
-  assert.equal(sig.curvePath([]), e.curvePath);
-  assert.equal(sig.shadePath([]), e.shadePath);
+  assert.equal(curveD([]), e.curvePath);
+  assert.equal(fillD([]), e.shadePath);
   assert.equal(sig.plot({ id: 'e', response: [], faint: false, points: '' }), e.plot);
-  assert.equal(pap.curvePath([]), e.paperPath);
+  assert.equal(curveD([]), e.paperPath);
   let pages = 0;
   for (const c of fixture.cases) {
     const d = c.page?.device;
@@ -222,7 +222,7 @@ ok('paper_computer_side_is_what_it_was_before_the_move', () => {
     assert.equal(SECTIONS.tone(page, page.device, v), old.computer.tone[k], k);
     assert.equal(papComputer.heldCurve(m.points ?? []), old.computer.held[k], k);
   }
-  assert.equal(papComputer.curvePath([1, -5, 30, -30]), old.computer.path);
+  assert.equal(curveD([1, -5, 30, -30]), old.computer.path);
 });
 
 ok('a_big_series_does_not_overflow_the_stack', () => {

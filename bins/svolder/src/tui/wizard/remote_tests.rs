@@ -158,6 +158,7 @@ async fn walked(
             &mut wizard,
             &Theme::new(false),
             Leaving::Nowhere,
+            false,
         ),
     )
     .await
@@ -358,6 +359,7 @@ async fn a_signal_ends_the_run_and_cancels_only_this_clients_walk() {
             &mut wizard,
             &Theme::new(false),
             Leaving::Nowhere,
+            false,
         ),
     )
     .await
@@ -450,6 +452,7 @@ async fn shown(state: svolder_ipc::JobState, expecting: &'static str) -> String 
             &mut wizard,
             &Theme::new(false),
             Leaving::ToTui,
+            false,
         ),
     )
     .await
@@ -580,6 +583,7 @@ async fn the_scan_draws_the_devices_heard_so_far() {
             &mut wizard,
             &Theme::new(false),
             Leaving::ToTui,
+            false,
         ),
     )
     .await

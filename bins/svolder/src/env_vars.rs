@@ -464,6 +464,22 @@ const ENV_VARS: &[EnvVar] = &[
                the daemon into `target/test-daemon`, apart from `target/debug`.",
     },
     EnvVar {
+        name: "SVOLDER_TMP_BASE",
+        read_by: "make, scripts",
+        dev_only: true,
+        what: "The directory the make targets and scripts make their temporary files under; \
+               only the helper's self-test and `make host-e2e` (pinned to the default) set it. \
+               Default `/tmp/svolder`, which the helper makes 0700 and refuses unless it is a real \
+               directory of yours.",
+    },
+    EnvVar {
+        name: "SVOLDER_TMP_LOG",
+        read_by: "make, scripts",
+        dev_only: true,
+        what: "A file the temporary-directory helper appends each path it makes to; `make check` \
+               sets it to its manifest, which its last step reads.",
+    },
+    EnvVar {
         name: "SVOLDER_LAB_SEED",
         read_by: "svolder-host test suite, make",
         dev_only: true,

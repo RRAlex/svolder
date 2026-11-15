@@ -252,8 +252,8 @@ for a tag that has no release yet). It builds each architecture on a native runn
 (`make packages ARCH=...`) without write access and runs `make check` on an arm64 runner, unless
 `check.yml` (which runs on every push to main) already passed on that very commit, which the run
 asks the API first; a by-hand run always tests. The images and the release wait for that check. So
-push main, wait for `check.yml` to pass, then push the tag. On a machine whose system bus has no
-BlueZ, `make check-no-bluez` skips itself, since `make test` already ran that way. It then pushes the multi-architecture image, then a last
+push main, wait for `check.yml` to pass, then push the tag. The release then pushes the
+multi-architecture image, then a last
 job combines the files (`make release-files`), attaches the compose file
 (`packaging/release-compose.sh`: `docker-compose.yml` with its `image:` line and the comment above
 it changed for `ghcr.io/rralex/svolder:VERSION`), checks the draft against `SHA256SUMS` and
@@ -953,7 +953,8 @@ the link the daemon holds, and answers `{"result":"identify","device":"fake","se
 `"sent":false` means one went out within the last 2 seconds and this request sent nothing. A device
 the daemon has no link to answers the `device not connected` error (code 3) without ending the wait
 before its next attempt. A daemon older than this request answers it with the `bad request` error
-below, which `svolder identify` turns into `this daemon is too old to identify; restart it`.
+below, which `svolder identify` turns into `the daemon cannot identify a device, which this
+svolder asks it to`.
 
 `history` (`{"cmd":"history","device":"fake","span_secs":3600}`) answers how a device's link has
 come and gone:
@@ -1166,7 +1167,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.34.2 on /run/user/1000/svolder.sock
+daemon: 0.34.5 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)

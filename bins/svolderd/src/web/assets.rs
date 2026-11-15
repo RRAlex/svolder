@@ -208,6 +208,21 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/clock.js"),
     ),
     (
+        "core/volume-ask.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/volume-ask.js"),
+    ),
+    (
+        "core/gestures.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/gestures.js"),
+    ),
+    (
+        "core/place.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/place.js"),
+    ),
+    (
         "core/tone-curve.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/tone-curve.js"),

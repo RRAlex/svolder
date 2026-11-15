@@ -39,6 +39,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
 use tokio::signal::unix::{SignalKind, signal};
@@ -95,6 +96,9 @@ const EQ_REMOVE_WAIT: Duration = Duration::from_secs(10);
 /// How often the daemon is looked at while it starts or stops.
 const POLL: Duration = Duration::from_millis(20);
 
+/// How often the watch looks at whether the daemon is still running.
+const WATCH_EVERY: Duration = Duration::from_secs(1);
+
 /// How old a leftover directory must be before the next demo removes it, so a directory another
 /// demo is still starting in is never taken.
 const STALE_AFTER: Duration = Duration::from_secs(60);
@@ -131,8 +135,8 @@ extern "C" fn note_signal(_: libc::c_int) {
 /// The demo's daemon and the directory it lives in. Dropping it stops the daemon and removes the
 /// directory, so every way out of the demo, a panic included, leaves neither behind.
 pub struct Demo {
-    /// The daemon, once it is started.
-    child: Option<Child>,
+    /// The daemon, once it is started; shared with the thread that reaps it if it ends mid-run.
+    child: Arc<Mutex<Option<Child>>>,
     /// The private directory: mode 0700, a short random name.
     dir: PathBuf,
     /// Whether the directory is left in place when this is dropped: a daemon that failed to
@@ -212,7 +216,7 @@ impl Demo {
         let dir = private_dir(&base).map_err(|e| failed(format!("{}: {e}", base.display())))?;
         // From here the directory is the guard's, whatever ends the start.
         let mut demo = Demo {
-            child: None,
+            child: Arc::new(Mutex::new(None)),
             dir,
             keep: false,
             host,
@@ -222,9 +226,13 @@ impl Demo {
         // Kept until [`run`] has the runtime's own handlers, so there is no moment in which a
         // signal ends this process with the daemon running and the directory made.
         listen_for_signals();
-        demo.child = Some(demo.spawn(&binary)?);
+        *locked(&demo.child) = Some(demo.spawn(&binary)?);
         demo.wait_until_up()?;
         isolate(&demo.dir, demo.host.as_ref());
+        // After `isolate`, which needs this to be the only thread.
+        watch_daemon(Arc::clone(&demo.child), WATCH_EVERY, |said| {
+            let _ = GONE.set(said);
+        });
         if demo.host.is_some() {
             eprintln!("{HOST_NOTE}");
         }
@@ -313,8 +321,7 @@ impl Demo {
                 return Err(StartError::Interrupted);
             }
             let log = self.dir.join("daemon.log");
-            let exited = self
-                .child
+            let exited = locked(&self.child)
                 .as_mut()
                 .and_then(|c| c.try_wait().ok().flatten());
             if exited.is_some() || Instant::now() >= deadline {
@@ -350,7 +357,7 @@ impl Drop for Demo {
         }
         // A child that already exited is reaped by the check, and its pid is not signalled: the
         // kernel may have given the number to another process.
-        if let Some(mut child) = self.child.take()
+        if let Some(mut child) = locked(&self.child).take()
             && matches!(child.try_wait(), Ok(None))
         {
             // SAFETY: `kill` takes a pid and a signal and has no preconditions of its own; the
@@ -370,6 +377,49 @@ impl Drop for Demo {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
+}
+
+/// What became of the daemon, said once by the watch when it ended mid-run.
+static GONE: OnceLock<String> = OnceLock::new();
+
+/// Why the demo's daemon is no longer there, when it ended while the TUI ran.
+pub(crate) fn daemon_gone() -> Option<&'static str> {
+    GONE.get().map(String::as_str)
+}
+
+/// `child` locked, whatever a thread that panicked while holding it left behind.
+fn locked(child: &Mutex<Option<Child>>) -> MutexGuard<'_, Option<Child>> {
+    child.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What the daemon's end is called, when it has ended: looking reaps it, so it never stays a
+/// zombie until the TUI quits.
+fn reap(child: &Mutex<Option<Child>>) -> Option<String> {
+    let status = locked(child).as_mut()?.try_wait().ok().flatten()?;
+    Some(format!("the demo daemon stopped ({status})"))
+}
+
+/// Look at the daemon every `every` from a thread of its own, until it has ended (`ended` is
+/// given how) or [`Demo`] has taken it away.
+fn watch_daemon(
+    child: Arc<Mutex<Option<Child>>>,
+    every: Duration,
+    ended: impl FnOnce(String) + Send + 'static,
+) {
+    let _ = std::thread::Builder::new()
+        .name("svolder-demo-watch".to_string())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(every);
+                if locked(&child).is_none() {
+                    return;
+                }
+                if let Some(said) = reap(&child) {
+                    ended(said);
+                    return;
+                }
+            }
+        });
 }
 
 /// Take SIGINT, SIGTERM and SIGHUP into [`INTERRUPTED`].

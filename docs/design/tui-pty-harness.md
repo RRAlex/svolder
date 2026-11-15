@@ -52,13 +52,28 @@ and that no answer is read as a key.
   `wait_ready`; a box the animation layer dissolves leaves rows of it for several frames after its
   last words are gone, so a case that reads rows back waits until they read as they did (the
   `static_rows` helper); a QR arrives over several frames.
-- `quit` sends one `q`, so a lost key fails the case. Only a case that has crossed the too-small
-  size uses `quit_after_crossing_too_small`, which sends `q` again: the TUI sometimes does not
-  read a key sent just after (an open issue of the TUI).
+- One wait rule: every wait is a condition on the screen or the program (the screen shows X, the
+  program exited) under the one deadline `WAIT` (120 s, reached only by a failure), never a short
+  deadline of its own and never a sleep that stands in for a condition. `find` waits for its text
+  before it looks for it, so a case does not read the screen the instant after a key. The only
+  short waits are the ones a case means: a text that must stay away (the tooltip that must not
+  show), a retry of a gesture whose window is real time (the double-click), the quiet second that
+  says a picture has stopped arriving (`settled_art_cells`), the timed samples of the squirrel's
+  entrance and exit (what a case checks is that no stray cell changes in that window; that the
+  squirrel has landed is a wait on the screen) and the 200 ms bound on the start-up medians
+  (a measured time, the one assertion on the clock). A run's processes are found by the whole name
+  of its home, so a run never stops a sibling's (`svolder-pty-7-2` is a prefix of
+  `svolder-pty-7-27`).
+- A key that the TUI may not read is sent again: `quit` sends `q` and, when no question shows
+  within 8 s (`RESEND`), sends it again, all under `WAIT`. Only a key that is idempotent is
+  resent this way: a second `q` on the open question quits, as Enter does, so a late first `q`
+  does no harm. Keys that change state (a toggle, Enter on a row, a typed letter) are never
+  resent; a case waits for the screen to show their effect instead. The TUI sometimes not reading
+  a key sent just after another input is an open issue of the TUI.
 - `finish` (what `quit` ends in) also checks the main screen holds no text of a terminal reply
   and that no process of the run (its daemon) is left.
 
 ## Wall time
 
-The cases take about 5 s of wall time in the test binary (`make tui-harness`), the same under a
-parallel cargo build.
+The cases take about 30 s of wall time in the test binary (`make tui-harness`), about the same
+beside a parallel cargo build.

@@ -580,7 +580,7 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
     let (wide, landed) = spectrum_of(&spectral(), 130, 30);
     assert!(
         wide.iter()
-            .any(|row| row.contains("Spectrum     ▁▁▂▂▂▃▃▃▄")),
+            .any(|row| row.contains("Spectrum     ▁▁▂▂▃▃▃▄▄▄▅▅▆▆▆▇▇") && row.contains("█ own ")),
         "{wide:#?}"
     );
     assert!(
@@ -1200,7 +1200,9 @@ fn the_spectrum_row_ends_where_the_volume_row_does_at_any_pane_width() {
         app.tui.device_split = if width == 140 { 0.36 } else { 0.0 };
         let (cells, volume_end) = spectrum_cells(&app, width, &theme);
         let first = cells.first().expect("cells").0;
-        let last = cells.last().expect("cells").0;
+        // a row with room to spare ends with a dim word, " daemon" or " own" (spectral() hears blocks of the own capture), for its source
+        let word = if width == 140 { 4 } else { 0 };
+        let last = cells.last().expect("cells").0 + word;
         assert!(
             cells.windows(2).all(|pair| pair[1].0 == pair[0].0 + 1),
             "gaps at {width}"
@@ -1447,4 +1449,27 @@ fn the_host_volume_switch_has_the_look_and_the_chaser_of_the_target_row() {
     let (_, dac, computer) = target_sides(&frame(&app, 130, 50), &name);
     assert!(dac.0.contains(Modifier::BOLD) && !dac.0.contains(Modifier::REVERSED));
     assert!(!computer.0.contains(Modifier::BOLD));
+}
+
+/// A wide Spectrum row ends with one dim word for where its bands come from: `own` for the
+/// loop's own capture, `daemon` once a frame of the daemon has landed.
+#[test]
+fn the_spectrum_row_says_whether_the_daemon_or_the_own_capture_feeds_it() {
+    let mut app = spectral();
+    let (rows, _) = spectrum_of(&app, 130, 30);
+    assert!(rows.iter().any(|row| row.contains("█ own ")), "{rows:#?}");
+    app.heard_frame(
+        &svolder_host::Frame {
+            capture_ms: 0,
+            left: [200; svolder_host::analysis::BANDS],
+            right: [200; svolder_host::analysis::BANDS],
+            levels: [200; 4],
+            beat: false,
+            bpm: None,
+            phase: 0,
+        },
+        app.now,
+    );
+    let (rows, _) = spectrum_of(&app, 130, 30);
+    assert!(rows.iter().any(|row| row.contains(" daemon ")), "{rows:#?}");
 }

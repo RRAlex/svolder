@@ -48,7 +48,8 @@ $(section_of "$v" "$file")
 self_test() {
   local out fail=0 self
   self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
-  tmp=$(mktemp -d)
+  . "$(dirname "$0")/../scripts/tmp-base.sh"
+  tmp=$(svtmp_dir rn) || return 1
   trap 'rm -rf "$tmp"' EXIT
   cat > "$tmp/CHANGELOG.md" <<'EOT'
 # Changelog

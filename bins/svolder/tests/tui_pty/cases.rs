@@ -164,8 +164,9 @@ fn cover_art_off_sends_no_query_and_auto_sends_the_probe() {
 
 /// The wait for a terminal that never answers is the probe's own: `cover_art = "auto"` starts
 /// about 100 ms after the start with the art off (the probe's wait; 101 ms measured), measured as
-/// the time to the first cell the TUI draws, the median of five starts each; both are said. The
-/// bound is the wait plus 100 ms for a loaded machine.
+/// the time to the first cell the TUI draws, the fastest of five starts each (a busy machine
+/// delays some starts, but a probe that really waits shows in every one); both are said. The
+/// bound is the wait plus 100 ms.
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
 fn a_silent_terminal_costs_the_probes_wait_and_no_more_at_start_up() {
@@ -180,17 +181,19 @@ fn a_silent_terminal_costs_the_probes_wait_and_no_more_at_start_up() {
         tui.quit();
         took
     };
-    let median = |lines: &str| {
-        let mut times: Vec<_> = (0..5).map(|_| first_cell(lines)).collect();
-        times.sort();
-        times[2]
+    let fastest = |lines: &str| {
+        (0..5)
+            .map(|_| first_cell(lines))
+            .min()
+            .expect("five starts")
     };
-    let off = median("cover_art = \"off\"");
-    let auto = median("cover_art = \"auto\"");
+    let off = fastest("cover_art = \"off\"");
+    let auto = fastest("cover_art = \"auto\"");
     eprintln!("start-up to the first cell, silent terminal: off {off:?}, auto {auto:?}");
     assert!(
         auto < off + std::time::Duration::from_millis(200),
-        "auto {auto:?} is slower than off {off:?} by more than the probe's wait"
+        "auto {auto:?} is slower than off {off:?} by {:?}, more than the probe's wait plus 100 ms",
+        auto.saturating_sub(off)
     );
 }
 
@@ -306,7 +309,7 @@ fn a_terminal_too_small_says_so_and_recovers_when_it_grows() {
     tui.resize(SMALL.0, SMALL.1);
     tui.wait_ready();
     assert_clean_device_screen(&tui);
-    tui.quit_after_crossing_too_small();
+    tui.quit();
 }
 
 #[test]
@@ -553,6 +556,28 @@ fn art_cells(screen: &vt100::Screen) -> usize {
     placeholders + halves
 }
 
+/// The art's cell count once it has stood unchanged for a second (the TUI draws whole frames, but
+/// a picture can still be arriving after its first one), so a picture still being drawn is not
+/// taken for the finished one. Each change restarts the second, all under [`WAIT`] per change.
+fn settled_art_cells(tui: &Tui) -> usize {
+    tui.wait_for("art cells", WAIT, |screen| art_cells(screen) > 0);
+    let deadline = std::time::Instant::now() + WAIT;
+    let mut counts = vec![tui.with_screen(art_cells)];
+    while tui
+        .try_wait_for(std::time::Duration::from_secs(1), |s| {
+            Some(art_cells(s)) != counts.last().copied()
+        })
+        .is_ok()
+    {
+        counts.push(tui.with_screen(art_cells));
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the art's cell count never settled; the counts were {counts:?}"
+        );
+    }
+    counts[counts.len() - 1]
+}
+
 /// Whether the art is on the screen, drawn as `responder`'s terminal draws it: the kitty
 /// protocol's picture and its placeholders, a sixel picture, or half-blocks.
 fn art_drawn(tap: &Tap, responder: Responder) -> bool {
@@ -779,7 +804,7 @@ fn a_resize_sizes_the_cover_again() {
         let tui = Tui::start(SMALL.0, SMALL.1, responder);
         tui.wait_for_text("Now playing: Test Pressing");
         wait_art(&tui, responder);
-        let small = tui.with_screen(art_cells);
+        let small = settled_art_cells(&tui);
         tui.resize(WIDE.0, WIDE.1);
         tui.wait_for("a bigger picture", WAIT, |screen| art_cells(screen) > small);
         assert_clean_device_screen(&tui);
@@ -910,6 +935,39 @@ fn the_settings_tooltips_row_turns_the_tooltips_off() {
     tui.quit();
 }
 
+/// The words of the setup wizard's `q` tooltip: what the key does, then the key.
+const SETUP_Q_TIP: &str = "quit · q";
+
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn a_resting_pointer_on_the_setup_wizards_key_line_shows_a_tooltip() {
+    let tui = Tui::run_program(
+        SMALL.0,
+        SMALL.1,
+        &crate::common::svolder_with_daemon(),
+        &["setup"],
+    );
+    tui.wait_for("the alternate screen", WAIT, |s| s.alternate_screen());
+    // The key line is the last row; its `q` is the one key that is there on every step.
+    tui.wait_for("the key line", WAIT, |s| {
+        s.contents()
+            .lines()
+            .last()
+            .is_some_and(|l| l.contains("quit"))
+    });
+    let (col, row) = tui.find("q quit");
+    tui.send_mouse(Mouse::Move, col, row);
+    tui.wait_for_text(SETUP_Q_TIP);
+    // Off the key, the tip goes.
+    tui.send_mouse(Mouse::Move, 0, 0);
+    tui.wait_for("the tooltip gone", WAIT, |s| {
+        !s.contents().contains(SETUP_Q_TIP)
+    });
+    // Quitting gives the terminal back: mouse reporting off, alternate screen left.
+    tui.send_keys("q");
+    tui.finish();
+}
+
 /// The tab strip's line when it is a whole frame wide: `cols` characters, ending in the
 /// Esc menu's mark.
 fn strip_of_width(text: &str, cols: u16) -> Option<usize> {
@@ -957,7 +1015,7 @@ fn a_resize_mid_run_redraws_the_whole_frame() {
     tui.resize(SMALL.0, SMALL.1);
     wait_for_frame(&tui, SMALL.0, SMALL.1);
     assert_clean_device_screen(&tui);
-    tui.quit_after_crossing_too_small();
+    tui.quit();
 }
 
 #[test]
@@ -987,19 +1045,22 @@ fn ctrl_c_quits_at_once_and_gives_the_terminal_back() {
 
 /// Every cell of the screen as text and colours.
 fn grid(tui: &Tui) -> Look {
-    tui.with_screen(|screen| {
-        let (rows, cols) = screen.size();
-        (0..rows.get())
-            .map(|row| {
-                (0..cols.get())
-                    .map(|col| {
-                        let cell = screen.cell(row, col).expect("a cell on the screen");
-                        (cell.contents().to_string(), cell.fgcolor(), cell.bgcolor())
-                    })
-                    .collect()
-            })
-            .collect()
-    })
+    tui.with_screen(look_of)
+}
+
+/// Every cell of `screen`: its text and colours.
+fn look_of(screen: &vt100::Screen) -> Look {
+    let (rows, cols) = screen.size();
+    (0..rows.get())
+        .map(|row| {
+            (0..cols.get())
+                .map(|col| {
+                    let cell = screen.cell(row, col).expect("a cell on the screen");
+                    (cell.contents().to_string(), cell.fgcolor(), cell.bgcolor())
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// The squirrel's box on the Tone pane: 27 columns by 6 rows, its right column three inside the
@@ -1063,7 +1124,8 @@ fn the_mascots_entrance_and_exit_leave_no_stray_cells_outside_its_box() {
     });
     // The intro and the first boxes have finished when two looks half a second apart agree.
     let mut before = grid(&tui);
-    for _ in 0..40 {
+    let settle_deadline = std::time::Instant::now() + WAIT;
+    loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let again = grid(&tui);
         let same = changed_outside(&before, &again, (0, 0, 0, 0)).is_empty();
@@ -1071,6 +1133,10 @@ fn the_mascots_entrance_and_exit_leave_no_stray_cells_outside_its_box() {
         if same {
             break;
         }
+        assert!(
+            std::time::Instant::now() < settle_deadline,
+            "the screen never settled"
+        );
     }
     let home = squirrel_box(&tui);
     // Cells that move on their own (the cursor's pulse) are not the squirrel's strays.
@@ -1108,15 +1174,16 @@ fn the_mascots_entrance_and_exit_leave_no_stray_cells_outside_its_box() {
             &stray[..stray.len().min(5)]
         );
     }
-    let landed = grid(&tui);
-    let inside = (home.0..=home.2)
-        .flat_map(|x| (home.1..=home.3).map(move |y| (x, y)))
-        .filter(|(x, y)| before[*y][*x] != landed[*y][*x])
-        .count();
-    assert!(
-        inside > 20,
-        "the squirrel never landed in its box ({inside} cells differ)"
-    );
+    // The entrance's length depends on the machine: the squirrel has landed when its box differs
+    // from the resting screen in more than a few cells.
+    tui.wait_for("the squirrel landed in its box", WAIT, |screen| {
+        let landed = look_of(screen);
+        let inside = (home.0..=home.2)
+            .flat_map(|x| (home.1..=home.3).map(move |y| (x, y)))
+            .filter(|(x, y)| before[*y][*x] != landed[*y][*x])
+            .count();
+        inside > 20
+    });
     // The dismissal leaves by an exit and takes every cell with it.
     tui.send_keys("?");
     tui.wait_for_text("Everywhere");
@@ -1449,7 +1516,7 @@ fn ctrl_c_at_the_mqtt_password_prompt_exits_130() {
     tui.wait_for_text("MQTT password:");
     tui.send_keys("\x03");
     let status = tui
-        .wait_exit_for(std::time::Duration::from_secs(10))
+        .wait_exit_for(WAIT)
         .expect("the command did not exit on Ctrl-C");
     assert_eq!(status.code(), Some(130), "{status:?}");
     // That the echo is back is the guard's unit test (the pty is closed with the program).
@@ -1480,11 +1547,9 @@ fn the_preset_list_takes_clicks_the_wheel_and_an_outside_click() {
         tui.wait_for_text("▶   Flat");
         // A click outside the box closes it.
         tui.send_mouse(Mouse::Click, 0, rows - 1);
-        tui.wait_for(
-            "the list closed",
-            std::time::Duration::from_secs(10),
-            |screen| !screen.contents().contains("Presets ·"),
-        );
+        tui.wait_for("the list closed", WAIT, |screen| {
+            !screen.contents().contains("Presets ·")
+        });
         // Open it again and pick a row by a click: the preset loads and the list closes.
         tui.wait_for_text("presets");
         let (col, row) = tui.find("presets");
@@ -1493,12 +1558,53 @@ fn the_preset_list_takes_clicks_the_wheel_and_an_outside_click() {
         tui.wait_for_text("Warm");
         let (col, row) = tui.find("Warm");
         tui.send_mouse(Mouse::Click, col, row);
-        tui.wait_for(
-            "the list closed on the pick",
-            std::time::Duration::from_secs(10),
-            |screen| !screen.contents().contains("Presets ·"),
-        );
+        tui.wait_for("the list closed on the pick", WAIT, |screen| {
+            !screen.contents().contains("Presets ·")
+        });
         tui.wait_for_text("Preset Warm");
+        tui.quit();
+    }
+}
+
+/// A Loki Max's own preset list takes the mouse as the tone control's does: a click on a row
+/// picks it, the wheel moves the selection, and a click outside closes it.
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn the_device_preset_list_takes_clicks_the_wheel_and_an_outside_click() {
+    for (cols, rows) in [SMALL, WIDE] {
+        let tui = Tui::start_with(
+            cols,
+            rows,
+            Responder::None,
+            &["--demo"],
+            &[("SVOLDER_FAKE_PROFILE", "lokimax")],
+        );
+        tui.wait_ready();
+        tui.wait_for_text("Loki Max");
+        tui.send_keys("p");
+        tui.wait_for_text("Presets · Loki Max");
+        // The list opens on the built-in the bands read.
+        tui.wait_for_text("▶ ● Flat");
+        // The wheel moves the selection a row at a time, and back.
+        let (col, row) = tui.find("Bass Boost");
+        tui.send_mouse(Mouse::WheelDown, col, row);
+        tui.wait_for_text("▶   Bass Boost");
+        tui.send_mouse(Mouse::WheelUp, col, row);
+        tui.wait_for_text("▶ ● Flat");
+        // A click outside the box closes it.
+        tui.send_mouse(Mouse::Click, 0, rows - 1);
+        tui.wait_for("the list closed", WAIT, |screen| {
+            !screen.contents().contains("Presets ·")
+        });
+        // Open it again and pick a built-in by a click: it applies and the list closes.
+        tui.send_keys("p");
+        tui.wait_for_text("Presets · Loki Max");
+        let (col, row) = tui.find("Bass Boost");
+        tui.send_mouse(Mouse::Click, col, row);
+        tui.wait_for("the list closed on the pick", WAIT, |screen| {
+            !screen.contents().contains("Presets ·")
+        });
+        tui.wait_for_text("Bass Boost on");
         tui.quit();
     }
 }
@@ -1558,16 +1664,122 @@ fn the_preset_list_imports_renames_and_deletes_through_the_daemon() {
     tui.send_keys("x");
     tui.wait_for_text("[y/N]");
     tui.send_keys("y");
-    tui.wait_for(
-        "the preset gone from the list",
-        std::time::Duration::from_secs(10),
-        |screen| !screen.contents().contains("cans two"),
-    );
+    tui.wait_for("the preset gone from the list", WAIT, |screen| {
+        !screen.contents().contains("cans two")
+    });
     tui.send_keys("\x1b");
-    tui.wait_for(
-        "the list closed",
-        std::time::Duration::from_secs(10),
-        |screen| !screen.contents().contains("Presets ·"),
-    );
+    tui.wait_for("the list closed", WAIT, |screen| {
+        !screen.contents().contains("Presets ·")
+    });
     tui.quit();
+}
+
+/// Hold the lock of the configuration file of `tui` for `seconds` (under the two the writer
+/// waits), from another process.
+fn hold_config_lock(tui: &Tui, seconds: &str) -> std::process::Child {
+    use std::process::{Command, Stdio};
+    let folder = tui.home().join("config").join("svolder");
+    let lock = folder.join("config.toml.lock");
+    std::fs::File::create(&lock).expect("the lock file is made");
+    let holder = Command::new("flock")
+        .arg(&lock)
+        .args(["sleep", seconds])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("flock holds the lock");
+    // Held once a try for it fails.
+    let deadline = std::time::Instant::now() + WAIT;
+    while Command::new("flock")
+        .arg("-n")
+        .arg(&lock)
+        .arg("true")
+        .status()
+        .expect("flock tries the lock")
+        .success()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the lock was never held"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    holder
+}
+
+/// The configuration of a direct session on the fake device.
+const DIRECT_CONFIG: &str = "schema = 1\n[daemon]\nautospawn = false\n[[device]]\nname = \"demo\"\n\
+                             udid = \"0102030405060708\"\n";
+
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn the_screen_stays_live_while_a_settings_write_waits_for_the_config_lock() {
+    let tui = Tui::start_with_config(WIDE.0, WIDE.1, DIRECT_CONFIG);
+    wait_values_read(&tui);
+    let file = tui
+        .home()
+        .join("config")
+        .join("svolder")
+        .join("config.toml");
+
+    // Settings, Behaviour: the box is open before the lock is taken, so the time the lock is
+    // held (under the two seconds the writer waits) is for the write alone.
+    tui.send_keys("s3");
+    tui.wait_for_text("Mouse capture");
+    let mut holder = hold_config_lock(&tui, "1.9");
+    tui.send_keys("\x1b[B");
+    tui.send_keys(" ");
+    // The row turns over, and the box closes on Esc, while the write still waits.
+    tui.wait_for("the Tooltips row off", WAIT, |s| {
+        s.contents()
+            .lines()
+            .any(|l| tooltips_value(l) == Some("off"))
+    });
+    tui.send_keys("\x1b");
+    wait_settings_closed(&tui);
+    assert!(
+        holder.try_wait().expect("the holder is polled").is_none(),
+        "the screen answered only after the lock was let go"
+    );
+
+    // The write lands once the lock is let go.
+    holder.wait().expect("the holder ends");
+    let deadline = std::time::Instant::now() + WAIT;
+    while !std::fs::read_to_string(&file).is_ok_and(|text| text.contains("tooltips")) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the write never landed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    tui.quit();
+}
+
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn a_quit_during_a_slow_connect_write_ends_the_run_and_loses_no_write() {
+    let mut tui = Tui::start_with_config(SMALL.0, SMALL.1, DIRECT_CONFIG);
+    wait_values_read(&tui);
+    let file = tui
+        .home()
+        .join("config")
+        .join("svolder")
+        .join("config.toml");
+    connect_row(&tui, MQTT_USERNAME_ROW);
+    tui.wait_for_text("MQTT username");
+    tui.send_keys("\r");
+    tui.wait_for_text("┌ MQTT username");
+    tui.send_keys("svolder");
+    let mut holder = hold_config_lock(&tui, "1.5");
+    tui.send_keys("\r");
+    tui.wait_for_text("saving");
+    // The wait reads this `q`: the write is seen through, then the run ends.
+    tui.send_keys("q");
+    let status = tui
+        .wait_exit_for(WAIT)
+        .expect("the run did not end after the quit");
+    assert!(status.success(), "{status:?}");
+    holder.wait().expect("the holder ends");
+    let text = std::fs::read_to_string(&file).expect("the file is there");
+    assert!(text.contains("svolder"), "the write was lost:\n{text}");
 }

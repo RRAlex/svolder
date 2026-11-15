@@ -410,7 +410,9 @@ impl HostLink {
         };
         // The daemon's capture feeds the row once its first frame has landed: the host is not
         // recorded twice. Before that the own capture runs, so the row never waits on a daemon.
-        let wanted = match feeds {
+        // A demo whose daemon has ended has nothing to take the row over from: no analysis runs
+        // in this process in its place.
+        let wanted = match feeds || app.session.daemon_gone {
             true => None,
             false => app.capture_target().map(str::to_string),
         };

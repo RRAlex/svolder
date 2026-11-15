@@ -15,7 +15,7 @@
 
 import { askForm, askQuestion, closeAsk } from './ask.js';
 import { heldCurve, valueWords } from './draw/computer.js';
-import { dragAlong, sliderKeys } from './gestures.js';
+import { dragAlong, sliderKeys } from '../../core/gestures.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { place } from './place.js';
 import { WORDS } from './words.js';

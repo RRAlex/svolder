@@ -36,6 +36,35 @@ fn the_join_toast_starts_when_it_is_raised() {
     assert!(app.toast().is_none());
 }
 
+/// The demo's daemon ending is said at once, the join command is dropped, and it is said again
+/// only after [`GONE_REPEAT`]; while the daemon runs nothing is said.
+#[test]
+fn the_demo_daemons_end_is_said_once_then_again_after_a_while() {
+    let mut app = crate::tui::test_support::app_showing(app::Screen::Device);
+    app.session.join_hint = Some("svolder tui --join /tmp/sd-abcdef/sv.sock".into());
+    let t0 = std::time::Instant::now();
+    say_daemon_gone(&mut app, None, t0);
+    assert!(app.toast().is_none(), "nothing is said while it runs");
+    assert!(
+        !app.session.daemon_gone,
+        "the own capture is stopped while it runs"
+    );
+    let how = "the demo daemon stopped (exit status: 1)";
+    say_daemon_gone(&mut app, Some(how), t0);
+    let toast = app.toast().expect("the end is said");
+    assert!(toast.text.starts_with(how), "{}", toast.text);
+    assert_eq!(app.session.join_hint, None);
+    assert!(
+        app.session.daemon_gone,
+        "the notice does not stop the own capture (steer reads this flag)"
+    );
+    app.dismiss_toast();
+    say_daemon_gone(&mut app, Some(how), t0 + Duration::from_secs(5));
+    assert!(app.toast().is_none(), "said again too soon");
+    say_daemon_gone(&mut app, Some(how), t0 + GONE_REPEAT);
+    assert!(app.toast().is_some(), "not said again after the wait");
+}
+
 /// A start, or the setup hand-over, whose open failed does not end the run: the failure is
 /// where it lands, which is the Devices screen saying it.
 #[tokio::test]
@@ -268,5 +297,8 @@ async fn the_n_wizard_gets_the_path_the_tui_shows() {
         refuse: None,
     };
     let failure = adder.wizard().await.err().expect("the file does not parse");
-    assert!(failure.what.contains("this is = not"), "{failure}");
+    assert!(
+        failure.what.contains("TOML parse error at line 1"),
+        "{failure}"
+    );
 }

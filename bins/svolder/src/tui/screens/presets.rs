@@ -289,7 +289,7 @@ fn draw_list(
 
 /// Record the `more ↑` and `more ↓` words the borders of `box_area` show as hits, for the ends
 /// that `(above, below)` say have rows hidden. The words end one cell inside their corner.
-fn push_ends(hits: &mut HitMap, box_area: Rect, (above, below): (bool, bool)) {
+pub(super) fn push_ends(hits: &mut HitMap, box_area: Rect, (above, below): (bool, bool)) {
     let word = |text: &str, y: u16| {
         let width = u16::try_from(widgets::text::cells(text)).unwrap_or(u16::MAX);
         Rect {

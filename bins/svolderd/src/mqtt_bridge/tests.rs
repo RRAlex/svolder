@@ -1719,3 +1719,39 @@ fn a_failed_attempt_comes_to_the_problem_its_port_and_trouble_say() {
     assert_eq!(problem(Trouble::Dropped, 8883), Some(MqttProblem::Tls));
     assert_eq!(problem(Trouble::Other, 1883), None);
 }
+
+/// The countdown `version` reports is the time to the next attempt in whole seconds, rounded up:
+/// a wait with a fraction of a second left still reads as that second, and a wait that has run
+/// out reads 0.
+#[tokio::test(start_paused = true)]
+async fn the_countdown_to_the_next_attempt_rounds_up_to_whole_seconds() {
+    use svolder_mqtt::Trouble;
+    use svolder_mqtt::client::Link;
+    let now = Instant::now();
+    let (set, link) = watch::channel(Link::Waiting {
+        retry_at: now + Duration::from_millis(2500),
+        trouble: Trouble::Unreachable,
+    });
+    let (ops, _ops_rx) = mpsc::unbounded_channel();
+    let bridge = Bridge {
+        config: MqttConfig {
+            host: Some("broker".into()),
+            ..MqttConfig::default()
+        },
+        ops,
+        link,
+        task: tokio::spawn(async {}),
+    };
+    let retry = |bridge: &Bridge| match bridge.status() {
+        MqttStatus::Trouble { retry_in_secs, .. } => retry_in_secs,
+        other => panic!("not in trouble: {other:?}"),
+    };
+    assert_eq!(retry(&bridge), Some(3));
+    tokio::time::advance(Duration::from_millis(600)).await;
+    assert_eq!(retry(&bridge), Some(2), "1.9 s left");
+    tokio::time::advance(Duration::from_millis(900)).await;
+    assert_eq!(retry(&bridge), Some(1), "1.0 s left");
+    tokio::time::advance(Duration::from_millis(1000)).await;
+    assert_eq!(retry(&bridge), Some(0), "the wait has run out");
+    drop(set);
+}

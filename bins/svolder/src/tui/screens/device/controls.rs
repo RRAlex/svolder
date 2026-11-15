@@ -650,6 +650,9 @@ fn switch_line(
     Some((Line::from(drawn.spans), names.map(|(a, b)| [a, b])))
 }
 
+/// How many columns the Spectrum row needs before it spares a word for its source.
+const SOURCE_MIN_ROOM: usize = 24;
+
 /// Columns between a row's bar and what follows it.
 const VALUE_GAP: usize = 2;
 
@@ -669,6 +672,16 @@ fn spectrum_line(app: &App, theme: &Theme, columns: Columns) -> (Line<'static>, 
     }
     // the row runs from the label to the pane's right edge, as the Volume row's value does
     let room = columns.room().saturating_sub(columns.field());
+    // the row's last word says where the bands come from, when the row is wide enough to spare it
+    let source = match app.host.from_daemon {
+        true => "daemon",
+        false => "own",
+    };
+    let word = match room >= SOURCE_MIN_ROOM {
+        true => source.len() + 1,
+        false => 0,
+    };
+    let room = room - word;
     let bands = app.host.bands.at(app.now);
     let levels = host::spread(&bands, room);
     // a beat of the daemon's frames makes the bands bold for a moment
@@ -686,6 +699,9 @@ fn spectrum_line(app: &App, theme: &Theme, columns: Columns) -> (Line<'static>, 
         };
         Span::styled(host::glyph(level).to_string(), style)
     }));
+    if word > 0 {
+        spans.push(Span::styled(format!(" {source}"), theme.style(Role::Dim)));
+    }
     (Line::from(spans), false)
 }
 

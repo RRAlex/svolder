@@ -1,6 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The dash's markup, the strip along the bottom of the scene: `−` `MUTE` `+`, the input (chips, or
+// The dash's markup, the strip along the bottom of the scene: `−` `MUTE` `+`, `EQ` (the side shown's EQ on or off), the input (chips, or
 // one chip that opens a list), the cover of the track when the host has one, the track with its progress, the transport as inline SVG and
 // `DEVICE ▴`. An amp shows its power key and gauges (draw/gauges.js) where the input would be, and its volume keys
 // only when it has a volume. A viewer who may not write gets the same keys drawn inert: a tap still
@@ -8,11 +8,12 @@
 // daemon's clock (core/clock.js); `moveProgress` puts the moving parts in place once a second.
 // Pure but for `moveProgress`, which sets what the markup names.
 
-import { elapsedUs, fraction, timeWords } from '../../../core/clock.js';
+import { daemonNow, elapsedUs, fraction, timeWords } from '../../../core/clock.js';
 import { DASH, SWITCH } from '../words.js';
 import { esc } from './esc.js';
 import { inertOf } from '../inert.js';
 import { drawGauges } from './gauges.js';
+import { eqKeyOf } from '../eq-key.js';
 
 /** At most this many input options are chips; more are one chip that opens a list. */
 export const CHIPS_MAX = 3;
@@ -46,6 +47,17 @@ function volumeKeys(v, inert) {
   return key('volume-down', '−', { inert, attrs: ` id="nd-vdown" aria-label="${DASH.quieter}"` })
     + mute
     + key('volume-up', '+', { inert, attrs: ` id="nd-vup" aria-label="${DASH.louder}"` });
+}
+
+/** The EQ key: `EQ` pressed while the side shown has its EQ on; nothing where it has none to turn off. */
+function eqKey(page, comp, inert) {
+  const eq = eqKeyOf(page, comp);
+  if (!eq) return '';
+  return key('eq', DASH.eq, {
+    inert,
+    cls: `cy${eq.on ? ' on' : ''}`,
+    attrs: ` id="nd-eq-key" aria-pressed="${eq.on}" aria-label="${DASH.eqLabel(eq.on)}"`,
+  });
 }
 
 /** The input: its options as chips (up to `CHIPS_MAX`) or the current one as a chip that opens a
@@ -94,19 +106,19 @@ export function switchKeys(sw, amp = false) {
   return `<span class="nd-swkeys" role="group" aria-label="${SWITCH.label}">${side('dac', sw.dac)}${side('computer', sw.computer)}</span>${why}`;
 }
 
-/** The track's progress at the browser's `localMs`, the part having been drawn at `drawnMs`:
+/** The track's progress at the browser's `localMs`:
  * `{ elapsed, length }` in microseconds, `null` for a part with no progress. */
-export function progressOf(p, track, localMs, drawnMs) {
+export function progressOf(p, track, localMs) {
   const prog = track.progress;
   if (!prog || !Number.isFinite(p.now_ms)) return null;
-  const daemonNow = p.now_ms + (localMs - drawnMs);
+  const now = daemonNow(p.now_ms, localMs);
   const elapsed = elapsedUs({
     status: track.status,
     position: prog.position_us,
     rate: prog.rate_milli,
     readAt: prog.read_at_ms,
     length: track.length_us,
-  }, daemonNow);
+  }, now);
   return { elapsed, length: track.length_us };
 }
 
@@ -119,7 +131,7 @@ function trackMarkup(p, localMs) {
   if (!p) return '<div class="nd-track" id="nd-track"></div>';
   const track = p.track;
   if (!track) return `<div class="nd-track" id="nd-track"><b class="nd-title">${esc(DASH.nothing)}</b></div>`;
-  const prog = progressOf(p, track, localMs, localMs);
+  const prog = progressOf(p, track, localMs);
   const at = prog ? fraction(prog.elapsed, prog.length) : 0;
   const words = [track.artist, track.album].filter(Boolean).map(esc);
   if (prog) words.push(`<span class="nd-time">${esc(timeWordsOf(prog))}</span>`);
@@ -128,12 +140,23 @@ function trackMarkup(p, localMs) {
     + `<span class="nd-prog"><i data-at="${at.toFixed(5)}"></i></span></div>`;
 }
 
+/** The version of the cover whose picture failed to load, or null: the draws leave it out until a
+ * draw sees another cover or none, which forgets the failure. */
+let failedCover = null;
+
+/** Remember that the picture of cover `version` failed to load (`null` forgets it). */
+export function markCoverFailed(version) {
+  failedCover = version ?? null;
+}
+
 /** The cover of the track, a small picture between the input and the title; nothing where the host
- * has none (no box, no gap). The address carries the cover's version, so another track is another
- * picture; one the daemon no longer holds is hidden by the dash's error listener. */
+ * has none, or where its picture failed to load (no box, no gap). The address carries the cover's
+ * version, so another track is another picture. */
 function coverMarkup(track) {
-  if (track?.cover === null || track?.cover === undefined) return '';
-  return `<span class="nd-cover" aria-hidden="true"><img src="api/v1/host/cover?v=${encodeURIComponent(track.cover)}" alt="" width="30" height="30"></span>`;
+  if (String(track?.cover ?? '') !== failedCover) failedCover = null;
+  if (track?.cover === null || track?.cover === undefined || String(track.cover) === failedCover) return '';
+  const v = encodeURIComponent(track.cover);
+  return `<span class="nd-cover" aria-hidden="true"><img src="api/v1/host/cover?v=${v}" alt="" width="30" height="30"></span>`;
 }
 
 /** The transport for a player in `status`: previous, pause or play, next. */
@@ -158,6 +181,7 @@ export function drawDash(page, view, localMs = Date.now(), comp = null) {
   const p = device?.playing ?? page?.host ?? null;
   const volume = onComputer ? { mute: true, muted: comp.volume.muted } : device?.volume;
   const left = volumeKeys(volume, inert || (onComputer && comp.volume.inert))
+    + eqKey(page, comp, inert)
     + (amp ? ampGauges(device, inert) : inputChips(device, inert));
   const right = (p?.buttons ? transport(p.track?.status, inert) : '')
     + key('sheet', DASH.device, { inert: false, cls: 'cy', attrs: ` id="nd-sheet" aria-haspopup="dialog" aria-label="${DASH.deviceLabel}"` });
@@ -168,12 +192,12 @@ export function drawDash(page, view, localMs = Date.now(), comp = null) {
 }
 
 /** Put the track's progress where `localMs` says: the fill and the time, from the player of `page`
- * the dash was drawn for at `drawnMs`. Nothing for a player with no progress, nor (unless
+ * the dash was drawn for. Nothing for a player with no progress, nor (unless
  * `always`) for one that is not playing. */
-export function moveProgress(root, page, localMs, drawnMs, always = false) {
+export function moveProgress(root, page, localMs, always = false) {
   const p = page?.device?.playing ?? page?.host;
   const track = p?.track;
-  const prog = track ? progressOf(p, track, localMs, drawnMs) : null;
+  const prog = track ? progressOf(p, track, localMs) : null;
   if (!prog || (!always && track.status !== 'playing')) return;
   const fill = root.querySelector('.nd-prog i');
   const time = root.querySelector('.nd-time');

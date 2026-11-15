@@ -140,7 +140,8 @@ fn listening_at(web: Option<&WebStatus>) -> Result<SocketAddr, String> {
             "the web UI could not start on {listen}: {error}; see `svolder doctor`"
         )),
         Some(WebStatus::Unknown) | None => Err(format!(
-            "this daemon serves no web UI: it is older than this svolder; run {RESTART_COMMAND}"
+            "{}; run {RESTART_COMMAND}",
+            crate::reach::too_old_words(None, "serve a web UI")
         )),
     }
 }
@@ -376,9 +377,11 @@ fn open_link_within(opener: &Path, link: &str, moment: std::time::Duration) -> R
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
             Ok(None) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
+                let _ = std::thread::Builder::new()
+                    .name("svolder-reap".to_string())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
                 return Ok(());
             }
             Err(e) => return Err(format!("{} could not be waited for: {e}", opener.display())),

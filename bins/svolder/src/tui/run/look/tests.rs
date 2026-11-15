@@ -63,12 +63,14 @@ async fn change(look: &mut Look, watching: Watching, change: TuiChange) -> Watch
         &mut (),
     )
     .await;
-    match flow {
+    let mut watching = match flow {
         Flow::Continue(watching) => watching,
         Flow::Adding(_) | Flow::Ended(_) => {
             panic!("a settings change neither ends the loop nor adds a device")
         }
-    }
+    };
+    look.settle(&mut watching).await;
+    watching
 }
 
 /// A look that draws in full colour, which is what a case about the theme or about the

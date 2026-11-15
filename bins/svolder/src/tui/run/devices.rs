@@ -116,6 +116,7 @@ where
         &mut wizard,
         &look.theme,
         wizard::Leaving::ToTui,
+        watching.app.tui.tooltips && watching.app.mouse,
     )
     .await;
     // The screen the wizard drew over is about to be drawn again, which is a screen change as
@@ -194,14 +195,15 @@ pub(super) async fn update_device<O: Open>(
             .is_none_or(|was| was.passphrase != device.passphrase)
             .then(|| device.passphrase.clone()),
     };
-    let written = write_device(opener, watching, look, screen, op, |path| {
+    let (own_name, record) = (name.to_string(), device.clone());
+    let written = write_device(opener, watching, look, screen, op, move |path| {
         // The daemon's view never carries a code, so a block it shows as `set` is not a file's.
-        if device.passphrase == "set" {
+        if record.passphrase == "set" {
             return Err(svolder_ipc::ConfigError::Parse(
                 "the daemon went away: open the editor again".into(),
             ));
         }
-        Config::update_device(path, name, device)
+        Config::update_device(path, &own_name, &record)
     })
     .await;
     let mut switched = Switched::Stayed;
@@ -253,8 +255,9 @@ pub(super) async fn remove_device<O: Open>(
     let op = DeviceConfigOp::Remove {
         device: name.to_string(),
     };
-    let wrote = write_device(opener, watching, look, screen, op, |path| {
-        Config::remove_device(path, name)
+    let own_name = name.to_string();
+    let wrote = write_device(opener, watching, look, screen, op, move |path| {
+        Config::remove_device(path, &own_name)
     })
     .await;
     if !wrote {
@@ -328,7 +331,7 @@ pub(super) async fn write_device<O: Open>(
     look: &Look,
     screen: &mut dyn Shown,
     op: DeviceConfigOp,
-    local: impl FnOnce(&Path) -> Result<(), svolder_ipc::ConfigError>,
+    local: impl FnOnce(&Path) -> Result<(), svolder_ipc::ConfigError> + Send + 'static,
 ) -> bool {
     let socket = daemon_socket(opener, watching);
     let mut wait = Wait::new("saving…".to_string());
@@ -342,7 +345,13 @@ pub(super) async fn write_device<O: Open>(
         )
         .await;
     match sent {
-        Some(Ok(None)) => written(opener, watching, local(&opener.path)).await,
+        Some(Ok(None)) => {
+            // No daemon answers: the file's own writer, which may wait for another writer's lock,
+            // runs on a thread of its own while the loop draws the wait.
+            let path = opener.path.clone();
+            let wrote = off_loop("saving…", move || local(&path), watching, look, screen).await;
+            written(opener, watching, wrote).await
+        }
         Some(Ok(Some(Response::DeviceConfig { devices, .. }))) => {
             // The daemon wrote the file and reloaded: nothing is left to tell it.
             if let Some(backend) = watching.backend.as_mut() {
@@ -371,6 +380,33 @@ pub(super) async fn write_device<O: Open>(
             false
         }
         None => false,
+    }
+}
+
+/// Run `work`, a write of the configuration file that may wait for another writer's lock, on a
+/// thread of its own while the loop draws `words` as a wait and reads the screen's input: a
+/// held lock freezes neither keys nor frames. The keys pressed meanwhile are dropped, as in any
+/// wait, except the ones that give up: the write is seen through and
+/// [`Watching::give_up_asked`] ends the loop after it.
+pub(super) async fn off_loop<T: Send + 'static>(
+    words: &str,
+    work: impl FnOnce() -> T + Send + 'static,
+    watching: &mut Watching,
+    look: &Look,
+    screen: &mut dyn Shown,
+) -> T {
+    let thread = tokio::task::spawn_blocking(work);
+    let mut wait = Wait::new(words.to_string());
+    let answer = wait
+        .on(thread, watching, look, screen, Interrupted::Carry)
+        .await;
+    // The write is seen through (a quit that left it half-waited would lose it); the loop ends
+    // when the intent that asked for it has finished.
+    watching.give_up_asked |= wait.gave_up;
+    match answer {
+        Some(Ok(done)) => done,
+        Some(Err(e)) => panic!("the configuration write stopped: {e}"),
+        None => unreachable!("a carried wait always sees its work through"),
     }
 }
 
@@ -881,6 +917,7 @@ fn take_over(watching: &mut Watching, mut fresh: Watching, look: &Look) {
     // A reload a Settings write still owes is the session's, not the device's: it goes out from
     // the device now watched, at the time it was due.
     fresh.reload_owed = watching.reload_owed.take();
+    fresh.give_up_asked = watching.give_up_asked;
     *watching = fresh;
 }
 

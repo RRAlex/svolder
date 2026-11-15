@@ -31,6 +31,10 @@ use crate::tui::widgets::spinner;
 /// about thirty frames a second.
 const FAST_TICK: Duration = Duration::from_millis(33);
 
+/// How long the loop waits between ticks while the spectrum is the only thing moving: twenty
+/// frames a second, since nothing the user drives is waiting on a redraw.
+pub(super) const SPECTRUM_TICK: Duration = Duration::from_millis(50);
+
 /// Where a copy goes: it is handed the whole escape sequence and answers whether the write
 /// took.
 pub(in crate::tui) type Clipboard = Box<dyn FnMut(&str) -> std::io::Result<()>>;
@@ -71,6 +75,8 @@ pub(in crate::tui) struct Look {
     detected: ColorDepth,
     /// The configuration file a change is written to.
     path: std::path::PathBuf,
+    /// The writes of Settings changes, which run off the loop in the order they were asked.
+    pub(in crate::tui) writes: super::writes::Writes,
     /// Where the Connect category looks for the MCP token.
     pub(in crate::tui) token_site: super::TokenSite,
     /// Where a copy of the token, a link or a pairing code goes first: the terminal, as an OSC 52
@@ -153,6 +159,20 @@ pub(in crate::tui) async fn flush_owed(watching: &mut super::Watching) {
     }
 }
 
+/// Take in the outcome of a Settings write: a file that changed owes the daemon a reload, and
+/// one that could not be written is said in a toast (the change applies all the same).
+pub(in crate::tui) fn write_ended(
+    watching: &mut super::Watching,
+    path: &Path,
+    done: super::writes::Done,
+) {
+    match done {
+        Ok(true) => reload_soon(watching, path),
+        Ok(false) => {}
+        Err(e) => watching.app.warn(format!("settings not saved: {e}")),
+    }
+}
+
 /// The file's modification time, `None` when it cannot be read.
 fn modified(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
@@ -182,6 +202,7 @@ impl Look {
             no_color,
             detected,
             path,
+            writes: super::writes::Writes::default(),
             token_site: super::TokenSite::process(),
             clipboard: Box::new(|sequence| {
                 crate::tui::decoration::title::emit(sequence);
@@ -229,11 +250,11 @@ impl Look {
         change: &TuiChange,
         app: &mut App,
         mouse: &mut M,
-    ) -> bool {
+    ) {
         if let TuiChange::Mouse(on) = change {
             if mouse.set_mouse(*on).is_err() {
                 app.warn("mouse capture did not change: the terminal refused");
-                return false;
+                return;
             }
             app.mouse = *on;
         }
@@ -246,63 +267,63 @@ impl Look {
         // screen change earns marks here too; the Settings box is drawn in the theme's own
         // colours and shows the change on the next frame, so a change made in it sweeps nothing.
         app.frame_flags.screen_changed |= change.sweeps() && app.overlays.settings.is_none();
-        let before = modified(&self.path);
-        match Config::update_tui(&self.path, |tui| change.apply(tui)) {
-            Ok(()) => modified(&self.path) != before,
-            Err(e) => {
-                app.warn(format!("settings not saved: {e}"));
-                false
-            }
-        }
+        let change = change.clone();
+        self.write(move |path| Config::update_tui(path, |tui| change.apply(tui)));
     }
 
     /// Write the split of the device screen the app holds, which a drag or a burst of nudges moved,
     /// to `[tui]` of the file once its write is due `now` ([`divider::due`]).
     ///
     /// The split applies whether or not it can be saved: a file that could not be written is
-    /// said in a toast, as a Settings change says it. Answers whether the file was changed.
-    pub(super) fn save_split(&mut self, app: &mut App, now: Instant) -> bool {
-        match divider::due(app, now) {
-            Some(fraction) => self.write_split(fraction, app),
-            None => false,
+    /// said in a toast, as a Settings change says it.
+    pub(super) fn save_split(&mut self, app: &mut App, now: Instant) {
+        if let Some(fraction) = divider::due(app, now) {
+            self.write_split(fraction);
         }
     }
 
     /// Write the split a loop that is ending still owes.
-    pub(super) fn save_split_owed(&mut self, app: &mut App) -> bool {
-        match divider::owed(app) {
-            Some(fraction) => self.write_split(fraction, app),
-            None => false,
+    pub(super) fn save_split_owed(&mut self, app: &mut App) {
+        if let Some(fraction) = divider::owed(app) {
+            self.write_split(fraction);
         }
     }
 
     /// Take `fraction` as the split of the session's own `[tui]` table and write it to the file,
     /// in the one key it changes.
-    fn write_split(&mut self, fraction: f64, app: &mut App) -> bool {
+    fn write_split(&mut self, fraction: f64) {
         self.tui.device_split = fraction;
-        let before = modified(&self.path);
-        match Config::update_tui(&self.path, |tui| tui.device_split = fraction) {
-            Ok(()) => modified(&self.path) != before,
-            Err(e) => {
-                app.warn(format!("settings not saved: {e}"));
-                false
-            }
-        }
+        self.write(move |path| Config::update_tui(path, |tui| tui.device_split = fraction));
     }
 
     /// Take the AutoEq refresh `weeks` into the app and write it to `[autoeq]` of the file, the
     /// way [`Look::change`] writes `[tui]`: it applies whether or not the file could be written,
-    /// and a file that could not be is said in a toast. Both answer whether the file was changed
-    /// (an unchanged file is left as it was, and owes the daemon nothing).
-    pub(super) fn change_autoeq(&mut self, weeks: RefreshWeeks, app: &mut App) -> bool {
+    /// and a file that could not be is said in a toast.
+    pub(super) fn change_autoeq(&mut self, weeks: RefreshWeeks, app: &mut App) {
         app.presets.autoeq_weeks = weeks;
-        let before = modified(&self.path);
-        match Config::update_autoeq(&self.path, |autoeq| autoeq.refresh_weeks = weeks) {
-            Ok(()) => modified(&self.path) != before,
-            Err(e) => {
-                app.warn(format!("settings not saved: {e}"));
-                false
-            }
+        self.write(move |path| Config::update_autoeq(path, |autoeq| autoeq.refresh_weeks = weeks));
+    }
+
+    /// Ask for `edit` to be made to the file on a thread of its own, after the writes asked
+    /// before it. Its outcome is whether the file changed (an unchanged file is left as it was,
+    /// and owes the daemon nothing), which [`write_ended`] takes in.
+    fn write(
+        &mut self,
+        edit: impl FnOnce(&Path) -> Result<(), svolder_ipc::ConfigError> + Send + 'static,
+    ) {
+        let path = self.path.clone();
+        self.writes.push(Box::new(move || {
+            let before = modified(&path);
+            edit(&path)?;
+            Ok(modified(&path) != before)
+        }));
+    }
+
+    /// Wait for every write asked and take each outcome in as the loop does: a loop that is
+    /// ending leaves none behind.
+    pub(in crate::tui) async fn settle(&mut self, watching: &mut super::Watching) {
+        for done in self.writes.drain().await {
+            write_ended(watching, &self.path, done);
         }
     }
 
@@ -592,8 +613,9 @@ fn row_rect(areas: &FrameAreas, id: FunctionId) -> Option<Rect> {
 /// How long the loop waits between ticks: [`FAST_TICK`] while an animation is running, a screen
 /// change's noise or melt is playing, a value is gliding to what the device confirmed, the
 /// volume is climbing to a target ([`App::climbing`]), a meter's peak marker is falling, the tone
-/// curve's spectrum is drifting, the Spectrum row of what the host plays is moving, or a beat of
-/// the daemon's frames is pulsing the row or the borders; a hundred milliseconds or faster while
+/// curve's spectrum is drifting, or a beat of the daemon's frames is pulsing the row or the
+/// borders; [`SPECTRUM_TICK`] while the Spectrum row of what the host plays is the only thing
+/// moving; a hundred milliseconds or faster while
 /// a spinner is turning; the meters' own pace
 /// ([`METER_PERIOD`]) while the host's capture is the level's source and the breathing borders
 /// or hue drift follow it (the pace an amp's meter readings redraw the same decoration at, since
@@ -629,11 +651,13 @@ fn base_period(app: &App, effects: &Effects) -> Duration {
         || app.is_easing(app.now)
         || app.climbing()
         || app.peaking(app.now)
-        || app.spectrum_moving()
         || app.pulsing()
         || app.mascot_animating();
     if moving {
         return FAST_TICK;
+    }
+    if app.spectrum_moving() {
+        return SPECTRUM_TICK;
     }
     if app.spinning() {
         return spinner::STEP;

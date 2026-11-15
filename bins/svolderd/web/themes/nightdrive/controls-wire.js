@@ -14,7 +14,8 @@
 
 import { askQuestion } from './ask.js';
 import { fractionOf, rawAt } from './draw/controls.js';
-import { dragAlong, sliderKeys } from './gestures.js';
+import { dragAlong, sliderKeys } from '../../core/gestures.js';
+import { stepWords } from '../../core/words.js';
 import { inertOf } from './inert.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { metersInPlace } from './draw/meters.js';
@@ -79,7 +80,7 @@ export function wireControls({
     knob.dataset.at = fractionOf(c, raw).toFixed(5);
     placeSheet(scale);
     // the device's own words for the step where it gave them, the number where it did not
-    const text = c.texts?.[raw - c.lo] ?? String(raw);
+    const text = stepWords(c, raw);
     scale.setAttribute('aria-valuenow', String(raw));
     scale.setAttribute('aria-valuetext', text);
     const word = scale.closest('.nd-level')?.querySelector('.nd-val');

@@ -1671,10 +1671,40 @@ async fn start_daemon_with(
     panic!("the daemon never connected to the fake device");
 }
 
+/// Run `svolder hops add --kind amp myhop` against `daemon`, sharing its directory, under
+/// `transport` (the default when `None`).
+fn hops_add_beside(daemon: &ChildGuard, transport: Option<&str>) -> std::process::Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_svolder"));
+    cmd.env("SVOLDER_HOST", "off")
+        .env("SVOLDER_ADAPTER", "hci-none")
+        .env("SVOLDER_SYSTEMCTL", daemon.dir.join("no-systemctl"))
+        .env("SVOLDER_WIREPLUMBER", daemon.dir.join("no-wireplumber"))
+        .env("SVOLDER_UNITDIR", daemon.dir.join("units"))
+        .env("XDG_CONFIG_HOME", &daemon.dir)
+        .env("XDG_STATE_HOME", &daemon.dir)
+        .env("XDG_DATA_HOME", &daemon.dir)
+        .env("XDG_RUNTIME_DIR", &daemon.dir)
+        .env_remove("SVOLDER_TRANSPORT")
+        .env_remove("SVOLDER_SOCKET")
+        .env_remove("SVOLDER_WEB_ENABLED")
+        .env_remove("SVOLDER_MCP_ENABLED")
+        .env_remove("SVOLDER_WEB_LISTEN")
+        .env_remove("SVOLDER_MCP_LISTEN")
+        .env_remove("SVOLDER_WEB_URL")
+        .arg("--socket")
+        .arg(&daemon.socket);
+    if let Some(transport) = transport {
+        cmd.args(["--transport", transport]);
+    }
+    cmd.args(["hops", "add", "--kind", "amp", "myhop"])
+        .output()
+        .expect("the binary runs")
+}
+
 /// A daemon that read its file once and finds it deleted keeps its configuration, and a CLI write
 /// that would recreate the file from the template (`hops add`) is refused in its missing-file
-/// words, exit 1, leaving no file. The CLI reads the very file the daemon does (`XDG_CONFIG_HOME`
-/// is the daemon's directory).
+/// words, exit 1, leaving no file, under the default transport and the direct ones alike. The CLI
+/// reads the very file the daemon does (`XDG_CONFIG_HOME` is the daemon's directory).
 #[tokio::test]
 async fn a_hops_write_is_refused_while_the_daemon_says_its_file_is_missing() {
     let svolderd = common::daemon_binary();
@@ -1682,37 +1712,21 @@ async fn a_hops_write_is_refused_while_the_daemon_says_its_file_is_missing() {
         let daemon = start_daemon_with(&svolderd, CONFIG, &[], "svolder/config.toml").await;
         let file = daemon.dir.join("svolder").join("config.toml");
         std::fs::remove_file(&file).expect("the file is deleted");
-        let out = Command::new(env!("CARGO_BIN_EXE_svolder"))
-            .env("SVOLDER_HOST", "off")
-            .env("SVOLDER_ADAPTER", "hci-none")
-            .env("SVOLDER_SYSTEMCTL", daemon.dir.join("no-systemctl"))
-            .env("SVOLDER_WIREPLUMBER", daemon.dir.join("no-wireplumber"))
-            .env("SVOLDER_UNITDIR", daemon.dir.join("units"))
-            .env("XDG_CONFIG_HOME", &daemon.dir)
-            .env("XDG_STATE_HOME", &daemon.dir)
-            .env("XDG_DATA_HOME", &daemon.dir)
-            .env("XDG_RUNTIME_DIR", &daemon.dir)
-            .env_remove("SVOLDER_TRANSPORT")
-            .env_remove("SVOLDER_SOCKET")
-            .env_remove("SVOLDER_WEB_ENABLED")
-            .env_remove("SVOLDER_MCP_ENABLED")
-            .env_remove("SVOLDER_WEB_LISTEN")
-            .env_remove("SVOLDER_MCP_LISTEN")
-            .env_remove("SVOLDER_WEB_URL")
-            .arg("--socket")
-            .arg(&daemon.socket)
-            .args(["hops", "add", "--kind", "amp", "myhop"])
-            .output()
-            .expect("the binary runs");
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert_eq!(out.status.code(), Some(1), "err={err}");
-        assert!(
-            err.contains(
-                "is missing: the daemon keeps its running configuration; restore the file"
-            ),
-            "err={err}"
-        );
-        assert!(!file.exists(), "the refused write left a file");
+        for transport in [None, Some("fake"), Some("ble")] {
+            let out = hops_add_beside(&daemon, transport);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{transport:?} err={err}");
+            assert!(
+                err.contains(
+                    "is missing: the daemon keeps its running configuration; restore the file"
+                ),
+                "{transport:?} err={err}"
+            );
+            assert!(
+                !file.exists(),
+                "{transport:?}: the refused write left a file"
+            );
+        }
     })
     .await
     .expect("test timed out");

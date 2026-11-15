@@ -1356,7 +1356,11 @@ dimmed as around the other list; an 80×24 terminal on a Loki Max whose bands re
 A question is answered with `y`; `n`, `Esc` and `Enter` — no is the default — go back to the list,
 and every other key is swallowed. Every key that is not the box's own is swallowed while it is
 open, and the mouse reaches nothing under it: a left click outside the box presses `Esc`, which
-closes it. `svolder preset list`, `preset apply` and `set recall|save` do the same from the shell.
+closes it. With the list on its rows the mouse works inside it as in the preset list: a left click
+on a slot or a built-in does what `Enter` on it does, the wheel moves the focus a row a notch, as
+`↑` and `↓` do, and a click on the `more ↑` or `more ↓` of the border goes to the first or the last
+row; a click on the `Built in` header does nothing, and the save question is answered from the
+keyboard. `svolder preset list`, `preset apply` and `set recall|save` do the same from the shell.
 
 ### Telemetry screen (`t`)
 
@@ -1567,7 +1571,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.34.2 │
+│                          v0.34.5 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -2261,7 +2265,8 @@ the tone-control screen, which has no clock. With capture on:
   — to press it on the host's player, focusing the row on it, as `Enter` there would
 - the preset list, while it shows its presets, takes the mouse itself: click a row to load it, turn
   the wheel to move the focus, click the `more ↑` or `more ↓` of its border to go to the first or
-  last row (see "The preset list" above)
+  last row (see "The preset list" above); the Loki Max's own list takes the same clicks and wheel
+  (see "The Loki Max's preset list" above)
 - the device editor, a removal question, the preset list's prompts and questions, a band's edit line
   and the quit question
   are answered from the keyboard: while one is open the mouse reaches nothing under it, and a left
@@ -2285,6 +2290,7 @@ description and key: `mute · m`), the rows of the Controls pane (with the contr
 use its kind), the Mode and Loudness halves, the bands, the Response curve, the Transport buttons,
 the rows of the Telemetry and Devices lists, and the header's connection words,
 `mouse:on`/`mouse:off` and fault glyphs; menu entries, the Settings box's rows and toasts have none.
+
 The Telemetry tab's, on an 80×24 terminal:
 
 ```
@@ -2294,6 +2300,12 @@ The Telemetry tab's, on an 80×24 terminal:
 │   Input        —                     ││   Mode      ‹ — ›                    │
 │ ▶ Phase invert [ ] —                 ││   Loudness  —                        │
 ```
+
+The setup wizard's key line has them too, with the same delay, words and placement: resting on a key
+of it (`q`, `Esc`, `Enter` and the rest) says what it does and the key (`quit · q`). They follow the
+same `[tui] tooltips` and mouse capture settings, and a key press, a click or a wait hides them. A
+tip uses the words the key line draws on that step (`cycle · ←→` on the Passphrase step), and a
+dimmed key's tip still names it. A walk opened by `n` on Devices has them too.
 
 ### Title meter
 

@@ -228,6 +228,12 @@
 }
 .nd-k.on { background: var(--nd-pink); color: var(--nd-night); text-shadow: none; }
 .nd-k.cy.on { background: var(--nd-cyan); color: var(--nd-night); }
+/* a tablet's width: the keys give padding and the groups gap to the track, which keeps its time in view */
+@media (min-width: 720px) and (max-width: 1023px) and (min-height: 500px) {
+  .nd-dash { gap: 8px; padding-inline: 10px; }
+  .nd-grp { gap: 5px; }
+  .nd-dash .nd-k { padding: 0 7px; }
+}
 .nd-k:hover { filter: brightness(1.2); }
 .nd-k:focus-visible { outline: 2px solid var(--nd-ink); outline-offset: 2px; }
 .nd-k.quiet { opacity: .5; }
@@ -663,7 +669,9 @@
   .nd-dash .nd-k { min-width: 36px; height: 36px; padding: 0 10px; border-radius: 6px; }
   .nd-dash .nd-k::after { content: ""; position: absolute; inset: -5px; }
   .nd-keys > * { order: 5; }
-  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup) { order: 1; }
+  .nd-keys > :is(#nd-vdown, #nd-mute, #nd-vup, #nd-eq-key) { order: 1; }
+  /* the first row holds the four keys and the transport down to 360 px */
+  @media (max-width: 380px) { .nd-dash :is(#nd-mute, #nd-eq-key) { padding: 0 6px; } }
   .nd-tr > * { order: 2; }
   .nd-tr > [data-act="prev"] { margin-left: auto; }
   .nd-tr > #nd-sheet { order: 6; margin-left: 0; }

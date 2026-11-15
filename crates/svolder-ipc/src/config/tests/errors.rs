@@ -93,3 +93,63 @@ fn a_writer_that_waits_out_the_lock_refuses_with_busy() {
     );
     drop(held);
 }
+
+/// A passphrase of the wrong TOML type is refused without the line or the value it was written
+/// with, by the parser and by a writer alike, and the refusal still says where.
+#[test]
+fn a_passphrase_of_the_wrong_type_is_not_quoted_back() {
+    let text = "schema = 1\n\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\npassphrase = 4321\n";
+    let err = Config::parse(text).unwrap_err();
+    let ConfigError::Parse(words) = &err else {
+        panic!("got {err:?}");
+    };
+    assert!(!words.contains("4321"), "{words}");
+    assert!(words.contains("line 6"), "{words}");
+    assert!(
+        words.contains("invalid type: integer, expected a string"),
+        "{words}"
+    );
+
+    let dir = temp_dir("config-errors");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, text).unwrap();
+    let err = Config::add_preset(&path, &hd650_warm()).unwrap_err();
+    assert!(!err.to_string().contains("4321"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+}
+
+/// A syntax error in a hand-edited passphrase line stops a writer without quoting the line, and
+/// says where; the same words as the parser's.
+#[test]
+fn a_writer_does_not_quote_a_line_it_cannot_parse() {
+    let dir = temp_dir("config-errors");
+    let path = dir.join("config.toml");
+    let text = "schema = 1\n\n[[device]]\nname = \"amp\"\npassphrase = 43 21\n";
+    std::fs::write(&path, text).unwrap();
+    let err = Config::add_preset(&path, &hd650_warm()).unwrap_err();
+    let ConfigError::Parse(words) = &err else {
+        panic!("got {err:?}");
+    };
+    assert!(!words.contains("43 21"), "{words}");
+    assert!(
+        words.starts_with("TOML parse error at line 5, column "),
+        "{words}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+}
+
+/// The place an error is reported at never panics on a multi-byte character before it or an
+/// offset past the end.
+#[test]
+fn a_position_is_found_past_multibyte_characters() {
+    use crate::error::{line_and_column, without_value};
+    let text = "a = \"é\"\nb = 1\n";
+    assert_eq!(line_and_column(text, 5), (1, 6));
+    assert_eq!(line_and_column(text, 6), (1, 6), "inside the two-byte é");
+    assert_eq!(line_and_column(text, 11), (2, 3));
+    assert_eq!(line_and_column(text, 999), (3, 1));
+    assert_eq!(
+        without_value("invalid value: string \"a, expected b\", expected u8"),
+        "invalid value: string, expected u8"
+    );
+}

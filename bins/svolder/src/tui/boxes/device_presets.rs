@@ -18,6 +18,14 @@ use crate::tui::app::{App, Intent, stepped};
 /// What the header over the built-ins says.
 pub const BUILT_IN: &str = "Built in";
 
+/// Whether the device's presets list is open on its rows, rather than on a question.
+pub fn choosing(app: &App) -> bool {
+    app.presets
+        .device_list
+        .as_ref()
+        .is_some_and(|list| matches!(list.step, Step::Choosing))
+}
+
 /// The device's presets list, while it is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceList {
@@ -92,6 +100,21 @@ pub fn rows(profile: &Profile) -> Vec<Row> {
         rows.extend((0..count).map(Row::Setting));
     }
     rows
+}
+
+/// Focus row `row` of the list, or its last row for one past the end, and nothing on the header:
+/// what a click on a row or on a `more` word of its border does before
+/// anything else.
+pub(in crate::tui) fn focus(app: &mut App, row: usize) {
+    let rows = rows(&app.profile);
+    let last = rows.len().saturating_sub(1);
+    let row = row.min(last);
+    if !rows.get(row).is_some_and(Row::focusable) {
+        return;
+    }
+    if let Some(list) = app.presets.device_list.as_mut() {
+        list.row = row;
+    }
 }
 
 /// What `Enter` on a slot says it did.

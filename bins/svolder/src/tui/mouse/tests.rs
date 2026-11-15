@@ -548,10 +548,10 @@ fn the_preset_list_reads_the_mouse_for_itself() {
     }
 }
 
-/// The Loki Max's list is answered from the keyboard too: nothing in it takes a click or the
-/// wheel, the question a save asks included, and a click outside presses `Esc`.
+/// The question a Loki Max's list asks before a save is answered from the keyboard: nothing in
+/// it takes a click or the wheel, and a click outside presses `Esc`.
 #[test]
-fn the_loki_max_preset_list_takes_no_clicks() {
+fn the_loki_max_save_question_takes_no_clicks() {
     let mut app = App::new(
         crate::tui::test_support::profile_named("lokimax"),
         "loki".into(),
@@ -560,28 +560,24 @@ fn the_loki_max_preset_list_takes_no_clicks() {
     );
     app.key(KeyEvent::from(KeyCode::Char('p')));
     assert!(app.presets.device_list.is_some(), "p opened no list");
-    for asking in [false, true] {
-        if asking {
-            app.key(KeyEvent::from(KeyCode::Up));
-            app.key(KeyEvent::from(KeyCode::Char('u')));
-            assert!(
-                matches!(
-                    app.presets.device_list.as_ref().map(|list| &list.step),
-                    Some(crate::tui::boxes::device_presets::Step::Asking(_))
-                ),
-                "u opened no save question"
-            );
-        }
-        let hits = frame_hits(&app, 80, 24);
-        let (mx, my) = middle(&hits);
-        assert_eq!(resolve(&hits, click(mx, my), &app), None, "asking {asking}");
-        let wheel = MouseEvent {
-            kind: MouseEventKind::ScrollUp,
-            ..click(mx, my)
-        };
-        assert_eq!(resolve(&hits, wheel, &app), None, "asking {asking}");
-        assert_outside_closes(&app, "Loki Max preset list");
-    }
+    app.key(KeyEvent::from(KeyCode::Up));
+    app.key(KeyEvent::from(KeyCode::Char('u')));
+    assert!(
+        matches!(
+            app.presets.device_list.as_ref().map(|list| &list.step),
+            Some(crate::tui::boxes::device_presets::Step::Asking(_))
+        ),
+        "u opened no save question"
+    );
+    let hits = frame_hits(&app, 80, 24);
+    let (mx, my) = middle(&hits);
+    assert_eq!(resolve(&hits, click(mx, my), &app), None);
+    let wheel = MouseEvent {
+        kind: MouseEventKind::ScrollUp,
+        ..click(mx, my)
+    };
+    assert_eq!(resolve(&hits, wheel, &app), None);
+    assert_outside_closes(&app, "Loki Max save question");
 }
 
 /// The quit question takes no clicks either: not on the rows under it, and not on the tabs

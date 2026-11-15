@@ -186,6 +186,8 @@ def the_mount(b, d):
     cards = b.page(PICKER_CARDS)
     check('  the picker lists Ember, Paper, Signal and Night drive',
           cards == ['ember', 'paper', 'signal', 'nightdrive'], cards)
+    # a theme's picture is drawn once its module has loaded, so the card has none for a moment
+    poll(lambda: b.page("!!document.querySelector('#picker .tcard[data-theme=signal] .tprev svg')"), 5.0)
     card = b.page("(() => { const c = document.querySelector('#picker .tcard[data-theme=signal]');"
                   " return [c.querySelector('b').textContent, c.querySelector('small').textContent,"
                   " !!c.querySelector('.tprev svg')]; })()")
@@ -2448,6 +2450,26 @@ def the_cover(b, d):
       return !!c && getComputedStyle(c).display === 'none'; })()"""), 5.0)
     check('  and in the player\'s own area a picture the daemon does not hold (a real 404) is hidden too, its box gone',
           gone is True, b.page("document.querySelector('#sg-player .sg-cover')?.outerHTML"))
+    # more events with the same failed cover: no cover box is inserted again, in the bar or the player
+    # (every inserted `.sg-cover` is counted as it happens, so a box that is gone again before a
+    # sample is taken still counts)
+    b.page("""(() => { window.__inserted = 0;
+      const seen = (n) => n.nodeType === 1 && (n.matches('.sg-cover') || n.querySelector('.sg-cover'));
+      window.__count = (rs) => { for (const r of rs) for (const n of r.addedNodes) {
+        if (seen(n)) window.__inserted++; } };
+      window.__mo = new MutationObserver(window.__count);
+      for (const id of ['sg-now', 'sg-open']) window.__mo.observe(document.getElementById(id),
+        { childList: true, subtree: true }); return 1; })()""")
+    for n in range(6):
+        b.page(SWAP % (json.dumps('deadbeefdeadbeef'), json.dumps('Event %d' % n)))
+        poll(lambda: 'Event %d' % n in b.page("document.getElementById('sg-open').textContent"), 5.0)
+    inserted = b.page("(() => { window.__count(window.__mo.takeRecords()); window.__mo.disconnect(); return window.__inserted; })()")
+    check('the_failed_cover_does_not_flash_back: six more events with the 404 cover, and no cover box is '
+          'inserted again in the bar or the player', inserted == 0, inserted)
+    b.page(SWAP % (json.dumps(first.split('v=')[1]), json.dumps('Good again')))
+    again = poll(lambda: b.page("""(() => { const i = document.querySelector('#sg-player .sg-cover img');
+      return !!i && i.complete && i.naturalWidth > 0; })()"""), 5.0)
+    check('  and another cover is tried again', again is True)
     check('  no page error', [e for e in errors(b) if 'cover' not in e and '404' not in e] == [], errors(b)[:3])
     # the 404 of the picture the daemon does not hold was the check's own ask
     if browser == 'chromium':
@@ -2463,6 +2485,85 @@ def the_cover_on_a_phone(b, d):
     check('the_bar_shows_the_cover_on_a_phone: 36 px, inside the window, before the transport',
           c['has'] and c['loaded'] and abs(c['box'][2] - 36) <= 2.5 and c['box'][0] >= 0
           and c['box'][1] <= c['transport'][0] + 0.5 and c['np'][1] <= vw + 0.5, [c, vw])
+
+
+PLAYER_COVER = """(() => { const r = (e) => { if (!e) return null; const b = e.getBoundingClientRect();
+    return { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height }; };
+  const pl = document.getElementById('sg-player'); const c = pl && pl.querySelector('.sg-cover');
+  const i = c && c.querySelector('img'); const top = pl && pl.querySelector('.sg-ptop');
+  return { pl: r(pl), cover: r(c), lbl: r(pl && pl.querySelector('.sg-lbl')), title: r(pl && pl.querySelector('.sg-title')),
+    transport: r(pl && pl.querySelector('.sg-transport')), pprog: r(pl && pl.querySelector('.sg-pprog')),
+    shadow: c ? getComputedStyle(c).boxShadow : null,
+    attrs: i ? [i.getAttribute('width'), i.getAttribute('height')] : null,
+    cols: top ? getComputedStyle(top).gridTemplateColumns.split(' ').length : null,
+    vw: innerWidth, vh: innerHeight, sx: document.documentElement.scrollWidth }; })()"""
+
+
+def the_player_cover_wide(b, d):
+    """The player's area at 1280 px: the cover to the right of the words and the transport, top-aligned
+    with the label, as wide as the page allows (a fifth of the area, 200 to 300 px), square, in the
+    amber glow; no picture leaves no box and no second column."""
+    forget(b, d)
+    load(b, d)
+    hop_click(b, 'player')
+    poll(lambda: b.page("!!document.querySelector('#sg-player .sg-cover img')"))
+    poll(lambda: b.page("document.querySelector('#sg-player .sg-cover img')?.complete"), 6.0)
+    c = b.page(PLAYER_COVER)
+    want = min(300.0, max(200.0, c['pl']['w'] * 0.2))
+    check('the_player_cover_is_right_of_the_transport_when_wide: top-aligned with the label, square, '
+          'a fifth of the area (200 to 300 px), inside the window, in the amber glow',
+          c['cover'] is not None and c['cover']['l'] >= c['transport']['r'] - 0.5
+          and c['cover']['l'] >= c['title']['r'] - 0.5 and abs(c['cover']['t'] - c['lbl']['t']) <= 1.5
+          and abs(c['cover']['w'] - want) <= 1.5 and abs(c['cover']['h'] - c['cover']['w']) <= 1.0
+          and c['cover']['r'] <= c['vw'] + 0.5 and c['sx'] <= c['vw'] + 0.5
+          and 'rgba(240, 167, 58' in (c['shadow'] or ''), c)
+    check('  the picture has no small width and height attributes the browser would stretch',
+          c['attrs'] == [None, None], c['attrs'])
+    own = b.page("document.querySelector('#sg-player .sg-cover img').getAttribute('src')").split('v=')[1]
+    long_name = '01_Daft_Punk_-_Around_the_World_(Radio_Edit)_Remastered_Version_2020.flac'
+    b.page(SWAP % (json.dumps(own), json.dumps(long_name)))
+    poll(lambda: long_name in b.page("document.querySelector('#sg-player .sg-title').textContent"), 5.0)
+    time.sleep(0.3)
+    lg = b.page(PLAYER_COVER)
+    check('  a title with no break points wraps inside its column: the title and the progress end before the cover',
+          lg['cover'] is not None and lg['title']['r'] <= lg['cover']['l'] - 0.5
+          and lg['pprog']['r'] <= lg['cover']['l'] - 0.5 and lg['title']['h'] > 50, lg)
+    b.page(SWAP % (json.dumps('deadbeefdeadbeef'), json.dumps('Another Song')))
+    poll(lambda: b.page(PLAYER_COVER)['cols'] == 1, 5.0)
+    h = b.page(PLAYER_COVER)
+    check('  a picture the daemon does not hold (a real 404) leaves one column, the words start where the label does',
+          h['cols'] == 1 and abs(h['title']['l'] - h['lbl']['l']) <= 0.5, h)
+    if browser == 'chromium':
+        b.errors[:] = [e for e in b.errors if 'host/cover' not in e]
+    b.page(SWAP % ('null', json.dumps('No Picture')))
+    poll(lambda: not b.page("!!document.querySelector('#sg-player .sg-cover')"), 5.0)
+    n = b.page(PLAYER_COVER)
+    check('  no cover leaves no box and no second column: the words start where the label does',
+          n['cover'] is None and n['cols'] == 1 and abs(n['title']['l'] - n['lbl']['l']) <= 0.5, n)
+
+
+def the_player_cover_on_a_phone(b, d):
+    """The player's area at 390 px: the cover above the title, 240 px, the transport on the first screen."""
+    forget(b, d)
+    load(b, d)
+    b.page("document.querySelector('#sg-line [aria-selected=true]').focus()")
+    b.press('Home')
+    poll(lambda: b.page("!!document.querySelector('#sg-player .sg-cover img')"))
+    poll(lambda: b.page("document.querySelector('#sg-player .sg-cover img')?.complete"), 6.0)
+    b.page('window.scrollTo(0, 0)')
+    time.sleep(0.3)
+    c = b.page(PLAYER_COVER)
+    check('the_player_cover_is_above_the_title_on_a_phone: 240 px square, above the title, inside the '
+          'window, the transport on the first screen',
+          c['cover'] is not None and abs(c['cover']['w'] - 240) <= 1.5 and abs(c['cover']['h'] - 240) <= 1.5
+          and c['cover']['b'] <= c['title']['t'] + 0.5 and c['cover']['r'] <= c['vw'] + 0.5
+          and c['sx'] <= c['vw'] + 0.5 and c['transport']['b'] <= c['vh'], c)
+    b.page(SWAP % ('null', json.dumps('No Picture')))
+    poll(lambda: not b.page("!!document.querySelector('#sg-player .sg-cover')"), 5.0)
+    n = b.page(PLAYER_COVER)
+    check('  no cover on a phone: one column, the words start where the label does, no sideways scroll',
+          n['cover'] is None and n['cols'] == 1 and abs(n['title']['l'] - n['lbl']['l']) <= 0.5
+          and n['sx'] <= n['vw'] + 0.5, n)
 
 
 def the_cover_gone():
@@ -3418,6 +3519,7 @@ def the_phone():
     try:
         the_strip(b, d)
         the_cover_on_a_phone(b, d)
+        the_player_cover_on_a_phone(b, d)
         a_swipe(b, d)
         a_draw_in_a_drag(b, d)
         a_pinned_strip(b, d)
@@ -3472,6 +3574,7 @@ try:
     the_bar(b, d)
     the_player(b, d)
     the_cover(b, d)
+    the_player_cover_wide(b, d)
     the_computer(b, d)
     the_band_table(b, d)
     the_presets(b, d)

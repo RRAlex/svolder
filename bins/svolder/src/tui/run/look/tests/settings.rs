@@ -30,6 +30,8 @@ async fn a_settings_change_is_applied_to_the_screen_and_written_to_the_file() {
     let Flow::Continue(watching) = flow else {
         panic!("a settings change does not end the loop");
     };
+    let mut watching = watching;
+    look.settle(&mut watching).await;
 
     assert_eq!(look.tui.palette, "neon");
     assert_eq!(
@@ -64,6 +66,8 @@ async fn a_settings_change_is_applied_to_the_screen_and_written_to_the_file() {
     let Flow::Continue(watching) = flow else {
         panic!("a settings change does not end the loop");
     };
+    let mut watching = watching;
+    look.settle(&mut watching).await;
     assert_eq!(mouse.on, Some(false));
     assert!(!watching.app.mouse);
     assert!(
@@ -287,6 +291,7 @@ async fn a_change_after_the_file_is_deleted_writes_the_template_and_that_change(
     assert!(!look.path.exists());
 
     look.change(&TuiChange::Mouse(false), &mut app, &mut mouse);
+    look.writes.drain().await;
 
     let written = Config::load_from(&look.path).unwrap().tui;
     let mut expected = Config::parse(&Config::template()).unwrap().tui;
@@ -312,6 +317,7 @@ async fn the_intro_sound_setting_is_saved_and_held() {
         &mut mouse,
     );
 
+    look.writes.drain().await;
     assert!(Config::load_from(&look.path).unwrap().tui.intro_sound);
     assert!(look.tui.intro_sound);
     drop(backend);
@@ -329,6 +335,7 @@ async fn a_change_to_another_key_leaves_a_bare_accent_on_file() {
     std::fs::write(&look.path, original).unwrap();
 
     look.change(&TuiChange::Mouse(false), &mut app, &mut mouse);
+    look.writes.drain().await;
 
     assert_eq!(
         std::fs::read_to_string(&look.path).unwrap(),
@@ -363,6 +370,8 @@ async fn a_settings_change_that_cannot_be_saved_is_reported_and_still_applies() 
     let Flow::Continue(watching) = flow else {
         panic!("a settings change does not end the loop");
     };
+    let mut watching = watching;
+    look.settle(&mut watching).await;
 
     assert!(!look.tui.intro, "the setting stands for the session");
     assert!(!watching.app.tui.intro);
@@ -402,6 +411,8 @@ async fn a_change_made_in_the_settings_box_sweeps_nothing() {
         let Flow::Continue(next) = flow else {
             panic!("a settings change does not end the loop");
         };
+        let mut next = next;
+        look.settle(&mut next).await;
         watching = next;
         assert!(
             !watching.app.frame_flags.screen_changed,
@@ -437,6 +448,7 @@ async fn a_failed_save_inside_the_settings_box_is_a_toast_over_the_box_taking_no
     let Flow::Continue(mut watching) = flow else {
         panic!("a settings change does not end the loop");
     };
+    look.settle(&mut watching).await;
     let toast = watching
         .app
         .toast()
@@ -520,6 +532,8 @@ async fn the_autoeq_refresh_is_applied_and_written_to_the_file() {
     let Flow::Continue(watching) = flow else {
         panic!("a setting does not end the loop");
     };
+    let mut watching = watching;
+    look.settle(&mut watching).await;
     assert_eq!(watching.app.presets.autoeq_weeks, RefreshWeeks::Weeks(26));
     assert_eq!(watching.app.toast().map(|toast| toast.text.clone()), None);
     let written = std::fs::read_to_string(&path).unwrap();
@@ -553,6 +567,8 @@ async fn the_autoeq_refresh_never_is_a_word_and_a_failed_save_is_said() {
     let Flow::Continue(first) = flow else {
         panic!("a setting does not end the loop");
     };
+    let mut first = first;
+    look.settle(&mut first).await;
     let saved = Config::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(saved.autoeq.refresh_weeks, RefreshWeeks::Never);
     first.close().await;
@@ -572,6 +588,8 @@ async fn the_autoeq_refresh_never_is_a_word_and_a_failed_save_is_said() {
     let Flow::Continue(watching) = flow else {
         panic!("a setting does not end the loop");
     };
+    let mut watching = watching;
+    look.settle(&mut watching).await;
     assert_eq!(watching.app.presets.autoeq_weeks, RefreshWeeks::Weeks(3));
     assert!(
         watching
@@ -580,4 +598,152 @@ async fn the_autoeq_refresh_never_is_a_word_and_a_failed_save_is_said() {
             .is_some_and(|toast| toast.text.starts_with("settings not saved: "))
     );
     watching.close().await;
+}
+
+/// Wait until the lock file `lock` is held by another process: a try for it fails.
+async fn held(lock: &std::ffi::OsStr) {
+    for _ in 0..500 {
+        let free = std::process::Command::new("flock")
+            .arg("-n")
+            .arg(lock)
+            .arg("true")
+            .status()
+            .expect("flock tries the lock")
+            .success();
+        if !free {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the lock was never held");
+}
+
+/// A write that waits for the file's lock is the writer thread's wait, not the loop's: the
+/// change is applied and the loop is handed back at once while another writer holds the lock,
+/// and the write lands, in order, once the lock is let go.
+#[tokio::test]
+async fn a_settings_write_waiting_for_the_lock_does_not_hold_the_loop() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let mut mouse = SpyMouse::default();
+    let mut look = look();
+    std::fs::create_dir_all(look.path.parent().expect("the file has a directory")).unwrap();
+    std::fs::write(&look.path, "schema = 1\n").unwrap();
+    let mut lock = look.path.as_os_str().to_owned();
+    lock.push(".lock");
+    std::fs::File::create(&lock).unwrap();
+    let mut holder = Command::new("flock")
+        .arg(&lock)
+        .args(["sleep", "1.2"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("flock holds the lock");
+    held(&lock).await;
+
+    let began = Instant::now();
+    let flow = take_intent(
+        Intent::Tui(TuiChange::Set(&INTRO, TuiValue::Bool(false))),
+        &opener_over(never_opens()),
+        watching(backend, app, None),
+        &mut mouse,
+        &mut look,
+        &mut (),
+    )
+    .await;
+    let Flow::Continue(mut watching) = flow else {
+        panic!("a settings change does not end the loop");
+    };
+    assert!(
+        began.elapsed() < Duration::from_millis(500),
+        "the loop waited {:?} for the lock",
+        began.elapsed()
+    );
+    assert!(holder.try_wait().unwrap().is_none(), "the lock was let go");
+    assert!(!look.tui.intro, "the setting applies at once");
+    assert!(!watching.app.tui.intro);
+
+    look.settle(&mut watching).await;
+    assert!(!Config::load_from(&look.path).unwrap().tui.intro);
+    holder.wait().unwrap();
+    watching.close().await;
+}
+
+/// Two writes asked while another writer holds the lock land one after the other in the order
+/// asked: the file ends as the last change left it.
+#[tokio::test]
+async fn writes_queued_behind_a_held_lock_land_in_the_order_asked() {
+    use std::process::{Command, Stdio};
+
+    let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
+    let mut mouse = SpyMouse::default();
+    let mut look = look();
+    std::fs::create_dir_all(look.path.parent().expect("the file has a directory")).unwrap();
+    std::fs::write(&look.path, "schema = 1\n").unwrap();
+    let mut lock = look.path.as_os_str().to_owned();
+    lock.push(".lock");
+    std::fs::File::create(&lock).unwrap();
+    let mut holder = Command::new("flock")
+        .arg(&lock)
+        .args(["sleep", "0.8"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("flock holds the lock");
+    held(&lock).await;
+
+    look.change(&TuiChange::Palette("neon".into()), &mut app, &mut mouse);
+    look.change(&TuiChange::Palette("amber".into()), &mut app, &mut mouse);
+    assert!(look.writes.busy(), "the first write waits for the lock");
+    let done = look.writes.drain().await;
+
+    assert_eq!(done, vec![Ok(true), Ok(true)]);
+    assert_eq!(Config::load_from(&look.path).unwrap().tui.palette, "amber");
+    holder.wait().unwrap();
+    drop(backend);
+}
+
+/// A write that failed has the ones queued behind it given up on, so a loop that ends waits for
+/// one lock wait and not one for each.
+#[tokio::test]
+async fn a_failed_write_gives_up_the_queued_ones_at_the_end() {
+    use std::process::{Command, Stdio};
+
+    let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
+    let mut mouse = SpyMouse::default();
+    let mut look = look();
+    std::fs::create_dir_all(look.path.parent().expect("the file has a directory")).unwrap();
+    std::fs::write(&look.path, "schema = 1\n").unwrap();
+    let mut lock = look.path.as_os_str().to_owned();
+    lock.push(".lock");
+    std::fs::File::create(&lock).unwrap();
+    let mut holder = Command::new("flock")
+        .arg(&lock)
+        .args(["sleep", "30"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("flock holds the lock");
+    held(&lock).await;
+
+    for palette in ["neon", "amber", "red"] {
+        look.change(&TuiChange::Palette(palette.into()), &mut app, &mut mouse);
+    }
+    let began = std::time::Instant::now();
+    let done = look.writes.drain().await;
+    let took = began.elapsed();
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+
+    assert_eq!(done.len(), 3);
+    assert!(done.iter().all(Result::is_err), "{done:?}");
+    assert!(!look.writes.owes());
+    // Each wait is two seconds: three of them would be six.
+    assert!(
+        took < std::time::Duration::from_millis(3500),
+        "took {took:?}"
+    );
+    drop(backend);
 }

@@ -11,6 +11,7 @@ controls, on a fake host (`SVOLDER_HOST=fake`: its sink and EQ live in memory, n
   a_tap_adds_a_point_and_x_removes_it   a tap on an empty spot of the mountains (the curve up) adds a PK, the
                                         sheet's `x` removes a point, `+ Add point` adds one at the widest gap
   the_mode_the_type_a_typed_value_and_the_presets_write   Off | EQ, the type, a value typed into a field, a preset
+  the_dash_eq_key_turns_the_eq_off_and_on_on_both_sides   the dash's EQ key posts off and on for the computer, and flips the device's Flat and EQ
   the_wheel_and_the_arrows_step_the_volume   the wheel over the big number and ↑ ↓ step the volume (the device's step; 1 % on the
                                         computer), held arrows repeat, none with a control focused or a sheet or question open
   the_switch_keys_never_ellipsize_this_computer   `This computer` shows whole from 600 px up, upright or sideways
@@ -1479,6 +1480,37 @@ def mouse_band(b, d):
           [added, top, t['H']])
 
 
+def eq_key(b, d):
+    """The dash's EQ key turns the EQ of the side shown off and on from the main view, on both sides."""
+    start(b, d)
+    name = 'the_dash_eq_key_turns_the_eq_off_and_on_on_both_sides'
+    key = "document.getElementById('nd-eq-key')"
+    flip(b, 'computer')
+    was = b.page(f'{COMPUTER}.eq.on') is True
+    check(f'{name}: the computer has the key in the dash, pressed as its EQ stands',
+          b.page(f"{key}?.getAttribute('aria-pressed')") == str(was).lower() and b.page(f"{key}.closest('#nd-dash') !== null"), was)
+    for want in (not was, was):
+        clear(b)
+        tap(b, '#nd-eq-key')
+        time.sleep(0.6)
+        modes = [p[1] for p in posts(b, 'api/v1/host/eq') if p[0] == 'api/v1/host/eq']
+        hud = b.page("document.querySelector('.nd-eq b')?.textContent")
+        check(f'{name}: a press posts {"on" if want else "off"}, the key and the HUD follow',
+              modes == [{'on': want}] and b.page(f'{COMPUTER}.eq.on') is want
+              and b.page(f"{key}.getAttribute('aria-pressed')") == str(want).lower() and (hud == 'OFF') == (not want), [modes, hud])
+    flip(b, 'dac')
+    tone = b.page('__core.model.device()?.tone?.mode')
+    check(f'{name}: the device has the key too, as its tone mode stands', b.page(f"{key}?.getAttribute('aria-pressed')") == str(tone == 'eq').lower(), tone)
+    clear(b)
+    tap(b, '#nd-eq-key')
+    time.sleep(0.8)
+    flat = tone == 'eq'
+    check(f'{name}: a press on the device changes its mode to the other of Flat and EQ',
+          b.page('__core.model.device()?.tone?.mode') == ('flat' if flat else 'eq'), b.page('__core.model.device()?.tone?.mode'))
+    check(f'{name}: and the key follows the tone mode it was not drawn for',
+          b.page(f"{key}.getAttribute('aria-pressed')") == str(not flat).lower(), b.page(f"{key}.outerHTML"))
+
+
 def one(name, fn, size=(1280, 900), fleet=(), web='auth = "none"'):
     d = common.Daemon('gungnir2-v2', host='fake', fleet=fleet, env={}, web=web)
     b = open_page(d, size)
@@ -1498,6 +1530,7 @@ one('a_tap_adds_a_point_and_x_removes_it', add_remove)
 one('a_tap_on_a_full_table_says_so', full_table)
 one('the_points_are_listed_by_frequency', sorted_points)
 one('the_mode_the_type_a_typed_value_and_the_presets_write', controls, size=(1280, 900))
+one('the_dash_eq_key_turns_the_eq_off_and_on_on_both_sides', eq_key)
 one('an_untouched_cell_writes_nothing', untouched)
 one('the_wheel_sets_the_q', wheel_q)
 one('the_mouse_hover_band_is_the_curves_window_and_a_hands_reach', mouse_band)

@@ -688,3 +688,28 @@ async fn a_write_while_the_file_is_gone_is_refused_and_makes_no_file() {
     fresh.save_preset("mine", curve(3.0), false).await.unwrap();
     assert!(dir.0.join("fresh.toml").exists());
 }
+
+/// A file deleted after the daemon's check and before its writer reads it, under the lock, is
+/// not made again from the template: the write is refused in the missing-file words.
+#[tokio::test]
+async fn a_file_deleted_between_the_check_and_the_write_is_not_made_again() {
+    let dir = scratch("write-race");
+    let path = dir.0.join("config.toml");
+    let daemon = stamped(
+        &path,
+        "schema = 1\n\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n",
+        0,
+    );
+    let refused = daemon
+        .edit_then_reload(Box::new(|path| {
+            std::fs::remove_file(path).unwrap();
+            Config::add_preset(path, &curve(3.0))
+        }))
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, ConfigWriteError::Off(_)), "{refused:?}");
+    assert!(refused.to_string().contains("is missing"), "{refused}");
+    assert_eq!(refused.reason(), Reason::ReadOnly);
+    assert!(!path.exists(), "the file was made again");
+    assert_eq!(daemon.config_snapshot().devices.len(), 1);
+}

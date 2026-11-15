@@ -175,7 +175,13 @@ and writes to nothing that is gone.
   and last on a line have the button off. A linked hop's Edit offers the note only, since its name
   and kind are the device's.
 - **The player.** Now playing grown: title, artist, album, progress, the transport and the path in
-  words with its verdict.
+  words with its verdict. The cover is a second column of the top (label to transport), square,
+  `clamp(200px, 20cqw, 300px)` wide in the hop box's glow and top-aligned; under 600 px of the
+  area (a container query) it is above the title at 240 px. No cover, one column. A long title with
+  no break points wraps inside its column (`overflow-wrap: anywhere`), never under the cover. The
+  box is sized by CSS and the daemon serves the player's picture as published (up to 4 MiB, no
+  thumbnail), so its sharpness is the player's own art: a small picture is stretched by the browser
+  to the box.
 - **The computer.** Its hop is the flip (see `host-control.md`): chosen, the area is the DAC's
   screen acting on the computer (the level in %, the curve with its points, Off | EQ, the points'
   table, the presets), with the route's facts that are not controls under it: the sound card and its

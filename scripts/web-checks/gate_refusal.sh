@@ -7,7 +7,8 @@
 set -uo pipefail
 
 here=$(dirname "$(readlink -f "$0")")
-tmp=$(mktemp -d)
+. "$(dirname "$(readlink -f "$0")")/../tmp-base.sh"
+tmp=$(svtmp_dir gr) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/scripts/web-checks/node/fixtures" "$tmp/bins/svolderd/web/themes/ember"
 cp "$here/run-all.sh" "$tmp/scripts/web-checks/run-all.sh"

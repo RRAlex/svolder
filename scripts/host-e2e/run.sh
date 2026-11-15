@@ -93,13 +93,14 @@ trap 'exit 143' TERM
 # The run directory is made here and the trap armed before the launcher starts, so an interrupt at
 # any moment ends whatever was started (`launcher stop` on a directory with nothing in it just
 # removes it).
-SVPW_RUN=$(mktemp -d /tmp/svpw.XXXXXX) || fail "mktemp failed" 2
+. "$HERE/../tmp-base.sh"
+SVPW_RUN=$(SVOLDER_TMP_BASE=/tmp/svolder svtmp_dir pw) || fail "mktemp failed" 2
 export SVPW_RUN
 STARTED=1
 env_out=$(bash "$LAUNCHER" start) || fail "the private PipeWire did not start" 2
 eval "$env_out"
 # Refuse unless this is the launcher's environment, whatever else is set.
-case "${SVPW_RUN:-}" in /tmp/svpw.??????) ;; *) fail "the launcher's environment is missing" 2 ;; esac
+case "${SVPW_RUN:-}" in /tmp/svolder/pw.??????) ;; *) fail "the launcher's environment is missing" 2 ;; esac
 [ "${XDG_RUNTIME_DIR:-}" = "$SVPW_RUN" ] && [ "${PIPEWIRE_RUNTIME_DIR:-}" = "$SVPW_RUN" ] \
   && [ "${PIPEWIRE_REMOTE:-}" = svolder-e2e-0 ] || fail "the launcher's environment is missing" 2
 echo "== private instance: $SVPW_RUN"

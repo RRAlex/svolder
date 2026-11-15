@@ -13,14 +13,15 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 full=0
 [ "${1:-}" = --full ] && full=1
-log=${MUTANTS_LOG:-$(mktemp "${TMPDIR:-/tmp}/svolder-mutants-XXXXXX.log")}
+. "$(dirname "$(readlink -f "$0")")/../tmp-base.sh"
+log=${MUTANTS_LOG:-$(svtmp_file mutlog)} || exit 1
 : >"$log"
 
 node_runners="mutate_ember_parts mutate_computer mutate_director mutate_model mutate_nightdrive mutate_notes mutate_paper mutate_signal mutate_sources"
 # a runner that times something runs its mutants alone, so it is last
 browser_runners="mutate_registry mutate_webui mutate_ember mutate_paper mutate_signal mutate_nightdrive mutate_haze mutate_scroll mutate_effects mutate_smoke mutate_notes mutate_sources"
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/svolder-mutants-XXXXXX")
+tmp=$(svtmp_dir mut) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 jobs=${MUTANTS_JOBS:-4}
 # a Ctrl-C or TERM ends the runners (the browser runners reap their own children on TERM)

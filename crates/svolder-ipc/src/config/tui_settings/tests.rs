@@ -243,13 +243,14 @@ fn the_first_wrong_key_is_the_one_the_error_names() {
     assert!(Config::parse(&text).is_ok());
 }
 
-/// A word where a switch belongs is toml's own error, with its line, column and excerpt.
+/// A word where a switch belongs is toml's own message with its line and column, without the
+/// excerpt of the file or the word it found.
 #[test]
 fn a_word_for_a_switch_is_tomls_own_error() {
     match Config::parse("schema = 1\n[tui]\ntitle_meter = \"yes\"\n") {
         Err(ConfigError::Parse(found)) => assert_eq!(
             found,
-            "TOML parse error at line 3, column 15\n  |\n3 | title_meter = \"yes\"\n  |               ^^^^^\ninvalid type: string \"yes\", expected a boolean\n"
+            "TOML parse error at line 3, column 15: invalid type: string, expected a boolean"
         ),
         other => panic!("expected a parse error, got {other:?}"),
     }

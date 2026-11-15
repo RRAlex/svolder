@@ -59,7 +59,7 @@ meters:
 To use the fake without the demo, give every call the fake transport and a configuration of its own,
 so a hand-run binary never reaches your real configuration, state or daemon:
 
-    dir=$(mktemp -d) && chmod 700 "$dir"
+    . scripts/tmp-base.sh; dir=$(svtmp_dir fake)
     XDG_CONFIG_HOME=$dir/config XDG_STATE_HOME=$dir/state XDG_RUNTIME_DIR=$dir/run \
       XDG_DATA_HOME=$dir/data XDG_CACHE_HOME=$dir/cache SVOLDER_TRANSPORT=fake \
       target/debug/svolder inspect
@@ -79,7 +79,8 @@ variable needs `make docs-env`, which regenerates that file's table from the bui
 | `make docs-check` | after editing any Markdown (`make check` runs it) | `python3` |
 | `make workflow-check` | after editing a workflow (`make check` runs it) | `python3` with PyYAML |
 | `make web-checks-quick` | after a change to the web page, its styles or templates that leaves the smoke alone | node, chromium, firefox and geckodriver, about 38 minutes (much longer with `WEB_CHECKS_JOBS=1`; `WEB_CHECKS_JOBS` sets how many checks run at once) |
-| `make web-checks` | before merging any change to the web page, and whenever a smoke file changed | node, both browsers, over an hour (six checks at a time, `WEB_CHECKS_JOBS` sets it) |
+| `make web-checks` | before merging any change to the web page, and whenever a smoke file changed | node, both browsers, over an hour cold (six checks at a time, `WEB_CHECKS_JOBS` sets it); a check whose inputs did not change is reused (`cached`) |
+| `make web-checks-cold` | before a version is tagged for a release build | the same with nothing reused |
 | `make e2e` | after a change to the transport, the session, the scanner, the daemon's reconnect or the simulator | two Bluetooth controllers; not part of `make check` |
 | `make docs-check-merge` | before a merge to main | `python3` |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | before a merge, and after editing a doc comment | nothing |
@@ -96,6 +97,19 @@ gate in depth, and [scripts/web-checks/README.md](scripts/web-checks/README.md) 
 proves which rule.
 
 Run `cargo fmt --all` before committing; `make check` fails on a file it would change.
+
+### Temporary files
+
+Every temporary file or directory the make targets and scripts make outside the checkout lives under
+`/tmp/svolder/`, so one `rm -rf /tmp/svolder` clears them. They are made through
+`scripts/tmp-base.sh` (`scripts/tmp_base.py` for Python), which creates the base 0700 and refuses
+one that is a link, not a directory or not yours, because `/tmp` is shared. A target that runs tests
+exports its directory there as `TMPDIR`, so the tests follow; a bare `cargo test` uses the system
+`TMPDIR`, which is fine (set `TMPDIR=/tmp/svolder/<name>` to keep it together). Names stay short so
+a socket path stays under 108 bytes. Browser profiles stay inside the checkout's build directory,
+which snap Chromium can see and `/tmp` it cannot. The web gate lock stays directly in `/tmp`, so
+clearing `/tmp/svolder` never breaks its exclusion. `make check` records every directory it makes
+and fails at the end on one that is still there.
 
 ## Commits
 

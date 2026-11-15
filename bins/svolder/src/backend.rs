@@ -11,11 +11,17 @@
 //! - [`direct`]: the half that owns a session of this process.
 //! - [`launch`]: how a front end reaches a daemon, and how one is started when nothing answers.
 //! - [`remote`]: the half that talks to a running daemon.
+//! - [`config`]: the configuration a verb loads, and the `--transport` words.
+//! - [`only_while`]: what a stream of statuses knows of the booleans a readout's `only_while` names.
 //! - [`stale`]: a daemon that holds other devices than the configuration file names.
 
+mod config;
 mod direct;
 pub mod launch;
+mod only_while;
 mod stale;
+#[cfg(test)]
+mod test_support;
 pub use stale::{daemon_reads, refusal_if_missing, reload_if_reads, reload_if_stale};
 #[cfg(not(test))]
 mod remote;
@@ -37,11 +43,16 @@ use svolder_profiles::units;
 use svolder_profiles::{Control, ControlKind, Profile};
 use svolder_proto::FunctionId;
 
+pub use config::{asks_a_daemon, known_transport};
+use config::{config_error, load_config, usage};
+pub(crate) use config::{daemon_note, print_warnings, registry, rows_from_config};
 use direct::DirectBackend;
 /// The transports a direct session can be opened on, and how one is opened: what grades an
 /// adapter needs, since a grade is one session per adapter rather than one per verb.
 pub use direct::{Wire, open_transport};
 pub(crate) use direct::{choose_configured, transport_for};
+pub(crate) use only_while::OnlyWhile;
+use only_while::apply_only_while;
 use remote::RemoteBackend;
 pub use svolder_ipc::socket::daemon_version::DaemonInfo;
 
@@ -1222,135 +1233,6 @@ impl Backend {
         self.close_announcing(RELEASE_QUIET, || eprintln!("svolder: releasing {name}…"))
             .await;
     }
-
-    /// A backend over the in-process fake device, connected and refreshed, beside the gate
-    /// that decides whether its link can be severed and reconnected.
-    ///
-    /// `connect_deadline` is how long one reconnect attempt keeps trying, which a case that
-    /// drives a front end across a dropped link sets long enough to outlast the front end's
-    /// own timers.
-    #[cfg(test)]
-    pub async fn fake(connect_deadline: Duration) -> (Backend, std::sync::Arc<FakeGate>) {
-        let (direct, gate) = direct::test_support::fake_backend_with(connect_deadline).await;
-        (Backend::Direct(Box::new(direct)), gate)
-    }
-
-    /// The same over the `fake-amp` profile, whose meters have a scale, so a test can play a
-    /// signal on them through the gate.
-    #[cfg(test)]
-    pub async fn fake_amp(connect_deadline: Duration) -> (Backend, std::sync::Arc<FakeGate>) {
-        let (direct, gate) =
-            direct::test_support::fake_backend_on("fake-amp", connect_deadline).await;
-        (Backend::Direct(Box::new(direct)), gate)
-    }
-
-    /// The same over a profile the case built, for a device with controls no built-in has.
-    #[cfg(test)]
-    pub async fn fake_over(
-        profile: Profile,
-        connect_deadline: Duration,
-    ) -> (Backend, std::sync::Arc<FakeGate>) {
-        let (direct, gate) =
-            direct::test_support::fake_backend_over(profile, connect_deadline).await;
-        (Backend::Direct(Box::new(direct)), gate)
-    }
-
-    /// Say that this backend is on the configured device called `name`, which a fake device has
-    /// no configuration file to have been picked out of.
-    #[cfg(test)]
-    pub(crate) fn configured_as(&mut self, name: &str) {
-        if let Backend::Direct(direct) = self {
-            direct.configured = Some(name.to_string());
-        }
-    }
-
-    /// A backend over the daemon listening at `socket`, opened the way a verb opens one over a
-    /// running daemon: what a case that is about the daemon half of a path drives.
-    #[cfg(test)]
-    pub(crate) async fn stub_remote(socket: &std::path::Path) -> Backend {
-        Backend::stub_remote_named(socket, None)
-            .await
-            .expect("the daemon on the socket answers")
-    }
-
-    /// The same, asking the daemon for the device `selector` names, so a case can see which
-    /// device a reopen asked it about.
-    #[cfg(test)]
-    pub(crate) async fn stub_remote_named(
-        socket: &std::path::Path,
-        selector: Option<&str>,
-    ) -> Result<Backend, Failure> {
-        RemoteBackend::open(socket, selector, true)
-            .await
-            .map(|remote| Backend::Remote(Box::new(remote)))
-    }
-}
-
-/// The configuration for a verb that acts on the device `selector` names (or the default, with
-/// none), or a failure naming what is wrong with it. A `default_device` naming no configured
-/// device fails a verb that needs the default, in its own words and without the warning that
-/// says the same; what the file only deserves a warning for is printed to stderr here.
-fn load_config(path: &Path, selector: Option<&str>) -> Result<Config, Failure> {
-    let config = Config::load_from(path).map_err(|e| config_error(e.to_string()))?;
-    if let Some(failure) = dangling_default_failure(&config, selector) {
-        return Err(failure);
-    }
-    print_warnings(&config);
-    Ok(config)
-}
-
-/// Print each of the config's warnings to stderr as `svolder: <warning>`, each at most once
-/// per process: a verb that reads the configuration in two places says it once.
-pub(crate) fn print_warnings(config: &Config) {
-    static SAID: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    for warning in config.warnings() {
-        let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
-        if !said.contains(&warning) {
-            eprintln!("svolder: {warning}");
-            said.push(warning);
-        }
-    }
-}
-
-/// The failure of a verb that would fall back on a `default_device` naming no configured
-/// device: it names the device rather than reaching for another one.
-fn dangling_default_failure(config: &Config, selector: Option<&str>) -> Option<Failure> {
-    if selector.is_some() {
-        return None;
-    }
-    config.dangling_default_failure().map(config_error)
-}
-
-/// Say under `-v` which daemon a verb is talking to.
-pub(crate) fn daemon_note(g: &Globals<'_>, socket: &std::path::Path) {
-    if g.verbose {
-        eprintln!("svolder: daemon at {}", socket.display());
-    }
-}
-
-/// The configured devices as rows, in the order the file lists them.
-pub(crate) fn rows_from_config(config: &Config) -> Vec<DeviceRow> {
-    config
-        .devices
-        .iter()
-        .map(|device| DeviceRow {
-            name: device.name.clone(),
-            ..DeviceRow::default()
-        })
-        .collect()
-}
-
-/// A failure the user can fix by typing the command differently: exit 1.
-///
-/// What `--transport` and the fake device's environment knobs are given is the command line's
-/// to say, so a value neither of them can use is answered by the help rather than by the file.
-fn usage(message: String) -> Failure {
-    Failure::of(Kind::Usage, message)
-}
-
-/// A failure the user can fix in the configuration file: exit 1.
-fn config_error(message: String) -> Failure {
-    Failure::of(Kind::ConfigUnreadable, message)
 }
 
 /// Open a session straight to the device this sighting names, with `passphrase`, and let it go
@@ -1391,128 +1273,6 @@ pub(crate) async fn try_connect(
     let refusal = backend.refusal();
     backend.close().await;
     refusal.map_or(Ok(()), Err)
-}
-
-/// The profile registry, or a failure pointing at the profiles it could not read.
-pub(crate) fn registry() -> Result<svolder_profiles::Registry, Failure> {
-    crate::registry().map_err(|e| Failure::of(Kind::UnknownProduct, e))
-}
-
-/// Whether `--transport` names somewhere this build can run.
-///
-/// This is the one list of them: [`Backend::open`] and [`Backend::devices_if_running`] ask it
-/// before they dispatch, and a front end with no verb to open a backend for asks it on its own,
-/// so an unusable value is refused in the same words whichever caller was given it.
-pub fn known_transport(name: &str) -> Result<(), Failure> {
-    match name {
-        "auto" | "daemon" | "ble" | "fake" => Ok(()),
-        other => Err(unknown_transport(other)),
-    }
-}
-
-/// Whether `--transport` lets a verb consult a running daemon: `auto` and `daemon` do, `ble`
-/// and `fake` run without one.
-pub fn asks_a_daemon(transport: &str) -> bool {
-    matches!(transport, "auto" | "daemon")
-}
-
-/// A `--transport` value that names nowhere to run, in the one wording every caller of it
-/// uses.
-fn unknown_transport(name: &str) -> Failure {
-    usage(format!(
-        "unknown transport {name:?}; use auto, daemon, ble, or fake"
-    ))
-}
-
-/// What a stream of single statuses knows of the booleans a readout's `only_while` can name,
-/// so each status can be shown with the derived value a full listing shows, and a readout can
-/// be shown again when the control it depends on changes under it.
-#[derive(Debug, Default)]
-pub(crate) struct OnlyWhile {
-    /// Whether the last reading of each function, by id, read true.
-    truth: std::collections::BTreeMap<String, bool>,
-    /// The last reading of each gated readout, by id, and the derived value shown for it.
-    readouts: std::collections::BTreeMap<String, (ValueObject, bool)>,
-}
-
-impl OnlyWhile {
-    /// Remember every reading in a listing, whose gated readouts are already derived.
-    pub(crate) fn note_all(&mut self, profile: &Profile, values: &[ValueObject]) {
-        for vo in values {
-            self.truth.insert(vo.id.clone(), vo.reads_true());
-        }
-        for vo in values {
-            if let Some(control) = gated(profile, vo) {
-                let shown = units::shows_true(profile, control, vo.reads_true(), |gate| {
-                    self.truth.get(&gate.id.to_string()).copied()
-                });
-                self.readouts.insert(vo.id.clone(), (vo.clone(), shown));
-            }
-        }
-    }
-
-    /// Remember one status and show it as false when it is a gated readout whose control last
-    /// read false or has not been heard. Returns the readouts that name this status's control
-    /// and whose derived value it changed, each already derived, to be shown after it.
-    pub(crate) fn apply(&mut self, profile: &Profile, vo: &mut ValueObject) -> Vec<ValueObject> {
-        self.truth.insert(vo.id.clone(), vo.reads_true());
-        if let Some(control) = gated(profile, vo) {
-            let shown = units::shows_true(profile, control, vo.reads_true(), |gate| {
-                self.truth.get(&gate.id.to_string()).copied()
-            });
-            vo.display = shown.to_string();
-            self.readouts.insert(vo.id.clone(), (vo.clone(), shown));
-        }
-        let Some(key) = vo.key.as_deref() else {
-            return Vec::new();
-        };
-        let open = vo.reads_true();
-        let mut changed = Vec::new();
-        for control in &profile.controls {
-            let names_this = control
-                .only_while
-                .as_deref()
-                .is_some_and(|gate| gate.eq_ignore_ascii_case(key));
-            if !names_this {
-                continue;
-            }
-            if let Some((last, shown)) = self.readouts.get_mut(&control.id.to_string()) {
-                let now = units::shows_true(profile, control, last.reads_true(), |_| Some(open));
-                if now != *shown {
-                    *shown = now;
-                    last.display = now.to_string();
-                    changed.push(last.clone());
-                }
-            }
-        }
-        changed
-    }
-}
-
-/// The control of a reading that is a readout an `only_while` gates.
-fn gated<'p>(profile: &'p Profile, vo: &ValueObject) -> Option<&'p Control> {
-    let control = profile.control_by_key(vo.key.as_deref()?)?;
-    profile.gate_of(control).map(|_| control)
-}
-
-/// Show a readout that has an `only_while` as false while the control it names does not read
-/// true. The raw value stays as the device sent it.
-fn apply_only_while(profile: &Profile, values: &mut [ValueObject]) {
-    let gated: Vec<(usize, bool)> = values
-        .iter()
-        .enumerate()
-        .filter_map(|(i, vo)| {
-            let control = gated(profile, vo)?;
-            let shown = units::shows_true(profile, control, vo.reads_true(), |gate| {
-                let id = gate.id.to_string();
-                Some(values.iter().any(|g| g.id == id && g.reads_true()))
-            });
-            Some((i, shown))
-        })
-        .collect();
-    for (i, on) in gated {
-        values[i].display = on.to_string();
-    }
 }
 
 #[cfg(test)]

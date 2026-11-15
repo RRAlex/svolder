@@ -146,7 +146,7 @@ function usable() {
   const part = document.getElementById('part-tone');
   const body = document.body.classList;
   return !!part && !part.hasAttribute('data-inert') && !part.closest('[inert]')
-    && body.contains('writes') && !body.contains('lost');
+    && ember.core.actions.canWrite() && !body.contains('lost');
 }
 
 /** The band picked in the table, or nothing. */

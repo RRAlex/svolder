@@ -375,6 +375,7 @@ impl App {
     /// one. The first block is its levels themselves.
     pub fn heard_block(&mut self, block: &Block, now: Instant) {
         self.now = now;
+        self.host.from_daemon = false;
         self.host.bands.land(&block.bands, now);
         let read = |level: f32| match level.is_finite() {
             true => f64::from(level).clamp(0.0, 1.0),
@@ -403,6 +404,7 @@ impl App {
     /// [`Host::pulse`](crate::tui::host::Host::pulse).
     pub fn heard_frame(&mut self, frame: &Frame, now: Instant) {
         self.heard_block(&frame.block(), now);
+        self.host.from_daemon = true;
         if frame.beat {
             self.host.beat_landed(now);
         }

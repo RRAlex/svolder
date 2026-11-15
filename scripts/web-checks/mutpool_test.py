@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Self-test of mutpool.py, the pool the browser mutation runners share: no browser, a second or two.
 Usage: python3 mutpool_test.py"""
+import atexit
 import os
+import shutil
 import sys
-import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+import tmp_base  # noqa: E402
 import threading
 
 import mutpool
@@ -41,7 +45,8 @@ check('and run again, not remembered', base.problem('k', flaky) is None and len(
 check('a passing baseline runs once', base.problem('k', flaky) is None and len(runs) == 2)
 
 # a daemon that lost the race for its port is started again; any other failure is a result
-work = tempfile.mkdtemp()
+work = tmp_base.mkdtemp('mp')
+atexit.register(shutil.rmtree, work, True)
 count = os.path.join(work, 'count')
 script = os.path.join(work, 'run.py')
 

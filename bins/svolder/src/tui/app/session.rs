@@ -38,12 +38,19 @@ pub struct Session {
     /// about again, however many devices this session opens on it or times it restarts.
     pub daemon_version_warned: Option<String>,
     /// Whether the daemon's `config changed` words were toasted since it last said the file was
-    /// unchanged: a change is told once, and a daemon that says unchanged again (a reload took
-    /// it) lets the next change be told.
-    pub config_changed_told: bool,
+    /// unchanged, and for a file it found missing (`Some(true)`) or changed (`Some(false)`): each
+    /// of the two is told once (a hand edit, then the file's deletion, are two), and a daemon
+    /// that says unchanged again (a reload took it) lets the next change be told.
+    pub config_changed_told: Option<bool>,
     /// The command that joins this run's daemon from a second terminal, in the demo; the Esc menu
     /// shows it.
     pub join_hint: Option<String>,
+    /// When the demo's daemon ending was last said, which is said again every
+    /// [`crate::tui::start::GONE_REPEAT`] while it stays gone.
+    pub gone_told: Option<std::time::Instant>,
+    /// Whether the demo's daemon has ended for good: nothing serves the host's frames any more,
+    /// so the loop's own capture does not run in its place.
+    pub daemon_gone: bool,
     /// How the device's configured passphrase disagrees with the advertisement, as the backend
     /// last judged it: the Status pane says so while it is `Some`. A best-effort note, never
     /// the digits of a code.

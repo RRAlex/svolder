@@ -16,7 +16,9 @@ import select
 import shutil
 import signal
 import sys
-import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tmp_base  # noqa: E402
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web-checks'))
@@ -75,7 +77,7 @@ def code_of(pid):
 def main():
     # A socket path holds 108 bytes, and a deep checkout's target/ passes them: the daemons' homes
     # go under a short directory of their own.
-    short = tempfile.mkdtemp(prefix='/tmp/svh.')
+    short = tmp_base.mkdtemp('svh')
     common.CHECKS = short
     try:
         run(short)

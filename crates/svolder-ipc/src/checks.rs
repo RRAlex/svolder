@@ -162,9 +162,7 @@ pub fn run(probes: &dyn Probes, socket: &Path, dev: bool) -> Vec<Outcome> {
     outcomes
 }
 
-/// The first line of a message, for a reason that is read as one line. A TOML parse error
-/// carries a whole snippet of the file under its first line, and the first line is the one that
-/// names where in the file the error is.
+/// The first line of a message, for a reason that is read as one line.
 fn first_line(message: &str) -> String {
     message.lines().next().unwrap_or_default().trim_end().into()
 }

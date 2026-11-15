@@ -78,11 +78,12 @@ fn masters() -> &'static Path {
 /// something was still running from is kept for the next sweep, so a fake that outlives its
 /// signal can still be found by it.
 fn sweep_finished_runs() {
-    for entry in std::fs::read_dir(std::env::temp_dir())
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
+    sweep_finished_runs_in(&std::env::temp_dir());
+}
+
+/// [`sweep_finished_runs`] over the scratch directories of `root`.
+fn sweep_finished_runs_in(root: &Path) {
+    for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let Some(run) = entry.file_name().to_str().and_then(run_of) else {
             continue;
         };
@@ -328,9 +329,11 @@ fn request(name: &str) -> ApplyRequest {
     }
 }
 
-/// Wait up to two seconds for `done` to hold.
+/// Wait up to ten seconds for `done` to hold.
 async fn until(done: impl Fn() -> bool) -> bool {
-    for _ in 0..40 {
+    // Returns as soon as `done` holds; the bound is long because a process may take seconds to
+    // start or end on a machine under heavy load.
+    for _ in 0..200 {
         if done() {
             return true;
         }
@@ -1043,7 +1046,8 @@ async fn a_chain_started_at_login_with_no_pid_file_is_seen_stopped_and_replaced(
     assert!(until(|| !argv.runs(first)).await);
     std::fs::remove_file(f.dir.join("run/svolder-host-eq.pid")).unwrap();
     let stray = start_stray(&f, "pipewire");
-    assert!(argv.runs(stray));
+    // Until the exec has set up its command line, the new process does not run the fake.
+    assert!(until(|| argv.runs(stray)).await, "the stray did not start");
     assert_eq!(host.status().await.running, Some(true));
     assert_eq!(host.status().await.problem(), None);
 
@@ -1102,7 +1106,7 @@ async fn a_fixture_stops_every_fake_of_its_directory_when_dropped() {
         &f.dir.join("pipewire-old").to_string_lossy(),
         &f.dir.join("config/svolder/host-eq.conf").to_string_lossy(),
     );
-    assert!(argv.runs(stray), "the stray did not start");
+    assert!(until(|| argv.runs(stray)).await, "the stray did not start");
     drop(f);
     assert!(
         until(|| !argv.runs(stray)).await,
@@ -1110,14 +1114,40 @@ async fn a_fixture_stops_every_fake_of_its_directory_when_dropped() {
     );
 }
 
+/// The sweep test's own root: whatever still runs from it is stopped before it is taken away,
+/// so a failed assertion leaves no fake behind that no later sweep could find.
+struct SweepRoot(PathBuf);
+
+impl Drop for SweepRoot {
+    fn drop(&mut self) {
+        for fake in running_from(&self.0) {
+            signal(fake, libc::SIGKILL);
+        }
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+impl std::ops::Deref for SweepRoot {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// The fixtures of a test run that ended without dropping them are swept by the next run: their
 /// fakes stopped, and their directories taken away once nothing runs from them. A directory of a
 /// run still going is left alone.
 #[tokio::test]
 async fn the_fixtures_of_a_run_that_is_over_are_swept() {
+    // The sweep runs over a root of this test's own: another test process sweeping the shared
+    // temp dir at the same moment would otherwise take these directories as its own finished
+    // runs (its names are not a run's, so that sweep leaves the root alone).
+    let root =
+        SweepRoot(std::env::temp_dir().join(format!("svhe-sweep-test-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&*root);
     // No process ever has the largest pid, so this run is always over.
-    let left = std::env::temp_dir().join(format!("svhe-{}-0", u32::MAX));
-    let _ = std::fs::remove_dir_all(&left);
+    let left = root.join(format!("svhe-{}-0", u32::MAX));
     std::fs::create_dir_all(&left).unwrap();
     std::os::unix::fs::symlink(masters().join("pipewire"), left.join("pipewire")).unwrap();
     let conf = left.join("host-eq.conf");
@@ -1130,20 +1160,26 @@ async fn the_fixtures_of_a_run_that_is_over_are_swept() {
         &conf.to_string_lossy(),
     );
     assert!(until(|| argv.runs(fake)).await, "the fake did not start");
-    let live = Fixture::new();
+    // A directory of this run, which is still going.
+    let live = root.join(format!("svhe-{}-0", std::process::id()));
+    std::fs::create_dir_all(&live).unwrap();
 
-    sweep_finished_runs();
+    sweep_finished_runs_in(&root);
     assert!(
         until(|| !argv.runs(fake)).await,
         "the fake outlived its run"
     );
     assert!(left.exists(), "the directory went before what ran from it");
-    sweep_finished_runs();
+    assert!(
+        until(|| running_from(&left).is_empty()).await,
+        "something still runs from the directory"
+    );
+    sweep_finished_runs_in(&root);
     assert!(
         !left.exists(),
         "the directory of a run that is over is still there"
     );
-    assert!(live.dir.exists(), "a fixture of this run was swept");
+    assert!(live.exists(), "a directory of this run was swept");
 }
 
 #[tokio::test]
@@ -1153,12 +1189,17 @@ async fn a_chain_of_another_conf_or_another_program_is_not_ours() {
     let stray = spawn_detached(&f.dir.join("pipewire"), &f.dir.join("elsewhere.conf"))
         .unwrap()
         .pid();
-    assert!(host.chains().is_empty());
-    host.remove().await.unwrap();
     let theirs = Argv::new(
         &f.dir.join("pipewire").to_string_lossy(),
         &f.dir.join("elsewhere.conf").to_string_lossy(),
     );
+    // Until the exec has set up its command line, the new process does not run the fake.
+    assert!(
+        until(|| theirs.runs(stray)).await,
+        "the stray did not start"
+    );
+    assert!(host.chains().is_empty());
+    host.remove().await.unwrap();
     assert!(theirs.runs(stray), "it was left running");
     signal(stray, libc::SIGKILL);
 }

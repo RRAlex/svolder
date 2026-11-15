@@ -126,6 +126,26 @@ pub(crate) async fn preset_write(socket: &Path, file: &Path, op: PresetOp) -> Re
 /// The preset write with no daemon to make it: the core's writers on the file, with the
 /// daemon's meaning for each op (a `save` with `force` adds a preset that is not there).
 pub(crate) fn preset_in_process(file: &Path, op: PresetOp) -> Result<(), Failure> {
+    guarded(file, || in_process(file, op)).map_err(crate::commands::device::config_failure)
+}
+
+/// Run `write`, a call of the core's file writers on `file`, refusing a file that goes missing
+/// before the writer reads it ([`ConfigError::Gone`](svolder_ipc::ConfigError::Gone)) when it
+/// was there as the write began: a deletion in that window never starts a template file that a
+/// daemon's next reload would take for the whole configuration. A file already absent is written
+/// as it always was.
+pub(crate) fn guarded<T>(
+    file: &Path,
+    write: impl FnOnce() -> Result<T, svolder_ipc::ConfigError>,
+) -> Result<T, svolder_ipc::ConfigError> {
+    match file.exists() {
+        true => Config::while_file_must_exist(write),
+        false => write(),
+    }
+}
+
+/// [`preset_in_process`]'s writer calls.
+fn in_process(file: &Path, op: PresetOp) -> Result<(), svolder_ipc::ConfigError> {
     let exists = |name: &str| Config::load_from(file).is_ok_and(|c| c.preset(name).is_some());
     match op {
         PresetOp::Save { preset, force } if force && exists(&preset.name) => {
@@ -136,7 +156,6 @@ pub(crate) fn preset_in_process(file: &Path, op: PresetOp) -> Result<(), Failure
         PresetOp::Rename { from, to } => Config::rename_preset(file, &from, &to),
         PresetOp::Delete { name } => Config::remove_preset(file, &name),
     }
-    .map_err(|e| Failure::of(Kind::ConfigUnreadable, e.to_string()))
 }
 
 /// What a refused preset write says: the daemon's own words, which are the core's for a name
@@ -178,4 +197,40 @@ pub(crate) fn too_old_words(version: Option<&str>, what: &str) -> String {
 /// than one that could not be reached or answered.
 pub(crate) fn is_too_old(failure: &Failure) -> bool {
     failure.code == Kind::DaemonTooOld.code()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A file that is there as the write begins and gone before the writer reads it is refused
+    /// as a daemon's missing file is, and no template file is made; a file already absent is
+    /// written as it always was.
+    #[test]
+    fn a_file_deleted_under_a_cli_write_is_not_made_again() {
+        let dir = crate::test_support::temp_dir("reach-guard");
+        let path = dir.0.join("config.toml");
+        std::fs::write(&path, "schema = 1\n").unwrap();
+        let hop = svolder_ipc::config::Hop {
+            what: svolder_ipc::config::HopWhat::Declared {
+                kind: svolder_ipc::config::HopKind::Amp,
+                name: "x".into(),
+            },
+            note: None,
+            after: None,
+        };
+        let err = guarded(&path, || {
+            std::fs::remove_file(&path).unwrap();
+            Config::add_hop(&path, &hop)
+        })
+        .unwrap_err();
+        assert!(matches!(err, svolder_ipc::ConfigError::Gone(_)), "{err:?}");
+        assert!(!path.exists(), "the file was made again");
+        let failure = crate::commands::device::config_failure(err);
+        assert_eq!(failure.code, 1);
+        assert!(failure.what.contains("is missing"), "{}", failure.what);
+
+        guarded(&path, || Config::add_hop(&path, &hop)).expect("an absent file is started");
+        assert!(path.exists());
+    }
 }

@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "bins/*"]
 
 [workspace.package]
-version = "0.34.2"
+version = "0.34.5"
 edition = "2024"
 rust-version = "1.93"
 license = "GPL-3.0-or-later"
@@ -113,3 +113,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.nalgebra]
 opt-level = 3
+
+# What `make demo*` builds and runs: optimised like a release, but incremental with many codegen
+# units so a developer's rebuild after an edit stays short. Like a release it has no debug
+# assertions and no overflow checks.
+[profile.demo]
+inherits = "release"
+incremental = true
+codegen-units = 256

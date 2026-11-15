@@ -25,12 +25,6 @@ export function pointsOf(tone) {
   }));
 }
 
-/** The curve's path in the plot's own box. */
-export const curvePath = curveD;
-
-/** The shade between the curve and the 0 dB line, closed along it. */
-export const shadePath = fillD;
-
 /** The value of step `raw` in `rows` (`[[value, words], …]`), or nothing for one that is not a
  * number. */
 function entry(rows, raw) {
@@ -63,8 +57,8 @@ export function heldGraph(tone, steps, band, raws) {
   const at = markerPoint('eq', bands[band - 1]);
   const response = responseDb(bands, FREQS);
   return {
-    d: curvePath(response),
-    shade: shadePath(response),
+    d: curveD(response),
+    shade: fillD(response),
     point: { x: at.x / VIEW_WIDTH, y: at.y / VIEW_HEIGHT },
   };
 }

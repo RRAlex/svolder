@@ -5,6 +5,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Coverage map: which check proves which rule
 
+Which checks does a change touch? `make web-touched` lists them from what each check loaded on its
+last run (see "Which checks a change touches" in README.md); this map says what each check proves.
+
 Each entry is a rule of the web UI's effects layer and the check that proves it. The rules of the
 smoke's model and director are proved in node, on a fake clock and a seeded random, with no GPU and
 no browser; the browser checks hold what needs a real page or a GPU. A test is named by its title in
@@ -875,8 +878,13 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   section drawn again is aged from its own stamp; the timer starts when the page is on show (with a write at
   once), rests while it is hidden, and is cleared by `stop()` and by the abort of the signal a theme passes (its
   unmount), after which nothing is written; `when` holds the writing (a caller's hidden section) while the part's
-  arrival is still noted; the words (`ago`) and the clock (`now`) are the caller's (`node/core-clock.mjs`, 12
-  cases). That the Devices popup's `stamp`, `ages` and `signal` selectors match what it draws: `core-device-wire.mjs`
+  arrival is still noted; the words (`ago`) and the clock (`now`) are the caller's (`node/core-clock.mjs`, 14
+  cases, the last two for `daemonNow`: the one clock every theme counts the track time on, keyed by the daemon's
+  `now_ms` value, so a redraw never takes the time back; a page-wide table of first sights, shared on purpose; the
+  Ember part swap and Signal's bar and hop redraws are in `node/playing.mjs` and `node/signal-draw.mjs`).
+  The volume ask Signal, Paper and Night drive share (`core/volume-ask.js`): the step shown until the device
+  answers or the ask is old, the step a change starts from, the expiry timer, and Night drive's dash over the real
+  store in both orders of the write's answer and the stream's reading (`node/core-volume-ask.mjs`, 5 cases). That the Devices popup's `stamp`, `ages` and `signal` selectors match what it draws: `core-device-wire.mjs`
   (`the_ages_are_kept_by_the_cores_ticker_with_the_selectors_of_the_page`, `the_readings_ages_are_kept_by_the_same_ticker_as_the_signals`)
   and `completeness.py`, "the ages step" (the popup's facts and readings, once per theme, Chromium).
 
@@ -1895,8 +1903,14 @@ proved by node harnesses; its light and dark and its first frame by `paper.py` i
   with the version, no style attribute; the player's area shows it before the title),
   "the_cover_follows_the_track" (another track's address; a real 404 hides it with no gap; no cover,
   no box; it comes back), "no_cover_leaves_no_gap" (`SVOLDER_FAKE_COVER_GONE_AFTER_MS`),
-  "the_bar_shows_the_cover_on_a_phone". Each killed by a mutant made by hand once: no cover drawn,
-  an address with no version, no hidden handler.
+  "the_bar_shows_the_cover_on_a_phone". Each of those was killed by a mutant made by hand once: no
+  cover drawn, an address with no version, no hidden handler.
+  The player's area (added in 0.34.3, no hand mutants yet):
+  "the_player_cover_is_right_of_the_transport_when_wide" (top-aligned, square, 200 to 300 px, glow,
+  no size attributes; a title with no break points wraps before the cover; a 404 or no cover leaves
+  one column), "the_player_cover_is_above_the_title_on_a_phone" (240 px, transport on the first
+  screen; no cover, one column), and the node case
+  "the_players_cover_leads_a_two_part_top_and_none_leaves_no_box".
 
 The theme Signal (design sections 3, 8 and 9), built on the core alone. Its frame: the registration,
 the line of hops, its dots and the choice of a hop. The open area below the line is filled by the
@@ -2275,7 +2289,14 @@ dash and the sheet come with the later tasks.
   `quiet` and `aria-disabled`, the sheet's key not; a guest has no transport), `the_track_reads_title_artist_album_and_time`
   (`Massive Attack · Mezzanine · 1:42 / 5:29`, the fill's share, the time moving two seconds on, a paused
   track standing still, `Nothing playing`), `an_amp_has_power_and_readouts_where_the_input_would_be`.
-- The dash in a browser (`nightdrive_theme.py`, both browsers): `the_dash_runs_minus_mute_plus_input_track_transport_device`
+- The dash's EQ key and clock (`node/nightdrive-eqkey.mjs`, `node/nightdrive-dash-clock.mjs`): the key stands for the
+  computer's EQ on or off or a device's Flat and EQ (none where there is no EQ to turn off), a press writes the other
+  mode through the core, a failed write, the stream's event before or after the write's answer; a draw with no new
+  player reading counts the track time on from where it was, a new reading re-bases it.
+- The dash's EQ key in a browser (`computer_nightdrive.py`, both browsers): `the_dash_eq_key_turns_the_eq_off_and_on_on_both_sides`
+  (the key in the dash pressed as the EQ stands; a press posts `{on}` for the computer and the key and the HUD follow;
+  on the device it flips its tone mode between Flat and EQ).
+- The dash in a browser (`nightdrive_theme.py`, both browsers): `the_dash_runs_minus_mute_plus_eq_input_track_transport_device`
   and `the_track_reads_title_artist_album_and_time` and `the_transport_is_svg_not_glyphs` against the
   model (40 px keys along the bottom), `minus_and_plus_step_the_volume_and_mute_toggles` (a tap steps one,
   two quick taps two from the step asked, a key on the focused `+` keeps the focus through the redraw),

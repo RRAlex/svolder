@@ -189,7 +189,7 @@ function clicked(event) {
     if (row && !event.target.closest('select, input')) table.pick(Number(row.dataset.n));
     return;
   }
-  if (off(control) || !document.body.classList.contains('writes')) return;
+  if (off(control) || !ember.core.actions.canWrite()) return;
   const n = Number(control.dataset.n);
   switch (control.dataset.comp) {
     case 'mode':

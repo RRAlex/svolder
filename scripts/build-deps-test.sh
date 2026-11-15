@@ -23,7 +23,8 @@ where() {
 shell=$(where sh)
 want=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' "$here/../Cargo.toml" | head -n 1)
 below=$(echo "$want" | awk -F. '{ printf "%d.%d.9", $1, $2 - 1 }')
-work=$(mktemp -d)
+. "$(dirname "$(readlink -f "$0")")/tmp-base.sh"
+work=$(svtmp_dir bd) || exit 1
 trap 'rm -rf "$work"' EXIT
 
 cases=0

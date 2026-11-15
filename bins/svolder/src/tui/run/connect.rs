@@ -218,18 +218,28 @@ pub(super) async fn changed<O: Open>(
             }
         }
     }
-    let wrote = match (change.is_mcp(), change.is_web()) {
-        (true, _) => Config::update_mcp(&opener.path, |mcp| change.apply_mcp(mcp)),
-        (_, true) => Config::update_web(&opener.path, |web| change.apply_web(web)),
-        (false, false) => Config::update_mqtt_noting(&opener.path, |mqtt| change.apply_mqtt(mqtt))
-            .map(|tightened| {
-                if tightened {
-                    watching
-                        .app
-                        .notify("config.toml was readable by others: now 0600");
-                }
-            }),
-    };
+    // The file's lock may be held by the daemon or another svolder for seconds: the write runs
+    // on a thread of its own while the loop draws a wait.
+    let (path, own) = (opener.path.clone(), change.clone());
+    let wrote = super::devices::off_loop(
+        "saving…",
+        move || match (own.is_mcp(), own.is_web()) {
+            (true, _) => Config::update_mcp(&path, |mcp| own.apply_mcp(mcp)).map(|()| false),
+            (_, true) => Config::update_web(&path, |web| own.apply_web(web)).map(|()| false),
+            (false, false) => Config::update_mqtt_noting(&path, |mqtt| own.apply_mqtt(mqtt)),
+        },
+        watching,
+        look,
+        screen,
+    )
+    .await
+    .map(|tightened| {
+        if tightened {
+            watching
+                .app
+                .notify("config.toml was readable by others: now 0600");
+        }
+    });
     let written = super::written(opener, watching, wrote).await;
     if written && !change.is_mcp() && !change.is_web() {
         // A daemon may have started since the socket was tried and read the file before this
@@ -575,11 +585,13 @@ pub(super) fn daemon_answered(
             &watching.app.overlays.conn.config_changed,
             info.config_changed,
         ) {
-            (Some(words), true) if !watching.app.session.config_changed_told => {
-                watching.app.session.config_changed_told = true;
+            (Some(words), true)
+                if watching.app.session.config_changed_told != Some(info.config_missing) =>
+            {
+                watching.app.session.config_changed_told = Some(info.config_missing);
                 watching.app.warn(words.clone());
             }
-            (_, false) => watching.app.session.config_changed_told = false,
+            (_, false) => watching.app.session.config_changed_told = None,
             _ => {}
         }
     }

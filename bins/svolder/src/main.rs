@@ -128,6 +128,7 @@ fn main() -> ExitCode {
     let socket = demo.as_ref().map(demo::Demo::socket);
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
+        .thread_name("svolder-tokio")
         .enable_all()
         .build()
     {

@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The Makefile's choice of unit directory, read off a dry run.
+//! The Makefile's choices (unit directory, which tests `make check` runs), read off a dry run.
 //!
 //! `make -n` prints the recipes without running them, so nothing is built or installed and no
-//! `systemctl` runs; `SYSTEMCTL=echo` would keep even a real run to a print. The Makefile has
-//! no `$(shell ...)` call, which `-n` would still run.
+//! `systemctl` runs; `SYSTEMCTL=echo` would keep even a real run to a print.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,6 +27,9 @@ fn dry_run_of(target: &str, prefix: &str, home: &str, extra: &[&str]) -> String 
         .arg(format!("HOME={home}"))
         .arg("SYSTEMCTL=echo")
         .args(extra)
+        .env_remove("MAKEFLAGS")
+        .env_remove("MAKELEVEL")
+        .env_remove("MFLAGS")
         .output()
         .expect("make runs");
     assert!(out.status.success(), "make -n failed: {out:?}");
@@ -147,5 +149,65 @@ fn screenshots_runs_its_script() {
         "out:\n{out}"
     );
     assert_eq!(lines[1], "bash scripts/screenshots.sh", "out:\n{out}");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+/// `CHECK_TESTS` as `make -pn` reads it with only `bin` on the `PATH`.
+fn check_tests_with_path(bin: &Path) -> String {
+    // The absolute path, since `PATH` is replaced below.
+    let out = Command::new("/usr/bin/make")
+        .args(["-pn", "-C"])
+        .arg(repo_root())
+        .env("PATH", bin)
+        .env_remove("MAKEFLAGS")
+        .env_remove("MAKELEVEL")
+        .env_remove("MFLAGS")
+        .output()
+        .expect("make runs");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("CHECK_TESTS := "))
+        .unwrap_or_else(|| panic!("no CHECK_TESTS in the make database: {out:?}"))
+        .to_string()
+}
+
+/// `make check` runs the tests once, on the private bus, when dbus-daemon is there, and keeps
+/// the plain run followed by `check-no-bluez` when it is not.
+#[test]
+fn check_runs_the_tests_once_when_dbus_daemon_is_there() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = temp_home("check-tests");
+    let with = base.join("with");
+    let without = base.join("without");
+    std::fs::create_dir_all(&with).expect("create a bin dir");
+    std::fs::create_dir_all(&without).expect("create an empty bin dir");
+    let fake = with.join("dbus-daemon");
+    std::fs::write(&fake, "#!/bin/sh\n").expect("write a fake dbus-daemon");
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    assert_eq!(check_tests_with_path(&with), "check-tests-private");
+    assert_eq!(check_tests_with_path(&without), "test check-no-bluez");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+/// `make test T=...` hands cargo that selection in place of the workspace, and then does not
+/// claim every binary was prebuilt.
+#[test]
+fn test_takes_a_cargo_selection() {
+    let base = temp_home("test-t");
+    let home = base.join("home");
+    let home = home.to_str().expect("utf-8 path");
+    let plain = dry_run_of("test", "/usr/local", home, &[]);
+    assert!(
+        plain.contains("SVOLDER_TEST_PREBUILT=1")
+            && plain.contains("test --workspace --all-features"),
+        "out:\n{plain}"
+    );
+    let one = dry_run_of("test", "/usr/local", home, &["T=-p svolder-host"]);
+    assert!(one.contains("test -p svolder-host"), "out:\n{one}");
+    assert!(
+        !one.contains("--workspace") && !one.contains("PREBUILT"),
+        "out:\n{one}"
+    );
     let _ = std::fs::remove_dir_all(base);
 }

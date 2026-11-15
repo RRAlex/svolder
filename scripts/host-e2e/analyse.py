@@ -59,7 +59,7 @@ def private_env():
         'XDG_DATA_HOME': run + '/data', 'XDG_CACHE_HOME': run + '/cache',
         'DBUS_SESSION_BUS_ADDRESS': 'unix:path=' + run + '/no-bus',
     }
-    if not (run.startswith('/tmp/svpw.') and len(run) == len('/tmp/svpw.XXXXXX')):
+    if not (run.startswith('/tmp/svolder/pw.') and len(run) == len('/tmp/svolder/pw.XXXXXX')):
         refuse('SVPW_RUN is not a private-pipewire.sh run directory (run through make host-e2e)')
     for k, v in want.items():
         if os.environ.get(k) != v:

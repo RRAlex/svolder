@@ -334,7 +334,18 @@ impl Daemon {
             if held.is_some() && gone(&path) {
                 return Err(ConfigWriteError::Off(missing_refusal(&path)));
             }
-            edit(&path).map_err(ConfigWriteError::Refused)?;
+            // Judged again under the file's own lock, where a deletion between the check above
+            // and the write is seen as well.
+            let wrote = match held.is_some() {
+                true => Config::while_file_must_exist(|| edit(&path)),
+                false => edit(&path),
+            };
+            match wrote {
+                Err(ConfigError::Gone(_)) => {
+                    return Err(ConfigWriteError::Off(missing_refusal(&path)));
+                }
+                other => other.map_err(ConfigWriteError::Refused)?,
+            }
             let generation = ticket(&reads);
             let stamp = file_stamp(&path);
             let read_back = Config::load_from(&path);

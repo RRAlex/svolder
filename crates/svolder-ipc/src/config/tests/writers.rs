@@ -436,3 +436,21 @@ fn writable_names_why_a_config_cannot_be_written() {
         Err(format!("{}: its directory is not writable", path.display()))
     );
 }
+
+/// A writer told the file must exist refuses an absent one under its lock, makes no file and no
+/// directory, and leaves the next writer free to start one.
+#[test]
+fn a_writer_told_the_file_must_exist_refuses_an_absent_one() {
+    let dir = temp_dir("config-writer");
+    let path = dir.join("sub").join("config.toml");
+    let err =
+        Config::while_file_must_exist(|| Config::add_preset(&path, &hd650_warm())).unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Gone(ref gone) if *gone == path),
+        "got {err:?}"
+    );
+    assert!(err.to_string().contains("is missing"), "{err}");
+    assert!(!dir.join("sub").exists(), "a directory was made");
+    Config::add_preset(&path, &hd650_warm()).expect("the next writer starts the file");
+    assert!(path.exists());
+}

@@ -775,6 +775,28 @@ fn usb() -> CaptureCall {
     CaptureCall::Start("alsa_output.usb-dac".into())
 }
 
+/// The demo's daemon ending for good ends the TUI's own capture too, and nothing starts it again:
+/// the daemon's frames were the row's source, and no daemon is coming back to take it over from
+/// a loop that would analyse the host in-process for the rest of the run.
+#[test]
+fn a_demo_daemon_that_is_gone_leaves_no_own_capture_running() {
+    let capture = FakeCapture::new();
+    let mut link = HostLink::none().with_capture(Box::new(capture.clone()));
+    let mut app = dac();
+    link.steer(&mut app);
+    assert_eq!(capture.calls(), [usb()], "the own capture runs before");
+
+    app.session.daemon_gone = true;
+    link.steer(&mut app);
+    link.steer(&mut app);
+    assert_eq!(
+        capture.calls(),
+        [usb(), CaptureCall::Stop],
+        "the own capture was not stopped once, or started again"
+    );
+    assert!(!app.host.capturing);
+}
+
 /// The capture runs while something wants a level no meter streams — the title meter, the
 /// breathing borders — and host audio shows, on the node the default sink named: it moves
 /// with the sink, and stops when the switches go off, when the sink names no node, and

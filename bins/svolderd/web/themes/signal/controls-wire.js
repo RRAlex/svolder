@@ -12,7 +12,8 @@
 // not move what is under the hand: it is drawn from the newest model once the hand is away.
 
 import { rawAt } from './draw/volume.js';
-import { dragAlong, sliderKeys } from './gestures.js';
+import { dragAlong, sliderKeys } from '../../core/gestures.js';
+import { stepWords } from '../../core/words.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { placeOpen } from './place.js';
 
@@ -113,7 +114,7 @@ export function wireControls({
     knob.dataset.at = ((raw - c.lo) / (c.hi - c.lo)).toFixed(5);
     placeOpen(scale);
     // The device's own words for the step where it gave them, the number where it did not.
-    const text = c.texts?.[raw - c.lo] ?? String(raw);
+    const text = stepWords(c, raw);
     scale.setAttribute('aria-valuenow', String(raw));
     scale.setAttribute('aria-valuetext', text);
     const word = scale.closest('.sg-level')?.querySelector('.sg-sval');

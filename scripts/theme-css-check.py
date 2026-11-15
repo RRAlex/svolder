@@ -114,11 +114,14 @@
 # `--self-test` runs the same rules on copies of the sheets with one thing broken in each and
 # fails when a copy passes.
 
+import os
 import pathlib
 import re
 import shutil
 import sys
-import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tmp_base  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB = ROOT / "bins" / "svolderd" / "web"
@@ -144,11 +147,16 @@ PURE = {
     # whole modules
     "act.js": ALL,  # createAct(core) over the core it is given; MINE_MS
     "contract.js": ALL,  # the lists the checks and the drivers ask for
+    "gestures.js": ALL,  # dragAlong, sliderKeys: listen on the element they are handed (the check no
+    # longer follows `sliderKeys`'s receiver: its callers, `*/controls-wire.js`, `*/volume-wire.js`
+    # and `*/computer-wire.js`, all pass a section's box)
     "html.js": ALL,
     "phone.js": ALL,
+    "place.js": ALL,
     "plot.js": ALL,
     "tone-curve.js": ALL,
     "viz-model.js": ALL,
+    "volume-ask.js": ALL,  # the ask's rules; `askExpiry` holds one timer, its own, per call
     "words.js": ALL,
     # the shared widgets: each draws into the place it is given and reaches no service. Its one
     # piece of state is which list (or question) is open in each scope (a modal of the stack,
@@ -157,7 +165,9 @@ PURE = {
     "list.js": ALL,
     # some exports of a module that holds a service beside them
     "api.js": {"newest"},  # one write in flight and the newest waiting, per call
-    "clock.js": {"AGES_EVERY_MS", "clockOffset", "daemonClock", "elapsedUs", "fraction",
+    # `daemonNow` keeps one page-wide table of the first sight of each `now_ms`, shared on purpose
+    "clock.js": {"AGES_EVERY_MS", "clockOffset", "daemonClock", "daemonNow",
+                 "elapsedUs", "fraction",
                  "timeWords"},  # `tickAges` reads and writes the page: `core.clock.tickAges`
     "computer.js": {"POINT_TYPES", "ROWS_SHOWN", "THIS_COMPUTER", "markersOf"},
     # the key table's readers; binding a table is `core.keys.bind`
@@ -199,12 +209,6 @@ LISTENERS = [
 # check cannot all read (it is exported, taken apart from an object, handed on as a value or has
 # no name), so nothing here proves it is not the window: the reason says what the callers hand it.
 HANDED = [
-    ("themes/nightdrive/gestures.js", "sliderKeys", "el",
-     "a slider's keys: controls-wire.js hands it the box of the controls' scales"),
-    ("themes/paper/gestures.js", "sliderKeys", "el",
-     "a slider's keys: the volume's, the controls' and the computer's wires hand it their box"),
-    ("themes/signal/gestures.js", "sliderKeys", "el",
-     "a slider's keys: the volume's, the controls' and the computer's wires hand it their box"),
     ("themes/signal/strip-wire.js", "wireStrip", "band",
      "the strip of hops (`#sg-line`), which signal.js looks up under the theme's root"),
 ]
@@ -1389,7 +1393,8 @@ def self_test():
     schemes = listed_schemes()
     bad = 0
     for name, (breaks, wanted) in cases.items():
-        with tempfile.TemporaryDirectory(prefix="theme-css-check.") as scratch:
+        scratch = tmp_base.mkdtemp("tcc")
+        try:
             web = pathlib.Path(scratch) / "web"
             (web / "core").mkdir(parents=True)
             for file in ("frame.css", "phone.js"):
@@ -1404,6 +1409,8 @@ def self_test():
                 shutil.copy(script, copy)
             breaks(web)
             lines = findings(web, schemes)[0]
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
         fine = not lines if wanted is None else any(wanted in line for line in lines)
         if not fine:
             bad += 1

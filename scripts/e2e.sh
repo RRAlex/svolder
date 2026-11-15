@@ -38,7 +38,8 @@ fi
 # This run's own directory: the logs and the state below live here, so two runs never share a
 # file. Removed when the run ends, unless it fails after writing to a log: then it is kept, for
 # the logs.
-RUN_DIR=$(mktemp -d -t svolder-e2e.XXXXXX)
+. "$(dirname "$(readlink -f "$0")")/tmp-base.sh"
+RUN_DIR=$(svtmp_dir e2e) || exit 1
 SIM_LOG="$RUN_DIR/sim.log"
 DAEMON_LOG="$RUN_DIR/daemon.log"
 # Set once the last step has passed, so the EXIT trap knows whether the run failed.
@@ -500,7 +501,7 @@ SIM_EXTRA="--trace --profile gungnir2-v2" start_sim
 start_daemon() {
   # A daemon started before has left its configuration directory behind.
   if [ -n "$DAEMON_DIR" ]; then rm -rf "$DAEMON_DIR" || true; fi
-  DAEMON_DIR=$(mktemp -d)
+  DAEMON_DIR=$(svtmp_dir ed) || exit 1
   DAEMON_SOCKET="$DAEMON_DIR/svolder.sock"
   mkdir -p "$DAEMON_DIR/svolder"
   cat >"$DAEMON_DIR/svolder/config.toml" <<EOF
@@ -827,7 +828,7 @@ SIM_UNIT="$SIGNAL_UNIT" SIM_EXTRA="--profile fake-amp --signal" start_sim
 # than left with BlueZ; a peripheral still held would not advertise for the next scan. It scans
 # for $SIGNAL_UNIT rather than $UNIT — see that variable's own comment above.
 SIGNAL_BUDGET=25
-SIGNAL_OUT=$(mktemp)
+SIGNAL_OUT=$(svtmp_file sig) || exit 1
 "$SVOLDER" --transport ble --adapter "$SCAN" -d "$SIGNAL_UNIT" watch >"$SIGNAL_OUT" 2>&1 &
 WATCH_PID=$!
 for _ in $(seq $((SIGNAL_BUDGET * 2))); do

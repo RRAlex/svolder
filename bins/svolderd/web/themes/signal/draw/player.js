@@ -28,16 +28,15 @@ export function playerScreen(page, localMs = Date.now()) {
   const track = host?.track;
   if (!track) return `<section id="sg-player" class="sg-plain"><p class="sg-detail">${esc(PLAYER.noTrack)}</p></section>`;
   const inert = inertPage(page);
-  const prog = progressOf(host, track, localMs, localMs);
+  const prog = progressOf(host, track, localMs);
   const at = prog ? fraction(prog.elapsed, prog.length) : 0;
   const time = prog ? timeWordsOf(prog) : '';
-  const attrs = prog ? ` data-drawn="${localMs}"` : '';
   const byline = [track.artist, track.album].filter(Boolean).map(esc).join(' · ');
   const path = host.path ?? page.host?.path ?? null;
-  return `<section id="sg-player" class="sg-plain"><span class="sg-lbl">${esc(PLAYER.title)}</span>`
-    + `${coverMarkup(track)}<h2 class="sg-title">${esc(track.headline)}</h2>${byline ? `<p class="sg-byline">${byline}</p>` : ''}`
-    + `<div class="sg-pprog" id="sg-pp"${attrs}><span class="sg-bar"><span class="sg-fill" data-at="${at.toFixed(5)}"></span></span>`
+  return `<section id="sg-player" class="sg-plain"><div class="sg-ptop">${coverMarkup(track)}<div class="sg-pmain">`
+    + `<span class="sg-lbl">${esc(PLAYER.title)}</span><h2 class="sg-title">${esc(track.headline)}</h2>${byline ? `<p class="sg-byline">${byline}</p>` : ''}`
+    + `<div class="sg-pprog" id="sg-pp"><span class="sg-bar"><span class="sg-fill" data-at="${at.toFixed(5)}"></span></span>`
     + `<span class="sg-time">${esc(time)}</span></div>`
-    + `${host.buttons ? transport(track.status, inert) : ''}`
+    + `${host.buttons ? transport(track.status, inert) : ''}</div></div>`
     + `<span class="sg-lbl sg-gap">${esc(PLAYER.path)}</span>${pathLines(path)}</section>`;
 }

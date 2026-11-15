@@ -23,7 +23,8 @@ if [ -z "$DEB_IMAGE" ]; then
     exit 1
 fi
 tag=svolder-dryrun-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
-work=$(mktemp -d "/tmp/$tag.XXXX")
+. "$(dirname "$(readlink -f "$0")")/tmp-base.sh"
+work=$(svtmp_dir "$tag") || exit 1
 containers="$tag-deb $tag-app"
 image=$tag:image
 step=start

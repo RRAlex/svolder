@@ -40,6 +40,14 @@ fn write_preset<O: Open>(opener: &Opener<O>, watching: &mut Watching, op: Preset
     });
 }
 
+/// Focus row `row` of whichever preset list is open: the device's own, or the tone control's.
+fn focus_list(app: &mut App, row: usize) {
+    match app.presets.device_list.is_some() {
+        true => device_presets::focus(app, row),
+        false => presets::focus(app, row),
+    }
+}
+
 /// Read the presets from the configuration file again, for the list that has just opened.
 fn read_presets<O: Open>(opener: &Opener<O>, watching: &mut Watching) {
     match Config::load_from(&opener.path) {
@@ -80,9 +88,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
         // A setting is neither a write nor anything the device has heard of: it changes how
         // this loop draws, and is saved where a hand edit would have put it.
         Intent::Tui(change) => {
-            if look.change(&change, &mut watching.app, mouse) {
-                super::look::reload_soon(&mut watching, look.path());
-            }
+            look.change(&change, &mut watching.app, mouse);
             // With capture off, a drag button's release goes to the terminal instead, so let
             // the drag go where it last was.
             let let_go = curve_drag::capture_off(&mut watching.app);
@@ -93,9 +99,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
         }
         // The refresh applies whether or not it can be saved, as a `[tui]` change does.
         Intent::AutoEqRefresh(weeks) => {
-            if look.change_autoeq(weeks, &mut watching.app) {
-                super::look::reload_soon(&mut watching, look.path());
-            }
+            look.change_autoeq(weeks, &mut watching.app);
         }
         Intent::Connection(change) => {
             Box::pin(connect::changed(
@@ -154,7 +158,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
                 },
                 None => DeviceConfigOp::ClearDefault,
             };
-            write_device(opener, &mut watching, look, screen, op, |path| {
+            write_device(opener, &mut watching, look, screen, op, move |path| {
                 Config::set_default_device(path, name.as_deref())
             })
             .await;
@@ -253,6 +257,15 @@ pub(super) async fn take_key<O: Open, M: MouseCapture>(
     take_intents(intents, opener, watching, mouse, look, screen).await
 }
 
+/// The end a `q` or Ctrl-C earned while a write of the configuration file was waited for: the
+/// write was seen through, and the loop ends now.
+fn quit_if_asked(flow: Flow) -> Flow {
+    match flow {
+        Flow::Continue(watching) if watching.give_up_asked => gave_up(watching),
+        other => other,
+    }
+}
+
 /// Carry out `intents` one after the other as [`take_intent`] does, stopping at the first that
 /// ends or changes what is watched.
 pub(super) async fn take_intents<O: Open, M: MouseCapture>(
@@ -264,7 +277,7 @@ pub(super) async fn take_intents<O: Open, M: MouseCapture>(
     screen: &mut dyn Shown,
 ) -> Flow {
     for intent in intents {
-        match take_intent(intent, opener, watching, mouse, look, screen).await {
+        match quit_if_asked(take_intent(intent, opener, watching, mouse, look, screen).await) {
             Flow::Continue(next) => watching = next,
             ended => return ended,
         }
@@ -320,7 +333,7 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             // A click that writes a value is the user changing it, as the key would, so the
             // row it writes to earns the same sweep.
             watching.app.touched(std::slice::from_ref(&intent));
-            take_intent(intent, opener, watching, mouse, look, screen).await
+            quit_if_asked(take_intent(intent, opener, watching, mouse, look, screen).await)
         }
         MouseAction::BandEdit(writes) => {
             let intents = watching.app.band_edit(writes);
@@ -351,7 +364,7 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             take_intents(intents, opener, watching, mouse, look, screen).await
         }
         MouseAction::PresetPick(row) => {
-            presets::focus(&mut watching.app, row);
+            focus_list(&mut watching.app, row);
             take_key(
                 KeyEvent::from(crossterm::event::KeyCode::Enter),
                 opener,
@@ -363,7 +376,7 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             .await
         }
         MouseAction::PresetGo(row) => {
-            presets::focus(&mut watching.app, row);
+            focus_list(&mut watching.app, row);
             Flow::Continue(watching)
         }
         MouseAction::Setting(at) => {

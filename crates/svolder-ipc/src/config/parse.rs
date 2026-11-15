@@ -141,7 +141,7 @@ impl Config {
     /// block for the unit, leaves the later ones out of [`Config::devices`] and says so in
     /// [`Config::warnings`], so a file written before the rule existed still starts the daemon.
     fn parse_as(text: &str, strict: bool, listen: &ListenDefaults) -> Result<Config, ConfigError> {
-        let raw: RawConfig = toml::from_str(text).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let raw: RawConfig = toml::from_str(text).map_err(|e| toml_error(&e, text))?;
         if raw.schema != 1 {
             return Err(ConfigError::Schema(raw.schema));
         }
@@ -249,4 +249,18 @@ fn validate_passphrase(name: &str, p: &str) -> Result<(), ConfigError> {
             "device {name}: passphrase must be auto, none, or four digits"
         )))
     }
+}
+
+/// The refusal for a file the TOML parser rejected: its message and where it stopped, without
+/// the lines of the file that the parser's own text quotes (a quoted line may be the passphrase)
+/// and without the value that did not fit.
+pub(super) fn toml_error(e: &toml::de::Error, text: &str) -> ConfigError {
+    let message = crate::error::without_value(e.message());
+    ConfigError::Parse(match e.span() {
+        Some(span) => {
+            let (line, column) = crate::error::line_and_column(text, span.start);
+            format!("TOML parse error at line {line}, column {column}: {message}")
+        }
+        None => format!("TOML parse error: {message}"),
+    })
 }

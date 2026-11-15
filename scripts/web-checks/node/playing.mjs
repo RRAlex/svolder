@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import {
   clockOffset, daemonClock, elapsedUs, fraction, timeWords,
 } from '../../../bins/svolderd/web/core/clock.js';
-import { loopPlan } from '../../../bins/svolderd/web/themes/ember/playing.js';
+import { page as domPage } from './dom.mjs';
+import { loopPlan, tick } from '../../../bins/svolderd/web/themes/ember/playing.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -98,6 +99,29 @@ ok('a_long_title_is_not_sped_up_to_fit_a_time', () => {
   const plan = loopPlan(5000);
   assert.ok(plan.total > 5000);
   assert.ok(Math.abs(plan.move - (5040 / 30) * 1000) < 1e-6);
+});
+
+ok('ember_tick_counts_on_when_the_part_is_swapped_for_one_of_the_same_reading', () => {
+  const part = (nowMs) => `<section id="part-playing" data-now="${nowMs}"><div class="np" data-status="playing"
+    data-position="0" data-rate="1000" data-read-at="${nowMs}" data-length="${200 * SEC}">
+    <span class="np-el"></span><span class="np-len"></span><div class="np-bar"></div></div></section>`;
+  const { document } = domPage(`<div id="host">${part(7_000_000)}</div>`);
+  Object.defineProperty(document, 'hidden', { value: false });
+  globalThis.document = document;
+  const realNow = Date.now;
+  try {
+    Date.now = () => 1000;
+    tick();
+    assert.equal(document.querySelector('.np-el').textContent, '0:00');
+    // a minute on, a redraw replaces the part with one of the same reading
+    Date.now = () => 61_000;
+    document.getElementById('host').innerHTML = part(7_000_000);
+    tick();
+    assert.equal(document.querySelector('.np-el').textContent, '1:00', 'counted on, not back to the reading');
+  } finally {
+    Date.now = realNow;
+    delete globalThis.document;
+  }
 });
 
 console.log(`playing.mjs: ${n} checks passed`);

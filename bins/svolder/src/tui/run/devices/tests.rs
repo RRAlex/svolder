@@ -3021,3 +3021,55 @@ async fn an_update_of_a_preset_that_is_gone_is_refused_with_and_without_a_daemon
     assert!(Config::load_from(&path).unwrap().presets.is_empty());
     watching.close().await;
 }
+
+/// A walk opened over the session shows the key line's tooltips while the TUI's `tooltips`
+/// setting and mouse capture are on, and none with the setting off.
+#[tokio::test(start_paused = true)]
+async fn the_walk_over_the_session_shows_the_key_line_tooltips_by_the_setting() {
+    for (tips, shown) in [(true, true), (false, false)] {
+        let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+        let path = config_naming(&[]);
+        let opener = opener_on(path.clone(), never_opens());
+        let mut watching = watching(backend, app, None);
+        watching.app.mouse = true;
+        watching.app.tui.tooltips = tips;
+        watching.app.show(Screen::Devices);
+        let (recorder, frames) = Recorder::new(SIZE.0, SIZE.1);
+        let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+        let rest = Event::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Moved,
+            column: 68,
+            row: SIZE.1 - 1,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        });
+        // The pointer rests on `q` for longer than the delay, then `q` leaves the walk.
+        let mut events: BoxStream<'static, io::Result<Event>> = Box::pin(
+            stream::iter(vec![
+                (Duration::from_secs(1), Ok::<Event, io::Error>(rest)),
+                (Duration::from_millis(1500), key('q')),
+            ])
+            .then(|(wait, event)| async move {
+                tokio::time::sleep(wait).await;
+                event
+            }),
+        );
+        let added = add_device(
+            &adds(path.clone()),
+            &opener,
+            &mut watching,
+            &mut terminal,
+            &mut events,
+            &mut look(),
+        )
+        .await;
+        assert!(matches!(added, Added::Carried), "the walk ended the run");
+        assert_eq!(
+            drawn(&frames)
+                .iter()
+                .any(|frame| frame.contains("quit · q")),
+            shown,
+            "tooltips {tips}"
+        );
+        watching.close().await;
+    }
+}

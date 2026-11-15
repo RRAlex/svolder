@@ -155,7 +155,8 @@ fi
     exit 2
 }
 
-workdir=$(mktemp -d)
+. "$(dirname "$(readlink -f "$0")")/tmp-base.sh"
+workdir=$(svtmp_dir rc) || exit 1
 trap 'jobs -p | xargs -r kill 2>/dev/null; rm -rf "$workdir"' EXIT
 
 # Refuse while the sink or a stream feeding it is running.

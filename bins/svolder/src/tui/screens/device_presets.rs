@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Paragraph};
 
 use crate::tui::app::App;
 use crate::tui::boxes::device_presets::{self, DeviceList, Question, Row, Step};
-use crate::tui::mouse::{HitMap, Selected};
+use crate::tui::mouse::{Hit, HitMap, Selected};
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::scroll::{MORE_DOWN, MORE_UP};
 use crate::tui::widgets::{self, CURSOR_WIDTH};
@@ -127,8 +127,20 @@ fn draw_list(
     }
     widgets::surfaces::modal_ground(frame, box_area, theme);
     frame.render_widget(Paragraph::new(lines).block(block), box_area);
+    let inner = Block::bordered().inner(box_area);
+    for (at, index) in (top..top + shown).enumerate() {
+        if matches!(rows[index], Row::Header) {
+            continue;
+        }
+        let line = Rect {
+            y: inner.y + u16::try_from(at).unwrap_or(u16::MAX),
+            height: 1,
+            ..inner
+        };
+        hits.push(line.intersection(inner), Hit::PresetRow(index));
+    }
+    super::presets::push_ends(hits, box_area, (top > 0, top + shown < rows.len()));
     if !rows.is_empty() {
-        let inner = Block::bordered().inner(box_area);
         let at = Rect {
             y: inner.y + u16::try_from(row - top).unwrap_or(0),
             height: 1,

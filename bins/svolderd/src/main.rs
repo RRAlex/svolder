@@ -96,6 +96,7 @@ struct Args {
 /// `Daemon::shutdown` waits for those first.
 fn main() -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .thread_name("svolderd-tokio")
         .enable_all()
         .build()
     {

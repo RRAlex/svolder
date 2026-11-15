@@ -54,8 +54,8 @@ use super::app::divider;
 use super::app::glide;
 use super::app::{App, Holding, Intent, Screen};
 use super::boxes::edit_line;
-use super::boxes::presets;
 use super::boxes::tooltip;
+use super::boxes::{device_presets, presets};
 use super::decoration::title::TitleMeter;
 use super::mouse::{self, HitMap, MouseAction};
 use super::render;
@@ -77,6 +77,7 @@ mod reopen;
 mod test_support;
 mod watching;
 mod web_box;
+mod writes;
 
 pub(in crate::tui) use connect::TokenSite;
 // A re-export only the tests use is its own `#[cfg(test)]` line, so the others stay unconditional.
@@ -406,9 +407,7 @@ where
     S: Stream<Item = std::io::Result<Event>> + Unpin,
 {
     // A split a drag let go of, or a burst of nudges that went quiet, is written once.
-    if look.save_split(&mut watching.app, Instant::now()) {
-        look::reload_soon(&mut watching, look.path());
-    }
+    look.save_split(&mut watching.app, Instant::now());
     // Who speaks for the player is settled before players are looked for, which is done once,
     // on the first turn host audio shows with no daemon to speak for the host.
     match_host_feed(&mut watching).await;
@@ -619,9 +618,8 @@ where
     )
     .await;
     // A split moved a moment ago is written whichever way the loop ended.
-    if look.save_split_owed(&mut end.watching.app) {
-        look::reload_soon(&mut end.watching, look.path());
-    }
+    look.save_split_owed(&mut end.watching.app);
+    look.settle(&mut end.watching).await;
     end
 }
 
@@ -743,6 +741,11 @@ where
         // screen shows; a direct session has no daemon to ask, and `ask_daemon` says nothing.
         _ = turns.timers.config_poll.tick(), if watching.app.session.daemon && watching.daemon_version.is_none() => {
             watching.daemon_version = connect::ask_daemon(watching.backend.as_ref());
+        }
+        // A Settings write ended: a changed file owes the daemon a reload, a refused one is said.
+        done = look.writes.recv(), if look.writes.busy() => {
+            look.writes.landed();
+            look::write_ended(&mut watching, look.path(), done);
         }
         // Settings wrote `[tui]` or `[autoeq]` and the writes paused: a daemon that reads this
         // file reloads once, so the file's change is not the daemon's to announce.
@@ -967,6 +970,11 @@ where
 /// A tick ages what is on screen, and sends what the keys held back.
 async fn on_tick(watching: &mut Watching) {
     watching.app.tick(Instant::now());
+    super::start::say_daemon_gone(
+        &mut watching.app,
+        crate::commands::demo::daemon_gone(),
+        std::time::Instant::now(),
+    );
     web_box::tick(watching, Instant::now());
     send_held(watching).await;
 }

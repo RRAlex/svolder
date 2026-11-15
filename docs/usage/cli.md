@@ -393,9 +393,9 @@ refused the passphrase on too, as the official app's identify does. At most one 
 every 2 seconds per device, however many front ends ask: a request inside that gap sends nothing
 and says so. A device whose link is down is the usual exit 3, with the wait until the daemon tries
 it again, as in `device not connected, next attempt in 12 s`. A daemon older than this verb
-answers `this daemon is too old to identify; restart it`, exit 1. A device whose profile offers no
-identify (the Mesh Card, where the app offers none) is refused in words, `NAME offers no identify`,
-exit 1; `svolder raw 200` can still send the function.
+answers `the daemon cannot identify a device, which this svolder asks it to`, exit 1. A device
+whose profile offers no identify (the Mesh Card, where the app offers none) is refused in words,
+`NAME offers no identify`, exit 1; `svolder raw 200` can still send the function.
 
 The words say `sent`, never that the unit blinked: nothing here can see the light. What the unit
 does (one blink, a timed cue, whether a repeat extends it) has not been seen on a real unit yet.
@@ -1343,7 +1343,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.34.2
+svolder 0.34.5
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

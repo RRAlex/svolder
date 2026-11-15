@@ -146,7 +146,11 @@ fn a_moving_spectrum_row_redraws_fast_while_it_is_on_the_screen() {
     app.heard_block(&block, t0);
     let off = Effects::new(false, &EffectsConfig::default());
     let slow = Duration::from_millis(250);
-    assert_eq!(tick_period(&app, &off), FAST_TICK, "the row is falling");
+    assert_eq!(
+        tick_period(&app, &off),
+        SPECTRUM_TICK,
+        "the row alone is falling"
+    );
     app.host.spectrum_on_screen = false;
     assert_eq!(
         tick_period(&app, &off),
@@ -156,4 +160,39 @@ fn a_moving_spectrum_row_redraws_fast_while_it_is_on_the_screen() {
     app.host.spectrum_on_screen = true;
     app.tick(t0 + crate::tui::host::FALL);
     assert_eq!(tick_period(&app, &off), slow, "the row settled");
+}
+
+/// The spectrum alone ticks at twenty frames a second; a drag the user drives while it moves
+/// keeps the thirty.
+#[test]
+fn the_spectrum_alone_ticks_at_twenty_frames_and_a_drag_keeps_thirty() {
+    use crate::tui::app::glide::{self, Bar};
+    use ratatui::layout::Rect;
+
+    let mut app = gungnir();
+    crate::tui::test_support::hear_one(&mut app, "10", 64);
+    app.host.linked = true;
+    app.host.capturing = true;
+    app.host.spectrum_on_screen = true;
+    let block = svolder_host::Block {
+        bands: [0.8; svolder_host::fft::BANDS],
+        left: 0.5,
+        right: 0.5,
+    };
+    app.heard_block(&block, app.now);
+    let off = Effects::new(false, &EffectsConfig::default());
+    assert_eq!(tick_period(&app, &off), Duration::from_millis(50));
+    assert!(SPECTRUM_TICK > FAST_TICK);
+
+    let row = app
+        .rows()
+        .iter()
+        .position(|row| row.control.key == "volume")
+        .expect("a volume row");
+    glide::press(&mut app, Bar::Row(row), Rect::new(0, 0, 127, 1), 126);
+    assert_eq!(
+        tick_period(&app, &off),
+        FAST_TICK,
+        "the user's drag redraws at thirty"
+    );
 }

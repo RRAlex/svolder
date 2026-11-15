@@ -7,7 +7,7 @@
 // unmount). The page is jsdom's, the clock, the timers and the watch of the page are fakes.
 // Run: node core-clock.mjs
 import assert from 'node:assert/strict';
-import { tickAges } from '../../../bins/svolderd/web/core/clock.js';
+import { daemonNow, tickAges } from '../../../bins/svolderd/web/core/clock.js';
 import { page } from './dom.mjs';
 
 let n = 0;
@@ -255,6 +255,23 @@ ok('the_stamp_may_be_the_root_of_the_ages_and_a_part_without_one_is_left_alone',
   bare.show(true);
   assert.deepEqual(bare.ages(), ['x'], 'no clock to age it by: left as drawn');
   bare.ticker.stop();
+});
+
+ok('daemonNow_counts_on_from_the_first_sight_of_a_value', () => {
+  assert.equal(daemonNow(9_000_000, 100), 9_000_000, 'the first sight is the value itself');
+  assert.equal(daemonNow(9_000_000, 60_100), 9_060_000, 'a redraw a minute on counts a minute on');
+  assert.equal(daemonNow(9_000_000, 60_100), 9_060_000, 'and again at the same moment');
+  assert.equal(daemonNow(9_070_000, 60_100), 9_070_000, 'a new reading re-bases it');
+  assert.equal(daemonNow(9_070_000, 65_100), 9_075_000);
+  assert.equal(daemonNow(9_000_000, 61_100), 9_061_000, 'an old reading seen again keeps its start');
+  assert.equal(daemonNow(9_000_000, 50), 9_000_000, 'never before the reading, a browser clock that stepped back');
+});
+
+ok('daemonNow_forgets_the_oldest_readings_not_the_newest', () => {
+  daemonNow(8_000_000, 1000);
+  for (let i = 1; i <= 70; i++) daemonNow(8_000_000 + i, 1000);
+  assert.equal(daemonNow(8_000_070, 5000), 8_004_070, 'a recent reading keeps its start');
+  assert.equal(daemonNow(8_000_000, 5000), 8_000_000, 'a forgotten one starts again');
 });
 
 console.log(`${n} core-clock checks passed`);

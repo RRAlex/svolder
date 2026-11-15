@@ -6,7 +6,7 @@
 // shows the player's time; `moveProgress` puts the moving parts in place once a second. Pure: the
 // model in, markup out.
 
-import { elapsedUs, fraction, timeWords } from '../../../core/clock.js';
+import { daemonNow, elapsedUs, fraction, timeWords } from '../../../core/clock.js';
 import { WORDS } from '../words.js';
 import { placeOpen } from '../place.js';
 import { esc } from './esc.js';
@@ -22,11 +22,23 @@ const ICONS = {
 };
 const icon = (name) => `<svg class="sg-ic" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 
-/** The track's cover, a small picture before its words; nothing where the host has none (no box,
- * no gap). The address carries the cover's version, so another track is another address. */
+/** The version of the cover whose picture failed to load, or null: the draws leave it out until a
+ * draw sees another cover or none, which forgets the failure. */
+let failedCover = null;
+
+/** Remember that the picture of cover `version` failed to load (`null` forgets it). */
+export function markCoverFailed(version) {
+  failedCover = version ?? null;
+}
+
+/** The track's cover, a picture before its words (sized by the theme's CSS); nothing where the host
+ * has none, or where its picture failed to load (no box, no gap). The address carries the cover's
+ * version, so another track is another address. */
 export function coverMarkup(track) {
-  if (track?.cover === null || track?.cover === undefined) return '';
-  return `<span class="sg-cover" aria-hidden="true"><img src="api/v1/host/cover?v=${encodeURIComponent(track.cover)}" alt="" width="36" height="36"></span>`;
+  if (String(track?.cover ?? '') !== failedCover) failedCover = null;
+  if (track?.cover === null || track?.cover === undefined || String(track.cover) === failedCover) return '';
+  const v = encodeURIComponent(track.cover);
+  return `<span class="sg-cover" aria-hidden="true"><img src="api/v1/host/cover?v=${v}" data-cover="${v}" alt=""></span>`;
 }
 
 /** The transport buttons for a player in `status`: previous, pause or play, next. */
@@ -38,20 +50,20 @@ export function transport(status, inert) {
     'sg-btn sg-small', true)).join('')}</span>`;
 }
 
-/** The track's progress at the browser's `localMs`, the part having been drawn at `drawnMs`:
+/** The track's progress at the browser's `localMs`:
  * `{ elapsed, length }` in microseconds, `null` for a part with no progress. The daemon's clock now
  * is what its part said then plus the time since. */
-export function progressOf(p, track, localMs, drawnMs) {
+export function progressOf(p, track, localMs) {
   const prog = track.progress;
   if (!prog || !Number.isFinite(p.now_ms)) return null;
-  const daemonNow = p.now_ms + (localMs - drawnMs);
+  const now = daemonNow(p.now_ms, localMs);
   const elapsed = elapsedUs({
     status: track.status,
     position: prog.position_us,
     rate: prog.rate_milli,
     readAt: prog.read_at_ms,
     length: track.length_us,
-  }, daemonNow);
+  }, now);
   return { elapsed, length: track.length_us };
 }
 
@@ -66,23 +78,21 @@ export function drawPlaying(page, localMs = Date.now()) {
   const track = p.track;
   if (!track) return `<div class="sg-np"><span class="sg-track"><i>${esc(WORDS.nothingPlaying)}</i></span></div>`;
   const inert = inertPage(page) || Boolean(page.device?.inert);
-  const prog = progressOf(p, track, localMs, localMs);
+  const prog = progressOf(p, track, localMs);
   const at = prog ? fraction(prog.elapsed, prog.length) : 0;
   const time = prog ? timeWordsOf(prog) : '';
   const artist = track.artist ? ` · ${esc(track.artist)}` : '';
-  const attrs = prog ? ` data-drawn="${localMs}"` : '';
-  return `<div class="sg-np" id="sg-np"${attrs}>${coverMarkup(track)}${p.buttons ? transport(track.status, inert) : ''}`
+  return `<div class="sg-np" id="sg-np">${coverMarkup(track)}${p.buttons ? transport(track.status, inert) : ''}`
     + `<span class="sg-track"><b>${esc(track.headline)}</b>${artist}</span>`
     + `<span class="sg-bar"><span class="sg-fill" data-at="${at.toFixed(5)}"></span></span>`
     + `<span class="sg-time">${esc(time)}</span></div>`;
 }
 
-/** Put the bar's progress where `localMs` says: the fill and the time, from the player of `page`
- * the bar was drawn for. Nothing for a player with no progress. */
+/** Put the bar's progress where `localMs` says: the fill and the time, from the player of `page`. Nothing for a player with no progress. */
 export function moveProgress(bar, page, localMs) {
   const p = page.device?.playing ?? page.host;
   const track = p?.track;
-  const prog = track ? progressOf(p, track, localMs, Number(bar.dataset.drawn)) : null;
+  const prog = track ? progressOf(p, track, localMs) : null;
   if (!prog || track.status !== 'playing') return;
   bar.querySelector('.sg-fill').dataset.at = fraction(prog.elapsed, prog.length).toFixed(5);
   bar.querySelector('.sg-time').textContent = timeWordsOf(prog);

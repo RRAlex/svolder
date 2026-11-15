@@ -7,6 +7,7 @@
 // reading again) holds the fade off, and trouble arriving while faded brings the top line back.
 
 import { TITLE, statusOf } from '../../core/title.js';
+import { ASK_MS } from '../../core/volume-ask.js';
 import { eqMarkup, noVolumeMarkup } from './draw/hud.js';
 import { outrunVolume } from './draw/volume.js';
 import { eqLine, topLine, volumeOf } from './hud.js';
@@ -147,9 +148,6 @@ export function createFade({
 /** What stands for a reading of the volume: a change in it is what shows the volume again. */
 const keyOf = (v) => (v ? `${v.raw ?? v.text ?? ''}|${Boolean(v.muted)}` : '');
 
-/** How long a volume that the page asked for is its own, ms. */
-const OWN_MS = 3000;
-
 /**
  * Wire the HUD in `root` (`.nd-top`, `.nd-vol`, `.nd-eq`) to `core` and `view`. `view.asked` is
  * `{ raw, at }` while this page's own ask for a volume step is waiting (`at` in `performance.now()`
@@ -210,7 +208,7 @@ export function wireHud({
     if (key === seen) return;
     seen = key;
     const asked = view.asked;
-    if (asked && asked.raw === data.raw && now() - asked.at < OWN_MS) return;
+    if (asked && asked.raw === data.raw && now() - asked.at < ASK_MS) return;
     fade.showVolume(SHOW_VOLUME_MS);
   });
 

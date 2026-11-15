@@ -17,7 +17,7 @@ import { drawMeters } from '../../../bins/svolderd/web/themes/nightdrive/draw/me
 import { drawSlots } from '../../../bins/svolderd/web/themes/nightdrive/draw/slots.js';
 import { tunable } from '../../../bins/svolderd/web/themes/nightdrive/tune.js';
 import { topLine } from '../../../bins/svolderd/web/themes/nightdrive/hud.js';
-import { drawDash, switchKeys } from '../../../bins/svolderd/web/themes/nightdrive/draw/dash.js';
+import { drawDash, markCoverFailed, switchKeys } from '../../../bins/svolderd/web/themes/nightdrive/draw/dash.js';
 import { presetBox } from '../../../bins/svolderd/web/themes/nightdrive/draw/presets.js';
 import { PALETTE } from '../../../bins/svolderd/web/themes/nightdrive/draw/palette.js';
 import { preview } from '../../../bins/svolderd/web/themes/nightdrive/preview.js';
@@ -400,6 +400,29 @@ ok('the_amp_page_takes_the_computers_parts_in_the_dash_and_the_sheet', () => {
   // back on the amp's own side it has no volume keys
   rig.core.computer.flip('dac');
   assert.ok(!drawDash(page, { phone: () => false }, 1000, rig.core.computer.view()).includes('volume-down'));
+});
+
+ok('a_failed_cover_is_left_out_until_another_cover_or_none_is_drawn', () => {
+  const page = pageOf('amp');
+  const dash = () => drawDash(page, view, 1000);
+  try {
+    page.device = { ...page.device, playing: { status: 'playing', track: { cover: 'abc123', status: 'playing' } } };
+    const track = page.device.playing.track;
+    assert.ok(dash().includes('nd-cover'), 'drawn before any error');
+    markCoverFailed('abc123');
+    for (let i = 0; i < 5; i++) assert.ok(!dash().includes('nd-cover'), `redraw ${i}: no cover`);
+    track.cover = null;
+    assert.ok(!dash().includes('nd-cover'));
+    track.cover = 'abc123';
+    assert.ok(dash().includes('abc123'), 'the same cover after none is tried again');
+    markCoverFailed('abc123');
+    track.cover = 'def456';
+    assert.ok(dash().includes('def456'), 'a new cover is tried');
+    track.cover = 'abc123';
+    assert.ok(dash().includes('abc123'), 'and the failure was forgotten');
+  } finally {
+    markCoverFailed(null);
+  }
 });
 
 console.log(`nightdrive-draw.mjs: ${n} passed`);

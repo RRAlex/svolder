@@ -286,6 +286,32 @@ fn advise_join(app: &mut app::App, socket: &std::path::Path, now: Instant) {
     app.session.join_hint = Some(command);
 }
 
+/// How long after the demo's daemon ending is said the loop says it again, so a toast that was
+/// dismissed or aged out does not leave a screen that looks alive.
+pub(super) const GONE_REPEAT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Tell the user the demo's daemon has ended (`gone` is how, from
+/// [`crate::commands::demo::daemon_gone`]): what is on screen is no longer served, and the join
+/// command no longer works. Said at once, then every [`GONE_REPEAT`].
+pub(super) fn say_daemon_gone(app: &mut app::App, gone: Option<&str>, now: Instant) {
+    let Some(how) = gone else {
+        return;
+    };
+    if app
+        .session
+        .gone_told
+        .is_some_and(|at| now.saturating_duration_since(at) < GONE_REPEAT)
+    {
+        return;
+    }
+    app.session.gone_told = Some(now);
+    app.session.daemon_gone = true;
+    app.session.join_hint = None;
+    app.warn(format!(
+        "{how}; the spectrum and levels stopped with it, press q and start the demo again"
+    ));
+}
+
 /// How a running TUI walks someone through adding a device: against the machine it is running
 /// on, from the scan on, with `-v` dropped for the reason every open the TUI makes drops it —
 /// the alternate screen is up, and a diagnostic would land in the middle of a frame.

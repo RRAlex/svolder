@@ -21,6 +21,26 @@ const TMP_TRIES: u32 = 16;
 /// How long a writer waits for another svolder writing the same file before it gives up.
 const LOCK_WAIT: Duration = Duration::from_secs(2);
 
+std::thread_local! {
+    /// Whether the writers on this thread refuse a file that is not there.
+    static FILE_MUST_EXIST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `write` with every file writer on this thread refusing an absent file
+/// ([`ConfigError::Gone`]) instead of starting one from the template. The check is made under
+/// the file's lock, where the read is, so a file deleted at any moment before it is never made
+/// again.
+pub(super) fn while_file_must_exist<T>(write: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FILE_MUST_EXIST.with(|flag| flag.set(self.0));
+        }
+    }
+    let _reset = Reset(FILE_MUST_EXIST.with(|flag| flag.replace(true)));
+    write()
+}
+
 /// Counts the temporary names this process has used, so two saves in one process never
 /// pick the same one.
 static TMP_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -38,10 +58,9 @@ static TMP_COUNTER: AtomicU32 = AtomicU32::new(0);
 /// ([`flock::lock_beside`]), waiting up to two seconds for another svolder's, so two writers take
 /// turns and neither loses the other's change; a wait that runs out fails naming the file. Where
 /// no lock file can be had (a directory the user cannot write, a read-only filesystem), the write
-/// goes on without one and fails, or not, as it would anyway. The wait is a plain sleep: the TUI
-/// calls the writers on its own loop, so while another svolder holds the lock its input and
-/// frames stop for up to those two seconds, a bound its callers accept. A file its owner cannot
-/// write is refused ([`ConfigError::ReadOnly`]), unless the edit would not change it.
+/// goes on without one and fails, or not, as it would anyway. The wait is a plain sleep, so a
+/// caller with a screen to keep live (the TUI) runs the write off its event loop. A file its
+/// owner cannot write is refused ([`ConfigError::ReadOnly`]), unless the edit would not change it.
 pub(super) fn edit_file(
     path: &Path,
     edit: impl FnOnce(&mut DocumentMut) -> Result<(), ConfigError>,
@@ -56,18 +75,32 @@ pub(super) fn edit_file_private(
     path: &Path,
     edit: impl FnOnce(&mut DocumentMut) -> Result<bool, ConfigError>,
 ) -> Result<bool, ConfigError> {
-    make_parent(path)?;
+    if !FILE_MUST_EXIST.with(std::cell::Cell::get) {
+        make_parent(path)?;
+    }
     let _lock = lock(path)?;
     let (text, existed) = match std::fs::read_to_string(path) {
         Ok(text) => (text, true),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Config::template(), false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if FILE_MUST_EXIST.with(std::cell::Cell::get) {
+                return Err(ConfigError::Gone(path.to_path_buf()));
+            }
+            (Config::template(), false)
+        }
         Err(e) => return Err(ConfigError::Io(path.to_path_buf(), e)),
     };
     #[cfg(test)]
     super::tests::after_read(path);
-    let mut doc = text
-        .parse::<DocumentMut>()
-        .map_err(|e| ConfigError::Parse(e.to_string()))?;
+    let mut doc = text.parse::<DocumentMut>().map_err(|e| {
+        let message = crate::error::without_value(e.message());
+        ConfigError::Parse(match e.span() {
+            Some(span) => {
+                let (line, column) = crate::error::line_and_column(&text, span.start);
+                format!("TOML parse error at line {line}, column {column}: {message}")
+            }
+            None => format!("TOML parse error: {message}"),
+        })
+    })?;
     let secret = edit(&mut doc)?;
     let written = doc.to_string();
     Config::parse(&written)?;

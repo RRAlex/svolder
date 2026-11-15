@@ -48,7 +48,15 @@ impl std::ops::Deref for Dir {
 
 impl Drop for Dir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        // A thread still writing into the directory (a download on its way out) can make one
+        // removal fail or put a file back, so it is retried until the directory is gone.
+        for _ in 0..100 {
+            let _ = std::fs::remove_dir_all(&self.0);
+            if !self.0.exists() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 }
 
@@ -456,8 +464,9 @@ async fn a_fifth_job_is_busy_and_cancel_ends_a_waiting_download() {
         },
     };
     let first = job_of(daemon.handle(preview(false)).await);
+    let mut jobs = vec![first];
     for _ in 1..JOBS {
-        job_of(daemon.handle(preview(true)).await);
+        jobs.push(job_of(daemon.handle(preview(true)).await));
     }
     let Response::Error { reason, .. } = daemon.handle(preview(false)).await else {
         panic!("a fifth start was accepted");
@@ -471,6 +480,29 @@ async fn a_fifth_job_is_busy_and_cancel_ends_a_waiting_download() {
             .await,
         Response::Ack
     );
-    assert_eq!(finish(&mut events, first).await, JobState::Cancelled);
+    // Every job is ended before the directory goes, so none is still writing into it.
+    for job in &jobs[1..] {
+        assert_eq!(
+            daemon
+                .handle(Request::AutoEq {
+                    op: AutoEqOp::Cancel { job: *job }
+                })
+                .await,
+            Response::Ack
+        );
+    }
+    let mut ended = std::collections::HashMap::new();
+    while ended.len() < jobs.len() {
+        let event = tokio::time::timeout(Duration::from_secs(20), events.next())
+            .await
+            .expect("an event in time")
+            .expect("the stream is open");
+        if let Event::AutoEq(JobEvent { job, state }) = event
+            && state.is_final()
+        {
+            ended.insert(job, state);
+        }
+    }
+    assert_eq!(ended[&first], JobState::Cancelled);
     daemon.shutdown().await;
 }

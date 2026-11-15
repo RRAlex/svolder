@@ -69,13 +69,13 @@ are in [scripts/web-checks/README.md](../../scripts/web-checks/README.md).
 ### What `make test` does
 
 `make test` runs `cargo test --workspace --all-features` once, so every binary is built by the same
-invocation and a test that needs a sibling binary runs the one on disk
-(`SVOLDER_TEST_PREBUILT=1`; without it the daemon a test spawns is built into a directory of its
-own). The environment is a scratch one: config, state, data and cache homes under a temporary
-directory, no WirePlumber (`SVOLDER_WIREPLUMBER` names a program that is not there), the MCP and
-web tokens unset, and the AutoEq catalogue pointed at a closed port. The run fails, naming it, if a
-test leaves anything in its temporary directory. A test that reached for the user's real files
-would find a scratch copy instead, so no test can read or change a person's configuration.
+invocation and a test that needs a sibling binary runs the one on disk (`SVOLDER_TEST_PREBUILT=1`;
+without it the daemon a test spawns is built into a directory of its own; `T='-p <crate>'`, another
+set, leaves it unset). The environment is a scratch one: config, state, data and cache homes under a
+temporary directory, no WirePlumber (`SVOLDER_WIREPLUMBER` names nothing), the MCP and web tokens
+unset, and the AutoEq catalogue pointed at a closed port. The run fails, naming it, if a test leaves
+anything in its temporary directory. `make check` runs it on a private no-BlueZ bus, so the
+BlueZ-answers branch of `backend.rs`:179 and `device_cli.rs`:507 runs only in a by-hand `make test`.
 
 The in-process MQTT broker (`rumqttd`, about 175 crates svolder-mqtt would otherwise build) is an
 optional dependency behind the `broker-tests` feature of `svolder-mqtt`, `svolderd` and `svolder`.

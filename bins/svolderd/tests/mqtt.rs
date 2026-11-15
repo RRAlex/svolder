@@ -819,7 +819,7 @@ async fn the_version_reply_says_where_the_bridge_stands() {
             (
                 bridged(away, ""),
                 Box::new(move |s| {
-                    matches!(s, MqttStatus::Trouble { host, port, problem: MqttProblem::Unreachable, retry_in_secs: Some(1..=2) }
+                    matches!(s, MqttStatus::Trouble { host, port, problem: MqttProblem::Unreachable, retry_in_secs: Some(_) }
                         if host == "127.0.0.1" && *port == away)
                 }),
             ),

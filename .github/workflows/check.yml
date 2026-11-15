@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# `make check` on an arm64 runner, the release runner's own conditions: a system D-Bus and no
-# BlueZ. It runs on every push to main, by hand, and as the `test` job of release.yml, where
-# `github.sha` is the caller's, the tagged commit; release.yml skips that call when this workflow
-# already passed on the commit. The runner has no BlueZ, so `make check` skips its second, private-bus
-# test run here (check-no-bluez) and the suite runs once.
+# `make check` on an arm64 runner, the release runner's own conditions: no BlueZ on the bus. It runs
+# on every push to main, by hand, and as the `test` job of release.yml, where `github.sha` is the
+# caller's, the tagged commit; release.yml skips that call when this workflow already passed on the
+# commit. The runner installs dbus-daemon, so `make check` runs the suite once, on a private bus
+# with no BlueZ (check-tests-private).
 name: check
 
 on:

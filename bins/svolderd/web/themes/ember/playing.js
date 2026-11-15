@@ -20,7 +20,7 @@
 
 import { ember, mine } from './bind.js';
 import {
-  clockOffset, daemonClock, elapsedUs, fraction, timeWords,
+  daemonNow, elapsedUs, fraction, timeWords,
 } from '../../core/clock.js';
 
 /** A number a `data-` attribute holds, or null when it holds none. */
@@ -29,9 +29,6 @@ const number = (text) => (text === undefined || text === '' ? null : Number(text
 /** Whether the phone's compact line is open: kept here, since a swap of the part replaces the
  * element that showed it. */
 let open = false;
-
-/** The daemon-clock offset of each part, noted when this page first saw it. */
-const offsets = new WeakMap();
 
 /** The part as the page holds it now, or nothing. */
 const part = () => document.getElementById('part-playing');
@@ -158,7 +155,6 @@ export function tick() {
   const root = part();
   const track = root?.querySelector('.np[data-status]');
   if (!track) return;
-  if (!offsets.has(root)) offsets.set(root, clockOffset(Number(root.dataset.now), Date.now()));
   const length = number(track.dataset.length);
   const known = track.dataset.readAt !== undefined;
   const elapsed = known ? elapsedUs({
@@ -167,7 +163,7 @@ export function tick() {
     rate: number(track.dataset.rate) ?? 1000,
     readAt: number(track.dataset.readAt),
     length,
-  }, daemonClock(offsets.get(root), Date.now())) : null;
+  }, daemonNow(Number(root.dataset.now), Date.now())) : null;
   const put = (element, text) => {
     if (element && element.textContent !== text) element.textContent = text;
   };

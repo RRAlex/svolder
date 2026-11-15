@@ -398,15 +398,17 @@ ok('a_note_with_markup_in_its_words_is_escaped', () => {
 
 ok('the_track_note_carries_what_keeps_its_time', () => {
   const page = pageOf('playing');
+  // a clock value no other case has drawn: the first sight of a value is what the arithmetic counts from
+  page.device.playing.now_ms = 1700000100001;
   const html = drawNotes(page, page.device, { now: 5000 });
   const m = /<span class="pn t\d" data-note="track"([^>]*)>/.exec(html);
   assert.ok(m, html);
-  assert.match(m[1], /data-clock="1700000100000"/);
+  assert.match(m[1], /data-clock="1700000100001"/);
   assert.match(m[1], /data-drawn="5000"/);
   assert.match(m[1], /data-position="30000000" data-rate="1000" data-read-at="1700000097000"/);
   // The same part drawn later is on the daemon's clock, not frozen at the part's own time.
   const later = drawNotes(page, page.device, { now: 8000 });
-  assert.match(later, /data-clock="1700000103000"/);
+  assert.match(later, /data-clock="1700000103001"/);
   // A fresh part is read at its own time.
   page.device.playing = { ...page.device.playing, now_ms: 1700000200000 };
   assert.match(drawNotes(page, page.device, { now: 9000 }), /data-clock="1700000200000"/);

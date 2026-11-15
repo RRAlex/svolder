@@ -8,6 +8,7 @@
 // (the band's third, or after its section on a phone) is marks.js's work. The model in, markup
 // out; the last change is the keeper's (`view.changes`, fed by live.js).
 
+import { daemonNow } from '../../../core/clock.js';
 import { notesOf } from '../notes.js';
 import { ARROW, RATE_MATCHES, WORDS } from '../words.js';
 import { esc } from './esc.js';
@@ -38,17 +39,10 @@ export function ink(text) {
     .replace(RATE_MATCHES, `${RATE_MATCHES}${TICK_SVG}`);
 }
 
-/** When the page first saw each version of a player's part, by this browser's clock: the part says
- * what time it was by the daemon's clock when it was sent, and a draw from the same part later
- * reads the time as that plus what has passed here since. */
-const arrivals = new WeakMap();
-
 /** The daemon's clock now, in milliseconds, for the player part `p`, `now` being this browser's. */
 function clockOf(p, now) {
   if (!Number.isFinite(p.now_ms)) return undefined;
-  const seen = arrivals.get(p);
-  if (!seen || seen.stamp !== p.now_ms) arrivals.set(p, { stamp: p.now_ms, at: now });
-  return p.now_ms + (now - arrivals.get(p).at);
+  return daemonNow(p.now_ms, now);
 }
 
 /** What the track note carries for the clock that keeps its time current: the player's reading

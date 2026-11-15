@@ -20,10 +20,7 @@ fn short_socket() -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("a clock after 1970")
         .subsec_nanos();
-    std::path::PathBuf::from(format!(
-        "/tmp/svm9-{}-{seq}-{nanos:x}.sock",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("svm9-{}-{seq}-{nanos:x}.sock", std::process::id()))
 }
 
 async fn stub_daemon() -> StubServer {

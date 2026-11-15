@@ -241,6 +241,9 @@ mod tests {
             .await
             .err()
             .expect("the file does not parse");
-        assert!(failure.what.contains("this is = not"), "{failure}");
+        assert!(
+            failure.what.contains("TOML parse error at line 1"),
+            "{failure}"
+        );
     }
 }

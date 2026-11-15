@@ -319,14 +319,14 @@ pub(crate) async fn write_preset(
 /// Refuse a write of `path` that a running daemon reading it would answer with the missing-file
 /// words: the file is gone, and a write would start it from the template and the reload after it
 /// would drop every device. Exit 1 with the daemon's own words, as its refused writes do.
+///
+/// Asked under every transport: `--transport ble` and `fake` name where the device is reached,
+/// not whether a daemon beside this process holds the file.
 pub(crate) async fn refuse_if_daemon_misses(
     g: &Globals<'_>,
     config: &Config,
     path: &Path,
 ) -> Result<(), Failure> {
-    if matches!(g.transport, "ble" | "fake") {
-        return Ok(());
-    }
     let socket = socket::path::resolve(g.socket, config.socket.as_deref());
     match crate::backend::refusal_if_missing(&socket, path).await {
         Some(words) => Err(Failure {
@@ -342,6 +342,15 @@ pub(crate) async fn refuse_if_daemon_misses(
 /// What a configuration file that could not be read or written earns: its own words, and the
 /// step that points at the file they are about.
 pub(crate) fn config_failure(e: ConfigError) -> Failure {
+    // A file that went missing under a write is refused as a daemon's missing file is.
+    if matches!(e, ConfigError::Gone(_)) {
+        return Failure {
+            code: 1,
+            what: e.to_string(),
+            next: String::new(),
+            reason: Some(svolder_ipc::Reason::ReadOnly),
+        };
+    }
     Failure::of(Kind::ConfigUnreadable, e.to_string())
 }
 

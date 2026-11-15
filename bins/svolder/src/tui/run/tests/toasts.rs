@@ -274,6 +274,43 @@ async fn a_changed_config_is_toasted_once_per_change() {
     next.close().await;
 }
 
+/// A hand edit followed by a delete is two news: the daemon's `config_changed` stays true from
+/// "changed" to "missing", and the second word is toasted as well, not only shown in the rows.
+#[tokio::test]
+async fn a_delete_after_a_hand_edit_is_toasted_too() {
+    use crate::test_support::stub_daemon::stub_daemon;
+
+    let daemon = stub_daemon().await;
+    let opener = daemon_opener(&daemon.socket, Duration::from_secs(1));
+    let mut watching = opener
+        .reopen(None, None)
+        .await
+        .expect("the stub daemon answers");
+    let own = std::path::Path::new("config.toml");
+    let answer = |missing: bool| {
+        let mut info = said(env!("CARGO_PKG_VERSION"));
+        info.config = Some("/home/u/config.toml".into());
+        info.config_changed = true;
+        info.config_missing = missing;
+        Some(info)
+    };
+
+    daemon_answered(&mut watching, answer(false), own);
+    let changed = watching.app.toast().map(|toast| toast.text.clone());
+    assert_eq!(changed.as_deref(), Some(CHANGED_TOAST));
+    watching.app.dismiss_toast();
+    daemon_answered(&mut watching, answer(true), own);
+    let missing = watching.app.toast().map(|toast| toast.text.clone());
+    assert!(
+        missing.is_some_and(|words| words != CHANGED_TOAST),
+        "the missing file was not toasted"
+    );
+    watching.app.dismiss_toast();
+    daemon_answered(&mut watching, answer(true), own);
+    assert!(watching.app.toast().is_none(), "told twice for one word");
+    watching.close().await;
+}
+
 /// The loop asks a daemon session on its own slow clock, whichever screen shows, so an edit
 /// made in another terminal reaches it; a direct session has no daemon to ask.
 #[tokio::test]
@@ -311,7 +348,7 @@ async fn the_loop_asks_the_daemon_on_a_slow_clock_for_a_changed_config() {
         end.watching.app.overlays.conn.config_changed.is_some(),
         "the slow ask never reached the session"
     );
-    assert!(end.watching.app.session.config_changed_told);
+    assert!(end.watching.app.session.config_changed_told.is_some());
     end.watching.close().await;
 }
 
@@ -346,8 +383,13 @@ async fn a_settings_write_has_the_daemon_reload_once_and_only_when_it_changed_th
         );
         let mut mouse = SpyMouse::default();
         for on in [true, false, true] {
-            let wrote = look.change(&TuiChange::Effects(on), &mut watching.app, &mut mouse);
-            assert!(wrote, "a change of the effects writes the file");
+            look.change(&TuiChange::Effects(on), &mut watching.app, &mut mouse);
+            let wrote = look.writes.drain().await;
+            assert_eq!(
+                wrote,
+                vec![Ok(true)],
+                "a change of the effects writes the file"
+            );
             reload_soon(&mut watching, look.path());
         }
         assert_eq!(
@@ -363,8 +405,9 @@ async fn a_settings_write_has_the_daemon_reload_once_and_only_when_it_changed_th
         assert!(watching.reload_owed.is_none());
 
         // the same value again leaves the file untouched: no write, so nothing owed
-        let again = look.change(&TuiChange::Effects(true), &mut watching.app, &mut mouse);
-        assert!(!again, "an unchanged file is not a write");
+        look.change(&TuiChange::Effects(true), &mut watching.app, &mut mouse);
+        let again = look.writes.drain().await;
+        assert_eq!(again, vec![Ok(false)], "an unchanged file is not a write");
         watching.close().await;
     }
 }
@@ -378,7 +421,8 @@ async fn a_refused_mouse_toggle_owes_no_reload() {
     let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
     let mut watching = watching(backend, app, None);
     let mut mouse = RefusingMouse;
-    assert!(!look.change(&TuiChange::Mouse(true), &mut watching.app, &mut mouse));
+    look.change(&TuiChange::Mouse(true), &mut watching.app, &mut mouse);
+    assert!(!look.writes.owes(), "a refused toggle asks for no write");
     watching.close().await;
 }
 

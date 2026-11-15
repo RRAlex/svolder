@@ -198,6 +198,7 @@ impl<O: Open> Opener<O> {
         }
         Ok(Watching {
             reload_owed: None,
+            give_up_asked: false,
             backend: Some(backend),
             app: Box::new(app),
             device: name.map(str::to_string),
@@ -401,6 +402,7 @@ impl<O: Open> Opener<O> {
         let _ = relisted(&self.path, &mut app);
         Watching {
             reload_owed: None,
+            give_up_asked: false,
             backend,
             app: Box::new(app),
             device: waited,

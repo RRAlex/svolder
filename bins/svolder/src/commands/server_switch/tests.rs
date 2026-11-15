@@ -22,10 +22,7 @@ fn short_socket() -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("a clock after 1970")
         .subsec_nanos();
-    std::path::PathBuf::from(format!(
-        "/tmp/svk1-{}-{seq}-{nanos:x}.sock",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("svk1-{}-{seq}-{nanos:x}.sock", std::process::id()))
 }
 
 /// A stub daemon on a short socket that a client reaches: a case that starts a daemon fails

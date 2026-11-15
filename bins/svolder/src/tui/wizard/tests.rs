@@ -91,6 +91,7 @@ async fn walked_buffer(
         wizard,
         &Theme::new(false),
         Leaving::Nowhere,
+        false,
     )
     .await;
     (end, terminal.backend().buffer().clone())
@@ -584,6 +585,7 @@ async fn walked_leaving(
         wizard,
         &Theme::new(false),
         leaving,
+        false,
     )
     .await;
     (end, terminal.backend().buffer().clone())
@@ -839,4 +841,159 @@ async fn the_wizard_says_why_when_the_terminal_is_refused() {
         Failure::of(Kind::Usage, "the terminal: no tty; asking in plain prompts")
     );
     assert_eq!(String::from_utf8(said).unwrap(), line);
+}
+
+/// One pointer move to `(column, row)`, as a terminal reports it.
+fn moved(column: u16, row: u16) -> io::Result<Event> {
+    Ok(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }))
+}
+
+/// `script`, each event after its own pause, and then the pause the last one leaves before the
+/// terminal has nothing more to say.
+fn paced(
+    script: Vec<(Duration, io::Result<Event>)>,
+    end: Duration,
+) -> BoxStream<'static, io::Result<Event>> {
+    futures::stream::unfold((script.into_iter(), end), |(mut left, end)| async move {
+        match left.next() {
+            Some((pause, event)) => {
+                tokio::time::sleep(pause).await;
+                Some((event, (left, end)))
+            }
+            None => {
+                tokio::time::sleep(end).await;
+                None
+            }
+        }
+    })
+    .boxed()
+}
+
+/// The last frame of a first step walked with tooltips `tips` over `script`, whose pauses are
+/// the pointer's rests.
+async fn tipped(
+    tips: bool,
+    script: Vec<(Duration, io::Result<Event>)>,
+    end: Duration,
+) -> Vec<String> {
+    let mut wizard = Wizard::new(host_hearing_one());
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("a test terminal opens");
+    let mut events = paced(script, end);
+    let ended = event_loop(
+        &mut terminal,
+        &mut events,
+        &mut wizard,
+        &Theme::new(false),
+        Leaving::Nowhere,
+        tips,
+    )
+    .await;
+    assert!(matches!(ended, WizardEnd::Stopped { .. }));
+    let buffer = terminal.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("a cell").symbol())
+                .collect()
+        })
+        .collect()
+}
+
+/// The words a footer key's tooltip says on the first step: the `q` key, in the words the
+/// same key says on every other screen's pane border.
+const Q_TIP: &str = "quit · q";
+
+/// A pointer resting on a key of the key line for the tooltip's delay shows what the key does
+/// in a box under the pointer (above it here, the key line being the last row).
+#[tokio::test(start_paused = true)]
+async fn a_pointer_resting_on_a_footer_key_shows_its_tooltip() {
+    let rows = tipped(
+        true,
+        vec![(BETWEEN, moved(68, 23))],
+        tooltip::DELAY + Duration::from_millis(300),
+    )
+    .await;
+    assert!(
+        rows[22].contains(Q_TIP),
+        "no tooltip above the key line:\n{}",
+        rows.join("\n")
+    );
+}
+
+/// Before the delay has passed nothing shows, and a move off the key hides the tooltip again.
+#[tokio::test(start_paused = true)]
+async fn the_tooltip_waits_for_its_delay_and_goes_when_the_pointer_leaves() {
+    let early = tipped(true, vec![(BETWEEN, moved(68, 23))], tooltip::DELAY / 2).await;
+    assert!(!early.join("\n").contains(Q_TIP), "shown before its delay");
+    let left = tipped(
+        true,
+        vec![
+            (BETWEEN, moved(68, 23)),
+            (tooltip::DELAY + Duration::from_millis(200), moved(30, 10)),
+        ],
+        BETWEEN,
+    )
+    .await;
+    assert!(!left.join("\n").contains(Q_TIP), "still shown off its key");
+}
+
+/// A key press hides it, and with tooltips off none shows.
+#[tokio::test(start_paused = true)]
+async fn a_key_hides_the_tooltip_and_the_setting_turns_it_off() {
+    let rest = tooltip::DELAY + Duration::from_millis(300);
+    let off = tipped(false, vec![(BETWEEN, moved(68, 23))], rest).await;
+    assert!(!off.join("\n").contains(Q_TIP), "shown with tooltips off");
+    let pressed = tipped(
+        true,
+        vec![(BETWEEN, moved(68, 23)), (rest, key(KeyCode::Down))],
+        BETWEEN,
+    )
+    .await;
+    assert!(!pressed.join("\n").contains(Q_TIP), "shown after a key");
+}
+
+/// On the Passphrase step the key line says `←→ cycle`, and the tooltip on that key says the
+/// same word rather than the table's `move`.
+#[tokio::test(start_paused = true)]
+async fn the_tooltip_on_a_footer_key_says_what_the_key_line_says_on_the_passphrase_step() {
+    let fx = host_hearing_one().refusing_without("1234");
+    let mut wizard = Wizard::new(fx.clone());
+    walk_to(&mut wizard, Step::Name).await;
+    let (_, rows) = walked(&mut wizard, vec![key(KeyCode::Enter)]).await;
+    let line = rows[23].clone();
+    assert!(line.contains("←→ cycle"), "|{line}|");
+    let column = u16::try_from(line[..line.find("←→").expect("the label")].chars().count())
+        .expect("a column");
+
+    let mut wizard = Wizard::new(fx);
+    walk_to(&mut wizard, Step::Name).await;
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("a test terminal opens");
+    let mut events = paced(
+        vec![(BETWEEN, key(KeyCode::Enter)), (BETWEEN, moved(column, 23))],
+        tooltip::DELAY + Duration::from_millis(300),
+    );
+    let _ = event_loop(
+        &mut terminal,
+        &mut events,
+        &mut wizard,
+        &Theme::new(false),
+        Leaving::Nowhere,
+        true,
+    )
+    .await;
+    let buffer = terminal.backend().buffer();
+    let text: String = (0..24)
+        .flat_map(|y| (0..80).map(move |x| (x, y)))
+        .map(|(x, y)| buffer.cell((x, y)).expect("a cell").symbol())
+        .collect();
+    assert!(
+        text.contains("cycle · ←→"),
+        "no tip with the key line's words"
+    );
+    assert!(!text.contains("move · ←→"), "the table's word");
 }

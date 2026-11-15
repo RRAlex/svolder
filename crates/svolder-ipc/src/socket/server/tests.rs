@@ -489,3 +489,31 @@ async fn a_blank_line_is_skipped() {
     .await
     .expect("test timed out");
 }
+
+/// A `passphrase` request whose `digits` is not a string is refused without the value it
+/// carried, and the refusal still says what was wrong and where; the words for a request that
+/// names no value (an unknown command) are untouched.
+#[test]
+fn a_bad_request_never_echoes_the_value_it_found() {
+    let line = r#"{"id":3,"request":{"cmd":"passphrase","digits":4321}}"#;
+    let e = serde_json::from_str::<RequestLine>(line).expect_err("digits is a number");
+    let words = bad_request_words(&e);
+    assert!(!words.contains("4321"), "{words}");
+    assert!(
+        words.starts_with("bad request: invalid type: integer, expected a string"),
+        "{words}"
+    );
+    assert!(words.contains(" at line 1 column"), "{words}");
+
+    let line = r#"{"id":3,"request":{"cmd":"passphrase","digits":"4321","device":7}}"#;
+    let e = serde_json::from_str::<RequestLine>(line).expect_err("device is a number");
+    assert!(
+        !bad_request_words(&e).contains('7'),
+        "{}",
+        bad_request_words(&e)
+    );
+
+    let e = serde_json::from_str::<RequestLine>(r#"{"id":1,"request":{"cmd":"state","device":5}}"#)
+        .expect_err("device is a number");
+    assert!(!bad_request_words(&e).contains("`5`"));
+}

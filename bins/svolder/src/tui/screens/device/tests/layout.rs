@@ -64,11 +64,13 @@ fn the_docs_show_the_device_screen_this_build_draws() {
         .into_iter()
         .chain([("svolder", "docs/images/svolder.avif".to_string())]);
     for (name, picture) in pictures {
+        assert!(
+            readme.contains(&picture),
+            "README.md does not show {picture}"
+        );
+        assert!(root.join(&picture).is_file(), "{picture} is missing");
         let twin = format!("docs/images/{name}.txt");
-        for file in [picture, twin] {
-            assert!(readme.contains(&file), "README.md does not show {file}");
-            assert!(root.join(&file).is_file(), "{file} is missing");
-        }
+        assert!(root.join(&twin).is_file(), "{twin} is missing");
     }
 }
 

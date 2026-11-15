@@ -31,7 +31,8 @@ if [ ${#missing[@]} -gt 0 ]; then
     exit 1
 fi
 
-scratch=$(mktemp -d)
+. "$(dirname "$(readlink -f "$0")")/tmp-base.sh"
+scratch=$(svtmp_dir shot) || exit 1
 # A failed run leaves no partial raw stream behind (it is gigabytes), and no half-finished output.
 trap 'rm -rf "$scratch" "$out/svolder.rgb" "$out/encoded"' EXIT
 started=$SECONDS

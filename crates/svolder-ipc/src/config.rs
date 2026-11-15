@@ -369,6 +369,15 @@ impl Config {
         said
     }
 
+    /// Run `write`, a call of this type's file writers, so that a file which is not there is
+    /// refused ([`ConfigError::Gone`]) instead of started from the template, judged under the
+    /// file's lock where the writer reads it. A daemon that read its file once writes this way:
+    /// a file deleted since is not made again from a template that the reload after the write
+    /// would take as the whole configuration.
+    pub fn while_file_must_exist<T>(write: impl FnOnce() -> T) -> T {
+        edit::while_file_must_exist(write)
+    }
+
     /// Load and validate the file at [`Config::path`]; `Ok(Config::default())` when it is absent.
     pub fn load() -> Result<Config, ConfigError> {
         Self::load_from(&Self::path())

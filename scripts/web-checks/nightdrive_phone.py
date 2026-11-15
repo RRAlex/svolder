@@ -92,7 +92,10 @@ CONTRAST = """((want) => { const dash = document.getElementById('nd-dash');
   const texts = [...dash.querySelectorAll(want.join(', '))].filter((e) => e.textContent.trim() !== '').map((e) => {
     const col = getComputedStyle(e).color.match(/[\\d.]+/g).map(Number);
     const l = lum(col[0], col[1], col[2]);
-    return { what: e.className + ' ' + e.textContent.slice(0, 12), ratio: (Math.max(l, under) + 0.05) / (Math.min(l, under) + 0.05) };
+    // a lit key (`on`) is read against its own fill, which is opaque
+    const own = e.classList.contains('on') ? getComputedStyle(e).backgroundColor.match(/[\\d.]+/g).map(Number) : null;
+    const base = own ? lum(own[0], own[1], own[2]) : under;
+    return { what: e.className + ' ' + e.textContent.slice(0, 12), ratio: (Math.max(l, base) + 0.05) / (Math.min(l, base) + 0.05) };
   });
   return { alpha: a, texts, worst: Math.min(...texts.map((t) => t.ratio)), count: texts.length, under, missing }; })"""
 

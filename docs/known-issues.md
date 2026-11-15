@@ -216,19 +216,6 @@ that branch rather than listed here.
   are not. Devices are matched by their configured name, so a rename through the daemon, the TUI's
   editor or the web page stops the device's actor and starts one under the new name: the link drops
   and is made again (`crates/svolder-ipc/src/config/devices.rs`, `bins/svolderd/src/handler.rs`).
-- [bug] **A hand-edited passphrase of the wrong TOML type is quoted back.** With `passphrase = 4321`
-  in `config.toml` (a number, not a string), every device write fails with the parser's words, which
-  quote the line and so the code, on the socket and as the web page's 422; the same goes for a
-  `digits` of the wrong type in a `passphrase` request, echoed in serde's words to the hand-written
-  client that sent it. A write's own answer never shows a passphrase back; only a parse failure of
-  the file or of a request does (`crates/svolder-ipc/src/config/edit.rs`,
-  `crates/svolder-ipc/src/socket/server.rs`).
-- [bug] **A CLI write run with `--transport ble` or `fake` beside a daemon ignores a missing
-  `config.toml`.** The CLI refuses a write while the daemon says its file is missing, but a run with
-  a direct transport skips that ask, so `svolder hops add --transport ble ...` recreates the file
-  from the template and the daemon's next reload takes it as the whole configuration, dropping every
-  device; the TUI's own writes (see the TUI) are not asked either
-  (`bins/svolder/src/commands/device.rs`, `bins/svolder/src/backend/stale.rs`).
 - [bug] **A walk whose front end died holds the walk slot for up to 10 minutes.** A front end that
   dies without cancelling its walk leaves it running until the 10-minute idle bound, and another
   front end cannot start a walk until then (`bins/svolderd/src/handler/walk.rs`).
@@ -349,11 +336,6 @@ that branch rather than listed here.
   computer as its side, so the computer's 16-filter limit applies, where a library entry may hold up
   to 63 filters. AutoEq's published files have ten filters, so only a mirror or a hand-made index
   trips it (`bins/svolderd/src/handler/autoeq.rs`).
-- [bug] **A too-old daemon is worded three ways.** `svolder web`'s answer for a daemon that serves
-  no web UI says it is older than this svolder and names the restart; AutoEq, the walk and `web
-  on|off` say `the daemon (VERSION) cannot ..., which this svolder asks it to`; and the identify
-  check says `this daemon is too old to identify; restart it` (`bins/svolder/src/commands/web.rs`,
-  `bins/svolder/src/reach.rs`, `bins/svolder/src/backend/remote.rs`).
 - [limit] **The process manager's pid file is written after the old chain stops.** `host eq apply`
   tries the runtime directory before anything of the chain that is on is touched, but the pid it
   keeps there is only known once the new chain starts; a runtime directory that fills up between
@@ -424,17 +406,15 @@ that branch rather than listed here.
   keys, the Web UI and MCP on/off keys and the guest view go through the daemon, but the Connect
   keys for the listen addresses and the other MCP and web settings, the `[tui]` and `[autoeq]`
   rows and a device's own edits write `config.toml` in the TUI's own process and then ask the
-  daemon to reload (`bins/svolder/src/tui/run/connect.rs:220`,
-  `bins/svolder/src/tui/run/look.rs:250`, `bins/svolder/src/tui/run/devices.rs:204`).
-- [bug] **A hand edit followed by a delete gives no toast for the missing file.** The once-only
-  toast is keyed on the daemon's `config_changed`, which stays true from "changed" to "missing", so
-  the second word shows in the Connect rows only (`bins/svolder/src/tui/run/connect.rs`).
+  daemon to reload (`bins/svolder/src/tui/run/connect.rs:227`,
+  `bins/svolder/src/tui/run/look.rs:267`, `bins/svolder/src/tui/run/devices.rs:206`).
 - [limit] **A key pressed in the instant the terminal is resized can be lost.** The first key
-  after the window is grown or shrunk, such as a `q` or Ctrl-C, can go unread until the next input
-  (a second press reads both), and a frame at the old size can stay until the next input too. The
-  cause is in crossterm 0.29.0's unix reader (`try_read` returns at the first token of a batch of
-  readiness events); there is no upstream fix, and svolder does not vendor or fork the library for
-  it (`bins/svolder/tests/tui_pty/harness.rs:522`).
+  after the window is grown or shrunk, or after a run of Esc presses closes boxes, such as a `q` or
+  Ctrl-C, can go unread until the next input (a second press reads both), and a frame at the old
+  size can stay until the next input too. The cause is in crossterm 0.29.0's unix reader (`try_read`
+  returns at the first token of a batch of readiness events; the Esc case is likely the same); there
+  is no upstream fix, and svolder does not vendor or fork the library for it
+  (`bins/svolder/tests/tui_pty/harness.rs:516`).
 - [limit] **Over SSH in a VTE terminal a pairing code and the MCP token cannot reach the local
   clipboard.** VTE (GNOME Terminal, Ptyxis) ignores OSC 52, and only the Web UI box's link is a
   terminal hyperlink (OSC 8), so a code or token copied in a session with no display has no route
@@ -516,6 +496,10 @@ that branch rather than listed here.
   daemon's 181-point spans, so at a span's edge the shade and the web page's can differ by a column;
   the second-source overlay, the marks for where a preset lives and the comparison are the web
   page's alone (`bins/svolder/src/tui/screens/tone/fit.rs`).
+- [bug] **The TUI's own config writes do not ask a daemon whether its file is missing.** The CLI
+  refuses a write while the daemon says its file is missing, but the TUI's writers go straight to
+  the file, so a write made there recreates it from the template and the daemon's next reload takes
+  it as the whole configuration, dropping every device (`bins/svolder/src/tui/run/`).
 
 ### Web UI
 
@@ -604,6 +588,10 @@ that branch rather than listed here.
   to the fleet's first device, the Overview names the device removed, and no toast says so; with the
   last device removed every theme shows its no-device card, whose look has not been checked by eye
   (`bins/svolderd/web/core/stream.js`).
+- [limit] **Night drive's dash EQ key has three looks not checked by eye.** A device with three
+  input chips beside the key, an amp's gauges beside it and a phone held sideways (landscape) with
+  the key have been measured by the checks only, never looked at
+  (`bins/svolderd/web/themes/nightdrive/draw/dash.js`).
 - [trade-off] **A cancelled AutoEq download runs out its thread.** A preview or import that is
   cancelled stops waiting at once, but a download already under way runs on its blocking thread to
   its limit (20 seconds for a correction, 60 for the index), since the HTTP client has no cancel
@@ -635,12 +623,6 @@ that branch rather than listed here.
   unit whose spawn failed at a reload is retried, and logged, at every probe end; `start_unwatched`
   appends the actor it starts to the set, so the order differs from the file's until the next reload
   (`bins/svolderd/src/handler/probe.rs`, `bins/svolderd/src/handler.rs`).
-- [bug] **A deletion between the missing-file check and the write still makes a template file.** The
-  daemon refuses a write when the file it read is gone, but the check runs outside the file's lock,
-  so a deletion between the check and the write, with another writer holding the lock, recreates the
-  file from the template; the CLI's guard asks the daemon once per write and has the same window. A
-  core writer that refuses a missing file under the lock would close it
-  (`bins/svolderd/src/handler/config_write.rs`, `crates/svolder-ipc/src/config/edit.rs`).
 - [trade-off] **`Client::request` skips a mismatched response id.** `Client::request`'s reply loop
   skips a `Reply::Response` whose id does not match the pending request (`_ => continue`) rather
   than reporting a protocol desync. Every caller today awaits each request to its end on its
@@ -894,14 +876,10 @@ that branch rather than listed here.
   is a larger change than any popup needs. A popup added by hand with `core.popups.add` (the checks'
   sample) has no menu row and no viewer gate (`bins/svolderd/web/core/registry.js`,
   `bins/svolderd/web/core/popups/popups.js`).
-- [debt] **Theme code kept in copies.** The three themes' gesture files are clones that differ by
-  little more than one variable name; Signal's and Paper's `draw/tone.js` export `curvePath` and
-  `shadePath` as aliases of `plot.js`'s `curveD` and `fillD` because the wires and five node checks
-  import them by those names; the three `controls-wire.js` spell `c.texts?.[raw - c.lo] ??
-  String(raw)` where `core.words.stepWords` says the same; Ember reads the body classes `writes` and
-  `guest` in five places instead of `core.actions.canWrite()`; Ember's `menuRows` is the module's
-  function over its singleton and not rows built from the mount's scope as Signal's and Night
-  drive's are (`bins/svolderd/web/themes/`, `bins/svolderd/web/themes/ember/ember.js`).
+- [debt] **Theme code kept in copies.** Ember reads the body class `guest` in one place
+  (`press.js`) where the others ask the core; Ember's `menuRows` is the module's function over its
+  singleton and not rows built from the mount's scope as Signal's and Night drive's are
+  (`bins/svolderd/web/themes/ember/press.js`, `bins/svolderd/web/themes/ember/ember.js`).
 - [debt] **Night drive's sheet and Signal's Add device sheet are not on the modal stack.** A popup
   opened over one makes it inert but leaves it standing behind
   (`bins/svolderd/web/themes/nightdrive/sheet-wire.js`,
@@ -1018,9 +996,10 @@ that branch rather than listed here.
   BlueZ lists, which on a machine with a built-in controller need not be the one that hears the
   device (`bins/svolder/src/backend/direct.rs`).
 - [test] **The happy path of `tui::wizard::setup` through a real terminal is untested.** The pty
-  harness drives `tui::run` in a real terminal, but no case runs the setup wizard; its refusals and
-  the choice of front end are tested over a `Claim` seam, and a real `Guard` cannot be built in a
-  unit test (`bins/svolder/src/tui/terminal.rs`).
+  harness drives `tui::run` in a real terminal, and one case runs `svolder setup` to hover its key
+  line and quit, but none walks the happy path; its refusals and the choice of front end are tested
+  over a `Claim` seam, and a real `Guard` cannot be built in a unit test
+  (`bins/svolder/src/tui/terminal.rs`).
 - [test] **The browser checks leave some paths to node or by hand.** `popups.py` presses Tab forward
   only (Shift+Tab on a hidden control is node's), and the drag-ending Escape on Ember's curve is not
   pressed; Ember's `0`, `f` and `v` keys are held by the `keys.py` spy alone; `keys.py` cannot count

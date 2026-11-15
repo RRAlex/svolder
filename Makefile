@@ -69,9 +69,14 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-quick web-checks-task paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
 
 ##@ Start
+demo-knobs-check: ## Fail if the env line the demos start with does not run
+	@$(DEMO_KNOBS) true || { echo "demo-knobs-check: make demo*'s env line does not run" >&2; exit 1; }
+	@$(DEMO_KNOBS:-u SVOLDER_FAKE_PROFILE=SVOLDER_FAKE_PROFILE=fake-amp) true || { echo "demo-knobs-check: the env line with PROFILE does not run" >&2; exit 1; }
+	@echo "demo-knobs-check: the demos' env line runs"
+
 ##@ Try it
 ##@ Install
 ##@ Check
@@ -90,7 +95,7 @@ tui-hangup-check: deps-build ## A closed terminal during a daemon walk: no abort
 #: beyond the build.
 tui-harness: deps-build ## The real TUI in a pty: start-up, keys, mouse, resize, quit
 	@$(CARGO) build --workspace
-	@scratch=$$(mktemp -d /tmp/svh.XXXXXX) || exit 1; \
+	@. scripts/tmp-base.sh; scratch=$$(svtmp_dir svh) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	env -u SVOLDER_MCP_TOKEN -u SVOLDER_WEB_TOKEN -u SVOLDER_WEB_ENABLED -u SVOLDER_MCP_ENABLED \
 	  -u SVOLDER_WEB_LISTEN -u SVOLDER_MCP_LISTEN -u SVOLDER_WEB_URL -u SVOLDER_MQTT_ENABLED \
@@ -162,10 +167,44 @@ docs-env: deps-build ## Rewrite docs/usage/environment.md's variable table
 	mv docs/usage/environment.md.new docs/usage/environment.md
 
 ##@ Check
+# Every temporary file the targets and scripts make outside the checkout lives under /tmp/svolder,
+# made through scripts/tmp-base.sh, which refuses a base that is a link, not a directory or not
+# yours. make check empties a manifest (tmp-snapshot), every directory made is appended to it, and
+# the last step fails on a listed path that still exists.
+TMP_LOG := $(CURDIR)/target/tmp-svolder.made
+check: export SVOLDER_TMP_LOG = $(TMP_LOG)
+.NOTPARALLEL: check
+
+tmp-snapshot: ## Empty the manifest of a make check run's temp dirs
+	@mkdir -p target; : > "$(TMP_LOG)"
+
+tmp-leak-check: ## Fail if the run left a /tmp/svolder directory behind
+	@[ -f "$(TMP_LOG)" ] || { echo 'tmp-leak-check: no manifest; run make tmp-snapshot first' >&2; exit 1; }; \
+	left=''; \
+	while IFS= read -r p || [ -n "$$p" ]; do \
+	  if [ -e "$$p" ] || [ -L "$$p" ]; then left="$$left\n  $$p"; fi; \
+	done < "$(TMP_LOG)"; \
+	if [ -n "$$left" ]; then \
+	  printf 'tmp-leak-check: the run left these under /tmp/svolder:%b\n' "$$left" >&2; \
+	  exit 1; \
+	fi; \
+	echo 'tmp-leak-check: every temporary directory the run made is gone'
+
+#: The base of scripts/tmp-base.sh and scripts/tmp_base.py on planted bases (link, file, foreign
+#: owner, wrong mode), under a scratch directory of its own.
+tmp-base-test: ## Self-test of the /tmp/svolder base helper
+	@sh scripts/tmp-base-test.sh
+
+# The tests run once where dbus-daemon can give them a bus with no BlueZ, which is what the
+# release runner has; without it they run on the system bus and check-no-bluez follows.
+CHECK_TESTS := $(if $(shell command -v dbus-daemon 2>/dev/null),check-tests-private,test check-no-bluez)
+
 #: Format check, lints, safety tripwire, docs check, licence check, SPDX header check, network check, systemd unit check, workflow
 #: check, web mutation snippets, theme CSS check, rate-check parser self-test, build-deps self-test, sim-app preflight self-test,
-#: tests and this help's own check.
-check: deps-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check test check-no-bluez ## Everything a commit must pass (make help T=check)
+#: tests (once, on a private bus with no BlueZ when dbus-daemon is installed; otherwise on the
+#: system bus, then on a private one), the /tmp/svolder base helper and its leak check, and this
+#: help's own check.
+check: tmp-snapshot tmp-base-test deps-check demo-knobs-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check $(CHECK_TESTS) tmp-leak-check ## Everything a commit must pass (make help T=check)
 
 license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-later
 	CARGO=$(CARGO) python3 scripts/check-licenses.py --self-test
@@ -338,8 +377,11 @@ audit: ## Fail on an advisory in Cargo.lock (needs network)
 # has a short fixed prefix so the longest test socket path stays under the 108 bytes a socket
 # address holds.
 ##@ Start
+#: Runs the workspace's tests in a scratch home. Another selection leaves SVOLDER_TEST_PREBUILT unset,
+#: since it builds only that crate's binaries.
+#: T=<cargo-args>   what cargo tests, such as '-p svolder-host' (default --workspace --all-features)
 test: deps-build ## Run all tests
-	@scratch=$$(mktemp -d /tmp/sv.XXXXXX) || exit 1; \
+	@. scripts/tmp-base.sh; scratch=$$(svtmp_dir sv) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	mkdir "$$scratch/t" || exit 1; \
 	env -u SVOLDER_MCP_TOKEN -u SVOLDER_WEB_TOKEN -u SVOLDER_WEB_ENABLED -u SVOLDER_MCP_ENABLED \
@@ -347,7 +389,7 @@ test: deps-build ## Run all tests
 	  XDG_CONFIG_HOME="$$scratch/config" \
 	  XDG_STATE_HOME="$$scratch/state" \
 	  XDG_DATA_HOME="$$scratch/data" XDG_CACHE_HOME="$$scratch/cache" SVOLDER_WIREPLUMBER="$$scratch/no-wireplumber" \
-	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_TEST_PREBUILT=1 $(CARGO) test --workspace --all-features \
+	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ $(if $(T),,SVOLDER_TEST_PREBUILT=1) $(CARGO) test $(or $(T),--workspace --all-features) \
 	  || exit $$?; \
 	left=$$(find "$$scratch/t" -mindepth 1 -maxdepth 1 ! -name 'svolder-unit-*' -exec basename {} \;); \
 	if [ -n "$$left" ]; then \
@@ -370,13 +412,12 @@ check-no-bluez: ## make test on a bus with no BlueZ (skipped if none)
 	  echo 'make check-no-bluez: skipped, the system bus has no BlueZ (running or startable), so make test already ran without it'; \
 	  exit 0; \
 	fi; \
-	command -v dbus-daemon >/dev/null || { echo 'make check-no-bluez: dbus-daemon is not installed' >&2; exit 1; }; \
-	bus=$$(mktemp -d /tmp/sv-bus.XXXXXX) || exit 1; \
-	trap 'kill $$pid 2>/dev/null; rm -rf "$$bus"' EXIT; \
-	dbus-daemon --session --nofork --address="unix:path=$$bus/bus" & pid=$$!; \
-	i=0; while [ ! -S "$$bus/bus" ] && [ $$i -lt 50 ]; do i=$$((i+1)); sleep 0.1; done; \
-	[ -S "$$bus/bus" ] || { echo 'make check-no-bluez: the private bus did not start' >&2; exit 1; }; \
-	DBUS_SYSTEM_BUS_ADDRESS="unix:path=$$bus/bus" $(MAKE) --no-print-directory test
+	MAKE="$(MAKE)" sh scripts/test-on-private-bus.sh
+
+#: The tests of make check on a private bus with no BlueZ, whatever the system bus has (what make
+#: check runs when dbus-daemon is installed). Needs dbus-daemon.
+check-tests-private: ## make test on a private bus with no BlueZ
+	@MAKE="$(MAKE)" sh scripts/test-on-private-bus.sh
 
 ##@ Check
 #: The volume's glide, the firmware-update and passphrase refusals (profile loader and the layers
@@ -448,7 +489,13 @@ clean-rust: clean-all ## clean-all, plus cargo's whole download cache
 # An exported SVOLDER_AUTOEQ_URL wins over the default, so a run that sets it (the checks' dead
 # address) keeps it; AUTOEQ_URL= (empty) leaves AutoEq off in the demo, and says so.
 AUTOEQ_URL ?= $(or $(SVOLDER_AUTOEQ_URL),https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/)
-DEMO_KNOBS = env SVOLDER_AUTOEQ_URL='$(AUTOEQ_URL)' $(if $(PROFILE),SVOLDER_FAKE_PROFILE=$(PROFILE),-u SVOLDER_FAKE_PROFILE) $(if $(SIGNAL),SVOLDER_FAKE_SIGNAL=$(SIGNAL),-u SVOLDER_FAKE_SIGNAL)
+# env takes its options (-u) before the first NAME=value, so every unset comes first.
+DEMO_KNOBS = env $(if $(PROFILE),,-u SVOLDER_FAKE_PROFILE) $(if $(SIGNAL),,-u SVOLDER_FAKE_SIGNAL) SVOLDER_AUTOEQ_URL='$(AUTOEQ_URL)' $(if $(PROFILE),SVOLDER_FAKE_PROFILE=$(PROFILE)) $(if $(SIGNAL),SVOLDER_FAKE_SIGNAL=$(SIGNAL))
+
+# The demos run an optimised build (Cargo.toml's `demo` profile, in target/demo): an unoptimised
+# one costs about five times the CPU, most of it the TUI's drawing and the spectrum's FFT.
+DEMO_BUILD = $(CARGO) build --profile demo -p svolder -p svolderd
+DEMO_BIN = target/demo/svolder
 
 ##@ Try it
 #: Drives your computer's real volume, media player and EQ: a volume or player change stays after
@@ -457,8 +504,8 @@ DEMO_KNOBS = env SVOLDER_AUTOEQ_URL='$(AUTOEQ_URL)' $(if $(PROFILE),SVOLDER_FAKE
 #: AUTOEQ_URL=<base>   where the EQ library reads AutoEq from (default the exported SVOLDER_AUTOEQ_URL, else AutoEq's own repository)
 #: SIGNAL=1   a demo signal moves the meters (a profile with meters: fake-amp, fake-mono, fake-five)
 demo: deps-build ## TUI + web UI on a fake device; drives your real audio
-	$(CARGO) build --workspace
-	$(DEMO_KNOBS) target/debug/svolder tui --demo --host --web
+	$(DEMO_BUILD)
+	$(DEMO_KNOBS) $(DEMO_BIN) tui --demo --host --web
 
 demo-dac: deps-build ## make demo on the fake DAC; drives your real audio
 	@$(MAKE) --no-print-directory demo PROFILE= SIGNAL=
@@ -469,16 +516,16 @@ demo-amp: deps-build ## make demo on the fake amp; drives your real audio
 #: The computer side (volume, EQ points, presets) is simulated in the demo's daemon, which the TUI
 #: and the web page share.
 demo-computer: deps-build ## TUI + web UI on a fake DAC; your audio untouched
-	$(CARGO) build --workspace
-	$(DEMO_KNOBS) target/debug/svolder tui --demo --web
+	$(DEMO_BUILD)
+	$(DEMO_KNOBS) $(DEMO_BIN) tui --demo --web
 
 demo-computer-amp: deps-build ## demo-computer on the fake amp; your audio untouched
 	@$(MAKE) --no-print-directory demo-computer PROFILE=fake-amp SIGNAL=1
 
 #: Touches nothing of yours.
 demo-safe: deps-build ## TUI alone on a fake device; your audio untouched
-	$(CARGO) build --workspace
-	$(DEMO_KNOBS) target/debug/svolder tui --demo
+	$(DEMO_BUILD)
+	$(DEMO_KNOBS) $(DEMO_BIN) tui --demo
 
 #: Starts svolder-sim for the official Schiit phone app (legacy advertisement, decoded frames
 #: printed), after checking bluetoothd's flags read-only; when they are missing it prints the
@@ -550,14 +597,21 @@ web-snippets: ## Fail on a moved mutant snippet or an unlisted node harness
 	@python3 scripts/web-checks/snippets.py
 	@python3 -I scripts/web-checks/node-list.py --self-test
 	@python3 -I scripts/web-checks/node-list.py
+	@python3 -I scripts/web-checks/touched.py --self-test
 
 ##@ Long checks (not part of check)
 #: The node harnesses and the browser checks, headless; a failure is re-run alone. Never takes a
 #: picture of the smoke. Needs node, node-jsdom, python3-websockets, python3-numpy, python3-pil, both browsers
-#: and geckodriver.
+#: and geckodriver. Cold it takes over an hour; minutes when little changed.
 #: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
-web-checks: deps-build ## Every web check in Chromium and Firefox (over an hour)
+web-checks: deps-build ## Every web check in Chromium and Firefox
 	@bash scripts/web-checks/run-all.sh
+
+#: The full gate with nothing reused from the result cache: required before a version is tagged for a
+#: release build. The serial lane and the node harnesses run cold in every full gate.
+#: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
+web-checks-cold: deps-build ## The full web gate, cold (before a tag)
+	@bash scripts/web-checks/run-all.sh --cold
 
 #: The node harnesses, the browser checks that leave the smoke alone and one short smoke check per
 #: browser. Refuses after a smoke file changed: run web-checks then.
@@ -570,6 +624,15 @@ web-checks-quick: deps-build ## The quick web gate (about 38 minutes)
 #: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
 web-checks-task: deps-build ## The task web gate (quick, logic checks in Chromium only)
 	@bash scripts/web-checks/run-all.sh --task
+
+#: The web checks a change touches: what changed since BASE (default main; with TO=R
+#: the diff BASE..R alone), matched to the files each check loaded on its last run
+#: (target/web-checks/deps) and to the files each node harness imports. Prints the labels and the
+#: WEB_CHECKS_ONLY command that runs them. Needs python3 and git only.
+#: BASE=<rev>   the revision to compare against
+#: TO=<rev>     with BASE, the diff BASE..TO alone (the working tree is left out)
+web-touched: ## Which web checks a change touches
+	@python3 -I scripts/web-checks/touched.py $(if $(TO),$(or $(BASE),main) $(TO),$(BASE))
 
 #: Needs two extended-advertising controllers.
 e2e: deps-build ## End to end over BlueZ
@@ -584,7 +647,7 @@ host-e2e: deps-build ## The computer EQ end to end on a private PipeWire
 #: SEED=<number>   the first sequence's seed (default 1000)
 #: RUNS=<number>   how many sequences (default 5000)
 preamp-lab: deps-build ## Long run of the computer EQ's preamp lab
-	@scratch=$$(mktemp -d /tmp/sv.XXXXXX) || exit 1; \
+	@. scripts/tmp-base.sh; scratch=$$(svtmp_dir sv) || exit 1; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	SVOLDER_LAB_SEED="$(or $(SEED),1000)" SVOLDER_LAB_RUNS="$(or $(RUNS),5000)" TMPDIR="$$scratch" \
 	  $(CARGO) test --release -p svolder-host --lib -- --ignored --nocapture the_lab_finds_nothing_in_a_long_run

@@ -33,6 +33,7 @@ use crate::recovery::Kind;
 use crate::wizard::{Effects, Prompt, Step, Takes, Wizard};
 
 use super::app::Screen;
+use super::boxes::tooltip::{self, Tooltip};
 use super::keys::{self, Scene};
 use super::mouse::{self, Hit, HitMap};
 use super::palette::detect_depth;
@@ -175,6 +176,11 @@ pub(super) struct ShownStep {
     pub(super) scroll: usize,
     /// How the last frame laid those words out, which is what a page of them is.
     pub(super) said: Said,
+    /// Whether the keys of the key line say what they do when the pointer rests on them: the
+    /// `[tui] tooltips` setting with mouse capture on.
+    pub(super) tips: bool,
+    /// The tooltip pending or showing for the key line's key the pointer rests on.
+    pub(super) tip: Option<Tooltip>,
 }
 
 /// How one frame laid the step out.
@@ -221,15 +227,18 @@ impl ShownStep {
             can_go_back: false,
             scroll: 0,
             said: Said::default(),
+            tips: false,
+            tip: None,
         }
     }
 
     /// Forget what was typed and the step it was typed for, so the next prompt is shown afresh
     /// whatever it says: a line typed at one step is never carried to another's field.
     pub(super) fn forget(&mut self) {
-        let waiting = self.waiting.take();
+        let (waiting, tips) = (self.waiting.take(), self.tips);
         *self = ShownStep::opening();
         self.waiting = waiting;
+        self.tips = tips;
     }
 
     /// Empty the Passphrase step's row once its code has been sent.
@@ -289,6 +298,30 @@ impl ShownStep {
     pub(super) fn wait_for(&mut self, waiting: Option<String>) {
         self.spinner = waiting.is_some().then(|| spinner::glyph(Duration::ZERO));
         self.waiting = waiting;
+        self.tip = None;
+    }
+
+    /// Read one mouse event at `now` against the hits of the last frame: a pointer resting on a
+    /// key of the key line asks for its tooltip, anything else hides it.
+    fn hover(&mut self, hits: &HitMap, event: &MouseEvent, now: Instant) {
+        let scene = self.scene();
+        self.tip = tooltip::hovered(self.tip, self.tips, hits, event, now, &|hit| {
+            tooltip::wizard_text(hit, scene)
+        });
+    }
+
+    /// Show the tooltip held if its delay has passed by `now`.
+    fn age_tip(&mut self, now: Instant) {
+        if let Some(tip) = self.tip.as_mut() {
+            tip.age(now);
+        }
+    }
+
+    /// How long a read of the terminal may wait before the frame is drawn again: while a tooltip
+    /// waits for its delay, as long as the TUI's loop does, and not at all otherwise.
+    fn tip_tick(&self) -> Option<Duration> {
+        let pending = self.tips && self.tip.is_some_and(|tip| !tip.shown);
+        pending.then_some(tooltip::PENDING_TICK)
     }
 
     /// Draw the devices `scan` hears from now on under the wait, or none at all for `None`.
@@ -445,6 +478,7 @@ pub(super) async fn event_loop<E, B, S>(
     wizard: &mut Wizard<E>,
     theme: &Theme,
     leaving: Leaving,
+    tips: bool,
 ) -> WizardEnd
 where
     E: Effects,
@@ -461,7 +495,7 @@ where
         }
     };
     let end = tokio::select! {
-        end = walk(terminal, events, wizard, theme, leaving) => end,
+        end = walk(terminal, events, wizard, theme, leaving, tips) => end,
         () = pressed => WizardEnd::Signalled,
     };
     // However the walk ended, a walk the daemon still runs for it is cancelled, and a device it
@@ -471,6 +505,28 @@ where
     end
 }
 
+/// Where one pass of the walk leaves the loop it ran in.
+enum Flow {
+    /// Read the next event of the same prompt.
+    Stay,
+    /// Ask the wizard for its next prompt.
+    Ask,
+    /// The walk is over.
+    End(WizardEnd),
+}
+
+/// Everything the walk holds from one prompt to the next: the frame it draws on, the terminal's
+/// events, the step on show and the wizard being walked.
+struct Walk<'a, E: Effects, B: Backend, S> {
+    canvas: Canvas<'a, B>,
+    events: &'a mut S,
+    /// Whether the terminal has anything left to say. A stream that has ended answers the
+    /// moment it is asked — and is not to be asked again — so once it has, the run is over.
+    reading: bool,
+    view: ShownStep,
+    wizard: &'a mut Wizard<E>,
+}
+
 /// The walk itself, ending however it ends.
 async fn walk<E, B, S>(
     terminal: &mut Terminal<B>,
@@ -478,6 +534,7 @@ async fn walk<E, B, S>(
     wizard: &mut Wizard<E>,
     theme: &Theme,
     leaving: Leaving,
+    tips: bool,
 ) -> WizardEnd
 where
     E: Effects,
@@ -485,220 +542,279 @@ where
     S: Stream<Item = io::Result<Event>> + Unpin,
 {
     let mut view = ShownStep::opening();
+    view.tips = tips;
     let mut hits = HitMap::default();
-    let mut canvas = Canvas::new(terminal, &mut hits, theme);
-    // Whether the terminal has anything left to say. A stream that has ended answers the
-    // moment it is asked — and is not to be asked again — so once it has, the run is over.
-    let mut reading = true;
+    let mut walk = Walk {
+        canvas: Canvas::new(terminal, &mut hits, theme),
+        events,
+        reading: true,
+        view,
+        wizard,
+    };
     loop {
+        let fresh = walk.wizard.stopped().is_none();
+        let prompt = match walk.next_prompt().await {
+            Err(end) => return end,
+            Ok(Some(prompt)) => prompt,
+            Ok(None) => {
+                // The daemon's walk could not be had, or went away: the run says why.
+                if fresh && let Some(code) = walk.wizard.stopped() {
+                    return WizardEnd::Stopped {
+                        code,
+                        why: walk.wizard.stopped_why().unwrap_or_default().to_string(),
+                    };
+                }
+                break;
+            }
+        };
+        // An answer the command line gave to this step is sent now, under a wait of its own,
+        // and the next prompt is asked for.
+        if walk.wizard.has_given_answer(&prompt) {
+            match walk.send_given_answer(prompt).await {
+                Some(end) => return end,
+                None => continue,
+            }
+        }
+        walk.view.show(prompt);
+        // The last step ends on what this front end does next: open the device it added.
+        walk.view.hands_over_to(walk.wizard.added());
+        let returns = leaving == Leaving::ToTui && walk.wizard.added().is_none();
+        let for_later = leaving == Leaving::Nowhere && walk.wizard.offers_later();
+        walk.view.can_go_back = walk.wizard.can_go_back() || returns || for_later;
+        loop {
+            match walk.read_event(returns, for_later).await {
+                Flow::Stay => {}
+                Flow::Ask => break,
+                Flow::End(end) => return end,
+            }
+        }
+    }
+    if walk.wizard.is_later() {
+        return WizardEnd::Later;
+    }
+    match walk.wizard.added() {
+        Some(device) => WizardEnd::Added(device.clone()),
+        None => WizardEnd::Quit,
+    }
+}
+
+impl<E, B, S> Walk<'_, E, B, S>
+where
+    E: Effects,
+    B: Backend,
+    S: Stream<Item = io::Result<Event>> + Unpin,
+{
+    /// The wizard's next prompt, waited for under the step's own wait; `None` where it has
+    /// nothing left to ask, which is what the last step answered leaves. `Err` ends the walk:
+    /// the user left while the step was being worked out.
+    async fn next_prompt(&mut self) -> Result<Option<Prompt>, WizardEnd> {
         // What the next step spends before it can be shown is named while it is spent. Nothing
         // has been asked for yet, so giving up here drops the work and leaves.
-        view.wait_for(wizard.busy());
-        let fresh = wizard.stopped().is_none();
+        self.view.wait_for(self.wizard.busy());
         // The daemon's walk that already waits at a prompt has it at once: nothing is waited for,
         // so no frame is drawn over the keys that are read while one is (a key pressed the moment
         // a step is answered would be dropped as the wait's). A prompt not there yet is waited
         // for, the read of its states picking up where this left it.
-        let ready = match wizard.is_remote() {
-            true => wizard.prompt().now_or_never(),
+        let ready = match self.wizard.is_remote() {
+            true => self.wizard.prompt().now_or_never(),
             false => None,
         };
         let asked = match ready {
             Some(asked) => Waited::Done(asked),
             None => {
                 wait_on(
-                    &mut canvas,
-                    events,
-                    &mut reading,
-                    &mut view,
+                    &mut self.canvas,
+                    self.events,
+                    &mut self.reading,
+                    &mut self.view,
                     CANCELS,
-                    wizard.prompt(),
+                    self.wizard.prompt(),
                 )
                 .await
             }
         };
-        view.wait_for(None);
-        // Nothing came back at all: the user left while the step was being worked out.
-        let Waited::Done(asked) = asked else {
-            return WizardEnd::Quit;
+        self.view.wait_for(None);
+        match asked {
+            Waited::Done(asked) => Ok(asked),
+            _ => Err(WizardEnd::Quit),
+        }
+    }
+
+    /// Send the answer the command line gave to `prompt`. `Some` ends the walk; `None` goes on
+    /// to the next prompt, with the failure shown on `prompt` if the send was refused.
+    async fn send_given_answer(&mut self, prompt: Prompt) -> Option<WizardEnd> {
+        self.view.wait_for(Some(SENDING.to_string()));
+        let sent = wait_on(
+            &mut self.canvas,
+            self.events,
+            &mut self.reading,
+            &mut self.view,
+            false,
+            self.wizard.answer_given(&prompt),
+        )
+        .await;
+        self.view.wait_for(None);
+        let (sent, left) = match sent {
+            Waited::Done(sent) => (sent, false),
+            Waited::Left(sent) => (sent, true),
+            Waited::GaveUp => return Some(WizardEnd::Quit),
         };
-        // The wizard has nothing left to ask, which is what the last step answered leaves.
-        let Some(prompt) = asked else {
-            // The daemon's walk could not be had, or went away: the run says why.
-            if fresh && let Some(code) = wizard.stopped() {
-                return WizardEnd::Stopped {
+        if let Err(failure) = sent {
+            if let Some(code) = self.wizard.stopped() {
+                return Some(WizardEnd::Stopped {
                     code,
-                    why: wizard.stopped_why().unwrap_or_default().to_string(),
-                };
+                    why: failure.to_string(),
+                });
             }
-            break;
-        };
-        // An answer the command line gave to this step is sent now, under a wait of its own,
-        // and the next prompt is asked for.
-        if wizard.has_given_answer(&prompt) {
-            view.wait_for(Some(SENDING.to_string()));
-            let sent = wait_on(
-                &mut canvas,
-                events,
-                &mut reading,
-                &mut view,
-                false,
-                wizard.answer_given(&prompt),
-            )
-            .await;
-            view.wait_for(None);
-            let (sent, left) = match sent {
-                Waited::Done(sent) => (sent, false),
-                Waited::Left(sent) => (sent, true),
-                Waited::GaveUp => return WizardEnd::Quit,
-            };
-            if let Err(failure) = sent {
-                if let Some(code) = wizard.stopped() {
-                    return WizardEnd::Stopped {
-                        code,
-                        why: failure.to_string(),
-                    };
-                }
-                view.show(prompt);
-                view.notice = Some(failure.to_string());
-            }
-            if left {
-                return WizardEnd::Quit;
-            }
-            continue;
+            self.view.show(prompt);
+            self.view.notice = Some(failure.to_string());
         }
-        view.show(prompt);
-        // The last step ends on what this front end does next: open the device it added.
-        view.hands_over_to(wizard.added());
-        let returns = leaving == Leaving::ToTui && wizard.added().is_none();
-        let for_later = leaving == Leaving::Nowhere && wizard.offers_later();
-        view.can_go_back = wizard.can_go_back() || returns || for_later;
-        loop {
-            // What the frame made of the step's own words is what the keys that scroll them
-            // move by, and how far they may move.
-            match draw(&mut canvas, &view) {
-                Ok(said) => view.said = said,
-                Err(e) => {
-                    return WizardEnd::Stopped {
-                        code: 1,
-                        why: e.to_string(),
-                    };
-                }
-            }
-            let event = match reading {
-                true => events.next().await,
-                false => None,
-            };
-            let Some(Ok(event)) = event else {
-                return WizardEnd::Stopped {
+        left.then_some(WizardEnd::Quit)
+    }
+
+    /// Draw the step, read one event and act on what it asks for.
+    async fn read_event(&mut self, returns: bool, for_later: bool) -> Flow {
+        // What the frame made of the step's own words is what the keys that scroll them
+        // move by, and how far they may move.
+        match draw(&mut self.canvas, &mut self.view) {
+            Ok(said) => self.view.said = said,
+            Err(e) => {
+                return Flow::End(WizardEnd::Stopped {
                     code: 1,
-                    why: super::run::INPUT_ENDED.to_string(),
-                };
-            };
-            let wanted = match event {
-                // A release is the other half of a press this loop has already acted on.
-                Event::Key(key) if key.kind != KeyEventKind::Release => press(&mut view, key),
-                Event::Mouse(click) => clicked(&mut view, canvas.hits(), click),
-                _ => Asked::Nothing,
-            };
-            match wanted {
-                Asked::Nothing => {}
-                Asked::Quit => return WizardEnd::Quit,
-                Asked::Back if wizard.can_go_back() => {
-                    // The step before is asked afresh: nothing typed here, a passphrase above
-                    // all, is carried into the field of another step.
-                    view.wait_for(wizard.is_remote().then(|| BACKING.to_string()));
-                    let backed = wait_on(
-                        &mut canvas,
-                        events,
-                        &mut reading,
-                        &mut view,
-                        CANCELS,
-                        wizard.back(),
-                    )
-                    .await;
-                    view.wait_for(None);
-                    if matches!(backed, Waited::GaveUp) {
-                        return WizardEnd::Quit;
-                    }
-                    view.forget();
-                    if let Some(code) = wizard.stopped() {
-                        return WizardEnd::Stopped {
-                            code,
-                            why: wizard.stopped_why().unwrap_or_default().to_string(),
-                        };
-                    }
-                    if matches!(backed, Waited::Left(_)) {
-                        return WizardEnd::Quit;
-                    }
-                    break;
-                }
-                Asked::Back if returns => return WizardEnd::Quit,
-                Asked::Back if for_later => {
-                    wizard.leave_for_later();
-                    return WizardEnd::Later;
-                }
-                Asked::Back => {}
-                Asked::Answer => {
-                    let (choice, text) = match view.answer() {
-                        Ok(answer) => answer,
-                        Err(why) => {
-                            view.notice = Some(why.to_string());
-                            continue;
-                        }
-                    };
-                    view.wait_for(waiting_for(&view.prompt, choice));
-                    if view.prompt.step == Step::Scan {
-                        view.listen_to(wizard.heard());
-                    }
-                    let cancels = !writes(&view.prompt, choice);
-                    // The code is sent with this answer and is not kept: a refused one is asked
-                    // for again on an empty row.
-                    view.spent_the_code();
-                    let answered = wait_on(
-                        &mut canvas,
-                        events,
-                        &mut reading,
-                        &mut view,
-                        cancels,
-                        wizard.answer(choice, text),
-                    )
-                    .await;
-                    view.wait_for(None);
-                    view.listen_to(None);
-                    let (answered, left) = match answered {
-                        Waited::Done(answered) => (answered, false),
-                        Waited::Left(answered) => (answered, true),
-                        Waited::GaveUp => return WizardEnd::Quit,
-                    };
-                    if let Err(failure) = answered {
-                        if wizard.stopped().is_some() {
-                            return WizardEnd::Stopped {
-                                code: failure.code,
-                                why: failure.to_string(),
-                            };
-                        }
-                        view.notice = Some(failure.to_string());
-                    } else {
-                        view.notice = None;
-                    }
-                    // The key that arrived mid-write is honoured now that the write is over:
-                    // the user asked to leave, so the walk ends here rather than going on to
-                    // the step after the one they left.
-                    if left {
-                        return WizardEnd::Quit;
-                    }
-                    break;
-                }
+                    why: e.to_string(),
+                });
             }
         }
+        // A tooltip waiting for its delay shortens the read, so the frame that shows it is
+        // drawn when the delay has passed rather than on the next event.
+        let event = match (self.reading, self.view.tip_tick()) {
+            (true, Some(tick)) => match tokio::time::timeout(tick, self.events.next()).await {
+                Ok(event) => event,
+                Err(_) => {
+                    self.view.age_tip(now());
+                    return Flow::Stay;
+                }
+            },
+            (true, None) => self.events.next().await,
+            (false, _) => None,
+        };
+        let Some(Ok(event)) = event else {
+            return Flow::End(WizardEnd::Stopped {
+                code: 1,
+                why: super::run::INPUT_ENDED.to_string(),
+            });
+        };
+        let wanted = match event {
+            // A release is the other half of a press this loop has already acted on.
+            Event::Key(key) if key.kind != KeyEventKind::Release => {
+                self.view.tip = None;
+                press(&mut self.view, key)
+            }
+            Event::Mouse(click) => {
+                self.view.hover(self.canvas.hits(), &click, now());
+                clicked(&mut self.view, self.canvas.hits(), click)
+            }
+            _ => {
+                self.view.tip = None;
+                Asked::Nothing
+            }
+        };
+        match wanted {
+            Asked::Nothing => Flow::Stay,
+            Asked::Quit => Flow::End(WizardEnd::Quit),
+            Asked::Back if self.wizard.can_go_back() => self.go_back().await,
+            Asked::Back if returns => Flow::End(WizardEnd::Quit),
+            Asked::Back if for_later => {
+                self.wizard.leave_for_later();
+                Flow::End(WizardEnd::Later)
+            }
+            Asked::Back => Flow::Stay,
+            Asked::Answer => self.answer().await,
+        }
     }
-    if wizard.is_later() {
-        return WizardEnd::Later;
+
+    /// Ask the step before this one afresh: nothing typed here, a passphrase above all, is
+    /// carried into the field of another step.
+    async fn go_back(&mut self) -> Flow {
+        self.view
+            .wait_for(self.wizard.is_remote().then(|| BACKING.to_string()));
+        let backed = wait_on(
+            &mut self.canvas,
+            self.events,
+            &mut self.reading,
+            &mut self.view,
+            CANCELS,
+            self.wizard.back(),
+        )
+        .await;
+        self.view.wait_for(None);
+        if matches!(backed, Waited::GaveUp) {
+            return Flow::End(WizardEnd::Quit);
+        }
+        self.view.forget();
+        if let Some(code) = self.wizard.stopped() {
+            return Flow::End(WizardEnd::Stopped {
+                code,
+                why: self.wizard.stopped_why().unwrap_or_default().to_string(),
+            });
+        }
+        match backed {
+            Waited::Left(_) => Flow::End(WizardEnd::Quit),
+            _ => Flow::Ask,
+        }
     }
-    match wizard.added() {
-        Some(device) => WizardEnd::Added(device.clone()),
-        None => WizardEnd::Quit,
+
+    /// Send what the step on show holds as its answer.
+    async fn answer(&mut self) -> Flow {
+        let (choice, text) = match self.view.answer() {
+            Ok(answer) => answer,
+            Err(why) => {
+                self.view.notice = Some(why.to_string());
+                return Flow::Stay;
+            }
+        };
+        self.view.wait_for(waiting_for(&self.view.prompt, choice));
+        if self.view.prompt.step == Step::Scan {
+            self.view.listen_to(self.wizard.heard());
+        }
+        let cancels = !writes(&self.view.prompt, choice);
+        // The code is sent with this answer and is not kept: a refused one is asked
+        // for again on an empty row.
+        self.view.spent_the_code();
+        let answered = wait_on(
+            &mut self.canvas,
+            self.events,
+            &mut self.reading,
+            &mut self.view,
+            cancels,
+            self.wizard.answer(choice, text),
+        )
+        .await;
+        self.view.wait_for(None);
+        self.view.listen_to(None);
+        let (answered, left) = match answered {
+            Waited::Done(answered) => (answered, false),
+            Waited::Left(answered) => (answered, true),
+            Waited::GaveUp => return Flow::End(WizardEnd::Quit),
+        };
+        if let Err(failure) = answered {
+            if self.wizard.stopped().is_some() {
+                return Flow::End(WizardEnd::Stopped {
+                    code: failure.code,
+                    why: failure.to_string(),
+                });
+            }
+            self.view.notice = Some(failure.to_string());
+        } else {
+            self.view.notice = None;
+        }
+        // The key that arrived mid-write is honoured now that the write is over:
+        // the user asked to leave, so the walk ends here rather than going on to
+        // the step after the one they left.
+        match left {
+            true => Flow::End(WizardEnd::Quit),
+            false => Flow::Ask,
+        }
     }
 }
 
@@ -916,19 +1032,33 @@ pub(super) enum Waited<T> {
 /// The hit map describes one frame only, so it is emptied here and filled by the screen, which
 /// is what [`render::draw`] does for every other screen. A terminal too small for a screen gets
 /// the same notice they get.
-fn draw<B: Backend>(canvas: &mut Canvas<B>, view: &ShownStep) -> Result<Said, B::Error> {
+fn draw<B: Backend>(canvas: &mut Canvas<B>, view: &mut ShownStep) -> Result<Said, B::Error> {
     let mut said = Said::default();
+    let mut stands = false;
     let (hits, theme) = (&mut *canvas.hits, canvas.theme);
+    let (tip, tips) = (view.tip, view.tips);
     canvas.terminal.draw(|frame| {
         hits.clear();
         let area = frame.area();
         frame.buffer_mut().set_style(area, theme.style(Role::Text));
         if render::fits(area) {
             said = screens::wizard::draw(frame, area, view, theme, hits);
+            // The tooltip goes over the finished frame, and only while its key is still under
+            // its cell.
+            let scene = view.scene_of(said);
+            let standing =
+                tooltip::standing_with(tip, tips, hits, &|hit| tooltip::wizard_text(hit, scene));
+            stands = standing.is_some();
+            if let (Some(held), Some(lines)) = (tip.filter(|held| held.shown), standing) {
+                tooltip::draw(frame, area, held.at, &lines, theme, None, hits);
+            }
         } else {
             render::too_small(frame, area, theme);
         }
     })?;
+    if !stands {
+        view.tip = None;
+    }
     Ok(said)
 }
 
@@ -1018,6 +1148,7 @@ async fn setup_on<E: Effects>(
         &mut wizard,
         &look.theme,
         Leaving::Nowhere,
+        config.tui.tooltips && config.tui.mouse,
     )
     .await;
     let device = match end {
@@ -1109,3 +1240,9 @@ async fn setup_on<E: Effects>(
 mod remote_tests;
 #[cfg(test)]
 mod tests;
+
+/// The clock the tooltip's delay is measured on: the real one, or the paused one a test runs
+/// under.
+fn now() -> Instant {
+    tokio::time::Instant::now().into_std()
+}

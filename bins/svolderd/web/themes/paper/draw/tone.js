@@ -28,9 +28,6 @@ export function pointsOf(tone) {
   }));
 }
 
-/** The curve's path in the plot's own box. */
-export const curvePath = curveD;
-
 /** The value of step `raw` in `rows` (`[[value, words], …]`), or nothing for one that is not a
  * number. */
 function entry(rows, raw) {
@@ -62,7 +59,7 @@ export function heldGraph(tone, steps, band, raws) {
   }
   const at = markerPoint('eq', bands[band - 1]);
   return {
-    d: curvePath(responseDb(bands, FREQS)),
+    d: curveD(responseDb(bands, FREQS)),
     point: { x: at.x / VIEW_WIDTH, y: at.y / VIEW_HEIGHT },
   };
 }

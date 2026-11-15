@@ -63,6 +63,13 @@ pub enum ConfigError {
     /// Another writer held the file's lock until the wait ran out.
     #[error("config io {0}: {BUSY}")]
     Busy(PathBuf),
+    /// The file is gone and the writer was told to leave it so rather than start one from the
+    /// template ([`Config::while_file_must_exist`]); the words are the daemon's missing-file
+    /// refusal.
+    ///
+    /// [`Config::while_file_must_exist`]: crate::Config::while_file_must_exist
+    #[error("{}", crate::socket::daemon_version::config_missing_refusal(&.0.display().to_string()))]
+    Gone(PathBuf),
     /// A writer refused a preset's name: taken, or not a name the core accepts. The words are the
     /// core's own ([`NameRefusal`]'s), so a front end tells the two apart without reading them.
     #[error("config: {0}")]
@@ -118,7 +125,7 @@ impl ConfigError {
             ConfigError::Taken { .. } | ConfigError::Name(NameRefusal::Taken(_)) => Reason::Taken,
             ConfigError::Name(_) => Reason::BadName,
             ConfigError::Missing { .. } => Reason::Missing,
-            ConfigError::ReadOnly(_) => Reason::ReadOnly,
+            ConfigError::ReadOnly(_) | ConfigError::Gone(_) => Reason::ReadOnly,
             ConfigError::Busy(_) => Reason::FileBusy,
             ConfigError::Parse(_) | ConfigError::Schema(_) | ConfigError::UnitTwice { .. } => {
                 Reason::Invalid
@@ -130,3 +137,39 @@ impl ConfigError {
 
 /// The words a lock still held when the wait runs out fails with.
 pub(crate) const BUSY: &str = "another svolder is writing this file";
+
+/// A serde or TOML parser's `message` without the value it found: `invalid type: integer
+/// `4321`, expected a string` reads `invalid type: integer, expected a string`. A value that
+/// does not fit may be the passphrase, and an answer never shows one back.
+pub(crate) fn without_value(message: &str) -> String {
+    let wrong_value =
+        message.starts_with("invalid type: ") || message.starts_with("invalid value: ");
+    if !wrong_value {
+        return message.to_string();
+    }
+    let (found, rest) = match message.rsplit_once(", expected") {
+        Some((found, rest)) => (found, format!(", expected{rest}")),
+        None => (message, String::new()),
+    };
+    let found = match found.find(['`', '"']) {
+        Some(at) => found[..at].trim_end(),
+        None => found,
+    };
+    format!("{found}{rest}")
+}
+
+/// `line L, column C` of byte `offset` in `text`, both counted from 1.
+pub(crate) fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
+    let mut end = offset.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let before = &text[..end];
+    let line = before.matches('\n').count() + 1;
+    let column = before
+        .rsplit('\n')
+        .next()
+        .map_or(0, |last| last.chars().count())
+        + 1;
+    (line, column)
+}

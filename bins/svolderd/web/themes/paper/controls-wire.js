@@ -10,7 +10,8 @@
 // the write still to be answered), so a change from elsewhere does not move what is under the
 // hand: it is drawn from the newest model once the hand is away.
 
-import { dragAlong, sliderKeys } from './gestures.js';
+import { dragAlong, sliderKeys } from '../../core/gestures.js';
+import { stepWords } from '../../core/words.js';
 import { closeList, closeOf, openList } from './lists.js';
 import { place } from './place.js';
 import { rawAt } from './ruler.js';
@@ -73,7 +74,7 @@ export function wireControls({
     mark.dataset.at = ((raw - c.lo) / (c.hi - c.lo)).toFixed(5);
     place(scale);
     // The device's own words for the step where it gave them, the number where it did not.
-    const text = c.texts?.[raw - c.lo] ?? String(raw);
+    const text = stepWords(c, raw);
     scale.setAttribute('aria-valuenow', String(raw));
     scale.setAttribute('aria-valuetext', text);
     const word = scale.closest('.p-row')?.querySelector('.p-line .p-w, .p-line .p-val');

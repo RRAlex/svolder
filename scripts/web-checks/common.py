@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 # the browsers are snaps here, found on PATH when they are there
@@ -37,6 +38,37 @@ SVOLDER = os.environ.get('SVOLDER', f'{REPO}/target/debug/svolder')
 LIVE_ASSETS = os.environ.get('SMOKE_EMBEDDED') != '1' and os.environ.get('SVOLDERD') is None
 
 os.makedirs(CHECKS, exist_ok=True)
+
+# The files each browser check loads, for touched.py: the page's own requests (path only, the
+# daemon's address left out) of every browser this process ran, kept in
+# target/web-checks/deps/<script>-<engine>@<pid>.txt, one path per line, rewritten when a browser
+# closes (touched.py unions the files of a label).
+DEPS = f'{CHECKS}/deps'
+_loaded = {}
+
+
+def _note_loaded(engine, urls):
+    """Add the page's own requests (`urls`, absolute) to this check's record."""
+    label = f'{os.path.splitext(os.path.basename(sys.argv[0] or "check"))[0]}-{engine}'
+    paths = _loaded.setdefault(label, set())
+    for u in urls:
+        p = urllib.parse.urlsplit(u)
+        if p.scheme == 'http' and p.hostname == '127.0.0.1':
+            paths.add(p.path)
+
+
+def _write_loaded():
+    """Write each record; a failure to write never fails the check."""
+    try:
+        os.makedirs(DEPS, exist_ok=True)
+        for label, paths in _loaded.items():
+            if paths:
+                # one file per process: the sweeps run children of the same check side by side
+                with open(f'{DEPS}/{label}@{os.getpid()}.txt', 'w') as f:
+                    f.write(''.join(f'{p}\n' for p in sorted(paths)))
+    except OSError:
+        pass
+
 
 # every browser started, closed at exit even when a check dies
 _live = []
@@ -440,7 +472,9 @@ class Chromium:
             else:
                 self.events.append(msg)
                 m, p = msg['method'], msg.get('params', {})
-                if m == 'Runtime.exceptionThrown':
+                if m == 'Network.requestWillBeSent':
+                    _note_loaded('chromium', [p['request']['url']])
+                elif m == 'Runtime.exceptionThrown':
                     d = p['exceptionDetails']
                     self.errors.append('exception: ' + (d.get('exception', {}).get('description')
                                                         or d.get('text', '')))
@@ -547,6 +581,7 @@ class Chromium:
             self.loop.run_until_complete(self.ws.close())
         except Exception:
             pass
+        _write_loaded()
         reap(self.proc)
         kill_using(self.profile)
         if self in _live:
@@ -648,7 +683,15 @@ class Firefox:
     def _preload(self):
         """Install the error collector as a WebDriver BiDi preload script (script.addPreloadScript),
         so it runs before the first script of every page from now on."""
-        self.preload("window.__errs = [];"
+        # pagehide keeps the page's resource entries in sessionStorage, so a page that navigates
+        # itself (a reload, a link) does not lose them: _harvest reads them back
+        self.preload("performance.setResourceTimingBufferSize(5000); window.__errs = [];"
+                     " addEventListener('pagehide', () => { try {"
+                     " const k = '__svolder_loaded';"
+                     " const s = new Set(JSON.parse(sessionStorage.getItem(k) || '[]'));"
+                     " performance.getEntriesByType('resource').forEach(e => s.add(e.name));"
+                     " s.add(location.href); sessionStorage.setItem(k, JSON.stringify([...s]));"
+                     " } catch (e) {} });"
                      " addEventListener('error', e => window.__errs.push('error: ' + e.message));"
                      " addEventListener('unhandledrejection',"
                      " e => window.__errs.push('rejection: ' + e.reason));")
@@ -668,7 +711,17 @@ class Firefox:
                     raise RuntimeError(reply)
         asyncio.run(go())
 
+    def _harvest(self):
+        """Note what the page has loaded so far (the resource timing entries of its document)."""
+        try:
+            _note_loaded('firefox', self.ev(
+                'performance.getEntriesByType("resource").map(e => e.name).concat([location.href],'
+                ' JSON.parse(sessionStorage.getItem("__svolder_loaded") || "[]"))'))
+        except Exception:
+            pass
+
     def goto(self, url, settle=0.8):
+        self._harvest()
         self._post('/url', {'url': url})
         self.sleep(settle)
 
@@ -769,6 +822,8 @@ class Firefox:
         if self not in _live:
             return
         if self.sid is not None:
+            self._harvest()
+            _write_loaded()
             try:
                 self._post('', method='DELETE')
             except Exception:

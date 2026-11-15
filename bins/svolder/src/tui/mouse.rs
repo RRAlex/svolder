@@ -17,6 +17,7 @@ use ratatui::layout::{Position, Rect};
 use super::app::curve_drag::{self, Gesture};
 use super::app::glide::Bar;
 use super::app::{App, Intent, Pane, Screen, SettingsBox, Side, ToneRow};
+use super::boxes::device_presets;
 
 /// The longest two left presses on the same cell can be apart and still make a double-click:
 /// crossterm reports every press alone, so [`note_press`] tells a double-click by the time
@@ -452,10 +453,13 @@ pub fn note_press(app: &mut App, event: &MouseEvent, now: Instant) {
 /// `more ↓` of its border goes to the first or last row, and a left click outside the box closes
 /// it as `Esc` does. Its prompts and questions are answered from the keyboard.
 ///
-/// The device editor, the removal question, the device's own presets, a band's edit line and the
-/// `q` question are answered from the keyboard: a click inside one asks for nothing, and a left
-/// click outside it presses `Esc`, which closes it or cancels what it asks, and reaches nothing
-/// under it.
+/// The device's own preset list is the same: its rows, wheel, `more` words and outside click act
+/// as the preset list's do; its header takes no click, and its save question is answered from the
+/// keyboard.
+///
+/// The device editor, the removal question, a band's edit line and the `q` question are answered
+/// from the keyboard: a click inside one asks for nothing, and a left click outside it presses
+/// `Esc`, which closes it or cancels what it asks, and reaches nothing under it.
 ///
 /// The toast is the one exception to all of that: it is drawn over every box, so a left click
 /// on it dismisses it whatever box is open and reaches nothing under it; a right press, a
@@ -522,7 +526,7 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
     }
     // The preset list is clicked and scrolled while it shows its presets; a click outside it was
     // answered above.
-    if app.presets.choosing() && !app.overlays.quitting {
+    if (app.presets.choosing() || device_presets::choosing(app)) && !app.overlays.quitting {
         return match (event.kind, hits.hit_at(event.column, event.row)) {
             (MouseEventKind::Down(MouseButton::Left), Some(&Hit::PresetRow(row))) => {
                 Some(MouseAction::PresetPick(row))
@@ -734,6 +738,8 @@ fn intent(mut intents: Vec<Intent>) -> Option<MouseAction> {
     intents.pop().map(MouseAction::Intent)
 }
 
+#[cfg(test)]
+mod device_preset_tests;
 #[cfg(test)]
 mod preset_tests;
 #[cfg(test)]

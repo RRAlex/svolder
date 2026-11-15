@@ -19,6 +19,7 @@ use svolder_profiles::tone::preset::same_name;
 use crate::backend::{Failure, Globals};
 use crate::cli::HopsCommand;
 use crate::commands::device::{config_failure, refuse_if_daemon_misses, reload_daemon_for_presets};
+use crate::reach::guarded;
 use crate::recovery::Kind;
 
 /// Carry out one of the `hops` sub-commands; a bare `hops` lists.
@@ -206,7 +207,7 @@ async fn add(
         note,
         after,
     };
-    Config::add_hop(&path, &hop).map_err(config_failure)?;
+    guarded(&path, || Config::add_hop(&path, &hop)).map_err(config_failure)?;
     written(
         g,
         &config,
@@ -248,7 +249,7 @@ async fn link(
         note,
         after,
     };
-    Config::add_hop(&path, &hop).map_err(config_failure)?;
+    guarded(&path, || Config::add_hop(&path, &hop)).map_err(config_failure)?;
     written(
         g,
         &config,
@@ -268,34 +269,36 @@ async fn edit(g: &Globals<'_>, id: &str, change: Change) -> Result<(), Failure> 
     let kind = change.kind.as_deref().map(kind_of).transpose()?;
     let mut linked_refusal = None;
     let mut changed = String::new();
-    let outcome = Config::edit_hop(&path, old.id(), |old| {
-        let what = match (&old.what, change.name, kind) {
-            (HopWhat::Declared { kind, name }, new_name, new_kind) => HopWhat::Declared {
-                kind: new_kind.unwrap_or(*kind),
-                name: new_name.unwrap_or_else(|| name.clone()),
-            },
-            (HopWhat::Linked { device }, None, None) => HopWhat::Linked {
-                device: device.clone(),
-            },
-            (HopWhat::Linked { device }, _, _) => {
-                let words = format!(
-                    "{device:?} links a device, which gives it its name and kind; \
+    let outcome = guarded(&path, || {
+        Config::edit_hop(&path, old.id(), |old| {
+            let what = match (&old.what, change.name, kind) {
+                (HopWhat::Declared { kind, name }, new_name, new_kind) => HopWhat::Declared {
+                    kind: new_kind.unwrap_or(*kind),
+                    name: new_name.unwrap_or_else(|| name.clone()),
+                },
+                (HopWhat::Linked { device }, None, None) => HopWhat::Linked {
+                    device: device.clone(),
+                },
+                (HopWhat::Linked { device }, _, _) => {
+                    let words = format!(
+                        "{device:?} links a device, which gives it its name and kind; \
                      remove the hop and add it declared to name it"
-                );
-                linked_refusal = Some(words.clone());
-                return Err(ConfigError::Parse(words));
-            }
-        };
-        let hop = Hop {
-            what,
-            note: match change.note {
-                Some(note) => note,
-                None => old.note.clone(),
-            },
-            after: change.after.or_else(|| old.after.clone()),
-        };
-        changed = hop.id().trim().to_string();
-        Ok(hop)
+                    );
+                    linked_refusal = Some(words.clone());
+                    return Err(ConfigError::Parse(words));
+                }
+            };
+            let hop = Hop {
+                what,
+                note: match change.note {
+                    Some(note) => note,
+                    None => old.note.clone(),
+                },
+                after: change.after.or_else(|| old.after.clone()),
+            };
+            changed = hop.id().trim().to_string();
+            Ok(hop)
+        })
     });
     if let Some(words) = linked_refusal {
         return Err(Failure::of(Kind::Usage, words));
@@ -310,7 +313,7 @@ async fn remove(g: &Globals<'_>, id: &str) -> Result<(), Failure> {
     let (config, path) = loaded()?;
     refuse_if_daemon_misses(g, &config, &path).await?;
     let id = config.hop(id).map(Hop::id).ok_or_else(|| no_such_hop(id))?;
-    Config::remove_hop(&path, id).map_err(config_failure)?;
+    guarded(&path, || Config::remove_hop(&path, id)).map_err(config_failure)?;
     written(g, &config, &path, &format!("removed hop {id:?}")).await;
     Ok(())
 }
@@ -326,7 +329,7 @@ async fn move_to(g: &Globals<'_>, id: &str, position: usize) -> Result<(), Failu
     let (config, path) = loaded()?;
     refuse_if_daemon_misses(g, &config, &path).await?;
     let id = config.hop(id).map(Hop::id).ok_or_else(|| no_such_hop(id))?;
-    Config::move_hop(&path, id, to).map_err(config_failure)?;
+    guarded(&path, || Config::move_hop(&path, id, to)).map_err(config_failure)?;
     written(
         g,
         &config,

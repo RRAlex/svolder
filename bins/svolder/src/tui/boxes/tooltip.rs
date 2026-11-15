@@ -69,38 +69,51 @@ impl Tooltip {
 /// Over nothing, or with a box open or mouse capture off, it hides it. Every other event (a
 /// press, a release, a drag, the wheel) hides it.
 pub fn hover(app: &mut App, hits: &HitMap, event: &MouseEvent, now: Instant) {
-    if let Some(tooltip) = app.pointer.tooltip.as_mut() {
+    let held = app.pointer.tooltip;
+    app.pointer.tooltip = hovered(held, app.tips_allowed(), hits, event, now, &|hit| {
+        text(hit, app)
+    });
+}
+
+/// [`hover`] for any front end: the tooltip `held` before `event`, whether tooltips are
+/// `allowed`, and `said`, which gives the words for a target (or `None` where it has none).
+/// Returns the tooltip held after the event.
+pub fn hovered(
+    held: Option<Tooltip>,
+    allowed: bool,
+    hits: &HitMap,
+    event: &MouseEvent,
+    now: Instant,
+    said: &dyn Fn(Hit) -> Option<Vec<String>>,
+) -> Option<Tooltip> {
+    let mut held = held;
+    if let Some(tooltip) = held.as_mut() {
         tooltip.age(now);
     }
-    if event.kind != MouseEventKind::Moved || !app.tips_allowed() {
-        app.pointer.tooltip = None;
-        return;
+    if event.kind != MouseEventKind::Moved || !allowed {
+        return None;
     }
     let at = (event.column, event.row);
-    let Some((hit, said)) = hits
+    let (hit, words) = hits
         .hit_at(at.0, at.1)
         .copied()
-        .and_then(|hit| Some((hit, text(hit, app)?)))
-    else {
-        app.pointer.tooltip = None;
-        return;
-    };
-    let shown = match app.pointer.tooltip {
-        Some(held) if text(held.hit, app).as_ref() == Some(&said) => {
-            if !held.shown {
-                app.pointer.tooltip = Some(Tooltip { hit, at, ..held });
-            }
-            return;
+        .and_then(|hit| Some((hit, said(hit)?)))?;
+    let shown = match held {
+        Some(prior) if said(prior.hit).as_ref() == Some(&words) => {
+            return Some(match prior.shown {
+                true => prior,
+                false => Tooltip { hit, at, ..prior },
+            });
         }
-        Some(held) => held.shown,
+        Some(prior) => prior.shown,
         None => false,
     };
-    app.pointer.tooltip = Some(Tooltip {
+    Some(Tooltip {
         hit,
         at,
         since: now,
         shown,
-    });
+    })
 }
 
 /// Hide the tooltip unless the frame just drawn found its target still under its cell
@@ -115,13 +128,26 @@ pub fn settle(app: &mut App, stands: bool) {
 /// forbids it: a box open, mouse capture off. The frame asks this once and both draws the lines
 /// and keeps the tooltip on the answer.
 pub(crate) fn standing(app: &App, hits: &HitMap) -> Option<Vec<String>> {
-    let tooltip = app.pointer.tooltip?;
-    if !app.tips_allowed() {
+    standing_with(app.pointer.tooltip, app.tips_allowed(), hits, &|hit| {
+        text(hit, app)
+    })
+}
+
+/// [`standing`] for any front end: `held` is the tooltip held, `allowed` whether tooltips may
+/// show, and `said` gives the words for a target.
+pub(crate) fn standing_with(
+    held: Option<Tooltip>,
+    allowed: bool,
+    hits: &HitMap,
+    said: &dyn Fn(Hit) -> Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    let tooltip = held?;
+    if !allowed {
         return None;
     }
     let (x, y) = tooltip.at;
-    let under = text(*hits.hit_at(x, y)?, app)?;
-    (Some(&under) == text(tooltip.hit, app).as_ref()).then_some(under)
+    let under = said(*hits.hit_at(x, y)?)?;
+    (Some(&under) == said(tooltip.hit).as_ref()).then_some(under)
 }
 
 /// Where a tooltip of `lines` goes on a screen of `screen`'s size for a pointer at `at`: under
@@ -415,7 +441,29 @@ fn key_word(code: KeyCode, app: &App) -> Option<Vec<String>> {
         .into_iter()
         .find(|hint| hint.code == code)
         .or_else(|| keys::all().iter().find(|hint| hint.code == code))?;
+    hint_tip(hint)
+}
+
+/// What a tooltip on one key says: what it does and the key, from the key table.
+fn hint_tip(hint: &keys::KeyHint) -> Option<Vec<String>> {
     lines(&[&format!("{} · {}", hint.does, hint.label)])
+}
+
+/// What a tooltip on `hit` says in the setup wizard, whose only targets with one are the keys
+/// of its footer: the words the key line itself draws for `scene` (a key's words can change
+/// with the step), in the form the same key says on a pane's border.
+pub(crate) fn wizard_text(hit: Hit, scene: keys::Scene) -> Option<Vec<String>> {
+    match hit {
+        Hit::Footer(at) => {
+            let hint = *keys::hints_for(Screen::Setup).get(at)?;
+            lines(&[&format!(
+                "{} · {}",
+                hint.does_in(scene),
+                hint.label_in(scene)
+            )])
+        }
+        _ => None,
+    }
 }
 
 /// A row of the Controls pane, by the control it shows or the Host group's row it is: the

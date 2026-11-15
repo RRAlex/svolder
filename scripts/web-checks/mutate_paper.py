@@ -16,9 +16,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 P = 'themes/paper/'
 PAGE = {
     'place sets nothing': [
-        (P + 'place.js', "const at = percent(el.dataset.at);", "const at = null;"),
-        (P + 'place.js', "const left = percent(el.dataset.x);", "const left = null;"),
-        (P + 'place.js', "const top = percent(el.dataset.y);", "const top = null;"),
+        ('core/place.js', "const at = percent(el.dataset.at);", "const at = null;"),
+        ('core/place.js', "const left = percent(el.dataset.x);", "const left = null;"),
+        ('core/place.js', "const top = percent(el.dataset.y);", "const top = null;"),
     ],
     'Auto ignores the system': [
         (P + 'style.css', ':not([data-scheme="light"])', ''),

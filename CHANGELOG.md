@@ -8,6 +8,81 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.34.5
+
+- **`make demo` uses far less CPU**: the demo targets build and run an optimised `demo` profile
+  (target/demo) instead of a debug build: with music playing the demo took about 27 % of a core,
+  now about 4 %, and it rebuilds faster too.
+- **The TUI no longer analyses the audio twice**: when the demo's daemon stops mid-run, the TUI
+  stopped relying on it and kept a spectrum and tempo analysis of its own running for the rest of
+  the session; it no longer does, the stopped daemon is reaped (no zombie) and a toast says so.
+  A wide Spectrum row ends with a dim word, `daemon` or `own`, for where its bands come from.
+- **Lighter redraws**: while only the Spectrum row moves, the TUI redraws 20 times a second
+  instead of 30; keys, drags and animations keep 30.
+- **The TUI stays live while another program writes the config**: Settings, Connect and device
+  changes no longer freeze keys and frames while the daemon or another svolder holds
+  `config.toml`'s lock; the writes go one at a time, in order, and `q` or Ctrl-C quits once the
+  write in hand is through.
+- **Track time no longer jumps back**: Signal's Now playing time and the player hop's time stayed
+  right only until something else redrew them (a facts reading, a DAC volume turn); one clock now
+  counts the track time in every theme.
+- **Night drive's volume keys** go on from the device's reading once another hand moved the
+  volume, as Signal and Paper already did.
+- **Config fixes**: a deleted `config.toml` is no longer recreated from the template by a daemon
+  write or by a CLI command run with `--transport ble` or `--transport fake`; a passphrase of the
+  wrong type in `config.toml` is no longer quoted back in an error (the line and column stay); a
+  file deleted right after a hand edit toasts the missing-file notice in the TUI too; `svolder
+  web` and identify against a too-old daemon say so in the same words as the other commands.
+- **Contributors**:
+  - `make web-touched` lists the web checks a change affects (from what each check loaded on its
+    last run, `scripts/web-checks/load-map.json`); it never lists too few: a check with no record,
+    or a file no record names, lists more.
+  - The full web gate reuses a check's last pass when nothing it depends on changed (its script,
+    the web areas it loads, the files cargo builds the binaries from, the browsers); a flaky pass
+    is never kept; `make web-checks-cold` runs everything and is required before a tag.
+  - `make check` runs the test suite once (on a private bus with no BlueZ) instead of twice;
+    `make test T='-p <crate>'` tests one crate.
+  - Tests that failed only on a heavily loaded machine wait on what they need instead of fixed
+    sleeps (the TUI `waiting` tests, two flaky tests, the process-manager tests).
+  - Every thread svolder and svolderd start has a name, so `top -H` shows which one burns.
+  - Web themes share more of the core: the track clock (`core/clock.js`), the volume ask
+    (`core/volume-ask.js`), gestures and placement; large TUI files split (Settings, the backend,
+    the setup wizard's walk).
+
+## 0.34.4
+
+- **Signal's failed cover stays away**: a cover whose picture could not be loaded came back on
+  each update of the player and flashed above the title on a phone; it is now left out until the
+  track's cover changes, and a new cover is tried again.
+
+## 0.34.3
+
+- **Night drive turns the EQ off from its main view**: the dash has an `EQ` key that turns the EQ
+  of the side shown off and on: the computer's EQ, or the device's tone mode between Flat and EQ
+  (Loudness counts as off). Before, the device's Flat was only in the DEVICE sheet.
+- **A bigger cover in Signal**: the player puts the track's cover to the right of the title,
+  progress and transport, 200 to 300 px wide in the amber glow; on a phone it sits above the title
+  at 240 px. With no cover there is no empty box.
+- **The Loki Max's preset list takes the mouse**: in the TUI's device preset list (`p` on the
+  device screen) a click on a slot or built-in does what Enter does, the wheel moves the focus, and
+  a click on `more ↑` or `more ↓` goes to the first or last row.
+- **Tooltips in the setup wizard**: resting the pointer on a key in `svolder setup`'s key line
+  shows what the key does, as the TUI's tooltips do, with the same delay and words; the
+  `[tui] tooltips` setting applies.
+- **Night drive's track time no longer jumps back**: a volume or mute press made the dash's track
+  time return to the last reading of the player (a pause, a seek or a new track).
+- **Tested on real hardware**: the README and the release notes now say some real Schiit devices
+  have been tested, not only the fake device and the simulator; the README's pictures no longer
+  link their text versions.
+- **`make demo` and the other demo targets run again**: since 0.34.0 they stopped at once with
+  `env: '-u': No such file or directory`, because the line that sets the demo's AutoEq address put
+  an assignment before `env`'s own options. `make check` now runs that line, so it cannot break
+  again unnoticed.
+- **Contributors**: every temporary file the make targets and scripts make, and the tests the make
+  targets run, lives under `/tmp/svolder`, which is made 0700 and refused when it is a link or not
+  yours, and `make check` fails on a directory its run left there; the pty harness cases wait on
+  what the screen shows under one deadline and hold on a loaded machine.
+
 ## 0.34.2
 
 - **Contributors**: the daemon's fake-host test asks for the host's view until the fake host is up,

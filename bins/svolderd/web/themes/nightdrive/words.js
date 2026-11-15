@@ -41,6 +41,8 @@ export const DASH = Object.freeze({
   quieter: 'Quieter',
   louder: 'Louder',
   mute: 'MUTE',
+  eq: 'EQ',
+  eqLabel: (on) => `EQ ${on ? 'on' : 'off'}`,
   input: 'Input',
   power: 'Power',
   previous: 'Previous',

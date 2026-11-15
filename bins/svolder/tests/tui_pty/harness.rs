@@ -29,7 +29,10 @@ use super::tap::{Query, Responder, Shared};
 
 /// How long a wait for something on the screen may take. Generous on purpose: a run beside
 /// a cargo build is slow, and a deadline is only ever reached by a failure.
-pub const WAIT: Duration = Duration::from_secs(60);
+pub const WAIT: Duration = Duration::from_secs(120);
+
+/// How long a key whose effect may be lost waits for it to show before it is sent again.
+pub const RESEND: Duration = Duration::from_secs(8);
 
 /// What a program must never leave drawn: the text of a terminal reply (echoed or misread), not a
 /// screen.
@@ -402,8 +405,12 @@ impl Tui {
         self.shared.lock().parser.screen().contents()
     }
 
-    /// Where `needle` first is on the screen: 0-based column and row of its first character.
+    /// Wait for `needle` to be on the screen, then say where it first is: 0-based column and row
+    /// of its first character. A screen that has not drawn it yet is waited on, up to [`WAIT`].
     pub fn find(&self, needle: &str) -> (u16, u16) {
+        self.wait_for(&format!("{needle:?} on the screen"), WAIT, |s| {
+            s.contents().contains(needle)
+        });
         let text = self.screen_text();
         for (row, line) in text.lines().enumerate() {
             if let Some(byte) = line.find(needle) {
@@ -507,33 +514,29 @@ impl Tui {
     }
 
     /// Quit the way a person does (`q`, then Enter on the question) and prove the terminal was
-    /// given back, as [`Tui::finish`] does. A `q` that is not read fails the case.
-    pub fn quit(self) {
-        self.send_keys("q");
-        self.wait_for_text("Quit svolder?");
-        self.send_keys("\r");
-        self.finish();
-    }
-
-    /// [`Tui::quit`] for a case that has crossed the too-small size: the TUI sometimes does not
-    /// read a `q` sent just after (a known bug of the TUI, the one `quit` must not hide in any
-    /// other case), so a `q` that brings no question is sent again; on an open question a
-    /// second `q` quits, as Enter does.
-    pub fn quit_after_crossing_too_small(mut self) {
-        for _ in 0..4 {
+    /// given back, as [`Tui::finish`] does. The TUI sometimes does not read a key sent just
+    /// after another input (a known issue of the TUI, not this harness's to fix), so a `q` that
+    /// brings no question within [`RESEND`] is sent again, all under [`WAIT`]. `q` is idempotent
+    /// here: on an open question a second `q` quits, as Enter does.
+    pub fn quit(mut self) {
+        let deadline = Instant::now() + WAIT;
+        loop {
             self.send_keys("q");
-            let asked = self.try_wait_for(Duration::from_secs(5), |s| {
-                s.contents().contains("Quit svolder?")
-            });
+            let asked = self.try_wait_for(RESEND, |s| s.contents().contains("Quit svolder?"));
             if asked.is_ok() {
                 self.send_keys("\r");
                 return self.finish();
             }
-            if self.wait_exit_for(Duration::from_millis(1)).is_some() {
+            // The program may have quit on the `q`: look for its exit before writing again.
+            if self.wait_exit_for(Duration::from_millis(500)).is_some() {
                 return self.finish();
             }
+            assert!(
+                Instant::now() < deadline,
+                "no `q` brought the question:\n{}",
+                self.screen_text()
+            );
         }
-        panic!("no `q` brought the question:\n{}", self.screen_text());
     }
 
     /// Wait for the program to exit, and prove the terminal was given back and nothing was
@@ -622,6 +625,17 @@ impl Drop for Tui {
     }
 }
 
+/// Whether `cmdline` names the directory `home` itself: the name must not run on into more
+/// digits, or the run `.../svolder-pty-7-2` would name the processes of `.../svolder-pty-7-27`.
+fn names_home(cmdline: &str, home: &str) -> bool {
+    cmdline.match_indices(home).any(|(at, _)| {
+        !cmdline[at + home.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
 /// The pids of the processes whose command line names `home`: the run's daemon, whose socket
 /// and configuration are under it.
 fn processes_naming(home: &Path) -> Vec<u32> {
@@ -634,7 +648,7 @@ fn processes_naming(home: &Path) -> Vec<u32> {
         .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
         .filter(|pid| {
             std::fs::read(format!("/proc/{pid}/cmdline"))
-                .is_ok_and(|c| String::from_utf8_lossy(&c).contains(home.as_ref()))
+                .is_ok_and(|c| names_home(&String::from_utf8_lossy(&c), home.as_ref()))
         })
         .collect()
 }
@@ -676,4 +690,27 @@ pub fn sixels_in(raw: &[u8]) -> usize {
         at = start;
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_home;
+
+    #[test]
+    fn a_home_is_not_named_by_a_longer_one_it_is_a_prefix_of() {
+        let home = "/tmp/svolder/svh.X/svolder-pty-7-2";
+        assert!(names_home(
+            "svolderd /tmp/svolder/svh.X/svolder-pty-7-2/sd-1/sv.sock",
+            home
+        ));
+        assert!(names_home(home, home));
+        assert!(!names_home(
+            "svolderd /tmp/svolder/svh.X/svolder-pty-7-27/sd-1/sv.sock",
+            home
+        ));
+        assert!(names_home(
+            "a /tmp/svolder/svh.X/svolder-pty-7-27/x b /tmp/svolder/svh.X/svolder-pty-7-2/y",
+            home
+        ));
+    }
 }

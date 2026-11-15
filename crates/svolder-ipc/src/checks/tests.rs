@@ -529,14 +529,12 @@ fn an_unparsable_config_fails_with_one_line_of_the_parsers_message() {
     p.config = Some(Ok("schema = 1\nthis is not toml\n".into()));
     let config = named(run(&p, sock(), false), CONFIG);
     assert!(matches!(config.state, State::Fail), "{config:?}");
-    // The parser lays the offending line out under its message; a reason is read, and
-    // logged, as one line, and the first is the one that says where the error is.
+    // A reason is read, and logged, as one line: the parser's words say where the error is.
     let whole = Config::parse("schema = 1\nthis is not toml\n")
         .unwrap_err()
         .to_string();
-    assert!(whole.contains('\n'), "{whole}");
     assert!(!config.reason.contains('\n'), "{config:?}");
-    assert_eq!(config.reason, whole.lines().next().unwrap());
+    assert_eq!(config.reason, whole);
     assert!(config.reason.contains("line 2"), "{config:?}");
     assert!(config.fix.is_none(), "{config:?}");
     assert_eq!(exit_code(&run(&p, sock(), false)), 2);

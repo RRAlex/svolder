@@ -20,7 +20,7 @@ export function usable() {
   const part = document.getElementById('part-tone');
   const body = document.body.classList;
   return Boolean(part) && !part.hasAttribute('data-inert') && !part.closest('[inert]')
-    && body.contains('writes') && !body.contains('lost');
+    && ember.core.actions.canWrite() && !body.contains('lost');
 }
 
 /** Whether `element` is a control that is switched off. */
@@ -38,7 +38,7 @@ export function paintEditor() {
     delete box.dataset.n;
   } else if (box.dataset.n !== String(point.n) || !box.querySelector('.stp')) {
     box.dataset.n = String(point.n);
-    box.innerHTML = editorBody(point, !document.body.classList.contains('writes'));
+    box.innerHTML = editorBody(point, !ember.core.actions.canWrite());
   } else {
     for (const [param, text] of Object.entries(pointWords(point))) {
       const value = box.querySelector(`.stp[data-param="${param}"] .v`);

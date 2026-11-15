@@ -186,9 +186,11 @@ fn run_program(program: &Path, args: &[&str], text: &str, moment: Duration) -> R
             Ok(Some(status)) => return Err(format!("exited with {status}")),
             Ok(None) if Instant::now() < until => std::thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
+                let _ = std::thread::Builder::new()
+                    .name("svolder-reap".to_string())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
                 return Ok(Ran::Running);
             }
             Err(e) => return Err(e.to_string()),

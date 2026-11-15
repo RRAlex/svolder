@@ -64,11 +64,11 @@ of a run on a quiet machine appear in `target/web-checks/timing.tsv`.
 
 | Rung | What to run | About |
 |---|---|---|
-| A task (in the implementer's own worktree) | `cargo fmt` and `clippy` on the touched crates, `cargo test -p <crate>`, `make web-snippets`, the node harnesses (`node scripts/web-checks/node/NAME.mjs`, seconds each), and the browser checks the change touches by name, in Chromium: `python3 scripts/web-checks/NAME.py chromium`. For a whole web change `make web-checks-task` | 1 to 6 minutes by name; the task gate about 30 minutes |
+| A task (in the implementer's own worktree) | `make web-touched` names the checks the change affects (below); `cargo fmt` and `clippy` on the touched crates, `cargo test -p <crate>`, `make web-snippets`, the node harnesses (`node scripts/web-checks/node/NAME.mjs`, seconds each), and the browser checks the change touches by name, in Chromium: `python3 scripts/web-checks/NAME.py chromium`. For a whole web change `make web-checks-task` | 1 to 6 minutes by name; the task gate about 30 minutes |
 | A lane end (the review) | `make check`, `make web-checks-task`; the checks that changed, in both engines by name | 10 to 20 minutes plus the task gate |
-| A merge to main | `make check`, `make web-checks` (the full gate: every check, Firefox included), `make host-e2e` once, `make e2e` once when the Bluetooth path changed | 35 to 45 minutes of web gate, plus 12 of `make check` |
+| A merge to main | `make check`, `make web-checks` (the full gate: every check, Firefox included; a pool check whose inputs did not change is `cached`, see the result cache), `make host-e2e` once, `make e2e` once when the Bluetooth path changed | a second gate in a row runs only the serial lane (about 30 minutes) and the node harnesses; a cold gate 35 to 120 minutes of web gate, plus 12 of `make check` |
 | A milestone merge | the merge rung, then `make host-e2e` five times, `make preamp-lab`, `nightdrive_timing.py` and the smoke's timing on a quiet machine | about 2 hours, unattended |
-| A release (a tag) | the milestone rung on the export tree with its own `CARGO_TARGET_DIR`, `make repro-check`, `make packages`, `make web-shots` | about 1.5 hours plus the CI build |
+| A release (a tag) | `make web-checks-cold` (the full gate with nothing reused) before the version is tagged, then the milestone rung on the export tree with its own `CARGO_TARGET_DIR`, `make repro-check`, `make packages`, `make web-shots` | about 1.5 hours plus the CI build |
 
 Firefox: the checks of the page's layout, its pointer events, its canvas and its fonts run in both
 engines on every web gate. The logic-only checks (`space_key`, `device_presets`, `core_rows`: the `logic_only` list in `run-all.sh`)
@@ -95,7 +95,9 @@ gate itself), is shared by every gate and lane on the machine: a browser check h
 (`flock -s`), any number at once; a check that asserts a pace holds it exclusive (`flock -x`) and so
 runs with no other browser check of any lane beside it. The re-run of a failed check holds it
 exclusive too, so "failed alone" means alone on the machine's gate. A check that waits more than 10 s
-for the lock prints `waiting for the gate lock (held by another gate)`; the lock is not fair
+for the lock prints `waiting for the gate lock (held by another gate)`, and its row ends with
+`(waited N s for the gate lock)`: the seconds in a check's row and in its verdict are its own, the
+wait is kept out of them (`lockwait.sh`, proved by `gate_wait.sh`); the lock is not fair
 (shared holders keep arriving), so a long wait means another gate's pool is running. On both gates
 these run one at a time in the exclusive lane after the parallel part: `nightdrive_timing.py`
 (Night drive's draw cost, its draws and floor rows a second, the budget's rate rule, its phone budget and the tap under a slowed CPU), `smoke_core.py`
@@ -137,28 +139,85 @@ What stays real-time, and why:
   after about a second", the same shape), `signal_theme.py` (no rate assert, only `within 3 s` waits) and
   `paper.py` (its rate-a-second hits belong to the web-themes lane).
 
+### Which checks a change touches
+
+`make web-touched` (`BASE=<rev>`, default `main`: a lane cut from a release branch passes that
+branch; `BASE=A TO=B` for the diff A to B alone) runs `touched.py`: it lists the checks the changed
+files affect, both engines, each with the file that made it affected, and prints the
+`WEB_CHECKS_ONLY="..." bash scripts/web-checks/run-all.sh` line that runs them. The rule is that it
+never under-selects: when in doubt it lists more and says why (a `WARNING` line).
+
+The map has two halves. A browser check records the files its browsers asked the daemon for on every
+run, in `target/web-checks/deps/<script>-<engine>@<pid>.txt` (`common.py`; an asset path under
+`/assets/` is a file of the web dir; one file per process, so the sweeps' child processes add up and
+`touched.py` unions the files of a label). Those records are kept in the committed
+`scripts/web-checks/load-map.json`, so a fresh worktree has them; a full gate run clears the
+records at its start and rewrites the map at its end, when it passes (`touched.py --refresh` does
+it by hand with `--refresh --replace`; plain `--refresh` only adds, so a partial run's records never shrink an entry; the merge commits the refreshed file after the full gate). Its format, which other tools may read:
+
+```
+{"licence_1": "...", "licence_2": "...",
+ "web_files": ["core/a.js", ...],                 every file of the web dir when it was written
+ "checks": {"nightdrive_theme-chromium": ["core/a.js", ...], ...}}   web-dir-relative paths
+```
+
+A browser check's files are the map's entry, this tree's records, its own script and the helpers
+it imports. A node harness's files are its script and every file its string literals lead to
+(relative to the script, under the web dir or under the repository root), followed through js
+files: js, css, svg, json and rs files (the harness that reads `eq/control.rs` is listed when
+it changes). A harness that names the web dir, or the root, as a base for computed paths depends on
+every web file. A changed file lists every check whose files include it, and besides:
+
+- a web file lists every browser check that loads anything from its area (`core/`, `fonts/`,
+  `themes/<name>/`), so a line missing from a check's entry cannot drop it;
+- a web file lists every browser check with no record (not in the map and not in this tree's
+  records: a fresh worktree, a new check); the note says how many;
+- a web file that no browser check has loaded (a new file, a stale map) lists every browser check;
+- `common.py` lists every browser check;
+- a file of the gate itself (`run-all.sh`, `fingerprint.py`, `gate_cache.sh`, `lockwait.sh`,
+  `gate_wait.sh`) says the full gate is needed (`make web-checks`) and lists every check;
+- another file here that no check reads and that is not a note, `touched.py` or the map prints a
+  `WARNING` and lists every check.
+
+A diff with no file under the web dir or here (a Rust-only diff) lists only the harnesses that name
+a changed file, usually none: the daemon's Rust web code is not mapped. `make web-snippets` runs the
+tool's own self-test on a fixture tree.
+
 ### The result cache
 
-The quick and task gates (`make web-checks-quick`, `make web-checks-task`) do not rerun a pool browser
-check whose last pass is still good; the full gate (`make web-checks`, the merge rung) never reads the
-cache, so it stays cold (it does write a record after each pass). A check's fingerprint
-(`fingerprint.py`) is a hash of the built `svolderd` and `svolder` binaries, the web directory the daemon
-serves, the check's own file, every helper it really imports or opens here (`common.py` and the rest,
-followed through their own imports; not file names in comments), the engine's name, the browsers'
-versions, the env that moves the daemon or the web dir (`SVOLDERD`, `SVOLDER`, `SMOKE_WEB`,
-`SMOKE_EMBEDDED`) and the env that chooses a check's cases (`ND_ONLY`, `ND_CASES`, `WEB_CHECK_THEMES`,
-`WEB_CHECK_POPUPS`,
-`HAZE_SECTIONS`, `SCROLL_SECTIONS`, `HIDDEN_SECS`, `LOOK_*`, `SVOLDER_FAKE_*`, `SECS`, `REPS`, the stills
-switches). A pass stored under the same fingerprint is reused: the check is not run, its line says
-`cached`, its row in `timing.tsv` has the verdict `cached` and 0 s, and the total line names the cached
-checks. Any change to any of those inputs changes the fingerprint and the check runs.
+Every gate (`make web-checks`, `make web-checks-quick`, `make web-checks-task`) skips a pool browser
+check whose last pass is still good. A check's fingerprint (`fingerprint.py`) is a hash of: the files cargo's dep-info lists for the `svolderd` and
+`svolder` binaries (`target/debug/*.d`: every crate's sources, `profiles/*.toml`, the templates) apart
+from the web dir except the daemon's own `wordmark.svg` and icons, `Cargo.*` and the compiler's version
+(taken once per gate, after the build; the binary's own bytes instead when `SVOLDERD`, `SVOLDER` or
+`SMOKE_EMBEDDED=1` gives or serves one; a listed file newer than its binary, or no dep-info, means no
+fingerprint and nothing is cached); `fixtures/`; the web files the check loads (its entry in `load-map.json` taken by
+area, `touched.web_scope`: every file of the `core/`, `fonts/` and `themes/<T>/` areas the entry reaches,
+plus every web file no check loads; a check with no entry, or with `SMOKE_WEB` set, hashes the whole web
+directory), so a theme change re-runs the checks `make web-touched` names and no others; the check's own
+file and every helper it really imports or opens here (`common.py` and the rest, followed through their
+own imports; not file names in comments); the gate's own files (`run-all.sh`, `fingerprint.py`,
+`touched.py`, `lockwait.sh`); the engine's name; the browsers' versions; the env that moves the daemon or
+the web dir (`SVOLDERD`, `SVOLDER`, `SMOKE_WEB`, `SMOKE_EMBEDDED`) and the env that chooses a check's
+cases (`ND_ONLY`, `ND_CASES`, `WEB_CHECK_THEMES`, `WEB_CHECK_POPUPS`, `HAZE_SECTIONS`,
+`SCROLL_SECTIONS`, `HIDDEN_SECS`, `LOOK_*`, `SVOLDER_FAKE_*`, `SECS`, `REPS`, the stills switches). A
+pass stored under the same fingerprint is reused: the check is not run, its line says `cached`, its row
+in `timing.tsv` has the verdict `cached` and 0 s, and the total line names the cached checks. Any change
+to any of those inputs, an edited web file included, changes the fingerprint and the check runs. The system fonts (the fallbacks `phone_sweep` and `contrast` measure) are not hashed: `make web-checks-cold` after a font package change.
 
-A pass is stored only when the fingerprint taken right before the run equals the one taken right after
-it (a pass that needed the alone retry is cached too), never when a subset env var is set (that run was not the whole check), and never when a browser's
+The full gate runs COLD (nothing reused) when you ask (`make web-checks-cold`, or
+`WEB_CHECKS_NO_CACHE=1`) and by itself when a smoke file, a file of the check tooling or the load map
+changed since the last full gate that passed (`run-all.sh` keeps their hash in
+`target/web-checks/cache/full-gate.state`; none yet means cold; the files are `smoke_files` plus
+`touched.py`, and the message says why). A cold run is mandatory before a version is TAGGED for a
+release build: the cache vouches for a merge, a tag takes nothing on trust. The serial lane (the pace and
+draw-cost checks, which hold the gate lock exclusive) and the node harnesses never use the cache. The
+cache lives in `target/web-checks/cache`, so `make clean` drops it.
+
+A pass is stored at the end of the gate, after the map refresh (so it carries the scope the next gate computes), and only when the Rust sources, tooling and browsers are still what they were after the build and the check's own files and the whole web dir are what they were when it started; never a pass that needed the alone retry (a flaky check is dropped from the cache), never when a subset env var is set (that run was not the whole check), and never when a browser's
 version cannot be read. Records are written atomically, one file per check and engine, in
 the `cache` directory under `target/web-checks`; a failed run drops its record; `rm -r` the directory to start over.
-`WEB_CHECKS_NO_CACHE=1` makes the quick and task gates run everything. The serial lane (the pace and
-draw-cost checks) and the node harnesses never use the cache. The quick gate's refusal stays by changed
+The quick gate's refusal stays by changed
 files, not fingerprints: it is about what the quick set does not run (the smoke's checks read
 `common.py` too, and a fingerprint cannot vouch for a check that is not in the set). `gate_cache.sh`
 proves the fingerprint on a throwaway tree.
@@ -169,7 +228,7 @@ check's waited-for descendants and the peak resident memory in MB of its largest
 `time`), and ends with the serial lane's wall time and the 15 slowest runs.
 
 The quick and task gates refuse, with a message that names the file, says whether it is a smoke file
-or the gate's own harness (`common.py`, `run-all.sh`, `COVERAGE.md`, `fingerprint.py`, `gate_cache.sh`) and names the rung to run
+or the gate's own harness (`common.py`, `run-all.sh`, `COVERAGE.md`, `fingerprint.py`, `gate_cache.sh`, `lockwait.sh`, `gate_wait.sh`) and names the rung to run
 (`make web-checks`, the merge rung), and exit 1, when a file of the smoke or one of its own checks changed against `main`
 (`WEB_CHECKS_BASE` names another base) in the commits, the working tree or the untracked files. The
 list is `smoke_files` in `run-all.sh`: the smoke's scripts under `bins/svolderd/web/themes/ember/`,
@@ -288,6 +347,8 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `node/core-list.mjs`: the list of options next to a chip (the classes passed, `aria-expanded`, a tap
   chooses after the close, a press outside, one at a time, `below` and `auto` places, the keys handed in
   by `key`, `listen` and a modal of the real stack, the place in a popup's page pane, which scrolls).
+- `node/core-volume-ask.mjs`: the volume ask Signal, Paper and Night drive share (`core/volume-ask.js`): the step
+  shown, the step a change starts from, the expiry timer, and Night drive's dash in both orders of the answer.
 - `node/core-clock.mjs`: the one ticker of a Device section's ages (`tickAges` of `core/clock.js`), on a
   jsdom page with a fake clock, fake timers and a fake watch of the page: the ages and the signal's age
   step with the clock on the daemon's time, a cell is written only when its words change, a row or a

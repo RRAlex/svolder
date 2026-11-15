@@ -8,8 +8,9 @@
 // reports it or `ASK_MS` pass. A drag holds the volume section, so what the device reports meanwhile
 // is drawn when the hand lets go, from the newest reading, never from the one at the touch.
 
-import { ASK_MS, shownRaw, showVolume } from './draw/volume.js';
-import { dragAlong, sliderKeys } from './gestures.js';
+import { askExpiry, baseOf, shownRaw } from '../../core/volume-ask.js';
+import { showVolume } from './draw/volume.js';
+import { dragAlong, sliderKeys } from '../../core/gestures.js';
 import { fractionOf, rawAt } from './ruler.js';
 
 const KEY_MATCH = '#p-needle';
@@ -19,8 +20,6 @@ export function wireVolume({ root, core, live, act, view, signal }) {
   const box = root.querySelector('#p-volume');
   if (!box) return;
   const store = core.model;
-  let timer = null;
-  signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
 
   const volume = () => store.part('volume');
   const inert = () => Boolean(store.device()?.inert);
@@ -37,23 +36,10 @@ export function wireVolume({ root, core, live, act, view, signal }) {
 
   /** The step asked for stops standing in for the reading after `ASK_MS`: the section is drawn
    * again then, from the reading. */
-  function expire() {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (view.asked && view.now - view.asked.at >= ASK_MS) {
-        view.asked = null;
-        live.draw('volume');
-      }
-    }, ASK_MS + 50);
-  }
+  const expiry = askExpiry({ view, now: () => view.now, redraw: () => live.draw('volume'), signal });
 
-  /** The step a change starts from: a raise from the step asked or the climb's target, a lowering
-   * from the level (a lower step ends a climb where the device is). */
-  function base(v, delta) {
-    const asked = view.asked && shownRaw(v, view) === view.asked.raw ? view.asked.raw : null;
-    if (delta < 0) return Math.min(asked ?? v.raw, v.raw);
-    return asked ?? (climbing(v) ? v.target : v.raw);
-  }
+  /** The step a change starts from (core/volume-ask.js). */
+  const base = (v, delta) => baseOf(v, view, delta);
 
   async function send(step, device) {
     const mine = view.asked;
@@ -102,7 +88,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
       || (!view.asked && step === v.raw && !climbing(v));
     if (same) return;
     view.asked = { raw: step, at: view.now };
-    expire();
+    expiry.arm();
     show();
     send(step, device).catch(() => {});
   }
@@ -153,7 +139,7 @@ export function wireVolume({ root, core, live, act, view, signal }) {
   // still going ends, so it never writes to the one now shown.
   live.onSwitch(() => {
     view.asked = null;
-    clearTimeout(timer);
+    expiry.clear();
     if (!gripped) return;
     gripped = false;
     live.freeze('volume', false);

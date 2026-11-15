@@ -17,10 +17,10 @@
 // dots, the cells and the level itself from what the core holds, and the sections are drawn again
 // from the newest model afterwards. Flipping to the DAC ends a drag (the core's `track`).
 
+import { curveD, fillD } from '../../core/plot.js';
 import { askForm, askQuestion, closeAsk } from './ask.js';
 import { fractionOf, lineHtml } from './draw/computer.js';
-import { curvePath, shadePath } from './draw/tone.js';
-import { dragAlong, sliderKeys } from './gestures.js';
+import { dragAlong, sliderKeys } from '../../core/gestures.js';
 import { closeList } from './lists.js';
 import { shelfAsks } from './shelf-asks.js';
 import { placeOpen } from './place.js';
@@ -102,8 +102,8 @@ export function wireComputer({
     const t = tone();
     const graph = box.querySelector('#sg-cgraph');
     if (!t || !graph) return;
-    graph.querySelector('.sg-curve').setAttribute('d', curvePath(t.response));
-    graph.querySelector('.sg-shade').setAttribute('d', shadePath(t.response));
+    graph.querySelector('.sg-curve').setAttribute('d', curveD(t.response));
+    graph.querySelector('.sg-shade').setAttribute('d', fillD(t.response));
     const eq = t.modes.find((m) => m.name === 'eq').on;
     for (const el of graph.querySelectorAll('.sg-curve, .sg-shade')) el.classList.toggle('faint', !eq);
     const dots = t.markers.map(fractionOf);

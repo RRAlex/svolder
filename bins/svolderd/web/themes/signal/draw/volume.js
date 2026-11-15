@@ -7,28 +7,11 @@
 // mute word) can be put in place without drawing the section again (`showVolume`), so a reading
 // never takes the hand's place. Pure but for `showVolume`, which sets what the markup names.
 
+import { shownRaw } from '../../../core/volume-ask.js';
 import { WORDS } from '../words.js';
 import { placeOpen } from '../place.js';
 import { esc } from './esc.js';
 import { button } from './word.js';
-
-/** How long a step asked for stays the one shown while the device has not reported it (ms). */
-export const ASK_MS = 3000;
-
-/** Whether the device is climbing to a step above where it is (a glide). */
-const gliding = (volume) => volume.target !== null && volume.target !== undefined
-  && volume.target > (volume.raw ?? 0);
-
-/** The step the knob stands at: the step asked for while it is not yet the one the device reports
- * and was not asked too long ago, else the one the device reports (or `null`). Once the device has
- * answered the ask, a reading that is not the ask (and is no glide) is another hand's and is shown. */
-export function shownRaw(volume, view) {
-  const asked = view.asked;
-  if (!asked || volume.raw === null || volume.raw === undefined) return volume.raw ?? null;
-  if (volume.raw === asked.raw || view.now - asked.at >= ASK_MS) return volume.raw;
-  if (asked.answered && !gliding(volume)) return volume.raw;
-  return asked.raw;
-}
 
 /** The fraction of the track (0 to 1) step `raw` stands at. */
 export const fractionOf = (volume, raw) => (volume.hi > volume.lo

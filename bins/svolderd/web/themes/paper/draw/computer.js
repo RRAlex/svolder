@@ -41,9 +41,6 @@ export const valueWords = { f: hzText, g: gainText, q: qText };
 /** The words of a point on the graph and in its row. */
 const pointWords = (p) => `Point ${p.n}: ${p.type} ${hzText(p.f)}, ${gainText(p.g)}, Q ${qText(p.q)}`;
 
-/** The curve's path in the plot's own box. */
-export const curvePath = curveD;
-
 /** One row of the table: its number, the type word that opens the list, the three values to type
  * into or step, and the `×` that removes it (the lone point is set flat). */
 function row(quiet, p, selected) {
@@ -130,5 +127,5 @@ export function computerPresets(page, view) {
 /** The curve of a held drag: the path of the points `list` (`{ type, f, g, q }`). */
 export function heldCurve(list) {
   const freqs = logFreqs(POINTS);
-  return curvePath(responseDb(list.map((p) => ({ f0: p.f, gainDb: p.g, q: p.q, type: p.type })), freqs));
+  return curveD(responseDb(list.map((p) => ({ f0: p.f, gainDb: p.g, q: p.q, type: p.type })), freqs));
 }

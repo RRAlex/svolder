@@ -826,10 +826,10 @@ def the_dash(b, d):
     lo, hi = m['lo'], m['hi']
     words = b.page(DASH_WORDS)
     acts = [w[0] for w in words]
-    check('the_dash_runs_minus_mute_plus_input_track_transport_device: the keys are `−`, `MUTE`, `+`, in that order,'
-          ' then the input, then the transport, then DEVICE',
-          words[:3] == [['volume-down', '−'], ['mute', 'MUTE'], ['volume-up', '+']]
-          and len(acts) > 7 and set(acts[3:-4]) == {'input'} and acts[-4:] == ['prev', 'play', 'next', 'sheet'], words)
+    check('the_dash_runs_minus_mute_plus_eq_input_track_transport_device: the keys are `−`, `MUTE`, `+`, `EQ`, in that'
+          ' order, then the input, then the transport, then DEVICE',
+          words[:4] == [['volume-down', '−'], ['mute', 'MUTE'], ['volume-up', '+'], ['eq', 'EQ']]
+          and len(acts) > 8 and set(acts[4:-4]) == {'input'} and acts[-4:] == ['prev', 'play', 'next', 'sheet'], words)
     box = b.page("""(() => { const r = document.getElementById('nd-dash').getBoundingClientRect();
       const q = [...document.querySelectorAll('#nd-dash .nd-k')].map((k) => k.getBoundingClientRect().height);
       return [Math.round(r.bottom), innerHeight, Math.min(...q), Math.max(...q)]; })()""")

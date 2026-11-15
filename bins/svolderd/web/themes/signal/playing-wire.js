@@ -5,7 +5,7 @@
 // happens), and the bar's progress and time move once a second while the player plays and the page
 // is on show.
 
-import { moveProgress } from './draw/playing.js';
+import { markCoverFailed, moveProgress } from './draw/playing.js';
 
 /** How often the progress moves (ms). */
 const TICK_MS = 1000;
@@ -25,10 +25,13 @@ export function wirePlaying({ root, core, act, signal }) {
     }, { signal });
   }
 
-  // A cover the daemon no longer holds is not shown, and leaves no gap.
+  // A cover the daemon no longer holds is not shown, and leaves no gap; the draws that follow leave
+  // it out until the track's cover is another one.
   for (const where of [bar, open]) {
     where.addEventListener('error', (event) => {
-      if (event.target.matches?.('.sg-cover img')) event.target.closest('.sg-cover').hidden = true;
+      if (!event.target.matches?.('.sg-cover img')) return;
+      event.target.closest('.sg-cover').hidden = true;
+      markCoverFailed(decodeURIComponent(event.target.dataset.cover ?? ''));
     }, { capture: true, signal });
   }
 

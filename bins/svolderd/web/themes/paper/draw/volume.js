@@ -7,6 +7,7 @@
 // word) can be put in place without drawing the ruler again (`showVolume`), so a reading never
 // takes the focus from the needle or a word.
 
+import { gliding, shownRaw } from '../../../core/volume-ask.js';
 import { place } from '../place.js';
 import {
   NARROW_PX, fractionOf, labelGap, marks, percentVolume, ticks, zones,
@@ -15,9 +16,6 @@ import { WORDS } from '../words.js';
 import { esc } from './esc.js';
 import { onComputer, viewerQuiet } from './side.js';
 import { word } from './word.js';
-
-/** How long a step asked for stays the one shown while the device has not reported it (ms). */
-export const ASK_MS = 3000;
 
 /** The ticks are drawn on a 1000 by 20 box, stretched over the ruler; heights of the two kinds. */
 const TICK_BOX = 1000;
@@ -30,22 +28,6 @@ const ZONE_FLIP = 0.7;
 
 /** The ruler's width in pixels as far as the sheet knows it. */
 const widthOf = (view) => view.rulerPx ?? (view.phone ? 340 : 900);
-
-/** Whether the device is climbing to a step above where it is (a glide). */
-const gliding = (volume) => volume.target !== null && volume.target !== undefined
-  && volume.target > (volume.raw ?? 0);
-
-/** The step the needle stands at: the step asked for while it is not yet the one the device
- * reports and was not asked too long ago, else the one the device reports (or `null`). Once the
- * device has answered the ask, a reading that is not the ask (and is no glide) is another hand's
- * and is shown. */
-export function shownRaw(volume, view) {
-  const asked = view.asked;
-  if (!asked || volume.raw === null || volume.raw === undefined) return volume.raw ?? null;
-  if (volume.raw === asked.raw || view.now - asked.at >= ASK_MS) return volume.raw;
-  if (asked.answered && !gliding(volume)) return volume.raw;
-  return asked.raw;
-}
 
 /** What the volume says at the step `raw`: the words (`-26.1 dB`), the number alone and its unit,
  * from the device's report when `raw` is its reading and from its table of steps otherwise. */

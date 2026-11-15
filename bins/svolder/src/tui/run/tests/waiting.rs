@@ -39,29 +39,14 @@ async fn an_unfound_device_waits_and_opens_in_full_when_the_daemon_finds_it() {
         Some(Holding::Waiting { .. })
     ));
 
-    let (recorder, frames) = Recorder::new(80, 24);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let finding = async {
-        tokio::time::sleep(Duration::from_millis(400)).await;
+    let (keys, input) = keyed();
+    let finding = |frames: Frames| async move {
+        shown(&frames, "fake not found yet").await;
         daemon.finds_it();
+        shown(&frames, "Mute").await;
+        quit(&keys);
     };
-    let adds = nothing_to_add();
-    let mut mouse = SpyMouse::default();
-    let mut title = title();
-    let (end, ()) = tokio::join!(
-        event_loop(LoopParts {
-            opener: &opener,
-            adder: &adds,
-            watching,
-            terminal: &mut terminal,
-            events: quit_after(Duration::from_millis(1500)),
-            mouse: &mut mouse,
-            title: &mut title,
-            look: look()
-        }),
-        finding
-    );
-    let frames = drawn(&frames);
+    let (end, frames) = loop_over(&opener, watching, Box::pin(input), finding).await;
     let waited = first_frame(&frames, "fake not found yet");
     let opened = first_frame(&frames, "Mute");
     assert!(waited < opened, "the panel comes before the controls");
@@ -108,29 +93,68 @@ async fn unfound_start() -> (
     (daemon, opener)
 }
 
-/// Run the loop on `watching` for `ms` milliseconds, then quit, and give back the frames.
-async fn run_for<O: Open>(
+/// Run the loop on `watching` over `input` while `script` plays against the stub daemon, and
+/// give back the frames. The script sees the frames as they are drawn, so it waits for what it
+/// needs to be on the screen instead of for a time to pass, and it ends the loop with [`quit`].
+async fn loop_over<O, F, Fut>(
     opener: &Opener<O>,
     watching: Watching,
-    ms: u64,
-) -> (LoopEnd, Vec<String>) {
+    input: BoxStream<'static, io::Result<Event>>,
+    script: F,
+) -> (LoopEnd, Vec<String>)
+where
+    O: Open,
+    F: FnOnce(Frames) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
     let (recorder, frames) = Recorder::new(80, 24);
     let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
     let adds = nothing_to_add();
     let mut mouse = SpyMouse::default();
     let mut title = title();
-    let end = event_loop(LoopParts {
-        opener,
-        adder: &adds,
-        watching,
-        terminal: &mut terminal,
-        events: quit_after(Duration::from_millis(ms)),
-        mouse: &mut mouse,
-        title: &mut title,
-        look: look(),
-    })
-    .await;
+    let (end, ()) = tokio::join!(
+        event_loop(LoopParts {
+            opener,
+            adder: &adds,
+            watching,
+            terminal: &mut terminal,
+            events: input,
+            mouse: &mut mouse,
+            title: &mut title,
+            look: look(),
+        }),
+        script(Arc::clone(&frames))
+    );
     (end, drawn(&frames))
+}
+
+/// Keys a script sends the loop when it wants, and the stream the loop reads them from.
+fn keyed() -> (
+    futures::channel::mpsc::UnboundedSender<io::Result<Event>>,
+    futures::channel::mpsc::UnboundedReceiver<io::Result<Event>>,
+) {
+    futures::channel::mpsc::unbounded()
+}
+
+/// `q` twice: the quit question and its answer.
+fn quit(keys: &futures::channel::mpsc::UnboundedSender<io::Result<Event>>) {
+    for _ in 0..2 {
+        keys.unbounded_send(key('q')).expect("the loop reads keys");
+    }
+}
+
+/// Run the loop on `watching` until a frame shows `text`, then quit, and give back the frames.
+async fn run_until<O: Open>(
+    opener: &Opener<O>,
+    watching: Watching,
+    text: &str,
+) -> (LoopEnd, Vec<String>) {
+    let (keys, input) = keyed();
+    loop_over(opener, watching, Box::pin(input), |frames| async move {
+        shown(&frames, text).await;
+        quit(&keys);
+    })
+    .await
 }
 
 /// A device found between the check that saw it waiting and the landing is not lost: the
@@ -148,7 +172,7 @@ async fn a_device_found_while_the_landing_is_made_still_opens_by_itself() {
         watching.app.session.holding,
         Some(Holding::Waiting { .. })
     ));
-    let (end, frames) = run_for(&opener, watching, 1000).await;
+    let (end, frames) = run_until(&opener, watching, "Mute").await;
     assert!(any_frame(&frames, "Mute"), "the device opened");
     assert!(end.watching.app.session.holding.is_none());
     end.watching.close().await;
@@ -327,7 +351,7 @@ async fn a_wait_whose_feed_is_closed_ends_when_the_daemons_list_says_it_is_up() 
     watching.feed_open = false;
     watching.app.session.feed_open = false;
     daemon.unfound(false);
-    let (end, frames) = run_for(&opener, watching, 4000).await;
+    let (end, frames) = run_until(&opener, watching, "Mute").await;
     assert!(any_frame(&frames, "Mute"), "the device opened");
     assert!(end.watching.app.session.holding.is_none());
     end.watching.close().await;
@@ -380,16 +404,17 @@ async fn a_switchs_landing_holds_the_socket_the_switch_used() {
     watching.close().await;
 }
 
-/// What `script` does to a stub daemon while the loop waits for its device and `ms` runs out:
-/// the frames and what the loop was left watching.
-async fn waiting_through<F, Fut>(
+/// What `script` does to a stub daemon while the loop waits for its device: the frames and what
+/// the loop was left watching. The script sees the frames as they are drawn, so it can wait
+/// for what it needs to be on the screen instead of for a time to pass.
+async fn waiting_through_seeing<F, Fut>(
     opener: &Opener<Stubbed>,
     input: BoxStream<'static, io::Result<Event>>,
     prepare: impl FnOnce(&mut Watching),
     script: F,
 ) -> (LoopEnd, Vec<String>)
 where
-    F: FnOnce() -> Fut,
+    F: FnOnce(Frames) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let failure = opener.reopen(None, None).await.err().expect("not found");
@@ -400,25 +425,7 @@ where
         Some(Holding::Waiting { .. })
     ));
     prepare(&mut watching);
-    let (recorder, frames) = Recorder::new(80, 24);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let adds = nothing_to_add();
-    let mut mouse = SpyMouse::default();
-    let mut title = title();
-    let (end, ()) = tokio::join!(
-        event_loop(LoopParts {
-            opener,
-            adder: &adds,
-            watching,
-            terminal: &mut terminal,
-            events: input,
-            mouse: &mut mouse,
-            title: &mut title,
-            look: look()
-        }),
-        script()
-    );
-    (end, drawn(&frames))
+    loop_over(opener, watching, input, script).await
 }
 
 /// The daemon stopping while the waiting panel shows does not end the loop: the subscription's
@@ -428,18 +435,16 @@ where
 async fn the_daemon_stopping_while_the_waiting_panel_shows_keeps_the_loop_running() {
     let (daemon, opener) = unfound_start().await;
     let opener = opener.waiting_for_the_daemon(Duration::from_secs(60));
-    let stopping = || async move {
-        tokio::time::sleep(Duration::from_millis(300)).await;
+    let (keys, input) = keyed();
+    let stopping = |frames: Frames| async move {
+        shown(&frames, "fake not found yet").await;
         daemon.stop().await;
+        // The loop has to run on past two relist periods after the stop: a least time, counted
+        // from the stop itself, so a slow machine only makes it longer.
+        tokio::time::sleep(2 * RELIST_PERIOD + Duration::from_millis(500)).await;
+        quit(&keys);
     };
-    let ms = 300 + 2 * RELIST_PERIOD.as_millis() as u64 + 500;
-    let (end, frames) = waiting_through(
-        &opener,
-        quit_after(Duration::from_millis(ms)),
-        |_| {},
-        stopping,
-    )
-    .await;
+    let (end, frames) = waiting_through_seeing(&opener, Box::pin(input), |_| {}, stopping).await;
     assert_eq!(end.code, 0, "the loop ran to the user's quit");
     assert!(
         end.watching.reconnect.is_some(),
@@ -462,22 +467,33 @@ async fn a_daemon_that_comes_back_resumes_the_wait() {
     let (daemon, opener) = unfound_start().await;
     let socket = daemon.socket.clone();
     let opener = opener.waiting_for_the_daemon(Duration::from_secs(60));
-    let restarting = || async move {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        daemon.stop().await;
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let again = stub_daemon_at(socket).await;
-        again.unfound(true);
-        tokio::time::sleep(Duration::from_millis(4000)).await;
-        drop(again);
+    let (keys, input) = keyed();
+    // The new daemon outlives the loop, which closes its session on the way out.
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let restarting = |frames: Frames| {
+        let kept = std::rc::Rc::clone(&kept);
+        async move {
+            shown(&frames, "fake not found yet").await;
+            daemon.stop().await;
+            let again = stub_daemon_at(socket).await;
+            again.unfound(true);
+            shown(&frames, "reconnected to the daemon").await;
+            // The wait goes on past a relist: the new daemon is asked for its devices again and
+            // the panel stays.
+            let asked = again.device_asks();
+            let relisted = async {
+                while again.device_asks() == asked {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(60), relisted)
+                .await
+                .expect("the new daemon is asked for its devices again");
+            *kept.borrow_mut() = Some(again);
+            quit(&keys);
+        }
     };
-    let (end, frames) = waiting_through(
-        &opener,
-        quit_after(Duration::from_millis(4000)),
-        |_| {},
-        restarting,
-    )
-    .await;
+    let (end, frames) = waiting_through_seeing(&opener, Box::pin(input), |_| {}, restarting).await;
     assert_eq!(end.code, 0);
     assert!(end.watching.reconnect.is_none(), "the daemon answered");
     assert!(matches!(
@@ -487,6 +503,7 @@ async fn a_daemon_that_comes_back_resumes_the_wait() {
     assert!(end.watching.backend.is_some(), "the new daemon is held");
     assert!(any_frame(&frames, "reconnected to the daemon"));
     end.watching.close().await;
+    drop(kept);
 }
 
 /// After the daemon came back, finding the device opens it in full.
@@ -497,36 +514,28 @@ async fn the_device_found_after_a_daemon_restart_opens_in_full() {
     let (daemon, opener) = unfound_start().await;
     let socket = daemon.socket.clone();
     let opener = opener.waiting_for_the_daemon(Duration::from_secs(60));
-    let restarting = || async move {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        daemon.stop().await;
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let again = stub_daemon_at(socket).await;
-        again.unfound(true);
-        tokio::time::sleep(Duration::from_millis(2500)).await;
-        again.finds_it();
-        tokio::time::sleep(Duration::from_millis(4000)).await;
-        drop(again);
+    let (keys, input) = keyed();
+    let kept = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let restarting = |frames: Frames| {
+        let kept = std::rc::Rc::clone(&kept);
+        async move {
+            shown(&frames, "fake not found yet").await;
+            daemon.stop().await;
+            let again = stub_daemon_at(socket).await;
+            again.unfound(true);
+            shown(&frames, "reconnected to the daemon").await;
+            again.finds_it();
+            *kept.borrow_mut() = Some(again);
+            shown(&frames, "Mute").await;
+            quit(&keys);
+        }
     };
-    let (end, frames) = waiting_through(
-        &opener,
-        quit_after(Duration::from_millis(6000)),
-        |_| {},
-        restarting,
-    )
-    .await;
+    let (end, frames) = waiting_through_seeing(&opener, Box::pin(input), |_| {}, restarting).await;
     assert!(any_frame(&frames, "Mute"), "the device opened in full");
     assert!(end.watching.app.session.holding.is_none());
     assert!(end.watching.app.profile.eq.is_some(), "the real profile");
     end.watching.close().await;
-}
-
-/// Keys that arrive one after another, each `pause` after the one before.
-fn keys_paced(pause: u64, keys: Vec<io::Result<Event>>) -> BoxStream<'static, io::Result<Event>> {
-    Box::pin(stream::iter(keys).then(move |event| async move {
-        tokio::time::sleep(Duration::from_millis(pause)).await;
-        event
-    }))
+    drop(kept);
 }
 
 /// Esc as a terminal reports it.
@@ -559,24 +568,25 @@ fn typing_a_host(watching: &mut Watching) {
 #[tokio::test]
 async fn finding_the_device_waits_for_an_open_box_to_close() {
     let (daemon, opener) = unfound_start().await;
-    let finding = || async move {
-        tokio::time::sleep(Duration::from_millis(300)).await;
+    let (keys, input) = futures::channel::mpsc::unbounded::<io::Result<Event>>();
+    let send = |event: io::Result<Event>| keys.unbounded_send(event).expect("the loop reads keys");
+    // Each step waits for the screen to show the one before, never for a time to pass.
+    let finding = |frames: Frames| async move {
+        shown(&frames, "MQTT broker host").await;
         daemon.finds_it();
-        tokio::time::sleep(Duration::from_millis(3500)).await;
+        send(key('m'));
+        shown(&frames, "broker.exam").await;
+        send(key('q'));
+        shown(&frames, "broker.examq").await;
+        send(escape());
+        send(escape());
+        // The device screen, once the box has closed, takes the quit question.
+        shown(&frames, "Mute").await;
+        send(key('q'));
+        send(key('q'));
     };
-    let input = keys_paced(
-        900,
-        vec![
-            key('m'),
-            key('q'),
-            escape(),
-            escape(),
-            // The device screen, once the box has closed, takes the quit question.
-            key('q'),
-            key('q'),
-        ],
-    );
-    let (end, frames) = waiting_through(&opener, input, typing_a_host, finding).await;
+    let (end, frames) =
+        waiting_through_seeing(&opener, Box::pin(input), typing_a_host, finding).await;
     assert_eq!(end.code, 0);
     let typed = first_frame(&frames, "broker.examq");
     assert!(
@@ -590,6 +600,18 @@ async fn finding_the_device_waits_for_an_open_box_to_close() {
     }
     assert!(end.watching.app.session.holding.is_none());
     end.watching.close().await;
+}
+
+/// Wait until a frame shows `text`, however long the machine takes to draw it.
+async fn shown(frames: &Frames, text: &str) {
+    let wait = async {
+        while !any_frame(&drawn(frames), text) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(60), wait)
+        .await
+        .unwrap_or_else(|_| panic!("no frame showed {text:?}"));
 }
 
 /// A wait that a failed switch interrupts resumes on the daemon the switch used, not on whatever

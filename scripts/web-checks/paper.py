@@ -185,6 +185,8 @@ def the_sheet(b, d):
     cards = b.page(PICKER_CARDS)
     check('  the picker lists Ember, Paper, Signal and Night drive',
           cards == ['ember', 'paper', 'signal', 'nightdrive'], cards)
+    # a theme's picture is drawn once its module has loaded, so the card has none for a moment
+    poll(lambda: b.page("!!document.querySelector('#picker .tcard[data-theme=paper] .tprev svg')"), 5.0)
     previews = b.page("[...document.querySelectorAll('#picker .tcard')]"
                       ".map((c) => [c.querySelector('b').textContent,"
                       " c.querySelector('small').textContent, !!c.querySelector('.tprev svg')])")

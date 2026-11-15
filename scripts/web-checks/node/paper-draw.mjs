@@ -10,8 +10,9 @@ import { readFileSync } from 'node:fs';
 import { responseDb, logFreqs, POINTS, yOf } from '../../../bins/svolderd/web/core/tone-curve.js';
 import { SECTIONS } from '../../../bins/svolderd/web/themes/paper/draw/sheet.js';
 import {
-  curvePath, heldGraph, pointsOf,
+  heldGraph, pointsOf,
 } from '../../../bins/svolderd/web/themes/paper/draw/tone.js';
+import { curveD } from '../../../bins/svolderd/web/core/plot.js';
 import { markersOf } from '../../../bins/svolderd/web/core/computer.js';
 import {
   SEVEN, computerView, modelOf, pageWith, point, wordsOf,
@@ -81,7 +82,7 @@ ok('the_curve_is_dashed_in_flat', () => {
 
 ok('the_curve_path_is_the_responses_line_in_the_plot', () => {
   const { tone } = toneOf('dac');
-  const d = curvePath(tone.response);
+  const d = curveD(tone.response);
   assert.ok(d.startsWith('M0.0 ') && d.split('L').length === 181, d.slice(0, 60));
 });
 
@@ -142,7 +143,7 @@ ok('a_held_graph_is_drawn_from_the_held_band', () => {
   assert.ok(held.d.startsWith('M0.0 '));
   assert.equal(held.d.split('L').length, ys.length);
   assert.ok(Math.abs(held.point.y - yOf(bands[1].gainDb) / 260) < 1e-9);
-  assert.notEqual(held.d, curvePath(tone.response));
+  assert.notEqual(held.d, curveD(tone.response));
   assert.equal(heldGraph(tone, steps, 3, { f: 64, g: 98, q: null }), null, 'a band not in full');
 });
 

@@ -7,7 +7,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SECTIONS } from '../../../bins/svolderd/web/themes/paper/draw/sheet.js';
-import { ASK_MS, shownRaw } from '../../../bins/svolderd/web/themes/paper/draw/volume.js';
 import { computerView, modelOf, pageWith } from './paper-rig.mjs';
 import {
   LABEL_DB, LABEL_GAP, NARROW_LABEL_DB, NARROW_PX, fractionOf, marks, percentVolume, rawAt, ticks, zones,
@@ -191,20 +190,6 @@ ok('a_guests_words_are_quiet_and_the_cap_and_risk_are_drawn', () => {
   const zoned = SECTIONS.volume(hot, hot.device, view);
   assert.ok(zoned.includes('p-zone risk') && zoned.includes('p-zone cap'), zoned);
   assert.ok(zoned.includes('may clip') && zoned.includes('>cap<'), zoned);
-});
-
-ok('shown_raw_is_the_ask_until_the_device_answers_or_the_ask_is_old', () => {
-  const v = (raw, target = null) => ({ raw, target });
-  const asked = (raw, at, answered = false) => ({ raw, at, answered });
-  assert.equal(shownRaw(v(50), { asked: null, now: 0 }), 50, 'no ask: the reading');
-  assert.equal(shownRaw(v(50), { asked: asked(50, 0), now: 10 }), 50, 'reading equals the ask');
-  assert.equal(shownRaw(v(50), { asked: asked(60, 0), now: ASK_MS }), 50, 'an ask older than ASK_MS');
-  assert.equal(shownRaw(v(50), { asked: asked(60, 0, true), now: 10 }), 50,
-    'answered and not gliding shows the reading');
-  assert.equal(shownRaw(v(50, 70), { asked: asked(60, 0, true), now: 10 }), 60,
-    'gliding keeps the ask');
-  assert.equal(shownRaw(v(50), { asked: asked(60, 0), now: 10 }), 60, 'unanswered keeps the ask');
-  assert.equal(shownRaw(v(null), { asked: asked(60, 0), now: 10 }), null, 'unread stays unread');
 });
 
 ok('the_drawn_ruler_is_replaced_when_the_label_gap_in_pixels_changes_within_a_band', () => {

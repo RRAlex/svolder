@@ -106,14 +106,16 @@ impl Player for PwPlay {
 /// Reap `child` from a thread of its own once it has ended, so a clip that plays to its end
 /// never lingers as a zombie while the TUI runs on.
 fn spawn_reaper(child: Arc<Mutex<Child>>) {
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(REAP_EVERY);
-            if !matches!(locked(&child).try_wait(), Ok(None)) {
-                return;
+    let _ = std::thread::Builder::new()
+        .name("svolder-reap".to_string())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(REAP_EVERY);
+                if !matches!(locked(&child).try_wait(), Ok(None)) {
+                    return;
+                }
             }
-        }
-    });
+        });
 }
 
 /// `child` locked, whatever a thread that panicked while holding it left behind.

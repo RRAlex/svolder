@@ -7,6 +7,8 @@
 // `elapsedUs`, `fraction`, `timeWords`). These are pure: numbers in, numbers or text out, so a
 // browser whose own clock is wrong still shows the player's time, and a theme's drawing may import
 // them from this file.
+// `daemonNow` is the one exception: it keeps a page-wide table of when this page first saw each
+// daemon clock value, shared by every theme on purpose, so the track time counts on from that sight.
 //
 // The one ticker of the ages a device's page carries as stamps (`tickAges`, with `AGES_EVERY_MS`).
 // It is not pure: it reads and writes the page under the root it is given, holds a timer and
@@ -30,6 +32,26 @@ export function clockOffset(dataNowMs, localMs) {
 /** The daemon's clock now, in milliseconds, when this browser's reads `localMs`. */
 export function daemonClock(offsetMs, localMs) {
   return localMs + offsetMs;
+}
+
+/** The first local time this page had each daemon clock value (`now_ms`), oldest first. */
+const sights = new Map();
+/** How many sights are kept: a player's part says a new value about once a minute. */
+const SIGHTS_KEPT = 64;
+
+/**
+ * The daemon's clock now, in milliseconds, for a part that said it was `nowMs` when it came:
+ * `nowMs` plus the time that passed here since this page first saw that value, wherever `localMs`
+ * (this browser's clock now) comes from. A redraw that brings no new reading of the player (a
+ * volume, a fact, a link) therefore counts on from the same start; a new reading re-bases it.
+ * Never before `nowMs`, whatever a browser clock that stepped back says.
+ */
+export function daemonNow(nowMs, localMs) {
+  if (!sights.has(nowMs)) {
+    sights.set(nowMs, localMs);
+    if (sights.size > SIGHTS_KEPT) sights.delete(sights.keys().next().value);
+  }
+  return nowMs + Math.max(0, localMs - sights.get(nowMs));
 }
 
 /**

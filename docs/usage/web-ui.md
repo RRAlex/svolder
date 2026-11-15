@@ -781,8 +781,10 @@ on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the p
   Forkbeard amp opens its power, meters and faults, with *Unlink*; its controls write to the amp,
   never to the DAC, and the DAC's volume stays in the DAC's label. A declared hop opens its name and
   note with *Edit*, *Move earlier*, *Move later* and *Remove*, which asks once. The player opens Now
-  playing with its transport and the path in words; the computer opens its sink, rate, volume, mute,
-  the computer EQ and the preset applied, read only.
+  playing with its transport and the path in words, and the track's cover to the right of them (a
+  fifth of the area wide, 200 to 300 px, above the title on a phone; a track with no cover leaves
+  no box); the computer opens its sink, rate, volume, mute, the computer EQ and the preset applied,
+  read only.
 - **Add to the chain….** A row of the menu, while a device is shown. It opens the sheet *After the*
   (device): Amp, Headphones, Speakers or Other, a name and an optional note. A Forkbeard amp the
   daemon lists that is not yet linked comes first as *name (connected)*, which links it. When you
@@ -831,7 +833,10 @@ draws on canvases, so it follows the music only when svolderd can capture the co
   `FLAT`). After 15 seconds with no input they fade out; a move, a key, a touch or the wheel brings
   them back at once, a volume changed elsewhere shows for 5 seconds, and trouble keeps them (or brings
   them back). The mouse cursor hides over the scene after 2 seconds still.
-- **The dash** along the bottom: `−` `MUTE` `+` (hold one and it repeats), the input as chips (a
+- **The dash** along the bottom: `−` `MUTE` `+` (hold one and it repeats), `EQ` (lit while the EQ of
+  the side shown is on: a press turns it off, a press on the dark key turns it on; on the computer
+  side it is the computer's EQ, on the device's side the tone mode goes between Flat and EQ, and
+  Loudness counts as off; a device with no Flat and EQ has no key), the input as chips (a
   list when there are more than three), the cover and the track with its progress bar, previous,
   play or pause and next, and `DEVICE ▴`. An amp has its power key and gauges where the input would
   be. Space plays and pauses the computer's player, as in every theme. The mouse wheel over the big

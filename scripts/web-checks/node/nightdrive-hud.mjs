@@ -459,13 +459,13 @@ ok('the_track_reads_title_artist_album_and_time', () => {
   // it plays on: 2 s later the time moves
   const els = { fill: { style: {} }, time: { textContent: '' } };
   const root = { querySelector: (sel) => (sel === '.nd-prog i' ? els.fill : els.time) };
-  moveProgress(root, dashPage(), 3000, 1000);
+  moveProgress(root, dashPage(), 3000);
   assert.equal(els.time.textContent, '1:44 / 5:29');
   assert.equal(els.fill.style.width, '31.61%');
   // a paused track does not move
   els.time.textContent = 'same';
   const paused = dashPage({ playing: { ...player({}, { ...TRACK, status: 'paused' }) } });
-  moveProgress(root, paused, 9000, 1000);
+  moveProgress(root, paused, 9000);
   assert.equal(els.time.textContent, 'same');
   // nothing playing
   const idle = drawDash(dashPage({ playing: { ...player({}, null) } }), {}, 1000);

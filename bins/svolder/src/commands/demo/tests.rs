@@ -215,7 +215,7 @@ fn demo_running(name: &str, script: &str) -> (Demo, PathBuf) {
         .spawn()
         .expect("spawn sh");
     let demo = Demo {
-        child: Some(child),
+        child: Arc::new(Mutex::new(Some(child))),
         dir,
         keep: false,
         host: None,
@@ -268,10 +268,9 @@ fn an_interrupt_during_the_start_is_not_a_failure() {
 /// signals nothing.
 #[test]
 fn dropping_a_demo_with_a_reaped_daemon_removes_the_directory() {
-    let (mut demo, base) = demo_running("reaped", "exit 0");
+    let (demo, base) = demo_running("reaped", "exit 0");
     let dir = demo.dir.clone();
-    let child = demo.child.as_mut().expect("a child");
-    while child.try_wait().expect("wait").is_none() {
+    while reap(&demo.child).is_none() {
         std::thread::sleep(POLL);
     }
     drop(demo);
@@ -494,4 +493,64 @@ fn the_web_link_line_says_what_the_link_does() {
     assert!(line.contains("signs this computer in, once"), "{line}");
     assert!(line.contains("expires in 5 minutes"), "{line}");
     assert!(line.contains("Web box has the link and QR code"), "{line}");
+}
+
+/// A daemon that exits mid-run is reaped by the next look, which says how it ended; the process
+/// is gone from the process table, not left defunct.
+#[test]
+fn an_exited_daemon_is_reaped_and_named() {
+    let child = Command::new("sh")
+        .args(["-c", "exit 3"])
+        .spawn()
+        .expect("spawn sh");
+    let pid = child.id();
+    let shared = Mutex::new(Some(child));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let said = loop {
+        if let Some(said) = reap(&shared) {
+            break said;
+        }
+        assert!(Instant::now() < deadline, "the daemon never ended");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(said.contains("exit status: 3"), "{said}");
+    assert!(
+        !Path::new(&format!("/proc/{pid}")).exists(),
+        "the daemon is left a zombie"
+    );
+}
+
+/// A daemon still running is not reported, and an empty slot has nothing to say.
+#[test]
+fn a_running_daemon_is_not_reported_gone() {
+    let child = Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn sleep");
+    let shared = Mutex::new(Some(child));
+    assert_eq!(reap(&shared), None);
+    let mut child = locked(&shared).take().expect("the child");
+    child.kill().expect("kill sleep");
+    child.wait().expect("wait");
+    assert_eq!(reap(&shared), None);
+}
+
+/// The watch reaps on its own timer and stops once the demo has taken the daemon away.
+#[test]
+fn the_watch_reaps_without_being_asked() {
+    let child = Command::new("sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .expect("spawn sh");
+    let pid = child.id();
+    let shared = Arc::new(Mutex::new(Some(child)));
+    let (said, heard) = std::sync::mpsc::channel();
+    watch_daemon(Arc::clone(&shared), Duration::from_millis(10), move |how| {
+        let _ = said.send(how);
+    });
+    let how = heard
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the watch never said the daemon ended");
+    assert!(how.contains("exit status: 0"), "{how}");
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
 }

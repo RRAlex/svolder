@@ -183,13 +183,13 @@ hidden over the scene. A fine pointer only.
 
 ## The dash
 
-The strip along the bottom holds, in this order: `−` `MUTE` `+` (the core's hold: a step at the press
-and, after 380 ms, every 70 ms, up to its 10 s cap; muted reads `−∞`), the input, the cover and the
-track (title; artist, album and elapsed over length; a progress bar), previous, play or pause and
-next as inline SVG, and `DEVICE ▴`, which opens the sheet. The input is chips when the device has
-`CHIPS_MAX` (3, `draw/dash.js`) options or fewer, else one chip showing the current one that opens a
-list (`USB ▾`). An amp has its power key and its temperature and power gauges where the input would
-be. The keys are 40 px high on a desktop and 44 px on a phone, and the hit area is 44 px.
+The strip along the bottom holds, in this order: `−` `MUTE` `+` (the core's hold: a step at the
+press and, after 380 ms, every 70 ms, up to its 10 s cap; muted reads `−∞`), `EQ` (the shown side's
+EQ on or off, a device's Flat or EQ; none without one), the input, the cover and the track (title;
+artist, album, elapsed over length; a bar), previous, play or pause and next as inline SVG, and
+`DEVICE ▴`, which opens the sheet. The input is chips for `CHIPS_MAX` (3, `draw/dash.js`) options
+or fewer, else one chip with a list. An amp has its power key and gauges where the input would be.
+The keys are 40 px high on a desktop and 44 on a phone, the hit area 44 px.
 
 **Space plays and pauses.** The frame's reserved key does it ([web-themes.md](web-themes.md)); Night
 drive binds nothing for it. The dash's play button posts the same press.
@@ -256,8 +256,8 @@ and the ✕ button, Escape or a tap on the scene closes it and gives the focus b
 
 The dash on a phone held upright is a translucent panel over the foot of the scene (`rgba(8,3,16,.7)`;
 the road shows through, and its text keeps 4.5:1 over the brightest of what is behind it) in two
-rows: `−` `MUTE` `+` and the transport on one, then the track with the input and `DEVICE ▴`. Its keys
-are 36 px tall with a 46 px hit area. At 360 by 780 the panel is 111 px, 14 % of the
+rows: `−` `MUTE` `+` `EQ` and the transport on one, then the track with the input and `DEVICE ▴`.
+Its keys are 36 px tall with a 46 px hit area. At 360 by 780 the panel is 111 px, 14 % of the
 window, and the scene above it 86 %; the checks hold it under 30 %. The scene runs behind the panel
 the whole height. The volume figure is in the scene, `min(60vw, 20dvh)` wide, under the device line and the EQ line,
 which shows its values there. The switch is one pill in the scene's top left corner, mirroring the menu button at the top

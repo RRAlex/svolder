@@ -157,6 +157,9 @@ pub struct Host {
     pub button: usize,
     /// Whether the loop has a capture of the sink's monitor running.
     pub capturing: bool,
+    /// Whether the bands the Spectrum row draws came from the daemon's frames (`true`) or from
+    /// the loop's own capture; what the row's last word says.
+    pub from_daemon: bool,
     /// How loud the capture reads, the louder of its two channels, smoothed over the blocks
     /// that have landed; `None` before the first.
     pub level: Option<f64>,
@@ -193,6 +196,7 @@ impl Host {
             marquee: Marquee::new(now),
             button: 0,
             capturing: false,
+            from_daemon: false,
             level: None,
             channels: None,
             level_at: None,

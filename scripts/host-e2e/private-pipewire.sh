@@ -10,7 +10,7 @@
 #   private-pipewire.sh proof   exit 0 only when the server lists nothing but private objects
 #   private-pipewire.sh stop    end every process started, remove the run directory
 #
-# The run directory is /tmp/svpw.XXXXXX exactly: SVPW_RUN, or the XDG_RUNTIME_DIR of the caller
+# The run directory is /tmp/svolder/pw.XXXXXX exactly: SVPW_RUN, or the XDG_RUNTIME_DIR of the caller
 # when that has the shape. `start` makes a new one unless SVPW_RUN names an empty one; `start`
 # and `stop` accept the same values. <run>/pids holds "pid start-time" per daemon; `stop`
 # signals a pid only while it is still that process (start time and SVPW_RUN in its
@@ -23,18 +23,18 @@ DEADLINE=${SVPW_DEADLINE:-15}
 
 die() { echo "private-pipewire: $*" >&2; exit "${2:-1}"; }
 
-# A run directory is exactly /tmp/svpw.XXXXXX, as `realpath -m` resolves it (no `..`, no links).
+# A run directory is exactly /tmp/svolder/pw.XXXXXX, as `realpath -m` resolves it (no `..`, no links).
 valid_run() {
   local r=$1
-  [[ "$r" =~ ^/tmp/svpw\.[A-Za-z0-9]{6}$ ]] && [ "$(realpath -m -- "$r")" = "$r" ]
+  [[ "$r" =~ ^/tmp/svolder/pw\.[A-Za-z0-9]{6}$ ]] && [ "$(realpath -m -- "$r")" = "$r" ]
 }
 
 run_dir() {
   local r
   if [ -n "${SVPW_RUN:-}" ]; then r=$SVPW_RUN
-  elif [[ "${XDG_RUNTIME_DIR:-}" == /tmp/svpw.* ]]; then r=$XDG_RUNTIME_DIR
+  elif [[ "${XDG_RUNTIME_DIR:-}" == /tmp/svolder/pw.* ]]; then r=$XDG_RUNTIME_DIR
   else return 1; fi
-  valid_run "$r" || die "$r is not a /tmp/svpw.XXXXXX run directory" 2
+  valid_run "$r" || die "$r is not a /tmp/svolder/pw.XXXXXX run directory" 2
   printf '%s' "$r"
 }
 
@@ -124,12 +124,13 @@ cmd_start() {
   refuse() { if [ -n "$made" ] && valid_run "$made"; then rmdir "$made" 2>/dev/null || true; fi; die "$1" 2; }
   if [ -n "${SVPW_RUN:-}" ]; then
     r=$SVPW_RUN
-    valid_run "$r" || die "SVPW_RUN must be a /tmp/svpw.XXXXXX directory" 2
+    valid_run "$r" || die "SVPW_RUN must be a /tmp/svolder/pw.XXXXXX directory" 2
     [ "$r" != "${XDG_RUNTIME_DIR:-}" ] || die "SVPW_RUN is the caller's own XDG_RUNTIME_DIR" 2
     [ -d "$r" ] || die "SVPW_RUN is not a directory" 2
     [ ! -s "$r/pids" ] || die "an instance is already recorded in $r (stop it first)" 2
   else
-    r=$(mktemp -d /tmp/svpw.XXXXXX) || die "mktemp failed"
+    . "$HERE/../tmp-base.sh"
+    r=$(SVOLDER_TMP_BASE=/tmp/svolder svtmp_dir pw) || die "mktemp failed"
     made=$r
     valid_run "$r" || refuse "unexpected run directory shape $r"
   fi
