@@ -243,6 +243,28 @@ async fn a_dead_pw_cli_is_restarted_and_the_newest_value_sent() {
 }
 
 #[tokio::test]
+async fn settle_restarts_a_pw_cli_that_ended_and_sends_the_newest_values() {
+    let tools = Tools::new("session-ended-settle");
+    // This pw-cli takes one line and ends without applying it.
+    tools.cli("read line\nexit 0\n");
+    let mut session = tools.session();
+    assert!(session.send(fixture_id(), &gain(0.1)).await);
+    tools.wait_dead().await;
+    tools.cli(
+        "while read line; do [ \"$line\" = quit ] && exit 0; echo \"$line\" >> \"$LOG\"; done\n",
+    );
+    // No new value: the tick's settle alone puts the unapplied value right.
+    assert!(session.settle(Some(fixture_id())).await);
+    let log = tools.wait_for(3).await;
+    assert_eq!(log.len(), 3, "{log:?}");
+    assert_eq!(log[2], line_for(&gain(0.1)));
+    // Settled: nothing more to do.
+    assert!(session.settle(Some(fixture_id())).await);
+    assert_eq!(tools.log().len(), 3);
+    session.close().await;
+}
+
+#[tokio::test]
 async fn a_line_lost_with_a_dead_pw_cli_is_sent_again_after_the_restart() {
     let tools = Tools::new("session-lost");
     // This pw-cli ends without taking a line, as one that died with the line in its pipe.

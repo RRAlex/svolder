@@ -9,6 +9,7 @@ use std::time::Duration;
 use svolder_host::eq::{HostEqState, Manager, Route};
 use svolder_host::fake::{FakeChain, FakeParams, FakePlayers, FakeSink, SinkWrite};
 use svolder_host::{Sink, SinkState};
+use svolder_profiles::tone::apo::{FilterKind, SourceFilter};
 
 use super::super::tests::{pass, settle};
 use super::*;
@@ -619,6 +620,9 @@ fn save(dir: &Dir, on: bool) {
             q: 1.0,
         }],
         slots: vec![1],
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     }
     .save(&dir.state())
     .expect("the state is saved");
@@ -710,4 +714,213 @@ async fn a_mute_makes_a_later_volume_answer_read_the_sink_again() {
     rig.service.host_mute(true).await.unwrap();
     let volume = rig.service.host_volume(20).await.unwrap();
     assert!(volume.muted, "an answer never reports a stale mute");
+}
+
+fn crossfeed_on() -> HostEqOp {
+    HostEqOp::Crossfeed {
+        on: Some(true),
+        model: None,
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_crossfeed_op_changes_the_chain_and_the_host_view() {
+    let rig = rig();
+    let _watching = rig.service.watching();
+    settle().await;
+    rig.eq(crossfeed_on()).await.expect("crossfeed on");
+    settle().await;
+    let eq = rig.service.view().eq.expect("the EQ's view");
+    let crossfeed = eq.crossfeed.expect("the crossfeed's view");
+    assert!(
+        crossfeed.on && !eq.on,
+        "crossfeed alone: the EQ's switch stays off"
+    );
+    assert!(
+        rig.chain.calls().iter().any(
+            |call| matches!(call, svolder_host::fake::ChainCall::Apply(request) if request.flat)
+        ),
+        "a flat chain was applied"
+    );
+    // A value change comes through the same op, and a change that names nothing is refused.
+    rig.eq(HostEqOp::Crossfeed {
+        on: None,
+        model: Some("meier".into()),
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    })
+    .await
+    .expect("a model");
+    settle().await;
+    pass(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.service.view().eq.unwrap().crossfeed.unwrap().model,
+        "meier"
+    );
+    let why = rig
+        .eq(HostEqOp::Crossfeed {
+            on: None,
+            model: None,
+            preset: None,
+            amount_pct: None,
+            crossover_hz: None,
+            delay_ms: None,
+            done: true,
+        })
+        .await
+        .unwrap_err();
+    assert!(why.contains("names nothing"), "{why}");
+}
+
+/// A state that says the crossfeed plays, as a run that did not stop leaves it.
+fn save_crossfeed_on(dir: &Dir, flat: bool) -> HostEqState {
+    let state = HostEqState {
+        on: true,
+        name: "Saved".into(),
+        origin: None,
+        target: "sink".into(),
+        route: Route::Smart,
+        manager: Manager::Child,
+        previous_default: None,
+        preamp_db: 0.0,
+        filters: vec![SourceFilter {
+            kind: FilterKind::Peaking,
+            f: 100.0,
+            g: 2.0,
+            q: 1.0,
+        }],
+        slots: vec![1],
+        crossfeed: Some(svolder_host::eq::CrossfeedSettings::default()),
+        crossfeed_on: true,
+        flat,
+    };
+    state.save(&dir.state()).expect("the state is saved");
+    state
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_start_turns_a_crossfeed_found_on_off_and_removes_a_chain_that_ran_for_it() {
+    for flat in [true, false] {
+        let dir = Dir::new();
+        let state = save_crossfeed_on(&dir, flat);
+        let (sink, chain, params) = (
+            FakeSink::new(Some(sink_state(0.42))),
+            FakeChain::with_state(state),
+            FakeParams::new(),
+        );
+        let service = HostService::idle();
+        service.run_with_in(
+            parts(computer_over(
+                &sink,
+                &chain,
+                &params,
+                Keep::File(dir.state()),
+            )),
+            false,
+        );
+        settle().await;
+        let crossfeed = service.view().eq.unwrap().crossfeed.unwrap();
+        assert!(!crossfeed.on, "never on after a start (flat: {flat})");
+        assert_eq!(crossfeed.off_reason.as_deref(), Some("restart"));
+        let calls = chain.calls();
+        match flat {
+            true => assert!(calls.contains(&svolder_host::fake::ChainCall::Remove)),
+            false => assert!(
+                calls.iter().any(|call| matches!(call, svolder_host::fake::ChainCall::Apply(request) if request.crossfeed.is_none() && !request.flat)),
+                "{calls:?}"
+            ),
+        }
+        let saved = HostEqState::load(&dir.state()).unwrap().unwrap();
+        assert!(!saved.crossfeed_on && !saved.flat);
+        assert!(saved.crossfeed.is_some(), "the settings stay");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stop_turns_the_crossfeed_off_and_removes_a_chain_that_ran_for_it() {
+    let dir = Dir::new();
+    let rig = rig_keeping(Keep::File(dir.state()));
+    settle().await;
+    rig.eq(crossfeed_on()).await.expect("crossfeed on");
+    assert!(
+        HostEqState::load(&dir.state())
+            .unwrap()
+            .unwrap()
+            .crossfeed_on
+    );
+    rig.service.shutdown().await;
+    assert_eq!(
+        rig.chain.calls().last(),
+        Some(&svolder_host::fake::ChainCall::Remove),
+        "the chain that ran for crossfeed alone is removed"
+    );
+    let saved = HostEqState::load(&dir.state()).unwrap().unwrap();
+    assert!(!saved.crossfeed_on && !saved.flat && !saved.on);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reload_that_ends_the_computer_side_turns_the_crossfeed_off_too() {
+    let dir = Dir::new();
+    let rig = rig_keeping(Keep::File(dir.state()));
+    settle().await;
+    rig.eq(crossfeed_on()).await.expect("crossfeed on");
+    rig.restart(Keep::File(dir.state()));
+    settle().await;
+    pass(Duration::from_secs(2)).await;
+    assert!(
+        rig.chain
+            .calls()
+            .contains(&svolder_host::fake::ChainCall::Remove),
+        "the old computer's chain was taken away"
+    );
+    assert!(
+        !HostEqState::load(&dir.state())
+            .unwrap()
+            .unwrap()
+            .crossfeed_on
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn in_a_container_a_crash_with_crossfeed_on_applies_the_eq_again_with_it_off() {
+    let dir = Dir::new();
+    let mut state = save_crossfeed_on(&dir, false);
+    // The container's chain died with the crash.
+    state.on = false;
+    let (sink, chain, params) = (
+        FakeSink::new(Some(sink_state(0.42))),
+        FakeChain::with_state(state),
+        FakeParams::new(),
+    );
+    let service = HostService::idle();
+    service.run_with_in(
+        parts(computer_over(
+            &sink,
+            &chain,
+            &params,
+            Keep::File(dir.state()),
+        )),
+        true,
+    );
+    settle().await;
+    let calls = chain.calls();
+    assert!(
+        calls.iter().any(|call| matches!(call, svolder_host::fake::ChainCall::Apply(request) if request.crossfeed.is_none() && !request.flat)),
+        "{calls:?}"
+    );
+    let eq = service.view().eq.unwrap();
+    assert!(
+        eq.on && !eq.crossfeed.unwrap().on,
+        "the EQ plays again, the crossfeed does not"
+    );
+    let saved = HostEqState::load(&dir.state()).unwrap().unwrap();
+    assert!(saved.on && !saved.crossfeed_on);
 }

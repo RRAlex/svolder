@@ -374,7 +374,8 @@ While a daemon reads the same configuration file it is the one writer, so `eq im
 `eq save`, `eq rename` and `eq delete`) reads and parses the file itself and asks the daemon to
 save the preset (a daemon older than 0.34.0 is refused with `svolder daemon restart`); with no
 daemon, or one that reads another file, the command writes the file itself. `--transport ble` and
-`fake` never ask a daemon, so they write the file too.
+`fake` never ask a daemon to write, so they write the file too, and then ask a daemon that reads
+the same file to reload it, as every transport does.
 
 While the daemon says the file it reads is gone, `eq save` and `eq import` are refused in its words
 (`PATH is missing: the daemon keeps its running configuration; restore the file, then try again`,
@@ -814,3 +815,120 @@ modes, including the Loudness note — a contour that tracks the DAC's own volum
 full volume and not drawn until it is measured on a real device — under
 ["What the graph draws"](tui.md#what-the-graph-draws); and typing a band's exact frequency, gain and
 Q under ["The edit line (`Enter`)"](tui.md#the-edit-line-enter).
+
+## Crossfeed
+
+Crossfeed is a setting of the computer's sound, beside the computer EQ: it feeds a low-passed,
+delayed copy of each channel into the other channel at a set level. Use it with headphones on the
+computer's output; it does nothing for the DAC's own tone control, which it never touches. It
+works from the TUI (`C`, then the tone screen `e` or the device screen's Tone pane), the web
+page's Sound… popup, [`svolder host crossfeed`](cli.md#host-crossfeed), the MCP server's
+`set_host_crossfeed` and Home Assistant; all of them change the same one setting, kept by the
+daemon (or by a TUI with no daemon), so the last change wins.
+
+### The four models
+
+- - **Bauer** (the default) is the stereophonic-to-binaural crossfeed of the bs2b library. The other
+  channel gets a low-passed copy of the sound, and the direct channel's highs are lifted a little to
+  keep the whole level. It has three presets, named for the people whose settings they are, listed
+  from the mildest to the strongest; choosing Bauer loads bs2b default.
+- **Linkwitz** is a first-order low-pass cross path: the low frequencies of each channel are added
+  to the other channel, and the direct sound is lowered by the same share.
+- **Meier** crosses only what differs between the channels (the "side" signal, low-passed), so
+  a sound in the centre stays untouched.
+- **Mid/Side bass** blends the bass below the crossover toward mono and leaves the centre and the
+  highs as they are. At 50 % the bass is fully mono. It adds no delay.
+
+### Presets, Level, Crossover and Delay
+
+| Model | Presets (crossover, level) | Crossover range | Level range | Delay |
+| --- | --- | --- | --- | --- |
+| Bauer | Jan Meier (650 Hz, 25 %), Chu Moy (700 Hz, 33 %), bs2b default (700 Hz, 37 %) | 300–2000 Hz, 10 Hz steps | 15–47 %, 1 % steps | own lag up to 1.00 ms, 0.01 ms steps |
+| Linkwitz | Default (700 Hz, 30 %) | 300–2000 Hz, 10 Hz steps | 5–50 %, 1 % steps | own lag up to 1.00 ms |
+| Meier | Default (650 Hz, 25 %), Rockbox (660 Hz, 24 %) | 300–2000 Hz, 10 Hz steps | 5–50 %, 1 % steps | own lag up to 1.00 ms |
+| Mid/Side bass | Default (120 Hz, 50 %) | 40–500 Hz, 10 Hz steps | 5–50 %, 1 % steps | none |
+
+- **Level** is the share of the other channel that is added at low frequencies, from 0 to
+  50 % (50 % is mono). It is shown in percent and in dB (`37 % · −8.6 dB`, the level of the
+  crossed sound against the input, `20·log10` of the share) by the TUI, the web popup and
+  `host crossfeed` alike. The Bauer presets are defined by bs2b's own figure, the feed level
+  (4.5 dB for the default: how far the crossed sound sits below the direct one); only
+  `--json` and the MCP server carry it, as `feed_db`. More percent is more crossfeed.
+- **Crossover** is where the crossed sound is cut: only what is lower than it crosses over
+  (higher in Mid/Side bass is a wider blend).
+- - **Delay** is how far the crossed copy is delayed, in ms. Every model has a lag of its own that
+  follows the crossover (about 0.26 ms for Bauer at 700 Hz); the delay shown is the total, never
+  below that, and `own` means no more than the model's own. It plays in whole samples, rounded down
+  (21 µs at 48 kHz). Mid/Side bass has none to set (its low pass lags by itself, about 1.9 ms at 120
+  Hz, which nothing changes).
+- A **preset** loads its exact numbers. Changing the model loads the new model's default preset;
+  picking the model that is already chosen changes nothing. Changing a Level, Crossover or Delay
+  makes the values **Custom**, and the screens say what they were edited from (`Custom, edited from
+  Chu Moy`). Every number is rounded to its step and held to its range, and a screen shows what
+  was kept.
+
+### On, off, and the level
+
+Crossfeed has its own switch, apart from the computer EQ's. It plays with the EQ on or off: with the
+EQ off and crossfeed on, the chain plays flat (every filter the identity) with the crossfeed after
+it. With both off no chain runs, and turning one on starts it; but while a stream plays, where live
+updates work, the chain stays as a flat pass-through (0 dB, or the lower level its loaded curve
+needs, a boosted preset keeping its cut) so the player is not paused, and goes once nothing has
+played through it for about 30 s; a graceful stop removes it at once, and turning either back on in
+that time reuses it.
+
+A chain that dies (killed, crashed) is noticed at once: the daemon starts it again with crossfeed
+off and the note "the computer EQ chain stopped and was started again". The EQ turns off, with the
+note "computer EQ turned off: the chain stopped (...)", only when the restarted chain dies quickly
+(within 10 s) a second time; a restart that fails is tried again after 1, 2, 4 and 8 s. A PipeWire
+restart never turns it off, a chain that ran for crossfeed alone is removed rather than restarted,
+and a pass-through that dies is not restarted. A daemon that starts over a chain it did not start
+sends it the saved state when it plays other values. The view never says live while no chain runs.
+Turning the EQ off while crossfeed plays, or on while it is flat, changes nothing but the sound; no
+chain is rebuilt.
+
+A crossfeed adds sound, so its loudest point is looked at: the preamp is the EQ's less the
+crossfeed's worst gain at any frequency and any usual rate (44.1 to 384 kHz), rounded up to 0.1 dB,
+and follows every change of model, level, crossover or delay. An update lowers the preamp before the
+crossfeed grows and raises it after the crossfeed shrinks, so nothing plays above 0 dB at any
+frequency, even between two values, and turning crossfeed on never asks. Meier with a delay plays
+about 1 to 2 dB quieter for the rate rule (up to about 3.5 dB at extremes), so a change of the
+output's rate (44.1 to 384 kHz) never takes it over 0 dB; the other models are unchanged. The rule
+is per frequency, as the EQ's: a peak in the samples of a loud, wide mix can still be a few tenths
+of a dB higher. With crossfeed on and the EQ off, the level stays at the lowest one the loaded chain
+allows until the chain restarts (a chain whose loaded curve took 6 dB off keeps those 6 dB while it
+plays flat).
+
+### It turns itself off
+
+Crossfeed is **off** whenever any of these happens, so a filter is never left on that you do not
+remember turning on:
+
+- the daemon (or a TUI with no daemon) starts and finds it on;
+- the output the computer plays into changes (read once a second from the sound server);
+- the filter chain restarts;
+- the daemon stops gracefully;
+- a TUI with no daemon quits;
+- a reload that changes `[host]` halts the computer's side and stops its chain; crossfeed goes
+  off with the same note as a stop (`svolder stopped`), though the daemon keeps running.
+
+Each reset leaves a note and a reason in the view (`restart`, `output-changed`, `chain-restarted`,
+`stopped`): "crossfeed turned off: it is off after a restart", and the TUI shows it as a toast
+once. The settings (model, numbers) are kept, only the switch goes off. A chain that runs for
+crossfeed alone is removed by a reset; a chain with an EQ goes on playing the EQ. If the
+sound server refuses the change the reset is tried again once a second and the note says so. A
+change of the sink's sample rate is no reset: the crossfeed is worked out again for the new rate
+(or turned off, with a note, when it cannot play at it). When live updates are unavailable, a
+change rebuilds the chain with the crossfeed in its configuration, and the next start of the daemon
+takes it out again. A chain left by an older svolder cannot take crossfeed and is rebuilt once
+when it is first turned on; a held curve the chain cannot carry says why in the view's
+`unavailable` instead, and the controls dim.
+
+### The saved state
+
+The state file of the computer EQ (`~/.local/state/svolder/host-eq.toml`) keeps the model, preset,
+level, crossover and delay under `crossfeed`, and two flags: `crossfeed_on` (the stage was last
+on) and `flat` (the chain was applied only for crossfeed). After a crash the next start reads them
+and takes the stage out of the chain, or removes the chain, so nothing stays on. Settings you
+change while the EQ was never applied and no state file exists exist only in memory until a chain
+is applied.

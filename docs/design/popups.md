@@ -59,7 +59,11 @@ A popup is three parts, under `core/popups/`:
   scrolled there. A draw may name a `title` (a popup whose title names what it is about) and
   `entries`; each stands from then on, a draw that names neither keeps both, and so do the loading
   and failed lines. `draw`, `loading` and `failed` draw the whole box again, so they first close the
-  inline ask and the list that are open in the popup: a wire closes neither before it draws. `draw`
+  inline ask and the list that are open in the popup: a wire closes neither before it draws. A
+  `put` that replaces a place holding an open list's opener, or an ask (its box or its place),
+closes
+  that list or ask the same way, so neither is left held with its markup gone; a `put` of what the
+  place holds already changes nothing and closes nothing. `draw`
   and `put` keep the focus: it goes to the element that has the same id after the redraw; when there
   is none, or it takes no focus because it is not rendered, to the first of these that is: the
   current entry of the side list, the way back from a page, the close button, the popup's element.
@@ -70,7 +74,10 @@ A popup is three parts, under `core/popups/`:
   whose page it holds, else after the title, so the keyboard scrolls it. A pane that shows
   everything, or that has a control (the keyboard scrolls from it), is no stop. The frame looks
   after each draw and `put` and when its box changes size; a page that grows by other means calls
-  `put` or `draw`.
+  `put` or `draw`. A bar of tabs (`.fp-tab`, `role="tab"`) in the frame's `bar` makes the pane the
+  tab panel: the frame gives it `role="tabpanel"`, the id `popup-<name>-page` (`popupPanelId`) that
+  each tab names in `aria-controls`, and `aria-labelledby` the tab shown, in step with each draw and
+  `put`.
 
 An entry of the side list is `{ id, label, dot?, dotWords?, tag?, group? }`. Beside its label
 it may carry a state dot (`dot`: `'on'`, `'warn'` or `'off'`; `dotWords` are read by a screen
@@ -183,8 +190,9 @@ write of that viewer's says (`core.actions.refuse()`: the toast `Sign in to chan
 the way to sign in, for a guest; the page's read-only words where writes are off); a step of
 the history makes the entry a plain one and says nothing. An entry of an earlier load of the
 page opens nothing in any case, so an address or a reload opens no popup. A viewer who loses
-the right while such a popup stands (the page's model is replaced with another viewer; a
-sign-out loads the page again) loses the popup: it closes. A popup added by hand
+the right while such a popup stands (the page's model is replaced with another viewer, or the
+rights are read again at every later event of the model, the fleet, the host or the stream
+(state, opened); a sign-out loads the page again) loses the popup: it closes. A popup added by hand
 (`core.popups.add`, the checks' sample) has no such gate.
 
 ## The lazy loader
@@ -293,10 +301,25 @@ stream and is the one popup that stays through a device switch. Its profile choi
 from a button in the page pane, as a list in a popup is (the pane is a place for lists); the modal's
 `onKey` hands Escape and the arrows to it. [devices-popup.md](devices-popup.md) has it whole.
 
+## Sound
+
+The menu's *Sound…* row (`core/popups/sound/`, a writer's) is one popup with two tabs, *EQ library*
+and *Crossfeed*. The frame's `draw` takes `head` (header tools, the tab strip's neighbours) and
+`bar` (a strip under the header that does not scroll); a popup with no side list is `fp-single`.
+`listed.js` lists `sound` (no `entries`); the EQ library has no listed popup of its own: its
+folder `popups/eq-library/` is the Sound popup's first tab, drawn into a view of the frame by
+`popups/sound/wire.js`, with its three pages as pills under the tabs. The Crossfeed tab is
+`popups/crossfeed/` (draw and wire): a header switch, Model and Preset menus, the two level curves
+and Level, Crossover and Delay steppers (one lane `actions.computer.setCrossfeed`: fields merged,
+the newest wins), every word and range from the daemon's view ([crossfeed.md](crossfeed.md)). The
+tabs are a tablist whose panel is the page pane (the tabs' `aria-controls` is
+`popupPanelId('sound')`).
+
 ## The EQ library
 
-`core/popups/eq-library/` is a writer's popup, the row *EQ library…* between *Devices…* and
-*Help…*: a search of AutoEq with a preview of the chosen measurement for the device on show (or for
+`core/popups/eq-library/` is the first tab of the Sound popup (the row *Sound…* between *Devices…* and
+*Help…*, see above): a search of AutoEq with a preview of the chosen measurement for the device on
+show (or for
 the computer), an import that only saves, an upload of a parametric EQ file and the saved presets
 with *Overwrite with current…*. It is about the side the page shows and so is not `stays`: a change
 of the shown device closes it, and its title names the side in every draw. It has a search field

@@ -196,6 +196,38 @@ await ok('tab_goes_round_by_the_controls_that_are_rendered', () => {
   assert.equal(r.document.activeElement, el);
 });
 
+await ok('a_radio_group_is_one_stop_of_tab_at_the_popups_end', () => {
+  const r = rig();
+  const radios = (checked) => {
+    const el = r.dialog('first');
+    for (const id of ['a', 'b', 'c']) {
+      const radio = r.document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'group';
+      radio.id = id;
+      radio.checked = id === checked;
+      el.append(radio);
+    }
+    return el;
+  };
+  // the group is the last thing in the box and its checked radio is not the last in the markup:
+  // the browser's Tab leaves the group from the checked one, so that is the end
+  const one = r.modal.open({ el: radios('b') });
+  r.document.getElementById('b').focus();
+  assert.equal(r.key('Tab').defaultPrevented, true, 'forward from the group\'s one stop');
+  assert.equal(r.at(), 'first', 'goes round to the first control');
+  assert.equal(r.key('Tab', { shiftKey: true }).defaultPrevented, true, 'back from the first');
+  assert.equal(r.at(), 'b', 'goes round to the group\'s one stop, the checked radio');
+  one.close();
+  // none checked: the browser's Tab enters the group at its first radio, Shift+Tab at its last
+  r.modal.open({ el: radios(null) });
+  r.document.getElementById('a').focus();
+  assert.equal(r.key('Tab').defaultPrevented, true, 'forward from the group with none checked');
+  assert.equal(r.at(), 'first');
+  assert.equal(r.key('Tab', { shiftKey: true }).defaultPrevented, true);
+  assert.equal(r.at(), 'c', 'Shift+Tab enters an unchecked group at its last radio');
+});
+
 await ok('tab_reaches_the_summary_of_a_closed_details_at_the_end', () => {
   const r = rig();
   const el = r.document.createElement('div');

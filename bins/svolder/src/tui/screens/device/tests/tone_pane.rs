@@ -212,3 +212,40 @@ fn a_device_with_no_tone_control_has_a_blank_preset_line() {
     let line = tone_lines(&app, &eq, &theme, 60).lines[2].clone();
     assert_eq!(line.spans.iter().map(Span::width).sum::<usize>(), 0);
 }
+
+/// The computer side's Crossfeed row sits at the bottom of the pane whatever its height: the
+/// summary under it goes first when the pane is short, then the table's rows, scrolled to keep
+/// the focused point in view; the row itself always stays.
+#[test]
+fn a_short_tone_pane_gives_up_the_crossfeed_summary_first_and_the_row_stays() {
+    use crate::tui::app::Screen;
+    let theme = Theme::new(false);
+    let mut app = crate::tui::test_support::app_showing(Screen::Device);
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
+        true, "bauer", None,
+    ));
+    app.flip_side();
+    let eq = app.profile.eq.clone().expect("a tone control");
+    let kinds = |height: usize| {
+        let pane = tone_lines_in(&app, &eq, &theme, (38, height));
+        let plain: Vec<String> = pane.lines.iter().map(|l| l.to_string()).collect();
+        (pane.lines.len(), plain, pane.crossfeed.map(|row| row.line))
+    };
+    // tall: blank, row, summary at the very bottom
+    let (len, plain, row) = kinds(14);
+    assert_eq!(len, 14, "{plain:#?}");
+    assert_eq!(row, Some(12));
+    assert!(plain[13].contains("37 %"), "{plain:#?}");
+    // 8 rows is the least that keeps the summary: 4 of head, a point, a blank, row, summary
+    let (len, plain, _) = kinds(8);
+    assert_eq!((len, plain[7].contains("37 %")), (8, true), "{plain:#?}");
+    // one row fewer: the summary goes, the row stays at the bottom, the point stays
+    let (len, plain, row) = kinds(7);
+    assert_eq!((len, row), (7, Some(6)), "{plain:#?}");
+    assert!(plain[6].contains("Crossfeed"), "{plain:#?}");
+    assert!(!plain.iter().any(|l| l.contains("37 %")));
+    assert!(
+        plain[4].contains("1000"),
+        "the table keeps a row: {plain:#?}"
+    );
+}

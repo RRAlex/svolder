@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use clap::CommandFactory;
+use clap::{CommandFactory, Parser};
 
 use super::*;
 
@@ -95,4 +95,26 @@ fn parse_duration_rejects_what_would_not_make_sense_as_a_timeout() {
     assert!(parse_duration("-1s").is_err());
     assert!(parse_duration("nans").is_err());
     assert!(parse_duration("1e18s").is_err(), "far past the 1e9 s bound");
+}
+
+/// `host crossfeed` takes `--json` before or after its verb, like the other `host` commands.
+#[test]
+fn host_crossfeed_takes_json_before_or_after_its_verb() {
+    for args in [
+        ["svolder", "host", "crossfeed", "--json", "level", "40"],
+        ["svolder", "host", "crossfeed", "level", "40", "--json"],
+    ] {
+        let cli = Cli::try_parse_from(args).expect("parses");
+        let Some(Command::Host {
+            command: HostCommand::Crossfeed { json, command },
+        }) = cli.command
+        else {
+            panic!("not host crossfeed");
+        };
+        assert!(json, "{args:?}");
+        assert!(matches!(command, Some(HostCrossfeedCommand::Level { .. })));
+    }
+    let cli = Cli::try_parse_from(["svolder", "host", "crossfeed", "level", "-5"])
+        .expect("a hyphen value reaches the command");
+    assert!(cli.command.is_some());
 }

@@ -9,7 +9,7 @@ use svolder_profiles::convert::{frequency_text, gain_text};
 use svolder_profiles::{EqMode, EqParam, EqSpec};
 use svolder_proto::FunctionId;
 
-use crate::tui::app::{App, LOUDNESS_MAX, ToneRow};
+use crate::tui::app::{App, LOUDNESS_MAX, ToneRow, Xf, crossfeed};
 use crate::tui::boxes::presets;
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::{self, CURSOR_WIDTH, LOUDNESS_WIDTH, MISSING};
@@ -50,6 +50,19 @@ pub(super) struct TonePane {
     pub(super) fields: Vec<[(usize, usize); 3]>,
     /// Cells the Loudness row's bar is drawn across, from [`LOUDNESS_BAR_AT`].
     pub(super) loudness_bar: usize,
+    /// The point the first of `bands` stands for: the table scrolls to keep the focused point
+    /// in view where the pane is short.
+    pub(super) bands_from: usize,
+    /// The Crossfeed row at the pane's bottom, on the computer side with crossfeed.
+    pub(super) crossfeed: Option<CrossfeedRow>,
+}
+
+/// Where the Crossfeed row sits in the Tone pane.
+pub(super) struct CrossfeedRow {
+    /// The interior line it landed on.
+    pub(super) line: u16,
+    /// Where its `‹` and `›` sit in the line, cursor included.
+    pub(super) arrows: (usize, usize),
 }
 
 /// The Tone pane: the mode the tone control is in, how strong its loudness curve is, and then a
@@ -58,9 +71,24 @@ pub(super) struct TonePane {
 /// `max_width` is the pane's own interior width, its border and padding already taken off, so a
 /// focused row's highlight never runs past it. The loudness bar is drawn across all the row has
 /// room for besides its value.
+#[cfg(test)]
 pub(super) fn tone_lines(app: &App, eq: &EqSpec, theme: &Theme, max_width: usize) -> TonePane {
+    tone_lines_in(app, eq, theme, (max_width, usize::MAX))
+}
+
+/// `tone_lines` for a pane whose interior is `(max_width, max_height)` cells: the computer
+/// side keeps its Crossfeed row at the bottom of the pane, under a table that scrolls to leave
+/// it room.
+pub(super) fn tone_lines_in(
+    app: &App,
+    eq: &EqSpec,
+    theme: &Theme,
+    (max_width, max_height): (usize, usize),
+) -> TonePane {
+    #[cfg(test)]
+    crate::tui::test_support::work::tick("tone_lines");
     if app.on_computer() {
-        return computer_lines(app, theme, max_width);
+        return computer_lines(app, theme, max_width, max_height);
     }
     let mode_raw = mode_spans(app, eq, theme, TONE_FIELD);
     let mode_width: usize = mode_raw.iter().map(Span::width).sum();
@@ -108,12 +136,14 @@ pub(super) fn tone_lines(app: &App, eq: &EqSpec, theme: &Theme, max_width: usize
         bands,
         fields,
         loudness_bar,
+        bands_from: 0,
+        crossfeed: None,
     }
 }
 
 /// The Tone pane on the computer side: the mode as `‹ Off | EQ ›`, the preset the points came
 /// from, and a row per point.
-fn computer_lines(app: &App, theme: &Theme, max_width: usize) -> TonePane {
+fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize) -> TonePane {
     let mode_raw = computer_mode_spans(app, theme, TONE_FIELD);
     let mode_width: usize = mode_raw.iter().map(Span::width).sum();
     let mode = tone_row(
@@ -145,7 +175,29 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize) -> TonePane {
         Line::from(Span::styled(POINT_TITLES, theme.style(Role::Dim))),
     ];
     let mut bands = Vec::new();
-    for (at, point) in app.computer_points().iter().enumerate() {
+    let points = app.computer_points();
+    // The Crossfeed row (and its numbers under it, where the pane has the room) sit at the
+    // bottom: the table gives up rows to them, scrolled to keep the focused point in view.
+    let xf = app.crossfeed();
+    let head = lines.len();
+    let (summary, gap) = match (xf, max_height) {
+        (None, _) => (false, false),
+        (Some(_), usize::MAX) => (true, true),
+        (Some(_), h) => (h >= head + 1 + 3, h >= head + 1 + 3),
+    };
+    let reserved = match xf {
+        Some(_) => 1 + usize::from(summary) + usize::from(gap),
+        None => 0,
+    };
+    let visible = match max_height {
+        usize::MAX => points.len(),
+        h => h.saturating_sub(head + reserved).min(points.len()),
+    };
+    let first = match max_height {
+        usize::MAX => 0,
+        _ => widgets::scroll::scroll_start(points.len(), visible, app.focused_point()),
+    };
+    for (at, point) in points.iter().enumerate().skip(first).take(visible) {
         bands.push(u16::try_from(lines.len()).unwrap_or(u16::MAX));
         let text = format!(
             "{}  {:<4} {:>5} Hz {:>5} dB {:>4}",
@@ -166,13 +218,77 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize) -> TonePane {
             max_width,
         ));
     }
+    let crossfeed = xf.map(|view| {
+        // Under the table, at the pane's bottom where its height is known.
+        let target = match max_height {
+            usize::MAX => lines.len() + usize::from(gap),
+            h => h - 1 - usize::from(summary),
+        };
+        while lines.len() < target {
+            lines.push(Line::default());
+        }
+        let (line, arrows) = crossfeed_line(app, view, theme, max_width);
+        let at = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+        lines.push(line);
+        if summary {
+            lines.push(summary_line(view, theme));
+        }
+        CrossfeedRow { line: at, arrows }
+    });
     TonePane {
         lines,
         mode_arrows: (CURSOR_WIDTH + TONE_FIELD, CURSOR_WIDTH + mode_width - 1),
         fields: vec![[(0, 0); 3]; bands.len()],
         bands,
         loudness_bar: 0,
+        bands_from: first,
+        crossfeed,
     }
+}
+
+/// The Crossfeed row of the pane: `Crossfeed ‹ on › Bauer · Chu Moy`, and where its `‹` and `›`
+/// sit in the line.
+fn crossfeed_line(
+    app: &App,
+    view: &svolder_host::eq::crossfeed::CrossfeedView,
+    theme: &Theme,
+    max_width: usize,
+) -> (Line<'static>, (usize, usize)) {
+    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Preset);
+    let (lit, other) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let arrow = theme.style(Role::ModeArrow);
+    let word = if view.on { "on" } else { "off" };
+    let room = max_width.saturating_sub(CURSOR_WIDTH + TONE_FIELD + 2 + word.len() + 2 + 1);
+    let spans = vec![
+        widgets::rows::label("Crossfeed", TONE_FIELD),
+        Span::styled("\u{2039} ", arrow),
+        Span::styled(word, if view.on { lit } else { other }),
+        Span::styled(" \u{203a}", arrow),
+        Span::raw(" "),
+        Span::raw(widgets::text::cut_to_cells(
+            &crossfeed::words_of(view),
+            room,
+        )),
+    ];
+    let arrows = (
+        CURSOR_WIDTH + TONE_FIELD,
+        CURSOR_WIDTH + TONE_FIELD + 2 + word.len() + 1,
+    );
+    let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
+    let line = row_style(line, focused, !app.session.connected, theme, max_width);
+    (line, arrows)
+}
+
+/// The dim line under the Crossfeed row: its numbers.
+fn summary_line(view: &svolder_host::eq::crossfeed::CrossfeedView, theme: &Theme) -> Line<'static> {
+    Line::from(Span::styled(
+        format!(
+            "{}{}",
+            " ".repeat(CURSOR_WIDTH),
+            crossfeed::summary_text(view)
+        ),
+        theme.style(Role::Dim),
+    ))
 }
 
 /// The computer's mode as a select with both its names: `‹ Off | EQ ›`, the one in force standing

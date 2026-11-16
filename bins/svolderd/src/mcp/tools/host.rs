@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The computer's tools: `get_host` reads its volume, EQ and player; `set_host_volume`,
-//! `host_mute` and `set_host_eq` change them.
+//! The computer's tools: `get_host` reads its volume, EQ, crossfeed and player; `set_host_volume`,
+//! `host_mute`, `set_host_eq` and `set_host_crossfeed` change them.
 //!
 //! The volume follows the rules the device's tools follow. It never goes above 100 %. A rise of
 //! more than [`MAX_RISE_DB`] over its lowest level of the last minute asks first, the level in
@@ -10,8 +10,11 @@
 //! connected device plays too asks, since the correction would play twice, and is repeated with
 //! the answer.
 
-use rmcp::model::CallToolRequestParams;
+use std::sync::Arc;
+
+use rmcp::model::{CallToolRequestParams, Tool, ToolAnnotations};
 use serde_json::{Value, json};
+use svolder_host::eq::crossfeed::{CrossfeedView, Model, ModelView};
 use svolder_ipc::host::HostView;
 use svolder_ipc::{HostEqOp, Request, Response};
 use svolder_profiles::tone::preset;
@@ -203,6 +206,55 @@ impl Tools {
         })
     }
 
+    /// Change the crossfeed. Turning it on never asks: the preamp rule lowers the level first, so
+    /// it cannot make the output louder.
+    pub(super) async fn set_host_crossfeed(&self, request: &CallToolRequestParams) -> Done {
+        let args = Args::new(request, CROSSFEED_ARGS)?;
+        let model = args.text("model")?;
+        if let Some(word) = model.filter(|word| Model::from_word(word).is_none()) {
+            let words: Vec<&str> = Model::ALL.iter().map(|m| m.word()).collect();
+            return Err(format!(
+                "no crossfeed model {word:?}; the models are {}",
+                words.join(", ")
+            )
+            .into());
+        }
+        let delay_ms = match args.value("delay_ms") {
+            Some(Value::String(word)) if word == OWN => Some(0.0),
+            Some(Value::String(_)) => {
+                return Err(format!("delay_ms must be a number of ms or {OWN:?}").into());
+            }
+            _ => args.number("delay_ms")?,
+        };
+        let on = args.flag("on")?;
+        let preset = args.text("preset")?.map(str::to_string);
+        let amount_pct = args.number("level_pct")?;
+        let crossover_hz = args.number("crossover_hz")?;
+        if on.is_none()
+            && model.is_none()
+            && preset.is_none()
+            && amount_pct.is_none()
+            && crossover_hz.is_none()
+            && delay_ms.is_none()
+        {
+            return Err(format!("give at least one of {}", CROSSFEED_ARGS.join(", ")).into());
+        }
+        self.host_send(Request::HostEq {
+            op: HostEqOp::Crossfeed {
+                on,
+                model: model.map(str::to_string),
+                preset,
+                amount_pct,
+                crossover_hz,
+                delay_ms,
+                done: true,
+            },
+        })
+        .await?;
+        let view = self.host_view().await?;
+        Ok(json!({ "crossfeed": crossfeed_of(&view) }))
+    }
+
     /// The device a preset recall is shaped to: the named one, else for a built-in the only or
     /// default one, which must have a tone control; a saved preset needs none.
     fn preset_device(&self, name: &str, named: Option<&str>) -> Result<Option<String>, Stop> {
@@ -251,6 +303,131 @@ fn eq_json(eq: &svolder_host::eq::EqView) -> Value {
     out
 }
 
+/// The arguments of `set_host_crossfeed`.
+const CROSSFEED_ARGS: &[&str] = &[
+    "on",
+    "model",
+    "preset",
+    "level_pct",
+    "crossover_hz",
+    "delay_ms",
+];
+
+/// The word of `delay_ms` for the model's own lag. A null cannot say it: every argument of
+/// these tools reads a null as not given.
+const OWN: &str = "own";
+
+/// The crossfeed as the tools show it. `curve` (plot data, large) and `models` (the schema of
+/// `set_host_crossfeed` carries their words and ranges) are left out on purpose.
+fn crossfeed_json(xf: &CrossfeedView) -> Value {
+    let mut out = json!({
+        "on": xf.on,
+        "model": xf.model,
+        "preset": xf.preset,
+        "edited_from": xf.edited_from,
+        "level_pct": xf.amount_pct,
+        "level_db": xf.amount_db,
+        "feed_db": xf.feed_db,
+        "crossover_hz": xf.crossover_hz,
+        "delay_ms": xf.delay_ms,
+        "delay_floor_ms": xf.delay_floor_ms,
+        "delay_own": xf.delay_own,
+        "delay_settable": xf.delay_settable,
+        "output": xf.output,
+        "note": xf.note,
+        "off_reason": xf.off_reason,
+    });
+    if let Some(why) = &xf.unavailable {
+        out["unavailable"] = json!(why);
+    }
+    out
+}
+
+/// The crossfeed of `view`, null when the EQ is unavailable or the daemon has none.
+fn crossfeed_of(view: &HostView) -> Value {
+    view.eq
+        .as_ref()
+        .filter(|eq| eq.unavailable.is_none())
+        .and_then(|eq| eq.crossfeed.as_ref())
+        .map_or(Value::Null, crossfeed_json)
+}
+
+/// The definition of `set_host_crossfeed`; the words and ranges come from the models' table.
+pub(super) fn crossfeed_definition() -> Tool {
+    let views: Vec<ModelView> = Model::ALL.into_iter().map(ModelView::of).collect();
+    let least = |f: fn(&ModelView) -> f64| views.iter().map(f).fold(f64::INFINITY, f64::min);
+    let most = |f: fn(&ModelView) -> f64| views.iter().map(f).fold(0.0, f64::max);
+    let per_model = |f: &dyn Fn(&ModelView) -> String| {
+        views
+            .iter()
+            .map(|view| format!("{}: {}", view.word, f(view)))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let presets = per_model(&|view| {
+        view.presets
+            .iter()
+            .map(|preset| preset.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    let levels = per_model(&|view| {
+        format!(
+            "{} to {} in steps of {}",
+            view.amount_pct.min, view.amount_pct.max, view.amount_pct.step
+        )
+    });
+    let crossovers = per_model(&|view| {
+        format!(
+            "{} to {} in steps of {}",
+            view.crossover_hz.min, view.crossover_hz.max, view.crossover_hz.step
+        )
+    });
+    let delays = per_model(&|view| match view.delay_settable {
+        true => format!(
+            "up to {} ms in steps of {}",
+            view.delay_max_ms, view.delay_step_ms
+        ),
+        false => "none".to_string(),
+    });
+    let properties = json!({
+        "on": { "type": "boolean", "description": "true to turn the crossfeed on, false to turn it off; turning it on never raises the level" },
+        "model": { "type": "string", "enum": Model::ALL.map(Model::word), "description": "The model; a different one loads its default preset" },
+        "preset": { "type": "string", "description": format!("A preset's name within the model, loaded after a model change; {presets}") },
+        "level_pct": {
+            "type": "number", "minimum": least(|m| m.amount_pct.min), "maximum": most(|m| m.amount_pct.max),
+            "description": format!("The level of the crossed signal as a share of the input, in percent, held to the model's range and snapped to its step ({levels}); makes the values custom")
+        },
+        "crossover_hz": {
+            "type": "number", "minimum": least(|m| m.crossover_hz.min), "maximum": most(|m| m.crossover_hz.max),
+            "description": format!("The crossover in Hz, held to the model's range and snapped to its step ({crossovers}); makes the values custom")
+        },
+        "delay_ms": {
+            "anyOf": [
+                { "type": "number", "minimum": 0, "maximum": most(|m| m.delay_max_ms) },
+                { "const": OWN }
+            ],
+            "description": format!("The total lag of the other side in ms, snapped to the model's step ({delays}); \"own\" or a number at or below the model's own lag asks for the model's own; makes the values custom; the answer says what was set")
+        }
+    });
+    let schema = json!({
+        "type": "object",
+        "properties": properties,
+        "required": [],
+        "additionalProperties": false
+    });
+    let Value::Object(schema) = schema else {
+        unreachable!("an object literal");
+    };
+    let mut tool = Tool::new(
+        "set_host_crossfeed",
+        "Change the computer's crossfeed, which feeds a low-passed, delayed copy of each channel into the other: give at least one of on, model, preset, level_pct, crossover_hz and delay_ms, and the call answers with the crossfeed as it is after the change.",
+        Arc::new(schema),
+    );
+    tool.annotations = Some(ToolAnnotations::new().read_only(false));
+    tool
+}
+
 fn host_json(view: &HostView) -> Value {
     let eq = view
         .eq
@@ -261,7 +438,12 @@ fn host_json(view: &HostView) -> Value {
         Value::Null,
         |p| json!({ "title": p.title, "artist": p.artist, "album": p.album, "status": p.status }),
     );
-    let mut out = json!({ "volume": volume_json(view), "eq": eq, "player": player });
+    let mut out = json!({
+        "volume": volume_json(view),
+        "eq": eq,
+        "crossfeed": crossfeed_of(view),
+        "player": player,
+    });
     if let Some(why) = view.eq.as_ref().and_then(|eq| eq.unavailable.as_ref()) {
         out["unavailable"] = json!(why);
     } else if !view.available {

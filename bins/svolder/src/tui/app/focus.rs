@@ -105,7 +105,7 @@ impl App {
                 ToneRow::Loudness => self.profile.eq.as_ref().map(EqSpec::loudness_id),
                 ToneRow::Band => self.band_cursor(),
                 ToneRow::Target => Some(SWITCH_ROW),
-                ToneRow::Point(_) => None,
+                ToneRow::Point(_) | ToneRow::Crossfeed(_) => None,
             },
             (Screen::Device, Pane::Status) => None,
             (Screen::Telemetry | Screen::Devices | Screen::Settings | Screen::Setup, _) => None,
@@ -187,7 +187,9 @@ impl App {
         match row {
             ToneRow::Mode => self.flat(),
             ToneRow::Loudness => self.loudness(),
-            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target => Vec::new(),
+            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target | ToneRow::Crossfeed(_) => {
+                Vec::new()
+            }
         }
     }
 
@@ -211,6 +213,24 @@ impl App {
     /// The pane landed in earns the light that runs round its contour, unless the keys have
     /// gone nowhere.
     pub(super) fn cycle_pane(&mut self, dir: isize) -> Vec<Intent> {
+        if self.screen == Screen::Tone && self.crossfeed_shown() {
+            // The computer side with crossfeed has three stops: the header, the Crossfeed
+            // section (unfolded while the keys are in it) and the points.
+            let stops = [
+                ToneRow::Mode,
+                ToneRow::Crossfeed(super::Xf::Preset),
+                ToneRow::Point(self.tone.point),
+            ];
+            let at = match self.tone.row {
+                ToneRow::Crossfeed(_) => 1,
+                ToneRow::Point(_) => 2,
+                _ => 0,
+            };
+            self.tone.xf_line = None;
+            self.tone.row = stops[cycled(at, dir, stops.len())];
+            self.frame_flags.pane_changed = true;
+            return Vec::new();
+        }
         if self.screen == Screen::Tone {
             self.tone.row = match self.tone.row {
                 ToneRow::Band => match self.tone.header_loudness {
@@ -221,7 +241,7 @@ impl App {
                     true => ToneRow::Point(self.tone.point),
                     false => ToneRow::Band,
                 },
-                ToneRow::Point(_) => ToneRow::Mode,
+                ToneRow::Point(_) | ToneRow::Crossfeed(_) => ToneRow::Mode,
             };
             self.frame_flags.pane_changed = true;
             return Vec::new();

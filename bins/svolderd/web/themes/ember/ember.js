@@ -188,7 +188,7 @@ function mount(root, core, { signal }) {
   });
 
   return {
-    menuRows,
+    menuRows: () => menuRows({ signal }),
     keys: TABLE,
     zones: ZONES,
     unmount() {
@@ -201,8 +201,9 @@ function mount(root, core, { signal }) {
 }
 
 /** The rows a mount of Ember gives the frame's menu: the effects and the visualizer's switch, then
- * the way into Arrange mode. */
-function menuRows() {
+ * the way into Arrange mode. `signal` is the mount's: the Arrange row does nothing once the
+ * mount has gone. */
+export function menuRows({ signal }) {
   return [...effects.menuRows(), { kind: 'sep' }, {
     kind: 'action',
     id: 'arrange',
@@ -211,7 +212,7 @@ function menuRows() {
     elementId: 'menu-arrange',
     available: canArrange,
     run: () => {
-      openArrange();
+      if (!signal.aborted) openArrange();
     },
   }];
 }

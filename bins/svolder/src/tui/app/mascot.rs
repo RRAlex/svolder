@@ -77,7 +77,11 @@ impl App {
                 .as_ref()
                 .map(|playing| (playing.status, playing.genre.clone())),
             presses: u32::try_from(self.notices.advice_presses).unwrap_or(u32::MAX),
-            screen_is_home: self.screen == Screen::Device && self.home_has_room(),
+            // Whether the squirrel is at home matters only to a squirrel that may be seen: one that
+            // is off is not looked for, and its home is not measured every frame.
+            screen_is_home: self.mascot_on()
+                && self.screen == Screen::Device
+                && self.home_has_room(),
             keys_held: self.modal_open(),
         }
     }

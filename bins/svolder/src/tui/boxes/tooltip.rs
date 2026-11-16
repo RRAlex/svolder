@@ -21,7 +21,7 @@ use ratatui::widgets::{Clear, Paragraph};
 use svolder_host::Button;
 use svolder_profiles::{Control, ControlKind};
 
-use crate::tui::app::{App, Pane, Screen};
+use crate::tui::app::{App, Pane, Screen, Xf};
 use crate::tui::host::HostRow;
 use crate::tui::keys;
 use crate::tui::mouse::{Hit, HitMap};
@@ -385,6 +385,20 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         }
         Hit::PointField(point, _) | Hit::Point(point) => {
             lines(&[&format!("Point {}", point + 1), "the wheel steps the gain"])
+        }
+        Hit::CrossfeedOn | Hit::CrossfeedModel(_) => lines(&[
+            "Crossfeed",
+            "a click on the word turns it on or off · ‹ › picks the model",
+        ]),
+        Hit::Crossfeed(Xf::Preset) | Hit::CrossfeedStep(Xf::Preset, _) => match app.screen {
+            Screen::Tone => lines(&["Crossfeed", "← → preset · , . model · ␣ on/off · X here"]),
+            _ => lines(&[
+                "Crossfeed",
+                "← → ␣ on/off · , . preset · Enter or X: all of it",
+            ]),
+        },
+        Hit::Crossfeed(row) | Hit::CrossfeedStep(row, _) => {
+            lines(&[row.label(), "← → steps · wheel too · Enter types a number"])
         }
         Hit::Curve => lines(&["Response curve", "drag · right-drag widens · wheel sets Q"]),
         Hit::Divider => lines(&["Pane divider", "drag · double-click resets · < > nudge"]),

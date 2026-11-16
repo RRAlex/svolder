@@ -44,6 +44,11 @@ ZERO = 2e-4
 # one-millisecond dip in the peak that grows with the filter's gain at the tone; the drag keeps the
 # tone off the peak (0.5 dB measured), a gap or a click is a step of several dB.
 STEP_DB = 1.0
+# The crossfeed phases play left-only and mono tones at this level, and every expected level and
+# phase comes from the engine's own response functions (the xf_expect example).
+XF_DBFS = -12.0
+XF_DB_TOL = 0.2
+EXPECT = os.path.join(REPO, 'target/debug/examples/xf_expect')
 
 
 def refuse(why):
@@ -301,6 +306,18 @@ class Recording:
             raise Fail('the recording is silent')
         return x[nz[0]:], fr
 
+    def finish2(self):
+        """Both channels, from the first sample that is not silent in either."""
+        self.t_stop = time.monotonic()
+        stop(self.p)
+        w = wave.open(self.path)
+        fr = w.getframerate()
+        x = np.frombuffer(w.readframes(w.getnframes()), '<i2').reshape(-1, 2)
+        nz = np.nonzero(np.abs(x).max(axis=1) > 3)[0]
+        if not len(nz):
+            raise Fail('the recording is silent')
+        return x[nz[0]:, 0].astype(float), x[nz[0]:, 1].astype(float), fr
+
     def window(self, x, fr, a, b):
         """The level between two monotonic times, counted back from the moment it was stopped."""
         end = len(x) / fr
@@ -392,6 +409,250 @@ def expected_db(view, fs):
 
 # ---- the run -------------------------------------------------------------------------------
 
+# ---- the crossfeed stage: tones, the oracle, the measurements ----------------------------------
+
+# The table the run ends with: (case, expected, measured).
+TABLE = []
+
+
+def row(case, want, got):
+    TABLE.append((case, want, got))
+    say('  T  %-58s expected %-24s measured %s' % (case, want, got))
+
+
+def stereo_wav(path, left_hz, right_hz, dbfs=XF_DBFS, secs=40):
+    """A tone on each channel (0 or None is silence), a second at a time: whole cycles for the
+    integer frequencies used here. Returns the one-second block's samples (int16, left and right)."""
+    n = np.arange(RATE)
+    a = 10 ** (dbfs / 20)
+
+    def channel(f):
+        if not f:
+            return np.zeros(RATE, '<i2')
+        return (a * np.sin(2 * np.pi * f * n / RATE) * 32767).astype('<i2')
+
+    block = np.stack([channel(left_hz), channel(right_hz)], 1)
+    w = wave.open(path, 'wb')
+    w.setnchannels(2)
+    w.setsampwidth(2)
+    w.setframerate(RATE)
+    for _ in range(secs):
+        w.writeframes(block.tobytes())
+    w.close()
+    return block
+
+
+def play(left_hz, right_hz=None):
+    """Replace the playing tone with a left-only (or two-channel) one; returns its samples."""
+    old = STATE.get('tone')
+    if old is not None:
+        stop(old)
+        wait_until('the old tone to leave', lambda: not node('svtone'), 5)
+    path = '%s/xf-tone-%s-%s.wav' % (RUN, left_hz, right_hz)
+    block = stereo_wav(path, left_hz, right_hz)
+    STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', path)
+    wait_until('the tone', lambda: node('svtone'))
+    return block
+
+
+def amp(x, fr, f, t0=0.4):
+    """The complex amplitude of the tone at `f` Hz in `x`, over whole periods of the sampled
+    tone after `t0` s (no leakage)."""
+    seg = x[int(t0 * fr):]
+    per = fr // math.gcd(int(f), fr)
+    n = (len(seg) // per) * per
+    if n < per:
+        raise Fail('a measurement window shorter than one period of %g Hz' % f)
+    k = np.exp(-2j * np.pi * f * np.arange(n) / fr)
+    return 2 * (seg[:n] * k).sum() / n
+
+
+def db_of(c):
+    return 20 * math.log10(max(abs(c), 1e-12))
+
+
+def wrap(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def oracle(xf, rate, hzs):
+    """The engine's complex gains at each frequency for the crossfeed the view describes, at the
+    sink's rate: [(same, other, delay_samples)]."""
+    if not os.access(EXPECT, os.X_OK):
+        raise Fail('no ' + EXPECT + ' (make host-e2e builds it)')
+    delay = 'own' if xf['delay_own'] else repr(xf['delay_ms'])
+    r = subprocess.run([EXPECT, str(rate), xf['model'], repr(xf['amount_pct']), repr(xf['crossover_hz']),
+                        delay] + [repr(float(h)) for h in hzs], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise Fail('xf_expect failed: ' + r.stderr.strip())
+    out = []
+    for line in r.stdout.splitlines():
+        o = json.loads(line)
+        out.append((complex(*o['same']), complex(*o['other']), o['delay_samples']))
+    return out
+
+
+def capture(secs=1.8):
+    rec = Recording()
+    time.sleep(secs + 0.3)
+    return rec.finish2()
+
+
+def measure_tone(left_hz, right_hz, want_l, want_r, f, rate, deadline=12.0):
+    """Record until both channels' complex gains (re the input tone) are the wanted ones, within
+    XF_DB_TOL dB (or 2 LSB when the wanted level is under 8 LSB) and one sample of phase between
+    the channels; returns (reached, seconds, measured L gain, measured R gain). A left-only tone
+    has the right channel as the cross path."""
+    t0 = time.monotonic()
+    a_in = 10 ** (XF_DBFS / 20)
+    lsb = 1.0 / 32768
+    got = (None, None)
+    while time.monotonic() - t0 < deadline:
+        try:
+            xl, xr, fr = capture()
+        except Fail:
+            continue
+        cl = amp(xl, fr, f) / 32768 / a_in
+        cr = amp(xr, fr, f) / 32768 / a_in
+        got = (cl, cr)
+        ok = True
+        for have, want in ((cl, want_l), (cr, want_r)):
+            if abs(want) * a_in < 8 * lsb:
+                ok = ok and abs(have - want) * a_in < 2 * lsb
+            else:
+                ok = ok and abs(db_of(have) - db_of(want)) <= XF_DB_TOL
+        if ok and abs(want_l) * a_in >= 8 * lsb and abs(want_r) * a_in >= 8 * lsb:
+            one_sample = 2 * math.pi * f / rate + 0.004
+            ok = abs(wrap(np.angle(cr / cl) - np.angle(want_r / want_l))) <= one_sample
+        if ok:
+            return True, time.monotonic() - t0, cl, cr
+    return False, time.monotonic() - t0, got[0], got[1]
+
+
+def bypass_ports_exact(label):
+    """The chain's stage ports hold exactly the bypass values (what a chain without crossfeed reads
+    back), so the null test is not only a 16-bit one."""
+    held = chain_params()
+    want = {}
+    for c in 'lr':
+        want.update({c + 'dir:b0': 1.0, c + 'dir:b1': 0.0, c + 'dir:b2': 0.0, c + 'dir:a1': 0.0, c + 'dir:a2': 0.0,
+                     c + 'sum:Gain 1': 1.0, c + 'sum:Gain 2': 0.0, c + 'del:Delay (s)': 0.0, c + 'mix:Gain 2': 0.0})
+        for p in ('x', 's'):
+            for k in ('b0', 'b1', 'b2', 'a1', 'a2'):
+                want['%s%s:%s' % (c, p, k)] = 0.0
+    off = {k: (held.get(k), v) for k, v in want.items() if held.get(k) != v}
+    check(not off, '%s: the stage ports hold exactly the bypass values (%s)' % (label, off or 'all %d' % len(want)))
+
+
+def xf_case(conn, label, f, mono=False, left=None):
+    """One tone through the chain as it is now (the daemon's view says what it is): the measured
+    gains of both channels against the engine's. Returns (measured L, measured R, expected
+    same, expected other, oracle delay samples)."""
+    view = conn.view()
+    rate = sink_rate() or RATE
+    pre = view['eq']['preamp_db']
+    same, other, delay = oracle(view['eq']['crossfeed'], rate, [f])[0]
+    g = 10 ** (pre / 20)
+    if mono:
+        want_l = want_r = g * (same + other)
+        play(f, f)
+    else:
+        want_l, want_r = g * same, g * other
+        play(f, None)
+    ok, took, cl, cr = measure_tone(f, f if mono else None, want_l, want_r, f, rate)
+    if not ok:
+        with open(RUN + '/fail-dump.log', 'w') as fh:
+            fh.write(tool('pw-dump').stdout)
+        say('  the tone is linked to: %s' % tone_links())
+        held = chain_params()
+        say('  the stage ports at the failure: %s' % {k: v for k, v in held.items() if k[1:4] in ('mix', 'del', 'sum') or k[1:4] in ('dir', 'x:b', 's:b', 'x:a', 's:a')})
+    kind = 'mono' if mono else 'left-only'
+    tag = '%s %g Hz' % (kind, f)
+    if cl is None:
+        check(False, '%s: %s: nothing was recorded' % (label, tag))
+        return None
+    row('%s, %s: left re input' % (label, tag), '%+.2f dB' % db_of(want_l), '%+.2f dB' % db_of(cl))
+    row('%s, %s: right re input' % (label, tag), '%+.2f dB' % db_of(want_r), '%+.2f dB' % db_of(cr))
+    if not mono and abs(want_l) > 1e-3 and abs(want_r) > 1e-3 and abs(cl) > 1e-4 and abs(cr) > 1e-4:
+        pw = wrap(np.angle(want_r / want_l))
+        pm = wrap(np.angle(cr / cl))
+        row('%s, %s: right behind left' % (label, tag),
+            '%.1f us' % (-pw / (2 * math.pi * f) * 1e6), '%.1f us' % (-pm / (2 * math.pi * f) * 1e6))
+    check(ok, '%s, %s: both channels play as the engine says (L %+.2f dB want %+.2f, R %+.2f dB want %+.2f; %.1f s)'
+          % (label, tag, db_of(cl), db_of(want_l), db_of(cr), db_of(want_r), took))
+    return cl, cr, want_l, want_r, delay
+
+
+def null_test(label, f, block):
+    """The left-only tone `f` through a chain that should do nothing: the recording is the input,
+    sample for sample, and the right channel is exactly silent."""
+    xl, xr, fr = capture(1.6)
+    per = fr // math.gcd(int(f), fr)
+    ref = block[:per, 0].astype(float)
+    seg = xl[int(0.4 * fr):]
+    n = (len(seg) // per) * per
+    shift = int(np.argmax(np.fft.irfft(np.fft.rfft(seg[:per]) * np.conj(np.fft.rfft(ref)), per)))
+    tiled = np.resize(np.roll(ref, shift), n)
+    res_l = np.abs(seg[:n] - tiled).max()
+    res_r = np.abs(xr[int(0.4 * fr):]).max()
+    row('%s: left minus input' % label, '0 LSB', '%g LSB' % res_l)
+    row('%s: right' % label, '0 LSB', '%g LSB' % res_r)
+    check(res_l == 0 and res_r == 0,
+          '%s: the stage changes nothing, null against the input (peak %g LSB left, %g LSB right; 1 LSB is -90 dBFS)'
+          % (label, res_l, res_r))
+
+
+def chain_params():
+    """The chain node's control ports as the graph holds them now: {name: value}."""
+    out = {}
+    for o in chain_nodes()[:1]:
+        for props in (o['info'].get('params') or {}).get('Props', []):
+            ps = props.get('params') or []
+            out.update(dict(zip(ps[0::2], ps[1::2])))
+    return out
+
+
+def tone_links():
+    """The names of the nodes the tone stream is linked to (the sink or the chain)."""
+    d = dump()
+    names = {o['id']: (o.get('info') or {}).get('props', {}).get('node.name') for o in d if o['type'].endswith('Node')}
+    tone = [i for i, n in names.items() if n == 'svtone']
+    return sorted({names.get(o['info']['input-node-id']) for o in d if o['type'].endswith('Link')
+                   and o['info']['output-node-id'] in tone})
+
+
+def chain_nodes():
+    return [o for o in dump() if o['type'].endswith('Node')
+            and (o.get('info') or {}).get('props', {}).get('node.name') == CHAIN]
+
+
+def chain_playing():
+    """Whether the chain's sink node is `running` in the graph (a stream plays through it)."""
+    n = chain_nodes()
+    return bool(n) and n[0]['info'].get('state') == 'running'
+
+
+def tone_link_ids():
+    """The ids of the links from the tone stream's node."""
+    d = dump()
+    tone = {o['id'] for o in d if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('node.name') == 'svtone'}
+    return sorted(o['id'] for o in d if o['type'].endswith('Link') and o['info']['output-node-id'] in tone)
+
+
+def go_quiet():
+    """End the tone and wait until nothing plays through the chain (the sink is not running)."""
+    old = STATE.pop('tone', None)
+    if old is not None:
+        stop(old)
+    wait_until('the tone to leave', lambda: not node('svtone'), 5)
+    wait_until('the chain\'s sink to stop running', lambda: not chain_playing(), 10)
+
+
+def retone():
+    STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/tone.wav')
+    wait_until('the tone', lambda: node('svtone'))
+
+
 # What the daemon inherits: a short list, the private variables, and what the script sets. Nothing
 # else of the caller's SVOLDER_* reaches it.
 KEEP_ENV = ('PATH', 'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'USER', 'LOGNAME', 'TERM', 'SVPW_RUN',
@@ -447,13 +708,22 @@ def main():
     wait_until('the daemon\'s own bus', lambda: os.path.exists(bus), 10)
     env = {k: v for k, v in os.environ.items() if k in KEEP_ENV}
     env.update(SVOLDER_HOST_EQ_MANAGER='child', SVOLDER_SYSTEMCTL='/bin/false',
-               SVOLDER_TRANSPORT='fake', SVOLDER_SOCKET=sock, DBUS_SESSION_BUS_ADDRESS='unix:path=' + bus)
-    out = open(RUN + '/daemon.log', 'w')
-    daemon = subprocess.Popen([binary, '--socket', sock], env=env, stdout=out, stderr=subprocess.STDOUT,
-                              stdin=subprocess.DEVNULL, start_new_session=True)
-    STATE['children'].append(daemon)
-    wait_until('the daemon\'s socket', lambda: os.path.exists(sock) and daemon.poll() is None, 15)
-    conn = wait_until('a connection', lambda: _try_conn(sock), 10)
+               SVOLDER_TRANSPORT='fake', SVOLDER_SOCKET=sock, SVOLDER_EQ_IDLE_TICKS='60', DBUS_SESSION_BUS_ADDRESS='unix:path=' + bus)
+    daemons = [0]
+
+    def start_daemon():
+        """A daemon of this run (its log is kept per start); returns (process, a connection)."""
+        daemons[0] += 1
+        out = open('%s/daemon%s.log' % (RUN, '' if daemons[0] == 1 else daemons[0]), 'w')
+        p = subprocess.Popen([binary, '--socket', sock], env=env, stdout=out, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        STATE['children'].append(p)
+        c = wait_until('a connection', lambda: _try_conn(sock) if p.poll() is None else Fail('the daemon ended'), 15)
+        if isinstance(c, Fail):
+            raise c
+        return p, c
+
+    daemon, conn = start_daemon()
     v = conn.view()
     check(v.get('eq') and v['eq']['unavailable'] is None, 'the daemon serves the computer EQ (%s)' % v['eq'])
     check(v['eq']['on'] is False and not node(CHAIN), 'the EQ starts off and no chain runs (nothing written at start)')
@@ -463,7 +733,7 @@ def main():
 
     watch = Watch(sock)
     tone_wav(RUN + '/tone.wav')
-    spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/tone.wav')
+    STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/tone.wav')
     wait_until('the tone', lambda: node('svtone'))
 
     # A. the unfiltered level (the tone reaches the sink: polled, not waited for)
@@ -638,9 +908,11 @@ def main():
     # to the config's coefficients (the hot curve the chain was applied with, a +6 dB peak on the
     # tone); the preamp does not, so it must never have risen past what that curve needs.
     old_id = node(CHAIN)['id']
+    go_quiet()   # a chain nothing plays through is removed at once (with a stream it stays as a pass-through)
     conn.eq({'op': 'mode', 'on': False})
     wait_until('the view to say off', lambda: conn.view()['eq']['on'] is False, 5)
     wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    retone()
     conn.eq({'op': 'set', 'index': 1, 'kind': 'PK', 'f': 1000.0, 'g': 6.0, 'q': 1.0, 'done': True})
     wait_until('the view to say on', lambda: conn.view()['eq']['on'] is True, 10)
     wait_until('the chain\'s node', lambda: node(CHAIN), 10)
@@ -722,22 +994,401 @@ def main():
     rec = Recording()
     time.sleep(0.6)
     conn.eq({'op': 'mode', 'on': False})
-    gone = wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    f_id, f_links = node(CHAIN)['id'], tone_link_ids()
     wait_until('the view to say off', lambda: conn.view()['eq']['on'] is False, 5)
-    reached, _, rel = wait_level(base, 0.0, 0.1, 10)
+    # With the tone playing the chain stays as a flat pass-through: the same node, the same links.
+    time.sleep(1.0)
+    check(node(CHAIN) is not None and node(CHAIN)['id'] == f_id and tone_link_ids() == f_links,
+          'F Off with a stream playing keeps the chain (node %s) and the tone\'s links %s (now %s)' % (f_id, f_links, tone_link_ids()))
+    check(conn.view()['eq']['note'] == 'chain kept as a pass-through until idle', 'F the view says the chain is kept (%r)' % conn.view()['eq']['note'])
+    # The pass-through plays flat under the preamp the chain was loaded with (a rate change puts the
+    # slots back to that config, so it never goes above what that needs): here the E-phase curve's -6 dB.
+    held_db = conn.view()['eq']['preamp_db']
+    say('F the pass-through preamp: %+.2f dB' % held_db)
+    reached, _, rel = wait_level(base, held_db, 0.1, 10)
     time.sleep(0.3)
     x, fr = rec.finish()
     gap, runs = longest_zero_ms(x, fr)
     lv = (rel if rel is not None else float('nan')) + base
     off = conn.view()
     say('F  Off: level %.3f dB (%+.3f re the unfiltered level); near-zero runs >= 0.5 ms: %s' % (lv, lv - base, zero_runs(x, fr, 24)))
-    check(reached, 'the level settles after Off')
-    check(gone and node(CHAIN) is None, 'Off removes the chain\'s node from the graph')
+    check(reached, 'the level settles at the pass-through\'s preamp (%+.2f dB) after Off' % held_db)
+    # Idle (the tone ends): the chain goes after the idle time (3 s here).
+    go_quiet()
+    gone = wait_until('the pass-through chain to go once idle', lambda: node(CHAIN) is None, 12)
+    check(gone and node(CHAIN) is None, 'F the pass-through chain is removed once nothing plays through it')
+    check(settles(lambda: conn.view()['eq']['note'] is None), 'F the note is gone with the chain (%r)' % conn.view()['eq']['note'])
+    retone()
     seen_off = settles(lambda: watch.host_eq() is False)
     check(seen_off, 'the daemon\'s route reader sees no chain in the path once the EQ is off (route %s)' % watch.route)
-    check(abs(lv - TONE_DBFS) <= 0.1, 'the level is back to %.1f dBFS +- 0.1 after Off' % TONE_DBFS)
+    back, _, lv0 = wait_level(base, 0.0, 0.1, 10)
+    check(back, 'the level is back to %.1f dBFS +- 0.1 once the chain is gone (%s)' % (TONE_DBFS, lv0))
     check(gap <= RELINK_MS + GAP_MARGIN_MS, 'the On -> Off gap is %.1f ms, within %.0f ms' % (gap, RELINK_MS + GAP_MARGIN_MS))
     check(off['eq']['on'] is False and len(off['eq']['points']) == 1, 'the view says off and keeps the point')
+
+    # X1. crossfeed off, the EQ on (one flat point): the stage is in the chain and does nothing.
+    # A left-only tone comes out as it went in, sample for sample, and the right channel is silent.
+    xfv = conn.view()['eq'].get('crossfeed')
+    check(xfv is not None and xfv['on'] is False and xfv['model'] == 'bauer',
+          'the view carries the crossfeed, off, on Bauer (%s)' % (xfv and {k: xfv[k] for k in ('on', 'model', 'preset')}))
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    wait_until('the view to say on', lambda: conn.view()['eq']['on'], 5)
+    chain_x = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    check(conn.view()['eq']['preamp_db'] == 0.0 and not conn.view()['eq']['crossfeed']['on'],
+          'the EQ is flat, the preamp 0 dB and the crossfeed off')
+    block = play(1000)
+    time.sleep(1.0)
+    null_test('X1 bypass (EQ on, crossfeed off) left-only 1 kHz', 1000, block)
+    bypass_ports_exact('X1')
+    if os.environ.get('HOST_E2E_PWDUMP_DIR'):
+        with open(os.path.join(os.environ['HOST_E2E_PWDUMP_DIR'], 'live-chain-crossfeed.json'), 'w') as fh:
+            fh.write(tool('pw-dump').stdout)
+
+    # X2. crossfeed on: Bauer, bs2b default, at the sink's rate. Every expected number is the
+    # engine's response (xf_expect) at the tone, with the preamp the view says.
+    conn.eq({'op': 'crossfeed', 'on': True})
+    xv = conn.view()['eq']['crossfeed']
+    check(xv['on'] is True and xv['model'] == 'bauer' and xv['preset'] == 'bs2b default'
+          and abs(xv['feed_db'] - 4.5) < 1e-6,
+          'crossfeed on plays Bauer, bs2b default (feed %.2f dB, crossover %g Hz, own lag %.3f ms)'
+          % (xv['feed_db'], xv['crossover_hz'], xv['delay_floor_ms']))
+    r100 = xf_case(conn, 'X2 Bauer default', 100)
+    r5k = xf_case(conn, 'X2 Bauer default', 5000)
+    own_phase = np.angle(r100[1] / r100[0])
+    cross100 = db_of(r100[1] / r100[0])
+    cross5k = db_of(r5k[1] / r5k[0])
+    check(abs(cross100 + xv['feed_db']) <= 1.0,
+          'at 100 Hz the right channel sits %.2f dB re the left, near the feed level -%.1f dB (the 700 Hz low pass takes a little)'
+          % (cross100, xv['feed_db']))
+    check(cross5k < cross100 - 15.0, 'at 5 kHz the right channel is far lower (%.1f dB re the left, against %.1f at 100 Hz)'
+          % (cross5k, cross100))
+    for f in (20, 100, 1000, 5000):
+        got = xf_case(conn, 'X2 Bauer default', f, mono=True)
+        check(got is not None and db_of(got[0]) <= 0.1 and db_of(got[1]) <= 0.1,
+              'a mono %g Hz tone plays at %+.2f / %+.2f dB re the input, never above it (the preamp rule)'
+              % (f, db_of(got[0]), db_of(got[1])) if got else 'mono tone recorded')
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_x,
+          'turning crossfeed on did not restart the chain (node %d, pids %s)' % chain_x)
+
+    # X2b. the delay, live: 0.60 ms in total
+    conn.eq({'op': 'crossfeed', 'delay_ms': 0.6})
+    xv = conn.view()['eq']['crossfeed']
+    check(abs(xv['delay_ms'] - 0.6) < 1e-9 and xv['delay_own'] is False, 'the view says a total lag of %.2f ms' % xv['delay_ms'])
+    rd = xf_case(conn, 'X2b Bauer delay 0.60 ms', 100)
+    rate = sink_rate() or RATE
+    added = -wrap(np.angle(rd[1] / rd[0]) - own_phase) / (2 * math.pi * 100 / rate)
+    total_ms = xv['delay_floor_ms'] + added * 1000 / rate
+    row('X2b total lag at 100 Hz (own %.3f ms + added)' % xv['delay_floor_ms'], '0.60 ms (+0, -1 sample)',
+        '%.3f ms (%.1f samples added, engine %d)' % (total_ms, added, rd[4]))
+    check(0.6 - 1.3 * 1000 / rate <= total_ms <= 0.6 + 0.3 * 1000 / rate,
+          'the total lag is %.3f ms for a 0.60 ms ask, within one sample (%.3f ms), live' % (total_ms, 1000 / rate))
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_x, 'the delay change did not restart the chain')
+
+    # X2c. M/S bass, 50 % at 120 Hz: the bass goes to both channels, the highs stay put
+    conn.eq({'op': 'crossfeed', 'model': 'mid-side'})
+    xv = conn.view()['eq']['crossfeed']
+    check(xv['model'] == 'mid-side' and abs(xv['amount_pct'] - 50.0) < 1e-6 and xv['crossover_hz'] == 120.0,
+          'M/S bass loads its default: %g %% at %g Hz' % (xv['amount_pct'], xv['crossover_hz']))
+    ms20 = xf_case(conn, 'X2c M/S bass', 20)
+    xf_case(conn, 'X2c M/S bass', 120)
+    ms2k = xf_case(conn, 'X2c M/S bass', 2000)
+    check(ms20 is not None and db_of(ms20[0]) > -12 and db_of(ms20[1]) > -12 and abs(db_of(ms20[0]) - db_of(ms20[1])) < 1.5,
+          'a left-only 20 Hz tone comes out on both channels (%+.2f / %+.2f dB re the input)'
+          % (db_of(ms20[0]), db_of(ms20[1])) if ms20 else 'M/S 20 Hz recorded')
+    pre = conn.view()['eq']['preamp_db']
+    check(ms2k is not None and abs(db_of(ms2k[0]) - pre) <= 0.2 and db_of(ms2k[1]) < -45,
+          'a left-only 2 kHz tone stays on the left, unchanged but for the preamp (%+.2f dB left, preamp %+.2f dB; %.1f dB right)'
+          % (db_of(ms2k[0]), pre, db_of(ms2k[1])) if ms2k else 'M/S 2 kHz recorded')
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_x, 'the model change did not restart the chain')
+
+    # X2e. a change sent while nothing plays (the chain idle): it holds when the sound starts again
+    conn.eq({'op': 'crossfeed', 'model': 'bauer'})
+    old = STATE.pop('tone')
+    stop(old)
+    wait_until('the tone to leave', lambda: not node('svtone'), 5)
+    time.sleep(1.5)
+    conn.eq({'op': 'crossfeed', 'amount_pct': 30.0})
+    xf_case(conn, 'X2e Bauer 30 %, set while idle', 100)
+
+    # X2d. back to off with the chain still running: nothing left of the stage
+    conn.eq({'op': 'crossfeed', 'model': 'bauer'})
+    conn.eq({'op': 'crossfeed', 'on': False})
+    check(conn.view()['eq']['crossfeed']['on'] is False, 'the view says crossfeed off')
+    block = play(100)
+    time.sleep(1.0)
+    null_test('X2d after crossfeed off (EQ on) left-only 100 Hz', 100, block)
+    bypass_ports_exact('X2d')
+
+    # S1. crossfeed turned on with the EQ off and NOTHING playing: the chain has not run, and PipeWire
+    # lists its controls at 0 (lpre:Mult too) until it does. The first tone plays at the preamp the
+    # view says, never the -120 dB floor, and the chain holds that preamp once it runs.
+    def idle_look(label):
+        held = chain_params()
+        say('%s: lpre:Mult %s, l01:b0 %s, %d of %d controls not 0, node %s'
+            % (label, held.get('lpre:Mult'), held.get('l01:b0'), sum(1 for x in held.values() if x != 0),
+               len(held), (node(CHAIN) or {}).get('info', {}).get('state')))
+
+    def plays_at_the_view(label):
+        v = conn.view()
+        pre = v['eq']['preamp_db']
+        mult = chain_params().get('lpre:Mult')
+        held = None if mult is None else 20 * math.log10(max(mult, 1e-12))
+        row(label, 'the view\'s preamp, above -20 dB, held by the chain', '%+.2f dB, lpre:Mult %s' % (pre, mult))
+        check(v['eq']['live'] and pre > -20.0 and held is not None and abs(held - pre) <= 0.01,
+              '%s: the chain plays at the view\'s preamp %+.2f dB (lpre:Mult %s), live %s (%r)'
+              % (label, pre, mult, v['eq']['live'], v['eq']['note']))
+
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    conn.eq({'op': 'crossfeed', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    idle_look('S1 the chain as it started, nothing playing')
+    time.sleep(2.0)
+    v = conn.view()
+    check(v['eq']['preamp_db'] > -20.0 and v['eq']['live'],
+          'S1: crossfeed on over a chain that has not run: the view\'s preamp is %+.2f dB, live %s (%r)'
+          % (v['eq']['preamp_db'], v['eq']['live'], v['eq']['note']))
+    xf_case(conn, 'S1 crossfeed on with nothing playing, then a tone', 1000)
+    plays_at_the_view('S1 once the tone plays')
+    go_quiet()
+    conn.eq({'op': 'crossfeed', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+
+    # S2. the EQ turned on with nothing playing, then a live edit, then a tone: the edit plays at
+    # its own preamp
+    conn.eq({'op': 'set', 'index': 1, 'kind': 'PK', 'f': TONE_HZ, 'g': 0.0, 'q': 1.0})
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    idle_look('S2 the chain as it started, nothing playing')
+    time.sleep(2.0)
+    conn.eq({'op': 'set', 'index': 1, 'g': -3.0, 'done': True})
+    time.sleep(1.0)
+    v = conn.view()
+    check(v['eq']['preamp_db'] > -20.0 and v['eq']['live'],
+          'S2: an edit over a chain that has not run: the view\'s preamp is %+.2f dB, live %s (%r)'
+          % (v['eq']['preamp_db'], v['eq']['live'], v['eq']['note']))
+    retone()
+    want = expected_db(conn.view(), sink_rate() or RATE)
+    ok, took, lv = wait_level(base, want, 0.2, 10)
+    row('S2 EQ on idle, -3 dB PK on the tone, then a tone', '%+.2f dB' % want,
+        'nan' if lv is None else '%+.2f dB' % lv)
+    check(ok, 'S2: the tone plays at %+.2f dB re off once it starts (%s dB after %.1f s)' % (want, lv, took))
+    plays_at_the_view('S2 once the tone plays')
+    conn.eq({'op': 'set', 'index': 1, 'g': 0.0, 'done': True})
+
+    # S3. a pause long enough for the chain to be suspended, crossfeed on: the chain that ran keeps
+    # listing what it holds, the EQ stays live with the stage on, and the sound comes back as it was
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    retone()
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    conn.eq({'op': 'crossfeed', 'on': True})
+    xf_case(conn, 'S3 crossfeed on, before a pause', 1000)
+    go_quiet()
+    wait_until('the chain to be suspended',
+               lambda: (node(CHAIN) or {}).get('info', {}).get('state') == 'suspended', 20)
+    time.sleep(6.0)
+    idle_look('S3 suspended after a pause')
+    v = conn.view()
+    check(v['eq']['live'] and v['eq']['crossfeed']['on'],
+          'S3: a suspended chain keeps the EQ live and crossfeed on (%r)' % (v['eq']['crossfeed']['note'] or v['eq']['note']))
+    xf_case(conn, 'S3 crossfeed on, after the pause', 1000)
+    conn.eq({'op': 'crossfeed', 'on': False})
+
+    # X3a. crossfeed on with the EQ off: one chain for the crossfeed alone, the EQ flat
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    retone()   # the chain is applied with a stream playing, as it always was here
+    conn.eq({'op': 'crossfeed', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    v = conn.view()
+    check(len(chain_nodes()) == 1 and len(_private_pids('host-eq.conf')) == 1,
+          'crossfeed on with the EQ off runs one chain (%d node, %d process)' % (len(chain_nodes()), len(_private_pids('host-eq.conf'))))
+    check(v['eq']['on'] is False and v['eq']['crossfeed']['on'] is True and len(v['eq']['points']) == 1
+          and v['eq']['points'][0]['g'] == 0.0,
+          'the view says the EQ off, crossfeed on, the EQ points untouched (%s)' % v['eq']['points'])
+    xf_case(conn, 'X3a EQ off, crossfeed on (flat chain)', 100)
+    xf_case(conn, 'X3a EQ off, crossfeed on (flat chain)', 1000)
+    # X3b. both off with nothing playing: no chain, no process
+    go_quiet()
+    conn.eq({'op': 'crossfeed', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    wait_until('the chain\'s process to end', lambda: not _private_pids('host-eq.conf'), 10)
+    v = conn.view()
+    check(v['eq']['on'] is False and v['eq']['crossfeed']['on'] is False and not chain_nodes()
+          and not _private_pids('host-eq.conf'),
+          'both off: no svolder_eq node, no chain process (and no unit: systemctl is /bin/false)')
+
+    # X5. the last reason for the chain goes while a stream plays: the chain stays as a pass-through
+    # (same node, same process, the stream's links untouched, no new sink), flat at 0 dB; the idle
+    # time (3 s here) after nothing plays it goes; a capture of the chain's own monitor is not a stream that plays.
+    # (A paused stream is pinned by the fixtures of props_of: no tool of the run can pause a stream; pw-cat
+    # stays `running` under SIGSTOP and ignores a Pause command.)
+    for how in ('ended', 'monitor capture', 'passive monitor capture'):
+        play(100)
+        conn.eq({'op': 'crossfeed', 'on': True})
+        wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+        wait_until('the tone to play through the chain', chain_playing, 10)
+        ids = (node(CHAIN)['id'], _private_pids('host-eq.conf'), tone_link_ids())
+        sinks = sorted(o['id'] for o in dump() if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('media.class') == 'Audio/Sink')
+        check(tone_links() == [CHAIN], 'X5 (%s) the tone is linked to the chain only (%s)' % (how, tone_links()))
+        conn.eq({'op': 'crossfeed', 'on': False})
+        time.sleep(1.5)
+        now = (node(CHAIN)['id'] if node(CHAIN) else None, _private_pids('host-eq.conf'), tone_link_ids())
+        sinks_now = sorted(o['id'] for o in dump() if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('media.class') == 'Audio/Sink')
+        check(now == ids and sinks_now == sinks,
+              'X5 (%s) crossfeed off keeps the chain node, its process, the stream\'s links and the sinks: %s -> %s' % (how, ids, now))
+        v = conn.view()
+        check(v['eq']['on'] is False and v['eq']['crossfeed']['on'] is False and v['eq']['note'] == 'chain kept as a pass-through until idle',
+              'X5 (%s) the view says the chain is kept (%r)' % (how, v['eq']['note']))
+        pp = chain_params()
+        check(abs(pp.get('lmix:Gain 2', 1.0)) < 1e-9 and abs(pp.get('lpre:Mult', 0.0) - 1.0) < 1e-6,
+              'X5 (%s) the pass-through is flat at 0 dB (stage gain %s, preamp mult %s)' % (how, pp.get('lmix:Gain 2'), pp.get('lpre:Mult')))
+        cap = None
+        if how.endswith('monitor capture'):
+            # The stream ends and a capture of the chain's own monitor goes on (non-passive keeps the
+            # sink running, the way a visualiser or a screen-share does): nothing plays.
+            props = 'node.autoconnect=false node.name=svmoncap' + (' node.passive=true' if how.startswith('passive') else '')
+            cap = spawn('pw-record', '--rate', str(RATE), '--channels', '2', '--format', 's16', '-P', props, RUN + '/moncap.wav')
+            wait_until('the capture\'s ports', lambda: 'svmoncap:input_FL' in tool('pw-link', '-i').stdout, 8)
+            for c in ('FL', 'FR'):
+                check(tool('pw-link', '%s:monitor_%s' % (CHAIN, c), 'svmoncap:input_%s' % c).returncode == 0, 'X5 the capture is linked to the chain\'s monitor %s' % c)
+            stop(STATE.pop('tone'))
+            say('X5 (%s) the chain sink state with only the capture: %s' % (how, chain_nodes()[0]['info'].get('state')))
+        elif how == 'ended':
+            stop(STATE.pop('tone'))
+        gone = settles(lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 15.0)
+        say('X5 (%s) the chain after the idle time: %s' % (how, 'gone' if gone else 'still there (sink state %s)' % (chain_nodes()[0]['info'].get('state') if chain_nodes() else None)))
+        check(gone, 'X5 (%s) the pass-through chain is removed once nothing plays through it' % how)
+        if cap is not None:
+            stop(cap)
+        if how != 'ended':
+            go_quiet()
+
+    # X3c. a rate change with the stage on: it plays again at the new rate, the same levels
+    retone()
+    conn.eq({'op': 'mode', 'on': True})
+    conn.eq({'op': 'crossfeed', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    at48 = xf_case(conn, 'X3c rate 48000 Hz', 100)
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '44100')
+    check(r.returncode == 0, 'clock.force-rate 44100 set on the private instance')
+    wait_until('the sink at 44100', lambda: sink_rate() == 44100, 6)
+    v = conn.view()
+    check(v['eq']['crossfeed']['on'] is True, 'crossfeed is still on after the rate change (note %r)' % v['eq']['crossfeed']['note'])
+    at44 = xf_case(conn, 'X3c rate 44100 Hz', 100)
+    xf_case(conn, 'X3c rate 44100 Hz', 1000)
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '0')
+    check(r.returncode == 0, 'clock.force-rate released')
+    wait_until('the sink back at 48000', lambda: sink_rate() == 48000, 6)
+    at48b = xf_case(conn, 'X3c back at 48000 Hz', 100)
+    if at48 and at44 and at48b:
+        for name, a, b in (('left', at48[0], at44[0]), ('right', at48[1], at44[1]), ('right, back', at48[1], at48b[1])):
+            row('X3c %s channel, 100 Hz, level across the rate change' % name, '%+.2f dB' % db_of(a), '%+.2f dB' % db_of(b))
+            check(abs(db_of(a) - db_of(b)) <= 0.3, 'the %s channel keeps its level across the rate change (%+.2f, %+.2f dB)'
+                  % (name, db_of(a), db_of(b)))
+
+    # X3e. the chain's process dies with crossfeed on: the daemon sees it, starts the chain again once with
+    # crossfeed off and its note; a second death right after is ridden out too, a third leaves the EQ off with a note;
+    # never a stacked node
+    pids = _private_pids('host-eq.conf')
+    check(len(pids) == 1, 'one chain process before it is killed (%s)' % pids)
+    os.kill(pids[0], signal.SIGKILL)
+    t_kill = time.monotonic()
+    restarted = None
+    while time.monotonic() - t_kill < 10.0:
+        v = conn.view()
+        xv = v['eq']['crossfeed']
+        new_pids = _private_pids('host-eq.conf')
+        if not xv['on'] and len(new_pids) == 1 and new_pids != pids and chain_nodes():
+            restarted = v
+            break
+        time.sleep(0.1)
+    took = time.monotonic() - t_kill
+    v = restarted or v
+    xv = v['eq']['crossfeed']
+    row('X3e the view after the chain process was killed', 'chain started again within ~2 s, crossfeed off with its note',
+        'eq on %s live %s, crossfeed on %s, off_reason %s, %d chain node, %d process, after %.1f s' % (
+            v['eq']['on'], v['eq']['live'], xv['on'], xv['off_reason'], len(chain_nodes()),
+            len(_private_pids('host-eq.conf')), took))
+    check(restarted is not None and took <= 4.0 and v['eq']['on'] and v['eq']['live'] and xv['off_reason'] == 'chain-restarted'
+          and xv['note'], 'the killed chain was started again %.1f s after the kill with crossfeed off (%r)' % (took, xv['note']))
+    check(len(chain_nodes()) == 1 and len(_private_pids('host-eq.conf')) == 1,
+          'one chain after the restart (%d node, %d process)' % (len(chain_nodes()), len(_private_pids('host-eq.conf'))))
+    # it dies again right after (PipeWire restarting does this once): started again; a third death in a row is a
+    # crash loop: the EQ is left off, with a note, and nothing is left running
+    time.sleep(1.0)
+    pids = _private_pids('host-eq.conf')
+    os.kill(pids[0], signal.SIGKILL)
+    wait_until('the chain started again after the second kill',
+               lambda: len(_private_pids('host-eq.conf')) == 1 and _private_pids('host-eq.conf') != pids and chain_nodes(), 10)
+    settles(lambda: conn.view()['eq']['on'] and conn.view()['eq']['live'], 6.0)
+    v = conn.view()
+    check(v['eq']['on'] and v['eq']['live'], 'one quick death is ridden out: the EQ is on and live (%r)' % v['eq']['note'])
+    time.sleep(1.0)
+    os.kill(_private_pids('host-eq.conf')[0], signal.SIGKILL)
+    t_kill = time.monotonic()
+    while time.monotonic() - t_kill < 10.0:
+        v = conn.view()
+        if not v['eq']['on']:
+            break
+        time.sleep(0.1)
+    took = time.monotonic() - t_kill
+    time.sleep(1.0)
+    row('X3e the view after the chain died three times in a row', 'EQ off with a note, no chain',
+        'eq on %s live %s, note %r, %d chain node, %d process, after %.1f s' % (
+            v['eq']['on'], v['eq']['live'], v['eq']['note'], len(chain_nodes()), len(_private_pids('host-eq.conf')), took))
+    check(not v['eq']['on'] and not v['eq']['live'] and v['eq']['note'] and 'chain stopped' in v['eq']['note'],
+          'the EQ is off with a note that the chain stopped (%r)' % v['eq']['note'])
+    check(len(chain_nodes()) == 0 and len(_private_pids('host-eq.conf')) == 0,
+          'no chain runs after the third death (%d node, %d process)' % (len(chain_nodes()), len(_private_pids('host-eq.conf'))))
+    # the EQ off and on again builds one chain, with crossfeed off
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    time.sleep(1.0)
+    check(len(chain_nodes()) == 1 and len(_private_pids('host-eq.conf')) == 1 and not conn.view()['eq']['crossfeed']['on'],
+          'one chain after the EQ is turned off and on, crossfeed off (%d node, %d process)'
+          % (len(chain_nodes()), len(_private_pids('host-eq.conf'))))
+    conn.eq({'op': 'crossfeed', 'on': True})
+
+    # X3d. the default sink moves to a second null sink: crossfeed turns itself off, with its note
+    r = tool('pw-cli', 'create-node', 'adapter',
+             '{ factory.name=support.null-audio-sink node.name=svolder_e2e_sink2 '
+             'node.description="svolder e2e sink 2" media.class=Audio/Sink audio.position=[ FL FR ] '
+             'object.linger=true priority.session=500 '
+             'adapter.auto-port-config={ mode=dsp monitor=true control=false position=preserve } }')
+    check(r.returncode == 0, 'a second null sink was made in the private instance (%s)' % (r.stdout + r.stderr).strip()[:100])
+    sink2 = wait_until('the second sink', lambda: node('svolder_e2e_sink2'), 8)
+    sink1 = node(SINK)['id']
+    check(conn.view()['eq']['crossfeed']['on'] is True, 'crossfeed is on before the switch')
+    t_switch = time.monotonic()
+    r = tool('wpctl', 'set-default', str(sink2['id']))
+    check(r.returncode == 0, 'the default sink is now the second one (%s)' % r.stderr.strip()[:100])
+    xv = None
+    while time.monotonic() - t_switch < 6.0:
+        xv = conn.view()['eq']['crossfeed']
+        if not xv['on']:
+            break
+        time.sleep(0.05)
+    took = time.monotonic() - t_switch
+    row('X3d crossfeed off after the default sink moved', 'off within 2 s, with a note',
+        '%s after %.2f s, off_reason %s, note %r' % ('off' if not xv['on'] else 'STILL ON', took, xv['off_reason'], xv['note']))
+    check(not xv['on'] and took <= 2.0 and xv['note'] and xv['off_reason'] == 'output-changed',
+          'crossfeed turned itself off %.2f s after the default sink moved, with the note %r' % (took, xv['note']))
+    tool('wpctl', 'set-default', str(sink1))
+    tool('pw-cli', 'destroy', str(sink2['id']))
+    wait_until('the first sink to be the default again',
+               lambda: tool('wpctl', 'inspect', '@DEFAULT_AUDIO_SINK@').stdout.count('svolder_e2e_sink"') > 0, 8)
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
 
     # G. volume 50 % and mute, read back from the sink itself
     conn.ask({'cmd': 'host_volume', 'pct': 50})
@@ -749,6 +1400,45 @@ def main():
     check(r.startswith('Volume: 0.50') and 'MUTED' in r, 'the sink is muted at 0.50 (%s)' % r)
     check(conn.view()['volume']['muted'] is True, 'the view says muted')
     conn.ask({'cmd': 'host_mute', 'muted': False})
+
+    # X4. a restart of the daemon: crossfeed is off after it, and a chain for it alone is gone
+    def restart_checks(what):
+        v = conn.view()
+        xf = v['eq']['crossfeed']
+        wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+        check(xf['on'] is False and v['eq']['on'] is False, 'after %s the crossfeed is off and the EQ off (off_reason %s, note %r)'
+              % (what, xf['off_reason'], xf['note']))
+        check(node(CHAIN) is None and not _private_pids('host-eq.conf'), 'after %s no svolder_eq node and no chain process' % what)
+        return xf
+
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    conn.eq({'op': 'crossfeed', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    conn.ask({'cmd': 'stop'})
+    watch.close()
+    conn.close()
+    try:
+        code = daemon.wait(10)
+    except subprocess.TimeoutExpired:
+        raise Fail('the daemon did not end after stop')
+    check(code == 0, 'the daemon ended on stop (exit %s) with a chain for crossfeed alone' % code)
+    wait_until('the chain to end', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+    daemon, conn = start_daemon()
+    watch = Watch(sock)
+    restart_checks('a graceful restart')
+    conn.eq({'op': 'crossfeed', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    os.kill(daemon.pid, signal.SIGKILL)
+    daemon.wait(5)
+    watch.close()
+    conn.close()
+    gone = settles(lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10.0)
+    say('X4 the chain after the daemon was killed: %s' % ('gone' if gone else 'still there'))
+    daemon, conn = start_daemon()
+    watch = Watch(sock)
+    xf = restart_checks('a killed daemon\'s restart')
+    check(xf['off_reason'] == 'restart' and xf['note'], 'the restart that found crossfeed on says why: %r (%s)' % (xf['note'], xf['off_reason']))
 
     # H. the daemon ending ends the child chain
     conn.eq({'op': 'mode', 'on': True})
@@ -767,6 +1457,7 @@ def main():
     check(node(CHAIN) is None and not _private_pids('host-eq.conf'), 'the daemon ending ended the child chain (process and node gone)')
     if STATE['failed']:
         raise Fail('%d check(s) failed: %s' % (len(STATE['failed']), '; '.join(STATE['failed'])))
+    say('host-e2e: %d crossfeed numbers above (the T lines)' % len(TABLE))
     say('host-e2e: PASS')
 
 

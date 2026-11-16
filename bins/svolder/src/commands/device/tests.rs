@@ -185,7 +185,9 @@ fn the_partial_failure_line_reads_naturally_at_every_count() {
 }
 
 /// A preset verb's reload goes to a daemon that reads the file it wrote, and to no other: not
-/// one that reads another file, and none at all under a direct transport.
+/// one that reads another file. A direct transport (`--transport ble` or `fake`) names where the
+/// device is reached, not whether a daemon beside this process holds the file, so it reloads one
+/// that does.
 #[tokio::test]
 async fn a_preset_verb_reloads_only_a_daemon_reading_its_file() {
     use crate::test_support::stub_daemon::stub_daemon;
@@ -210,10 +212,15 @@ async fn a_preset_verb_reloads_only_a_daemon_reading_its_file() {
     assert_eq!(daemon.reloads(), 1, "a daemon reading the file");
     reload_daemon_for_presets(&globals("fake"), &config, &path).await;
     reload_daemon_for_presets(&globals("ble"), &config, &path).await;
-    assert_eq!(daemon.reloads(), 1, "a direct transport has no daemon");
+    assert_eq!(
+        daemon.reloads(),
+        3,
+        "a direct transport still has a daemon to tell"
+    );
     daemon.says(None, Some("/elsewhere/config.toml"));
     reload_daemon_for_presets(&globals("auto"), &config, &path).await;
-    assert_eq!(daemon.reloads(), 1, "a daemon reading another file");
+    reload_daemon_for_presets(&globals("fake"), &config, &path).await;
+    assert_eq!(daemon.reloads(), 3, "a daemon reading another file");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -559,6 +566,39 @@ mod preset_verbs {
             .await
             .expect_err("refused");
         assert_eq!(failure.what, words);
+    }
+
+    /// A preset written under a direct transport is written in this process, so a daemon that
+    /// reads the file is asked to reload once for each write; one that reads another file is left
+    /// alone.
+    #[tokio::test]
+    async fn a_direct_write_has_a_daemon_reading_the_file_reload() {
+        let daemon = stub_daemon().await;
+        let (_dir, path) = scratch("direct");
+        daemon.says(None, path.to_str());
+        let socket = daemon.socket.display().to_string();
+        let direct = |transport| Globals {
+            transport,
+            ..globals(&socket)
+        };
+        let config = Config::default();
+        for (n, transport) in ["fake", "ble"].into_iter().enumerate() {
+            write_preset(&direct(transport), &config, &path, save(&format!("p{n}")))
+                .await
+                .expect("in process");
+        }
+        assert_eq!(
+            names(&path),
+            ["p0", "p1"],
+            "written here, not by the daemon"
+        );
+        assert!(daemon.preset_ops().is_empty());
+        assert_eq!(daemon.reloads(), 2, "one reload per direct write");
+        daemon.says(None, Some("/elsewhere/config.toml"));
+        write_preset(&direct("fake"), &config, &path, save("p2"))
+            .await
+            .expect("in process");
+        assert_eq!(daemon.reloads(), 2, "a daemon reading another file");
     }
 
     #[tokio::test]

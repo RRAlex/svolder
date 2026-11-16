@@ -37,6 +37,9 @@ pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
         HostCommand::Eq {
             command: HostEqCommand::Status { json },
         } => host_status(g, json).await,
+        HostCommand::Crossfeed { json, command } => {
+            super::host_crossfeed::run(g, json, command).await
+        }
     }
 }
 
@@ -69,7 +72,7 @@ pub(crate) async fn served(g: &Globals<'_>, config: &Config) -> Option<(PathBuf,
 
 /// The computer EQ the daemon on `socket` shows; `None` when it shows none or does not answer
 /// in time.
-async fn eq_view(socket: &Path) -> Option<EqView> {
+pub(super) async fn eq_view(socket: &Path) -> Option<EqView> {
     tokio::time::timeout(ASK_WAIT, async {
         let mut client = Client::connect(socket).await.ok()?;
         match client.request(Request::Host).await.ok()? {
@@ -83,7 +86,7 @@ async fn eq_view(socket: &Path) -> Option<EqView> {
 }
 
 /// Ask the daemon on `socket` to change the computer EQ: its refusal comes back in its words.
-async fn eq_op(socket: &Path, op: HostEqOp) -> Result<(), Failure> {
+pub(super) async fn eq_op(socket: &Path, op: HostEqOp) -> Result<(), Failure> {
     let mut client = Client::connect(socket)
         .await
         .map_err(|e| Failure::of(crate::recovery::Kind::NoDaemon, e.to_string()))?;

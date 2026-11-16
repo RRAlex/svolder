@@ -37,7 +37,8 @@ use crate::tui::widgets::rows::BALANCE_MARK;
 
 use super::{
     art_box, art_reserved, art_slot, cell_window, cells, cut_cells, fault_line, frames_of,
-    header_height, logo_of, now_playing_room, path_row, row_style, tone_lines,
+    header_height, logo_of, now_playing_room, path_row, row_style, tone_lines, tone_lines_in,
+    words_beside_art,
 };
 
 /// Columns the Controls pane takes at 80 columns: half of them, the least either pane keeps.
@@ -67,6 +68,8 @@ mod effects;
 mod tab_strip;
 // the connection strip and the level history
 mod graphs;
+// the work one frame of the screen costs
+mod frame_work;
 
 /// The column every control row's value starts in on the mockup screen: the pane border,
 /// the row cursor and the label column of its longest label.

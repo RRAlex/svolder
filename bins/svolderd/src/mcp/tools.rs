@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The tools the MCP server offers: five that read (four a device, `get_host` the computer) and,
-//! with `[mcp] writes`, seven that act: three that change a device, `identify`, which asks it to
-//! show itself, and three for the computer (see [`host`]).
+//! with `[mcp] writes`, eight that act: three that change a device, `identify`, which asks it to
+//! show itself, and four for the computer (see [`host`]).
 //!
 //! Every tool goes through the daemon's own request path ([`Fleet`]), the one the socket's
 //! clients use, so a value is validated and refused exactly as `svolder set` does. Results
@@ -29,33 +29,30 @@
 //! recall always asks, since the bands it sets are not known until the device reports them and
 //! any of them can reach the top of its range.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use rmcp::ServerHandler;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ElicitRequest, ElicitRequestParams,
-    ErrorData, InputRequest, InputRequests, InputRequiredResult, JsonObject, ListToolsResult,
-    PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
-    ToolAnnotations,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ErrorData, InputRequiredResult,
+    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
+    Tool,
 };
 use rmcp::service::{RequestContext, RoleServer};
-use serde_json::{Map, Value, json};
-use svolder_ipc::{DeviceInfo, Event, Request, Response, ValueObject};
+use serde_json::{Value, json};
+use svolder_ipc::{DeviceInfo, Request, Response};
 use svolder_profiles::roles;
-use svolder_profiles::safety::{self, FLOOR_WINDOW, Rules, Situation, Through};
+use svolder_profiles::safety::{self, Rules, Situation, Through};
 use svolder_profiles::tone::preset::{self, Preset};
-use svolder_profiles::units::{self, Amount, Outside, Refusal};
+use svolder_profiles::units;
 
 use crate::device::Command;
 use crate::fleet::Fleet;
-use crate::locks::locked;
-use crate::writer::{Glided, Mode, Options, Outcome};
+use crate::writer::{ClimbView, Glided, Mode, Options, Outcome};
 use svolder_ipc::CODE_TIMEOUT;
 use svolder_profiles::device_presets;
 use svolder_profiles::{Control, ControlKind, Profile, convert, intent};
@@ -63,7 +60,15 @@ use svolder_proto::{FunctionClass, FunctionId};
 
 pub use svolder_profiles::safety::MAX_RISE_DB;
 
+mod describe;
+mod guard;
 mod host;
+mod schema;
+
+use describe::{db_text, describe_control, keys_of, label_words, reply};
+pub use guard::Floors;
+use guard::{Ask, Guard, LetThrough, gain_guard, level_raw, names_a_save, permission, plain_input};
+use schema::{Args, TOOLS, definition};
 
 /// The longest span `get_link_history` answers for, in hours: what the daemon keeps.
 const MAX_HISTORY_HOURS: f64 = 24.0;
@@ -72,8 +77,8 @@ const MAX_HISTORY_HOURS: f64 = 24.0;
 /// level the device has reached.
 const CLIMB_WAIT: Duration = Duration::from_secs(5);
 
-/// How often the level is read while the tool waits for a climb.
-const CLIMB_POLL: Duration = Duration::from_millis(50);
+/// How long past [`CLIMB_WAIT`] the reading that answers a climb is given to arrive.
+const CLIMB_GRACE: Duration = Duration::from_millis(50);
 
 /// The key `input_requests` carries the volume question under, and the answer comes back under.
 const ASK: &str = "confirm_change";
@@ -95,111 +100,6 @@ pub struct Tools {
     floors: Arc<Floors>,
 }
 
-/// The levels one control was noted at, oldest first.
-type Window = VecDeque<(Instant, f64)>;
-
-/// The levels in dB each device's controls were seen at in the last [`FLOOR_WINDOW`], shared by
-/// every request: the lowest of them is what a rise is measured from, so a staircase of small
-/// steps adds up to one big rise instead of passing each as a small one.
-#[derive(Default)]
-pub struct Floors {
-    seen: Mutex<HashMap<(String, String), Window>>,
-}
-
-impl Floors {
-    /// Note that `key` on `device` is at `level` now.
-    fn record(&self, device: &str, key: &str, level: f64) {
-        let now = Instant::now();
-        let mut seen = locked(&self.seen);
-        let window = seen
-            .entry((device.to_ascii_lowercase(), key.to_ascii_lowercase()))
-            .or_default();
-        while window
-            .front()
-            .is_some_and(|(at, _)| now.duration_since(*at) > FLOOR_WINDOW)
-        {
-            window.pop_front();
-        }
-        window.push_back((now, level));
-    }
-
-    /// The lowest level noted for `key` on `device` within the window.
-    fn floor(&self, device: &str, key: &str) -> Option<f64> {
-        let now = Instant::now();
-        let seen = locked(&self.seen);
-        seen.get(&(device.to_ascii_lowercase(), key.to_ascii_lowercase()))?
-            .iter()
-            .filter(|(at, _)| now.duration_since(*at) <= FLOOR_WINDOW)
-            .map(|(_, level)| *level)
-            .min_by(f64::total_cmp)
-    }
-
-    /// Start the window over at `level`, after the user agreed to a rise to it.
-    fn reset(&self, device: &str, key: &str, level: f64) {
-        locked(&self.seen).remove(&(device.to_ascii_lowercase(), key.to_ascii_lowercase()));
-        self.record(device, key, level);
-    }
-
-    /// Note every level in dB the devices report, until `stop`: a knob turned down is a lower
-    /// floor whether or not a tool saw it.
-    async fn watch(self: Arc<Self>, fleet: Arc<dyn Fleet>, stop: CancellationToken) {
-        let mut events = fleet.events().await;
-        loop {
-            let event = tokio::select! {
-                () = stop.cancelled() => return,
-                event = events.next() => event,
-            };
-            let Some(Event::Status { device, reading }) = event else {
-                if event.is_none() {
-                    return;
-                }
-                continue;
-            };
-            if let Some(key) = reading.key
-                && reading
-                    .unit
-                    .as_deref()
-                    .is_some_and(|u| u.eq_ignore_ascii_case("dB"))
-            {
-                self.record(&device, &key, reading.value.unwrap_or(f64::NEG_INFINITY));
-            }
-        }
-    }
-}
-
-/// What lets sound through that a guard asks about.
-#[derive(Clone, Copy)]
-enum LetThrough {
-    /// A mute released.
-    Unmute,
-    /// A device powered on.
-    PowerOn,
-}
-
-impl LetThrough {
-    fn gerund(self) -> &'static str {
-        match self {
-            LetThrough::Unmute => "unmuting",
-            LetThrough::PowerOn => "powering on",
-        }
-    }
-
-    fn title(self) -> &'static str {
-        match self {
-            LetThrough::Unmute => "Unmute",
-            LetThrough::PowerOn => "Power on",
-        }
-    }
-
-    /// The first field of the question's state.
-    fn tag(self) -> &'static str {
-        match self {
-            LetThrough::Unmute => "unmute",
-            LetThrough::PowerOn => "poweron",
-        }
-    }
-}
-
 /// How a tool call ends other than with an answer.
 enum Stop {
     /// A tool error, in words for the model.
@@ -215,22 +115,6 @@ impl From<String> for Stop {
 }
 
 type Done = Result<Value, Stop>;
-
-/// The tool names, each with whether it changes a device.
-const TOOLS: [(&str, bool); 12] = [
-    ("list_devices", false),
-    ("get_state", false),
-    ("get_link_history", false),
-    ("list_presets", false),
-    ("get_host", false),
-    ("set_control", true),
-    ("load_preset", true),
-    ("mute", true),
-    ("identify", true),
-    ("set_host_volume", true),
-    ("host_mute", true),
-    ("set_host_eq", true),
-];
 
 impl Tools {
     /// The tools over `fleet`: the write tools only when `writes`, volume levels capped at
@@ -310,6 +194,7 @@ impl Tools {
             "set_host_volume" => self.set_host_volume(&request, caller).await,
             "host_mute" => self.host_mute(&request, caller).await,
             "set_host_eq" => self.set_host_eq(&request, caller).await,
+            "set_host_crossfeed" => self.set_host_crossfeed(&request).await,
             _ => self.mute(&request, caller).await,
         };
         Ok(match outcome {
@@ -442,6 +327,7 @@ impl Tools {
                 .and_then(|vo| vo.raw.as_i64())
         };
         let listed: Vec<Preset> = fitting.iter().map(|(p, _)| p.clone()).collect();
+        crate::recall::warm(eq, &listed).await;
         let on = match preset::on(eq, raw, &listed, info.recalled.as_deref()) {
             preset::On::Preset(found) => Some(found.name.clone()),
             preset::On::Unread | preset::On::Custom => None,
@@ -1173,29 +1059,27 @@ impl Tools {
 
     /// Set `control` to raw step `target` through the device's writer, which judges on its own
     /// reading whether it lands at once or climbs, and report where it got to: a landing with its
-    /// echo; a climb by reading the level until it is `target` or [`CLIMB_WAIT`] has passed, then
-    /// answering with the reading — another front end, a mute or the knob may end a climb short
-    /// of its target, and one still going when the wait runs out is answered where it has got to.
-    /// No read holds the answer past the wait, however long the daemon takes over it.
+    /// echo; a climb by waiting on the writer's climb watch until the climb ends or [`CLIMB_WAIT`]
+    /// has passed, then answering with one reading — another front end, a mute or the knob may
+    /// end a climb short of its target, and one still going when the wait runs out is answered
+    /// where it has got to. No read holds the answer past the wait, however long the daemon takes
+    /// over it.
     async fn glide_set(&self, info: &DeviceInfo, control: &Control, target: i64) -> Done {
         match self.fleet.glide(info, &control.key, target).await {
             Glided::Landed(Response::Value(vo)) => Ok(reply(info, control, &vo)),
             Glided::Climbing { .. } => {
                 let until = Instant::now() + CLIMB_WAIT;
-                while Instant::now() < until {
-                    match tokio::time::timeout_at(until, self.read_raw(info, &control.key)).await {
-                        Ok(read) => match read? {
-                            Some(raw) if raw == target => break,
-                            _ => tokio::time::sleep(CLIMB_POLL).await,
-                        },
-                        Err(_) => break,
+                if let Some(watched) = self.fleet.watch(info) {
+                    let over = self.climb_over(info, control, target, watched.climb);
+                    if let Ok(over) = tokio::time::timeout_at(until, over).await {
+                        over?;
                     }
                 }
                 let last = self.fleet.request(Request::Get {
                     device: Some(info.name.clone()),
                     key: control.key.clone(),
                 });
-                match tokio::time::timeout_at(until + CLIMB_POLL, last).await {
+                match tokio::time::timeout_at(until + CLIMB_GRACE, last).await {
                     Ok(Response::Value(vo)) => Ok(reply(info, control, &vo)),
                     Ok(other) => Err(answer_error(other).into()),
                     Err(_) => {
@@ -1210,6 +1094,34 @@ impl Tools {
             )
             .into()),
         }
+    }
+
+    /// Wait until the climb of `control` is over on `climb`. The writer shows a climb a moment
+    /// after it answers that one began, so a watch that shows none yet is told apart from a
+    /// climb already over by one reading: at `target` it is over; short of it, the climb is
+    /// awaited when it shows.
+    async fn climb_over(
+        &self,
+        info: &DeviceInfo,
+        control: &Control,
+        target: i64,
+        mut climb: tokio::sync::watch::Receiver<Option<ClimbView>>,
+    ) -> Result<(), Stop> {
+        let shows = |view: &Option<ClimbView>| view.as_ref().is_some_and(|v| v.key == control.key);
+        if !shows(&climb.borrow_and_update()) {
+            if self.read_raw(info, &control.key).await? == Some(target) {
+                return Ok(());
+            }
+            if climb.has_changed().unwrap_or(true) && !shows(&climb.borrow_and_update()) {
+                // It showed and ended while the reading was out.
+                return Ok(());
+            }
+            if climb.wait_for(shows).await.is_err() {
+                return Ok(());
+            }
+        }
+        let _ = climb.wait_for(|view| !shows(view)).await;
+        Ok(())
     }
 
     /// The device `selector` names and its profile.
@@ -1229,267 +1141,6 @@ impl Tools {
     }
 }
 
-/// What a set reports: the reading the device confirmed, a level counted the way `get_state`
-/// counts it.
-fn reply(info: &DeviceInfo, control: &Control, vo: &ValueObject) -> Value {
-    let origin = roles::origin(control);
-    let display = match vo.raw.as_i64() {
-        Some(raw) if control.kind == ControlKind::Level && origin != 0 => {
-            units::text(control, raw).unwrap_or_else(|| vo.display.clone())
-        }
-        _ => vo.display.clone(),
-    };
-    let value = match control.kind {
-        ControlKind::Level => value_of(control, vo),
-        _ => json!(vo.value),
-    };
-    json!({
-        "device": info.name,
-        "key": vo.key,
-        "label": vo.label,
-        "value": value,
-        "unit": vo.unit,
-        "display": display,
-    })
-}
-
-/// The question a gain select raised to raw value `new` from `current` asks.
-fn gain_guard(
-    info: &DeviceInfo,
-    control: &Control,
-    current: Option<i64>,
-    new: Option<i64>,
-) -> Guard {
-    let name = |raw: Option<i64>| {
-        raw.and_then(|r| u8::try_from(r).ok())
-            .and_then(|r| control.value_name(r))
-            .map_or("an unknown setting".to_string(), str::to_string)
-    };
-    Guard {
-        level: None,
-        floor_db: None,
-        glide: None,
-        ask: Some(Ask {
-            message: format!(
-                "changing {} on {} from {} to {} raises the output",
-                control.label.to_ascii_lowercase(),
-                info.name,
-                name(current),
-                name(new)
-            ),
-            title: format!("Change the {}", control.label.to_ascii_lowercase()),
-            state: format!(
-                "gain|{}|{}|{}|{}",
-                info.name,
-                control.key,
-                new.map_or("none".to_string(), |n| n.to_string()),
-                current.map_or("none".to_string(), |n| n.to_string())
-            ),
-        }),
-    }
-}
-
-/// A level's raw step for the number the model gave, in the control's own unit (dB for the
-/// volume; steps from the centre for a balance), snapped to the nearest step the device has. A
-/// number outside the control's range is refused, not clamped.
-fn level_raw(control: &Control, value: &Value) -> Result<i64, String> {
-    let bad = || {
-        format!(
-            "{} takes a number{}",
-            control.key,
-            control
-                .unit
-                .as_deref()
-                .map(|u| format!(" in {u}"))
-                .unwrap_or_default()
-        )
-    };
-    let number = match value {
-        Value::Number(n) => n.as_f64().filter(|n| n.is_finite()),
-        Value::String(s) => units::number_in(s, control.unit.as_deref()),
-        _ => None,
-    }
-    .ok_or_else(bad)?;
-    if roles::is_volume(control) && !safety::in_db(control) {
-        return Err(
-            "the volume of this device has no level in dB, so it cannot be set here".to_string(),
-        );
-    }
-    let unit = control
-        .unit
-        .as_deref()
-        .map(|u| format!(" {u}"))
-        .unwrap_or_default();
-    match units::raw_for(control, number, Outside::Refuse) {
-        Ok(raw) => Ok(raw),
-        Err(Refusal::Outside { min, max }) => Err(format!(
-            "{} is between {min} and {max}{unit}; {number} is outside that, and the value is a \
-             level, not a change",
-            control.key
-        )),
-        Err(Refusal::NotFinite | Refusal::NoRange) => Err(bad()),
-    }
-}
-
-/// A toggle's or select's value as text for the set path, which reads on/off and names.
-fn plain_input(value: &Value) -> Result<String, String> {
-    match value {
-        Value::Bool(true) => Ok("on".to_string()),
-        Value::Bool(false) => Ok("off".to_string()),
-        Value::String(s) => Ok(s.clone()),
-        Value::Number(n) => Ok(n.to_string()),
-        _ => Err("value must be a boolean, a string or a number".to_string()),
-    }
-}
-
-/// What a check found: the level the write lands on, when it is a level, and a question the
-/// user must answer first, when there is one.
-struct Guard {
-    level: Option<f64>,
-    /// The lowest level of the last minute the check judged a level against, when it judged one.
-    floor_db: Option<f64>,
-    ask: Option<Ask>,
-    /// The raw step a volume is set to through the device's writer, which judges on its own
-    /// reading whether it lands at once or climbs; `None` for every other control.
-    glide: Option<i64>,
-}
-
-/// A question the user must answer before a change goes through.
-struct Ask {
-    /// The change in a sentence, which a client that cannot ask is told too.
-    message: String,
-    /// The short title of the question.
-    title: String,
-    /// What the retry must echo for its answer to count for this very change.
-    state: String,
-}
-
-/// Whether `name` is the save action's key, alone or followed by a slot (`save`, `save 2`,
-/// `Save Preset 2`), blanks and case aside.
-fn names_a_save(name: &str) -> bool {
-    let name = name.trim();
-    match name.get(..roles::SAVE_KEY.len()) {
-        Some(head) if head.eq_ignore_ascii_case(roles::SAVE_KEY) => {
-            let rest = name[roles::SAVE_KEY.len()..].trim();
-            rest.is_empty() || device_presets::parse_slot(rest, u8::MAX).is_some()
-        }
-        _ => false,
-    }
-}
-
-/// Whether the user has agreed to what `ask` asks: a client that can ask is asked, and goes
-/// ahead on an accepted answer to this very question; any other goes ahead on `confirm`. A no is
-/// final and says `stays` is left as it is.
-fn permission(
-    ask: &Ask,
-    request: &CallToolRequestParams,
-    caller: Caller,
-    confirmed: bool,
-    stays: &str,
-) -> Result<(), Stop> {
-    if caller.can_ask {
-        match answer(request, &ask.state) {
-            Answer::Yes => Ok(()),
-            Answer::No => Err(Stop::Say(format!(
-                "the user declined: {stays}; do not ask again unless the user does"
-            ))),
-            Answer::Unasked => Err(Stop::Ask(question(ask)?)),
-        }
-    } else if !confirmed {
-        Err(Stop::Say(format!(
-            "{}; ask the user whether to do it, and if they agree repeat this call with \"confirm\": true",
-            ask.message
-        )))
-    } else {
-        Ok(())
-    }
-}
-
-/// What a retry says about the question.
-enum Answer {
-    Yes,
-    No,
-    Unasked,
-}
-
-/// The user's answer carried by the retry, when it answers this very question: the state the
-/// retry echoes must be the one asked with, and the answer an accept with `confirm` true; a
-/// decline or a cancel is a no.
-fn answer(request: &CallToolRequestParams, state: &str) -> Answer {
-    if request.request_state.as_deref() != Some(state) {
-        return Answer::Unasked;
-    }
-    let Some(reply) = request
-        .input_responses
-        .as_ref()
-        .and_then(|answers| answers.get(ASK))
-    else {
-        return Answer::Unasked;
-    };
-    match reply["action"].as_str() {
-        Some("accept") if reply["content"]["confirm"] == json!(true) => Answer::Yes,
-        Some("accept") => Answer::No,
-        Some("decline" | "cancel") => Answer::No,
-        _ => Answer::Unasked,
-    }
-}
-
-/// The question a 2026-07-28 client is sent, with the state the retry must echo.
-fn question(ask: &Ask) -> Result<InputRequiredResult, Stop> {
-    let schema = serde_json::from_value(json!({
-        "type": "object",
-        "properties": {
-            "confirm": {
-                "type": "boolean",
-                "title": ask.title,
-                "description": "Allow this change"
-            }
-        },
-        "required": ["confirm"]
-    }))
-    .map_err(|e| Stop::Say(format!("could not build the question: {e}")))?;
-    let mut requests = InputRequests::new();
-    requests.insert(
-        ASK.to_string(),
-        InputRequest::Elicitation(ElicitRequest::new(
-            ElicitRequestParams::FormElicitationParams {
-                meta: None,
-                message: format!("{}. Allow it?", ask.message),
-                requested_schema: schema,
-            },
-        )),
-    );
-    Ok(InputRequiredResult::new(
-        Some(requests),
-        Some(ask.state.clone()),
-    ))
-}
-
-/// A control's label inside a sentence: lower case, except a label that starts with a number
-/// (`20 Hz`), whose unit keeps its capitals.
-fn label_words(control: &Control) -> String {
-    match control.label.starts_with(|c: char| c.is_ascii_digit()) {
-        true => control.label.clone(),
-        false => control.label.to_ascii_lowercase(),
-    }
-}
-
-/// A level in dB for a sentence: `-6.0 dB`, and `silence` at the lowest step.
-fn db_text(db: f64) -> String {
-    units::amount_text(Amount::of(db), Some("dB"))
-}
-
-/// The keys of the controls `keep` accepts, for a message that names the valid ones.
-fn keys_of(profile: &Profile, keep: impl Fn(&Control) -> bool) -> String {
-    profile
-        .controls
-        .iter()
-        .filter(|c| keep(c))
-        .map(|c| c.key.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 /// A refused or failed request in words.
 fn answer_error(response: Response) -> String {
     match response {
@@ -1498,289 +1149,9 @@ fn answer_error(response: Response) -> String {
     }
 }
 
-/// One control as `get_state` shows it: its key, label and kind, its reading, and what it can
-/// be set to.
-fn describe_control(profile: &Profile, control: &Control, values: &[ValueObject]) -> Value {
-    let id = control.id.to_string();
-    let reading = values.iter().find(|v| v.id == id);
-    let mut out = Map::new();
-    out.insert("key".into(), json!(control.key));
-    out.insert("label".into(), json!(control.label));
-    out.insert("kind".into(), json!(kind_word(control.kind)));
-    out.insert("writable".into(), json!(control.kind.writable()));
-    out.insert(
-        "value".into(),
-        reading.map_or(Value::Null, |r| match profile.gate_of(control) {
-            Some(_) => json!(gated(profile, control, r, values)),
-            None => value_of(control, r),
-        }),
-    );
-    if let Some(unit) = &control.unit {
-        out.insert("unit".into(), json!(unit));
-    }
-    if !control.values.is_empty() {
-        let names: Vec<&str> = control.values.iter().map(|(_, n)| n.as_str()).collect();
-        out.insert("values".into(), json!(names));
-    }
-    if control.kind == ControlKind::Level
-        && let Some(range) = level_range(control)
-    {
-        out.insert("range".into(), range);
-    }
-    Value::Object(out)
-}
-
-/// A level's range as `get_state` shows it: in its unit when it has a conversion, the silent step
-/// of a volume left out, else in whole steps counted from its centre, if it has one. `None` for a
-/// level with no range.
-fn level_range(control: &Control) -> Option<Value> {
-    let bounds = units::bounds(control)?;
-    Some(match control.convert {
-        None => json!({ "min": bounds.min as i64, "max": bounds.max as i64 }),
-        Some(_) => json!({ "min": bounds.min, "max": bounds.max }),
-    })
-}
-
-fn kind_word(kind: ControlKind) -> &'static str {
-    match kind {
-        ControlKind::Select => "select",
-        ControlKind::Toggle => "toggle",
-        ControlKind::Level => "level",
-        ControlKind::Readout => "readout",
-        ControlKind::Meter => "meter",
-        ControlKind::Fault => "fault",
-    }
-}
-
-/// Whether a readout an `only_while` gates reads true: it and its gate both read true in
-/// `values`, a gate not reported counting as closed ([`units::shows_true`]).
-fn gated(
-    profile: &Profile,
-    control: &Control,
-    reading: &ValueObject,
-    values: &[ValueObject],
-) -> bool {
-    units::shows_true(profile, control, reads_true(&reading.raw), |gate| {
-        let id = gate.id.to_string();
-        values
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| reads_true(&v.raw))
-    })
-}
-
-/// Whether a raw reading reads true: a boolean's own bit, or an integer 1.
-fn reads_true(raw: &Value) -> bool {
-    match raw {
-        Value::Bool(on) => *on,
-        other => other.as_i64() == Some(1),
-    }
-}
-
-/// A reading's value in the shape the control's kind suggests: a boolean for a toggle or
-/// fault, for a level the value built from its raw step (the converted number for a level with a
-/// conversion, `null` at silence, the step counted from the centre for a centred one), the name
-/// for a select. A meter is read as its raw value: it is never converted here.
-fn value_of(control: &Control, reading: &ValueObject) -> Value {
-    match control.kind {
-        ControlKind::Toggle | ControlKind::Fault => json!(reads_true(&reading.raw)),
-        ControlKind::Level | ControlKind::Meter => {
-            let origin = units::origin(control);
-            let amount = reading
-                .raw
-                .as_i64()
-                .and_then(|raw| units::amount(control, raw).map(|amount| (raw, amount)));
-            match amount {
-                Some((_, Amount::Value(value))) if control.convert.is_some() => json!(value),
-                Some((_, Amount::Silence)) => Value::Null,
-                Some((raw, Amount::Value(_))) if origin != 0 => json!(raw - origin),
-                _ => reading.raw.clone(),
-            }
-        }
-        ControlKind::Select | ControlKind::Readout => reading
-            .raw
-            .as_u64()
-            .and_then(|r| u8::try_from(r).ok())
-            .and_then(|r| control.value_name(r))
-            .map_or_else(|| reading.raw.clone(), |name| json!(name)),
-    }
-}
-
 /// A tool error: the model reads the words and may try again.
 fn failure(message: &str) -> CallToolResponse {
     CallToolResult::error(vec![rmcp::model::ContentBlock::text(message)]).into()
-}
-
-/// A call's arguments, checked: a name the tool does not take is refused, and each is read
-/// as the type the tool wants.
-struct Args<'a> {
-    map: &'a JsonObject,
-}
-
-impl<'a> Args<'a> {
-    fn new(request: &'a CallToolRequestParams, allowed: &[&str]) -> Result<Args<'a>, String> {
-        static EMPTY: std::sync::OnceLock<JsonObject> = std::sync::OnceLock::new();
-        let map = request
-            .arguments
-            .as_ref()
-            .unwrap_or_else(|| EMPTY.get_or_init(JsonObject::new));
-        if let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
-            return Err(format!(
-                "{} takes no argument {extra:?}; its arguments are: {}",
-                request.name,
-                if allowed.is_empty() {
-                    "none".to_string()
-                } else {
-                    allowed.join(", ")
-                }
-            ));
-        }
-        Ok(Args { map })
-    }
-
-    fn value(&self, key: &str) -> Option<&Value> {
-        self.map.get(key).filter(|v| !v.is_null())
-    }
-
-    fn text(&self, key: &str) -> Result<Option<&str>, String> {
-        match self.value(key) {
-            None => Ok(None),
-            Some(Value::String(s)) => Ok(Some(s)),
-            Some(_) => Err(format!("{key} must be a string")),
-        }
-    }
-
-    fn required_text(&self, key: &str) -> Result<&str, String> {
-        self.text(key)?
-            .ok_or_else(|| format!("the argument {key:?} is required"))
-    }
-
-    fn number(&self, key: &str) -> Result<Option<f64>, String> {
-        match self.value(key) {
-            None => Ok(None),
-            Some(v) => v
-                .as_f64()
-                .map(Some)
-                .ok_or_else(|| format!("{key} must be a number")),
-        }
-    }
-
-    fn flag(&self, key: &str) -> Result<Option<bool>, String> {
-        match self.value(key) {
-            None => Ok(None),
-            Some(Value::Bool(b)) => Ok(Some(*b)),
-            Some(_) => Err(format!("{key} must be true or false")),
-        }
-    }
-}
-
-/// A tool's definition: its name, its one-sentence description and its arguments.
-fn definition(name: &'static str, write: bool) -> Tool {
-    let device = json!({
-        "type": "string",
-        "description": "The device's name from list_devices; may be left out when there is one device"
-    });
-    let (description, properties, required): (&str, Value, &[&str]) = match name {
-        "list_devices" => (
-            "List the configured devices with their product name and whether each is connected.",
-            json!({}),
-            &[],
-        ),
-        "get_state" => (
-            "Read every control of a device with its key, label, kind, current value, unit (the volume is in dB; a balance counts from its centre: 0 centred, below 0 to the left, above to the right) and the values or range it accepts; the keys are the ones set_control takes.",
-            json!({ "device": device }),
-            &[],
-        ),
-        "get_link_history" => (
-            "Show when a device's Bluetooth link came up and dropped over the last hours (at most 24).",
-            json!({
-                "device": device,
-                "hours": { "type": "number", "description": "How far back to look, in hours; above 0, at most 24; 24 when left out" }
-            }),
-            &[],
-        ),
-        "list_presets" => (
-            "List a device's presets, each with whether it is the one on (`on`): the tone-control presets, built in and saved, that fit its equalizer; or, on a Loki Max, its three device slots (`slot`, never marked on, since the device does not say which is current) and its five built-in settings.",
-            json!({ "device": device }),
-            &[],
-        ),
-        "set_control" => (
-            "Set one control of a device by its key from get_state (a level in its unit, dB for the volume, a balance in steps from its centre: 0 centred, below 0 to the left, above to the right; a toggle as true or false; a select by name); a rise of more than 6 dB, a higher gain or mode, an unmute, or powering a device on (the power toggle set to true) asks the user first, and a volume above the owner's limit is refused; a volume above three quarters of its range climbs there, and the reply gives the level the device had reached when the tool answered, which is short of the target if the climb is still going; powering off never asks.",
-            json!({
-                "device": device,
-                "key": { "type": "string", "description": "The control's key from get_state" },
-                "value": { "type": ["number", "string", "boolean"], "description": "The new value; for a level the number in its unit (dB for the volume; a balance counts from its centre)" },
-                "confirm": { "type": "boolean", "description": "Only after the user agreed to the change, and only for a client that cannot ask the user itself; ignored when it can" }
-            }),
-            &["key", "value"],
-        ),
-        "load_preset" => (
-            "Apply a preset from list_presets: a tone-control preset to a device's equalizer, which does not touch the volume control, but each band boosts at most 6 dB and bands that overlap add up, so it can make some frequencies louder; or, on a Loki Max, a device slot (its recall always asks the user first, because the bands it sets are not known and any of them can be set as high as +12 dB) or a built-in setting (it asks the user first when a band would rise more than 6 dB above its lowest level of the last minute, naming each such band). Saving to a slot is not offered.",
-            json!({
-                "device": device,
-                "name": { "type": "string", "description": "The preset's name from list_presets" },
-                "confirm": { "type": "boolean", "description": "Only for a Loki Max, only after the user agreed to the question the call raised, and only for a client that cannot ask the user itself; ignored when it can" }
-            }),
-            &["name"],
-        ),
-        "get_host" => (
-            "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q) and the player (title, artist, album, status); each is null while it is not available, and `unavailable` says why.",
-            json!({}),
-            &[],
-        ),
-        "set_host_volume" => (
-            "Set the computer's volume in whole percent, 0 to 100 (never above 100); a rise of more than 6 dB over its lowest level in the last minute, on the scale the computer's mixer uses (the cube of the percent), asks the user first; lowering never asks.",
-            json!({
-                "percent": { "type": "integer", "minimum": 0, "maximum": 100, "description": "The new volume in percent, 0 to 100" },
-                "confirm": { "type": "boolean", "description": "Only after the user agreed to the rise, and only for a client that cannot ask the user itself; ignored when it can" }
-            }),
-            &["percent"],
-        ),
-        "host_mute" => (
-            "Mute or unmute the computer's output; unmuting asks the user first.",
-            json!({
-                "muted": { "type": "boolean", "description": "true to mute, false to unmute; unmuting asks the user first" },
-                "confirm": { "type": "boolean", "description": "Only after the user agreed to unmute, and only for a client that cannot ask the user itself; ignored when it can" }
-            }),
-            &["muted"],
-        ),
-        "set_host_eq" => (
-            "Recall a preset on the computer's EQ (`preset`, a saved preset or a built-in one, which is shaped to a device's tone control: name that device in `device`, or leave it out when there is one) or turn the EQ off (`off`: true); give exactly one of them. A preset a connected device plays too asks the user first, since the correction would play twice.",
-            json!({
-                "preset": { "type": "string", "description": "The preset's name from list_presets" },
-                "off": { "type": "boolean", "description": "true to turn the computer's EQ off" },
-                "device": device,
-                "confirm": { "type": "boolean", "description": "Only after the user agreed to the question the call raised, and only for a client that cannot ask the user itself; ignored when it can" }
-            }),
-            &[],
-        ),
-        "identify" => (
-            "Ask a device to show itself, so it can be told apart from the others; it changes nothing on the device, and a second call within two seconds of one that went out sends nothing and answers sent false.",
-            json!({ "device": device }),
-            &[],
-        ),
-        _ => (
-            "Mute or unmute a device's output; unmuting asks the user first.",
-            json!({
-                "device": device,
-                "on": { "type": "boolean", "description": "true to mute, false to unmute; unmuting asks the user first" },
-                "confirm": { "type": "boolean", "description": "Only after the user agreed to unmute, and only for a client that cannot ask the user itself; ignored when it can" }
-            }),
-            &["on"],
-        ),
-    };
-    let schema = json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false
-    });
-    let Value::Object(schema) = schema else {
-        unreachable!("an object literal");
-    };
-    let mut tool = Tool::new(name, description, Arc::new(schema));
-    tool.annotations = Some(ToolAnnotations::new().read_only(!write));
-    tool
 }
 
 /// What the server answers `initialize` and `server/discover` with, and how it lists and runs

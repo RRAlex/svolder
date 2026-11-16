@@ -93,56 +93,6 @@ async fn unfound_start() -> (
     (daemon, opener)
 }
 
-/// Run the loop on `watching` over `input` while `script` plays against the stub daemon, and
-/// give back the frames. The script sees the frames as they are drawn, so it waits for what it
-/// needs to be on the screen instead of for a time to pass, and it ends the loop with [`quit`].
-async fn loop_over<O, F, Fut>(
-    opener: &Opener<O>,
-    watching: Watching,
-    input: BoxStream<'static, io::Result<Event>>,
-    script: F,
-) -> (LoopEnd, Vec<String>)
-where
-    O: Open,
-    F: FnOnce(Frames) -> Fut,
-    Fut: std::future::Future<Output = ()>,
-{
-    let (recorder, frames) = Recorder::new(80, 24);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let adds = nothing_to_add();
-    let mut mouse = SpyMouse::default();
-    let mut title = title();
-    let (end, ()) = tokio::join!(
-        event_loop(LoopParts {
-            opener,
-            adder: &adds,
-            watching,
-            terminal: &mut terminal,
-            events: input,
-            mouse: &mut mouse,
-            title: &mut title,
-            look: look(),
-        }),
-        script(Arc::clone(&frames))
-    );
-    (end, drawn(&frames))
-}
-
-/// Keys a script sends the loop when it wants, and the stream the loop reads them from.
-fn keyed() -> (
-    futures::channel::mpsc::UnboundedSender<io::Result<Event>>,
-    futures::channel::mpsc::UnboundedReceiver<io::Result<Event>>,
-) {
-    futures::channel::mpsc::unbounded()
-}
-
-/// `q` twice: the quit question and its answer.
-fn quit(keys: &futures::channel::mpsc::UnboundedSender<io::Result<Event>>) {
-    for _ in 0..2 {
-        keys.unbounded_send(key('q')).expect("the loop reads keys");
-    }
-}
-
 /// Run the loop on `watching` until a frame shows `text`, then quit, and give back the frames.
 async fn run_until<O: Open>(
     opener: &Opener<O>,
@@ -600,18 +550,6 @@ async fn finding_the_device_waits_for_an_open_box_to_close() {
     }
     assert!(end.watching.app.session.holding.is_none());
     end.watching.close().await;
-}
-
-/// Wait until a frame shows `text`, however long the machine takes to draw it.
-async fn shown(frames: &Frames, text: &str) {
-    let wait = async {
-        while !any_frame(&drawn(frames), text) {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    };
-    tokio::time::timeout(Duration::from_secs(60), wait)
-        .await
-        .unwrap_or_else(|_| panic!("no frame showed {text:?}"));
 }
 
 /// A wait that a failed switch interrupts resumes on the daemon the switch used, not on whatever

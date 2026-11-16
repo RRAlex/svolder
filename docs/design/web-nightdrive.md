@@ -382,7 +382,7 @@ daemon captures the computer's audio only for a page that is looked at.
 | `tune.js`, `tune-wire.js` | the tone control on the mountains as numbers, and the hands on it |
 | `points-wire.js` | the computer's side: the points' table's hands (what the drawing reads of the computer is the core's `computer.view()`) |
 | `hud.js`, `hud-wire.js`, `dash-fade.js`, `rest.js` | the HUD's words, its fade, the dash's fade, the resting cursor |
-| `dash-wire.js`, `volume-keys.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `gestures.js`, `lists.js`, `ask.js` (the core's list and inline ask in Night drive's classes and words), `inert.js`, `place.js` | the hands: what a tap, a hold, a drag, a key, a list or a question does |
+| `dash-wire.js`, `volume-keys.js`, `sheet-wire.js`, `bands-wire.js`, `presets-wire.js`, `controls-wire.js`, `facts-wire.js`, `card-wire.js`, `lists.js`, `ask.js` (the core's list and inline ask in Night drive's classes and words), `inert.js`, `place.js` (where knobs, counters, needles and the shaded zone stand, from `data-at`) | the hands: what a tap, a hold, a drag, a key, a list or a question does (the drag and the keys of a track are the core's `gestures.js`) |
 | `states.js`, `words.js` | how the page stands and the quiet line's words; the fixed words |
 | `live.js` | the parts of the shown device each section shows; the store's events on the page, which sections are drawn again and which are held, are `core.freeze.createLive`'s |
 | `debug.js`, `debug-wire.js`, `stats.js` | the readout and the switches, the draws' times |

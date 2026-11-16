@@ -335,3 +335,73 @@ async fn a_tool_that_does_not_answer_is_given_up_on_and_ended() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+fn gets(dir: &TempDir) -> usize {
+    lines(&dir.join("calls"))
+        .iter()
+        .filter(|c| c.starts_with("get-volume"))
+        .count()
+}
+
+/// The reader the computer's volume uses publishes; the capture's look is a held reader of the
+/// same program and costs nothing while the reading is young.
+#[tokio::test]
+async fn sinks_made_for_one_program_share_a_published_reading() {
+    let (dir, _) = fake("sink-shared", "0.54");
+    let program = dir.join("wpctl");
+    let computer = Wpctl::shared_for(&program);
+    let capture = Wpctl::shared_for(&program).held();
+    assert_eq!(computer.read().await, Some(modi(0.54, false)));
+    assert_eq!(capture.read().await, Some(modi(0.54, false)));
+    assert_eq!(capture.read().await, Some(modi(0.54, false)));
+    assert_eq!(gets(&dir), 1, "one get-volume for the three reads");
+    assert_eq!(lines(&dir.join("calls")).len(), 2, "and one inspect");
+    // A held reader that finds nothing young reads for itself and publishes nothing.
+    let alone = Wpctl::shared_for(&program).held_for(Duration::ZERO);
+    alone.read().await;
+    assert_eq!(gets(&dir), 2);
+}
+
+#[tokio::test]
+async fn sinks_made_for_two_programs_share_nothing() {
+    let (one, _) = fake("sink-shared-a", "0.10");
+    let (two, _) = fake("sink-shared-b", "0.20");
+    let a = Wpctl::shared_for(one.join("wpctl"));
+    let b = Wpctl::shared_for(two.join("wpctl")).held();
+    assert_eq!(a.read().await.map(|s| s.volume), Some(0.10));
+    assert_eq!(b.read().await.map(|s| s.volume), Some(0.20));
+}
+
+/// Every `set-*` call, through a sink of any kind made for the program, drops the published
+/// reading: the next read of a held reader asks again.
+#[tokio::test]
+async fn any_set_call_drops_the_published_reading() {
+    let (dir, _) = fake("sink-writes", "0.54");
+    let program = dir.join("wpctl");
+    let computer = Wpctl::shared_for(&program);
+    let capture = Wpctl::shared_for(&program).held();
+    computer.read().await;
+    capture.read().await;
+    assert_eq!(gets(&dir), 1);
+    // The EQ's manager changes the default sink through a sink of its own.
+    Wpctl::new(&program).run(&["set-default", "57"]).await;
+    capture.read().await;
+    assert_eq!(gets(&dir), 2, "after set-default");
+    computer.read().await;
+    assert!(computer.set_volume(0.3).await);
+    assert_eq!(capture.read().await.map(|s| s.volume), Some(0.3));
+    computer.read().await;
+    assert!(capture.set_mute(true).await);
+    assert!(capture.read().await.expect("a sink").muted);
+    computer.read().await;
+    assert!(computer.toggle_mute().await);
+    assert!(!capture.read().await.expect("a sink").muted);
+}
+
+#[tokio::test]
+async fn a_sink_made_with_new_shares_nothing_and_holds_nothing() {
+    let (dir, wpctl) = fake("sink-unheld", "0.54");
+    wpctl.read().await;
+    wpctl.read().await;
+    assert_eq!(gets(&dir), 2);
+}

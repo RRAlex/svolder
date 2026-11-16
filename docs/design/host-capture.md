@@ -22,17 +22,20 @@ The capture is a helper of the current run (`host/capture.rs`), so a reconfigure
 generation gate ends it, and dropping it kills its `pw-record`; a step of a run that was halted
 publishes nothing. While it runs the helper reads the default sink every 2 s on a task of its own,
 so a slow `wpctl` never holds up the frames, and puts the capture on the node the sink names, so a
-switch of the default sink moves it. It only reads (`Sink::read`): the daemon never sets the sink's
-volume or mute. `pw-record` is passive (`node.passive = true`), so the tap never keeps the sink
-awake or the graph busy and watching does not change the sound; a sink that suspends gives it no
-samples, and the page and the TUI then show silence. It also sets `node.rate = 0`: measured on
-PipeWire 1.6.2 with several allowed rates, a passive capture alone still started the graph at
-48 kHz, because `pw-record` suggests a rate of its own, and a non-passive one held it there,
-while with both properties a 44.1 kHz and a 96 kHz stream set the graph's rate and the capture
-kept receiving samples. `--rate 48000` stays, so only our stream is resampled. `make rate-check`
-repeats the measurement on a host (the real session, silent streams, never part of `make check`);
-what `make check` does run is `make rate-check-test`, the script's parsers on saved tool output
-(`crates/svolder-host/tests/fixtures/rate-check/` and the `pw-dump` fixtures).
+switch of the default sink moves it. The read is a held one (`Wpctl::held`): it takes the reading
+the computer's volume read just made while that is younger than 2.5 s, so the daemon runs
+`get-volume` once per beat however many things watch the sink, and a new default sink can reach the
+capture up to about 2 s later than a fresh read would show it. It only reads (`Sink::read`): the
+daemon never sets the sink's volume or mute. `pw-record` is passive (`node.passive = true`), so the
+tap never keeps the sink awake or the graph busy and watching does not change the sound; a sink that
+suspends gives it no samples, and the page and the TUI then show silence. It also sets `node.rate =
+0`: measured on PipeWire 1.6.2 with several allowed rates, a passive capture alone still started the
+graph at 48 kHz, because `pw-record` suggests a rate of its own, and a non-passive one held it
+there, while with both properties a 44.1 kHz and a 96 kHz stream set the graph's rate and the
+capture kept receiving samples. `--rate 48000` stays, so only our stream is resampled. `make
+rate-check` repeats the measurement on a host (the real session, silent streams, never part of `make
+check`); what `make check` does run is `make rate-check-test`, the script's parsers on saved tool
+output (`crates/svolder-host/tests/fixtures/rate-check/` and the `pw-dump` fixtures).
 
 A hold that outlives a reconfigure sees the capture go `Unavailable` ("host audio is off") and gets
 the new run's capture when the host comes back.

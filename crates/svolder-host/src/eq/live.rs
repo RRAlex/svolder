@@ -11,7 +11,14 @@
 //! A rate change rebuilds the graph and puts the config's coefficients back, so whoever sends
 //! reads the rate with [`props_of`] and sends every slot again.
 //!
-//! [`props_of`] reads the node, the rate and the values the chain holds out of `pw-dump`.
+//! After slot 16 the graph holds one crossfeed stage per channel, the same six nodes whatever
+//! the model (see [`crossfeed`](super::crossfeed)), so crossfeed changes are `set-param`s too
+//! ([`crossfeed_params`]). The config on disk always has the stage off, a bypass that is
+//! bit-exact: [`render_live_conf`] writes it so, and [`render_live_conf_with`] writes a given
+//! stage for a chain that cannot be set live.
+//!
+//! [`props_of`] reads the node, the rate, the values the chain holds and the sink it plays into
+//! out of `pw-dump`; [`output_sink`] reads the real output sink.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -20,6 +27,7 @@ use serde_json::Value;
 use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
 use svolder_profiles::tone::response::coefficients;
 
+use super::crossfeed::{DELAY_BUFFER_S, Stage};
 use super::points::Points;
 use super::{NODE_NAME, Route, builtin_type, conf_frame, num};
 
@@ -155,22 +163,84 @@ fn raw_values(filter: Option<&SourceFilter>, rate_hz: u32) -> [f64; 6] {
     }
 }
 
+/// A `bq_raw` node named `name` holding `[b0, b1, b2, a0, a1, a2]` for `rate_hz`.
+fn raw_node(name: &str, [b0, b1, b2, a0, a1, a2]: [f64; 6], rate_hz: u32) -> String {
+    format!(
+        "{{ type = builtin name = {name} label = bq_raw config = {{ coefficients = [ {{ rate = {rate_hz} b0 = {} b1 = {} b2 = {} a0 = {} a1 = {} a2 = {} }} ] }} }}",
+        num(b0),
+        num(b1),
+        num(b2),
+        num(a0),
+        num(a1),
+        num(a2)
+    )
+}
+
+/// The six `bq_raw` numbers of a stage section `[b0, b1, b2, a1, a2]`: `a0` is 1.
+fn stage_raw([b0, b1, b2, a1, a2]: [f64; 5]) -> [f64; 6] {
+    [b0, b1, b2, 1.0, a1, a2]
+}
+
+/// The nodes of the crossfeed stage of `channel`, as the config writes them, holding `stage`.
+fn stage_nodes(channel: char, stage: &Stage, rate_hz: u32) -> String {
+    let mut out = String::new();
+    for (name, section) in [("dir", stage.dir), ("x", stage.x), ("s", stage.s)] {
+        let _ = writeln!(
+            out,
+            "                    {}",
+            raw_node(&format!("{channel}{name}"), stage_raw(section), rate_hz)
+        );
+    }
+    let [sum1, sum2] = stage.sum;
+    let _ = writeln!(
+        out,
+        "                    {{ type = builtin name = {channel}sum label = mixer control = {{ \"Gain 1\" = {} \"Gain 2\" = {} }} }}",
+        num(sum1),
+        num(sum2)
+    );
+    let _ = writeln!(
+        out,
+        "                    {{ type = builtin name = {channel}del label = delay config = {{ \"max-delay\" = {} }} control = {{ \"Delay (s)\" = {} }} }}",
+        num(DELAY_BUFFER_S),
+        num(stage.delay_s)
+    );
+    let _ = writeln!(
+        out,
+        "                    {{ type = builtin name = {channel}mix label = mixer control = {{ \"Gain 1\" = 1 \"Gain 2\" = {} }} }}",
+        num(stage.mix)
+    );
+    out
+}
+
+/// The links of the crossfeed stage of `channel`: its own channel's last slot feeds the direct
+/// and side paths, the other channel's feeds the cross path (the other channel's slot 16 so
+/// tees to this channel's cross node).
+fn stage_links(channel: char, other: char) -> String {
+    let last = format!("{SLOTS:02}");
+    let mut out = String::new();
+    for (from, to) in [
+        (format!("{channel}{last}:Out"), format!("{channel}dir:In")),
+        (format!("{channel}{last}:Out"), format!("{channel}s:In")),
+        (format!("{other}{last}:Out"), format!("{channel}x:In")),
+        (format!("{channel}x:Out"), format!("{channel}sum:In 1")),
+        (format!("{channel}s:Out"), format!("{channel}sum:In 2")),
+        (format!("{channel}sum:Out"), format!("{channel}del:In")),
+        (format!("{channel}dir:Out"), format!("{channel}mix:In 1")),
+        (format!("{channel}del:Out"), format!("{channel}mix:In 2")),
+    ] {
+        let _ = writeln!(
+            out,
+            "                    {{ output = \"{from}\" input = \"{to}\" }}"
+        );
+    }
+    out
+}
+
 /// The graph's node of one slot, as the config writes it.
 fn slot_node(channel: char, slot: u8, filter: Option<&SourceFilter>, rate_hz: u32) -> String {
     let name = format!("{channel}{slot:02}");
     match SHAPE {
-        SlotShape::Raw => {
-            let [b0, b1, b2, a0, a1, a2] = raw_values(filter, rate_hz);
-            format!(
-                "{{ type = builtin name = {name} label = bq_raw config = {{ coefficients = [ {{ rate = {rate_hz} b0 = {} b1 = {} b2 = {} a0 = {} a1 = {} a2 = {} }} ] }} }}",
-                num(b0),
-                num(b1),
-                num(b2),
-                num(a0),
-                num(a1),
-                num(a2)
-            )
-        }
+        SlotShape::Raw => raw_node(&name, raw_values(filter, rate_hz), rate_hz),
         SlotShape::Typed => {
             let (kind, f, g, q) = match filter.map(|f| held(f, rate_hz)) {
                 Some(f) => (f.kind, f.f, f.g, f.q),
@@ -204,14 +274,27 @@ fn preamp_node(channel: char, db: f64) -> String {
 /// The complete PipeWire config of the live chain in front of the sink `target`, for `route`:
 /// the frame of [`render_conf`](super::render_conf) round a graph of `lpre → l01 … l16` and
 /// `rpre → r01 … r16`, the slots holding `points` (their coefficients worked out for a sink
-/// running at `rate_hz`) and the preamp `preamp_db`. The node is
-/// called [`NODE_NAME`].
+/// running at `rate_hz`), the preamp `preamp_db` and the crossfeed stage OFF (a bypass). The
+/// node is called [`NODE_NAME`].
 pub fn render_live_conf(
     points: &Points,
     preamp_db: f64,
     target: &str,
     route: Route,
     rate_hz: u32,
+) -> String {
+    render_live_conf_with(points, preamp_db, target, route, rate_hz, &Stage::bypass())
+}
+
+/// [`render_live_conf`] with the crossfeed stage holding `stage`: for a chain that cannot be set
+/// live, so the stage has to be in the config it starts with.
+pub fn render_live_conf_with(
+    points: &Points,
+    preamp_db: f64,
+    target: &str,
+    route: Route,
+    rate_hz: u32,
+    stage: &Stage,
 ) -> String {
     let in_slot = |slot: u8| {
         points
@@ -243,12 +326,17 @@ pub fn render_live_conf(
             previous = name;
         }
     }
-    let last = format!("{SLOTS:02}");
+    for channel in CHANNELS {
+        nodes.push_str(&stage_nodes(channel, stage, rate_hz));
+    }
+    for (channel, other) in [('l', 'r'), ('r', 'l')] {
+        links.push_str(&stage_links(channel, other));
+    }
     let graph = format!(
         "                nodes = [\n{nodes}                ]\n\
          \x20               links = [\n{links}                ]\n\
          \x20               inputs  = [ \"lpre:In\" \"rpre:In\" ]\n\
-         \x20               outputs = [ \"l{last}:Out\" \"r{last}:Out\" ]\n"
+         \x20               outputs = [ \"lmix:Out\" \"rmix:Out\" ]\n"
     );
     conf_frame(&graph, target, route)
 }
@@ -292,6 +380,26 @@ pub fn preamp_params(db: f64) -> Vec<(String, f64)> {
         .collect()
 }
 
+/// The parameters that set the crossfeed stage to `stage` on both channels, in one
+/// `set-param`: the three paths' coefficients (`ldir:b0 … ls:a2`, `a0` sent as 1), the sum's
+/// gains (`lsum:Gain 1`, `lsum:Gain 2`), the added delay in seconds (`ldel:Delay (s)`) and the
+/// delayed path's gain into the mixer (`lmix:Gain 2`, 0 for the bypass).
+pub fn crossfeed_params(stage: &Stage) -> Vec<(String, f64)> {
+    let mut params = Vec::new();
+    for channel in CHANNELS {
+        for (name, section) in [("dir", stage.dir), ("x", stage.x), ("s", stage.s)] {
+            for (port, value) in RAW_PORTS.iter().zip(stage_raw(section)) {
+                params.push((format!("{channel}{name}:{port}"), value));
+            }
+        }
+        params.push((format!("{channel}sum:Gain 1"), stage.sum[0]));
+        params.push((format!("{channel}sum:Gain 2"), stage.sum[1]));
+        params.push((format!("{channel}del:Delay (s)"), stage.delay_s));
+        params.push((format!("{channel}mix:Gain 2"), stage.mix));
+    }
+    params
+}
+
 /// The `pw-cli` line that sets `params` on node `node`, in one call:
 /// `set-param 42 Props { params = [ "l07:Gain" 6 … ] }`.
 pub fn set_param_line(node: u32, params: &[(String, f64)]) -> String {
@@ -311,6 +419,15 @@ impl LiveNode {
             .iter()
             .all(|(name, _)| self.params.contains_key(name))
     }
+
+    /// Whether the node has the crossfeed stage's controls (every port [`crossfeed_params`]
+    /// lists). A chain built before the stage existed has the preamp's and not these: it plays,
+    /// and is rebuilt once when crossfeed is first turned on.
+    pub fn has_crossfeed_controls(&self) -> bool {
+        crossfeed_params(&Stage::bypass())
+            .iter()
+            .all(|(name, _)| self.params.contains_key(name))
+    }
 }
 
 /// The live chain's node as `pw-dump` shows it.
@@ -321,7 +438,16 @@ pub struct LiveNode {
     /// The rate the sink the chain plays into is running at; `None` when that sink is not
     /// found or has no format yet. The chain's own node does not show it.
     pub rate_hz: Option<u32>,
-    /// The values the chain's slots and preamp hold, by port name (`l07:b0`).
+    /// The `node.name` of the sink the chain's output stream is linked to; `None` when it is
+    /// not linked to one.
+    pub sink: Option<String>,
+    /// Whether a playback stream plays through the chain's sink: a node linked into the sink's
+    /// input that is itself `running`. The sink's own state is not read: a capture of its
+    /// monitor keeps it running with nothing playing, and a paused or corked stream leaves its
+    /// node `idle`.
+    pub playing: bool,
+    /// The values the chain's slots, preamp and crossfeed stage hold, by port name (`l07:b0`,
+    /// `lmix:Gain 2`).
     pub params: HashMap<String, f64>,
 }
 
@@ -366,25 +492,39 @@ pub fn props_of(dump: &str) -> Option<LiveNode> {
             .flatten()
         })
     });
-    let rate_hz = sink.and_then(|sink| {
-        let sink = objects
+    let sink_object = sink.and_then(|sink| {
+        objects
             .iter()
-            .find(|object| object["id"].as_u64() == Some(sink))?;
+            .find(|object| object["id"].as_u64() == Some(sink))
+    });
+    let sink_name = sink_object
+        .and_then(|sink| sink["info"]["props"]["node.name"].as_str())
+        .map(str::to_string);
+    let rate_hz = sink_object.and_then(|sink| {
         let rate = sink["info"]["params"]["Format"].as_array()?.first()?["rate"].as_u64()?;
         u32::try_from(rate).ok().filter(|rate| *rate > 0)
     });
     Some(LiveNode {
         id,
         rate_hz,
+        sink: sink_name,
+        playing: objects.iter().any(|link| {
+            link["type"].as_str().is_some_and(|t| t.ends_with("Link"))
+                && link["info"]["input-node-id"].as_u64() == Some(u64::from(id))
+                && link["info"]["output-node-id"].as_u64().is_some_and(|from| {
+                    objects.iter().any(|stream| {
+                        stream["id"].as_u64() == Some(from)
+                            && stream["info"]["state"].as_str() == Some("running")
+                    })
+                })
+        }),
         params,
     })
 }
 
-/// The rate the default audio sink runs at in `dump`, `None` when there is no default sink,
-/// it is the computer EQ itself, or it has no format yet.
-pub fn default_sink_rate(dump: &str) -> Option<u32> {
-    let objects: Vec<Value> = serde_json::from_str(dump).ok()?;
-    let name = objects.iter().find_map(|object| {
+/// The `node.name` of the default audio sink in the parsed `objects` of a dump.
+fn default_sink_name(objects: &[Value]) -> Option<String> {
+    objects.iter().find_map(|object| {
         if object["props"]["metadata.name"].as_str() != Some("default") {
             return None;
         }
@@ -398,16 +538,69 @@ pub fn default_sink_rate(dump: &str) -> Option<u32> {
                     .and_then(|value| value["name"].as_str().map(str::to_string)),
                 value => value["name"].as_str().map(str::to_string),
             })
-    })?;
-    if name == NODE_NAME || name.starts_with(&format!("{NODE_NAME}.")) {
-        return None;
-    }
-    let sink = objects.iter().find(|object| {
+    })
+}
+
+/// Whether `name` is the computer EQ's own sink or its output stream.
+fn is_chain_name(name: &str) -> bool {
+    name == NODE_NAME || name.starts_with(&format!("{NODE_NAME}."))
+}
+
+/// The node named `name` in `objects`.
+fn node_by_name<'a>(objects: &'a [Value], name: &str) -> Option<&'a Value> {
+    objects.iter().find(|object| {
         object["type"].as_str().is_some_and(|t| t.ends_with("Node"))
-            && object["info"]["props"]["node.name"].as_str() == Some(name.as_str())
-    })?;
+            && object["info"]["props"]["node.name"].as_str() == Some(name)
+    })
+}
+
+/// The first format rate of `sink`, `None` when it has none yet.
+fn rate_of(sink: &Value) -> Option<u32> {
     let rate = sink["info"]["params"]["Format"].as_array()?.first()?["rate"].as_u64()?;
     u32::try_from(rate).ok().filter(|rate| *rate > 0)
+}
+
+/// The rate the default audio sink runs at in `dump`, `None` when there is no default sink,
+/// it is the computer EQ itself, or it has no format yet.
+pub fn default_sink_rate(dump: &str) -> Option<u32> {
+    let objects: Vec<Value> = serde_json::from_str(dump).ok()?;
+    let name = default_sink_name(&objects)?;
+    if is_chain_name(&name) {
+        return None;
+    }
+    rate_of(node_by_name(&objects, &name)?)
+}
+
+/// The sink the computer plays into, as a dump shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputSink {
+    /// The sink's `node.name`.
+    pub name: String,
+    /// What a person calls it: its `node.description`, else its `node.nick`.
+    pub description: Option<String>,
+    /// The rate it runs at, `None` before it has a format.
+    pub rate_hz: Option<u32>,
+}
+
+/// The real output sink in `dump`: the default sink, or, when the default is the computer EQ
+/// itself (the default route), the sink the chain's output stream is linked to. `None` when
+/// there is no default sink, or the default is the chain and it is linked to none. It is what
+/// "the output changed" is read from: the same answer whether or not the chain is in front.
+pub fn output_sink(dump: &str) -> Option<OutputSink> {
+    let objects: Vec<Value> = serde_json::from_str(dump).ok()?;
+    let default = default_sink_name(&objects)?;
+    let name = match is_chain_name(&default) {
+        true => props_of(dump)?.sink?,
+        false => default,
+    };
+    let sink = node_by_name(&objects, &name)?;
+    let props = &sink["info"]["props"];
+    let text = |key: &str| props[key].as_str().map(str::to_string);
+    Some(OutputSink {
+        name,
+        description: text("node.description").or_else(|| text("node.nick")),
+        rate_hz: rate_of(sink),
+    })
 }
 
 #[cfg(test)]

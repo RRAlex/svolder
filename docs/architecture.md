@@ -12,6 +12,49 @@ rough is in [known-issues.md](known-issues.md).
 
 Longer, per-subsystem design notes live in `docs/design/`, one file for each part of the system.
 
+## How it fits together
+
+```text
+      svolder CLI / TUI      web page        MCP clients     Home Assistant
+            │ unix socket       │ HTTP + events   │ MCP          │ MQTT
+            └──────────┬────────┴────────┬────────┴──────┬───────┘
+                       ▼                 ▼               ▼
+              ┌──────────────────── servers (thin) ─────────────────┐
+              │  IPC server · web server · MCP server · MQTT bridge │
+              └──────────────────────────┬──────────────────────────┘
+                                         ▼
+              ┌──────────── core: one model, one set of ops ────────┐
+              │  the view (state every surface draws) + event feed  │
+              │  device ops → each device's writer; computer ops →  │
+              │  the EQ controller (EQ, crossfeed, preamp)          │
+              │  saved truth: config.toml + host-eq.toml (EQ state) │
+              └───────────────┬────────────────────────┬────────────┘
+                              ▼                        ▼
+                 devices (the fleet)          the computer ("host")
+                 BLE via BlueZ / fake         PipeWire: sink + route look,
+                 one writer per device:       capture → spectrum/tempo,
+                 volume rule, glides,         EQ filter chain (systemd unit,
+                 readings back                detached process or child),
+                                              live sends, crossfeed stage,
+                                              preamp rule
+```
+
+Three ideas hold it together.
+
+- **One writer per thing.** A device has one writer: every write to it, from any front end, goes
+  through its queue, which orders them, replaces a slider's superseded value and applies the volume
+  rule. The computer's sound has one EQ controller (`EqControl`) that owns the filter chain, the
+  crossfeed stage and the preamp rule. Over a running daemon a front end does not write behind it:
+  `svolder` asks the daemon first (`auto`), and with none running the TUI or the CLI runs the same
+  controller or a direct session itself (the fake transport stands in for BlueZ in demos and tests).
+- **One view, many surfaces.** The core builds the state and the event feed once, and the CLI, the
+  TUI, the web page, MCP and MQTT draw or send what it says; the words and ranges they show (a
+  crossfeed model's range, a preset's name) come from it and no surface works them out again.
+- **The saved files are the truth.** The devices, presets and servers are saved in `config.toml`,
+  written under its lock one writer at a time; the computer EQ and crossfeed are saved in
+  `host-eq.toml` in the state directory, written whole. Live state is rebuilt from them when the
+  daemon starts, and anything that could surprise starts off, as crossfeed does after every start.
+
 ## Design docs
 
 Each says how a part works now and the principles behind it.
@@ -19,15 +62,17 @@ Each says how a part works now and the principles behind it.
 - [The daemon](design/daemon.md): sessions, the scanner, the writer and the volume rule, reload.
 - [IPC and configuration](design/ipc-and-configuration.md): the socket protocol, the
   configuration file and its writers, the launcher chain, tokens.
-- [Profiles](design/profiles.md): the profile format, how profiles load and resolve, the safety
-  data they carry.
+- [Profiles](design/profiles.md): the format, how profiles load and resolve, their safety data.
 - [The tone control, presets and AutoEq import](design/tone-control-and-presets.md): the
   parametric EQ model, recall, which preset is on, fitting a headphone correction.
 - [MQTT and Home Assistant](design/mqtt-and-home-assistant.md): the bridge, discovery, commands.
 - [The MCP server](design/mcp-server.md): the HTTP server, the tools, the volume rules for a model.
 - [Host audio](design/host-audio.md): the computer's sink, players and capture, and the computer EQ.
 - [The daemon's capture](design/host-capture.md): holds, shared capture, frames to web and socket.
-- [Computer controls](design/host-control.md) and [preamp](design/host-control-preamp.md).
+- [Computer controls](design/host-control.md), [preamp](design/host-control-preamp.md),
+  [crossfeed](design/crossfeed.md).
+- [The life of one volume change](design/volume-change.md): a key press on the TUI to the reading
+  that comes back, step by step.
 - [The terminal UI](design/tui.md): the app and its loop, screens and boxes, the key table and the
   three key rules, roles and palettes, the intro, the squirrel and the animation layer.
 - [The web UI](design/web-ui.md): the request's way in, sign-in and tokens, view models, the stream,
@@ -131,60 +176,9 @@ Two splits are worth knowing because they repeat:
 
 ## The life of one volume change
 
-A press of `+` on the TUI's device screen, from the key to the reading that comes back. Every name
-below is a real function; `x/tests.rs` beside a file holds its tests.
-
-1. **Key to intent.** `take_key` (`bins/svolder/src/tui/run/input.rs`) hands the event to
-   `App::key` (`tui/app/dispatch.rs`), which turns a key press into a list of `Intent`s, and
-   `App::on_screen`, which tries the keys every screen shares and then `App::device_key`
-   (`tui/app/controls.rs`). `+` and `=` call `nudge("volume", 1)`, which finds the volume control
-   in the profile and `step_level` builds `Intent::Set { key: "volume", value: "up", .. }`.
-   Nothing here touches a radio or the clock; the `App` is plain state.
-2. **Intent to backend.** `send` and `dispatch` (`tui/run/events.rs`) pass each intent through
-   `App::paces` (`tui/app/glide.rs`), which drops a raise of the volume above three quarters of its
-   range unless the glide's credit, a tenth of the range a second, pays for it. What passes goes to
-   `execute`, which calls `Backend::set` (`bins/svolder/src/backend.rs`) without waiting for the
-   echo. With a daemon, `Backend::set` builds a `Request::Set` and `RemoteBackend::write`
-   (`backend/remote.rs`) sends it with `Client::request`
-   (`crates/svolder-ipc/src/socket/client.rs`). With no daemon, `DirectBackend::set`
-   (`backend/direct.rs`) builds the message itself (as in step 5) and goes straight to step 6.
-3. **The daemon takes the request.** The socket server (`serve` in
-   `crates/svolder-ipc/src/socket/server.rs`) calls `Daemon::handle_from`
-   (`bins/svolderd/src/handler.rs`), which maps `Request::Set` to a `Command::Set` and calls
-   `Daemon::write`. That resolves the device and submits the command to its writer with
-   `Writer::submit`.
-4. **The writer and the volume rule.** The writer (`bins/svolderd/src/writer.rs`) is the one
-   door every front end's write goes through: the socket, the web page, MQTT and MCP, each as its
-   own `Origin`. It queues writes per function, drops what a newer slider value replaces, and
-   works out a relative step (`up`, `down`) from where the volume is heading, not from a stale
-   reading (`Task::resolved`, `roles::next_step` in `svolder-profiles`). A write to an absolute
-   level from the web, MQTT or MCP takes `Writer::glide`, whose task asks `safety::judge`
-   (`crates/svolder-profiles/src/safety.rs`) whether the level may land at once or must climb.
-5. **Command to frame.** The device's actor runs the command: `Actor::run_command`
-   (`bins/svolderd/src/device/commands.rs`) calls `build_set`, then `build_relative` for `up`,
-   which uses `roles::relative_step`, or `codec::intent` for a literal value. Both produce a
-   `Message` for the function the profile names. `Actor::send` refuses the firmware-update family
-   and the passphrase function before anything else.
-6. **Message to bytes to air.** `Session::set` (`crates/svolder-ble/src/session.rs`; `set_no_wait`
-   when nobody waits) calls `encode_command` (`crates/svolder-proto/src/frame.rs`), then the
-   session's private `write`, which spaces writes and calls `Link::write`. For a real adapter that
-   is `BluezLink` in `crates/svolder-ble/src/bluez/transport.rs`; for the fake, an in-process
-   `FakeDevice` that answers real frames.
-7. **The reading comes back.** The device answers with a notification. `Session::recv` reads it,
-   its private `fold` runs `decode_notification` (`svolder-proto`) and
-   `DeviceState::apply_notification` (`crates/svolder-ble/src/state.rs`) records it. The actor's
-   loop (`bins/svolderd/src/device/link.rs`) wakes on it, and `Actor::publish_status`
-   (`device/publish.rs`) sends an `Event::Status` to every subscriber and records it in the ring
-   the web strip and `history` read.
-8. **Back to the screen.** `Client::subscribe` feeds `RemoteBackend::next_status`
-   (`backend/remote.rs`), which hands the TUI an `Update`. The loop calls `heard`
-   (`tui/run/events.rs`), which calls `App::apply` (`tui/app/readings.rs`); the next pass of the
-   loop calls `render::draw` (`tui/render.rs`) and the new value is on the screen. Every other
-   front end, on the same stream, learns of the change in the same way: the web page over its
-   server-sent stream, MQTT as a state message.
-
-A press does not wait for step 7: the screen shows the old value until the device confirms, so
-what is drawn is always what the device said, never what a key hoped for.
+A press of `+` on the TUI's device screen travels from the key to the reading that comes back in
+eight steps, each a real function, from the TUI's key table through the writer to the device and
+back as a view and an event: [the life of one volume change](design/volume-change.md).
 
 ## Where the volume safety rule lives, and why
 

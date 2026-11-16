@@ -233,3 +233,103 @@ fn a_terminal_that_cannot_be_claimed_is_a_usage_failure() {
     assert_eq!(failure.what, "the terminal: no tty");
     assert_eq!(failure.code, Kind::Usage.code());
 }
+
+/// A writer that counts the writes it takes.
+#[derive(Default, Clone)]
+struct Counted(Rc<RefCell<usize>>);
+
+impl std::io::Write for Counted {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        *self.0.borrow_mut() += 1;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A whole frame of a large terminal reaches the terminal in one write, not one per escape
+/// sequence and cell.
+#[test]
+fn a_frame_goes_out_in_one_write() {
+    let writes = Counted::default();
+    let backend = ratatui::backend::CrosstermBackend::new(frame_writer(writes.clone()));
+    let mut terminal = ratatui::Terminal::with_options(
+        backend,
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 200, 60)),
+        },
+    )
+    .expect("a terminal");
+    *writes.0.borrow_mut() = 0;
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            for y in 0..area.height {
+                let colour = ratatui::style::Color::Rgb(0, 0, y as u8);
+                let line = ratatui::text::Span::styled(
+                    "spectrum ".repeat(22),
+                    ratatui::style::Style::new().fg(colour),
+                );
+                frame.render_widget(
+                    line,
+                    ratatui::layout::Rect {
+                        y,
+                        height: 1,
+                        ..area
+                    },
+                );
+            }
+        })
+        .expect("the frame draws");
+    assert_eq!(*writes.0.borrow(), 1);
+}
+
+/// A writer that logs what reaches it, each write as text, into a log the case shares.
+struct Logged(Rc<RefCell<Vec<String>>>);
+
+impl std::io::Write for Logged {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .borrow_mut()
+            .push(String::from_utf8_lossy(buf).into_owned());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// What a frame left unsent and the cursor reach the alternate screen before it is left: none of
+/// it lands on the screen the shell gets back.
+#[test]
+fn a_frames_leftovers_go_out_before_the_screen_is_left() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let backend = ratatui::backend::CrosstermBackend::new(frame_writer(Logged(log.clone())));
+    let mut terminal = ratatui::Terminal::with_options(
+        backend,
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 20, 2)),
+        },
+    )
+    .expect("a terminal");
+    std::io::Write::write_all(terminal.backend_mut(), b"left over").expect("buffered");
+    log.borrow_mut().clear();
+    leave_screen(&mut terminal, || log.borrow_mut().push("left".into()));
+    let log = log.borrow();
+    let left = log
+        .iter()
+        .position(|w| w == "left")
+        .expect("the screen was left");
+    let sent = log
+        .iter()
+        .position(|w| w.contains("left over"))
+        .expect("the leftover went out");
+    assert!(sent < left, "{log:?}");
+    assert!(
+        log[..left].iter().any(|w| w.contains("\x1b[?25h")),
+        "the cursor showed only after the screen was left: {log:?}"
+    );
+}

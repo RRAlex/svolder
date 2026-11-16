@@ -193,7 +193,7 @@ impl Held {
     }
 
     /// Hold `pid` with no check: a pid that is gone or is no process's gives nothing.
-    fn of(pid: u32) -> Option<Held> {
+    pub(super) fn of(pid: u32) -> Option<Held> {
         // SAFETY: `pidfd_open` takes a pid and flags and touches no memory of this process.
         let fd =
             unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0 as libc::c_uint) };
@@ -213,6 +213,11 @@ impl Held {
             Some(libc::ESRCH | libc::EINVAL) => None,
             _ => Some(Held { pid, fd: None }),
         }
+    }
+
+    /// The pidfd, `None` when the hold is on the bare pid.
+    pub(super) fn into_fd(self) -> Option<OwnedFd> {
+        self.fd
     }
 
     /// Whether signals go through a pidfd.
@@ -250,6 +255,9 @@ impl Held {
     }
 }
 
+/// The name of the thread that reaps the chain, as `top -H` shows it (15 bytes at most).
+const REAPER_NAME: &str = "svolder-eq-reap";
+
 /// Start `program -c conf` in a session of its own, in `/`, with no standard streams, and keep
 /// reaping it on a thread so it never lingers as a zombie while this process lives. Returns
 /// the child, held.
@@ -276,8 +284,12 @@ pub(super) fn spawn_detached(program: &Path, conf: &Path) -> std::io::Result<Hel
         pid: child.id(),
         fd: None,
     });
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
+    // A thread that cannot start leaves the child a zombie until this process ends, which the
+    // held pid already tolerates.
+    let _ = std::thread::Builder::new()
+        .name(REAPER_NAME.into())
+        .spawn(move || {
+            let _ = child.wait();
+        });
     Ok(held)
 }

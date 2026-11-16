@@ -13,10 +13,11 @@ use crate::web::test_support::{
 };
 
 /// Every route of the computer, with a body each would accept.
-const ROUTES: [(&str, &str); 7] = [
+const ROUTES: [(&str, &str); 8] = [
     ("/api/v1/host/volume", r#"{"pct":40}"#),
     ("/api/v1/host/mute", r#"{"muted":true}"#),
     ("/api/v1/host/eq", r#"{"on":true}"#),
+    ("/api/v1/host/crossfeed", r#"{"on":true}"#),
     ("/api/v1/host/eq/preset", r#"{"name":"Warm"}"#),
     (
         "/api/v1/host/eq/points",
@@ -68,6 +69,10 @@ async fn every_computer_route_needs_a_signed_writer() {
     }
     let eq = view_of(&daemon).await.eq.expect("the computer EQ");
     assert!(!eq.on, "nothing was switched on");
+    assert!(
+        !eq.crossfeed.expect("the crossfeed").on,
+        "nor the crossfeed"
+    );
     assert_eq!(eq.points.len(), 1, "nor a point added");
     daemon.stop().await;
 }
@@ -358,5 +363,75 @@ async fn a_neutral_curve_never_asks() {
     .await;
     assert_eq!(reply.status, Code::OK, "{}", reply.body);
     assert!(json(&reply.body).get("ask").is_none());
+    daemon.stop().await;
+}
+
+/// The crossfeed route reaches the controller: on, a model, values held to the model's range, a
+/// drag; a body that names nothing is a 409 in the daemon's words and an unknown field is a 400.
+#[tokio::test]
+async fn the_crossfeed_route_changes_the_computers_crossfeed() {
+    let daemon = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web_over(&daemon);
+    let crossfeed = |daemon: &FakeDaemon| {
+        let daemon_fleet = Arc::clone(&daemon.fleet);
+        async move {
+            match daemon_fleet.request(Request::Host).await {
+                Response::Host(view) => view.eq.expect("eq").crossfeed.expect("crossfeed"),
+                other => panic!("no host view: {other:?}"),
+            }
+        }
+    };
+    let reply = call(&web, post("/api/v1/host/crossfeed", r#"{"on":true}"#)).await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    assert_eq!(json(&reply.body), serde_json::json!({ "ok": true }));
+    assert!(crossfeed(&daemon).await.on);
+    assert!(
+        !view_of(&daemon).await.eq.unwrap().on,
+        "the EQ's switch is its own"
+    );
+
+    let reply = call(
+        &web,
+        post(
+            "/api/v1/host/crossfeed",
+            r#"{"model":"meier","amount_pct":99,"crossover_hz":1000}"#,
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    let now = crossfeed(&daemon).await;
+    assert_eq!(now.model, "meier");
+    assert_eq!(now.amount_pct, 50.0, "held to the model's range");
+    assert_eq!(now.crossover_hz, 1000.0);
+    assert_eq!(now.preset, None, "a value edit is Custom");
+
+    let reply = call(
+        &web,
+        post(
+            "/api/v1/host/crossfeed",
+            r#"{"amount_pct":20,"done":false}"#,
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+
+    let reply = call(&web, post("/api/v1/host/crossfeed", "{}")).await;
+    assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    assert!(
+        json(&reply.body)["error"]
+            .as_str()
+            .unwrap()
+            .contains("names nothing")
+    );
+    let reply = call(&web, post("/api/v1/host/crossfeed", r#"{"volume":1}"#)).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
+    let reply = call(&web, post("/api/v1/host/crossfeed", r#"{"on":"yes"}"#)).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
+    let reply = call(
+        &web,
+        post("/api/v1/host/crossfeed", r#"{"model":"nonsense"}"#),
+    )
+    .await;
+    assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
     daemon.stop().await;
 }

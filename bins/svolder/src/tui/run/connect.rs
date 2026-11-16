@@ -182,7 +182,7 @@ pub(super) async fn changed<O: Open>(
     if let Some(switch) = switch_of(change) {
         let socket = super::devices::daemon_socket(opener, watching);
         // The daemon's version and then its reload can take seconds: shown as a wait.
-        let mut wait = super::devices::Wait::new(switch.waiting());
+        let mut wait = super::devices::Wait::after(switch.waiting(), super::devices::SAVING_GRACE);
         let sent = wait
             .on(
                 switch_through(&socket, switch.clone()),

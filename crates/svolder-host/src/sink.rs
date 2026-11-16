@@ -5,18 +5,27 @@
 //! muted and what it is called, read from and written to `@DEFAULT_AUDIO_SINK@`.
 //!
 //! The default sink is the one read and changed, whichever device it is; its name comes along
-//! so a caller can say which one that is. Every call runs `wpctl` once and gives it
-//! [`TIMEOUT`]: a missing tool, one that fails or one that does not answer in time reads as no
-//! sink and writes nothing, never as an error.
+//! so a caller can say which one that is. Every call that reaches `wpctl` runs it once and gives
+//! it [`TIMEOUT`]: a missing tool, one that fails or one that does not answer in time reads as
+//! no sink and writes nothing, never as an error.
 //!
-//! A read asks `get-volume` every time and `inspect` only when the sink may have changed: on
-//! the first read, after a read that failed, when the volume or the mute moved, and once the
-//! name it holds is [`INSPECT_EVERY`] old, which catches a new default sink that happens to
-//! read the same volume.
+//! A fresh read asks `get-volume` and `inspect` only when the sink may have changed: on the
+//! first read, after a read that failed, when the volume or the mute moved, and once the name it
+//! holds is [`INSPECT_EVERY`] old, which catches a new default sink that happens to read the
+//! same volume.
+//!
+//! The daemon reads the sink from two places on a 2 s beat. The sinks [`Wpctl::from_env`] makes
+//! for one program share their naming and a published reading: a plain one reads fresh and
+//! publishes what it read; one made [`held`](Wpctl::held) gives the published reading while it
+//! is younger than [`READ_HELD`] and runs `wpctl` only when there is none, so the second reader
+//! costs nothing while the first one is watching, and never makes the first one's reading
+//! older. Any `set-*` call through any [`Wpctl`] of the program drops the published reading, so
+//! a read after a write is fresh.
 
 use std::ffi::{OsStr, OsString};
+use std::future::Future;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -35,6 +44,11 @@ pub const TIMEOUT: Duration = Duration::from_secs(1);
 /// How long the name and the node `wpctl inspect` gave stand for the default sink while its
 /// volume and mute read the same: a new default sink is caught within this.
 pub const INSPECT_EVERY: Duration = Duration::from_secs(5);
+
+/// How long a published reading of the default sink stands for a [held](Wpctl::held) reader:
+/// a little over the 2 s beat of the reader that publishes it, so a held reader that comes just
+/// before the next publication is still served.
+pub const READ_HELD: Duration = Duration::from_millis(2500);
 
 /// What the default sink said when it was read.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,9 +92,99 @@ pub struct Wpctl {
     timeout: Duration,
     /// How long a naming stands while the volume and the mute read the same.
     inspect_every: Duration,
+    /// What every clone of this sink shares: the naming and the published reading.
+    shared: Arc<Shared>,
+    /// Whether a read gives the published reading while it is younger than this, instead of
+    /// reading fresh and publishing.
+    held: Option<Duration>,
+}
+
+/// What clones of a [`Wpctl`] (and every one [`Wpctl::shared_for`] makes for the same program)
+/// share, as they read the same sink.
+#[derive(Debug)]
+struct Shared {
     /// What `wpctl inspect` last named the sink, and what it read then: `None` before the first
-    /// read and after one that failed. Clones share it, as they read the same sink.
-    named: Arc<Mutex<Option<Named>>>,
+    /// read and after one that failed.
+    named: Mutex<Option<Named>>,
+    /// The reading a fresh reader last published.
+    held: Coalescer,
+}
+
+impl Shared {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            named: Mutex::default(),
+            held: Coalescer::default(),
+        })
+    }
+}
+
+/// The last reading a fresh reader published, which held readers take while it is young and
+/// which a write drops.
+#[derive(Debug, Default)]
+pub struct Coalescer {
+    /// The published reading and when, and how many writes there have been.
+    state: Mutex<Published>,
+}
+
+#[derive(Debug, Default)]
+struct Published {
+    reading: Option<(tokio::time::Instant, SinkState)>,
+    writes: u64,
+}
+
+impl Coalescer {
+    /// What `fresh` reads, published for held readers (unless a write came while it ran, or it
+    /// read nothing: a failed read drops what was published).
+    pub async fn publish(
+        &self,
+        fresh: impl Future<Output = Option<SinkState>>,
+    ) -> Option<SinkState> {
+        let writes = crate::locked(&self.state).writes;
+        let read = fresh.await;
+        let mut state = crate::locked(&self.state);
+        state.reading = match &read {
+            Some(read) if state.writes == writes => {
+                Some((tokio::time::Instant::now(), read.clone()))
+            }
+            _ => None,
+        };
+        read
+    }
+
+    /// The published reading when it is younger than `hold`, else what `fresh` reads, which is
+    /// given back and not published (a held reader never makes the reading look younger).
+    pub async fn held(
+        &self,
+        hold: Duration,
+        fresh: impl Future<Output = Option<SinkState>>,
+    ) -> Option<SinkState> {
+        let young = match &crate::locked(&self.state).reading {
+            Some((at, read)) if at.elapsed() < hold => Some(read.clone()),
+            _ => None,
+        };
+        match young {
+            Some(read) => Some(read),
+            None => fresh.await,
+        }
+    }
+
+    /// Note a write to the sink: the published reading is dropped, and so is the one a read under
+    /// way would publish.
+    pub fn wrote(&self) {
+        let mut state = crate::locked(&self.state);
+        state.writes += 1;
+        state.reading = None;
+    }
+}
+
+/// The state the sinks of each program share, for [`Wpctl::shared_for`] and for the writes that
+/// drop a published reading.
+type SharedFor = (OsString, Arc<Shared>);
+
+fn registry() -> std::sync::MutexGuard<'static, Vec<SharedFor>> {
+    static SHARED: OnceLock<Mutex<Vec<SharedFor>>> = OnceLock::new();
+    crate::locked(SHARED.get_or_init(Mutex::default))
 }
 
 /// The default sink as `wpctl inspect` last named it, and as `get-volume` read at that moment.
@@ -105,12 +209,14 @@ impl Wpctl {
             program: program.into(),
             timeout: TIMEOUT,
             inspect_every: INSPECT_EVERY,
-            named: Arc::default(),
+            shared: Shared::new(),
+            held: None,
         }
     }
 
     /// The sink through the `wpctl` [`WPCTL_ENV`] names, else `wpctl` on `PATH`; `None` when
-    /// [`host_unreached`](crate::host_unreached) says host audio is off for this process.
+    /// [`host_unreached`](crate::host_unreached) says host audio is off for this process. See
+    /// [`Wpctl::shared_for`].
     pub fn from_env() -> Option<Self> {
         if crate::host_unreached() {
             return None;
@@ -118,7 +224,39 @@ impl Wpctl {
         let program = std::env::var_os(WPCTL_ENV)
             .filter(|named| !named.is_empty())
             .unwrap_or_else(|| "wpctl".into());
-        Some(Self::new(program))
+        Some(Self::shared_for(program))
+    }
+
+    /// The sink through `program`, sharing its naming and its published reading with every
+    /// other sink made here for the same program (and with their clones).
+    pub fn shared_for(program: impl Into<OsString>) -> Self {
+        let program = program.into();
+        let mut all = registry();
+        let at = all.iter().position(|(named, _)| *named == program);
+        let shared = match at {
+            Some(at) => Arc::clone(&all[at].1),
+            None => {
+                let shared = Shared::new();
+                all.push((program.clone(), Arc::clone(&shared)));
+                shared
+            }
+        };
+        Self {
+            shared,
+            ..Self::new(program)
+        }
+    }
+
+    /// The same sink as a held reader: a read gives the reading another sink of the program
+    /// published within [`READ_HELD`], and reads fresh (publishing nothing) when there is none.
+    pub fn held(self) -> Self {
+        self.held_for(READ_HELD)
+    }
+
+    /// [`Wpctl::held`] with readings standing `hold` instead of [`READ_HELD`].
+    pub fn held_for(mut self, hold: Duration) -> Self {
+        self.held = Some(hold);
+        self
     }
 
     /// The same sink with each call given `timeout` instead of [`TIMEOUT`].
@@ -135,8 +273,16 @@ impl Wpctl {
 
     /// `wpctl`'s standard output when it ran, exited 0 and did so in time; the child is killed
     /// when it runs out of time.
+    /// A `set-*` call, done or not, drops the reading published for this program.
     pub async fn run(&self, args: &[&str]) -> Option<String> {
-        output_within(&self.program, args, self.timeout).await
+        let out = output_within(&self.program, args, self.timeout).await;
+        if args.first().is_some_and(|verb| verb.starts_with("set-")) {
+            self.shared.held.wrote();
+            if let Some((_, shared)) = registry().iter().find(|(named, _)| *named == self.program) {
+                shared.held.wrote();
+            }
+        }
+        out
     }
 }
 
@@ -228,23 +374,19 @@ pub fn sink_ids(status: &str) -> Vec<u32> {
     ids
 }
 
-#[async_trait]
-impl Sink for Wpctl {
-    /// Runs `wpctl get-volume` on the default sink, and `wpctl inspect` after it when the sink
-    /// may have changed (see the module's docs). The volume is what makes a sink: without it
-    /// there is none, and the next read names the sink afresh; an `inspect` that fails leaves
-    /// the sink unnamed and with nothing to capture, and is asked again on the next read.
-    async fn read(&self) -> Option<SinkState> {
+impl Wpctl {
+    /// One reading of the sink, asked of `wpctl` now (see [`Sink::read`] for what it asks).
+    async fn read_fresh(&self) -> Option<SinkState> {
         let read = self
             .run(&["get-volume", DEFAULT_SINK])
             .await
             .as_deref()
             .and_then(parse_volume);
         let Some((volume, muted)) = read else {
-            *crate::locked(&self.named) = None;
+            *crate::locked(&self.shared.named) = None;
             return None;
         };
-        let standing = crate::locked(&self.named).clone().filter(|named| {
+        let standing = crate::locked(&self.shared.named).clone().filter(|named| {
             named.volume == volume
                 && named.muted == muted
                 && named.at.elapsed() < self.inspect_every
@@ -254,7 +396,7 @@ impl Sink for Wpctl {
             None => {
                 let inspect = self.run(&["inspect", DEFAULT_SINK]).await;
                 let (name, target) = inspect.as_deref().map(parse_inspect).unwrap_or_default();
-                *crate::locked(&self.named) = inspect.is_some().then(|| Named {
+                *crate::locked(&self.shared.named) = inspect.is_some().then(|| Named {
                     volume,
                     muted,
                     name: name.clone(),
@@ -270,6 +412,20 @@ impl Sink for Wpctl {
             name,
             target,
         })
+    }
+}
+
+#[async_trait]
+impl Sink for Wpctl {
+    /// Runs `wpctl get-volume` on the default sink, and `wpctl inspect` after it when the sink
+    /// may have changed (see the module's docs). The volume is what makes a sink: without it
+    /// there is none, and the next read names the sink afresh; an `inspect` that fails leaves
+    /// the sink unnamed and with nothing to capture, and is asked again on the next read.
+    async fn read(&self) -> Option<SinkState> {
+        match self.held {
+            Some(hold) => self.shared.held.held(hold, self.read_fresh()).await,
+            None => self.shared.held.publish(self.read_fresh()).await,
+        }
     }
 
     async fn set_volume(&self, volume: f32) -> bool {

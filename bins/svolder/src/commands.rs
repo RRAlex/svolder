@@ -16,6 +16,7 @@
 //!   `devices`, `add` and `remove`.
 //! - [`doctor`]: `doctor`, the checks of the host, the daemon and each device, and their fixes.
 //! - [`hops`]: `hops list|add|link|edit|remove|move`, what the sound goes through after the DAC.
+//! - [`host_crossfeed`]: `host crossfeed`, the crossfeed on what the computer plays, through the daemon.
 //! - [`host_eq`]: `host eq`, an equalizer on what the computer plays.
 //! - [`identify`]: `identify`, a device asked to show itself.
 //! - [`interrupts`]: Ctrl-C, SIGTERM and SIGHUP counted, for a verb that must clean up before it
@@ -32,6 +33,7 @@ pub(crate) mod demo;
 pub(crate) mod device;
 pub(crate) mod doctor;
 pub(crate) mod hops;
+pub(crate) mod host_crossfeed;
 pub(crate) mod host_eq;
 pub(crate) mod identify;
 pub(crate) mod interrupts;

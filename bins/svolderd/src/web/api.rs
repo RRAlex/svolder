@@ -13,6 +13,7 @@ use axum::routing::get;
 use hyper::{HeaderMap, StatusCode};
 use svolder_ipc::host::HostView;
 use svolder_ipc::{Config, DeviceInfo, Request, Response as Answer};
+use svolder_profiles::tone::preset::Preset;
 
 use super::model::{self, HostModel};
 use super::router::{bare, devices, error, refusal};
@@ -138,13 +139,27 @@ pub(crate) fn load(web: &Web, name: &str) -> Result<Loaded, Response> {
 pub(crate) async fn load_off_thread(web: &Web, name: &str) -> Result<Loaded, Response> {
     let web = web.clone();
     let name = name.to_string();
-    match tokio::task::spawn_blocking(move || load(&web, &name)).await {
+    let loaded = match tokio::task::spawn_blocking(move || load(&web, &name)).await {
         Ok(loaded) => loaded,
-        Err(_) => Err(error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "the device could not be read",
-        )),
+        Err(_) => {
+            return Err(error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the device could not be read",
+            ));
+        }
+    }?;
+    // The page model reads which preset is on, which fits the imported ones: made here, off the
+    // runtime's threads, so that reading only finds them kept.
+    if let Some(eq) = loaded
+        .feed
+        .profile
+        .as_ref()
+        .and_then(|profile| profile.eq.as_ref())
+    {
+        let listed: Vec<Preset> = loaded.presets.iter().map(|(p, _)| p.clone()).collect();
+        crate::recall::warm(eq, &listed).await;
     }
+    Ok(loaded)
 }
 
 /// What `device_model` takes.

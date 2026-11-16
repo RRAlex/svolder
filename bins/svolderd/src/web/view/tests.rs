@@ -2091,3 +2091,251 @@ fn a_devices_key_follows_its_unit_and_hides_it() {
     assert!(!super::key(unit).to_lowercase().contains("aabbcc"));
     assert_eq!(super::key(unit).len(), 16);
 }
+
+/// Loading a device for the page makes the fit of an imported preset off the runtime's thread:
+/// the runtime keeps ticking while a slow fit runs, and the fit is kept when the page model
+/// reads which preset is on.
+#[tokio::test(flavor = "current_thread")]
+async fn loading_a_device_fits_an_imported_preset_off_the_runtime_thread() {
+    use crate::recall::fits::tests::{
+        consumer_reads_the_fit_warm_made, eq, imported, is_warm, ticks_during,
+    };
+    use crate::web::test_support::{fake_daemon, web_over};
+    use svolder_ipc::{Handler, PresetOp, Request, Response};
+    let fake = fake_daemon("gungnir2-v2", "dac").await;
+    let slow = imported("slow-fit-web-load", 1.5);
+    let saved = fake
+        .daemon
+        .handle(Request::PresetWrite {
+            op: PresetOp::Save {
+                preset: Box::new(slow.clone()),
+                force: false,
+            },
+        })
+        .await;
+    assert!(matches!(saved, Response::PresetWritten { .. }), "{saved:?}");
+    assert!(!is_warm(&eq(), &slow));
+    let web = web_over(&fake);
+    let ticks = ticks_during(crate::web::api::load_off_thread(&web, "dac")).await;
+    assert!(ticks >= 10, "the interval ticked {ticks} times in 300 ms");
+    assert!(is_warm(&eq(), &slow));
+    assert!(consumer_reads_the_fit_warm_made(&eq(), &slow));
+    fake.stop().await;
+}
+
+/// A recall through the fleet makes the fit of an imported preset off the runtime's thread
+/// before the device's writer plans it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_recall_fits_an_imported_preset_off_the_runtime_thread() {
+    use crate::recall::fits::tests::{
+        consumer_reads_the_fit_warm_made, eq, imported, is_warm, ticks_during,
+    };
+    use crate::web::test_support::{fake_daemon, web_over};
+    let fake = fake_daemon("gungnir2-v2", "dac").await;
+    let slow = imported("slow-fit-fleet-recall", 3.5);
+    let web = web_over(&fake);
+    let info = crate::web::api::load_live(&web, "dac")
+        .unwrap_or_else(|_| panic!("the device"))
+        .info;
+    assert!(!is_warm(&eq(), &slow));
+    let ticks = ticks_during(fake.fleet.recall(&info, &slow.name, vec![slow.clone()])).await;
+    assert!(ticks >= 10, "the interval ticked {ticks} times in 300 ms");
+    assert!(is_warm(&eq(), &slow));
+    assert!(consumer_reads_the_fit_warm_made(&eq(), &slow));
+    fake.stop().await;
+}
+
+/// A recall of a preset on the computer asks which connected devices play it, which fits an
+/// imported preset to each: made off the runtime's thread.
+#[tokio::test(flavor = "current_thread")]
+async fn a_computer_recall_fits_an_imported_preset_off_the_runtime_thread() {
+    use crate::recall::fits::tests::{
+        consumer_reads_the_fit_warm_made, eq, imported, is_warm, ticks_during,
+    };
+    use crate::web::test_support::fake_daemon_playing;
+    use svolder_ipc::{Handler, HostEqOp, PresetOp, Request};
+    let fake = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let slow = imported("slow-fit-computer", 4.5);
+    fake.daemon
+        .handle(Request::PresetWrite {
+            op: PresetOp::Save {
+                preset: Box::new(slow.clone()),
+                force: false,
+            },
+        })
+        .await;
+    assert!(!is_warm(&eq(), &slow));
+    let asked = Request::HostEq {
+        op: HostEqOp::Preset {
+            name: slow.name.clone(),
+            device: Some("dac".into()),
+            confirm: false,
+        },
+    };
+    let ticks = ticks_during(fake.daemon.handle(asked)).await;
+    assert!(ticks >= 10, "the interval ticked {ticks} times in 300 ms");
+    assert!(is_warm(&eq(), &slow));
+    assert!(consumer_reads_the_fit_warm_made(&eq(), &slow));
+    fake.stop().await;
+}
+
+/// A recall fits the preset it names and no other of the list it is given.
+#[tokio::test(flavor = "current_thread")]
+async fn a_recall_fits_only_the_preset_it_names() {
+    use crate::recall::fits::tests::{eq, imported, is_warm};
+    use crate::web::test_support::{fake_daemon, web_over};
+    let fake = fake_daemon("gungnir2-v2", "dac").await;
+    let (named, other) = (
+        imported("slow-fit-named", 5.5),
+        imported("slow-fit-other", 5.7),
+    );
+    let web = web_over(&fake);
+    let info = crate::web::api::load_live(&web, "dac")
+        .unwrap_or_else(|_| panic!("the device"))
+        .info;
+    let _ = fake
+        .fleet
+        .recall(&info, "slow-fit-named", vec![other.clone(), named.clone()])
+        .await;
+    assert!(is_warm(&eq(), &named));
+    assert!(!is_warm(&eq(), &other));
+    fake.stop().await;
+}
+
+/// A recall of the computer's preset fits the preset it names and no other.
+#[tokio::test(flavor = "current_thread")]
+async fn a_computer_recall_fits_only_the_preset_it_names() {
+    use crate::recall::fits::tests::{eq, imported, is_warm};
+    use crate::web::test_support::fake_daemon_playing;
+    use svolder_ipc::{Handler, HostEqOp, PresetOp, Request};
+    let fake = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let (named, other) = (
+        imported("slow-fit-c-named", 8.5),
+        imported("slow-fit-c-other", 8.7),
+    );
+    for preset in [&named, &other] {
+        fake.daemon
+            .handle(Request::PresetWrite {
+                op: PresetOp::Save {
+                    preset: Box::new(preset.clone()),
+                    force: false,
+                },
+            })
+            .await;
+    }
+    let asked = Request::HostEq {
+        op: HostEqOp::Preset {
+            name: named.name.clone(),
+            device: Some("dac".into()),
+            confirm: false,
+        },
+    };
+    fake.daemon.handle(asked).await;
+    assert!(is_warm(&eq(), &named));
+    assert!(!is_warm(&eq(), &other));
+    fake.stop().await;
+}
+
+/// A recall that waits for its fit does not overwrite a recall that reached the writer while it
+/// waited: the older request is dropped, and the device is left on the later pick.
+#[tokio::test(flavor = "current_thread")]
+async fn a_recall_waiting_for_its_fit_does_not_overwrite_a_later_one() {
+    use crate::recall::fits::tests::imported;
+    use crate::web::test_support::{fake_daemon, web_over};
+    use crate::writer::Origin;
+    let fake = fake_daemon("gungnir2-v2", "dac").await;
+    let slow = imported("slow-fit-overtaken", 9.5);
+    let web = web_over(&fake);
+    let info = crate::web::api::load_live(&web, "dac")
+        .unwrap_or_else(|_| panic!("the device"))
+        .info;
+    let fleet = std::sync::Arc::clone(&fake.fleet);
+    let older = {
+        let (info, slow) = (info.clone(), slow.clone());
+        tokio::spawn(async move { fleet.recall(&info, &slow.name, vec![slow.clone()]).await })
+    };
+    // The older recall has taken its turn and waits for its fit.
+    tokio::task::yield_now().await;
+    let device = fake.daemon.resolve(Some("dac")).expect("the device");
+    let eq = device
+        .feed
+        .borrow()
+        .profile
+        .clone()
+        .unwrap()
+        .eq
+        .clone()
+        .unwrap();
+    let flat = svolder_profiles::tone::preset::builtins(&eq)
+        .into_iter()
+        .next()
+        .expect("a built-in");
+    let later = device
+        .writer
+        .recall(Origin::Socket, flat.name.clone(), vec![flat.clone()]);
+    let answer = older.await.expect("the task");
+    let why = answer.err().expect("the older recall is dropped");
+    assert!(why.contains("newer write"), "{why}");
+    drop(later);
+    assert_eq!(
+        device.writer.recalled().borrow().as_deref(),
+        Some(flat.name.as_str())
+    );
+    fake.stop().await;
+}
+
+/// Two recalls that both wait for a cold fit are ordered by the order of the requests, not by
+/// which fit ends first: the later request is the one the device ends on, whichever way round
+/// the fits end.
+#[tokio::test(flavor = "current_thread")]
+async fn two_recalls_waiting_for_fits_end_on_the_later_request_whichever_fit_ends_first() {
+    use crate::recall::fits::tests::imported;
+    use crate::web::test_support::{fake_daemon, web_over};
+    // (older's name, newer's name, whether the older is dropped): the older's fit ends first,
+    // then last.
+    // Each round has its own corrections, so every fit is cold.
+    for (round, (older, newer, dropped)) in [
+        ("fit-short-first", "slow-fit-second", false),
+        ("slow-fit-first", "fit-short-second", true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let gain = 10.0 + round as f64;
+        let fake = fake_daemon("gungnir2-v2", "dac").await;
+        let web = web_over(&fake);
+        let info = crate::web::api::load_live(&web, "dac")
+            .unwrap_or_else(|_| panic!("the device"))
+            .info;
+        let (a, b) = (imported(older, gain + 0.5), imported(newer, gain + 0.9));
+        let first = {
+            let (fleet, info, a) = (std::sync::Arc::clone(&fake.fleet), info.clone(), a.clone());
+            tokio::spawn(async move { fleet.recall(&info, &a.name, vec![a.clone()]).await })
+        };
+        // The older request has its ticket before the newer one asks.
+        tokio::task::yield_now().await;
+        let second = {
+            let (fleet, info, b) = (std::sync::Arc::clone(&fake.fleet), info.clone(), b.clone());
+            tokio::spawn(async move { fleet.recall(&info, &b.name, vec![b.clone()]).await })
+        };
+        let (first, second) = (first.await.expect("task"), second.await.expect("task"));
+        assert!(
+            second.is_ok(),
+            "{older}/{newer}: the newer was dropped: {:?}",
+            second.err()
+        );
+        assert_eq!(
+            first.is_err(),
+            dropped,
+            "{older}/{newer}: {:?}",
+            first.err()
+        );
+        let device = fake.daemon.resolve(Some("dac")).expect("the device");
+        assert_eq!(
+            device.writer.recalled().borrow().as_deref(),
+            Some(newer),
+            "{older}/{newer}"
+        );
+        fake.stop().await;
+    }
+}

@@ -22,7 +22,7 @@ use ratatui::widgets::Paragraph;
 use svolder_proto::FunctionId;
 
 use crate::tui::app::divider::Split;
-use crate::tui::app::{App, Holding, Pane, Screen};
+use crate::tui::app::{App, Holding, Pane, Screen, Xf};
 use crate::tui::keys::Scene;
 use crate::tui::layout_tier::{self, Tier};
 use crate::tui::mouse::{Hit, HitMap};
@@ -38,7 +38,7 @@ pub(crate) mod split;
 mod status;
 mod tone_pane;
 
-pub(crate) use art::{art_box, art_reserved, art_slot};
+pub(crate) use art::{art_box, art_reserved, art_slot, words_beside_art};
 pub(crate) use header::{Rule, header_height, logo_of};
 pub(super) use header::{
     draw_header, header_built, header_text, host_eq_words, mark_rect, marked, mouse_span,
@@ -56,7 +56,9 @@ use status::{
     device_drawn, faults_fit, level_from_drawn, link_drawn, now_playing_drawn, passphrase_drawn,
     status_lines,
 };
-use tone_pane::{LOUDNESS_BAR_AT, TonePane, tone_lines};
+#[cfg(test)]
+use tone_pane::tone_lines;
+use tone_pane::{LOUDNESS_BAR_AT, TonePane, tone_lines_in};
 
 /// Lines the Status pane takes: two of its own inside a frame. The tall tier's blank top row
 /// comes on top of these, added where the pane is laid out.
@@ -200,8 +202,9 @@ pub fn draw(
     );
     let tone = match (app.profile.eq.as_ref(), tone_area) {
         (Some(eq), Some(area)) => {
-            let max_width = usize::from(tier.block().inner(area).width);
-            Some(tone_lines(app, eq, theme, max_width))
+            let inner = tier.block().inner(area);
+            let size = (usize::from(inner.width), usize::from(inner.height));
+            Some(tone_lines_in(app, eq, theme, size))
         }
         _ => None,
     };
@@ -348,7 +351,25 @@ fn draw_tone(
     if app.on_computer() {
         rows.push((eq.mode_id(), mode_row));
         for (point, top) in tone.bands.iter().enumerate() {
-            hits.push(pane_row(inner, *top), Hit::Point(point));
+            hits.push(pane_row(inner, *top), Hit::Point(tone.bands_from + point));
+        }
+        if let Some(xf) = &tone.crossfeed {
+            let row = pane_row(inner, xf.line);
+            hits.push(row, Hit::Crossfeed(Xf::Preset));
+            let arrow = |at: usize| Rect {
+                x: inner.x + u16::try_from(at).unwrap_or(0),
+                y: row.y,
+                width: 1,
+                height: 1,
+            };
+            hits.push(
+                arrow(xf.arrows.0).intersection(row),
+                Hit::CrossfeedStep(Xf::Preset, -1),
+            );
+            hits.push(
+                arrow(xf.arrows.1).intersection(row),
+                Hit::CrossfeedStep(Xf::Preset, 1),
+            );
         }
         return rows;
     }
@@ -503,18 +524,40 @@ fn draw_holding(
 /// The tiers `area` falls in, and the three bands this screen is laid out in over it: the
 /// header, the panes between, and the Status frame — a row under the panes in the tall tier,
 /// and a line taller for each of the `Link`, `Level from`, `Now playing` and `Passphrase` rows
-/// it draws — down to the terminal's last row.
+/// it draws, and the rows [`art::growth`] gives it for a larger cover — down to the terminal's
+/// last row.
 fn rows_of(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
+    if let Some(laid) = app.drawn.device_rows(area) {
+        // A kept layout is only ever the one the app would give now.
+        #[cfg(test)]
+        assert_eq!(
+            laid,
+            crate::tui::test_support::work::uncounted(|| lay_out(area, app)),
+            "the layout kept for the frame is not the app's"
+        );
+        return laid;
+    }
+    #[cfg(test)]
+    crate::tui::test_support::work::tick("device_layout");
+    let laid = lay_out(area, app);
+    app.drawn.keep_device_rows(area, laid);
+    laid
+}
+
+/// [`rows_of`] worked out afresh.
+fn lay_out(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
     let (tier, [header, body]) = layout_tier::split(area);
     let extra_lines = u16::from(device_drawn(app))
         + u16::from(link_drawn(app, tier))
         + u16::from(level_from_drawn(app))
         + u16::from(now_playing_drawn(app))
         + u16::from(passphrase_drawn(app));
+    let base = STATUS_HEIGHT + extra_lines + tier.top();
+    let grown = art::growth(area, body, tier, base, tier.row_gap(), app);
     let [panes, _, status] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(tier.row_gap()),
-        Constraint::Length(STATUS_HEIGHT + extra_lines + tier.top()),
+        Constraint::Length(base + grown),
     ])
     .areas(body);
     (tier, [header, panes, status])
@@ -561,6 +604,7 @@ pub(crate) fn frames_of(area: Rect, app: &App) -> Vec<(FrameId, Rect)> {
 }
 
 /// The pane the squirrel's home is on `area`, and where the pane's own content lies in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomePane {
     /// The pane's frame.
     pub rect: Rect,
@@ -574,6 +618,24 @@ pub(crate) struct HomePane {
 /// The pane the squirrel lives on: the Tone pane, or the Controls pane on a device with no tone
 /// control. A screen with no device open has none.
 pub(crate) fn home_of(area: Rect, app: &App, theme: &Theme) -> Option<HomePane> {
+    let monochrome = theme.monochrome();
+    if let Some(kept) = app.drawn.home(area, monochrome) {
+        // A kept home is only ever the one the app would give now.
+        #[cfg(test)]
+        assert_eq!(
+            kept,
+            crate::tui::test_support::work::uncounted(|| find_home(area, app, theme)),
+            "the squirrel's home kept for the frame is not the app's"
+        );
+        return kept;
+    }
+    let home = find_home(area, app, theme);
+    app.drawn.keep_home(area, monochrome, home.clone());
+    home
+}
+
+/// [`home_of`] worked out afresh.
+fn find_home(area: Rect, app: &App, theme: &Theme) -> Option<HomePane> {
     if app.session.holding.is_some() {
         return None;
     }
@@ -581,8 +643,9 @@ pub(crate) fn home_of(area: Rect, app: &App, theme: &Theme) -> Option<HomePane> 
     let (controls, tone) = panes_of(panes, app.profile.eq.is_some(), tier, app.tui.device_split);
     let (rect, lines) = match (app.profile.eq.as_ref(), tone) {
         (Some(eq), Some(tone)) => {
-            let max_width = usize::from(tier.block().inner(tone).width);
-            (tone, tone_lines(app, eq, theme, max_width).lines)
+            let inner = tier.block().inner(tone);
+            let size = (usize::from(inner.width), usize::from(inner.height));
+            (tone, tone_lines_in(app, eq, theme, size).lines)
         }
         _ => (
             controls,

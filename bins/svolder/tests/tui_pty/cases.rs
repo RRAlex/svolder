@@ -540,17 +540,16 @@ fn now_playing_is_drawn_on_the_fake_devices_screen() {
 const PLACEHOLDER: char = '\u{10EEEE}';
 
 /// How many cells of the art `screen` has: the kitty placeholders, or the half-block cells in
-/// the rows the Now playing row ends, at the right of the Status pane.
+/// the rows of the Status pane (which the art fills at its right, however tall the pane is).
 fn art_cells(screen: &vt100::Screen) -> usize {
     let text = screen.contents();
     let placeholders = text.chars().filter(|c| *c == PLACEHOLDER).count();
-    let Some(row) = text.lines().position(|line| line.contains("Now playing")) else {
+    let Some(top) = text.lines().position(|line| line.contains("┌ Status")) else {
         return placeholders;
     };
     let halves: usize = text
         .lines()
-        .skip(row.saturating_sub(5))
-        .take(6)
+        .skip(top)
         .map(|line| line.chars().filter(|c| matches!(c, '▀' | '▄')).count())
         .sum();
     placeholders + halves
@@ -1782,4 +1781,105 @@ fn a_quit_during_a_slow_connect_write_ends_the_run_and_loses_no_write() {
     holder.wait().expect("the holder ends");
     let text = std::fs::read_to_string(&file).expect("the file is there");
     assert!(text.contains("svolder"), "the write was lost:\n{text}");
+}
+
+/// The rows of the Status pane that carry picture cells (kitty placeholders or half-blocks) on
+/// the screen as text, and the pane's own height from its top border to the bottom one.
+fn status_art_rows(text: &str) -> (usize, usize) {
+    let lines: Vec<&str> = text.lines().collect();
+    // A screen caught between two frames has no pane yet: no pane, no art.
+    let Some(top) = lines.iter().position(|line| line.contains("┌ Status")) else {
+        return (0, 0);
+    };
+    let pane = &lines[top..];
+    let art = pane
+        .iter()
+        .filter(|line| {
+            line.chars()
+                .filter(|c| *c == PLACEHOLDER || matches!(c, '▀' | '▄'))
+                .count()
+                >= 4
+        })
+        .count();
+    let bottom = pane.iter().position(|line| line.starts_with('└'));
+    (art, bottom.map_or(0, |bottom| bottom + 1))
+}
+
+/// From 100 by 45 the Status pane grows upward and its cover with it, the kitty picture and the
+/// half-block one alike; one row or column short of that the pane and the cover are as they
+/// were.
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn the_cover_grows_with_the_status_pane_from_100_by_45() {
+    for responder in [Responder::None, Responder::Kitty] {
+        let drawn = |cols: u16, rows: u16| {
+            let tui = Tui::start(cols, rows, responder);
+            tui.wait_for_text("Now playing: Test Pressing");
+            wait_art(&tui, responder);
+            // The kitty picture's placeholder rows and the half-blocks arrive with the frame
+            // that shows them, so a count is taken once the cell count has settled.
+            settled_art_cells(&tui);
+            assert_clean_device_screen(&tui);
+            let counts = status_art_rows(&tui.screen_text());
+            tui.quit();
+            counts
+        };
+        let (small_art, small_pane) = drawn(100, 44);
+        let (grown_art, grown_pane) = drawn(100, 45);
+        assert!(
+            grown_pane > small_pane + 4,
+            "{responder:?}: {small_pane} {grown_pane}"
+        );
+        assert!(small_art <= small_pane - 2, "{responder:?}: {small_art}");
+        assert!(
+            grown_art > small_art + 4,
+            "{responder:?}: {small_art} {grown_art}"
+        );
+        assert!(grown_art <= grown_pane - 2, "{responder:?}: {grown_art}");
+    }
+}
+
+/// A resize across the 100 by 45 line, both ways, grows the Status pane and its cover and then
+/// takes them back, leaving no picture above the shrunk pane.
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn a_resize_across_100_by_45_grows_and_shrinks_the_cover() {
+    for responder in [Responder::Kitty, Responder::None] {
+        let tui = Tui::start(100, 44, responder);
+        tui.wait_for_text("Now playing: Test Pressing");
+        wait_art(&tui, responder);
+        let (small_art, small_pane) = status_art_rows(&tui.screen_text());
+        tui.resize(100, 45);
+        tui.wait_for("the cover in the grown pane", WAIT, |screen| {
+            let (art, pane) = status_art_rows(&screen.contents());
+            pane > small_pane + 4 && art > small_art + 4
+        });
+        assert_clean_device_screen(&tui);
+        tui.resize(100, 44);
+        tui.wait_for("the small cover again", WAIT, |screen| {
+            status_art_rows(&screen.contents()) == (small_art, small_pane)
+        });
+        // Nothing of the grown picture stands between the Controls pane's top and the small pane
+        // (the wordmark above them is made of half-blocks too).
+        let text = tui.screen_text();
+        let lines: Vec<&str> = text.lines().collect();
+        let controls = lines
+            .iter()
+            .position(|line| line.contains("┌ Controls"))
+            .expect("the Controls pane");
+        let top = lines
+            .iter()
+            .position(|line| line.contains("┌ Status"))
+            .expect("the pane");
+        let above: usize = lines[controls..top]
+            .iter()
+            .map(|line| {
+                line.chars()
+                    .filter(|c| *c == PLACEHOLDER || matches!(c, '▀' | '▄'))
+                    .count()
+            })
+            .sum();
+        assert_eq!(above, 0, "{responder:?}:\n{text}");
+        tui.quit();
+    }
 }

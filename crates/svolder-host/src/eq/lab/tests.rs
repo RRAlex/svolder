@@ -62,6 +62,7 @@ fn a_seed_makes_the_same_sequence_every_time() {
 #[test]
 fn the_model_reverts_slots_on_a_rate_change_and_keeps_the_preamp() {
     let conf = Conf {
+        stage: Vec::new(),
         pre: 0.5,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
     };
@@ -89,6 +90,7 @@ fn a_set_param_to_a_stale_id_does_nothing() {
     let mut lab = Lab::new(48_000);
     let mut world = world(&lab.shared);
     world.conf = Some(Conf {
+        stage: Vec::new(),
         pre: 1.0,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
     });
@@ -155,6 +157,7 @@ fn the_rule_is_checked_on_what_plays() {
     {
         let mut world = world(&lab.shared);
         let mut conf = Conf {
+            stage: Vec::new(),
             pre: 1.0,
             slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
         };
@@ -350,6 +353,65 @@ fn a_new_chain_does_not_inherit_what_was_sent_to_the_old_one_after_a_pw_cli_deat
             },
             Event::Ticks(40),
             Event::Rate(48_000),
+        ],
+    );
+}
+
+/// A slot reverted to the config's value while a drag is under way, at the same node and rate:
+/// the next looks put the dragged point's values back on the chain.
+#[test]
+fn a_slot_revert_in_the_middle_of_a_drag_is_put_right() {
+    holds(
+        48_000,
+        &[
+            Event::Toggle(true),
+            Event::Ticks(60),
+            Event::Drag {
+                pick: 2,
+                kind: None,
+                f: None,
+                g: Some(6.0),
+                q: None,
+                steps: 4,
+                gap_ticks: 3,
+            },
+            Event::SlotRevert,
+            Event::Drag {
+                pick: 2,
+                kind: None,
+                f: None,
+                g: Some(-4.0),
+                q: None,
+                steps: 4,
+                gap_ticks: 3,
+            },
+            Event::Ticks(80),
+            Event::SlotRevert,
+            Event::Ticks(80),
+        ],
+    );
+}
+
+/// The daemon restarts in the middle of a drag: the chain it finds plays values the state file
+/// does not hold, and the saved state goes to it with the preamp never above unity.
+#[test]
+fn a_daemon_that_restarts_in_the_middle_of_a_drag_puts_the_saved_state_on_the_chain() {
+    holds(
+        48_000,
+        &[
+            Event::Toggle(true),
+            Event::Ticks(60),
+            Event::Drag {
+                pick: 2,
+                kind: None,
+                f: None,
+                g: Some(9.0),
+                q: None,
+                steps: 6,
+                gap_ticks: 1,
+            },
+            Event::DaemonRestart,
+            Event::Ticks(120),
         ],
     );
 }
@@ -589,6 +651,342 @@ fn a_write_that_fails_once_does_not_land_the_daemons_line_on_a_chain_it_did_not_
             Event::Rate(44_100),
         ],
     );
+}
+
+fn crossfeed(on: Option<bool>, model: Option<usize>, delay_ms: Option<f64>, done: bool) -> Event {
+    Event::Crossfeed {
+        on,
+        model,
+        amount_pct: None,
+        delay_ms,
+        done,
+    }
+}
+
+/// Seed 1515, shrunk: Meier with a delay is turned on at 88.2 kHz, the sink moves to 176.4 kHz,
+/// and the next line fails once; the full line that repairs it carries the stage as it was
+/// worked out at 88.2 kHz, whose delay plays as other whole samples at 176.4 kHz.
+#[test]
+fn a_repair_after_a_rate_change_plays_the_old_stage_under_its_preamp() {
+    holds(
+        192_000,
+        &[
+            Event::Rate(88_200),
+            Event::Crossfeed {
+                on: Some(false),
+                model: Some(2),
+                amount_pct: Some(42.998),
+                delay_ms: Some(0.7302),
+                done: false,
+            },
+            Event::Drag {
+                pick: 3,
+                kind: None,
+                f: None,
+                g: Some(-9.51),
+                q: None,
+                steps: 4,
+                gap_ticks: 1,
+            },
+            Event::Ticks(25),
+            crossfeed(Some(true), None, None, false),
+            Event::Rate(176_400),
+            Event::FailNextWrite,
+            Event::Drag {
+                pick: 0,
+                kind: None,
+                f: None,
+                g: Some(1.043),
+                q: None,
+                steps: 4,
+                gap_ticks: 2,
+            },
+        ],
+    );
+}
+
+/// Seed 5457, shrunk: the same through a `pw-cli` that dies after a line, at 96 then 192 kHz (the
+/// seed asked 1.75 ms, which Meier holds to its 1 ms).
+#[test]
+fn a_restarted_pw_cli_after_a_rate_change_plays_the_old_stage_under_its_preamp() {
+    holds(
+        96_000,
+        &[
+            crossfeed(Some(true), Some(2), Some(1.0), true),
+            Event::Ticks(39),
+            Event::CliDeath {
+                after_line: Some(true),
+            },
+            Event::Ticks(2),
+            Event::Rate(192_000),
+            Event::Drag {
+                pick: 13,
+                kind: None,
+                f: None,
+                g: Some(8.831),
+                q: None,
+                steps: 3,
+                gap_ticks: 2,
+            },
+        ],
+    );
+}
+
+/// No failure at all: a crossfeed drag between a rate change and the next look sends the stage
+/// worked out at the rate the controller last saw, at every moment of its second.
+#[test]
+fn a_crossfeed_drag_right_after_a_rate_change_plays_under_its_preamp() {
+    for ticks in 20..45 {
+        holds(
+            96_000,
+            &[
+                crossfeed(Some(true), Some(2), Some(1.0), true),
+                Event::Ticks(ticks),
+                Event::Rate(192_000),
+                crossfeed(None, None, Some(1.0), false),
+                Event::Ticks(3),
+            ],
+        );
+    }
+}
+
+/// No failure either: the repeat a second after the stage went out, sent between a rate change
+/// and the next look, carries the stage worked out at the old rate.
+#[test]
+fn the_stage_repeat_right_after_a_rate_change_plays_under_its_preamp() {
+    for (before, after) in [(17, 3), (18, 4), (19, 5)] {
+        holds(
+            96_000,
+            &[
+                Event::Ticks(before),
+                crossfeed(Some(true), Some(2), Some(1.0), true),
+                Event::Ticks(after),
+                Event::Rate(192_000),
+                Event::Ticks(40),
+            ],
+        );
+    }
+}
+
+/// A DAC that runs at 384 kHz: a crossfeed drag right after the sink moves there from 176.4 kHz
+/// sends Meier at 50 % and 0.5 ms as it was worked out for 176.4 kHz.
+#[test]
+fn a_crossfeed_drag_right_after_a_change_to_384_khz_plays_under_its_preamp() {
+    let on = Event::Crossfeed {
+        on: Some(true),
+        model: Some(2),
+        amount_pct: Some(50.0),
+        delay_ms: Some(0.5),
+        done: true,
+    };
+    holds(
+        176_400,
+        &[
+            on,
+            Event::Ticks(25),
+            Event::Rate(384_000),
+            crossfeed(None, None, Some(0.5), false),
+            Event::Ticks(3),
+        ],
+    );
+}
+
+/// The ports of `stage` on the left channel as a node holds them (f32), in the order
+/// [`stage_gain_db`] reads them.
+fn stage_ports(stage: &crate::eq::crossfeed::Stage) -> Vec<f64> {
+    let ports: HashMap<String, f64> = crossfeed_params(stage)
+        .into_iter()
+        .map(|(name, value)| (name, f64::from(value as f32)))
+        .collect();
+    let mut values = Vec::new();
+    for path in ["dir", "x", "s"] {
+        for port in PORTS {
+            values.push(ports[&format!("l{path}:{port}")]);
+        }
+    }
+    for port in ["sum:Gain 1", "sum:Gain 2", "del:Delay (s)", "mix:Gain 2"] {
+        values.push(ports[&format!("l{port}")]);
+    }
+    values
+}
+
+/// The evaluator does not share the controller's guess of which whole sample a delay on the
+/// boundary plays: Meier at 35 %, 2 kHz and 0.15 ms worked out at 96 kHz plays 15 samples at
+/// 192 kHz by PipeWire's f32 sum and 14 by an f64 one; the worse of the two counts.
+#[test]
+fn the_evaluator_takes_the_worse_sample_of_a_delay_on_the_boundary() {
+    use crate::eq::crossfeed::{CrossfeedChange, CrossfeedSettings, Stage};
+    let settings = CrossfeedSettings::for_model(CrossfeedModel::Meier)
+        .change(
+            &CrossfeedChange {
+                amount_pct: Some(35.0),
+                crossover_hz: Some(2000.0),
+                delay_ms: Some(0.15),
+                ..Default::default()
+            },
+            96_000,
+        )
+        .unwrap();
+    let stage = Stage::of(&settings, 96_000).unwrap();
+    let mut on_15 = stage.clone();
+    on_15.delay_s = 15.5 / 192_000.0;
+    let worse = stage_gain_db(&stage_ports(&on_15), 192_000);
+    let got = stage_gain_db(&stage_ports(&stage), 192_000);
+    assert!(got >= worse - 1e-9, "{got} under {worse}");
+}
+
+/// Seed 15327 (0.35.1's first fix, 20000 runs), shrunk: crossfeed is turned on, its line fails
+/// and so does the apply that would hold the stage in the config, so the start is undone; the
+/// session's repair then plays the line it was handed (the stage under its own preamp), and the
+/// next line must take the stage off again before the preamp rises.
+#[test]
+fn a_crossfeed_start_that_fails_takes_back_the_line_it_handed_over() {
+    holds(
+        44_100,
+        &[
+            Event::Drag {
+                pick: 15,
+                kind: Some(FilterKind::LowShelf),
+                f: None,
+                g: Some(-11.55),
+                q: None,
+                steps: 2,
+                gap_ticks: 0,
+            },
+            Event::FailNextWrite,
+            Event::Fail { kind: 0 },
+            crossfeed(Some(true), Some(2), None, true),
+        ],
+    );
+}
+
+/// Seed 12272 (fix 2's 20000 runs, the 8-rate list), shrunk: a curve the command line applied
+/// and two loads, then the sink moves to 352.8 kHz. The EQ must not say live while the chain
+/// plays silence.
+#[test]
+fn a_move_to_352_8_khz_never_plays_silence_while_live() {
+    holds(
+        44_100,
+        &[
+            Event::Drag {
+                pick: 15,
+                kind: Some(FilterKind::LowShelf),
+                f: Some(542.657),
+                g: None,
+                q: Some(3.232),
+                steps: 3,
+                gap_ticks: 0,
+            },
+            Event::RefuseSends { ms: 200 },
+            Event::Drag {
+                pick: 11,
+                kind: Some(FilterKind::HighShelf),
+                f: None,
+                g: Some(9.936),
+                q: None,
+                steps: 0,
+                gap_ticks: 2,
+            },
+            Event::Crossfeed {
+                on: Some(true),
+                model: None,
+                amount_pct: Some(46.007),
+                delay_ms: None,
+                done: true,
+            },
+            Event::Cli {
+                filters: vec![
+                    point(FilterKind::LowShelf, 27.4, 8.31, 4.84),
+                    point(FilterKind::Peaking, 24.9, -11.48, 0.62),
+                    point(FilterKind::HighShelf, 17_640.5, -8.39, 0.27),
+                    point(FilterKind::Peaking, 119.0, -3.57, 3.44),
+                ],
+                stated: 0.0,
+                gap_ticks: 3,
+            },
+            Event::Load {
+                filters: vec![
+                    point(FilterKind::HighShelf, 49.7, -1.65, 0.32),
+                    point(FilterKind::HighShelf, 14.6, -8.59, 2.35),
+                ],
+                stated: -1.5,
+            },
+            Event::Load {
+                filters: vec![point(FilterKind::HighShelf, 10_697.3, 6.72, 4.01)],
+                stated: 0.0,
+            },
+            Event::Rate(352_800),
+        ],
+    );
+}
+
+/// Seed 20568, shrunk: the same at 384 kHz, from a chain loaded at 176.4 kHz.
+#[test]
+fn a_move_to_384_khz_never_plays_silence_while_live() {
+    holds(
+        384_000,
+        &[
+            Event::Fail { kind: 0 },
+            Event::Rate(176_400),
+            Event::Crossfeed {
+                on: Some(true),
+                model: None,
+                amount_pct: Some(41.183),
+                delay_ms: Some(1.0),
+                done: true,
+            },
+            Event::Load {
+                filters: vec![
+                    point(FilterKind::HighShelf, 25.2, -23.23, 8.68),
+                    point(FilterKind::HighShelf, 5_584.0, 7.07, 3.35),
+                    point(FilterKind::LowShelf, 4_886.4, -6.88, 6.67),
+                    point(FilterKind::Peaking, 14.6, -4.78, 0.15),
+                ],
+                stated: 0.0,
+            },
+            Event::Load {
+                filters: vec![
+                    point(FilterKind::LowShelf, 5_999.3, 2.29, 0.52),
+                    point(FilterKind::LowShelf, 21.5, 9.63, 1.91),
+                    point(FilterKind::Peaking, 52.0, -10.03, 7.64),
+                    point(FilterKind::LowShelf, 809.0, 9.15, 0.63),
+                ],
+                stated: 0.0,
+            },
+            Event::Remove { pick: 8 },
+            Event::Rate(384_000),
+        ],
+    );
+}
+
+/// The low shelf of seed 20568 (21.5 Hz, +9.63 dB, Q 1.91) is stable in f32 at 384 kHz but its
+/// coefficients play +3.5 dB at DC for +9.6 (b1 rounds to a1): its preamp is measured on what
+/// they play, so the chain never goes above unity with it, and it is never silence. A curve with
+/// no bound to its peak there (seed 12272's load at 352.8 kHz) is refused, and its preamp is the
+/// floor, never below it.
+#[test]
+fn a_curve_f32_cannot_hold_at_a_high_rate_is_measured_as_it_plays_or_refused() {
+    use crate::eq::manage::{check_playable, played_preamp};
+    let shelf = Correction {
+        preamp_db: 0.0,
+        filters: vec![point(FilterKind::LowShelf, 21.5, 9.63, 1.91)],
+    };
+    let (sets, centres) = crate::eq::live::played_sets(&shelf, 384_000);
+    let plays = svolder_profiles::tone::response::played_peak_db_of(&sets, &centres, 384_000);
+    let preamp = played_preamp(&shelf, 384_000);
+    assert!(plays.is_finite() && preamp.is_finite(), "{plays} {preamp}");
+    assert!(plays + preamp <= 0.008, "{plays} under {preamp}");
+    let unbounded = Correction {
+        preamp_db: -1.5,
+        filters: vec![
+            point(FilterKind::HighShelf, 14.6, -8.59, 2.35),
+            point(FilterKind::HighShelf, 49.7, -1.65, 0.32),
+        ],
+    };
+    let refused = check_playable(&unbounded, 352_800).expect_err("refused at 352.8 kHz");
+    assert!(refused.what.contains("352800 Hz"), "{}", refused.what);
+    assert_eq!(played_preamp(&unbounded, 352_800), -120.0);
+    assert!(check_playable(&unbounded, 48_000).is_ok());
 }
 
 /// The shrunk sequence of one seed as Rust, to paste into a regression test:

@@ -106,6 +106,12 @@ async fn the_model_carries_volume_eq_and_the_shared_presets() {
     assert_eq!(model["eq"]["max"], 16);
     assert_eq!(model["eq"]["points"].as_array().unwrap().len(), 1);
     assert_eq!(model["eq"]["response"].as_array().unwrap().len(), 181);
+    // the crossfeed rides along as the host's own view, curve and model table included
+    let crossfeed = &model["eq"]["crossfeed"];
+    assert_eq!(crossfeed["on"], false, "{model}");
+    assert_eq!(crossfeed["model"], "bauer");
+    assert_eq!(crossfeed["curve"]["hz"].as_array().unwrap().len(), 61);
+    assert!(crossfeed["models"].as_array().unwrap().len() >= 2);
     let names: Vec<&str> = model["presets"]
         .as_array()
         .unwrap()

@@ -14,7 +14,7 @@ use crate::tui::boxes::{device_presets, presets};
 use crate::tui::keys;
 use crate::tui::screens::{help, menu};
 
-use super::{App, FocusMemory, Intent, Screen, stepped};
+use super::{App, FocusMemory, Intent, Screen, ToneRow, stepped};
 
 impl App {
     /// The writes one key press asks for, with the row the cursor left noted for its trail.
@@ -120,6 +120,13 @@ impl App {
         if self.tone.point_line.is_some() {
             return self.point_line_key(key.code);
         }
+        if self.tone.xf_line.is_some() {
+            // A line whose row the keys have left closes, as Esc closes it; the key then acts.
+            match self.xf_row() {
+                Some(_) => return self.xf_key(key.code).unwrap_or_default(),
+                None => self.tone.xf_line = None,
+            }
+        }
         // `Esc` lets go of a point being dragged on the tone curve, and does nothing else then.
         if key.code == KeyCode::Esc && self.pointer.curve_drag.take().is_some() {
             return Vec::new();
@@ -152,6 +159,10 @@ impl App {
             KeyCode::Tab => return self.cycle_pane(1),
             KeyCode::BackTab => return self.cycle_pane(-1),
             _ => {}
+        }
+        // The Crossfeed rows take their keys (`Esc` folds the section) before the global ones.
+        if let Some(intents) = self.xf_key(code) {
+            return intents;
         }
         if let Some(intents) = self.global_key(code) {
             return intents;
@@ -328,6 +339,7 @@ impl App {
             KeyCode::Char('m') => self.mute(),
             KeyCode::Char('i') => self.flip_key("phase"),
             KeyCode::Char('o') => self.flip_key("nos"),
+            KeyCode::Char('X') if self.crossfeed_shown() => self.jump_to_crossfeed(),
             KeyCode::Char('a') if self.screen == Screen::Tone && self.on_computer() => return None,
             KeyCode::Char('a') => {
                 self.advise_key();
@@ -434,6 +446,12 @@ impl App {
     /// per change and never for a key that shows the screen already showing.
     fn enter(&mut self, screen: Screen) {
         if self.screen != screen {
+            // The Crossfeed focus belongs to the screen it was made on; the screen shown next
+            // opens on its own row (`X` and Enter put the keys in the section after this).
+            if matches!(self.tone.row, ToneRow::Crossfeed(_)) {
+                self.tone.row = ToneRow::Mode;
+            }
+            self.tone.xf_line = None;
             self.screen = screen;
             self.frame_flags.screen_changed = true;
             self.frame_flags.navigated = true;
@@ -480,7 +498,7 @@ impl App {
 
     /// The switch is a row of the tone screen only: a cursor left on it goes back to Mode.
     fn leave_target(&mut self) {
-        if self.tone.row == crate::tui::app::ToneRow::Target {
+        if self.tone.row == ToneRow::Target {
             self.tone.row = crate::tui::app::ToneRow::Mode;
         }
     }
@@ -505,6 +523,7 @@ impl App {
             || self.presets.device_list.is_some()
             || self.tone.edit_line.is_some()
             || self.tone.point_line.is_some()
+            || self.tone.xf_line.is_some()
             || self.overlays.quitting
     }
 }

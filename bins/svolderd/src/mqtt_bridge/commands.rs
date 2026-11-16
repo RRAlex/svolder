@@ -312,7 +312,7 @@ impl BridgeTask {
                 ));
             }
             WriteOutcome::Replaced => {}
-            WriteOutcome::Computer(on, result) => self.computer_written(on, result),
+            WriteOutcome::Computer(what, result) => self.computer_written(&what, result),
             WriteOutcome::Written(control, outcome) => self.written(&control, outcome),
         }
     }

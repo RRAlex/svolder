@@ -799,6 +799,36 @@ await ok('a_preset_load_ends_a_held_drag_and_nothing_more_is_written_for_it', as
   assert.equal(r.posts.length, 2);
 });
 
+await ok('a_preset_reloaded_under_the_same_name_ends_a_held_drag_by_the_daemons_load_count', async () => {
+  const list = slotted([point('PK', 226, 0, 1), point('PK', 2000, 0, 1), point('PK', 8000, 0, 1)]);
+  const counted = (loads, points) => ({ ...withPoints(points), eq: { ...modelOf().eq, loads, points } });
+  const r = rig({ computer: counted(4, list) });
+  await r.actions.computer.setPoint(3, { g: 1 }, { done: false });
+  assert.equal(r.posts.length, 1);
+  // the same read again (no load) keeps the hold; the same preset loaded again does not
+  r.store.emit('host', { ...r.store.page().host, computer: counted(4, list) });
+  assert.notEqual(r.pending.get('point:5'), null, 'no load, the hold stays');
+  const again = slotted([point('PK', 100, 1, 1), point('PK', 500, 1, 1), point('PK', 900, 1, 1)]);
+  r.store.emit('host', { ...r.store.page().host, computer: counted(5, again) });
+  assert.equal(r.pending.get('point:5'), null, 'the same name, one more load: the hold ended');
+  r.clock.advance(r.clock.t + 60);
+  await r.actions.computer.setPoint(3, { g: 2 }, { done: false });
+  r.clock.advance(r.clock.t + 60);
+  await r.actions.computer.setPoint(3, {}, { done: true });
+  await flush();
+  assert.equal(r.posts.length, 1, 'nothing more was written for the point that has its number now');
+});
+
+await ok('a_daemon_with_no_load_count_is_followed_by_the_name', async () => {
+  const list = slotted([point('PK', 226, 0, 1), point('PK', 2000, 0, 1), point('PK', 8000, 0, 1)]);
+  const r = rig({ computer: withPoints(list) });
+  assert.equal(r.store.page().host.computer.eq.loads, undefined);
+  await r.actions.computer.setPoint(3, { g: 1 }, { done: false });
+  r.store.emit('host', { ...r.store.page().host, computer: { ...withPoints(list),
+    eq: { ...modelOf().eq, preset: 'Bass lift', points: list } } });
+  assert.equal(r.pending.get('point:5'), null, 'a new name ends the hold');
+});
+
 await ok('every_point_set_and_remove_names_the_point_by_its_slot', async () => {
   const list = slotted([point('PK', 226, 0, 1), point('PK', 2000, 0, 1), point('PK', 8000, 0, 1)]);
   const r = rig({ computer: withPoints(list) });

@@ -218,6 +218,8 @@ where
     look::flush_owed(&mut end.watching).await;
     let watching = &mut end.watching;
     watching.host.stop_capture(&mut watching.app);
+    // The crossfeed of a controller of the loop's own is off when the loop ends.
+    watching.computer.shutdown().await;
     end
 }
 
@@ -465,6 +467,7 @@ where
 {
     colour(look, &watching.app);
     watching.app.clock = svolder_ipc::clock::local_hhmm(SystemTime::now());
+    watching.app.drawn.begin_frame();
     watching.app.observe_mascot(
         Instant::now(),
         svolder_ipc::clock::local_month_day(SystemTime::now()),
@@ -506,11 +509,31 @@ where
     {
         repaint(seams.terminal);
     }
+    let area = seams
+        .terminal
+        .size()
+        .map(|size| Rect::new(0, 0, size.width, size.height));
     let cost = Instant::now();
     let drawn = seams.terminal.draw(|frame| {
         areas = render::draw(frame, &watching.app, &look.theme, &mut turns.hits);
         paint_over(frame, &areas, &look.theme, &mut look.effects, last_tick);
     });
+    // The box the cover had in this frame sizes its picture after it, from the same layout.
+    if let Ok(area) = area
+        && let (Some(hash), Some(font)) = (
+            watching.app.host.cover.hash.clone(),
+            watching.app.host.cover.font,
+        )
+    {
+        let size = crate::tui::screens::device::art_box(area, &watching.app);
+        watching.app.drawn.keep_art_box(crate::tui::app::ArtBox {
+            area,
+            hash,
+            font,
+            size,
+        });
+    }
+    watching.app.drawn.end_frame();
     if synced {
         (look.sync)(SyncEdge::End);
         look.effects.pace(cost.elapsed());

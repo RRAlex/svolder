@@ -641,6 +641,7 @@ e2e: deps-build ## End to end over BlueZ
 #: A private PipeWire and WirePlumber: no sound card, never touches your session.
 host-e2e: deps-build ## The computer EQ end to end on a private PipeWire
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolderd
+	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder-host --example xf_expect
 	@bash scripts/host-e2e/run.sh
 
 #: Random event sequences against a model of PipeWire.

@@ -624,7 +624,7 @@ def guest_devices(b, theme):
     time.sleep(0.3)
     rows = b.page("[...document.querySelectorAll('#fx-menu [id^=\"menu-popup-\"]')].map((e) => e.id)")
     b.page('(__core.frame.closeMenu(), 1)')
-    check(f'{tag}: the menu has Devices\' row and Help\'s, not the writer\'s EQ library',
+    check(f'{tag}: the menu has Devices\' row and Help\'s, not the writer\'s Sound',
           rows == ['menu-popup-devices', 'menu-popup-help'], rows)
     b.page("(__core.router.open('devices', 'overview'), 1)")
     stands = ready(b, 'devices')
@@ -686,11 +686,11 @@ POPUPS = {
         'list': None,
         'extra': devices_extra,
     },
-    'eq-library': {
-        'title': 'EQ library · Gungnir 2',
-        'folder': 'core/popups/eq-library/',
+    'sound': {
+        'title': 'Sound',
+        'folder': 'core/popups/sound/',
         'add': None,
-        'entries': ['autoeq', 'upload', 'saved'],
+        'entries': [],
         'ask': None,
         'form': None,
         'list': None,
@@ -721,7 +721,7 @@ POPUPS = {
     },
 }
 # the sample first: the entry animation's case and the open by script are made on the first
-ORDER = ['sample', 'devices', 'eq-library', 'help']
+ORDER = ['sample', 'devices', 'sound', 'help']
 ONLY = [name for name in ORDER
         if name in os.environ.get('WEB_CHECK_POPUPS', ','.join(ORDER)).split(',')]
 
@@ -1073,7 +1073,7 @@ def desk(b, d, theme, name, hook):
         back = rects(b, name)['back']
         # a device's page holds its settings' controls, and the saved presets' page a button on each
         # row: Tab needs more presses to come round
-        inside, names = tab_walk(b, name, 16 if name in ('devices', 'eq-library') else 8)
+        inside, names = tab_walk(b, name, 16 if name in ('devices', 'sound') else 8)
         check(f'tab_stays_inside {tag}: at page {last}, where the way back is not shown, Tab never leaves'
               ' the popup and comes round',
               paged is True and back is not None and not back['shown'] and inside

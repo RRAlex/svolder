@@ -61,6 +61,8 @@ from popups import DESK, PHONE, by_the_menu, centre, close_popup, el, ready, rec
 browser = modal.browser
 DEVICE = 'Gungnir 2'
 NAME = 'eq-library'
+# the popup that holds the EQ library as a tab, and the id of the ones of its parts
+POPUP = 'sound'
 HD650 = 'Sennheiser HD 650'
 SOURCES = ['oratory1990', 'Rtings', 'Innerfidelity']
 
@@ -119,7 +121,7 @@ def expected_words(preview):
 def open_library(b, tag):
     b.page(BODY)
     b.page("(document.getElementById('fx-button').focus(), 1)")
-    return by_the_menu(b, NAME)
+    return by_the_menu(b, POPUP)
 
 
 def search(b, text):
@@ -131,11 +133,11 @@ def case(b, d, fx, theme):
     tag = f'({theme})'
     b.page(BODY)
     opened = open_library(b, tag)
-    title = b.page(f"[document.getElementById('{pid('title')}').textContent, document.title,"
-                   " [...document.querySelectorAll('#popup-eq-library .fp-entry')].map((e) => e.textContent)]")
+    title = b.page(f"[document.getElementById('popup-sound-context').textContent, document.title,"
+                   " [...document.querySelectorAll('#popup-sound .fp-pill')].map((e) => e.textContent)]")
     check(f'opens_by_its_menu_row_and_names_the_device {tag}',
-          opened is True and title[0] == f'EQ library · {DEVICE}' and 'EQ library' in title[1]
-          and DEVICE in title[1] and title[2] == ['AutoEq', 'Upload a file', 'Saved presets'], title)
+          opened is True and title[0] == f'EQ library · {DEVICE}' and 'Sound' in title[1]
+          and title[2] == ['AutoEq', 'Upload a file', 'Saved presets'], title)
 
     # ---- the search ----
     asked = len(fx.requests)
@@ -266,7 +268,7 @@ def case(b, d, fx, theme):
     mine = b.page(f"__core.actions.savePreset('Mine', {{ device: __core.model.shown() }}).then((a) => a.ok)")
     time.sleep(0.5)
     made.append('Mine')
-    press_on(b, '#' + f'popup-{NAME}-entry-saved')
+    press_on(b, '#' + f'popup-sound-pill-saved')
     got = poll(lambda: b.page("document.querySelectorAll('.fpe-row').length") >= 3, 6.0)
     state = b.page("""[...document.querySelectorAll('.fpe-row')].map((r) => [
       r.querySelector('.fpe-row-name').textContent, r.querySelector('.fpe-where').textContent,
@@ -280,7 +282,7 @@ def case(b, d, fx, theme):
           and by_name['Mine'][1] in ('In the library', f'On {DEVICE} now')
           and any(row[5] and row[2] == 'true' and 'is built in' in (row[3] or '') for row in state), state)
     check(f'saved_presets_say_where_they_live_and_overwrite_asks_once {tag}: nothing says "saved on the device"',
-          'saved on the device' not in text_of(b, 'popup-eq-library'))
+          'saved on the device' not in text_of(b, 'popup-sound'))
     index = [i for i, row in enumerate(state) if row[0] == 'Mine'][0]
     posts = len(b.page(POSTS))
     press_on(b, f'#popup-{NAME}-overwrite-{index}')
@@ -297,7 +299,7 @@ def case(b, d, fx, theme):
           [asked, kept, sent, said])
 
     # ---- the upload ----
-    press_on(b, '#' + f'popup-{NAME}-entry-upload')
+    press_on(b, '#' + f'popup-sound-pill-upload')
     up = b.page("(() => { const s = document.getElementById('popup-eq-library-upload-save');"
                 " return [s.getAttribute('aria-disabled'), s.disabled,"
                 " document.getElementById('popup-eq-library-upload-words').textContent]; })()")
@@ -327,10 +329,10 @@ def case(b, d, fx, theme):
           name == 'Good file' and saved is True and 'Saved' in text_of(b, pid('upload-words')), [name, list(rows(d))])
 
     # ---- the layout ----
-    press_on(b, '#' + f'popup-{NAME}-entry-autoeq')
-    r = rects(b, NAME)
+    press_on(b, '#' + f'popup-sound-pill-autoeq')
+    r = rects(b, POPUP)
     check(f'nothing_scrolls_sideways {tag}: at 1280 px', r['over'] == [0, 0], r['over'])
-    close_popup(b, NAME)
+    close_popup(b, POPUP)
     for name in made:
         d.post(DEVICE, 'presets/delete', {'name': name})
     time.sleep(0.5)
@@ -344,27 +346,26 @@ def phone(b, d, theme):
     time.sleep(0.4)
     b.page(BODY)
     b.page("(document.getElementById('fx-button').focus(), 1)")
-    opened = by_the_menu(b, NAME)
-    r0 = rects(b, NAME)
-    list_only = r0['side'] and r0['side']['shown'] and (not r0['page'] or not r0['page']['shown'])
-    check(f'nothing_scrolls_sideways {tag}: on a phone the popup opens at its list, the page pane not shown',
-          opened is True and list_only and r0['over'] == [0, 0], r0)
-    press_on(b, f'#popup-{NAME}-entry-autoeq')
+    opened = by_the_menu(b, POPUP)
+    r0 = rects(b, POPUP)
+    strip = b.page("[...document.querySelectorAll('#popup-sound .fp-tab, #popup-sound .fp-pill')]"
+                   ".map((e) => e.getBoundingClientRect().right <= innerWidth)")
+    page_shown = r0['page'] and r0['page']['shown'] and not r0['side']
+    check(f'nothing_scrolls_sideways {tag}: on a phone the popup opens on its EQ library tab, the page '
+          'shown, the tabs and the pills inside the window',
+          opened is True and page_shown and r0['over'] == [0, 0] and all(strip) and len(strip) == 5, [r0, strip])
+    press_on(b, f'#popup-sound-pill-autoeq')
     put_text(b, pid('query'), 'hd 650')
     b.press('Enter')
     poll(lambda: b.page("document.querySelectorAll('.fpe-group').length") == 1, 8.0)
     press_on(b, variant(0, 0))
     poll(lambda: b.page("!!document.querySelector('#popup-eq-library-preview .fp-graph')"), 15.0)
-    r1 = rects(b, NAME)
-    page_only = r1['page'] and r1['page']['shown'] and (not r1['side'] or not r1['side']['shown'])
+    r1 = rects(b, POPUP)
+    page_only = r1['page'] and r1['page']['shown'] and not r1['side']
     graph = b.page("document.querySelector('.fp-graph').getBoundingClientRect().width")
     check(f'nothing_scrolls_sideways {tag}: on a phone a page shows alone, its graph fits and nothing '
           'scrolls sideways', page_only and r1['over'] == [0, 0] and 150 < graph <= PHONE[0], [r1, graph])
-    press_on(b, f'#popup-{NAME}-back')
-    back = rects(b, NAME)
-    check(f'nothing_scrolls_sideways {tag}: the way back is the list again',
-          back['side'] and back['side']['shown'], back)
-    close_popup(b, NAME)
+    close_popup(b, POPUP)
     b.resize(*DESK)
     time.sleep(0.4)
 
@@ -375,8 +376,8 @@ def computer(b, d, theme):
     side = b.page("(__core.computer.flip('computer'), __core.computer.side())")
     time.sleep(0.6)
     b.page("(document.getElementById('fx-button').focus(), 1)")
-    opened = by_the_menu(b, NAME)
-    named = b.page(f"document.getElementById('{pid('title')}').textContent")
+    opened = by_the_menu(b, POPUP)
+    named = b.page("document.getElementById('popup-sound-context').textContent")
     check(f'the_computer_side {tag}: the title names the computer', side == 'computer' and opened is True
           and named == 'EQ library · This computer', [side, named])
     search(b, 'hd 650')
@@ -387,13 +388,13 @@ def computer(b, d, theme):
     check(f'the_computer_side {tag}: the preview is the correction as the computer plays it, with no fit',
           shown is True and 'as the computer plays it' in pane[0] and 'Worst miss' not in pane[0]
           and pane[1] is False, pane)
-    press_on(b, '#' + f'popup-{NAME}-entry-saved')
+    press_on(b, '#' + f'popup-sound-pill-saved')
     poll(lambda: b.page("document.querySelectorAll('.fpe-row').length") >= 1, 6.0)
     state = b.page("[...document.querySelectorAll('[data-act=overwrite]')].map((e) => e.getAttribute('aria-disabled'))")
     note = text_of(b, pid('saved-note'))
     check(f'the_computer_side {tag}: Overwrite is disabled on every row, and says why',
           state and all(one == 'true' for one in state) and 'not over one' in (note or ''), [state, note])
-    close_popup(b, NAME)
+    close_popup(b, POPUP)
     b.page("(__core.computer.flip('dac'), 1)")
     time.sleep(0.4)
 
@@ -404,11 +405,11 @@ def no_way_in(b, theme, who):
     time.sleep(0.3)
     rows = b.page("[...document.querySelectorAll('#fx-menu [id^=\"menu-popup-\"]')].map((e) => e.id)")
     b.page('(__core.frame.closeMenu(), 1)')
-    b.page("(__core.router.open('eq-library'), 1)")
+    b.page("(__core.router.open('sound'), 1)")
     time.sleep(0.5)
     posts = [p for p in b.page(POSTS) if '/autoeq/' in p[0]]
-    check(f'{tag}: the Devices row only (the read-only popup), no EQ library row, no popup and no request',
-          rows == ['menu-popup-devices', 'menu-popup-help'] and b.page("!document.getElementById('popup-eq-library')") is True
+    check(f'{tag}: the Devices row only (the read-only popup), no Sound row, no popup and no request',
+          rows == ['menu-popup-devices', 'menu-popup-help'] and b.page("!document.getElementById('popup-sound')") is True
           and posts == [], [rows, posts])
 
 

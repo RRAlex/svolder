@@ -487,9 +487,11 @@ impl Parts {
             covers: Arc::new(move |url| cover::cover(url, &places)),
             helpers: Vec::new(),
             frames: match (PwFrames::from_env(), Wpctl::from_env()) {
+                // The capture's look takes the reading the computer's volume read published
+                // when there is a young one, so the two readers cost one `wpctl` call a beat.
                 (Some(capture), Some(sink)) => Ok(Frames {
                     capture: Box::new(capture),
-                    sink: Arc::new(sink),
+                    sink: Arc::new(sink.held()),
                 }),
                 _ => Err("this host has no capture tool".to_string()),
             },
@@ -647,6 +649,9 @@ struct Shared {
     players: Mutex<Option<Arc<dyn Players>>>,
     /// The computer's volume and EQ, while a run has them.
     computer: Mutex<Option<Arc<Computer>>>,
+    /// The task that turns the last computer side's crossfeed off, while it runs: the next side
+    /// waits for it.
+    stopping: Mutex<Option<JoinHandle<()>>>,
     /// The current cover and its hash.
     cover: Mutex<Option<(String, Arc<Cover>)>>,
     /// Which run is the current one. Halting moves it on, and a task of an earlier run, which
@@ -700,6 +705,13 @@ pub(crate) struct HostService {
 pub(crate) trait EqSwitch: Send + Sync {
     /// Turn the EQ on with the points kept, or off, which keeps them.
     async fn set_on(&self, on: bool) -> Result<(), String>;
+
+    /// Change the crossfeed: turn it on or off, or choose a preset of a model.
+    async fn crossfeed(
+        &self,
+        on: Option<bool>,
+        choice: Option<(String, String)>,
+    ) -> Result<(), String>;
 }
 
 /// The computer's controller as the service holds it, reached when a switch is turned.
@@ -714,6 +726,34 @@ impl EqSwitch for SharedSwitch {
         computer
             .eq_op(
                 HostEqOp::Mode { on },
+                &[],
+                |_| Vec::new(),
+                |_| async { Ok(()) },
+            )
+            .await
+            .map_err(|refusal| refusal.to_string())
+    }
+
+    async fn crossfeed(
+        &self,
+        on: Option<bool>,
+        choice: Option<(String, String)>,
+    ) -> Result<(), String> {
+        let computer = locked(&self.0.computer)
+            .clone()
+            .ok_or_else(|| "computer controls unavailable: host audio is off".to_string())?;
+        let (model, preset) = choice.unzip();
+        computer
+            .eq_op(
+                HostEqOp::Crossfeed {
+                    on,
+                    model,
+                    preset,
+                    amount_pct: None,
+                    crossover_hz: None,
+                    delay_ms: None,
+                    done: true,
+                },
                 &[],
                 |_| Vec::new(),
                 |_| async { Ok(()) },
@@ -809,6 +849,7 @@ impl HostService {
                 capturing: AtomicBool::new(false),
                 players: Mutex::new(None),
                 computer: Mutex::new(None),
+                stopping: Mutex::new(None),
                 cover: Mutex::new(None),
                 generation: Mutex::new(0),
             }),
@@ -881,6 +922,16 @@ impl HostService {
         let mut running = locked(&self.running);
         halt(&mut running, &self.shared);
         launch(&mut running, &self.shared, parts, container);
+    }
+
+    /// [`HostService::stop`] after the computer's crossfeed is turned off: the daemon's graceful
+    /// stop. A chain that ran for crossfeed alone is removed first.
+    pub(crate) async fn shutdown(&self) {
+        let computer = locked(&self.shared.computer).clone();
+        if let Some(computer) = computer {
+            computer.shutdown().await;
+        }
+        self.stop();
     }
 
     /// End the host for good: what runs stops, the view goes unavailable, and no later
@@ -1064,7 +1115,15 @@ fn halt(running: &mut Running, shared: &Shared) {
     let mut gate = locked(&shared.generation);
     *gate += 1;
     *locked(&shared.players) = None;
-    *locked(&shared.computer) = None;
+    // The computer's controls end with this run: its crossfeed is turned off first, by a task of
+    // its own where no one waits for it (a reload, a drop); the daemon's stop waits for it.
+    if let Some(computer) = locked(&shared.computer).take()
+        && let Ok(runtime) = tokio::runtime::Handle::try_current()
+    {
+        // The next computer side waits for it before its own start reset ([`computer::run`]), so
+        // two applies or removes of one chain never interleave.
+        *locked(&shared.stopping) = Some(runtime.spawn(async move { computer.shutdown().await }));
+    }
     *locked(&shared.cover) = None;
     shared.capturing.store(false, Ordering::SeqCst);
     shared.capture.send_replace(CaptureState::off());

@@ -179,6 +179,8 @@ struct View {
 /// columns are as short as [`pack`] can make them. What still does not fit is what the box
 /// scrolls through, in as many columns as its width takes.
 fn view(area: Rect, app: &App) -> View {
+    #[cfg(test)]
+    crate::tui::test_support::work::tick("help_view");
     let sections = sections(app);
     let lead = lead(app, &sections);
     let entries = sections.iter().flatten();
@@ -555,6 +557,7 @@ fn reason(hint: &KeyHint, app: &App) -> Option<&'static str> {
         When::CanIdentify => "this device offers no identify",
         When::HasComputer => "needs the computer's controls",
         When::OnComputer => "on the computer side only",
+        When::HasCrossfeed => "on the computer side, with crossfeed",
         When::Choosing => "not while typing",
         When::Typing => "only while typing",
         When::Backable => "nothing to go back to",

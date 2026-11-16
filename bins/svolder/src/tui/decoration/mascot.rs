@@ -130,7 +130,8 @@ pub(crate) struct View {
     pub playing: Option<(svolder_host::players::Status, Vec<String>)>,
     /// How many times `a` has said it was all clear.
     pub presses: u32,
-    /// Whether the screen shown is the one the squirrel lives on.
+    /// Whether the screen shown is the one the squirrel lives on and its home there has room:
+    /// never for a squirrel that may not be seen, whose home is not measured.
     pub screen_is_home: bool,
     /// Whether a box, the help overlay or a typed field has the keys: nothing enters then.
     pub keys_held: bool,

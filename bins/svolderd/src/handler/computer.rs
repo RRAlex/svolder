@@ -5,8 +5,9 @@
 //! `host_eq`, and the two things a recall on the computer needs from the devices the daemon
 //! holds: which of them play the same preset, and flattening them when the user said yes.
 
+use svolder_host::eq::parse_kind;
 use svolder_ipc::{HostEqOp, Response};
-use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
+use svolder_profiles::tone::apo::{Correction, SourceFilter};
 use svolder_profiles::tone::preset::{self, Preset};
 use svolder_proto::FunctionId;
 
@@ -64,11 +65,16 @@ impl Daemon {
                 Ok(()) => Response::Ack,
                 Err(refused) => refused,
             },
-            HostEqOp::Preset { ref device, .. } => {
+            HostEqOp::Preset {
+                ref device,
+                ref name,
+                ..
+            } => {
                 let presets = match self.recallable(device.as_deref()).await {
                     Ok(presets) => presets,
                     Err(why) => return refuse(why),
                 };
+                self.warm_fits(&presets, name).await;
                 let holders = |name: &str| self.devices_playing(&presets, name);
                 let flatten = |names: Vec<String>| self.flatten_devices(origin, names);
                 answer(self.host.host_eq(op, &presets, holders, flatten).await)
@@ -102,6 +108,26 @@ impl Daemon {
             presets.extend(preset::builtins(&eq));
         }
         Ok(presets)
+    }
+
+    /// Make the fit of the preset called `name` among `presets`, when it is imported, to the tone
+    /// control of every connected device, off the runtime's threads, so that
+    /// [`Daemon::devices_playing`] only finds it kept.
+    async fn warm_fits(&self, presets: &[Preset], name: &str) {
+        let Some(named) = preset::find(presets, name) else {
+            return;
+        };
+        let profiles: Vec<_> = self
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let feed = device.feed.borrow();
+                feed.connected.then(|| feed.profile.clone()).flatten()
+            })
+            .collect();
+        for eq in profiles.iter().filter_map(|profile| profile.eq.as_ref()) {
+            crate::recall::warm(eq, std::slice::from_ref(named)).await;
+        }
     }
 
     /// The configured names of the connected devices whose tone control plays the preset called
@@ -173,10 +199,7 @@ impl Daemon {
             .points
             .iter()
             .map(|point| {
-                let kind = point
-                    .kind
-                    .parse::<FilterKind>()
-                    .map_err(|e| refuse(e.to_string()))?;
+                let kind = parse_kind(&point.kind).map_err(|e| refuse(e.to_string()))?;
                 Ok(SourceFilter {
                     kind,
                     f: point.f,

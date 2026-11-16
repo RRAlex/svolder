@@ -287,6 +287,34 @@ async fn a_cover_that_will_not_decode_is_dropped_and_not_asked_for_again() {
     assert_eq!(daemon.host_cover_asks().len(), asks);
 }
 
+/// Every cover that failed is remembered as one that did, not only the last: a track whose cover
+/// failed before and plays again keeps the usual layout, whatever failed in between.
+#[tokio::test]
+async fn a_track_played_again_whose_cover_failed_is_still_a_failed_cover() {
+    let daemon = stub_daemon().await;
+    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+    bytes.extend_from_slice(&[7; 300]);
+    for hash in ["abc", "def"] {
+        daemon.serves_cover(
+            hash,
+            Cover {
+                bytes: bytes.clone(),
+                mime: "image/png",
+            },
+        );
+    }
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let (mut art, mut app) = (halfblocks(), playing(Some("abc")));
+    settle(&mut art, &mut app, Some(&backend), SMALL).await;
+    assert_eq!(app.host.cover.failed.as_deref(), Some("abc"));
+    app.host.cover.hash = Some("def".into());
+    settle(&mut art, &mut app, Some(&backend), SMALL).await;
+    assert_eq!(app.host.cover.failed.as_deref(), Some("def"));
+    app.host.cover.hash = Some("abc".into());
+    art.steer(&mut app, Some(&backend), SMALL);
+    assert_eq!(app.host.cover.failed.as_deref(), Some("abc"));
+}
+
 #[tokio::test]
 async fn a_resize_sizes_the_picture_again_for_the_new_box() {
     let daemon = stub_daemon().await;
@@ -420,7 +448,7 @@ fn the_three_formats_the_daemon_sniffs_decode() {
 #[test]
 fn a_large_picture_is_kept_at_a_size_that_costs_little() {
     let image = decode(&encoded(2000, 1000, ImageFormat::Png)).expect("decodes");
-    assert_eq!((image.width(), image.height()), (512, 256));
+    assert_eq!((image.width(), image.height()), (1024, 512));
 }
 
 #[test]
@@ -524,4 +552,28 @@ async fn art_turned_on_makes_its_picker_off_the_loop() {
     assert!(art.busy(), "the picker is on its way");
     finish_a_step(&mut art, &mut app).await;
     assert!(art.picker.is_some());
+}
+
+/// A cover that is not square (a video's wide thumbnail) is drawn smaller than its box, and is
+/// built once for that box: the frames after it build nothing again, however many of them steer.
+#[tokio::test]
+async fn a_wide_cover_is_built_once_for_its_box_and_not_again_every_frame() {
+    let daemon = stub_daemon().await;
+    daemon.serves_cover(
+        "wide",
+        Cover {
+            bytes: encoded(160, 90, ImageFormat::Png),
+            mime: "image/png",
+        },
+    );
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let (mut art, mut app) = (halfblocks(), playing(Some("wide")));
+    settle(&mut art, &mut app, Some(&backend), BIG).await;
+    let picture = app.host.cover.picture.as_ref().expect("a picture").size();
+    let most = art_box(BIG, &app).expect("a box");
+    assert_ne!(picture, most, "the wide picture is smaller than its box");
+    for _ in 0..3 {
+        art.steer(&mut app, Some(&backend), BIG);
+        assert!(!art.busy(), "the picture is built again for the same box");
+    }
 }

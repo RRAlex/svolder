@@ -387,6 +387,12 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   facts and Identify from every fixture device. `devices_popup.py` is the same in a browser, in every theme, with
   one daemon per theme because Remove… leaves none of the configuration as it found it
   (`python3 devices_popup.py chromium|firefox`; `WEB_CHECK_SHOTS=<folder>` writes `<theme>-device.png`).
+- `node/core-crossfeed.mjs`: the Sound popup's Crossfeed tab (`core/popups/crossfeed/`, the tabs of `core/popups/sound/`
+  and the crossfeed lane) on the real core over a jsdom page and a fake host (28 cases). `crossfeed_popup.py` is the same
+  in a browser, in every theme: the menu row, the tabs, geometry on each tab at 1280 and 390 px, a press -> a request ->
+  the view, the keyboard, the frame tokens, a guest with no row. It lays a crossfeed view over the host model and answers
+  the route in the page, so it holds with or without the daemon's route
+  (`python3 crossfeed_popup.py chromium|firefox`; `WEB_CHECK_SHOTS=<folder>` writes the pictures).
 - `node/core-eq-library.mjs`: the EQ library popup (`core/popups/eq-library/`) on the real core over a jsdom page and
   a fake daemon: the search and its late answers, the preview, the import, the upload, the saved presets with
   *Overwrite with current…*, the computer's side (30 cases). `eq_library.py` is the same in a browser, in every theme,

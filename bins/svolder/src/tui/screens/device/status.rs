@@ -183,7 +183,7 @@ fn level_from_line(app: &App, theme: &Theme) -> Line<'static> {
 }
 
 /// What the `Now playing` row opens on.
-const NOW_PLAYING: &str = " Now playing: ";
+pub(super) const NOW_PLAYING: &str = " Now playing: ";
 /// Columns between the track's words and the player's own name after them.
 const IDENTITY_GAP: usize = 3;
 

@@ -69,12 +69,9 @@ pub(super) fn graph(app: &App) -> Graph {
     }
 }
 
+/// The type a view's word names; a word nobody sends reads as a peak.
 fn kind_of(word: &str) -> FilterKind {
-    match word {
-        "LSC" => FilterKind::LowShelf,
-        "HSC" => FilterKind::HighShelf,
-        _ => FilterKind::Peaking,
-    }
+    svolder_host::eq::parse_kind(word).unwrap_or(FilterKind::Peaking)
 }
 
 /// The points as the filters the curve is summed from.

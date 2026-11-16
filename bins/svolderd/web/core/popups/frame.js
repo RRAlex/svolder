@@ -22,8 +22,8 @@
 // and Space.
 
 import { attr, esc } from '../html.js';
-import { closeAsk } from '../inline-ask.js';
-import { closeList } from '../list.js';
+import { FRAME_CLASSES, closeAsk } from '../inline-ask.js';
+import { closeList, openerIn } from '../list.js';
 import { claim, REACH } from '../modal.js';
 
 /** The words of the frame's own controls and states. */
@@ -42,6 +42,12 @@ export const titleId = (name) => `popup-${name}-title`;
 export const closeId = (name) => `popup-${name}-close`;
 /** The id of the button that goes back from a page to the list. */
 export const backId = (name) => `popup-${name}-back`;
+/** The id of the place of the header's tools. */
+export const headId = (name) => `popup-${name}-head`;
+/** The id of the place of the strip under the header. */
+export const barId = (name) => `popup-${name}-bar`;
+/** The id of the page pane of the popup `name` while its bar holds tabs: what a tab controls. */
+export const popupPanelId = (name) => `popup-${name}-page`;
 /** The id of the side list's entry `id`. */
 export const entryId = (name, id) => `popup-${name}-entry-${id}`;
 
@@ -109,10 +115,14 @@ export function sideHtml(name, entries, page = null) {
  * `within` to name; the head is no such place, and holds no control but the close button. `page` is
  * the router's (`null`: the list); at a page the pane opens with the button back to the list,
  * which only the phone layout shows. `state` is `'ready'`, or `'loading'` or `'failed'`, which
- * put the frame's own line in the page pane in place of `body`.
+ * put the frame's own line in the page pane in place of `body`. `head` is markup for the header's
+ * tools, between the title and the close button (a switch), and `bar` markup for a strip under the
+ * header that does not scroll with the page (tabs); each is in a place of its own, `headId(name)`
+ * and `barId(name)`, drawn only when it is not empty.
  */
 export function popupHtml({
   name, title, entries = [], page = null, body = '', state = 'ready', words = POPUP_WORDS,
+  head = '', bar = '',
 }) {
   const where = entries.length === 0 ? 'fp-single' : (page === null ? 'fp-at-list' : 'fp-at-page');
   const side = entries.length === 0 ? ''
@@ -130,9 +140,11 @@ export function popupHtml({
   return `<div class="fp-box ${where}"${attr('data-popup', name)}${attr('data-state', state)}>`
     + '<header class="fp-head">'
     + `<h2 class="fp-title"${attr('id', titleId(name))}>${esc(title)}</h2>`
+    + (head === '' ? '' : `<div class="fp-head-tools"${attr('id', headId(name))}>${head}</div>`)
     + `<button type="button" class="fp-close"${attr('id', closeId(name))} data-popup-close`
     + `${attr('aria-label', words.close)}>×</button>`
     + '</header>'
+    + (bar === '' ? '' : `<div class="fp-bar"${attr('id', barId(name))}>${bar}</div>`)
     + `<div class="fp-body">${side}<section class="fp-page" data-list-place>${back}${inside}`
     + '</section></div>'
     + '</div>';
@@ -179,7 +191,8 @@ export function redraw(place, html, fallback = null) {
  * what is typed, asked or scrolled there. A draw that names
  * a `title` changes it from then on (a popup whose title names what it is about), and one
  * that names `entries` changes the side list; a draw that names neither keeps both. `draw`,
- * `loading` and `failed` close the inline ask and the list that are open in the popup.
+ * `loading` and `failed` close the inline ask and the list that are open in the popup, and so does
+ * a `put` that replaces a place holding the list's opener or an ask.
  * `titleWords(page)` is what the browser tab's title says of the popup at
  * `page`: its title, then at a page the label of that page's entry. `drawn()`, if given, is
  * called after every draw of the whole box (popups.js keeps the tab's title in step with it).
@@ -233,10 +246,11 @@ export function createPopupFrame({
     }
     const entry = target.closest?.('[data-popup-page]');
     if (!entry) return;
-    // At the list a wide window already shows the first entry's page in the pane: a step to it
-    // would push an entry of the history that changes nothing a person sees.
-    const there = entry.classList.contains('on') && Boolean(entry.closest('.fp-at-list'))
-      && shown(el.querySelector('.fp-page'));
+    // At the list a wide window already shows the first entry's page in the pane, and a popup with
+    // no side list shows the page of the tab pressed: a step to it would push an entry of the
+    // history that changes nothing a person sees.
+    const there = entry.classList.contains('on') && (Boolean(entry.closest('.fp-single'))
+      || (Boolean(entry.closest('.fp-at-list')) && shown(el.querySelector('.fp-page'))));
     if (!there) router.step(entry.dataset.popupPage);
   });
 
@@ -252,8 +266,8 @@ export function createPopupFrame({
   /** Where the focus may go inside the popup, the best first: the current entry of the side
    * list, the way back from a page, the close button, the popup itself. */
   const places = () => [
-    el.querySelector('.fp-entry.on'), el.querySelector('[data-popup-back]'),
-    el.querySelector('[data-popup-close]'),
+    el.querySelector('.fp-tab.on'), el.querySelector('.fp-entry.on'),
+    el.querySelector('[data-popup-back]'), el.querySelector('[data-popup-close]'),
   ].filter(shown).concat(el);
 
   /** The page pane is a stop of the keyboard while it holds more than it shows and has no
@@ -274,6 +288,24 @@ export function createPopupFrame({
       pane.setAttribute('aria-labelledby', el.querySelector('.fp-entry.on')?.id ?? titleId(name));
     } else if (document.activeElement !== pane) {
       for (const mark of ['tabindex', 'role', 'aria-labelledby']) pane.removeAttribute(mark);
+      // Firefox makes a scroll container a stop of Tab of its own when it sits after a bar of
+      // controls; a popup with a bar says plainly that the pane is no stop
+      if (el.querySelector('.fp-bar')) pane.tabIndex = -1;
+    }
+    // a bar of tabs (`.fp-tab`, `role="tab"`) makes the pane the panel of the tab shown, which the
+    // tabs name by `aria-controls` (the pane's id is `popupPanelId`)
+    const shown = el.querySelector('.fp-bar .fp-tab.on');
+    if (shown) {
+      pane.id = popupPanelId(name);
+      pane.setAttribute('role', 'tabpanel');
+      pane.setAttribute('aria-labelledby', shown.id);
+    } else if (pane.id === popupPanelId(name)) {
+      pane.removeAttribute('id');
+      // the panel's marks only: a region this call just set keeps its role and name
+      if (pane.getAttribute('role') === 'tabpanel') {
+        pane.removeAttribute('role');
+        pane.removeAttribute('aria-labelledby');
+      }
     }
   }
   // A caret left on the page under the popup (a click on its words leaves one) is no place to
@@ -350,15 +382,27 @@ export function createPopupFrame({
     },
     /** What the box shows: `'ready'`, `'loading'` or `'failed'`; `null` before the first draw. */
     state: () => el.querySelector('.fp-box')?.dataset.state ?? null,
-    draw({ title: named, entries: list = entries, page = null, body = '' }) {
+    draw({
+      title: named, entries: list = entries, page = null, body = '', head = '', bar = '',
+    }) {
       if (named !== undefined) title = named;
       entries = list;
       at = page;
-      paint({ entries, page, body });
+      paint({
+        entries, page, body, head, bar,
+      });
     },
     put(id, html) {
       const place = document.getElementById(id);
-      if (place && el.contains(place) && !holds(place, html)) redraw(place, html, places);
+      if (place && el.contains(place) && !holds(place, html)) {
+        // a list whose opener is in the place, and an ask drawn in it (or its place), go with it
+        const held = el.contains(document.activeElement);
+        if (openerIn(place)) closeList(el);
+        if (place.querySelector(`.${FRAME_CLASSES.box}`)) closeAsk(el);
+        redraw(place, html, places);
+        // a focused option or answer went with its panel: the focus stays in the popup
+        if (held && !el.contains(document.activeElement)) places().some((to) => give(document, to));
+      }
       reach();
     },
     /** Draw the side list alone, with `list` as its entries from now on: the page pane, an ask or

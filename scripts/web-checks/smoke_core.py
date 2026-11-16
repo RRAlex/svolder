@@ -524,7 +524,7 @@ def run():
         b.press('ArrowDown')
         check('  ArrowDown reaches the Devices row', kb()['focus'] == 'menu-popup-devices', kb())
         b.press('ArrowDown')
-        check('  ArrowDown reaches the EQ library row', kb()['focus'] == 'menu-popup-eq-library', kb())
+        check('  ArrowDown reaches the Sound row', kb()['focus'] == 'menu-popup-sound', kb())
         b.press('ArrowDown')
         check('  ArrowDown reaches the Help row', kb()['focus'] == 'menu-popup-help', kb())
         b.press('ArrowDown')

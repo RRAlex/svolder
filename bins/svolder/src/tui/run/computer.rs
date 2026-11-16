@@ -13,9 +13,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use svolder_host::eq::{Edit, EqControl, EqFailure, EqView};
+use svolder_host::eq::{EqControl, EqFailure, EqView};
+use svolder_ipc::host::run_eq_op;
 use svolder_ipc::{HostEqOp, Request, Response};
-use svolder_profiles::tone::apo::{FilterKind, SourceFilter};
 use tokio::sync::{Mutex, mpsc, watch};
 
 use super::host::Aborting;
@@ -99,6 +99,10 @@ fn tag_of(op: &HostEqOp) -> Tag {
 struct Waiting {
     items: std::sync::Mutex<std::collections::VecDeque<(Tag, Work)>>,
     wake: tokio::sync::Notify,
+    /// A change is running (it left the queue and has not ended).
+    inflight: std::sync::atomic::AtomicBool,
+    /// Told when a change ends: what a quit waits on to see the queue drained.
+    idle: tokio::sync::Notify,
 }
 
 /// The computer's controls, as the loop reaches them.
@@ -114,6 +118,8 @@ pub(in crate::tui) struct ComputerLink {
     queue: Option<Arc<Waiting>>,
     /// The task that runs them.
     _worker: Option<Aborting<()>>,
+    /// The quit has begun: a change that gets the controller after that does nothing.
+    quitting: Arc<std::sync::atomic::AtomicBool>,
     /// What they ended with.
     pub(super) answers: Option<mpsc::UnboundedReceiver<Answer>>,
     /// Why there is no controller of the loop's own, where there is none to make.
@@ -168,6 +174,49 @@ impl ComputerLink {
         }
     }
 
+    /// Leave the computer as a quit should: the loop's own controller stops ticking, then turns
+    /// the crossfeed off (a chain that ran for it alone is removed), so quitting leaves no stage
+    /// in the sound's path. Nothing when the loop has no controller of its own: a daemon's is the
+    /// daemon's to stop.
+    pub(in crate::tui) async fn shutdown(&mut self) {
+        let Some(control) = self.control.take() else {
+            return;
+        };
+        // The quit lets what waits run, except crossfeed changes (a crossfeed-on asked a moment
+        // before the quit must not turn it on again after the shutdown): the user's last EQ edit
+        // is applied or kept. A change that is running is not cancelled, and neither is a tick:
+        // the shutdown takes the lock after them.
+        self.quitting
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(queue) = self.queue.clone() {
+            let drained = async {
+                loop {
+                    let idle = queue.idle.notified();
+                    tokio::pin!(idle);
+                    idle.as_mut().enable();
+                    // Both are read under the queue's lock, where the worker takes a change off it
+                    // and marks it running: no change is ever in neither place.
+                    let busy = {
+                        let items = queue.items.lock().expect("the queue");
+                        queue.inflight.load(std::sync::atomic::Ordering::SeqCst)
+                            || !items.is_empty()
+                    };
+                    if !busy {
+                        return;
+                    }
+                    idle.await;
+                }
+            };
+            let _ = tokio::time::timeout(Duration::from_secs(5), drained).await;
+        }
+        let mut control = control.lock().await;
+        self._tick = None;
+        control.shutdown().await;
+        drop(control);
+        self._worker = None;
+        self.queue = None;
+    }
+
     /// The controller's view now, for the app to start from.
     pub(in crate::tui) fn view(&self) -> Option<EqView> {
         self.views.as_ref().map(|views| views.borrow().clone())
@@ -182,7 +231,11 @@ impl ComputerLink {
                 .unwrap_or_else(|| "computer controls unavailable".to_string())
         })?;
         let tag = tag_of(&op);
-        self.queue(Box::pin(async move { run(control, op).await }), tag);
+        let quitting = Arc::clone(&self.quitting);
+        self.queue(
+            Box::pin(async move { run(control, quitting, op).await }),
+            tag,
+        );
         Ok(())
     }
 
@@ -198,10 +251,22 @@ impl ComputerLink {
             let run = Arc::clone(&waiting);
             self._worker = Some(Aborting(tokio::spawn(async move {
                 loop {
-                    let next = run.items.lock().expect("the queue").pop_front();
+                    let next = {
+                        let mut items = run.items.lock().expect("the queue");
+                        let next = items.pop_front();
+                        if next.is_some() {
+                            run.inflight
+                                .store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        next
+                    };
                     match next {
                         Some((_, work)) => {
-                            if let Some(answer) = work.await
+                            let answer = work.await;
+                            run.inflight
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
+                            run.idle.notify_waiters();
+                            if let Some(answer) = answer
                                 && told.send(answer).is_err()
                             {
                                 return;
@@ -254,8 +319,9 @@ impl ComputerLink {
                         .clone()
                         .unwrap_or_else(|| "computer controls unavailable".to_string())
                 })?;
+                let quitting = Arc::clone(&self.quitting);
                 Box::pin(async move {
-                    match run(control, off).await {
+                    match run(control, quitting, off).await {
                         None => Some(Answer::Moved(name)),
                         refused => refused,
                     }
@@ -367,83 +433,29 @@ fn answer_of(response: Option<Response>) -> Option<Answer> {
     }
 }
 
-/// A point's index from the wire, which counts from 1.
-fn zero_based(index: u8) -> Result<usize, EqFailure> {
-    usize::from(index).checked_sub(1).ok_or_else(|| EqFailure {
-        what: "points count from 1".to_string(),
-        next: "Choose a point that is there".to_string(),
-    })
-}
-
-/// The 0-based index a change means: with a slot the controller finds the point by the slot
-/// and the index is not looked at, else it counts from 1.
-fn index_for(index: u8, slot: Option<u8>) -> Result<usize, EqFailure> {
-    match slot {
-        Some(_) => Ok(usize::from(index.max(1)) - 1),
-        None => zero_based(index),
-    }
-}
-
-/// A point's type from its word.
-fn kind_of(word: &str) -> Result<FilterKind, EqFailure> {
-    word.parse().map_err(|_| EqFailure {
-        what: format!("{word:?} is not a point type"),
-        next: "Use PK, LSC or HSC".to_string(),
-    })
-}
-
 /// Change the loop's own controller as `op` says.
-async fn run(control: Arc<Mutex<EqControl>>, op: HostEqOp) -> Option<Answer> {
-    let result = change(&mut *control.lock().await, op).await;
+async fn run(
+    control: Arc<Mutex<EqControl>>,
+    quitting: Arc<std::sync::atomic::AtomicBool>,
+    op: HostEqOp,
+) -> Option<Answer> {
+    let mut control = control.lock().await;
+    if quitting.load(std::sync::atomic::Ordering::SeqCst)
+        && matches!(op, HostEqOp::Crossfeed { .. })
+    {
+        return None;
+    }
+    let result = change(&mut control, op).await;
     result.err().map(|why| Answer::Said(why.to_string()))
 }
 
 async fn change(control: &mut EqControl, op: HostEqOp) -> Result<(), EqFailure> {
     match op {
-        HostEqOp::Mode { on } => control.set_on(on).await,
-        HostEqOp::Apply {
-            name,
-            origin,
-            correction,
-            ..
-        } => control.load(name, origin, correction).await,
-        HostEqOp::Set {
-            index,
-            slot,
-            kind,
-            f,
-            g,
-            q,
-            done,
-        } => {
-            let kind = kind.as_deref().map(kind_of).transpose()?;
-            let index = index_for(index, slot)?;
-            control
-                .edit(Edit::Set {
-                    index,
-                    slot,
-                    kind,
-                    f,
-                    g,
-                    q,
-                    done,
-                })
-                .await
-        }
-        HostEqOp::Add { kind, f, g, q } => {
-            let kind = kind_of(&kind)?;
-            control
-                .edit(Edit::Add(SourceFilter { kind, f, g, q }))
-                .await
-        }
-        HostEqOp::Remove { index, slot } => {
-            let index = index_for(index, slot)?;
-            control.edit(Edit::Remove { index, slot }).await
-        }
         HostEqOp::Preset { .. } | HostEqOp::SaveAs { .. } => Err(EqFailure {
             what: "this session keeps no presets of its own for the computer".to_string(),
             next: "Recall it from the preset list".to_string(),
         }),
+        op => run_eq_op(control, op).await,
     }
 }
 

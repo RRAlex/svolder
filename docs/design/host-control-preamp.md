@@ -51,10 +51,13 @@ edits to the others until it is mended or removed.
 The coefficients are worked out for the rate the sink runs at, so a rate change or a restart of the
 chain checks the curve again at the new rate before anything is sent. A curve that is not playable
 there turns the EQ off: the chain leaves the path, the points are kept, the state says off, and the
-note says which point and at which rate. The note goes at the next successful apply. Nothing is
-sent at the new rate. The rate is forgotten with the chain, so an apply with none there reads the
-default output's rate (`pw-dump`) and checks and writes at it; when it cannot be read it is the
-default 48 kHz and the first look at the new chain checks it at the rate the sink runs at.
+note says which point and at which rate. Nothing is sent at the new rate. The note goes at the next
+successful apply. A chain that plays flat (crossfeed alone, or a pass-through) plays none of the
+points, so they are not checked and it goes on; turning the EQ on at a rate they cannot play at is
+refused, and the state keeps the preamp they were saved with. The rate is forgotten with the chain,
+so an apply with none there reads the default output's rate (`pw-dump`) and checks and writes at it;
+when it cannot be read it is the default 48 kHz and the first look at the new chain checks it at the
+rate the sink runs at.
 If the chain cannot be taken out, the note says so, nothing is sent, and the chain is looked at
 again: it plays on again once the sink's rate plays the curve, or goes off once it can be removed.
 
@@ -75,9 +78,15 @@ Three more rules keep that true when something else changes the chain:
 - A chain the controller did not start (it was running when the daemon started, it started again,
   the command line replaced it, or it is the first looked at after an apply) is looked at before
   anything is sent to it. The preamp it holds then bounds every preamp sent until an apply, or a
-  state file read at start or on a reload, says what it was started from: the bound suits the
-  slots the chain starts from. After a reload the bound is taken again from the node at the next
-  look.
+  state file read at start or on a reload, says what it was started from: the bound suits the slots
+  the chain starts from. After a reload the bound is taken again from the node at the next look. A
+  preamp at the -120 dB floor bounds nothing: such a chain plays nothing (an older svolder could
+  leave one so), and it is sent the preamp the view says. A graph that has not run (nothing has
+  played through the chain yet) lists every control at 0, which all of a slot's `b0` at 0 gives
+  away, and it starts from its config when it runs, dropping what was sent before; so a look at it
+  bounds nothing, checks no send and makes no foreign resend, and the first look that finds it run
+  takes the bound and sends everything again (every slot, the stage and the preamp). Up to one watch
+  period (1 s) of the saved config plays first.
 - The session sends only to the node id the controller looked at. When the node it finds is under
   another id (a refusal dropped the kept node, or a write failed and it was found again), the line
   is not written; the controller looks at that node and sends once more.
@@ -93,6 +102,16 @@ a restart of the chain (which loads the config on disk). A hand edit that soften
 point's new type, and a point added or removed all go live and do not apply. The node bound has the
 same price: a user whose chain was sent to by a command-line apply before the daemon's reload
 plays quieter than the points need, until the next apply.
+
+## The crossfeed stage
+
+The crossfeed stage sits after the EQ, and the preamp falls by what the stage could add at its worst
+frequency, at any usual rate, since a line sent before the next look after a rate change plays the
+stage worked out for the old rate (the preamp rule counts both). For Bauer's default that is about
+0.04 dB at 100 Hz in a mono tone; for M/S bass at 50 % it is about 3.1 dB, because at the 120 Hz
+crossover an anti-phase signal adds `|1 - a·LP/2| + |a·LP/2|`, about 1.41. So M/S bass plays about
+3.1 dB under the input at every frequency: a tone at 2 kHz is unchanged apart from that preamp.
+`make host-e2e` measures these levels on a private PipeWire.
 
 ## A chain from an older svolder
 
@@ -128,14 +147,16 @@ reads the state file (an event or a tick's reload), and no panic.
 
 The rule that nothing plays over unity says nothing about whether the EQ still works, so a second
 one asks after three seconds with no event, once, while nothing is armed to fail (a refused send,
-a node not listed yet) and the controller can tell what the node plays. It cannot after a line a
-dying `pw-cli` took without applying; after the graph is rebuilt at a rate the controller last
-read (the slots go back, and a revert with no rate change is not noticed); when the daemon starts
-over a node it did not start. The rule waits there for the next line that carries every slot, or a
-node the controller started. A controller that says it is on and live must have a node that plays
-the points it shows, at the rate the sink runs at, under the preamp it shows, within 0.05 dB at
-every frequency of a grid. One that is off, with a curve that plays at the sink's rate, must turn
-on when asked.
+a node not listed yet) and the controller can tell what the node plays. A `pw-cli` that ended after
+taking a line is started again at the next look, within a second, and the newest values are sent; a
+graph rebuilt at the rate the controller last read puts the slots back, and the look sees it, since
+any port the look before held at its sent value that now differs is a revert and is sent again. A
+daemon that starts over a node it did not start compares its slots and preamp with the saved points
+at the first look and, where they differ, sends the saved state through the normal update (preamp
+first when it falls, never above the node's own preamp unless that is the -120 dB floor): the saved
+file wins. A controller that says it is on and live must have a node that plays the points it shows,
+at the rate the sink runs at, under the preamp it shows, within 0.05 dB at every frequency of a
+grid. One that is off, with a curve that plays at the sink's rate, must turn on when asked.
 
 The short run is two blocks of 300 seeds. The first draws every kind of event with its usual
 weight. The second, the targeted profile, takes nearly half of its events from a command-line

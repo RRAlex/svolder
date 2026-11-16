@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The computer's EQ over MQTT: one ON/OFF switch and one read-only preset sensor, both under a
-//! Home Assistant device of their own, `This computer`. Nothing else of the computer is
-//! exposed: no volume, no mute, no points.
+//! The computer's EQ over MQTT: one ON/OFF switch and one read-only preset sensor, and the
+//! crossfeed's switch and preset select ([`crossfeed`]), all under a Home Assistant device of
+//! their own, `This computer`. Nothing else of the computer is exposed: no volume, no mute, no
+//! points.
 //!
 //! The entities live under the bridge-level unit [`UNIT`], so their topics read
 //! `<base>/computer/computer_eq/state` and `.../set`, and `<base>/computer/computer_eq_preset/state`.
@@ -12,10 +13,12 @@
 //! them.
 
 use serde_json::{Map, Value as Json, json};
-use svolder_host::eq::EqView;
+use svolder_host::eq::{CrossfeedView, EqView};
 
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
+
+pub mod crossfeed;
 
 /// The bridge-level unit the computer's topics sit under, in place of a device's unit id.
 pub const UNIT: &str = "computer";
@@ -38,9 +41,31 @@ const OFF: &str = "OFF";
 /// What the preset sensor says for a curve no preset stands for.
 pub const CUSTOM: &str = svolder_profiles::tone::preset::CUSTOM;
 
-/// The computer's discovery entries: the switch (a `binary_sensor` unless `commands`) and the
-/// preset sensor. An empty `discovery_prefix` turns discovery off and returns nothing.
-pub fn entries(base_topic: &str, discovery_prefix: &str, commands: bool) -> Vec<DiscoveryEntry> {
+/// Every discovery topic the computer's entities can have for `commands`, whatever the view
+/// holds, for clearing what an earlier run announced.
+pub fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
+    if discovery_prefix.is_empty() {
+        return Vec::new();
+    }
+    let component = if commands { "switch" } else { "binary_sensor" };
+    let mut all = vec![
+        topics::discovery_config(discovery_prefix, component, UNIT, EQ_KEY),
+        topics::discovery_config(discovery_prefix, "sensor", UNIT, PRESET_KEY),
+    ];
+    all.extend(crossfeed::topics_of(discovery_prefix, commands));
+    all
+}
+
+/// The computer's discovery entries: the EQ switch (a `binary_sensor` unless `commands`) and
+/// preset sensor, and, when the controller serves crossfeed (`crossfeed` is its view), the
+/// crossfeed switch and preset select. An empty `discovery_prefix` turns discovery off and
+/// returns nothing.
+pub fn entries(
+    base_topic: &str,
+    discovery_prefix: &str,
+    commands: bool,
+    crossfeed: Option<&CrossfeedView>,
+) -> Vec<DiscoveryEntry> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
@@ -63,7 +88,7 @@ pub fn entries(base_topic: &str, discovery_prefix: &str, commands: bool) -> Vec<
         "state_topic".into(),
         topics::diagnostic(base_topic, UNIT, PRESET_KEY).into(),
     );
-    vec![
+    let mut all = vec![
         DiscoveryEntry {
             topic: topics::discovery_config(discovery_prefix, component, UNIT, EQ_KEY),
             payload: Json::Object(switch),
@@ -72,7 +97,16 @@ pub fn entries(base_topic: &str, discovery_prefix: &str, commands: bool) -> Vec<
             topic: topics::discovery_config(discovery_prefix, "sensor", UNIT, PRESET_KEY),
             payload: Json::Object(preset),
         },
-    ]
+    ];
+    if let Some(view) = crossfeed {
+        all.extend(crossfeed::entries(
+            base_topic,
+            discovery_prefix,
+            commands,
+            view,
+        ));
+    }
+    all
 }
 
 /// The fields every entity of the computer shares.

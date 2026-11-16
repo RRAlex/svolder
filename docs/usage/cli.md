@@ -1057,8 +1057,9 @@ Correct what the computer plays, before it reaches the DAC
 Usage: svolder host [OPTIONS] <COMMAND>
 
 Commands:
-  eq    An equalizer on what the computer plays
-  help  Print this message or the help of the given subcommand(s)
+  eq         An equalizer on what the computer plays
+  crossfeed  Cross a little of each channel into the other for headphones, through the daemon
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
   -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
@@ -1071,7 +1072,8 @@ Options:
 
 ### host eq
 
-The group's one subcommand, with `apply`, `remove` and `status` below it.
+The group's first subcommand, with `apply`, `remove` and `status` below it. (`host crossfeed`, the
+group's other one, is described in its own section.)
 
 ```
 An equalizer on what the computer plays
@@ -1207,6 +1209,10 @@ On the default route the default output goes back to what it was. A chain that i
 after a reboot or a kill, is removed all the same, and a remove with nothing applied does nothing.
 `svolder: host EQ removed` says it was on, `svolder: host EQ was not on` that it was not.
 
+When crossfeed plays, a `remove` that finds the daemon running only turns the EQ off and says:
+`svolder: host EQ off; the chain stays while crossfeed plays`. Without a daemon, `remove` also
+turns the saved crossfeed switch off; the model and numbers are kept.
+
 Applying or removing the computer EQ adds or takes away the node what is playing goes through, so
 WirePlumber links each stream again: a player can stall for a moment, and a browser can pause as it
 does when headphones are unplugged — press play again. svolder sends nothing to the player.
@@ -1253,6 +1259,11 @@ $ svolder host eq status
 host EQ: off (last: Sennheiser HD 650)
 ```
 
+While the chain runs for crossfeed alone (the EQ is off), `status` says so:
+`host EQ: off · the chain is running for crossfeed alone · in front of SINK · MANAGER`. While both
+are off and the chain is kept as a flat pass-through for a stream still playing, `status` says the
+chain is kept as a pass-through until idle, and `remove` leaves it, saying so.
+
 A state file that says on while nothing runs reads `stopped` and names the fix on a second line,
 `the unit is not running: systemctl --user status svolder-host-eq` (for a process,
 `the process is not running: apply it again with svolder host eq apply`); one that says off while
@@ -1261,6 +1272,82 @@ with `on`, `running` (`null` when it could not be told), `name`, `origin`, `targ
 `manager`, `previous_default`, `preamp_db`, `filters` (each `type`, `f`, `g`, `q`) and `problem`;
 with nothing ever applied it prints `{"on":false,"running":null}`; a state file that cannot be read
 says so, `host EQ: unknown: …`, instead of reading as off.
+
+### host crossfeed
+
+Cross a little of each channel into the other for headphones: the computer's
+[crossfeed](eq.md#crossfeed) (what it does, the four models, the ranges). With no verb it prints
+the state; a verb changes it. Every verb goes through `svolderd`, which owns the filter chain and
+every rule that keeps a crossfeed from being left on, so the CLI never starts one by itself
+(`--transport` does not change that).
+
+```
+Cross a little of each channel into the other for headphones, through the daemon
+
+Usage: svolder host crossfeed [OPTIONS] [COMMAND]
+
+Commands:
+  on         Turn the crossfeed on, with the numbers it has
+  off        Turn the crossfeed off
+  model      Choose the model (the words `svolder host crossfeed --json` lists under `models`) and load its default preset
+  preset     Load one of the model's presets, by the name the view lists
+  level     Set how much of the other channel is crossed, in percent
+  crossover  Set the crossover, in Hz
+  delay      Set the total lag of the crossed signal, in ms, or `own` for the model's own
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the crossfeed as the daemon sends it, as one JSON object
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help (see more with '--help')
+```
+
+```
+$ svolder host crossfeed
+crossfeed: off
+model: Bauer
+preset: bs2b default
+level: 37 % · −8.6 dB
+crossover: 700 Hz
+delay: 0.26 ms (own, floor 0.26 ms)
+output: Example DAC
+$ svolder host crossfeed preset chu moy
+$ svolder host crossfeed level 40
+$ svolder host crossfeed delay own
+$ svolder host crossfeed on
+crossfeed: on
+```
+
+The lines are: `crossfeed:` on or off (with the reason after a colon when it cannot be changed now),
+the `model`, the `preset` (`Custom (edited from Chu Moy)` after a number was changed), the `level`
+as percent and the crossed signal's level in dB (`20·log10` of the share, as the TUI and the web
+show it; `--json` also carries bs2b's feed level as `feed_db`), the `crossover`, the `delay` (the
+total lag, `own` when it is the model's own, and its floor), the `output` it plays into when known
+and the `note` of the last reset ([the four resets](eq.md#it-turns-itself-off)). `--json` prints the
+daemon's view as one object, also after a verb: `on`, `model`, `preset`, `edited_from`,
+`amount_pct`, `amount_db`, `feed_db`, `crossover_hz`, `delay_ms`, `delay_floor_ms`,
+`delay_settable`, `delay_own`, `output`, `note`, `off_reason`, `unavailable`, `curve` (the two level
+curves, 61 points) and `models` (every model's words, presets and ranges).
+
+The verbs: `on` and `off`; `model WORD` (`bauer`, `linkwitz`, `meier`, `mid-side`; loads the model's
+default preset); `preset NAME` (matched case-insensitively against the current model's presets,
+several words need no quotes); `level PERCENT`; `crossover HZ`; `delay MS` or `delay own` (back to
+the model's own lag; Mid/Side bass takes no delay). Numbers are plain (`level 37`, `crossover 700`);
+a trailing unit is accepted but never needed, which keeps `%` out of scripts and crontabs. A value
+past a range is held to it by the daemon, and the answer prints what it holds. Turning crossfeed on
+never asks: the preamp is lowered first.
+
+With no daemon running, or one that does not answer, `show` cannot know whether crossfeed plays
+(a TUI with no daemon may be playing it): its first line is `crossfeed: unknown: …` with what the
+saved state says (`on` or `off`), and the other lines are the saved settings (the delay floor at an
+assumed 48 kHz); `--json` carries the saved switch in `on` and the reason in `unavailable`. A
+daemon that answers with host audio off shows them as off. Every verb with no daemon exits 3, naming
+`svolder daemon install`; a daemon that does not offer crossfeed (an older one) exits 7
+(`svolder daemon restart`). See [exit codes](exit-codes.md).
 
 ## capture
 
@@ -1343,7 +1430,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.34.5
+svolder 0.35.1
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

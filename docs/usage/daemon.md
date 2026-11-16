@@ -253,19 +253,18 @@ for a tag that has no release yet). It builds each architecture on a native runn
 `check.yml` (which runs on every push to main) already passed on that very commit, which the run
 asks the API first; a by-hand run always tests. The images and the release wait for that check. So
 push main, wait for `check.yml` to pass, then push the tag. The release then pushes the
-multi-architecture image, then a last
-job combines the files (`make release-files`), attaches the compose file
-(`packaging/release-compose.sh`: `docker-compose.yml` with its `image:` line and the comment above
-it changed for `ghcr.io/rralex/svolder:VERSION`), checks the draft against `SHA256SUMS` and
-publishes it; a failed run leaves no release. The image is tagged `VERSION` (both architectures)
-and, as each architecture is built on its own runner, `VERSION-amd64` and `VERSION-arm64`; there is
-no `latest`, so pin a version. `docker-compose.yml` is the one asset outside `SHA256SUMS`.
-`make workflow-check` (part of `make check`) allows the workflow's two triggers and
-nothing else (`workflow_dispatch`, and `push` of `v*` tags with no branch or path filter); it also
-fails on a job with a write scope beyond its own
-(`contents` for the release job, `packages` for the image jobs), a step that runs `make` with a
-token in its environment, a `run:` that interpolates untrusted input, a persisted clone token or an
-action that is not pinned to a commit SHA.
+multi-architecture image, and a last job combines the files (`make release-files`), attaches the
+compose file (`packaging/release-compose.sh`: `docker-compose.yml` with its `image:` line and the
+comment above it changed for `ghcr.io/rralex/svolder:VERSION`), checks the draft against
+`SHA256SUMS` and publishes it; a failed run leaves no release. The image is tagged `VERSION` (both
+architectures) and, as each architecture is built on its own runner, `VERSION-amd64` and
+`VERSION-arm64`; there is no `latest`, so pin a version. `docker-compose.yml` is the one asset
+outside `SHA256SUMS`. `make workflow-check` (part of `make check`) allows the workflow's two
+triggers and nothing else (`workflow_dispatch`, and `push` of `v*` tags with no branch or path
+filter); it also fails on a job with a write scope beyond its own (`contents` for the release job,
+`packages` for the image jobs), a step that runs `make` with a token in its environment, a `run:`
+that interpolates untrusted input, a persisted clone token or an action that is not pinned to a
+commit SHA.
 
 The binaries are static, so one build runs on any x86_64 Linux: they reach the system bus through
 the libdbus built into them, and PipeWire through its own tools (`wpctl`, `pw-record`) when those
@@ -428,6 +427,16 @@ follows `svolderd:` for those two levels. When the daemon's stderr is the system
 (`JOURNAL_STREAM` names it), the line has neither the stamp nor `svolderd: `, since the journal
 stamps each line and tags it with the unit and pid (`... myhost svolderd[812]: error: ...`).
 `svolder daemon status` names where the log goes, and `svolder daemon logs` reads it.
+
+### Thread names
+
+`top -H -p <pid>` (or `ps -L`) shows which thread uses the CPU. The runtime's workers are
+`svolderd-tokio` in the daemon and `svolder-tokio` in `svolder` (the TUI and the verbs). The rest
+are named for their job: `svolder-capture` reads the frames of the computer's sound capture,
+`svolder-mpris-connect` opens the connection to the session bus for the player, `svolder-eq-reap`
+waits for the computer EQ's chain process to end, `svolder-reap` waits for a short helper to end
+(the clipboard tool, the start-up sound, the browser `svolder web` opens) so none lingers as a
+zombie, and `svolder-demo-watch` looks at the daemon a `--demo` run started.
 
 ### Configuration file
 
@@ -773,7 +782,9 @@ the override's contents in `docker-compose.override.yml` beside `docker-compose.
 `docker-compose.host-audio.yml` there and set `COMPOSE_FILE` and the two keys in `.env` by hand.
 Through the socket the daemon reads and sets the computer's volume and carries the computer EQ as a
 `pipewire` child of the daemon inside the container, which ends with it; it is applied again at the
-daemon's start when `host-eq.toml` says it was on. A one-shot
+daemon's start when `host-eq.toml` says it was on. The computer's crossfeed is the exception: it is
+turned off at the daemon's start (the saved settings stay) and at its graceful stop, so it never
+outlives the daemon that was asked to play it ([the resets](eq.md#it-turns-itself-off)). A one-shot
 `svolder host eq` in the container refuses, printing `in a container the computer EQ runs with the
 daemon. start svolderd, then try again`. Without the override the daemon has no host side
 (`available` is `false` in `host`), the web page draws no Now playing card and no path line, and a
@@ -1167,7 +1178,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.34.5 on /run/user/1000/svolder.sock
+daemon: 0.35.1 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)
@@ -1303,6 +1314,9 @@ Options:
 unit does not listen on is another daemon's, and that daemon is the one asked to stop — which is
 what the `also running` lines of `daemon status` and doctor's "Other daemons" rows print. "Nothing
 to stop" where neither the units nor a daemon answering are there.
+
+A stop that ends the daemon in order also turns the computer's crossfeed off and removes a chain
+that ran for crossfeed alone; a computer EQ the chain carries stays as it was.
 
 ```
 Stop the daemon

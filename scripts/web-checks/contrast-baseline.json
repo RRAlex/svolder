@@ -89,10 +89,6 @@
   "ratio": 2.775,
   "need": 3.0
  },
- "ember.dark|eq-library|button#popup-eq-library-close|edge": {
-  "ratio": 1.31,
-  "need": 3.0
- },
  "ember.dark|eq-library|button#popup-eq-library-compare-open|edge": {
   "ratio": 2.864,
   "need": 3.0
@@ -107,6 +103,10 @@
  },
  "ember.dark|eq-library|button#popup-eq-library-v-0-2|edge": {
   "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|eq-library|button#popup-sound-close|edge": {
+  "ratio": 1.31,
   "need": 3.0
  },
  "ember.dark|eq-library|button.fi-btn|edge": {
@@ -142,7 +142,7 @@
   "need": 3.0
  },
  "ember.dark|guest|button.viz-graph|edge": {
-  "ratio": 1.738,
+  "ratio": 1.744,
   "need": 3.0
  },
  "ember.dark|help|button#popup-help-close|edge": {
@@ -158,7 +158,7 @@
   "need": 3.0
  },
  "ember.dark|off|button.viz-graph|edge": {
-  "ratio": 1.738,
+  "ratio": 1.744,
   "need": 3.0
  },
  "ember.dark|page|#part-tone .eqg gap|graph": {
@@ -194,7 +194,19 @@
   "need": 3.0
  },
  "ember.dark|page|button.viz-graph|edge": {
-  "ratio": 1.744,
+  "ratio": 1.738,
+  "need": 3.0
+ },
+ "ember.dark|sound|button#popup-sound-close|edge": {
+  "ratio": 1.31,
+  "need": 3.0
+ },
+ "ember.dark|sound|button.fi-btn|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|sound|input#popup-eq-library-query|edge": {
+  "ratio": 1.749,
   "need": 3.0
  },
  "nightdrive.dark|blank|button#nd-sheet|text": {
@@ -299,6 +311,10 @@
  },
  "nightdrive.dark|page|text|text-large": {
   "ratio": 1.003,
+  "need": 3.0
+ },
+ "nightdrive.dark|sound|button.fi-btn|edge": {
+  "ratio": 2.792,
   "need": 3.0
  },
  "paper.dark|eq-library|.fp-graph gap|graph": {
@@ -445,6 +461,10 @@
   "ratio": 2.483,
   "need": 3.0
  },
+ "paper.light|sound|button.fi-btn|edge": {
+  "ratio": 2.409,
+  "need": 3.0
+ },
  "signal.dark|blank|button#fx-button|edge": {
   "ratio": 1.546,
   "need": 3.0
@@ -533,10 +553,6 @@
   "ratio": 2.758,
   "need": 3.0
  },
- "signal.dark|eq-library|button#popup-eq-library-close|edge": {
-  "ratio": 1.485,
-  "need": 3.0
- },
  "signal.dark|eq-library|button#popup-eq-library-compare-open|edge": {
   "ratio": 2.864,
   "need": 3.0
@@ -551,6 +567,10 @@
  },
  "signal.dark|eq-library|button#popup-eq-library-v-0-2|edge": {
   "ratio": 2.864,
+  "need": 3.0
+ },
+ "signal.dark|eq-library|button#popup-sound-close|edge": {
+  "ratio": 1.485,
   "need": 3.0
  },
  "signal.dark|eq-library|button.fi-btn|edge": {
@@ -1163,6 +1183,18 @@
  },
  "signal.dark|page|input#sg-b5q|edge": {
   "ratio": 1.065,
+  "need": 3.0
+ },
+ "signal.dark|sound|button#popup-sound-close|edge": {
+  "ratio": 1.485,
+  "need": 3.0
+ },
+ "signal.dark|sound|button.fi-btn|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "signal.dark|sound|input#popup-eq-library-query|edge": {
+  "ratio": 1.692,
   "need": 3.0
  }
 }

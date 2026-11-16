@@ -192,6 +192,18 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     app.flip_side();
                 }
             }
+            if hint.when == When::HasCrossfeed {
+                app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
+                    false,
+                    "bauer",
+                    Some("Chu Moy"),
+                ));
+                app.flip_side();
+                if hint.label.ends_with("on Crossfeed") {
+                    // the section's own keys act with the keys in it
+                    app.focus_crossfeed(crate::tui::app::Xf::Preset);
+                }
+            }
             if hint.label == "< > |" {
                 // the bar's keys act on the bar the last frame drew
                 app.drawn.split.set(Some(crate::tui::app::divider::Split {

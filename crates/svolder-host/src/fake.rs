@@ -523,6 +523,8 @@ pub enum ChainCall {
 #[derive(Debug, Clone, Default)]
 pub struct FakeChain {
     inner: Arc<Mutex<ChainInner>>,
+    /// Woken when the chain dies.
+    died: Arc<Notify>,
 }
 
 #[derive(Debug, Default)]
@@ -531,6 +533,8 @@ struct ChainInner {
     calls: Vec<ChainCall>,
     refusing: Option<EqFailure>,
     unknown: bool,
+    /// The process that runs the chain ended on its own; an apply or a remove clears it.
+    dead: bool,
 }
 
 impl FakeChain {
@@ -544,6 +548,20 @@ impl FakeChain {
     /// Whether the chain cannot tell if it runs: its status then has no `running` answer.
     pub fn cannot_tell(&self, unknown: bool) {
         self.lock().unknown = unknown;
+    }
+
+    /// The chain's process ends on its own: it no longer runs, and [`Chain::exited`] resolves,
+    /// until an apply or a remove.
+    pub fn die(&self) {
+        self.lock().dead = true;
+        self.died.notify_waiters();
+    }
+
+    /// Another process started a chain again: it runs, as `state` says.
+    pub fn set_running_again(&self, state: HostEqState) {
+        let mut inner = self.lock();
+        inner.state = Some(HostEqState { on: true, ..state });
+        inner.dead = false;
     }
 
     /// A chain with nothing applied.
@@ -589,8 +607,17 @@ impl Chain for FakeChain {
             preamp_db: played_preamp(&request.correction, rate),
             filters: held.filters,
             slots: held.slots,
+            // As the real host keeps them: the settings stay, the request says whether the
+            // stage is in the config and whether the EQ plays flat.
+            crossfeed: request
+                .crossfeed
+                .clone()
+                .or_else(|| inner.state.as_ref().and_then(|s| s.crossfeed.clone())),
+            crossfeed_on: request.crossfeed.is_some(),
+            flat: request.flat,
         };
         inner.state = Some(state.clone());
+        inner.dead = false;
         Ok(state)
     }
 
@@ -600,6 +627,7 @@ impl Chain for FakeChain {
         if let Some(failure) = inner.refusing.clone() {
             return Err(failure);
         }
+        inner.dead = false;
         if let Some(state) = inner.state.as_mut() {
             state.on = false;
         }
@@ -616,11 +644,14 @@ impl Chain for FakeChain {
     }
 
     async fn status(&self) -> EqStatus {
-        let (state, unknown) = {
+        let (state, unknown, dead) = {
             let inner = self.lock();
-            (inner.state.clone(), inner.unknown)
+            (inner.state.clone(), inner.unknown, inner.dead)
         };
-        let running = state.as_ref().map(|state| state.on).filter(|_| !unknown);
+        let running = state
+            .as_ref()
+            .map(|state| state.on && !dead)
+            .filter(|_| !unknown);
         EqStatus {
             state,
             running,
@@ -635,6 +666,21 @@ impl Chain for FakeChain {
     fn state(&self) -> Option<HostEqState> {
         self.lock().state.clone()
     }
+
+    async fn exited(&self) {
+        loop {
+            let woken = self.died.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            {
+                let inner = self.lock();
+                if inner.dead && inner.state.as_ref().is_some_and(|state| state.on) {
+                    return;
+                }
+            }
+            woken.await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -644,6 +690,15 @@ mod tests {
     use super::*;
     use crate::fft::BANDS;
     use crate::players::Progress;
+
+    #[tokio::test]
+    async fn the_fake_chain_node_lists_the_crossfeed_ports_until_they_are_removed() {
+        let params = FakeParams::new();
+        let mut handle = params.clone();
+        assert!(handle.node().await.unwrap().has_crossfeed_controls());
+        params.without_crossfeed_ports();
+        assert!(!handle.node().await.unwrap().has_crossfeed_controls());
+    }
 
     fn dac(volume: f32, muted: bool) -> SinkState {
         SinkState {
@@ -967,6 +1022,8 @@ mod tests {
             sink: None,
             slots: Vec::new(),
             rate_hz: None,
+            flat: false,
+            crossfeed: None,
         };
         assert_eq!(chain.state(), None);
         let state = chain.apply(request.clone()).await.expect("applies");
@@ -1013,6 +1070,8 @@ mod tests {
             sink: None,
             slots: Vec::new(),
             rate_hz: None,
+            flat: false,
+            crossfeed: None,
         }
     }
 
@@ -1050,19 +1109,29 @@ struct ParamsInner {
     /// The node id kept since the last look, as the real session keeps it until it is told to
     /// look again.
     kept: Option<u32>,
+    /// The output the computer plays into, as the last look at the graph saw it.
+    output: Option<crate::eq::live::OutputSink>,
 }
 
 impl Default for FakeParams {
     /// A fake with a node (id 1, 48 kHz) that takes every send, whose preamp ports hold +60 dB,
-    /// which bounds no preamp a controller sends.
+    /// which bounds no preamp a controller sends, and that lists the crossfeed stage's controls
+    /// as a current chain does.
     fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(ParamsInner {
                 node: Some(LiveNode {
                     id: 1,
                     rate_hz: Some(48_000),
-                    // A current chain lists its preamp control before any set.
-                    params: crate::eq::live::preamp_params(60.0).into_iter().collect(),
+                    sink: None,
+                    playing: false,
+                    // A current chain lists its preamp and crossfeed controls before any set.
+                    params: crate::eq::live::preamp_params(60.0)
+                        .into_iter()
+                        .chain(crate::eq::live::crossfeed_params(
+                            &crate::eq::CrossfeedStage::bypass(),
+                        ))
+                        .collect(),
                 }),
                 takes: true,
                 lines: Vec::new(),
@@ -1070,6 +1139,7 @@ impl Default for FakeParams {
                 forgotten: 0,
                 holds: true,
                 kept: None,
+                output: None,
             })),
         }
     }
@@ -1095,6 +1165,38 @@ impl FakeParams {
     /// The node the fake reports from now on, `None` for a chain that is not in the graph.
     pub fn set_node(&self, node: Option<LiveNode>) {
         self.lock().node = node;
+    }
+
+    /// Whether a stream plays through the chain's sink from now on.
+    pub fn set_playing(&self, playing: bool) {
+        if let Some(node) = self.lock().node.as_mut() {
+            node.playing = playing;
+        }
+    }
+
+    /// The output the fake reports from now on, `None` for none known.
+    pub fn set_output(&self, output: Option<crate::eq::live::OutputSink>) {
+        self.lock().output = output;
+    }
+
+    /// Set the values the node holds for `ports` without a send: PipeWire changed them (the graph
+    /// was rebuilt at the same rate and the ports went back to the config's).
+    pub fn set_ports(&self, ports: &[(&str, f64)]) {
+        if let Some(node) = self.lock().node.as_mut() {
+            for (name, value) in ports {
+                node.params.insert((*name).to_string(), *value);
+            }
+        }
+    }
+
+    /// A node as a 0.34 chain shows it: the preamp's controls and none of the crossfeed stage's.
+    pub fn without_crossfeed_ports(&self) {
+        if let Some(node) = self.lock().node.as_mut() {
+            for (name, _) in crate::eq::live::crossfeed_params(&crate::eq::CrossfeedStage::bypass())
+            {
+                node.params.remove(&name);
+            }
+        }
     }
 
     /// The lines sent so far, as `pw-cli` would be given them.
@@ -1127,6 +1229,10 @@ impl Params for FakeParams {
 
     async fn sink_rate(&mut self) -> Option<u32> {
         self.lock().node.as_ref().and_then(|node| node.rate_hz)
+    }
+
+    fn output(&self) -> Option<crate::eq::live::OutputSink> {
+        self.lock().output.clone()
     }
 
     async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {

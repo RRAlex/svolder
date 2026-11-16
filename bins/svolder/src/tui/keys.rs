@@ -76,6 +76,8 @@ pub enum When {
     HasComputer,
     /// Only while the computer's side is shown.
     OnComputer,
+    /// Only while the computer's side is shown and its controller serves crossfeed.
+    HasCrossfeed,
     /// Only on a wizard step that offers choices.
     Choosing,
     /// Only on a wizard step that takes a typed line.
@@ -110,6 +112,8 @@ pub struct Scene {
     pub has_computer: bool,
     /// Whether the computer's side is shown.
     pub on_computer: bool,
+    /// Whether the computer's side is shown with crossfeed to change.
+    pub has_crossfeed: bool,
     /// Whether it has no volume for the keys to move: a flag that reads false by default, so a
     /// screen that says nothing of it leaves the key worth pressing.
     pub no_volume: bool,
@@ -150,6 +154,7 @@ impl Scene {
             has_balance: app.balance().is_some(),
             has_computer: app.computer_offered(),
             on_computer: app.on_computer(),
+            has_crossfeed: app.crossfeed_shown(),
             no_volume: app.volume().is_none(),
             no_toggle: !app.has_toggle_or_host_rows(),
             no_identify: !app.identify_offered(),
@@ -509,6 +514,58 @@ static HINTS: &[KeyHint] = &[
         group: ACTIONS,
         toggles: None,
         long: Some(PRESETS_LONG),
+    },
+    // The computer's crossfeed: `X` goes to its section on the tone screen (unfolding it) and
+    // out of it again (folding it); the other keys act on its rows while the keys are in them.
+    KeyHint {
+        code: KeyCode::Char('X'),
+        label: "X",
+        does: "toggle crossfeed",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasCrossfeed,
+        group: ACTIONS,
+        toggles: None,
+        long: Some("toggle the crossfeed section (unfold / fold)"),
+    },
+    KeyHint {
+        code: KeyCode::Char(' '),
+        label: "\u{2423} on Crossfeed",
+        does: "crossfeed on/off",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasCrossfeed,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Right,
+        label: "\u{2190}\u{2192} on Crossfeed",
+        does: "preset / step",
+        screens: &[Screen::Tone],
+        when: When::HasCrossfeed,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Char('.'),
+        label: ", . on Crossfeed",
+        does: "model / preset",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasCrossfeed,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Enter,
+        label: "Enter on Crossfeed",
+        does: "type a value / open",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasCrossfeed,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
     },
     // The computer's table of points, on the tone-control screen's computer side.
     KeyHint {
@@ -978,6 +1035,8 @@ pub fn hidden_in(hint: &KeyHint, scene: Scene) -> bool {
         When::HasPhase | When::HasNos => !available_in(hint, scene),
         // The computer's keys are not listed where its controls are not there at all.
         When::HasComputer | When::OnComputer => !scene.has_computer,
+        // Crossfeed's keys are not listed where the computer serves none.
+        When::HasCrossfeed => !scene.has_crossfeed,
         _ => false,
     }
 }
@@ -1005,6 +1064,7 @@ pub fn available_in(hint: &KeyHint, scene: Scene) -> bool {
         When::CanIdentify => !scene.no_identify,
         When::HasComputer => scene.has_computer,
         When::OnComputer => scene.on_computer,
+        When::HasCrossfeed => scene.has_crossfeed,
         When::Choosing => !scene.typing,
         When::Typing => scene.typing,
         When::Backable => scene.can_go_back,

@@ -99,6 +99,9 @@ every popup stand on it, so a popup brings no modal code of its own.
   (`onKey: (event) => list.key(event) || form.key(event)`).
 - Of the keys `onKey` leaves, Escape closes the top and Tab goes round, also from outside the top:
   from its last control to its first, with Shift back, past one that is disabled or not rendered.
+  A radio group is one stop, as it is for the browser: its checked radio, else the one Tab enters
+  it at (the first radio; the last with Shift), so a group at the end of a popup does not hide the
+  end from the stack.
 - **The browser's own behaviour inside the top is never prevented by the stack**: a letter typed
   in a field, the caret's keys, Enter and Space on the focused button, Tab from one control of the
   top to the next, a native select. A key of a text composition (an input method) is the field's
@@ -160,6 +163,15 @@ every part follows the key rule above: it attaches no key listener, and one that
   so `openList` throws for a list in a modal whose panel would land outside it. The panel is
   measured at its box's top left corner, not shown, and shown once it is placed, so measuring
   it never adds a scrollbar to the box.
+- `core/gestures.js`, `core/place.js`, `core/volume-ask.js`: the hands every theme shares: dragging
+  along a track and the slider keys; a mark's place as a fraction of its box (set through the
+  style object, never a `style` attribute); the step the page asked the volume for, which stands
+  for the reading until the device reports it (`ASK_MS`). Signal and Paper import all three; Night
+  drive places its sheet itself; Ember's knob uses `volume-ask.js` and its `menuRows` is per mount.
+- `core/clock.js`: the daemon's clock on the page. `daemonNow(now_ms, localMs)` is keyed by the
+  daemon's `now_ms` value at this page's **first local sight** of it, never by the time of a draw:
+  a redraw with no new player reading counts the track on from the same start in every theme, and
+  a new `now_ms` re-bases it.
 - `core/act.js`: `createAct(core, { now })` sends a write through the core's actions and logs the
   last fifty requests, which is how a page knows a change is its own (`MINE_MS`).
 - `tickAges` (`core.clock`): the ticker of the ages on a device's page (the Devices popup calls
@@ -201,6 +213,29 @@ theme draws inside `#theme`. So:
 
 Each module keeps one small map for this (scope to the handle open in it; an entry goes when its
 ask or list closes) and nothing else.
+
+## What a popup's frame dresses
+
+`core/frame.css` dresses a popup's classes from the `--frame-*` tokens alone, so a theme sets no
+colour of them. The box, side list, pane and shared pieces (`fp-box`, `fp-entry`, `fp-page`,
+`fp-key`, `fp-dot`, `fp-tag`, `fp-heading`, `fp-row`, `fp-graph`) are in [popups.md](popups.md);
+these are the ones around a page:
+
+- `fp-head-tools`: the header's tools, between the title and the close button (a switch); drawn
+  only when the popup's `head` is not empty.
+- `fp-bar`: a strip under the header that does not scroll, ruled by `--frame-line`. It holds
+  `fp-tabs` and, on a tab with pages, `fp-pills`.
+- `fp-tabs`, `fp-tab`: `role="tab"` buttons in `--frame-dim`; the one shown (`.on`) is
+  `--frame-ink` over a 3 px edge in `--frame-accent`. The pane is its tab panel (popups.md).
+- `fp-pills`, `fp-pill`: a tab's pages, edged and worded in `--frame-dim`; the current one (`.on`)
+  in `--frame-accent`. The focus ring of tabs, pills and switch is `--frame-accent`.
+- `fpx-*`: the Crossfeed tab. The switch (`fpx-switch`, in the header tools: `--frame-dim` off,
+  `--frame-accent` on), the menus and steppers (`fpx-menu`, `fpx-step`, edged in `--frame-dim`, a
+  custom preset in `--frame-accent`) and the readings (`fpx-row`: `--frame-dim` label,
+  `--frame-ink` value, `fpx-grey` in `--frame-faint`). The picture draws the same ear's level
+  curve (`fpx-same`) in `--frame-ink` and the other ear's (`fpx-other`) in `--frame-accent`, over
+  the grid (`--frame-graph-grid`), the leak's gap (`--frame-graph-gap`) and the crossover
+  (`--frame-graph-target`); with crossfeed off (`fpx-off`) curves and dot are `--frame-faint`.
 
 ## The last focus
 

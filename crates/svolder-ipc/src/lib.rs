@@ -39,7 +39,7 @@ pub use config::{
 pub use error::{ConfigError, IpcError};
 pub use host::{
     CaptureKind, CaptureView, DacFacts, FrameView, Hop, HostView, HostVolume, PathLine,
-    PlayingView, Verdict, path_line, sink_is_dac,
+    PlayingView, Verdict, path_line, run_eq_op, sink_is_dac,
 };
 pub use passphrase_note::{PassphraseNote, passphrase_verdict};
 pub use socket::client::{Client, is_running, request_on_own_connection};

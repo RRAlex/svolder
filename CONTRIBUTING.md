@@ -43,12 +43,13 @@ first.
 
     make demo-safe
 
-builds the workspace and runs `svolder tui --demo`: the TUI on a fake device, on a daemon of its
-own.
-The daemon, its configuration, its state and its socket live in a private directory made for the
-run and removed when it ends, so nothing of yours is read or written. `make demo` is not that: it
-adds `--host --web`, so the fake device sits beside your computer's real audio (the real volume,
-media player and computer EQ, which stay changed after it) and the web UI listens on a free port.
+builds `svolder` and `svolderd` with the optimised `demo` profile (a second target directory,
+`target/demo`, beside `target/debug`, about 4 % of a core with music playing instead of about 27 %)
+and runs `svolder tui --demo`: the TUI on a fake device, on a daemon of its own. The daemon, its
+configuration, its state and its socket live in a private directory made for the run and removed
+when it ends, so nothing of yours is read or written. `make demo` is not that: it adds `--host
+--web`, so the fake device sits beside your computer's real audio (the real volume, media player and
+computer EQ, which stay changed after it) and the web UI listens on a free port.
 
 The fake is a Gungnir 2. `SVOLDER_FAKE_PROFILE` picks another profile (`fake-amp`, `fake-mono`,
 `fake-five` or any built-in one) and `SVOLDER_FAKE_SIGNAL=1` plays a music-like signal on the

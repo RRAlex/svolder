@@ -8,6 +8,10 @@
 //! the words, and the device's writer ([`crate::writer`]) sends the commands in order, stopping at
 //! the first that fails.
 
+pub(crate) mod fits;
+
+pub use self::fits::{fitted, warm};
+
 use svolder_profiles::device_presets::{self, SettingWrite};
 use svolder_profiles::tone::preset::{self, EqCommand, Preset, Recall, RecallError};
 use svolder_profiles::{Profile, ProfileError};

@@ -159,10 +159,10 @@ ok('the_list_refuses_a_popup_without_its_row_and_a_name_twice', () => {
 ok('the_pages_list_is_one_the_core_can_read_and_holds_help', () => {
   assert.doesNotThrow(() => checkListed(POPUPS));
   assert.deepEqual(POPUPS.map((popup) => [popup.name, popup.row.label, popup.row.sees]),
-    [['devices', 'Devices…', 'everyone'], ['eq-library', 'EQ library…', 'writer'],
+    [['devices', 'Devices…', 'everyone'], ['sound', 'Sound…', 'writer'],
       ['help', 'Help…', 'everyone']]);
   assert.equal(POPUPS[0].stays, true, 'Devices stays through a change of the shown device');
-  assert.ok(!POPUPS[1].stays && !POPUPS[2].stays, 'the EQ library and Help do not');
+  assert.ok(!POPUPS[1].stays && !POPUPS[2].stays, 'Sound and Help do not');
 });
 
 ok('no_row_of_the_frames_names_a_device', () => {

@@ -190,10 +190,15 @@ fn the_mascot_is_shown_the_device() {
     hear_one(&mut app, &id, min + 3);
     let view = app.mascot_view();
     assert_eq!(view.volume, Some((min + 3, min, max)));
-    assert!(view.screen_is_home);
+    assert!(
+        !view.screen_is_home,
+        "an unseen squirrel's home is not measured"
+    );
     assert_eq!(view.link, crate::tui::decoration::mascot::Link::Connected);
     assert!(view.eq.is_none(), "no tone reading has been heard");
     assert!(!app.mascot_on(), "hidden until the terminal can show it");
+    app.mascot.capable = true;
+    assert!(app.mascot_view().screen_is_home);
 }
 
 /// The hour's toast is told only while the squirrel may be seen, and never over a Failure toast.
@@ -238,6 +243,7 @@ fn a_home_with_no_room_is_away_from_home() {
         &TuiConfig::default(),
         Vec::new(),
     );
+    app.mascot.capable = true;
     assert!(app.mascot_view().screen_is_home, "the pane has room");
     let eq = app.profile.eq.as_mut().expect("a tone control");
     let band = eq.bands[0].clone();

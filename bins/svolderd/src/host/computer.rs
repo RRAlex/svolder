@@ -17,20 +17,21 @@
 //!   service writes nothing; only a daemon in a container applies the chain again, once per
 //!   start of the computer side (the daemon's start, or the host coming back on after a reload),
 //!   when the saved state says it was on ([`Computer::start`]). The view never says on while no
-//!   chain runs.
+//!   chain runs. The one exception is the crossfeed: a state that says it plays was left by a
+//!   run that did not stop, so the start takes the stage out (or removes a chain that ran for it
+//!   alone), and a stop or a reload that ends the computer side does the same
+//!   ([`Computer::shutdown`]): crossfeed never stays on across a restart.
 //! - Volume writes are coalesced to the newest value, at most [`VOLUME_WRITE_EVERY`] apart, and
 //!   the last value is always written. The volume is 0 to 100 on the wire.
 
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::Shared;
-use svolder_host::eq::{Edit, EqControl, EqView, Keep, PwCliSession};
+use svolder_host::eq::{EqControl, EqView, Keep, PwCliSession};
 use svolder_host::{Sink, SinkState};
 use svolder_ipc::HostEqOp;
-use svolder_ipc::host::HostVolume;
-use svolder_profiles::tone::apo::{FilterKind, SourceFilter};
+use svolder_ipc::host::{HostVolume, run_eq_op};
 use svolder_profiles::tone::preset::{self, BothSides, Preset};
 use tokio::sync::{Mutex, watch};
 use tokio::time::Instant;
@@ -267,6 +268,14 @@ impl Computer {
         control.sync_running().await;
     }
 
+    /// Stop the computer's controls gracefully: the crossfeed turns off (and a chain that ran for
+    /// it alone is removed) before the controller goes.
+    pub(crate) async fn shutdown(&self) {
+        if let Ok(control) = self.control() {
+            control.lock().await.shutdown().await;
+        }
+    }
+
     /// Carry out one change of the EQ. A `Preset` is looked up in `presets`; if a device
     /// `holders` names for it plays the same one, the change is refused with a question unless it
     /// is confirmed, in which case `flatten` flattens those devices first. `SaveAs` is not the
@@ -284,10 +293,6 @@ impl Computer {
     {
         let control = self.control()?;
         match op {
-            HostEqOp::Mode { on } => {
-                let mut control = control.lock().await;
-                Ok(control.set_on(on).await.map_err(|e| e.to_string())?)
-            }
             HostEqOp::Preset {
                 name,
                 confirm,
@@ -318,13 +323,9 @@ impl Computer {
                     .await
                     .map_err(|e| flattened_note(e.to_string(), &flattened, &found.name))?)
             }
-            HostEqOp::Apply {
-                name,
-                origin,
-                correction,
-                sink,
-            } => {
-                if sink.is_some() {
+            HostEqOp::SaveAs { .. } => Err("the daemon saves a preset itself".to_string().into()),
+            op => {
+                if matches!(op, HostEqOp::Apply { sink: Some(_), .. }) {
                     return Err(
                         "the daemon puts the computer EQ in front of the default sink; \
                          choose another sink without a daemon"
@@ -333,51 +334,11 @@ impl Computer {
                     );
                 }
                 let mut control = control.lock().await;
-                Ok(control
-                    .load(name, origin, correction)
+                Ok(run_eq_op(&mut control, op)
                     .await
                     .map_err(|e| e.to_string())?)
             }
-            HostEqOp::Set {
-                index,
-                slot,
-                kind,
-                f,
-                g,
-                q,
-                done,
-            } => {
-                let edit = Edit::Set {
-                    index: index_for(index, slot)?,
-                    slot,
-                    kind: kind.as_deref().map(kind_of).transpose()?,
-                    f,
-                    g,
-                    q,
-                    done,
-                };
-                Ok(self.edit(control, edit).await?)
-            }
-            HostEqOp::Add { kind, f, g, q } => {
-                let kind = kind_of(&kind)?;
-                Ok(self
-                    .edit(control, Edit::Add(SourceFilter { kind, f, g, q }))
-                    .await?)
-            }
-            HostEqOp::Remove { index, slot } => {
-                let edit = Edit::Remove {
-                    index: index_for(index, slot)?,
-                    slot,
-                };
-                Ok(self.edit(control, edit).await?)
-            }
-            HostEqOp::SaveAs { .. } => Err("the daemon saves a preset itself".to_string().into()),
         }
-    }
-
-    async fn edit(&self, control: &Arc<Mutex<EqControl>>, edit: Edit) -> Result<(), String> {
-        let mut control = control.lock().await;
-        control.edit(edit).await.map_err(|e| e.to_string())
     }
 
     /// Tick the controller every 50 ms and have it read its state file again about once a
@@ -442,6 +403,12 @@ pub(super) async fn run(
             });
         });
     };
+    // A computer side that just ended is still turning its crossfeed off: the start reset of this
+    // one runs after it, never beside it.
+    let stopping = crate::locks::locked(&shared.stopping).take();
+    if let Some(stopping) = stopping {
+        let _ = stopping.await;
+    }
     tokio::join!(
         computer.start(container),
         computer.tick(),
@@ -514,27 +481,6 @@ fn flattened_note(why: String, devices: &[String], name: &str) -> String {
             devices.join(" and the ")
         ),
     }
-}
-
-/// A point index from the wire (from 1) as the controller counts them.
-fn zero_based(index: u8) -> Result<usize, String> {
-    usize::from(index)
-        .checked_sub(1)
-        .ok_or_else(|| "points count from 1".to_string())
-}
-
-/// The 0-based index a request means: with a slot the index is not looked at (the controller
-/// finds the point by its slot), else it counts from 1.
-fn index_for(index: u8, slot: Option<u8>) -> Result<usize, String> {
-    match slot {
-        Some(_) => Ok(usize::from(index.max(1)) - 1),
-        None => zero_based(index),
-    }
-}
-
-/// A point's type from its word on the wire.
-fn kind_of(word: &str) -> Result<FilterKind, String> {
-    FilterKind::from_str(word).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

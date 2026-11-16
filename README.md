@@ -31,6 +31,10 @@ first run on a new device as a test:
 - Tell us what happened, with the output of `svolder doctor`, in an
   [issue](https://github.com/RRAlex/svolder/issues).
 
+Confirmed on real hardware: Mimir, Freya+ (reported by users). The other models follow the protocol
+and are untested; if yours works or does not, please
+[open an issue](https://github.com/RRAlex/svolder/issues).
+
 [LEGAL.md](LEGAL.md) says the same, and you use svolder at your own risk.
 
 ## Screenshots
@@ -160,6 +164,43 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
     claude mcp add --transport http svolder http://127.0.0.1:8737/mcp --header "Authorization: Bearer <token>"
 
 [The MCP server](docs/usage/mcp.md) covers other clients, the volume rule and the tools.
+
+## How it fits together
+
+```text
+      svolder CLI / TUI      web page        MCP clients     Home Assistant
+            │ unix socket       │ HTTP + events   │ MCP          │ MQTT
+            └──────────┬────────┴────────┬────────┴──────┬───────┘
+                       ▼                 ▼               ▼
+              ┌──────────────────── servers (thin) ─────────────────┐
+              │  IPC server · web server · MCP server · MQTT bridge │
+              └──────────────────────────┬──────────────────────────┘
+                                         ▼
+              ┌──────────── core: one model, one set of ops ────────┐
+              │  the view (state every surface draws) + event feed  │
+              │  device ops → each device's writer; computer ops →  │
+              │  the EQ controller (EQ, crossfeed, preamp)          │
+              │  saved truth: config.toml + host-eq.toml (EQ state) │
+              └───────────────┬────────────────────────┬────────────┘
+                              ▼                        ▼
+                 devices (the fleet)          the computer ("host")
+                 BLE via BlueZ / fake         PipeWire: sink + route look,
+                 one writer per device:       capture → spectrum/tempo,
+                 volume rule, glides,         EQ filter chain (systemd unit,
+                 readings back                detached process or child),
+                                              live sends, crossfeed stage,
+                                              preamp rule
+```
+
+- **One writer per thing.** Each device has one writer that orders its writes and applies the volume
+  rule, and the computer's sound has one EQ controller; a front end never writes behind a running
+  daemon, and with none running the TUI or the CLI runs the same core itself.
+- **One view, many surfaces.** The words and ranges every screen shows come from the core, so the
+  TUI, the web page, MCP and Home Assistant agree.
+- **The saved files are the truth.** Live state is rebuilt from `config.toml` (devices, presets,
+  servers) and the computer EQ's `host-eq.toml`, and anything that could surprise starts off.
+
+[The architecture](docs/architecture.md) says where each part lives.
 
 ## Where the details live
 

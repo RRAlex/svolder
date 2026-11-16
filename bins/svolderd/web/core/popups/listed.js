@@ -31,8 +31,12 @@ export const HELP = 'help';
 /** The name of the Devices popup. */
 export const DEVICES = 'devices';
 
-/** The name of the EQ library popup. */
-export const EQ_LIBRARY = 'eq-library';
+/** The name of the Sound popup: its tabs are the EQ library and Crossfeed. */
+export const SOUND = 'sound';
+
+/** The router's page of the Sound popup's Crossfeed tab; its other pages (`autoeq`, `upload`,
+ * `saved`, and none) are the EQ library tab's (eq-library/draw.js). */
+export const CROSSFEED = 'crossfeed';
 
 /** The page of the Devices popup that is about the device at `url` (its URL segment): the page's
  * id in the router, whichever device the page behind shows. */
@@ -43,9 +47,10 @@ export const devicePage = (url) => `d-${url}`;
  * first opening. Devices is everyone's: a writer's draws the configured devices and their
  * settings, a reader's (a guest, or a page with writes off) the fleet and each device's facts,
  * signal and readings with nothing that writes. It stays through a change of the shown device,
- * which it makes itself. The EQ library is a writer's only (the daemon reaches the internet for
- * it, which only a writer asks) and closes with a change of the shown device: it is about that
- * device. */
+ * which it makes itself. Sound is a writer's only (the daemon reaches the internet for the EQ
+ * library, which only a writer asks, and crossfeed is a write) and closes with a change of the
+ * shown device: its EQ library tab is about that device. It has no side list: its tabs are the
+ * pages (sound/draw.js). */
 export const POPUPS = [
   {
     name: DEVICES,
@@ -56,15 +61,10 @@ export const POPUPS = [
     row: { label: 'Devices…', sees: 'everyone' },
   },
   {
-    name: EQ_LIBRARY,
-    title: 'EQ library',
-    entries: [
-      { id: 'autoeq', label: 'AutoEq' },
-      { id: 'upload', label: 'Upload a file' },
-      { id: 'saved', label: 'Saved presets' },
-    ],
-    load: () => import('./eq-library/wire.js'),
-    row: { label: 'EQ library…', sees: 'writer' },
+    name: SOUND,
+    title: 'Sound',
+    load: () => import('./sound/wire.js'),
+    row: { label: 'Sound…', sees: 'writer' },
   },
   {
     name: HELP,

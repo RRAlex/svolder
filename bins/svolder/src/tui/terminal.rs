@@ -3,10 +3,11 @@
 
 //! Raw-mode terminal setup and teardown, undone on every exit path including a panic.
 
-use std::io::IsTerminal;
+use std::io::{BufWriter, IsTerminal};
 use std::mem::ManuallyDrop;
 use std::time::{Duration, Instant};
 
+use ratatui::backend::CrosstermBackend;
 use svolder_ipc::Config;
 
 use super::decoration::title::{self, TitleSink};
@@ -192,6 +193,30 @@ impl MouseCapture for Mouse {
     }
 }
 
+/// How many bytes a frame is gathered in before it goes out: a frame of a large terminal in true
+/// colour with a few thousand cells changed (a moving Spectrum row, breathing borders) fits. A
+/// larger one, a whole screen redrawn cell by cell in changing colours, goes out in several
+/// writes, in order.
+const FRAME_BUFFER: usize = 256 * 1024;
+
+/// What a frame is written through on its way to `out`: a buffer the frame's escape sequences
+/// and cells gather in, sent with the frame's flush in one write, rather than a write (and a
+/// lock of the standard output) for each of them.
+fn frame_writer<W: std::io::Write>(out: W) -> BufWriter<W> {
+    BufWriter::with_capacity(FRAME_BUFFER, out)
+}
+
+/// The terminal a run draws on: raw mode, the alternate screen, and frames written through
+/// [`frame_writer`] to the standard output.
+pub type FrameTerminal = ratatui::Terminal<CrosstermBackend<BufWriter<std::io::Stdout>>>;
+
+/// Enter raw mode and the alternate screen, and answer with the terminal frames are drawn on.
+fn open_terminal() -> std::io::Result<FrameTerminal> {
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+    ratatui::Terminal::new(CrosstermBackend::new(frame_writer(std::io::stdout())))
+}
+
 /// Puts the terminal into TUI mode and guarantees it comes back, even on panic.
 ///
 /// The terminal and the mouse capture are separate fields so a caller can lend out both at
@@ -199,7 +224,7 @@ impl MouseCapture for Mouse {
 pub struct Guard {
     /// The ratatui terminal, backed by the alternate screen and raw mode. Never dropped: its
     /// own drop prints when the cursor cannot be shown, and a hung-up terminal cannot show it.
-    pub terminal: ManuallyDrop<ratatui::DefaultTerminal>,
+    pub terminal: ManuallyDrop<FrameTerminal>,
     /// This terminal's mouse capture.
     pub mouse: Mouse,
     /// What the terminal draws, once it has been asked ([`super::art::probe_for`]): `None` where
@@ -226,7 +251,7 @@ impl Guard {
             let _ = ratatui::try_restore();
             hook(info);
         }));
-        let terminal = ManuallyDrop::new(ratatui::try_init()?);
+        let terminal = ManuallyDrop::new(open_terminal()?);
         let mut guard = Guard {
             terminal,
             mouse: Mouse::default(),
@@ -255,9 +280,22 @@ impl Drop for Guard {
     fn drop(&mut self) {
         mouse_off_then_flush(&mut self.mouse, &mut StdinFlush);
         restore_title();
-        let _ = ratatui::try_restore();
-        let _ = self.terminal.show_cursor();
+        leave_screen(&mut self.terminal, || {
+            let _ = ratatui::try_restore();
+        });
     }
+}
+
+/// Leave the screen frames are drawn on: what a frame left unsent (a write the terminal refused)
+/// and the cursor go out while the alternate screen is still up, and only then does `restore`
+/// leave it, so no byte of a frame lands on the screen the shell gets back.
+fn leave_screen<B>(terminal: &mut ratatui::Terminal<B>, restore: impl FnOnce())
+where
+    B: ratatui::backend::Backend + std::io::Write,
+{
+    let _ = std::io::Write::flush(terminal.backend_mut());
+    let _ = terminal.show_cursor();
+    restore();
 }
 
 /// Which side of a frame a synchronized-output mark goes on.

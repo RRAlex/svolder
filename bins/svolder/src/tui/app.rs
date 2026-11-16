@@ -39,6 +39,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use ratatui::layout::Rect;
 use svolder_ipc::config::RefreshWeeks;
 use svolder_ipc::{Config, EffectsConfig, TuiConfig};
 use svolder_profiles::Profile;
@@ -53,6 +54,7 @@ use super::boxes::toast::{Toast, ToastKind};
 use super::decoration::effects::Effects;
 use super::decoration::mascot::Mascot;
 use super::host::Host;
+use super::layout_tier::Tier;
 use super::screens::device;
 use super::widgets::graph::{Histories, Link};
 use super::widgets::spinner;
@@ -60,6 +62,7 @@ use super::widgets::spinner;
 mod advice;
 mod connect;
 mod controls;
+pub(crate) mod crossfeed;
 pub(super) mod curve_drag;
 mod devices;
 mod dispatch;
@@ -82,6 +85,7 @@ mod tone;
 mod tone_state;
 
 pub(crate) use controls::row_group;
+pub use crossfeed::{Xf, XfLine};
 pub(crate) use devices::DevicesScreen;
 pub(crate) use frame_flags::FrameFlags;
 pub use intent::{ConnChange, EffectSwitch, Intent, TuiChange};
@@ -188,8 +192,10 @@ pub struct SettingsBox {
     pub row: usize,
 }
 
-/// Whether the last frame drew the switch, per screen: a frame too narrow for it has no switch
-/// row for a key to be on. True until a frame says otherwise.
+/// What drawing a frame leaves for the app to read: whether the last frame drew the switch, per
+/// screen (a frame too narrow for it has no switch row for a key to be on; true until a frame says
+/// otherwise), where it drew the bar between the panes, and, while a frame is being drawn, the
+/// device screen's layout it worked out.
 #[derive(Debug, Clone)]
 pub struct Drawn {
     /// The Controls pane's switch line.
@@ -202,6 +208,137 @@ pub struct Drawn {
     /// Where the last device frame drew the bar between its two panes, `None` where it drew no
     /// bar to move: another screen, one pane, or a terminal too narrow for two of 40 columns.
     pub split: std::cell::Cell<Option<divider::Split>>,
+    /// Whether a frame is being drawn ([`Drawn::hold`], [`Drawn::begin_frame`]), so the layout
+    /// below may be kept for it.
+    held: std::cell::Cell<bool>,
+    /// The device screen's layout as the frame being drawn worked it out: the frame's area, its
+    /// tiers and its three bands. Kept while [`Drawn::hold`] holds, so every part of one frame
+    /// that asks where the bands are (the panes, their frames, the squirrel's home, the cover)
+    /// reads the one answer rather than building both panes again; `None` outside a frame.
+    device_rows: std::cell::Cell<Option<(Rect, Tier, [Rect; 3])>>,
+    /// The squirrel's home as the frame being drawn found it, over an area in a monochrome theme
+    /// or not (what the panes' words say can differ by it): the squirrel's look at its home and
+    /// its draw read the one answer. Kept with the layout, `None` outside a frame.
+    home: std::cell::RefCell<Option<(Rect, bool, Option<device::HomePane>)>>,
+    /// The box the cover had in the frame last drawn: the frame's area, the cover and the cells
+    /// it was sized for, and the box (`None`: no room). The picture is sized by it after the
+    /// frame rather than by laying the screen out again; kept until the next frame begins.
+    art_box: std::cell::RefCell<Option<ArtBox>>,
+}
+
+/// The box the cover had in a drawn frame ([`Drawn::art_box`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArtBox {
+    /// The frame's area.
+    pub area: Rect,
+    /// The cover the box was for.
+    pub hash: String,
+    /// The terminal's cell, in pixels, the box was sized by.
+    pub font: (u16, u16),
+    /// The box, or `None` where the frame had no room for it.
+    pub size: Option<ratatui::layout::Size>,
+}
+
+impl Drawn {
+    /// Keep the layout a frame works out until the answer is dropped, for a stretch in which
+    /// the app does not change: drawing one frame. A hold inside another leaves it to the outer
+    /// one to let go.
+    #[must_use = "the layout is kept only while the hold is held"]
+    pub fn hold(&self) -> Held<'_> {
+        Held {
+            drawn: self,
+            opened: !self.held.replace(true),
+        }
+    }
+
+    /// Keep the layout from here until [`Drawn::end_frame`], for the loop's steps before a frame
+    /// and the frame itself: those steps change nothing the layout reads (the squirrel's brain,
+    /// the terminal's size, the pointer), so the squirrel's look at its home, the picture's
+    /// check and the frame all read one layout.
+    pub fn begin_frame(&self) {
+        self.held.set(true);
+        self.art_box.replace(None);
+    }
+
+    /// Forget what [`Drawn::begin_frame`] kept: the frame is drawn.
+    pub fn end_frame(&self) {
+        self.held.set(false);
+        self.forget();
+    }
+
+    /// Forget the layout and the home a frame kept.
+    fn forget(&self) {
+        self.device_rows.set(None);
+        self.home.replace(None);
+    }
+
+    /// The squirrel's home over `area`, `monochrome` or not, as this frame found it, if it has.
+    pub(crate) fn home(&self, area: Rect, monochrome: bool) -> Option<Option<device::HomePane>> {
+        self.home
+            .borrow()
+            .as_ref()
+            .filter(|(at, mono, _)| *at == area && *mono == monochrome)
+            .map(|(_, _, home)| home.clone())
+    }
+
+    /// Keep the squirrel's home over `area` for the rest of the frame, if one is held.
+    pub(crate) fn keep_home(&self, area: Rect, monochrome: bool, home: Option<device::HomePane>) {
+        if self.held.get() {
+            self.home.replace(Some((area, monochrome, home)));
+        }
+    }
+
+    /// Note the box the cover had in the frame being drawn.
+    pub(crate) fn keep_art_box(&self, art_box: ArtBox) {
+        self.art_box.replace(Some(art_box));
+    }
+
+    /// The box the frame last drawn gave the cover `hash` over `area` with cells `font` large, if
+    /// it noted one for exactly those.
+    pub(crate) fn drawn_art_box(
+        &self,
+        area: Rect,
+        hash: &str,
+        font: (u16, u16),
+    ) -> Option<Option<ratatui::layout::Size>> {
+        self.art_box
+            .borrow()
+            .as_ref()
+            .filter(|kept| kept.area == area && kept.hash == hash && kept.font == font)
+            .map(|kept| kept.size)
+    }
+
+    /// The device screen's layout over `area` as this frame worked it out, if it has.
+    pub(crate) fn device_rows(&self, area: Rect) -> Option<(Tier, [Rect; 3])> {
+        self.device_rows
+            .get()
+            .filter(|(at, _, _)| *at == area)
+            .map(|(_, tier, rows)| (tier, rows))
+    }
+
+    /// Keep the device screen's layout over `area` for the rest of the frame, if one is held.
+    pub(crate) fn keep_device_rows(&self, area: Rect, (tier, rows): (Tier, [Rect; 3])) {
+        if self.held.get() {
+            self.device_rows.set(Some((area, tier, rows)));
+        }
+    }
+}
+
+/// A frame's hold on what it worked out ([`Drawn::hold`]): dropping it forgets all of it.
+pub struct Held<'a> {
+    /// What is held.
+    drawn: &'a Drawn,
+    /// Whether this hold began it, and so ends it.
+    opened: bool,
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        if self.opened {
+            self.drawn.held.set(false);
+            self.drawn.forget();
+        }
+    }
 }
 
 impl Default for Drawn {
@@ -211,6 +348,10 @@ impl Default for Drawn {
             controls_pending: std::cell::Cell::new(false),
             tone_switch: std::cell::Cell::new(true),
             split: std::cell::Cell::new(None),
+            held: std::cell::Cell::new(false),
+            device_rows: std::cell::Cell::new(None),
+            home: std::cell::RefCell::new(None),
+            art_box: std::cell::RefCell::new(None),
         }
     }
 }
@@ -451,6 +592,8 @@ impl App {
                 row: ToneRow::Band,
                 point: 0,
                 point_line: None,
+                xf_line: None,
+                xf_note: None,
                 header_loudness: false,
                 mode_before_flat: None,
                 mode_before_loudness: None,
@@ -521,10 +664,16 @@ impl App {
             .host
             .now_playing()
             .map_or(0, |words| device::cells(&words));
+        // Words that fit beside any picture stand still whatever the picture takes, so the
+        // screen is not laid out to measure it.
+        let reserved = match words <= device::words_beside_art() {
+            true => 0,
+            false => device::art_reserved(self),
+        };
         self.host.marquee.advance(
             now,
             words,
-            device::now_playing_room(self.size).saturating_sub(device::art_reserved(self)),
+            device::now_playing_room(self.size).saturating_sub(reserved),
         );
     }
 
@@ -536,9 +685,12 @@ impl App {
             self.pointer.tooltip = None;
         }
         self.size = (width, height);
-        // The help overlay's offset holds inside the view the new size gives it.
-        let (_, most) = super::screens::help::scroll_of(self);
-        self.overlays.help_scroll = self.overlays.help_scroll.min(most);
+        // The open help overlay's offset holds inside the view the new size gives it; a closed
+        // one starts again from its first key when it opens.
+        if self.overlays.help_open {
+            let (_, most) = super::screens::help::scroll_of(self);
+            self.overlays.help_scroll = self.overlays.help_scroll.min(most);
+        }
     }
 
     /// The glyph the header's or the Devices screen's spinner is showing now: whichever of them

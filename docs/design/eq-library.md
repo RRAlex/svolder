@@ -4,7 +4,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 -->
 # The EQ library popup
 
-`core/popups/eq-library/` is a popup of the menu, a writer's: the row *EQ library…* stands
+`core/popups/eq-library/` is the first tab of the menu's *Sound…* popup, a writer's: the row stands
 between *Devices…* and *Help…*, and a guest or a page with `[web] writes` off has neither the row
 nor a way in ([popups.md](popups.md#the-list-of-popups)). It is where a person finds a headphone's
 correction in AutoEq, sees how well the bands of the device (or the computer's EQ) can follow it,

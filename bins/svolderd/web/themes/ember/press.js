@@ -151,10 +151,11 @@ export function installPress(given) {
   document.addEventListener('submit', submitted, mine());
   document.addEventListener('change', chosen, mine());
 
-  // A touch on a control a guest cannot use says so, with the way to sign in.
+  // A touch on a control a guest cannot use says so, with the way to sign in (the viewer is the
+  // core's: a read-only page has no sign-in to offer).
   document.addEventListener('click', (event) => {
     const inert = event.target.closest('[aria-disabled="true"]');
-    if (!inert || !document.body.classList.contains('guest')) return;
+    if (!inert || !ember.core.model.page().viewer?.guest) return;
     event.preventDefault();
     ember.core.actions.signInPrompt();
   }, mine({ capture: true }));

@@ -11,6 +11,35 @@
 
 pub(super) mod presets;
 
+/// How often each piece of a frame's work ran on this thread: the pane builders and layouts a
+/// frame should do once say so here, and a case pins the count a frame costs.
+pub(crate) mod work {
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+
+    thread_local! {
+        static DONE: RefCell<BTreeMap<&'static str, usize>> = const { RefCell::new(BTreeMap::new()) };
+    }
+
+    /// Count one run of `what`.
+    pub(crate) fn tick(what: &'static str) {
+        DONE.with(|done| *done.borrow_mut().entry(what).or_default() += 1);
+    }
+
+    /// `work` done without counting it, for a check that redoes what the code under test did.
+    pub(crate) fn uncounted<T>(work: impl FnOnce() -> T) -> T {
+        let kept = take();
+        let done = work();
+        DONE.with(|done| *done.borrow_mut() = kept);
+        done
+    }
+
+    /// Every count since the last call, which starts them again from nothing.
+    pub(crate) fn take() -> BTreeMap<&'static str, usize> {
+        DONE.with(|done| std::mem::take(&mut *done.borrow_mut()))
+    }
+}
+
 use std::time::{Duration, Instant};
 
 use crossterm::event::{
@@ -706,7 +735,27 @@ pub(crate) fn computer_eq(
         unavailable: None,
         max: 16,
         running_unknown: false,
+        loads: 0,
+        crossfeed: None,
     })
+}
+
+/// A computer EQ with two points whose view carries the crossfeed of `model`'s preset `preset`
+/// (`None` for the model's default), playing or not, as the controller's own view builds it.
+pub(crate) fn computer_eq_with_crossfeed(
+    xf_on: bool,
+    model: &str,
+    preset: Option<&str>,
+) -> Box<svolder_host::eq::EqView> {
+    use svolder_host::eq::crossfeed::{CrossfeedSettings, CrossfeedView, Model};
+    let model = Model::from_word(model).expect("a model word");
+    let settings = match preset {
+        Some(name) => CrossfeedSettings::from_preset(model, name).expect("a preset"),
+        None => CrossfeedSettings::for_model(model),
+    };
+    let mut eq = computer_eq(true, &[("PK", 1000.0, 0.0, 1.0), ("LSC", 100.0, 1.0, 1.0)]);
+    eq.crossfeed = Some(CrossfeedView::of(&settings, xf_on, 48_000, None, None));
+    eq
 }
 
 /// The Target line of a frame: its text, and the modifiers and foreground of the first cell of

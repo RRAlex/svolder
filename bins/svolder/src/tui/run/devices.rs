@@ -334,7 +334,7 @@ pub(super) async fn write_device<O: Open>(
     local: impl FnOnce(&Path) -> Result<(), svolder_ipc::ConfigError> + Send + 'static,
 ) -> bool {
     let socket = daemon_socket(opener, watching);
-    let mut wait = Wait::new("saving…".to_string());
+    let mut wait = Wait::after("saving…".to_string(), SAVING_GRACE);
     let sent = wait
         .on(
             crate::reach::device_request(&socket, op),
@@ -396,7 +396,7 @@ pub(super) async fn off_loop<T: Send + 'static>(
     screen: &mut dyn Shown,
 ) -> T {
     let thread = tokio::task::spawn_blocking(work);
-    let mut wait = Wait::new(words.to_string());
+    let mut wait = Wait::after(words.to_string(), SAVING_GRACE);
     let answer = wait
         .on(thread, watching, look, screen, Interrupted::Carry)
         .await;
@@ -921,6 +921,10 @@ fn take_over(watching: &mut Watching, mut fresh: Watching, look: &Look) {
     *watching = fresh;
 }
 
+/// How long a write of the configuration file runs before the loop draws a wait for it: a write
+/// that takes no longer than this (the usual one) shows none.
+pub(super) const SAVING_GRACE: Duration = Duration::from_millis(250);
+
 /// A wait the loop draws while it lasts: `words` behind a spinner that turns at its own step,
 /// reading the screen's input for the keys that give up.
 pub(super) struct Wait {
@@ -936,12 +940,22 @@ pub(super) struct Wait {
     gave_up: bool,
     /// The words a give-up during a carried wait puts in place of `words`, taken by the first.
     after_give_up: Option<String>,
+    /// Whether a toast showing when the wait begins goes at once: a wait with a grace stands for
+    /// a write whose own toast would have replaced it, drawn or not.
+    clears: bool,
 }
 
 impl Wait {
     /// A wait that says `words`, its first frame due at once.
     pub(super) fn new(words: String) -> Wait {
-        let mut ticks = tokio::time::interval(spinner::STEP);
+        Wait::after(words, Duration::ZERO)
+    }
+
+    /// A wait that says `words` once `grace` has passed: work that ends first draws no wait at
+    /// all, so a write to a local file does not flash one frame of it.
+    pub(super) fn after(words: String, grace: Duration) -> Wait {
+        let mut ticks =
+            tokio::time::interval_at(tokio::time::Instant::now() + grace, spinner::STEP);
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         Wait {
             words,
@@ -951,6 +965,7 @@ impl Wait {
             errors_in_a_row: 0,
             gave_up: false,
             after_give_up: None,
+            clears: !grace.is_zero(),
         }
     }
 
@@ -971,6 +986,9 @@ impl Wait {
         screen: &mut dyn Shown,
         interrupted: Interrupted,
     ) -> Option<T> {
+        if self.clears {
+            watching.app.dismiss_toast();
+        }
         let answer = self.turn(work, watching, look, screen, interrupted).await;
         watching.app.end_wait();
         answer

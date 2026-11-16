@@ -104,10 +104,23 @@ export function createModals({ document, fallback = () => null }) {
   const covered = new Set();
 
   /** The controls of `el` that Tab reaches, in the page's order: those that are rendered (where
-   * the browser cannot say, a control is taken to be). */
-  const reach = (el) => [...el.querySelectorAll(REACH)]
-    .filter((one) => !one.closest('[hidden], [inert]')
-      && (one.checkVisibility?.({ visibilityProperty: true }) ?? true));
+   * the browser cannot say, a control is taken to be). A radio group is one stop, as it is for
+   * the browser: its checked radio, else the one Tab enters it at (the first radio, or with
+   * `back` the last). */
+  const reach = (el, back = false) => {
+    const all = [...el.querySelectorAll(REACH)]
+      .filter((one) => !one.closest('[hidden], [inert]')
+        && (one.checkVisibility?.({ visibilityProperty: true }) ?? true));
+    const group = (one) => (one.type === 'radio' && one.name
+      ? all.filter((other) => other.type === 'radio' && other.name === one.name
+        && other.form === one.form) : null);
+    const stop = (one) => {
+      const members = group(one);
+      if (members === null) return one;
+      return members.find((other) => other.checked) ?? members[back ? members.length - 1 : 0];
+    };
+    return all.filter((one) => stop(one) === one);
+  };
 
   /** Give `el` the focus; `false` when it did not take it. */
   function give(el) {
@@ -177,9 +190,13 @@ export function createModals({ document, fallback = () => null }) {
    * (with Shift, its first), or from outside it, the focus goes round to the other end, and stays
    * on `el` when nothing in it takes it. */
   function tab(event, el) {
-    const list = reach(el);
     const back = event.shiftKey;
-    const at = list.indexOf(document.activeElement);
+    const list = reach(el, back);
+    const focused = document.activeElement;
+    // a radio of a group stands for the group's stop
+    const at = list.findIndex((one) => one === focused || (one.type === 'radio'
+      && one.name !== '' && focused?.type === 'radio' && focused.name === one.name
+      && focused.form === one.form));
     if (at >= 0 && at !== (back ? 0 : list.length - 1)) return;
     event.preventDefault();
     for (const next of back ? list.reverse() : list) {

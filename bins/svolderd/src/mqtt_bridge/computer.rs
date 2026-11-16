@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The computer's EQ on the bridge: following the host's view, announcing its switch and preset
-//! sensor, publishing their states, and turning the EQ on or off when the switch is commanded.
+//! The computer's EQ and crossfeed on the bridge: following the host's view, announcing the EQ's
+//! switch and preset sensor and the crossfeed's switch and preset select, publishing their
+//! states, and turning the EQ or the crossfeed on or off, or choosing a crossfeed preset, when
+//! one is commanded. The crossfeed's entities are announced only while the view carries a
+//! crossfeed.
 //!
 //! Nothing is announced while the host reports no EQ at all (host audio off): what an earlier
 //! announcement left is cleared, once the host has had [`START_SETTLES`] from the start to report
@@ -44,6 +47,8 @@ pub(super) struct Published {
     pub(super) available: Option<bool>,
     /// The switch's state and the preset sensor's last published.
     pub(super) state: Option<(&'static str, String)>,
+    /// The crossfeed switch's state and preset's last published.
+    pub(super) crossfeed_state: Option<(&'static str, String)>,
     /// Whether what an earlier run left retained has been cleared.
     pub(super) swept: bool,
     /// When the bridge began following the computer.
@@ -76,6 +81,7 @@ impl BridgeTask {
             configs: BTreeMap::new(),
             available: None,
             state: None,
+            crossfeed_state: None,
             swept: false,
             since: Instant::now(),
         });
@@ -97,6 +103,9 @@ impl BridgeTask {
         let availability = topics::device_availability(&base, computer::UNIT);
         let state_topic = topics::diagnostic(&base, computer::UNIT, computer::EQ_KEY);
         let preset_topic = topics::diagnostic(&base, computer::UNIT, computer::PRESET_KEY);
+        let xf_topic = topics::diagnostic(&base, computer::UNIT, computer::crossfeed::SWITCH_KEY);
+        let xf_preset_topic =
+            topics::diagnostic(&base, computer::UNIT, computer::crossfeed::PRESET_KEY);
 
         // The first publish takes down what an earlier run left retained, whichever entities it
         // announced and whether or not this run serves the computer. While the host has not yet
@@ -114,16 +123,16 @@ impl BridgeTask {
         if !published.swept {
             published.swept = true;
             let wanted: Vec<String> = match eq {
-                Some(_) => computer::entries(&base, &prefix, commands)
+                Some(eq) => computer::entries(&base, &prefix, commands, eq.crossfeed.as_ref())
                     .into_iter()
                     .map(|entry| entry.topic)
                     .collect(),
                 None => Vec::new(),
             };
             for with_commands in [true, false] {
-                for entry in computer::entries(&base, &prefix, with_commands) {
-                    if !wanted.contains(&entry.topic) {
-                        client.clear(entry.topic);
+                for topic in computer::topics_of(&prefix, with_commands) {
+                    if !wanted.contains(&topic) {
+                        client.clear(topic);
                     }
                 }
             }
@@ -131,6 +140,8 @@ impl BridgeTask {
                 client.clear(availability.clone());
                 client.clear(state_topic.clone());
                 client.clear(preset_topic.clone());
+                client.clear(xf_topic.clone());
+                client.clear(xf_preset_topic.clone());
             }
         }
 
@@ -143,17 +154,21 @@ impl BridgeTask {
                 client.clear(availability);
                 client.clear(state_topic);
                 client.clear(preset_topic);
+                client.clear(xf_topic);
+                client.clear(xf_preset_topic);
             }
             published.configs.clear();
             published.available = None;
             published.state = None;
+            published.crossfeed_state = None;
             return;
         };
 
-        let next: BTreeMap<String, String> = computer::entries(&base, &prefix, commands)
-            .into_iter()
-            .map(|entry| (entry.topic, entry.payload.to_string()))
-            .collect();
+        let next: BTreeMap<String, String> =
+            computer::entries(&base, &prefix, commands, eq.crossfeed.as_ref())
+                .into_iter()
+                .map(|entry| (entry.topic, entry.payload.to_string()))
+                .collect();
         for (topic, body) in &next {
             if published.configs.get(topic) != Some(body) {
                 client.announce(topic.clone(), body.clone());
@@ -187,10 +202,30 @@ impl BridgeTask {
             }
             published.state = Some((on, preset));
         }
+        match eq.crossfeed.as_ref() {
+            Some(crossfeed) => {
+                let (on, preset) = computer::crossfeed::state(crossfeed);
+                let was = published.crossfeed_state.clone();
+                if was.as_ref().map(|s| s.0) != Some(on) {
+                    client.retain(xf_topic, on);
+                }
+                if was.as_ref().map(|s| s.1.as_str()) != Some(preset.as_str()) {
+                    client.retain(xf_preset_topic, preset.clone());
+                }
+                published.crossfeed_state = Some((on, preset));
+            }
+            None if published.crossfeed_state.is_some() => {
+                client.clear(xf_topic);
+                client.clear(xf_preset_topic);
+                published.crossfeed_state = None;
+            }
+            None => {}
+        }
     }
 
-    /// A command on one of the computer's topics: only the switch takes one, `ON` or `OFF`. ON
-    /// with nothing kept to apply leaves the EQ off.
+    /// A command on one of the computer's topics: the EQ switch and the crossfeed switch take
+    /// `ON` or `OFF`, the crossfeed preset select takes one of its options. EQ ON with nothing
+    /// kept to apply leaves the EQ off. `Custom` is no command.
     pub(super) fn computer_command(&mut self, key: &str, body: &[u8]) {
         let drop = |why: &str| {
             log::warn(&format!(
@@ -200,14 +235,21 @@ impl BridgeTask {
         let Some(published) = self.computer.as_ref() else {
             return;
         };
-        if !key.eq_ignore_ascii_case(computer::EQ_KEY) {
-            return drop("nothing of the computer but its EQ switch takes commands");
+        let eq_key = key.eq_ignore_ascii_case(computer::EQ_KEY);
+        let xf_key = key.eq_ignore_ascii_case(computer::crossfeed::SWITCH_KEY);
+        let preset_key = key.eq_ignore_ascii_case(computer::crossfeed::PRESET_KEY);
+        if !(eq_key || xf_key || preset_key) {
+            return drop("nothing of the computer but its EQ and crossfeed takes commands");
         }
         let Ok(text) = std::str::from_utf8(body) else {
             return drop("the payload is not text");
         };
-        let Some(on) = computer::parse(text) else {
-            return drop(&format!("{:?} is not ON or OFF", text.trim()));
+        let on = match preset_key {
+            true => None,
+            false => match computer::parse(text) {
+                Some(on) => Some(on),
+                None => return drop(&format!("{:?} is not ON or OFF", text.trim())),
+            },
         };
         let view = published.view.borrow().clone();
         let Some(eq) = view.eq.as_ref().filter(|_| view.available) else {
@@ -216,25 +258,57 @@ impl BridgeTask {
         if let Some(why) = &eq.unavailable {
             return drop(why);
         }
-        if on && !eq.on && computer::nothing_kept(eq) {
-            log::info(
-                "mqtt: This computer: ON left the EQ off: no EQ points are saved yet; set the \
-                 EQ up first",
-            );
+        let switch = Arc::clone(&published.switch);
+        if eq_key {
+            let on = on.unwrap_or_default();
+            if on && !eq.on && computer::nothing_kept(eq) {
+                log::info(
+                    "mqtt: This computer: ON left the EQ off: no EQ points are saved yet; set the \
+                     EQ up first",
+                );
+                return;
+            }
+            let what = format!("turning the EQ {}", if on { "on" } else { "off" });
+            self.writes
+                .spawn(async move { WriteOutcome::Computer(what, switch.set_on(on).await) });
             return;
         }
-        let switch = Arc::clone(&published.switch);
+        let Some(crossfeed) = eq.crossfeed.as_ref() else {
+            return drop("this computer serves no crossfeed");
+        };
+        if let Some(why) = &crossfeed.unavailable {
+            return drop(why);
+        }
+        let (what, on, choice) = match on {
+            Some(on) => (
+                format!("turning crossfeed {}", if on { "on" } else { "off" }),
+                Some(on),
+                None,
+            ),
+            None => match computer::crossfeed::parse_preset(crossfeed, text) {
+                None => return drop(&format!("{:?} is not a crossfeed preset", text.trim())),
+                Some(computer::crossfeed::Choice::Custom) => {
+                    log::info(
+                        "mqtt: This computer: Custom is a crossfeed state, not a choice; the \
+                         settings stay as they are",
+                    );
+                    return;
+                }
+                Some(computer::crossfeed::Choice::Preset { model, preset }) => (
+                    format!("choosing the crossfeed preset {:?}", text.trim()),
+                    None,
+                    Some((model, preset)),
+                ),
+            },
+        };
         self.writes
-            .spawn(async move { WriteOutcome::Computer(on, switch.set_on(on).await) });
+            .spawn(async move { WriteOutcome::Computer(what, switch.crossfeed(on, choice).await) });
     }
 
-    /// The end of a switch: say so when it was refused.
-    pub(super) fn computer_written(&mut self, on: bool, result: Result<(), String>) {
+    /// The end of a command to the computer: say so when it was refused.
+    pub(super) fn computer_written(&mut self, what: &str, result: Result<(), String>) {
         if let Err(why) = result {
-            log::warn(&format!(
-                "mqtt: This computer: turning the EQ {} failed: {why}",
-                if on { "on" } else { "off" }
-            ));
+            log::warn(&format!("mqtt: This computer: {what} failed: {why}"));
         }
         // The state is whatever the view says now.
         self.changed(computer::UNIT);

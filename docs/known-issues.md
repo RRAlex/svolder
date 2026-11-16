@@ -330,6 +330,17 @@ that branch rather than listed here.
   changed `[web]` section and stops and starts the server on its address, so open event streams
   end, and a listen port of 0 changes (`bins/svolderd/src/http_slot.rs:93`).
 
+- [trade-off] **A flat chain for crossfeed can sit below 0 dB.** With crossfeed on and the EQ off, the
+  chain plays flat at the lowest level its loaded configuration allows (the rule for a change of the
+  sink's rate), so a chain loaded with a -6 dB curve keeps -6 dB until it restarts
+  (`crates/svolder-host/src/eq/control.rs`, `preamp`).
+- [bug] **Crossfeed settings changed before any chain was applied are lost at a restart.** With no
+  state file the settings live in memory only and are written when a chain is applied
+  (`crates/svolder-host/src/eq/control/xf.rs`).
+- [trade-off] **A crossfeed reset whose chain part fails is retried every second without a limit.** The
+  view's note says so; the retries stop when the host accepts the change
+  (`crates/svolder-host/src/eq/control/xf.rs`, `finish_reset`).
+
 ### CLI
 
 - [bug] **`eq import --autoeq` refuses a correction of more than 16 filters.** The import names the
@@ -400,6 +411,10 @@ that branch rather than listed here.
   `bins/svolder/src/commands/device.rs`, `bins/svolder/src/commands/device/devices.rs`,
   `bins/svolder/src/commands/capture/handover.rs`).
 
+- [trade-off] **`svolder host crossfeed` with no daemon assumes 48 kHz.** `show` has no sink to ask,
+  so it works the delay floor out at 48 kHz; a daemon uses the sink's rate, so the two can differ by a
+  few hundredths of a millisecond (`bins/svolder/src/commands/host_crossfeed.rs`, `offline`).
+
 ### TUI
 
 - [bug] **The TUI writes some settings itself while a daemon runs.** User preset writes, the MQTT
@@ -428,6 +443,22 @@ that branch rather than listed here.
   attached over SSH) makes the copy tools run against that session's clipboard, which is the
   computer's, not the one you sit at, and the note says `copied with xclip` without naming it
   (`bins/svolder/src/tui/clipboard.rs`).
+- [limit] **A demo whose daemon died says so with a toast, not a word on the screen.** When the
+  daemon that `svolder tui --demo` started ends, the TUI toasts it at once and again every 30 s; the
+  Status pane carries no word for it, and the TUI's player watcher and sink poll still start for a
+  daemon that is gone, so the screen keeps what it last drew (`bins/svolder/src/tui/start.rs`,
+  `bins/svolder/src/commands/demo.rs`).
+- [trade-off] **A quit with Settings writes queued behind a held lock gives the later ones up.**
+  Settings writes run one at a time, each waiting up to two seconds for the file's lock; when one
+  fails at quit (a lock the daemon holds past its wait) the writes still queued fail the same way,
+  so a quit waits once, and each is toasted `not saved: the file is busy`
+  (`bins/svolder/src/tui/run/writes.rs`).
+- [trade-off] **A joined TUI starts its own capture when its daemon dies, and a daemon too slow to
+  answer is left alone for 30 s.** While the daemon's frames connection is open the TUI's own
+  capture stays stopped, and when the daemon goes away the own capture takes over, so the Spectrum
+  row never waits on a daemon; a request for the frames that connects and is not answered within 3 s
+  (`Opened::Mute`) bars the connection for `FRAMES_RETRY`, 30 s, and the own capture feeds the row
+  meanwhile (`bins/svolder/src/tui/run/host/frames.rs`).
 - [trade-off] **The footer has no tooltip.** The footer is only the setup wizard's key line, which
   has no app state and gets no mouse-move events; the main screens' key words have tooltips on
   their pane borders (`bins/svolder/src/tui/boxes/tooltip.rs:386`).
@@ -660,6 +691,61 @@ that branch rather than listed here.
   (`OPEN_WITHIN`), and the CLI's whole connect-and-request sequences in their own, not in
   `Client::request_within`, because their bound covers more than one request
   (`crates/svolder-ipc/src/socket/client.rs`, `bins/svolder/src/tui/run/host/frames.rs`).
+- [limit] **A chain that dies is restarted by the exit watch only after it was applied or seen.**
+  The watch is armed when the chain is first applied or seen in the graph, so a non-container daemon
+  that finds no chain at start still does not apply one; a chain that dies while the daemon is a
+  container's and the state says on is restarted as any death is (a crash loop leaves the EQ off). A
+  unit that systemd restarts itself (`Restart=on-failure`) may also be restarted through apply by
+  the watch; a second apply replaces the first and never stacks
+  (`crates/svolder-host/src/eq/control/exit.rs`).
+- [limit] **The crossfeed stage's rate fold stops at 384 kHz.** A Meier stage with a delay, worked
+  out at a usual rate and played at 705.6 or 768 kHz, can add up to about 2.1 dB over its fold; no
+  DAC in the docs runs there (`crates/svolder-host/src/eq/manage.rs` (`CONFIG_STAGE_RATES`)).
+- [limit] **The chain's f32 coefficients cannot hold low, sharp bands at high rates.** An HSC at 20
+  Hz, -12 dB, Q 0.1 or a PK at 20 Hz, -12 dB, Q 10 at 176.4 kHz play more than 3 dB off at DC or
+  their centre, and an LSC at 21.5 Hz, +9.63 dB, Q 1.91 at 384 kHz plays +3.5 dB at DC for +9.6; the
+  preamp is measured on the f32 coefficients, so it is safe, but not what the view shows, and a
+  fidelity refusal would break `every_hand_corner_is_playable_at_every_rate`
+  (`crates/svolder-host/src/eq/manage.rs` (`check_playable`)).
+- [limit] **A paused stream is not proved to keep a pass-through.** A real PipeWire cannot be made
+  to pause a stream in `make host-e2e` (`pw-cat` stays running under a stop signal), so a corked
+  `idle` stream node is pinned by the `props_of` fixtures only, and the lab never sets `playing`
+  (`crates/svolder-host/src/eq/live/tests.rs`, `crates/svolder-host/src/eq/lab.rs`).
+- [limit] **A chain started with nothing playing plays its saved config for up to a second.** After
+  the first stream starts, the chain plays the config it was started from until the next look (up to
+  `WATCH_EVERY`, 1 s) finds it run and sends everything again, so crossfeed turned on idle is heard
+  about a second late and an idle edit plays the applied curve for that second; the config is
+  self-consistent, so it is safe (`crates/svolder-host/src/eq/control.rs`).
+- [limit] **A kernel without pidfd cannot be waited on for the computer EQ's chain.** `Host::exited`
+  waits on the chain's process through a pidfd (Linux 5.3 and later); where none can be opened it
+  never resolves, so a chain that dies there is not restarted until the next apply or remove
+  (`crates/svolder-host/src/eq/manage/exit.rs`).
+- [trade-off] **A new default sink can reach the capture about 2 s later.** While the computer's
+  volume is watched, the capture's look takes the reading the volume read published up to 2.5 s ago
+  (`Coalescer::held`), so one `wpctl get-volume` serves both readers each 2 s beat; a change of the
+  default sink reaches the capture up to about 2 s later than a fresh read would show it, the EQ's
+  own writes drop the published reading, and a failed read is not shared (each reader times out for
+  itself) (`crates/svolder-host/src/sink.rs`).
+- [limit] **A recall that waits for a cold fit can be dropped.** A recall through the fleet that
+  waits for an imported preset's first fit is answered "a newer write reached ... so <name> was not
+  recalled" when any write or recall reached the device's writer meanwhile; the user repeats it, and
+  only the first recall of a cold preset waits (`bins/svolderd/src/fleet.rs`,
+  `bins/svolderd/src/writer.rs`).
+- [limit] **`recall::warm` remembers its fits in a capped set.** The set holds as many keys as the
+  profiles crate's fit cache (4096); if that cache is cleared on its own at the cap, a later first
+  ask can fit inline once (`bins/svolderd/src/recall/fits.rs`,
+  `crates/svolder-profiles/src/tone/preset.rs`).
+- [trade-off] **A node found at the -120 dB floor bounds no preamp.** A chain 0.34.5 or 0.35.0 left
+  silent holds a multiplier of 1e-6 (-120 dB) or 0, so a held preamp at or below -119.9 dB
+  (`SILENT_HELD_DB`) is taken as no bound and the first look sends the saved preamp. A chain another
+  process started on a curve that truly needs the floor (a peak of about 120 dB) is then bounded only
+  by the saved curve's own preamp until the next apply (`crates/svolder-host/src/eq/control.rs`
+  (`watch`)).
+- [debt] **A leftover note hides the pass-through note.** In the view a leftover `note` (a restart
+  or failure text) wins over "chain kept as a pass-through until idle", and `host eq status` and
+  `remove` find the pass-through by that note, so after a restart they say stopped or removed for a
+  chain that is kept; an explicit view field would fix it (`crates/svolder-host/src/eq/control.rs`
+  (`view`)).
 - [debt] **The hop and preset write routes answer without a `reason` and keep their own status
   table.** The device and series routes share one refusal table and carry a `reason`; the hop and
   preset routes answer from a `ConfigWriteError` with statuses the page's checks pin (409 for a
@@ -672,10 +758,12 @@ that branch rather than listed here.
   the page drops them client-side; the series route's `secs` over the ring's half hour is held to it
   and not refused (`bins/svolderd/src/web/events.rs`, `bins/svolderd/src/web/events/device.rs`,
   `bins/svolderd/src/web/api.rs`).
-- [debt] **Fits run inline on the runtime thread in three places.** The page model, a recall and the
-  MCP tools call `preset::on`, `matches` or `fit_for` on the thread they run on; AutoEq's own jobs
-  and previews fit in `spawn_blocking` behind a semaphore (`bins/svolderd/src/web/view/tone.rs`,
-  `bins/svolderd/src/recall.rs`, `bins/svolderd/src/mcp/tools.rs`).
+- [debt] **The MQTT bridge still fits inline on its own task.** The page model, the MCP tools, a
+  recall through the fleet and a computer recall make an imported preset's first fit on a blocking
+  thread (`recall::warm`), but the bridge's state publish reads which preset is on
+  (`preset_state`) and its preset select recalls through `writer.recall`, both from synchronous
+  code, so a cold imported preset fits there on the runtime (`bins/svolderd/src/mqtt_bridge/state.rs`,
+  `bins/svolderd/src/mqtt_bridge/commands.rs`).
 - [debt] **A reconcile dropped before any stop lets its new actors go.** Their handles drop and each
   actor closes its link by itself, unawaited; only the stop waits for actors
   (`bins/svolderd/src/handler.rs`).
@@ -683,6 +771,13 @@ that branch rather than listed here.
   carries `read_only` or no reason for it, so a front end matches the text; a
   `Reason::ConfigMissing` would let it match the reason (`crates/svolder-ipc/src/error.rs`,
   `bins/svolderd/src/handler/config_write.rs`).
+- [debt] **The route's `pw-dump` is a read of its own beside the sink's `get-volume`.** The route
+  carries the sink's volume and mute too, so a later pass could feed one read from the other and
+  save about 0.5 spawn a second; the EQ's own 1 s look (`control.rs`) is a third read and is
+  untouched (`bins/svolderd/src/host.rs` (`ROUTE_EVERY`), `crates/svolder-host/src/eq/control.rs`).
+- [debt] **The computer EQ's process scan runs on the async threads.** `chains()` and `Argv::find`
+  read `/proc` synchronously, and are called from `status`, `stop_process` and now `exited`: small,
+  and blocking (`crates/svolder-host/src/eq/manage.rs`, `crates/svolder-host/src/eq/process.rs`).
 - [test, with Bifrost 3 testing] **The shared listen is proven on fakes and on one device.** Every
   actor looks for its device through one `Scanner`: the listen that runs hears every device
   looked for while it runs, answers each the moment it is heard (the one that leaves nobody
@@ -699,23 +794,18 @@ that branch rather than listed here.
   event after a walk that wrote a device, is covered through the route tests of the walk's events;
   the device shows within a second anyway, by the page's second tick
   (`bins/svolderd/src/web/events/page.rs`).
+- [test] **The preamp lab does not model a graph that has not run.** Its node always holds what is
+  sent: no lab mode lists zeros, drops sends and starts from the config on the first run, so the
+  not-run look's ordering and bound cases are pinned by `control/tests/idle.rs` and host-e2e S1 and
+  S2 only (`crates/svolder-host/src/eq/lab.rs`).
+- [test] **`the_reaper_thread_is_named` fails under heavy load.** It should wait on a condition
+  (`crates/svolder-host/src/eq/manage/tests/process.rs`).
+- [test] **Nothing guards the capture's held sink reader.** The daemon builds the capture's look
+  with `sink.held()` so the two readers cost one `wpctl` call a beat; a test of the sink proves the
+  sharing, and none proves the daemon's wiring uses it (`bins/svolderd/src/host.rs`).
 
 ### CLI
 
-- [bug] **A pw-cli that dies after taking a line can leave a value unapplied.** The computer EQ's
-  session repairs the link only when its outbox is marked full, and a pw-cli that ends is noticed
-  only at the next send: the last value of a drag can stay unapplied while the view says live,
-  until the next edit. The volume cap still holds. A fix needs the link to report that it ended
-  since its last line (`crates/svolder-host/src/eq/session.rs`).
-- [bug] **A daemon that starts over a chain it did not start shows the saved state.** When the
-  daemon starts while a computer EQ chain from another run is playing (for example one left in
-  the middle of a drag), the view shows `host-eq.toml` while the chain plays what it was started
-  from, until the next edit or apply (`EqControl::new` and `adopt` in
-  `crates/svolder-host/src/eq/control.rs`).
-- [bug] **A revert of the chain at the same rate is not noticed.** The controller sends every
-  slot again when the sink's rate changes or the chain restarts; a rebuild at the same rate, or a
-  rate round trip between two looks, puts the chain's own values back unseen. The volume cap holds
-  for any revert (`crates/svolder-host/src/eq/control.rs`).
 - [limit] **A unit's chain and a process chain look the same.** The computer EQ finds its
   PipeWire chain by its exact command line, which is the same under svolder's user unit and under
   the background-process manager (only the process's cgroup would tell them apart, and svolder
@@ -793,13 +883,36 @@ that branch rather than listed here.
   change as a hand edit. The 60-second poll of the file is 300 ms under `cfg(test)` so the loop test
   sees a second ask; no test runs the real period (`bins/svolder/src/tui/run/look.rs`,
   `bins/svolder/src/tui/run.rs`).
+- [debt] **A frame with a cover still builds the Controls and Tone lines up to four times.** The
+  layout is worked out once a frame, but its cover growth builds both panes to count their lines,
+  the draw builds them again in colour, and the squirrel's home builds its pane once more; the
+  clock's tick lays the screen out again for a title longer than the room beside the cover.
+  Counting the lines without building them is the next step
+  (`bins/svolder/src/tui/screens/device/art.rs`, `panes_need`).
+- [trade-off] **The cover's picture is sized by the box the frame just drew.** `Art::steer` runs
+  after the capture is steered; a capture that starts or stops there and moves the Status pane
+  resizes the picture one frame later rather than laying the screen out again every frame
+  (`bins/svolder/src/tui/art/engine.rs`, `Drawn::drawn_art_box`).
 - [test] **A taken preset name's daemon answer is proved in loop and daemon tests only.** The TUI
   checks a name against its own copy of the library before it sends, so the daemon's answer to a
   taken name shows on screen only after a race; no pty case reaches it
   (`bins/svolder/src/tui/run/input.rs:30`).
 
-### Profiles and presets
-
+- - [debt] **The Linkwitz, Meier and Mid/Side bass numbers are placeholders.** Their names, ranges
+  and defaults are svolder's own choices; Mid/Side bass's own lag (about 1.9 ms at 120 Hz) is not
+  shown as delay, and Bauer at 15 % is 15.06 dB of feed, just past bs2b's 15 dB limit
+  (`crates/svolder-host/src/eq/crossfeed.rs`, `SPECS`). The preset names are wire ids: renaming one
+  breaks an automation that selects it.
+- [test] **No test reaches the rate at which the stage cannot play.** A coefficient past the chain's
+  limit turns crossfeed off with a note, but no rate in the engine's ranges gets there
+  (`crates/svolder-host/src/eq/control/xf.rs`).
+- [test] **Most TUI loop tests wait on fixed real time.** `quit_after` deadlines remain in the loop
+  tests of `mouse`, `link`, `keys`, `exit`, `meters`, `writes`, `daemon`, `curve` and `devices`;
+  with 300 ms of delay injected into a frame draw seven of them fail
+  (`a_daemon_restarted_under_the_tui_is_reopened_without_a_key`,
+  `a_double_click_on_a_bands_gain_opens_the_line_on_it`,
+  `a_left_click_on_the_painted_squirrel_plays_the_hop` among them); `pointer.rs` and `toasts.rs`
+  already wait on the screen or a daemon condition (`bins/svolder/src/tui/run/tests/`).
 - [limit] **The peak search assumes one peak per half octave.** `response`'s peak refinement runs
   a golden-section search over the two sample intervals either side of the best of 1024 samples
   and over a half-octave window round each filter's centre, and a golden-section search finds one
@@ -830,11 +943,6 @@ that branch rather than listed here.
 
 ### Web page
 
-- [bug] **A preset reloaded under the same name mid-drag is missed.** The page's
-  drag follows the wire view by preset name, so a preset reloaded with the same name while a point
-  is held is not seen as a change; the same preset maps each slot to the same filter, so the drag
-  still writes the right one. A generation counter on the wire view would close it (the name
-  compare is in `bins/svolderd/web/core/computer.js`).
 - [limit] **Chromium's Back button skips history entries pushed without a user gesture.** A popup
   opened by code, not from a tap or a key, would not be stepped by phone Back, and the checks'
   `history.back()` does not show it; every popup opens from a gesture, and the router says so in the
@@ -876,24 +984,15 @@ that branch rather than listed here.
   is a larger change than any popup needs. A popup added by hand with `core.popups.add` (the checks'
   sample) has no menu row and no viewer gate (`bins/svolderd/web/core/registry.js`,
   `bins/svolderd/web/core/popups/popups.js`).
-- [debt] **Theme code kept in copies.** Ember reads the body class `guest` in one place
-  (`press.js`) where the others ask the core; Ember's `menuRows` is the module's function over its
-  singleton and not rows built from the mount's scope as Signal's and Night drive's are
-  (`bins/svolderd/web/themes/ember/press.js`, `bins/svolderd/web/themes/ember/ember.js`).
 - [debt] **Night drive's sheet and Signal's Add device sheet are not on the modal stack.** A popup
   opened over one makes it inert but leaves it standing behind
   (`bins/svolderd/web/themes/nightdrive/sheet-wire.js`,
   `bins/svolderd/web/themes/signal/hops-wire.js`).
-- [debt] **The popup frame has a few unhandled corners.** `put` over a place that holds an open
-  list's opener or an ask's own place leaves the list or ask held with its opener or box gone (only
-  `draw`, `loading` and `failed` close them), and a wire that puts over such a place closes them
-  itself; in a place for lists a panel with room neither under nor over its chip stands against the
-  pane's bottom, over the chip; `reach` reads the pane's overflow after a draw, a `put` and a size
-  change of the box, so content that grows by other means is seen at the next draw; a radio group at
-  an end of a popup is one Tab stop for the browser and several for the stack; a viewer's rights are
-  read from the model, and a change that reaches the page by another event would not close a popup
-  (`bins/svolderd/web/core/popups/frame.js`, `bins/svolderd/web/core/list.js`,
-  `bins/svolderd/web/core/modal.js`, `bins/svolderd/web/core/popups/popups.js`).
+- [debt] **The popup frame has two layout corners left.** In a place for lists a panel with room
+  neither under nor over its chip stands against the pane's bottom, over the chip; `reach` reads
+  the pane's overflow after a draw, a `put` and a size change of the box, so content that grows by
+  other means is seen at the next draw (`bins/svolderd/web/core/list.js`,
+  `bins/svolderd/web/core/popups/frame.js`).
 - [debt] **A few core parts keep hidden coupling.** `freeze.js` gives an open list's hold back
   before a gesture's without being told which is which, which no theme reads today; `createLive`
   reads a reading that names no device as the shown device's (`bins/svolderd/web/core/freeze.js`,
@@ -991,6 +1090,9 @@ that branch rather than listed here.
   self-test takes about 37 seconds. `routes-doc-check.py` reads a call's body only as an object
   literal at the call, lists the walk's follow stream as one row, and ties no check to the IPC ops
   (`server_switch`, `daemon reload`) (`scripts/theme-css-check.py`, `scripts/routes-doc-check.py`).
+- [debt] **A failed web check is re-run whole.** A check that fails is run again as a whole, in its
+  browser; there is no way to re-run only the failed case of a check, so a late case costs the
+  check's full time again (`scripts/web-checks/run-all.sh`).
 - [test, with hardware] **An unnamed run takes BlueZ's first adapter, which no dongle test can steer.** With no
   `--adapter`, no configured `adapter` and no remembered one, the transport opens the first adapter
   BlueZ lists, which on a machine with a built-in controller need not be the one that hears the
@@ -1001,17 +1103,19 @@ that branch rather than listed here.
   over a `Claim` seam, and a real `Guard` cannot be built in a unit test
   (`bins/svolder/src/tui/terminal.rs`).
 - [test] **The browser checks leave some paths to node or by hand.** `popups.py` presses Tab forward
-  only (Shift+Tab on a hidden control is node's), and the drag-ending Escape on Ember's curve is not
-  pressed; Ember's `0`, `f` and `v` keys are held by the `keys.py` spy alone; `keys.py` cannot count
-  a handler property or a listener added in a state it never enters; `completeness.py` compares no
-  counts between themes; the Devices popup's `reach()` on a pane the wire puts, the timed re-read,
-  "not connected since HH:MM", a rename and a drop are node only (the fake cannot bring a dropped
-  device back without a restart); `eq_library.py` proves a fit gap only where the fixture's
-  measurement has one, so a preview with no gap or no boost is node's; the walk's wrong passphrase
-  and a scan that takes time need a fake knob (`svolder-sim --advertised-passphrase` has it for the
-  radio); whether Escape reaches the stack while a native `<select>` list is open has not been tried
-  in a browser; a wheel over the veil in Firefox and a list placed beside classic scrollbars have
-  not been looked at by hand (`scripts/web-checks/popups.py`, `scripts/web-checks/keys.py`,
+  only (Shift+Tab on a hidden control is node's), no browser check presses Tab through a real radio
+  group at a popup's end (the stop and the Sound popup's tabpanel are proved in node, whose jsdom
+  has no Tab of its own), and the drag-ending Escape on Ember's curve is not pressed; Ember's `0`,
+  `f` and `v` keys are held by the `keys.py` spy alone; `keys.py` cannot count a handler property or
+  a listener added in a state it never enters; `completeness.py` compares no counts between themes;
+  the Devices popup's `reach()` on a pane the wire puts, the timed re-read, "not connected since
+  HH:MM", a rename and a drop are node only (the fake cannot bring a dropped device back without a
+  restart); `eq_library.py` proves a fit gap only where the fixture's measurement has one, so a
+  preview with no gap or no boost is node's; the walk's wrong passphrase and a scan that takes time
+  need a fake knob (`svolder-sim --advertised-passphrase` has it for the radio); whether Escape
+  reaches the stack while a native `<select>` list is open has not been tried in a browser; a wheel
+  over the veil in Firefox and a list placed beside classic scrollbars have not been looked at by
+  hand (`scripts/web-checks/popups.py`, `scripts/web-checks/keys.py`,
   `scripts/web-checks/completeness.py`).
 - [observed] **Under heavy load a few pty harness cases time out now and then.** With 16 busy loops
   running, cases such as cover-under-box, the MQTT rows and the divider failed once in a while and

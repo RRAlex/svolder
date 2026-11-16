@@ -36,6 +36,11 @@ impl Drop for Dir {
     }
 }
 
+mod exit;
+mod idle;
+mod passthrough;
+mod xf;
+
 fn pk(f: f64, g: f64, q: f64) -> SourceFilter {
     SourceFilter {
         kind: FilterKind::Peaking,
@@ -89,6 +94,9 @@ fn saved(path: &Path, filters: Vec<SourceFilter>, slots: Vec<u8>, on: bool) {
         preamp_db: 0.0,
         filters,
         slots,
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     }
     .save(path)
     .unwrap();
@@ -658,6 +666,8 @@ fn node(id: u32, rate_hz: Option<u32>) -> LiveNode {
     LiveNode {
         id,
         rate_hz,
+        sink: None,
+        playing: false,
         // Ports that hold +60 dB bound no preamp the tests send.
         params: crate::eq::live::preamp_params(60.0).into_iter().collect(),
     }
@@ -680,17 +690,24 @@ async fn a_new_rate_or_a_restarted_chain_sends_every_slot_again() {
     let at_44k = slot_params(1, Some(&pk(1000.0, 0.0, 1.0)), 44_100);
     assert_eq!(value(&sent[0], "l01:b0"), Some(at_44k[0].1));
 
-    params.set_node(Some(node(1, None)));
+    // The same node, its sink suspended: it holds what was sent to it.
+    let mut suspended = node(1, None);
+    suspended
+        .params
+        .extend(params.sent().last().cloned().unwrap_or_default());
+    params.set_node(Some(suspended));
     for _ in 0..WATCH_EVERY {
         control.tick().await;
     }
-    assert_eq!(params.sent().len(), 1, "a suspended sink is not a change");
+    // Only the repeat of the first send (a second later, the same values) went out.
+    assert_eq!(params.sent().len(), 2, "a suspended sink is not a change");
+    assert_eq!(params.sent()[0], params.sent()[1], "the repeat is the same");
 
     params.set_node(Some(node(7, None)));
     for _ in 0..WATCH_EVERY {
         control.tick().await;
     }
-    assert_eq!(params.sent().len(), 2, "a new node is");
+    assert_eq!(params.sent().len(), 3, "a new node is");
     assert!(params.forgotten() > 2);
 }
 
@@ -1454,6 +1471,8 @@ fn legacy_node() -> LiveNode {
     LiveNode {
         id: 1,
         rate_hz: Some(48_000),
+        sink: None,
+        playing: false,
         params: std::collections::HashMap::new(),
     }
 }
@@ -1678,6 +1697,48 @@ async fn the_eq_turns_on_again_at_the_sinks_rate_after_a_rate_change_turned_it_o
     control.edit(gain(0, 14.4, true)).await.unwrap();
 }
 
+/// The sink moves to a rate the chain's config cannot play at (an earlier load, still in the
+/// config) while the points on screen can: the chain is applied again with the points there, and
+/// the EQ stays on.
+#[tokio::test]
+async fn a_rate_the_loaded_curve_cannot_play_at_applies_the_points_again() {
+    let (mut control, chain, params) = setup(Keep::Memory);
+    params.set_node(Some(node(1, Some(48_000))));
+    let low = vec![hsc(14.6, -8.59, 2.35), hsc(49.7, -1.65, 0.32)];
+    control
+        .load("Low".into(), None, correction(low, -1.5))
+        .await
+        .unwrap();
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    let high = vec![hsc(10_697.3, 6.72, 4.01)];
+    control
+        .load("High".into(), None, correction(high, 0.0))
+        .await
+        .unwrap();
+    let applies = || {
+        chain
+            .calls()
+            .into_iter()
+            .filter_map(|call| match call {
+                ChainCall::Apply(request) => Some(request),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let applied = applies().len();
+    params.set_node(Some(node(1, Some(352_800))));
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    let view = control.view();
+    assert!(view.on, "{:?}", view.note);
+    let after = applies();
+    assert_eq!(after.len(), applied + 1, "applied again");
+    assert_eq!(after.last().unwrap().rate_hz, Some(352_800));
+}
+
 #[tokio::test]
 async fn a_chain_taken_for_an_older_one_is_watched_until_its_control_appears() {
     let (mut control, _, params) = setup(Keep::Memory);
@@ -1892,8 +1953,8 @@ async fn a_chain_started_by_the_command_line_is_checked_and_sent_again_at_any_ra
     let sends = params.sent();
     assert_eq!(
         sends.len(),
-        first + 1,
-        "every slot is sent after the reload"
+        first + 2,
+        "every slot is sent after the reload, and once more a second later"
     );
     assert!((1..=16).all(|slot| touches(&sends[first], slot)));
     control.edit(gain(1, 3.0, true)).await.unwrap();
@@ -1937,4 +1998,140 @@ fn a_silent_preamp_port_reads_as_the_floor() {
     assert_eq!(held_preamp_db(&ports(-1.0)), Some(-120.0));
     assert_eq!(held_preamp_db(&ports(1.0)), Some(0.0));
     assert_eq!(held_preamp_db(&HashMap::new()), None);
+}
+
+/// A node as another process left it: the slots of `conf` at `rate` under a preamp of `db`.
+fn playing(id: u32, conf: &[(u8, SourceFilter)], db: f64, rate: u32) -> LiveNode {
+    let mut node = node(id, Some(rate));
+    for slot in 1..=SLOTS as u8 {
+        let filter = conf
+            .iter()
+            .find(|(held, _)| *held == slot)
+            .map(|(_, filter)| filter);
+        node.params.extend(slot_params(slot, filter, rate));
+    }
+    node.params.extend(preamp_params(db));
+    node
+}
+
+#[tokio::test]
+async fn a_start_over_a_chain_playing_other_values_sends_the_saved_state_preamp_first() {
+    let dir = Dir::new();
+    saved(&dir.state(), vec![pk(4000.0, 6.0, 1.0)], vec![1], true);
+    let (mut control, _, params) = setup(Keep::File(dir.state()));
+    // The chain was left holding another curve, under a preamp that does not suit the saved one.
+    params.set_node(Some(playing(5, &[(1, pk(1000.0, -3.0, 1.0))], 0.0, 48_000)));
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    let sends = params.sent();
+    assert!(!sends.is_empty(), "the saved state is sent to the chain");
+    let first = &sends[0];
+    assert!(
+        first[0].0.contains("pre:"),
+        "a preamp that falls goes before the slots, not {:?}",
+        first[0]
+    );
+    let db = 20.0 * value(first, "lpre:Mult").expect("the preamp goes").log10();
+    assert!(db <= 0.0, "{db} dB, above unity");
+    assert!((1..=16).all(|slot| touches(first, slot)));
+    let wanted = [(1, pk(4000.0, 6.0, 1.0))];
+    let over = over_unity(&wanted, 48_000, &sends, 48_000);
+    assert!(over <= 0.01, "{over} dB over unity once the state is sent");
+}
+
+#[tokio::test]
+async fn a_start_over_a_chain_that_plays_the_saved_state_sends_nothing() {
+    let dir = Dir::new();
+    saved(&dir.state(), vec![pk(4000.0, 6.0, 1.0)], vec![1], true);
+    let (mut control, _, params) = setup(Keep::File(dir.state()));
+    let held = [(1, pk(4000.0, 6.0, 1.0))];
+    let db = control.preamp();
+    params.set_node(Some(playing(5, &held, db, 48_000)));
+    for _ in 0..WATCH_EVERY * 2 {
+        control.tick().await;
+    }
+    assert!(params.sent().is_empty(), "{:?}", params.sent());
+}
+
+/// A node holding the -120 dB floor (the `Mult` 1e-6 an earlier start could leave) plays nothing:
+/// a start over it sends the saved state's preamp, not the floor again.
+#[tokio::test]
+async fn a_start_over_a_chain_held_at_the_floor_sends_the_saved_preamp() {
+    let dir = Dir::new();
+    saved(&dir.state(), vec![pk(4000.0, 6.0, 1.0)], vec![1], true);
+    let (mut control, _, params) = setup(Keep::File(dir.state()));
+    let held = [(1, pk(4000.0, 6.0, 1.0))];
+    let wanted = control.preamp();
+    let mut silent = playing(5, &held, wanted, 48_000);
+    for name in ["lpre:Mult", "rpre:Mult"] {
+        silent.params.insert(name.to_string(), 1e-6);
+    }
+    params.set_node(Some(silent));
+    for _ in 0..WATCH_EVERY * 2 {
+        control.tick().await;
+    }
+    let sends = params.sent();
+    let db = sends
+        .iter()
+        .rev()
+        .find_map(|send| value(send, "lpre:Mult"))
+        .map(|mult| 20.0 * mult.log10())
+        .expect("the saved preamp is sent to a chain held at the floor");
+    assert!(
+        (db - wanted).abs() < 0.01,
+        "{db} dB sent, the saved state plays at {wanted} dB"
+    );
+    assert!(control.view().live);
+}
+
+#[tokio::test]
+async fn every_preset_load_moves_the_view_s_load_count_even_under_the_same_name() {
+    let (mut control, _, _) = setup(Keep::Memory);
+    assert_eq!(control.view().loads, 0);
+    let warm = correction(vec![pk(1000.0, 3.0, 1.0)], 0.0);
+    control
+        .load("Warm".into(), None, warm.clone())
+        .await
+        .unwrap();
+    assert_eq!(control.view().loads, 1);
+    // The same name again, with other points: the name did not move, the count did.
+    control
+        .load(
+            "Warm".into(),
+            None,
+            correction(vec![pk(2000.0, -2.0, 1.0)], 0.0),
+        )
+        .await
+        .unwrap();
+    let view = control.view();
+    assert_eq!((view.preset.as_deref(), view.loads), (Some("Warm"), 2));
+    // A hand edit is not a load.
+    control.edit(gain(0, 1.0, true)).await.unwrap();
+    assert_eq!(control.view().loads, 2);
+    // A refused load is not either.
+    let flat = correction(vec![pk(1000.0, 0.0, 1.0); 17], 0.0);
+    assert!(control.load("Huge".into(), None, flat).await.is_err());
+    assert_eq!(control.view().loads, 2);
+}
+
+#[tokio::test]
+async fn a_state_file_read_again_moves_the_load_count() {
+    let dir = Dir::new();
+    saved(&dir.state(), vec![pk(1000.0, 1.0, 1.0)], vec![1], false);
+    let (mut control, _, _) = setup(Keep::File(dir.state()));
+    let before = control.view().loads;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    saved(&dir.state(), vec![pk(1000.0, 2.0, 1.0)], vec![1], false);
+    assert!(control.reload_if_changed());
+    assert_eq!(control.view().loads, before + 1);
+}
+
+/// A view from a peer that has no `loads` reads as 0.
+#[test]
+fn a_view_without_a_load_count_still_parses() {
+    let mut json = serde_json::to_value(EqView::default()).unwrap();
+    json.as_object_mut().unwrap().remove("loads");
+    let view: EqView = serde_json::from_value(json).unwrap();
+    assert_eq!(view.loads, 0);
 }

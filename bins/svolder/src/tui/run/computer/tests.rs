@@ -328,6 +328,9 @@ async fn a_direct_tui_never_shows_the_eq_on_with_no_chain() {
             q: 1.0,
         }],
         slots: vec![1],
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     }
     .save(&path)
     .unwrap();
@@ -429,4 +432,214 @@ async fn under_a_fake_host_the_computer_is_the_daemons_and_the_loop_reaches_noth
     .expect("the daemon got every request");
     assert_eq!(daemon.host_volume_ops(), ["volume 41", "muted true"]);
     watching.close().await;
+}
+
+/// The crossfeed's op is the controller's with no daemon too: it plays flat for the crossfeed
+/// alone, and a quit takes it out again (the chain that ran for it alone is removed).
+#[tokio::test]
+async fn a_direct_tui_serves_the_crossfeed_and_a_quit_turns_it_off() {
+    let chain = Arc::new(FakeChain::new());
+    let control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory);
+    let mut link = ComputerLink::over(control);
+    link.direct(HostEqOp::Crossfeed {
+        on: Some(true),
+        model: None,
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    })
+    .expect("a controller");
+    let seen = tokio::time::timeout(WITHIN, async {
+        loop {
+            let view = next_view(&mut link.views).await;
+            if view
+                .crossfeed
+                .as_ref()
+                .is_some_and(|crossfeed| crossfeed.on)
+            {
+                return view;
+            }
+        }
+    })
+    .await
+    .expect("the view says crossfeed is on");
+    assert!(!seen.on, "the EQ's own switch stays off");
+    assert!(
+        chain
+            .calls()
+            .iter()
+            .any(|call| matches!(call, ChainCall::Apply(request) if request.flat)),
+        "a flat chain was applied"
+    );
+
+    // A change that names nothing comes back as a refusal in words.
+    link.direct(HostEqOp::Crossfeed {
+        on: None,
+        model: None,
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    })
+    .expect("a controller");
+    let answer = tokio::time::timeout(WITHIN, answered(&mut link.answers))
+        .await
+        .expect("a refusal comes back");
+    assert!(
+        matches!(&*answer, Answer::Said(why) if why.contains("names nothing")),
+        "{answer:?}"
+    );
+
+    link.shutdown().await;
+    assert_eq!(
+        chain.calls().last(),
+        Some(&ChainCall::Remove),
+        "the quit removed it"
+    );
+    // A link joined to a daemon (no controller of its own) has nothing to stop.
+    ComputerLink::none().shutdown().await;
+}
+
+/// A crossfeed-on still waiting its turn when the loop quits is dropped: the quit wins, and no
+/// chain is applied after it.
+#[tokio::test]
+async fn a_quit_wins_over_a_queued_crossfeed_on() {
+    let chain = Arc::new(FakeChain::new());
+    let control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory);
+    let mut link = ComputerLink::over(control);
+    // Something holds the controller (a slow apply): the queued change waits behind it.
+    let held = link
+        .control
+        .clone()
+        .expect("a controller")
+        .lock_owned()
+        .await;
+    link.direct(HostEqOp::Crossfeed {
+        on: Some(true),
+        model: None,
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    })
+    .expect("a controller");
+    tokio::task::yield_now().await;
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+    });
+    link.shutdown().await;
+    release.await.unwrap();
+    assert!(
+        chain.calls().is_empty(),
+        "the queued crossfeed never ran: {:?}",
+        chain.calls()
+    );
+}
+
+/// A chain whose apply waits at a gate, so a change can be caught while it runs.
+struct Gated {
+    inner: FakeChain,
+    started: Arc<tokio::sync::Notify>,
+    gate: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl svolder_host::eq::Chain for Gated {
+    async fn apply(
+        &self,
+        request: svolder_host::eq::ApplyRequest,
+    ) -> Result<svolder_host::eq::HostEqState, EqFailure> {
+        self.started.notify_one();
+        self.gate.notified().await;
+        self.inner.apply(request).await
+    }
+    async fn remove(&self) -> Result<(), EqFailure> {
+        self.inner.remove().await
+    }
+    async fn status(&self) -> svolder_host::eq::Status {
+        self.inner.status().await
+    }
+    async fn keep_conf(&self, request: svolder_host::eq::ApplyRequest) -> Result<(), EqFailure> {
+        self.inner.keep_conf(request).await
+    }
+    fn unavailable(&self) -> Option<EqFailure> {
+        self.inner.unavailable()
+    }
+    fn state(&self) -> Option<svolder_host::eq::HostEqState> {
+        self.inner.state()
+    }
+}
+
+fn crossfeed_on() -> HostEqOp {
+    HostEqOp::Crossfeed {
+        on: Some(true),
+        model: None,
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    }
+}
+
+/// A change that is running when the loop quits is finished, not cancelled (the apply is held at
+/// a gate when the quit comes), and a crossfeed-on asked after it never plays; the user's EQ edit
+/// queued behind it is applied before the shutdown.
+#[tokio::test]
+async fn a_quit_finishes_the_running_change_and_keeps_the_users_queued_edit() {
+    let inner = FakeChain::new();
+    let (started, gate) = (
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+    let chain = Arc::new(Gated {
+        inner: inner.clone(),
+        started: Arc::clone(&started),
+        gate: Arc::clone(&gate),
+    });
+    let control = EqControl::new(chain, Box::new(FakeParams::new()), Keep::Memory);
+    let mut link = ComputerLink::over(control);
+    // The EQ turns on (its apply waits at the gate), then the user's edit and a crossfeed-on queue.
+    link.direct(HostEqOp::Mode { on: true })
+        .expect("a controller");
+    tokio::time::timeout(WITHIN, started.notified())
+        .await
+        .expect("the apply began");
+    link.direct(gain(1, 3.0)).expect("a controller");
+    link.direct(crossfeed_on()).expect("a controller");
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate.notify_one();
+        // The edit that follows applies again (a point changed while the EQ is on is live).
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate.notify_one();
+    });
+    link.shutdown().await;
+    release.await.unwrap();
+    let calls = inner.calls();
+    assert!(
+        matches!(calls.first(), Some(ChainCall::Apply(request)) if !request.flat),
+        "the running apply finished: {calls:?}"
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|call| matches!(call, ChainCall::Apply(request) if request.flat)),
+        "no crossfeed was turned on after the quit: {calls:?}"
+    );
+    let state = svolder_host::eq::Chain::state(&inner).expect("a state");
+    assert!(
+        state.on && !state.crossfeed_on,
+        "the EQ stays as the user left it"
+    );
+    assert!(
+        state.filters.iter().any(|filter| filter.g == 3.0)
+            || calls.iter().any(|call| matches!(call, ChainCall::KeepConf(r) if r.correction.filters.iter().any(|f| f.g == 3.0))),
+        "the user's last edit was kept: {calls:?}"
+    );
 }

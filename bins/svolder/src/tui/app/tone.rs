@@ -35,6 +35,9 @@ pub enum ToneRow {
     Band,
     /// A point of the computer's table, 0-based, on the computer side.
     Point(usize),
+    /// A row of the computer's Crossfeed section; the tone screen shows the section unfolded
+    /// exactly while the keys are in it.
+    Crossfeed(super::Xf),
     /// The DAC/Computer switch, the row over Mode on the tone-control screen: `←→` pick the side.
     Target,
 }
@@ -129,21 +132,31 @@ impl App {
     /// [`App::move_tone_row`] among the rows from Mode down.
     fn move_tone_row_below(&mut self, delta: isize) {
         if self.on_computer() {
-            // The mode, then a row per point.
-            let at = match self.tone.row {
-                ToneRow::Point(point) => 1 + point,
-                _ => 0,
-            };
-            match stepped(at, delta, 1 + self.computer_points().len()) {
-                0 => self.tone.row = ToneRow::Mode,
-                row => self.focus_point(row - 1),
+            // The mode, the Crossfeed rows (the tone screen's section, unfolded as the keys
+            // reach it), then a row per point; the device screen's pane has its one Crossfeed
+            // row under the points.
+            let mut stops = vec![ToneRow::Mode];
+            if self.screen == Screen::Tone {
+                stops.extend(self.xf_stops().into_iter().map(ToneRow::Crossfeed));
             }
+            stops.extend((0..self.computer_points().len()).map(ToneRow::Point));
+            if self.screen != Screen::Tone {
+                stops.extend(self.xf_stops().into_iter().map(ToneRow::Crossfeed));
+            }
+            let at = stops.iter().position(|r| *r == self.tone.row).unwrap_or(0);
+            let from = self.cursor_id();
+            self.tone.xf_line = None;
+            match stops[stepped(at, delta, stops.len())] {
+                ToneRow::Point(point) => self.focus_point(point),
+                row => self.tone.row = row,
+            }
+            self.cursor_moved(from);
             return;
         }
         let at = match self.tone.row {
             ToneRow::Mode | ToneRow::Target => 0,
             ToneRow::Loudness => 1,
-            ToneRow::Band | ToneRow::Point(_) => 2 + self.tone.band,
+            ToneRow::Band | ToneRow::Point(_) | ToneRow::Crossfeed(_) => 2 + self.tone.band,
         };
         match stepped(at, delta, 2 + self.bands()) {
             0 => self.tone.row = ToneRow::Mode,
@@ -162,7 +175,7 @@ impl App {
         match row {
             ToneRow::Mode => self.tone.header_loudness = false,
             ToneRow::Loudness => self.tone.header_loudness = true,
-            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target => {}
+            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target | ToneRow::Crossfeed(_) => {}
         }
     }
 
@@ -178,6 +191,7 @@ impl App {
         if self.on_computer() {
             return match self.tone.row {
                 ToneRow::Point(at) => self.nudge_point_gain(at, dir),
+                ToneRow::Crossfeed(row) => self.xf_arrow(row, dir),
                 ToneRow::Target => Vec::new(),
                 _ => self.step_computer_mode(dir),
             };
@@ -186,7 +200,7 @@ impl App {
             return Vec::new();
         };
         match self.tone.row {
-            ToneRow::Target => Vec::new(),
+            ToneRow::Target | ToneRow::Crossfeed(_) => Vec::new(),
             ToneRow::Mode => self.step_mode(mode_id, dir),
             ToneRow::Loudness => {
                 let target = self.loudness_target(dir);

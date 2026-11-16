@@ -142,6 +142,13 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Fit**: choosing bands so that they match a headphone correction as closely as the device's
   bands allow.
 - **APO**: Equalizer APO's parametric text, the format AutoEq writes.
+- **Crossfeed**: feeding a low-passed, delayed copy of each channel into the other channel at a set
+  level. The computer's has four models (Bauer, Linkwitz, Meier,
+  Mid/Side bass); see [crossfeed.md](design/crossfeed.md).
+- **Feed level**: bs2b's way to state a Bauer crossfeed's level, in dB: how far the crossed signal
+  sits below the direct one at low frequencies (4.5 dB for the default preset, 37 %).
+- **Mid/Side** (M/S): the sum and the difference of the two channels. Meier crosses only the side
+  signal; Mid/Side bass blends the bass toward the mid signal.
 
 ## Host audio
 

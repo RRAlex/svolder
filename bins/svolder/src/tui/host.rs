@@ -114,6 +114,9 @@ impl Computer {
 pub struct Cover {
     /// The cover's name (a hash) while the track has one: what the art is asked for by.
     pub hash: Option<String>,
+    /// The cover (by name) that could not be fetched, decoded or built, which the layout gives no
+    /// room to.
+    pub failed: Option<String>,
     /// The terminal's cell size in pixels `(width, height)` while the art is drawn, which the
     /// layout sizes the picture's box by; `None` with the art off.
     pub font: Option<(u16, u16)>,

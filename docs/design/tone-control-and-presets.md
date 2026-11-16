@@ -111,6 +111,13 @@ plan's writes go out as a batch that other tone-control writes wait for, and `re
 writer remembers which preset was last recalled on each device and publishes it, so every front end
 shows the same one as the one that is on.
 
+An imported preset's first fit to a tone control runs in `spawn_blocking` behind `recall::fitted`'s
+two permits, which AutoEq previews, the page load (`web::api::load_off_thread`), fleet recalls, MCP
+`list_presets` and the computer recall share; `recall::warm` makes the first fit, so the
+synchronous `preset::on` and `matches` only read the kept result. A fleet recall that waited for a
+cold fit is dropped if any write reached the device's writer meanwhile: it takes a place in the
+order of arrival (`Writer::ticket`) and is sent with `Writer::recall_unless_overtaken`.
+
 ### Which preset is on
 
 `on` (`tone/preset.rs`) is the one rule every front end reads: `Unread` until the mode and every

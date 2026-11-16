@@ -375,7 +375,7 @@ place (`decoration/transition.rs`), so a test can say what a frame draws.
 - Drawing: `render.rs`, `screens/`, `widgets.rs` and `widgets/`, `layout_tier.rs`, `theme.rs`,
   `palette.rs`; tests beside each (`screens/*/tests.rs`, `theme/tests.rs`). The Settings box's rows
   are pinned by `screens/settings/rows.golden`; the user guide's mockups are read back by tests
-  (`test_support.rs`, `screens/menu/tests.rs`, `screens/settings/tests.rs`), so a screen that
+  (`test_support.rs`, `screens/menu/tests.rs`, `screens/settings/tests/look.rs`), so a screen that
   changes shape fails until the guide follows. The configuration template is read back the same way:
   `crates/svolder-ipc/src/config/tests/tui.rs` compares it with `docs/usage/config.md`.
 - The loop: `run.rs`, `run/events.rs`, `run/input.rs`, `run/look.rs`; tests in `run/tests/` and

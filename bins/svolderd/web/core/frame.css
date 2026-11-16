@@ -734,6 +734,29 @@
   fill: none; stroke: var(--frame-graph-compare); stroke-width: 1.5; stroke-dasharray: 1 3;
   stroke-linecap: round;
 }
+/* a page's words: a note and the notes that say it failed or what changed, a note under a list, a
+   link that leaves the page, the live line; then the focus rings of the frame's own controls */
+.fp-note { margin: 0; color: var(--frame-dim); }
+.fp-rows + .fp-note { margin-top: 12px; }
+.fp-page a { color: var(--frame-accent); text-underline-offset: 2px; }
+.fp-page a:focus-visible {
+  outline: 2px solid var(--frame-accent); outline-offset: 2px; border-radius: 4px;
+}
+.fp-note.fp-failed { color: var(--frame-danger); }
+/* the Overview's line that config.toml changed since the last reload: the ink of the theme's own
+ * surface and an accent edge, so it reads in every theme without its own colours */
+.fp-note.fp-config {
+  margin: 0 0 12px; padding: 8px 12px; color: var(--frame-ink); background: var(--frame-hover);
+  border-inline-start: 3px solid var(--frame-accent); border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.fp-live { color: var(--frame-dim); font-family: var(--frame-mono); }
+.fp-close:focus-visible, .fp-back:focus-visible {
+  outline: 2px solid var(--frame-accent); outline-offset: 2px;
+}
+.fp-entry:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
+/* the pane takes the focus while it scrolls (popups/frame.js) */
+.fp-page:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
 /* the Devices popup (popups/devices/draw.js): a device's block is its name, its state line and
    its key graphs; one that is not connected is dimmed by the tokens for dim words and for what
    is offline, never by an opacity */
@@ -827,29 +850,6 @@
 .fpw-ended, .fpw-added { font: 400 14px/1.45 var(--frame-font); color: var(--frame-ink); }
 .fpw-ended.fp-failed { color: var(--frame-danger); }
 .fpw-added { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.fp-note { margin: 0; color: var(--frame-dim); }
-/* a note under a list stands off it */
-.fp-rows + .fp-note { margin-top: 12px; }
-/* a link that leaves the page */
-.fp-page a { color: var(--frame-accent); text-underline-offset: 2px; }
-.fp-page a:focus-visible {
-  outline: 2px solid var(--frame-accent); outline-offset: 2px; border-radius: 4px;
-}
-.fp-note.fp-failed { color: var(--frame-danger); }
-/* the Overview's line that config.toml changed since the last reload: the ink of the theme's own
- * surface and an accent edge, so it reads in every theme without its own colours */
-.fp-note.fp-config {
-  margin: 0 0 12px; padding: 8px 12px; color: var(--frame-ink); background: var(--frame-hover);
-  border-inline-start: 3px solid var(--frame-accent); border-radius: 4px;
-  overflow-wrap: anywhere;
-}
-.fp-live { color: var(--frame-dim); font-family: var(--frame-mono); }
-.fp-close:focus-visible, .fp-back:focus-visible {
-  outline: 2px solid var(--frame-accent); outline-offset: 2px;
-}
-.fp-entry:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
-/* the pane takes the focus while it scrolls (popups/frame.js) */
-.fp-page:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: -2px; }
 /* the EQ library popup (popups/eq-library/draw.js): the search field, the headphones as disclosures
    of their measurements, the preview's graph and key, the import and upload forms and the saved
    rows, dressed by the tokens alone */
@@ -880,10 +880,8 @@
 .fpe-chip-on { color: var(--frame-dim); font: 500 13px var(--frame-font); }
 .fpe-plot { height: 180px; margin: 0 0 8px; overflow: hidden; }
 .fpe-svg { display: block; width: 100%; height: 100%; }
-.fpe-svg .fp-graph-target, .fpe-svg .fp-graph-series, .fpe-svg .fp-graph-compare {
-  vector-effect: non-scaling-stroke;
-}
-.fpe-svg .fp-graph-grid { vector-effect: non-scaling-stroke; }
+.fpe-svg .fp-graph-grid, .fpe-svg .fp-graph-target, .fpe-svg .fp-graph-series,
+.fpe-svg .fp-graph-compare { vector-effect: non-scaling-stroke; }
 .fpe-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 8px; padding: 0; list-style: none; }
 .fpe-key { display: inline-flex; align-items: center; gap: 6px; color: var(--frame-dim); font: 400 12.5px var(--frame-font); }
 .fpe-swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--frame-graph-series); }
@@ -901,6 +899,91 @@
 .fpe-ask:empty { display: none; }
 .fpe-saved-words:empty { display: none; }
 .fpe-lower { margin-top: 8px; color: var(--frame-warn); }
+/* a popup's header tools (a switch) and the bar under the header (tabs, pills): the bar does not
+   scroll with the page */
+.fp-head-tools { display: flex; flex: none; align-items: center; }
+.fpx-switch {
+  display: inline-flex; align-items: center; gap: 8px; min-height: var(--frame-tap); padding: 0 8px;
+  border: 0; background: none; color: var(--frame-dim); font: 500 14px var(--frame-font); cursor: pointer;
+}
+.fpx-switch[aria-disabled="true"] { cursor: default; }
+.fpx-switch-track {
+  position: relative; width: 38px; height: 22px; box-sizing: border-box; border-radius: 999px;
+  border: 1px solid var(--frame-line-strong); background: transparent;
+}
+.fpx-switch-knob {
+  position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--frame-dim);
+}
+.fpx-switch.on { color: var(--frame-ink); }
+.fpx-switch.on .fpx-switch-track { border-color: var(--frame-accent); background: var(--frame-accent); }
+.fpx-switch.on .fpx-switch-knob { left: 19px; background: var(--frame-on-accent); }
+.fp-bar { flex: none; padding: 0 12px; border-bottom: 1px solid var(--frame-line); }
+.fp-tabs { display: flex; gap: 4px; }
+.fp-tab {
+  display: inline-flex; align-items: center; gap: 8px; min-height: var(--frame-tap); padding: 0 14px;
+  border: 0; border-bottom: 3px solid transparent; background: none; color: var(--frame-dim);
+  font: 500 14px var(--frame-font); cursor: pointer;
+}
+.fp-tab:hover { background: var(--frame-hover); }
+.fp-tab.on { color: var(--frame-ink); border-bottom-color: var(--frame-accent); }
+.fp-tab:focus-visible, .fp-pill:focus-visible, .fpx-switch:focus-visible {
+  outline: 2px solid var(--frame-accent); outline-offset: -2px;
+}
+.fp-pills { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0 10px; }
+.fp-pill {
+  min-height: 36px; padding: 0 14px; border-radius: 999px; background: none; cursor: pointer;
+  border: 1px solid var(--frame-dim); color: var(--frame-dim); font: 500 13px var(--frame-font);
+}
+.fp-pill:hover { background: var(--frame-hover); }
+.fp-pill.on { border-color: var(--frame-accent); color: var(--frame-accent); }
+/* the Crossfeed tab of the Sound popup (popups/crossfeed/draw.js) */
+.fpx-context { margin: 0 0 12px; }
+.fpx { display: grid; gap: 12px; }
+.fpx > * { margin: 0; }
+.fpx-turnedoff { color: var(--frame-warn); }
+/* the fields: a model and a preset menu, and the steps beside a number; their edges stand at 3:1
+   against the surface */
+.fpx-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.fpx-field { display: grid; gap: 4px; min-width: 0; }
+.fpx-label { color: var(--frame-dim); font: 500 12.5px var(--frame-font); }
+.fpx-menu {
+  display: flex; align-items: center; justify-content: space-between; width: 100%; min-width: 0;
+  padding: 0 14px; border-radius: 10px; text-align: left; overflow-wrap: anywhere;
+}
+.fpx-menu, .fpx-step { border-color: var(--frame-dim); }
+.fpx-menu::after { content: '▾'; flex: none; margin-left: 8px; color: var(--frame-dim); }
+.fpx-menu.fpx-custom { border-color: var(--frame-accent); }
+.fpx-steps { display: inline-flex; gap: 6px; }
+.fpx-step { min-width: var(--frame-tap); padding: 0; font-size: 20px; line-height: 1; }
+/* the picture: the response plot with its strokes (the same ear in the ink, the other ear in the
+   accent), its keys and its axis, and the same strokes in the muted tokens while crossfeed is off */
+.fpx-plot { aspect-ratio: 5 / 2; overflow: hidden; }
+.fpx-svg { display: block; width: 100%; height: 100%; }
+.fpx-svg path, .fpx-svg circle { vector-effect: non-scaling-stroke; }
+.fpx-grid { fill: none; stroke: var(--frame-graph-grid); stroke-width: 1; }
+.fpx-same { fill: none; stroke: var(--frame-ink); stroke-width: 2; }
+.fpx-other { fill: none; stroke: var(--frame-accent); stroke-width: 2; }
+.fpx-leak { fill: var(--frame-graph-gap); stroke: none; }
+.fpx-cross { fill: none; stroke: var(--frame-graph-target); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.fpx-dot { fill: var(--frame-accent); stroke: none; }
+.fpx-same-key { border-top-color: var(--frame-ink); }
+.fpx-other-key { border-top-color: var(--frame-accent); }
+.fpx-axis { display: flex; justify-content: space-between; margin: 2px 0 6px; color: var(--frame-dim); font: 400 12px var(--frame-font); }
+.fpx-legend { margin: 0; }
+.fpx-picture { margin: 0; }
+.fpx-off .fpx-same, .fpx-off .fpx-other { stroke: var(--frame-faint); }
+.fpx-off .fpx-leak { fill: var(--frame-hover); }
+.fpx-off .fpx-dot { fill: var(--frame-faint); }
+.fpx-off .fpx-value { color: var(--frame-dim); }
+/* the readings: a label, a value and a step for each */
+.fpx-rows { display: grid; }
+.fpx-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 4px 0; border-bottom: 1px solid var(--frame-line);
+}
+.fpx-value { color: var(--frame-ink); font-variant-numeric: tabular-nums; text-align: right; }
+.fpx-grey .fpx-label, .fpx-grey .fpx-value { color: var(--frame-faint); }
 /* centred on a phone (the core's PHONE_MAX_PX, core/phone.js), where a popup fills the screen and
    shows its list or its page, never both */
 @media (max-width: 719px) {

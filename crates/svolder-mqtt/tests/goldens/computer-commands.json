@@ -10,6 +10,44 @@
         }
       ],
       "availability_mode": "all",
+      "command_topic": "svolder/computer/computer_crossfeed_preset/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
+      "name": "Crossfeed preset",
+      "options": [
+        "Bauer · Jan Meier",
+        "Bauer · Chu Moy",
+        "Bauer · bs2b default",
+        "Linkwitz",
+        "Meier · Default",
+        "Meier · Rockbox",
+        "Mid/Side bass",
+        "Custom"
+      ],
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/computer/computer_crossfeed_preset/state",
+      "unique_id": "svolder_computer_computer_crossfeed_preset"
+    },
+    "topic": "homeassistant/select/svolder_computer/computer_crossfeed_preset/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
       "device": {
         "identifiers": [
           "svolder_computer"
@@ -25,6 +63,36 @@
       "unique_id": "svolder_computer_computer_eq_preset"
     },
     "topic": "homeassistant/sensor/svolder_computer/computer_eq_preset/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/computer/computer_crossfeed/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
+      "name": "Crossfeed",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/computer/computer_crossfeed/state",
+      "unique_id": "svolder_computer_computer_crossfeed"
+    },
+    "topic": "homeassistant/switch/svolder_computer/computer_crossfeed/config"
   },
   {
     "payload": {

@@ -16,6 +16,35 @@
         ],
         "name": "This computer"
       },
+      "name": "Crossfeed",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/computer/computer_crossfeed/state",
+      "unique_id": "svolder_computer_computer_crossfeed"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_computer/computer_crossfeed/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
       "name": "EQ",
       "origin": {
         "name": "svolder",
@@ -27,6 +56,33 @@
       "unique_id": "svolder_computer_computer_eq"
     },
     "topic": "homeassistant/binary_sensor/svolder_computer/computer_eq/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
+      "name": "Crossfeed preset",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/computer/computer_crossfeed_preset/state",
+      "unique_id": "svolder_computer_computer_crossfeed_preset"
+    },
+    "topic": "homeassistant/sensor/svolder_computer/computer_crossfeed_preset/config"
   },
   {
     "payload": {

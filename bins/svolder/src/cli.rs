@@ -604,6 +604,56 @@ pub(crate) enum HostCommand {
         #[command(subcommand)]
         command: HostEqCommand,
     },
+    /// Cross a little of each channel into the other for headphones, through the daemon
+    ///
+    /// With no verb, print the crossfeed: whether it plays, the model, the preset, the level,
+    /// the crossover and the delay. The words and ranges are the daemon's: a value outside a
+    /// range is held to it, and the answer says what was set.
+    Crossfeed {
+        /// Print the crossfeed as the daemon sends it, as one JSON object
+        #[arg(long, global = true)]
+        json: bool,
+        #[command(subcommand)]
+        command: Option<HostCrossfeedCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum HostCrossfeedCommand {
+    /// Turn the crossfeed on, with the numbers it has
+    On,
+    /// Turn the crossfeed off
+    Off,
+    /// Choose the model (the words `svolder host crossfeed --json` lists under `models`) and
+    /// load its default preset
+    Model {
+        /// The model's word, such as `bauer` or `mid-side`
+        word: String,
+    },
+    /// Load one of the model's presets, by the name the view lists
+    Preset {
+        /// The preset's name, in any case (`"Chu Moy"`, or the words unquoted)
+        #[arg(required = true, num_args = 1..)]
+        name: Vec<String>,
+    },
+    /// Set how much of the other channel is crossed, in percent
+    Level {
+        /// The percent as a plain number, held to the model's range (e.g. `37`)
+        #[arg(allow_hyphen_values = true)]
+        percent: String,
+    },
+    /// Set the crossover, in Hz
+    Crossover {
+        /// The frequency as a plain number, held to the model's range (e.g. `700`)
+        #[arg(allow_hyphen_values = true)]
+        hz: String,
+    },
+    /// Set the total lag of the crossed signal, in ms, or `own` for the model's own
+    Delay {
+        /// Milliseconds (`0.5` or `0.5ms`; never below the model's own lag), or `own`
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
 }
 
 #[derive(Subcommand)]

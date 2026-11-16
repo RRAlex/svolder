@@ -28,16 +28,20 @@
 // the model's event that lists the new preset reach it in either order. It is not put while its
 // question is open (the question lives in it); it is put when the question closes.
 //
+// Two pages have their own file, as parts of this wire: the upload (upload-wire.js) and the saved
+// presets with the overwrite question (saved-wire.js). This file keeps the search, the preview and
+// the import, which share the choice, and the state the parts read through `here`.
+//
 // The popup writes nothing but through the actions, attaches no key listener (the modal hands
 // `onKey` the keys) and wants nothing of the stream: the page behind follows the device.
 
-import { askQuestion } from '../../inline-ask.js';
 import { openList } from '../../list.js';
 import {
-  ENTRIES, FILE_MAX, IDS, WORDS, askId, defaultName, defaultOpen, entriesOf, importHtml,
-  importWordsHtml, keyOf, overwriteWhy, pageHtml, previewHtml, previewWordsHtml, refusalWords,
-  resultsHtml, savedHtml, savedWordsHtml, statusHtml, titleOf, uploadFieldsHtml, uploadWordsHtml,
+  ENTRIES, IDS, WORDS, defaultName, defaultOpen, entriesOf, importHtml, importWordsHtml, keyOf,
+  pageHtml, previewHtml, previewWordsHtml, refusalWords, resultsHtml, statusHtml, titleOf,
 } from './draw.js';
+import { createSaved } from './saved-wire.js';
+import { createUpload, savedOf } from './upload-wire.js';
 
 /** How long the typing in the search field pauses before the search is sent, in milliseconds. */
 export const DEBOUNCE_MS = 300;
@@ -46,20 +50,6 @@ export const DEBOUNCE_MS = 300;
 const variantOf = (m) => ({
   name: m.name, source: m.source, form: m.form, ...(m.rig ? { rig: m.rig } : {}),
 });
-
-/** What a save answered, as the page keeps it. */
-const savedOf = (answer) => ({
-  name: answer.name, filters: answer.filters, skipped: answer.skipped ?? 0,
-});
-
-/** The name a preset imported from a file is called by default, as `svolder eq import` names it:
- * the file's name without its extension and without a trailing ` ParametricEQ`, cut at 40
- * characters. */
-function stemOf(name) {
-  const stem = String(name ?? '').replace(/\.[^./\\]*$/, '').trim();
-  const bare = / parametriceq$/i.test(stem) ? stem.slice(0, -' parametriceq'.length) : stem;
-  return [...bare.trim()].slice(0, 40).join('').trim();
-}
 
 /** The EQ library's part for the router: `{ show(page), hide(), onKey(event) }`, over `core`,
  * drawn into `frame` (popups/frame.js). */
@@ -93,12 +83,7 @@ export function wire({ core, frame }) {
   let importing = { status: 'idle' };
   let importStop = null;
 
-  let up = { filename: '', text: null, name: null, status: 'idle' };
-  let uploadStop = null;
-  let reading = 0;
 
-  let said = { words: '', failed: false };
-  let asking = null;
   let pick = null;
   let stopping = new AbortController();
   let offs = [];
@@ -123,53 +108,12 @@ export function wire({ core, frame }) {
   }
   const sideKey = (one) => (one.computer ? '\0computer' : one.url);
 
-  /** Why there is no curve to save on the device: the words, or `null` when there is one. */
-  function liveWhy() {
-    if (side.computer) return null;
-    const device = side.url ? store.device(side.url) : null;
-    const link = side.url ? (store.part('link', side.url) ?? fleetRow(side.url)?.link) : null;
-    if (link && link.state !== 'on') return WORDS.notConnected(side.name);
-    if (!device?.presets) return WORDS.noToneControl(side.name);
-    if (!device.tone?.response) return WORDS.notRead;
-    return null;
-  }
-
-  /** The presets the side lists, as the saved page's rows. */
-  function savedList() {
-    if (side.computer) {
-      const computer = store.page().host?.computer;
-      if (!computer) return { rows: [], note: 'The computer\'s presets are not read yet.' };
-      return {
-        rows: (computer.presets ?? []).map((one) => ({
-          name: one.name, built_in: one.built_in === true, imported: false, on: one.on === true,
-          playable: one.playable, why: one.why,
-        })),
-      };
-    }
-    const device = side.url ? store.device(side.url) : null;
-    if (!device?.presets) {
-      // a device the daemon has not found has no profile to list presets from: that is not the
-      // same as a device that has no tone control
-      const link = side.url ? (store.part('link', side.url) ?? fleetRow(side.url)?.link) : null;
-      const name = side.name || 'This device';
-      return {
-        rows: [],
-        note: link && link.state !== 'on' ? WORDS.presetsUnknown(name) : WORDS.noToneControl(name),
-      };
-    }
-    return {
-      rows: device.presets.rows.map((one) => ({
-        name: one.name, built_in: one.built_in === true, imported: one.imported === true,
-        on: one.on === true,
-      })),
-    };
-  }
-
   /** What the draws are given. */
   function model() {
     return {
-      query, search, selected, preview, compare, importing, side, open: opened, up,
-      list: savedList(), live: liveWhy(), words: said.words, failed: said.failed,
+      query, search, selected, preview, compare, importing, side, open: opened, up: upload.up,
+      list: saved.savedList(), live: saved.liveWhy(), words: saved.said.words,
+      failed: saved.said.failed,
     };
   }
 
@@ -198,18 +142,6 @@ export function wire({ core, frame }) {
   const putResults = () => put(IDS.results, resultsHtml({
     answer: search.answer, selected, open: opened,
   }));
-  function putUpload() {
-    put(IDS.upFields, uploadFieldsHtml({ up, side }));
-    put(IDS.upWordsPlace, uploadWordsHtml({ up, side }));
-  }
-  const putWords = () => put(IDS.savedWordsPlace, savedWordsHtml(said));
-  /** The saved list, not while its question stands. */
-  function putSaved() {
-    if (asking) return;
-    put(IDS.saved, savedHtml({
-      list: savedList(), side, live: liveWhy(),
-    }));
-  }
 
   /** Give the focus to the element `id`, if it is drawn and takes it. */
   function focusOn(id) {
@@ -218,13 +150,25 @@ export function wire({ core, frame }) {
     if (el && frame.el.contains(el) && !off) el.focus({ preventScroll: true });
   }
 
+  /** The popup's state, as the parts (upload-wire.js, saved-wire.js) read it. */
+  const here = {
+    get open() { return open; },
+    get opening() { return opening; },
+    get side() { return side; },
+    get stopping() { return stopping; },
+  };
+  const saved = createSaved({ core, doc, here, put, fleetRow });
+  const upload = createUpload({
+    core, doc, view, here, put, focusOn, putSaved: saved.putSaved, listed,
+  });
+
   /** Stop what is in flight: the controllers that are given. */
   function stopAll() {
-    for (const stop of [searchStop, previewStop, importStop, uploadStop]) stop?.abort();
+    for (const stop of [searchStop, previewStop, importStop]) stop?.abort();
+    upload.stop();
     searchStop = null;
     previewStop = null;
     importStop = null;
-    uploadStop = null;
     view.clearTimeout(timer);
     timer = 0;
   }
@@ -405,7 +349,7 @@ export function wire({ core, frame }) {
       if (answer.ok) {
         importing = { ...importing, late: WORDS.savedLate(answer.name, sentWords) };
         putImport();
-        putSaved();
+        saved.putSaved();
         listed();
       }
       return;
@@ -413,7 +357,7 @@ export function wire({ core, frame }) {
     if (answer.ok) {
       importing = { name: typed, status: 'saved', saved: savedOf(answer) };
       putImport();
-      putSaved();
+      saved.putSaved();
       listed();
       return;
     }
@@ -424,141 +368,6 @@ export function wire({ core, frame }) {
     putImport();
     if (['taken', 'bad_name'].includes(answer.reason)) focusOn(IDS.importName);
     else focusOn(IDS.importSave);
-  }
-
-  // ---- the upload ----
-
-  /** The text of `file`. */
-  function textOf(file) {
-    if (typeof file.text === 'function') return file.text();
-    return new Promise((resolve, reject) => {
-      const reader = new view.FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(file);
-    });
-  }
-
-  async function takeFile(file) {
-    reading += 1;
-    const turn = reading;
-    const mine = opening;
-    // each file starts with its own name: only a name typed from here on is the person's
-    up = { ...up, typed: false };
-    if (!file) {
-      up = { ...up, filename: '', text: null, status: 'idle' };
-      putUpload();
-      return;
-    }
-    const base = { ...up, filename: file.name, text: null };
-    if (file.size > FILE_MAX) {
-      up = { ...base, status: 'unreadable', words: WORDS.fileTooLarge };
-      putUpload();
-      return;
-    }
-    up = { ...base, status: 'reading' };
-    putUpload();
-    let text = null;
-    try {
-      text = await textOf(file);
-    } catch {
-      text = null;
-    }
-    if (!open || mine !== opening || turn !== reading) return;
-    if (text === null) {
-      up = { ...base, status: 'unreadable', words: WORDS.fileUnreadable };
-    } else if (text.length > FILE_MAX) {
-      up = { ...base, status: 'unreadable', words: WORDS.fileTooLarge };
-    } else {
-      // a name typed while the file was being read is the person's: it stays
-      const name = up.typed === true ? up.name : stemOf(file.name);
-      up = { ...up, filename: file.name, text, name, status: 'idle' };
-    }
-    putUpload();
-  }
-
-  async function runUpload() {
-    if (up.status === 'sending') return;
-    const field = doc.getElementById(IDS.upName);
-    const typed = field ? field.value : (up.name ?? '');
-    up = { ...up, name: typed };
-    if (up.text === null) {
-      up = { ...up, status: up.status === 'unreadable' ? 'unreadable' : 'idle' };
-      putUpload();
-      focusOn(IDS.file);
-      return;
-    }
-    const name = typed.trim();
-    if (name === '') {
-      up = { ...up, status: 'refused', field: true, words: WORDS.noName };
-      putUpload();
-      focusOn(IDS.upName);
-      return;
-    }
-    const stop = new AbortController();
-    uploadStop = stop;
-    const mine = opening;
-    const sent = up.text;
-    const chosen = reading;
-    up = { ...up, status: 'sending', field: false };
-    putUpload();
-    const answer = await core.actions.autoEqUpload(sent, name, { signal: stop.signal });
-    if (answer.aborted || !open || mine !== opening) return;
-    if (chosen !== reading) {
-      // another file was chosen while this one was saving: the answer is not that file's
-      if (answer.ok) {
-        putSaved();
-        listed();
-      }
-      return;
-    }
-    if (answer.ok) {
-      up = { ...up, status: 'saved', saved: savedOf(answer) };
-      putUpload();
-      putSaved();
-      listed();
-      return;
-    }
-    const naming = ['taken', 'bad_name'].includes(answer.reason);
-    up = { ...up, status: 'refused', field: naming, words: refusalWords('upload', answer) };
-    putUpload();
-    focusOn(naming ? IDS.upName : IDS.upSave);
-  }
-
-  // ---- the saved presets ----
-
-  /** The press of *Overwrite with current…* on row `i`: its reason when it is disabled, else one
-   * question, the safe answer focused. */
-  function askOverwrite(i, button) {
-    const row = savedList().rows[i];
-    if (!row) return;
-    const why = overwriteWhy(row, { side, live: liveWhy() });
-    if (why !== null) {
-      said = { words: why, failed: true };
-      putWords();
-      return;
-    }
-    said = { words: '', failed: false };
-    putWords();
-    const mine = opening;
-    asking = askQuestion({
-      within: doc.getElementById(askId(i)),
-      text: WORDS.overwriteAsk(row.name, side.name),
-      yes: 'overwrite', no: 'keep', words: { answers: WORDS.answers }, signal: stopping.signal,
-      opener: button,
-      go: async () => {
-        const answer = await core.actions.overwritePreset(row.name, { device: side.url });
-        if (!open || mine !== opening) return answer;
-        if (answer.ok) said = { words: WORDS.overwritten(row.name), failed: false };
-        else said = { words: refusalWords('overwrite', answer), failed: true };
-        putWords();
-        return answer;
-      },
-      onClose: () => {
-        asking = null;
-        if (open) putSaved();
-      },
-    });
   }
 
   // ---- events ----
@@ -572,7 +381,7 @@ export function wire({ core, frame }) {
     } else if (field.id === IDS.importName) {
       importing = { ...importing, name: field.value };
     } else if (field.id === IDS.upName) {
-      up = { ...up, name: field.value, typed: true };
+      upload.typed(field.value);
     }
   });
   // an input method that ends its composition has typed the word: the search follows the pause
@@ -586,7 +395,7 @@ export function wire({ core, frame }) {
     later();
   });
   frame.el.addEventListener('change', (event) => {
-    if (open && event.target.id === IDS.file) takeFile(event.target.files?.[0] ?? null);
+    if (open && event.target.id === IDS.file) upload.takeFile(event.target.files?.[0] ?? null);
   });
   // `toggle` does not bubble: it is caught on the way down. A disclosure the person set is kept
   // through the next put of the results, unless it is how the draw would have it anyway.
@@ -613,7 +422,7 @@ export function wire({ core, frame }) {
     } else if (form.dataset.form === 'import') {
       runImport();
     } else if (form.dataset.form === 'upload') {
-      runUpload();
+      upload.runUpload();
     }
   });
 
@@ -638,7 +447,7 @@ export function wire({ core, frame }) {
       putImport();
       focusOn(IDS.importName);
     } else if (button.dataset.act === 'overwrite') {
-      askOverwrite(Number(button.dataset.i), button);
+      saved.askOverwrite(Number(button.dataset.i), button);
     }
   });
 
@@ -656,14 +465,14 @@ export function wire({ core, frame }) {
       compare = null;
       preview = { status: 'idle' };
       importing = { status: 'idle' };
-      said = { words: '', failed: false };
+      saved.clear();
       const kept = search.status === 'loading' ? search.query : null;
       draw();
       if (kept) runSearch(kept);
       return;
     }
     side = now;
-    if ((page ?? ENTRIES[0].id) === 'saved') putSaved();
+    if ((page ?? ENTRIES[0].id) === 'saved') saved.putSaved();
   }
 
   return {
@@ -682,7 +491,7 @@ export function wire({ core, frame }) {
       }
       page = to;
       side = sideNow();
-      said = { words: '', failed: false };
+      saved.clear();
       draw();
     },
     hide() {
@@ -693,7 +502,7 @@ export function wire({ core, frame }) {
       for (const off of offs) off();
       offs = [];
       pick = null;
-      asking = null;
+      saved.drop();
       query = '';
       search = { status: 'idle' };
       opened = new Map();
@@ -701,10 +510,10 @@ export function wire({ core, frame }) {
       compare = null;
       preview = { status: 'idle' };
       importing = { status: 'idle' };
-      up = { filename: '', text: null, name: null, status: 'idle' };
+      upload.reset();
       composing = false;
-      said = { words: '', failed: false };
+      saved.clear();
     },
-    onKey: (event) => Boolean(asking?.key(event) || pick?.key(event)),
+    onKey: (event) => Boolean(saved.asking?.key(event) || pick?.key(event)),
   };
 }

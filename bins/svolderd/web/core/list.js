@@ -220,5 +220,11 @@ export function closeList(within = null) {
   lists.get(scopeOf(within))?.close(false);
 }
 
+/** Whether the list open in the scope of `place` has its opener in `place` (or is it). */
+export function openerIn(place) {
+  const opener = lists.get(scopeOf(place))?.opener;
+  return Boolean(opener) && place.contains(opener);
+}
+
 /** How many scopes have a list open: none on a page at rest. */
 export const openLists = () => lists.size;

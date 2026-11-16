@@ -414,6 +414,20 @@ pub struct HostEqState {
     /// in a state saved before the live chain: the filters then sit in slots 1 to n.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slots: Vec<u8>,
+    /// The crossfeed's settings, kept while it is off: its model, preset and numbers. `None`
+    /// until crossfeed is first set; a state from before crossfeed loads with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossfeed: Option<crossfeed::CrossfeedSettings>,
+    /// Whether crossfeed is playing now. True only while it plays, so that a start that finds it
+    /// true knows a crash or a kill left it on and turns it off: crossfeed never stays on
+    /// across a restart.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crossfeed_on: bool,
+    /// Whether the chain runs for crossfeed alone: the EQ is off and plays flat (every slot the
+    /// identity, the preamp 0 dB). `on` stays what the EQ itself is; a start that finds `flat`
+    /// with `crossfeed_on` removes the chain.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flat: bool,
 }
 
 impl HostEqState {
@@ -503,6 +517,7 @@ impl Drop for Staged {
 }
 
 mod control;
+pub mod crossfeed;
 #[cfg(test)]
 mod lab;
 pub mod live;
@@ -514,7 +529,14 @@ mod pty;
 pub mod session;
 mod systemd;
 
-pub use control::{CUSTOM, Edit, EqControl, EqView, Keep, LIVE_NOTE, PointView};
+pub use control::{
+    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LIVE_NOTE, PASSTHROUGH_NOTE, PointView,
+    kind_word, parse_kind,
+};
+pub use crossfeed::{
+    CrossfeedSettings, CrossfeedView, Model as CrossfeedModel, Stage as CrossfeedStage,
+    StageResponse, stage_response,
+};
 pub use live::{LiveNode, PREAMP, PreampCarrier, SHAPE, SlotShape};
 pub(crate) use manage::checked_request;
 pub use manage::{

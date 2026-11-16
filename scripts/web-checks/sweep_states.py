@@ -200,7 +200,8 @@ def visit_writer(b, probe, d, rig):
     expected |= {f'devices/d-{first}/{x}' for x in ('top', 'readings-open', 'passphrase-form', 'profile-list',
                                                     'refused-name')}
     expected |= {'devices/d-Second/dimmed', 'devices/d-Second/remove-ask', 'devices/add/warning',
-                 'devices/add/scan', 'devices/add/pick', 'eq-library/autoeq/empty', 'eq-library/autoeq/preview'}
+                 'devices/add/scan', 'devices/add/pick', 'eq-library/autoeq/empty', 'eq-library/autoeq/preview',
+                 'eq-library/autoeq', 'eq-library/upload', 'eq-library/saved', 'sound/crossfeed'}
     probe = Tracker(probe, expected)
     b.page(BODY)
     probe('page')
@@ -252,13 +253,18 @@ def visit_writer(b, probe, d, rig):
         time.sleep(0.4)
         shut(b, 'devices')
     # ---- the EQ library: a search, a preview with its graph, the other pages ----
-    if open_to(b, 'eq-library', 'autoeq', probe, 'eq-library/autoeq/empty'):
+    if open_to(b, 'sound', 'autoeq', probe, 'eq-library/autoeq/empty'):
         if search(b, 'hd 650'):
             press_sel(b, variant(0, 0))
             if poll(lambda: b.page("!!document.querySelector('#popup-eq-library-preview .fp-graph-target')"), 15.0):
                 time.sleep(0.4)
                 probe('eq-library/autoeq/preview')
-        shut(b, 'eq-library')
+        shut(b, 'sound')
+    # the other pages of the EQ library tab, and the Crossfeed tab
+    for page, label in (('autoeq', 'eq-library/autoeq'), ('upload', 'eq-library/upload'),
+                        ('saved', 'eq-library/saved'), ('crossfeed', 'sound/crossfeed')):
+        if open_to(b, 'sound', page, probe, label):
+            shut(b, 'sound')
     probe.done('writer')
 
 

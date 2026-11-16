@@ -64,9 +64,9 @@ CORE_ACTIONS = ['applySetting', 'autoEqImport', 'autoEqPreview', 'autoEqSearch',
                 'removeDevice', 'renameDevice', 'renamePreset', 'savePreset', 'saveSlot',
                 'setBand', 'setControl', 'setLoudness', 'setMode', 'setPassphrase', 'setProfile',
                 'setVolume', 'showDevice', 'signInPrompt', 'signOut', 'stopClimb', 'walk']
-CORE_ACTIONS_COMPUTER = ['addNext', 'addPoint', 'cell', 'current', 'deletePreset', 'nudge',
-                         'recallPreset', 'removePoint', 'renamePreset', 'savePreset', 'setMode',
-                         'setMute', 'setPoint', 'setVolume', 'step', 'stepPoint', 'toggleMute']
+CORE_ACTIONS_COMPUTER = ['addNext', 'addPoint', 'cell', 'crossfeedAsked', 'current', 'deletePreset',
+                         'nudge', 'onCrossfeedRefusal', 'recallPreset', 'removePoint', 'renamePreset',
+                         'savePreset', 'setCrossfeed', 'setMode', 'setMute', 'setPoint', 'setVolume', 'step', 'stepPoint', 'toggleMute']
 # the hand `core.eq.points` makes, the table `core.eq.table` makes, the flow of a typed cell and
 # the computer's view of a page that has the computer's side
 CORE_HAND = ['active', 'begin', 'blur', 'burst', 'canGrab', 'cancel', 'destroy', 'down', 'dropTap',
@@ -533,9 +533,9 @@ try:
         check(f'{name} has these members and no others', keys == EXPECTED_KEYS[name],
               sorted(set(keys) ^ set(EXPECTED_KEYS[name])))
     listed = b.page('__core.popups.listed().map((p) => [p.name, p.row.sees, p.stays === true])')
-    check('the page lists Devices (everyone\'s, which stays through a device switch), the EQ library (a '
+    check('the page lists Devices (everyone\'s, which stays through a device switch), Sound (a '
           'writer\'s) and Help, in that order',
-          listed == [['devices', 'everyone', True], ['eq-library', 'writer', False],
+          listed == [['devices', 'everyone', True], ['sound', 'writer', False],
                      ['help', 'everyone', False]], listed)
     check('core.words words a step of a level', b.page(
         "[__core.words.stepWords({ lo: 2, texts: ['a', 'b'] }, 3), __core.words.stepWords({ lo: 0 }, 7)]")

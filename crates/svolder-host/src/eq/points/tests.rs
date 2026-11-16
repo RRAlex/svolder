@@ -24,6 +24,9 @@ fn state(filters: Vec<SourceFilter>, slots: Vec<u8>) -> HostEqState {
         preamp_db: 0.0,
         filters,
         slots,
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     }
 }
 

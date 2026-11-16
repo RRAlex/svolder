@@ -545,6 +545,9 @@ fn eq_state(target: &str, on: bool, origin: Option<&str>) -> svolder_host::eq::H
         preamp_db: -3.0,
         filters: Vec::new(),
         slots: Vec::new(),
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     }
 }
 

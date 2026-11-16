@@ -1861,6 +1861,81 @@ async fn the_computer_switch_follows_the_eq_and_turns_it_on_and_off() {
     .expect("test timed out");
 }
 
+/// The crossfeed's two state topics carry the switch word and the preset option, each on its own
+/// topic, through a command on the select, a command on the switch and a change made over the
+/// socket (as a reset to OFF reaches the view).
+#[tokio::test]
+async fn the_crossfeed_states_reach_their_own_topics_over_the_broker() {
+    use svolder_ipc::HostEqOp;
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let (_child, mut client) =
+            daemon_on(&bridged(broker.port, "commands = true\n"), &FAKE_COMPUTER).await;
+        let switch_state = computer_topic("computer_crossfeed/state");
+        let preset_state = computer_topic("computer_crossfeed_preset/state");
+        let mut first = watch(&broker).await;
+        first
+            .wait_for_each(
+                &[
+                    (&switch_state, "OFF"),
+                    (&preset_state, "Bauer · bs2b default"),
+                ],
+                STEP,
+            )
+            .await;
+        let mut watcher = watch(&broker).await;
+
+        // A command sent before the bridge's subscription is in place is lost, so it is sent
+        // again until its state comes.
+        for (command, body, topic, want) in [
+            (
+                "computer_crossfeed_preset/set",
+                "Linkwitz",
+                &preset_state,
+                "Linkwitz",
+            ),
+            ("computer_crossfeed/set", "ON", &switch_state, "ON"),
+        ] {
+            let mut seen = false;
+            for _ in 0..10 {
+                watcher.publish(&computer_topic(command), body).await;
+                let got = watcher.collect(Duration::from_millis(700)).await;
+                if got.iter().any(|s| &s.topic == topic && s.payload == want) {
+                    seen = true;
+                    break;
+                }
+            }
+            assert!(seen, "{want} never reached {topic}");
+        }
+
+        let off = Request::HostEq {
+            op: HostEqOp::Crossfeed {
+                on: Some(false),
+                model: None,
+                preset: None,
+                amount_pct: None,
+                crossover_hz: None,
+                delay_ms: None,
+                done: true,
+            },
+        };
+        assert_eq!(client.request(off).await.expect("an answer"), Response::Ack);
+        watcher
+            .wait_for(&switch_state, STEP, |s| s.payload == "OFF")
+            .await;
+        // The preset stays: the settings it plays when turned on again.
+        let held = watcher.collect(Duration::from_millis(500)).await;
+        assert!(
+            held.iter()
+                .filter(|s| s.topic == preset_state)
+                .all(|s| s.payload == "Linkwitz"),
+            "{held:#?}"
+        );
+    })
+    .await
+    .expect("test timed out");
+}
+
 fn computer_config(component: &str, key: &str) -> String {
     format!("homeassistant/{component}/svolder_computer/{key}/config")
 }

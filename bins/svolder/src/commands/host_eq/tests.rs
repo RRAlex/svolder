@@ -44,6 +44,8 @@ async fn a_one_shot_command_under_the_child_manager_is_refused_and_writes_nothin
         sink: None,
         slots: Vec::new(),
         rate_hz: None,
+        flat: false,
+        crossfeed: None,
     };
     let failure = apply_once(host(), request).await.unwrap_err();
     assert_eq!(failure.code, 1);

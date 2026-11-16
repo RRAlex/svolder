@@ -8,6 +8,170 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.35.1
+
+- **The computer EQ puts a stale chain right sooner**: when the `pw-cli` that feeds the chain ends
+  right after taking a line, the next look (within a second) starts it again and sends the newest
+  values; and when the chain's slots go back to old values at the same node and rate (also while
+  crossfeed plays), the next look notices it and sends them again. A slow `pw-cli` is not mistaken
+  for a revert.
+- **A computer EQ chain that dies is put right**: a chain that is killed or crashes is noticed at
+  once and started again with crossfeed off and the note "the computer EQ chain stopped and was
+  started again"; the EQ turns off, with a note saying the chain stopped, only when the restarted
+  chain dies quickly (within 10 s) a second time, and a PipeWire restart never turns it off. A chain
+  that ran for crossfeed alone is removed rather than restarted. The view no longer says live while
+  no chain runs.
+- **A daemon that starts over a chain it did not start puts the saved state on it**: a run left in
+  the middle of a drag, or another program's, is sent the saved points and preamp at the first look
+  (preamp lowered first) when it plays other values; the view no longer shows the file while the
+  chain plays something else.
+- **A preset reloaded under the same name ends a held point**: the web page follows the daemon's new
+  load count, so a point held in a drag lets go when the preset is reloaded.
+- **Turning crossfeed or the EQ off no longer pauses the player**: with both off while a stream
+  plays, where live updates work, the chain stays as a flat pass-through (0 dB, or the lower level
+  its loaded curve needs), switched live with no sink swap, and goes once nothing has played through
+  it for about 30 s; turning crossfeed or the EQ back on in that time reuses it, and the view says
+  "chain kept as a pass-through until idle".
+- **Nothing plays above 0 dB at any usual output rate (44.1 to 384 kHz)**: the crossfeed's cost
+  counts the most of its worst gain over those rates, so a change of the output's rate, a crossfeed
+  drag or the one-second repeat between a rate change and the next look can no longer play above 0
+  dB. Meier with a delay plays about 1 to 2 dB quieter for it (up to about 3.5 dB at extremes, for
+  example 0.5 ms at 44.1 or 48 kHz: preamp -3.6 to -5.9 dB at 50 %, -2.0 to -3.4 dB at the default
+  level); Bauer, Linkwitz, Mid/Side bass and Meier at its own lag are unchanged.
+- **No silence at 352.8 or 384 kHz**: the computer EQ no longer goes silent while it says live when
+  an earlier curve its chain still holds cannot play at that rate; the chain is applied again with
+  the points on screen, and the EQ turns off with a note only when that fails. Crossfeed alone, or a
+  pass-through, is no longer removed there for kept EQ points it does not play (with a note that
+  the EQ turned off, though it was off); turning the EQ on at such a rate is refused instead.
+- **No silence after turning crossfeed or the EQ on while nothing played**: it could leave the sound
+  silent once music started (also in 0.34.5 and 0.35.0), because the chain's preamp was sent at -120
+  dB. A filter chain that has never played now gets every value again when it first plays, at the
+  preamp the view says; the saved config plays for up to a second first. A chain that 0.34.5 or
+  0.35.0 left silent plays again after the upgrade: a start that finds the preamp at -120 dB sends
+  the saved one.
+- **A volume change from an MCP client that climbs is quieter on the system**: above three quarters
+  of the range the change waits on the device's writer, no longer reading the level every 50 ms,
+  and answers with one reading, the level reached.
+- **Fewer `wpctl` runs**: the daemon reads the default sink's volume once every 2 s however many
+  things watch it (the capture takes the reading the computer's volume read just made); an outside
+  volume change still reaches the view within the same 2 s. While playing with the EQ off the daemon
+  runs about 1.2 of these helper runs a second instead of about 1.8 (from the design, not a
+  measurement).
+- **The TUI no longer burns a core over a wide cover**: a cover that is not square (a video's 16:9
+  thumbnail) was encoded again on every frame, about a whole core with sixel or half-blocks, or the
+  picture re-sent to the terminal many times a second with kitty; it is now built once for its cover
+  and box (about 3% of a core at 158x76). A frame also lays the device screen out once instead of
+  five to eight times, the closed help overlay is no longer laid out, and a frame goes to the
+  terminal in one write.
+- **A bigger cover in the TUI on large terminals**: from 100x45 the device screen's Status pane
+  grows upward while a cover shows, and the cover grows with it, taking only the rows the Controls
+  and Tone panes do not draw in, so every row of both stays in sight; a cover that fails to load
+  keeps the usual layout, and smaller terminals are unchanged.
+- **Preset writes with `--transport ble` or `fake` reach a running daemon**: `svolder preset ...`
+  and `hops` now ask a daemon that reads the same configuration file to reload, as the other
+  transports do; before, its Home Assistant bridge kept offering the old list.
+- **No flash of "saving..." in the TUI**: the wait shows only after 250 ms, so a quick local write
+  (Connect, device edits) draws no frame of it; a write that ends within those 250 ms still clears
+  an earlier toast.
+- **A preset recall that waits for its first fit says when it was overtaken**: a fleet recall of an
+  imported preset whose first fit to the device is still being worked out is dropped when another
+  write or recall reaches the device meanwhile, and answers "a newer write reached <device> while
+  the preset's fit was made, so <name> was not recalled"; repeat it to recall the preset.
+- **Volume steps on the web page go on from the right place**: when the stream's reading of a step
+  arrived before the write's answer, the next step used the old base; it now goes on from the
+  reading in either order (Signal, Paper, Night drive and Ember).
+- **The Sound popup is a proper tab list**: screen readers announce its two tabs as tabs, with the
+  page below them as their panel, and Tab at the end of a popup whose last control is a radio group
+  goes round to the first control, as at any other end.
+- **Docs**: the README and `docs/architecture.md` have a picture of how the parts fit together, and
+  the README names the models confirmed on real hardware; the life of one volume change has its own
+  page, `docs/design/volume-change.md`; `docs/usage/daemon.md` names the threads `top -H` shows.
+- **Contributors**:
+  - The longest files and test files are split by area (pure moves; test names unchanged):
+    `svolderd`'s `device/tests.rs` and `writer/tests.rs`, the TUI's `settings/tests.rs` and
+    `run/devices/tests.rs`, `svolder-host`'s `eq/manage/tests.rs`, the tone screen's `tone.rs` and
+    its tests, the MCP tools' `tools.rs` (into `guard`, `schema` and `describe`) and its tests, and
+    the web page's `eq-library/wire.js` (into `upload-wire.js` and `saved-wire.js`).
+  - The TUI loop tests in `pointer.rs` and `toasts.rs` wait on the screen or a daemon condition
+    instead of fixed deadlines; `.cargo/config.toml` sets `RUST_MIN_STACK` to 8 MiB so test threads
+    do not overflow on the TUI loop futures.
+  - `svolder_host::eq`: `Link::ended()` (a `pw-cli` that has ended), `Chain::exited` (a chain whose
+    process ends without an apply or remove having stopped it), `reverted()` compares every port
+    the look before held at its sent value, the lab event `SlotRevert`; `systemctl --user` calls
+    run on tokio's process with a 5 s timeout; the chain's reaper thread is `svolder-eq-reap`.
+  - `svolder_host::sink`: `Wpctl::shared_for`, `Wpctl::held`, `Coalescer` and `READ_HELD`; any
+    `set-*` call drops the published reading; the TUI's own sink reads fresh at every poll.
+  - Web: Ember's knob and press code use `core/volume-ask.js` (`shownRaw`, `baseOf`, `askExpiry`,
+    `noteReading`, `ackAsk`) instead of copies; a writer's popup re-reads the viewer's rights at
+    every model, fleet, host and stream event; `frame.put` closes the list or the inline ask whose
+    markup it replaces; frame.css is regrouped, pixel-equal in four themes.
+  - `svolder_host::eq`: `EqView.loads` (serde default 0; bumped by every successful
+    `EqControl::load` and every state-file reload); `EqControl` watches `Chain::exited` with one
+    task of its own armed when the chain is first applied or seen (`control/exit.rs`, `DEATH_WINDOW`
+    200 ticks), a failed restart backs off 1, 2, 4 and 8 s; `FakeChain::die()`; `EqControl.foreign`
+    makes the first look compare a start-up chain with the saved points (`differs_from_points`);
+    `LiveNode.playing` (a `running` stream node linked into the chain's sink in `pw-dump`; a monitor
+    capture never counts), `keep_passthrough`, `check_idle`, `IDLE_KEEP` (600 ticks) and
+    `SVOLDER_EQ_IDLE_TICKS` to shorten it for tests, `FakeParams::set_playing`; the live crossfeed
+    stage's cost is `config_stage_cost_db` (also over 352.8 and 384 kHz), with the preamp lab's
+    rates widened and regressions pinned (seeds 1515, 5457, 15327, 12272 and 20568); a failed
+    crossfeed start from EQ off leaves no chain, and a failed crossfeed change re-sends the stage as
+    it stands; `played_preamp` floors at -120 dB and a non-finite coefficient is refused;
+    `scripts/host-e2e` X3e kills the chain three times and asserts the restart, the second death
+    ridden out and the third turning the EQ off, and X5 the pass-through.
+  - `watch` reads a chain whose slots all list `b0` 0 as a graph that has not run (`graph_ran`):
+    such a look takes no preamp bound, checks no read back and makes no foreign resend, and the
+    first look that finds the graph run sends everything again (`not_run`); host-e2e phases S1 and
+    S2 (on with nothing playing, then a tone) and S3 (a pause that suspends the chain).
+  - The tui-harness crossfeed unfold case waits for the tone screen drawn whole, no longer failing
+    on a first run.
+  - TUI frames: `Drawn::begin_frame` and `end_frame` keep the device layout for one frame (checked
+    against a fresh layout under `cfg(test)`), `test_support::work` counts pane builds and layouts
+    per frame, and the terminal is `terminal::FrameTerminal`, a 256 KiB `BufWriter` over stdout,
+    instead of `ratatui::DefaultTerminal`.
+  - The first fit of an imported preset to a tone control (the page model, a recall, the MCP
+    `list_presets` and `load_preset`, a computer recall's holder check) runs on a blocking thread
+    behind the permits AutoEq's previews use (`recall::fitted`, `recall::warm`), no longer on the
+    runtime's thread.
+  - The makefile test (`bins/svolder/tests/makefile.rs`) passes under `make test T=...`: it drops
+    the exported `T`.
+
+## 0.35.0
+
+- **Crossfeed for the computer's sound**: feeds a low-passed, delayed copy of each channel into
+  the other channel at a set level. It works beside the computer EQ and plays with the EQ on or off.
+  Four models: Bauer (the bs2b maths, with the presets "Jan Meier", "Chu Moy" and "bs2b default",
+  mildest first), Linkwitz (a first-order low-pass cross path), Meier (only what differs between the
+  channels is crossed) and Mid/Side bass (the bass blended toward mono). Each has Level (percent and
+  dB) and Crossover, and every model but Mid/Side bass a Delay; changing one makes the values
+  "Custom, edited from" the preset. The preamp is lowered for the crossfeed's loudest point, so
+  nothing plays above 0 dB at any frequency and turning it on never asks.
+- **It never stays on by surprise**: crossfeed is off after the daemon (or the TUI) starts, after
+  the output changes, after the filter chain restarts and after a graceful stop (a TUI with no
+  daemon quitting counts), each with a note saying why; the model and numbers are kept. With both
+  the EQ and crossfeed off no chain runs.
+- **Where to find it**: the terminal UI's tone screen (`e`, on the computer's side) has a Crossfeed
+  section, folded to one line until you `Tab` or press `X` into it, and the device screen's Tone
+  pane has a Crossfeed row (`←→` on or off, `,` `.` preset); the web page's menu row *Sound…* opens
+  a popup whose second tab is Crossfeed, with a picture of what each ear hears, and whose first tab
+  is the EQ library, which was the *EQ library…* row; `svolder host crossfeed` shows and changes it
+  from a terminal; the MCP server's `get_host` reads it and `set_host_crossfeed` changes it (with
+  `[mcp] writes = true`); Home Assistant gets a Crossfeed switch and a Crossfeed preset select on
+  "This computer", while host audio is on.
+- `host eq status` says when the chain runs for crossfeed alone, and `host eq remove` while crossfeed
+  plays turns the EQ off and keeps the chain. `POST api/v1/host/crossfeed` changes it from the web
+  page (write-gated).
+- Contributors: `svolder_host::eq::crossfeed` (models, presets, ranges, the stage's coefficients, own
+  lag, worst gain, `CrossfeedView` with its curves; the one table is `SPECS`, no front end holds a
+  word or range); a fixed crossfeed stage of six nodes per channel in the live graph (off in every
+  configuration); `HostEqState` gains `crossfeed`, `crossfeed_on` and `flat`; `EqView.crossfeed`;
+  `HostEqOp::Crossfeed`; `EqControl` splits "a chain runs" from "the EQ is on"; one
+  `svolder_ipc::host::run_eq_op` serves the daemon and the TUI; `svolder_host::eq::parse_kind`;
+  `svolder_mqtt::computer::entries` takes the `CrossfeedView` and `computer::topics_of` lists every
+  entity's discovery topic; the TUI's `app/crossfeed.rs`; the web page's `core/popups/sound/` and
+  `core/popups/crossfeed/` (the frame's `draw` takes `head` and `bar`); the preamp lab models the
+  stage. The design is in `docs/design/crossfeed.md`.
+
 ## 0.34.5
 
 - **`make demo` uses far less CPU**: the demo targets build and run an optimised `demo` profile

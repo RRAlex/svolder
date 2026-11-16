@@ -16,7 +16,7 @@ use ratatui::layout::{Position, Rect};
 
 use super::app::curve_drag::{self, Gesture};
 use super::app::glide::Bar;
-use super::app::{App, Intent, Pane, Screen, SettingsBox, Side, ToneRow};
+use super::app::{App, Intent, Pane, Screen, SettingsBox, Side, ToneRow, Xf};
 use super::boxes::device_presets;
 
 /// The longest two left presses on the same cell can be apart and still make a double-click:
@@ -71,6 +71,16 @@ pub enum Hit {
     /// [`PARAMS`](super::boxes::edit_line::PARAMS) — which a click focuses the band from, as
     /// anywhere on the row, and a double-click opens the edit line on.
     BandField(usize, usize),
+    /// Focus this row of the computer's Crossfeed section, which unfolds it on the tone screen;
+    /// the wheel over it steps the row.
+    Crossfeed(Xf),
+    /// The on/off word of the tone screen's Crossfeed row.
+    CrossfeedOn,
+    /// Step the model of the tone screen's Crossfeed row one way (`-1` back, `1` on).
+    CrossfeedModel(i64),
+    /// Step this row of the Crossfeed section one way (`-1` back, `1` on): the `‹` and `›` of
+    /// its select.
+    CrossfeedStep(Xf, i64),
     /// Show this screen.
     Tab(Screen),
     /// A word on a pane's top border, which a click presses the key of.
@@ -284,6 +294,18 @@ pub enum MouseAction {
     /// Focus this half of the tone control's header or Tone pane rows — Mode or Loudness — and
     /// toggle it, finished the way [`App::click_tone_row`] finishes it.
     ToggleTone(ToneRow),
+    /// Turn crossfeed on or off.
+    CrossfeedOn,
+    /// Step the model one way.
+    CrossfeedModel(i64),
+    /// Focus this row of the Crossfeed section and, from a `‹` or `›`, step it that way
+    /// (`0`: only focus).
+    Crossfeed {
+        /// The row.
+        row: Xf,
+        /// The step: `-1`, `0` or `1`.
+        step: i64,
+    },
     /// Click one cell of a computer point's row.
     PointField {
         /// The point, 0-based.
@@ -657,6 +679,10 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::PaneHeader(pane) => Some(MouseAction::Focus(pane, app.selected())),
         Hit::Band(i) | Hit::Point(i) => Some(MouseAction::Band(i)),
         Hit::PointField(point, field) => Some(MouseAction::PointField { point, field }),
+        Hit::Crossfeed(row) => Some(MouseAction::Crossfeed { row, step: 0 }),
+        Hit::CrossfeedStep(row, step) => Some(MouseAction::Crossfeed { row, step }),
+        Hit::CrossfeedOn => Some(MouseAction::CrossfeedOn),
+        Hit::CrossfeedModel(dir) => Some(MouseAction::CrossfeedModel(dir)),
         Hit::Side(side) => Some(MouseAction::Target(Some(side))),
         Hit::Target => Some(MouseAction::Target(None)),
         // The edit line is drawn over the tone-control screen only, so on the device screen's
@@ -722,6 +748,12 @@ fn resolve_wheel(hits: &HitMap, x: u16, y: u16, app: &App, dir: i64) -> Option<M
             edit(app.nudge_band(i, dir))
         }
         Hit::Loudness | Hit::LoudnessBar => intent(app.step_loudness(dir)),
+        // The wheel steps the row it is over, up for on (the next preset, a bigger value).
+        Hit::CrossfeedModel(_) | Hit::CrossfeedOn => None,
+        Hit::Crossfeed(row) | Hit::CrossfeedStep(row, _) => Some(MouseAction::Crossfeed {
+            row,
+            step: dir.signum(),
+        }),
         Hit::Curve => {
             let curve = hits.area_of(Hit::Curve)?;
             let band =

@@ -15,9 +15,10 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { page } from './dom.mjs';
 import { createCore } from '../../../bins/svolderd/web/core/core.js';
 import {
-  closeId, createPopupFrame, currentOf, dot, entryId, heading, keycap, popupHtml, popupId, redraw,
-  rows, tag, titleId,
+  barId, closeId, createPopupFrame, currentOf, dot, entryId, heading, keycap, popupHtml, popupId,
+  popupPanelId, redraw, rows, tag, titleId,
 } from '../../../bins/svolderd/web/core/popups/frame.js';
+import { tabsHtml } from '../../../bins/svolderd/web/core/popups/sound/draw.js';
 import { frameRows } from '../../../bins/svolderd/web/core/menu-rows.js';
 import { HELP, POPUPS, rowId } from '../../../bins/svolderd/web/core/popups/listed.js';
 import { openAsks } from '../../../bins/svolderd/web/core/inline-ask.js';
@@ -368,6 +369,12 @@ await ok('a_pane_that_holds_more_than_it_shows_is_a_named_stop_of_the_keyboard',
   assert.equal(r.document.activeElement, pane());
   frame.draw({ entries: [], body: '<p>long</p>' });
   assert.deepEqual(marks(), ['0', 'region', 'popup-long-title'], 'with no list, after the title');
+  // tabs dropped while the pane is a long region that has the focus: its region marks stay
+  frame.draw({ entries: [], body: '<p>long</p>', bar: '<div class="fp-tabs"><button class="fp-tab on" id="t1">a</button></div>' });
+  assert.equal(marks()[1], 'tabpanel');
+  pane().focus();
+  frame.draw({ entries: [], body: '<p>long</p>' });
+  assert.deepEqual(marks(), ['0', 'region', 'popup-long-title'], 'marks of a region are kept');
   // a pane that shows all it holds is no stop
   tall = 300;
   frame.draw({ entries: TWO, page: 'two', body: '<p>short</p>' });
@@ -673,6 +680,61 @@ await ok('the_list_takes_its_keys_from_the_popup_and_a_pick_or_escape_closes_the
   r.window.close();
 });
 
+await ok('a_put_over_the_place_of_an_open_lists_opener_or_an_asks_place_closes_it', async () => {
+  const r = rig();
+  await r.open();
+  const pop = () => r.$('popup-sample');
+  const chip = r.$(IDS.listOpen);
+  chip.parentElement.id = 'chip-place';
+  chip.click();
+  assert.equal(openLists(), 1);
+  // a put elsewhere leaves the list alone
+  r.frame.put(IDS.live, '<span>other</span>');
+  assert.equal(openLists(), 1, 'a put over another place keeps the list');
+  assert.ok(pop().querySelector('.fi-opt:focus'), 'the focus is on an option');
+  r.frame.put('chip-place', '<p>drawn again</p>');
+  assert.equal(openLists(), 0, 'the opener left with its place: the list is closed');
+  assert.equal(pop().querySelector('.fi-list'), null, 'and its panel is gone');
+  assert.ok(pop().contains(r.document.activeElement), 'the focus stays in the popup');
+  r.window.close();
+  // the ask: its place is put over
+  const q = rig();
+  await q.open();
+  q.$(IDS.askOpen).click();
+  assert.equal(openAsks(), 1);
+  q.frame.put(IDS.live, '<span>other</span>');
+  assert.equal(openAsks(), 1, 'a put over another place keeps the ask');
+  q.frame.put(IDS.ask, '<p>drawn again</p>');
+  assert.equal(openAsks(), 0, 'the ask\'s own place was put over: the ask is closed');
+  assert.ok(q.$('popup-sample').contains(q.document.activeElement), 'the focus stays in the popup');
+  q.key('Escape');
+  await q.settle();
+  assert.equal(q.$('popup-sample'), null, 'no ghost ask takes the Escape: it closes the popup');
+  q.window.close();
+});
+
+await ok('a_bar_of_tabs_makes_the_page_pane_the_tabpanel_of_the_tab_shown', async () => {
+  const r = rig();
+  await r.open();
+  const pane = () => r.$('popup-sample').querySelector('.fp-page');
+  const bar = (on) => '<div class="fp-tabs" role="tablist">'
+    + ['a', 'b'].map((id) => `<button type="button" role="tab" id="t-${id}" class="fp-tab${id === on ? ' on' : ''}"`
+      + ` aria-controls="${popupPanelId('sample')}">${id}</button>`).join('') + '</div>';
+  assert.equal(pane().getAttribute('role'), null, 'with no tabs the pane has no role');
+  r.frame.draw({ entries: [], page: null, body: '<p>x</p>', bar: bar('a') });
+  assert.equal(pane().getAttribute('role'), 'tabpanel');
+  assert.equal(pane().getAttribute('aria-labelledby'), 't-a', 'named by the tab shown');
+  assert.equal(pane().id, popupPanelId('sample'), 'the id the tabs control');
+  r.frame.put(barId('sample'), bar('b'));
+  assert.equal(pane().getAttribute('aria-labelledby'), 't-b', 'a put of the bar follows the tab');
+  r.frame.draw({ entries: [], page: null, body: '<p>x</p>' });
+  assert.equal(pane().getAttribute('role'), null, 'a draw with no tabs drops the role');
+  assert.equal(pane().id, '', 'and the id');
+  // the Sound popup's tabs name the pane by the same id
+  assert.ok(tabsHtml({ page: null }).includes(`aria-controls="${popupPanelId('sound')}"`));
+  r.window.close();
+});
+
 await ok('a_reading_leaves_an_open_ask_and_its_focus_alone', async () => {
   const r = rig();
   await r.open();
@@ -848,9 +910,9 @@ function loader() {
 
 await ok('a_page_has_the_listed_popups_until_one_is_added_and_a_name_is_added_once', async () => {
   const r = rig({ sample: false });
-  assert.deepEqual(r.core.popups.names(), ['devices', 'eq-library', HELP], 'the page\'s own list and no other');
+  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', HELP], 'the page\'s own list and no other');
   r.core.popups.add('sample', { title: TITLE, load: async () => ({ wire }) });
-  assert.deepEqual(r.core.popups.names(), ['devices', 'eq-library', HELP, 'sample']);
+  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', HELP, 'sample']);
   assert.throws(() => r.core.popups.add('sample', { title: TITLE, load: async () => ({ wire }) }),
     /sample is added already/);
   assert.throws(() => r.core.popups.add('other', { title: 'T' }), /loader/);
@@ -943,6 +1005,29 @@ await ok('a_viewer_who_does_not_see_a_popups_row_cannot_open_it_and_nothing_load
   assert.equal(w.core.router.state().popup, null, 'a viewer who lost the right loses the popup');
   assert.equal(w.$('popup-gear'), null);
   w.window.close();
+});
+
+await ok('a_viewer_who_loses_the_right_by_another_event_loses_the_popup_too', async () => {
+  const made = () => [{
+    name: 'gear', title: 'Gear', row: { label: 'Gear', sees: 'writer' },
+    load: async () => ({ wire: () => ({ show() {} }) }),
+  }];
+  for (const [event, data] of [
+    ['fleet', { devices: [] }], ['host', null], ['state', 'open'], ['opened', null],
+  ]) {
+    const w = rig({ sample: false, popups: made() });
+    w.$('knob').focus();
+    w.core.router.open('gear');
+    await w.settle();
+    assert.equal(w.core.router.state().popup, 'gear');
+    // the rights are read from the page's model: this one changed in place and an event other
+    // than the page being replaced is what the page hears next
+    w.core.model.page().viewer = { guest: true, writes: false };
+    w.core.model.emit(event, data);
+    await w.settle();
+    assert.equal(w.core.router.state().popup, null, `${event}: the popup of a writer is closed`);
+    w.window.close();
+  }
 });
 
 await ok('the_question_mark_is_listed_once_the_page_has_the_help_popup', () => {

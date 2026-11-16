@@ -17,6 +17,8 @@ import { parse, thousandsReading } from './words.js';
 import { NO_DEVICE, REFUSED } from './write.js';
 
 const NOT_A_NUMBER = 'Not a number.';
+/** The crossfeed fields that are numbers: a model or preset pick replaces them while queued. */
+const CROSSFEED_NUMBERS = ['amount_pct', 'crossover_hz', 'delay_ms'];
 
 /** What a cell's text means for a field held to `[low, high]`: a number, `null` for none, or `{ error }` when a comma
  * could be a decimal mark or a thousands separator and the range does not tell which (`1,000` in a frequency is 1000,
@@ -57,7 +59,7 @@ export function createComputerActions({
 
   /** The newest-waiting writer of one value of the computer (`key` is its hold): the call that
    * starts a run resolves with its last answer, one that only queues resolves `queued`. */
-  function lane(key, path, bodyOf) {
+  function lane(key, path, bodyOf, said = toast) {
     const state = { running: false, last: null };
     state.send = newest(async (value) => {
       const answer = await post(path, bodyOf(value));
@@ -69,7 +71,7 @@ export function createComputerActions({
       state.last = { ok: false, ...answer, error: answer.error || REFUSED };
       return state.last.error;
     }, (why) => {
-      toast(why);
+      said(why);
       held.drop(key);
       held.resync();
     });
@@ -108,6 +110,28 @@ export function createComputerActions({
   const volumeLane = lane('volume', 'api/v1/host/volume', (pct) => ({ pct }));
   const muteLane = lane('mute', 'api/v1/host/mute', (muted) => ({ muted }));
   const modeLane = lane('mode', 'api/v1/host/eq', (on) => ({ on }));
+
+  // Crossfeed: one lane for every field, because the daemon takes the fields of one request
+  // together. What has not been sent yet is one body, the fields merged newest-last, and `done` is
+  // the newest's (false while a stepper repeats); what is asked (held) is that body too, until the
+  // model has been read after the writes. A refusal goes to the popup that listens (its own words),
+  // else to a toast.
+  const asked = { body: null, shown: {} };
+  const refusals = new Set();
+  // what was asked is forgotten with its hold
+  held.listen((type) => {
+    if (type === 'settled' && held.get('crossfeed') === null) asked.shown = {};
+  });
+  const crossfeedLane = lane('crossfeed', 'api/v1/host/crossfeed', () => {
+    const { body } = asked;
+    asked.body = null;
+    return body;
+  }, (why) => {
+    asked.shown = {};
+    asked.body = null;
+    if (refusals.size === 0) toast(why);
+    else refusals.forEach((fn) => fn(why));
+  });
 
   /** Per point as the caller numbers it (1-based): the id (slot) of the point it names, found when
    * its first change came and kept until the edit ends, so another front end's re-sort that moves
@@ -295,6 +319,36 @@ export function createComputerActions({
       return muteLane(!muted);
     },
     setMode: (mode) => modeLane(mode === 'eq'),
+
+    /** Change the crossfeed: `fields` is any of `on`, `model`, `preset`, `amount_pct`,
+     * `crossover_hz`, `delay_ms`; `done` is false while a stepper repeats and true at its end
+     * (and for a single change). The newest value of each field wins; one request at a time. */
+    setCrossfeed(fields, { done = true } = {}) {
+      // the daemon applies a body as model, then preset, then numbers: a model or preset picked now
+      // replaces what was queued before it (the latest intent wins), and a number asked after the
+      // pick goes on top of it
+      const current = store.page().host?.computer?.eq?.crossfeed?.model;
+      const changes = 'model' in fields && fields.model !== (asked.shown.model ?? current);
+      // (a pick of the model in view is no change: the host keeps the numbers for it)
+      const drop = changes ? ['preset', ...CROSSFEED_NUMBERS]
+        : ('preset' in fields ? CROSSFEED_NUMBERS : []);
+      const queued = { ...(asked.body ?? {}) };
+      const shown = { ...asked.shown };
+      for (const field of drop) {
+        delete queued[field];
+        delete shown[field];
+      }
+      asked.body = { ...queued, ...fields, done };
+      asked.shown = { ...shown, ...fields };
+      return crossfeedLane({ ...asked.shown });
+    },
+    /** The crossfeed fields this viewer has asked for and the model has not yet answered. */
+    crossfeedAsked: () => held.get('crossfeed')?.value ?? {},
+    /** `fn(words)` hears each refusal of a crossfeed write; returns the way to stop. */
+    onCrossfeedRefusal(fn) {
+      refusals.add(fn);
+      return () => refusals.delete(fn);
+    },
 
     /** Recall the preset `name` on the computer. When a connected device plays it too the daemon
      * hands back a question: it is asked, a yes flattens that device and applies (`confirm`), a no

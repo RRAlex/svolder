@@ -248,7 +248,7 @@ const READ_TOOLS: [&str; 5] = [
     "list_presets",
     "get_host",
 ];
-const WRITE_TOOLS: [&str; 7] = [
+const WRITE_TOOLS: [&str; 8] = [
     "set_control",
     "load_preset",
     "mute",
@@ -256,6 +256,7 @@ const WRITE_TOOLS: [&str; 7] = [
     "set_host_volume",
     "host_mute",
     "set_host_eq",
+    "set_host_crossfeed",
 ];
 
 #[tokio::test]

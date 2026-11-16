@@ -1394,7 +1394,9 @@ async fn the_cover_of_the_track_playing_is_drawn_beside_its_title_and_follows_th
     watching.show_art(Some(ratatui_image::picker::Picker::halfblocks()));
 
     let served = &daemon;
-    let (end, _) = drive(watching, TALL, |frames, _| async move {
+    // One row short of the size where the Status pane grows for a cover: the picture to build
+    // stays small (the grown one is a big box in a debug build).
+    let (end, _) = drive(watching, (TALL.0, 44), |frames, _| async move {
         let daemon = served;
         let started = Instant::now();
         while !has_art(&drawn(&frames)) {
@@ -1433,6 +1435,47 @@ async fn the_cover_of_the_track_playing_is_drawn_beside_its_title_and_follows_th
         picture.hash, "def",
         "the picture of the track before is still drawn"
     );
+    end.watching.close().await;
+}
+
+/// While the cover shows, a frame lays the device screen out once: the squirrel's look at its
+/// home, the picture's check, the panes and the box the picture is sized by after the frame all
+/// read that one layout, and the clock's tick needs none for a title that fits beside the cover.
+/// Counted over the next frames the loop draws, however long the machine takes to draw them.
+#[tokio::test]
+async fn a_frame_beside_the_cover_lays_the_device_screen_out_once() {
+    let daemon = stub_daemon().await;
+    daemon.version(env!("CARGO_PKG_VERSION"));
+    daemon.serves_cover("abc", cover_of_a_picture());
+    daemon.hosts(view_with_cover("So What", "abc"));
+    let mut watching = joined(&daemon, TuiConfig::default(), counting(&Arc::default())).await;
+    watching.show_art(Some(ratatui_image::picker::Picker::halfblocks()));
+
+    let (end, _) = drive(watching, (TALL.0, 44), |frames, _| async move {
+        let started = Instant::now();
+        while !has_art(&drawn(&frames)) {
+            assert!(started.elapsed() < SHOWS_WITHIN, "no cover was drawn");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        // The frame under way when the count starts may have laid out before it.
+        crate::tui::test_support::work::take();
+        let before = drawn(&frames).len();
+        let started = Instant::now();
+        while drawn(&frames).len() < before + 4 {
+            assert!(
+                started.elapsed() < SHOWS_WITHIN,
+                "the loop drew no more frames"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let laid = crate::tui::test_support::work::take()
+            .get("device_layout")
+            .copied()
+            .unwrap_or(0);
+        let framed = drawn(&frames).len() - before;
+        assert!(laid <= framed + 1, "{laid} layouts for {framed} frames");
+    })
+    .await;
     end.watching.close().await;
 }
 

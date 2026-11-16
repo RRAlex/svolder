@@ -42,13 +42,14 @@ live" lists where each module's tests are.
   `scripts/host-e2e/private-pipewire.sh`. A 1 kHz tone at -20 dBFS plays into the null sink and a
   recorder linked by hand to the sink's own monitor hears it after the filter chain.
   `scripts/host-e2e/run.sh` runs `svolderd` (the repo-built one, a child chain, no `systemctl`, a
-  fake device) and `scripts/host-e2e/analyse.py` drives it over the socket: the EQ on (with the
-  Off to EQ gap), a drag of one point to +6 dB at 20 updates a second, with the peak off the tone so
-  a bypass cannot pass for a boost (no gap, no click, the preamp at or under unity), a move, a
-  live type change from a peak to a low shelf, a forced sample-rate change followed by the
-  controller sending every slot again, Off, the volume and mute, and the daemon ending with its
-  chain. It prints `host-e2e: PASS`. Run it after a change to the computer EQ, its chain or the
-  daemon's computer side; it is opt-in and not part of `make check`.
+  fake device) and `scripts/host-e2e/analyse.py` drives it over the socket: the EQ on (with the Off
+  to EQ gap), a drag of one point to +6 dB at 20 updates a second, with the peak off the tone so a
+  bypass cannot pass for a boost (no gap, no click, the preamp at or under unity), a move, a live
+  type change from a peak to a low shelf, a forced sample-rate change followed by the controller
+  sending every slot again, Off, the crossfeed (see `analyse.py`; X3e kills the chain three times:
+  restarted, the second death ridden out, the third leaving the EQ off), the volume and mute, and
+  the daemon ending with its chain. It prints `host-e2e: PASS`. Run it after a change to the
+  computer EQ, its chain or the daemon's computer side; opt-in, not part of `make check`.
 - **`make preamp-lab`**: the computer EQ's preamp lab, the long run (`SEED` is the first seed and
   `RUNS` how many of each profile; 5000 by default). The controller is driven through
   seeded random sequences of hand edits, preset loads, command-line applies, node restarts, rate
@@ -62,20 +63,23 @@ live" lists where each module's tests are.
 
 `make check` does not run the web checks, `make e2e`, `make host-e2e`, the long preamp lab or the
 soak: they need browsers, two controllers, a PipeWire install or an hour, and a machine without
-them must still be able to run the ordinary gate. The quick web gate refuses (exit 1, naming the file) when a smoke
-file or one of the smoke's checks changed since `main`, so it cannot stand in for the full one; the lists and the reasoning
-are in [scripts/web-checks/README.md](../../scripts/web-checks/README.md).
+them must still be able to run the ordinary gate. The quick web gate refuses (exit 1, naming the
+file) when a smoke file or one of the smoke's checks changed since `main`, so it cannot stand in
+for the full one. `make web-touched` (`BASE=<rev>`) names the checks a diff touches, and a tag
+needs `make web-checks-cold`. The lists are in
+[scripts/web-checks/README.md](../../scripts/web-checks/README.md).
 
 ### What `make test` does
 
 `make test` runs `cargo test --workspace --all-features` once, so every binary is built by the same
 invocation and a test that needs a sibling binary runs the one on disk (`SVOLDER_TEST_PREBUILT=1`;
 without it the daemon a test spawns is built into a directory of its own; `T='-p <crate>'`, another
-set, leaves it unset). The environment is a scratch one: config, state, data and cache homes under a
-temporary directory, no WirePlumber (`SVOLDER_WIREPLUMBER` names nothing), the MCP and web tokens
-unset, and the AutoEq catalogue pointed at a closed port. The run fails, naming it, if a test leaves
-anything in its temporary directory. `make check` runs it on a private no-BlueZ bus, so the
-BlueZ-answers branch of `backend.rs`:179 and `device_cli.rs`:507 runs only in a by-hand `make test`.
+set, leaves it unset; `make help T=<target>` takes a target instead, so the two uses of `T` differ).
+The environment is a scratch one: config, state, data and cache homes under a temporary directory,
+no WirePlumber (`SVOLDER_WIREPLUMBER` names nothing), the MCP and web tokens unset, and the AutoEq
+catalogue pointed at a closed port. The run fails, naming it, if a test leaves anything in its
+temporary directory. `make check` runs it on a private no-BlueZ bus, so the BlueZ-answers branch of
+`backend.rs`:179 and `device_cli.rs`:507 runs only in a by-hand `make test`.
 
 The in-process MQTT broker (`rumqttd`, about 175 crates svolder-mqtt would otherwise build) is an
 optional dependency behind the `broker-tests` feature of `svolder-mqtt`, `svolderd` and `svolder`.
@@ -119,16 +123,15 @@ A silent recall reports nothing, so the session's refresh after a recall is test
 `SVOLDER_TRANSPORT=fake` (or `--transport fake`) a front end or the daemon talks to it in-process
 with no radio. The fake's behaviour is set by environment variables the tests and demos use:
 `SVOLDER_FAKE_PROFILE`, `SVOLDER_FAKE_UNIT`, `SVOLDER_FAKE_FIRMWARE`, `SVOLDER_FAKE_PASSPHRASE`,
-`SVOLDER_FAKE_FAULTS`, `SVOLDER_FAKE_SIGNAL`, `SVOLDER_FAKE_LOKI_REPORTS` (`full` or `short`, the
-id a Loki Max band is reported on), `SVOLDER_FAKE_SILENT_RECALL` (`1`, a recall reports nothing),
-`SVOLDER_FAKE_QUIET_SAME` (`1`, a Command equal to the held value reports nothing, on every control),
-and three that play hard cases,
-`SVOLDER_FAKE_SEVER_AFTER_MS` (cut the first link, to watch a reconnect),
-`SVOLDER_FAKE_GONE_AFTER_MS` (take the device off the air) and `SVOLDER_FAKE_GONE_FILE` (the
-same, the moment a file appears at that path, for a check that must drop it on its own cue).
-`FakeTransport` also counts connects
-and releases and can advertise differently, go quiet or push readings, for tests of the scanner and
-the session. `docs/usage/environment.md` lists the variables.
+`SVOLDER_FAKE_FAULTS`, `SVOLDER_FAKE_SIGNAL`, `SVOLDER_FAKE_LOKI_REPORTS` (`full` or `short`, the id
+a Loki Max band is reported on), `SVOLDER_FAKE_SILENT_RECALL` (`1`, a recall reports nothing),
+`SVOLDER_FAKE_QUIET_SAME` (`1`, a Command equal to the held value reports nothing, on every
+control), and three that play hard cases, `SVOLDER_FAKE_SEVER_AFTER_MS` (cut the first link, to
+watch a reconnect), `SVOLDER_FAKE_GONE_AFTER_MS` (take the device off the air) and
+`SVOLDER_FAKE_GONE_FILE` (the same, the moment a file appears at that path, for a check that must
+drop it on its own cue). `FakeTransport` also counts connects and releases and can advertise
+differently, go quiet or push readings, for tests of the scanner and the session.
+`docs/usage/environment.md` lists the variables.
 
 `make demo-safe` and `svolder tui --demo` run a fake device behind a throwaway daemon in a directory
 of their own, touching nothing of the user's; the daemon's host is the fake one
@@ -147,11 +150,10 @@ code the device advertises, not the one it checks), seed faults (`--faults`), pl
 (`--signal`, for a profile whose meters have a scale such as `fake-amp`), report a Loki Max's bands
 on the short id form (`--loki-reports short`) or not at all after a recall (`--silent-recall`),
 report a change only (`--quiet-same`), start with USB, S/PDIF lock and a sample rate of its own and
-change them from stdin (`--usb`, `--spdif-locked`, `--sample-rate`; `usb 1`, `spdif 0`,
-`rate 44100`), print every decoded frame (`--trace`), lay the advertisement out as an older device
-does (`--layout legacy`) and answer pairing (`--accept-pairing`, which must never run on a host
-that also has a Bluetooth central of its own on the same adapters). It needs an adapter
-(`--adapter`).
+change them from stdin (`--usb`, `--spdif-locked`, `--sample-rate`; `usb 1`, `spdif 0`, `rate
+44100`), print every decoded frame (`--trace`), lay the advertisement out as an older device does
+(`--layout legacy`) and answer pairing (`--accept-pairing`, which must never run on a host that also
+has a Bluetooth central of its own on the same adapters). It needs an adapter (`--adapter`).
 
 The device reports the tone-control mode on a change only: a Command equal to the mode it holds is
 stored and answered with nothing, found by the profile's tone-control role so every parametric-EQ
@@ -219,8 +221,7 @@ rule itself is in [the map](../architecture.md#where-the-volume-safety-rule-live
 can use:
 
 - every relative Markdown link in the README and the Markdown under `docs/`, `profiles/` and
-  `scripts/` reaches an existing file, and every `#anchor` an existing
-  heading;
+  `scripts/` reaches an existing file, and every `#anchor` an existing heading;
 - no process tag in a tracked text file (the tags the script's own source lists);
 - a code span that looks like a repo path, in a shipped Markdown file or a `//` comment of the Rust
   sources, names a tracked file or folder; the `PATH_ALLOW` list in `scripts/docs-check.py` takes a
@@ -232,8 +233,8 @@ can use:
 
 Some tests read the documentation too, so it follows the build: the TUI's mockups in
 `docs/usage/tui.md` are compared with what the renderer draws
-(`bins/svolder/src/tui/test_support.rs`, `screens/menu/tests.rs`, `screens/settings/tests.rs`), and
-`docs/usage/environment.md`'s table is compared with `svolder help env --markdown`
+(`bins/svolder/src/tui/test_support.rs`, `screens/menu/tests.rs`, `screens/settings/tests/look.rs`),
+and `docs/usage/environment.md`'s table is compared with `svolder help env --markdown`
 (`bins/svolder/tests/env_vars_doc.rs`); `make docs-env` rewrites that table from the built binary.
 `crates/svolder-ipc/src/config/tests/tui.rs` reads the template blocks of `docs/usage/config.md`
 twice: the configuration template and that page carry the same intro lines.
@@ -253,51 +254,50 @@ fake daemon). The script, the styles and the smoke need a real browser and are c
 - **Browser checks** (`*.py`, headless Chromium and Firefox against throwaway fake daemons, never
   the installed binaries and never the default ports) keep what needs a GPU or a real page: finite
   and bounded fields, the calm frame rate, the haze's density on screen, legibility against Glow,
-  touch panning, the wheel, resize, screen swaps, a theme that fails to load, the CSP and the fallbacks. What a browser alone
-  does to the tone curve's points is checked with real pointer and touch events: a drag, a right
-  drag, the wheel, a pinch, the page still scrolling away from a point, the swap that waits for a
-  drag (`tone_drag.py` in both browsers, `tone_touch.py` in Chromium, where touch pans). They read
-  the smoke with `readPixels` and float readbacks, never a picture.
-- **The theme contract** holds every theme the page lists to one set of checks: `node/contract.mjs`
-  for the lists of what a theme must reach and show, `contract.py` for a short pass per theme in
-  each browser (volume, mute, a band, a preset, a device lost and back, a refused write, resting and
-  waking, the menu button and `T`, `?theme=`, a guest), `completeness.py` for every control and fact
-  on every kind of device in the fake fleet, and `core_rows.py` for what the core holds for themes
-  to come. They go through each theme's test driver and judge what the fake daemon received and
-  what the theme showed, never a pixel. [Web themes](web-themes.md) says why. The core's stack of
-  modals and its router of the history are held by `node/core-modal.mjs` and `node/core-router.mjs`
-  on a jsdom page (the apt package `node-jsdom`) and by `modal.py` in each browser, in every theme:
-  no key acts behind a modal, and Back steps a popup without changing the shown device. A harness
-  that needs jsdom skips loudly where it is missing (`SKIPPED`, exit 77, a failure for the gate)
-  and passes only under `WEB_CHECK_ALLOW_NO_JSDOM=1`, under which the whole node list passes on
-  a machine without jsdom; `node/dom.mjs` says when a harness uses a jsdom page. Paper adds six node
-  harnesses (`paper-*.mjs`: tokens and contrast, words, the live sheet, the ruler, every section from
-  every fixture, the notes), `paper.py` in both browsers (dark from the first byte, the needle's
-  value against its place, drags, the cap, a held section, the questions, no sideways scroll at
-  390 px, the notes), and two mutation runners; [web-paper.md](web-paper.md#the-checks-and-the-mutants)
-  lists them. `WEB_CHECK_THEMES` limits the contract passes to the themes it names and fails on a
-  name the page does not list.
-- **The sweeps** hold what the other checks leave to the eye. `contrast.py` computes WCAG 2.2
-  contrast from the colours the browser draws for the page, the menu and every listed popup, in
-  every theme and scheme (a picture ground is sampled); `phone_sweep.py` loads the same states at
-  360, 390 and 768 px and reads sideways scroll, cut elements and small controls. Each keeps a
-  baseline of today's failures (a new or worse one fails) and fails on a state it did not reach or
-  a planted fault it misses. Full gate only; blind to canvas text, hover, animation, forced colours.
-  `make routes-doc-check` ties the daemon's routes, the fields of the devices, series,
-  walk and AutoEq routes and their writer gate to the table in [web-ui.md](../usage/web-ui.md).
-- **Arrange mode** has `node/ember-order.mjs` (the order's rules) and `arrange.py` (every section
-  into every zone, keys, touch, Reset, Escape, the order across a reload).
-- **Mutation runners** (`mutate_*.py`, `node/mutate_*.sh`) edit a copy of the page's files and must
-  make a check fail, so a check that cannot fail is found. They are slow and run by hand, one
-  worker. `snippets.py` (`make web-snippets`, part of `make check`) needs no browser: it loads each
-  runner's table and fails when a mutation's text no longer occurs exactly once in its file.
-- **The coverage map** (`COVERAGE.md`) says which check proves each rule.
-- **The approved look** (`node/look-values.mjs`) holds the smoke's tuned numbers the node scenarios
-  are written for. A number retuned in `TUNING` alone fails one check, `node/model.mjs` "the
-  approved look", which names the number and the place to update. The browser checks that depend on
-  a look number read it from the page's `TUNING`, so they follow it.
-- **The gate's refusal** (`gate_refusal.sh`) proves on a throwaway repository that the quick gate
-  refuses after a smoke file changed.
+  touch panning, the wheel, resize, screen swaps, a theme that fails to load, the CSP and the
+  fallbacks. What a browser alone does to the tone curve's points is checked with real pointer and
+  touch events: a drag, a right drag, the wheel, a pinch, the page still scrolling away from a
+  point, the swap that waits for a drag (`tone_drag.py` in both browsers, `tone_touch.py` in
+  Chromium, where touch pans). They read the smoke with `readPixels` and float readbacks, no
+  picture. - **The theme contract** holds every theme the page lists to one set of checks:
+  `node/contract.mjs` for the lists of what a theme must reach and show, `contract.py` for a short
+  pass per theme in each browser (volume, mute, a band, a preset, a device lost and back, a refused
+  write, resting and waking, the menu button and `T`, `?theme=`, a guest), `completeness.py` for
+  every control and fact on every kind of device in the fake fleet, and `core_rows.py` for what the
+  core holds for themes to come. They go through each theme's test driver and judge what the fake
+  daemon received and what the theme showed, never a pixel. [Web themes](web-themes.md) says why.
+  The core's stack of modals and its router of the history are held by `node/core-modal.mjs` and
+  `node/core-router.mjs` on a jsdom page (the apt package `node-jsdom`) and by `modal.py` in each
+  browser, in every theme: no key acts behind a modal, and Back steps a popup without changing the
+  shown device. A harness that needs jsdom skips loudly where it is missing (`SKIPPED`, exit 77, a
+  failure for the gate) and passes only under `WEB_CHECK_ALLOW_NO_JSDOM=1`, under which the whole
+  node list passes on a machine without jsdom; `node/dom.mjs` says when a harness uses a jsdom page.
+  Paper adds six node harnesses (`paper-*.mjs`: tokens and contrast, words, the live sheet, the
+  ruler, every section from every fixture, the notes), `paper.py` in both browsers (dark from the
+  first byte, the needle's value against its place, drags, the cap, a held section, the questions,
+  no sideways scroll at 390 px, the notes), and two mutation runners;
+  [web-paper.md](web-paper.md#the-checks-and-the-mutants) lists them. `WEB_CHECK_THEMES` limits the
+  contract passes to the themes it names and fails on a name the page does not list. - **The
+  sweeps** hold what the other checks leave to the eye. `contrast.py` computes WCAG 2.2 contrast
+  from the colours the browser draws for the page, the menu and every listed popup, in every theme
+  and scheme (a picture ground is sampled); `phone_sweep.py` loads the same states at 360, 390 and
+  768 px and reads sideways scroll, cut elements and small controls. Each keeps a baseline of
+  today's failures (a new or worse one fails) and fails on a state it did not reach or a planted
+  fault it misses. Full gate only; blind to canvas text, hover, animation, forced colours. `make
+  routes-doc-check` ties the daemon's routes, the fields of the devices, series, walk and AutoEq
+  routes and their writer gate to the table in [web-ui.md](../usage/web-ui.md). - **Arrange mode**
+  has `node/ember-order.mjs` (the order's rules) and `arrange.py` (every section into every zone,
+  keys, touch, Reset, Escape, the order across a reload). - **Mutation runners** (`mutate_*.py`,
+  `node/mutate_*.sh`) edit a copy of the page's files and must make a check fail, so a check that
+  cannot fail is found. They are slow and run by hand, one worker. `snippets.py` (`make
+  web-snippets`, part of `make check`) needs no browser: it loads each runner's table and fails when
+  a mutation's text no longer occurs exactly once in its file. - **The coverage map**
+  (`COVERAGE.md`) says which check proves each rule. - **The approved look**
+  (`node/look-values.mjs`) holds the smoke's tuned numbers the node scenarios are written for. A
+  number retuned in `TUNING` alone fails one check, `node/model.mjs` "the approved look", which
+  names the number and the place to update. The browser checks that depend on a look number read it
+  from the page's `TUNING`, so they follow it. - **The gate's refusal** (`gate_refusal.sh`) proves
+  on a throwaway repository that the quick gate refuses after a smoke file changed.
 
 The soak (`soak.py`) runs the smoke for half an hour and compares its frame rate and mean alpha
 with a recorded run; its numbers, not a picture, are what is trusted. The detail of every check, the

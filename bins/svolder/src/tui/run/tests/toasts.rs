@@ -129,23 +129,12 @@ async fn the_loop_warns_of_a_daemon_of_another_version_and_a_direct_session_neve
         .reopen(None, None)
         .await
         .expect("the stub daemon answers");
-    let (recorder, frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let end = event_loop(LoopParts {
-        opener: &on_daemon,
-        adder: &nothing_to_add(),
-        watching: session,
-        terminal: &mut terminal,
-        events: quit_after(Duration::from_millis(800)),
-        mouse: &mut SpyMouse::default(),
-        title: &mut title(),
-        look: look(),
-    })
-    .await;
-    assert!(
-        any_frame(&drawn(&frames), "than this svolder"),
-        "the warning never reached the screen"
-    );
+    let (keys, input) = keyed();
+    let warned = |frames: Frames| async move {
+        shown(&frames, "than this svolder").await;
+        quit(&keys);
+    };
+    let (end, _frames) = loop_over(&on_daemon, session, Box::pin(input), warned).await;
     assert_eq!(
         end.watching.app.session.daemon_version.as_deref(),
         Some(STUB_VERSION)
@@ -153,20 +142,19 @@ async fn the_loop_warns_of_a_daemon_of_another_version_and_a_direct_session_neve
     end.watching.close().await;
 
     let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
-    let (recorder, frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let end = event_loop(LoopParts {
-        opener: &opener_over(never_opens()),
-        adder: &nothing_to_add(),
-        watching: watching(backend, app, None),
-        terminal: &mut terminal,
-        events: quit_after(Duration::from_millis(300)),
-        mouse: &mut SpyMouse::default(),
-        title: &mut title(),
-        look: look(),
-    })
+    let (keys, input) = keyed();
+    let drawn_once = |frames: Frames| async move {
+        shown(&frames, "Mute").await;
+        quit(&keys);
+    };
+    let (end, frames) = loop_over(
+        &opener_over(never_opens()),
+        watching(backend, app, None),
+        Box::pin(input),
+        drawn_once,
+    )
     .await;
-    assert!(!any_frame(&drawn(&frames), "than this svolder"));
+    assert!(!any_frame(&frames, "than this svolder"));
     end.watching.close().await;
 }
 
@@ -324,26 +312,19 @@ async fn the_loop_asks_the_daemon_on_a_slow_clock_for_a_changed_config() {
         .reopen(None, None)
         .await
         .expect("the stub daemon answers");
-    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let edited = async {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    let (keys, input) = keyed();
+    // The first ask after the edit may already be on its way with the old answer; the answer of
+    // the one after it is the first to say the file changed, and the one before it was handled.
+    let edited = |_frames: Frames| async {
         daemon.config_changed(true);
+        let asked = daemon.version_asks();
+        until("two asks after the edit", || {
+            daemon.version_asks() >= asked + 2
+        })
+        .await;
+        quit(&keys);
     };
-    let (adder, mut mouse, mut title) = (nothing_to_add(), SpyMouse::default(), title());
-    let (end, ()) = tokio::join!(
-        event_loop(LoopParts {
-            opener: &opener,
-            adder: &adder,
-            watching: session,
-            terminal: &mut terminal,
-            events: quit_after(Duration::from_millis(1_000)),
-            mouse: &mut mouse,
-            title: &mut title,
-            look: look(),
-        }),
-        edited
-    );
+    let (end, _frames) = loop_over(&opener, session, Box::pin(input), edited).await;
     assert!(
         end.watching.app.overlays.conn.config_changed.is_some(),
         "the slow ask never reached the session"
@@ -444,21 +425,13 @@ async fn the_owed_reload_never_holds_the_loop_and_a_direct_session_asks_nothing(
         .await
         .expect("the stub daemon answers");
     reload_soon(&mut session, &path);
-    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let (adder, mut mouse, mut meter) = (nothing_to_add(), SpyMouse::default(), title());
     let started = std::time::Instant::now();
-    let end = event_loop(LoopParts {
-        opener: &opener,
-        adder: &adder,
-        watching: session,
-        terminal: &mut terminal,
-        events: quit_after(Duration::from_millis(2_000)),
-        mouse: &mut mouse,
-        title: &mut meter,
-        look: look(),
-    })
-    .await;
+    let (keys, input) = keyed();
+    let sent = |_frames: Frames| async {
+        until("the owed reload is sent", || daemon.reloads() == 1).await;
+        quit(&keys);
+    };
+    let (end, _frames) = loop_over(&opener, session, Box::pin(input), sent).await;
     assert!(
         started.elapsed() < Duration::from_secs(15),
         "the loop waited for the daemon's reload: {:?}",
@@ -478,19 +451,9 @@ async fn the_owed_reload_never_holds_the_loop_and_a_direct_session_asks_nothing(
         .expect("the stub daemon answers");
     reload_soon(&mut session, &path);
     session.reload_owed.as_mut().expect("owed").0 += Duration::from_secs(60);
-    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let end = event_loop(LoopParts {
-        opener: &opener,
-        adder: &adder,
-        watching: session,
-        terminal: &mut terminal,
-        events: quit_after(Duration::from_millis(300)),
-        mouse: &mut mouse,
-        title: &mut meter,
-        look: look(),
-    })
-    .await;
+    let (keys, input) = keyed();
+    quit(&keys);
+    let (end, _frames) = loop_over(&opener, session, Box::pin(input), |_| async {}).await;
     assert_eq!(daemon.reloads(), 1, "the owed reload went out at the end");
     end.watching.close().await;
 
@@ -504,18 +467,17 @@ async fn the_owed_reload_never_holds_the_loop_and_a_direct_session_asks_nothing(
         watching.daemon_version.is_none(),
         "a direct session asked a daemon"
     );
-    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let end = event_loop(LoopParts {
-        opener: &opener_over(never_opens()),
-        adder: &adder,
+    let (keys, input) = keyed();
+    let drawn_once = |frames: Frames| async move {
+        shown(&frames, "Mute").await;
+        quit(&keys);
+    };
+    let (end, _frames) = loop_over(
+        &opener_over(never_opens()),
         watching,
-        terminal: &mut terminal,
-        events: quit_after(Duration::from_millis(800)),
-        mouse: &mut mouse,
-        title: &mut meter,
-        look: look(),
-    })
+        Box::pin(input),
+        drawn_once,
+    )
     .await;
     assert!(end.watching.daemon_version.is_none());
     assert!(

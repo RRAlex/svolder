@@ -273,6 +273,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/popups/popups.js"),
     ),
     (
+        "core/popups/crossfeed/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/crossfeed/draw.js"),
+    ),
+    (
+        "core/popups/crossfeed/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/crossfeed/wire.js"),
+    ),
+    (
         "core/popups/devices/draw.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/devices/draw.js"),
@@ -313,6 +323,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/popups/eq-library/draw.js"),
     ),
     (
+        "core/popups/eq-library/saved-wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/eq-library/saved-wire.js"),
+    ),
+    (
+        "core/popups/eq-library/upload-wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/eq-library/upload-wire.js"),
+    ),
+    (
         "core/popups/eq-library/wire.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/eq-library/wire.js"),
@@ -326,6 +346,16 @@ const FILES: &[Entry] = &[
         "core/popups/help/wire.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/help/wire.js"),
+    ),
+    (
+        "core/popups/sound/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/sound/draw.js"),
+    ),
+    (
+        "core/popups/sound/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/sound/wire.js"),
     ),
     (
         "core/menu-rows.js",

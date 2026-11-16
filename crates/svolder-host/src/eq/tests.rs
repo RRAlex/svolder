@@ -283,6 +283,9 @@ fn state() -> HostEqState {
         preamp_db: c.preamp_db,
         filters: c.filters,
         slots: Vec::new(),
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     }
 }
 
@@ -309,6 +312,86 @@ fn a_state_round_trips_through_its_file() {
         .map(|e| e.unwrap().file_name())
         .collect();
     assert_eq!(leftovers.len(), 1, "{leftovers:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `host-eq.toml` as 0.34 wrote it, with none of the crossfeed keys.
+const STATE_0_34: &str = r#"on = true
+name = "Sennheiser HD 650"
+target = "alsa_output.usb-dac"
+route = "smart"
+manager = "systemd"
+preamp_db = -3.0
+slots = [1]
+
+[[filters]]
+kind = "Peaking"
+f = 1000.0
+g = 3.0
+q = 1.0
+"#;
+
+#[test]
+fn a_state_from_0_34_loads_with_no_crossfeed_and_saves_without_its_keys() {
+    let dir = scratch("old-state");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("host-eq.toml");
+    std::fs::write(&path, STATE_0_34).unwrap();
+    let state = HostEqState::load(&path).unwrap().expect("a state");
+    assert!(state.on);
+    assert_eq!(state.crossfeed, None);
+    assert!(!state.crossfeed_on);
+    assert!(!state.flat);
+    state.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("crossfeed") && !text.contains("flat"),
+        "an unset crossfeed adds no key: {text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_state_with_crossfeed_round_trips_and_an_older_reader_ignores_the_keys() {
+    use crate::eq::crossfeed::{CrossfeedSettings, Model};
+    let dir = scratch("new-state");
+    let path = dir.join("host-eq.toml");
+    let mut before = state();
+    before.crossfeed = Some(CrossfeedSettings {
+        preset: None,
+        edited_from: None,
+        amount: 0.35,
+        delay_ms: Some(0.5),
+        ..CrossfeedSettings::for_model(Model::Meier)
+    });
+    before.crossfeed_on = true;
+    before.flat = true;
+    before.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("crossfeed_on = true") && text.contains("flat = true"),
+        "{text}"
+    );
+    assert!(text.contains("model = \"meier\""), "{text}");
+    assert_eq!(HostEqState::load(&path), Ok(Some(before.clone())));
+    // Off keeps the settings and writes neither flag.
+    before.crossfeed_on = false;
+    before.flat = false;
+    before.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("crossfeed_on") && !text.contains("flat"),
+        "{text}"
+    );
+    assert_eq!(HostEqState::load(&path), Ok(Some(before)));
+    // An older svolder's state has no such fields and ignores unknown keys.
+    #[derive(Debug, serde::Deserialize)]
+    struct Older {
+        on: bool,
+        name: String,
+    }
+    let older: Older = toml::from_str(&text).unwrap();
+    assert!(older.on && older.name == "Sennheiser HD 650");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

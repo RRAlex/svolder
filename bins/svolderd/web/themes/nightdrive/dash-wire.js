@@ -20,7 +20,7 @@ import { entryOf } from './hud.js';
 import {
   drawDash, markCoverFailed, moveProgress, placeFills, switchKeys,
 } from './draw/dash.js';
-import { ASK_MS, baseOf } from '../../core/volume-ask.js';
+import { ASK_MS, ackAsk, baseOf, noteReading } from '../../core/volume-ask.js';
 import { pressEqKey } from './eq-key.js';
 import { inertOf } from './inert.js';
 import { closeList, closeOf, openList } from './lists.js';
@@ -129,10 +129,12 @@ export function wireDash({
     }
     // The daemon may land the write on another step (the quietest, under a cap below every step).
     const landed = answer.landed?.raw;
-    if (typeof landed === 'number' && landed !== mine.raw) view.asked = { raw: landed, at: now() };
+    if (typeof landed === 'number' && landed !== mine.raw) {
+      view.asked = { raw: landed, at: now(), read: mine.read, seen: mine.read === landed };
+    }
     // The device has the step: a reading that comes after this and differs from it is another
-    // hand's (the listener below).
-    if (view.asked) view.asked.acked = true;
+    // hand's (the listener below); one that came before it and was the step answers the ask now.
+    if (view.asked) ackAsk(view, view.asked);
   }
 
   /** Ask for step `raw` of `target`: held to the range and the cap, noted in `view.asked`, sent. A
@@ -182,10 +184,10 @@ export function wireDash({
 
   // A reading that is not the answer to the step asked is another hand's: the next step starts from it.
   const offVolume = store.on('volume', (data) => {
+    if ((data.device ?? store.shown()) !== store.shown()) return;
     const a = view.asked;
-    if (!a?.acked || data.raw === undefined) return;
-    if (data.raw !== a.raw) view.asked = null;
-    else a.answered = true;
+    if (a?.acked && data.raw !== undefined && data.raw !== a.raw) view.asked = null;
+    else noteReading(view, data.raw);
   });
   signal.addEventListener('abort', offVolume, { once: true });
 

@@ -28,9 +28,9 @@ use crate::backend::Backend;
 use crate::tui::app::{App, Screen};
 use crate::tui::screens::device::{art_box, art_slot};
 
-/// The longest side a decoded picture is kept at, in pixels: far more than a cell box of the
-/// Status pane ever holds, little enough that a large cover costs no memory.
-const KEPT_PX: u32 = 512;
+/// The longest side a decoded picture is kept at, in pixels: more than the grown Status pane's
+/// cell box holds on a terminal with big cells, little enough that a large cover costs no memory.
+const KEPT_PX: u32 = 1024;
 
 /// The widest and tallest picture that is decoded, in pixels, and the most memory it may take:
 /// the daemon checks a cover's first bytes and its size in bytes, not what it decodes to.
@@ -200,10 +200,13 @@ impl Art {
         self.making || self.fetching.is_some() || self.decoding.is_some() || self.building.is_some()
     }
 
-    /// Put the picture the app holds as `picture`.
-    fn show(&mut self, app: &mut App, picture: Option<Picture>) {
-        self.shown = picture.as_ref().map(|p| (p.hash.clone(), p.size()));
-        app.host.cover.picture = picture;
+    /// Put the picture the app holds as `picture`, built for the box `size`: a picture of a cover
+    /// that is not square is smaller than its box, and it is the box a frame asks for again.
+    fn show(&mut self, app: &mut App, picture: Option<(Picture, Size)>) {
+        self.shown = picture
+            .as_ref()
+            .map(|(picture, size)| (picture.hash.clone(), *size));
+        app.host.cover.picture = picture.map(|(picture, _)| picture);
     }
 
     /// Give up everything held for a track: nothing is fetched, built or drawn.
@@ -268,6 +271,7 @@ impl Art {
             self.decoding = None;
         }
         if self.missing.contains(&hash) {
+            app.host.cover.failed = Some(hash);
             return;
         }
         let Some((_, image)) = self.image.as_ref() else {
@@ -278,7 +282,15 @@ impl Art {
         if app.screen != Screen::Device {
             return;
         }
-        let Some(size) = art_box(area, app) else {
+        // The box the frame just drawn gave this cover at these cells, else one worked out now.
+        let size = match app
+            .drawn
+            .drawn_art_box(area, &hash, (font.width, font.height))
+        {
+            Some(drawn) => drawn,
+            None => art_box(area, app),
+        };
+        let Some(size) = size else {
             // No room for it at this size: the words keep the row.
             self.show(app, None);
             return;
@@ -342,6 +354,7 @@ impl Art {
                     return;
                 }
                 let Some(cover) = cover else {
+                    app.host.cover.failed = Some(hash.clone());
                     self.missing.insert(hash);
                     return;
                 };
@@ -362,6 +375,7 @@ impl Art {
                 match image {
                     Some(image) => self.image = Some((hash, image)),
                     None => {
+                        app.host.cover.failed = Some(hash.clone());
                         self.missing.insert(hash);
                     }
                 }
@@ -383,13 +397,17 @@ impl Art {
                 match protocol {
                     Some(protocol) => self.show(
                         app,
-                        Some(Picture {
-                            protocol,
-                            hash,
-                            sent: Arc::default(),
-                        }),
+                        Some((
+                            Picture {
+                                protocol,
+                                hash,
+                                sent: Arc::default(),
+                            },
+                            size,
+                        )),
                     ),
                     None => {
+                        app.host.cover.failed = Some(hash.clone());
                         self.missing.insert(hash);
                     }
                 }

@@ -8,7 +8,7 @@
 // or `ASK_MS` pass. A drag takes a hold of the open area (`keep`, shared with the tone's), so what
 // the device reports meanwhile is drawn when the hand lets go, from the newest reading, never from the one at the touch.
 
-import { askExpiry, baseOf, shownRaw } from '../../core/volume-ask.js';
+import { ackAsk, askExpiry, baseOf, noteReading, shownRaw } from '../../core/volume-ask.js';
 import { rawAt, showVolume } from './draw/volume.js';
 import { dragAlong, sliderKeys } from '../../core/gestures.js';
 
@@ -57,20 +57,16 @@ export function wireVolume({
     // The daemon may land the write on another step (the quietest, under a cap below every step).
     const landed = answer.landed?.raw;
     if (typeof landed === 'number' && landed !== mine.raw) {
-      view.asked = { raw: landed, at: Date.now() };
+      view.asked = { raw: landed, at: Date.now(), read: mine.read, seen: mine.read === landed };
       show();
     }
     // The device has the step: a reading that comes after this and differs from it is another
-    // hand's (`answered`, set by that reading, below).
-    view.asked.acked = true;
+    // hand's (`answered`, set by that reading, or at once by one that came first).
+    if (ackAsk(view, view.asked)) show();
   }
 
   live.onReading('volume', () => {
-    const asked = view.asked;
-    if (asked?.acked && !asked.answered) {
-      asked.answered = true;
-      show();
-    }
+    if (noteReading(view, volume()?.raw)) show();
   });
 
   /** Ask for step `raw`: held to the range and the cap, shown at once, and sent. A viewer who may

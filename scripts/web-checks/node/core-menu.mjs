@@ -107,9 +107,9 @@ await ok('the_arrows_go_round_the_ends_past_a_disabled_and_a_hidden_row', async 
     r.press('ArrowDown');
     seen.push(r.at());
   }
-  // Off is disabled, Gone is hidden: neither is reached; Devices, EQ library and Help are the
+  // Off is disabled, Gone is hidden: neither is reached; Devices, Sound and Help are the
   // page's popup rows
-  assert.deepEqual(seen, ['On', 'row-act', 'menu-popup-devices', 'menu-popup-eq-library',
+  assert.deepEqual(seen, ['On', 'row-act', 'menu-popup-devices', 'menu-popup-sound',
     'menu-popup-help',
     'menu-sign-out', 'menu-theme', 'On']);
   r.press('ArrowUp');
@@ -187,8 +187,8 @@ await ok('a_listed_popups_row_is_in_the_menu_and_opens_its_popup', async () => {
   const plain = await rig();
   plain.core.frame.openMenu();
   assert.deepEqual([...plain.pop.querySelectorAll('[id^="menu-popup-"]')].map((el) => el.id),
-    ['menu-popup-devices', 'menu-popup-eq-library', 'menu-popup-help'],
-    'the page as shipped has the rows of Devices, the EQ library and Help and no other');
+    ['menu-popup-devices', 'menu-popup-sound', 'menu-popup-help'],
+    'the page as shipped has the rows of Devices, Sound and Help and no other');
   plain.window.close();
 });
 

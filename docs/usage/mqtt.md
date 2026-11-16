@@ -406,13 +406,15 @@ saving to a slot is not offered. A retained command is never acted on.
 
 ### The computer's EQ
 
-One more Home Assistant device, `This computer`, carries the computer's EQ and nothing else of the
-computer: no volume, no mute and no points.
+One more Home Assistant device, `This computer`, carries the computer's EQ and crossfeed and nothing
+else of the computer: no volume, no mute and no points.
 
 | Entity | Topics | What |
 |---|---|---|
 | `switch.this_computer_eq` | `B/computer/computer_eq/state` (`ON`/`OFF`) and `.../set` | the EQ on or off; a `binary_sensor` while `commands` is off |
 | `sensor.this_computer_eq_preset` | `B/computer/computer_eq_preset/state` | the preset the points came from, `custom` after a hand edit, empty while the EQ is off |
+| `switch.this_computer_crossfeed` | `B/computer/computer_crossfeed/state` (`ON`/`OFF`) and `.../set` | [crossfeed](eq.md#crossfeed) on or off; a `binary_sensor` while `commands` is off |
+| `select.this_computer_crossfeed_preset` | `B/computer/computer_crossfeed_preset/state` and `.../set` | the model and preset; a `sensor` while `commands` is off |
 
 `ON` turns the EQ on with the points the daemon keeps; `OFF` removes it and keeps them. With no
 points kept yet (nothing applied or edited since the daemon first ran), `ON` leaves the EQ off and
@@ -420,6 +422,19 @@ logs a line. A retained command is never acted on. The entities appear while the
 computer's controls; when it cannot (for example no `pw-cli`), they say unavailable, and with host
 audio off nothing is announced. When the daemon cannot tell whether the chain runs, the switch
 reports the state the daemon saved, which is what it last applied.
+
+The crossfeed select's options are the daemon's own table, so they follow it: `Bauer · Jan Meier`,
+`Bauer · Chu Moy`, `Bauer · bs2b default`, `Linkwitz`, `Meier · Default`, `Meier · Rockbox`,
+`Mid/Side bass` (a model with one preset shows the model alone), and `Custom`. `Custom` is in the
+list because it is a state the entity reports after a hand edit; choosing it is no command and
+changes nothing (the select goes on showing the state topic's value). Choosing a preset sets the
+model and preset and leaves crossfeed on or off as it was. A reset that turns crossfeed off (a
+restart, a change of output, a chain restart, a graceful stop) shows as the switch going `OFF`, with
+no entity of its own. The entities are announced only while host audio is on, and they are as
+available as the computer's other entities. When crossfeed cannot be changed (the view's
+`unavailable` reason: a chain from an older svolder, a held curve) or the daemon refuses a change,
+the entities stay online and the command is dropped with a log line naming the reason. A retained
+command is never acted on.
 
 ### The connection
 

@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Test threads get 8 MiB of stack: the TUI loop tests poll large futures in a debug build and
+# overflow the 2 MiB default (waiting.rs's restart test, the reopen-path tests). Set here, not
+# in the Makefile, so a direct `cargo test` (CI, gate-1100) is covered too.
+[env]
+RUST_MIN_STACK = "8388608"

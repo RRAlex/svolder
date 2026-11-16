@@ -19,8 +19,8 @@ is; [the frame](frame.md) says what the page keeps for itself.
 | `paper.js` | the registration, the menu rows, the mount: wires the sections to the store |
 | `live.js` | `createLive`: draws the sections, keeps them current, holds one while a hand is on it (the holds are counted by `core.freeze.keeper`) |
 | `draw/` | one file per section: `sheet.js` (the skeleton, title, footer, `SECTIONS`), `volume.js`, `tone.js`, `controls.js`, `presets.js`, `playing.js`, `amp.js`, `device.js`, `notes.js`, and the small `word.js`, `esc.js` |
-| `*-wire.js`, `graph.js`, `lists.js`, `ask.js`, `gestures.js` | the hands: what a tap, a drag, a key, a list or a question does (`lists.js` and `ask.js` give the core's list and inline ask Paper's classes and words) |
-| `ruler.js`, `changes.js`, `notes.js`, `marks.js`, `words.js`, `place.js` | pure maths and words: the ruler, the last change, the notes, where they sit, every fixed word |
+| `*-wire.js`, `graph.js`, `lists.js`, `ask.js` | the hands: what a tap, a drag, a key, a list or a question does (`lists.js` and `ask.js` give the core's list and inline ask Paper's classes and words) |
+| `ruler.js`, `changes.js`, `notes.js`, `marks.js`, `words.js`, `place.js` (the core's `placeFractions` with Paper's fill class) | pure maths and words: the ruler, the last change, the notes, where they sit, every fixed word; the drag and the keys of a track are the core's `gestures.js` |
 | `driver.js` | the test driver |
 | `preview.js` | the picture on Paper's picker card |
 | `style.css` | the tokens, the sheet, every section, the phone |

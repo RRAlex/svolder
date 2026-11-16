@@ -12,9 +12,8 @@ live. This page is how that is built and what it promises to leave alone. The cr
 `svolder-host`, placed in [the map](../architecture.md#the-crates); the TUI and `svolder host eq`
 use it, and so does `svolderd`, whose host service follows the player, reads its cover and reads the
 route for every front end ([below](#the-daemons-host-service)). The parametric maths and the presets
-a host EQ applies are in [tone-control-and-presets.md](tone-control-and-presets.md); the
-commands and keys are in the [EQ reference](../usage/eq.md) and the [TUI
-reference](../usage/tui.md).
+a host EQ applies are in [tone-control-and-presets.md](tone-control-and-presets.md); the commands
+and keys are in the [EQ reference](../usage/eq.md) and the [TUI reference](../usage/tui.md).
 
 ## No PipeWire library
 
@@ -32,12 +31,13 @@ could reach the user's session set the first or do the second.
 ## The sink
 
 `Sink` (`crates/svolder-host/src/sink.rs`) is a trait; `Wpctl` implements it by running `wpctl`
-against `@DEFAULT_AUDIO_SINK@`. The default sink is the one read and changed, whichever device it
-is, and its name comes along so a screen can say which one that is. Each call runs `wpctl` once
-under `TIMEOUT` (1 s). A read asks `get-volume` every time and `inspect` only when the sink may have
-changed: on the first read, after a failed one, when the volume or the mute moved, and once the name
-it holds is `INSPECT_EVERY` (5 s) old, which catches a new default sink that happens to read the
-same volume. A write sets the volume capped to 100 % (never a boost) or toggles mute.
+against `@DEFAULT_AUDIO_SINK@`, whichever device that is, with its name for screens. Each call runs
+`wpctl` once under `TIMEOUT` (1 s). A fresh read asks `get-volume` every time and `inspect` only
+when the sink may have changed: at the first read, after a failed one, when the volume or mute
+moved, and once the name it holds is `INSPECT_EVERY` (5 s) old, to catch a new default sink at the
+same volume. A write sets the volume, capped to 100 %, or toggles mute. One program's sinks share
+the naming and the last fresh reading (`Wpctl::shared_for`): a held reader (`Wpctl::held`, the
+capture's) takes it while under 2.5 s old, and a `set-*` drops it.
 
 ## The players
 

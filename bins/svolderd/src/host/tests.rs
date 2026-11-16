@@ -1229,3 +1229,130 @@ async fn a_silent_bus_that_then_looks_absent_is_still_looked_for() {
     assert_eq!(looked.load(Ordering::SeqCst), 4, "the looks went on");
     assert_eq!(title_of(&service), Some("So What".to_string()));
 }
+
+/// The daemon serves the crossfeed op: on carries it out, and a change that names nothing is
+/// refused in words.
+#[tokio::test]
+async fn the_daemon_serves_the_crossfeed_op() {
+    let parts = Parts::fake(FakeKnobs::default());
+    let computer = parts.computer.expect("a computer");
+    let op = |on: Option<bool>| HostEqOp::Crossfeed {
+        on,
+        model: None,
+        preset: None,
+        amount_pct: None,
+        crossover_hz: None,
+        delay_ms: None,
+        done: true,
+    };
+    computer
+        .eq_op(op(Some(true)), &[], |_| Vec::new(), |_| async { Ok(()) })
+        .await
+        .expect("served");
+    assert!(computer.eq_view().crossfeed.expect("a view").on);
+    let why = computer
+        .eq_op(op(None), &[], |_| Vec::new(), |_| async { Ok(()) })
+        .await
+        .expect_err("refused");
+    assert!(why.to_string().contains("names nothing"), "{why}");
+}
+
+/// A fake sink read the way the daemon's two readers read the real one: the computer's volume
+/// read publishes, the capture's look takes a young published reading.
+struct Readers {
+    sink: svolder_host::fake::FakeSink,
+    held: svolder_host::sink::Coalescer,
+}
+
+impl Readers {
+    fn new() -> Self {
+        Self {
+            sink: svolder_host::fake::FakeSink::new(Some(SinkState {
+                volume: 0.5,
+                muted: false,
+                name: "DAC".to_string(),
+                target: Some("dac".to_string()),
+            })),
+            held: svolder_host::sink::Coalescer::default(),
+        }
+    }
+
+    async fn computer(&self) -> Option<SinkState> {
+        self.held.publish(self.sink.read()).await
+    }
+
+    async fn capture(&self) -> Option<SinkState> {
+        self.held
+            .held(svolder_host::sink::READ_HELD, self.sink.read())
+            .await
+    }
+}
+
+/// Run the computer's reader (when `computer`) and the capture's, each every 2 s and a second
+/// apart, for 60 virtual seconds; the sink's volume is 50 % until 30 s and 80 % after, and the
+/// volumes the computer's reads saw come back with the number of reads of the sink.
+async fn beat(computer: bool, capture: bool) -> (usize, Vec<(u64, f32)>) {
+    let readers = Arc::new(Readers::new());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let start = tokio::time::Instant::now();
+    for (on, is_computer, phase) in [(computer, true, 0), (capture, false, 1)] {
+        if !on {
+            continue;
+        }
+        let (readers, seen) = (Arc::clone(&readers), Arc::clone(&seen));
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(phase)).await;
+            loop {
+                if is_computer {
+                    let read = readers.computer().await.expect("a sink");
+                    locked(&seen).push((start.elapsed().as_secs(), read.volume));
+                } else {
+                    readers.capture().await;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
+    for second in 0..60 {
+        if second == 30 {
+            readers.sink.set(Some(SinkState {
+                volume: 0.8,
+                muted: false,
+                name: "DAC".to_string(),
+                target: Some("dac".to_string()),
+            }));
+        }
+        pass(Duration::from_secs(1)).await;
+    }
+    let seen = locked(&seen).clone();
+    (readers.sink.reads(), seen)
+}
+
+/// The capture's look and the computer's volume read the sink every 2 s, a second apart: 60
+/// reads of the sink in 60 virtual seconds read separately (the baseline), and at most one in 2
+/// s with the capture's look taking the computer's reading.
+#[tokio::test(start_paused = true)]
+async fn two_readers_every_two_seconds_cost_one_read_in_two_seconds() {
+    let (reads, _) = beat(true, true).await;
+    assert!((29..=31).contains(&reads), "{reads} reads in 60 s");
+}
+
+/// A capture that is alone (nobody watches the computer) reads at its own beat and never takes
+/// its own reading for a young one.
+#[tokio::test(start_paused = true)]
+async fn a_capture_alone_reads_at_every_look() {
+    let (reads, _) = beat(false, true).await;
+    assert!((29..=31).contains(&reads), "{reads} reads in 60 s");
+}
+
+/// The computer's reader always reads fresh: an outside change of the volume reaches it within
+/// its own 2 s beat, whatever the capture's look holds.
+#[tokio::test(start_paused = true)]
+async fn an_outside_volume_change_reaches_the_computer_within_a_beat() {
+    let (_, seen) = beat(true, true).await;
+    let first = seen
+        .iter()
+        .find(|(_, volume)| *volume > 0.7)
+        .expect("the change was seen");
+    assert!(first.0 <= 32, "seen at {} s, changed at 30 s", first.0);
+}

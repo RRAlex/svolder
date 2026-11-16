@@ -32,6 +32,8 @@ HOOK = """(() => { window.__posts = []; const f = window.fetch;
 STATE = """(() => { const k = document.querySelector('sv-knob'); const g = k.geometry();
   return { raw: k.raw, lo: k.lo, hi: k.hi, cap: k.cap, climbing: k.climbing(),
            cx: g.cx, cy: g.cy, r: g.radius,
+           num: k.querySelector('.big .num').textContent,
+           live: k.texts[k.raw - k.lo] ?? '', goal: k.texts[(k.target ?? -1) - k.lo] ?? '',
            posts: window.__posts.filter((p) => /volume/.test(p)).length }; })()"""
 
 
@@ -147,6 +149,9 @@ try:
     a = state(b)
     check('a click at 97 % starts a climb (three quarters written, the knob shows the climb)',
           a['climbing'] and a['raw'] >= quarter - 1 and a['raw'] < top, [top, a])
+    # the big number follows the live level while the climb runs, not the step it climbs to
+    check('  the big number counts the live level, not the climb\'s target',
+          a['num'] == a['live'].split(' ')[0] and a['num'] != a['goal'].split(' ')[0], a)
     b.sleep(0.5)
     a2 = state(b)
     check('  the reading rises over time', a2['raw'] > a['raw'], [a, a2])

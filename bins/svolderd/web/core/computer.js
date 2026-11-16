@@ -130,6 +130,10 @@ export function createPending({ store, fetch }) {
     if (key === 'volume') return computer.volume?.pct === value;
     if (key === 'mute') return computer.volume?.muted === value;
     if (key === 'mode') return computer.eq?.on === value;
+    if (key === 'crossfeed') {
+      const now = computer.eq?.crossfeed;
+      return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);
+    }
     const id = /^point:(\d+)$/.exec(key)?.[1];
     if (!id) return false;
     // the point is found by its id: the daemon lists the points by frequency, so it may be
@@ -153,6 +157,12 @@ export function createPending({ store, fetch }) {
     }
   }
 
+  /** How many presets the daemon has loaded, or `null` when it does not say. */
+  function loadsOf(computer) {
+    const loads = computer?.eq?.loads;
+    return Number.isInteger(loads) ? loads : null;
+  }
+
   /** Where the point a hold is on is listed in `computer`'s model, or `null`. */
   function listedAt(key, computer) {
     const id = /^point:(\d+)$/.exec(key)?.[1];
@@ -164,10 +174,16 @@ export function createPending({ store, fetch }) {
   store.on('host', (host) => {
     reads++;
     // a preset loaded meanwhile renumbers the slots: a point held is another point now, so its
-    // hold ends and nothing more is written for it (an edit of its own makes the preset `custom`)
+    // hold ends and nothing more is written for it (an edit of its own makes the preset `custom`).
+    // The daemon counts its loads, so a preset reloaded under the same name counts too; a daemon
+    // that sends no count is followed by the name.
     const loaded = host?.computer?.eq?.preset ?? null;
+    const loads = loadsOf(host?.computer);
+    const reloaded = (hold) => (hold.loads !== null && loads !== null
+      ? loads !== hold.loads
+      : loaded !== hold.preset && loaded !== 'custom');
     for (const [key, hold] of [...held]) {
-      if (key.startsWith('point:') && !hold.released && loaded !== hold.preset && loaded !== 'custom') {
+      if (key.startsWith('point:') && !hold.released && reloaded(hold)) {
         held.delete(key);
         tracks.delete(key);
         notify('ended', { key });
@@ -254,7 +270,8 @@ export function createPending({ store, fetch }) {
     set(key, value) {
       const at = listedAt(key, store.page().host?.computer);
       const preset = store.page().host?.computer?.eq?.preset ?? null;
-      held.set(key, { value, released: false, at, preset: held.get(key)?.preset ?? preset });
+      const loads = held.get(key)?.loads ?? loadsOf(store.page().host?.computer);
+      held.set(key, { value, released: false, at, preset: held.get(key)?.preset ?? preset, loads });
       notify('held');
     },
     /** The change is over: the model is read again and the value goes. */

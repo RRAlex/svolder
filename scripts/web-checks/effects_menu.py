@@ -173,22 +173,22 @@ try:
     s = state(b)
     check('Enter opens with focus on the checked item', s['open'] and s['focus'] == 'glow', s)
     reached = b.ev(REACHABLE)
-    check('the rows the arrows reach with Smoke disabled: the Theme row, Glow, Off, Arrange, Devices, EQ '
-          'library, Help (the Device row is disabled with one device, and there is no Sign out with auth '
+    check('the rows the arrows reach with Smoke disabled: the Theme row, Glow, Off, Arrange, Devices, '
+          'Sound, Help (the Device row is disabled with one device, and there is no Sign out with auth '
           'none)',
           reached == ['menu-theme', 'glow', 'off', 'menu-arrange', 'menu-popup-devices',
-                      'menu-popup-eq-library', 'menu-popup-help'], reached)
+                      'menu-popup-sound', 'menu-popup-help'], reached)
     order = []
     for k in ('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp',
               'ArrowRight', 'ArrowLeft', 'End', 'Home'):
         b.press(k)
         order.append(state(b)['focus'])
     check('arrows wrap: Down past the Help row, the last, is the Theme row; they skip the disabled Smoke and '
-          'the Device row (one device) and reach the Devices and EQ library rows; Right is Down and Left is '
+          'the Device row (one device) and reach the Devices and Sound rows; Right is Down and Left is '
           'Up; End and Home jump',
-          order == ['off', 'menu-arrange', 'menu-popup-devices', 'menu-popup-eq-library',
-                    'menu-popup-help', 'menu-popup-eq-library', 'menu-popup-devices',
-                    'menu-popup-eq-library', 'menu-popup-devices', 'menu-popup-help',
+          order == ['off', 'menu-arrange', 'menu-popup-devices', 'menu-popup-sound',
+                    'menu-popup-help', 'menu-popup-sound', 'menu-popup-devices',
+                    'menu-popup-sound', 'menu-popup-devices', 'menu-popup-help',
                     'menu-theme'], order)
     b.press('ArrowDown')
     b.press('ArrowDown')

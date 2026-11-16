@@ -87,7 +87,15 @@ fn spacing_group(control: &Control) -> (u8, bool) {
 }
 
 /// The Controls pane's lines, its groups a blank line apart where `spaced`.
-fn controls_lines(app: &App, theme: &Theme, room: usize, tier: Tier, spaced: bool) -> Controls {
+pub(super) fn controls_lines(
+    app: &App,
+    theme: &Theme,
+    room: usize,
+    tier: Tier,
+    spaced: bool,
+) -> Controls {
+    #[cfg(test)]
+    crate::tui::test_support::work::tick("controls_lines");
     app.drawn.controls_pending.set(false);
     let rows = pane_rows(app);
     let spectrum = app.spectrum_drawn_in(tier);

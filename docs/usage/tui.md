@@ -36,9 +36,10 @@ Options:
 ```
 
 `svolder tui --demo` tries the TUI with no device, no configuration and no daemon of your own
-(`make demo-safe` builds and runs it from a checkout; `make demo` is the variant below that uses your
-computer's real audio). It makes a private directory (mode 0700, `sd-` and
-six random hex digits, under the system's temporary directory), starts the `svolderd` that stands
+(`make demo-safe` builds and runs it from a checkout, with the optimised `demo` profile in
+`target/demo`; `make demo` is the variant below that uses your computer's real audio). It makes a
+private directory (mode 0700, `sd-` and six random hex digits, under the system's temporary
+directory), starts the `svolderd` that stands
 beside `svolder` (there is no search of `PATH`; it says what to build when that one is missing) in
 it over the fake device, and opens the TUI on that daemon. The fake device honours
 `SVOLDER_FAKE_PROFILE`, `SVOLDER_FAKE_FAULTS` and `SVOLDER_FAKE_SIGNAL`:
@@ -368,6 +369,14 @@ onto them from the bands, and `←→` steps the mode through flat, EQ and loudn
 loudness strength, whichever row is focused. The Mode select's `‹ ›` arrows are in the accent
 whether or not the row is focused.
 
+On the computer's side, where the daemon (or the TUI itself) serves the computer's crossfeed, the
+pane keeps one more row at the bottom, under the points table: `Crossfeed ‹ on › Bauer · Chu Moy`,
+with a dim line of its numbers under it (`33 % · −9.5 dB · 700 Hz · 0.26 ms`). `←→` or `␣` turn it
+on and off, `,` and `.` pick the preset, and `Enter` or `X` open the tone screen with the crossfeed
+section unfolded (see "Crossfeed" below). On a short pane the dim line goes first, then rows of the
+points table, which scrolls to keep the focused point in sight. A daemon that does not offer
+crossfeed shows no row.
+
 Below the Loudness row, the pane names the preset the tone control is on, as the tone-control
 screen's header does (see below): `Preset    NAME`, `NAME*` once the curve has moved off the one
 loaded last, `custom` for a curve no preset matches, and `loading NAME` while a recall is still
@@ -598,13 +607,20 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
 - **Cover art**, at the right of the Status pane beside `Now playing`, while `[tui] cover_art` is
   `"auto"` (the default; the Settings box's **Host audio** category has the row): the cover of the
   track the daemon follows, as tall as the pane's rows and as wide as a square of that height is in
-  your terminal's own cells. The rows are written to what the picture leaves, so it is never over a
-  value, and it goes before the title does: the rows always keep at least 64 columns, and a pane
-  with no room beyond that has no picture. It is the daemon's cover, so a TUI on another machine
-  shows it too; a direct session (no daemon) has none, and neither has a daemon older than 0.34.0,
-  which cannot send the picture. A new track clears the old picture at once and draws the next when
-  it has arrived; a track with no cover has none; a resize draws it again for the new size. A JPEG,
-  PNG or WebP cover is decoded and sized off the loop, so no frame or key ever waits on it.
+  your terminal's own cells. On a terminal of at least 100 columns by 45 rows the Status pane
+  grows upward while a cover shows, taking only the rows the Controls and Tone panes do not draw
+  anything in (every row of both stays in sight, their groups a blank line apart where they have
+  room) and no more than the picture can use at the width the rows leave it, so the cover is a
+  larger square: half-block covers are readable there. A cover that could not be fetched or
+  decoded keeps the usual layout. Below that size, or with no cover, the pane keeps its usual
+  height. The rows are written to what the picture leaves, so it is never over a value, and it
+  goes before the title does: the rows always keep at least 64 columns, and a pane with no room
+  beyond that has no picture.
+  It is the daemon's cover, so a TUI on another machine shows it too; a direct session (no daemon)
+  has none, and neither has a daemon older than 0.34.0, which cannot send the picture. A new track
+  clears the old picture at once and draws the next when it has arrived; a track with no cover has
+  none; a resize draws it again for the new size. A JPEG, PNG or WebP cover is decoded and sized
+  off the loop, so no frame or key ever waits on it.
 
   How it is drawn depends on what the terminal answers when the TUI starts: it asks once, on the
   alternate screen, before reading any key, and waits at most 100 ms for the answers. A terminal
@@ -659,7 +675,9 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     capture reads, every 21⅓ ms, takes a band straight up to the block's own value where that is
     higher than the band stands; a quieter block does not drop the band to its value but leaves it
     falling back at its one rate, the whole scale in 750 ms, so the row settles once the music
-    stops. With no capture running the row reads `—`, dim. It is a reading, as a meter's row is:
+    stops. With no capture running the row reads `—`, dim. On a pane with 24 columns or more
+    after the label the row ends with a dim word, `daemon` when the bands come from
+    the daemon's capture and `own` when this TUI runs its own. It is a reading, as a meter's row is:
     neither the keys nor the mouse reach it.
 - **`Level from`**, the Status pane's line above `Now playing`: where the level the glow, the
   breathing borders, the focus runner and the title meter follow comes from — `meters` while the
@@ -893,6 +911,38 @@ is, and the sink's own name dim after them; before it has been read it reads `�
 down to 100 % on a step down and goes no higher), `␣`/`Enter` and `m` turn its mute. Joined to a
 daemon every one of these is a request to it; with no daemon the TUI reads and sets the sink itself,
 and runs the computer EQ's controller of its own.
+
+#### Crossfeed
+
+On the computer's side the tone screen has a Crossfeed section between the Response graph and the
+Points table, for [the computer's crossfeed](eq.md#crossfeed). Folded it is one line,
+`Crossfeed  on · Bauer · Chu Moy · 33 % · 700 Hz · 0.26 ms  (X)`; it unfolds when the keys enter it
+(`Tab`, `↑↓` onto it, `X` or a click) and folds again when they leave (`Tab` on, a click elsewhere,
+`Esc`). On the computer's side `Tab` has three stops when crossfeed is offered: the header, the
+Crossfeed section and the points. `X` jumps to the section from anywhere on the screen and toggles it
+open or shut.
+
+Unfolded, the section has a Model and Preset row, then Level, Crossover and Delay:
+
+- on the Model and Preset row `←→` pick the preset, `,` and `.` the model, and `␣` or `Enter` turn
+  crossfeed on and off; changing the model loads its default preset;
+- - on Level, Crossover and Delay `←→` and `,` `.` move the value by one step of the model (the
+  daemon rounds every value to the model's step, so nothing finer exists), `Enter` opens an edit
+  line for a typed number (`Enter` writes it, `Esc` cancels), and a click or the wheel on the value
+  or its `‹ ›` steps it; Delay says `none` for Mid/Side bass and `(own)` at the model's own lag;
+- a preset's numbers are kept until one is changed, and then the row says `Custom` and what it was
+  edited from. Every range, step and word comes from the daemon's view, so a TUI never shows a
+  value the daemon would refuse. A key sends each change on its own (the terminal sends no key
+  repeat), and the mouse wheel and `‹ ›` do the same.
+
+From 120 columns the three value rows open in a block 40 columns wide beside the Points table with
+the two level curves of the section: the level the same ear hears and the level the other ear hears
+for each frequency, in dB. Below 120 columns they open under the folded line and take rows from the
+Response graph only while focused, so the graph keeps its height at rest; on a screen of 24 rows
+they may cost the graph three rows. When crossfeed turns itself off ([the four
+resets](eq.md#it-turns-itself-off)), a toast says why once: `crossfeed turned off: ...`. A daemon
+that does not serve crossfeed has no section and no `X` key; the key table and the `?` overlay list
+`X`, `␣`, `←→`, `, .` and `Enter` on Crossfeed only where the computer serves it.
 
 #### What the graph draws
 
@@ -1571,7 +1621,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.34.5 │
+│                          v0.35.1 │
 │                                  │
 │             Settings             │
 │               Help               │

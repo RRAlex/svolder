@@ -1671,6 +1671,34 @@ fn an_older_peer_reads_the_view_without_the_new_fields() {
             },
         ),
         (
+            r#"{"cmd":"host_eq","op":{"op":"crossfeed","on":true,"done":true}}"#,
+            Request::HostEq {
+                op: HostEqOp::Crossfeed {
+                    on: Some(true),
+                    model: None,
+                    preset: None,
+                    amount_pct: None,
+                    crossover_hz: None,
+                    delay_ms: None,
+                    done: true,
+                },
+            },
+        ),
+        (
+            r#"{"cmd":"host_eq","op":{"op":"crossfeed","model":"mid-side","preset":"Default","amount_pct":35.0,"crossover_hz":150.0,"delay_ms":0.4,"done":false}}"#,
+            Request::HostEq {
+                op: HostEqOp::Crossfeed {
+                    on: None,
+                    model: Some("mid-side".into()),
+                    preset: Some("Default".into()),
+                    amount_pct: Some(35.0),
+                    crossover_hz: Some(150.0),
+                    delay_ms: Some(0.4),
+                    done: false,
+                },
+            },
+        ),
+        (
             r#"{"cmd":"host_eq","op":{"op":"save_as","name":"Mine"}}"#,
             Request::HostEq {
                 op: HostEqOp::SaveAs {
@@ -1691,6 +1719,17 @@ fn an_older_peer_reads_the_view_without_the_new_fields() {
         }
     ));
 
+    // A crossfeed op that says nothing of `done` is the last of its drag, as a point's is.
+    let crossfeed: Request =
+        serde_json::from_str(r#"{"cmd":"host_eq","op":{"op":"crossfeed","amount_pct":30.0}}"#)
+            .unwrap();
+    assert!(matches!(
+        crossfeed,
+        Request::HostEq {
+            op: HostEqOp::Crossfeed { done: true, .. }
+        }
+    ));
+
     let old = r#"{"available":true,"now_ms":5}"#;
     let view: crate::host::HostView = serde_json::from_str(old).unwrap();
     assert!(view.volume.is_none() && view.eq.is_none());
@@ -1703,10 +1742,31 @@ fn an_older_peer_reads_the_view_without_the_new_fields() {
     });
     full.eq = Some(svolder_host::eq::EqView::default());
     let line = serde_json::to_string(&full).unwrap();
+    assert!(
+        !line.contains("crossfeed"),
+        "an EQ with none says nothing of it"
+    );
     assert_eq!(
         serde_json::from_str::<crate::host::HostView>(&line).unwrap(),
         full
     );
+    // The crossfeed view rides in the EQ's view and comes back whole.
+    if let Some(eq) = full.eq.as_mut() {
+        eq.crossfeed = Some(svolder_host::eq::CrossfeedView::of(
+            &svolder_host::eq::CrossfeedSettings::default(),
+            true,
+            48_000,
+            Some("Speakers".into()),
+            None,
+        ));
+    }
+    let line = serde_json::to_string(&full).unwrap();
+    assert!(line.contains(r#""crossfeed":{"on":true,"model":"bauer""#));
+    assert_eq!(
+        serde_json::from_str::<crate::host::HostView>(&line).unwrap(),
+        full
+    );
+    full.eq.as_mut().unwrap().crossfeed = None;
     // A peer from before the fields ignores them: its own struct has no such keys.
     #[derive(Debug, Deserialize)]
     struct OldView {

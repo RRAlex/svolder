@@ -264,8 +264,8 @@ allows. Browser storage is only through `core.prefs`, under `svolder.theme.signa
 | `line.js` | the hop list from the model (pure), the choice that survives a redraw, the followed URLs |
 | `live.js` | draws the sections, keeps them current, holds one while a hand is on it (the holds are counted by `core.freeze.keeper`) |
 | `draw/` | one file per section: `line.js` (the wire, dots, labels, box, strip, the loop), `volume.js`, `tone.js`, `choices.js`, `playing.js`, `shelf.js`, `facts.js`, `amp.js`, `hop.js`, `player.js`, `computer.js`, `card.js`, and the small `word.js`, `esc.js` |
-| `*-wire.js`, `strip-wire.js`, `gestures.js`, `lists.js`, `ask.js` (the core's list and inline ask in Signal's classes and words), `device-list.js` | the hands: what a tap, a drag, a key, a list or a question does |
-| `slim.js`, `place.js`, `words.js`, `presets.js` | the slim bar, pure maths and fixed words |
+| `*-wire.js`, `strip-wire.js`, `lists.js`, `ask.js` (the core's list and inline ask in Signal's classes and words), `device-list.js` | the hands: what a tap, a drag, a key, a list or a question does |
+| `slim.js`, `place.js` (the core's `placeFractions` with Signal's fill class), `words.js`, `presets.js` | the slim bar, pure maths and fixed words; the drag and the keys of a track are the core's `gestures.js` |
 | `driver.js`, `preview.js`, `style.css` | the test driver, the picker's picture, the tokens and every section |
 
 Pure modules take the model and return text or numbers; drawing modules return markup; wiring

@@ -1071,6 +1071,20 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   every theme, wide and at 390 px; a rename through the page leaves none; a SIGHUP takes it away at the page's next read, popup still open),
   `remove_asks_once_and_ends_on_the_overview` (a device that is not shown, then the shown one, then a rename),
   and a guest's and a read-only page's themes draw no *Device settings…*.
+  The Sound popup (`core/popups/sound/`: the EQ library and Crossfeed tabs, the pill bar of the EQ library's pages, the
+  header's switch) and its Crossfeed tab (`core/popups/crossfeed/`, the lane `setCrossfeed` of
+  `core/computer-actions.js`), in `core-crossfeed.mjs` (28 cases on the real core over a jsdom page and a fake host that
+  applies the op as the contract says): the draws from views (off, Bauer, Custom with its edited-from, Mid/Side bass with the
+  delay greyed, the turned-off note, unavailable, none, a hostile name escaped), the steps from the view's range and step,
+  what is asked laid over the view, the row (Sound…, a writer's), the tabs and the pills stepping the router, the arrows
+  between tabs, a press as one request, the switch, the model and preset lists, a hold that repeats with `done: false` and
+  ends with one `done: true` (also when the popup closes on it), the newest value winning with the fields merged, the
+  answer and the stream update in either order, a refusal in the tab's own words, a 404 and no answer, a guest and a page
+  with writes off with no way in, Escape closing the list first. In a browser, `crossfeed_popup.py` (19 checks per theme
+  and engine): the menu row opens Sound on the EQ library tab, a real click on Crossfeed, geometry on each tab at 1280 and
+  390 px (no overflow, bar and page inside the window, steppers 44 px, the page behind unmoved), a press -> a request ->
+  the view, the keyboard and Escape, the frame tokens, and a guest's daemon with no row
+  (`WEB_CHECK_SHOTS=<folder>` writes `<theme>-crossfeed-<wide|phone>-<on|off>.png`).
   The EQ library popup (`core/popups/eq-library/`, `core/autoeq-actions.js`), in `core-eq-library.mjs` (30 cases, each
   on the real core over a jsdom page and a fake daemon, with a device on show that has neighbours): the row (a
   writer's, between Devices and Help), the title naming the side in every draw, a guest and a read-only page with no

@@ -30,6 +30,8 @@ fn dry_run_of(target: &str, prefix: &str, home: &str, extra: &[&str]) -> String 
         .env_remove("MAKEFLAGS")
         .env_remove("MAKELEVEL")
         .env_remove("MFLAGS")
+        // `make test T=...` exports its selection, which would stand in for the one asked here
+        .env_remove("T")
         .output()
         .expect("make runs");
     assert!(out.status.success(), "make -n failed: {out:?}");

@@ -36,7 +36,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use super::live::{self, CONFIG_RATE_HZ, SLOTS, render_live_conf};
+use super::crossfeed::{CrossfeedSettings, Stage, stage_worst_over_db, worst_gain_db};
+use super::live::{self, CONFIG_RATE_HZ, SLOTS, render_live_conf_with};
 use super::paths::{EqPaths, absolute, is_executable, on_path};
 use super::points::Points;
 use super::process::{Argv, Held, desktop_program, gone, parse_pid_file, spawn_detached};
@@ -96,6 +97,14 @@ pub struct ApplyRequest {
     /// The rate the sink runs at, when it is known: the config's coefficients are worked out
     /// for it (48 kHz when absent).
     pub rate_hz: Option<u32>,
+    /// The chain runs for crossfeed alone: the config's slots are the identity and its preamp 0
+    /// dB, while `correction` stays the EQ's own points (they are what the state keeps).
+    pub flat: bool,
+    /// The crossfeed the config holds ON, for a chain that cannot be set live: the stage is in
+    /// the config it starts with and its worst gain is in the config's preamp. `None` is the
+    /// stage off, which is how a live chain is always written. The state keeps these settings
+    /// (and `crossfeed_on`) when given, else the ones it had.
+    pub crossfeed: Option<CrossfeedSettings>,
 }
 
 /// What `host eq status` knows: the state file, and whether the chain runs.
@@ -147,6 +156,23 @@ impl Status {
             Some(state) if !state.on => {
                 lines.push(format!("host EQ: off (last: {})", state.name));
             }
+            // The chain runs for crossfeed alone: the EQ in it plays flat.
+            Some(state) if state.flat => {
+                let word = match self.running {
+                    Some(false) => "stopped",
+                    _ => "running",
+                };
+                // Crossfeed off too: a pass-through kept for a stream that plays.
+                let why = match state.crossfeed_on {
+                    true => format!("{word} for crossfeed alone"),
+                    false => format!("kept as a pass-through until idle ({word})"),
+                };
+                lines.push(format!(
+                    "host EQ: off · the chain is {why} · in front of {} · {}",
+                    state.target,
+                    state.manager.word()
+                ));
+            }
             Some(state) => {
                 let word = match self.running {
                     Some(false) => "stopped",
@@ -188,6 +214,8 @@ impl Status {
             "previous_default": state.previous_default,
             "preamp_db": state.preamp_db,
             "filters": filters,
+            "crossfeed_on": state.crossfeed_on,
+            "flat": state.flat,
             "problem": self.problem(),
         })
     }
@@ -206,8 +234,8 @@ pub fn safe_preamp(correction: &Correction) -> f64 {
 pub fn played_preamp(correction: &Correction, rate_hz: u32) -> f64 {
     let (sets, centres) = live::played_sets(correction, rate_hz);
     let peak = played_peak(&sets, &centres, rate_hz);
-    // A peak that is not a number is a filter that is not a filter: [`check_playable`] refuses
-    // it, and the preamp then is as deep as it gets.
+    // A peak that is not a number, or has no bound, is a filter that is not a filter:
+    // [`check_playable`] refuses it, and the preamp then is the floor, never below it.
     let peak = match peak.is_nan() {
         true => f64::INFINITY,
         false => peak.max(0.0),
@@ -215,7 +243,64 @@ pub fn played_preamp(correction: &Correction, rate_hz: u32) -> f64 {
     // Rounded up to a tenth of a dB, but a peak within 0.008 dB over a tenth (what
     // f32 rounding of the coefficients leaves) does not cost the next one.
     let limit = -((peak * 10.0 - PEAK_TOLERANCE_TENTHS).ceil().max(0.0) / 10.0);
-    correction.preamp_db.min(limit).max(f64::MIN) + 0.0
+    correction.preamp_db.min(limit).max(PREAMP_FLOOR_DB) + 0.0
+}
+
+/// What the crossfeed stage `settings` takes off the preamp at `rate_hz`, in dB: its worst gain
+/// ([`worst_gain_db`]) rounded up to 0.1 as the EQ's own preamp is (a gain within 0.008 dB over a
+/// tenth does not cost the next one), never below 0. The config's preamp and the controller's
+/// both subtract this, so what the chain is started with is what the controller sends.
+pub fn stage_cost_db(settings: &CrossfeedSettings, rate_hz: u32) -> f64 {
+    ((worst_gain_db(settings, rate_hz) * 10.0 - STAGE_TOLERANCE_TENTHS)
+        .ceil()
+        .max(0.0))
+        / 10.0
+}
+
+/// The sink rates a stage worked out at one rate may play at later: those of DACs up to 384 kHz.
+pub(crate) const CONFIG_STAGE_RATES: [u32; 8] = [
+    44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+];
+
+/// How many answers of [`config_stage_cost_db`] are kept: a drag asks for the same settings
+/// several times an update (the view, the send, the save).
+const STAGE_COSTS_KEPT: usize = 8;
+
+/// What a stage takes off the preamp, held in a config or sent live: the stage as it was worked
+/// out for `rate_hz` plays at whatever rate the sink runs at later (a config's coefficients do not
+/// follow it, and a line sent before the controller looks again carries the old ones), so this is
+/// the most [`stage_cost_db`]-style cost over every usual rate, the delay's whole samples
+/// included. A stage with no delayed side path (every model but Meier with an added delay) plays
+/// the same at every rate, so its cost is [`stage_cost_db`]'s.
+pub fn config_stage_cost_db(settings: &CrossfeedSettings, rate_hz: u32) -> f64 {
+    let Ok(stage) = Stage::of(settings, rate_hz) else {
+        return stage_cost_db(settings, rate_hz);
+    };
+    if stage.delay_s == 0.0 || stage.s == [0.0; 5] {
+        return stage_cost_db(settings, rate_hz);
+    }
+    static KEPT: Mutex<Vec<(CrossfeedSettings, u32, f64)>> = Mutex::new(Vec::new());
+    if let Some((_, _, cost)) = crate::locked(&KEPT)
+        .iter()
+        .find(|(held, at, _)| *at == rate_hz && held == settings)
+    {
+        return *cost;
+    }
+    let rates: Vec<u32> = CONFIG_STAGE_RATES
+        .iter()
+        .copied()
+        .chain([rate_hz])
+        .collect();
+    let cost = ((stage_worst_over_db(&stage, &rates) * 10.0 - STAGE_TOLERANCE_TENTHS)
+        .ceil()
+        .max(0.0))
+        / 10.0;
+    let mut kept = crate::locked(&KEPT);
+    if kept.len() >= STAGE_COSTS_KEPT {
+        kept.remove(0);
+    }
+    kept.push((settings.clone(), rate_hz, cost));
+    cost
 }
 
 /// [`response::played_peak_db_of`], remembering the newest answer: a drag asks for the same
@@ -247,6 +332,10 @@ fn played_peak(sets: &[[f64; 5]], centres: &[f64], rate_hz: u32) -> f64 {
 /// The preamp is measured on the f32 coefficients that play; the tolerance only keeps a tenth
 /// that the curve passes by a hair from costing the next one.
 const PEAK_TOLERANCE_TENTHS: f64 = 0.08;
+/// The stage's cost forgives only float noise (a worst gain of 1e-15 dB over a tenth): the EQ's
+/// preamp beside it already spends [`PEAK_TOLERANCE_TENTHS`], and the two together must stay
+/// within what a played chain is held to (0.01 dB).
+const STAGE_TOLERANCE_TENTHS: f64 = 1e-4;
 /// The deepest preamp the computer EQ plays, in dB: a curve that needs less is silence with a
 /// resonance on top. A policy floor, the same as a typed biquad's own gain minimum.
 const PREAMP_FLOOR_DB: f64 = -120.0;
@@ -260,12 +349,21 @@ const COEFFICIENT_LIMIT: f64 = 10.0;
 const STABLE_MARGIN: f64 = 1e-7;
 
 /// Whether `correction` can be played at `rate_hz` as it stands, `Ok` when it can: every filter
-/// is strictly stable in the f32 coefficients the chain runs, and the curve needs a preamp
-/// within the floor. The refusal says which and what to do; nothing has changed when it is
+/// is finite and strictly stable in the f32 coefficients the chain runs, and the curve needs a
+/// preamp within the floor. The refusal says which and what to do; nothing has changed when it is
 /// asked for.
 pub fn check_playable(correction: &Correction, rate_hz: u32) -> Result<(), EqFailure> {
     let (sets, centres) = live::played_sets(correction, rate_hz);
     for (index, set) in sets.iter().enumerate() {
+        if set.iter().any(|c| !c.is_finite()) {
+            return Err(trouble(
+                format!(
+                    "point {} cannot be worked out at {rate_hz} Hz: its frequency is too low for its shape at this rate",
+                    index + 1
+                ),
+                "Raise its frequency, lower its Q or its gain, or use a lower sample rate",
+            ));
+        }
         if set.iter().any(|c| c.abs() > COEFFICIENT_LIMIT) {
             return Err(trouble(
                 format!(
@@ -427,6 +525,9 @@ pub struct Host {
     child: Mutex<Option<tokio::process::Child>>,
     /// Held by an apply or a remove from its start to its end, so two never interleave.
     gate: tokio::sync::Mutex<()>,
+    /// Counts the applies and removes that have finished, so [`Host::exited`] can tell a chain
+    /// that was stopped on purpose from one that died.
+    epoch: tokio::sync::watch::Sender<u64>,
 }
 
 impl Host {
@@ -459,6 +560,7 @@ impl Host {
             pid_file: paths.pid_file.map(|file| absolute(&file)),
             child: Mutex::new(None),
             gate: tokio::sync::Mutex::new(()),
+            epoch: tokio::sync::watch::Sender::new(0),
         }
     }
 
@@ -505,20 +607,23 @@ impl Host {
     /// The manager this machine uses: the one forced, else a child in a container, else
     /// systemd when its user manager answers, else a process. A forced manager that is none of
     /// the three is refused.
-    fn manager(&self) -> Result<Manager, EqFailure> {
+    async fn manager(&self) -> Result<Manager, EqFailure> {
         if let Some(word) = &self.bad_manager {
             return Err(trouble(
                 format!("{MANAGER_ENV}={word:?} names no manager"),
                 "Use `systemd`, `process` or `child`",
             ));
         }
-        Ok(self.forced.unwrap_or_else(|| match self.container {
+        if let Some(forced) = self.forced {
+            return Ok(forced);
+        }
+        Ok(match self.container {
             true => Manager::Child,
-            false => match self.ctl.user_manager_answers() {
+            false => match self.ctl.user_manager_answers().await {
                 true => Manager::Systemd,
                 false => Manager::Process,
             },
-        }))
+        })
     }
 
     fn unit_path(&self) -> PathBuf {
@@ -543,12 +648,19 @@ impl Host {
     /// config and the unit or autostart entry are written beside their places ([`Staged`]),
     /// before anything is stopped, so a request that cannot be served, or whose files cannot be
     /// written or deleted, leaves a computer EQ that is on as it was.
-    pub async fn apply(&self, mut request: ApplyRequest) -> Result<HostEqState, EqFailure> {
+    pub async fn apply(&self, request: ApplyRequest) -> Result<HostEqState, EqFailure> {
         let _gate = self.gate.lock().await;
+        let applied = self.apply_held(request).await;
+        self.epoch.send_modify(|epoch| *epoch += 1);
+        applied
+    }
+
+    /// [`Host::apply`] with the gate held.
+    async fn apply_held(&self, mut request: ApplyRequest) -> Result<HostEqState, EqFailure> {
         if let Some(failure) = self.unavailable() {
             return Err(failure);
         }
-        let manager = self.manager()?;
+        let manager = self.manager().await?;
         let held = checked_request(&mut request, manager)?;
         let pipewire = self.pipewire.clone().expect("unavailable() checked it");
         plain(&pipewire)?;
@@ -575,8 +687,8 @@ impl Host {
         };
         let state = HostEqState {
             on: true,
-            name: request.name,
-            origin: request.origin,
+            name: request.name.clone(),
+            origin: request.origin.clone(),
             target,
             route,
             manager,
@@ -584,6 +696,14 @@ impl Host {
             preamp_db: request.correction.preamp_db,
             filters: held.filters.clone(),
             slots: held.slots.clone(),
+            // The crossfeed's settings stay across an apply; the chain it starts has the stage
+            // off unless the request holds it in the config.
+            crossfeed: request
+                .crossfeed
+                .clone()
+                .or_else(|| previous.as_ref().and_then(|s| s.crossfeed.clone())),
+            crossfeed_on: request.crossfeed.is_some(),
+            flat: request.flat,
         };
         // The process manager keeps its pid in the runtime directory, so one that has none is
         // refused here, before anything changes.
@@ -623,13 +743,7 @@ impl Host {
         let files = Files {
             conf: stage(
                 &self.conf,
-                &render_live_conf(
-                    &held,
-                    state.preamp_db,
-                    &state.target,
-                    state.route,
-                    request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
-                ),
+                &conf_text(&held, state.preamp_db, &state.target, state.route, &request),
             )?,
             manager: match manager_file {
                 Some(file) => Some(stage(
@@ -649,12 +763,12 @@ impl Host {
         // only the process manager's own leftovers are stopped.
         match manager {
             Manager::Systemd => {
-                let unit_runs = self.unit_active() == Some(true);
+                let unit_runs = self.unit_active().await == Some(true);
                 self.stop_process_with(!unit_runs).await?;
                 self.stop_child().await;
             }
             Manager::Process => {
-                self.stop_unit()?;
+                self.stop_unit().await?;
                 self.stop_child().await;
             }
             // A child replaces the child this host started; what another manager left is not
@@ -812,24 +926,25 @@ impl Host {
         ] {
             self.ctl
                 .systemctl(&args)
+                .await
                 .map_err(|why| trouble(why, &next))?;
         }
         // A unit that fails at once is said, rather than left for `status` to find.
         for _ in 0..15 {
-            match self.unit_active() {
+            match self.unit_active().await {
                 Some(true) | None => return Ok(()),
                 Some(false) => tokio::time::sleep(POLL).await,
             }
         }
-        match self.unit_active() {
+        match self.unit_active().await {
             Some(false) => Err(trouble(format!("{UNIT} did not start"), next)),
             _ => Ok(()),
         }
     }
 
     /// Whether the unit is active, `None` when systemd cannot be asked.
-    fn unit_active(&self) -> Option<bool> {
-        let text = self.ctl.show(&["show", UNIT, "-p", "ActiveState"])?;
+    async fn unit_active(&self) -> Option<bool> {
+        let text = self.ctl.show(&["show", UNIT, "-p", "ActiveState"]).await?;
         Some(text.lines().any(|line| line.trim() == "ActiveState=active"))
     }
 
@@ -929,7 +1044,7 @@ impl Host {
     /// Stop what `manager` runs and delete its own files; the config and the state stay.
     async fn stop_manager(&self, manager: Manager) -> Result<(), EqFailure> {
         match manager {
-            Manager::Systemd => self.stop_unit(),
+            Manager::Systemd => self.stop_unit().await,
             Manager::Process => self.stop_process().await,
             Manager::Child => {
                 self.stop_child().await;
@@ -942,12 +1057,12 @@ impl Host {
     /// `enable` made. A unit systemd no longer knows, or whose file was deleted by hand while
     /// systemd still has it loaded, is as good as stopped: what `systemctl` says is not there
     /// is tolerated, and anything else it refuses with is a failure.
-    fn stop_unit(&self) -> Result<(), EqFailure> {
+    async fn stop_unit(&self) -> Result<(), EqFailure> {
         let unit = self.unit_path();
         let wants = self.wants_path();
         let file = unit.exists();
         let link = wants.symlink_metadata().is_ok();
-        let loaded = self.ctl.show(&["show", UNIT, "-p", "LoadState"]);
+        let loaded = self.ctl.show(&["show", UNIT, "-p", "LoadState"]).await;
         let known = loaded
             .as_deref()
             .is_some_and(|text| !text.contains("LoadState=not-found"));
@@ -959,7 +1074,7 @@ impl Host {
         }
         if known {
             for verb in ["stop", "disable"] {
-                if let Err(why) = self.ctl.systemctl(&[verb, UNIT])
+                if let Err(why) = self.ctl.systemctl(&[verb, UNIT]).await
                     && !is_absent(&why)
                 {
                     return Err(trouble(
@@ -978,7 +1093,7 @@ impl Host {
         }
         if known || file || link {
             // The manager forgets the unit; a failure here leaves nothing running.
-            let _ = self.ctl.systemctl(&["daemon-reload"]);
+            let _ = self.ctl.systemctl(&["daemon-reload"]).await;
         }
         Ok(())
     }
@@ -1093,6 +1208,13 @@ impl Host {
     /// runs with no pid file (the autostart entry started it) is found and stopped.
     pub async fn remove(&self) -> Result<(), EqFailure> {
         let _gate = self.gate.lock().await;
+        let removed = self.remove_held().await;
+        self.epoch.send_modify(|epoch| *epoch += 1);
+        removed
+    }
+
+    /// [`Host::remove`] with the gate held.
+    async fn remove_held(&self) -> Result<(), EqFailure> {
         if self.off {
             return Err(self.unavailable().expect("host audio is off"));
         }
@@ -1106,12 +1228,15 @@ impl Host {
             self.restore_default(state).await;
         }
         // Both managers are looked at: the one the state names, and any file another left.
-        self.stop_unit()?;
+        self.stop_unit().await?;
         self.stop_process().await?;
         self.stop_child().await;
         self.delete_files();
         if let Some(mut state) = state {
+            // With no chain there is no stage and no flat EQ: the settings stay.
             state.on = false;
+            state.crossfeed_on = false;
+            state.flat = false;
             state
                 .save(&self.state)
                 .map_err(|e| cannot_write(&self.state, e))?;
@@ -1139,7 +1264,7 @@ impl Host {
         // With the host off nothing is asked of systemd or the process table.
         let running = match &state {
             Some(state) if !self.off => match state.manager {
-                Manager::Systemd => self.unit_active(),
+                Manager::Systemd => self.unit_active().await,
                 Manager::Process => Some(self.process_running()),
                 Manager::Child => Some(self.child_running()),
             },
@@ -1180,6 +1305,13 @@ pub trait Chain: Send + Sync {
 
     /// The saved state, `None` when there is none or it cannot be read.
     fn state(&self) -> Option<HostEqState>;
+
+    /// Resolves when the chain this host is running ends without an apply or a remove having
+    /// stopped it, as [`Host::exited`]. A chain that cannot be waited on never resolves, which
+    /// is the default.
+    async fn exited(&self) {
+        std::future::pending::<()>().await
+    }
 }
 
 #[async_trait]
@@ -1206,6 +1338,10 @@ impl Chain for Host {
 
     fn state(&self) -> Option<HostEqState> {
         Host::state(self)
+    }
+
+    async fn exited(&self) {
+        Host::exited(self).await
     }
 }
 
@@ -1239,6 +1375,9 @@ pub(crate) fn checked_request(
         preamp_db: 0.0,
         filters: request.correction.filters.clone(),
         slots: request.slots.clone(),
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
     });
     if request.correction.filters.len() > SLOTS {
         return Err(trouble(
@@ -1257,15 +1396,32 @@ pub(crate) fn checked_request(
             "Fix the band or the filter it names",
         )
     })?;
-    check_playable(
+    // A flat request plays none of its points: they are kept, and are not checked.
+    let playable = match check_playable(
         &request.correction,
         request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
-    )?;
-    // Whatever the correction states, it is never applied above unity.
-    request.correction.preamp_db = played_preamp(
-        &request.correction,
-        request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
-    );
+    ) {
+        Ok(()) => true,
+        Err(why) if !request.flat => return Err(why),
+        Err(_) => false,
+    };
+    if let Some(settings) = &request.crossfeed {
+        Stage::of(settings, request.rate_hz.unwrap_or(CONFIG_RATE_HZ)).map_err(|why| {
+            trouble(
+                format!("the crossfeed cannot be applied: {why}"),
+                "Change the crossfeed's crossover or model",
+            )
+        })?;
+    }
+    // Whatever the correction states, it is never applied above unity. Points that cannot be
+    // measured at this rate keep the preamp they state, which a later turn-on measures again.
+    request.correction.preamp_db = match playable {
+        true => played_preamp(
+            &request.correction,
+            request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
+        ),
+        false => request.correction.preamp_db.min(0.0),
+    };
     Ok(held)
 }
 
@@ -1273,20 +1429,52 @@ pub(crate) fn checked_request(
 /// at its rate, written for the sink and route `state` holds. Shared by `Host::keep_conf` and the
 /// lab's model of it.
 pub(crate) fn kept_conf(state: &HostEqState, request: ApplyRequest) -> String {
-    let mut correction = request.correction;
+    let mut correction = request.correction.clone();
     correction.preamp_db = played_preamp(&correction, request.rate_hz.unwrap_or(CONFIG_RATE_HZ));
     let points = Points::from_state(&HostEqState {
         filters: correction.filters.clone(),
         slots: request.slots.clone(),
         ..state.clone()
     });
-    render_live_conf(
+    conf_text(
         &points,
         correction.preamp_db,
         &state.target,
         state.route,
-        request.rate_hz.unwrap_or(CONFIG_RATE_HZ),
+        &request,
     )
+}
+
+/// The config text for `points` under the EQ preamp `preamp_db`, as `request` says: a flat
+/// request writes the identity slots and no EQ preamp, a crossfeed in the request writes the
+/// stage on with its worst gain taken from the preamp, so nothing plays above unity.
+pub(crate) fn conf_text(
+    points: &Points,
+    preamp_db: f64,
+    target: &str,
+    route: Route,
+    request: &ApplyRequest,
+) -> String {
+    let rate = request.rate_hz.unwrap_or(CONFIG_RATE_HZ);
+    let (points, eq_preamp) = match request.flat {
+        true => (
+            Points {
+                filters: Vec::new(),
+                slots: Vec::new(),
+            },
+            0.0,
+        ),
+        false => (points.clone(), preamp_db),
+    };
+    let (stage, preamp) = match &request.crossfeed {
+        // The request was checked ([`checked_request`]): the stage holds at this rate.
+        Some(settings) => match Stage::of(settings, rate) {
+            Ok(stage) => (stage, eq_preamp - config_stage_cost_db(settings, rate)),
+            Err(_) => (Stage::bypass(), eq_preamp),
+        },
+        None => (Stage::bypass(), eq_preamp),
+    };
+    render_live_conf_with(&points, preamp, target, route, rate, &stage)
 }
 
 /// The files an apply writes, staged beside their places before anything is changed.
@@ -1340,6 +1528,8 @@ async fn resolve_sink(wpctl: &Wpctl, asked: &str) -> Result<String, EqFailure> {
             )
         })
 }
+
+mod exit;
 
 #[cfg(test)]
 mod tests;

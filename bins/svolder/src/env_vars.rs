@@ -422,6 +422,14 @@ const ENV_VARS: &[EnvVar] = &[
                `systemd` when the user manager answers, else `process`.",
     },
     EnvVar {
+        name: "SVOLDER_EQ_IDLE_TICKS",
+        read_by: "svolder, svolderd",
+        dev_only: true,
+        what: "How many 50 ms ticks nothing must play through the computer EQ's chain, kept as \
+               a pass-through after the last of the EQ and crossfeed went off, before the \
+               chain is removed. Default 600 (30 s); the end-to-end run sets it shorter.",
+    },
+    EnvVar {
         name: "SVOLDER_PW_RECORD",
         read_by: "svolder, svolderd",
         dev_only: true,

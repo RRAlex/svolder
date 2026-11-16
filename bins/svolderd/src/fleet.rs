@@ -14,7 +14,7 @@ use svolder_host::cover::Cover;
 use svolder_ipc::host::HostView;
 use svolder_ipc::{Config, DeviceInfo, Event, Request, Response};
 use svolder_profiles::Profile;
-use svolder_profiles::tone::preset::Preset;
+use svolder_profiles::tone::preset::{self, Preset};
 
 use crate::device::Command;
 use crate::handler::{
@@ -396,7 +396,27 @@ impl Fleet for DaemonFleet {
         fitting: Vec<Preset>,
     ) -> Result<(Recalled, Response), String> {
         let handle = self.handle(device)?;
-        let recalling = handle.writer.recall(self.origin, name.to_string(), fitting);
+        // The writer plans the recall from the fit of the imported preset: made first, off the
+        // runtime's threads. A write or a recall that reaches the writer meanwhile is a later
+        // request, so this recall is dropped rather than planned over it.
+        let ticket = handle.writer.ticket();
+        let profile = handle.feed.borrow().profile.clone();
+        if let (Some(eq), Some(named)) = (
+            profile.as_ref().and_then(|profile| profile.eq.as_ref()),
+            preset::find(&fitting, name),
+        ) {
+            crate::recall::warm(eq, std::slice::from_ref(named)).await;
+        }
+        let Some(recalling) =
+            handle
+                .writer
+                .recall_unless_overtaken(ticket, self.origin, name.to_string(), fitting)
+        else {
+            return Err(format!(
+                "a newer write reached {} while the preset's fit was made, so {name} was not recalled",
+                device.name
+            ));
+        };
         match self.finish(device, recalling, "recall").await? {
             (Planned::Plan(recalled), response) => Ok((recalled, response)),
             (Planned::Setting(_), _) => Err(format!(

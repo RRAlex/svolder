@@ -10,13 +10,14 @@
 //! controller's `Chain` and `Params` over it, and [`Lab`] drives an [`EqControl`] and the
 //! outside world (the command line, PipeWire, the sink) through [`Event`]s. After every event
 //! and every tick of 50 ms [`Lab::check`] works out the curve the node plays (the ports it
-//! holds, as f32, clamped) times the preamp it plays, with an evaluator of its own, and it must
-//! never be over unity.
+//! holds, as f32, clamped) times the crossfeed stage it plays (its worst gain from the ports it
+//! holds, again with an evaluator of its own) times the preamp it plays, and it must never be
+//! over unity.
 //!
 //! What the model takes from PipeWire, with where it was measured:
 //!
-//! - A node starts from the config on disk: every slot and the preamp take the config's values,
-//!   and the node keeps that config to go back to. A restart of the chain is a new node (a new
+//! - A node starts from the config on disk: every slot, the crossfeed stage and the preamp take
+//!   the config's values, and the node keeps that config to go back to. A restart of the chain is a new node (a new
 //!   id), and so is an apply.
 //! - A change of the sink's rate rebuilds the graph: every slot goes back to the config the node
 //!   started from (not the file as it is now), and the preamp keeps the value it was last set
@@ -45,16 +46,19 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use svolder_profiles::tone::apo::{self, Correction, FilterKind, SourceFilter};
 
-use super::control::{Edit, EqControl, Keep};
-use super::live::{CONFIG_RATE_HZ, LiveNode, SLOTS, render_live_conf};
+use super::control::{CrossfeedEdit, Edit, EqControl, Keep};
+use super::crossfeed::Model as CrossfeedModel;
+use super::live::{LiveNode, SLOTS, crossfeed_params};
 use super::manage::{
-    ApplyRequest, Chain, EqFailure, Status, check_playable, checked_request, kept_conf,
+    ApplyRequest, Chain, EqFailure, Status, check_playable, checked_request, conf_text, kept_conf,
 };
 use super::session::{Link, Session};
 use super::{HostEqState, Manager, Route};
 
-/// The sink's rates a sequence moves among.
-const RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
+/// The sink's rates a sequence moves among: those of DACs up to 384 kHz.
+const RATES: [u32; 8] = [
+    44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+];
 
 /// How much over unity a played curve may be, in dB: what f32 rounding of the coefficients
 /// leaves, the same bound the safety tests hold the preamp to.
@@ -146,6 +150,9 @@ struct Conf {
     pre: f64,
     /// Each slot's `b0 b1 b2 a0 a1 a2`.
     slots: Vec<[f64; 6]>,
+    /// The crossfeed stage's ports, as `dir:b0`, `sum:Gain 1`, `mix:Gain 2` (the same values on
+    /// both channels).
+    stage: Vec<(String, f64)>,
 }
 
 /// `text`'s number after `key`.
@@ -160,6 +167,7 @@ fn parse_conf(text: &str) -> Conf {
     let mut conf = Conf {
         pre: f64::NAN,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
+        stage: Vec::new(),
     };
     for node in text.split("{ type = builtin").skip(1) {
         let name = node
@@ -169,6 +177,25 @@ fn parse_conf(text: &str) -> Conf {
             .unwrap_or("");
         if name == "lpre" {
             conf.pre = field(node, "Mult = ").expect("the preamp's Mult");
+        } else if let Some(path) = name
+            .strip_prefix('l')
+            .filter(|n| ["dir", "x", "s"].contains(n))
+        {
+            for port in PORTS {
+                let value = field(node, &format!(" {port} = ")).expect("a coefficient");
+                conf.stage.push((format!("{path}:{port}"), value));
+            }
+        } else if name == "lsum" {
+            for gain in ["Gain 1", "Gain 2"] {
+                let value = field(node, &format!("\"{gain}\" = ")).expect("a gain");
+                conf.stage.push((format!("sum:{gain}"), value));
+            }
+        } else if name == "ldel" {
+            let value = field(node, "\"Delay (s)\" = ").expect("a delay");
+            conf.stage.push(("del:Delay (s)".to_string(), value));
+        } else if name == "lmix" {
+            let value = field(node, "\"Gain 2\" = ").expect("the mixer's gain");
+            conf.stage.push(("mix:Gain 2".to_string(), value));
         } else if let Some(slot) = name.strip_prefix('l').and_then(|n| n.parse::<usize>().ok()) {
             for (value, port) in conf.slots[slot - 1].iter_mut().zip(PORTS) {
                 *value = field(node, &format!(" {port} = ")).expect("a coefficient");
@@ -216,8 +243,25 @@ impl Node {
         node
     }
 
-    /// Every slot takes the config's values again.
+    /// Every slot and every port of the stage takes the config's values again.
     fn load_slots(&mut self) {
+        // A config written without a stage (a test's own) holds the bypass.
+        let bypass: Vec<(String, f64)> = crossfeed_params(&super::crossfeed::Stage::bypass())
+            .into_iter()
+            .filter(|(name, _)| name.starts_with('l'))
+            .map(|(name, value)| (name[1..].to_string(), value))
+            .collect();
+        let stage = match self.started_from.stage.is_empty() {
+            true => &bypass,
+            false => &self.started_from.stage,
+        };
+        for channel in ['l', 'r'] {
+            for (port, value) in stage {
+                let name = format!("{channel}{port}");
+                let held = held_value(&name, *value);
+                self.ports.insert(name, held);
+            }
+        }
         for channel in ['l', 'r'] {
             for (index, values) in self.started_from.slots.iter().enumerate() {
                 for (port, value) in PORTS.iter().zip(values) {
@@ -239,6 +283,8 @@ impl Node {
 #[derive(Debug, Default)]
 struct Cli {
     alive: bool,
+    /// It ended since the session last asked.
+    ended: bool,
     /// The next line ends it: `Some(true)` after applying the line, `Some(false)` without.
     dies_after_next_line: Option<bool>,
     /// It refused a `set-param` and the session has not read that yet.
@@ -246,6 +292,14 @@ struct Cli {
     /// A refusal that shows after this many more reads of the flag: the session's reader task
     /// sets it a moment after `pw-cli` prints it.
     refusal_in: Option<u8>,
+}
+
+impl Cli {
+    /// It ends.
+    fn end(&mut self) {
+        self.alive = false;
+        self.ended = true;
+    }
 }
 
 /// Everything outside the controller.
@@ -399,18 +453,17 @@ impl World {
     /// config it will write. `rate_hz` is what the caller knows of the sink's rate.
     fn stage_apply(mut request: ApplyRequest) -> Result<(HostEqState, Conf), EqFailure> {
         let held = checked_request(&mut request, Manager::Child)?;
-        let rate = request.rate_hz.unwrap_or(CONFIG_RATE_HZ);
-        let text = render_live_conf(
+        let text = conf_text(
             &held,
             request.correction.preamp_db,
             "sink",
             Route::Smart,
-            rate,
+            &request,
         );
         let state = HostEqState {
             on: true,
-            name: request.name,
-            origin: request.origin,
+            name: request.name.clone(),
+            origin: request.origin.clone(),
             target: "sink".to_string(),
             route: Route::Smart,
             manager: Manager::Child,
@@ -418,6 +471,9 @@ impl World {
             preamp_db: request.correction.preamp_db,
             filters: held.filters.clone(),
             slots: held.slots.clone(),
+            crossfeed: request.crossfeed.clone(),
+            crossfeed_on: request.crossfeed.is_some(),
+            flat: request.flat,
         };
         Ok((state, parse_conf(&text)))
     }
@@ -428,6 +484,8 @@ impl World {
         self.conf = None;
         if let Some(mut state) = self.state() {
             state.on = false;
+            state.crossfeed_on = false;
+            state.flat = false;
             state
                 .save(&self.state_path())
                 .expect("the state is written");
@@ -450,7 +508,11 @@ impl World {
                 .iter()
                 .find(|(name, _)| name == "lpre:Mult")
                 .map(|(_, mult)| format!("{:+.2} dB", 20.0 * mult.log10()));
-            format!("set-param node {id}: slots {slots:?} preamp {pre:?}")
+            let mix = params
+                .iter()
+                .find(|(name, _)| name == "lmix:Gain 2")
+                .map(|(_, mix)| *mix);
+            format!("set-param node {id}: slots {slots:?} preamp {pre:?} stage mix {mix:?}")
         });
         let lands = !matches!(self.cli.dies_after_next_line, Some(false));
         self.lost_line |= !lands;
@@ -484,7 +546,7 @@ impl World {
             }
         }
         if self.cli.dies_after_next_line.take().is_some() {
-            self.cli.alive = false;
+            self.cli.end();
             self.cli.refused = false;
             self.cli.refusal_in = None;
         }
@@ -611,6 +673,10 @@ impl Link for ModelLink {
         refused
     }
 
+    fn ended(&mut self) -> bool {
+        std::mem::take(&mut world(&self.world).cli.ended)
+    }
+
     fn ensure_running(&mut self) -> Option<bool> {
         let mut world = world(&self.world);
         if world.cli.alive {
@@ -641,7 +707,7 @@ impl Link for ModelLink {
         let once = std::mem::take(&mut world.fail_next_write);
         match once || world.refuse_sends_until_ms > world.clock_ms {
             true => {
-                world.cli.alive = false;
+                world.cli.end();
                 false
             }
             false => {
@@ -657,6 +723,8 @@ impl Link for ModelLink {
         let found = world.listed().map(|node| LiveNode {
             id: node.id,
             rate_hz: Some(world.sink_rate),
+            sink: None,
+            playing: false,
             params: node
                 .ports
                 .iter()
@@ -790,6 +858,75 @@ fn played(node: &Node, channel: char) -> (Vec<[f64; 5]>, f64) {
     )
 }
 
+/// The values of the crossfeed stage's ports on one channel, in the order [`stage_gain_db`]
+/// reads them: the three paths' `b0 b1 b2 a0 a1 a2`, the sum's two gains, the delay, the final
+/// mixer's gain for the delayed path.
+fn stage_values(node: &Node, channel: char) -> Vec<f64> {
+    let mut values = Vec::new();
+    for path in ["dir", "x", "s"] {
+        for port in PORTS {
+            values.push(node.value(&format!("{channel}{path}:{port}")));
+        }
+    }
+    for port in ["sum:Gain 1", "sum:Gain 2", "del:Delay (s)", "mix:Gain 2"] {
+        values.push(node.value(&format!("{channel}{port}")));
+    }
+    values
+}
+
+/// The most the stage the ports `values` hold adds at `rate_hz`, in dB (never below 0), from
+/// the ports alone: one output is `dir·C + mix·z^-n·(sum2·s·C + sum1·x·O)`, so the two inputs
+/// aligned to add make `|dir + mix·sum2·z^-n·s| + |mix·sum1·x|` at each frequency, over a grid of
+/// 1 Hz steps. The delay plays in whole samples, truncated; a delay within a thousandth of a
+/// sample of a whole one (PipeWire truncates its f32 product, this an f64 one) plays as the worse
+/// of the two samples beside it.
+fn stage_gain_db(values: &[f64], rate_hz: u32) -> f64 {
+    let section = |at: usize| {
+        let c = &values[at * 6..at * 6 + 6];
+        [
+            c[0] / c[3],
+            c[1] / c[3],
+            c[2] / c[3],
+            c[4] / c[3],
+            c[5] / c[3],
+        ]
+    };
+    let (dir, x, s) = (section(0), section(1), section(2));
+    let (sum1, sum2, delay, mix) = (values[18], values[19], values[20], values[21]);
+    let rate = f64::from(rate_hz);
+    let product = delay * rate;
+    let mut samples = vec![(product - 1e-3).floor().max(0.0)];
+    if (product + 1e-3).floor() != samples[0] {
+        samples.push((product + 1e-3).floor());
+    }
+    let at = |c: &[f64; 5], w: f64| {
+        let z = |n: f64| ((-w * n).cos(), (-w * n).sin());
+        let (z1, z2) = (z(1.0), z(2.0));
+        let num = (c[0] + c[1] * z1.0 + c[2] * z2.0, c[1] * z1.1 + c[2] * z2.1);
+        let den = (1.0 + c[3] * z1.0 + c[4] * z2.0, c[3] * z1.1 + c[4] * z2.1);
+        let d = den.0 * den.0 + den.1 * den.1;
+        (
+            (num.0 * den.0 + num.1 * den.1) / d,
+            (num.1 * den.0 - num.0 * den.1) / d,
+        )
+    };
+    let mut worst = 1.0f64;
+    for f in 1..=(rate_hz / 2).max(1) {
+        let w = 2.0 * std::f64::consts::PI * f64::from(f) / rate;
+        let (hd, hs, hx) = (at(&dir, w), at(&s, w), at(&x, w));
+        for n in &samples {
+            let d = ((-w * n).cos(), (-w * n).sin());
+            let side = (
+                mix * sum2 * (hs.0 * d.0 - hs.1 * d.1),
+                mix * sum2 * (hs.0 * d.1 + hs.1 * d.0),
+            );
+            let direct = (hd.0 + side.0, hd.1 + side.1);
+            worst = worst.max(direct.0.hypot(direct.1) + (mix * sum1 * hx.0.hypot(hx.1)));
+        }
+    }
+    20.0 * worst.log10()
+}
+
 // ---------------------------------------------------------------------------------------------
 // The events
 
@@ -833,6 +970,15 @@ pub enum Event {
     Rate(u32),
     /// `pw-cli` dies: now, or after the next line (which it applies, or not).
     CliDeath { after_line: Option<bool> },
+    /// A hand changes the crossfeed: it goes on or off, takes the model at `model` of the list,
+    /// an amount in percent or a total delay in ms, as a drag (`done` false) or a release.
+    Crossfeed {
+        on: Option<bool>,
+        model: Option<usize>,
+        amount_pct: Option<f64>,
+        delay_ms: Option<f64>,
+        done: bool,
+    },
     /// `pw-cli` takes no line for `ms`.
     RefuseSends { ms: u32 },
     /// The chain refuses the next call of this kind (0 apply, 1 remove, 2 keep, 3 start).
@@ -847,6 +993,9 @@ pub enum Event {
     FailNextWrite,
     /// From now on a refusal shows this many reads of the flag late.
     RefusalLag(u8),
+    /// The EQ's slots and the stage's ports go back to the config's values at the same node and
+    /// rate, the preamp as last set (PipeWire rebuilt the slots alone).
+    SlotRevert,
 }
 
 fn filter(rng: &mut Rng, hand: bool) -> SourceFilter {
@@ -929,7 +1078,24 @@ pub fn generate_targeted(seed: u64, len: usize) -> Vec<Event> {
 /// The event a `roll` of 0 to 99 stands for, with its fields drawn from `rng`.
 fn event_for(rng: &mut Rng, roll: u64) -> Event {
     match roll {
-        0..=19 => Event::Ticks(1 + rng.below(45) as u32),
+        0..=15 => Event::Ticks(1 + rng.below(45) as u32),
+        16..=19 => {
+            let model = rng.chance(25).then(|| rng.below(4) as usize);
+            let amount_pct = rng.chance(50).then(|| rng.range(5.0, 50.0));
+            let delay_ms = rng.chance(30).then(|| rng.range(0.0, 2.0));
+            let on = rng.chance(60).then(|| rng.chance(65));
+            // A change that names nothing is refused: every one names something.
+            let on = on.or(
+                (model.is_none() && amount_pct.is_none() && delay_ms.is_none()).then_some(true),
+            );
+            Event::Crossfeed {
+                on,
+                model,
+                amount_pct,
+                delay_ms,
+                done: rng.chance(70),
+            }
+        }
         20..=37 => Event::Drag {
             pick: rng.below(16) as usize,
             kind: rng.chance(15).then(|| filter(rng, true).kind),
@@ -979,7 +1145,8 @@ fn event_for(rng: &mut Rng, roll: u64) -> Event {
             ms: rng.pick(&[0, 0, 300, 1_200]),
         },
         94..=95 => Event::FailNextWrite,
-        96..=97 => Event::RefusalLag(rng.below(3) as u8),
+        96 => Event::RefusalLag(rng.below(3) as u8),
+        97 => Event::SlotRevert,
         _ => Event::DaemonRestart,
     }
 }
@@ -1028,11 +1195,31 @@ impl Peaks {
     }
 }
 
+/// The stage gains worked out so far, by port values and rate.
+#[derive(Default)]
+struct StageGains(HashMap<Vec<u64>, f64>);
+
+impl StageGains {
+    fn of(&mut self, values: &[f64], rate_hz: u32) -> f64 {
+        let key: Vec<u64> = std::iter::once(u64::from(rate_hz))
+            .chain(values.iter().map(|v| v.to_bits()))
+            .collect();
+        if self.0.len() > 2_000 {
+            self.0.clear();
+        }
+        *self
+            .0
+            .entry(key)
+            .or_insert_with(|| stage_gain_db(values, rate_hz))
+    }
+}
+
 /// A run of one sequence.
 struct Lab {
     shared: Shared,
     control: EqControl,
     peaks: Peaks,
+    stages: StageGains,
     /// The daemon's own count of ticks, which says when it reads the state file.
     daemon_ticks: u64,
     _dir: Dir,
@@ -1099,6 +1286,7 @@ impl Lab {
             shared,
             control,
             peaks: Peaks::default(),
+            stages: StageGains::default(),
             daemon_ticks: 0,
             _dir: dir,
             at: 0,
@@ -1117,6 +1305,7 @@ impl Lab {
                     ['l', 'r'].map(|channel| played(node, channel)),
                     world.sink_rate,
                     node.id,
+                    ['l', 'r'].map(|channel| stage_values(node, channel)),
                 )
             });
             (broken, played)
@@ -1130,10 +1319,11 @@ impl Lab {
         if let Some(broken) = broken {
             return fail(broken);
         }
-        let Some((channels, rate, id)) = played else {
+        let Some((channels, rate, id, stages)) = played else {
             return Ok(());
         };
-        for (channel, (sets, pre_db)) in ['l', 'r'].into_iter().zip(&channels) {
+        for ((channel, (sets, pre_db)), stage) in ['l', 'r'].into_iter().zip(&channels).zip(&stages)
+        {
             if let Some(slot) = sets.iter().position(|set| !stable(set)) {
                 return fail(format!(
                     "node {id} plays an unstable biquad in {channel}{:02}: {:?}",
@@ -1142,10 +1332,11 @@ impl Lab {
                 ));
             }
             let peak = self.peaks.of(sets, rate);
-            if peak + pre_db > TOLERANCE_DB {
+            let stage = self.stages.of(stage, rate);
+            if peak + stage + pre_db > TOLERANCE_DB {
                 return fail(format!(
-                    "node {id} plays {:+.3} dB over unity at {rate} Hz on {channel}: the slots peak {peak:+.3} dB under a preamp of {pre_db:+.3} dB",
-                    peak + pre_db
+                    "node {id} plays {:+.3} dB over unity at {rate} Hz on {channel}: the slots peak {peak:+.3} dB and the crossfeed stage adds up to {stage:+.3} dB under a preamp of {pre_db:+.3} dB",
+                    peak + stage + pre_db
                 ));
             }
         }
@@ -1378,6 +1569,26 @@ impl Lab {
             Event::Toggle(on) => {
                 let _ = self.control.set_on(*on).await;
             }
+            Event::Crossfeed {
+                on,
+                model,
+                amount_pct,
+                delay_ms,
+                done,
+            } => {
+                let _ = self
+                    .control
+                    .crossfeed(CrossfeedEdit {
+                        on: *on,
+                        model: model.map(|at| CrossfeedModel::ALL[at % 4].word().to_string()),
+                        preset: None,
+                        amount_pct: *amount_pct,
+                        crossover_hz: None,
+                        delay_ms: *delay_ms,
+                        done: *done,
+                    })
+                    .await;
+            }
             Event::Cli {
                 filters,
                 stated,
@@ -1393,6 +1604,8 @@ impl Lab {
                     sink: None,
                     slots: Vec::new(),
                     rate_hz: None,
+                    flat: false,
+                    crossfeed: None,
                 };
                 // The daemon is not blocked by the command line: it ticks in the wait.
                 let staged = World::stage_apply(request);
@@ -1431,7 +1644,7 @@ impl Lab {
                 let mut world = world(&self.shared);
                 match after_line {
                     None => {
-                        world.cli.alive = false;
+                        world.cli.end();
                         world.cli.refused = false;
                     }
                     Some(lands) => world.cli.dies_after_next_line = Some(*lands),
@@ -1453,6 +1666,11 @@ impl Lab {
             Event::ListDelay { ms } => world(&self.shared).list_delay_ms = u64::from(*ms),
             Event::FailNextWrite => world(&self.shared).fail_next_write = true,
             Event::RefusalLag(lag) => world(&self.shared).refusal_lag = *lag,
+            Event::SlotRevert => {
+                if let Some(node) = world(&self.shared).node.as_mut() {
+                    node.load_slots();
+                }
+            }
             Event::DaemonRestart => {
                 let before = {
                     let mut world = world(&self.shared);

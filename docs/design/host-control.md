@@ -164,9 +164,10 @@ computer, for any shown device, and `null` with the host off.
 - `volume`: `{pct, muted, sink}`, absent until the daemon has read the sink, which it does only
   while a page's stream is open; `pct` is above 100 when another program boosted the sink, and the
   page then writes no more than 100.
-- `eq`: `{on, running_unknown, points[{type, f, g, q}], preamp_db, preset, live, note, max,
-  response}`. `response` is the points' curve in dB at the tone control's 181 log-spaced
-  frequencies (20 Hz to 20 kHz), the preamp left out. `running_unknown`: `on` is the state file's.
+- `eq`: `{on, running_unknown, points[{type, f, g, q}], preamp_db, preset, live, note, max, loads,
+  response}`. `response` is the points' curve in dB at the tone control's 181 log-spaced frequencies
+  (20 Hz to 20 kHz), the preamp left out. `running_unknown`: `on` is the state file's. `loads`
+  counts loads and reloads (a held value ends when it moves). `live` is false with no chain.
 - `presets`: `[{name, built_in, on, playable, why}]`, the built-ins of the shown device's tone
   control and the user's presets. One of more than 16 filters is listed with `playable: false` and
   its reason. On a page whose device has no tone control (an amp) there is no band layout to
@@ -229,11 +230,10 @@ the screen is the DAC page's layout, an amp's too, and flipping back restores it
   reads `—`; a level above 100 % shows as read with the dial at its end.
 - **Tone control.** Mode `Off | EQ`. The curve's points are tapped on (an empty spot adds a PK),
   dragged (frequency and gain) and set for Q by the wheel, a right drag or a pinch: the core's hand
-  (`core.eq.points`) makes the gestures and a flip ends them; `computer.js` forwards the
-  events. While a point is dragged the part's swap waits (`keep.js`) and `computer-page.js` moves
-  the curve and cells; the part is drawn again from the host's model when the writes are answered.
-  The point in hand has a `-` and `+` per value (`computer-steps.js`): a hold repeats, a final write
-  ends.
+  (`core.eq.points`) makes the gestures and a flip ends them; `computer.js` forwards the events.
+  While a point is dragged the part's swap waits (`keep.js`) and `computer-page.js` moves the curve
+  and cells; the part is drawn again from the host's model when the writes are answered. The point
+  in hand has a `-` and `+` per value (`computer-steps.js`): a hold repeats, a final write ends.
 - **The order** of the points is the daemon's: `HostEqState.filters` is kept sorted by frequency (a
   stable sort) when an edit ends (a drag's last value, a typed value, an add, a preset recalled or
   loaded) and never during a drag. The wire's 1-based point numbers are that order; the point's
@@ -345,18 +345,18 @@ takes a whole percent from 0 to 100; above 100 is refused as the cap. A rise of 
 the volume's cubic scale asks the client, counted from the lowest level this server saw, so a
 staircase of small steps asks at the sum; a level not read yet counts as 1 %. `host_mute` unmuting
 asks, muting does not. `set_host_eq` takes exactly one of a preset name or `off`; a built-in needs a
-device with a tone control, a saved preset needs none, and the question a preset on a device too
-asks is put to the client and repeated with `confirm`. The three writes are listed only while
-`[mcp] writes` is on. The computer's cap is 100 %, not `max_volume_db`.
+device with a tone control, a saved preset needs none, and a preset on a device too asks the client,
+repeated with `confirm`. `set_host_crossfeed` changes the [crossfeed](crossfeed.md). The writes are
+listed only while `[mcp] writes` is on. The cap is 100 %, not `max_volume_db`.
 
 ## MQTT
 
 Home Assistant gets one device, `This computer`: a switch (a binary sensor with commands off) that
 turns the computer EQ on with its kept points and off, and a sensor naming the applied preset
-(`custom`, or nothing). No computer volume, mute or point is offered; HA's own media integrations do
-volume better. A retained command is never acted on; ON with nothing kept (the first point flat, no
-preset) logs that and stays off. With the computer not served nothing is announced and the retained
-entities are cleared at the bridge's start.
+(`custom`, or nothing); and a crossfeed switch and select. No computer volume, mute or point is
+offered; HA's own media integrations do volume better. A retained command is never acted on; ON with
+nothing kept (the first point flat, no preset) logs that and stays off. With the computer not served
+nothing is announced and the retained entities are cleared at the bridge's start.
 
 ## Packages and Docker
 

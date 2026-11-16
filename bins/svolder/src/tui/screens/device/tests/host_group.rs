@@ -975,7 +975,9 @@ fn a_click_on_a_transport_button_lands_on_it() {
 
 /// A route to a Gungnir 2 sink at 48 kHz, the player on the same rate and every volume at
 /// 100 %, with `edit` applied.
-fn gungnir_route(edit: impl FnOnce(&mut svolder_host::RouteFacts)) -> svolder_host::RouteFacts {
+pub(super) fn gungnir_route(
+    edit: impl FnOnce(&mut svolder_host::RouteFacts),
+) -> svolder_host::RouteFacts {
     let mut route = svolder_host::RouteFacts {
         sink: Some(svolder_host::SinkFacts {
             name: "alsa_output.usb-Schiit_Audio_Gungnir_2-00.analog-stereo".into(),
@@ -1003,7 +1005,7 @@ fn gungnir_route(edit: impl FnOnce(&mut svolder_host::RouteFacts)) -> svolder_ho
 
 /// The mockup's app on a daemon that speaks for the host, with `route` read, the DAC on its
 /// first USB input, which is the only USB port connected.
-fn daemon_hosting(route: svolder_host::RouteFacts) -> App {
+pub(super) fn daemon_hosting(route: svolder_host::RouteFacts) -> App {
     let mut app = host_mockup_app();
     hear(
         &mut app,

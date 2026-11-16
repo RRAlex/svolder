@@ -287,12 +287,10 @@ pub(crate) async fn reload_daemon_quietly(g: &Globals<'_>, config: &Config) -> O
 
 /// Tell a running daemon that a preset was written to `path`, when it reads that very file, so
 /// its MQTT bridge offers the new list. Nothing is said, and nothing else is done, where there
-/// is no daemon, where it reads another file, or where the reload fails; a direct session
-/// (`--transport ble` or `fake`) has none to tell.
+/// is no daemon, where it reads another file, or where the reload fails. A direct transport
+/// (`--transport ble` or `fake`) names where the device is reached, not whether a daemon beside
+/// this process holds the file, so it tells one as any other does.
 pub(crate) async fn reload_daemon_for_presets(g: &Globals<'_>, config: &Config, path: &Path) {
-    if matches!(g.transport, "ble" | "fake") {
-        return;
-    }
     let socket = socket::path::resolve(g.socket, config.socket.as_deref());
     if svolder_ipc::is_running(&socket).await {
         crate::backend::reload_if_reads(socket, path).await;
@@ -301,7 +299,8 @@ pub(crate) async fn reload_daemon_for_presets(g: &Globals<'_>, config: &Config, 
 
 /// Write one op of the preset library for a verb: through the daemon while one that reads `path`
 /// answers (it is then the one writer, judges the name and reloads itself), and through the
-/// file's own writer with none, with one that reads another file, or under a direct transport.
+/// file's own writer with none, with one that reads another file, or under a direct transport;
+/// a direct write is followed by a reload of a daemon that reads the file, which did not make it.
 pub(crate) async fn write_preset(
     g: &Globals<'_>,
     config: &Config,
@@ -312,7 +311,13 @@ pub(crate) async fn write_preset(
     let direct = matches!(g.transport, "ble" | "fake");
     match !direct && crate::backend::daemon_reads(&socket, path).await {
         true => crate::reach::preset_write(&socket, path, op).await,
-        false => crate::reach::preset_in_process(path, op),
+        false => {
+            crate::reach::preset_in_process(path, op)?;
+            if direct {
+                crate::backend::reload_if_reads(socket, path).await;
+            }
+            Ok(())
+        }
     }
 }
 

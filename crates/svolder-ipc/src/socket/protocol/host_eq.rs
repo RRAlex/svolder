@@ -85,6 +85,51 @@ pub enum HostEqOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slot: Option<u8>,
     },
+    /// Change the crossfeed. Every field but `done` is optional and only the ones given change.
+    /// Offer it only while the host's `EqView.crossfeed` is present: a daemon without it cannot
+    /// parse the op. The rules (`CrossfeedSettings::change` in svolder-host holds them):
+    ///
+    /// - an op that names nothing at all is refused; an unknown `model` word or `preset` name is
+    ///   refused in words (it is not held to a default), so is a number that is not finite and a
+    ///   `delay_ms` for a model that plays none (Mid/Side bass);
+    /// - `model` other than the current one loads that model's default preset; the same model
+    ///   changes nothing, so a click on the selected model keeps Custom values;
+    /// - then `preset` loads that preset's exact numbers (in the new model when both are sent);
+    /// - then any `amount_pct`, `crossover_hz` or `delay_ms` makes the values Custom
+    ///   (`EqView.crossfeed.preset` becomes none and `edited_from` names the preset); the daemon
+    ///   rounds each to its model's step and holds it to the model's range, so a stepper that
+    ///   sends 38.34 gets 38; presets stay exact;
+    /// - `delay_ms` at or below the view's `delay_floor_ms` (0 included) asks for the model's own
+    ///   delay (the view then says `delay_own`); anything above it is the total lag;
+    /// - `on` is applied last, so turning on plays the numbers sent with it. A `Crossfeed` that
+    ///   only sets `on` to its current value changes nothing.
+    ///
+    /// The ranges, presets, words and descriptions come from the view's `models`, never from
+    /// the sender. A refusal leaves everything as it was.
+    Crossfeed {
+        /// turn the crossfeed on or off
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+        /// the model's word: `bauer`, `mid-side`, `meier` or `linkwitz`
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        /// the preset's name within the model, as the view lists it
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preset: Option<String>,
+        /// the share of the other channel in percent
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        amount_pct: Option<f64>,
+        /// the crossover in Hz
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        crossover_hz: Option<f64>,
+        /// the total lag of the other side in ms, never below the model's own
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delay_ms: Option<f64>,
+        /// whether this is the last value of a drag (not a drag: the default); a drag is heard
+        /// but not saved
+        #[serde(default = "done_by_default")]
+        done: bool,
+    },
     /// Save the points as a preset of the user's, under a name
     SaveAs {
         /// the new preset's name

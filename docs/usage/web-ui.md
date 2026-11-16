@@ -592,10 +592,12 @@ knows, kept current as devices come and go. It stays open while you look around 
   such, for a device that is not connected); closed, nothing of it is drawn, so a browser's
   find-in-page does not look inside it.
 
-**EQ library** is the menu's *EQ library…* row, in every theme, between *Devices…* and *Help…*, for
-whoever may change things (a guest and a page with `[web] writes` off do not have it). It is about
-the side the page shows: its title says which (`EQ library · Kara`, `EQ library · This computer`),
-and it closes when another device is shown. Its list on the left has three pages:
+**Sound** is the menu's *Sound…* row, in every theme, between *Devices…* and *Help…*, for whoever may
+change things (a guest and a page with `[web] writes` off do not have it). One popup with two tabs
+under its title, **EQ library** and **Crossfeed**; the tab you leave is kept open behind the other.
+The EQ library tab is about the side the page shows: its title says which
+(`EQ library · Kara`, `EQ library · This computer`), and it closes when another device is shown.
+Its three pages are a row of pills under the tabs, shown only on that tab:
 
 - **AutoEq** searches AutoEq's index (through the daemon: the page never reaches the internet). Type
   a headphone's name (at most 60 characters); the search is sent after a short pause, or at once on
@@ -634,6 +636,23 @@ density). There is none for the computer, for a built-in preset or in Flat and L
 Recall, rename and delete stay where each theme shows the presets. The terminal UI draws the fit
 and overwrites a preset with `u`, and `i` imports a file; comparing two measurements is not there
 yet.
+
+**The Crossfeed tab** sets [the computer's crossfeed](eq.md#crossfeed), whichever side the page
+shows, and needs the daemon to offer it (otherwise the tab says `Crossfeed is not offered here.`,
+and with the computer's sound off, that there is no crossfeed to set). A
+reader has no *Sound…* row. The header has the on/off switch; under it:
+
+- **Model** and **Preset** menus (changing the model loads its default preset);
+- - a picture of the level each ear gets by frequency: the level of the same ear (the ink line) and
+  of the other ear (the accent line), in dB, drawn from the daemon's own curves;
+- - **Level** (percent and dB, such as `37 % · −8.6 dB`), **Crossover** (Hz) and **Delay** (ms),
+  each with `−` and `+`; hold a button to repeat, and one change is sent when it ends. Delay is
+  greyed with `none` for Mid/Side bass and says `(own)` at the model's own lag;
+- after a number is changed the preset reads `Custom` with `Edited from NAME`; and when crossfeed
+  turned itself off ([the four resets](eq.md#it-turns-itself-off)) a note says why.
+
+Every word, range and step comes from the daemon's view, so the page never offers a value the daemon
+would refuse; the page shows the number the daemon holds after each change.
 
 **Ember's effects** have three levels, chosen in the menu:
 
@@ -1019,6 +1038,17 @@ refusal (the daemon's, a volume rule's, a configuration file that cannot be writ
 value that is not a number in its unit, a name a preset or a hop cannot have or a hop that cannot
 take that edit, and `204` for a write a newer one replaced. Every error body is `{"error":"…"}`.
 
+`POST api/v1/host/crossfeed` is a write like the others (it needs `writes` and a signed-in visitor)
+and changes the computer's crossfeed: `{"on"?, "model"?, "preset"?, "amount_pct"?, "crossover_hz"?,
+"delay_ms"?, "done"?}`. A body that names nothing is a `409`, as is a refusal in the daemon's words
+(an unknown model or preset, a delay for Mid/Side bass, crossfeed that cannot be changed now). The
+daemon rounds every number to the model's step and holds it to its range; `done` is false while a
+drag or a held button goes on and, when absent, true. `api/v1/host` carries the crossfeed's view
+under the computer's `eq` as `crossfeed`: `on`, `model`, `preset`, `edited_from`, `amount_pct`,
+`amount_db`, `feed_db`, `crossover_hz`, `delay_ms`, `delay_floor_ms`, `delay_settable`, `delay_own`,
+`output`, `note`, `off_reason`, `unavailable`, `curve` (`hz`, `same_db` and `other_db`, 61 points
+each) and `models` (every model's words, presets and ranges).
+
 **The routes at a glance**, every one the daemon serves under `api/v1/` with its method. A segment
 that varies is in capitals (`DEVICE` is a device's name or unit id, `JOB` a job's number, `N`, `KEY`
 and `BAND` what the paragraphs above name). *Takes* is the body's fields (a GET's query fields start
@@ -1063,6 +1093,7 @@ below are all there is. The table is checked against the daemon's sources and th
 | POST | `api/v1/hops/remove` | not listed |
 | GET | `api/v1/host` | not listed |
 | GET | `api/v1/host/cover` | not listed |
+| POST | `api/v1/host/crossfeed` | not listed |
 | POST | `api/v1/host/eq` | not listed |
 | POST | `api/v1/host/eq/points` | not listed |
 | POST | `api/v1/host/eq/points/N` | not listed |

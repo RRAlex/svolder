@@ -23,8 +23,9 @@
 // router asks at every open and at every step of the history, so nothing is pushed, drawn or
 // loaded, and an open says what a write of that viewer's says (`core.actions.refuse()`: `Sign in
 // to change this` with the way to sign in, or the page's read-only words). A viewer who loses
-// the right while such a popup stands (the page's model replaced with another viewer) loses the
-// popup: it closes.
+// the right while such a popup stands (the page's model replaced with another viewer, or the
+// rights read again at a later event: the fleet, the host, the stream's state) loses the popup: it
+// closes.
 //
 // The popup is opened, stepped and closed through the router (`core.router.open(name, page)`).
 // Opening shows the frame at once with its loading line; the part draws when the module has
@@ -118,10 +119,12 @@ export function createPopups({ core, document, listed: given = [] }) {
   };
 
   for (const entry of listed) popups.add(entry.name, entry, entry);
-  // the viewer changed under a popup that is no longer theirs
-  core.model.on('model', () => {
+  // the viewer changed under a popup that is no longer theirs: the page replaced with another
+  // viewer's, or any later event of the model or the stream, which reads the rights again
+  const lost = () => {
     const entry = listed.find((one) => one.name === core.router.state().popup);
     if (entry && !sees(entry)) core.router.close();
-  });
+  };
+  for (const event of ['model', 'fleet', 'host', 'state', 'opened']) core.model.on(event, lost);
   return popups;
 }

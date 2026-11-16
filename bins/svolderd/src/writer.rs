@@ -52,7 +52,7 @@
 mod slots;
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -193,6 +193,15 @@ pub struct ClimbView {
     pub target: i64,
 }
 
+/// The order in which requests arrived at one device's writer handles.
+#[derive(Default)]
+struct Tickets {
+    /// The last ticket given.
+    issued: u64,
+    /// The ticket of the newest request that was sent to the writer.
+    sent: u64,
+}
+
 /// The front ends' end of one device's writer; its clones share it.
 #[derive(Clone)]
 pub struct Writer {
@@ -201,6 +210,8 @@ pub struct Writer {
     recalled: watch::Receiver<Option<String>>,
     /// The climb on, while one is.
     climb: watch::Receiver<Option<ClimbView>>,
+    /// The tickets of the requests, and the newest one sent: see [`Writer::ticket`].
+    tickets: Arc<Mutex<Tickets>>,
 }
 
 /// How one submitted write is made: how it waits behind the one in flight on its function, and
@@ -272,6 +283,7 @@ impl Writer {
             asks,
             recalled,
             climb,
+            tickets: Arc::default(),
         }
     }
 
@@ -302,6 +314,7 @@ impl Writer {
             asks,
             recalled,
             climb,
+            tickets: Arc::default(),
         }
     }
 
@@ -316,7 +329,7 @@ impl Writer {
         options: impl Into<Options>,
     ) -> oneshot::Receiver<Outcome> {
         let (done, answer) = oneshot::channel();
-        let _ = self.asks.send(Ask::Submit {
+        self.ask(Ask::Submit {
             origin,
             command,
             options: options.into(),
@@ -336,7 +349,7 @@ impl Writer {
         mode: Mode,
     ) -> oneshot::Receiver<Glided> {
         let (glided, answer) = oneshot::channel();
-        let _ = self.asks.send(Ask::Glide {
+        self.ask(Ask::Glide {
             origin,
             key,
             raw,
@@ -349,6 +362,40 @@ impl Writer {
     /// Recall the preset `name` among `fitting`, the presets that fit the device, as one batch
     /// (see the module's docs).
     pub fn recall(&self, origin: Origin, name: String, fitting: Vec<Preset>) -> Recalling {
+        let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
+        tickets.issued += 1;
+        tickets.sent = tickets.issued;
+        self.send_recall(origin, name, fitting)
+    }
+
+    /// A ticket for a request that must wait before it is sent (for a fit): the request's place
+    /// in the order of arrival. It is sent with [`Writer::recall_unless_overtaken`].
+    pub fn ticket(&self) -> u64 {
+        let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
+        tickets.issued += 1;
+        tickets.issued
+    }
+
+    /// [`Writer::recall`] for the request that took `ticket`, unless a request that arrived
+    /// after it was sent first: `None` then, and nothing is sent, as a later pick replaces an
+    /// earlier one. Whichever of two waiting recalls ends its wait first, the older is the one
+    /// dropped.
+    pub fn recall_unless_overtaken(
+        &self,
+        ticket: u64,
+        origin: Origin,
+        name: String,
+        fitting: Vec<Preset>,
+    ) -> Option<Recalling> {
+        let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
+        if tickets.sent > ticket {
+            return None;
+        }
+        tickets.sent = ticket;
+        Some(self.send_recall(origin, name, fitting))
+    }
+
+    fn send_recall(&self, origin: Origin, name: String, fitting: Vec<Preset>) -> Recalling {
         let (planned, plan) = oneshot::channel();
         let (done, answer) = oneshot::channel();
         let _ = self.asks.send(Ask::Recall {
@@ -364,12 +411,20 @@ impl Writer {
         }
     }
 
+    /// Send `ask`, a write or a recall, with the next ticket.
+    fn ask(&self, ask: Ask) {
+        let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
+        tickets.issued += 1;
+        tickets.sent = tickets.issued;
+        let _ = self.asks.send(ask);
+    }
+
     /// Apply the built-in setting `name` of the device as one batch (see the module's docs): the
     /// answers are those of a recall, [`Planned::Setting`] for the plan.
     pub fn apply(&self, origin: Origin, name: String) -> Recalling {
         let (planned, plan) = oneshot::channel();
         let (done, answer) = oneshot::channel();
-        let _ = self.asks.send(Ask::Apply {
+        self.ask(Ask::Apply {
             origin,
             name,
             planned,

@@ -20,7 +20,7 @@ fn gradient() -> DynamicImage {
 }
 
 /// The mockup's app with a cover to show: the terminal's cells are 8 by 16 pixels.
-fn covered() -> App {
+pub(super) fn covered() -> App {
     let mut app = hearing(Some(track("So What")));
     app.host.cover.hash = Some("0123456789abcdef".into());
     app.host.cover.font = Some((8, 16));
@@ -28,7 +28,7 @@ fn covered() -> App {
 }
 
 /// `app` with the art for its box in a frame of `area`, drawn as half-blocks.
-fn with_art(mut app: App, area: Rect) -> App {
+pub(super) fn with_art(mut app: App, area: Rect) -> App {
     let size = art_box(area, &app).expect("a box for the art");
     let protocol = build(&Picker::halfblocks(), gradient(), size).expect("a picture");
     app.host.cover.picture = Some(Picture {
@@ -257,4 +257,189 @@ fn a_kitty_picture_is_not_uploaded_under_a_toast_or_a_tooltip() {
     assert!(!sent(&app), "uploaded under a tooltip");
     app.pointer.tooltip = None;
     assert!(sent(&app), "not uploaded once the tooltip was gone");
+}
+
+/// The heights of the panes (Controls, Tone, Status) in a frame `area`, and the cover's box.
+fn heights(app: &App, area: Rect) -> ([u16; 3], Option<Size>) {
+    let frames = frames_of(area, app);
+    let tone = if frames.len() == 3 {
+        frames[1].1.height
+    } else {
+        0
+    };
+    let status = frames[frames.len() - 1].1.height;
+    let heights = [frames[0].1.height, tone, status];
+    (heights, art_box(area, app))
+}
+
+/// The lines of `rows` (a frame as text) inside `pane`, blank ones left out.
+fn lines_in(rows: &[String], pane: Rect) -> Vec<String> {
+    rows.iter()
+        .skip(usize::from(pane.y))
+        .take(usize::from(pane.height))
+        .map(|row| {
+            let inside: String = row
+                .chars()
+                .skip(usize::from(pane.x) + 1)
+                .take(usize::from(pane.width).saturating_sub(2))
+                .collect();
+            inside.trim().to_string()
+        })
+        .filter(|line| !line.is_empty() && !line.starts_with('─') && !line.starts_with('┌'))
+        .collect()
+}
+
+/// `app` with a cover named and the terminal's cells 8 by 16 pixels.
+fn with_cover(mut app: App) -> App {
+    app.host.cover.hash = Some("0123456789abcdef".into());
+    app.host.cover.font = Some((8, 16));
+    app
+}
+
+/// A Kraken on a host, playing, capturing, with the Host group and its Transport and Spectrum
+/// rows: the busiest Controls pane of the built-in profiles.
+fn kraken_playing() -> App {
+    let mut app = app_on(crate::tui::test_support::profile_named("kraken"));
+    app.host.linked = true;
+    app.host.fold_read(
+        Some(svolder_host::SinkState {
+            volume: 0.54,
+            muted: false,
+            name: "Kraken Analog Stereo".into(),
+            target: Some("alsa_output.usb-Kraken-00.analog-stereo".into()),
+        }),
+        true,
+    );
+    app.host.found_bus(Some(track("So What")), app.now);
+    app.host.capturing = true;
+    app
+}
+
+/// The Gungnir on the computer's side: a sink with a target (the path row), capture on, and the
+/// computer's EQ with crossfeed (the Tone pane's Crossfeed row), playing a track.
+fn computer_side_playing() -> App {
+    let mut app = super::host_group::daemon_hosting(super::host_group::gungnir_route(|_| {}));
+    app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
+        true, "bauer", None,
+    ));
+    app.flip_side();
+    assert!(app.on_computer());
+    app
+}
+
+/// Every non-blank line the Controls and Tone panes draw without a cover, they draw with one in
+/// the grown layout of `area`, and the Status pane is taller.
+fn assert_panes_lose_nothing(make: fn() -> App, area: Rect) {
+    let bare = make();
+    let app = with_cover(make());
+    let base = frames_of(area, &bare);
+    let grown = frames_of(area, &app);
+    assert!(
+        grown[grown.len() - 1].1.height > base[base.len() - 1].1.height,
+        "{area:?}"
+    );
+    let before = text(&frame(&bare, area.width, area.height));
+    let after = text(&frame(&app, area.width, area.height));
+    for ((_, was), (_, now)) in base.iter().zip(&grown).take(base.len() - 1) {
+        assert_eq!(lines_in(&before, *was), lines_in(&after, *now), "{area:?}");
+    }
+}
+
+#[test]
+fn the_status_pane_grows_upward_from_100_by_45_and_the_cover_with_it() {
+    let app = covered();
+    let (usual, usual_box) = heights(&app, area(100, 44));
+    // One column or one row short of 100 by 45: the pane the height it was.
+    assert_eq!(heights(&app, area(99, 45)).0[2], usual[2]);
+    assert_eq!(usual, [32, 32, 8]);
+    assert_eq!(
+        usual_box,
+        Some(Size {
+            width: 10,
+            height: 5
+        })
+    );
+    // From 100 by 45 the pane takes the rows the panes do not draw in.
+    let (grown, grown_box) = heights(&app, area(100, 45));
+    assert_eq!(grown, [22, 22, 19]);
+    assert_eq!(
+        grown_box,
+        Some(Size {
+            width: 32,
+            height: 16
+        })
+    );
+    // The pane takes what the Tone pane (its lines and frame) leaves of the 160 by 50 body.
+    let (wide, wide_box) = heights(&app, area(160, 50));
+    assert_eq!(wide, [15, 15, 31]);
+    assert_eq!(
+        wide_box,
+        Some(Size {
+            width: 56,
+            height: 28
+        })
+    );
+    // More rows than the cover can use at that width stay with the panes.
+    let (tall, tall_box) = heights(&app, area(160, 70));
+    assert_eq!(tall_box.map(|size| size.height), Some(tall[2] - 3));
+    assert!(tall[0] > 15, "{tall:?}");
+}
+
+#[test]
+fn the_status_pane_takes_no_row_a_pane_draws_in() {
+    for (width, height) in [(100, 45), (160, 50), (160, 70)] {
+        let area = area(width, height);
+        assert_panes_lose_nothing(kraken_playing, area);
+        assert_panes_lose_nothing(computer_side_playing, area);
+        assert_panes_lose_nothing(host_mockup_app, area);
+    }
+    // The rows the old fixed floor cut: the Kraken's Host group and the computer side's path.
+    let kraken = with_cover(kraken_playing());
+    let rows = text(&frame(&kraken, 160, 50));
+    let controls = lines_in(&rows, frames_of(area(160, 50), &kraken)[0].1);
+    for word in ["Host", "Transport", "Spectrum"] {
+        assert!(
+            controls.iter().any(|line| line.contains(word)),
+            "{word}: {controls:#?}"
+        );
+    }
+    let computer = with_cover(computer_side_playing());
+    let rows = text(&frame(&computer, 160, 50));
+    let frames = frames_of(area(160, 50), &computer);
+    let controls = lines_in(&rows, frames[0].1);
+    assert!(
+        controls.iter().any(|line| line.starts_with("Path")),
+        "{controls:#?}"
+    );
+    let tone = lines_in(&rows, frames[1].1);
+    assert!(
+        tone.iter().any(|line| line.contains("Crossfeed")),
+        "{tone:#?}"
+    );
+}
+
+#[test]
+fn a_cover_that_failed_keeps_the_usual_layout() {
+    let mut app = with_cover(kraken_playing());
+    let grown = heights(&app, area(160, 50)).0;
+    app.host.cover.failed = app.host.cover.hash.clone();
+    let failed = heights(&app, area(160, 50));
+    assert_eq!(failed.1, None, "no cover box for a failed cover");
+    app.host.cover.hash = None;
+    assert_eq!(failed.0, heights(&app, area(160, 50)).0);
+    assert!(grown[2] > failed.0[2], "{grown:?} {failed:?}");
+    // Another track's cover is not the failed one.
+    app.host.cover.hash = Some("fedcba9876543210".into());
+    assert_eq!(heights(&app, area(160, 50)).0, grown);
+}
+
+#[test]
+fn the_status_pane_does_not_grow_with_no_cover_to_show() {
+    let mut app = covered();
+    app.host.cover.hash = None;
+    let plain = heights(&app, area(100, 45)).0;
+    assert_eq!(plain[2], 8);
+    let mut app = covered();
+    app.host.cover.font = None;
+    assert_eq!(heights(&app, area(160, 50)).0[2], 8);
 }

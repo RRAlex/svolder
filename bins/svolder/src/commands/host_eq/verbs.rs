@@ -79,6 +79,8 @@ pub async fn host_apply(g: &Globals<'_>, target: &str, sink: Option<&str>, yes: 
                 sink: sink.map(str::to_string),
                 slots: Vec::new(),
                 rate_hz: None,
+                flat: false,
+                crossfeed: None,
             };
             apply(request).await.map(Some)
         }
@@ -187,13 +189,24 @@ fn built_in(name: &str, shown: Option<&EqSpec>) -> Option<Preset> {
 /// `svolder host eq remove`.
 pub async fn host_remove(g: &Globals<'_>) -> ExitCode {
     let was_on = state().is_some_and(|state| state.on);
+    // A daemon keeps the chain for crossfeed while that plays, and as a pass-through while a
+    // stream plays through it: the EQ goes off and the chain stays, which the words say.
+    let mut stays = false;
     let done = match Config::load().ok() {
         Some(config) => match served(g, &config).await {
             Some((socket, eq)) => {
                 let was_on = was_on || eq.on;
-                eq_op(&socket, HostEqOp::Mode { on: false })
-                    .await
-                    .map(|()| was_on)
+                let done = eq_op(&socket, HostEqOp::Mode { on: false }).await;
+                if done.is_ok() {
+                    stays = match super::eq_view(&socket).await {
+                        Some(now) => {
+                            now.note.as_deref() == Some(svolder_host::eq::PASSTHROUGH_NOTE)
+                                || now.crossfeed.as_ref().is_some_and(|crossfeed| crossfeed.on)
+                        }
+                        None => eq.crossfeed.as_ref().is_some_and(|crossfeed| crossfeed.on),
+                    };
+                }
+                done.map(|()| was_on)
             }
             None => remove().await.map(|()| was_on),
         },
@@ -203,9 +216,13 @@ pub async fn host_remove(g: &Globals<'_>) -> ExitCode {
         Ok(was_on) => {
             eprintln!(
                 "svolder: {}",
-                match was_on {
-                    true => "host EQ removed",
-                    false => "host EQ was not on",
+                match (was_on, stays) {
+                    (_, true) => {
+                        "host EQ off; the chain stays (crossfeed plays, or a stream does: it \
+                         goes once idle)"
+                    }
+                    (true, false) => "host EQ removed",
+                    (false, false) => "host EQ was not on",
                 }
             );
             ExitCode::SUCCESS
@@ -226,7 +243,12 @@ pub async fn host_status(g: &Globals<'_>, json: bool) -> ExitCode {
             .as_ref()
             .is_some_and(|state| state.manager == svolder_host::eq::Manager::Child)
     {
-        status.running = Some(eq.on);
+        // The chain also runs for crossfeed alone and as a kept pass-through, with the EQ off.
+        status.running = Some(
+            eq.on
+                || eq.crossfeed.as_ref().is_some_and(|crossfeed| crossfeed.on)
+                || eq.note.as_deref() == Some(svolder_host::eq::PASSTHROUGH_NOTE),
+        );
     }
     match json {
         true => println!("{}", status.json()),

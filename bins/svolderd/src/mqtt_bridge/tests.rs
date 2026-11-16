@@ -1402,9 +1402,13 @@ async fn a_retained_preset_command_is_not_acted_on() {
     assert!(stand.log.lock().expect("the log").is_empty());
 }
 
+/// What a switch was told of the crossfeed: on or off, and a model's word with a preset's name.
+type CrossfeedCall = (Option<bool>, Option<(String, String)>);
+
 /// A switch that records what it was told and answers as `answer` says.
 struct RecordingSwitch {
     calls: std::sync::Mutex<Vec<bool>>,
+    crossfeeds: std::sync::Mutex<Vec<CrossfeedCall>>,
     answer: Result<(), String>,
 }
 
@@ -1412,6 +1416,15 @@ struct RecordingSwitch {
 impl crate::host::EqSwitch for RecordingSwitch {
     async fn set_on(&self, on: bool) -> Result<(), String> {
         self.calls.lock().unwrap().push(on);
+        self.answer.clone()
+    }
+
+    async fn crossfeed(
+        &self,
+        on: Option<bool>,
+        choice: Option<(String, String)>,
+    ) -> Result<(), String> {
+        self.crossfeeds.lock().unwrap().push((on, choice));
         self.answer.clone()
     }
 }
@@ -1463,6 +1476,7 @@ async fn with_computer_at(
     let (tx, rx) = watch::channel(view);
     let switch = Arc::new(RecordingSwitch {
         calls: std::sync::Mutex::new(Vec::new()),
+        crossfeeds: std::sync::Mutex::new(Vec::new()),
         answer,
     });
     task.follow_computer(ComputerLink {
@@ -1581,15 +1595,208 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
     assert!(published.configs.is_empty() && published.available.is_none());
 }
 
+/// A computer view whose controller serves crossfeed, as `on` and `preset` say, with the model
+/// table of the host crate.
+fn crossfeed_computer_view(
+    on: bool,
+    model: &str,
+    preset: Option<&str>,
+) -> svolder_ipc::host::HostView {
+    use svolder_host::eq::crossfeed::{Model, ModelView};
+    let mut view = computer_view(false, None, 0.0);
+    view.eq.as_mut().unwrap().crossfeed = Some(svolder_host::eq::CrossfeedView {
+        on,
+        model: model.to_string(),
+        preset: preset.map(str::to_string),
+        models: Model::ALL.into_iter().map(ModelView::of).collect(),
+        ..Default::default()
+    });
+    view
+}
+
+fn crossfeed_calls(switch: &RecordingSwitch) -> Vec<CrossfeedCall> {
+    switch.crossfeeds.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn the_crossfeed_is_announced_and_its_states_follow_the_view() {
+    let (mut task, tx, _switch) = with_computer(
+        crossfeed_computer_view(true, "bauer", Some("Chu Moy")),
+        Ok(()),
+    )
+    .await;
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 4);
+    assert!(
+        published
+            .configs
+            .contains_key("homeassistant/select/svolder_computer/computer_crossfeed_preset/config")
+    );
+    assert_eq!(
+        published.crossfeed_state,
+        Some(("ON", "Bauer · Chu Moy".to_string()))
+    );
+
+    tx.send_replace(crossfeed_computer_view(false, "meier", None));
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(
+        task.computer.as_ref().unwrap().crossfeed_state,
+        Some(("OFF", "Custom".to_string()))
+    );
+
+    // A controller that no longer serves crossfeed takes its entities down, not the EQ's.
+    tx.send_replace(computer_view(false, None, 0.0));
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.crossfeed_state, None);
+}
+
+#[tokio::test]
+async fn host_audio_off_clears_the_crossfeed_with_the_computer() {
+    let (mut task, tx, _switch) =
+        with_computer(crossfeed_computer_view(true, "bauer", None), Ok(())).await;
+    task.publish_computer();
+    assert!(task.computer.as_ref().unwrap().crossfeed_state.is_some());
+    tx.send_replace(svolder_ipc::host::HostView::default());
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert!(published.configs.is_empty() && published.crossfeed_state.is_none());
+}
+
+#[tokio::test]
+async fn crossfeed_commands_reach_the_controller_as_one_change_each() {
+    let (mut task, _tx, switch) = with_computer(
+        crossfeed_computer_view(false, "bauer", Some("bs2b default")),
+        Ok(()),
+    )
+    .await;
+    task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
+    task.message("svolder/computer/computer_crossfeed/set", b" off ", false);
+    task.message(
+        "svolder/computer/computer_crossfeed_preset/set",
+        "Bauer · Chu Moy".as_bytes(),
+        false,
+    );
+    task.message(
+        "svolder/computer/computer_crossfeed_preset/set",
+        b"Linkwitz",
+        false,
+    );
+    settle(&mut task).await;
+    let mut calls = crossfeed_calls(&switch);
+    calls.sort();
+    let mut want: Vec<CrossfeedCall> = vec![
+        (Some(true), None),
+        (Some(false), None),
+        (None, Some(("bauer".into(), "Chu Moy".into()))),
+        (
+            None,
+            Some((
+                "linkwitz".into(),
+                svolder_host::eq::crossfeed::Model::Linkwitz.spec().presets[0]
+                    .name
+                    .into(),
+            )),
+        ),
+    ];
+    want.sort();
+    assert_eq!(calls, want);
+    // The EQ's own switch was not touched.
+    assert!(computer_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn custom_and_unknown_crossfeed_commands_change_nothing() {
+    let (mut task, _tx, switch) = with_computer(
+        crossfeed_computer_view(true, "bauer", Some("bs2b default")),
+        Ok(()),
+    )
+    .await;
+    for body in [&b"Custom"[..], b"custom", b"Bauer", b"nonsense", &[0xff]] {
+        task.message(
+            "svolder/computer/computer_crossfeed_preset/set",
+            body,
+            false,
+        );
+    }
+    task.message("svolder/computer/computer_crossfeed/set", b"toggle", false);
+    settle(&mut task).await;
+    assert!(crossfeed_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn a_crossfeed_command_the_host_cannot_take_does_nothing() {
+    // No crossfeed in the view, the controller's crossfeed unavailable, host audio off, no
+    // commands, and a retained command: none reaches the controller.
+    let mut unavailable = crossfeed_computer_view(false, "bauer", None);
+    unavailable
+        .eq
+        .as_mut()
+        .unwrap()
+        .crossfeed
+        .as_mut()
+        .unwrap()
+        .unavailable = Some("computer controls unavailable: x".into());
+    for view in [
+        computer_view(false, None, 0.0),
+        unavailable,
+        svolder_ipc::host::HostView::default(),
+    ] {
+        let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
+        task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
+        task.message(
+            "svolder/computer/computer_crossfeed_preset/set",
+            b"Linkwitz",
+            false,
+        );
+        settle(&mut task).await;
+        assert!(crossfeed_calls(&switch).is_empty());
+    }
+    let (mut task, _tx, switch) =
+        with_computer(crossfeed_computer_view(false, "bauer", None), Ok(())).await;
+    task.message("svolder/computer/computer_crossfeed/set", b"ON", true);
+    task.config.commands = false;
+    task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
+    settle(&mut task).await;
+    assert!(crossfeed_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn a_refused_crossfeed_command_is_followed_by_the_views_state() {
+    let (mut task, _tx, switch) = with_computer(
+        crossfeed_computer_view(false, "bauer", Some("bs2b default")),
+        Err("no".into()),
+    )
+    .await;
+    task.publish_computer();
+    task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
+    settle(&mut task).await;
+    assert_eq!(crossfeed_calls(&switch), [(Some(true), None)]);
+    // The refusal marks the computer for a publish, and the state stays the view's.
+    assert!(task.computer.as_ref().unwrap().dirty);
+    task.publish_computer();
+    assert_eq!(
+        task.computer.as_ref().unwrap().crossfeed_state,
+        Some(("OFF", "Bauer · bs2b default".to_string()))
+    );
+}
+
 /// The retained configs an earlier run left under the computer, which Home Assistant would
 /// remove and add again if they were cleared before being announced.
 #[cfg(feature = "broker-tests")]
-fn left_over() -> [String; 3] {
+fn left_over() -> [String; 4] {
     [
         "homeassistant/switch/svolder_computer/computer_eq/config".to_string(),
         "homeassistant/sensor/svolder_computer/computer_eq_preset/config".to_string(),
         // Announced only by a bridge that does not take commands: this one clears it.
         "homeassistant/binary_sensor/svolder_computer/computer_eq/config".to_string(),
+        // The crossfeed's, which a view without a crossfeed does not announce: cleared too.
+        "homeassistant/switch/svolder_computer/computer_crossfeed/config".to_string(),
     ]
 }
 
@@ -1621,12 +1828,17 @@ async fn a_computer_not_yet_reported_is_not_swept_before_it_is() {
     let published = task.computer.as_ref().unwrap();
     assert!(published.swept);
     assert_eq!(published.configs.len(), 2);
-    let [switch, preset, binary] = left_over();
+    let [switch, preset, binary, crossfeed] = left_over();
     let seen = watcher.collect(Duration::from_millis(700)).await;
     assert!(
         seen.iter()
             .any(|s| s.topic == binary && s.payload.is_empty()),
         "the config this bridge will not serve is cleared: {seen:#?}"
+    );
+    assert!(
+        seen.iter()
+            .any(|s| s.topic == crossfeed && s.payload.is_empty()),
+        "a crossfeed the host does not serve is cleared: {seen:#?}"
     );
     assert!(
         seen.iter()
@@ -1665,7 +1877,7 @@ async fn a_computer_that_stays_unreported_is_swept_after_the_start_settles() {
             Duration::from_secs(5),
         )
         .await;
-    assert_eq!(cleared.len(), 3);
+    assert_eq!(cleared.len(), 4);
 }
 
 #[tokio::test]

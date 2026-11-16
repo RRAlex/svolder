@@ -8,6 +8,10 @@
 //! - `api/v1/host/volume` `{"pct"}`: 0 to 100, never above.
 //! - `api/v1/host/mute` `{"muted"}`.
 //! - `api/v1/host/eq` `{"on"}`.
+//! - `api/v1/host/crossfeed` `{"on"?, "model"?, "preset"?, "amount_pct"?, "crossover_hz"?,
+//!   "delay_ms"?, "done"?}`: change the computer's crossfeed (`HostEqOp::Crossfeed`; the daemon
+//!   holds the values to the model's ranges and says what it refuses in words, a 409). `done` is
+//!   false while a drag goes on and, when absent, true; a body that names nothing is a 409.
 //! - `api/v1/host/eq/preset` `{"name", "device"?, "confirm"?}`: a preset recalled on the
 //!   computer.
 //! - `api/v1/host/eq/points` `{"type", "f", "g", "q"}`: add a point; a value outside the hand
@@ -29,7 +33,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use hyper::{HeaderMap, StatusCode};
 use serde::Deserialize;
-use svolder_host::eq::{HAND, HandRanges};
+use svolder_host::eq::{HAND, HandRanges, kind_word, parse_kind};
 use svolder_ipc::{CODE_COMPUTER_UNAVAILABLE, HostEqOp, Request, Response as Answer};
 
 use super::super::Web;
@@ -40,8 +44,6 @@ use super::super::writes::writer;
 const MAX_PCT: i64 = 100;
 /// The most slots there are.
 const MAX_SLOT: i64 = 16;
-/// The point types the computer EQ knows.
-const KINDS: [&str; 3] = ["PK", "LSC", "HSC"];
 
 /// The computer's routes.
 pub(super) fn routes() -> Router<Web> {
@@ -49,6 +51,7 @@ pub(super) fn routes() -> Router<Web> {
         .route("/api/v1/host/volume", post(volume))
         .route("/api/v1/host/mute", post(mute))
         .route("/api/v1/host/eq", post(mode))
+        .route("/api/v1/host/crossfeed", post(crossfeed))
         .route("/api/v1/host/eq/preset", post(preset))
         .route("/api/v1/host/eq/points", post(add))
         .route("/api/v1/host/eq/points/{n}", post(set))
@@ -104,19 +107,16 @@ fn out_of_range(why: impl Into<String>) -> Response {
     error(StatusCode::UNPROCESSABLE_ENTITY, why)
 }
 
-/// `kind` as the core spells it, or a 422.
+/// `kind` as the core spells it (`PK`, `LSC` or `HSC`), read as every front end reads it
+/// ([`parse_kind`]), or a 422.
 #[allow(
     clippy::result_large_err,
     reason = "the refusal is the answer the handler returns as it is"
 )]
 fn kind_of(kind: &str) -> Result<String, Response> {
-    let upper = kind.trim().to_ascii_uppercase();
-    match KINDS.contains(&upper.as_str()) {
-        true => Ok(upper),
-        false => Err(out_of_range(format!(
-            "no point type {kind:?}; use PK, LSC or HSC"
-        ))),
-    }
+    parse_kind(kind)
+        .map(|kind| kind_word(kind).to_string())
+        .map_err(|why| out_of_range(why.to_string()))
 }
 
 /// The point `n` of the path, counted from 1, or a 422.
@@ -205,6 +205,54 @@ async fn mode(State(web): State<Web>, headers: HeaderMap, body: axum::body::Byte
     }
     match parse::<Mode>(&body) {
         Ok(asked) => eq(&web, HostEqOp::Mode { on: asked.on }).await,
+        Err(refused) => *refused,
+    }
+}
+
+/// What `crossfeed` takes: the fields of `HostEqOp::Crossfeed`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Crossfeed {
+    on: Option<bool>,
+    model: Option<String>,
+    preset: Option<String>,
+    amount_pct: Option<f64>,
+    crossover_hz: Option<f64>,
+    delay_ms: Option<f64>,
+    #[serde(default = "done_by_default")]
+    done: bool,
+}
+
+/// A change that does not say it goes on is the last of its drag.
+fn done_by_default() -> bool {
+    true
+}
+
+/// Change the computer's crossfeed.
+async fn crossfeed(
+    State(web): State<Web>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Err(refused) = writer(&web, &headers) {
+        return refused;
+    }
+    match parse::<Crossfeed>(&body) {
+        Ok(asked) => {
+            eq(
+                &web,
+                HostEqOp::Crossfeed {
+                    on: asked.on,
+                    model: asked.model,
+                    preset: asked.preset,
+                    amount_pct: asked.amount_pct,
+                    crossover_hz: asked.crossover_hz,
+                    delay_ms: asked.delay_ms,
+                    done: asked.done,
+                },
+            )
+            .await
+        }
         Err(refused) => *refused,
     }
 }

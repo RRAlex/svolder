@@ -268,6 +268,14 @@ impl App {
     /// The computer's view changed: a preset the DAC was flattened for is on the computer now, so
     /// a later refusal is no refusal of that move.
     pub(crate) fn note_computer_view(&mut self) {
+        // Crossfeed that turned itself off says why, once, in a toast.
+        let note = self.crossfeed().and_then(|view| view.note.clone());
+        if note != self.tone.xf_note {
+            if let Some(why) = note.clone() {
+                self.notify(why);
+            }
+            self.tone.xf_note = note;
+        }
         let applied = self.computer_preset();
         if self.presets.computer_flattened.is_some()
             && applied.as_ref() == self.presets.computer_flattened.as_ref()
@@ -346,6 +354,7 @@ impl App {
         };
         self.pointer.curve_drag = None;
         self.tone.edit_line = None;
+        self.tone.xf_line = None;
         // On the device's side the Host group's Volume row is the switch itself: the cursor stays
         // on the switch line when the row becomes a line and a bar.
         let on_switch = self.switch_focused()
@@ -359,7 +368,7 @@ impl App {
         };
         self.tone.row = match (self.side, self.tone.row) {
             (Side::Computer, ToneRow::Band | ToneRow::Loudness) => ToneRow::Point(self.tone.point),
-            (Side::Dac, ToneRow::Point(_)) => ToneRow::Band,
+            (Side::Dac, ToneRow::Point(_) | ToneRow::Crossfeed(_)) => ToneRow::Band,
             (_, row) => row,
         };
         if self.screen == Screen::Device {
@@ -371,6 +380,7 @@ impl App {
 
     /// Focus point `index` of the computer's table.
     pub(crate) fn focus_point(&mut self, index: usize) {
+        self.tone.xf_line = None;
         self.tone.point = index;
         self.tone.row = ToneRow::Point(index);
         if self.screen == Screen::Device {

@@ -636,7 +636,7 @@ impl Daemon {
         }
         self.mcp.stop().await;
         self.web.stop().await;
-        self.host.stop();
+        self.host.shutdown().await;
         self.stop_bridge().await;
         // The actors the set holds, the ones a reload in flight started and the walk's probe:
         // with the mark set, none of them grows.

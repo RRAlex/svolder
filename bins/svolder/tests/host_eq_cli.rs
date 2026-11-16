@@ -417,12 +417,13 @@ fn applying_an_imported_preset_writes_the_conf_and_the_unit_and_says_what_is_on(
         "{err}"
     );
     let conf = home.read("svolder/host-eq.conf");
-    // The live chain: a preamp at the lowered gain (10^(-6.4/20)) and sixteen raw slots a side.
+    // The live chain: a preamp at the lowered gain (10^(-6.4/20)), sixteen raw slots a side.
     assert!(
         conf.contains("name = lpre label = linear control = { Mult = 0.4786"),
         "{conf}"
     );
-    assert_eq!(conf.matches("label = bq_raw").count(), 32, "{conf}");
+    // Sixteen slots a side, and the crossfeed stage's direct, cross and side paths a side.
+    assert_eq!(conf.matches("label = bq_raw").count(), 32 + 6, "{conf}");
     let state = home.read("svolder/host-eq.toml");
     let slots = state
         .split("slots = [")
@@ -481,7 +482,8 @@ fn a_band_preset_applies_its_bands_as_peaking_filters_with_the_preamp_its_peak_n
     let (code, _out, err) = home.run(&["host", "eq", "apply", "mine"]);
     assert_eq!(code, 0, "{err}");
     let conf = home.read("svolder/host-eq.conf");
-    assert_eq!(conf.matches("label = bq_raw").count(), 32, "{conf}");
+    // Sixteen slots a side, and the crossfeed stage's direct, cross and side paths a side.
+    assert_eq!(conf.matches("label = bq_raw").count(), 32 + 6, "{conf}");
     let mult: f64 = conf
         .lines()
         .find(|line| line.contains("name = lpre "))
@@ -1188,4 +1190,91 @@ fn the_sweep_leaves_a_process_that_is_not_the_homes_fake_alone() {
         alive,
         "the sweep signalled a process that is not the home's fake"
     );
+}
+
+// ---- svolder host crossfeed ----
+
+/// With no daemon, `show` reads the saved settings and says the live state is unknown, and every verb is
+/// refused with the code of no daemon and the way to start one.
+#[test]
+fn crossfeed_without_a_daemon_says_unknown_and_refuses_every_verb() {
+    let home = Home::new();
+    let (code, out, err) = home.run(&["host", "crossfeed"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.starts_with(
+            "crossfeed: unknown: no daemon is running, so whether it plays now is unknown \
+             (the saved state says off)\n"
+        ),
+        "{out}"
+    );
+    let (code, out, _err) = home.run(&["host", "crossfeed", "--json"]);
+    assert_eq!(code, 0);
+    let view: svolder_host::eq::CrossfeedView = serde_json::from_str(&out).expect("one object");
+    assert!(!view.on && !view.models.is_empty());
+
+    for verb in [["on"], ["off"]] {
+        let (code, out, err) = home.run(&["host", "crossfeed", verb[0]]);
+        assert_eq!(code, 3, "{err}");
+        assert!(out.is_empty());
+        assert!(
+            err.contains("crossfeed needs svolderd") && err.contains("svolder daemon install"),
+            "{err}"
+        );
+    }
+    assert!(!home.exists("svolder/host-eq.toml"), "nothing was written");
+}
+
+/// Against a running daemon the verbs change its crossfeed and print what it holds: a value past
+/// the range comes back held, and the words and names are the view's.
+#[tokio::test]
+async fn crossfeed_verbs_go_through_a_running_daemon() {
+    let svolderd = common::daemon_binary();
+    tokio::time::timeout(Duration::from_secs(90), async {
+        let mut home = Home::new();
+        home.start_daemon_on(&svolderd, "fake").await;
+        let (code, out, err) = home.run(&["host", "crossfeed"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(out.starts_with("crossfeed: off\n"), "{out}");
+
+        let (code, _out, err) = home.run(&["host", "crossfeed", "on"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("crossfeed on"), "{err}");
+
+        let (code, out, err) = home.run(&["host", "crossfeed", "--json"]);
+        assert_eq!(code, 0, "{err}");
+        let view: svolder_host::eq::CrossfeedView = serde_json::from_str(&out).unwrap();
+        assert!(view.on);
+        if view.delay_settable {
+            let (code, _out, err) = home.run(&["host", "crossfeed", "delay", "own"]);
+            assert_eq!(code, 0, "{err}");
+            assert!(err.contains("crossfeed delay: "), "{err}");
+        }
+        let second = view.models.get(1).expect("a second model").clone();
+        let range = second.amount_pct;
+
+        let (code, _out, err) =
+            home.run(&["host", "crossfeed", "model", &second.word.to_uppercase()]);
+        assert_eq!(code, 0, "{err}");
+        let (code, _out, err) = home.run(&["host", "crossfeed", "level", "9999"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            err.contains(&format!("crossfeed level: {:.0} %", range.max)),
+            "held to the range ({range:?}): {err}"
+        );
+        let preset = second.presets.last().expect("a preset").name.clone();
+        let (code, _out, err) = home.run(&["host", "crossfeed", "preset", &preset.to_lowercase()]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            err.contains(&format!("crossfeed preset: {preset}")),
+            "{err}"
+        );
+        let (code, _out, err) = home.run(&["host", "crossfeed", "model", "no-such-model"]);
+        assert_eq!(code, 1, "{err}");
+        let (code, _out, err) = home.run(&["host", "crossfeed", "off"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("crossfeed off"), "{err}");
+    })
+    .await
+    .expect("the case finishes in time");
 }

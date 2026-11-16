@@ -6,9 +6,15 @@
 
 use super::*;
 
+/// The `qq` that ends a loop, queued behind events already in the stream: the loop reads its
+/// events in order, so it quits after the last of them whatever the clock says.
+fn queued_quit() -> BoxStream<'static, io::Result<Event>> {
+    Box::pin(stream::iter(vec![key('q'), key('q')]))
+}
+
 /// A pointer resting on a tab shows its tooltip once the delay has passed, and the loop draws
 /// it without another event arriving: the pending tooltip shortens the tick. The delay is read
-/// from the wall clock, so this case runs in real time.
+/// from the wall clock, so this case runs in real time and waits for the tooltip on the screen.
 #[tokio::test]
 async fn a_pointer_resting_on_a_tab_shows_its_tooltip_through_the_loop() {
     use crossterm::event::MouseEventKind;
@@ -16,26 +22,22 @@ async fn a_pointer_resting_on_a_tab_shows_its_tooltip_through_the_loop() {
     let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
     app.mouse = true;
     let (x, y) = coord_of(&app, "EQ");
-    let script = stream::iter(vec![mouse_at(MouseEventKind::Moved, x, y)])
-        .chain(quit_after(Duration::from_secs(2)));
-    let (recorder, frames) = Recorder::new(SIZE.0, SIZE.1);
-    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
-    let mut mouse = SpyMouse::default();
-
-    let end = event_loop(LoopParts {
-        opener: &opener_over(never_opens()),
-        adder: &nothing_to_add(),
-        watching: watching(backend, app, None),
-        terminal: &mut terminal,
-        events: script,
-        mouse: &mut mouse,
-        title: &mut title(),
-        look: look(),
-    })
+    let (keys, input) = keyed();
+    keys.unbounded_send(mouse_at(MouseEventKind::Moved, x, y))
+        .expect("the loop reads events");
+    let tooltip = |frames: Frames| async move {
+        shown(&frames, "EQ · the tone control · e").await;
+        quit(&keys);
+    };
+    let (end, frames) = loop_over(
+        &opener_over(never_opens()),
+        watching(backend, app, None),
+        Box::pin(input),
+        tooltip,
+    )
     .await;
 
     assert_eq!(end.code, 0, "{:?}", end.why);
-    let frames = drawn(&frames);
     assert!(
         any_frame(&frames, "EQ · the tone control · e"),
         "the loop never drew the tooltip"
@@ -63,7 +65,7 @@ async fn motion_within_one_target_draws_no_frame() {
         let events: Vec<_> = (0..=moves)
             .map(|n| mouse_at(MouseEventKind::Moved, x + n % 4, y))
             .collect();
-        let script = stream::iter(events).chain(quit_after(Duration::from_millis(50)));
+        let script = stream::iter(events).chain(queued_quit());
         let (recorder, frames) = Recorder::new(SIZE.0, SIZE.1);
         let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
         let mut mouse = SpyMouse::default();
@@ -124,15 +126,9 @@ async fn the_pointer_over_the_web_boxs_link_is_noted_and_cleared() {
         let script = stream::iter(vec![mouse_at(MouseEventKind::Moved, at.0, at.1)])
             .chain(stream::iter(keys))
             .chain(match close {
-                true => quit_after(Duration::from_millis(50)),
+                true => queued_quit(),
                 // `q` would close the box; `x` is swallowed by it, and the input ends after.
-                false => Box::pin(
-                    stream::once(async {
-                        tokio::time::sleep(Duration::from_millis(50)).await;
-                        key('x')
-                    })
-                    .chain(stream::iter(vec![key('x')])),
-                ),
+                false => Box::pin(stream::iter(vec![key('x'), key('x')])),
             });
         let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
         let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
@@ -191,7 +187,7 @@ async fn a_press_clears_the_pointers_rest_on_the_link() {
         mouse_at(MouseEventKind::Moved, x + 3, y),
         mouse_at(MouseEventKind::Down(MouseButton::Right), x + 3, y - 3),
     ])
-    .chain(quit_after(Duration::from_millis(50)));
+    .chain(queued_quit());
     let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
     let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
     let mut mouse = SpyMouse::default();
@@ -231,7 +227,7 @@ async fn the_loop_writes_the_web_boxs_link_as_a_hyperlink_after_drawing_it() {
             },
         ));
         let esc = || Ok(Event::Key(KeyEvent::from(crossterm::event::KeyCode::Esc)));
-        let script = stream::iter(vec![esc(), esc()]).chain(quit_after(Duration::from_millis(50)));
+        let script = stream::iter(vec![esc(), esc()]).chain(queued_quit());
         let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
         let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
         let mut mouse = SpyMouse::default();

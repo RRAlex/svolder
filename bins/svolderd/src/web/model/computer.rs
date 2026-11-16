@@ -6,7 +6,7 @@
 //! whose tone control gives the built-in presets their bands.
 
 use serde::Serialize;
-use svolder_host::eq::EqView;
+use svolder_host::eq::{CrossfeedView, EqView};
 use svolder_ipc::{DeviceInfo, HostView};
 use svolder_profiles::tone::apo::{Correction, SourceFilter};
 use svolder_profiles::tone::preset::{self, Preset};
@@ -46,6 +46,9 @@ pub(crate) struct EqModel {
     pub(crate) on: bool,
     /// Whether it could not be told if the chain runs: `on` is only what the state file says.
     pub(crate) running_unknown: bool,
+    /// How many presets were loaded so far: a held value ends when it moves, even for a preset
+    /// of the same name.
+    pub(crate) loads: u64,
     pub(crate) points: Vec<PointModel>,
     pub(crate) preamp_db: f64,
     /// The preset the points came from, `custom` once a hand changed them.
@@ -59,6 +62,9 @@ pub(crate) struct EqModel {
     /// The points' summed curve in dB at 181 log-spaced frequencies from 20 Hz to 20 kHz, the
     /// preamp left out.
     pub(crate) response: Vec<f64>,
+    /// The crossfeed as the host's own view gives it (the Sound popup's Crossfeed tab draws it);
+    /// none from a host that has none.
+    pub(crate) crossfeed: Option<CrossfeedView>,
 }
 
 /// One preset the computer side lists.
@@ -124,6 +130,7 @@ fn eq_model(view: &EqView) -> EqModel {
     EqModel {
         on: view.on,
         running_unknown: view.running_unknown,
+        loads: view.loads,
         preamp_db: view.preamp_db,
         preset: view.preset.clone(),
         live: view.live,
@@ -131,6 +138,7 @@ fn eq_model(view: &EqView) -> EqModel {
         max: view.max,
         response: response_of(&points),
         points,
+        crossfeed: view.crossfeed.clone(),
     }
 }
 

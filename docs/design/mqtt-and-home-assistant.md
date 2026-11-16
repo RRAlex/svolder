@@ -162,7 +162,9 @@ one is logged once and ignored.
 ## The computer's EQ
 
 A bridge-level unit, `computer`, in place of a unit id: `svolder_mqtt::computer` builds one switch
-and one preset sensor under the Home Assistant device `This computer` (identifiers
+and one preset sensor (and, while the controller serves crossfeed, a crossfeed switch and a
+crossfeed preset select, `computer::crossfeed`, whose options are the view's model table and whose
+`Custom` is a state, not a command) under the Home Assistant device `This computer` (identifiers
 `svolder_computer`), and `mqtt_bridge/computer.rs` follows the host's view
 (`ComputerLink`), announces them while the view carries an EQ, and publishes `ON`/`OFF` and the
 preset name. The preset topic is cleared, not retained empty, while the EQ is off. A command goes

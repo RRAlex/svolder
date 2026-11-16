@@ -14,7 +14,7 @@ use svolder_profiles::tone::apo::{self, Correction, Parsed};
 use svolder_profiles::tone::fit::Preview;
 use svolder_profiles::tone::preset::{Imported, Preset, host_correction};
 use svolder_profiles::tone::response::log_freqs;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::watch;
 
 use super::search;
 use crate::locks::locked;
@@ -22,10 +22,6 @@ use crate::locks::locked;
 /// How many downloaded corrections are kept for the run, so a preview and the import after it
 /// fetch the file once. A file is at most 64 KiB; when the list is full the oldest goes.
 const FILES_KEPT: usize = 32;
-
-/// How many fits run at once: a fit is a second or so of one core, and a page asks for one per
-/// preview.
-const FITS_AT_ONCE: usize = 2;
 
 /// How many points a preview has: the web's curve grid.
 pub(super) const PREVIEW_POINTS: usize = crate::web::view::POINTS;
@@ -103,7 +99,6 @@ pub(super) struct Core {
     client: Option<Client>,
     index: Arc<Mutex<Held>>,
     files: Mutex<Vec<(String, Arc<Parsed>)>>,
-    fits: Semaphore,
 }
 
 impl Core {
@@ -112,7 +107,6 @@ impl Core {
             client,
             index: Arc::new(Mutex::new(Held::default())),
             files: Mutex::new(Vec::new()),
-            fits: Semaphore::new(FITS_AT_ONCE),
         }
     }
 
@@ -286,12 +280,7 @@ impl Core {
                 Ok(Preview::computer(&played, &grid))
             }
             Side::Device(eq) => {
-                let _permit = self
-                    .fits
-                    .acquire()
-                    .await
-                    .map_err(|_| Failure::new("the daemon is stopping", Reason::Stopping))?;
-                tokio::task::spawn_blocking(move || Preview::device(&correction, &eq, &grid))
+                crate::recall::fitted(move || Preview::device(&correction, &eq, &grid))
                     .await
                     .map_err(|_| Failure::new("the fit stopped unexpectedly", Reason::Internal))
             }

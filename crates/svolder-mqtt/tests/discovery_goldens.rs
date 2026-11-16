@@ -122,13 +122,23 @@ fn lokimax_with_commands() {
     assert_golden(sorted_json(entries), "lokimax-commands.json");
 }
 
+/// The view of a controller that serves crossfeed: its model table.
+fn crossfeed_view() -> svolder_host::eq::CrossfeedView {
+    use svolder_host::eq::crossfeed::{Model, ModelView};
+    svolder_host::eq::CrossfeedView {
+        models: Model::ALL.into_iter().map(ModelView::of).collect(),
+        ..Default::default()
+    }
+}
+
 #[test]
-fn the_computer_has_one_switch_and_one_sensor() {
+fn the_computer_has_the_eq_and_crossfeed_entities() {
     assert_golden(
         sorted_json(svolder_mqtt::computer::entries(
             "svolder",
             "homeassistant",
             true,
+            Some(&crossfeed_view()),
         )),
         "computer-commands.json",
     );
@@ -137,6 +147,7 @@ fn the_computer_has_one_switch_and_one_sensor() {
             "svolder",
             "homeassistant",
             false,
+            Some(&crossfeed_view()),
         )),
         "computer-read-only.json",
     );

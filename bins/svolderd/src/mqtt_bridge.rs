@@ -331,8 +331,8 @@ enum WriteOutcome {
     Written(Control, Outcome),
     /// A recall a later pick replaced before it started.
     Replaced,
-    /// The computer EQ's switch was turned: whether it was asked on, and how it ended.
-    Computer(bool, Result<(), String>),
+    /// A command to the computer ended: what it asked, as a phrase for the log, and how it ended.
+    Computer(String, Result<(), String>),
 }
 
 /// One control of one device: its unit id and its profile key.

@@ -19,13 +19,14 @@ or no units, start `svolderd` itself, detached, and wait up to two seconds for i
 before. `--transport daemon` walks the same chain but never falls back — with nothing answering at
 the end of it, the command exits 3 rather than opening a direct session.
 
-`--transport ble` forces a direct BlueZ session without ever consulting a daemon; `--transport fake`
-forces the in-process fake device, likewise without consulting a daemon, so the fake is never
-shadowed by a daemon on the same machine. `-v` names the choice on stderr:
-`svolder: daemon at <socket>`, or `svolder: direct (ble)` / `svolder: direct (fake)`. `devices` and
-`doctor` open no transport of their own, so `-v` names where they looked instead:
-`svolder: daemon at <socket>` for a daemon that answered, and, for `devices` reading the
-configuration file, `svolder: from the configuration`.
+`--transport ble` forces a direct BlueZ session without consulting a daemon for the device;
+`--transport fake` forces the in-process fake device, likewise, so the fake is never shadowed by a
+daemon on the same machine. The one thing they still tell a daemon is a preset or hop write
+(`svolder preset ...`, `hops`): the file is written directly and a daemon that reads the same file
+is asked to reload. `-v` names the choice on stderr: `svolder: daemon at <socket>`, or `svolder:
+direct (ble)` / `svolder: direct (fake)`. `devices` and `doctor` open no transport of their own, so
+`-v` names where they looked instead: `svolder: daemon at <socket>` for a daemon that answered, and,
+for `devices` reading the configuration file, `svolder: from the configuration`.
 
 A chain that started a daemon of its own and it did not answer in time prints
 `svolder: the daemon did not answer in 2s; using a direct session — see <log>` on stderr before the

@@ -17,7 +17,7 @@ process.env.TZ = 'UTC';
 const { default: assert } = await import('node:assert/strict');
 const { page } = await import('./dom.mjs');
 const { createCore } = await import('../../../bins/svolderd/web/core/core.js');
-const { EQ_LIBRARY, POPUPS } = await import('../../../bins/svolderd/web/core/popups/listed.js');
+const { SOUND, POPUPS } = await import('../../../bins/svolderd/web/core/popups/listed.js');
 const { IDS, WORDS, askId, eid, overwriteId, variantId, refusalWords, keyOf } = await import(
   '../../../bins/svolderd/web/core/popups/eq-library/draw.js');
 const { hzWords } = await import('../../../bins/svolderd/web/core/words.js');
@@ -178,7 +178,7 @@ function rig({ shown = 'A', viewer = {}, host = null, devices = {}, side = null 
   const calm = async () => { for (let i = 0; i < 8; i++) await p.settle(); };
   const open = async (to = null) => {
     $('knob').focus();
-    core.router.open(EQ_LIBRARY, to);
+    core.router.open(SOUND, to);
     await calm();
   };
   const type = (id, text, extra = {}) => {
@@ -202,7 +202,7 @@ function rig({ shown = 'A', viewer = {}, host = null, devices = {}, side = null 
   return {
     ...p, core, daemon, pauses, keyListeners, $, calm, open, type, search, click, submit, text,
     posts: (tail) => daemon.calls.filter((one) => one.path.endsWith(tail)),
-    title: () => $('popup-eq-library-title')?.textContent,
+    title: () => $('popup-sound-context')?.textContent,
     at: () => p.document.activeElement?.id ?? null,
   };
 }
@@ -223,11 +223,12 @@ const refused = (status, reason, error = 'daemon words') => ({ status, body: { e
 
 await ok('the_popup_is_a_writers_between_devices_and_help_and_names_the_side_in_every_title', async () => {
   const order = POPUPS.map((one) => one.name);
-  assert.deepEqual(order, ['devices', 'eq-library', 'help']);
-  const entry = POPUPS.find((one) => one.name === EQ_LIBRARY);
+  assert.deepEqual(order, ['devices', 'sound', 'help']);
+  const entry = POPUPS.find((one) => one.name === SOUND);
   assert.equal(entry.row.sees, 'writer');
   assert.equal(entry.stays, undefined, 'a change of the shown device closes it');
-  assert.deepEqual(entry.entries.map((one) => one.id), ['autoeq', 'upload', 'saved']);
+  assert.equal(entry.entries, undefined, 'no side list: the tabs and the pills are its pages');
+  assert.equal(entry.row.label, 'Sound…');
   const a = rig();
   await a.open();
   assert.equal(a.title(), 'EQ library · A');
@@ -249,7 +250,7 @@ await ok('a_guest_and_a_page_with_writes_off_have_no_way_in', async () => {
   for (const viewer of [{ guest: true, signed_in: false }, { writes: false }]) {
     const r = rig({ viewer });
     await r.open();
-    assert.equal(r.$('popup-eq-library'), null, 'nothing is drawn');
+    assert.equal(r.$('popup-sound'), null, 'nothing is drawn');
     assert.equal(r.core.router.state().popup, null);
     r.window.close();
   }
@@ -635,7 +636,7 @@ await ok('the_answer_and_the_models_event_reach_the_saved_list_in_either_order',
     await r.calm();
     const names = [...r.document.querySelectorAll('.fpe-row-name')].map((el) => el.textContent);
     assert.deepEqual(names, ['Flat', 'Mine', 'Sennheiser HD 650'], `${order}: the list has the new preset`);
-    assert.match(r.$('popup-eq-library').textContent, /Imported/);
+    assert.match(r.$('popup-sound').textContent, /Imported/);
     r.window.close();
   }
 });
@@ -720,7 +721,7 @@ await ok('each_saved_preset_says_where_it_lives_and_why_it_cannot_be_overwritten
   assert.match(rows[2].querySelector('.fpe-why').textContent, /From AutoEq is imported: save the curve under a new name\./);
   assert.equal(overwrite(1).getAttribute('aria-disabled'), null, 'a preset of the person\'s own can be overwritten');
   assert.equal(overwrite(3).getAttribute('aria-disabled'), null);
-  assert.ok(!r.text('popup-eq-library').includes('saved on the device'), '"saved on the device" is not claimed');
+  assert.ok(!r.text('popup-sound').includes('saved on the device'), '"saved on the device" is not claimed');
   r.window.close();
 });
 
@@ -732,7 +733,7 @@ await ok('overwrite_asks_once_with_the_safe_answer_focused_and_sends_force_namin
     await r.open('saved');
     r.$(overwriteId(1)).click();
     await r.calm();
-    const keep = r.$('popup-eq-library').querySelector('[data-answer="keep"]');
+    const keep = r.$('popup-sound').querySelector('[data-answer="keep"]');
     assert.equal(r.at(), null === keep ? '' : r.document.activeElement.id, 'x');
     assert.equal(r.document.activeElement, keep, 'the safe answer has the focus');
     assert.match(r.$(askId(1)).textContent, new RegExp(`Replace “Mine” with the curve that is on ${shown} now\\?`));
@@ -741,7 +742,7 @@ await ok('overwrite_asks_once_with_the_safe_answer_focused_and_sends_force_namin
     assert.equal(r.posts('/presets').length, 0, 'keeping sends nothing');
     r.$(overwriteId(1)).click();
     await r.calm();
-    r.$('popup-eq-library').querySelector('[data-answer="overwrite"]').click();
+    r.$('popup-sound').querySelector('[data-answer="overwrite"]').click();
     await r.calm();
     const sent = r.posts('/presets');
     assert.equal(sent.length, 1);
@@ -759,10 +760,10 @@ await ok('a_refused_overwrite_keeps_the_question_and_says_why', async () => {
   await r.open('saved');
   r.$(overwriteId(1)).click();
   await r.calm();
-  r.$('popup-eq-library').querySelector('[data-answer="overwrite"]').click();
+  r.$('popup-sound').querySelector('[data-answer="overwrite"]').click();
   await r.calm();
   assert.match(r.text(IDS.savedWords), /read-only/);
-  assert.ok(r.$('popup-eq-library').querySelector('[data-answer="keep"]'), 'the question stays');
+  assert.ok(r.$('popup-sound').querySelector('[data-answer="keep"]'), 'the question stays');
   assert.equal(r.document.activeElement.dataset.answer, 'keep');
   r.window.close();
 });
@@ -1033,7 +1034,7 @@ await ok('an_overwrite_is_worded_once_under_the_list_and_not_toasted', async () 
   await r.open('saved');
   r.$(overwriteId(1)).click();
   await r.calm();
-  r.$('popup-eq-library').querySelector('[data-answer="overwrite"]').click();
+  r.$('popup-sound').querySelector('[data-answer="overwrite"]').click();
   await r.calm();
   assert.match(r.text(IDS.savedWords), /now holds the curve that is on/);
   assert.equal(r.$('toasts').textContent, '', 'the answer\'s toast would say it twice');

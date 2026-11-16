@@ -1,12 +1,12 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// Node harness for the step a page asked the volume for (core/volume-ask.js), which Signal, Paper
-// and Night drive keep alike: the step shown until the device answers or the ask is old, the step
-// a change starts from, the timer that ends a stale ask; and Night drive's dash starting from the
-// reading, not the ask, once the device has answered and another hand moved it.
+// Node harness for the step a page asked the volume for (core/volume-ask.js), which Signal, Paper,
+// Night drive and Ember keep alike: the step shown until the device answers or the ask is old, the
+// step a change starts from, the timer that ends a stale ask; and Night drive's dash starting from
+// the reading, not the ask, once the device has answered and another hand moved it.
 // Run: node core-volume-ask.mjs
 import assert from 'node:assert/strict';
-import { ASK_MS, askExpiry, baseOf, shownRaw } from '../../../bins/svolderd/web/core/volume-ask.js';
+import { ASK_MS, ackAsk, askExpiry, baseOf, noteReading, shownRaw } from '../../../bins/svolderd/web/core/volume-ask.js';
 import { page as domPage } from './dom.mjs';
 import { DAC, computerRig } from './nightdrive-rig.mjs';
 import { wireDash } from '../../../bins/svolderd/web/themes/nightdrive/dash-wire.js';
@@ -38,6 +38,23 @@ await ok('a_change_starts_from_the_ask_while_it_is_shown_else_from_the_reading',
   assert.equal(baseOf(v(50), view(asked(60, 0), ASK_MS), 1), 50, 'an old ask is forgotten');
   assert.equal(baseOf(v(50, 70), view(null), 1), 70, 'a raise in a climb goes on from its target');
   assert.equal(baseOf(v(50, 70), view(null), -1), 50);
+});
+
+await ok('a_reading_before_the_answer_settles_the_ask_when_the_answer_comes', () => {
+  const view = { asked: { raw: 41, at: 0 } };
+  assert.equal(noteReading(view, 41), false, 'before the answer a reading changes nothing yet');
+  ackAsk(view, view.asked);
+  assert.deepEqual([view.asked.acked, view.asked.answered], [true, true]);
+  const other = { asked: { raw: 41, at: 0 } };
+  noteReading(other, 30);
+  ackAsk(other, other.asked);
+  assert.equal(other.asked.answered, undefined, 'a reading of another step does not answer the ask');
+  const late = { asked: { raw: 41, at: 0 } };
+  ackAsk(late, late.asked);
+  assert.equal(late.asked.answered, undefined);
+  assert.equal(noteReading(late, 41), true, 'after the answer the reading answers the ask');
+  assert.equal(late.asked.answered, true);
+  assert.equal(noteReading({ asked: null }, 41), false);
 });
 
 await ok('the_expiry_clears_a_stale_ask_once_and_redraws', () => {
@@ -73,7 +90,7 @@ await ok('the_expiry_clears_a_stale_ask_once_and_redraws', () => {
 
 /** Night drive's dash over the real store and listener, the device's volume at `raw`; the act's answer is
  * held until `release()` so a case can put the stream's reading before or after it. */
-function dashRig(raw) {
+function dashRig(raw, landed) {
   const { window, document } = domPage('<div id="nightdrive"><span id="nd-switch"></span><div id="nd-dash"></div></div>');
   Object.assign(globalThis, { document, window });
   const volume = (at) => ({ text: `${at}`, unit: 'dB', muted: false, raw: at, lo: 0, hi: 100, mute: 'mute', target: null });
@@ -87,7 +104,7 @@ function dashRig(raw) {
     act: async (_name, step) => {
       sent.push(step);
       await new Promise((resolve) => { release = resolve; });
-      return { ok: true };
+      return landed === undefined ? { ok: true } : { ok: true, landed: { raw: landed } };
     },
   };
   const wired = wireDash({
@@ -131,12 +148,52 @@ await ok('night_drive_order_the_streams_reading_then_the_answer', async () => {
   r.release();
   await r.tick();
   assert.equal(r.view.asked.acked, true);
-  assert.equal(r.view.asked.answered, undefined, 'the reading came first: the ask stands until ASK_MS');
+  assert.equal(r.view.asked.answered, true, 'the reading of the step came first: the answer settles it');
   r.store.applyPart(r.store.shown(), 'volume', r.volume(30));
   r.up();
   await r.tick();
-  assert.equal(r.sent.at(-1), 42, 'still from the ask until it is old');
+  assert.equal(r.sent.at(-1), 31, 'from the reading, as when the answer comes first');
   r.stop();
+});
+
+await ok('night_drive_order_the_streams_reading_another_hands_reading_then_the_answer', async () => {
+  const r = dashRig(40);
+  r.up();
+  await r.tick();
+  r.store.emit('volume', { raw: 41, text: '41' });
+  // another hand turns it down after the device read the step asked; both readings precede the answer
+  r.store.applyPart(r.store.shown(), 'volume', r.volume(30));
+  r.store.emit('volume', { raw: 30, text: '30' });
+  r.release();
+  await r.tick();
+  r.up();
+  await r.tick();
+  assert.equal(r.sent.at(-1), 31, 'the newer reading is another hand\'s: from it, not from the ask');
+  r.stop();
+});
+
+await ok('night_drive_the_reading_of_the_landed_step_before_the_answer_settles_the_ask', async () => {
+  const r = dashRig(40, 42);
+  r.up();
+  await r.tick();
+  r.store.emit('volume', { raw: 42, text: '42' });
+  r.release();
+  await r.tick();
+  assert.equal(r.view.asked.raw, 42, 'the daemon landed the write on another step');
+  assert.equal(r.view.asked.answered, true, 'the device had read the step it landed on');
+  r.stop();
+});
+
+await ok('a_reading_of_another_step_before_the_answer_keeps_the_ask_and_a_later_one_after_the_step_changes_nothing', () => {
+  const view = { asked: { raw: 41, at: 0 } };
+  noteReading(view, 30);
+  assert.equal(ackAsk(view, view.asked), false, 'our write came after that reading');
+  assert.equal(view.asked.answered, undefined);
+  const seen = { asked: { raw: 41, at: 0 } };
+  noteReading(seen, 41);
+  noteReading(seen, 30);
+  assert.equal(ackAsk(seen, seen.asked), true, 'the step was read once, a later reading changes nothing');
+  assert.equal(seen.asked.answered, true);
 });
 
 console.log(`${n} core-volume-ask checks passed`);

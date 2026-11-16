@@ -31,7 +31,7 @@ use tokio::net::unix::pipe::Sender;
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
 
-use super::live::{LiveNode, preamp_params, props_of, set_param_line};
+use super::live::{LiveNode, OutputSink, output_sink, preamp_params, props_of, set_param_line};
 use super::paths::{is_executable, on_path};
 use crate::route::PwDump;
 
@@ -68,6 +68,13 @@ pub trait Params: Send + Sync {
     /// The rate the default output runs at, for an apply while no chain is there to show it:
     /// `None` when it cannot be read.
     async fn sink_rate(&mut self) -> Option<u32> {
+        None
+    }
+
+    /// The output the computer plays into (the default sink, or the one behind the chain when
+    /// the chain is the default), as the last look at the graph saw it: it is read with the node,
+    /// from the same dump, so asking costs nothing. `None` when no look saw one.
+    fn output(&self) -> Option<OutputSink> {
         None
     }
 
@@ -133,6 +140,12 @@ pub(super) trait Link: Send + Sync {
     /// Whether the `pw-cli` refused a `set-param` since this was last asked.
     fn take_refusal(&mut self) -> bool;
 
+    /// Whether the `pw-cli` that was running has ended since this was last asked (or since its
+    /// last line): what it was given may not have landed.
+    fn ended(&mut self) -> bool {
+        false
+    }
+
     /// A `pw-cli` to be fed: `Some(false)` when one is running, `Some(true)` when one was
     /// started now, `None` when there is none and none can be started yet.
     fn ensure_running(&mut self) -> Option<bool>;
@@ -149,6 +162,11 @@ pub(super) trait Link: Send + Sync {
 
     /// The rate the default output runs at.
     async fn sink_rate(&mut self) -> Option<u32>;
+
+    /// The output the graph showed the last time the node was read.
+    fn output(&self) -> Option<OutputSink> {
+        None
+    }
 
     /// The kept node was dropped on purpose, so the next read of it is a look at the chain.
     fn node_dropped(&mut self) {}
@@ -237,9 +255,15 @@ impl<L: Link> Session<L> {
     }
 
     /// Whether a refusal has been read and not yet acted on: the kept node is then dropped and
-    /// the next line carries every port.
+    /// the next line carries every port. A `pw-cli` that ended since its last line makes the
+    /// next line carry every port too, since what it held in its pipe is not known to have
+    /// landed.
     fn take_refusal(&mut self) -> bool {
+        // The refusal first: an ended `pw-cli` takes the one it printed with it.
         let refused = self.link.take_refusal();
+        if self.link.ended() {
+            self.outbox.mark_full();
+        }
         if refused {
             self.node = None;
             self.outbox.mark_full();
@@ -297,6 +321,10 @@ impl<L: Link> Params for Session<L> {
         self.link.sink_rate().await
     }
 
+    fn output(&self) -> Option<OutputSink> {
+        self.link.output()
+    }
+
     async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
         let sent = self.deliver(node, params).await;
         if !sent {
@@ -342,6 +370,8 @@ struct PwLink {
     /// The last rate a node was read with: a sink that is suspended shows none, which is not a
     /// change of rate.
     rate: Option<u32>,
+    /// The output the last read of the graph showed.
+    output: Option<OutputSink>,
 }
 
 /// The real [`Params`]: one held-open `pw-cli`, and `pw-dump` to find the node.
@@ -361,6 +391,7 @@ impl PwCliSession {
                 running: None,
                 started: None,
                 rate: None,
+                output: None,
             }),
         }
     }
@@ -457,6 +488,17 @@ impl PwLink {
 
 #[async_trait]
 impl Link for PwLink {
+    fn ended(&mut self) -> bool {
+        let gone = self
+            .running
+            .as_mut()
+            .is_some_and(|running| !matches!(running.child.try_wait(), Ok(None)));
+        if gone {
+            self.running = None;
+        }
+        gone
+    }
+
     fn take_refusal(&mut self) -> bool {
         self.running
             .as_ref()
@@ -521,7 +563,9 @@ impl Link for PwLink {
     }
 
     async fn read_node(&mut self) -> Option<LiveNode> {
-        let mut node = props_of(&self.dump.read().await?)?;
+        let dump = self.dump.read().await?;
+        self.output = output_sink(&dump);
+        let mut node = props_of(&dump)?;
         match node.rate_hz {
             Some(rate) => self.rate = Some(rate),
             None => node.rate_hz = self.rate,
@@ -531,6 +575,10 @@ impl Link for PwLink {
 
     async fn sink_rate(&mut self) -> Option<u32> {
         super::live::default_sink_rate(&self.dump.read().await?)
+    }
+
+    fn output(&self) -> Option<OutputSink> {
+        self.output.clone()
     }
 }
 
@@ -542,6 +590,10 @@ impl Params for PwCliSession {
 
     async fn sink_rate(&mut self) -> Option<u32> {
         self.session.sink_rate().await
+    }
+
+    fn output(&self) -> Option<OutputSink> {
+        self.session.output()
     }
 
     async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {

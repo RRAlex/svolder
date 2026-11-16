@@ -158,6 +158,8 @@ pub struct FrameAreas {
 /// nor animated: [`FrameAreas::toast`] says where it is.
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme, hits: &mut HitMap) -> FrameAreas {
     hits.clear();
+    // Everything this frame works out about the layout is kept until it is drawn.
+    let _held = app.drawn.hold();
     let area = frame.area();
     frame.buffer_mut().set_style(area, theme.style(Role::Text));
     if !fits(area) {

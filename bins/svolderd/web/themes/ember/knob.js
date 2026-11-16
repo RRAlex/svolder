@@ -5,6 +5,7 @@
 // arc and target tick, the readout and its notes — by the geometry the page's drawing uses
 // (draw/dial.js): view box -30 -16 260 220, centre (100, 100), 270° from -135°, 0° up.
 
+import { ackAsk, askExpiry, baseOf, noteReading, shownRaw } from '../../core/volume-ask.js';
 import { ember } from './bind.js';
 import {
   angle as dialAngle, arc, fraction, point, SWEEP, spoke as spokeAt, tickClass as classOf,
@@ -19,8 +20,6 @@ const SVG = 'http://www.w3.org/2000/svg';
 const WHEEL_STEP = 40;
 /** The steps' worth of travel it takes to cross between silence and the step above it. */
 const DETENT = 4;
-/** How long a step asked stays the one shown while the device has not echoed it (ms). */
-const ASKED_FOR = 3000;
 /** How long the lit ticks, the arc, the handle and the numeral take to move between two
  * readings: less than the 84 ms between a climb's steps, so each reported step is reached
  * before the next arrives. */
@@ -50,9 +49,16 @@ class Knob extends HTMLElement {
     this.locked = d.inert === 'true';
     // The computer's volume: 0 to 100 %, written through the computer's own actions.
     this.computer = d.computer === 'true';
-    // The step the user has asked for and the device has not yet echoed: what the knob shows.
-    this.asked = null;
-    this.askedAt = 0;
+    // The step the user has asked for and the device has not yet echoed, as every theme keeps it
+    // (core/volume-ask.js): what the knob shows.
+    this.view = { asked: null, now: Date.now() };
+    this.expiry = askExpiry({
+      view: this.view,
+      now: Date.now,
+      redraw: () => this.show(),
+      // the timer ends itself: no listener on the mount's signal keeps a swapped-out knob
+      signal: new AbortController().signal,
+    });
     // The climb target a touch cancelled, ignored in readings until the stream drops it.
     this.cancelled = null;
     this.travel = 0;
@@ -64,6 +70,11 @@ class Knob extends HTMLElement {
     return !this.locked && this.raw !== null;
   }
 
+  /** The volume as `core/volume-ask.js` takes it. */
+  reading() {
+    return { raw: this.raw, target: this.target };
+  }
+
   /** Whether a climb is shown: its target is above the level. */
   climbing() {
     return this.target !== null && this.raw !== null && this.target > this.raw;
@@ -73,12 +84,16 @@ class Knob extends HTMLElement {
   ask(raw) {
     let step = Math.min(this.hi, Math.max(this.lo, Math.round(raw)));
     if (this.cap !== null && step > this.cap) step = this.cap;
-    // Nothing to say: the step is the one already asked, or the level the device holds.
-    if (step === this.asked || (this.asked === null && step === this.raw && !this.climbing())) {
-      return;
-    }
-    this.asked = step;
-    this.askedAt = Date.now();
+    // Nothing to say: the step is the one asked and still shown, or the level the device holds.
+    const { view } = this;
+    const at = Date.now();
+    const held = view.asked?.raw === step
+      && shownRaw(this.reading(), { asked: view.asked, now: at }) === step;
+    const same = held || (!view.asked && step === this.raw && !this.climbing());
+    if (same) return;
+    view.now = at;
+    view.asked = { raw: step, at };
+    this.expiry.arm();
     this.show();
     this.write(step);
   }
@@ -88,27 +103,31 @@ class Knob extends HTMLElement {
    * below every step): that step is the one asked, unless a newer ask has replaced it. */
   async write(step) {
     const { core, signal } = ember;
+    const { view } = this;
+    const mine = view.asked;
     const answer = this.computer ? await core.actions.computer.setVolume(step)
       : await core.actions.setVolume(step);
     if (signal.aborted || answer.queued || answer.dropped) return;
+    // Another ask has taken the place of this one meanwhile: its answer is not for that.
+    if (view.asked !== mine || !mine) return;
     if (!answer.ok) {
-      this.asked = null;
+      view.asked = null;
       this.show();
       return;
     }
     const landed = answer.landed?.raw;
-    if (typeof landed === 'number' && this.asked !== null && landed !== this.asked) {
-      this.asked = landed;
+    if (typeof landed === 'number' && landed !== mine.raw) {
+      view.asked = { raw: landed, at: Date.now(), read: mine.read, seen: mine.read === landed };
       this.show();
     }
+    if (ackAsk(view, view.asked)) this.show();
   }
 
   /** The step a change by `delta` starts from: a raise from what is asked or the climb's target,
    * a lowering from the level (a lower step ends a climb where the device is). */
   base(delta) {
-    const level = this.raw;
-    if (delta < 0) return Math.min(this.asked ?? level, level);
-    return this.asked ?? (this.climbing() ? this.target : level);
+    this.view.now = Date.now();
+    return baseOf(this.reading(), this.view, delta);
   }
 
   /** Move by `steps` whole steps (a held key, a button, Page Up/Down): no detent but a step's. */
@@ -162,17 +181,28 @@ class Knob extends HTMLElement {
         })
         .catch(() => {});
     }
-    this.asked = null;
+    this.view.asked = null;
     this.travel = 0;
   }
 
   /** What the knob reads out: the asked step's words until the device's echo arrives. */
   show() {
-    const asked = this.asked;
+    const asked = this.shownAsk();
     // Muted reads `−∞ dB`, as the other themes say it.
     if (this.classList.contains('muted') && !this.computer) return this.readout('−∞ dB');
     if (asked === null) return this.readout(this.words);
     this.readout(this.texts[asked - this.lo] ?? this.words);
+  }
+
+  /** The step asked, while it stands for the reading; else `null`. */
+  shownAsk() {
+    const { asked } = this.view;
+    if (!asked) return null;
+    this.view.now = Date.now();
+    // A climb whose target is the step asked shows the live level (the sub line says where to).
+    if (this.target !== null && this.target === asked.raw) return null;
+    const step = shownRaw(this.reading(), this.view);
+    return step === asked.raw && step !== this.raw ? step : null;
   }
 
   /** Put `text` in the big number and its unit. */
@@ -472,12 +502,9 @@ class Knob extends HTMLElement {
     this.risk = data.risk;
     this.cap = data.cap;
     this.words = data.text;
-    // The asked step stands until a reading reflects it, as the level or as the climb's target
-    // (the number then shows the live level), or, if none does, a while after it was asked.
-    if (this.asked !== null && (data.raw === this.asked || this.target === this.asked
-      || Date.now() - this.askedAt > ASKED_FOR)) {
-      this.asked = null;
-    }
+    // The asked step stands until a reading reflects it or, if none does, a while after it was
+    // asked (core/volume-ask.js).
+    noteReading(this.view, data.raw);
     this.classList.toggle('muted', data.muted);
     const level = data.raw === null || (this.silence && data.raw === this.lo) ? null : data.raw;
     for (const label of this.svg.querySelectorAll('.ltick, .lbl')) {
