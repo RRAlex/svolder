@@ -13,9 +13,11 @@ Everything here talks to the instance through the inherited private environment.
 until `private-pipewire.sh proof` has passed. Prints one line per measurement and `host-e2e:
 PASS` or the first failed assertion (exit 1).
 """
+import cmath
 import json
 import math
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -27,9 +29,13 @@ import wave
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)  # python -I leaves the script's directory out
+import vu  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(HERE))
 LAUNCHER = os.path.join(HERE, 'private-pipewire.sh')
 SINK = 'svolder_e2e_sink'
+# what the daemon names the captured sink (its description, from pipewire.conf)
+SINK_DESCRIPTION = 'svolder e2e sink'
 CHAIN = 'svolder_eq'
 RATE = 48000
 TONE_HZ = 1000.0
@@ -45,7 +51,8 @@ ZERO = 2e-4
 # tone off the peak (0.5 dB measured), a gap or a click is a step of several dB.
 STEP_DB = 1.0
 # The crossfeed phases play left-only and mono tones at this level, and every expected level and
-# phase comes from the engine's own response functions (the xf_expect example).
+# phase comes from the engine's own response functions (the xf_expect example; the virtual speakers'
+# phases V0-V11 use vs_expect).
 XF_DBFS = -12.0
 XF_DB_TOL = 0.2
 EXPECT = os.path.join(REPO, 'target/debug/examples/xf_expect')
@@ -682,6 +689,138 @@ def wait_level(base, want, tol, deadline):
     return False, time.monotonic() - t0, lv
 
 
+# ---- the virtual speakers stage: the set, the oracle, the measurements --------------------------
+
+VS_EXPECT = os.path.join(REPO, 'target/debug/examples/vs_expect')
+VS_LABEL = 'Synthetic room'
+
+
+def vs_oracle(rate, wav, hzs):
+    """The engine's four complex gains at each frequency for the stored WAV, on a sink at `rate`:
+    [{'ll', 'lr', 'rl', 'rr'}] (the vs_expect example)."""
+    if not os.access(VS_EXPECT, os.X_OK):
+        raise Fail('no ' + VS_EXPECT + ' (make host-e2e builds it)')
+    r = subprocess.run([VS_EXPECT, str(rate), wav] + [repr(float(h)) for h in hzs],
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise Fail('vs_expect failed: ' + r.stderr.strip())
+    return [{k: complex(*o[k]) for k in ('ll', 'lr', 'rl', 'rr')} for o in map(json.loads, r.stdout.splitlines())]
+
+
+def vs_import(conn, path, label=VS_LABEL):
+    """Import the fixture as the person's own set (a job) and wait until the catalogue lists it
+    as fetched; returns its entry."""
+    r = conn.ask({'cmd': 'speakers', 'op': {'op': 'import', 'path': path, 'label': label, 'room': 'with'}})
+    if r.get('result') != 'job':
+        raise Fail('the import was answered with %s' % r)
+
+    def found():
+        c = conn.ask({'cmd': 'speakers', 'op': {'op': 'catalogue'}})
+        return next((s for s in c.get('sets', []) if s.get('label') == label and s.get('fetched')), None)
+    return wait_until('the imported set in the catalogue', found, 20)
+
+
+def vs_wav(set_id):
+    """Where the daemon keeps the set's converted WAV (what the convolvers read, and the oracle)."""
+    return os.path.join(RUN, 'state', 'svolder', 'speakers', set_id + '.wav')
+
+
+def chain_conf():
+    """The path of the config the running chain process was started with, or None."""
+    for pid in _private_pids('host-eq.conf'):
+        try:
+            args = open('/proc/%d/cmdline' % pid, 'rb').read().decode(errors='replace').split('\0')
+        except OSError:
+            continue
+        for a in args:
+            if a.endswith('host-eq.conf'):
+                return a
+    return None
+
+
+VS_CONF_OFF = re.compile(r'name = lvs label = mixer control = \{ "Gain 1" = 1 "Gain 2" = 0 "Gain 3" = 0 \}')
+
+
+def vs_bypass_ok():
+    """Both speaker mixers hold the bypass (dry 1, wet 0 and 0) exactly."""
+    held = chain_params()
+    return all(held.get(m + ':Gain %d' % i) == v for m in ('lvs', 'rvs') for i, v in ((1, 1.0), (2, 0.0), (3, 0.0)))
+
+
+def vs_bypass_exact(label):
+    """Both speaker mixers hold the bypass exactly, with the convolvers loaded."""
+    held = chain_params()
+    want = {}
+    for m in ('lvs', 'rvs'):
+        want.update({m + ':Gain 1': 1.0, m + ':Gain 2': 0.0, m + ':Gain 3': 0.0})
+    off = {k: (held.get(k), v) for k, v in want.items() if held.get(k) != v}
+    check(not off, '%s: the speakers mixers hold exactly the bypass (%s)' % (label, off or 'all %d' % len(want)))
+
+
+def vs_null(label, f, bypass_ports=True):
+    """A left-only tone through a chain that should do nothing, once the tone is linked to the chain (and the
+    mixers hold the bypass): the null test."""
+    block = play(f)
+    check(settles(lambda: tone_links() == [CHAIN] and (not bypass_ports or vs_bypass_ok()), 10.0),
+          '%s: the tone is linked to the chain' % label)
+    null_test(label, f, block)
+
+
+def vs_forget_refused(conn, sid, wav, label):
+    """Forgetting the set is refused as busy while a chain holds it, and its WAV is still there."""
+    r = conn.ask({'cmd': 'speakers', 'op': {'op': 'forget', 'id': sid}})
+    check(r.get('result') != 'ack' and r.get('reason') == 'busy' and os.path.exists(wav),
+          '%s: forgetting the set is refused as busy and the WAV stays (%s)' % (label, json.dumps(r)[:140]))
+
+
+def vs_case(conn, label, f, wav, side='left'):
+    """One tone through the chain with the virtual speakers on: both ears' complex gains against
+    the engine's response of the stored WAV at the sink's rate (side: left, right or mono).
+    Returns (measured L, measured R, wanted L, wanted R)."""
+    view = conn.view()
+    sp = view['eq']['speakers']
+    check(sp['on'] is True, '%s: the view says the virtual speakers are on' % label)
+    rate = sink_rate() or RATE
+    g = 10 ** (view['eq']['preamp_db'] / 20)
+    r = vs_oracle(rate, wav, [f])[0]
+    if side == 'left':
+        want_l, want_r = g * r['ll'], g * r['lr']
+        play(f, None)
+    elif side == 'right':
+        want_l, want_r = g * r['rl'], g * r['rr']
+        play(None, f)
+    else:
+        want_l, want_r = g * (r['ll'] + r['rl']), g * (r['lr'] + r['rr'])
+        play(f, f)
+    ok, took, cl, cr = measure_tone(f, f if side != 'left' else None, want_l, want_r, f, rate)
+    tag = '%s %g Hz' % (side, f)
+    if not ok:
+        with open(RUN + '/fail-dump.log', 'w') as fh:
+            fh.write(tool('pw-dump').stdout)
+        say('  the tone is linked to: %s' % tone_links())
+        say('  the speakers ports at the failure: %s' % {k: v for k, v in chain_params().items() if k[:3] in ('lvs', 'rvs')})
+    if cl is None:
+        check(False, '%s: %s: nothing was recorded' % (label, tag))
+        return None
+    row('%s, %s: left ear re input' % (label, tag), '%+.2f dB' % db_of(want_l), '%+.2f dB' % db_of(cl))
+    row('%s, %s: right ear re input' % (label, tag), '%+.2f dB' % db_of(want_r), '%+.2f dB' % db_of(cr))
+    if abs(want_l) > 1e-3 and abs(want_r) > 1e-3 and abs(cl) > 1e-4 and abs(cr) > 1e-4:
+        pw = wrap(np.angle(want_r / want_l))
+        pm = wrap(np.angle(cr / cl))
+        row('%s, %s: right ear behind left' % (label, tag),
+            '%.1f us' % (-pw / (2 * math.pi * f) * 1e6), '%.1f us' % (-pm / (2 * math.pi * f) * 1e6))
+    check(ok, '%s, %s: both ears play as the engine says (L %+.2f dB want %+.2f, R %+.2f dB want %+.2f; %.1f s)'
+          % (label, tag, db_of(cl), db_of(want_l), db_of(cr), db_of(want_r), took))
+    return cl, cr, want_l, want_r
+
+
+def cpu_seconds(pid):
+    """The user plus system CPU time of a process in seconds (clock ticks, so +-0.01 s)."""
+    stat = open('/proc/%d/stat' % pid).read()
+    fields = stat[stat.rindex(')') + 2:].split()
+    return (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
+
+
 def main():
     proof = tool('bash', LAUNCHER, 'proof')
     if proof.returncode != 0:
@@ -707,8 +846,17 @@ def main():
     spawn('dbus-daemon', '--config-file=' + RUN + '/bus.conf', '--nofork')
     wait_until('the daemon\'s own bus', lambda: os.path.exists(bus), 10)
     env = {k: v for k, v in os.environ.items() if k in KEEP_ENV}
+    web_sock = socket.socket()
+    web_sock.bind(('127.0.0.1', 0))
+    web_port = web_sock.getsockname()[1]
+    web_sock.close()
+    web_token = 'host-e2e-' + os.urandom(12).hex()
     env.update(SVOLDER_HOST_EQ_MANAGER='child', SVOLDER_SYSTEMCTL='/bin/false',
-               SVOLDER_TRANSPORT='fake', SVOLDER_SOCKET=sock, SVOLDER_EQ_IDLE_TICKS='60', DBUS_SESSION_BUS_ADDRESS='unix:path=' + bus)
+               SVOLDER_TRANSPORT='fake', SVOLDER_SOCKET=sock, SVOLDER_EQ_IDLE_TICKS='60', DBUS_SESSION_BUS_ADDRESS='unix:path=' + bus,
+               SVOLDER_SPEAKERS_URL='http://127.0.0.1:9/', SVOLDER_AUTOEQ_URL='http://127.0.0.1:9/',
+               # the VU phase reads the levels-only frames over the daemon's web page: a free loopback port
+               # of this run (never 8737 or 8738) and a token of its own
+               SVOLDER_WEB_ENABLED='1', SVOLDER_WEB_LISTEN='127.0.0.1:%d' % web_port, SVOLDER_WEB_TOKEN=web_token)
     daemons = [0]
 
     def start_daemon():
@@ -1400,6 +1548,365 @@ def main():
     check(r.startswith('Volume: 0.50') and 'MUTED' in r, 'the sink is muted at 0.50 (%s)' % r)
     check(conn.view()['volume']['muted'] is True, 'the view says muted')
     conn.ask({'cmd': 'host_mute', 'muted': False})
+
+    # ---- Virtual speakers (V0-V11): four convolvers and two mixers after the crossfeed stage, played
+    # through a synthetic set (the vs_expect fixture, imported as the person's own set and converted by
+    # the daemon); every expected number is the engine's response of the stored WAV (vs_expect).
+    # G left the sink at 50 % (a gain of 0.125): back to full so the tones play at their own level
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    check(tool('wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@').stdout.startswith('Volume: 1.00'), 'the sink is back at full volume')
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+    fixture = RUN + '/vs-room.wav'
+    r = subprocess.run([VS_EXPECT, '--write', fixture], capture_output=True, text=True, timeout=30)
+    check(r.returncode == 0 and os.path.getsize(fixture) > 4 * 4800 * 4, 'vs_expect wrote the synthetic 4-channel room (%s)' % (r.stderr.strip() or fixture))
+    entry = vs_import(conn, fixture)
+    sid = entry['id']
+    swav = vs_wav(sid)
+    check(os.path.exists(swav), 'the daemon stored the converted set as %s' % swav)
+    check(entry['room'] == 'with' and entry['fetched'] is True and entry['own'] is True,
+          'the catalogue lists it as an own set under With room (%s)' % {k: entry[k] for k in ('id', 'room', 'rate', 'taps_ms', 'loudness_db', 'cut')})
+    vsv = conn.view()['eq']['speakers']
+    check(vsv is not None and vsv['on'] is False and vsv['set'] is None, 'the view carries the virtual speakers, off, no set chosen yet')
+
+    # V0. a set chosen while the speakers are off is only kept: the chain is not rebuilt and no WAV is loaded
+    retone()
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    check(settles(lambda: tone_links() == [CHAIN], 10.0), 'the tone plays through the chain')
+    chain_v0 = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    conn.eq({'op': 'speakers', 'set': sid})
+    vsv = conn.view()['eq']['speakers']
+    check(vsv['set'] == sid and vsv['on'] is False and vsv['room_name'] == 'With room' and vsv['term'] == 'BRIR',
+          'the view says %s chosen, off, "%s · %s"' % (vsv['set'], vsv['room_name'], vsv['term']))
+    conf_path = chain_conf()
+    check(conf_path is not None and os.path.exists(conf_path), 'the chain\'s config is readable (%s)' % conf_path)
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_v0 and 'lvs:Gain 1' not in chain_params()
+          and 'vLL' not in open(conf_path).read(),
+          'choosing a set while the speakers are off changed nothing: same chain, no stage in the graph or the config')
+    check(conn.view()['eq']['preamp_db'] == 0.0, 'the EQ is flat, the preamp 0 dB')
+
+    # V1. on rebuilds the chain once with the stage in it; the config on disk holds the stage off while it plays;
+    # off keeps the convolvers loaded and idle, and the chain is a bit-exact bypass
+    conn.eq({'op': 'speakers', 'on': True})
+    check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0 and len(_private_pids('host-eq.conf')) == 1 and node(CHAIN), 10.0),
+          'turning the speakers on rebuilt the chain with the stage playing (pids %s -> %s)' % (chain_v0[1], _private_pids('host-eq.conf')))
+    check(_private_pids('host-eq.conf') != chain_v0[1] and len(chain_nodes()) == 1, 'one rebuild, one chain (%d node, %d process)' % (len(chain_nodes()), len(_private_pids('host-eq.conf'))))
+    conf_path = chain_conf() or conf_path
+    conf_text = open(conf_path).read()
+    check('vLL' in conf_text and 'vRR' in conf_text and VS_CONF_OFF.search(conf_text) is not None
+          and chain_params().get('lvs:Gain 2') == 1.0,
+          'while the speakers play the config on disk holds the four convolvers and the stage OFF (dry 1, wet 0, 0)')
+    vs_forget_refused(conn, sid, swav, 'V1 while the speakers play')
+    conn.eq({'op': 'speakers', 'on': False})
+    check(settles(lambda: 'vLL' not in open(conf_path).read(), 10.0), 'after off the config is rewritten without the convolvers')
+    check('lvs:Gain 1' in chain_params(), 'the graph still holds the idle stage (convolvers loaded)')
+    vs_null('V1 bypass (set loaded, speakers off) left-only 1 kHz', 1000)
+    vs_bypass_exact('V1')
+    vs_forget_refused(conn, sid, swav, 'V1 off but loaded')
+    chain_off = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+
+    # V6b. the WAV is gone while the stage is OFF but loaded: a rate change rebuilds the chain without the stage and
+    # says so; the chain stays alive and never goes silent
+    os.remove(swav)
+    tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '44100')
+    wait_until('the sink at 44100', lambda: sink_rate() == 44100, 6)
+    check(settles(lambda: _private_pids('host-eq.conf') not in ([], chain_off[1]) and node(CHAIN) and 'lvs:Gain 1' not in chain_params(), 10.0),
+          'the rebuild after the WAV went missing left the stage out (pids %s -> %s)' % (chain_off[1], _private_pids('host-eq.conf')))
+    check(settles(lambda: 'could not be read' in (conn.view()['eq']['note'] or ''), 6.0), 'the EQ says why: %r' % conn.view()['eq']['note'])
+    check(len(chain_nodes()) == 1 and len(_private_pids('host-eq.conf')) == 1 and conn.view()['eq']['live'], 'the chain is alive and live')
+    tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '0')
+    wait_until('the sink back at 48000', lambda: sink_rate() == 48000, 6)
+    vs_null('V6b chain after the fallback (speakers off) left-only 1 kHz', 1000, bypass_ports=False)
+    chain_untouched = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    r = conn.eq({'op': 'speakers', 'set': sid, 'on': True}, expect_ack=False)
+    check(r.get('result') != 'ack' and 'missing or damaged' in json.dumps(r),
+          'turning on a set whose WAV is missing is refused in words (%s)' % json.dumps(r)[:160])
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_untouched and conn.view()['eq']['speakers']['on'] is False,
+          'the refusal left the chain and the speakers as they were')
+    entry = vs_import(conn, fixture)
+    check(entry['id'] == sid and os.path.exists(swav), 'the set is back as %s' % sid)
+
+    # the converter kept the four paths apart: the stored set is the fixture scaled by one real gain and moved by
+    # the converter's lead-in (the fixture's first Dirac is at sample 0, so the store puts 1 ms of zeros in front)
+    probe = [100, 300, 1000, 2000, 5000]
+    fx, st = vs_oracle(RATE, fixture, probe), vs_oracle(RATE, swav, probe)
+    lead_s = (RATE // 1000) / RATE
+    scale = [st[k][p] / fx[k][p] * cmath.exp(2j * math.pi * f * lead_s)
+             for k, f in enumerate(probe) for p in ('ll', 'lr', 'rl', 'rr')]
+    check(all(abs(x - scale[0]) <= 2e-3 * abs(scale[0]) for x in scale) and scale[0].real > 0 and abs(scale[0].imag) < 2e-3 * scale[0].real,
+          'the stored set is the fixture times one real gain on all four paths at %d frequencies (x%.3f)' % (len(probe), scale[0].real))
+
+    # V2. on, a tone on the left speaker alone: both ears' level and phase against the engine's response
+    conn.eq({'op': 'speakers', 'set': sid, 'on': True})
+    check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0 and len(_private_pids('host-eq.conf')) == 1 and node(CHAIN), 10.0),
+          'the speakers are on with the set back')
+    chain_v1 = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    vsv = conn.view()['eq']['speakers']
+    check(vsv['on'] is True and vsv['set'] == sid, 'the view says the virtual speakers are on')
+    for f in (100, 1000, 5000):
+        vs_case(conn, 'V2', f, swav, 'left')
+    # V3. the right speaker alone
+    for f in (100, 1000, 5000):
+        vs_case(conn, 'V3', f, swav, 'right')
+    # V4. mono: never above 0 dBFS at any frequency (the set is scaled so the worst case is -0.1 dB)
+    for f in (100, 1000, 5000):
+        got = vs_case(conn, 'V4', f, swav, 'mono')
+        check(got is not None and db_of(got[0]) <= 0.1 and db_of(got[1]) <= 0.1,
+              'a mono %g Hz tone plays at %+.2f / %+.2f dB re the input, never above it' % (f, db_of(got[0]), db_of(got[1])) if got else 'mono tone recorded')
+    grid = [20 * 1000 ** (i / 399) for i in range(400)]
+    sweep = vs_oracle(RATE, swav, grid)
+    worst = max(max(20 * math.log10(abs(r['ll'] + r['rl'])), 20 * math.log10(abs(r['lr'] + r['rr']))) for r in sweep)
+    check(worst <= 0.0, 'the engine\'s mono response is at most %+.2f dB re the input over 20 Hz to 20 kHz (400 points)' % worst)
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_v1, 'measuring did not restart the chain (node %d, pids %s)' % chain_v1)
+    # off and on again: no rebuild either way, and off is the bit-exact bypass again
+    conn.eq({'op': 'speakers', 'on': False})
+    vs_null('V1b bypass after the speakers were on, left-only 1 kHz', 1000)
+    vs_bypass_exact('V1b')
+    conn.eq({'op': 'speakers', 'on': True})
+    check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0, 6.0), 'the speakers play again')
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_v1, 'off and on again did not restart the chain')
+    vs_case(conn, 'V2b after off and on', 1000, swav, 'left')
+
+    # V10. the chain process's CPU while a tone plays through the speakers (recorded, not a gate)
+    pid = _private_pids('host-eq.conf')[0]
+    c0, t0 = cpu_seconds(pid), time.monotonic()
+    time.sleep(6.0)
+    cpu = (cpu_seconds(pid) - c0) / (time.monotonic() - t0) * 100
+    row('V10 chain process CPU, speakers on, a tone playing (6 s window)', 'recorded, no limit', '%.2f %% of one core' % cpu)
+
+    # V5. a rate change: the convolvers re-resample, the speakers stay on and play at the new rate
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '44100')
+    check(r.returncode == 0, 'clock.force-rate 44100 set on the private instance')
+    wait_until('the sink at 44100', lambda: sink_rate() == 44100, 6)
+    check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0 and conn.view()['eq']['speakers']['on'] is True, 8.0),
+          'the stage was sent again after the rate change and the speakers are still on (%r)' % conn.view()['eq']['speakers']['note'])
+    v44 = [vs_case(conn, 'V5 rate 44100 Hz', f, swav, 'left') for f in (100, 1000)]
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '0')
+    check(r.returncode == 0, 'clock.force-rate released')
+    wait_until('the sink back at 48000', lambda: sink_rate() == 48000, 6)
+    vs_case(conn, 'V5 back at 48000 Hz', 100, swav, 'left')
+
+    # V6. the set's WAV is gone while the chain holds it: the next rebuild (a rate change) leaves the stage out,
+    # with the speakers off and a note, and the chain stays alive and plays the dry sound
+    os.remove(swav)
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '44100')
+    wait_until('the sink at 44100', lambda: sink_rate() == 44100, 6)
+    check(settles(lambda: conn.view()['eq']['speakers']['on'] is False, 8.0), 'the speakers turned themselves off once the WAV was gone and the chain rebuilt')
+    vsv = conn.view()['eq']['speakers']
+    row('V6 the view after the WAV went missing', 'off, set-missing, a note to fetch it again',
+        'on %s, off_reason %s, note %r' % (vsv['on'], vsv['off_reason'], vsv['note']))
+    check(vsv['off_reason'] == 'set-missing' and vsv['note'] and 'missing or damaged' in vsv['note'],
+          'the fallback says why: %r (%s)' % (vsv['note'], vsv['off_reason']))
+    check(len(chain_nodes()) == 1 and len(_private_pids('host-eq.conf')) == 1 and conn.view()['eq']['on'] and conn.view()['eq']['live'],
+          'the chain is alive after the fallback (%d node, %d process, EQ on and live)' % (len(chain_nodes()), len(_private_pids('host-eq.conf'))))
+    tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '0')
+    wait_until('the sink back at 48000', lambda: sink_rate() == 48000, 6)
+    vs_null('V6 chain after the fallback (was on), left-only 1 kHz', 1000, bypass_ports=False)
+    # fetch it again (the same file is the same set), choose it, on
+    entry = vs_import(conn, fixture)
+    check(entry['id'] == sid and os.path.exists(swav), 'the set is back as %s' % sid)
+    conn.eq({'op': 'speakers', 'set': sid, 'on': True})
+    check(settles(lambda: conn.view()['eq']['speakers']['on'] is True and 'lvs:Gain 2' in chain_params(), 10.0), 'the speakers are on again with the set back')
+    vs_case(conn, 'V6 after the set came back', 1000, swav, 'left')
+
+    # V7. crossfeed on turns the speakers off (one update), and the speakers on turn crossfeed off
+    conn.eq({'op': 'crossfeed', 'on': True})
+    v = conn.view()['eq']
+    check(v['crossfeed']['on'] is True and v['speakers']['on'] is False and v['speakers']['set'] == sid,
+          'crossfeed on turned the speakers off and kept the choice (crossfeed %s, speakers %s)' % (v['crossfeed']['on'], v['speakers']['on']))
+    check(settles(vs_bypass_ok, 6.0), 'the speakers mixers hold the bypass (both mixers, all three gains) while crossfeed plays')
+    xf_case(conn, 'V7 crossfeed over the speakers', 1000)
+    conn.eq({'op': 'speakers', 'on': True})
+    v = conn.view()['eq']
+    check(v['crossfeed']['on'] is False and v['speakers']['on'] is True,
+          'the speakers on turned crossfeed off (crossfeed %s, speakers %s)' % (v['crossfeed']['on'], v['speakers']['on']))
+    vs_case(conn, 'V7 speakers back', 1000, swav, 'left')
+
+    # V8. the default sink moves to a second null sink: the speakers turn themselves off, with a note
+    r = tool('pw-cli', 'create-node', 'adapter',
+             '{ factory.name=support.null-audio-sink node.name=svolder_e2e_sink2 '
+             'node.description="svolder e2e sink 2" media.class=Audio/Sink audio.position=[ FL FR ] '
+             'object.linger=true priority.session=500 '
+             'adapter.auto-port-config={ mode=dsp monitor=true control=false position=preserve } }')
+    check(r.returncode == 0, 'a second null sink was made in the private instance (%s)' % (r.stdout + r.stderr).strip()[:100])
+    sink2 = wait_until('the second sink', lambda: node('svolder_e2e_sink2'), 8)
+    sink1 = node(SINK)['id']
+    check(conn.view()['eq']['speakers']['on'] is True, 'the speakers are on before the switch')
+    t_switch = time.monotonic()
+    r = tool('wpctl', 'set-default', str(sink2['id']))
+    check(r.returncode == 0, 'the default sink is now the second one (%s)' % r.stderr.strip()[:100])
+    sv = None
+    while time.monotonic() - t_switch < 6.0:
+        sv = conn.view()['eq']['speakers']
+        if not sv['on']:
+            break
+        time.sleep(0.05)
+    took = time.monotonic() - t_switch
+    row('V8 speakers off after the default sink moved', 'off within 2 s, with a note',
+        '%s after %.2f s, off_reason %s, note %r' % ('off' if not sv['on'] else 'STILL ON', took, sv['off_reason'], sv['note']))
+    check(not sv['on'] and took <= 2.0 and sv['note'] and sv['off_reason'] == 'output-changed' and sv['set'] == sid,
+          'the speakers turned themselves off %.2f s after the default sink moved, with the note %r, the choice kept' % (took, sv['note']))
+    tool('wpctl', 'set-default', str(sink1))
+    tool('pw-cli', 'destroy', str(sink2['id']))
+    wait_until('the first sink to be the default again',
+               lambda: tool('wpctl', 'inspect', '@DEFAULT_AUDIO_SINK@').stdout.count('svolder_e2e_sink"') > 0, 8)
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+
+    # V11. off on a chain that runs for the speakers alone, with a tone playing: the chain stays as a pass-through
+    # until idle (never silent while live), then goes
+    block = play(1000)
+    conn.eq({'op': 'speakers', 'set': sid, 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0 and conn.view()['eq']['on'] is False, 10.0),
+          'a chain for the speakers alone runs, the EQ off')
+    wait_until('the tone to play through the chain', chain_playing, 10)
+    check(settles(lambda: tone_links() == [CHAIN], 10.0), 'the tone is linked to the chain')
+    chain_pt = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    conn.eq({'op': 'speakers', 'on': False})
+    v = conn.view()['eq']
+    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_pt and v['note'] and 'pass-through' in v['note'] and v['speakers']['on'] is False,
+          'off kept the chain as a pass-through (%r), same node and process' % v['note'])
+    null_test('V11 pass-through (speakers off, EQ off) left-only 1 kHz', 1000, block)
+    go_quiet()
+    check(settles(lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 15.0), 'the pass-through chain is removed once nothing plays through it')
+
+    # V9. the speakers on with a chain for them alone (EQ off), then a graceful stop and a kill of the daemon: each
+    # restart finds them off, the choice kept, no chain, and nothing in the config or the graph playing a WAV
+    def vs_restart_checks(what, reason):
+        wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+        v = conn.view()['eq']
+        sv = v['speakers']
+        check(sv['on'] is False and sv['set'] == sid and v['on'] is False,
+              'after %s the speakers are off, the choice kept (%r, off_reason %s)' % (what, sv['note'], sv['off_reason']))
+        if reason:
+            check(sv['off_reason'] == reason and sv['note'], 'after %s the view says why: %r (%s)' % (what, sv['note'], sv['off_reason']))
+        text = open(conf_path).read() if os.path.exists(conf_path) else ''
+        check(re.search(r'name = (lvs|rvs) label = mixer control = \{ "Gain 1" = 0 ', text) is None,
+              'after %s the config holds no stage that plays (%s)' % (what, 'no config left' if not text else 'stage %s' % ('listed, off' if 'lvs' in text else 'absent')))
+        check(node(CHAIN) is None and not _private_pids('host-eq.conf') and 'lvs:' not in tool('pw-dump').stdout,
+              'after %s no chain runs and no stage is in the graph (pw-dump has no lvs: control)' % what)
+
+    retone()
+    conn.eq({'op': 'speakers', 'set': sid, 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    check(settles(lambda: conn.view()['eq']['speakers']['on'] is True and 'lvs:Gain 2' in chain_params(), 10.0),
+          'a chain for the speakers alone runs (EQ on %s)' % conn.view()['eq']['on'])
+    conf_path = chain_conf() or conf_path
+    conn.ask({'cmd': 'stop'})
+    watch.close()
+    conn.close()
+    try:
+        code = daemon.wait(10)
+    except subprocess.TimeoutExpired:
+        raise Fail('the daemon did not end after stop')
+    check(code == 0, 'the daemon ended on stop (exit %s) with the speakers playing' % code)
+    wait_until('the chain to end', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10)
+    daemon, conn = start_daemon()
+    watch = Watch(sock)
+    vs_restart_checks('a graceful restart', None)
+    conn.eq({'op': 'speakers', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    os.kill(daemon.pid, signal.SIGKILL)
+    daemon.wait(5)
+    watch.close()
+    conn.close()
+    gone = settles(lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10.0)
+    say('V9 the chain after the daemon was killed: %s' % ('gone' if gone else 'still there'))
+    daemon, conn = start_daemon()
+    watch = Watch(sock)
+    vs_restart_checks('a killed daemon\'s restart', 'restart')
+    # the choice survives, and the next chain it builds holds the stage off (the tone of the first half ends first:
+    # a second retone would leave it running under the same name)
+    go_quiet()
+    retone()
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    check(settles(lambda: node(CHAIN) and len(_private_pids('host-eq.conf')) == 1 and conn.view()['eq']['live'], 10.0), 'a chain runs')
+    vsv = conn.view()['eq']['speakers']
+    check('lvs:Gain 1' not in chain_params() and 'vLL' not in open(chain_conf()).read() and vsv['set'] == sid and vsv['on'] is False,
+          'a chain built while the speakers are off holds no stage (no lvs: control, no convolver in the config), the choice kept')
+    # on: one rebuild, and it plays
+    pids = _private_pids('host-eq.conf')
+    conn.eq({'op': 'speakers', 'on': True})
+    check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0 and _private_pids('host-eq.conf') not in ([], pids), 10.0),
+          'turning the speakers on rebuilt the chain once with the stage playing')
+    vs_case(conn, 'V9 after the restarts', 1000, swav, 'left')
+    go_quiet()
+    conn.eq({'op': 'mode', 'on': False})
+    conn.eq({'op': 'speakers', 'on': False})
+    wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 15)
+    say('host-e2e: virtual speakers phases V0-V11 done')
+
+    # U. The VU meters' levels: the real capture (pw-record of the sink's monitor) into the daemon, read as the
+    # levels-only frames (`?only=levels`) of its web page. The sink is at full volume and unmuted (G left it at 50 %
+    # and the V phases put it back; set again here so this phase never depends on them), the EQ and the speakers
+    # off, so the monitor carries the signal as played. A level byte maps -72..0 dBFS over 0..255; a peak byte of 255
+    # is an over (a sample at 16-bit full scale or above).
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    conn.ask({'cmd': 'host_mute', 'muted': False})
+    r = tool('wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@').stdout.strip()
+    check(r.startswith('Volume: 1.00') and 'MUTED' not in r, 'U the sink is at full volume and unmuted (%s)' % r)
+    v = conn.view()['eq']
+    check(node(CHAIN) is None and not v['on'] and not v['speakers']['on'] and not v['crossfeed']['on'],
+          'U no chain, the EQ, the speakers and the crossfeed off: the monitor carries the signal as played')
+    go_quiet()
+    levels = vu.Levels(web_port, web_token)
+    try:
+        def vu_play(label, x):
+            """Play `x` on both channels until the next one; returns the median and extremes of the level bytes
+            of the frames that arrive once the capture holds it (a half second after both channels show signal)."""
+            go_quiet()
+            path = '%s/vu-%s.wav' % (RUN, label)
+            vu.write_wav(path, x)
+            t_play = time.monotonic()
+            STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', path)
+            wait_until('the tone', lambda: node('svtone'))
+            wait_until('both channels of the frames to carry it',
+                       lambda: any(f['lv'][0] > 100 and f['lv'][1] > 100 for f in levels.since(t_play)), 15)
+            # settled: 15 more frames (half a second at the capture's pace) after the first with signal, then the
+            # window of the next 45
+            t_sig = time.monotonic()
+            wait_until('15 frames of the signal', lambda: len(levels.since(t_sig)) >= 15, 10)
+            t0 = time.monotonic()
+            wait_until('45 frames of the window', lambda: len(levels.since(t0)) >= 45, 10)
+            frames = levels.since(t0)
+            check(len(frames) >= 30, 'U %s: %d levels-only frames in the window' % (label, len(frames)))
+            st = vu.window_stats(frames)
+            say('U  %s: rms bytes %s (%.2f, %.2f dBFS), peak bytes %s..%s' % (
+                label, st['rms'], vu.byte_db(st['rms'][0]), vu.byte_db(st['rms'][1]), st['peak_min'], st['peak_max']))
+            return st
+
+        # a -18 dBFS RMS 1 kHz sine (peak -15 dBFS): the RMS byte reads -18 dB within 0.3 dB
+        st = vu_play('sine-rms-18', vu.sine(rms_dbfs=-18.0))
+        check(vu.only_levels_shape([f for _, f in levels.frames]), 'U every frame of ?only=levels is exactly {t, lv} with four bytes')
+        names = [e[1] for e in levels.events]
+        check(names[:1] == ['hello'] and set(names) <= {'hello', 'capture', 'frame'},
+              'U the levels-only stream sends hello, capture and frames only (%s)' % sorted(set(names)))
+        state = [e[2] for e in levels.events if e[1] in ('hello', 'capture')][-1]
+        check(state.get('capture') == 'running' and state.get('sink') == SINK_DESCRIPTION,
+              'U the capture runs on the private sink (%s on %s)' % (state.get('capture'), state.get('sink')))
+        for ch, b in zip('LR', st['rms']):
+            check(abs(vu.byte_db(b) + 18.0) <= 0.3, 'U the %s RMS byte %d reads %.2f dBFS, -18 +- 0.3' % (ch, b, vu.byte_db(b)))
+        check(max(st['peak_max']) <= 254, 'U a -18 dBFS RMS sine is no over (peak bytes %s)' % (st['peak_max'],))
+        # a 0 dBFS square (16-bit full scale): every frame's peak byte is 255, the over
+        st = vu_play('square-0', vu.square(0.0))
+        check(st['peak_min'] == (255, 255), 'U a 0 dBFS square: the peak byte is 255 in every frame (%s)' % (st['peak_min'],))
+        # a -0.1 dBFS sine: close to full scale and no over
+        st = vu_play('sine-peak-0.1', vu.sine(peak_dbfs=-0.1))
+        check(max(st['peak_max']) <= 254 and min(st['peak_min']) >= 253,
+              'U a -0.1 dBFS sine: the peak byte is 254 or less, never 255 (%s..%s)' % (st['peak_min'], st['peak_max']))
+        # a -0.1 dBFS square: the 0.1 dB under full scale is not an over either
+        st = vu_play('square-peak-0.1', vu.square(-0.1))
+        check(max(st['peak_max']) <= 254 and min(st['peak_min']) >= 253,
+              'U a -0.1 dBFS square: the peak byte is 254 or less (%s..%s)' % (st['peak_min'], st['peak_max']))
+    finally:
+        levels.close()
+    go_quiet()
+    say('host-e2e: VU phase U done')
 
     # X4. a restart of the daemon: crossfeed is off after it, and a chain for it alone is gone
     def restart_checks(what):

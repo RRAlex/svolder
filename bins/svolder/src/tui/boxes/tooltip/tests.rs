@@ -570,6 +570,16 @@ fn every_target_has_its_text_within_forty_cells() {
     );
     app.session.connected = false;
     check(Hit::Connection, &app, &["link lost · r reopens"]);
+    app.tui.vu_reference = -20;
+    check(
+        Hit::Vu,
+        &app,
+        &[
+            "VU meter · 0 VU = -20 dBFS",
+            "┃ the needle · ● an over, held 1.2 s",
+            "Settings sets what reads 0 VU",
+        ],
+    );
     check(
         Hit::MouseMark,
         &app,

@@ -179,7 +179,8 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
               ┌──────────── core: one model, one set of ops ────────┐
               │  the view (state every surface draws) + event feed  │
               │  device ops → each device's writer; computer ops →  │
-              │  the EQ controller (EQ, crossfeed, preamp)          │
+              │  the EQ controller (EQ, crossfeed, virtual          │
+              │  speakers, preamp)                                  │
               │  saved truth: config.toml + host-eq.toml (EQ state) │
               └───────────────┬────────────────────────┬────────────┘
                               ▼                        ▼
@@ -188,7 +189,8 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
                  one writer per device:       capture → spectrum/tempo,
                  volume rule, glides,         EQ filter chain (systemd unit,
                  readings back                detached process or child),
-                                              live sends, crossfeed stage,
+                                              live sends, crossfeed and
+                                              virtual-speakers stages,
                                               preamp rule
 ```
 

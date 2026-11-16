@@ -103,8 +103,11 @@ the list does not move the drag onto another point; a point removed elsewhere, a
 slot renumbering ends the drag with no write. For 2 s after a hold ends a client reads the model the
 daemon sent before the release and a re-sort reaches it with the next read.
 
-**What the path says.** With a live chain in the path, flat or not, the daemon says `host EQ on`
-and the path changes the sound.
+**What the path says.** With a live chain in the path the path changes the sound, and it names the
+stages the daemon's EQ view says play: `host EQ on`, `crossfeed on`, `virtual speakers on`, or
+`EQ pass-through` for the flat chain kept while a stream plays. `RouteFacts.stages` carries them;
+when the view cannot vouch for them (controls unavailable, an older svolder's chain) there is none
+and the path says `host EQ on`.
 
 **The fake.** `SVOLDER_FAKE_HOST_EQ` and `SVOLDER_FAKE_COMPUTER_VOLUME` give the simulated daemon a
 computer side whose route follows the fake volume and mute; `make demo-computer` runs it.
@@ -215,148 +218,31 @@ values on screen while it runs and sends at most 20 a second, the last always.
 
 ## The flip in each theme
 
-### Ember
-
-The switch is `#part-switch`, a part of its own beside the shown device's name in the header: the
-device's name and `This computer` in the mode track's style (`.seg`), swapped out of band as the
-link's dot is. Where the computer cannot be used it carries the reason. It is drawn for any shown
-device, an amp too, while the model has the computer's controls (`draw/computer.js`).
-
-On the computer side `core.computer.view()` hands the drawing the core's `volumeOf` and `toneOf`;
-the screen is the DAC page's layout, an amp's too, and flipping back restores its own.
-
-- **Volume.** The same `sv-knob` over a model of 0 to 100 % (labels 0, 25, 50, 75, 100; no zone, no
-  cap tick); `data-computer` sends its steps and mute through `actions.computer`. The first paint
-  reads `—`; a level above 100 % shows as read with the dial at its end.
-- **Tone control.** Mode `Off | EQ`. The curve's points are tapped on (an empty spot adds a PK),
-  dragged (frequency and gain) and set for Q by the wheel, a right drag or a pinch: the core's hand
-  (`core.eq.points`) makes the gestures and a flip ends them; `computer.js` forwards the events.
-  While a point is dragged the part's swap waits (`keep.js`) and `computer-page.js` moves the curve
-  and cells; the part is drawn again from the host's model when the writes are answered. The point
-  in hand has a `-` and `+` per value (`computer-steps.js`): a hold repeats, a final write ends.
-- **The order** of the points is the daemon's: `HostEqState.filters` is kept sorted by frequency (a
-  stable sort) when an edit ends (a drag's last value, a typed value, an add, a preset recalled or
-  loaded) and never during a drag. The wire's 1-based point numbers are that order; the point's
-  `slot` is its identity: a front end that holds a point across an edit, its own or another's, finds
-  it by the slot, and sends it with every write. The web core keeps a drag's holds by slot, looks
-  the number up again before every write and ends the drag with no write when the point is gone; it
-  tells the themes where a held point went with the `moved` event (`from`, `to`). The TUI does the
-  same for a pointer drag and for its focus.
-- **The table** shows six rows of Type, Frequency, Gain, Q and `×` (labelled `Remove point N`; on a
-  lone point it sets the point to 0 dB and keeps its frequency, type and Q) and scrolls; `N more ↓
-  scroll` counts the rows below. The dragged point's row is lit and scrolled into view. A value is
-  typed into its cell (`2.5k`, `+3,2`), the type is a choice of PK, LSC, HSC. `+ Add point` adds a
-  PK at the widest gap; the line reads `7 of 16 points · preamp −6.0 dB`. 16 rows are as tall as 7.
-- **Presets** are the shared list, with `Save as preset` (the points on show), and rename and delete
-  for a viewer's own; one the EQ cannot play is disabled with its reason. A preset a connected
-  device plays too is put as the core's question (`core.ask`).
-- The switch's halves have stable ids (`side-dac`, `side-computer`): a flip from the keyboard keeps
-  the focus on the chosen half across the redraw. A point's marker sits on the summed curve at its
-  frequency (`toneOf`, shared by every theme), so a shelf's dot is on the line.
-- Every computer control carries `data-comp` and no `data-json`, so the DAC side's handlers leave it
-  alone; for a guest each is `aria-disabled`, and the switch alone works.
-
-### Paper
-
-The switch is a line by the title, `showing: the DAC · this computer` (`the amp` on an amp's page),
-the side shown underlined in pencil as Paper marks every chosen word, the other dotted. When the
-computer cannot be used the line is replaced by the sentence of why. The ruler reads 0 to 100 %
-(labels at 0, 25, 50, 75, 100, a tick every 2 %, no zone and no cap) with the percent beside the
-needle; before the first read the number is `—` and the needle is not drawn. The tone is written
-`TONE · off · EQ` with the mode chosen underlined; an EQ whose state is only what its file says is
-drawn with a dashed underline and a line saying so. The curve has a pencil point for each point;
-under it a table (`#`, `type`, `frequency`, `gain`, `Q`, `×`) shows six rows and a half and scrolls
-(`N more below`, counting what is not fully in view); below it `+ Add point` and the line `7 of 16
-points · preamp −6.0 dB`. The table keeps its height, so sixteen points never grow the sheet: the
-add word's place stays when it goes.
-
-The hands are `computer-wire.js` (the drawing is `draw/computer.js`, `draw/volume.js` reuses the
-DAC's ruler through `percentVolume` in `ruler.js`). A point is dragged on the graph through the core's
-`core.eq.points` hand; a tap on an empty spot adds a PK at that place (on a full table it says `16 is the most`);
-the arrow keys step a focused point and the wheel its Q, each a burst with one last value; a cell takes typed text (held to the
-hand ranges) or the up and down keys; the type word opens Paper's list. The row and the mark of the
-point in hand are drawn selected. A flip ends a drag through `computer.track` (the last value is
-sent, nothing else) and runs the same closing of lists and holds as another device shown.
-
-On an amp's page the switch is drawn too, and the computer's side is the DAC page's own volume, tone
-and presets sections (the amp's power and meters stay); the device's notes are left out. Paper's `×`
-and `−` are in its faces, and the table's down hint is a drawn stroke, not an arrow glyph.
-
-### Signal
-
-The flip is the line's own hop: the computer's hop is named `This computer`, says `PipeWire ·
-<rate>` and, while it is the hop chosen, `controls below` (or why the controls cannot be used).
-Choosing it is the flip: the side is the computer's exactly while that hop is chosen, any other hop
-writes `dac`, and a load with the computer kept (and usable) chooses the hop (`keepChoice`, `sideOf`
-in `line.js`). On an amp's page the line has the hop too while the computer is served.
-
-The area below is the DAC's usual screen acting on the computer (`draw/computer.js`,
-`computer-wire.js`): the level in % with `−`, Mute, `+` and the track (`—` until read), the curve
-with a dot on each point (on the curve, at the summed response at the point's frequency), the mode
-`Off | EQ` as chips, the points' table (six rows in view, `×` labelled `Remove point N`, `+ Add
-point`, the line `7 of 16 points · preamp −6.0 dB`), the presets with Save as, Rename and Delete,
-and, last, the facts of the route that are not controls: the sound card and its format, the other
-streams and the verdict on the sound's way (the daemon's words name PipeWire there, not the
-computer). Nothing below the line says `computer`, but for the path's own words (its `computer: …`
-hop line, `computer volume N %`, `computer muted`). A preset the DAC plays too is asked in Signal's own card, through its `asker`.
-
-### Night drive
-
-The switch is two keys, the shown device's name and `This computer`, in a slot of their own left of
-the menu button (`#nd-switch`, by `#nd-slot`); on a phone it is in the scene's top column, under the
-device line (held sideways, at the left). They are drawn for any shown device, an amp too, while the
-model has the computer's controls, and where the computer cannot be used the sentence stands under
-them, in the switch's own place. They are not the dash's: the dash fades to a fifth with the HUD
-after 15 s on a desktop and on a phone held sideways, and the keys stay whole; the right of the top
-line (the verdict, the status words) stands under the keys and the EQ line under it. The keys keep
-their ids (`nd-side-dac`, `nd-side-computer`), so a keyboard flip keeps its focus across the redraw.
-
-The core's `computer.view()` hands the drawing its `volumeOf` and `toneOf` on the
-computer side only. The scene, the top line, the dash's transport and the fade do not flip; the rest
-reads the computer's, in the DAC page's own parts, so an amp page flipped to the computer has the
-volume keys, figure, mode, points and presets of a DAC page and its own power key and gauges still.
-
-- **Volume.** The outrun figure reads `42` with `%`; muted keeps the number, dimmed; before the
-  first read it is a dash and the keys are quiet, never a live 0 %. The dash's `−` `MUTE` `+` step
-  and mute the computer (`actions.computer`), a held key repeats as the device's does.
-- **EQ line.** `OFF`, or `EQ` with the preset's name, and no gains list; a state only the EQ's file
-  says is marked `unconfirmed`.
-- **Mountains.** The bubbles are the points, each on the curve the points sum to (a shelf's too);
-  the lit point has the bell's diamonds, a drag of one sets its Q. A press grabs a bubble and moves
-  its frequency and gain, the wheel and two fingers set the Q, and a tap on an empty spot adds a PK
-  while the curve is up (the morph at one half or more); a first touch only shows the curve. The
-  held bubble is on the curve all along a drag; a flip ends the drag and writes only its last value.
-  With the EQ off the curve, the bubbles and the diamonds are drawn at 45 %: the points it would
-  play, not playing. The computer's tone is worked out once per model change or held value
-  (`tune-wire.js`), not per frame.
-- **Sheet.** Mode (`Off | EQ`), Points (the table of six rows that scrolls, `N more below ↓`, each
-  value between a `−` and a `+` that step it (a held one repeats) and a field that takes a typed
-  one, the type as a choice, `×` labelled `Remove point N`, `+ Add point`, the line `7 of 16 points
-  · preamp −6.0 dB`) and the shared presets with `Save as…`, rename and delete. A phone shows a
-  point as a block, each value named, with 44 px keys. A preset a connected device plays too is
-  asked in the presets' own place in the sheet (`Apply`, `Keep`).
-- Nothing below the switch says whose controls these are. For a guest every control is quiet and
-  `aria-disabled`; the switch alone works.
+Each web theme draws the flip and the computer's controls in its own way (Ember, Paper, Signal and
+Night drive): see [the second page](host-control-themes.md).
 
 ## MCP
 
-`get_host` reads the computer (volume, mute, the EQ and its points, the player). `set_host_volume`
-takes a whole percent from 0 to 100; above 100 is refused as the cap. A rise of more than 6 dB on
-the volume's cubic scale asks the client, counted from the lowest level this server saw, so a
-staircase of small steps asks at the sum; a level not read yet counts as 1 %. `host_mute` unmuting
-asks, muting does not. `set_host_eq` takes exactly one of a preset name or `off`; a built-in needs a
-device with a tone control, a saved preset needs none, and a preset on a device too asks the client,
-repeated with `confirm`. `set_host_crossfeed` changes the [crossfeed](crossfeed.md). The writes are
-listed only while `[mcp] writes` is on. The cap is 100 %, not `max_volume_db`.
+`get_host` reads the computer (volume, mute, the EQ and its points, the player, the crossfeed and
+the virtual speakers). `set_host_volume` takes a whole percent from 0 to 100; above 100 is refused
+(the cap is 100 %, not `max_volume_db`). A rise of more than 6 dB on the volume's cubic scale asks
+the client, counted from the lowest level this server saw, so a staircase of small steps asks at the
+sum; a level not read yet counts as 1 %. `host_mute` unmuting asks, muting does not. `set_host_eq`
+takes exactly one of a preset name or `off`; a built-in needs a device with a tone control, a saved
+preset needs none, and a preset on a device too asks the client, repeated with `confirm`.
+`set_host_crossfeed` ([crossfeed](crossfeed.md)) and [`set_host_speakers`](virtual-speakers.md) each
+answer with both, since one on turns the other off. The writes are listed only while `[mcp] writes`
+is on.
 
 ## MQTT
 
 Home Assistant gets one device, `This computer`: a switch (a binary sensor with commands off) that
 turns the computer EQ on with its kept points and off, and a sensor naming the applied preset
-(`custom`, or nothing); and a crossfeed switch and select. No computer volume, mute or point is
-offered; HA's own media integrations do volume better. A retained command is never acted on; ON with
-nothing kept (the first point flat, no preset) logs that and stays off. With the computer not served
-nothing is announced and the retained entities are cleared at the bridge's start.
+(`custom`, or nothing); and a crossfeed and a speakers switch and select. No computer volume, mute
+or point is offered; HA's own media integrations do volume better. A retained command is never acted
+on; ON with nothing kept (the first point flat, no preset) logs that and stays off. With the
+computer not served nothing is announced and the retained entities are cleared at the bridge's
+start.
 
 ## Packages and Docker
 
@@ -376,12 +262,13 @@ again if the state says on. Outside Docker the chain stays a user unit, or a det
 - The page: `core-computer.mjs` (the core), a `computer_*.py` driver for each theme in both browsers
   on the fake daemon, and the contract and completeness checks, which list every computer target.
   The Night drive timing check has a computer-side case with every cell lit (4.5 ms in Chromium).
-- `make host-e2e`: the real daemon and the real chain on a private PipeWire and WirePlumber with a
-  null sink, never the session. It plays a tone, drags and retypes points at 20 updates a second,
-  forces a sample-rate change (again after a live softening: never over unity), turns the EQ off,
-  checks the volume and mute with `wpctl`, and that every process it started is gone (testing.md).
-- `make demo-computer` and `make demo-computer-amp`: the page with a simulated computer, your audio
-  left alone.
+- `make host-e2e`: the real daemon and chain on a private PipeWire with a null sink, never the
+  session. It plays a tone, drags and retypes points at 20 updates a second, forces a sample-rate
+  change (again after a live softening: never over unity), turns the EQ off, checks the speakers
+  (V0-V11), volume and mute with `wpctl`, and that every process it started is gone
+  ([host-e2e.md](host-e2e.md)).
+- `make demo-computer`, `make demo-computer-amp`: the page with a simulated computer, audio left
+  alone.
 
 ## Known limits
 

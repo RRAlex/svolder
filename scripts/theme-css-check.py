@@ -156,6 +156,7 @@ PURE = {
     "plot.js": ALL,
     "tone-curve.js": ALL,
     "viz-model.js": ALL,
+    "vu-model.js": ALL,
     "volume-ask.js": ALL,  # the ask's rules; `askExpiry` holds one timer, its own, per call
     "words.js": ALL,
     # the shared widgets: each draws into the place it is given and reaches no service. Its one

@@ -171,7 +171,7 @@ import os, re, sys
 here = sys.argv[1]
 sys.path.insert(0, here)
 import fingerprint as f
-neutral = {'PATH', 'HOME', 'SMOKE_WEB', 'SMOKE_EMBEDDED', 'SVOLDERD', 'SVOLDER', 'SVOLDER_AUTOEQ_URL',
+neutral = {'PATH', 'HOME', 'SMOKE_WEB', 'SMOKE_EMBEDDED', 'SVOLDERD', 'SVOLDER', 'SVOLDER_AUTOEQ_URL', 'SVOLDER_SPEAKERS_URL',
            'SVOLDER_WEB_ASSETS', 'BASELINE_COMMIT', 'WEB_CHECKS_BASE', 'WEB_CHECKS_BROWSER_VERSION',
            'WEB_CHECKS_CACHE', 'WEB_CHECKS_ROOT'}
 bad = set()

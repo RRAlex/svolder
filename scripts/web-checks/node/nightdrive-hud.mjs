@@ -70,6 +70,17 @@ ok('the_verdict_shows_when_the_computer_changes_the_sound', () => {
   assert.equal(topLine(page({ host: { route: { host_eq: false } } }), 'open').right, '');
 });
 
+ok('the_verdict_names_the_stage_the_path_names', () => {
+  const route = { host: { route: { host_eq: true } } };
+  const through = (words) => ({ playing: { path: { ...pathOf(true), words } } });
+  const right = (words) => topLine(page(route, through(words)), 'open').right;
+  assert.equal(right('crossfeed on'), 'crossfeed on · changes the sound');
+  assert.equal(right('resampled 44.1 → 48 kHz · virtual speakers on'), 'virtual speakers on · changes the sound');
+  assert.equal(right('host EQ on · crossfeed on'), 'host EQ on · crossfeed on · changes the sound');
+  assert.equal(right('EQ pass-through'), 'EQ pass-through · changes the sound');
+  assert.equal(right('computer volume 54 %'), 'host EQ on · changes the sound');
+});
+
 ok('trouble_replaces_the_verdict', () => {
   const eq = { host: { route: { host_eq: true } } };
   const lost = topLine(page(eq, { playing: { path: pathOf(true) } }), 'lost');

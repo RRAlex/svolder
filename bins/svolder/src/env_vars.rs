@@ -248,7 +248,10 @@ const ENV_VARS: &[EnvVar] = &[
                `svolder host eq apply` and `remove` refuse with either set. For `svolderd`, `off` \
                turns the host service off (no player watcher, no `pw-dump`, no cover reads), \
                whatever `[host] enabled` says, and `fake` runs a fake player, a fake route and a \
-               bundled cover in its place, for demos and checks. Unset by default.",
+               bundled cover in its place, for demos and checks, and serves two synthetic virtual \
+               speakers sets from a store of its own, `fake-speakers` in the daemon's private \
+               runtime directory (never the person's own sets; removed when the daemon stops). \
+               Unset by default.",
     },
     EnvVar {
         name: "SVOLDER_MQTT_PASSWORD",
@@ -378,6 +381,18 @@ const ENV_VARS: &[EnvVar] = &[
                mirror, or a local server in tests. Read once, when the daemon starts. Default is \
                AutoEq's own, or under `SVOLDER_TRANSPORT=fake` (demos, tests) an address nothing \
                listens on, where AutoEq is off and says so; `make demo*` sets AutoEq's own.",
+    },
+    EnvVar {
+        name: "SVOLDER_SPEAKERS_URL",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "The origin (`http://host:port`) the daemon fetches virtual speakers' sets from, \
+               in place of the sets' own sources: it replaces the scheme and host of each set's \
+               listed address and keeps its path, so a mirror or a local server in tests serves \
+               them. Only listed sets are ever asked for, and each download is checked against \
+               its pinned checksum. Read once, when the daemon starts. Default is the sets' own \
+               sources, or under `SVOLDER_TRANSPORT=fake` (demos, tests) an address nothing \
+               listens on, where fetching is off and says so.",
     },
     EnvVar {
         name: "SVOLDER_SCREENSHOTS_AUTOEQ_URL",

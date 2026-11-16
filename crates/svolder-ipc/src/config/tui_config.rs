@@ -70,6 +70,10 @@ pub struct TuiConfig {
     pub graph_span: GraphSpan,
     /// How much history the connection strip spans.
     pub link_span: LinkSpan,
+    /// The level in dBFS the TUI's VU meter reads as 0 VU, a whole number from -30 to -6 (a
+    /// number outside that range is read as the nearest end of it), from `vu_reference` under
+    /// `[tui]`. Only a terminal of 100 by 45 or more draws the meter.
+    pub vu_reference: i8,
     /// The share of the device screen's width the Controls pane takes of the two panes' room,
     /// from `device_split` under `[tui]`: `0.5` splits it evenly. The screen holds each pane to at
     /// least 40 columns, so a value that leaves either less is read as the nearest split that
@@ -539,6 +543,7 @@ impl Default for TuiConfig {
             graphs: true,
             graph_span: GraphSpan::default(),
             link_span: LinkSpan::default(),
+            vu_reference: svolder_host::vu::Reference::default().db(),
             device_split: DEFAULT_DEVICE_SPLIT,
             effects: EffectsConfig::default(),
         }

@@ -166,7 +166,9 @@ impl ComputerLink {
     /// `SVOLDER_HOST=off`, and a reason where `pw-cli` is not there.
     pub(in crate::tui) fn live() -> ComputerLink {
         match crate::commands::host_eq::session_control() {
-            Ok(control) => ComputerLink::over(control),
+            Ok(control) => {
+                ComputerLink::over(control.with_speakers_dir(&svolder_ipc::config::speakers_dir()))
+            }
             Err(why) => ComputerLink {
                 why: Some(why),
                 ..ComputerLink::default()
@@ -175,14 +177,14 @@ impl ComputerLink {
     }
 
     /// Leave the computer as a quit should: the loop's own controller stops ticking, then turns
-    /// the crossfeed off (a chain that ran for it alone is removed), so quitting leaves no stage
+    /// the crossfeed and the virtual speakers off (a chain that ran for them alone is removed), so quitting leaves no stage
     /// in the sound's path. Nothing when the loop has no controller of its own: a daemon's is the
     /// daemon's to stop.
     pub(in crate::tui) async fn shutdown(&mut self) {
         let Some(control) = self.control.take() else {
             return;
         };
-        // The quit lets what waits run, except crossfeed changes (a crossfeed-on asked a moment
+        // The quit lets what waits run, except crossfeed and speakers changes (one asked a moment
         // before the quit must not turn it on again after the shutdown): the user's last EQ edit
         // is applied or kept. A change that is running is not cancelled, and neither is a tick:
         // the shutdown takes the lock after them.
@@ -441,7 +443,7 @@ async fn run(
 ) -> Option<Answer> {
     let mut control = control.lock().await;
     if quitting.load(std::sync::atomic::Ordering::SeqCst)
-        && matches!(op, HostEqOp::Crossfeed { .. })
+        && matches!(op, HostEqOp::Crossfeed { .. } | HostEqOp::Speakers { .. })
     {
         return None;
     }

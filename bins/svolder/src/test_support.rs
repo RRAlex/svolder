@@ -8,6 +8,7 @@
 //! covers them all; this is the one for the whole crate.
 
 pub(crate) mod autoeq_script;
+pub(crate) mod speakers_script;
 pub(crate) mod stub_daemon;
 pub(crate) mod walk_script;
 

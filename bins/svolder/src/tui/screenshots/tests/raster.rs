@@ -205,6 +205,22 @@ fn a_box_character_the_raster_does_not_draw_is_an_error_naming_it() {
 }
 
 #[test]
+fn the_dashed_line_is_three_dashes_across_the_middle_of_the_cell() {
+    let cov = cover('┄');
+    let row = CELL.h / 2;
+    let lit: Vec<u32> = (0..CELL.w).filter(|x| at(&cov, *x, row) > 0.5).collect();
+    assert!(
+        !lit.is_empty() && lit.len() <= CELL.w as usize / 2,
+        "{lit:?}"
+    );
+    // Three separate runs, a gap between each, nothing above or below the line.
+    let runs = lit.windows(2).filter(|pair| pair[1] != pair[0] + 1).count() + 1;
+    assert_eq!(runs, 3, "{lit:?}");
+    assert_eq!(at(&cov, 0, 0), 0.0);
+    assert_eq!(at(&cov, 0, CELL.h - 1), 0.0);
+}
+
+#[test]
 fn letters_and_symbols_are_left_to_the_fonts() {
     for c in ['A', '‹', '▶', '·'] {
         assert!(drawn(c, CELL).is_none(), "{c}");

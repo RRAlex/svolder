@@ -15,6 +15,10 @@ pub const ROUTE_NOT_READ: &str = "route not read";
 
 /// The word for a path that nothing alters.
 const UNTOUCHED: &str = "untouched";
+/// What follows the words of an untouched path in its tooltip: the verdict cannot see inside
+/// the player.
+const UNTOUCHED_NOTE: &str = "the player may still change the sound itself (loudness \
+                              normalization, its own EQ)";
 
 /// What the device itself reports of its end of the path.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -156,13 +160,24 @@ impl PathLine {
         self.words.join(" · ")
     }
 
-    /// The whole sentence behind the short words of a sound that goes elsewhere (`the computer
-    /// plays to DELL S2721QS`), for a tooltip; `None` for any other verdict.
+    /// The whole sentence behind the short words, for a tooltip: for a sound that goes elsewhere
+    /// (`the computer plays to DELL S2721QS`), and for an untouched path, which says where the
+    /// verdict starts (the player's output) and that the player may still change the sound
+    /// itself. `None` for any other verdict.
     pub fn sentence(&self) -> Option<String> {
         match &self.verdict {
             Verdict::NotThisDac { sink, by_player } => {
                 let who = if *by_player { "player" } else { "computer" };
                 Some(format!("the {who} plays to {sink}"))
+            }
+            Verdict::Untouched => {
+                let extra = match self.words.get(1..) {
+                    Some(rest) if !rest.is_empty() => format!(" ({})", rest.join(", ")),
+                    _ => String::new(),
+                };
+                Some(format!(
+                    "{UNTOUCHED} from the player's output on{extra}; {UNTOUCHED_NOTE}"
+                ))
             }
             _ => None,
         }
@@ -412,7 +427,7 @@ fn computer_hop(
         changes.push("computer muted".to_string());
     }
     if route.host_eq {
-        changes.push("host EQ on".to_string());
+        changes.extend(chain_words(route.stages));
     }
     match route.others_mixing {
         0 => {}
@@ -424,6 +439,30 @@ fn computer_hop(
         detail: detail.join(", "),
         changes: changes.len() > before,
         unknown: unknown.len() > unknown_before,
+    }
+}
+
+/// The words for the filter chain in the path: each stage that plays, in chain order, or the
+/// flat pass-through kept while a stream plays; `host EQ on` where the stages were not told. The
+/// Night drive's top line (`STAGE_WORDS` in bins/svolderd/web/themes/nightdrive/hud.js) picks these
+/// words out of the path by their text: change both together.
+fn chain_words(stages: Option<svolder_host::ChainStages>) -> Vec<String> {
+    let Some(stages) = stages else {
+        return vec!["host EQ on".to_string()];
+    };
+    let words: Vec<String> = [
+        (stages.eq, "host EQ on"),
+        (stages.crossfeed, "crossfeed on"),
+        (stages.speakers, "virtual speakers on"),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, word)| word.to_string())
+    .collect();
+    if words.is_empty() {
+        vec!["EQ pass-through".to_string()]
+    } else {
+        words
     }
 }
 

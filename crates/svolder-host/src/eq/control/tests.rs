@@ -39,6 +39,7 @@ impl Drop for Dir {
 mod exit;
 mod idle;
 mod passthrough;
+mod vs;
 mod xf;
 
 fn pk(f: f64, g: f64, q: f64) -> SourceFilter {
@@ -97,6 +98,9 @@ fn saved(path: &Path, filters: Vec<SourceFilter>, slots: Vec<u8>, on: bool) {
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     }
     .save(path)
     .unwrap();

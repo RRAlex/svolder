@@ -27,6 +27,8 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use svolder_host::vu::Reference;
+
 use super::parse::PALETTES;
 use super::{ColorDepth, CoverArt, GraphSpan, IntroEffect, LinkSpan, Transition, TuiConfig};
 
@@ -63,6 +65,19 @@ pub enum TuiSettingKind {
         /// The words, in the order the Settings box steps through them.
         words: fn() -> Vec<&'static str>,
     },
+    /// A whole number in a range.
+    Number {
+        /// The number in `tui`.
+        get: fn(&TuiConfig) -> i64,
+        /// Set the number in `tui`, held to `min..=max`.
+        set: fn(&mut TuiConfig, i64),
+        /// The lowest number.
+        min: i64,
+        /// The highest number.
+        max: i64,
+        /// What the Settings box writes after the number.
+        unit: &'static str,
+    },
     /// `accent`: a colour or nothing. Nothing writes the template's commented line back. A change
     /// of the accent does not go through [`TuiSetting::apply`].
     Accent,
@@ -75,6 +90,8 @@ pub enum TuiValue {
     Bool(bool),
     /// For a [`TuiSettingKind::Word`].
     Word(&'static str),
+    /// For a [`TuiSettingKind::Number`]; a number outside its range is held at the nearest end.
+    Number(i64),
 }
 
 impl TuiSetting {
@@ -89,6 +106,7 @@ impl TuiSetting {
             (TuiSettingKind::Word { set, .. }, TuiValue::Word(word)) => {
                 set(tui, word);
             }
+            (TuiSettingKind::Number { set, .. }, TuiValue::Number(number)) => set(tui, number),
             _ => debug_assert!(false, "{} does not take {value:?}", self.key),
         }
     }
@@ -97,6 +115,14 @@ impl TuiSetting {
     pub fn flag(&self, tui: &TuiConfig) -> Option<bool> {
         match &self.kind {
             TuiSettingKind::Bool { get, .. } => Some(get(tui)),
+            _ => None,
+        }
+    }
+
+    /// The key's number in `tui`, for a key that holds one.
+    pub fn number(&self, tui: &TuiConfig) -> Option<i64> {
+        match &self.kind {
+            TuiSettingKind::Number { get, .. } => Some(get(tui)),
             _ => None,
         }
     }
@@ -409,6 +435,39 @@ pub static COVER_ART: TuiSetting = TuiSetting {
     },
 };
 
+/// What `vu_reference` does, for its help and its template line.
+fn vu_reference_text() -> Cow<'static, str> {
+    Cow::Owned(format!(
+        "The level in dBFS the VU meter reads as 0 VU, from {} to {}; {} is the usual. The meter \
+         is drawn on a terminal of 100 by 45 or more, in the Status pane, while host audio shows.",
+        Reference::MIN,
+        Reference::MAX,
+        Reference::default().db(),
+    ))
+}
+
+/// `vu_reference`: the level the VU meter reads as 0 VU.
+pub static VU_REFERENCE: TuiSetting = TuiSetting {
+    key: "vu_reference",
+    label: "VU reference",
+    help: vu_reference_text,
+    template: vu_reference_text,
+    kind: TuiSettingKind::Number {
+        get: |tui| i64::from(tui.vu_reference),
+        set: |tui, db| tui.vu_reference = held_reference(db),
+        unit: "dBFS",
+        min: Reference::MIN as i64,
+        max: Reference::MAX as i64,
+    },
+};
+
+/// `db` held to the VU reference's range (a number too wide for an `i32` is held at the end it is
+/// past): the one clamp the parser and the setter share.
+pub(super) fn held_reference(db: i64) -> i8 {
+    let db = i32::try_from(db).unwrap_or(if db < 0 { i32::MIN } else { i32::MAX });
+    Reference::new(db).db()
+}
+
 /// `graphs`: whether the screens draw their graphs.
 pub static GRAPHS: TuiSetting = TuiSetting {
     key: "graphs",
@@ -479,7 +538,7 @@ pub static LINK_SPAN: TuiSetting = TuiSetting {
 
 /// Every plain key of the `[tui]` table, in the order the template lists them and the writer
 /// appends them.
-pub static TUI_SETTINGS: [&TuiSetting; 19] = [
+pub static TUI_SETTINGS: [&TuiSetting; 20] = [
     &PALETTE,
     &ACCENT,
     &COLORS,
@@ -496,6 +555,7 @@ pub static TUI_SETTINGS: [&TuiSetting; 19] = [
     &HOST_AUDIO,
     &VISUALIZER,
     &COVER_ART,
+    &VU_REFERENCE,
     &GRAPHS,
     &GRAPH_SPAN,
     &LINK_SPAN,

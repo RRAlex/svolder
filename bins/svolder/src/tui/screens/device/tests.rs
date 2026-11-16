@@ -70,6 +70,8 @@ mod tab_strip;
 mod graphs;
 // the work one frame of the screen costs
 mod frame_work;
+// the VU rows of the Status pane
+mod vu;
 
 /// The column every control row's value starts in on the mockup screen: the pane border,
 /// the row cursor and the label column of its longest label.

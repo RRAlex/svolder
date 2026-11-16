@@ -81,7 +81,8 @@ than 300 px, it changes (below).
   button is anchored to a slot at the band's top right. There is no `+` on the line: adding a
   device is a row of the frame's menu (below).
 - **The open area**, under the band: what the chosen hop offers (below). A DAC's is the volume and
-  the curve (`310px 1fr`, a 40 px gap, from 1020 px). From 720 to 1019 px the tone curve (and an
+  the curve (`310px 1fr`, a 40 px gap, from 1020 px; the computer's adds a third column from
+  1240 px, below). From 720 to 1019 px the tone curve (and an
   amp's meters) take a full-width row of their own under the volume, so the curve is never
   narrower than 300 px and a point can be dragged on a portrait tablet. The input, the mode and
   the presets are in the shelf (below), not here, except the mode on a phone.
@@ -186,7 +187,43 @@ and writes to nothing that is gone.
   screen acting on the computer (the level in %, the curve with its points, Off | EQ, the points'
   table, the presets), with the route's facts that are not controls under it: the sound card and its
   format, the other streams and the path's verdict. Where the controls are not drawn (not served,
-  unavailable) the hop opens those facts alone. Choosing the hop writes nothing.
+  unavailable) the hop opens those facts alone. Choosing the hop writes nothing. Its area also holds
+  the level meters (next section).
+
+## The computer's level meters
+
+The computer's area (`#sg-cvu`) shows two needle dials, left and right, of what the computer plays,
+with the reading in VU under each, a peak lamp per channel and, under both, the reference. The rules of the
+needle, the scale and the lamp are in [the VU meter](vu-meter.md); this is how Signal draws and
+holds them. From 1240 px the area has a third column, 400 px, beside the volume and the curve
+(`310px 1fr 400px`, the curve keeps 300 px or more); from 720 px to 1239 the dials sit beside the
+volume in the first row and the curve takes its own row below; on a phone the order is volume,
+meters, curve. The dials are side by side in their column.
+
+- **Meters | Spectrum.** Two chips in the section's corner choose what it shows: the dials (the
+  default) or **Spectrum**, a canvas line of the 240 smoothed bands (`core`'s `VizModel`, in
+  `--sg-computer`; no beats, no max hold) in `draw/spectrum.js`. This is the only visualizer
+  Signal has.
+- **The glow.** Each dial face is one `<button>` named for the glow ("Meter glow: filament.
+  Change"); a tap, Enter or Space turns both dials W1 (subtle: a faint warm wash on the face), W2
+  (warm backlight: a lit face with a dark scale) and W3 (filament: the scale and needle glow and the face
+  stays dark; the default) in turn. The glow is a class on `#sg-cvu` (`sg-w1`, `sg-w2`, `sg-w3`);
+  the key is in Signal's key table.
+- **The reference.** `−`, `+` and a reading ("0 VU = −18 dBFS") move it a dB at a time from -30 to
+  -6; Reset appears only when it is not -18. It changes the needle at once.
+- **Preferences.** Per browser, through `core.prefs`: `vu-glow` (`w1`, `w2` or `w3`), `vu-view`
+  (`meters` or `spectrum`) and `vu-ref` (a whole number); each read is guarded and a bad value
+  falls back, so the page is whole without storage.
+- **What is held.** Only while the section is on the page and the tab is visible. Meters holds the
+  levels-only stream (`core.levels`, 4 bytes a frame, [host-capture.md](host-capture.md)) and one
+  animation loop that writes two `rotate()` transforms through the style object, the readings as
+  text at most 10 times a second and a lamp class on change; Spectrum holds the full stream and its
+  canvas loop instead. The face, glows and scale are drawn once with the section, and `live.js`
+  puts the needles back after a redraw (`view.openDrawn`) rather than drawing per frame. Under
+  reduced motion the needle takes the settled value of each reading. A capture that is `starting`
+  or unavailable says so under the dials and the needles rest.
+- **What it says.** "The level of what PipeWire plays, read at the sound card's monitor." The
+  meters follow the volume only where the sink's monitor does.
 
 **The Add to the chain… sheet.** The frame's menu has Signal's row, `Add to the chain…`, offered
 while a device is shown; it opens a sheet that asks what comes after the device: Amp, Headphones,
@@ -247,8 +284,8 @@ The tokens are in `style.css` on `:root[data-theme="signal"]`.
 | edge, box fill, box glow | `rgba(255,236,212,.14)`, `rgba(240,167,58,.06)`, `0 0 30px rgba(240,167,58,.1)` |
 
 Text on the ground reads at 4.5 to 1 or better; the faint colour is for lines and never for text,
-and a declared hop's words use the dim one. There is no scheme switch, no effects and no visualizer,
-so the theme gives the menu no rows of its own. The menu button is the plain ink circle. The
+and a declared hop's words use the dim one. There is no scheme switch and no effects, and the only
+picture of the music is the computer's Spectrum line, so the theme gives the menu no rows of its own. The menu button is the plain ink circle. The
 preview is the line with five hops and the DAC boxed. Signal needs `meters` and `host`, and its
 only scheme is `dark`. The fonts are the system's, so the page makes no new request.
 
@@ -263,8 +300,8 @@ allows. Browser storage is only through `core.prefs`, under `svolder.theme.signa
 | `signal.js` | the registration, the mount, what each kind of hop opens |
 | `line.js` | the hop list from the model (pure), the choice that survives a redraw, the followed URLs |
 | `live.js` | draws the sections, keeps them current, holds one while a hand is on it (the holds are counted by `core.freeze.keeper`) |
-| `draw/` | one file per section: `line.js` (the wire, dots, labels, box, strip, the loop), `volume.js`, `tone.js`, `choices.js`, `playing.js`, `shelf.js`, `facts.js`, `amp.js`, `hop.js`, `player.js`, `computer.js`, `card.js`, and the small `word.js`, `esc.js` |
-| `*-wire.js`, `strip-wire.js`, `lists.js`, `ask.js` (the core's list and inline ask in Signal's classes and words), `device-list.js` | the hands: what a tap, a drag, a key, a list or a question does |
+| `draw/` | one file per section: `line.js` (the wire, dots, labels, box, strip, the loop), `volume.js`, `tone.js`, `choices.js`, `playing.js`, `shelf.js`, `facts.js`, `amp.js`, `hop.js`, `player.js`, `computer.js`, `card.js`, `vu.js` (the dials), `spectrum.js` (the line), and the small `word.js`, `esc.js` |
+| `*-wire.js` (`vu-wire.js`: the glow, the reference, the streams and the clock), `strip-wire.js`, `lists.js`, `ask.js` (the core's list and inline ask in Signal's classes and words), `device-list.js` | the hands: what a tap, a drag, a key, a list or a question does |
 | `slim.js`, `place.js` (the core's `placeFractions` with Signal's fill class), `words.js`, `presets.js` | the slim bar, pure maths and fixed words; the drag and the keys of a track are the core's `gestures.js` |
 | `driver.js`, `preview.js`, `style.css` | the test driver, the picker's picture, the tokens and every section |
 
@@ -293,6 +330,10 @@ daemon's and the core's.
   hop) and reads values back from what the page draws. The completeness pass also asserts that every
   theme lists as many targets of each kind as the first theme listed, on every kind of device; the
   device's facts are reached through the core's driver on the Devices popup's page.
+- **The meters**: `node/signal-vu.mjs` (the section's markup) and `signal_vu.py` (Chromium and
+  Firefox: the needles' transforms per frame, the lamp, the glow cycle and its key, the reference,
+  the chips and the streams held, the three widths); the needle itself is `node/vu.mjs` against
+  the golden file.
 - **Mutation runners**: `node/mutate_signal.sh` (twelve mutants of the sources, the last three
   the mode kept on a desktop's first screen, a Loudness chip without its round buttons and the menu
   row offered with no device; the first nine: the line dropping the

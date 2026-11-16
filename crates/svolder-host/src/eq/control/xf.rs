@@ -35,13 +35,14 @@
 use super::*;
 use crate::eq::crossfeed::{CrossfeedChange, held};
 use crate::eq::manage::config_stage_cost_db;
+use crate::eq::speakers::OffReason as SpeakersOff;
 
 /// What the view says when the stage was found on at the owner's start.
 const RESTART_NOTE: &str = "crossfeed turned off: it is off after a restart";
 
 impl EqControl {
     /// The rate the stage is worked out for.
-    fn rate(&self) -> u32 {
+    pub(super) fn rate(&self) -> u32 {
         self.sent.rate.or(self.known_rate).unwrap_or(CONFIG_RATE_HZ)
     }
 
@@ -92,7 +93,7 @@ impl EqControl {
         self.xf_kept = state.crossfeed.is_some();
         self.flat = state.flat && state.on;
         self.xf_for = None;
-        self.xf_dirty = false;
+        self.stage_dirty = false;
         // A config that was applied with the stage may start the chain again with it on.
         self.xf_conf = state.crossfeed_on;
         if state.crossfeed_on {
@@ -121,21 +122,22 @@ impl EqControl {
     pub(super) fn reset_xf(&mut self, why: OffReason, note: String, plays: bool) {
         self.xf_on = false;
         self.xf_for = None;
-        self.xf_dirty = false;
+        self.stage_dirty = false;
         self.xf_note = Some(note);
         self.xf_reason = Some(why);
-        self.owed = Some(Owed { plays, tried: None });
+        self.owe(plays);
     }
 
     /// Compare the output the stage was turned on for with the one the last look saw: another
     /// one is a reset. A stage turned on while no output could be read takes the first one seen.
     pub(super) fn check_output(&mut self) {
-        if !self.xf_on {
-            return;
-        }
         let Some(now) = self.output.clone() else {
             return;
         };
+        self.check_speakers_output(&now);
+        if !self.xf_on {
+            return;
+        }
         match self.xf_for.as_deref() {
             Some(was) if was != now.name => {
                 let name = now.description.clone().unwrap_or(now.name);
@@ -154,6 +156,12 @@ impl EqControl {
     /// runs for crossfeed alone, else the stage off. One that fails is tried again a second
     /// later (a stop tries at once).
     pub(super) async fn finish_reset(&mut self) {
+        self.finish_stage_reset().await;
+        // A config that holds convolvers for speakers that are off is written without them.
+        self.rewrite_speakers_conf().await;
+    }
+
+    async fn finish_stage_reset(&mut self) {
         let Some(owed) = self.owed.clone() else {
             return;
         };
@@ -166,6 +174,9 @@ impl EqControl {
             // that says on is not turned off here. A chain that ran for crossfeed alone is gone.
             self.owed = None;
             self.xf_conf = false;
+            self.sp.conf_on = false;
+            self.sp.loaded = None;
+            self.pin();
             if self.flat {
                 self.runs = false;
                 self.flat = false;
@@ -182,7 +193,7 @@ impl EqControl {
             self.owed = None;
         } else if let Some(owed) = self.owed.as_mut() {
             owed.tried = Some(self.ticks);
-            if self.xf_note.is_some() {
+            if self.xf_note.is_some() || self.sp.note.is_some() {
                 // The state and the view say off: say that the chain could not follow.
                 self.unavailable_note();
             }
@@ -190,10 +201,13 @@ impl EqControl {
     }
 
     fn unavailable_note(&mut self) {
-        if let Some(note) = self.xf_note.as_mut()
-            && !note.contains("could not be taken out")
+        for note in [self.xf_note.as_mut(), self.sp.note.as_mut()]
+            .into_iter()
+            .flatten()
         {
-            note.push_str(" (the stage could not be taken out of the chain yet; trying again)");
+            if !note.contains("could not be taken out") {
+                note.push_str(" (the stage could not be taken out of the chain yet; trying again)");
+            }
         }
     }
 
@@ -201,18 +215,26 @@ impl EqControl {
     /// removed, a live one gets the bypass (the preamp rises after it), and one whose config may
     /// hold the stage, or that refuses the send, is applied again without it. Whether it is off.
     async fn physical_off(&mut self) -> bool {
-        if self.flat {
+        if self.flat && !self.space_on() {
             return self.turn_off().await.is_ok();
         }
         let owed = self.owed.take();
-        if !self.xf_conf && self.stage_by_live() && self.xf_ports {
-            self.xf_dirty = true;
+        if self.stage_by_live() {
+            // Whether the chain holds the speakers' stage is read now: the send carries it.
+            self.has_speakers_ports().await;
+        }
+        if !self.xf_conf
+            && !self.sp.conf_on
+            && self.stage_by_live()
+            && (self.xf_ports || self.sp.ports)
+        {
+            self.stage_dirty = true;
             self.look_first = true;
             if self.send_dirty().await {
                 let _ = self.save().await;
                 return true;
             }
-            self.xf_dirty = false;
+            self.stage_dirty = false;
         }
         match self.apply().await {
             Ok(()) => {
@@ -241,6 +263,13 @@ impl EqControl {
             self.reset_xf(
                 OffReason::Stopped,
                 "crossfeed turned off: svolder stopped".to_string(),
+                true,
+            );
+        }
+        if self.sp.on {
+            self.reset_sp(
+                SpeakersOff::Stopped,
+                "virtual speakers turned off: svolder stopped".to_string(),
                 true,
             );
         }
@@ -378,7 +407,7 @@ impl EqControl {
             // failed with the next one): the stage as it stands now goes with the next line, so
             // the chain does not keep a stage the preamp is no longer worked out for.
             if self.runs && self.xf_ports && self.stage_by_live() {
-                self.xf_dirty = true;
+                self.stage_dirty = true;
             }
         }
         result
@@ -386,7 +415,7 @@ impl EqControl {
 
     /// Save the settings (and the state) when there is a state to hold them: a chain that was
     /// never applied has none, and the settings are kept until one is.
-    async fn save_settings(&mut self) -> Result<(), EqFailure> {
+    pub(super) async fn save_settings(&mut self) -> Result<(), EqFailure> {
         match self.runs {
             true => self.save().await,
             false => self.save_state(),
@@ -399,7 +428,7 @@ impl EqControl {
         self.xf = next;
         self.xf_kept = true;
         if self.stage_by_live() {
-            self.xf_dirty = true;
+            self.stage_dirty = true;
         }
         if !done {
             return Ok(());
@@ -408,7 +437,7 @@ impl EqControl {
         if self.stage_by_live() && self.send_dirty().await {
             return self.save().await;
         }
-        self.xf_dirty = false;
+        self.stage_dirty = false;
         self.apply().await?;
         self.save().await
     }
@@ -424,10 +453,25 @@ impl EqControl {
         );
         self.xf_kept = true;
         self.xf_on = true;
+        // Crossfeed and the virtual speakers are one choice: the speakers go off in the same
+        // update (the send that turns the stage on carries their bypass).
+        let speakers_were_on = std::mem::take(&mut self.sp.on);
+        let speakers_before = (
+            self.sp.note.clone(),
+            self.sp.reason,
+            self.sp.for_output.clone(),
+        );
+        if speakers_were_on {
+            self.sp.for_output = None;
+            self.sp.note = Some("virtual speakers turned off: crossfeed is on".to_string());
+        }
         let result = self.xf_start_inner().await;
         if result.is_err() {
             self.xf_on = false;
-            self.xf_dirty = false;
+            if speakers_were_on {
+                self.speakers_back(speakers_before);
+            }
+            self.stage_dirty = false;
             self.force_conf = false;
             // A flat chain applied for this start goes again, so the EQ the user had turned off
             // stays off; one that cannot be removed now is owed its removal.
@@ -445,6 +489,22 @@ impl EqControl {
             }
         }
         result
+    }
+
+    /// A crossfeed start that turned the speakers off failed: they play again as they were when
+    /// the chain still holds their set, and stay off in words when it was rebuilt without it.
+    fn speakers_back(&mut self, before: (Option<String>, Option<SpeakersOff>, Option<String>)) {
+        if self.sp.loaded.is_some() && self.sp.loaded == self.sp.chosen && self.sp.ports {
+            self.sp.on = true;
+            (self.sp.note, self.sp.reason, self.sp.for_output) = before;
+            return;
+        }
+        self.sp.for_output = None;
+        self.sp.note = Some(
+            "virtual speakers turned off: the computer EQ chain was rebuilt without them".into(),
+        );
+        self.sp.reason = Some(SpeakersOff::ChainRestarted);
+        let _ = self.save_state();
     }
 
     async fn xf_start_inner(&mut self) -> Result<(), EqFailure> {
@@ -465,10 +525,10 @@ impl EqControl {
         self.look_output().await;
         self.xf_for = self.output.as_ref().map(|out| out.name.clone());
         // The stage goes to the chain by a live send unless the config holds it.
-        self.xf_dirty = !self.xf_conf;
-        if self.xf_dirty && self.stage_by_live() && !self.send_dirty().await {
+        self.stage_dirty = !self.xf_conf;
+        if self.stage_dirty && self.stage_by_live() && !self.send_dirty().await {
             // The send did not take: the chain holds the stage in its config instead.
-            self.xf_dirty = false;
+            self.stage_dirty = false;
             self.force_conf = true;
             self.apply().await?;
         }
@@ -513,12 +573,12 @@ impl EqControl {
         self.xf_on = false;
         self.xf_for = None;
         if !self.xf_conf && self.stage_by_live() && self.has_ports().await {
-            self.xf_dirty = true;
+            self.stage_dirty = true;
             self.look_first = true;
             if self.send_dirty().await {
                 return self.save().await;
             }
-            self.xf_dirty = false;
+            self.stage_dirty = false;
         }
         match self.apply().await {
             Ok(()) => self.save().await,

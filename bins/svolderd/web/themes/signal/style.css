@@ -637,3 +637,122 @@ span.sg-prm { border-color: transparent; cursor: default; }
 @media (max-width: 719px) and (prefers-reduced-motion: reduce) {
   .sg-slide { transition: none; }
 }
+
+/* ---- the computer's level meters: two dials, three glows (a class on the section), Spectrum ---- */
+
+.sg-vu {
+  --sg-face: #130f0c; --sg-glow: rgba(240, 167, 58, .5); --sg-ink2: #f4eee5; --sg-lamp-off: #2a241d;
+  min-width: 0;
+}
+.sg-vpane[hidden] { display: none; }
+.sg-vhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.sg-vviews { display: flex; gap: 6px; }
+.sg-vviews .sg-pill { height: 30px; font-size: 12.5px; }
+.sg-vdials { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sg-vdial { min-width: 0; }
+.sg-vface {
+  display: block; width: 100%; margin: 0; padding: 8px 10px 10px; position: relative; overflow: hidden; cursor: pointer;
+  background: var(--sg-face); border: 1px solid var(--sg-edge); border-radius: 12px; font: inherit; color: inherit;
+}
+.sg-vface svg { display: block; width: 100%; height: auto; }
+.sg-vface:focus-visible { outline: 2px solid var(--sg-device); outline-offset: 2px; }
+.sg-vface .tk { stroke: var(--sg-mid); fill: none; stroke-linecap: butt; }
+.sg-vface .tk.minor { stroke: var(--sg-dim); }
+.sg-vface .arc { stroke: var(--sg-dim); fill: none; }
+.sg-vface .zone { stroke: var(--sg-bad); fill: none; opacity: .85; }
+.sg-vface .num { fill: var(--sg-mid); font: 500 10px var(--sg-font); text-anchor: middle; }
+.sg-vface .num.hot { fill: var(--sg-bad); }
+.sg-vface .unit { fill: var(--sg-dim); font: 600 11px var(--sg-font); letter-spacing: .14em; text-anchor: middle; }
+.sg-vface .sill { fill: var(--sg-ground); stroke: var(--sg-edge); }
+.sg-vneedle { transform-box: view-box; transform-origin: 120px 168px; transform: rotate(-42deg); will-change: transform; }
+.sg-vneedle line { stroke-linecap: round; fill: none; }
+.sg-vneedle .bloom { display: block; }
+.sg-vneedle .shaft { stroke-width: 2.4; }
+.sg-vneedle .shaft.L { stroke: var(--sg-computer); }
+.sg-vneedle .shaft.R { stroke: var(--sg-ink2); }
+.sg-vneedle .tip.L { fill: var(--sg-computer); }
+.sg-vneedle .tip.R { fill: none; stroke: var(--sg-ink2); stroke-width: 1.6; }
+/* glass sheen: one diagonal reflection, static */
+.sg-vface::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(158deg, rgba(255, 238, 214, .10) 0%, rgba(255, 238, 214, .035) 40%, transparent 40.4%);
+}
+.sg-vrd { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 14px; color: var(--sg-mid); }
+.sg-vch { color: var(--sg-dim); width: 18px; font-weight: 500; }
+.sg-vnum { font-variant-numeric: tabular-nums; min-width: 70px; text-align: right; color: var(--sg-ink); margin-left: auto; }
+.sg-vlamp { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--sg-dim); }
+.sg-vlamp::before {
+  content: ""; width: 10px; height: 10px; border-radius: 50%; background: #3a2410;
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 110, .22), inset 0 1px 2px rgba(255, 214, 150, .18);
+}
+.sg-vlamp.on { color: #ff9a55; }
+.sg-vlamp.on::before {
+  background: radial-gradient(circle at 40% 35%, #ffd9a0 0 18%, #ff8a3a 55%, #d8461a 100%);
+  box-shadow: 0 0 6px 1px #ff8a3a, 0 0 16px 4px rgba(255, 120, 40, .55);
+}
+.sg-vstate:empty { display: none; }
+.sg-vref { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.sg-vref .sg-lbl { flex-basis: 100%; }
+.sg-vout { font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
+.sg-vref [hidden] { display: none; }
+.sg-vref [aria-disabled="true"] { opacity: .4; cursor: default; }
+.sg-vref .sg-pill { white-space: nowrap; }
+.sg-vspec {
+  display: block; width: 100%; height: 150px; color: var(--sg-computer);
+  background: var(--sg-face); border: 1px solid var(--sg-edge); border-radius: 12px;
+}
+
+/* W1 subtle: dark glass, a faint warm backlight rising from the pivot */
+.sg-w1 .sg-vface { background: radial-gradient(ellipse 85% 120% at 50% 108%, rgba(240, 167, 58, .20) 0%, rgba(240, 167, 58, .07) 46%, transparent 72%), var(--sg-face); }
+.sg-w1 .scale { filter: drop-shadow(0 0 2px rgba(240, 167, 58, .38)); }
+.sg-w1 .bloom.a { stroke: rgba(255, 176, 70, .12); stroke-width: 9; }
+.sg-w1 .bloom.b { stroke: rgba(255, 176, 70, .22); stroke-width: 5; }
+
+/* W2 warm backlight: a lit amber card, light falling off to a dark brown edge, ink printed on it */
+.sg-w2 .sg-vface {
+  background: radial-gradient(ellipse 100% 135% at 50% 100%, #ffc468 0%, #f0a042 28%, #b8641c 62%, #4b210a 100%);
+  box-shadow: 0 0 34px rgba(255, 150, 50, .20), inset 0 0 26px rgba(40, 14, 2, .65); border-color: rgba(255, 190, 110, .28);
+}
+.sg-w2 .tk { stroke: #2b1505; } .sg-w2 .tk.minor { stroke: #4a2810; }
+.sg-w2 .arc { stroke: #3a1c08; } .sg-w2 .zone { stroke: #a5240c; opacity: 1; }
+.sg-w2 .num { fill: #2b1505; } .sg-w2 .num.hot { fill: #4a0d03; } .sg-w2 .unit { fill: #4d2509; }
+.sg-w2 .sill { fill: #1f0e04; stroke: rgba(255, 190, 110, .2); }
+.sg-w2 .scale { filter: drop-shadow(0 0 1.5px rgba(255, 226, 170, .55)); }
+.sg-w2 .sg-vneedle .shaft.L, .sg-w2 .sg-vneedle .shaft.R { stroke: #1d0e04; }
+.sg-w2 .tip.L { fill: #1d0e04; } .sg-w2 .tip.R { stroke: #1d0e04; }
+.sg-w2 .bloom.a { stroke: rgba(50, 18, 3, .14); stroke-width: 8; }
+.sg-w2 .bloom.b { stroke: rgba(50, 18, 3, .2); stroke-width: 4.5; }
+
+/* W3 filament: deep brown glass, the scale drawn as lit filament, a lamp glow under the sill */
+.sg-w3 .sg-vface {
+  background: linear-gradient(180deg, #120b07 0%, #1a0f08 70%, #2a1608 100%);
+  box-shadow: 0 8px 30px -10px rgba(255, 140, 40, .35), inset 0 -14px 22px -10px rgba(255, 150, 50, .30), inset 0 0 0 1px rgba(255, 190, 110, .10);
+}
+.sg-w3 .tk { stroke: #ffc678; } .sg-w3 .tk.minor { stroke: #c98c4a; }
+.sg-w3 .arc { stroke: #ffc678; stroke-width: 1.6; } .sg-w3 .zone { stroke: #ff6a3a; opacity: .95; }
+.sg-w3 .num { fill: #ffd9a3; } .sg-w3 .num.hot { fill: #ff8a5a; } .sg-w3 .unit { fill: #c98c4a; }
+.sg-w3 .sill { fill: #ffb45e; stroke: none; opacity: .55; }
+.sg-w3 .scale { filter: drop-shadow(0 0 2.5px rgba(255, 170, 60, .85)) drop-shadow(0 0 7px rgba(255, 140, 40, .40)); }
+.sg-w3 .sg-vneedle .shaft.L { stroke: #ffe3b0; } .sg-w3 .sg-vneedle .shaft.R { stroke: #fff3de; }
+.sg-w3 .tip.L { fill: #ffe3b0; } .sg-w3 .tip.R { stroke: #fff3de; }
+.sg-w3 .bloom.a { stroke: rgba(255, 160, 50, .16); stroke-width: 10; }
+.sg-w3 .bloom.b { stroke: rgba(255, 170, 60, .30); stroke-width: 5; }
+.sg-w2 .sg-vrd .sg-vnum, .sg-w3 .sg-vrd .sg-vnum { text-shadow: 0 0 9px rgba(255, 170, 60, .28); }
+
+/* the third column from 1240 px (where the curve keeps 300 px), beside the volume from 720 px, after the
+   volume on a phone; below 1240 px the curve has its own row under the volume and the meters */
+@media (min-width: 1240px) {
+  .sg-open:has(> #sg-cvu) { grid-template-columns: 310px minmax(0, 1fr) 400px; }
+}
+@media (max-width: 1239px) {
+  #sg-cvu { order: 2; }
+  .sg-open:has(> #sg-cvu) #sg-ctone { order: 3; grid-column: 1 / -1; }
+  #sg-cvolume { order: 1; }
+}
+@media (max-width: 719px) {
+  .sg-vface { padding: 6px 6px 8px; }
+  .sg-vrd { gap: 6px; font-size: 12.5px; }
+  .sg-vnum { min-width: 52px; }
+  .sg-vviews .sg-pill { height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .sg-vneedle { will-change: auto; } }

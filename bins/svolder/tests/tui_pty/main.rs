@@ -13,3 +13,5 @@ mod tap;
 
 mod cases;
 mod crossfeed;
+mod speakers;
+mod vu;

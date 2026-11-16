@@ -14,6 +14,7 @@
 //! - [`qr`]: a QR code as text, in half blocks.
 //! - [`recovery`]: what went wrong, and the one step that follows from it.
 //! - [`scanning`]: finding a device on the air, and how well each adapter hears it.
+//! - [`speakers`]: the calls the front ends make of the daemon's virtual-speakers sets service.
 //! - [`state`]: what svolder remembers about the devices it has connected to, between runs.
 //! - [`summary`]: what bare `svolder` prints when its output is being read rather than watched.
 //! - [`tui`]: `svolder tui`, the interactive terminal UI.
@@ -32,6 +33,7 @@ mod qr;
 mod reach;
 mod recovery;
 mod scanning;
+mod speakers;
 mod state;
 mod summary;
 #[cfg(test)]

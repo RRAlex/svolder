@@ -22,7 +22,7 @@ use ratatui::widgets::Paragraph;
 use svolder_proto::FunctionId;
 
 use crate::tui::app::divider::Split;
-use crate::tui::app::{App, Holding, Pane, Screen, Xf};
+use crate::tui::app::{App, Holding, Pane, Screen};
 use crate::tui::keys::Scene;
 use crate::tui::layout_tier::{self, Tier};
 use crate::tui::mouse::{Hit, HitMap};
@@ -37,6 +37,7 @@ mod header;
 pub(crate) mod split;
 mod status;
 mod tone_pane;
+mod vu;
 
 pub(crate) use art::{art_box, art_reserved, art_slot, words_beside_art};
 pub(crate) use header::{Rule, header_height, logo_of};
@@ -48,13 +49,13 @@ pub(crate) use status::{has_fault_controls, now_playing_room};
 pub(super) use tone_pane::{
     BANDS_APPLY_IN_EQ, ModeHalves, band_dim, band_ids, band_values, bands_apply, mode_line,
 };
+pub(crate) use vu::vu_drawn_in;
 
 #[cfg(test)]
 use controls::path_row;
 use controls::{Controls, controls_pane, height, room};
 use status::{
     device_drawn, faults_fit, level_from_drawn, link_drawn, now_playing_drawn, passphrase_drawn,
-    status_lines,
 };
 #[cfg(test)]
 use tone_pane::tone_lines;
@@ -355,7 +356,8 @@ fn draw_tone(
         }
         if let Some(xf) = &tone.crossfeed {
             let row = pane_row(inner, xf.line);
-            hits.push(row, Hit::Crossfeed(Xf::Preset));
+            let which = app.xf_first();
+            hits.push(row, Hit::Crossfeed(which));
             let arrow = |at: usize| Rect {
                 x: inner.x + u16::try_from(at).unwrap_or(0),
                 y: row.y,
@@ -364,11 +366,11 @@ fn draw_tone(
             };
             hits.push(
                 arrow(xf.arrows.0).intersection(row),
-                Hit::CrossfeedStep(Xf::Preset, -1),
+                Hit::CrossfeedStep(which, -1),
             );
             hits.push(
                 arrow(xf.arrows.1).intersection(row),
-                Hit::CrossfeedStep(Xf::Preset, 1),
+                Hit::CrossfeedStep(which, 1),
             );
         }
         return rows;
@@ -416,12 +418,14 @@ fn draw_status(
 ) {
     let art = art::slot_in(area, tier, app);
     let status_width = status_width(area, tier, art.map(|(_, reserved)| reserved));
-    pane(
+    let vu = vu::vu_drawn(app, (frame.area().width, frame.area().height));
+    let (lines, vu_at) = status::status_parts(app, theme, status_width, tier, vu);
+    let inner = pane(
         frame,
         PaneSpec {
             area,
             title: "Status",
-            lines: status_lines(app, theme, status_width, tier),
+            lines,
             focus: Pane::Status,
             title_hit: None,
             actions: &STATUS_ACTIONS,
@@ -431,6 +435,18 @@ fn draw_status(
         tier,
         hits,
     );
+    if let Some(first) = vu_at {
+        // The meter's two channel rows, as wide as the words beside the picture.
+        let rows = Rect {
+            width: u16::try_from(status_width)
+                .unwrap_or(u16::MAX)
+                .min(inner.width),
+            height: 2,
+            ..pane_row(inner, u16::try_from(first).unwrap_or(u16::MAX))
+        }
+        .intersection(inner);
+        hits.push(rows, Hit::Vu);
+    }
     // Under a box the picture is not written: a kitty picture is sent once, in the slot's first
     // cell, which the box's Clear would wipe unseen. The rows keep the room it will have.
     if let (Some((slot, _)), Some(picture)) = (art, app.host.cover.picture.as_ref())
@@ -544,6 +560,15 @@ fn rows_of(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
     laid
 }
 
+/// The rows the VU meter adds to the Status pane of a frame `area` large: [`vu::ROWS`] where it
+/// is drawn, else none.
+fn vu_rows(area: Rect, app: &App) -> u16 {
+    match vu::vu_drawn(app, (area.width, area.height)) {
+        true => vu::ROWS,
+        false => 0,
+    }
+}
+
 /// [`rows_of`] worked out afresh.
 fn lay_out(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
     let (tier, [header, body]) = layout_tier::split(area);
@@ -551,7 +576,8 @@ fn lay_out(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
         + u16::from(link_drawn(app, tier))
         + u16::from(level_from_drawn(app))
         + u16::from(now_playing_drawn(app))
-        + u16::from(passphrase_drawn(app));
+        + u16::from(passphrase_drawn(app))
+        + vu_rows(area, app);
     let base = STATUS_HEIGHT + extra_lines + tier.top();
     let grown = art::growth(area, body, tier, base, tier.row_gap(), app);
     let [panes, _, status] = Layout::vertical([

@@ -239,6 +239,12 @@ pub fn host_eq_state_path() -> PathBuf {
     state_home().join("svolder").join("host-eq.toml")
 }
 
+/// Where the converted virtual-speakers sets are kept: `speakers` in svolder's state directory
+/// (the chain depends on them, so they are state and not cache).
+pub fn speakers_dir() -> PathBuf {
+    state_home().join("svolder").join("speakers")
+}
+
 /// The environment variable that names where systemd unit files go.
 pub const UNITDIR_ENV: &str = "SVOLDER_UNITDIR";
 

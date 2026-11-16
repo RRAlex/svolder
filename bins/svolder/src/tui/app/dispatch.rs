@@ -114,6 +114,9 @@ impl App {
         if self.presets.device_list.is_some() {
             return device_presets::key(self, key.code);
         }
+        if self.speakers_box.list.is_some() {
+            return self.sets_key(key.code);
+        }
         if self.tone.edit_line.is_some() {
             return edit_line::key(self, key.code);
         }
@@ -340,6 +343,7 @@ impl App {
             KeyCode::Char('i') => self.flip_key("phase"),
             KeyCode::Char('o') => self.flip_key("nos"),
             KeyCode::Char('X') if self.crossfeed_shown() => self.jump_to_crossfeed(),
+            KeyCode::Char('S') if self.space_shown() => self.open_sets(),
             KeyCode::Char('a') if self.screen == Screen::Tone && self.on_computer() => return None,
             KeyCode::Char('a') => {
                 self.advise_key();
@@ -521,6 +525,7 @@ impl App {
             || self.devices.confirm.is_some()
             || self.presets.preset_list.is_some()
             || self.presets.device_list.is_some()
+            || self.speakers_box.list.is_some()
             || self.tone.edit_line.is_some()
             || self.tone.point_line.is_some()
             || self.tone.xf_line.is_some()

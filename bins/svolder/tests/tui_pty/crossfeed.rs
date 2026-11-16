@@ -16,7 +16,7 @@ fn on_computer(cols: u16, rows: u16) -> Tui {
     let tui = Tui::start(cols, rows, Responder::None);
     tui.wait_ready();
     tui.send_keys("C");
-    tui.wait_for_text("Crossfeed");
+    tui.wait_for_text("Space");
     tui
 }
 
@@ -48,7 +48,7 @@ fn the_tone_panes_crossfeed_row_sits_under_the_eq() {
     for (cols, rows) in SIZES {
         let tui = on_computer(cols, rows);
         let table = row_of(&tui, "Type");
-        let row = row_of(&tui, "Crossfeed ");
+        let row = row_of(&tui, "Space ");
         assert!(
             row > table,
             "{cols}x{rows}: under the points table:\n{}",
@@ -78,11 +78,17 @@ fn tab_and_x_unfold_and_fold_the_tone_screens_section_and_the_graph_keeps_its_he
         // which unfolds
         tui.send_keys("\t\t");
         tui.wait_for_text("Level");
-        let open = row_of(&tui, "Crossfeed ") - row_of(&tui, "Response");
+        let open = row_of(&tui, "Space ") - row_of(&tui, "Response");
+        // the Space row leads the section: the Crossfeed row is under it whole, and in the narrow
+        // tier the three value rows too, from the graph's rows
         match cols >= 120 {
-            true => assert_eq!(open, graph, "{cols}x{rows}: the graph keeps its height"),
+            true => assert_eq!(
+                open + 1,
+                graph,
+                "{cols}x{rows}: the Space row's second line"
+            ),
             false => assert_eq!(
-                open + 3,
+                open + 4,
                 graph,
                 "{cols}x{rows}: the rows come from the graph"
             ),
@@ -113,7 +119,7 @@ fn a_crossfeed_change_goes_through_the_daemon_and_comes_back_in_the_view() {
         let tui = on_computer(cols, rows);
         open_tone_screen(&tui);
         let folded = tui.screen_text();
-        assert!(folded.contains("Crossfeed  off"), "{folded}");
+        assert!(folded.contains("Space      off"), "{folded}");
         // Space in the section turns it on; the folded line then reads the numbers
         tui.send_keys("X");
         tui.wait_for_text("Level");
@@ -121,8 +127,9 @@ fn a_crossfeed_change_goes_through_the_daemon_and_comes_back_in_the_view() {
         tui.wait_for("on in the view", WAIT, |s| {
             s.contents().contains("Crossfeed on ")
         });
-        // a step of Level goes through the daemon and comes back as exactly one step (1 %)
-        tui.send_keys("\x1b[B");
+        // a step of Level goes through the daemon and comes back as exactly one step (1 %); the
+        // Crossfeed row is the stop under the Space row
+        tui.send_keys("\x1b[B\x1b[B");
         tui.wait_for("the cursor on Level", WAIT, |s| {
             s.contents().contains("▶ Level")
         });
@@ -133,7 +140,7 @@ fn a_crossfeed_change_goes_through_the_daemon_and_comes_back_in_the_view() {
         tui.wait_for("one step back", WAIT, |s| s.contents().contains("‹ 37 %"));
         tui.send_keys("X");
         tui.wait_for("folded", WAIT, |s| !s.contents().contains("Level"));
-        assert!(has(&tui, "Crossfeed  on"), "{}", tui.screen_text());
+        assert!(has(&tui, "Space      Crossfeed"), "{}", tui.screen_text());
         tui.quit();
     }
 }
@@ -157,7 +164,7 @@ fn the_crossfeed_focus_stays_on_the_tone_screen() {
         tui.send_keys("X");
         tui.wait_for("folded", WAIT, |s| !s.contents().contains("Level"));
     }
-    assert!(has(&tui, "Crossfeed  off"), "{}", tui.screen_text());
+    assert!(has(&tui, "Space      off"), "{}", tui.screen_text());
     assert!(!has(&tui, "Level"), "folded on the way back");
     tui.quit();
 }

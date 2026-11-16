@@ -48,6 +48,39 @@
         }
       ],
       "availability_mode": "all",
+      "command_topic": "svolder/computer/computer_speakers_set/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
+      "json_attributes_topic": "svolder/computer/computer_speakers_set/attributes",
+      "name": "Virtual speakers set",
+      "options": [
+        "Set A · No room · HRTF",
+        "Set B · With room · BRIR"
+      ],
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/computer/computer_speakers_set/state",
+      "unique_id": "svolder_computer_computer_speakers_set"
+    },
+    "topic": "homeassistant/select/svolder_computer/computer_speakers_set/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
       "device": {
         "identifiers": [
           "svolder_computer"
@@ -123,5 +156,35 @@
       "unique_id": "svolder_computer_computer_eq"
     },
     "topic": "homeassistant/switch/svolder_computer/computer_eq/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/computer/computer_speakers/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
+      "name": "Virtual speakers",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/computer/computer_speakers/state",
+      "unique_id": "svolder_computer_computer_speakers"
+    },
+    "topic": "homeassistant/switch/svolder_computer/computer_speakers/config"
   }
 ]

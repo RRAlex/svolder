@@ -42,6 +42,12 @@ export const KEYS = [
     words: 'Volume to its lowest', when: writes,
   },
 
+  // ---- a level meter's face: the glow
+  {
+    id: 'meter-glow', key: ['Enter', 'Space'], keys: ['Enter', ' '], zone: '.sg-vface',
+    words: 'Change the meter glow',
+  },
+
   // ---- a scale of the shelf
   {
     id: 'scale-step', key: ['↑', '↓', '←', '→'], keys: ARROWS, zone: '.sg-scale',
@@ -115,6 +121,7 @@ export const KEYS = [
 export const ZONES = {
   '#sg-line': 'The line',
   '#sg-vtrack, #sg-cvtrack': 'The volume',
+  '.sg-vface': 'A level meter',
   '.sg-scale': 'A scale',
   '.sg-pt': 'A point of the curve',
   '.sg-pt[data-n]': 'A point of the curve',

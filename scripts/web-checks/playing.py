@@ -45,6 +45,9 @@ STATE = """(() => {
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
     return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10); };
   const text = (s) => q(s)?.textContent.trim() ?? null;
+  // What is drawn: the words a screen reader reads in their place (.np-sr) are left out.
+  const seen = (s) => { const el = q(s); if (!el) return null; const c = el.cloneNode(true);
+    c.querySelectorAll('.np-sr').forEach((n) => n.remove()); return c.textContent.trim(); };
   const root = q('#part-playing'); const wide = q('.p-band');
   const img = q('#part-playing .np-cover img');
   const np = q('#part-playing .np'); const shown = (s) => {
@@ -53,7 +56,7 @@ STATE = """(() => {
     col: box(q('.view .col')),
     knob: box(q('sv-knob')), view: box(q('.view')), barBox: box(q('.np-bar')),
     title: text('.np-title'), artist: text('.np-artist'), source: text('.np-source'),
-    none: text('.np-none'), path: text('.np-path'), verdict: text('.np-verdict'),
+    none: text('.np-none'), path: seen('.np-path'), verdict: seen('.np-verdict'),
     chips: [...document.querySelectorAll('.np-path > *')].map((el) => [box(el), el.className]),
     pathClass: q('.np-path')?.className ?? null, hops: document.querySelectorAll('.np-hop').length,
     img: img ? { loaded: img.complete && img.naturalWidth > 0, src: img.getAttribute('src'),
@@ -133,6 +136,10 @@ try:
           and s['pathShown'] and not s['foldShown'], s)
     check('the path says untouched, with its three hops, for the fake route on the fake DAC',
           s['verdict'] == 'untouched' and s['hops'] == 3 and 'ok' in s['pathClass'].split(), s)
+    tip = b.ev("document.querySelector('.np-verdict')?.title ?? null")
+    check('an untouched verdict carries the tooltip that says the player may still change the sound',
+          isinstance(tip, str) and tip.startswith('untouched from the player') and
+          'loudness normalization' in tip and 'its own EQ' in tip, tip)
     band_playing = s['band']
     first = seconds(s['el'])
     check('the length reads 20:00 and the time reads m:ss',

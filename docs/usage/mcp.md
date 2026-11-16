@@ -84,8 +84,8 @@ config error.
 ### Writes and the volume rule
 
 With `writes = false` the server offers five read tools (`get_host` reads the computer) and nothing
-can change. `writes = true` adds eight more: three that change a device, `identify`, which only asks
-the unit to show itself, and four for the computer's volume, EQ and crossfeed. The
+can change. `writes = true` adds nine more: three that change a device, `identify`, which only asks
+the unit to show itself, and five for the computer's volume, EQ, crossfeed and virtual speakers. The
 rule below stands between a model and your amplifier. Set `max_volume_db` too:
 `svolder doctor` warns when writes are on without it.
 
@@ -224,15 +224,22 @@ when one device is configured. Results are structured JSON.
   like the others, so a client with an older list that calls it is refused naming the setting.
 - `get_host` — no arguments; answers `{"volume": {percent, muted, sink} | null, "eq": {on, preset,
   preamp_db, points: [{type, frequency_hz, gain_db, q}]} | null, "player": {title, artist, album,
-  status} | null, "crossfeed": {…} | null}`. Each is read on its own: `volume` and `player` are null while there is nothing to
-  read, and `eq` is null with `unavailable` saying why when the computer EQ cannot be used. An EQ whose state the daemon could not verify carries `"unverified":
-  true`: `on` is then only what the saved state says. `crossfeed` is the computer's crossfeed beside
-  the EQ: `on`, `model`, `preset` (null for Custom), `edited_from`, `level_pct`, `level_db`,
-  `feed_db`, `crossover_hz`, `delay_ms`, `delay_floor_ms`, `delay_own`, `delay_settable`, `output`,
-  `note`, `off_reason`, and `unavailable`
-  when it cannot be changed now. It is null while the computer EQ cannot be used. The level curves
-  and the table of models are left out (they are plot data; `set_host_crossfeed`'s schema carries
-  the words and ranges).
+  status} | null, "crossfeed": {…} | null, "speakers": {…} | null}`. Each is read on its own:
+  `volume` and `player` are null while there is nothing to read, and `eq` is null with `unavailable`
+  saying why when the computer EQ cannot be used. An EQ whose state the daemon could not verify
+  carries `"unverified": true`: `on` is then only what the saved state says. `crossfeed` is the
+  computer's crossfeed beside the EQ: `on`, `model`, `preset` (null for Custom), `edited_from`,
+  `level_pct`, `level_db`, `feed_db`, `crossover_hz`, `delay_ms`, `delay_floor_ms`, `delay_own`,
+  `delay_settable`, `output`, `note`, `off_reason`, and `unavailable` when it cannot be changed now.
+  It is null while the computer EQ cannot be used. The level curves and the table of models are left
+  out (they are plot data; `set_host_crossfeed`'s schema carries the words and ranges). `speakers`
+  is the computer's virtual speakers: `on`, `set` (the chosen set's id), `room` (`with` or `no`),
+  `room_name` and `term` (`With room` with `BRIR`, or `No room` with `HRTF`), `label`, `licence`,
+  `credit`, `source_url`, `angles`, `taps_ms`, `loudness_db` (the seven set fields from `label` on,
+  and `set`, are null while no set is chosen), `cut`, `note`, `off_reason`, `unavailable` when they
+  cannot be changed now, and `sets`, the fetched sets (`id`, `room`, `room_name`, `term`, `label`,
+  `licence`, `credit`, `source_url`) a call can choose from. The four curves and `timing` are left
+  out. It is null while the computer EQ cannot be used or the daemon has no virtual speakers.
 - `set_host_volume` (writes) — `percent`, a whole number from 0 to 100, optional `confirm`. Above
   100 is refused whatever is answered. The rise rule is the one above, on the computer's own scale
   (the cube of the percent, `60 * log10(percent / 100)` dB): a rise of more than 6 dB over the lowest
@@ -246,14 +253,23 @@ when one device is configured. Results are structured JSON.
   it needs one: the named device, or the only one. A preset a connected device plays too asks, since
   the correction would play twice; repeat with `"confirm": true` once the user agreed, which
   flattens that device first.
-- - `set_host_crossfeed` (writes) — the computer's [crossfeed](eq.md#crossfeed). Optional `on`,
+- `set_host_crossfeed` (writes) — the computer's [crossfeed](eq.md#crossfeed). Optional `on`,
   `model` (`bauer`, `linkwitz`, `meier`, `mid-side`), `preset` (a name of the model), `level_pct`,
   `crossover_hz` and `delay_ms` (a number, or the word `"own"` for the model's own lag: a null reads
   as "not given" in every tool, so a word says it; Mid/Side bass takes no delay); at least one must
   be given. A value past the model's range is held to it, and the enums and ranges are in the tool's
   schema, read from the daemon's own table. Turning crossfeed on never asks: the preamp is lowered
-  first, so it cannot raise the level. Answers `{"crossfeed": {…}}`, the same object `get_host`
-  carries, with what the daemon holds.
+  first, so it cannot raise the level, but it turns the virtual speakers off. Answers
+  `{"crossfeed": {…}, "speakers": {…}}`, the objects `get_host` carries, so the speakers' note shows
+  when they went off.
+- `set_host_speakers` (writes) — the computer's virtual speakers. Optional `on` and `set` (the id of
+  a fetched set, from `get_host`'s `speakers.sets`); at least one must be given. `on` is applied
+  last, so `{"on": true, "set": "<id>"}` chooses and plays in one call; turning them on turns
+  crossfeed off, and a set that is not fetched, no chosen set, or an unavailable EQ is a tool error.
+  Nothing is fetched or imported by this tool: the sets are the ones fetched with `svolder host
+  speakers`, the TUI or the web UI; a set that is not among `speakers.sets` is refused with the
+  fetched ids listed. It never asks. Answers `{"crossfeed": {…}, "speakers": {…}}`, the objects
+  `get_host` carries, so crossfeed's note shows when it went off.
 
 ## mcp
 

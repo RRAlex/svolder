@@ -141,8 +141,10 @@ def reap(proc, secs=10):
 
 # The address every check's daemon reaches AutoEq at unless the check says another: a port nothing
 # listens on, so no daemon of a check ever reaches the real host (SVOLDER_AUTOEQ_URL, the
-# `results/` directory).
+# `results/` directory). The virtual speakers' sources are on the same dead port
+# (SVOLDER_SPEAKERS_URL).
 NO_AUTOEQ = 'http://127.0.0.1:9/results/'
+NO_SPEAKERS = 'http://127.0.0.1:9/'
 AUTOEQ_FIXTURE = f'{REPO}/scripts/web-checks/fixtures/autoeq'
 
 
@@ -227,6 +229,7 @@ class Daemon:
         environ['SVOLDER_FAKE_COVER_GONE_FILE'] = self.cover_gone_file
         environ['SVOLDER_FAKE_PLAYER_GONE_FILE'] = self.player_gone_file
         environ['SVOLDER_AUTOEQ_URL'] = NO_AUTOEQ
+        environ['SVOLDER_SPEAKERS_URL'] = NO_SPEAKERS
         environ.update(env or {})
         self.log = open(f'{home}/daemon.log', 'w')
         self._cmd = [SVOLDERD, '--socket', f'{home}/run/svolder.sock', '--config',

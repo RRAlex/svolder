@@ -40,6 +40,8 @@ pub struct ToneEdit {
     pub xf_line: Option<super::XfLine>,
     /// The reason crossfeed last said it turned itself off, so a toast names it once.
     pub(super) xf_note: Option<String>,
+    /// The reason the virtual speakers last said they turned themselves off, likewise.
+    pub(super) sp_note: Option<String>,
     /// Which half of the tone screen's header the cursor was last on: `Loudness` when set, else
     /// `Mode` (where the header opens). `Tab` reads this to return the cursor to the half it
     /// left rather than always opening on Mode; [`App::move_tone_row`] and a click on either

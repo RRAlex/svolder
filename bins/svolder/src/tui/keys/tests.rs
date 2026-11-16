@@ -204,6 +204,14 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     app.focus_crossfeed(crate::tui::app::Xf::Preset);
                 }
             }
+            if hint.when == When::HasSpace {
+                app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_speakers(
+                    false,
+                    None,
+                    &[],
+                ));
+                app.flip_side();
+            }
             if hint.label == "< > |" {
                 // the bar's keys act on the bar the last frame drew
                 app.drawn.split.set(Some(crate::tui::app::divider::Split {

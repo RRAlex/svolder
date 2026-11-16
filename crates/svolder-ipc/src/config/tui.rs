@@ -76,6 +76,9 @@ fn write_tui(
             TuiSettingKind::Word { get, .. } if get(before) != get(after) => {
                 set_key_at(doc, &["tui"], key.key, Value::from(get(after)))?;
             }
+            TuiSettingKind::Number { get, .. } if get(before) != get(after) => {
+                set_key_at(doc, &["tui"], key.key, Value::from(get(after)))?;
+            }
             TuiSettingKind::Accent if before.accent != after.accent => {
                 match after.accent.as_deref() {
                     Some(accent) => set_key_at(doc, &["tui"], key.key, Value::from(accent))?,

@@ -471,7 +471,7 @@ async fn the_loops_futures_stay_small() {
     let loop_size = std::mem::size_of_val(&looping);
     drop(looping);
     for (name, size, bound) in [
-        ("the loop", loop_size, 48 * 1024),
+        ("the loop", loop_size, 12 * 1024),
         ("the feed step", step_size, 1024),
     ] {
         assert!(
@@ -479,7 +479,21 @@ async fn the_loops_futures_stay_small() {
             "{name}'s future is {size} bytes, over {bound}: box what it holds across an await"
         );
     }
+    // The handlers the loop boxes are allocated on every event they carry out: the largest one
+    // that a short run of the loop (a key, the ticks, the quit) boxed is bounded too.
+    let (backend, _gate, app) = fake(SHORT_DEADLINE).await;
+    let ran = super::super::test_support::watching(backend, app, None);
+    let end = run(ran, quit_after(Duration::from_millis(50))).await;
+    end.watching.close().await;
+    let largest = crate::tui::run::LARGEST_BOXED.load(Ordering::Relaxed);
+    assert!(
+        (1..=HANDLER_BOUND).contains(&largest),
+        "the largest boxed handler future is {largest} bytes, over {HANDLER_BOUND}: split it"
+    );
 }
+
+/// The most a boxed handler's future may be: about a quarter more than the largest is now.
+const HANDLER_BOUND: usize = 52 * 1024;
 
 /// A sink that takes ten seconds to answer each read.
 struct SlowSink {
@@ -1079,6 +1093,7 @@ async fn the_capture_follows_the_spectrum_row_across_the_screens_and_the_tiers()
                 bands: [1.0; svolder_host::fft::BANDS],
                 left: 0.5,
                 right: 0.5,
+                levels: Default::default(),
             };
             taken += usize::from(held.push(full));
         }

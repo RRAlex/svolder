@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use svolder_host::vu::Reference;
 use svolder_host::{Block, Frame};
 use svolder_profiles::{Control, ControlKind, Placed};
 use svolder_proto::FunctionId;
@@ -14,7 +15,7 @@ use svolder_proto::FunctionId;
 use crate::tui::audio_level::{LevelFrom, LevelSource, MeterLevel};
 use crate::tui::layout_tier::Tier;
 
-use super::{App, Reading};
+use super::{App, Reading, Screen};
 
 /// How long a meter's peak marker stays where the loudest reading put it, in milliseconds.
 const PEAK_HOLD_MS: u64 = 400;
@@ -342,7 +343,26 @@ impl App {
         }
         let target = self.host.sink.as_ref()?.target.as_deref()?;
         let for_level = self.wants_level() && !self.meters_streaming();
-        (self.spectrum_shown() || for_level).then_some(target)
+        (self.spectrum_shown() || self.vu_shown() || for_level).then_some(target)
+    }
+
+    /// Whether the device screen draws the VU rows of the Status pane: host audio shows and the
+    /// terminal is 100 by 45 or larger, on the device screen with a device open and no box over it
+    /// (the capture is not held under one, as the Spectrum's is not). Nothing else is asked for: no
+    /// cover, no capture, no track.
+    pub fn vu_shown(&self) -> bool {
+        self.host_shown()
+            && self.screen == Screen::Device
+            && self.session.holding.is_none()
+            && !self.modal_open()
+            && crate::tui::screens::device::vu_drawn_in(self.size)
+    }
+
+    /// Whether the VU rows are on the screen with the capture running and something on them off
+    /// rest (a needle above the left stop, a lamp lit), which the loop redraws at the Spectrum
+    /// row's pace for: a capture block draws no frame of its own. Settled, they are still.
+    pub fn vu_moving(&self) -> bool {
+        self.vu_shown() && self.host.capturing && self.host.vu.moving(self.now)
     }
 
     /// Whether the device screen draws the Host group's Spectrum row in a frame of `tier`:
@@ -382,6 +402,11 @@ impl App {
             false => 0.0,
         };
         let (left, right) = (read(block.left), read(block.right));
+        self.host.vu.land(
+            &block.levels,
+            Reference::new(i32::from(self.tui.vu_reference)),
+            now,
+        );
         let loudest = left.max(right);
         self.readings.histories.record_host(now, left, right);
         let step = self.host.level_at.map_or(1.0, |before| {

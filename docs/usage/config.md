@@ -377,6 +377,9 @@ schema = 1
 # Whether the Now playing row shows the track's cover art: auto (the best the terminal draws) or off.
 # cover_art = "auto"
 
+# The level in dBFS the VU meter reads as 0 VU, from -30 to -6; -18 is the usual. The meter is drawn on a terminal of 100 by 45 or more, in the Status pane, while host audio shows.
+# vu_reference = -18
+
 # Whether the screens draw their graphs: Telemetry, the level history and the connection strip.
 # graphs = true
 
@@ -446,3 +449,7 @@ schema = 1
 # Three to five #rrggbb colours; the glow rests on the one nearest the DAC accent.
 # stops = ["#5a1a08", "#c04a10", "#e0a030", "#f6dca0"]
 ```
+
+`[tui] vu_reference` is a whole number of dBFS. A whole number outside -30 to -6 is held at the
+nearest end (`0` reads -6, `-99` reads -30); `-17.5`, a string or a boolean is refused like any
+other bad `[tui]` value. The Settings box's Host audio category has the row.

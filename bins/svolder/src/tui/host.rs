@@ -18,6 +18,8 @@ use svolder_ipc::host::{HostView, HostVolume, PlayingView};
 
 use super::widgets::marquee::Marquee;
 
+pub mod vu;
+
 /// What joins a track's title to its artist on the `Now playing` row.
 const BY: &str = " — ";
 /// How far one press of `←→` on the computer's volume moves it, in percent.
@@ -173,7 +175,7 @@ pub struct Host {
     /// from; `None` before the first.
     pub level_at: Option<Instant>,
     /// The Spectrum row's bands.
-    pub bands: Bands,
+    pub bands: Box<Bands>,
     /// When the last beat of the daemon's frames landed, `None` before the first.
     pub beat: Option<Instant>,
     /// Whether the frame last drawn put the Spectrum row on the screen: inside the Controls
@@ -182,6 +184,9 @@ pub struct Host {
     pub spectrum_on_screen: bool,
     /// The computer's own controls, which the daemon's view or the loop's own controller fill.
     pub computer: Box<Computer>,
+    /// The VU meter's needles and lamps, which the capture's blocks and the daemon's frames
+    /// move.
+    pub vu: Box<vu::Vu>,
 }
 
 impl Host {
@@ -203,10 +208,11 @@ impl Host {
             level: None,
             channels: None,
             level_at: None,
-            bands: Bands::default(),
+            bands: Box::default(),
             beat: None,
             spectrum_on_screen: false,
             computer: Box::default(),
+            vu: Box::new(vu::Vu::new(now)),
         }
     }
 
@@ -216,8 +222,9 @@ impl Host {
         self.level = None;
         self.channels = None;
         self.level_at = None;
-        self.bands = Bands::default();
+        *self.bands = Bands::default();
         self.beat = None;
+        self.vu.rest();
     }
 
     /// A beat of the daemon's frames landed at `now`.

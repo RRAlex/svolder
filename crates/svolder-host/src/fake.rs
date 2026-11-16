@@ -615,6 +615,16 @@ impl Chain for FakeChain {
                 .or_else(|| inner.state.as_ref().and_then(|s| s.crossfeed.clone())),
             crossfeed_on: request.crossfeed.is_some(),
             flat: request.flat,
+            speakers: request
+                .speakers
+                .as_ref()
+                .map(|speakers| speakers.id.clone())
+                .or_else(|| inner.state.as_ref().and_then(|s| s.speakers.clone())),
+            speakers_on: request.speakers.is_some(),
+            speakers_loaded: request
+                .speakers
+                .as_ref()
+                .map(|speakers| speakers.id.clone()),
         };
         inner.state = Some(state.clone());
         inner.dead = false;
@@ -630,6 +640,7 @@ impl Chain for FakeChain {
         inner.dead = false;
         if let Some(state) = inner.state.as_mut() {
             state.on = false;
+            state.speakers_loaded = None;
         }
         Ok(())
     }
@@ -700,6 +711,27 @@ mod tests {
         assert!(!handle.node().await.unwrap().has_crossfeed_controls());
     }
 
+    #[tokio::test]
+    async fn the_fake_chain_node_lists_the_speakers_ports_only_once_a_set_is_in_its_graph() {
+        let params = FakeParams::new();
+        let mut handle = params.clone();
+        // A current chain with no set chosen has no convolver stage.
+        assert!(!handle.node().await.unwrap().has_speakers_controls());
+        params.with_speakers_ports(false);
+        let node = handle.node().await.unwrap();
+        assert!(node.has_speakers_controls());
+        assert_eq!(node.params["lvs:Gain 1"], 1.0);
+        assert_eq!(node.params["rvs:Gain 2"], 0.0);
+        params.with_speakers_ports(true);
+        let node = handle.node().await.unwrap();
+        assert_eq!(node.params["lvs:Gain 1"], 0.0);
+        assert_eq!(node.params["rvs:Gain 3"], 1.0);
+        params.without_speakers_ports();
+        assert!(!handle.node().await.unwrap().has_speakers_controls());
+        // The crossfeed and preamp ports are untouched by any of it.
+        assert!(handle.node().await.unwrap().has_crossfeed_controls());
+    }
+
     fn dac(volume: f32, muted: bool) -> SinkState {
         SinkState {
             volume,
@@ -725,6 +757,7 @@ mod tests {
             bands: [level; BANDS],
             left: level,
             right: level,
+            levels: Default::default(),
         }
     }
 
@@ -1024,6 +1057,7 @@ mod tests {
             rate_hz: None,
             flat: false,
             crossfeed: None,
+            speakers: None,
         };
         assert_eq!(chain.state(), None);
         let state = chain.apply(request.clone()).await.expect("applies");
@@ -1072,6 +1106,7 @@ mod tests {
             rate_hz: None,
             flat: false,
             crossfeed: None,
+            speakers: None,
         }
     }
 
@@ -1194,6 +1229,24 @@ impl FakeParams {
         if let Some(node) = self.lock().node.as_mut() {
             for (name, _) in crate::eq::live::crossfeed_params(&crate::eq::CrossfeedStage::bypass())
             {
+                node.params.remove(&name);
+            }
+        }
+    }
+
+    /// A node whose graph holds the virtual speakers' stage, its mixers set to play the
+    /// convolved sound when `on` and the dry one when not: what the chain is after it is rebuilt
+    /// with a set chosen.
+    pub fn with_speakers_ports(&self, on: bool) {
+        if let Some(node) = self.lock().node.as_mut() {
+            node.params.extend(crate::eq::live::speakers_params(on));
+        }
+    }
+
+    /// A node as a chain with no set chosen shows it: none of the virtual speakers' ports.
+    pub fn without_speakers_ports(&self) {
+        if let Some(node) = self.lock().node.as_mut() {
+            for (name, _) in crate::eq::live::speakers_params(false) {
                 node.params.remove(&name);
             }
         }

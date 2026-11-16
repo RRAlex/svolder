@@ -21,14 +21,30 @@ use crate::tui::widgets::{self, MISSING};
 use super::{cell_window, cells, is_firmware_family, raw_of};
 
 /// The Status pane's lines, fit to a pane `width` columns wide in a frame of `tier`: its own
-/// two, then the `Device` row, the `Link` row, the `Level from` row, the `Now playing` row and
-/// the `Passphrase` row under them while each is drawn.
+/// two, then the `Device` row, the `Link` row, the `Level from` row, the `Now playing` row, the VU
+/// rows (`vu`: the frame is large enough for them) and the `Passphrase` row under them while each
+/// is drawn.
+#[cfg(test)]
 pub(super) fn status_lines(
     app: &App,
     theme: &Theme,
     width: usize,
     tier: Tier,
+    vu: bool,
 ) -> Vec<Line<'static>> {
+    status_parts(app, theme, width, tier, vu).0
+}
+
+/// `status_lines` and, with the VU rows drawn, the index of the first channel row among them
+/// (the blank row that sets the meter off comes before it).
+pub(super) fn status_parts(
+    app: &App,
+    theme: &Theme,
+    width: usize,
+    tier: Tier,
+    vu: bool,
+) -> (Vec<Line<'static>>, Option<usize>) {
+    let mut vu_at = None;
     let mut lines = vec![
         status_line_one(app, theme, width),
         status_line_two(app, theme, width),
@@ -40,15 +56,19 @@ pub(super) fn status_lines(
         lines.push(link_line(app, theme, width));
     }
     if level_from_drawn(app) {
-        lines.push(level_from_line(app, theme));
+        lines.push(level_from_line(app, theme, vu));
     }
     if now_playing_drawn(app) {
         lines.push(now_playing_line(app, theme, width));
     }
+    if vu {
+        vu_at = Some(lines.len() + 1);
+        lines.extend(super::vu::vu_lines(app, theme));
+    }
     if let Some(line) = passphrase_line(app, theme, width) {
         lines.push(line);
     }
-    lines
+    (lines, vu_at)
 }
 
 /// What the `Device` row puts between its facts.
@@ -172,14 +192,22 @@ pub(super) fn level_from_drawn(app: &App) -> bool {
 }
 
 /// The `Level from` row: where the level the glow, the breathing borders and the title meter
-/// read comes from now — `meters`, `host`, or `—`, dim, from nowhere.
-fn level_from_line(app: &App, theme: &Theme) -> Line<'static> {
+/// read comes from now — `meters`, `host`, or `—`, dim, from nowhere — and, while the VU rows are
+/// drawn (`vu`), the level that reads 0 VU on them, dim.
+fn level_from_line(app: &App, theme: &Theme, vu: bool) -> Line<'static> {
     let from = match app.level_from() {
         LevelFrom::Meters => Span::raw("meters"),
         LevelFrom::Host => Span::raw("host"),
         LevelFrom::Nowhere => Span::styled(MISSING, theme.style(Role::Dim)),
     };
-    Line::from(vec![Span::raw(LEVEL_FROM), from])
+    let mut spans = vec![Span::raw(LEVEL_FROM), from];
+    if vu {
+        spans.push(Span::styled(
+            super::vu::reference_words(app),
+            theme.style(Role::Dim),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// What the `Now playing` row opens on.

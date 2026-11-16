@@ -50,6 +50,7 @@ fn route(product: &str) -> RouteFacts {
         player_match: PlayerMatch::Pid,
         others_mixing: 0,
         host_eq: false,
+        stages: None,
     }
 }
 
@@ -212,6 +213,11 @@ fn the_path_is_untouched_when_every_hop_is() {
     let card = card_on(&view, Some("2"), OPEN).expect("a card");
     let path = card.path.expect("a path");
     assert_eq!((path.class, path.words.as_str()), ("ok", "untouched"));
+    assert!(
+        path.title.contains("may still change the sound itself"),
+        "{}",
+        path.title
+    );
     let labels: Vec<_> = path.hops.iter().map(|hop| hop.label.as_str()).collect();
     assert_eq!(labels, ["player", "computer", "DAC"]);
     assert!(path.hops.iter().all(|hop| !hop.changes), "{path:?}");

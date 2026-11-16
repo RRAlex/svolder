@@ -771,6 +771,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "constant_time_eq"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1425,9 +1434,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2266,6 +2277,18 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -3670,6 +3693,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sofar"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ba07a7507e4ff68a059effe66c2a4efffbb45092d4a6885ae1b989a41ef94cb"
+dependencies = [
+ "arrayvec",
+ "bitflags 2.13.2",
+ "log",
+ "miniz_oxide 0.9.1",
+ "thiserror 2.0.21",
+ "winnow 1.0.5",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3767,7 +3804,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "svolder"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -3799,7 +3836,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-autoeq"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "percent-encoding",
  "rustls",
@@ -3810,7 +3847,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-ble"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "async-trait",
  "btleplug",
@@ -3826,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-fake"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "svolder-profiles",
  "svolder-proto",
@@ -3834,7 +3871,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-host"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "async-trait",
  "dbus",
@@ -3845,13 +3882,14 @@ dependencies = [
  "serde",
  "serde_json",
  "svolder-profiles",
+ "svolder-speakers",
  "tokio",
  "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]
 name = "svolder-ipc"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "async-trait",
  "dbus",
@@ -3870,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-mqtt"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "rumqttc",
  "rumqttd",
@@ -3883,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-profiles"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "levenberg-marquardt",
  "nalgebra",
@@ -3896,7 +3934,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-proto"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "hex",
  "serde",
@@ -3905,7 +3943,7 @@ dependencies = [
 
 [[package]]
 name = "svolder-sim"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "bluer",
  "clap",
@@ -3920,8 +3958,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "svolder-speakers"
+version = "0.36.1"
+dependencies = [
+ "ring",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "sofar",
+ "svolder-autoeq",
+ "svolder-speakers",
+ "thiserror 2.0.21",
+ "toml 1.2.1+spec-1.1.0",
+ "ureq",
+ "zip",
+]
+
+[[package]]
 name = "svolder-walk"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3933,7 +3989,7 @@ dependencies = [
 
 [[package]]
 name = "svolderd"
-version = "0.35.1"
+version = "0.36.1"
 dependencies = [
  "askama",
  "async-trait",
@@ -3959,6 +4015,7 @@ dependencies = [
  "svolder-mqtt",
  "svolder-profiles",
  "svolder-proto",
+ "svolder-speakers",
  "svolder-walk",
  "tokio",
  "tokio-stream",
@@ -4439,6 +4496,12 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
+name = "typed-path"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
 
 [[package]]
 name = "typenum"
@@ -5129,6 +5192,39 @@ name = "zeroize"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "zip"
+version = "9.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80cc68510ea7553c30a69c732de5278e94183f68765af6c642dbccefd6ec777e"
+dependencies = [
+ "constant_time_eq",
+ "crc32fast",
+ "flate2",
+ "getrandom 0.4.3",
+ "indexmap",
+ "libc",
+ "memchr",
+ "nix 0.32.0",
+ "typed-path",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
 
 [[package]]
 name = "zlib-rs"

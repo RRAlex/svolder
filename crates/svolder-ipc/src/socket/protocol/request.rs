@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
 use super::READINGS_SPAN_SECS;
-use super::{AutoEqOp, DeviceConfigOp, HostEqOp, MqttOp, PresetOp, Server, WalkOp};
+use super::{AutoEqOp, DeviceConfigOp, HostEqOp, MqttOp, PresetOp, Server, SpeakersOp, WalkOp};
 
 /// The `cmd` of every [`Request`] kind, in the enum's order. The server tells a kind it does not
 /// have from a malformed one of a kind it has by this list; a test reads the enum's own source
@@ -42,6 +42,7 @@ pub(crate) const REQUEST_CMDS: &[&str] = &[
     "host_frames",
     "walk",
     "auto_eq",
+    "speakers",
     "device_config",
     "server_switch",
     "guest_switch",
@@ -241,6 +242,12 @@ pub enum Request {
         /// what to do
         op: AutoEqOp,
     },
+    /// One step of the virtual speakers' sets: list them, fetch or import one (jobs), forget one,
+    /// stop a job, or follow the jobs
+    Speakers {
+        /// what to do
+        op: SpeakersOp,
+    },
     /// List, add, change or remove a configured device, or make one the default; answered with
     /// the configured devices as they stand after it. The daemon writes its configuration file
     /// and reloads it
@@ -300,6 +307,7 @@ impl Request {
             Request::Subscribe { .. } | Request::HostFrames => true,
             Request::Walk { op } => op.is_stream(),
             Request::AutoEq { op } => op.is_stream(),
+            Request::Speakers { op } => op.is_stream(),
             _ => false,
         }
     }

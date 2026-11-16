@@ -616,6 +616,76 @@ pub(crate) enum HostCommand {
         #[command(subcommand)]
         command: Option<HostCrossfeedCommand>,
     },
+    /// Two virtual speakers on headphones, through the daemon
+    ///
+    /// Two choices: "With room · BRIR" (the speakers in a measured room) and "No room · HRTF"
+    /// (the same speakers in the open). A set is fetched once from a curated catalogue, or
+    /// imported from your own file, and kept on this computer. With no verb, print the state:
+    /// whether they play, the chosen set, its licence and its loudness change. Turning them on
+    /// turns the crossfeed off.
+    Speakers {
+        /// Print the state, the list or the saved set as the daemon sends it, as JSON
+        #[arg(long, global = true)]
+        json: bool,
+        #[command(subcommand)]
+        command: Option<HostSpeakersCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum HostSpeakersCommand {
+    /// Print the state: whether they play, the chosen set, its licence and its loudness change
+    Show,
+    /// Turn the virtual speakers on, with the chosen set
+    On,
+    /// Turn the virtual speakers off
+    Off,
+    /// List the sets: the catalogue's, and the ones you imported, with which are fetched
+    List {
+        /// Only the sets of one choice
+        #[arg(long, value_enum)]
+        room: Option<RoomArg>,
+    },
+    /// Download a catalogue set, check it and keep it on this computer
+    Fetch {
+        /// The set's id, as `list` shows it
+        id: String,
+    },
+    /// Choose a fetched set (a rebuild of the chain, with one short gap when they play)
+    Use {
+        /// The set's id, as `list` shows it
+        id: String,
+        /// Turn the virtual speakers on with it
+        #[arg(long)]
+        on: bool,
+    },
+    /// Import a SOFA file, or a WAV of 4 or 14 channels, as your own set
+    ///
+    /// The daemon reads the file, so it must be on the computer the daemon runs on.
+    Import {
+        /// The file to import
+        file: std::path::PathBuf,
+        /// The name to show; the file's own name when left out
+        #[arg(long)]
+        label: Option<String>,
+        /// Which choice it belongs under; `no` when left out
+        #[arg(long, value_enum)]
+        room: Option<RoomArg>,
+    },
+    /// Remove a fetched or imported set from this computer
+    Forget {
+        /// The set's id, as `list` shows it
+        id: String,
+    },
+}
+
+/// The two choices of the virtual speakers, as a flag's value.
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum RoomArg {
+    /// With room · BRIR: the speakers in a measured room
+    With,
+    /// No room · HRTF: the same speakers in the open
+    No,
 }
 
 #[derive(Subcommand)]

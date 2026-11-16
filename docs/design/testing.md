@@ -38,18 +38,9 @@ live" lists where each module's tests are.
   it after a change to the transport, the session, the scanner, the daemon's reconnect or the
   simulator; it is not part of `make check`.
 - **`make host-e2e`**: the computer EQ end to end, through the real daemon, on a private PipeWire
-  server with its own WirePlumber and a null sink (no sound card), started by
-  `scripts/host-e2e/private-pipewire.sh`. A 1 kHz tone at -20 dBFS plays into the null sink and a
-  recorder linked by hand to the sink's own monitor hears it after the filter chain.
-  `scripts/host-e2e/run.sh` runs `svolderd` (the repo-built one, a child chain, no `systemctl`, a
-  fake device) and `scripts/host-e2e/analyse.py` drives it over the socket: the EQ on (with the Off
-  to EQ gap), a drag of one point to +6 dB at 20 updates a second, with the peak off the tone so a
-  bypass cannot pass for a boost (no gap, no click, the preamp at or under unity), a move, a live
-  type change from a peak to a low shelf, a forced sample-rate change followed by the controller
-  sending every slot again, Off, the crossfeed (see `analyse.py`; X3e kills the chain three times:
-  restarted, the second death ridden out, the third leaving the EQ off), the volume and mute, and
-  the daemon ending with its chain. It prints `host-e2e: PASS`. Run it after a change to the
-  computer EQ, its chain or the daemon's computer side; opt-in, not part of `make check`.
+  with a null sink, never the session; the whole run is on [its page](host-e2e.md). Run it after a
+  change to the computer EQ, its chain or the daemon's computer side, alone: no other `make test`
+  may run beside it. Not part of `make check`.
 - **`make preamp-lab`**: the computer EQ's preamp lab, the long run (`SEED` is the first seed and
   `RUNS` how many of each profile; 5000 by default). The controller is driven through
   seeded random sequences of hand edits, preset loads, command-line applies, node restarts, rate
@@ -307,6 +298,10 @@ tools needed (node, two browsers, geckodriver, a few Python packages) and the ti
 ## Other gates `make check` runs
 
 - `make license-check` (`scripts/check-licenses.py`) fails on a licence GPL-3.0-or-later cannot use.
+- `make speakers-fixtures` rewrites the synthetic SOFA files (made with `python3-h5py`, committed)
+  and tests them. `make speakers-catalogue-check` (network; before a release, not part of `make
+  check`) fetches each catalogue entry and checks its size, its checksum and that the converter
+  accepts it.
 - `make spdx-check` (`scripts/spdx-check.sh`) fails when a source file lacks its SPDX header; a
   test (`bins/svolder/tests/spdx_check.rs`) proves the checker on small trees.
 - `make network-check` fails when `cargo tree -p svolder -e normal -i ureq` or `-i rustls` prints

@@ -23,6 +23,9 @@ use tokio::sync::oneshot;
 use tokio_stream::wrappers::BroadcastStream;
 
 use self::autoeq::AutoEqService;
+use self::speakers::SpeakersService;
+pub use self::speakers::pin_from_state;
+pub(crate) use self::speakers::room_of;
 use self::walk::WalkService;
 use crate::device::{self, Command, DeviceHandle, Refused};
 use crate::fleet::DaemonFleet;
@@ -98,6 +101,8 @@ pub struct Daemon {
     walk: WalkService,
     /// AutoEq's jobs.
     autoeq: AutoEqService,
+    /// Virtual speakers' sets and their jobs.
+    speakers: SpeakersService,
     /// Held (read) by a configuration write for as long as its blocking thread runs; the stop
     /// takes the write side, so it waits for writes under way.
     writes: Arc<tokio::sync::RwLock<()>>,
@@ -194,6 +199,7 @@ impl Daemon {
             web: Slot::default(),
             walk: WalkService::new(),
             autoeq: AutoEqService::new(None),
+            speakers: SpeakersService::new(None),
             writes: Arc::default(),
             host: HostService::idle(),
             host_mode: HostMode::Off,
@@ -623,14 +629,15 @@ impl Daemon {
         written(&self.devices).stopping = true;
         // The jobs go first: they may hold the transport or a request of a front end, and no
         // server or actor below should be waited on behind them.
-        let (walk, autoeq) = futures::join!(
+        let (walk, autoeq, speakers) = futures::join!(
             self.walk.shutdown(JOB_STOP_BOUND),
-            self.autoeq.shutdown(JOB_STOP_BOUND)
+            self.autoeq.shutdown(JOB_STOP_BOUND),
+            self.speakers.shutdown(JOB_STOP_BOUND)
         );
-        if walk + autoeq > 0 {
+        if walk + autoeq + speakers > 0 {
             log::error(&format!(
                 "shutdown: {} job(s) did not stop within {} s and were given up on",
-                walk + autoeq,
+                walk + autoeq + speakers,
                 JOB_STOP_BOUND.as_secs()
             ));
         }
@@ -1052,6 +1059,7 @@ impl Daemon {
                 self.walk.handle(op, origin, me)
             }
             Request::AutoEq { op } => self.autoeq_op(origin, op).await,
+            Request::Speakers { op } => self.speakers_op(origin, op).await,
             Request::DeviceConfig { op } => self.device_config(op).await,
             Request::ServerSwitch { server, enabled } => self.server_switch(server, enabled).await,
             Request::GuestSwitch { read } => self.guest_switch(read).await,
@@ -1149,6 +1157,7 @@ impl Handler for Daemon {
                 .map_err(|message| Box::new(Response::error(CODE_USAGE, message))),
             Request::Walk { op } => self.walk.stream(op),
             Request::AutoEq { op } => self.autoeq.stream(op),
+            Request::Speakers { op } => self.speakers.stream(op),
             other => Err(Box::new(Response::error(
                 CODE_USAGE,
                 format!("{} is not a stream", other.cmd()),
@@ -1266,6 +1275,7 @@ mod mqtt_set;
 mod preset_write;
 mod probe;
 mod server_switch;
+mod speakers;
 mod walk;
 pub use config_write::{ConfigEdit, ConfigWriteError};
 pub(crate) use config_write::{file_stamp, imported_overwrite};

@@ -61,6 +61,11 @@ const GAIN_LABEL_WIDTH: u16 = 4;
 /// Rows the Bands block takes beyond one per band: two borders and the column titles. The
 /// tall tier's blank top row comes on top of these, added where the block is laid out.
 const BANDS_CHROME: u16 = 3;
+/// Rows the Response block keeps while the virtual speakers' block is unfolded: two borders, a
+/// data row and the axis' two.
+const MIN_GRAPH: u16 = 5;
+/// Rows the Points table keeps then: two borders, its titles and two points.
+const MIN_TABLE: u16 = 5;
 /// The lowest gain the curve is drawn over, in dB.
 pub(crate) const GAIN_FLOOR_DB: f64 = -12.0;
 /// The highest.
@@ -341,9 +346,17 @@ fn rows(area: Rect, bands: usize, split: bool, xf: crossfeed::Layout) -> (Tier, 
         },
         false => body,
     };
-    let table = u16::try_from(bands)
+    let mut table = u16::try_from(bands)
         .unwrap_or(0)
         .saturating_add(BANDS_CHROME + tier.top());
+    // The virtual speakers' block gives the graph its rows back out of the table's (which
+    // scrolls): the graph keeps room for a data row, its axis and its borders.
+    if xf.boxed {
+        let spare = body
+            .height
+            .saturating_sub(xf.height() + tier.row_gap() + MIN_GRAPH);
+        table = table.min(spare.max(MIN_TABLE));
+    }
     // The Crossfeed section's line sits between the graph and the Points table, with the rows
     // it unfolds into under the line in the narrow tiers.
     let [response, xf_area, _, bands] = Layout::vertical([
@@ -443,6 +456,7 @@ mod fit;
 mod header;
 mod points;
 mod response;
+mod speakers;
 
 #[cfg(test)]
 mod tests;

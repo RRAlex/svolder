@@ -6,7 +6,7 @@
 //! whose tone control gives the built-in presets their bands.
 
 use serde::Serialize;
-use svolder_host::eq::{CrossfeedView, EqView};
+use svolder_host::eq::{CrossfeedView, EqView, SpeakersView};
 use svolder_ipc::{DeviceInfo, HostView};
 use svolder_profiles::tone::apo::{Correction, SourceFilter};
 use svolder_profiles::tone::preset::{self, Preset};
@@ -65,6 +65,9 @@ pub(crate) struct EqModel {
     /// The crossfeed as the host's own view gives it (the Sound popup's Crossfeed tab draws it);
     /// none from a host that has none.
     pub(crate) crossfeed: Option<CrossfeedView>,
+    /// The virtual speakers as the host's own view gives it (the Sound popup's Virtual speakers
+    /// tab draws it); none from a host that has none.
+    pub(crate) speakers: Option<SpeakersView>,
 }
 
 /// One preset the computer side lists.
@@ -139,6 +142,7 @@ fn eq_model(view: &EqView) -> EqModel {
         response: response_of(&points),
         points,
         crossfeed: view.crossfeed.clone(),
+        speakers: view.speakers.clone(),
     }
 }
 

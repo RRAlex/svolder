@@ -406,8 +406,8 @@ saving to a slot is not offered. A retained command is never acted on.
 
 ### The computer's EQ
 
-One more Home Assistant device, `This computer`, carries the computer's EQ and crossfeed and nothing
-else of the computer: no volume, no mute and no points.
+One more Home Assistant device, `This computer`, carries the computer's EQ, crossfeed and virtual
+speakers and nothing else of the computer: no volume, no mute and no points.
 
 | Entity | Topics | What |
 |---|---|---|
@@ -415,6 +415,8 @@ else of the computer: no volume, no mute and no points.
 | `sensor.this_computer_eq_preset` | `B/computer/computer_eq_preset/state` | the preset the points came from, `custom` after a hand edit, empty while the EQ is off |
 | `switch.this_computer_crossfeed` | `B/computer/computer_crossfeed/state` (`ON`/`OFF`) and `.../set` | [crossfeed](eq.md#crossfeed) on or off; a `binary_sensor` while `commands` is off |
 | `select.this_computer_crossfeed_preset` | `B/computer/computer_crossfeed_preset/state` and `.../set` | the model and preset; a `sensor` while `commands` is off |
+| `switch.this_computer_virtual_speakers` | `B/computer/computer_speakers/state` (`ON`/`OFF`) and `.../set` | [virtual speakers](eq.md#virtual-speakers) on or off; a `binary_sensor` while `commands` is off |
+| `select.this_computer_virtual_speakers_set` | `B/computer/computer_speakers_set/state` and `.../set`, attributes on `.../attributes` | the fetched set; a `sensor` while `commands` is off |
 
 `ON` turns the EQ on with the points the daemon keeps; `OFF` removes it and keeps them. With no
 points kept yet (nothing applied or edited since the daemon first ran), `ON` leaves the EQ off and
@@ -435,6 +437,18 @@ available as the computer's other entities. When crossfeed cannot be changed (th
 `unavailable` reason: a chain from an older svolder, a held curve) or the daemon refuses a change,
 the entities stay online and the command is dropped with a log line naming the reason. A retained
 command is never acted on.
+
+The virtual speakers' two entities are announced only while the daemon serves the speakers. The
+select's options are the fetched sets, each as `<label> · With room · BRIR` or `<label> · No room ·
+HRTF` (a label two sets share gets ` (<id>)` after it); it reads unknown (payload `None`, and its
+attributes `{}`) while no fetched set is chosen. Its attributes carry the chosen set's `set`,
+`room`, `term`, `licence`, `credit`, `source_url`, `angles`, `loudness_db` and `cut`. Choosing a set
+picks it, with one filter-chain rebuild while they play, and does **not** turn the speakers on; `ON`
+with no set chosen is dropped with a log line. Nothing is fetched, imported or forgotten from Home
+Assistant. The speakers and crossfeed are one choice: `ON` on one turns the other off, so the
+crossfeed switch goes `OFF` when the speakers go on, and the speakers' switch goes `OFF` when the
+crossfeed turns on. A reset (a restart, a change of output, a chain restart, a graceful stop, a
+missing set) shows as the switch going `OFF`.
 
 ### The connection
 

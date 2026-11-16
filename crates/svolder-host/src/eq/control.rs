@@ -40,13 +40,16 @@ use super::HostEqState;
 use super::crossfeed::{CrossfeedSettings, CrossfeedView, OffReason, Stage};
 use super::live::{
     CONFIG_RATE_HZ, OutputSink, SHAPE, SLOTS, SlotShape, crossfeed_params, preamp_params,
-    slot_params,
+    slot_params, speakers_params,
 };
 use super::manage::{
-    ApplyRequest, Chain, EqFailure, check_playable, config_stage_cost_db, played_preamp,
+    ApplyRequest, Chain, EqFailure, SpeakersConf, check_playable, config_stage_cost_db,
+    played_preamp,
 };
 use super::points::{Change, Points};
 use super::session::Params;
+use super::speakers::OffReason as SpeakersOff;
+use super::speakers::SpeakersView;
 
 /// What a live edit that did not take says, once.
 pub const LIVE_NOTE: &str = "this computer's PipeWire takes EQ changes when a drag ends";
@@ -154,6 +157,11 @@ pub struct EqView {
     /// from a controller or a peer that has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crossfeed: Option<CrossfeedView>,
+    /// The virtual speakers, when the controller serves them: the chosen set, the fetched sets
+    /// and the picture. `None` from a controller or a peer that has none, and then no front end
+    /// offers them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers: Option<SpeakersView>,
 }
 
 /// One change of the points.
@@ -325,7 +333,8 @@ pub struct EqControl {
     xf_note: Option<String>,
     /// Why the crossfeed turned itself off, with `xf_note`.
     xf_reason: Option<OffReason>,
-    /// The chain runs for crossfeed alone: the EQ plays flat, its points kept.
+    /// The chain runs for crossfeed or the virtual speakers alone (or as a pass-through): the
+    /// EQ plays flat, its points kept.
     flat: bool,
     /// The tick at which a stream was last seen playing through the pass-through chain.
     played_at: u64,
@@ -334,7 +343,7 @@ pub struct EqControl {
     /// The config on disk may hold the stage on, so a chain that starts again plays it.
     xf_conf: bool,
     /// The stage, with the preamp that goes with it, is to be sent with the next update.
-    xf_dirty: bool,
+    stage_dirty: bool,
     /// The chain has the stage's controls, as last looked at; a chain from before the stage
     /// does not.
     xf_ports: bool,
@@ -364,6 +373,8 @@ pub struct EqControl {
     look_first: bool,
     /// The newest worst gain worked out, with the settings and rate it is for.
     gain_cache: Mutex<Option<(CrossfeedSettings, u32, f64)>>,
+    /// The virtual speakers (see the module `vs`).
+    sp: vs::Speakers,
 }
 
 /// A crossfeed reset whose part on the chain is still to be done: the state, the view and the
@@ -479,7 +490,7 @@ impl EqControl {
                 .and_then(|text| text.parse().ok())
                 .unwrap_or(IDLE_KEEP),
             xf_conf: false,
-            xf_dirty: false,
+            stage_dirty: false,
             xf_ports: true,
             owed: None,
             force_conf: false,
@@ -491,6 +502,7 @@ impl EqControl {
             resend_stage: false,
             reverts: VecDeque::new(),
             gain_cache: Mutex::new(None),
+            sp: vs::Speakers::default(),
         };
         if let Some(state) = state {
             control.adopt(state);
@@ -508,6 +520,7 @@ impl EqControl {
         self.origin = state.origin.clone();
         self.runs = state.on;
         self.adopt_crossfeed(&state);
+        self.adopt_speakers(&state);
         let held_stage = match state.crossfeed_on {
             true => config_stage_cost_db(&self.xf, CONFIG_RATE_HZ),
             false => 0.0,
@@ -597,7 +610,7 @@ impl EqControl {
     /// Whether the chain runs as a plain pass-through: flat, with the crossfeed off too. It is
     /// kept for a stream that plays and removed once none has for [`IDLE_KEEP`] ticks.
     fn passthrough(&self) -> bool {
-        self.runs && self.flat && !self.xf_on
+        self.runs && self.flat && !self.space_on()
     }
 
     /// Whether a stream plays through the chain, from a fresh look at the graph; `None` when the
@@ -615,16 +628,21 @@ impl EqControl {
         let Some(node) = self.look_playing().await else {
             return Ok(false);
         };
-        if !self.stage_by_live() || self.xf_conf || !node.has_crossfeed_controls() {
+        self.sp.ports = node.has_speakers_controls();
+        if !self.stage_by_live()
+            || self.xf_conf
+            || self.sp.conf_on
+            || !node.has_crossfeed_controls()
+        {
             return Ok(false);
         }
         let was = std::mem::replace(&mut self.flat, true);
         self.dirty.extend(1..=SLOTS as u8);
-        self.xf_dirty = true;
+        self.stage_dirty = true;
         self.look_first = true;
         if !self.send_dirty().await {
             self.dirty.clear();
-            self.xf_dirty = false;
+            self.stage_dirty = false;
             self.flat = was;
             return Ok(false);
         }
@@ -736,6 +754,7 @@ impl EqControl {
             running_unknown: self.unknown,
             loads: self.loads,
             crossfeed: Some(self.crossfeed_view()),
+            speakers: self.speakers_view(),
         }
     }
 
@@ -769,6 +788,7 @@ impl EqControl {
             rate_hz: self.known_rate,
             flat: self.flat,
             crossfeed: self.stage_in_conf().then(|| self.xf.clone()),
+            speakers: self.speakers_conf(),
         }
     }
 
@@ -779,6 +799,13 @@ impl EqControl {
         let mut request = self.request();
         if self.xf_on && self.xf_conf {
             request.crossfeed = Some(self.xf.clone());
+        }
+        // A config that holds the stage on keeps holding it, as the crossfeed's does.
+        if self.sp.on && self.sp.conf_on {
+            request.speakers = request.speakers.map(|speakers| SpeakersConf {
+                on: true,
+                ..speakers
+            });
         }
         request
     }
@@ -792,7 +819,23 @@ impl EqControl {
         if !self.runs || self.known_rate.is_none() {
             self.known_rate = self.params.sink_rate().await;
         }
-        let state = self.chain.apply(self.request()).await?;
+        // The WAV is checked before the config names it: one that cannot be played is applied
+        // without the stage, and the choice goes Off.
+        let turned_off = self.check_set_for_apply();
+        let request = self.request();
+        let conf = request.speakers.clone();
+        let state = match self.chain.apply(request).await {
+            Ok(state) => state,
+            Err(failure) => {
+                // The running chain holds the set it held.
+                self.pin();
+                if turned_off {
+                    // It may play the stage still: taking it out is owed.
+                    self.owe(true);
+                }
+                return Err(failure);
+            }
+        };
         let stage_db = match state.crossfeed_on {
             true => config_stage_cost_db(&self.xf, self.known_rate.unwrap_or(CONFIG_RATE_HZ)),
             false => 0.0,
@@ -815,7 +858,8 @@ impl EqControl {
         // A chain just built has the stage's controls, and the stage off unless its config
         // holds it: the stage that is on is sent to it.
         self.xf_ports = true;
-        self.xf_dirty = self.xf_on && !state.crossfeed_on;
+        self.speakers_applied(conf.as_ref());
+        self.stage_dirty = (self.xf_on && !state.crossfeed_on) || (self.sp.on && !self.sp.conf_on);
         self.force_conf = false;
         self.base = Some(state);
         self.runs = true;
@@ -854,7 +898,9 @@ impl EqControl {
                 },
             };
             let holds_stage = request.crossfeed.is_some();
+            let speakers = request.speakers.clone();
             if self.chain.keep_conf(request).await.is_ok() {
+                self.speakers_kept(speakers.as_ref());
                 self.kept = Some(written);
                 self.kept_stage_db = match holds_stage {
                     true => config_stage_cost_db(&self.xf, rate),
@@ -887,6 +933,9 @@ impl EqControl {
                 crossfeed: self.xf_kept.then(|| self.xf.clone()),
                 crossfeed_on: self.xf_on,
                 flat: self.flat,
+                speakers: self.sp.chosen.clone(),
+                speakers_on: self.sp.on,
+                speakers_loaded: self.sp.loaded.clone(),
                 ..base.clone()
             };
             state
@@ -928,7 +977,7 @@ impl EqControl {
             };
         }
         // The EQ off with crossfeed on keeps the one chain, playing flat; both off removes it.
-        if self.xf_on && self.runs && running != Some(false) {
+        if self.space_on() && self.runs && running != Some(false) {
             return match self.flat {
                 true => Ok(()),
                 false => self.go_flat().await,
@@ -962,8 +1011,9 @@ impl EqControl {
         result
     }
 
-    /// The EQ on while the chain plays flat for crossfeed: the slots take the points and the
-    /// preamp the curve needs, live, with no apply (by applying when live updates cannot).
+    /// The EQ on while the chain plays flat for crossfeed or the speakers: the slots take the
+    /// points and the preamp the curve needs, live, with no apply (by applying when live updates
+    /// cannot).
     async fn leave_flat(&mut self) -> Result<(), EqFailure> {
         // The points were kept unchecked while the chain played flat.
         self.playable(&self.points)?;
@@ -1008,12 +1058,17 @@ impl EqControl {
         if self.xf_on && self.xf_note.is_none() {
             self.xf_note = Some("crossfeed turned off: the computer EQ chain was removed".into());
         }
+        if self.sp.on && self.sp.note.is_none() {
+            self.sp.note =
+                Some("virtual speakers turned off: the computer EQ chain was removed".into());
+        }
+        self.speakers_gone();
         self.runs = false;
         self.flat = false;
         self.xf_on = false;
         self.xf_for = None;
         self.xf_conf = false;
-        self.xf_dirty = false;
+        self.stage_dirty = false;
         self.unknown = false;
         self.legacy = false;
         self.dirty.clear();
@@ -1057,6 +1112,7 @@ impl EqControl {
                     self.flat = false;
                     self.xf_on = false;
                     self.xf_for = None;
+                    self.speakers_gone();
                     off = true;
                 }
                 Some(true) => self.unknown = false,
@@ -1129,6 +1185,9 @@ impl EqControl {
             crossfeed: None,
             crossfeed_on: false,
             flat: false,
+            speakers: None,
+            speakers_on: false,
+            speakers_loaded: None,
         });
         let before = (
             std::mem::replace(&mut self.points, held),
@@ -1349,7 +1408,7 @@ impl EqControl {
     fn slot_values(&self, rate: u32) -> Vec<(String, f64)> {
         let mut params = Vec::new();
         for slot in 1..=SLOTS as u8 {
-            // A chain that plays flat for crossfeed has every slot the identity.
+            // A chain that plays flat has every slot the identity.
             let filter = self
                 .points
                 .slots
@@ -1392,7 +1451,7 @@ impl EqControl {
     }
 
     async fn send_dirty_once(&mut self) -> bool {
-        if self.dirty.is_empty() && !self.xf_dirty {
+        if self.dirty.is_empty() && !self.stage_dirty {
             return true;
         }
         // Nothing goes to a node that has not been looked at: it may be one another process
@@ -1405,13 +1464,13 @@ impl EqControl {
         };
         // A rate the sink moved to since the last look changes what the stage is worked out
         // for: it is looked at (which re-sends the slots and the stage) before anything goes.
-        let rate_moved = self.xf_dirty
+        let rate_moved = self.stage_dirty
             && node
                 .rate_hz
                 .is_some_and(|rate| self.sent.rate.is_some_and(|sent| sent != rate));
         if self.sent.id != Some(node.id) || rate_moved {
             self.watch().await;
-            if !self.runs || !self.live_now() || (self.dirty.is_empty() && !self.xf_dirty) {
+            if !self.runs || !self.live_now() || (self.dirty.is_empty() && !self.stage_dirty) {
                 return false;
             }
         }
@@ -1424,13 +1483,18 @@ impl EqControl {
         let mut params = self.slot_values(rate);
         // The stage goes with the slots, between them and the preamp: a preamp that falls
         // (the stage turns on) is before it, one that rises (the stage turns off) after.
-        let sent_stage = std::mem::take(&mut self.xf_dirty);
+        let sent_stage = std::mem::take(&mut self.stage_dirty);
         if sent_stage {
             let stage = match self.xf_on {
                 true => Stage::of(&self.xf, rate).unwrap_or_else(|_| Stage::bypass()),
                 false => Stage::bypass(),
             };
             params.extend(crossfeed_params(&stage));
+            // The virtual speakers' mixers go with it, so that one update turns one stage on
+            // and the other off.
+            if self.sp.ports {
+                params.extend(speakers_params(self.sp.on));
+            }
         }
         // A preamp that falls goes before the slots and one that rises after them, so an update
         // that is not applied in one piece never plays a boost the preamp has not caught up with.
@@ -1457,16 +1521,16 @@ impl EqControl {
             false => params.splice(0..0, preamp).for_each(drop),
         }
         let Some(vouched) = self.sent.id else {
-            self.xf_dirty |= sent_stage;
+            self.stage_dirty |= sent_stage;
             return false;
         };
         if !self.params.send(vouched, &params).await {
-            self.xf_dirty |= sent_stage;
+            self.stage_dirty |= sent_stage;
             return false;
         }
         self.dirty.clear();
         if sent_stage {
-            self.stage_on_node = self.xf_on;
+            self.stage_on_node = self.space_on();
             self.resend_stage = true;
         }
         // One repeat per send, a second later, and none for the repeat itself: PipeWire may not
@@ -1541,6 +1605,14 @@ impl EqControl {
                     self.xf_conf,
                 );
             }
+            if self.sp.on {
+                self.reset_sp(
+                    SpeakersOff::ChainRestarted,
+                    "virtual speakers turned off: the computer EQ chain restarted".to_string(),
+                    self.sp.conf_on,
+                );
+            }
+            self.speakers_restarted();
         }
         if node.rate_hz.is_some() {
             self.known_rate = node.rate_hz;
@@ -1554,6 +1626,13 @@ impl EqControl {
             return;
         }
         self.xf_ports = node.has_crossfeed_controls();
+        self.sp.ports = node.has_speakers_controls();
+        if self.sp.ports && self.sp.loaded.is_none() {
+            // A chain another process built holds a set: the chosen one is taken to be it, and
+            // its WAV is pinned.
+            self.sp.loaded = self.sp.chosen.clone();
+            self.pin();
+        }
         if self.legacy {
             self.legacy = false;
             self.dirty.extend(1..=SLOTS as u8);
@@ -1576,7 +1655,11 @@ impl EqControl {
             // is sent the bypass with the first update.
             let stage_seen = node.params.get("lmix:Gain 2").is_some_and(|mix| *mix > 0.0);
             if stage_seen && !self.xf_on && self.xf_ports {
-                self.xf_dirty = true;
+                self.stage_dirty = true;
+            }
+            let speakers_seen = node.params.get("lvs:Gain 2").is_some_and(|mix| *mix > 0.0);
+            if speakers_seen && !self.sp.on && self.sp.ports {
+                self.stage_dirty = true;
             }
         }
         if first_run {
@@ -1593,6 +1676,11 @@ impl EqControl {
         }
         let resend = std::mem::take(&mut self.resend);
         if restarted || rate_changed || self.held || resend {
+            // The rebuilt graph re-opens the set's WAV: one that cannot be read leaves the chain
+            // silent with no exit, so the chain is applied again without the stage.
+            if (restarted || rate_changed) && self.rebuild_for_missing_set().await {
+                return;
+            }
             if restarted {
                 // A chain that started again plays the config on disk, and none of what was
                 // sent to the old one.
@@ -1668,7 +1756,7 @@ impl EqControl {
             // play at it.
             if self.xf_on {
                 match Stage::of(&self.xf, self.sent.rate.unwrap_or(CONFIG_RATE_HZ)) {
-                    Ok(_) => self.xf_dirty = true,
+                    Ok(_) => self.stage_dirty = true,
                     Err(why) => {
                         let at = self
                             .sent
@@ -1681,6 +1769,10 @@ impl EqControl {
                         );
                     }
                 }
+            }
+            // The speakers' mixers are on their config's gains again: sent at once.
+            if self.sp.on {
+                self.stage_dirty = true;
             }
             self.dirty.extend(1..=SLOTS as u8);
             self.watch_due = self.check.is_some();
@@ -1738,7 +1830,7 @@ impl EqControl {
         if !self.verified
             || self.check.is_some()
             || !self.dirty.is_empty()
-            || self.xf_dirty
+            || self.stage_dirty
             || self.ticks < self.sent_at + REVERT_QUIET
         {
             return false;
@@ -1766,11 +1858,19 @@ impl EqControl {
                     true,
                 );
             }
+            if self.sp.on {
+                self.reset_sp(
+                    SpeakersOff::ChainRestarted,
+                    "virtual speakers turned off: the chain keeps going back to its config"
+                        .to_string(),
+                    true,
+                );
+            }
             self.reverts.clear();
             return true;
         }
         self.dirty.extend(1..=SLOTS as u8);
-        self.xf_dirty = self.xf_on;
+        self.stage_dirty = self.space_on();
         true
     }
 
@@ -1783,7 +1883,9 @@ impl EqControl {
 
     async fn step(&mut self) {
         self.ticks += 1;
+        self.refresh_sets_when_old();
         self.finish_reset().await;
+        self.retry_rebuild().await;
         self.check_exit().await;
         self.check_idle().await;
         // A chain that is taken for an older one or that waits for its rate is looked at, not
@@ -1791,7 +1893,7 @@ impl EqControl {
         if !self.runs || !self.live || self.unavailable.is_some() {
             // Without live updates nothing is sent and the chain is not watched, but a crossfeed
             // that plays is still held to its output: it is looked at once a second.
-            if self.runs && self.xf_on && self.ticks.is_multiple_of(WATCH_EVERY) {
+            if self.runs && self.space_on() && self.ticks.is_multiple_of(WATCH_EVERY) {
                 self.look_output().await;
                 self.check_output();
                 self.finish_reset().await;
@@ -1812,12 +1914,12 @@ impl EqControl {
             self.resend_at = None;
             // A value that waits on this very tick goes out as a first send, which earns a repeat
             // of its own; only a send of nothing new is the repeat.
-            let nothing_new = self.dirty.is_empty() && !self.xf_dirty;
+            let nothing_new = self.dirty.is_empty() && !self.stage_dirty;
             self.dirty.extend(1..=SLOTS as u8);
-            self.xf_dirty |= std::mem::take(&mut self.resend_stage);
+            self.stage_dirty |= std::mem::take(&mut self.resend_stage);
             self.resending = nothing_new;
         }
-        let sent = (self.dirty.is_empty() && !self.xf_dirty) || self.send_dirty().await;
+        let sent = (self.dirty.is_empty() && !self.stage_dirty) || self.send_dirty().await;
         // A repeat that did not go is not owed again: what it carried stays dirty, and the send
         // that follows is an ordinary one with a repeat of its own.
         self.resending = false;
@@ -1907,7 +2009,10 @@ fn refuse_edit(why: String) -> EqFailure {
 }
 
 mod exit;
+mod vs;
 mod xf;
+
+pub use vs::SpeakersEdit;
 
 #[cfg(test)]
 mod tests;

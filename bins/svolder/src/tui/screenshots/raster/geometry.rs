@@ -84,10 +84,27 @@ fn arms(c: char) -> Option<[Arm; 4]> {
     })
 }
 
+/// The light triple dash horizontal, `┄`: three dashes across the cell's middle, each a sixth of its
+/// width with a sixth between.
+fn dashed(cell: CellSize) -> Coverage {
+    let light = (cell.w as f32 / 8.0).round().max(1.0) as u32;
+    let y0 = cell.h.saturating_sub(light) / 2;
+    let mut cov = blank(cell);
+    for dash in 0..3 {
+        let x0 = cell.w * (2 * dash) / 6;
+        let x1 = cell.w * (2 * dash + 1) / 6;
+        fill(&mut cov, cell, (x0, x1.max(x0 + 1)), (y0, y0 + light), 1.0);
+    }
+    cov
+}
+
 /// A box-drawing character as arms from the centre of the cell to its edges. The centre band is
 /// always covered and each arm runs from its far edge to the cell's edge, so arms of
 /// neighbouring cells meet exactly.
 fn boxed(c: char, cell: CellSize) -> Result<Coverage, String> {
+    if c == '┄' {
+        return Ok(dashed(cell));
+    }
     let Some([up, right, down, left]) = arms(c) else {
         return Err(format!(
             "U+{:04X} {c}: a box-drawing character the raster does not draw",

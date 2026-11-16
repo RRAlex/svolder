@@ -308,6 +308,7 @@ pub(super) async fn execute(
         | Intent::ReadPresets
         | Intent::AutoEqSearch { .. }
         | Intent::AutoEqImport { .. }
+        | Intent::Speakers(_)
         | Intent::HostEq(_)
         | Intent::MoveToDac(_)
         | Intent::Tui(_)

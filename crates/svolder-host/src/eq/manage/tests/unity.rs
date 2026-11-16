@@ -144,6 +144,7 @@ async fn a_re_apply_from_the_state_file_is_bounded_too() {
             rate_hz: None,
             flat: false,
             crossfeed: None,
+            speakers: None,
         })
         .await
         .unwrap();

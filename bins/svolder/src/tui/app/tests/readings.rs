@@ -305,6 +305,7 @@ fn host_blocks_feed_the_left_and_right_series() {
                 bands: [0.0; svolder_host::fft::BANDS],
                 left,
                 right,
+                levels: Default::default(),
             },
             t0,
         );

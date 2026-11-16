@@ -130,6 +130,30 @@ pub enum HostEqOp {
         #[serde(default = "done_by_default")]
         done: bool,
     },
+    /// Change the virtual speakers. Every field but `done` is optional and only the ones given
+    /// change. Offer it only while the host's `EqView.speakers` is present: a daemon without it
+    /// cannot parse the op. The rules:
+    ///
+    /// - an op that names nothing at all is refused;
+    /// - `set` names a fetched set (the view's `sets` lists them by id): the choice goes to that
+    ///   set, which rebuilds the chain once; an id that is not fetched is refused in words;
+    /// - `on` is applied last, so turning on plays the set sent with it; turning it on while the
+    ///   crossfeed plays turns the crossfeed off in the same update, and the other way round;
+    /// - turning it on with no set chosen is refused in words.
+    ///
+    /// A refusal leaves everything as it was.
+    Speakers {
+        /// turn the virtual speakers on or off
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+        /// the id of the fetched set to choose
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        set: Option<String>,
+        /// whether this is the last value of a change (the default); kept for the shape the
+        /// other ops share
+        #[serde(default = "done_by_default")]
+        done: bool,
+    },
     /// Save the points as a preset of the user's, under a name
     SaveAs {
         /// the new preset's name
@@ -140,4 +164,45 @@ pub enum HostEqOp {
 /// A `set` that does not say it goes on is the last of its drag.
 fn done_by_default() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_speakers_op_names_only_what_it_changes() {
+        let op: HostEqOp = serde_json::from_str(r#"{"op":"speakers","on":true}"#).unwrap();
+        assert_eq!(
+            op,
+            HostEqOp::Speakers {
+                on: Some(true),
+                set: None,
+                done: true
+            }
+        );
+        let op = HostEqOp::Speakers {
+            on: None,
+            set: Some("sadie-d2".into()),
+            done: true,
+        };
+        assert_eq!(
+            serde_json::to_string(&op).unwrap(),
+            r#"{"op":"speakers","set":"sadie-d2","done":true}"#
+        );
+    }
+
+    #[test]
+    fn the_other_ops_still_parse_as_they_did() {
+        let op: HostEqOp = serde_json::from_str(r#"{"op":"crossfeed","on":false}"#).unwrap();
+        assert!(matches!(
+            op,
+            HostEqOp::Crossfeed {
+                on: Some(false),
+                ..
+            }
+        ));
+        let op: HostEqOp = serde_json::from_str(r#"{"op":"mode","on":true}"#).unwrap();
+        assert_eq!(op, HostEqOp::Mode { on: true });
+    }
 }

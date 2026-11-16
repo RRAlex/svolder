@@ -45,7 +45,7 @@ mod tui_settings;
 
 pub use homes::{
     UNITDIR_ENV, cache_home, config_home, home_dir, host_eq_paths, host_eq_state_path,
-    pin_scratch_homes, state_home,
+    pin_scratch_homes, speakers_dir, state_home,
 };
 pub use hops::{Hop, HopKind, HopWhat};
 pub use net_config::{
@@ -61,7 +61,7 @@ pub use tui_config::{
 pub use tui_settings::{
     COLORS, CONFIRM_QUIT, COVER_ART, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT,
     INTRO_SOUND, LINK_SPAN, MONOCHROME, MOUSE, PALETTE, THEME_BACKGROUND, TITLE_METER, TOOLTIPS,
-    TRANSITION, TUI_SETTINGS, TuiSetting, TuiSettingKind, TuiValue, VISUALIZER,
+    TRANSITION, TUI_SETTINGS, TuiSetting, TuiSettingKind, TuiValue, VISUALIZER, VU_REFERENCE,
 };
 
 use parse::DEFAULT_PALETTE;

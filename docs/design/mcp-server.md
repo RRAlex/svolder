@@ -45,21 +45,25 @@ a secret the owner has replaced.
 
 ## The tools
 
-`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers thirteen, listed in `TOOLS`: `list_devices`,
+`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers fourteen, listed in `TOOLS`: `list_devices`,
 `get_state`, `get_link_history`, `list_presets` and `get_host` read; `set_control`, `load_preset`,
-`mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq` and `set_host_crossfeed` write.
-`get_host`, `set_host_volume`, `host_mute`, `set_host_eq` and `set_host_crossfeed` are the computer's
-(`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to 100 becomes dB as
-`60 * log10(percent / 100)`, the floors hold it under `host:volume`, and a rise past `MAX_RISE_DB`
-asks as the device's does; a volume not read yet counts as 1 %. An unmute always asks, as the
-device's does. `max_volume_db` does not cover the computer, whose cap is 100 %. The floors see
-only this server's own computer writes and reads. A preset another device plays too asks, and
-repeats with `confirm`. The write tools are not listed while `[mcp] writes` is off, and a call to
-one is refused naming the setting, because a client may hold an older list. A device refusal is a
-tool error the model reads; only a tool that does not exist is a protocol error. `get_host`
-reads the crossfeed beside the EQ, and `set_host_crossfeed` sends one `HostEqOp::Crossfeed`; its
-enums and ranges are built from the models table of `svolder-host`. It never asks: turning the
-crossfeed on lowers the preamp first, so it cannot raise the level.
+`mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed` and
+`set_host_speakers` write. `get_host`, `set_host_volume`, `host_mute`, `set_host_eq`,
+`set_host_crossfeed` and `set_host_speakers` are the computer's
+(`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to 100 becomes dB as `60 * log10(percent /
+100)`, the floors hold it under `host:volume`, and a rise past `MAX_RISE_DB` asks as the device's
+does; a volume not read yet counts as 1 %. An unmute always asks, as the device's does.
+`max_volume_db` does not cover the computer, whose cap is 100 %. The floors see only this server's
+own computer writes and reads. A preset another device plays too asks, and repeats with `confirm`.
+The write tools are not listed while `[mcp] writes` is off, and a call to one is refused naming the
+setting, because a client may hold an older list. A device refusal is a tool error the model reads;
+only a tool that does not exist is a protocol error. `get_host` reads the crossfeed beside the EQ,
+and `set_host_crossfeed` sends one `HostEqOp::Crossfeed`; its enums and ranges are built from the
+models table of `svolder-host`. It never asks: turning the crossfeed on lowers the preamp first, so
+it cannot raise the level. `get_host` also reads the virtual speakers (the view without its curves,
+with the fetched sets), and `set_host_speakers {on?, set?}` sends one `HostEqOp::Speakers`, and both
+speakers and crossfeed tools answer with both views (one turns the other off): a set is chosen by
+the id of one already fetched, and no tool fetches.
 
 Every tool goes through `Fleet`, the same request path the socket's clients use
 (`bins/svolderd/src/fleet.rs`), so a value is validated and refused exactly as `svolder set` refuses

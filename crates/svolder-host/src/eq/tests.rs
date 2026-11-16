@@ -286,6 +286,9 @@ fn state() -> HostEqState {
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     }
 }
 
@@ -453,4 +456,47 @@ fn a_staged_file_changes_nothing_until_it_is_committed() {
         .collect();
     assert_eq!(left, ["file.conf"], "a temporary file was left behind");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_state_from_0_35_loads_with_no_speakers_and_saves_without_their_keys() {
+    let dir = scratch("old-speakers");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("host-eq.toml");
+    std::fs::write(&path, STATE_0_34).unwrap();
+    let state = HostEqState::load(&path).unwrap().expect("a state");
+    assert_eq!(state.speakers, None);
+    assert!(!state.speakers_on);
+    state.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("speakers"),
+        "an unset choice adds no key: {text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_chosen_set_is_kept_while_off_and_the_on_flag_only_while_it_plays() {
+    let dir = scratch("speakers-state");
+    let path = dir.join("host-eq.toml");
+    let mut before = state();
+    before.speakers = Some("dummy-d2".into());
+    before.speakers_on = true;
+    before.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("speakers = \"dummy-d2\"") && text.contains("speakers_on = true"),
+        "{text}"
+    );
+    assert_eq!(HostEqState::load(&path), Ok(Some(before.clone())));
+    before.speakers_on = false;
+    before.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("speakers = \"dummy-d2\"") && !text.contains("speakers_on"),
+        "{text}"
+    );
+    assert_eq!(HostEqState::load(&path), Ok(Some(before)));
+    let _ = std::fs::remove_dir_all(&dir);
 }

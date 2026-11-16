@@ -40,6 +40,9 @@ pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
         HostCommand::Crossfeed { json, command } => {
             super::host_crossfeed::run(g, json, command).await
         }
+        HostCommand::Speakers { json, command } => {
+            super::host_speakers::run(g, json, command).await
+        }
     }
 }
 

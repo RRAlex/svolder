@@ -145,6 +145,18 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Crossfeed**: feeding a low-passed, delayed copy of each channel into the other channel at a set
   level. The computer's has four models (Bauer, Linkwitz, Meier,
   Mid/Side bass); see [crossfeed.md](design/crossfeed.md).
+- **Virtual speakers**: two speakers at about 30 degrees to either side (45 for a With room · BRIR
+  set), heard on headphones. One choice with two forms, always shown with its term: **With room ·
+  BRIR** and **No room · HRTF**; see [virtual-speakers.md](design/virtual-speakers.md).
+- **Set** (virtual speakers'): one measurement of a head, or of a head in a room, kept as one
+  4-channel WAV and a sidecar; fetched from the catalogue or imported from your own file.
+- **BRIR** (binaural room impulse response): what each ear hears of each speaker in a measured
+  room, its reflections and tail included. svolder shows it as **With room · BRIR**.
+- **HRTF** (head-related transfer function; the impulse response form is the HRIR): what each ear
+  hears of a sound from one direction in the open, with no room. svolder shows it as **No room ·
+  HRTF**.
+- **Space**: the computer's one choice of Off, Crossfeed or Virtual speakers.
+- **SOFA**: the file format (AES69) the measured sets come in; svolder reads it once, at import.
 - **Feed level**: bs2b's way to state a Bauer crossfeed's level, in dB: how far the crossed signal
   sits below the direct one at low frequencies (4.5 dB for the default preset, 37 %).
 - **Mid/Side** (M/S): the sum and the difference of the two channels. Meier crosses only the side
@@ -194,7 +206,13 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Capture state**: whether the daemon's capture is `Starting`, `Running` (the sink's name and the
   node it records) or `Unavailable` (a plain reason); sent to every holder on change.
 - **Frames stream**: the frames of the daemon's capture sent to one front end: `api/v1/host/frames`
-  for a web page, `Request::HostFrames` for a TUI.
+  for a web page, `Request::HostFrames` for a TUI. `?only=levels` on the web route sends just the
+  time and the four level bytes.
+- **VU meter**: a needle for each channel of what the computer plays, 0 VU at a chosen reference
+  (-18 dBFS by default), drawn by Signal on the web and by the Status pane of the TUI; see
+  [the VU meter](design/vu-meter.md).
+- **Over**: a frame whose sample peak reaches full scale (the peak byte's top value, 255); it lights
+  the VU meter's lamp for 1.2 seconds.
 - **Beat pulse**: the TUI's 200 ms response to a frame's beat flag: the Spectrum row bold and the
   breathing borders lifted.
 

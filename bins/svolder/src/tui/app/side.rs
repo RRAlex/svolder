@@ -276,6 +276,7 @@ impl App {
             }
             self.tone.xf_note = note;
         }
+        self.note_speakers_view();
         let applied = self.computer_preset();
         if self.presets.computer_flattened.is_some()
             && applied.as_ref() == self.presets.computer_flattened.as_ref()

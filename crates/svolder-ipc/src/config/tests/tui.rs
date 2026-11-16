@@ -32,6 +32,7 @@ fn tui_defaults_when_the_block_is_absent() {
             graphs: true,
             graph_span: GraphSpan::M5,
             link_span: LinkSpan::H12,
+            vu_reference: -18,
             device_split: 0.5,
             effects: EffectsConfig::default()
         }
@@ -851,4 +852,40 @@ fn the_device_split_reads_validates_and_round_trips() {
     Config::update_tui(&templated, |t| t.device_split = 0.5).unwrap();
     let saved = std::fs::read_to_string(&templated).unwrap();
     assert!(saved.contains("\ndevice_split = 0.5\n"), "{saved}");
+}
+
+/// The VU reference is -18 while the file says nothing, reads a whole number, is held to -30 to
+/// -6 when the file names a number outside it, refuses what is no whole number, and is written as
+/// a number where the template shows it.
+#[test]
+fn the_vu_reference_reads_clamps_and_round_trips() {
+    assert_eq!(Config::parse("").unwrap().tui.vu_reference, -18);
+    for (text, held) in [
+        ("-17", -17),
+        ("-30", -30),
+        ("-6", -6),
+        ("-99", -30),
+        ("0", -6),
+    ] {
+        let text = format!("schema = 1\n[tui]\nvu_reference = {text}\n");
+        assert_eq!(
+            Config::parse(&text).unwrap().tui.vu_reference,
+            held,
+            "{text}"
+        );
+    }
+    for bad in ["-17.5", "\"loud\"", "true"] {
+        let text = format!("schema = 1\n[tui]\nvu_reference = {bad}\n");
+        assert!(Config::parse(&text).is_err(), "{bad} was accepted");
+    }
+    let dir = temp_dir("config-writer");
+    let templated = dir.join("config.toml");
+    Config::create_from_template(&templated).unwrap();
+    let template = std::fs::read_to_string(&templated).unwrap();
+    assert!(template.contains("\n# vu_reference = -18\n"), "{template}");
+    Config::update_tui(&templated, |t| t.vu_reference = -17).unwrap();
+    let saved = std::fs::read_to_string(&templated).unwrap();
+    assert!(saved.contains("\nvu_reference = -17\n"), "{saved}");
+    assert!(!saved.contains("# vu_reference"), "{saved}");
+    assert_eq!(Config::parse(&saved).unwrap().tui.vu_reference, -17);
 }

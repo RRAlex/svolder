@@ -26,6 +26,9 @@ const LINE_MAX: usize = 10;
 /// One row of the Crossfeed section, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Xf {
+    /// The space choice (Off, Crossfeed, Virtual speakers): the section's first row where the
+    /// view carries virtual speakers.
+    Space,
     /// On or off, the model and its preset: the section's own line, which is also the folded
     /// section's one line.
     Preset,
@@ -35,15 +38,19 @@ pub enum Xf {
     Crossover,
     /// The total lag of the other side.
     Delay,
+    /// The virtual speakers' set, while they are the choice.
+    Set,
 }
 
 impl Xf {
-    /// Every row, in the order the section draws them.
+    /// Every row of the crossfeed, in the order the section draws them.
     pub const ALL: [Xf; 4] = [Xf::Preset, Xf::Level, Xf::Crossover, Xf::Delay];
 
     /// The row's label.
     pub fn label(self) -> &'static str {
         match self {
+            Xf::Space => "Space",
+            Xf::Set => "Set",
             Xf::Preset => "Crossfeed",
             Xf::Level => "Level",
             Xf::Crossover => "Crossover",
@@ -54,7 +61,7 @@ impl Xf {
     /// The unit its edit line shows after the number.
     pub fn unit(self) -> &'static str {
         match self {
-            Xf::Preset => "",
+            Xf::Space | Xf::Set | Xf::Preset => "",
             Xf::Level => "%",
             Xf::Crossover => "Hz",
             Xf::Delay => "ms",
@@ -111,8 +118,10 @@ impl App {
         // screen has any.
         let here = match (self.screen, self.tone.row) {
             (Screen::Tone, ToneRow::Crossfeed(row)) => Some(row),
-            (Screen::Device, ToneRow::Crossfeed(Xf::Preset)) if self.pane == super::Pane::Tone => {
-                Some(Xf::Preset)
+            (Screen::Device, ToneRow::Crossfeed(row))
+                if self.pane == super::Pane::Tone && row == self.xf_first() =>
+            {
+                Some(row)
             }
             _ => None,
         };
@@ -156,6 +165,10 @@ impl App {
         let was = self.xf_row() == Some(row);
         self.focus_crossfeed(row);
         if was && self.pointer.double_click && self.screen == Screen::Tone {
+            // The choice and the set open the set list; a value opens its line.
+            if matches!(row, Xf::Space | Xf::Set) {
+                return self.open_sets();
+            }
             self.open_xf_line(row);
         }
         Vec::new()
@@ -183,7 +196,7 @@ impl App {
         if self.screen != Screen::Tone {
             self.show(Screen::Tone);
         }
-        self.focus_crossfeed(Xf::Preset);
+        self.focus_crossfeed(self.xf_first());
         self.frame_flags.pane_changed = true;
         Vec::new()
     }
@@ -274,7 +287,7 @@ impl App {
         let view = self.crossfeed()?;
         let model = self.xf_model()?;
         match row {
-            Xf::Preset => None,
+            Xf::Space | Xf::Set | Xf::Preset => None,
             Xf::Level => Some((model.amount_pct, view.amount_pct)),
             Xf::Crossover => Some((model.crossover_hz, view.crossover_hz)),
             Xf::Delay => model.delay_settable.then_some((
@@ -292,7 +305,7 @@ impl App {
     fn xf_set(&mut self, row: Xf, value: f64) -> Vec<Intent> {
         let mut values = [None; 3];
         match row {
-            Xf::Preset => return Vec::new(),
+            Xf::Space | Xf::Set | Xf::Preset => return Vec::new(),
             Xf::Level => values[0] = Some(value),
             Xf::Crossover => values[1] = Some(value),
             Xf::Delay => values[2] = Some(value),
@@ -320,6 +333,8 @@ impl App {
     /// on the device screen's pane; a value row's step it.
     pub(crate) fn xf_arrow(&mut self, row: Xf, dir: i64) -> Vec<Intent> {
         match (row, self.screen) {
+            (Xf::Space, _) => self.space_step(dir),
+            (Xf::Set, _) => self.set_step(dir),
             (Xf::Preset, Screen::Tone) => self.xf_preset(dir),
             (Xf::Preset, _) => self.xf_toggle(Some(dir > 0)),
             (row, _) => self.xf_value_step(row, dir),
@@ -333,6 +348,26 @@ impl App {
             return Some(self.xf_line_key(code));
         }
         let tone = self.screen == Screen::Tone;
+        // The choice and the set: the arrows and `, .` step them, `␣` turns the space off or on,
+        // `Enter` opens the set list (on the device screen it first goes to the tone screen).
+        if matches!(row, Xf::Space | Xf::Set) {
+            return Some(match code {
+                KeyCode::Left | KeyCode::Char(',') => self.xf_arrow(row, -1),
+                KeyCode::Right | KeyCode::Char('.') => self.xf_arrow(row, 1),
+                KeyCode::Char(' ') => self.space_toggle(),
+                KeyCode::Enter if !tone => {
+                    self.show(Screen::Tone);
+                    self.focus_crossfeed(row);
+                    Vec::new()
+                }
+                KeyCode::Enter => self.open_sets(),
+                KeyCode::Esc if tone => {
+                    self.leave_crossfeed();
+                    Vec::new()
+                }
+                _ => return None,
+            });
+        }
         Some(match code {
             KeyCode::Left => self.xf_arrow(row, -1),
             KeyCode::Right => self.xf_arrow(row, 1),
@@ -347,7 +382,7 @@ impl App {
             }
             KeyCode::Enter if !tone => {
                 self.show(Screen::Tone);
-                self.focus_crossfeed(Xf::Preset);
+                self.focus_crossfeed(row);
                 Vec::new()
             }
             // Enter on the model and preset row has no number to type: it turns it on or off.
@@ -444,10 +479,14 @@ impl App {
     /// the Crossfeed rows go between the mode and the points. On the device screen only the
     /// pane's one row is a stop, and it sits under the points.
     pub(crate) fn xf_stops(&self) -> Vec<Xf> {
-        match (self.crossfeed_shown(), self.screen) {
-            (false, _) => Vec::new(),
-            (true, Screen::Tone) => Xf::ALL.to_vec(),
-            (true, _) => vec![Xf::Preset],
+        let speakers = self.space_shown() && self.space_now() == super::Space::Speakers;
+        match (self.crossfeed_shown(), self.screen, self.space_shown()) {
+            (false, ..) => Vec::new(),
+            (true, Screen::Tone, false) => Xf::ALL.to_vec(),
+            (true, Screen::Tone, true) if speakers => vec![Xf::Space, Xf::Set],
+            (true, Screen::Tone, true) => [&[Xf::Space][..], &Xf::ALL].concat(),
+            (true, _, true) => vec![Xf::Space],
+            (true, _, false) => vec![Xf::Preset],
         }
     }
 }

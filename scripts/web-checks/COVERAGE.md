@@ -820,6 +820,19 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   `the_same_preset_on_both_asks_and_yes_flattens_the_dac`, `the_amp_page_flips_to_the_computer_with_the_dac_parts`,
   `the_pill_keeps_the_focus_across_a_keyboard_flip`, `presets_save_rename_delete_from_the_computer_side`, and in Chromium under touch emulation `a_finger_adds_drags_and_pinches`). Its driver is held by the contract and
   completeness checks.
+- Signal's level meters (`signal_vu.py`, both browsers, `SVOLDER_HOST=fake`, the page's EventSource for the frames
+  streams replaced by the check's own fake; the model's rules are `node/vu.mjs`): `the_computer_opens_with_meters_and_two_dial_buttons`,
+  `the_needles_settle_at_the_rotation_the_model_says`, `the_lamp_lights_on_a_255_peak_and_is_off_later`,
+  `the_reference_steps_by_one_db_and_stops_at_its_ends`, `the_face_cycles_the_glow_by_click_enter_and_space`,
+  `the_choices_survive_a_reload`, `refused_storage_leaves_the_defaults_and_no_error`,
+  `the_spectrum_view_swaps_the_streams_and_stops_the_needles`, `a_hidden_page_holds_no_stream_after_the_grace`,
+  `the_capture_state_is_said_and_the_needles_rest`, `the_markup_has_no_style_attribute`,
+  `the_layout_holds_at_390` / `_900` / `_1020` / `_1239` / `_1240` / `_1241` / `_1280` (curve at least 300 px, dials side by side,
+  third column from 1240 px, beside the volume below it), `a_frame_writes_two_needle_transforms_at_most`,
+  `a_guest_turns_the_glow_too`, `reduced_motion_jumps_the_needle_to_the_settled_value` (prefers-reduced-motion emulated: one frame,
+  two animation frames, the needles already at the model's angle; the Spectrum line drawn when bands arrive; the model's
+  `settled()` itself is the node harness's), `leaving_the_computer_side_closes_the_streams_and_stops_the_needles`,
+  `Reset_hands_the_focus_to_the_plus_button_when_it_hides`, and the lamp's spoken word and the readings' channel names.
 - Signal's computer side (`node/signal-line.mjs`, `node/signal-draw.mjs`, `computer_signal.py`, both browsers,
   `SVOLDER_HOST=fake`): the hop and the choice (`the_computer_hop_is_called_this_computer`,
   `choosing_it_is_the_flip_and_another_hop_flips_back`, `a_kept_computer_side_chooses_the_hop_on_load`), the
@@ -1085,6 +1098,21 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   390 px (no overflow, bar and page inside the window, steppers 44 px, the page behind unmoved), a press -> a request ->
   the view, the keyboard and Escape, the frame tokens, and a guest's daemon with no row
   (`WEB_CHECK_SHOTS=<folder>` writes `<theme>-crossfeed-<wide|phone>-<on|off>.png`).
+  The Virtual speakers tab (`core/popups/speakers/`, `core/speakers-actions.js`, the held key
+  `speakers`), in
+  `core-speakers.mjs` (30 cases on the real core over a jsdom page and a fake daemon): the three
+  views and their pictures
+  from contract-shaped data (a set with no timing says so), the choice cards and their words from
+  the data, the sets list
+  with fetch, cancel, use and forget, the own file, the answer of a call and the stream's list in
+  either order, a forgotten
+  set answering 404 read once with no retry, exclusivity with crossfeed, and mutations of the
+  mirror, linear decay, floor
+  and scale that must fail. In a browser, `speakers_popup.py` (68 checks per engine across the four
+  themes): the third tab,
+  the wide and narrow layouts (container queries), the chip kept, a press -> a request -> the view,
+  geometry at 1280 and
+  390 px, the frame tokens (`WEB_CHECK_SHOTS=<folder>` writes `<theme>-speakers-*.png`).
   The EQ library popup (`core/popups/eq-library/`, `core/autoeq-actions.js`), in `core-eq-library.mjs` (30 cases, each
   on the real core over a jsdom page and a fake daemon, with a device on show that has neighbours): the row (a
   writer's, between Devices and Help), the title naming the side in every draw, a guest and a read-only page with no

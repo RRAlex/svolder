@@ -656,6 +656,7 @@ impl RemoteBackend {
                 // A family's job stream comes only on a connection of its own.
                 | Event::Walk(_)
                 | Event::AutoEq(_)
+                | Event::Speakers(_)
                 | Event::Unknown => continue,
             }
         }

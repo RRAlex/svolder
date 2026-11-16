@@ -42,6 +42,16 @@ pub const FRAMES: usize = 1024;
 /// gets the blocks it missed dropped rather than an ever older backlog.
 const QUEUE: usize = 8;
 
+/// The levels of one block as amplitudes (1.0 = full scale), left then right: what the VU
+/// needles read and what the over lamp compares to [`OVER`](crate::analysis::OVER).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Levels {
+    /// The RMS of each channel.
+    pub rms: [f32; 2],
+    /// The sample peak (largest absolute sample) of each channel.
+    pub peak: [f32; 2],
+}
+
 /// What one block of the sink's output looks like.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Block {
@@ -52,6 +62,8 @@ pub struct Block {
     pub left: f32,
     /// The right channel's RMS level on the drawing scale.
     pub right: f32,
+    /// The RMS and peak of each channel as amplitudes.
+    pub levels: Levels,
 }
 
 impl Block {
@@ -68,7 +80,25 @@ impl Block {
             bands: spectrum.bands(&mono),
             left: level(frames.iter().map(|f| sample(f[0]))),
             right: level(frames.iter().map(|f| sample(f[1]))),
+            levels: amplitudes(frames.iter().map(|f| [sample(f[0]), sample(f[1])])),
         }
+    }
+}
+
+/// The RMS and peak amplitudes of the stereo frames `pairs` gives; none give silence.
+fn amplitudes(pairs: impl Iterator<Item = [f32; 2]>) -> Levels {
+    let (mut squares, mut peak, mut count) = ([0.0f64; 2], [0.0f32; 2], 0u32);
+    for pair in pairs {
+        for (channel, s) in pair.into_iter().enumerate() {
+            squares[channel] += f64::from(s) * f64::from(s);
+            peak[channel] = peak[channel].max(s.abs());
+        }
+        count += 1;
+    }
+    let n = f64::from(count.max(1));
+    Levels {
+        rms: squares.map(|q| (q / n).sqrt() as f32),
+        peak,
     }
 }
 
@@ -499,12 +529,47 @@ mod tests {
     }
 
     #[test]
+    fn a_block_carries_rms_and_peak_amplitudes() {
+        let mut spectrum = Spectrum::new(RATE, FRAMES);
+        let block = Block::of(&mut spectrum, &stereo(1_000.0, 0.5, 0.25, FRAMES * 8));
+        assert!(
+            (block.levels.rms[0] - 0.3536).abs() < 1e-3,
+            "{:?}",
+            block.levels
+        );
+        assert!(
+            (block.levels.rms[1] - 0.1768).abs() < 1e-3,
+            "{:?}",
+            block.levels
+        );
+        assert!(
+            (block.levels.peak[0] - 0.5).abs() < 1e-3,
+            "{:?}",
+            block.levels
+        );
+        assert!(
+            (block.levels.peak[1] - 0.25).abs() < 1e-3,
+            "{:?}",
+            block.levels
+        );
+        let mut negative = vec![0.0; FRAMES * CHANNELS];
+        negative[0] = -1.0;
+        let peak = Block::of(&mut spectrum, &negative).levels.peak;
+        assert_eq!(peak, [1.0, 0.0]);
+        let mut bad = vec![0.0; FRAMES * CHANNELS];
+        bad[0] = f32::NAN;
+        bad[2] = f32::INFINITY;
+        assert_eq!(Block::of(&mut spectrum, &bad).levels, Levels::default());
+    }
+
+    #[test]
     fn a_block_of_silence_is_empty() {
         let mut spectrum = Spectrum::new(RATE, FRAMES);
         let silent = Block {
             bands: [0.0; BANDS],
             left: 0.0,
             right: 0.0,
+            levels: Levels::default(),
         };
         assert_eq!(
             Block::of(&mut spectrum, &vec![0.0; FRAMES * CHANNELS]),

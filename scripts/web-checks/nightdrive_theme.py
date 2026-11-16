@@ -1357,6 +1357,8 @@ def the_dash_press_while_faded(b, d):
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
+# the longest verdict is the three stages of the filter chain, then the path's flag
+LONGEST = 'host EQ on \\u00b7 crossfeed on \\u00b7 virtual speakers on \\u00b7 changes the sound'
 SUN_SCAN = """(() => {
   const num = (c) => c.match(/[\\d.]+/g).map(Number);
   const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92
@@ -1368,7 +1370,7 @@ SUN_SCAN = """(() => {
   const out = [];
   const right = document.querySelector('.nd-right');
   // the longest verdict, in the amber it has, whether or not the model has one now
-  if (!right.textContent.trim()) { right.textContent = 'host EQ on \u00b7 changes the sound'; right.className = 'nd-right warn'; }
+  if (!right.textContent.trim()) { right.textContent = '__LONGEST__'; right.className = 'nd-right warn'; }
   for (const sel of ['.nd-left', '.nd-right', '.nd-eq', '.nd-novol']) {
     const e = document.querySelector(sel);
     if (!e || !e.textContent.trim()) continue;
@@ -1381,7 +1383,37 @@ SUN_SCAN = """(() => {
   }
   const vq = document.querySelector('.nd-vol svg')?.getBoundingClientRect();
   return { size: [w, h], sun: Object.values(sun).map(Math.round), out,
-    volume: vq ? [vq.left, vq.top, vq.right, vq.bottom].map(Math.round) : null }; })()"""
+    volume: vq ? [vq.left, vq.top, vq.right, vq.bottom].map(Math.round) : null }; })()""".replace('__LONGEST__', LONGEST)
+
+# the verdict with the three stages as the HUD puts it, and the boxes of what stands by it
+LONG_VERDICT_BOXES = """(() => {
+  const page = document.getElementById('nightdrive');
+  const right = document.querySelector('.nd-right');
+  right.textContent = '__LONGEST__'; right.className = 'nd-right warn';
+  page.classList.add('nd-verdict');
+  const box = (sel) => { const e = document.querySelector(sel); if (!e || !e.textContent.trim() && !e.children.length) return null;
+    const q = e.getBoundingClientRect(); return q.width ? [q.left, q.top, q.right, q.bottom].map(Math.round) : null; };
+  const lines = Math.round(right.getBoundingClientRect().height / parseFloat(getComputedStyle(right).lineHeight));
+  return { w: innerWidth, h: innerHeight, switch: page.classList.contains('nd-has-switch'), lines,
+    verdict: box('.nd-right'), eq: box('.nd-eq'), keys: box('.nd-swkeys'), left: box('.nd-left'), button: box('.nd-menu-btn') }; })()""".replace('__LONGEST__', LONGEST)
+
+
+def the_long_verdict(b, d):
+    """The verdict with all three stages named (`host EQ on, crossfeed on, virtual speakers on, changes the sound`)
+    meets neither the EQ line nor the keys by the menu button, nor the device line, at 1280x800 and on a phone."""
+    forget(b, d)
+    load(b, d)
+    time.sleep(0.8)
+    for w, h in ((1280, 800), (390, 844)):
+        b.resize(w, h)
+        time.sleep(0.8)
+        got = b.page(LONG_VERDICT_BOXES)
+        time.sleep(0.2)
+        got = b.page(LONG_VERDICT_BOXES)
+        met = [n for n in ('eq', 'keys', 'left') if got[n] and got['verdict'] and rects_meet(got['verdict'], got[n])]
+        print(f'     {w}x{h}: {got}')
+        check(f'the_long_verdict_clears_the_eq_line: {w}x{h}: the verdict ({got["lines"]} line(s)) meets nothing', met == [] and got['verdict'] is not None, [met, got])
+    b.resize(1280, 900)
 
 
 def the_sun(b, d):
@@ -2503,6 +2535,10 @@ ONLY = os.environ.get('ND_ONLY')
 d = common.Daemon('gungnir2-v2', host='fake')
 b = make()
 try:
+    if ONLY == 'verdict':
+        the_long_verdict(b, d)
+        base.finish('nightdrive_theme.py')
+        raise SystemExit(0)
     if ONLY == 'pace':
         the_pace_on_a_fake_clock(d)
         base.finish('nightdrive_theme.py')
@@ -2534,6 +2570,7 @@ try:
     the_menu_button_outside_the_fade(b, d)
     the_fonts(b, d)
     the_sun(b, d)
+    the_long_verdict(b, d)
     the_dash(b, d)
     the_dash_hold(b, d)
     the_dash_ask_again(b, d)

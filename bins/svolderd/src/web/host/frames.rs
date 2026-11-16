@@ -17,6 +17,10 @@
 //!  "lv": [rmsL, rmsR, peakL, peakR], "beat": 0, "bpm": 120, "phase": 77}
 //! ```
 //!
+//! With `?only=levels` a frame is just `{"t", "lv"}` (about 45 bytes instead of 700), for a
+//! page that draws meters only; the other events are the same, and any other query is ignored.
+//! In `lv` a peak byte of 255 is an over (a sample at or above 16-bit full scale).
+//!
 //! `t` is the capture's unix milliseconds on the daemon's clock, `l` and `r` the bands of the
 //! channels from 20 Hz up (a byte maps dB over a range that is a tuning, not a promise), `bpm`
 //! a number or null and `phase` 0–255 along the beat. A keep-alive comment goes out every 3 s, so a
@@ -30,7 +34,7 @@
 use std::convert::Infallible;
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::extract::{RawQuery, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
@@ -52,7 +56,11 @@ const QUEUE: usize = 8;
 const KEEP_ALIVE: Duration = Duration::from_secs(3);
 
 /// The frames stream, for a viewer who may read the page.
-pub(super) async fn frames(State(web): State<Web>, headers: HeaderMap) -> Response {
+pub(super) async fn frames(
+    State(web): State<Web>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
     // Subscribed before the cookie is looked at: a token rotated between the two ends the
     // stream, instead of slipping past a check that read the old one.
     let signed_out = web.signed_out.subscribe();
@@ -63,7 +71,8 @@ pub(super) async fn frames(State(web): State<Web>, headers: HeaderMap) -> Respon
         return error(StatusCode::NOT_FOUND, "host audio is not available");
     };
     let (tx, rx) = mpsc::channel(QUEUE);
-    tokio::spawn(follow(web.clone(), events, signed_out, tx));
+    let only_levels = levels_only(query.as_deref());
+    tokio::spawn(follow(web.clone(), events, signed_out, tx, only_levels));
     Sse::new(ReceiverStream::new(rx).map(Ok::<_, Infallible>))
         .keep_alive(KeepAlive::new().interval(KEEP_ALIVE).text(""))
         .into_response()
@@ -78,6 +87,7 @@ async fn follow(
     mut events: crate::fleet::FramesWatch,
     mut signed_out: watch::Receiver<u64>,
     tx: mpsc::Sender<Event>,
+    only_levels: bool,
 ) {
     let hello = Event::default()
         .retry(Duration::from_secs(2))
@@ -110,7 +120,9 @@ async fn follow(
             // A frame the page has no room for is dropped before it is encoded.
             FramesEvent::Frame(_) if tx.capacity() == 0 => true,
             FramesEvent::Frame(frame) => {
-                let event = Event::default().event("frame").data(frame_json(&frame));
+                let event = Event::default()
+                    .event("frame")
+                    .data(frame_json(&frame, only_levels));
                 !matches!(
                     tx.try_send(event),
                     Err(mpsc::error::TrySendError::Closed(_))
@@ -159,8 +171,11 @@ fn capture_json(state: &CaptureState, now_ms: Option<u64>) -> String {
     serde_json::Value::Object(json).to_string()
 }
 
-/// A frame as the page reads it.
-fn frame_json(frame: &Frame) -> String {
+/// A frame as the page reads it; with `levels_only` just its time and levels.
+fn frame_json(frame: &Frame, levels_only: bool) -> String {
+    if levels_only {
+        return serde_json::json!({ "t": frame.capture_ms, "lv": frame.levels }).to_string();
+    }
     serde_json::json!({
         "t": frame.capture_ms,
         "l": base64(&frame.left),
@@ -171,6 +186,12 @@ fn frame_json(frame: &Frame) -> String {
         "phase": frame.phase,
     })
     .to_string()
+}
+
+/// Whether the query asks for the levels-only frames: `only=levels`; any other value or key
+/// leaves the full frames.
+fn levels_only(query: Option<&str>) -> bool {
+    query.is_some_and(|q| q.split('&').any(|pair| pair == "only=levels"))
 }
 
 /// `bytes` in standard base64 (RFC 4648, with padding), which `atob` reads on the page.

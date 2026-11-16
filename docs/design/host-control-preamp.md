@@ -52,12 +52,13 @@ The coefficients are worked out for the rate the sink runs at, so a rate change 
 chain checks the curve again at the new rate before anything is sent. A curve that is not playable
 there turns the EQ off: the chain leaves the path, the points are kept, the state says off, and the
 note says which point and at which rate. Nothing is sent at the new rate. The note goes at the next
-successful apply. A chain that plays flat (crossfeed alone, or a pass-through) plays none of the
-points, so they are not checked and it goes on; turning the EQ on at a rate they cannot play at is
-refused, and the state keeps the preamp they were saved with. The rate is forgotten with the chain,
-so an apply with none there reads the default output's rate (`pw-dump`) and checks and writes at it;
-when it cannot be read it is the default 48 kHz and the first look at the new chain checks it at the
-rate the sink runs at.
+successful apply. A chain that plays flat (crossfeed or the virtual speakers alone, or a
+pass-through) plays none of the points, so they are not checked and it goes on, an apply of it (a
+set chosen there) included; turning the EQ on at a rate they cannot play at is refused, and the
+state keeps the preamp they were saved with. The rate is forgotten with the chain, so an apply with
+none there reads the default output's rate (`pw-dump`) and checks and writes at it; when it cannot
+be read it is the default 48 kHz and the first look at the new chain checks it at the rate the sink
+runs at.
 If the chain cannot be taken out, the note says so, nothing is sent, and the chain is looked at
 again: it plays on again once the sink's rate plays the curve, or goes off once it can be removed.
 

@@ -74,6 +74,35 @@
         ],
         "name": "This computer"
       },
+      "name": "Virtual speakers",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "svolder/computer/computer_speakers/state",
+      "unique_id": "svolder_computer_computer_speakers"
+    },
+    "topic": "homeassistant/binary_sensor/svolder_computer/computer_speakers/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
       "name": "Crossfeed preset",
       "origin": {
         "name": "svolder",
@@ -110,5 +139,33 @@
       "unique_id": "svolder_computer_computer_eq_preset"
     },
     "topic": "homeassistant/sensor/svolder_computer/computer_eq_preset/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/availability"
+        },
+        {
+          "topic": "svolder/computer/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer"
+        ],
+        "name": "This computer"
+      },
+      "json_attributes_topic": "svolder/computer/computer_speakers_set/attributes",
+      "name": "Virtual speakers set",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/computer/computer_speakers_set/state",
+      "unique_id": "svolder_computer_computer_speakers_set"
+    },
+    "topic": "homeassistant/sensor/svolder_computer/computer_speakers_set/config"
   }
 ]

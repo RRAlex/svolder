@@ -21,6 +21,7 @@
 //! - [`fft`]: the transform and the scales the captured blocks are drawn on.
 //! - [`eq`]: the computer EQ: its PipeWire config, unit, autostart entry and state file, as text,
 //!   and the manager that applies it and keeps the chain running.
+//! - [`vu`]: the VU meter's scale, needle and over lamp, pure, with no clock of their own.
 //! - [`fake`]: stand-ins for the sources, for tests.
 //!
 //! Nothing here links PipeWire: the sink and the capture run PipeWire's own command-line
@@ -40,11 +41,12 @@ pub mod fft;
 pub mod players;
 pub mod route;
 pub mod sink;
+pub mod vu;
 
 pub use analysis::{Analyser, Frame};
-pub use capture::{Block, Capture, FrameCapture, PwFrames, PwRecord, pw_record_args};
+pub use capture::{Block, Capture, FrameCapture, Levels, PwFrames, PwRecord, pw_record_args};
 pub use players::{Button, Mpris, NoBus, NowPlaying, Players, Progress, Status, unix_ms};
-pub use route::{PlayerMatch, PwDump, RouteFacts, SinkFacts, StreamFacts, route};
+pub use route::{ChainStages, PlayerMatch, PwDump, RouteFacts, SinkFacts, StreamFacts, route};
 pub use sink::{Sink, SinkState, Wpctl};
 
 /// The environment variable that turns every host part off for the process when it reads

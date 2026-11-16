@@ -15,6 +15,7 @@
 // device, signing out). This file joins them and names the default target.
 
 import { createAutoEqActions } from './autoeq-actions.js';
+import { createSpeakersActions } from './speakers-actions.js';
 import { createComputerActions } from './computer-actions.js';
 import { createPending } from './computer.js';
 import { createDeviceActions } from './device-actions.js';
@@ -45,6 +46,7 @@ export function createActions({
     ...createDeviceConfigActions({ store, post, writes }),
     ...createAutoEqActions({ store, post, writes }),
   };
+  const speakersActions = createSpeakersActions({ store, post, writes, held, toast });
   const { press, hops } = createHostActions({ store, post, writes });
   const { signOut, signInPrompt, showDevice } = createNavigation({
     store, post, toast, history, location, needs,
@@ -58,6 +60,7 @@ export function createActions({
    * for a caller that named none. */
   const computerOn = {
     ...computerActions,
+    ...speakersActions,
     recallPreset: (name, options) => computerActions.recallPreset(name, aimed(options)),
     renamePreset: (from, to, options) => computerActions.renamePreset(from, to, aimed(options)),
     deletePreset: (name, options) => computerActions.deletePreset(name, aimed(options)),

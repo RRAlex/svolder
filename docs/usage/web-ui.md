@@ -229,26 +229,30 @@ does not move: it has the same size with art, without it, and with no player at 
 card is one quiet line, `No player`, with no buttons. The buttons go to the player that is
 playing; a guest, and a page with `[web] writes` off, see the card without them.
 
-The **signal path** is one line from the player to the DAC: what the hops add up to first, then
-each hop (the player's stream, the computer's sink, the DAC's own input and sample rate). It says
+The **signal path** is one line from the player to the DAC: what the hops add up to first, then each
+hop (the player's stream, the computer's sink, the DAC's own input and sample rate). It says
 `untouched` only when every hop is known to leave the signal alone: the stream and the sink at one
-rate, both at 100 % and not muted, no host EQ, nothing else mixing in, and the rate the DAC reads
-equal to the one the computer sends. Otherwise it names what changes it (`resampled 44.1 → 48 kHz`,
-`computer volume 54 %`, `host EQ on`, `DAC reads 44.1 kHz`) or what it could not read (`DAC rate not
-read`, `DAC input not read`), and when the computer plays to another sink it says so in
-short (`→ Speakers`, or `player → Speakers` for a player routed elsewhere; the whole sentence, `the
-computer plays to Speakers`, is the line's tooltip). Until the daemon has read the route (the first
-read is under way, or `pw-dump` is missing) the line says `route not read`. While the DAC listens to an input the
-computer does not feed (Optical, Coaxial, AES or BNC) the line says `the DAC listens to Optical` and
-gives no verdict, since the computer's stream is not what the DAC plays. So does a Gungnir 2 or a
-Yggdrasil on one USB port while the computer is on the other (`the DAC listens to USB 1 · the
-computer is on USB 2`); when both ports read connected, or a reading is missing, the line says
-`both USB ports connected` or `USB ports not read` and is never `untouched`. A DAC with no input
-choice (the Eitr 2, the Mesh Card) takes USB alone and counts as on USB. It never says more than
-the readings show: svolder cannot see the bits. A DAC's page has a path line; an amp's or a
-preamp's has none. On a desktop the card's height is fixed, so a path with more to say than fits
-ends in a chip of three dots (the verdict first, always; the dots' tooltip lists the hops left
-out, and a screen reader still reads them).
+rate, both at 100 % and not muted, no filter chain (EQ, crossfeed, virtual speakers) in the path,
+nothing else mixing in, and the rate the DAC reads equal to the one the computer sends. Otherwise it
+names what changes it (`resampled 44.1 → 48 kHz`, `computer volume 54 %`, `host EQ on`, `crossfeed
+on`, `virtual speakers on`, `EQ pass-through` for the flat chain kept while a stream plays, `DAC
+reads 44.1 kHz`) or what it could not read (`DAC rate not read`, `DAC input not read`), and when the
+computer plays to another sink it says so in short (`→ Speakers`, or `player → Speakers` for a
+player routed elsewhere; the whole sentence, `the computer plays to Speakers`, is the line's
+tooltip). Until the daemon has read the route (the first read is under way, or `pw-dump` is missing)
+the line says `route not read`. While the DAC listens to an input the computer does not feed
+(Optical, Coaxial, AES or BNC) the line says `the DAC listens to Optical` and gives no verdict,
+since the computer's stream is not what the DAC plays. So does a Gungnir 2 or a Yggdrasil on one USB
+port while the computer is on the other (`the DAC listens to USB 1 · the computer is on USB 2`);
+when both ports read connected, or a reading is missing, the line says `both USB ports connected` or
+`USB ports not read` and is never `untouched`. A DAC with no input choice (the Eitr 2, the Mesh
+Card) takes USB alone and counts as on USB. It never says more than the readings show: svolder
+cannot see the bits. `untouched` covers the computer and the DAC; what the player changes before its
+output, such as loudness normalization or its own EQ, happens where svolder cannot look, and the
+verdict's tooltip says so. A DAC's page has a path line; an amp's or a preamp's has none. On a
+desktop the card's height is fixed, so a path with more to say than fits ends in a chip of three
+dots (the verdict first, always; the dots' tooltip lists the hops left out, and a screen reader
+still reads them).
 
 **The visualizer.** Beside Now playing (the band's right half on a desktop, a 180 px card under the
 volume on a phone, under the meters on an amp's page) the page draws what the computer plays, live,
@@ -592,12 +596,12 @@ knows, kept current as devices come and go. It stays open while you look around 
   such, for a device that is not connected); closed, nothing of it is drawn, so a browser's
   find-in-page does not look inside it.
 
-**Sound** is the menu's *Sound…* row, in every theme, between *Devices…* and *Help…*, for whoever may
-change things (a guest and a page with `[web] writes` off do not have it). One popup with two tabs
-under its title, **EQ library** and **Crossfeed**; the tab you leave is kept open behind the other.
-The EQ library tab is about the side the page shows: its title says which
-(`EQ library · Kara`, `EQ library · This computer`), and it closes when another device is shown.
-Its three pages are a row of pills under the tabs, shown only on that tab:
+**Sound** is the menu's *Sound…* row, in every theme, between *Devices…* and *Help…*, for whoever
+may change things (a guest and a page with `[web] writes` off do not have it). One popup with three
+tabs under its title, **EQ library**, **Crossfeed** and **Virtual speakers**; the tab you leave is
+kept open behind the other. The EQ library tab is about the side the page shows: its title says
+which (`EQ library · Kara`, `EQ library · This computer`), and it closes when another device is
+shown. Its three pages are a row of pills under the tabs, shown only on that tab:
 
 - **AutoEq** searches AutoEq's index (through the daemon: the page never reaches the internet). Type
   a headphone's name (at most 60 characters); the search is sent after a short pause, or at once on
@@ -653,6 +657,36 @@ reader has no *Sound…* row. The header has the on/off switch; under it:
 
 Every word, range and step comes from the daemon's view, so the page never offers a value the daemon
 would refuse; the page shows the number the daemon holds after each change.
+
+**The Virtual speakers tab** sets [the computer's virtual speakers](eq.md#virtual-speakers) and
+needs the daemon to offer them (otherwise the tab says so). Its header has the on/off switch, and
+turning them on turns crossfeed off. Under it, in order:
+
+- a note when the speakers turned themselves off ([why](eq.md#virtual-speakers-turn-themselves-off))
+  or a change was refused;
+- three pictures of the chosen set, **Arrivals**, **Directions** and **Decay**, side by side in a
+  wide popup and one at a time with chips below it in a narrow one (the chip you pick is
+  remembered by this browser). *Arrivals* shows when the sound reaches each ear with both speakers
+  playing, as bars in dB below the loudest: the direct sound, and with a room its early
+  reflections and tail; a reflection within 1.5 ms of a stronger one, or of the direct sound, is
+  not shown separately. *Directions* shows the two measured angles and the measurement distance.
+  *Decay* shows how fast the energy dies away in three bands, with up to 100 points (fewer at low
+  rates). A set with no timing data says `Not measured for this set.` in Arrivals and Decay;
+- the two choices, **With room · BRIR** and **No room · HRTF**, as cards: a choice picks the set in
+  use when it is of that room, else the first fetched one of it;
+- the licence line (the licence's name, the credit words where it asks for them, the source page),
+  the response of the four paths and the facts (angles, length, loudness change against Off);
+- the **sets**: the catalogue's and your own, with a filter, **Fetch** (a running fetch says
+  `Fetching...` with **Cancel**, and shows no progress count), **Use** and **Forget**;
+- **Your own file**: a SOFA file, or a WAV of 4 or 14 channels, up to 32 MiB, with a name and a
+  choice of room.
+
+A fetch or an import runs on when you go to another tab or close the popup, and the tab shows it
+again, or what it ended with, when you come back; only **Cancel** stops a fetch.
+
+Every word, number and picture is the daemon's (`eq.speakers`): `timing` is `{arrivals: {left,
+right: [{ms, db}], tail: {times_ms, left, right} | null}, decay: {times_ms, low, mid, high,
+end_ms}}`, absent from a daemon without it.
 
 **Ember's effects** have three levels, chosen in the menu:
 
@@ -804,6 +838,19 @@ on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the p
   fifth of the area wide, 200 to 300 px, above the title on a phone; a track with no cover leaves
   no box); the computer opens its sink, rate, volume, mute, the computer EQ and the preset applied,
   read only.
+- **Level meters.** The computer's area also shows two needle dials, left and right, of what the
+  computer plays (from 1240 px wide a third column beside the volume and the curve; from 720 px the
+  dials sit beside the volume and the curve has its own row; on a phone they come after the volume).
+  Each reads in VU under its dial and has a lamp that lights when that channel reaches full scale
+  and stays lit for 1.2 seconds. 0 VU is a level of -18 dBFS by default; *−*, *+* and *Reset*
+  under the dials move it from -30 to -6 dBFS (*Reset* shows only when it is not -18). The needle
+  follows the RMS level with the swing of a VU meter (about 0.3 seconds to settle). A tap on a dial
+  face, or Enter or Space on it, turns the glow through subtle, warm backlight and filament (the
+  default). *Meters | Spectrum* in the corner swaps the dials for a line of the music's spectrum.
+  The glow, the view and the reference are kept in this browser. The level is read at the sound
+  card's monitor, so it follows the computer's volume and mute only where the sink's monitor does
+  and shows what the computer EQ's chain adds. Nothing is captured while the section is not on
+  the page or the tab is hidden; with no capture possible the dials rest and say why.
 - **Add to the chain….** A row of the menu, while a device is shown. It opens the sheet *After the*
   (device): Amp, Headphones, Speakers or Other, a name and an optional note. A Forkbeard amp the
   daemon lists that is not yet linked comes first as *name (connected)*, which links it. When you
@@ -830,7 +877,7 @@ on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the p
   every control drawn but inert, and a tap says why. The browser's tab reads the device and the
   state, for example *Bifrost 3 · connected — svolder*.
 
-Signal has no effects, no visualizer and no Arrange mode. See [Signal](../design/web-signal.md).
+Signal has no effects and no Arrange mode, and no visualizer beyond the computer's Spectrum line. See [Signal](../design/web-signal.md).
 
 **Night drive** is the page's fourth theme: the music drawn as an outrun road at dusk. Pick it from
 the menu's *Theme* row or with `T`, or open the page with `?theme=nightdrive`. It is dark only, and it
@@ -1038,6 +1085,13 @@ refusal (the daemon's, a volume rule's, a configuration file that cannot be writ
 value that is not a number in its unit, a name a preset or a hop cannot have or a hop that cannot
 take that edit, and `204` for a write a newer one replaced. Every error body is `{"error":"…"}`.
 
+`POST api/v1/host/speakers` is a write like the others and changes the computer's virtual speakers
+(No room · HRTF, With room · BRIR): `{"on"?, "set"?, "done"?}`, where `set` is the id of a fetched
+set (the view's `sets` lists them). Choosing a set rebuilds the chain once while they play; on
+rebuilds it once when the chain does not hold the set yet; off is live; turning them on turns
+crossfeed off in the same update and the other way round. A body that names nothing, a set that is
+not fetched and no set chosen are each a `409` in the daemon's words. The view is `eq.speakers`.
+
 `POST api/v1/host/crossfeed` is a write like the others (it needs `writes` and a signed-in visitor)
 and changes the computer's crossfeed: `{"on"?, "model"?, "preset"?, "amount_pct"?, "crossover_hz"?,
 "delay_ms"?, "done"?}`. A body that names nothing is a `409`, as is a refusal in the daemon's words
@@ -1099,11 +1153,16 @@ below are all there is. The table is checked against the daemon's sources and th
 | POST | `api/v1/host/eq/points/N` | not listed |
 | POST | `api/v1/host/eq/points/N/remove` | not listed |
 | POST | `api/v1/host/eq/preset` | not listed |
-| GET | `api/v1/host/frames` | not listed |
+| GET | `api/v1/host/frames` | `?only` |
 | POST | `api/v1/host/mute` | not listed |
 | POST | `api/v1/host/press` | not listed |
+| POST | `api/v1/host/speakers` | not listed |
 | POST | `api/v1/host/volume` | not listed |
 | GET | `api/v1/session` | not listed |
+| POST | `api/v1/speakers/catalogue` | `none` |
+| POST | `api/v1/speakers/fetch` | `id` |
+| POST | `api/v1/speakers/forget` | `id` |
+| POST | `api/v1/speakers/import` | `data`, `label`, `room` |
 | POST | `api/v1/walk` | `none` |
 | POST | `api/v1/walk/JOB/answer` | `choice`, `text`, `run` |
 | POST | `api/v1/walk/JOB/back` | `run` |
@@ -1166,6 +1225,25 @@ download. The upload's body may be 128 KiB and the others' 8 KiB. `POST
 api/v1/devices/DEVICE/presets` also takes `"force":true`, which writes the device's bands over the
 user's preset of that name (a built-in, an imported preset and the computer's side are refused,
 `422` and `409`).
+
+Virtual speakers' sets are the daemon's too, on the same terms (a signed-in viewer with writes on; a
+guest `401`, a read-only page `403`, so a guest never makes the daemon reach the internet or the
+disk). `POST api/v1/speakers/catalogue` answers `sets` (the catalogue's first, then the person's
+own: `id`, `room` as `with` or `no`, `label`, `licence`, `credit`, `source_url`, `bytes`, `own`,
+`room_name` and `term` (the choice's words, With room / No room and BRIR / HRTF), `fetched`,
+`damaged` in words when a stored set cannot be played, and for a fetched set `angles`, `taps_ms`,
+`rate`, `loudness_db` and `cut`), `fetching` (false when this daemon reaches nothing, with the words
+in `note`) and `max_sets`. `/fetch` (`{"id":"…"}`, a catalogue id) and `/import` answer once, after
+the daemon's download, check and conversion: `{"set":{…},"evicted":[…]}`. `/import` takes the file
+as base64 in `data` (at most 32 MiB of file; a larger one imports with the CLI), an optional `label`
+(default `Own file`) and `room` (`with` or `no`, default `no`); it never takes a path. `/forget`
+(`{"id":"…"}`) answers `{"id"}`. The reasons add `not_listed` (`404`, an id the catalogue does not
+list or a source that answers 404), `unreachable` (`502`, fetching off, a source that cannot be
+reached, or a download that is not the file the catalogue pins), `invalid` (`422`, a file the
+converter refuses, in words), `missing` (`404`, a set that is not stored) and `busy` (`409`, a fetch
+or import is running, or the set plays now); a request that the client abandons cancels its job. The
+import's body may be about 43 MiB and take up to 60 seconds to arrive (the others' 4 KiB and 5
+seconds); two imports are read at once, a third is refused `409` `busy`.
 
 While an imported preset is on the device, or recalled and edited, the device's model carries it as
 `tone.overlay` for the curve to draw (`name`, `origin`, `target`, `fit`, `gap` spans as `[from_hz,

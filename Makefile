@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
 
 ##@ Start
 demo-knobs-check: ## Fail if the env line the demos start with does not run
@@ -101,7 +101,7 @@ tui-harness: deps-build ## The real TUI in a pty: start-up, keys, mouse, resize,
 	  -u SVOLDER_WEB_LISTEN -u SVOLDER_MCP_LISTEN -u SVOLDER_WEB_URL -u SVOLDER_MQTT_ENABLED \
 	  -u SVOLDER_MQTT_HOST -u SVOLDER_MQTT_PORT -u SVOLDER_MQTT_USERNAME -u SVOLDER_MQTT_PASSWORD \
 	  TMPDIR="$$scratch" \
-	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_TEST_PREBUILT=1 \
+	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_SPEAKERS_URL=http://127.0.0.1:9/ SVOLDER_TEST_PREBUILT=1 \
 	  $(CARGO) test -p svolder --test tui_pty -- --ignored || exit $$?; \
 	left=$$(find "$$scratch" -mindepth 1 -maxdepth 1 -exec basename {} \;); \
 	if [ -n "$$left" ]; then \
@@ -123,6 +123,19 @@ tests-check: ## Check the web tests catch a deliberate break (by hand)
 	@bash scripts/web-checks/mutants.sh $(if $(filter 1,$(FULL)),--full)
 
 ##@ Pictures and generated docs
+#: Regenerates crates/svolder-speakers/tests/fixtures (committed; CI never needs h5py) and tests them.
+#: Needs python3-h5py.
+speakers-fixtures: deps-build ## Rewrite the synthetic SOFA fixtures and test them
+	@python3 -c 'import h5py' 2>/dev/null || { echo "speakers-fixtures: python3-h5py is not installed; install it with: sudo apt install python3-h5py"; exit 1; }
+	@python3 scripts/speakers/make-sofa-fixtures.py crates/svolder-speakers/tests/fixtures
+	@$(CARGO) test -p svolder-speakers --test sofa_fixtures
+
+#: Network: fetches every catalogue set once (the release check; never in `make check`).
+#: ID=<id>   only that set
+#: Checks each set's checksum and its conversion.
+speakers-catalogue-check: deps-build ## Fetch every catalogue set (network)
+	@sh scripts/speakers/catalogue-check.sh $(ID)
+
 ##@ Release builds (docker)
 ##@ Clean
 
@@ -203,8 +216,8 @@ CHECK_TESTS := $(if $(shell command -v dbus-daemon 2>/dev/null),check-tests-priv
 #: check, web mutation snippets, theme CSS check, rate-check parser self-test, build-deps self-test, sim-app preflight self-test,
 #: tests (once, on a private bus with no BlueZ when dbus-daemon is installed; otherwise on the
 #: system bus, then on a private one), the /tmp/svolder base helper and its leak check, and this
-#: help's own check.
-check: tmp-snapshot tmp-base-test deps-check demo-knobs-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check $(CHECK_TESTS) tmp-leak-check ## Everything a commit must pass (make help T=check)
+#: help's own check, and the VU needle's golden file against the engine.
+check: tmp-snapshot tmp-base-test deps-check demo-knobs-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check vu-golden-check $(CHECK_TESTS) tmp-leak-check ## Everything a commit must pass (make help T=check)
 
 license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-later
 	CARGO=$(CARGO) python3 scripts/check-licenses.py --self-test
@@ -389,7 +402,7 @@ test: deps-build ## Run all tests
 	  XDG_CONFIG_HOME="$$scratch/config" \
 	  XDG_STATE_HOME="$$scratch/state" \
 	  XDG_DATA_HOME="$$scratch/data" XDG_CACHE_HOME="$$scratch/cache" SVOLDER_WIREPLUMBER="$$scratch/no-wireplumber" \
-	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ $(if $(T),,SVOLDER_TEST_PREBUILT=1) $(CARGO) test $(or $(T),--workspace --all-features) \
+	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_SPEAKERS_URL=http://127.0.0.1:9/ $(if $(T),,SVOLDER_TEST_PREBUILT=1) $(CARGO) test $(or $(T),--workspace --all-features) \
 	  || exit $$?; \
 	left=$$(find "$$scratch/t" -mindepth 1 -maxdepth 1 ! -name 'svolder-unit-*' -exec basename {} \;); \
 	if [ -n "$$left" ]; then \
@@ -551,6 +564,11 @@ mascot-shots: ## Draw a still of each of the squirrel's entrances and exits
 	$(CARGO) test -q -p svolder --bin svolder -- --ignored tui::screenshots::mascot::mascot_entrances
 	@for f in target/screenshots/mascot/*.ppm; do ffmpeg -loglevel error -y -i "$$f" "$${f%.ppm}.png" || exit 1; done
 
+#: Writes target/screenshots/vu/{100x45,160x50,100x45-cover}.{ppm,txt}: the device screen with the
+#: TUI's VU rows; no network, fonts as for the other stills.
+vu-shots: ## Draw the TUI's VU rows at 100x45 and 160x50
+	$(CARGO) test -q -p svolder --bin svolder -- --ignored tui::screenshots::vu_shots
+
 web-icons: ## Draw the web UI's icons from the wordmark (ffmpeg)
 	$(CARGO) test -q -p svolderd --bin svolderd -- --ignored --exact web::icons::draw
 	for size in 192 512; do \
@@ -561,6 +579,13 @@ web-icons: ## Draw the web UI's icons from the wordmark (ffmpeg)
 ##@ Check
 rate-check-test: ## Run rate-check's parsers on saved output (no PipeWire)
 	@bash scripts/rate-check.sh --self-test >/dev/null || bash scripts/rate-check.sh --self-test
+VU_GOLDEN := scripts/web-checks/fixtures/vu-ballistics.json
+#: The VU needle's golden path: the web page's needle is checked against this file.
+vu-golden: ## Rewrite the VU needle's golden file from the Rust engine
+	@$(CARGO) run -q -p svolder-host --example vu_golden > $(VU_GOLDEN).tmp && mv $(VU_GOLDEN).tmp $(VU_GOLDEN)
+vu-golden-check: ## Fail if the VU golden file is not what the engine gives
+	@$(CARGO) run -q -p svolder-host --example vu_golden | cmp -s - $(VU_GOLDEN) || { echo "vu-golden-check: $(VU_GOLDEN) is out of date: make vu-golden"; exit 1; }
+	@echo "vu-golden-check: the golden file matches the engine"
 release-notes-test: ## Run the release-notes extraction on a temp repo
 	@bash packaging/release-notes.sh --self-test >/dev/null || bash packaging/release-notes.sh --self-test
 
@@ -642,6 +667,7 @@ e2e: deps-build ## End to end over BlueZ
 host-e2e: deps-build ## The computer EQ end to end on a private PipeWire
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolderd
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder-host --example xf_expect
+	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder-host --example vs_expect
 	@bash scripts/host-e2e/run.sh
 
 #: Random event sequences against a model of PipeWire.

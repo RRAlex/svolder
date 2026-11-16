@@ -59,6 +59,8 @@ pub(crate) struct StubDaemon {
     walk: super::walk_script::WalkScript,
     /// The AutoEq service it runs, as a case scripted it.
     autoeq: super::autoeq_script::AutoEqScript,
+    /// The virtual-speakers sets service it runs, as a case scripted it.
+    speakers: super::speakers_script::SpeakersScript,
     /// The `device_config` ops it has been sent, in order.
     device_ops: Mutex<Vec<svolder_ipc::DeviceConfigOp>>,
     /// The configuration file its `device_config` ops are applied to, as the daemon's writers
@@ -314,6 +316,7 @@ impl Handler for StubDaemon {
             }
             Request::Walk { op } => self.walk.handle(op),
             Request::AutoEq { op } => self.autoeq.handle(op).await,
+            Request::Speakers { op } => self.speakers.handle(op).await,
             Request::DeviceConfig { op } => self.device_config(op),
             Request::PresetWrite { op } => self.preset_write(op),
             Request::Reload => {
@@ -529,6 +532,9 @@ impl Handler for StubDaemon {
                     false => Ok(self.autoeq.follow()),
                 }
             }
+            Request::Speakers {
+                op: svolder_ipc::SpeakersOp::Follow,
+            } => Ok(self.speakers.follow()),
             Request::HostFrames => self
                 .open_frames()
                 .await
@@ -818,6 +824,11 @@ impl StubServer {
             features.push("autoeq".to_string());
         }
         &self.handler.autoeq
+    }
+
+    /// The virtual-speakers sets service the daemon runs, as a case scripts it.
+    pub(crate) fn speakers(&self) -> &super::speakers_script::SpeakersScript {
+        &self.handler.speakers
     }
 
     /// How many times the daemon has been told to read its configuration again.
@@ -1281,6 +1292,7 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         subscribed: Mutex::default(),
         walk: super::walk_script::WalkScript::default(),
         autoeq: super::autoeq_script::AutoEqScript::default(),
+        speakers: super::speakers_script::SpeakersScript::default(),
         device_ops: Mutex::default(),
         device_file: Mutex::new(None),
         device_refusal: Mutex::new(None),

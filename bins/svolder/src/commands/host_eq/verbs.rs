@@ -81,6 +81,7 @@ pub async fn host_apply(g: &Globals<'_>, target: &str, sink: Option<&str>, yes: 
                 rate_hz: None,
                 flat: false,
                 crossfeed: None,
+                speakers: None,
             };
             apply(request).await.map(Some)
         }

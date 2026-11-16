@@ -10,6 +10,7 @@ mod families;
 mod handshake;
 mod host_cover;
 mod server_switch;
+mod speakers;
 mod walk;
 
 /// A scan row is built from what an advertisement carries, with the product named as the

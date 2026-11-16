@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The computer's EQ and crossfeed on the bridge: following the host's view, announcing the EQ's
-//! switch and preset sensor and the crossfeed's switch and preset select, publishing their
-//! states, and turning the EQ or the crossfeed on or off, or choosing a crossfeed preset, when
-//! one is commanded. The crossfeed's entities are announced only while the view carries a
-//! crossfeed.
+//! The computer's EQ, crossfeed and virtual speakers on the bridge: following the host's view,
+//! announcing the EQ's switch and preset sensor, the crossfeed's switch and preset select and the
+//! speakers' switch and set select, publishing their states (and the chosen set's attributes),
+//! and turning the EQ, the crossfeed or the speakers on or off, or choosing a crossfeed preset or
+//! a fetched set, when one is commanded. The crossfeed's and the speakers' entities are announced
+//! only while the view carries them.
 //!
 //! Nothing is announced while the host reports no EQ at all (host audio off): what an earlier
 //! announcement left is cleared, once the host has had [`START_SETTLES`] from the start to report
@@ -49,6 +50,8 @@ pub(super) struct Published {
     pub(super) state: Option<(&'static str, String)>,
     /// The crossfeed switch's state and preset's last published.
     pub(super) crossfeed_state: Option<(&'static str, String)>,
+    /// The speakers' switch, chosen set and attributes last published.
+    pub(super) speakers_state: Option<computer::speakers::State>,
     /// Whether what an earlier run left retained has been cleared.
     pub(super) swept: bool,
     /// When the bridge began following the computer.
@@ -82,6 +85,7 @@ impl BridgeTask {
             available: None,
             state: None,
             crossfeed_state: None,
+            speakers_state: None,
             swept: false,
             since: Instant::now(),
         });
@@ -106,6 +110,9 @@ impl BridgeTask {
         let xf_topic = topics::diagnostic(&base, computer::UNIT, computer::crossfeed::SWITCH_KEY);
         let xf_preset_topic =
             topics::diagnostic(&base, computer::UNIT, computer::crossfeed::PRESET_KEY);
+        let sp_topic = topics::diagnostic(&base, computer::UNIT, computer::speakers::SWITCH_KEY);
+        let sp_set_topic = topics::diagnostic(&base, computer::UNIT, computer::speakers::SET_KEY);
+        let sp_attrs_topic = computer::speakers::attributes_topic(&base);
 
         // The first publish takes down what an earlier run left retained, whichever entities it
         // announced and whether or not this run serves the computer. While the host has not yet
@@ -123,10 +130,16 @@ impl BridgeTask {
         if !published.swept {
             published.swept = true;
             let wanted: Vec<String> = match eq {
-                Some(eq) => computer::entries(&base, &prefix, commands, eq.crossfeed.as_ref())
-                    .into_iter()
-                    .map(|entry| entry.topic)
-                    .collect(),
+                Some(eq) => computer::entries(
+                    &base,
+                    &prefix,
+                    commands,
+                    eq.crossfeed.as_ref(),
+                    eq.speakers.as_ref(),
+                )
+                .into_iter()
+                .map(|entry| entry.topic)
+                .collect(),
                 None => Vec::new(),
             };
             for with_commands in [true, false] {
@@ -142,6 +155,9 @@ impl BridgeTask {
                 client.clear(preset_topic.clone());
                 client.clear(xf_topic.clone());
                 client.clear(xf_preset_topic.clone());
+                client.clear(sp_topic.clone());
+                client.clear(sp_set_topic.clone());
+                client.clear(sp_attrs_topic.clone());
             }
         }
 
@@ -156,19 +172,28 @@ impl BridgeTask {
                 client.clear(preset_topic);
                 client.clear(xf_topic);
                 client.clear(xf_preset_topic);
+                client.clear(sp_topic);
+                client.clear(sp_set_topic);
+                client.clear(sp_attrs_topic);
             }
             published.configs.clear();
             published.available = None;
             published.state = None;
             published.crossfeed_state = None;
+            published.speakers_state = None;
             return;
         };
 
-        let next: BTreeMap<String, String> =
-            computer::entries(&base, &prefix, commands, eq.crossfeed.as_ref())
-                .into_iter()
-                .map(|entry| (entry.topic, entry.payload.to_string()))
-                .collect();
+        let next: BTreeMap<String, String> = computer::entries(
+            &base,
+            &prefix,
+            commands,
+            eq.crossfeed.as_ref(),
+            eq.speakers.as_ref(),
+        )
+        .into_iter()
+        .map(|entry| (entry.topic, entry.payload.to_string()))
+        .collect();
         for (topic, body) in &next {
             if published.configs.get(topic) != Some(body) {
                 client.announce(topic.clone(), body.clone());
@@ -221,6 +246,29 @@ impl BridgeTask {
             }
             None => {}
         }
+        match eq.speakers.as_ref() {
+            Some(speakers) => {
+                let now = computer::speakers::state(speakers);
+                let was = published.speakers_state.clone();
+                if was.as_ref().map(|s| s.on) != Some(now.on) {
+                    client.retain(sp_topic, now.on);
+                }
+                if was.as_ref().map(|s| &s.set) != Some(&now.set) {
+                    client.retain(sp_set_topic, now.set_payload());
+                }
+                if was.as_ref().map(|s| &s.attributes) != Some(&now.attributes) {
+                    client.retain(sp_attrs_topic, now.attributes_payload());
+                }
+                published.speakers_state = Some(now);
+            }
+            None if published.speakers_state.is_some() => {
+                client.clear(sp_topic);
+                client.clear(sp_set_topic);
+                client.clear(sp_attrs_topic);
+                published.speakers_state = None;
+            }
+            None => {}
+        }
     }
 
     /// A command on one of the computer's topics: the EQ switch and the crossfeed switch take
@@ -238,13 +286,17 @@ impl BridgeTask {
         let eq_key = key.eq_ignore_ascii_case(computer::EQ_KEY);
         let xf_key = key.eq_ignore_ascii_case(computer::crossfeed::SWITCH_KEY);
         let preset_key = key.eq_ignore_ascii_case(computer::crossfeed::PRESET_KEY);
-        if !(eq_key || xf_key || preset_key) {
-            return drop("nothing of the computer but its EQ and crossfeed takes commands");
+        let sp_key = key.eq_ignore_ascii_case(computer::speakers::SWITCH_KEY);
+        let set_key = key.eq_ignore_ascii_case(computer::speakers::SET_KEY);
+        if !(eq_key || xf_key || preset_key || sp_key || set_key) {
+            return drop(
+                "nothing of the computer but its EQ, crossfeed and virtual speakers takes commands",
+            );
         }
         let Ok(text) = std::str::from_utf8(body) else {
             return drop("the payload is not text");
         };
-        let on = match preset_key {
+        let on = match preset_key || set_key {
             true => None,
             false => match computer::parse(text) {
                 Some(on) => Some(on),
@@ -271,6 +323,40 @@ impl BridgeTask {
             let what = format!("turning the EQ {}", if on { "on" } else { "off" });
             self.writes
                 .spawn(async move { WriteOutcome::Computer(what, switch.set_on(on).await) });
+            return;
+        }
+        if sp_key || set_key {
+            let Some(speakers) = eq.speakers.as_ref() else {
+                return drop("this computer serves no virtual speakers");
+            };
+            if let Some(why) = &speakers.unavailable {
+                return drop(why);
+            }
+            let (what, set) = match on {
+                Some(true) if computer::speakers::state(speakers).set.is_empty() => {
+                    log::info(
+                        "mqtt: This computer: ON left the virtual speakers off: no fetched set \
+                         is chosen; choose one first",
+                    );
+                    return;
+                }
+                Some(on) => (
+                    format!(
+                        "turning the virtual speakers {}",
+                        if on { "on" } else { "off" }
+                    ),
+                    None,
+                ),
+                None => match computer::speakers::parse_set(speakers, text) {
+                    None => return drop(&format!("{:?} is not a fetched set", text.trim())),
+                    Some(id) => (
+                        format!("choosing the virtual speakers set {:?}", text.trim()),
+                        Some(id),
+                    ),
+                },
+            };
+            self.writes
+                .spawn(async move { WriteOutcome::Computer(what, switch.speakers(on, set).await) });
             return;
         }
         let Some(crossfeed) = eq.crossfeed.as_ref() else {

@@ -538,6 +538,7 @@ pub(super) fn block(left: f32, right: f32) -> Block {
         bands: [left.max(right); svolder_host::fft::BANDS],
         left,
         right,
+        levels: Default::default(),
     }
 }
 

@@ -114,6 +114,18 @@ impl Tui {
     /// once it has the alternate screen, reading a configuration with the device and these lines
     /// under `[tui]`. The terminal answers queries as `responder` says.
     pub fn start_plain(cols: u16, rows: u16, responder: Responder, tui_lines: &str) -> Tui {
+        Tui::start_plain_with_env(cols, rows, responder, tui_lines, &[])
+    }
+
+    /// [`Tui::start_plain`] with these extra environment variables, which may name the programs a
+    /// host the case fakes runs (`SVOLDER_HOST=on`, `SVOLDER_WPCTL`, `SVOLDER_PW_RECORD`).
+    pub fn start_plain_with_env(
+        cols: u16,
+        rows: u16,
+        responder: Responder,
+        tui_lines: &str,
+        env: &[(&str, &str)],
+    ) -> Tui {
         let config = format!(
             "schema = 1\n[daemon]\nautospawn = false\n[[device]]\nname = \"demo\"\n\
              udid = \"0102030405060708\"\n[tui]\n{tui_lines}\n"
@@ -124,7 +136,7 @@ impl Tui {
             responder,
             &common::svolder_with_daemon(),
             &["tui"],
-            &[],
+            env,
             Some(&config),
         );
         tui.wait_for("the alternate screen", WAIT, |s| s.alternate_screen());

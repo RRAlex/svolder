@@ -8,6 +8,156 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.36.1
+
+- **`untouched` says what it cannot see**: the signal path's verdict covers the computer and the
+  DAC; what the player does inside itself, such as loudness normalization or its own EQ, happens
+  inside the player, where svolder cannot look. The web verdict's tooltip says so, and so do the web and TUI
+  guides.
+- **Level meters for what the computer plays**: Signal's computer area shows two needle dials,
+  left and right, with the reading in VU under each and a lamp that lights when that channel
+  reaches full scale and stays lit for 1.2 seconds. 0 VU is a level of -18 dBFS by default; `−`,
+  `+` and Reset under the dials move it from -30 to -6 dBFS, a dB at a time. The needle follows the
+  RMS level with a VU meter's swing, about 0.3 seconds to settle. The level is read at the sound
+  card's monitor, so it follows the computer's volume and mute only where the sink's monitor does
+  and includes what the computer EQ's chain adds.
+- **Three glows, and a Spectrum view**: a tap on a dial face (or Enter or Space on it) turns the
+  glow through subtle, warm backlight and filament, the default; the Meters | Spectrum chips swap
+  the dials for a line of the music's spectrum, which Signal did not have before. The glow, the
+  view and the reference are kept per browser. The dials sit in a third column from 1240 px wide,
+  beside the volume from 720 px, and after the volume on a phone. Nothing is captured while the
+  section is off the page or the tab is hidden.
+- **The terminal UI has the meters too**: from a terminal of 100 by 45 columns and rows, with host
+  audio on, the Status pane under Now playing (and under the cover) draws `VU L` and `VU R`, each a
+  needle on a 40-cell track with its reading in VU and a lamp (`○`, `●`). `[tui] vu_reference`
+  (-30 to -6 dBFS, default -18; Settings, Host audio, VU reference) sets what reads 0 VU, and the
+  `Level from` row says it. A whole number outside the range is held at the nearest end; any other
+  value is refused like any other bad `[tui]` value.
+- **A peak at full scale is now an over, and only that**: the frames' peak byte reads 255 only for
+  a sample at or above 16-bit full scale, and at most 254 otherwise, so a master peaking at -0.1
+  dBFS no longer reads as full. A square or clipped master can still light the lamp when it is
+  resampled on the way (a 44.1 kHz stream into a 48 kHz graph, say), which overshoots by up to
+  1.9 dB.
+- **`GET api/v1/host/frames?only=levels`** streams frames with just `t` and `lv` (about 45 bytes
+  each instead of about 700), the same `hello` and `capture` events and the same holds; any other
+  query is the full stream. Signal's Meters view holds it.
+- **Docs**: `docs/design/vu-meter.md` (the scale, the ballistics, the over lamp, the golden file),
+  Signal's meters in `docs/design/web-signal.md`, the levels-only frames and the over rule in
+  `docs/design/host-capture.md`, and the web, TUI and configuration pages say how to use them.
+- **Contributors**:
+  - `svolder_host::vu` (pure, no clock): `Scale` (-20 to +3 VU, linear in amplitude), `Reference`,
+    `Needle` (second order, omega 14.2 and zeta 0.83, 1 ms steps, a gap over 2000 ms snaps) and
+    `Lamp`; `analysis::OVER` and `peak_byte`; `Levels` on `capture::Block`, filled by `Block::of`
+    and `Frame::block()`. `make vu-golden` writes the needle's path for a fixed script to
+    `scripts/web-checks/fixtures/vu-ballistics.json` and `make vu-golden-check`, in `make check`,
+    holds it to the engine.
+  - The web core gains `core/vu-model.js`, the page's twin of `vu`, checked against the golden file
+    by `node/vu.mjs`, and `core.levels`, the levels-only stream. Signal gains `draw/vu.js`,
+    `draw/spectrum.js` and `vu-wire.js`; `signal_vu.py` and `node/signal-vu.mjs` check them.
+  - `TuiSettingKind::Number` and `TuiValue::Number` take a whole-number `[tui]` key in the plain-key
+    table; `Host` boxes its `bands` and a `vu::Vu` (the loop's by-value bound is 512 bytes);
+    `capture_target` and the loop's tick count the VU rows. `make vu-shots` draws their stills.
+  - `make host-e2e` gains phase U (the VU levels): `scripts/host-e2e/vu.py`, self-check
+    `scripts/host-e2e/vu_selftest.py`.
+  - A doc link to a test-only function in the TUI's status code is plain code, so `cargo doc` with
+    `-D warnings` passes.
+
+## 0.36.0
+
+- **Virtual speakers**: the computer's sound on headphones can come from two speakers in front of
+  you, at about 30 degrees to either side (45 degrees for the With room · BRIR set), in place of
+  from inside your head. There are two choices, each shown with its technical term: **With room ·
+  BRIR** (the speakers in a measured room) and **No room · HRTF** (the same speakers in the open).
+  They run as one more stage of the computer EQ's filter chain, after crossfeed, with no extra
+  PipeWire package. The design is in `docs/design/virtual-speakers.md`, the guide in
+  `docs/usage/eq.md`.
+- **Sets come from a short catalogue, on request**: svolderd downloads the one you pick, checks its
+  checksum, converts it to one small file (with exactly 1 ms of silence in front of its earliest
+  impulse, so PipeWire's resampling at other sink rates cuts nothing) and keeps only that, in
+  `~/.local/state/svolder/speakers/` (at most 32; the oldest unused one goes). The catalogue lists
+  five No room · HRTF sets and one With room · BRIR set, all under licences that allow any use, and
+  the licence and credit line show wherever a set is chosen. Nothing is bundled and a set's source
+  is only ever fetched over HTTPS, from the catalogue's hosts, within 120 s and 64 MiB.
+- **Your own file works too**: import a SOFA file, or a WAV of 4 or 14 channels, and it becomes a
+  set of its own, with its own licence line.
+- **One choice with crossfeed**: Off, Crossfeed or Virtual speakers; turning one on turns the other
+  off in the same update, so the Home Assistant crossfeed switch and `set_host_crossfeed` work as
+  before. Every set is scaled so that it never plays above 0 dB at any frequency, which makes it
+  quieter than Off; the view says by how much ("about 7 dB quieter").
+- **Virtual speakers turn themselves off as crossfeed does**: after a restart, when the output
+  changes, when the filter chain restarts, and on a graceful stop, each with a note; also when the
+  chosen set's file is missing or damaged, with "virtual speakers off: ... is missing or damaged,
+  fetch it again". The choice of set is kept. Turning them on rebuilds the chain once (one short
+  gap) when the running chain does not hold the set yet, as after a choice made while they were off;
+  off is live, and choosing a set rebuilds only while they play.
+- **`svolder host speakers`**: `show`, `on`, `off`, `list [--room with|no]`, `fetch ID`, `use ID
+  [--on]`, `import FILE [--label NAME] [--room with|no]` and `forget ID`, all with `--json`, through
+  the daemon. Ctrl-C during a fetch or an import cancels it on the daemon and exits 130; `show`
+  works without a daemon from the saved state.
+- **The terminal UI has a Space choice**: the Tone pane's Crossfeed row and the tone screen's
+  section become Off, Crossfeed or Virtual speakers where the daemon serves them, with the set, its
+  licence line, the angles, the length, the level and two curves; `S` opens the set list (fetch with
+  progress, choose, forget, import a file, filter by With room · BRIR or No room · HRTF).
+- **The Sound popup has a third tab, Virtual speakers**: the switch in the header, three pictures of
+  the chosen set (Arrivals, Directions, Decay: side by side on a wide window, one at a time with
+  chips on a narrow one, the chip remembered), the two choices, the licence line, the sets list
+  (fetch with cancel, use, forget) and your own file to import (up to 32 MiB). A set with no timing
+  data says "Not measured for this set." in Arrivals and Decay.
+- **MCP**: `get_host` also reads the computer's virtual speakers, and a new tool `set_host_speakers
+  {on?, set?}` chooses a fetched set and turns them on or off; it needs `[mcp] writes` and never
+  fetches.
+- **Home Assistant**: the `This computer` device gains a `Virtual speakers` switch and a `Virtual
+  speakers set` select of the fetched sets (each option as `Label · With room · BRIR` or `Label ·
+  No room · HRTF`), with the chosen set's licence, credit line, source page, angles and loudness
+  change as attributes; a binary sensor and a sensor while `commands` is off. Choosing a set does
+  not turn the speakers on, and nothing is fetched from Home Assistant.
+- **The signal path line names the stage**: it says `crossfeed on`, `virtual speakers on` or
+  `host EQ on` (or a combination) for the chain in the path, and `EQ pass-through` for the flat
+  chain kept while a stream plays, and never `untouched` while a chain is in the path; the Night
+  drive's top line uses the same words.
+- **Docs**: `docs/design/virtual-speakers.md` (the graph, the conversion, the catalogue, the
+  lifecycle and the contract), a Virtual speakers section in `docs/usage/eq.md`, and the CLI, TUI,
+  web, MCP, Home Assistant and glossary pages say how to use them.
+- **Contributors**:
+  - New crate `svolder-speakers` (pure, no PipeWire; the fetch client behind the `net` feature): the
+    catalogue, the SOFA reader on `sofar`'s `hdf` module and the `zip` reader, the converter
+    (lead-in fit, 0.5 s cap with a fade, the level rule on a 16-times zero-padded FFT, the loudness
+    change, the curve, the timing analysis), the store (sidecar, checksum, 32 sets, a pin that holds
+    every set a running chain was started with, `list_sidecars` without reading the WAVs) and the
+    fetch client; synthetic SOFA fixtures are committed (`make speakers-fixtures`), and `make
+    speakers-catalogue-check` (network, not in `make check`) checks every catalogue entry.
+  - `svolder_host::eq::speakers`: the set, the view (`SpeakersView`, `SetView`, `OffReason`), the
+    oracle `speakers_response` and the convolver stage in the live config (`lvs` and `rvs` mixers
+    with dry `Gain 1` and wet `Gain 2` and `Gain 3`; the convolvers are in the config only while a
+    set is chosen); `eq::control::vs` is the controller (choose rebuilds while they play, on
+    rebuilds when the chain lacks the set, off is live, the check before every apply, the resets,
+    the config rewrite without a restart); `host-eq.toml` gains `speakers`, `speakers_on` and
+    `speakers_loaded`; `HostEqOp::Speakers` and `EqView.speakers` are on the wire.
+  - `svolderd`: the `speakers` request family (`catalogue`, `fetch`, `import`, `forget`, `follow`,
+    `cancel`) with fetch and import as jobs, one `Arc<Store>` handed to the host service,
+    the web routes `api/v1/speakers/*` and `api/v1/host/speakers`, and `SVOLDER_SPEAKERS_URL`;
+    `svolder_ipc::SPEAKERS_OFF_PREFIX` lets a client know fetching is off without linking
+    svolder-speakers.
+  - `svolder_host::route`: `RouteFacts.stages` (`ChainStages`: EQ, crossfeed, speakers), filled by
+    svolderd from the EQ view when the route has a chain; `None` reads as `host EQ on`.
+  - `svolder_mqtt::computer::speakers` (entities, options, state, parse) and the `speakers`
+    parameter of `computer::entries`; `EqSwitch::speakers` in svolderd and the bridge's speakers
+    publish and command in `mqtt_bridge/computer.rs`.
+  - `bins/svolder/src/speakers.rs` is the one client of the daemon's sets family (the CLI's and the
+    TUI's), which cancels a fetch or an import on the daemon when its call is dropped; the stub
+    daemon gained a scripted `speakers` service.
+  - TUI: `Xf::Space` and `Xf::Set` stops, `App.speakers_box` boxed to keep the loop future small;
+    `cargo test -p svolder --bin svolder -- --ignored speakers_stills` writes the text looks.
+  - Web: `core/speakers-actions.js`, `core/popups/speakers/{draw,pictures,wire}.js`, a third tab in
+    `core/popups/sound`, the held key `speakers`; `SVOLDER_HOST=fake` serves two synthetic sets
+    (`fake-no-room`, `fake-with-room`, labelled "Synthetic") from a store of its own in the daemon's
+    private runtime directory, made fresh at start and removed at stop, never the person's sets;
+    `core-speakers.mjs` and `speakers_popup.py`; the speakers tab turns on container queries.
+  - `make host-e2e` gains the Virtual speakers phases V0 to V11 and the example `vs_expect`; every
+    daemon the run starts gets `SVOLDER_SPEAKERS_URL` and `SVOLDER_AUTOEQ_URL` on a closed port.
+  - The signal path line's words come from `ChainStages`; `of_view` returns `None` when the view
+    cannot vouch.
+
 ## 0.35.1
 
 - **The computer EQ puts a stale chain right sooner**: when the `pw-cli` that feeds the chain ends

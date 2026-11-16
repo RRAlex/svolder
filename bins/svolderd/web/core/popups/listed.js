@@ -31,12 +31,15 @@ export const HELP = 'help';
 /** The name of the Devices popup. */
 export const DEVICES = 'devices';
 
-/** The name of the Sound popup: its tabs are the EQ library and Crossfeed. */
+/** The name of the Sound popup: its tabs are the EQ library, Crossfeed and Virtual speakers. */
 export const SOUND = 'sound';
 
 /** The router's page of the Sound popup's Crossfeed tab; its other pages (`autoeq`, `upload`,
  * `saved`, and none) are the EQ library tab's (eq-library/draw.js). */
 export const CROSSFEED = 'crossfeed';
+
+/** The router's page of the Sound popup's Virtual speakers tab. */
+export const SPEAKERS = 'speakers';
 
 /** The page of the Devices popup that is about the device at `url` (its URL segment): the page's
  * id in the router, whichever device the page behind shows. */

@@ -217,3 +217,22 @@ async fn the_saved_presets_follow_the_file() {
     assert!(names(&after).contains(&"Mine".to_string()), "{after}");
     daemon.stop().await;
 }
+
+/// The virtual speakers ride along in the computer's EQ model as the host's own view, set list,
+/// curve and timing included; a host that serves none sends none.
+#[test]
+fn the_model_carries_the_virtual_speakers_as_the_hosts_own_view() {
+    let mut view = svolder_host::eq::EqView::default();
+    assert_eq!(
+        serde_json::to_value(super::eq_model(&view)).unwrap()["speakers"],
+        Value::Null
+    );
+    view.speakers = Some(svolder_host::eq::SpeakersView {
+        set: Some("sadie-d2".to_string()),
+        label: "SADIE II, D2".to_string(),
+        ..svolder_host::eq::SpeakersView::default()
+    });
+    let model = serde_json::to_value(super::eq_model(&view)).unwrap();
+    assert_eq!(model["speakers"]["set"], "sadie-d2", "{model}");
+    assert_eq!(model["speakers"]["label"], "SADIE II, D2");
+}

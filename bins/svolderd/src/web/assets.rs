@@ -128,6 +128,11 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/autoeq-actions.js"),
     ),
     (
+        "core/speakers-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/speakers-actions.js"),
+    ),
+    (
         "core/volume-actions.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/volume-actions.js"),
@@ -176,6 +181,11 @@ const FILES: &[Entry] = &[
         "core/viz-model.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/viz-model.js"),
+    ),
+    (
+        "core/vu-model.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/vu-model.js"),
     ),
     (
         "core/title.js",
@@ -281,6 +291,21 @@ const FILES: &[Entry] = &[
         "core/popups/crossfeed/wire.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/crossfeed/wire.js"),
+    ),
+    (
+        "core/popups/speakers/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/speakers/draw.js"),
+    ),
+    (
+        "core/popups/speakers/pictures.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/speakers/pictures.js"),
+    ),
+    (
+        "core/popups/speakers/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/speakers/wire.js"),
     ),
     (
         "core/popups/devices/draw.js",

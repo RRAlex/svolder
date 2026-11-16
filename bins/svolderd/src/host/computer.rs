@@ -20,7 +20,8 @@
 //!   chain runs. The one exception is the crossfeed: a state that says it plays was left by a
 //!   run that did not stop, so the start takes the stage out (or removes a chain that ran for it
 //!   alone), and a stop or a reload that ends the computer side does the same
-//!   ([`Computer::shutdown`]): crossfeed never stays on across a restart.
+//!   ([`Computer::shutdown`]): crossfeed never stays on across a restart. The virtual speakers
+//!   follow the same rule.
 //! - Volume writes are coalesced to the newest value, at most [`VOLUME_WRITE_EVERY`] apart, and
 //!   the last value is always written. The volume is 0 to 100 on the wire.
 
@@ -140,9 +141,12 @@ impl Computer {
         }
     }
 
-    /// The real computer: `wpctl` for the sink, `pw-cli` and the manager of the chain for the EQ.
-    /// Whatever tool is missing says so in the view.
-    pub(crate) fn real() -> Self {
+    /// The real computer: `wpctl` for the sink, `pw-cli` and the manager of the chain for the EQ,
+    /// serving the virtual speakers from `speakers`: the daemon's one store, which the catalogue
+    /// service shares (the pin on the set a chain holds lives in it, so two stores would let a
+    /// forget delete a WAV that plays). `None` serves none. Whatever tool is missing says so in
+    /// the view.
+    pub(crate) fn real_with(speakers: Option<Arc<svolder_host::eq::SpeakersStore>>) -> Self {
         let sink = svolder_host::Wpctl::from_env()
             .map(|wpctl| Arc::new(wpctl) as Arc<dyn Sink>)
             .ok_or_else(|| "no wpctl on this computer".to_string());
@@ -153,13 +157,38 @@ impl Computer {
                     svolder_ipc::config::host_eq_paths(),
                     svolder_ipc::checks::live::in_container(),
                 ));
-                EqControl::new(
+                let control = EqControl::new(
                     host,
                     Box::new(session),
                     Keep::File(svolder_ipc::config::host_eq_state_path()),
-                )
+                );
+                match speakers {
+                    Some(store) => control.with_speakers(store),
+                    None => control,
+                }
             });
         Computer::new(sink, eq)
+    }
+
+    /// The id of the set the person chose, as the controller keeps it (kept while the speakers
+    /// are off): what the speakers service's eviction spares. Read from the controller's
+    /// published view, never from behind its lock, so any thread may ask.
+    pub(crate) fn chosen_speakers(&self) -> Option<String> {
+        let eq = self.eq.as_ref().ok()?;
+        let view = eq.view.borrow();
+        view.speakers
+            .as_ref()
+            .and_then(|speakers| speakers.set.clone())
+    }
+
+    /// The speakers service fetched, imported or forgot a set: the controller reads the sets
+    /// again and publishes its view, on `runtime`, so a caller on any thread (a blocking
+    /// thread, a plain one) never blocks and never needs a runtime of its own.
+    pub(crate) fn sets_changed(&self, runtime: &tokio::runtime::Handle) {
+        if let Ok(eq) = &self.eq {
+            let control = Arc::clone(&eq.control);
+            runtime.spawn(async move { control.lock().await.sets_changed() });
+        }
     }
 
     /// The EQ as a front end is shown it: the controller's newest view, or the reason there is

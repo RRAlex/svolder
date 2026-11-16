@@ -172,7 +172,8 @@ pub(crate) static THEMES: &[Theme] = &[
             js "presets-wire.js", js "facts-wire.js", js "ask.js", js "slim.js", js "strip-wire.js",
             js "draw/amp.js", js "amp-wire.js", js "device-list.js", js "draw/hop.js",
             js "hops-wire.js", js "draw/player.js", js "draw/computer.js", js "draw/card.js",
-            js "card-wire.js", js "driver.js", js "morph.js", js "computer-wire.js", js "shelf-asks.js"
+            js "card-wire.js", js "driver.js", js "morph.js", js "computer-wire.js", js "shelf-asks.js",
+            js "draw/vu.js", js "draw/spectrum.js", js "vu-wire.js"
         ]
     },
     theme! {

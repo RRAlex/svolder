@@ -558,6 +558,7 @@ fn reason(hint: &KeyHint, app: &App) -> Option<&'static str> {
         When::HasComputer => "needs the computer's controls",
         When::OnComputer => "on the computer side only",
         When::HasCrossfeed => "on the computer side, with crossfeed",
+        When::HasSpace => "on the computer side, with virtual speakers",
         When::Choosing => "not while typing",
         When::Typing => "only while typing",
         When::Backable => "nothing to go back to",

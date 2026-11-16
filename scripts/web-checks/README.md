@@ -528,6 +528,11 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   drawn), the clock offset from `hello`, the delay's median over 2 s, the beats scheduled ahead
   from the tempo and phase (on time behind a steady delay, never twice, none in silence) and the
   band and pixel maps.
+- `node/vu.mjs`: the VU meter's page model (`core/vu-model.js`) and `core.levels`: the needle
+  against the engine's golden path (`fixtures/vu-ballistics.json`, within 1e-4 at every sample), the
+  300 ms rise and fall, the stops, the scale, the reference's clamp and reset, a levels-only or full
+  frame decoded, the 2000 ms snap and the lamp's 1200 ms hold each at their exact edges, a stalled
+  stream or a clear at rest, and the levels stream opened on `?only=levels` apart from the full one.
 - `smoke_core.py`: the level shown, the cloud and the haze, loss and refusal, switches, hidden and
   away, sizing.
 - `smoke_page.py`: how the page drives the smoke: a lost stream, when WebGL is probed, the menu, the

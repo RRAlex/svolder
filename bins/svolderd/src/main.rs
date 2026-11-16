@@ -294,6 +294,32 @@ fn autoeq_client(args: &Args, configured: Option<String>) -> svolder_autoeq::Cli
     )
 }
 
+/// The virtual speakers' client and store: `SVOLDER_SPEAKERS_URL` or the sets' own sources, and
+/// the state home's `svolder/speakers` (a store of its own with synthetic sets for
+/// `SVOLDER_HOST=fake`), read once. The transport is the daemon's, so a fake
+/// daemon never reaches the internet however it was told. The set a computer EQ chain left
+/// running holds is pinned from its state file until a controller pins for itself.
+fn speakers_setup(
+    args: &Args,
+    configured: Option<String>,
+) -> (svolder_speakers::Client, svolder_speakers::Store) {
+    // `SVOLDER_HOST=fake` never touches the person's own sets: it keeps two synthetic ones in a
+    // store of its own (removed when the daemon stops), under ids no catalogue has.
+    let store = if host::HostMode::from_env() == host::HostMode::Fake {
+        host::fake_speakers::open()
+    } else {
+        let store = svolder_speakers::Store::new(&svolder_ipc::config::speakers_dir());
+        let state =
+            svolder_host::eq::HostEqState::load(&svolder_ipc::config::host_eq_state_path()).ok();
+        handler::pin_from_state(&store, state.flatten().as_ref());
+        store
+    };
+    (
+        svolder_speakers::Client::for_transport(&args.transport, configured),
+        store,
+    )
+}
+
 /// Build the daemon on the claimed socket, bring its devices, bridge and servers up, and start
 /// the tasks that run beside the accept loop.
 async fn start(
@@ -321,7 +347,18 @@ async fn start(
         args,
         std::env::var("SVOLDER_AUTOEQ_URL").ok(),
     ))
+    // The sets' base address and the one store, read and built once; the host service hands the
+    // same store to the computer EQ's controller.
+    .with_speakers_setup(speakers_setup(
+        args,
+        std::env::var("SVOLDER_SPEAKERS_URL").ok(),
+    ))
     .shared();
+    // What a daemon killed mid-import left of a file the web sent.
+    daemon.sweep_speakers_imports();
+    // The speakers service asks the computer's controller for the chosen set and tells it when
+    // the sets change.
+    daemon.link_speakers_to_host();
     daemon.reconcile(config).await;
     daemon.host_to(&config.host);
     daemon.bridge_to(&config.mqtt, &config.presets).await;
@@ -394,6 +431,9 @@ async fn serve_until_stopped(
     // publishes nothing once the stop is marked, and the actors it started are the stop's to
     // close. Aborting it first would drop such an actor's handle before the stop could ask it.
     daemon.shutdown().await;
+    if host::HostMode::from_env() == host::HostMode::Fake {
+        host::fake_speakers::remove();
+    }
     reloader.abort();
     // Whatever the transport is still taking off the radio (a connection an actor cut short a
     // connect attempt on) runs on a task of its own, and the runtime is about to stop: the

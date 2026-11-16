@@ -737,6 +737,7 @@ pub(crate) fn computer_eq(
         running_unknown: false,
         loads: 0,
         crossfeed: None,
+        speakers: None,
     })
 }
 
@@ -755,6 +756,67 @@ pub(crate) fn computer_eq_with_crossfeed(
     };
     let mut eq = computer_eq(true, &[("PK", 1000.0, 0.0, 1.0), ("LSC", 100.0, 1.0, 1.0)]);
     eq.crossfeed = Some(CrossfeedView::of(&settings, xf_on, 48_000, None, None));
+    eq
+}
+
+/// A computer EQ with crossfeed (off, Bauer's default) and virtual speakers as the controller's
+/// view carries them: playing or not, `chosen` the id of the chosen set, `fetched` the fetched
+/// sets as `(id, room word, label)`. The chosen set is a no room set unless it is listed `with`.
+pub(crate) fn computer_eq_with_speakers(
+    on: bool,
+    chosen: Option<&str>,
+    fetched: &[(&str, &str, &str)],
+) -> Box<svolder_host::eq::EqView> {
+    use svolder_host::eq::speakers::{SetView, SpeakersCurve};
+    let mut eq = computer_eq_with_crossfeed(false, "bauer", None);
+    let sets: Vec<SetView> = fetched
+        .iter()
+        .map(|&(id, room, label)| SetView {
+            id: id.to_string(),
+            room: room.to_string(),
+            room_name: if room == "with" {
+                "With room"
+            } else {
+                "No room"
+            }
+            .to_string(),
+            term: if room == "with" { "BRIR" } else { "HRTF" }.to_string(),
+            label: label.to_string(),
+            licence: "Apache-2.0".to_string(),
+            credit: Some("sample credit words".to_string()),
+            source_url: "https://sofacoustics.example/data/sadie/".to_string(),
+        })
+        .collect();
+    let mut view = svolder_host::eq::SpeakersView {
+        on,
+        sets: sets.clone(),
+        ..svolder_host::eq::SpeakersView::default()
+    };
+    if let Some(set) = chosen.and_then(|id| sets.iter().find(|set| set.id == id)) {
+        view.set = Some(set.id.clone());
+        view.room = Some(set.room.clone());
+        view.room_name = Some(set.room_name.clone());
+        view.term = Some(set.term.clone());
+        view.label = set.label.clone();
+        view.licence = set.licence.clone();
+        view.credit = set.credit.clone();
+        view.source_url = set.source_url.clone();
+        view.angles = "left 30.0 deg, right 330.0 deg, 1.5 m".to_string();
+        view.taps_ms = 5.3;
+        view.loudness_db = -7.2;
+        let hz: Vec<f64> = (0..61)
+            .map(|i| 20.0 * 10f64.powf(f64::from(i) / 20.0))
+            .collect();
+        let fall = |from: f64| -> Vec<f64> { (0..61).map(|i| from - f64::from(i) * 0.4).collect() };
+        view.curve = SpeakersCurve {
+            hz,
+            ll_db: fall(-0.5),
+            rr_db: fall(-0.5),
+            lr_db: fall(-9.0),
+            rl_db: fall(-9.0),
+        };
+    }
+    eq.speakers = Some(view);
     eq
 }
 

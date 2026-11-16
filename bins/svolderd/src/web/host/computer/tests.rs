@@ -13,11 +13,12 @@ use crate::web::test_support::{
 };
 
 /// Every route of the computer, with a body each would accept.
-const ROUTES: [(&str, &str); 8] = [
+const ROUTES: [(&str, &str); 9] = [
     ("/api/v1/host/volume", r#"{"pct":40}"#),
     ("/api/v1/host/mute", r#"{"muted":true}"#),
     ("/api/v1/host/eq", r#"{"on":true}"#),
     ("/api/v1/host/crossfeed", r#"{"on":true}"#),
+    ("/api/v1/host/speakers", r#"{"on":true}"#),
     ("/api/v1/host/eq/preset", r#"{"name":"Warm"}"#),
     (
         "/api/v1/host/eq/points",
@@ -433,5 +434,34 @@ async fn the_crossfeed_route_changes_the_computers_crossfeed() {
     )
     .await;
     assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    daemon.stop().await;
+}
+
+/// The speakers route reaches the controller: a body that names nothing and an op the daemon
+/// cannot serve (no store in the fake) are 409s in its words, an unknown field is a 400.
+#[tokio::test]
+async fn the_speakers_route_reaches_the_controller_and_says_what_it_refuses() {
+    let daemon = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web_over(&daemon);
+    let reply = call(&web, post("/api/v1/host/speakers", "{}")).await;
+    assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    assert!(
+        json(&reply.body)["error"]
+            .as_str()
+            .unwrap()
+            .contains("names nothing")
+    );
+    let reply = call(&web, post("/api/v1/host/speakers", r#"{"on":true}"#)).await;
+    assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    assert!(
+        json(&reply.body)["error"]
+            .as_str()
+            .unwrap()
+            .contains("not available")
+    );
+    let reply = call(&web, post("/api/v1/host/speakers", r#"{"volume":1}"#)).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
+    let reply = call(&web, post("/api/v1/host/speakers", r#"{"set":3}"#)).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
     daemon.stop().await;
 }

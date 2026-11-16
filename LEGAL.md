@@ -68,6 +68,10 @@ as amended by Bill C-244 (diagnosis, maintenance and repair) and Bill C-294 (int
   htmx 2.0.11, unmodified, under the BSD Zero Clause License. Their licence texts are in
   `THIRD-PARTY-LICENSES`, which the release packages carry, as the crates' and the static
   build's are.
+- **What the SOFA reader carries.** The `sofar` crate (MIT OR Apache-2.0) that reads SOFA files
+  derives its HDF5 reader from libmysofa (BSD 3-Clause, copyright 2016-2017 Symonics GmbH,
+  Christian Hoene). The notice and licence text are in `THIRD-PARTY-LICENSES`, which the release
+  packages carry.
 
 ## 5. No warranty, and a safety note
 

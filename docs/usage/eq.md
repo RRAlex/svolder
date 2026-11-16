@@ -932,3 +932,73 @@ on) and `flat` (the chain was applied only for crossfeed). After a crash the nex
 and takes the stage out of the chain, or removes the chain, so nothing stays on. Settings you
 change while the EQ was never applied and no state file exists exist only in memory until a chain
 is applied.
+
+## Virtual speakers
+
+Virtual speakers make the computer's sound on headphones seem to come from two speakers in front of
+you, at about 30 degrees to either side (45 for a With room · BRIR set), instead of from inside your
+head. Use them with headphones on the computer's output. There are two choices, each always shown
+with its technical term:
+
+- **With room · BRIR**: the speakers in a measured room, with its early reflections and its tail;
+- **No room · HRTF**: the same speakers in the open, with no room at all.
+
+Nothing is bundled. A set is a measurement: you **fetch** one once from a short catalogue (svolderd
+downloads it, checks its checksum, converts it and keeps only the result, 4 KB to 0.25 MB; your own
+file at a high rate up to about 3 MB), or **import** a file of your own (a SOFA file, or a WAV of 4
+or 14 channels, which the daemon reads from its own machine). Fetching and importing need the
+daemon, which is the one process that reaches the internet; a TUI with no daemon lists the sets
+already fetched and chooses among them. A set's licence and credit line, where the licence asks for
+one, show wherever the set is chosen. The sets, their licences and how a file becomes a set are in
+[virtual-speakers.md](../design/virtual-speakers.md#the-catalogue-and-the-fetch).
+
+It works from the TUI (`C`, then the tone screen `e` or the device screen's Tone pane, and `S` for
+the set list), the web page's Sound... popup (its Virtual speakers tab), [`svolder host
+speakers`](cli.md#host-speakers), the MCP server's `get_host` and
+[`set_host_speakers`](mcp.md#the-tools) (which never fetch), and Home Assistant (a switch and a
+select of the fetched sets); all of them change the same one setting, kept by the daemon (or by a
+TUI with no daemon), so the last change wins. A daemon from before virtual speakers shows crossfeed
+alone.
+
+### One choice with crossfeed
+
+Space is one choice: **Off**, **Crossfeed** or **Virtual speakers**. Both feed one ear the other
+speaker's sound, so they never play together: turning one on turns the other off in the same
+update (the crossfeed switch in Home Assistant goes OFF, `set_host_crossfeed` keeps working). The
+virtual speakers are global, like the EQ, not per output.
+
+### Choosing a set, and the level
+
+Choosing a set, or another set while they play, applies the filter chain again once, with one short
+gap in the sound, as a change of the output's rate does. Turning them on rebuilds it once too when
+the running chain does not hold the set yet (the usual first on after a choice made while they were
+off); turning them off is live.
+Choosing a set while they are off only keeps the choice: turning them on with no set chosen is
+refused with the reason in words. A set is shown with where its speakers were measured (`left 30.0
+deg, right 330.0 deg, 1.5 m`; the room set's are at 45 degrees), the length of its responses (`cut
+to 0.5 s` when it was shortened) and its **loudness change**: every set is scaled when it is
+converted so that the stage never plays above 0 dB at any frequency, which makes it quieter than
+Off (about 7 dB, say), and the view says how much. The rule is per frequency, as the EQ's, never a
+claim about the peaks in the samples. A set's first impulse always has 1 ms of silence in front of
+it, so the sound server's resampling at other rates cuts nothing.
+
+### Virtual speakers turn themselves off
+
+The virtual speakers are **off** whenever any of the four resets of
+[crossfeed](#it-turns-itself-off) happens (the daemon or a TUI starts and finds them on, the output
+changes, the filter chain restarts, the daemon stops gracefully), and also when the chosen set's
+file is missing or damaged: the chain then plays without them, the note says `virtual speakers off:
+<set> is missing or damaged, fetch it again` with the reason `set-missing`, and the list shows the
+set as not fetched. The choice of set is kept, only the switch goes off. A chain that runs for the
+speakers alone is removed by a reset. A change of the sink's rate is no reset.
+
+### The saved sets and state
+
+The state file of the computer EQ (`~/.local/state/svolder/host-eq.toml`) keeps the chosen set's id
+as `speakers`, and two flags: `speakers_on` (the stage was last on) and `speakers_loaded` (the set
+the running chain holds, so a daemon that starts over that chain keeps the set's file safe). After a
+crash the next start reads them and takes the stage out of the chain, or removes the chain, so
+nothing stays on. The sets themselves are in `~/.local/state/svolder/speakers/`, one `<id>.wav` and
+one `<id>.toml` each, at most 32 (the oldest unused one goes when a new one comes); forgetting a set
+that plays, or one a running chain still holds, is refused.
+

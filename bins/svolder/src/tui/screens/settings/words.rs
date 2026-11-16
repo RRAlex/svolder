@@ -10,6 +10,7 @@ pub(super) fn key_value(key: &TuiSetting, tui: &TuiConfig) -> String {
     match &key.kind {
         TuiSettingKind::Bool { get, .. } => word(get(tui)),
         TuiSettingKind::Word { get, .. } => get(tui).to_string(),
+        TuiSettingKind::Number { get, unit, .. } => format!("{} {unit}", get(tui)),
         TuiSettingKind::Accent => {
             debug_assert!(false, "{} has a row per family, not a key row", key.key);
             String::new()
@@ -22,6 +23,7 @@ fn key_line(key: &TuiSetting, tui: &TuiConfig) -> String {
     match &key.kind {
         TuiSettingKind::Bool { get, .. } => format!("[tui] {} = {}", key.key, get(tui)),
         TuiSettingKind::Word { get, .. } => format!("[tui] {} = \"{}\"", key.key, get(tui)),
+        TuiSettingKind::Number { get, .. } => format!("[tui] {} = {}", key.key, get(tui)),
         TuiSettingKind::Accent => {
             debug_assert!(false, "{} has a row per family, not a key row", key.key);
             format!("[tui] {}", key.key)

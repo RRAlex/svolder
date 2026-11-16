@@ -331,6 +331,9 @@ async fn a_direct_tui_never_shows_the_eq_on_with_no_chain() {
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     }
     .save(&path)
     .unwrap();
@@ -539,6 +542,51 @@ async fn a_quit_wins_over_a_queued_crossfeed_on() {
         "the queued crossfeed never ran: {:?}",
         chain.calls()
     );
+}
+
+/// A speakers change still waiting its turn when the loop quits is dropped too, and a direct TUI
+/// serves the speakers' op (refused in words here: no set is fetched).
+#[tokio::test]
+async fn a_quit_wins_over_a_queued_speakers_change_and_a_direct_tui_answers_the_op() {
+    let chain = Arc::new(FakeChain::new());
+    let dir = std::env::temp_dir().join(format!("svolder-tui-speakers-{}", std::process::id()));
+    let control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory)
+        .with_speakers_dir(&dir);
+    let mut link = ComputerLink::over(control);
+    link.direct(HostEqOp::Speakers {
+        on: Some(true),
+        set: None,
+        done: true,
+    })
+    .expect("a controller");
+    let answer = tokio::time::timeout(WITHIN, answered(&mut link.answers))
+        .await
+        .expect("a refusal comes back");
+    assert!(
+        matches!(&*answer, Answer::Said(why) if why.contains("no set is chosen")),
+        "{answer:?}"
+    );
+    let held = link
+        .control
+        .clone()
+        .expect("a controller")
+        .lock_owned()
+        .await;
+    link.direct(HostEqOp::Speakers {
+        on: Some(true),
+        set: Some("x".into()),
+        done: true,
+    })
+    .expect("a controller");
+    tokio::task::yield_now().await;
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+    });
+    link.shutdown().await;
+    release.await.unwrap();
+    assert!(chain.calls().is_empty(), "{:?}", chain.calls());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A chain whose apply waits at a gate, so a change can be caught while it runs.

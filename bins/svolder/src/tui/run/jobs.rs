@@ -23,6 +23,7 @@ use tokio::time::Instant;
 use crate::autoeq::{self, NEEDS_DAEMON};
 use crate::tui::boxes::presets::Done;
 use crate::tui::boxes::presets::search::{Ask, DEBOUNCE};
+use crate::tui::boxes::speakers::SpeakersCall;
 
 /// A request to the daemon that has not been sent: its future does nothing until it is awaited.
 pub(in crate::tui) type Call = BoxFuture<'static, Result<Response, IpcError>>;
@@ -61,6 +62,9 @@ pub(in crate::tui) struct Jobs {
     /// The task that carries out the preset writes one after the other, so two keys in a row
     /// reach the file in the order they were pressed.
     writes: Option<mpsc::UnboundedSender<PresetJob>>,
+    /// The fetch or import of a virtual speakers' set in flight: dropped with the loop, it stops
+    /// and cancels its job on the daemon.
+    pub(super) fetching: Option<super::speakers::Running>,
 }
 
 impl Default for Jobs {
@@ -72,6 +76,7 @@ impl Default for Jobs {
             due: None,
             searching: None,
             writes: None,
+            fetching: None,
         }
     }
 }
@@ -165,6 +170,16 @@ impl Jobs {
             };
             let _ = done.send(Done::Imported(asked, result));
         });
+    }
+}
+
+impl Jobs {
+    /// Carry out a call to the daemon's virtual speaker sets, on a task of its own: what it says
+    /// comes back as [`Done::Speakers`].
+    pub(super) fn speakers(&mut self, socket: Option<PathBuf>, call: SpeakersCall) {
+        if let Some(running) = super::speakers::run(self.done.clone(), socket, call) {
+            self.fetching = Some(running);
+        }
     }
 }
 

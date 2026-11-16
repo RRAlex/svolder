@@ -43,7 +43,7 @@ FLEET = [('fake-amp', 'Amp', '1112131415161718'), ('fake-five', 'Five', '2122232
          ('fake-mono', 'Mono', '3132333435363738'), ('lokimax', 'Loki Max', '4142434445464748')]
 # the members of `core`, which every theme may rely on and none may find missing
 CORE = ['actions', 'analysis', 'ask', 'climb', 'clock', 'computer', 'curve', 'drag', 'driver', 'eq', 'frame',
-        'freeze', 'hold', 'keys', 'lifecycle', 'modal', 'model', 'mounted', 'plot', 'popups', 'prefs', 'registry', 'repeat', 'router',
+        'freeze', 'hold', 'keys', 'levels', 'lifecycle', 'modal', 'model', 'mounted', 'plot', 'popups', 'prefs', 'registry', 'repeat', 'router',
         'scheme', 'stream', 'theme', 'title', 'toneNote', 'words']
 # the members of the parts of `core` a theme builds on, pinned like the core's own: the drag's
 # helpers and the hand's makers, the computer's side, the actions and the computer's actions
@@ -65,8 +65,11 @@ CORE_ACTIONS = ['applySetting', 'autoEqImport', 'autoEqPreview', 'autoEqSearch',
                 'setBand', 'setControl', 'setLoudness', 'setMode', 'setPassphrase', 'setProfile',
                 'setVolume', 'showDevice', 'signInPrompt', 'signOut', 'stopClimb', 'walk']
 CORE_ACTIONS_COMPUTER = ['addNext', 'addPoint', 'cell', 'crossfeedAsked', 'current', 'deletePreset',
-                         'nudge', 'onCrossfeedRefusal', 'recallPreset', 'removePoint', 'renamePreset',
-                         'savePreset', 'setCrossfeed', 'setMode', 'setMute', 'setPoint', 'setVolume', 'step', 'stepPoint', 'toggleMute']
+                         'nudge', 'onCrossfeedRefusal', 'onSpeakersRefusal', 'recallPreset', 'removePoint',
+                         'renamePreset', 'resyncSpeakers', 'savePreset', 'setCrossfeed', 'setMode', 'setMute',
+                         'setPoint', 'setSpeakers', 'setVolume', 'speakersAsked', 'speakersCatalogue',
+                         'speakersFetch', 'speakersForget', 'speakersImport', 'step', 'stepPoint',
+                         'toggleMute']
 # the hand `core.eq.points` makes, the table `core.eq.table` makes, the flow of a typed cell and
 # the computer's view of a page that has the computer's side
 CORE_HAND = ['active', 'begin', 'blur', 'burst', 'canGrab', 'cancel', 'destroy', 'down', 'dropTap',

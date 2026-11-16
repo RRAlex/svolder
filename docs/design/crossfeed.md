@@ -9,7 +9,9 @@ level. svolder runs it as one fixed stage inside the computer EQ's
 filter chain. This page is the graph, the maths of the four models, the lifecycle that keeps the
 stage from being left on, the state and the contract. What a user sees and does is in
 [eq.md](../usage/eq.md#crossfeed); the chain it sits in is in [host-control.md](host-control.md), the
-level rule in [host-control-preamp.md](host-control-preamp.md). The code is
+level rule in [host-control-preamp.md](host-control-preamp.md). Crossfeed and the
+[virtual speakers](virtual-speakers.md) are one choice: turning crossfeed on turns the speakers off
+in the same update, and the other way round. The code is
 `crates/svolder-host/src/eq/crossfeed.rs` (pure: settings, models, maths, the view),
 `eq/live.rs` (the graph and the `set-param`s) and `eq/control/xf.rs` (the controller).
 

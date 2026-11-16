@@ -85,6 +85,7 @@ fn route(edit: impl FnOnce(&mut RouteFacts)) -> RouteFacts {
         player_match: PlayerMatch::Pid,
         others_mixing: 0,
         host_eq: false,
+        stages: None,
     };
     edit(&mut route);
     route

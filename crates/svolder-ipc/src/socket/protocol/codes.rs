@@ -85,6 +85,10 @@ pub const FEATURE_WALK: &str = "walk";
 /// upload): while it runs, it is the one process that reaches AutoEq's repository.
 pub const FEATURE_AUTOEQ: &str = "autoeq";
 
+/// The feature a daemon lists when it takes the `speakers` ops (list, fetch, import and forget the
+/// virtual speakers' sets): while it runs, it is the one process that reaches the sets' sources.
+pub const FEATURE_SPEAKERS: &str = "speakers";
+
 /// The feature a daemon lists when it takes the `preset_write` requests
 /// ([`PresetOp`](super::PresetOp)): while it runs, a front end saves, renames and deletes the
 /// user's presets through it and writes no `[[preset]]` block itself.
@@ -103,6 +107,7 @@ pub const FEATURES: &[&str] = &[
     FEATURE_AUTOEQ,
     FEATURE_HOST_COVER,
     FEATURE_PRESET_WRITE,
+    FEATURE_SPEAKERS,
 ];
 
 /// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no

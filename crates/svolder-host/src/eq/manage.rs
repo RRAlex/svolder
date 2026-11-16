@@ -37,7 +37,7 @@ use async_trait::async_trait;
 use tokio::process::Command;
 
 use super::crossfeed::{CrossfeedSettings, Stage, stage_worst_over_db, worst_gain_db};
-use super::live::{self, CONFIG_RATE_HZ, SLOTS, render_live_conf_with};
+use super::live::{self, CONFIG_RATE_HZ, SLOTS, SpeakersGraph, render_live_conf_full};
 use super::paths::{EqPaths, absolute, is_executable, on_path};
 use super::points::Points;
 use super::process::{Argv, Held, desktop_program, gone, parse_pid_file, spawn_detached};
@@ -105,6 +105,24 @@ pub struct ApplyRequest {
     /// stage off, which is how a live chain is always written. The state keeps these settings
     /// (and `crossfeed_on`) when given, else the ones it had.
     pub crossfeed: Option<CrossfeedSettings>,
+    /// The virtual speakers' stage the config holds: the four convolvers reading a set's WAV.
+    /// `None` is a config with no convolvers, which is how every chain is written while the
+    /// choice is not virtual speakers. The state keeps the set's id (and `speakers_on`) when
+    /// given, else the ones it had.
+    pub speakers: Option<SpeakersConf>,
+}
+
+/// The virtual speakers' stage in a config (see [`ApplyRequest::speakers`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpeakersConf {
+    /// The set's id.
+    pub id: String,
+    /// The absolute path of the set's WAV. It must stay readable while any chain started with
+    /// this config runs.
+    pub wav: PathBuf,
+    /// Whether the mixers play the convolved sound: only for a chain that cannot be set live. A
+    /// config otherwise always has the stage off.
+    pub on: bool,
 }
 
 /// What `host eq status` knows: the state file, and whether the chain runs.
@@ -704,6 +722,18 @@ impl Host {
                 .or_else(|| previous.as_ref().and_then(|s| s.crossfeed.clone())),
             crossfeed_on: request.crossfeed.is_some(),
             flat: request.flat,
+            // The chosen set stays across an apply; a config that holds the convolvers is one a
+            // start loads the WAV from, which `speakers_on` tells the next owner to turn off.
+            speakers: request
+                .speakers
+                .as_ref()
+                .map(|speakers| speakers.id.clone())
+                .or_else(|| previous.as_ref().and_then(|s| s.speakers.clone())),
+            speakers_on: request.speakers.is_some(),
+            speakers_loaded: request
+                .speakers
+                .as_ref()
+                .map(|speakers| speakers.id.clone()),
         };
         // The process manager keeps its pid in the runtime directory, so one that has none is
         // refused here, before anything changes.
@@ -1233,10 +1263,13 @@ impl Host {
         self.stop_child().await;
         self.delete_files();
         if let Some(mut state) = state {
-            // With no chain there is no stage and no flat EQ: the settings stay.
+            // With no chain there is no stage, no convolver and no flat EQ: the settings and the
+            // chosen set stay.
             state.on = false;
             state.crossfeed_on = false;
             state.flat = false;
+            state.speakers_on = false;
+            state.speakers_loaded = None;
             state
                 .save(&self.state)
                 .map_err(|e| cannot_write(&self.state, e))?;
@@ -1378,6 +1411,9 @@ pub(crate) fn checked_request(
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     });
     if request.correction.filters.len() > SLOTS {
         return Err(trouble(
@@ -1410,6 +1446,14 @@ pub(crate) fn checked_request(
             trouble(
                 format!("the crossfeed cannot be applied: {why}"),
                 "Change the crossfeed's crossover or model",
+            )
+        })?;
+    }
+    if let Some(speakers) = &request.speakers {
+        SpeakersGraph::new(&speakers.wav, speakers.on).map_err(|why| {
+            trouble(
+                format!("the virtual speakers cannot be applied: {why}"),
+                "Fetch the set again, or choose another",
             )
         })?;
     }
@@ -1474,7 +1518,20 @@ pub(crate) fn conf_text(
         },
         None => (Stage::bypass(), eq_preamp),
     };
-    render_live_conf_with(&points, preamp, target, route, rate, &stage)
+    // The request was checked ([`checked_request`]): the path is one the config can hold.
+    let speakers = request
+        .speakers
+        .as_ref()
+        .and_then(|speakers| SpeakersGraph::new(&speakers.wav, speakers.on).ok());
+    render_live_conf_full(
+        &points,
+        preamp,
+        target,
+        route,
+        rate,
+        &stage,
+        speakers.as_ref(),
+    )
 }
 
 /// The files an apply writes, staged beside their places before anything is changed.

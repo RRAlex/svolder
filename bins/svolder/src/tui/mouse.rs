@@ -120,6 +120,9 @@ pub enum Hit {
     /// The `more ↑` (`true`) or `more ↓` (`false`) words on the preset list's border, which a
     /// click goes to that end of the list from.
     PresetEnd(bool),
+    /// Focus this row of the virtual speakers' set list, an index into its rows; a double-click
+    /// does what `Enter` does.
+    SetRow(usize),
     /// The toast, which a click dismisses and which hides what is under it from the mouse.
     Toast,
     /// The header's `● connected` / `○ disconnected` words, which a click does nothing on; a
@@ -129,6 +132,9 @@ pub enum Hit {
     MouseMark,
     /// The header's fault glyphs, which a click does nothing on.
     FaultMark,
+    /// The Status pane's two VU rows, which a click does nothing on; a pointer resting on them says
+    /// what the meter is.
+    Vu,
     /// The squirrel, which a click makes hop and the wheel does nothing on.
     Mascot,
     /// The bar between the device screen's Controls and Tone panes, on every row of it: a left
@@ -153,6 +159,8 @@ pub enum Selected {
     Presets,
     /// The AutoEq search box's results.
     Search,
+    /// The virtual speakers' set list's rows.
+    Sets,
 }
 
 /// The row the keys select in a list, as the last frame drew it.
@@ -324,6 +332,9 @@ pub enum MouseAction {
     PresetPick(usize),
     /// Focus this row of the preset list, or the last one for a row past the end.
     PresetGo(usize),
+    /// Focus this row of the virtual speakers' set list and, on a double-click of the focused
+    /// row, fetch or use it.
+    SetRow(usize),
     /// Hold this band's point for this gesture, focusing the band: a press on the curve that
     /// grabbed it ([`curve_drag::start`]).
     Grab {
@@ -561,6 +572,23 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
             _ => None,
         };
     }
+    // The set list is clicked and scrolled while it shows its sets.
+    if app
+        .speakers_box
+        .list
+        .as_ref()
+        .is_some_and(|list| matches!(list.step, crate::tui::boxes::speakers::Step::Choosing))
+        && !app.overlays.quitting
+    {
+        return match (event.kind, hits.hit_at(event.column, event.row)) {
+            (MouseEventKind::Down(MouseButton::Left), Some(&Hit::SetRow(row))) => {
+                Some(MouseAction::SetRow(row))
+            }
+            (MouseEventKind::ScrollUp, _) => Some(MouseAction::Key(KeyCode::Up)),
+            (MouseEventKind::ScrollDown, _) => Some(MouseAction::Key(KeyCode::Down)),
+            _ => None,
+        };
+    }
     // Every other modal box is answered from the keyboard: the rows under it are not to be
     // clicked out from underneath what is being answered.
     if app.modal_open() {
@@ -715,11 +743,11 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::Transport(button) => Some(MouseAction::Transport(button)),
         Hit::Toast => Some(MouseAction::DismissToast),
         // These only say what they are to a resting pointer.
-        Hit::Connection | Hit::MouseMark | Hit::FaultMark => None,
+        Hit::Connection | Hit::MouseMark | Hit::FaultMark | Hit::Vu => None,
         // The menu answers its own clicks.
         Hit::MenuEntry(_) | Hit::MenuOutside => None,
         // The preset list answers its own clicks.
-        Hit::PresetRow(_) | Hit::PresetEnd(_) => None,
+        Hit::PresetRow(_) | Hit::PresetEnd(_) | Hit::SetRow(_) => None,
         // These are drawn by the Settings box alone, which answers its own clicks.
         Hit::SettingRow(_)
         | Hit::SettingPrev

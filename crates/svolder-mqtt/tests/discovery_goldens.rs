@@ -131,14 +131,38 @@ fn crossfeed_view() -> svolder_host::eq::CrossfeedView {
     }
 }
 
+/// The view of a controller that serves the virtual speakers: two fetched sets.
+fn speakers_view() -> svolder_host::eq::SpeakersView {
+    let set = |id: &str, label: &str, room: &str, room_name: &str, term: &str| {
+        svolder_host::eq::speakers::SetView {
+            id: id.into(),
+            room: room.into(),
+            room_name: room_name.into(),
+            term: term.into(),
+            label: label.into(),
+            licence: "CC-BY-4.0".into(),
+            credit: None,
+            source_url: "https://example.org/set".into(),
+        }
+    };
+    svolder_host::eq::SpeakersView {
+        sets: vec![
+            set("a", "Set A", "no", "No room", "HRTF"),
+            set("b", "Set B", "with", "With room", "BRIR"),
+        ],
+        ..Default::default()
+    }
+}
+
 #[test]
-fn the_computer_has_the_eq_and_crossfeed_entities() {
+fn the_computer_has_the_eq_crossfeed_and_speakers_entities() {
     assert_golden(
         sorted_json(svolder_mqtt::computer::entries(
             "svolder",
             "homeassistant",
             true,
             Some(&crossfeed_view()),
+            Some(&speakers_view()),
         )),
         "computer-commands.json",
     );
@@ -148,6 +172,7 @@ fn the_computer_has_the_eq_and_crossfeed_entities() {
             "homeassistant",
             false,
             Some(&crossfeed_view()),
+            Some(&speakers_view()),
         )),
         "computer-read-only.json",
     );

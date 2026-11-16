@@ -326,6 +326,9 @@ impl Config {
                 TuiSettingKind::Word { get, .. } => {
                     commented(&mut out, &explain, key.key, get(tui))
                 }
+                TuiSettingKind::Number { get, .. } => {
+                    commented(&mut out, &explain, key.key, get(tui))
+                }
                 TuiSettingKind::Accent => commented(&mut out, &explain, key.key, UNSET),
             }
         }

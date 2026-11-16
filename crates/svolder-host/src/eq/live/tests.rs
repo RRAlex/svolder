@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::path::Path;
+
 use super::*;
 use crate::eq::render_conf;
 
@@ -719,4 +721,154 @@ fn a_capture_of_the_chains_monitor_is_not_playing() {
 fn a_running_stream_linked_to_another_sink_is_not_playing_through_the_chain() {
     let dump = playing_dump(vec![stream(30, "running"), link_of(40, 30, 12)]);
     assert!(!props_of(&dump).unwrap().playing);
+}
+
+fn speakers_conf(on: bool) -> String {
+    let graph = SpeakersGraph::new(Path::new("/state/svolder/speakers/sadie-d2.wav"), on).unwrap();
+    render_live_conf_full(
+        &one_point(),
+        0.0,
+        "sink",
+        Route::Smart,
+        48_000,
+        &Stage::bypass(),
+        Some(&graph),
+    )
+}
+
+#[test]
+fn the_speakers_graph_has_four_convolvers_and_two_mixers_after_the_crossfeed_stage() {
+    let conf = speakers_conf(false);
+    for (name, channel) in [("vLL", 0), ("vLR", 1), ("vRL", 2), ("vRR", 3)] {
+        let node = format!(
+            "{{ type = builtin name = {name} label = convolver config = {{ filename = \"/state/svolder/speakers/sadie-d2.wav\" channel = {channel} gain = 1 }} }}"
+        );
+        assert_eq!(conf.matches(&node).count(), 1, "{node}");
+    }
+    for name in ["lvs", "rvs"] {
+        let node = format!(
+            "{{ type = builtin name = {name} label = mixer control = {{ \"Gain 1\" = 1 \"Gain 2\" = 0 \"Gain 3\" = 0 }} }}"
+        );
+        assert_eq!(conf.matches(&node).count(), 1, "{node}");
+    }
+    let link = |from: &str, to: &str| format!("{{ output = \"{from}\" input = \"{to}\" }}");
+    for (from, to) in [
+        ("lmix:Out", "lvs:In 1"),
+        ("rmix:Out", "rvs:In 1"),
+        ("lmix:Out", "vLL:In"),
+        ("rmix:Out", "vRL:In"),
+        ("lmix:Out", "vLR:In"),
+        ("rmix:Out", "vRR:In"),
+        ("vLL:Out", "lvs:In 2"),
+        ("vRL:Out", "lvs:In 3"),
+        ("vLR:Out", "rvs:In 2"),
+        ("vRR:Out", "rvs:In 3"),
+    ] {
+        assert_eq!(conf.matches(&link(from, to)).count(), 1, "{from} -> {to}");
+    }
+    assert!(conf.contains("outputs = [ \"lvs:Out\" \"rvs:Out\" ]"));
+    assert!(!conf.contains("outputs = [ \"lmix:Out\""));
+}
+
+#[test]
+fn a_chain_without_a_set_has_no_convolvers_and_the_old_outputs() {
+    let conf = render_live_conf(&one_point(), 0.0, "sink", Route::Smart, 48_000);
+    assert!(!conf.contains("convolver"));
+    assert!(!conf.contains("lvs"));
+    assert!(conf.contains("outputs = [ \"lmix:Out\" \"rmix:Out\" ]"));
+}
+
+#[test]
+fn the_conf_text_apart_from_the_speakers_stage_is_the_plain_conf() {
+    let plain = render_live_conf(&one_point(), 0.0, "sink", Route::Smart, 48_000);
+    let with = speakers_conf(false);
+    let kept: Vec<&str> = with
+        .lines()
+        .filter(|line| !line.contains("vLL") && !line.contains("vLR"))
+        .filter(|line| !line.contains("vRL") && !line.contains("vRR"))
+        .filter(|line| !line.contains("lvs") && !line.contains("rvs"))
+        .filter(|line| !line.contains("outputs"))
+        .collect();
+    let plain: Vec<&str> = plain.lines().filter(|l| !l.contains("outputs")).collect();
+    assert_eq!(kept, plain);
+}
+
+#[test]
+fn a_conf_written_with_the_stage_on_plays_wet_only() {
+    let conf = speakers_conf(true);
+    assert!(conf.contains(
+        "name = lvs label = mixer control = { \"Gain 1\" = 0 \"Gain 2\" = 1 \"Gain 3\" = 1 }"
+    ));
+    assert!(conf.contains(
+        "name = rvs label = mixer control = { \"Gain 1\" = 0 \"Gain 2\" = 1 \"Gain 3\" = 1 }"
+    ));
+}
+
+#[test]
+fn a_wav_path_that_would_break_the_conf_is_refused() {
+    for bad in ["relative/x.wav", "/a\"b.wav", "/a\\b.wav", "/a\nb.wav", ""] {
+        assert!(
+            SpeakersGraph::new(Path::new(bad), false).is_err(),
+            "{bad:?}"
+        );
+    }
+    assert!(SpeakersGraph::new(Path::new("/a b/c d.wav"), false).is_ok());
+}
+
+#[test]
+fn speakers_params_name_the_mixer_ports_for_both_ears() {
+    let off = speakers_params(false);
+    let on = speakers_params(true);
+    let names: Vec<&str> = off.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "lvs:Gain 1",
+            "lvs:Gain 2",
+            "lvs:Gain 3",
+            "rvs:Gain 1",
+            "rvs:Gain 2",
+            "rvs:Gain 3"
+        ]
+    );
+    let values = |p: &[(String, f64)]| p.iter().map(|(_, v)| *v).collect::<Vec<_>>();
+    assert_eq!(values(&off), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    assert_eq!(values(&on), [0.0, 1.0, 1.0, 0.0, 1.0, 1.0]);
+}
+
+#[test]
+fn a_node_has_the_speakers_controls_only_when_the_conf_had_the_stage() {
+    let mut node = LiveNode {
+        id: 1,
+        rate_hz: Some(48_000),
+        sink: None,
+        playing: false,
+        params: HashMap::new(),
+    };
+    assert!(!node.has_speakers_controls());
+    node.params.extend(speakers_params(false));
+    assert!(node.has_speakers_controls());
+    node.params.remove("rvs:Gain 3");
+    assert!(!node.has_speakers_controls());
+}
+
+#[test]
+fn the_speakers_mixers_gains_are_read_back_from_a_dump() {
+    let mut params = Vec::new();
+    for (name, value) in speakers_params(true) {
+        params.push(serde_json::json!(name));
+        params.push(serde_json::json!(value));
+    }
+    let dump = serde_json::to_string(&[serde_json::json!({
+        "id": 10, "type": "PipeWire:Interface:Node",
+        "info": {"state": "running",
+                 "props": {"node.name": NODE_NAME, "media.class": "Audio/Sink"},
+                 "params": {"Props": [{"params": params}]}}
+    })])
+    .unwrap();
+    let node = props_of(&dump).expect("the chain is in the dump");
+    assert!(node.has_speakers_controls());
+    assert_eq!(node.params["lvs:Gain 1"], 0.0);
+    assert_eq!(node.params["lvs:Gain 2"], 1.0);
+    assert_eq!(node.params["rvs:Gain 3"], 1.0);
 }

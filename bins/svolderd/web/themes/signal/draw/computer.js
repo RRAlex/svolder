@@ -18,6 +18,7 @@ import {
 import { chip } from './choices.js';
 import { esc } from './esc.js';
 import { VIEW_HEIGHT, VIEW_WIDTH, plot } from './tone.js';
+import { vuArea } from './vu.js';
 import { button } from './word.js';
 
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
@@ -75,14 +76,17 @@ export function computerGraph(tone, { inert, picked = null }) {
 }
 
 /** The first screen of the computer side: the volume and the tone curve, with the mode under it on
- * a phone (on a desktop it heads the shelf's presets column). `c` is `{ volume, tone }` from the
- * core; either may be null. */
-export function computerOpen(c, { phone, inert, picked }) {
+ * a phone (on a desktop it heads the shelf's presets column), and the level meters (`vu`, the
+ * state vu-wire.js keeps; none while the page has none) beside them. `c` is `{ volume, tone }` from
+ * the core; either may be null. */
+export function computerOpen(c, {
+  phone, inert, picked, vu = null,
+}) {
   const volume = c.volume ? `<section id="sg-cvolume" class="sg-vol">${computerVolume(c.volume, inert)}</section>` : '';
   const tone = c.tone
     ? `<section id="sg-ctone" class="sg-tone"><span class="sg-lbl">${esc(WORDS.tone)}</span>`
       + `${computerGraph(c.tone, { inert, picked })}${phone ? computerMode(c.tone, inert) : ''}</section>` : '';
-  return volume + tone;
+  return volume + tone + (vu ? vuArea(vu) : '');
 }
 
 /** One row of the points' table: its number, its type, the three values typed in their own fields

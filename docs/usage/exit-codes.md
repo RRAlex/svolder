@@ -19,7 +19,7 @@ What each verb returns to the shell. Back to the [usage index](README.md).
 | 5 | An active fault was reported by the device |
 | 6 | The computer's controls are unavailable (PipeWire tools or socket missing, or host audio off) |
 | 7 | The daemon does not know the request, or lacks the feature asked for (it is older than this svolder: `svolder daemon restart`); `add`, `remove`, `setup`'s walk, the device edits and the AutoEq verbs (`eq search`, `eq import`) say so with 7 |
-| 130 | `watch` was told not to wait for the release (Ctrl-C during it); `capture` was ended by Ctrl-C before its frame window; `setup` or `add` was left by Ctrl-C, SIGTERM or a closed terminal during the daemon's walk (the walk is cancelled); `eq import --autoeq` was left by Ctrl-C or a closed terminal (the daemon's job is cancelled) |
+| 130 | `watch` was told not to wait for the release (Ctrl-C during it); `capture` was ended by Ctrl-C before its frame window; `setup` or `add` was left by Ctrl-C, SIGTERM or a closed terminal during the daemon's walk (the walk is cancelled); `eq import --autoeq` or `host speakers fetch` or `host speakers import` was left by Ctrl-C, SIGTERM or a closed terminal (the daemon's job is cancelled) |
 
 With no `-d` and several devices in range, the candidates are listed on stderr and the command exits
 2; name one of them with `-d`:

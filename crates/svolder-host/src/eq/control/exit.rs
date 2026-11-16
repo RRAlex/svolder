@@ -193,6 +193,14 @@ impl EqControl {
                 false,
             );
         }
+        if self.sp.on {
+            // The restarted chain plays its config with the stage off.
+            self.reset_sp(
+                crate::eq::speakers::OffReason::ChainRestarted,
+                "virtual speakers turned off: the computer EQ chain restarted".to_string(),
+                false,
+            );
+        }
         if self.flat {
             // The chain ran for crossfeed alone, which is off now (or was a pass-through): no
             // chain is wanted.

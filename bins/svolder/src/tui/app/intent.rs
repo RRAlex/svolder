@@ -11,6 +11,11 @@ use svolder_profiles::Family;
 use svolder_profiles::tone::preset::Preset;
 
 impl Intent {
+    /// A call to the daemon's virtual speaker sets.
+    pub(crate) fn speakers(call: crate::tui::boxes::speakers::SpeakersCall) -> Intent {
+        Intent::Speakers(Box::new(call))
+    }
+
     /// A change of the computer EQ.
     pub(crate) fn eq(op: svolder_ipc::HostEqOp) -> Intent {
         Intent::HostEq(Box::new(op))
@@ -97,6 +102,9 @@ pub enum Intent {
         /// The side of the EQ the list is for.
         target: svolder_ipc::AutoEqTarget,
     },
+    /// Ask the daemon about the virtual speakers' sets: the catalogue, a fetch or an import, a
+    /// forget, a cancel.
+    Speakers(Box<crate::tui::boxes::speakers::SpeakersCall>),
     /// Take the computer EQ off, and then load the preset of this name onto the DAC once it is.
     MoveToDac(String),
     /// Change the computer EQ: its mode or its points.

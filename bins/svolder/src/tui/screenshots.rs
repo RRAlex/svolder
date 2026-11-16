@@ -185,3 +185,59 @@ fn divider_shots() {
         write_ppm(&ppm, &image).expect("written");
     }
 }
+
+/// The device screen with the VU rows at 100 by 45 and at 160 by 50 (the Gungnir 2 and the capture's
+/// seeded signal), as PPM files and text twins in the vu folder of the screenshots output.
+/// Offline: the stand-in correction is worn.
+#[test]
+#[ignore = "draws the VU stills: cargo test -p svolder --bin svolder -- --ignored vu_shots"]
+fn vu_shots() {
+    let out = out_dir().join("vu");
+    std::fs::create_dir_all(&out).expect("the output folder");
+    let correction = stand_in();
+    let mut raster = Raster::new(
+        fonts::load_system()
+            .map_err(|m| m.message())
+            .expect("fonts"),
+        scenes_palette(&correction),
+    );
+    for (name, size, cover) in [
+        ("100x45", (100, 45), false),
+        ("160x50", (160, 50), false),
+        ("100x45-cover", (100, 45), true),
+        ("160x50-cover", (160, 50), true),
+    ] {
+        let shot = still_sized(&correction, Still::Dac, size, |app| {
+            if cover {
+                with_half_block_cover(app, size);
+            }
+        });
+        let ppm = out.join(format!("{name}.ppm"));
+        let image = raster.paint(&shot.buffer, name).expect("painted");
+        write_ppm(&ppm, &image).expect("written");
+        std::fs::write(out.join(format!("{name}.txt")), still_twin(&shot.buffer))
+            .expect("the text twin");
+    }
+}
+
+/// Give `app` a cover to show beside its Now playing row in a frame `size` large, drawn as
+/// half-blocks from a gradient.
+fn with_half_block_cover(app: &mut crate::tui::app::App, size: (u16, u16)) {
+    use image::{DynamicImage, RgbImage};
+    use ratatui::layout::Rect;
+    app.host.cover.hash = Some("0123456789abcdef".into());
+    app.host.cover.font = Some((8, 16));
+    let frame = Rect::new(0, 0, size.0, size.1);
+    let boxed = crate::tui::screens::device::art_box(frame, app).expect("a box for the cover");
+    let image = DynamicImage::ImageRgb8(RgbImage::from_fn(96, 96, |x, y| {
+        image::Rgb([(x * 2) as u8, (y * 2) as u8, 128])
+    }));
+    let protocol =
+        crate::tui::art::engine::build(&ratatui_image::picker::Picker::halfblocks(), image, boxed)
+            .expect("a picture");
+    app.host.cover.picture = Some(crate::tui::art::Picture {
+        protocol,
+        hash: "0123456789abcdef".into(),
+        sent: Default::default(),
+    });
+}

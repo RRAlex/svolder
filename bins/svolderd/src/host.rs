@@ -39,10 +39,10 @@ use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use ring::digest;
 use svolder_host::cover::{self, Cover, CoverPlaces};
-use svolder_host::eq::{EqControl, Keep};
+use svolder_host::eq::{EqControl, Keep, SpeakersStore};
 use svolder_host::fake::FakePlayers;
 use svolder_host::fake::{FakeChain, FakeParams, FakeSink};
-use svolder_host::route::{PlayerMatch, PwDump, SinkFacts, StreamFacts, route};
+use svolder_host::route::{ChainStages, PlayerMatch, PwDump, SinkFacts, StreamFacts, route};
 use svolder_host::{
     Button, Frame, FrameCapture, Mpris, NoBus, NowPlaying, Players, Progress, PwFrames, RouteFacts,
     Sink, SinkState, Status, Wpctl, unix_ms,
@@ -62,6 +62,7 @@ use crate::locks::locked;
 
 mod capture;
 mod computer;
+pub(crate) mod fake_speakers;
 mod synthetic;
 
 pub(crate) use computer::{Computer, EqRefusal, is_unavailable};
@@ -376,7 +377,14 @@ impl Parts {
     /// presses; the bundled cover; a route on a Schiit sink named for the fake device, at the
     /// player's own rate; synthetic music for a capture, unless `knobs` has none; and whatever
     /// `knobs` has it lose. Needs a tokio runtime for the knobs' timers.
+    #[cfg(test)]
     pub(crate) fn fake(knobs: FakeKnobs) -> Parts {
+        Parts::fake_with(knobs, None)
+    }
+
+    /// The fake parts (as `Parts::fake` in tests) whose computer serves virtual speakers from `speakers`, the daemon's one
+    /// store, with two synthetic sets put in it (see `fake_speakers`).
+    pub(crate) fn fake_with(knobs: FakeKnobs, speakers: Option<Arc<SpeakersStore>>) -> Parts {
         let players = fake_players(knobs.title.as_deref());
         let mut helpers = Vec::new();
         let drop_cover = {
@@ -447,6 +455,7 @@ impl Parts {
             &knobs.display,
             knobs.eq,
             knobs.computer_volume,
+            speakers,
         ));
         Parts {
             connect: found(Arc::new(players)),
@@ -472,8 +481,9 @@ impl Parts {
         }
     }
 
-    /// The real host: the session bus, `pw-dump` and the places a cover may be read from.
-    fn real() -> Parts {
+    /// The real host: the session bus, `pw-dump` and the places a cover may be read from, the
+    /// computer's EQ serving the virtual speakers from `speakers`.
+    fn real(speakers: Option<Arc<SpeakersStore>>) -> Parts {
         let places = CoverPlaces::from_env();
         Parts {
             connect: Arc::new(|| {
@@ -495,14 +505,19 @@ impl Parts {
                 }),
                 _ => Err("this host has no capture tool".to_string()),
             },
-            computer: Some(Arc::new(Computer::real())),
+            computer: Some(Arc::new(Computer::real_with(speakers))),
         }
     }
 }
 
 /// The fake computer: a sink at 42 % named for the fake device, and an EQ over a chain and a
 /// `pw-cli` that live in memory and keep their points there.
-fn fake_computer(display: &str, eq: FakeEq, volume_pct: u8) -> Computer {
+fn fake_computer(
+    display: &str,
+    eq: FakeEq,
+    volume_pct: u8,
+    speakers: Option<Arc<SpeakersStore>>,
+) -> Computer {
     let sink: Arc<dyn Sink> = Arc::new(FakeSink::new(Some(SinkState {
         volume: f32::from(volume_pct) / 100.0,
         muted: false,
@@ -514,11 +529,15 @@ fn fake_computer(display: &str, eq: FakeEq, volume_pct: u8) -> Computer {
         _ => {
             let params = FakeParams::new();
             params.holds(eq == FakeEq::Live);
-            Ok(EqControl::new(
-                Arc::new(FakeChain::new()),
-                Box::new(params),
-                Keep::Memory,
-            ))
+            let control =
+                EqControl::new(Arc::new(FakeChain::new()), Box::new(params), Keep::Memory);
+            Ok(match speakers {
+                Some(store) => {
+                    fake_speakers::seed(&store);
+                    control.with_speakers(store)
+                }
+                None => control,
+            })
         }
     };
     Computer::new(Ok(sink), controller)
@@ -567,7 +586,8 @@ impl Routes for PwRoutes {
 /// rate and nothing else in the way, so the path reads untouched; or, when asked, a route that
 /// alters the signal in every way: the player at 91 % and 44.1 kHz into a sink at 48 kHz and
 /// 54 %, the host EQ on and two other sounds mixing. The fake computer's EQ is part of the route:
-/// on with a curve that is not flat, it is in the path as the real chain would be.
+/// on with a curve that is not flat, or its crossfeed or virtual speakers on, it is in the path as
+/// the real chain would be, naming the stages that play.
 struct FakeRoute {
     display: String,
     /// Whether the route changes the signal (see [`FakeKnobs::route_changed`]).
@@ -577,12 +597,15 @@ struct FakeRoute {
 }
 
 impl FakeRoute {
-    /// Whether the fake computer's EQ is on with a curve that changes the sound.
-    fn eq_changes_the_sound(&self) -> bool {
-        self.computer.as_ref().is_some_and(|computer| {
-            let eq = computer.eq_view();
-            eq.on && eq.points.iter().any(|point| point.g != 0.0)
-        })
+    /// The stages of the fake computer's chain that change the sound: the EQ with a curve that is
+    /// not flat, the crossfeed and the virtual speakers; `None` while none does.
+    fn chain_stages(&self) -> Option<ChainStages> {
+        let eq = self.computer.as_ref()?.eq_view();
+        let stages = ChainStages {
+            eq: eq.on && eq.points.iter().any(|point| point.g != 0.0),
+            ..ChainStages::of_view(&eq).unwrap_or_default()
+        };
+        (stages.eq || stages.crossfeed || stages.speakers).then_some(stages)
     }
 }
 
@@ -615,6 +638,7 @@ impl Routes for FakeRoute {
             volume_milli: Some(if self.changed { 910 } else { 1000 }),
             muted: false,
         };
+        let stages = self.chain_stages();
         let playing = player.is_some();
         Some(RouteFacts {
             sink: Some(sink),
@@ -625,7 +649,15 @@ impl Routes for FakeRoute {
                 PlayerMatch::NoPlayer
             },
             others_mixing: if self.changed { 2 } else { 0 },
-            host_eq: self.changed || self.eq_changes_the_sound(),
+            host_eq: self.changed || stages.is_some(),
+            stages: if self.changed {
+                Some(ChainStages {
+                    eq: true,
+                    ..stages.unwrap_or_default()
+                })
+            } else {
+                stages
+            },
         })
     }
 }
@@ -697,6 +729,9 @@ struct Running {
 pub(crate) struct HostService {
     shared: Arc<Shared>,
     running: Mutex<Running>,
+    /// The daemon's one store of virtual speakers' sets, which every real computer this service
+    /// starts serves them from.
+    speakers: Mutex<Option<Arc<SpeakersStore>>>,
 }
 
 /// What turns the computer EQ on and off for a front end that holds no controller of its own: the
@@ -712,6 +747,9 @@ pub(crate) trait EqSwitch: Send + Sync {
         on: Option<bool>,
         choice: Option<(String, String)>,
     ) -> Result<(), String>;
+
+    /// Change the virtual speakers: turn them on or off, or choose a fetched set by its id.
+    async fn speakers(&self, on: Option<bool>, set: Option<String>) -> Result<(), String>;
 }
 
 /// The computer's controller as the service holds it, reached when a switch is turned.
@@ -752,6 +790,25 @@ impl EqSwitch for SharedSwitch {
                     amount_pct: None,
                     crossover_hz: None,
                     delay_ms: None,
+                    done: true,
+                },
+                &[],
+                |_| Vec::new(),
+                |_| async { Ok(()) },
+            )
+            .await
+            .map_err(|refusal| refusal.to_string())
+    }
+
+    async fn speakers(&self, on: Option<bool>, set: Option<String>) -> Result<(), String> {
+        let computer = locked(&self.0.computer)
+            .clone()
+            .ok_or_else(|| "computer controls unavailable: host audio is off".to_string())?;
+        computer
+            .eq_op(
+                HostEqOp::Speakers {
+                    on,
+                    set,
                     done: true,
                 },
                 &[],
@@ -854,7 +911,39 @@ impl HostService {
                 generation: Mutex::new(0),
             }),
             running: Mutex::new(Running::default()),
+            speakers: Mutex::new(None),
         }
+    }
+
+    /// Serve the virtual speakers from `store` in every real computer started from now on: the
+    /// daemon's one store, shared with the speakers service.
+    pub(crate) fn serve_speakers(&self, store: Arc<SpeakersStore>) {
+        *locked(&self.speakers) = Some(store);
+    }
+
+    /// What the speakers service asks for the chosen set: the one the computer running now keeps
+    /// (the service is linked once, and the computer is started again at every change of the
+    /// host's section or mode). `None` with no computer.
+    pub(crate) fn chosen_speakers_fn(&self) -> Box<dyn Fn() -> Option<String> + Send + Sync> {
+        let shared = Arc::clone(&self.shared);
+        Box::new(move || {
+            let computer = locked(&shared.computer).clone()?;
+            computer.chosen_speakers()
+        })
+    }
+
+    /// What the speakers service calls when the sets changed: the computer running now reads
+    /// them again, on the runtime this is called from, whatever thread the call comes from.
+    /// Needs a tokio runtime.
+    pub(crate) fn sets_changed_fn(&self) -> Box<dyn Fn() + Send + Sync> {
+        let shared = Arc::clone(&self.shared);
+        let runtime = tokio::runtime::Handle::current();
+        Box::new(move || {
+            let computer = locked(&shared.computer).clone();
+            if let Some(computer) = computer {
+                computer.sets_changed(&runtime);
+            }
+        })
     }
 
     /// A service running what `config` and `mode` ask for. Needs a tokio runtime.
@@ -899,8 +988,10 @@ impl HostService {
             return;
         }
         let parts = match mode {
-            HostMode::Fake => Parts::fake(FakeKnobs::from_env()),
-            _ => Parts::real(),
+            HostMode::Fake => {
+                Parts::fake_with(FakeKnobs::from_env(), locked(&self.speakers).clone())
+            }
+            _ => Parts::real(locked(&self.speakers).clone()),
         };
         launch(
             &mut running,
@@ -914,6 +1005,28 @@ impl HostService {
     #[cfg(test)]
     pub(crate) fn run_with(&self, parts: Parts) {
         self.run_with_in(parts, false);
+    }
+
+    /// [`HostService::run_with`] a computer whose EQ runs over `chain` and `params`, serving the
+    /// virtual speakers from the store this service was given, as a real computer does.
+    #[cfg(test)]
+    pub(crate) fn run_with_eq(&self, chain: FakeChain, params: FakeParams) {
+        let control = EqControl::new(Arc::new(chain), Box::new(params), Keep::Memory);
+        let control = match locked(&self.speakers).clone() {
+            Some(store) => control.with_speakers(store),
+            None => control,
+        };
+        self.run_with(Parts {
+            connect: found(Arc::new(fake_players(None))),
+            routes: None,
+            covers: Arc::new(|_| None),
+            helpers: Vec::new(),
+            frames: Err("no capture here".to_string()),
+            computer: Some(Arc::new(Computer::new(
+                Err("no sink here".to_string()),
+                Ok(control),
+            ))),
+        });
     }
 
     /// [`HostService::run_with`] as a daemon that runs in a container (or not) starts it.
@@ -1379,6 +1492,16 @@ fn stamped(view: HostView) -> HostView {
     }
 }
 
+/// The route with the stages of its filter chain, taken from the computer's EQ view where the
+/// route alone could not tell them apart.
+fn with_stages(mut route: RouteFacts, shared: &Shared) -> RouteFacts {
+    if route.host_eq && route.stages.is_none() {
+        let computer = locked(&shared.computer).clone();
+        route.stages = computer.and_then(|computer| ChainStages::of_view(&computer.eq_view()));
+    }
+    route
+}
+
 /// A route read under way, ended with it.
 struct Reading(JoinHandle<Option<RouteFacts>>);
 
@@ -1516,7 +1639,7 @@ async fn serve(
             }
             route = finished_route(&mut reading), if reading.is_some() => {
                 reading = None;
-                state.route = route;
+                state.route = route.map(|route| with_stages(route, shared));
                 emit(&state);
             }
             () = tokio::time::sleep_until(cover_due.unwrap_or_else(Instant::now)),

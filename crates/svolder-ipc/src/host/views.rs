@@ -87,7 +87,8 @@ pub struct FrameView {
     pub left: Vec<u8>,
     /// The right channel's bands, 240 bytes.
     pub right: Vec<u8>,
-    /// Left RMS, right RMS, left peak and right peak, as bytes on the same scale.
+    /// Left RMS, right RMS, left peak and right peak, as bytes on the same scale. A peak byte of
+    /// 255 means an over (a sample at or above 16-bit full scale); below that, 254 is the top.
     pub levels: [u8; 4],
     /// Whether a beat starts in this frame.
     #[serde(default)]

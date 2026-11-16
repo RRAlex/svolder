@@ -3,11 +3,11 @@
 // The core a theme is given: the model of the page, the actions that change a device or the
 // computer, the side of the page this viewer looks at (the device or the computer), the question a
 // theme can ask, the stack of modals, the router of the history, the preferences of the theme
-// mounted, light or dark, the lifecycle of a canvas, the host's analysis, the tone curve's maths
-// and gestures (`eq`: the bands' drag, the points' hand, the table), the plots' SVG, the words and
-// the clock, the section keeper, the frame (the menu's button, its menu, the picker of themes and
-// the toasts), the keys (the frame's own list and the binding of a theme's key table), the
-// registry of themes and the checks' driver for the device's facts (driver.js:
+// mounted, light or dark, the lifecycle of a canvas, the host's analysis and its levels alone, the
+// tone curve's maths and gestures (`eq`: the bands' drag, the points' hand, the table), the plots'
+// SVG, the words and the clock, the section keeper, the frame (the menu's button, its menu, the
+// picker of themes and the toasts), the keys (the frame's own list and the binding of a theme's key
+// table), the registry of themes and the checks' driver for the device's facts (driver.js:
 // test surface, as a theme's own driver is). `createCore` makes every module and joins what they
 // leave to it: the store's state and events go to the climb's toast and the tone mode's note, a
 // device shown pushes through the router, and another device on show closes every modal but a
@@ -90,6 +90,10 @@ export function createCore({
   const climb = createClimb({ toast, dismissToast, body: document.body });
   const toneNote = createToneNote({ toast, now: () => window.performance.now() });
   const analysis = createAnalysis({ EventSource: window.EventSource });
+  // the light form of the same frames, `{ t, lv }` alone, for the VU meter (vu-model.js)
+  const levels = createAnalysis({
+    EventSource: window.EventSource, url: 'api/v1/host/frames?only=levels',
+  });
   const registry = createRegistry(themes, {
     ...(importer ? { importer } : {}),
     beforeMount: (theme) => {
@@ -145,6 +149,9 @@ export function createCore({
     mounted: null,
     lifecycle: { watchVisible, canvasLoop },
     analysis,
+    // the host's levels alone (`{ t, lv }` frames, ~45 B each), shared by its holders like
+    // `analysis` and apart from it: a holder of one does not open the other
+    levels,
     title: null,
     // press-and-hold repeat (repeat.js); `hold` is its old name, pinned for a theme written
     // against it

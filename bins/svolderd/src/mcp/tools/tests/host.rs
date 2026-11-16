@@ -18,6 +18,7 @@ async fn get_host_reads_volume_eq_and_player() {
                 "points": [{"type": "PK", "frequency_hz": 1000.0, "gain_db": -3.0, "q": 1.0}]
             },
             "crossfeed": null,
+            "speakers": null,
             "player": {"title": "Song", "artist": "Band", "album": "Record", "status": "playing"}
         })
     );

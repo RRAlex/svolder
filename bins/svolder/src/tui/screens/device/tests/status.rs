@@ -279,8 +279,13 @@ fn a_boolean_readout_is_not_listed_on_the_raw_line() {
 /// The first Status line of `app` at `width` columns, as the text it draws.
 fn first_status_line(app: &App, width: usize) -> String {
     let theme = Theme::new(false);
-    super::super::status::status_lines(app, &theme, width, crate::tui::layout_tier::Tier::default())
-        [0]
+    super::super::status::status_lines(
+        app,
+        &theme,
+        width,
+        crate::tui::layout_tier::Tier::default(),
+        false,
+    )[0]
     .spans
     .iter()
     .map(|span| span.content.as_ref())
@@ -384,8 +389,13 @@ fn bifrost_facts(signal: Option<(i16, bool, u64)>) -> crate::backend::DeviceRow 
 /// The Status line `index` of `app` at `width` columns, as spans.
 fn status_line_spans(app: &App, width: usize, index: usize) -> Vec<Span<'static>> {
     let theme = Theme::new(false);
-    super::super::status::status_lines(app, &theme, width, crate::tui::layout_tier::Tier::default())
-        [index]
+    super::super::status::status_lines(
+        app,
+        &theme,
+        width,
+        crate::tui::layout_tier::Tier::default(),
+        false,
+    )[index]
         .spans
         .clone()
 }

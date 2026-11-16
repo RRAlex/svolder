@@ -28,7 +28,7 @@ use svolder_ipc::config::RefreshWeeks;
 use svolder_ipc::config::{
     COLORS, CONFIRM_QUIT, COVER_ART, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT,
     INTRO_SOUND, LINK_SPAN, MONOCHROME, MOUSE, PALETTE, THEME_BACKGROUND, TITLE_METER, TOOLTIPS,
-    TRANSITION, VISUALIZER,
+    TRANSITION, VISUALIZER, VU_REFERENCE,
 };
 use svolder_ipc::token::TokenSource;
 use svolder_ipc::{
@@ -208,6 +208,7 @@ pub const CATEGORIES: [(&str, &[Setting]); 5] = [
             Setting::HostAudio,
             Setting::Key(&VISUALIZER),
             Setting::Key(&COVER_ART),
+            Setting::Key(&VU_REFERENCE),
         ],
     ),
     (

@@ -474,6 +474,9 @@ impl World {
             crossfeed: request.crossfeed.clone(),
             crossfeed_on: request.crossfeed.is_some(),
             flat: request.flat,
+            speakers: None,
+            speakers_on: false,
+            speakers_loaded: None,
         };
         Ok((state, parse_conf(&text)))
     }
@@ -1606,6 +1609,7 @@ impl Lab {
                     rate_hz: None,
                     flat: false,
                     crossfeed: None,
+                    speakers: None,
                 };
                 // The daemon is not blocked by the command line: it ticks in the wait.
                 let staged = World::stage_apply(request);

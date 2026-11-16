@@ -187,7 +187,8 @@ export function redraw(place, html, fallback = null) {
  * list(entries), loading(page), failed(page) }`: `focus()` is the control the focus opens on,
  * `draw` draws the whole box, `put` one place inside it by its id and `list` the side list
  * alone, all keeping the focus. A `put` of what the place holds already changes nothing, so a
- * control in it keeps its element and the focus; `list` leaves the page pane as it stands, with
+ * control in it keeps its element and the focus, and a list it opened stays open (the opener's
+ * `aria-expanded` is the list's, not the place's); `list` leaves the page pane as it stands, with
  * what is typed, asked or scrolled there. A draw that names
  * a `title` changes it from then on (a popup whose title names what it is about), and one
  * that names `entries` changes the side list; a draw that names neither keeps both. `draw`,
@@ -330,11 +331,20 @@ export function createPopupFrame({
   }
   let watched = null;
 
-  /** Whether `place` holds `html` already, as the browser would parse it. */
+  /** Whether `place` holds `html` already, as the browser would parse it. The `aria-expanded` that
+   * a list stamps on its opener (list.js; an opener has `aria-haspopup`) says whether that list is
+   * open, not what was drawn: it is set aside on both sides, so a put of the same markup keeps an
+   * open list and its opener. Any other `aria-expanded` is compared. */
   function holds(place, html) {
     const parsed = document.createElement('template');
     parsed.innerHTML = html;
-    return parsed.innerHTML === place.innerHTML;
+    const live = document.createElement('template');
+    live.innerHTML = place.innerHTML;
+    for (const side of [parsed.content, live.content]) {
+      const marked = side.querySelectorAll('[aria-haspopup][aria-expanded]');
+      for (const one of marked) one.removeAttribute('aria-expanded');
+    }
+    return parsed.innerHTML === live.innerHTML;
   }
 
   /** Draw the whole box. An inline ask or a list open in it closes first: its markup goes with

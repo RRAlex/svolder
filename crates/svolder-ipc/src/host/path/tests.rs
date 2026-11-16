@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::host::HostView;
+use svolder_host::route::ChainStages;
 use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
 
 /// The device the routes below end in.
@@ -47,6 +48,7 @@ pub(in crate::host) fn clean() -> RouteFacts {
         player_match: PlayerMatch::Pid,
         others_mixing: 0,
         host_eq: false,
+        stages: None,
     }
 }
 
@@ -64,6 +66,13 @@ fn untouched_when_every_hop_leaves_it_alone() {
     let line = path_line(&clean(), &dac());
     assert_eq!(line.verdict, Verdict::Untouched);
     assert_eq!(line.words, vec!["untouched".to_string()]);
+    assert_eq!(
+        line.sentence().as_deref(),
+        Some(
+            "untouched from the player's output on; the player may still change the sound \
+             itself (loudness normalization, its own EQ)"
+        )
+    );
     let labels: Vec<_> = line.hops.iter().map(|hop| hop.label.as_str()).collect();
     assert_eq!(labels, ["player", "computer", "DAC"]);
     assert!(line.hops.iter().all(|hop| !hop.changes));
@@ -186,6 +195,55 @@ fn host_eq_on_is_named() {
     let line = path_line(&route, &dac());
     assert_eq!(line.verdict, Verdict::Changed);
     assert_eq!(line.words, vec!["host EQ on".to_string()]);
+}
+
+/// A route whose filter chain runs with the stages `stages` says.
+fn chain(eq: bool, crossfeed: bool, speakers: bool) -> RouteFacts {
+    let mut route = clean();
+    route.host_eq = true;
+    route.stages = Some(ChainStages {
+        eq,
+        crossfeed,
+        speakers,
+    });
+    route
+}
+
+#[test]
+fn each_stage_in_the_chain_is_named() {
+    for (route, word) in [
+        (chain(true, false, false), "host EQ on"),
+        (chain(false, true, false), "crossfeed on"),
+        (chain(false, false, true), "virtual speakers on"),
+    ] {
+        let line = path_line(&route, &dac());
+        assert_eq!(line.verdict, Verdict::Changed);
+        assert_eq!(line.words, vec![word.to_string()]);
+    }
+}
+
+#[test]
+fn stages_together_are_named_in_chain_order() {
+    let line = path_line(&chain(true, true, true), &dac());
+    assert_eq!(
+        line.words,
+        ["host EQ on", "crossfeed on", "virtual speakers on"]
+    );
+}
+
+#[test]
+fn a_chain_kept_flat_is_a_pass_through_never_untouched() {
+    let line = path_line(&chain(false, false, false), &dac());
+    assert_eq!(line.verdict, Verdict::Changed);
+    assert_eq!(line.words, vec!["EQ pass-through".to_string()]);
+}
+
+#[test]
+fn no_stage_word_without_a_chain() {
+    let mut route = chain(true, true, true);
+    route.host_eq = false;
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Untouched);
 }
 
 #[test]
@@ -793,4 +851,24 @@ fn only_a_dac_with_a_reading_per_port_is_judged_by_its_ports() {
     let mut device = dac();
     device.input = Some("USB 1".into());
     assert_eq!(path_line(&clean(), &device).verdict, Verdict::Untouched);
+}
+
+#[test]
+fn an_assumed_player_keeps_its_words_in_the_untouched_sentence() {
+    let mut route = clean();
+    route.player_match = PlayerMatch::Assumed;
+    let line = path_line(&route, &dac());
+    let sentence = line.sentence().expect("a sentence");
+    assert_eq!(
+        sentence,
+        "untouched from the player's output on (player assumed); the player may still change the \
+         sound itself (loudness normalization, its own EQ)"
+    );
+}
+
+#[test]
+fn a_changed_path_has_no_sentence() {
+    let mut route = clean();
+    route.sink.as_mut().unwrap().volume_milli = Some(540);
+    assert_eq!(path_line(&route, &dac()).sentence(), None);
 }

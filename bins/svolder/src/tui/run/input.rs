@@ -204,6 +204,7 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             let socket = watching.backend.as_ref().and_then(Backend::daemon_socket);
             watching.jobs.import(socket, *variant, name, target);
         }
+        Intent::Speakers(call) => start_speakers(&mut watching, *call),
         Intent::HostEq(op) => computer::eq(&mut watching, *op),
         Intent::MoveToDac(name) => computer::move_to_dac(&mut watching, name),
         // The computer's volume and mute: a request to the daemon when joined to one, else the
@@ -390,6 +391,10 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             )
             .await
         }
+        MouseAction::SetRow(row) => {
+            let intents = watching.app.click_set_row(row);
+            Box::pin(take_intents(intents, opener, watching, mouse, look, screen)).await
+        }
         MouseAction::PresetGo(row) => {
             focus_list(&mut watching.app, row);
             Flow::Continue(watching)
@@ -452,4 +457,13 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             take_intents(intents, opener, watching, mouse, look, screen).await
         }
     }
+}
+
+/// Send a call to the virtual speakers' sets to the daemon, off the loop.
+pub(super) fn start_speakers(
+    watching: &mut Watching,
+    call: crate::tui::boxes::speakers::SpeakersCall,
+) {
+    let socket = watching.backend.as_ref().and_then(Backend::daemon_socket);
+    watching.jobs.speakers(socket, call);
 }

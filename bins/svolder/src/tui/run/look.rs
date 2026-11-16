@@ -615,8 +615,8 @@ fn row_rect(areas: &FrameAreas, id: FunctionId) -> Option<Rect> {
 /// volume is climbing to a target ([`App::climbing`]), a meter's peak marker is falling, the tone
 /// curve's spectrum is drifting, or a beat of the daemon's frames is pulsing the row or the
 /// borders; [`SPECTRUM_TICK`] while the Spectrum row of what the host plays is the only thing
-/// moving; a hundred milliseconds or faster while
-/// a spinner is turning; the meters' own pace
+/// moving, or the VU rows are on the screen with the capture running and a needle off rest or a
+/// lamp lit; a hundred milliseconds or faster while a spinner is turning; the meters' own pace
 /// ([`METER_PERIOD`]) while the host's capture is the level's source and the breathing borders
 /// or hue drift follow it (the pace an amp's meter readings redraw the same decoration at, since
 /// a capture block draws no frame of its own); and the app's own slow tick otherwise, which it
@@ -656,7 +656,7 @@ fn base_period(app: &App, effects: &Effects) -> Duration {
     if moving {
         return FAST_TICK;
     }
-    if app.spectrum_moving() {
+    if app.spectrum_moving() || app.vu_moving() {
         return SPECTRUM_TICK;
     }
     if app.spinning() {

@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "bins/*"]
 
 [workspace.package]
-version = "0.35.1"
+version = "0.36.1"
 edition = "2024"
 rust-version = "1.93"
 license = "GPL-3.0-or-later"
@@ -46,6 +46,14 @@ svolder-mqtt = { path = "crates/svolder-mqtt" }
 svolder-fake = { path = "crates/svolder-fake" }
 svolder-host = { path = "crates/svolder-host" }
 svolder-autoeq = { path = "crates/svolder-autoeq" }
+svolder-speakers = { path = "crates/svolder-speakers" }
+# The SOFA (HDF5) reader the speaker sets are converted through, once, at import. Its own
+# high-level reader, resampler and renderer are left off (`default-features = false`): only its
+# `hdf` module is used, so no resampling crate comes with it. Pinned: one maintainer, 0.x API.
+sofar = { version = "=0.4.0", default-features = false }
+# The zip reader for the per-subject archives some sets are published in: deflate through
+# zlib-rs, reading only, no compressor and none of the default features.
+zip = { version = "9.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 svolder-walk = { path = "crates/svolder-walk" }
 # The HTTP client the AutoEq download speaks through: rustls with the ring provider, no gzip,
 # and never the baked-in Mozilla roots (`webpki-roots`, a CDLA-Permissive-2.0 data licence this

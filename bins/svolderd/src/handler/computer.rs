@@ -79,6 +79,15 @@ impl Daemon {
                 let flatten = |names: Vec<String>| self.flatten_devices(origin, names);
                 answer(self.host.host_eq(op, &presets, holders, flatten).await)
             }
+            HostEqOp::Speakers { ref set, .. } => {
+                let named = set.clone();
+                let answered = answer(
+                    self.host
+                        .host_eq(op, &[], |_| Vec::new(), |_| async { Ok(()) })
+                        .await,
+                );
+                self.speakers.missing_reason(answered, named.as_deref())
+            }
             op => answer(
                 self.host
                     .host_eq(op, &[], |_| Vec::new(), |_| async { Ok(()) })

@@ -686,11 +686,21 @@ await ok('a_put_over_the_place_of_an_open_lists_opener_or_an_asks_place_closes_i
   const pop = () => r.$('popup-sample');
   const chip = r.$(IDS.listOpen);
   chip.parentElement.id = 'chip-place';
+  const drawn = chip.parentElement.innerHTML;
   chip.click();
   assert.equal(openLists(), 1);
   // a put elsewhere leaves the list alone
   r.frame.put(IDS.live, '<span>other</span>');
   assert.equal(openLists(), 1, 'a put over another place keeps the list');
+  // so does a put of the opener's place as it was drawn: the open list's `aria-expanded` on the
+  // opener is not a change of what the place holds
+  r.frame.put('chip-place', drawn);
+  assert.equal(openLists(), 1, 'a put of what the place holds keeps the list');
+  assert.equal(r.$(IDS.listOpen), chip, 'and the opener');
+  // an `aria-expanded` that is not a list opener's is what the place shows: a change of it is drawn
+  r.frame.put(IDS.live, '<button type="button" id="fold" aria-expanded="false">more</button>');
+  r.frame.put(IDS.live, '<button type="button" id="fold" aria-expanded="true">more</button>');
+  assert.equal(r.$('fold').getAttribute('aria-expanded'), 'true', 'a disclosure\'s state is drawn');
   assert.ok(pop().querySelector('.fi-opt:focus'), 'the focus is on an option');
   r.frame.put('chip-place', '<p>drawn again</p>');
   assert.equal(openLists(), 0, 'the opener left with its place: the list is closed');

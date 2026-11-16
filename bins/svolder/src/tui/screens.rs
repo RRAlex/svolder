@@ -23,6 +23,7 @@ pub mod menu;
 pub mod presets;
 pub mod quit;
 pub mod settings;
+pub mod speakers;
 pub mod switch;
 pub mod telemetry;
 pub mod tone;

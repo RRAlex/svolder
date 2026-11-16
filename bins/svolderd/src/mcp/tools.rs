@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The tools the MCP server offers: five that read (four a device, `get_host` the computer) and,
-//! with `[mcp] writes`, eight that act: three that change a device, `identify`, which asks it to
-//! show itself, and four for the computer (see [`host`]).
+//! with `[mcp] writes`, nine that act: three that change a device, `identify`, which asks it to
+//! show itself, and five for the computer (see [`host`]).
 //!
 //! Every tool goes through the daemon's own request path ([`Fleet`]), the one the socket's
 //! clients use, so a value is validated and refused exactly as `svolder set` does. Results
@@ -195,6 +195,7 @@ impl Tools {
             "host_mute" => self.host_mute(&request, caller).await,
             "set_host_eq" => self.set_host_eq(&request, caller).await,
             "set_host_crossfeed" => self.set_host_crossfeed(&request).await,
+            "set_host_speakers" => self.set_host_speakers(&request).await,
             _ => self.mute(&request, caller).await,
         };
         Ok(match outcome {

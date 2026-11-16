@@ -19,6 +19,8 @@
 //! - `devices`: the configured devices from the page: list, add, edit, remove, make default.
 //! - `hops`: the hops after the DAC from the page: add, edit, remove and move.
 //! - `presets`: the user's presets from the page: save, rename and delete.
+//! - `speakers`: virtual speakers' sets from the page: list, fetch, import and forget, through the
+//!   daemon.
 //! - `tone`: the tone control from the page: the mode, a band, the loudness and a preset's recall.
 //! - `walk`: the device walk from the page: start it, answer it, step back, cancel it.
 
@@ -28,6 +30,7 @@ mod device_presets;
 mod devices;
 mod hops;
 mod presets;
+mod speakers;
 mod tone;
 mod walk;
 
@@ -51,6 +54,9 @@ use crate::device::Command;
 use crate::writer::{Glided, Mode, Options, Outcome};
 
 pub(crate) use autoeq::{UPLOAD_BODY_MAX, UPLOAD_PATH};
+pub(crate) use speakers::{
+    IMPORT_BODY_MAX, IMPORT_BODY_TIMEOUT, IMPORT_BUSY, IMPORT_PATH, import_permit,
+};
 
 /// The writes' routes.
 pub(crate) fn routes() -> Router<Web> {
@@ -62,6 +68,7 @@ pub(crate) fn routes() -> Router<Web> {
         .route("/api/v1/devices/{device}/identify", post(identify))
         .merge(tone::routes())
         .merge(autoeq::routes())
+        .merge(speakers::routes())
         .merge(device_presets::routes())
         .merge(presets::routes())
         .merge(hops::routes())

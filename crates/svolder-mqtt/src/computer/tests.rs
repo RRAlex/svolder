@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use svolder_host::eq::crossfeed::{Model, ModelView};
-use svolder_host::eq::{CrossfeedView, PointView};
+use svolder_host::eq::{CrossfeedView, PointView, SpeakersView};
 
 use super::*;
 
@@ -24,13 +24,13 @@ fn view(on: bool, preset: Option<&str>, gain: f64) -> EqView {
 
 #[test]
 fn read_only_makes_the_switch_a_binary_sensor() {
-    let entries = entries("svolder", "homeassistant", false, None);
+    let entries = entries("svolder", "homeassistant", false, None, None);
     assert_eq!(
         entries[0].topic,
         "homeassistant/binary_sensor/svolder_computer/computer_eq/config"
     );
     assert!(entries[0].payload.get("command_topic").is_none());
-    let with = super::entries("svolder", "homeassistant", true, None);
+    let with = super::entries("svolder", "homeassistant", true, None, None);
     assert_eq!(
         with[0].topic,
         "homeassistant/switch/svolder_computer/computer_eq/config"
@@ -43,13 +43,13 @@ fn read_only_makes_the_switch_a_binary_sensor() {
 
 #[test]
 fn an_empty_discovery_prefix_publishes_nothing() {
-    assert!(entries("svolder", "", true, None).is_empty());
+    assert!(entries("svolder", "", true, None, None).is_empty());
 }
 
 #[test]
 fn no_volume_mute_or_point_entity_exists() {
     for commands in [true, false] {
-        let keys: Vec<String> = entries("svolder", "homeassistant", commands, None)
+        let keys: Vec<String> = entries("svolder", "homeassistant", commands, None, None)
             .iter()
             .map(|e| e.topic.clone())
             .collect();
@@ -110,7 +110,7 @@ fn xf_view(on: bool, model: &str, preset: Option<&str>) -> CrossfeedView {
 #[test]
 fn the_crossfeed_entities_are_a_switch_and_a_select_with_commands() {
     let view = xf_view(false, "bauer", Some("bs2b default"));
-    let all = entries("svolder", "homeassistant", true, Some(&view));
+    let all = entries("svolder", "homeassistant", true, Some(&view), None);
     assert_eq!(all.len(), 4);
     assert_eq!(
         all[2].topic,
@@ -142,7 +142,7 @@ fn the_crossfeed_entities_are_a_switch_and_a_select_with_commands() {
 #[test]
 fn without_commands_the_crossfeed_is_a_binary_sensor_and_a_sensor() {
     let view = xf_view(false, "bauer", None);
-    let all = entries("svolder", "homeassistant", false, Some(&view));
+    let all = entries("svolder", "homeassistant", false, Some(&view), None);
     assert_eq!(
         all[2].topic,
         "homeassistant/binary_sensor/svolder_computer/computer_crossfeed/config"
@@ -159,13 +159,23 @@ fn without_commands_the_crossfeed_is_a_binary_sensor_and_a_sensor() {
 
 #[test]
 fn a_controller_without_crossfeed_announces_none_and_topics_of_lists_every_entity() {
-    assert_eq!(entries("svolder", "homeassistant", true, None).len(), 2);
+    assert_eq!(
+        entries("svolder", "homeassistant", true, None, None).len(),
+        2
+    );
     for commands in [true, false] {
         let view = xf_view(true, "meier", None);
-        let announced: Vec<String> = entries("svolder", "homeassistant", commands, Some(&view))
-            .into_iter()
-            .map(|e| e.topic)
-            .collect();
+        let speakers = sp_view(false, None);
+        let announced: Vec<String> = entries(
+            "svolder",
+            "homeassistant",
+            commands,
+            Some(&view),
+            Some(&speakers),
+        )
+        .into_iter()
+        .map(|e| e.topic)
+        .collect();
         assert_eq!(topics_of("homeassistant", commands), announced);
     }
     assert!(topics_of("", true).is_empty());
@@ -238,4 +248,168 @@ fn a_preset_command_names_a_model_and_a_preset_or_is_custom() {
     );
     assert_eq!(crossfeed::parse_preset(&view, "Bauer"), None);
     assert_eq!(crossfeed::parse_preset(&view, ""), None);
+}
+
+fn set_view(id: &str, label: &str, with_room: bool) -> svolder_host::eq::speakers::SetView {
+    svolder_host::eq::speakers::SetView {
+        id: id.into(),
+        room: if with_room { "with" } else { "no" }.into(),
+        room_name: if with_room { "With room" } else { "No room" }.into(),
+        term: if with_room { "BRIR" } else { "HRTF" }.into(),
+        label: label.into(),
+        licence: "CC-BY-4.0".into(),
+        credit: Some("Credit words".into()),
+        source_url: "https://example.org/set".into(),
+    }
+}
+
+fn sp_view(on: bool, chosen: Option<&str>) -> SpeakersView {
+    SpeakersView {
+        on,
+        set: chosen.map(str::to_string),
+        room_name: chosen.map(|_| "No room".into()),
+        term: chosen.map(|_| "HRTF".into()),
+        licence: "CC-BY-4.0".into(),
+        credit: Some("Credit words".into()),
+        source_url: "https://example.org/set".into(),
+        angles: "left 30.0 deg, right 330.0 deg, 1.5 m".into(),
+        loudness_db: -7.0,
+        sets: vec![set_view("a", "Set A", false), set_view("b", "Set B", true)],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_speakers_entities_are_a_switch_and_a_select_with_commands() {
+    let view = sp_view(false, Some("a"));
+    let all = entries("svolder", "homeassistant", true, None, Some(&view));
+    assert_eq!(all.len(), 4);
+    assert_eq!(
+        all[2].topic,
+        "homeassistant/switch/svolder_computer/computer_speakers/config"
+    );
+    assert_eq!(all[2].payload["name"], "Virtual speakers");
+    assert_eq!(
+        all[2].payload["command_topic"],
+        "svolder/computer/computer_speakers/set"
+    );
+    assert_eq!(
+        all[3].topic,
+        "homeassistant/select/svolder_computer/computer_speakers_set/config"
+    );
+    assert_eq!(
+        all[3].payload["options"],
+        serde_json::json!(["Set A · No room · HRTF", "Set B · With room · BRIR"])
+    );
+    assert_eq!(
+        all[3].payload["json_attributes_topic"],
+        "svolder/computer/computer_speakers_set/attributes"
+    );
+}
+
+#[test]
+fn without_commands_the_speakers_are_a_binary_sensor_and_a_sensor() {
+    let view = sp_view(false, None);
+    let all = entries("svolder", "homeassistant", false, None, Some(&view));
+    assert_eq!(
+        all[2].topic,
+        "homeassistant/binary_sensor/svolder_computer/computer_speakers/config"
+    );
+    assert_eq!(
+        all[3].topic,
+        "homeassistant/sensor/svolder_computer/computer_speakers_set/config"
+    );
+    assert!(all[3].payload.get("command_topic").is_none());
+    assert!(all[3].payload.get("options").is_none());
+}
+
+#[test]
+fn a_controller_without_speakers_announces_none_and_topics_of_lists_every_entity() {
+    assert_eq!(
+        entries("svolder", "homeassistant", true, None, None).len(),
+        2
+    );
+    let view = sp_view(false, None);
+    for commands in [true, false] {
+        let announced: Vec<String> =
+            entries("svolder", "homeassistant", commands, None, Some(&view))
+                .into_iter()
+                .map(|e| e.topic)
+                .collect();
+        let all = topics_of("homeassistant", commands);
+        assert!(announced.iter().all(|t| all.contains(t)), "{announced:?}");
+        assert!(all.iter().any(|t| t.contains("computer_speakers_set")));
+    }
+}
+
+#[test]
+fn two_sets_with_one_label_are_told_apart_by_their_id() {
+    let sets = [set_view("a", "Same", false), set_view("b", "Same", false)];
+    assert_eq!(
+        speakers::options(&sets),
+        ["Same · No room · HRTF (a)", "Same · No room · HRTF (b)"]
+    );
+}
+
+#[test]
+fn the_speakers_state_names_the_chosen_set_and_carries_its_licence() {
+    let state = speakers::state(&sp_view(true, Some("b")));
+    assert_eq!(state.on, "ON");
+    assert_eq!(state.set, "Set B · With room · BRIR");
+    let attrs: serde_json::Value = serde_json::from_str(&state.attributes).unwrap();
+    assert_eq!(attrs["licence"], "CC-BY-4.0");
+    assert_eq!(attrs["credit"], "Credit words");
+    assert_eq!(attrs["source_url"], "https://example.org/set");
+    // Kept while off.
+    assert_eq!(speakers::state(&sp_view(false, Some("a"))).on, "OFF");
+    assert_eq!(
+        speakers::state(&sp_view(false, Some("a"))).set,
+        "Set A · No room · HRTF"
+    );
+    // No choice, or a choice that is not fetched: no set, no attributes.
+    for chosen in [None, Some("gone")] {
+        let state = speakers::state(&sp_view(false, chosen));
+        assert!(state.set.is_empty() && state.attributes.is_empty());
+    }
+}
+
+#[test]
+fn a_set_command_names_a_fetched_set_in_any_case() {
+    let view = sp_view(false, None);
+    assert_eq!(
+        speakers::parse_set(&view, " set b · with room · brir "),
+        Some("b".to_string())
+    );
+    assert_eq!(speakers::parse_set(&view, "Set B"), None);
+    assert_eq!(speakers::parse_set(&view, ""), None);
+}
+
+#[test]
+fn no_chosen_set_resets_the_select_to_unknown_and_the_attributes_to_nothing() {
+    for chosen in [None, Some("gone")] {
+        let state = speakers::state(&sp_view(false, chosen));
+        assert_eq!(state.set_payload(), "None");
+        assert_eq!(state.attributes_payload(), "{}");
+    }
+    let state = speakers::state(&sp_view(false, Some("a")));
+    assert_eq!(state.set_payload(), "Set A · No room · HRTF");
+    assert!(state.attributes_payload().contains("CC-BY-4.0"));
+}
+
+#[test]
+fn an_option_that_differs_only_in_case_is_matched_exactly_first() {
+    let mut view = sp_view(false, None);
+    view.sets = vec![set_view("a", "Room", false), set_view("b", "room", false)];
+    assert_eq!(
+        speakers::parse_set(&view, "room · No room · HRTF"),
+        Some("b".to_string())
+    );
+    assert_eq!(
+        speakers::parse_set(&view, "Room · No room · HRTF"),
+        Some("a".to_string())
+    );
+    assert_eq!(
+        speakers::parse_set(&view, "ROOM · no room · hrtf"),
+        Some("a".to_string())
+    );
 }

@@ -33,8 +33,10 @@ command -v pipewire >/dev/null && command -v pw-dump >/dev/null && command -v pw
   && command -v wpctl >/dev/null && command -v wireplumber >/dev/null && command -v python3 >/dev/null \
   || fail "needs pipewire, wireplumber and their tools (pw-dump, pw-cat, pw-record, pw-link, pw-metadata, wpctl) and python3 with numpy" 2
 python3 -I -c 'import numpy' 2>/dev/null || fail "python3 needs numpy" 2
+python3 -I "$HERE/vu_selftest.py" || fail "the VU phase's own check (vu_selftest.py) failed" 2
 [ -x "$REPO/target/debug/svolderd" ] || fail "no target/debug/svolderd (make host-e2e builds it)" 2
 [ -x "$REPO/target/debug/examples/xf_expect" ] || fail "no target/debug/examples/xf_expect (make host-e2e builds it)" 2
+[ -x "$REPO/target/debug/examples/vs_expect" ] || fail "no target/debug/examples/vs_expect (make host-e2e builds it)" 2
 echo "== daemon binary: $REPO/target/debug/svolderd, built $(date -r "$REPO/target/debug/svolderd" '+%F %T')"
 
 BEFORE=$(audio_procs)

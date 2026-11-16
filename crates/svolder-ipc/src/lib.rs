@@ -50,14 +50,15 @@ pub use socket::protocol::{
     CODE_UNKNOWN_REQUEST, CODE_USAGE, COMMAND_DEADLINE, COVER_CHUNK_BYTES, ConfiguredDevice,
     Connect, ConnectFailure, CoverReader, DEFAULT_REQUEST_TIMEOUT, DeviceConfigOp, DeviceInfo,
     Event, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER,
-    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SERVER_SWITCH, FEATURE_UNKNOWN_REQUEST_CODE,
-    FEATURE_WALK, FEATURES, HostEqOp, JOB_RESULT_MAX_BYTES, JOB_STOP_BOUND, JobEvent, JobId,
-    JobState, LinkChange, MAX_SCAN_WINDOW, McpStatus, MqttOp, MqttProblem, MqttStatus,
-    NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, PassphraseKind, PresetOp, ProfileChoice,
-    READINGS_SPAN_SECS, RELOAD_TIMEOUT, RUNTIME_STOP_BOUND, Reason, RecallOut, Reply, Request,
-    RequestLine, Response, SERIES_SIGNAL, ScanEntry, SeriesOut, Server, TokenInfo, TokenKind,
-    ValueObject, WALK_IDLE_BOUND, WEB_OFF, WRITE_SETTLE_BOUND, WalkOp, WebStatus, cover_chunk,
-    not_found_yet, raw_json, to_line,
+    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS,
+    FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, HostEqOp, JOB_RESULT_MAX_BYTES,
+    JOB_STOP_BOUND, JobEvent, JobId, JobState, LinkChange, MAX_SCAN_WINDOW, McpStatus, MqttOp,
+    MqttProblem, MqttStatus, NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, PassphraseKind,
+    PresetOp, ProfileChoice, READINGS_SPAN_SECS, RELOAD_TIMEOUT, RUNTIME_STOP_BOUND, Reason,
+    RecallOut, Reply, Request, RequestLine, Response, SERIES_SIGNAL, SPEAKERS_OFF_PREFIX,
+    ScanEntry, SeriesOut, Server, SpeakersAngles, SpeakersCatalogue, SpeakersOp, SpeakersProgress,
+    SpeakersRoom, SpeakersSaved, SpeakersSet, TokenInfo, TokenKind, ValueObject, WALK_IDLE_BOUND,
+    WEB_OFF, WRITE_SETTLE_BOUND, WalkOp, WebStatus, cover_chunk, not_found_yet, raw_json, to_line,
 };
 pub use socket::server::{Bound, Handler, bind, listen_fds, serve, serve_bound, serve_on};
 pub use socket::signal::{

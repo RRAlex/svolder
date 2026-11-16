@@ -69,8 +69,10 @@ Each says how a part works now and the principles behind it.
 - [The MCP server](design/mcp-server.md): the HTTP server, the tools, the volume rules for a model.
 - [Host audio](design/host-audio.md): the computer's sink, players and capture, and the computer EQ.
 - [The daemon's capture](design/host-capture.md): holds, shared capture, frames to web and socket.
+- [The VU meter](design/vu-meter.md): the scale, the reference, the needle's ballistics, the over
+  lamp and the golden file both engines follow.
 - [Computer controls](design/host-control.md), [preamp](design/host-control-preamp.md),
-  [crossfeed](design/crossfeed.md).
+  [crossfeed](design/crossfeed.md), [virtual speakers](design/virtual-speakers.md).
 - [The life of one volume change](design/volume-change.md): a key press on the TUI to the reading
   that comes back, step by step.
 - [The terminal UI](design/tui.md): the app and its loop, screens and boxes, the key table and the

@@ -54,7 +54,9 @@ A popup is three parts, under `core/popups/`:
   on the veil are the router's `close()`, an entry is `step(id)`, the way back is `step(null)`.
   `draw` draws the whole box and `put` one place in it by its id (a live line), so a reading
   never draws over an open ask; a `put` of what the place holds already changes nothing, so a
-  control in it keeps its element and the focus (a control in a place that is put has an id).
+  control in it keeps its element and the focus (a control in a place that is put has an id), and
+  a list it opened stays open: the `aria-expanded` a list sets on its opener (`aria-haspopup`) is
+  not compared.
   `list(entries)` draws the side list alone: the pane stays, with what is typed, asked or
   scrolled there. A draw may name a `title` (a popup whose title names what it is about) and
   `entries`; each stands from then on, a draw that names neither keeps both, and so do the loading
@@ -303,17 +305,40 @@ from a button in the page pane, as a list in a popup is (the pane is a place for
 
 ## Sound
 
-The menu's *Sound…* row (`core/popups/sound/`, a writer's) is one popup with two tabs, *EQ library*
-and *Crossfeed*. The frame's `draw` takes `head` (header tools, the tab strip's neighbours) and
-`bar` (a strip under the header that does not scroll); a popup with no side list is `fp-single`.
-`listed.js` lists `sound` (no `entries`); the EQ library has no listed popup of its own: its
-folder `popups/eq-library/` is the Sound popup's first tab, drawn into a view of the frame by
-`popups/sound/wire.js`, with its three pages as pills under the tabs. The Crossfeed tab is
+The menu's *Sound…* row (`core/popups/sound/`, a writer's) is one popup with three tabs, *EQ
+library*, *Crossfeed* and *Virtual speakers*. The frame's `draw` takes `head` (header tools, the tab
+strip's neighbours) and `bar` (a strip under the header that does not scroll); a popup with no side
+list is `fp-single`. `listed.js` lists `sound` (no `entries`); the EQ library has no listed popup of
+its own: its folder `popups/eq-library/` is the Sound popup's first tab, drawn into a view of the
+frame by `popups/sound/wire.js`, with its three pages as pills under the tabs. The Crossfeed tab is
 `popups/crossfeed/` (draw and wire): a header switch, Model and Preset menus, the two level curves
 and Level, Crossover and Delay steppers (one lane `actions.computer.setCrossfeed`: fields merged,
 the newest wins), every word and range from the daemon's view ([crossfeed.md](crossfeed.md)). The
 tabs are a tablist whose panel is the page pane (the tabs' `aria-controls` is
 `popupPanelId('sound')`).
+
+The Virtual speakers tab is `popups/speakers/` (`draw.js` the markup, `pictures.js` the pictures
+as strings, `wire.js` the part that reads and writes), with its calls in `core/speakers-actions.js`
+([virtual-speakers.md](virtual-speakers.md)). It is a third tab with its own header switch (router
+page `speakers`) beside Crossfeed's, which stays as it was; the daemon keeps the two exclusive and
+the tab dots follow. It reads `host.computer.eq.speakers`, the daemon's view, with what this viewer
+asked laid over it (held key `speakers`, the lane held like crossfeed's) and the catalogue
+(`api/v1/speakers/catalogue`), whose answer is the truth about which sets are fetched. The page
+shows, in order, a note of what turned the speakers off or refused, the three views of the chosen
+set (Arrivals, Directions, Decay: side by side when the popup's own box is 1120 px wide or more,
+one at a time with chips below otherwise; the chip is kept in `localStorage`
+`svolder.speakers.chip`; the switch is a container query of the tab, so the frame's one media
+width stays the phone's), the two choice cards ("With room · BRIR", "No room · HRTF", whose words
+come from the data, never from the page), the licence line, the four paths' response with its
+facts, the list of sets (filter pills, Fetch with Cancel, Use, Forget) and the person's own file
+(SOFA or WAV, up to 32 MiB, read by the page and sent as base64). Every number is the daemon's:
+the pictures draw the view's `curve`, `angles` and `timing`; a set with no `timing` says "Not
+measured for this set." in Arrivals and Decay, and Directions draws only the two measured angles.
+A fetch shows "Fetching..." with Cancel and no count (the route answers once; Cancel aborts the
+request, which cancels the daemon's job). A fetch's answer and the stream's change of the set list
+may come in either order, and a set another front end removed answers `missing`: the part reads
+the catalogue again, says so and does not retry. With `SVOLDER_HOST=fake` the daemon serves two
+synthetic sets from a store of its own in its private runtime directory, never the person's.
 
 ## The EQ library
 

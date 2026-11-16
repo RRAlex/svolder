@@ -32,6 +32,9 @@ impl Case {
                     .find(|word| *word != get(&default))
                     .expect("a list of words has one besides the default"),
             ),
+            TuiSettingKind::Number { get, min, .. } => {
+                TuiValue::Number(if get(&default) == min { min + 1 } else { min })
+            }
             TuiSettingKind::Accent => unreachable!("the accent is not applied"),
         }
     }
@@ -49,6 +52,7 @@ fn cases() -> Vec<Case> {
             let toml = |tui: &TuiConfig| match key.kind {
                 TuiSettingKind::Bool { get, .. } => get(tui).to_string(),
                 TuiSettingKind::Word { get, .. } => format!("{:?}", get(tui)),
+                TuiSettingKind::Number { get, .. } => get(tui).to_string(),
                 TuiSettingKind::Accent => format!("{:?}", tui.accent.as_deref().unwrap_or("")),
             };
             let mut case = Case {
@@ -256,7 +260,7 @@ fn a_word_for_a_switch_is_tomls_own_error() {
     }
 }
 
-/// The table holds the nineteen keys in the order the template lists them.
+/// The table holds the twenty keys in the order the template lists them.
 #[test]
 fn the_table_lists_the_keys_in_template_order() {
     let names: Vec<&str> = TUI_SETTINGS.iter().map(|key| key.key).collect();
@@ -279,6 +283,7 @@ fn the_table_lists_the_keys_in_template_order() {
             "host_audio",
             "visualizer",
             "cover_art",
+            "vu_reference",
             "graphs",
             "graph_span",
             "link_span",
@@ -316,6 +321,11 @@ fn a_key_reads_back_what_apply_set() {
                 assert_eq!(case.key.word(&tui), Some(word));
                 assert_eq!(case.key.flag(&tui), None);
             }
+            TuiValue::Number(number) => {
+                assert_eq!(case.key.number(&tui), Some(number));
+                assert_eq!(case.key.flag(&tui), None);
+                assert_eq!(case.key.word(&tui), None);
+            }
         }
     }
 }
@@ -335,6 +345,64 @@ fn a_word_key_takes_only_its_own_words() {
             assert_eq!(get(&tui), word);
         }
     }
+}
+
+/// A number key holds its range: a value outside it is held at the nearest end, the ends and
+/// the middle are taken as they are, and the default sits inside.
+#[test]
+fn a_number_key_holds_its_range() {
+    let mut seen = 0;
+    for key in TUI_SETTINGS {
+        let TuiSettingKind::Number {
+            get, set, min, max, ..
+        } = key.kind
+        else {
+            continue;
+        };
+        seen += 1;
+        let mut tui = TuiConfig::default();
+        assert!((min..=max).contains(&get(&tui)), "{}", key.key);
+        for (asked, held) in [(min - 40, min), (max + 40, max), (min, min), (max, max)] {
+            set(&mut tui, asked);
+            assert_eq!(get(&tui), held, "{}: {asked}", key.key);
+        }
+        set(&mut tui, i64::MAX);
+        assert_eq!(get(&tui), max, "{}: the widest number", key.key);
+        set(&mut tui, i64::MIN);
+        assert_eq!(get(&tui), min, "{}: the narrowest number", key.key);
+    }
+    assert_eq!(seen, 1, "vu_reference is the one number key");
+}
+
+/// The VU reference takes the engine's range and default: -30 to -6, -18.
+#[test]
+fn the_vu_reference_is_the_engines_range() {
+    let TuiSettingKind::Number {
+        get, set, min, max, ..
+    } = VU_REFERENCE.kind
+    else {
+        panic!("vu_reference is a number");
+    };
+    assert_eq!(
+        (min, max, get(&TuiConfig::default())),
+        (
+            i64::from(svolder_host::vu::Reference::MIN),
+            i64::from(svolder_host::vu::Reference::MAX),
+            i64::from(svolder_host::vu::Reference::default().db())
+        )
+    );
+    let mut tui = TuiConfig::default();
+    set(&mut tui, -17);
+    assert_eq!(tui.vu_reference, -17);
+}
+
+/// The VU reference's unit is the one the Settings box writes after it.
+#[test]
+fn the_vu_reference_carries_its_unit() {
+    let TuiSettingKind::Number { unit, .. } = VU_REFERENCE.kind else {
+        panic!("vu_reference is a number");
+    };
+    assert_eq!(unit, "dBFS");
 }
 
 /// The words of a key are the ones its error message and the Settings box list.

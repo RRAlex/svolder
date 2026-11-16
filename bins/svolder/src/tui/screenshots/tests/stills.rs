@@ -3,7 +3,7 @@
 
 //! The five stills, built from a hand-written correction.
 
-use crate::tui::screenshots::scenes::{Still, still, still_with};
+use crate::tui::screenshots::scenes::{Still, still, still_sized, still_with};
 use crate::tui::screenshots::text::{HostDetails, guard};
 use crate::tui::screenshots::world::stand_in;
 use crate::tui::test_support::{text, theme_for};
@@ -213,4 +213,23 @@ fn a_still_built_twice_is_the_same_frame() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     let two = still(&stand_in(), Still::Dac).buffer;
     assert_eq!(one, two);
+}
+
+#[test]
+fn the_vu_rows_are_in_the_device_still_from_100_by_45_and_read_the_seeded_signal() {
+    let rows = |size| text(&still_sized(&stand_in(), Still::Dac, size, |_| {}).buffer).join("\n");
+    let tall = rows((100, 45));
+    for label in ["VU L", "VU R"] {
+        let line = tall
+            .lines()
+            .find(|line| line.contains(label))
+            .unwrap_or_else(|| panic!("no {label} row\n{tall}"));
+        assert!(
+            line.contains('┃') && !line.contains("< -20") && !line.contains('—'),
+            "{line}"
+        );
+    }
+    assert!(tall.contains("(0 VU = -18 dBFS)"), "{tall}");
+    // The README's size (120 by 40) is below 100 by 45 in height: its stills carry no meter.
+    assert!(!rows((120, 40)).contains("VU L"));
 }

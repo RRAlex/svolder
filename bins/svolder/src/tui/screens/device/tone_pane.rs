@@ -9,7 +9,7 @@ use svolder_profiles::convert::{frequency_text, gain_text};
 use svolder_profiles::{EqMode, EqParam, EqSpec};
 use svolder_proto::FunctionId;
 
-use crate::tui::app::{App, LOUDNESS_MAX, ToneRow, Xf, crossfeed};
+use crate::tui::app::{App, LOUDNESS_MAX, Space, ToneRow, Xf, crossfeed, speakers};
 use crate::tui::boxes::presets;
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::{self, CURSOR_WIDTH, LOUDNESS_WIDTH, MISSING};
@@ -180,13 +180,23 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
     // bottom: the table gives up rows to them, scrolled to keep the focused point in view.
     let xf = app.crossfeed();
     let head = lines.len();
-    let (summary, gap) = match (xf, max_height) {
-        (None, _) => (false, false),
-        (Some(_), usize::MAX) => (true, true),
-        (Some(_), h) => (h >= head + 1 + 3, h >= head + 1 + 3),
+    // The numbers under the row: the crossfeed's one line, or the two lines of the space choice
+    // (what it is and how it sounds).
+    let details = match (xf, app.space_shown()) {
+        (Some(_), true) => space_details(app, theme, max_width),
+        (Some(view), false) => vec![summary_line(view, theme)],
+        (None, _) => Vec::new(),
+    };
+    let (shown, gap) = match (xf, max_height) {
+        (None, _) => (0, false),
+        (Some(_), usize::MAX) => (details.len(), true),
+        (Some(_), h) => {
+            let room = h >= head + 1 + 2 + details.len();
+            (if room { details.len() } else { 0 }, room)
+        }
     };
     let reserved = match xf {
-        Some(_) => 1 + usize::from(summary) + usize::from(gap),
+        Some(_) => 1 + shown + usize::from(gap),
         None => 0,
     };
     let visible = match max_height {
@@ -222,17 +232,18 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         // Under the table, at the pane's bottom where its height is known.
         let target = match max_height {
             usize::MAX => lines.len() + usize::from(gap),
-            h => h - 1 - usize::from(summary),
+            h => h - 1 - shown,
         };
         while lines.len() < target {
             lines.push(Line::default());
         }
-        let (line, arrows) = crossfeed_line(app, view, theme, max_width);
+        let (line, arrows) = match app.space_shown() {
+            true => space_line(app, theme, max_width),
+            false => crossfeed_line(app, view, theme, max_width),
+        };
         let at = u16::try_from(lines.len()).unwrap_or(u16::MAX);
         lines.push(line);
-        if summary {
-            lines.push(summary_line(view, theme));
-        }
+        lines.extend(details.into_iter().take(shown));
         CrossfeedRow { line: at, arrows }
     });
     TonePane {
@@ -277,6 +288,57 @@ fn crossfeed_line(
     let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
     let line = row_style(line, focused, !app.session.connected, theme, max_width);
     (line, arrows)
+}
+
+/// The Space row of the pane: `Space ‹ Virtual speakers ›`, and where its `‹` and `›` sit.
+fn space_line(app: &App, theme: &Theme, max_width: usize) -> (Line<'static>, (usize, usize)) {
+    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
+    let (lit, arrow) = (theme.style(Role::SelectName), theme.style(Role::ModeArrow));
+    let word = app.space_now().word();
+    let spans = vec![
+        widgets::rows::label("Space", TONE_FIELD),
+        Span::styled("\u{2039} ", arrow),
+        Span::styled(word, lit),
+        Span::styled(" \u{203a}", arrow),
+    ];
+    let arrows = (
+        CURSOR_WIDTH + TONE_FIELD,
+        CURSOR_WIDTH + TONE_FIELD + 2 + widgets::text::cells(word) + 1,
+    );
+    let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
+    let line = row_style(line, focused, !app.session.connected, theme, max_width);
+    (line, arrows)
+}
+
+/// The dim lines under the Space row: for the virtual speakers the set with its choice and term,
+/// then how it sounds; for the crossfeed its model and preset, then its numbers; none for off.
+fn space_details(app: &App, theme: &Theme, max_width: usize) -> Vec<Line<'static>> {
+    let dim = |text: String| {
+        let room = max_width.saturating_sub(CURSOR_WIDTH + 1);
+        Line::from(Span::styled(
+            format!(
+                "{}{}",
+                " ".repeat(CURSOR_WIDTH),
+                widgets::text::cut_to_cells(&text, room)
+            ),
+            theme.style(Role::Dim),
+        ))
+    };
+    match (app.space_now(), app.speakers(), app.crossfeed()) {
+        (Space::Speakers, Some(view), _) => vec![
+            dim(speakers::set_words(view)),
+            dim(format!(
+                "{} \u{b7} {}",
+                speakers::level_short(view),
+                speakers::length_text(view)
+            )),
+        ],
+        (Space::Crossfeed, _, Some(view)) => vec![
+            dim(crossfeed::words_of(view)),
+            dim(crossfeed::summary_text(view)),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 /// The dim line under the Crossfeed row: its numbers.

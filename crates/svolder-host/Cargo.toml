@@ -27,5 +27,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 svolder-profiles = { workspace = true, features = ["serde"] }
+# The sets the virtual speakers play: the store checks a WAV before a config names it.
+svolder-speakers.workspace = true
 # `process` runs `wpctl` without holding a thread while it answers.
 tokio = { workspace = true, features = ["process"] }

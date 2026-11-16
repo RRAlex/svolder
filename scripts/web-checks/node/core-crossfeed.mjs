@@ -301,7 +301,7 @@ await ok('opened_at_crossfeed_it_draws_the_tab_the_switch_and_the_view', async (
   const r = rig();
   await r.open();
   const tabs = [...r.document.querySelectorAll('.fp-tab')].map((t) => t.textContent.trim());
-  assert.deepEqual(tabs, ['EQ library', 'Crossfeed']);
+  assert.deepEqual(tabs, ['EQ library', 'Crossfeed', 'Virtual speakers']);
   assert.equal(r.$(sound.tabId('xf')).getAttribute('aria-selected'), 'true');
   assert.equal(r.document.querySelector('.fp-pills'), null, 'the pills are the EQ library tab\'s');
   assert.equal(r.$(draw.IDS.switch).getAttribute('aria-checked'), 'true');
@@ -684,6 +684,26 @@ await ok('the_tab_dot_follows_the_stream_and_a_redraw_keeps_the_focus', async ()
   await r.stream();
   assert.equal(r.$(sound.tabId('xf')).querySelector('.fp-dot'), null);
   assert.equal(r.document.activeElement?.id, draw.stepId('amount_pct', 1));
+  r.window.close();
+});
+
+await ok('an_open_menu_stays_open_through_a_stream_that_changes_nothing_it_shows', async () => {
+  const r = rig();
+  await r.open();
+  await r.click(draw.IDS.model);
+  assert.equal(r.$(draw.IDS.model).getAttribute('aria-expanded'), 'true');
+  // the stream sends the computer again (its player moved on, say): the crossfeed is the same
+  await r.stream();
+  assert.deepEqual([...r.document.querySelectorAll('.fi-opt')].map((o) => o.textContent),
+    ['Bauer', 'Mid/Side bass'], 'the list is still open');
+  pick(r, 'Mid/Side bass');
+  await r.calm();
+  assert.deepEqual(r.sent().at(-1), { model: 'mid-side', done: true });
+  assert.notEqual(r.$(draw.IDS.model).getAttribute('aria-expanded'), 'true', 'the list is closed');
+  // and a stream after the list closed does not draw the page again for the opener's state
+  const before = r.$(draw.IDS.model);
+  await r.stream();
+  assert.equal(r.$(draw.IDS.model), before, 'the menu button is the same element');
   r.window.close();
 });
 

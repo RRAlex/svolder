@@ -47,6 +47,25 @@ async fn an_apply_keeps_the_crossfeed_settings_and_never_starts_with_it_on() {
 }
 
 #[tokio::test]
+async fn a_remove_while_the_speakers_play_leaves_them_off_and_keeps_the_choice() {
+    let f = Fixture::new();
+    let host = f.host(Manager::Systemd);
+    host.apply(request("First")).await.unwrap();
+    let mut state = host.state().unwrap();
+    state.speakers = Some("set-a".into());
+    state.speakers_on = true;
+    state.speakers_loaded = Some("set-a".into());
+    state
+        .save(&f.dir.join("state/svolder/host-eq.toml"))
+        .unwrap();
+    host.remove().await.unwrap();
+    let state = host.state().unwrap();
+    assert!(!state.on && !state.speakers_on, "no chain, no stage");
+    assert_eq!(state.speakers_loaded, None, "no chain holds a set");
+    assert_eq!(state.speakers.as_deref(), Some("set-a"), "the choice stays");
+}
+
+#[tokio::test]
 async fn a_re_apply_while_on_replaces_the_process_and_stops_the_old_one() {
     let f = Fixture::new();
     let host = f.host(Manager::Process);

@@ -541,6 +541,7 @@ fn spectral() -> App {
         bands,
         left: 0.5,
         right: 0.5,
+        levels: Default::default(),
     };
     app.heard_block(&block, app.now);
     app
@@ -649,6 +650,7 @@ fn the_spectrum_row_falls_back_between_blocks() {
         bands: [1.0; svolder_host::fft::BANDS],
         left: 1.0,
         right: 1.0,
+        levels: Default::default(),
     };
     app.heard_block(&block, landed + host::FALL);
     assert_eq!(
@@ -998,6 +1000,7 @@ pub(super) fn gungnir_route(
         player_match: svolder_host::PlayerMatch::Pid,
         others_mixing: 0,
         host_eq: false,
+        stages: None,
     };
     edit(&mut route);
     route
@@ -1235,7 +1238,7 @@ fn a_single_loud_band_is_a_hump_across_several_columns() {
     let mut bands = [0.0; svolder_host::fft::BANDS];
     bands[8] = 1.0;
     let mut app = spectral();
-    app.host.bands = host::Bands::default();
+    *app.host.bands = host::Bands::default();
     app.host.bands.land(&bands, app.now);
     let (cells, _) = spectrum_cells(&app, 140, &Theme::new(false));
     let lit: Vec<&str> = cells

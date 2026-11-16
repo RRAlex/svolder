@@ -294,7 +294,7 @@ async fn a_pass_through_over_a_boosted_preset_plays_under_the_preamp_that_preset
 }
 
 /// A high shelf playable at 48 kHz that cannot play at 192 kHz.
-fn shelf() -> Correction {
+pub(super) fn shelf() -> Correction {
     Correction {
         preamp_db: 0.0,
         filters: vec![SourceFilter {

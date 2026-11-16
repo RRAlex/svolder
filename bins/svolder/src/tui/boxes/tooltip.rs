@@ -397,6 +397,14 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
                 "← → ␣ on/off · , . preset · Enter or X: all of it",
             ]),
         },
+        Hit::Crossfeed(Xf::Space) | Hit::CrossfeedStep(Xf::Space, _) => lines(&[
+            "Space",
+            "← → Off · Crossfeed · Virtual speakers · ␣ on/off · Enter or S: sets",
+        ]),
+        Hit::Crossfeed(Xf::Set) | Hit::CrossfeedStep(Xf::Set, _) => lines(&[
+            "Virtual speakers set",
+            "← → the fetched sets · Enter or S: the list, fetch, import",
+        ]),
         Hit::Crossfeed(row) | Hit::CrossfeedStep(row, _) => {
             lines(&[row.label(), "← → steps · wheel too · Enter types a number"])
         }
@@ -415,6 +423,14 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
             "Mouse capture · M toggles it",
             "off, the terminal selects text",
         ]),
+        Hit::Vu => {
+            let reference = app.tui.vu_reference;
+            lines(&[
+                &format!("VU meter · 0 VU = {reference} dBFS"),
+                "┃ the needle · ● an over, held 1.2 s",
+                "Settings sets what reads 0 VU",
+            ])
+        }
         Hit::FaultMark => {
             let faults = app.faults();
             if faults.is_empty() {
@@ -432,6 +448,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         | Hit::MenuEntry(_)
         | Hit::MenuOutside
         | Hit::PresetRow(_)
+        | Hit::SetRow(_)
         | Hit::PresetEnd(_)
         | Hit::Mascot
         | Hit::Toast => None,

@@ -29,6 +29,7 @@ svolder-fake.workspace = true
 svolder-host.workspace = true
 svolder-mqtt.workspace = true
 svolder-autoeq = { workspace = true, features = ["net"] }
+svolder-speakers = { workspace = true, features = ["net"] }
 rmcp.workspace = true
 serde_json.workspace = true
 hyper.workspace = true
@@ -51,6 +52,7 @@ rumqttd = { workspace = true, optional = true }
 [dev-dependencies]
 # The loopback AutoEq server the service's tests point the daemon's client at.
 svolder-autoeq = { workspace = true, features = ["test-server"] }
+svolder-speakers = { workspace = true, features = ["net", "test-server"] }
 # The MQTT integration tests run a broker in this process on 127.0.0.1 and watch it with a
 # client of their own.
 rumqttc.workspace = true

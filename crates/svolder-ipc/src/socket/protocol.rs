@@ -16,7 +16,7 @@
 //!   statuses.
 //! - `timeouts`: the deadlines and bounds both sides wait by.
 //! - `autoeq`, `device_config`, `host_cover`, `host_eq`, `jobs`, `mqtt_set`, `preset_write`,
-//!   `server_switch`, `walk`: the request families with their own ops and answers.
+//!   `server_switch`, `speakers`, `walk`: the request families with their own ops and answers.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,7 @@ mod mqtt_set;
 mod preset_write;
 mod request;
 mod server_switch;
+mod speakers;
 mod status;
 mod timeouts;
 mod walk;
@@ -43,9 +44,9 @@ pub(crate) use codes::FEATURE_REASONS;
 pub use codes::{
     CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_UNKNOWN_REQUEST,
     CODE_USAGE, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER,
-    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SERVER_SWITCH, FEATURE_UNKNOWN_REQUEST_CODE,
-    FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED, NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF,
-    not_found_yet,
+    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS,
+    FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED, NOT_CONNECTED,
+    NOT_FOUND_YET, WEB_OFF, not_found_yet,
 };
 pub use device_config::{ConfiguredDevice, DeviceConfigOp, PassphraseKind, ProfileChoice};
 pub use host_cover::{COVER_CHUNK_BYTES, CoverReader, cover_chunk};
@@ -56,6 +57,10 @@ pub use preset_write::PresetOp;
 pub(crate) use request::REQUEST_CMDS;
 pub use request::Request;
 pub use server_switch::Server;
+pub use speakers::{
+    SPEAKERS_OFF_PREFIX, SpeakersAngles, SpeakersCatalogue, SpeakersOp, SpeakersProgress,
+    SpeakersRoom, SpeakersSaved, SpeakersSet,
+};
 pub use status::{
     LinkChange, McpStatus, MqttProblem, MqttStatus, READINGS_SPAN_SECS, RecallOut, SeriesOut,
     TokenInfo, TokenKind, WebStatus,
@@ -328,6 +333,13 @@ pub enum Response {
     AutoEqSearch(Box<AutoEqSearch>),
     /// The reply to an `auto_eq` upload: the preset that was saved.
     AutoEqSaved(AutoEqSaved),
+    /// The reply to a `speakers` catalogue.
+    SpeakersCatalogue(Box<SpeakersCatalogue>),
+    /// The reply to a `speakers` import_dir.
+    SpeakersImportDir {
+        /// the directory, absolute
+        path: String,
+    },
     /// The reply to a `device_config` request: the configured devices, in the file's order, as
     /// they stand after the op, and the profiles an op takes.
     DeviceConfig {
@@ -526,6 +538,8 @@ pub enum Event {
     Walk(JobEvent),
     /// A change in a job of AutoEq. Only on an `auto_eq` follow stream.
     AutoEq(JobEvent),
+    /// A change in a job of the virtual speakers' sets. Only on a `speakers` follow stream.
+    Speakers(JobEvent),
     /// A kind this build does not know, from a peer newer than it.
     #[serde(other)]
     Unknown,

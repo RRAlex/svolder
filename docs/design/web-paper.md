@@ -344,6 +344,6 @@ A line by the title, `showing: the DAC · this computer`, flips the ruler and th
 computer: the ruler reads 0 to 100 %, the tone is written `TONE · off · EQ` and has a curve with a
 pencil point per point, a scrolling table with `×` and `+ Add point`, and the line that counts the
 points and the preamp. The drawing is `draw/computer.js`, the hands `computer-wire.js`; the design
-is in [host control](host-control.md#paper).
+is in [host control](host-control-themes.md#paper).
 
 [Back to web themes](web-themes.md).

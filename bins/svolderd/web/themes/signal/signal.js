@@ -16,6 +16,8 @@
 //                card-wire.js its Try now and its seconds
 //   draw/computer.js, computer-wire.js   what the computer's hop opens: choosing it is the flip, and
 //                the DAC's screen then acts on the computer (volume, curve, points, presets, facts)
+//   draw/vu.js, vu-wire.js, draw/spectrum.js   the computer's level meters beside its curve: two dials,
+//                their glow, reference and the Spectrum view, and the streams and clock that move them
 //   draw/hop.js  the `+` sheet and the open area of a hop the person declared
 //   volume-wire.js, tone-wire.js, controls-wire.js, presets-wire.js, facts-wire.js, playing-wire.js,
 //                amp-wire.js, hops-wire.js, device-list.js, lists.js, ask.js   the hands on them
@@ -59,6 +61,7 @@ import { preview } from './preview.js';
 import { wireSlim } from './slim.js';
 import { wireStrip } from './strip-wire.js';
 import { wireTone } from './tone-wire.js';
+import { wireVu } from './vu-wire.js';
 import { wireVolume } from './volume-wire.js';
 
 export { openers };
@@ -128,8 +131,9 @@ function computerParts(page, view) {
  * computer (the volume and the curve); the route's facts alone where its controls are not shown. */
 openers.computer = (page, _hop, view) => {
   const parts = computerParts(page, view);
-  return parts ? computerOpen(parts, { phone: view.phone(), inert: inertPage(page), picked: parts.picked })
-    : computerScreen(page);
+  return parts ? computerOpen(parts, {
+    phone: view.phone(), inert: inertPage(page), picked: parts.picked, vu: view.vu?.state() ?? null,
+  }) : computerScreen(page);
 };
 
 /** What a page with no hop to open says: the card of the page, when it has one. */
@@ -318,6 +322,7 @@ function mount(root, core, { signal }) {
   wireControls({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wirePresets({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wireComputer({ root, core, live, act, view, keep, shelfKeep, release, signal });
+  view.vu = wireVu({ root, core, view, signal });
   wireFacts({ root, core, signal });
   wireStrip({ band, hops: view.hops, chosen: () => view.chosen, choose: view.choose, signal });
   wireSlim({ bar: root.querySelector('#sg-slim'), band: root.querySelector('.sg-bandwrap'),

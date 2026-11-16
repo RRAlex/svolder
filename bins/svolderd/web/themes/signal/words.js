@@ -218,3 +218,41 @@ export const STATES = {
   retryIn: (secs) => (secs > 0 ? `next try in ${secs} s` : 'trying again now'),
   last: 'Last heard, not live',
 };
+
+/** The computer's level meters: two dials (left, right), the reference under them and the Meters or
+ * Spectrum view. `glowWords` names the glow a dial face has on (the face is the button that changes it). */
+export const VU = {
+  title: 'Level',
+  meters: 'Meters',
+  spectrum: 'Spectrum',
+  views: 'View',
+  left: 'Left',
+  right: 'Right',
+  peak: 'Peak',
+  /** The words after "Peak" for a lit or a dark lamp, for a screen reader. */
+  peakState: (on) => (on ? ', over' : ', off'),
+  reference: 'Reference',
+  refWords: (db) => `0 VU = −${Math.abs(db)} dBFS`,
+  lower: 'Lower the reference by 1 dB',
+  raise: 'Raise the reference by 1 dB',
+  reset: (db) => `Reset to −${Math.abs(db)}`,
+  unit: 'VU',
+  below: '< −20',
+  glows: { w1: 'subtle', w2: 'warm backlight', w3: 'filament' },
+  glowWords: (glow) => `Meter glow: ${VU.glows[glow]}. Change`,
+  note: 'The level of what PipeWire plays, read at the sound card’s monitor.',
+  capture: {
+    starting: 'Starting the level capture…',
+    unavailable: (why) => (why ? `Level capture unavailable: ${why}` : 'Level capture unavailable.'),
+  },
+  spectrumLabel: 'Spectrum of what PipeWire plays',
+  channel: (side) => `${side} level`,
+};
+
+/** A reading in VU as the dial's text: `+2.6`, `−4.3`, or `< −20` below the scale. */
+export function vuText(db) {
+  if (!Number.isFinite(db) || db < -20) return VU.below;
+  const tenths = Math.round(Math.abs(db) * 10) / 10;
+  if (db >= 0 || tenths === 0) return `+${tenths.toFixed(1)}`;
+  return `−${tenths.toFixed(1)}`;
+}

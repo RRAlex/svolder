@@ -428,6 +428,21 @@ pub struct HostEqState {
     /// with `crossfeed_on` removes the chain.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flat: bool,
+    /// The id of the chosen virtual-speakers set, kept while they are off. `None` until one is
+    /// chosen; a state from before them loads with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers: Option<String>,
+    /// Whether the virtual speakers are playing now. True only while they play, so that a start
+    /// that finds it true knows a crash or a kill left them on and turns them off: they never
+    /// stay on across a restart (crossfeed's rule, `crossfeed_on`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub speakers_on: bool,
+    /// The set whose convolvers the running chain holds, playing or idle, which may not be the
+    /// one chosen since: its WAV must stay while the chain runs, so the next owner pins it.
+    /// Written by an apply with the convolvers, cleared by an apply without them and by a
+    /// remove; `None` in a state from before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers_loaded: Option<String>,
 }
 
 impl HostEqState {
@@ -527,11 +542,12 @@ pub mod points;
 mod process;
 mod pty;
 pub mod session;
+pub mod speakers;
 mod systemd;
 
 pub use control::{
-    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LIVE_NOTE, PASSTHROUGH_NOTE, PointView,
-    kind_word, parse_kind,
+    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LEGACY_NOTE, LIVE_NOTE, PASSTHROUGH_NOTE,
+    PointView, SpeakersEdit, kind_word, parse_kind,
 };
 pub use crossfeed::{
     CrossfeedSettings, CrossfeedView, Model as CrossfeedModel, Stage as CrossfeedStage,
@@ -540,12 +556,14 @@ pub use crossfeed::{
 pub use live::{LiveNode, PREAMP, PreampCarrier, SHAPE, SlotShape};
 pub(crate) use manage::checked_request;
 pub use manage::{
-    ApplyRequest, Chain, EqFailure, Host, Status, UNIT, check_playable, lowered_note,
+    ApplyRequest, Chain, EqFailure, Host, SpeakersConf, Status, UNIT, check_playable, lowered_note,
     played_preamp, safe_preamp,
 };
 pub use paths::EqPaths;
 pub use points::{Change, HAND, HandRanges, Points};
 pub use session::{Params, PwCliSession};
+pub use speakers::{Irs, SetInfo, SpeakersResponse, SpeakersView, speakers_response};
+pub use svolder_speakers::Store as SpeakersStore;
 pub use systemd::UserSystemd;
 
 #[cfg(test)]

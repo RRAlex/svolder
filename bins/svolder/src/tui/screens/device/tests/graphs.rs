@@ -219,6 +219,7 @@ fn hosting() -> App {
             bands: [0.0; 16],
             left: ramp(0, step) as f32,
             right: ramp(1, step) as f32,
+            levels: Default::default(),
         };
         app.heard_block(&block, base + Duration::from_millis(step * 250));
     }

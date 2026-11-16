@@ -135,7 +135,7 @@ def case(b, theme):
     opened = by_the_menu(b, 'sound')
     pills = b.page(f"{TABS}.map((e) => e.textContent.trim())")
     check(f'the_menu_row_opens_sound_and_the_tabs_switch {tag}: Sound… opens on the EQ library tab',
-          opened is True and pills == ['EQ library', 'Crossfeed', 'AutoEq', 'Upload a file', 'Saved presets'], pills)
+          opened is True and pills == ['EQ library', 'Crossfeed', 'Virtual speakers', 'AutoEq', 'Upload a file', 'Saved presets'], pills)
     geometry(b, tag, 'wide, EQ library', behind)
     shot(b, theme, 'wide-eq-library')
     tab(b, 'xf')

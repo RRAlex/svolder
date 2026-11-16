@@ -37,7 +37,7 @@ use std::collections::VecDeque;
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
-use crate::capture::Block;
+use crate::capture::{Block, Levels};
 use crate::fft::{self, fft};
 
 /// How many bands a channel has.
@@ -57,6 +57,12 @@ pub const WINDOW: usize = 8192;
 /// The level, in dB below full scale, that [`to_byte`] puts at 0: a band at or below it is 0.
 /// A tuning constant, not a promise to any front end.
 pub const BYTE_FLOOR_DB: f32 = -72.0;
+
+/// The amplitude (1.0 = full scale) from which a sample peak counts as an over: positive full
+/// scale of 16-bit samples, 32767/32768. Every deeper format's full scale is above it. A peak
+/// is an over when it is `>= OVER`. The tap's resampling (44.1 to 48 kHz) can overshoot square
+/// content by up to 1.9 dB, so a hard-limited master may light an over its source never had.
+pub const OVER: f32 = 32767.0 / 32768.0;
 
 /// The slowest tempo [`Frame::bpm`] gives.
 pub const MIN_BPM: f32 = 60.0;
@@ -123,7 +129,8 @@ pub struct Frame {
     /// The right channel's bands.
     pub right: [u8; BANDS],
     /// The levels over the frame's own [`FRAME_RATE`]th of a second, as bytes: left RMS, right
-    /// RMS, left peak, right peak.
+    /// RMS, left peak, right peak. The RMS bytes are [`to_byte`]; a peak byte is [`peak_byte`],
+    /// whose 255 means an over.
     pub levels: [u8; 4],
     /// Whether a beat starts in this frame.
     pub beat: bool,
@@ -136,7 +143,8 @@ pub struct Frame {
 
 impl Frame {
     /// The TUI's [`Block`] for this frame: the [`BANDS`] re-binned to the sixteen of
-    /// [`fft::BANDS`], and the RMS levels, all on the drawing scale ([`fft::scale`]).
+    /// [`fft::BANDS`], and the RMS levels on the drawing scale ([`fft::scale`]), plus the levels as amplitudes
+    /// (a peak byte of 255 is exactly [`OVER`]).
     ///
     /// A TUI band takes the loudest of the bands whose centre falls inside it, each the mean
     /// power of the two channels: that equals a mix of a mono signal and sits 3 dB under a
@@ -158,6 +166,16 @@ impl Frame {
             bands: loudest.map(fft::scale),
             left: fft::scale(byte_amplitude(self.levels[0])),
             right: fft::scale(byte_amplitude(self.levels[1])),
+            levels: Levels {
+                rms: [
+                    byte_amplitude(self.levels[0]),
+                    byte_amplitude(self.levels[1]),
+                ],
+                peak: [
+                    peak_amplitude(self.levels[2]),
+                    peak_amplitude(self.levels[3]),
+                ],
+            },
         }
     }
 }
@@ -174,6 +192,17 @@ pub fn to_byte(amplitude: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
+/// The byte a sample peak (amplitude, 1.0 = full scale) is sent as: [`to_byte`] capped at 254,
+/// and 255 only for a peak of [`OVER`] or more, so the top byte means an over and a master that
+/// peaks at -0.1 dBFS does not read as one.
+pub fn peak_byte(amplitude: f32) -> u8 {
+    if amplitude >= OVER {
+        255
+    } else {
+        to_byte(amplitude).min(254)
+    }
+}
+
 /// The amplitude a byte stands for; 0 is silence, not the floor.
 fn byte_amplitude(byte: u8) -> f32 {
     if byte == 0 {
@@ -181,6 +210,15 @@ fn byte_amplitude(byte: u8) -> f32 {
     }
     let db = f32::from(byte) / 255.0 * -BYTE_FLOOR_DB + BYTE_FLOOR_DB;
     10f32.powf(db / 20.0)
+}
+
+/// The amplitude a peak byte stands for: 255, an over, is exactly [`OVER`].
+fn peak_amplitude(byte: u8) -> f32 {
+    if byte == 255 {
+        OVER
+    } else {
+        byte_amplitude(byte)
+    }
 }
 
 /// The [`BANDS`] + 1 band edges in Hz, a 1/24 octave apart from [`LOW_HZ`]; band `i` runs from
@@ -319,8 +357,8 @@ impl Analyser {
         let levels = [
             rms(0),
             rms(1),
-            to_byte(self.peaks[0]),
-            to_byte(self.peaks[1]),
+            peak_byte(self.peaks[0]),
+            peak_byte(self.peaks[1]),
         ];
         self.squares = [0.0; 2];
         self.peaks = [0.0; 2];
@@ -690,6 +728,47 @@ mod tests {
         assert!(near(rms_r, -15.05), "{rms_r}");
         assert!(near(peak_l, -6.02), "{peak_l}");
         assert!(near(peak_r, -12.04), "{peak_r}");
+    }
+
+    #[test]
+    fn the_top_peak_byte_means_an_over() {
+        assert_eq!(peak_byte(OVER), 255);
+        assert_eq!(peak_byte(1.0), 255);
+        assert_eq!(peak_byte(0.9999), 254);
+        assert_eq!(peak_byte(10f32.powf(-0.1 / 20.0)), 254);
+        assert_eq!(peak_byte(0.0), 0);
+        assert_eq!(peak_byte(f32::NAN), 0);
+        assert_eq!(to_byte(10f32.powf(-0.1 / 20.0)), 255);
+    }
+
+    #[test]
+    fn a_full_scale_square_peaks_at_255_and_a_near_one_at_254() {
+        let square = |level: f32| -> Vec<f32> {
+            (0..RATE as usize)
+                .flat_map(|n| {
+                    let s = if (n / 24) % 2 == 0 { level } else { -level };
+                    [s, s]
+                })
+                .collect()
+        };
+        let full = frames(&square(32767.0 / 32768.0));
+        assert_eq!(full.last().unwrap().levels[2..], [255, 255]);
+        let near = frames(&square(10f32.powf(-0.1 / 20.0)));
+        assert_eq!(near.last().unwrap().levels[2..], [254, 254]);
+        assert_eq!(near.last().unwrap().levels[..2], [255, 255]);
+    }
+
+    #[test]
+    fn a_frame_gives_its_block_the_level_amplitudes() {
+        let mut frame = frames(&vec![0.0; RATE as usize / 10])[0];
+        frame.levels = [200, 100, 255, 100];
+        let levels = frame.block().levels;
+        assert_eq!(levels.peak[0], OVER);
+        assert_eq!(levels.rms[0], byte_amplitude(200));
+        assert_eq!(levels.rms[1], byte_amplitude(100));
+        assert_eq!(levels.peak[1], byte_amplitude(100));
+        frame.levels = [0; 4];
+        assert_eq!(frame.block().levels, Default::default());
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub(super) struct RawTui {
     graphs: bool,
     graph_span: String,
     link_span: String,
+    vu_reference: i64,
     device_split: f64,
     effects: RawEffects,
 }
@@ -68,6 +69,7 @@ impl Default for RawTui {
             graphs,
             graph_span,
             link_span,
+            vu_reference,
             device_split,
             effects: _,
         } = TuiConfig::default();
@@ -93,6 +95,7 @@ impl Default for RawTui {
             graphs,
             graph_span: graph_span.name().into(),
             link_span: link_span.name().into(),
+            vu_reference: i64::from(vu_reference),
             device_split,
             effects: RawEffects::Switch(true),
         }
@@ -308,6 +311,7 @@ pub(super) fn tui(raw: RawTui) -> Result<TuiConfig, ConfigError> {
         graphs,
         graph_span: _,
         link_span: _,
+        vu_reference,
         device_split,
         effects,
     } = raw;
@@ -333,6 +337,7 @@ pub(super) fn tui(raw: RawTui) -> Result<TuiConfig, ConfigError> {
         graphs,
         graph_span,
         link_span,
+        vu_reference: super::super::tui_settings::held_reference(vu_reference),
         device_split,
         effects: effects.into(),
     })

@@ -29,6 +29,7 @@ mod host;
 mod identify;
 mod presets;
 mod set_control;
+mod speakers;
 
 /// What runs with the key of a read.
 type ReadHook = Box<dyn Fn(&str) + Send>;
@@ -245,6 +246,30 @@ impl Fleet for Scripted {
                         xf.on = on.unwrap_or(xf.on);
                         if let Some(model) = model {
                             xf.model = model;
+                        }
+                        if on == Some(true) {
+                            // The controller's rule: crossfeed and virtual speakers never both play.
+                            if let Some(sp) = eq.speakers.as_mut().filter(|sp| sp.on) {
+                                sp.on = false;
+                                sp.note =
+                                    Some("virtual speakers turned off: crossfeed is on".into());
+                            }
+                        }
+                    }
+                    Request::HostEq {
+                        op: HostEqOp::Speakers { on, set, .. },
+                    } => {
+                        let eq = view.eq.get_or_insert_with(Default::default);
+                        let sp = eq.speakers.get_or_insert_with(Default::default);
+                        sp.on = on.unwrap_or(sp.on);
+                        if set.is_some() {
+                            sp.set = set;
+                        }
+                        if on == Some(true)
+                            && let Some(xf) = eq.crossfeed.as_mut().filter(|xf| xf.on)
+                        {
+                            xf.on = false;
+                            xf.note = Some("crossfeed turned off: virtual speakers are on".into());
                         }
                     }
                     _ => {}

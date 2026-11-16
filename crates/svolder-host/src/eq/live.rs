@@ -17,11 +17,20 @@
 //! bit-exact: [`render_live_conf`] writes it so, and [`render_live_conf_with`] writes a given
 //! stage for a chain that cannot be set live.
 //!
+//! After the crossfeed stage a chain may hold the virtual speakers' stage: four `convolver`s
+//! (`vLL`, `vLR`, `vRL`, `vRR`, channels 0 to 3 of one WAV) and two mixers (`lvs`, `rvs`) that
+//! hold the dry sound (`Gain 1`) and the convolved one (`Gain 2` and `Gain 3`). Off is a bypass
+//! that is bit-exact, on plays the convolved sound only ([`speakers_params`]). The stage is in
+//! the config only when a set is chosen ([`render_live_conf_full`]): a convolver whose WAV
+//! cannot be opened leaves the chain alive and silent, so whoever writes a path has checked the
+//! file first.
+//!
 //! [`props_of`] reads the node, the rate, the values the chain holds and the sink it plays into
 //! out of `pw-dump`; [`output_sink`] reads the real output sink.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::path::Path;
 
 use serde_json::Value;
 use svolder_profiles::tone::apo::{Correction, FilterKind, SourceFilter};
@@ -296,6 +305,118 @@ pub fn render_live_conf_with(
     rate_hz: u32,
     stage: &Stage,
 ) -> String {
+    render_live_conf_full(points, preamp_db, target, route, rate_hz, stage, None)
+}
+
+/// The virtual speakers' stage as the config holds it: the WAV the four convolvers read and
+/// whether the mixers play the convolved sound.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpeakersGraph {
+    /// The absolute path of the 4-channel WAV (LL, LR, RL, RR).
+    wav: String,
+    /// Whether the mixers play the convolved sound (and not the dry one).
+    on: bool,
+}
+
+impl SpeakersGraph {
+    /// A stage reading `wav`, playing when `on`. The config on disk always has the stage off
+    /// (`on` false); `true` is for a chain that cannot be set live, as with
+    /// [`render_live_conf_with`]'s stage. The WAV must stay readable while any running chain was
+    /// started with it (see [`speakers`](super::speakers)). The path must be absolute and free of what
+    /// would end the config's string early (a quote, a backslash, a control character).
+    pub fn new(wav: &Path, on: bool) -> Result<SpeakersGraph, String> {
+        let text = wav
+            .to_str()
+            .ok_or_else(|| format!("{}: the path is not text", wav.display()))?;
+        if !wav.is_absolute() {
+            return Err(format!("{text}: the path is not absolute"));
+        }
+        if text
+            .chars()
+            .any(|c| c == '"' || c == '\\' || c.is_control())
+        {
+            return Err(format!(
+                "{text:?}: the path holds a character the config cannot take"
+            ));
+        }
+        Ok(SpeakersGraph {
+            wav: text.to_string(),
+            on,
+        })
+    }
+
+    /// The `[Gain 1, Gain 2, Gain 3]` of both mixers.
+    fn gains(&self) -> [f64; 3] {
+        speakers_gains(self.on)
+    }
+}
+
+/// The mixers' gains for the stage off (the dry sound alone) or on (the convolved sound alone).
+fn speakers_gains(on: bool) -> [f64; 3] {
+    match on {
+        true => [0.0, 1.0, 1.0],
+        false => [1.0, 0.0, 0.0],
+    }
+}
+
+/// The convolvers' names and their channel in the WAV: the speaker, then the ear.
+const CONVOLVERS: [(&str, u8); 4] = [("vLL", 0), ("vLR", 1), ("vRL", 2), ("vRR", 3)];
+
+/// The nodes of the virtual speakers' stage.
+fn speakers_nodes(graph: &SpeakersGraph) -> String {
+    let mut out = String::new();
+    for (name, channel) in CONVOLVERS {
+        let _ = writeln!(
+            out,
+            "                    {{ type = builtin name = {name} label = convolver config = {{ filename = \"{}\" channel = {channel} gain = 1 }} }}",
+            graph.wav
+        );
+    }
+    let [dry, left, right] = graph.gains().map(num);
+    for name in ["lvs", "rvs"] {
+        let _ = writeln!(
+            out,
+            "                    {{ type = builtin name = {name} label = mixer control = {{ \"Gain 1\" = {dry} \"Gain 2\" = {left} \"Gain 3\" = {right} }} }}"
+        );
+    }
+    out
+}
+
+/// The links of the virtual speakers' stage: each crossfeed mixer output feeds its own ear's
+/// dry input and both convolvers of its speaker; each convolver feeds its ear's mixer.
+fn speakers_links() -> String {
+    let mut out = String::new();
+    for (from, to) in [
+        ("lmix:Out", "lvs:In 1"),
+        ("rmix:Out", "rvs:In 1"),
+        ("lmix:Out", "vLL:In"),
+        ("rmix:Out", "vRL:In"),
+        ("lmix:Out", "vLR:In"),
+        ("rmix:Out", "vRR:In"),
+        ("vLL:Out", "lvs:In 2"),
+        ("vRL:Out", "lvs:In 3"),
+        ("vLR:Out", "rvs:In 2"),
+        ("vRR:Out", "rvs:In 3"),
+    ] {
+        let _ = writeln!(
+            out,
+            "                    {{ output = \"{from}\" input = \"{to}\" }}"
+        );
+    }
+    out
+}
+
+/// [`render_live_conf_with`] with the virtual speakers' stage after the crossfeed stage when
+/// `speakers` is given; without it the graph is the plain one.
+pub fn render_live_conf_full(
+    points: &Points,
+    preamp_db: f64,
+    target: &str,
+    route: Route,
+    rate_hz: u32,
+    stage: &Stage,
+    speakers: Option<&SpeakersGraph>,
+) -> String {
     let in_slot = |slot: u8| {
         points
             .slots
@@ -332,11 +453,19 @@ pub fn render_live_conf_with(
     for (channel, other) in [('l', 'r'), ('r', 'l')] {
         links.push_str(&stage_links(channel, other));
     }
+    let outputs = match speakers {
+        Some(graph) => {
+            nodes.push_str(&speakers_nodes(graph));
+            links.push_str(&speakers_links());
+            "[ \"lvs:Out\" \"rvs:Out\" ]"
+        }
+        None => "[ \"lmix:Out\" \"rmix:Out\" ]",
+    };
     let graph = format!(
         "                nodes = [\n{nodes}                ]\n\
          \x20               links = [\n{links}                ]\n\
          \x20               inputs  = [ \"lpre:In\" \"rpre:In\" ]\n\
-         \x20               outputs = [ \"lmix:Out\" \"rmix:Out\" ]\n"
+         \x20               outputs = {outputs}\n"
     );
     conf_frame(&graph, target, route)
 }
@@ -400,6 +529,19 @@ pub fn crossfeed_params(stage: &Stage) -> Vec<(String, f64)> {
     params
 }
 
+/// The parameters that set the virtual speakers' stage on or off on both ears: the three gains
+/// of `lvs` and `rvs`. Off is the dry sound alone (1, 0, 0), on the convolved sound alone
+/// (0, 1, 1). Both are live: no rebuild.
+pub fn speakers_params(on: bool) -> Vec<(String, f64)> {
+    let mut params = Vec::new();
+    for name in ["lvs", "rvs"] {
+        for (port, gain) in (1..=3).zip(speakers_gains(on)) {
+            params.push((format!("{name}:Gain {port}"), gain));
+        }
+    }
+    params
+}
+
 /// The `pw-cli` line that sets `params` on node `node`, in one call:
 /// `set-param 42 Props { params = [ "l07:Gain" 6 … ] }`.
 pub fn set_param_line(node: u32, params: &[(String, f64)]) -> String {
@@ -425,6 +567,14 @@ impl LiveNode {
     /// and is rebuilt once when crossfeed is first turned on.
     pub fn has_crossfeed_controls(&self) -> bool {
         crossfeed_params(&Stage::bypass())
+            .iter()
+            .all(|(name, _)| self.params.contains_key(name))
+    }
+
+    /// Whether the node has the virtual speakers' controls (every port [`speakers_params`]
+    /// lists): its config held the stage, which is only so while a set is chosen.
+    pub fn has_speakers_controls(&self) -> bool {
+        speakers_params(false)
             .iter()
             .all(|(name, _)| self.params.contains_key(name))
     }

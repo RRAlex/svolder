@@ -31,9 +31,9 @@ const NO_DAEMON_UNKNOWN: &str = "no daemon is running, so whether it plays now i
 /// What a verb prints: the lines for standard output, then the lines for standard error (which
 /// the command prefixes with `svolder: `).
 #[derive(Debug, Default, PartialEq)]
-struct Answer {
-    out: Vec<String>,
-    err: Vec<String>,
+pub(super) struct Answer {
+    pub(super) out: Vec<String>,
+    pub(super) err: Vec<String>,
 }
 
 /// `svolder host crossfeed [--json] [VERB]`.
@@ -146,7 +146,7 @@ async fn answer(
 }
 
 /// What asking for the daemon that serves the computer EQ found.
-enum Reach {
+pub(super) enum Reach {
     /// Its socket, and the computer EQ it shows.
     Serving(std::path::PathBuf, Box<svolder_host::eq::EqView>),
     /// A daemon answers on the socket but shows no computer EQ (its host is off).
@@ -158,7 +158,7 @@ enum Reach {
 }
 
 /// Look for the daemon, starting nothing.
-async fn reach(g: &Globals<'_>, config: Option<&Config>) -> Reach {
+pub(super) async fn reach(g: &Globals<'_>, config: Option<&Config>) -> Reach {
     let Some(config) = config.filter(|_| asks_a_daemon(g.transport)) else {
         return Reach::NoDaemon;
     };
@@ -188,7 +188,7 @@ async fn host_eq(socket: &std::path::Path) -> Option<Option<svolder_host::eq::Eq
 }
 
 /// The refusal of a verb with no daemon serving the computer EQ.
-fn needs_a_daemon() -> Failure {
+pub(super) fn needs_a_daemon() -> Failure {
     Failure {
         code: Kind::NoDaemon.code(),
         what: format!("{NEEDS_A_DAEMON}, and none serves the computer EQ"),
@@ -207,7 +207,7 @@ fn offline(settings: Option<&CrossfeedSettings>, on: bool, why: &str) -> Crossfe
 }
 
 /// A refusal of a value the command line got wrong.
-fn usage(what: String, next: String) -> Failure {
+pub(super) fn usage(what: String, next: String) -> Failure {
     Failure {
         code: Kind::Usage.code(),
         what,

@@ -722,7 +722,8 @@ async fn the_changed_fake_route_changes_everything() {
 }
 
 /// The fake route follows the fake computer's EQ: untouched while the EQ is off or flat, and the
-/// verdict says `host EQ on` once it is on with a point that is not flat.
+/// verdict says `host EQ on` once it is on with a point that is not flat; the crossfeed in the
+/// path says `crossfeed on`.
 #[tokio::test]
 async fn the_fake_route_follows_the_fake_computers_eq() {
     let parts = Parts::fake(FakeKnobs::default());
@@ -765,6 +766,29 @@ async fn the_fake_route_follows_the_fake_computers_eq() {
     assert_eq!(line.verdict, svolder_ipc::host::Verdict::Changed);
     assert_eq!(line.words, ["host EQ on"]);
     eq(HostEqOp::Mode { on: false }).await.expect("off");
+    assert_eq!(
+        verdict().await.verdict,
+        svolder_ipc::host::Verdict::Untouched
+    );
+    let crossfeed = |on| {
+        eq(HostEqOp::Crossfeed {
+            on: Some(on),
+            model: None,
+            preset: None,
+            amount_pct: None,
+            crossover_hz: None,
+            delay_ms: None,
+            done: true,
+        })
+    };
+    crossfeed(true).await.expect("crossfeed on");
+    let line = verdict().await;
+    assert_eq!(line.verdict, svolder_ipc::host::Verdict::Changed);
+    assert_eq!(line.words, ["crossfeed on"]);
+    eq(HostEqOp::Mode { on: true }).await.expect("on again");
+    assert_eq!(verdict().await.words, ["host EQ on", "crossfeed on"]);
+    crossfeed(false).await.expect("crossfeed off");
+    eq(HostEqOp::Mode { on: false }).await.expect("off again");
     assert_eq!(
         verdict().await.verdict,
         svolder_ipc::host::Verdict::Untouched
@@ -1355,4 +1379,53 @@ async fn an_outside_volume_change_reaches_the_computer_within_a_beat() {
         .find(|(_, volume)| *volume > 0.7)
         .expect("the change was seen");
     assert!(first.0 <= 32, "seen at {} s, changed at 30 s", first.0);
+}
+
+/// The fake computer serves virtual speakers from the store it is given, with two synthetic sets
+/// in it (one for each choice, under ids no catalogue has) and none chosen; the same fake with no
+/// store serves none, as the fake always did.
+#[tokio::test]
+async fn the_fake_computer_serves_speakers_from_a_store_with_two_synthetic_sets() {
+    let dir = std::env::temp_dir().join(format!("svolder-fake-speakers-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let store = Arc::new(svolder_speakers::Store::new(&dir));
+    let parts = Parts::fake_with(FakeKnobs::default(), Some(Arc::clone(&store)));
+    let view = parts.computer.expect("a computer").eq_view();
+    let speakers = view.speakers.expect("the speakers are served");
+    assert!(!speakers.on);
+    assert_eq!(speakers.set, None);
+    let mut ids: Vec<_> = speakers.sets.iter().map(|set| set.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        ["fake-no-room", "fake-with-room"],
+        "{:?}",
+        speakers.sets
+    );
+    for set in &speakers.sets {
+        store.check(&set.id).expect("the stored set plays");
+        assert!(
+            svolder_speakers::find(&set.id).is_none(),
+            "no catalogue entry"
+        );
+        assert!(set.label.starts_with("Synthetic"), "{}", set.label);
+    }
+    let bare = Parts::fake(FakeKnobs::default())
+        .computer
+        .expect("a computer");
+    assert!(bare.eq_view().speakers.is_none(), "no store, no speakers");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The fake daemon's store is made fresh, with the two synthetic sets in it.
+#[test]
+fn the_fake_daemons_store_is_made_fresh() {
+    let run = std::env::temp_dir().join(format!("svolder-fake-run-{}", std::process::id()));
+    let dir = run.join("fake-speakers");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("left-over.toml"), "x").unwrap();
+    let store = fake_speakers::open_in(&dir);
+    assert!(!dir.join("left-over.toml").exists(), "made fresh");
+    assert_eq!(store.list_sidecars().len(), 2);
+    let _ = std::fs::remove_dir_all(&run);
 }

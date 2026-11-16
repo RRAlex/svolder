@@ -623,6 +623,9 @@ fn save(dir: &Dir, on: bool) {
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     }
     .save(&dir.state())
     .expect("the state is saved");
@@ -780,6 +783,66 @@ async fn a_crossfeed_op_changes_the_chain_and_the_host_view() {
     assert!(why.contains("names nothing"), "{why}");
 }
 
+fn speakers_op(on: Option<bool>, set: Option<&str>) -> HostEqOp {
+    HostEqOp::Speakers {
+        on,
+        set: set.map(str::to_string),
+        done: true,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_speakers_op_reaches_the_controller_and_is_refused_where_it_cannot_serve_them() {
+    // No store: the op is refused in words, the view has no speakers, nothing is written.
+    let rig = rig();
+    let _first = rig.service.watching();
+    settle().await;
+    let why = rig.eq(speakers_op(Some(true), None)).await.unwrap_err();
+    assert!(why.contains("not available"), "{why}");
+    assert!(rig.service.view().eq.unwrap().speakers.is_none());
+    assert!(!rig.wrote());
+
+    // A store with no set in it: the view carries the speakers, and the op's refusals are the
+    // controller's own words.
+    let dir = Dir::new();
+    let (sink, chain, params) = (
+        FakeSink::new(Some(sink_state(0.42))),
+        FakeChain::new(),
+        FakeParams::new(),
+    );
+    let sink_arc: Arc<dyn Sink> = Arc::new(sink.clone());
+    let eq = EqControl::new(
+        Arc::new(chain.clone()),
+        Box::new(params.clone()),
+        Keep::Memory,
+    )
+    .with_speakers_dir(&dir.0.join("speakers"));
+    let service = HostService::idle();
+    service.run_with(parts(Computer::new(Ok(sink_arc), Ok(eq))));
+    let _watching = service.watching();
+    settle().await;
+    let view = service
+        .view()
+        .eq
+        .unwrap()
+        .speakers
+        .expect("the speakers' view");
+    assert!(!view.on && view.sets.is_empty());
+    let ask = |op| async {
+        service
+            .host_eq(op, &[], |_| Vec::new(), |_| async { Ok(()) })
+            .await
+            .map_err(|refused| refused.to_string())
+    };
+    let why = ask(speakers_op(Some(true), None)).await.unwrap_err();
+    assert!(why.contains("no set is chosen"), "{why}");
+    let why = ask(speakers_op(None, Some("nope"))).await.unwrap_err();
+    assert!(why.contains("nope"), "{why}");
+    let why = ask(speakers_op(None, None)).await.unwrap_err();
+    assert!(why.contains("names nothing"), "{why}");
+    assert!(chain.calls().is_empty(), "a refusal changes nothing");
+}
+
 /// A state that says the crossfeed plays, as a run that did not stop leaves it.
 fn save_crossfeed_on(dir: &Dir, flat: bool) -> HostEqState {
     let state = HostEqState {
@@ -801,6 +864,9 @@ fn save_crossfeed_on(dir: &Dir, flat: bool) -> HostEqState {
         crossfeed: Some(svolder_host::eq::CrossfeedSettings::default()),
         crossfeed_on: true,
         flat,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     };
     state.save(&dir.state()).expect("the state is saved");
     state

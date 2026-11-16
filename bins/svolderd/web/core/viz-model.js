@@ -12,7 +12,9 @@
 // the left and right channels as 240 bytes in base64 (a byte is a level of 0 to 255 over
 // -72 .. 0 dBFS), the left and right RMS and the left and right peak as bytes, a beat onset flag
 // (0 or 1), the tempo (a number or null) and the beat's phase (0 to 255 of the period since the
-// last beat).
+// last beat). Peak byte 255 is an over (a sample peak of 32767/32768 of full scale or more), never
+// a peak below it; the VU meter's model (`vu-model.js`) reads the levels, and `?only=levels`
+// sends them alone.
 //
 //   decode(wire)         the frame as `{ t, left, right, levels, beat, bpm, phase }` (`left`,
 //                        `right` and `levels` are `Uint8Array`s, `beat` a boolean), or null for

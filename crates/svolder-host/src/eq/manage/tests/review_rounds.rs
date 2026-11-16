@@ -127,6 +127,7 @@ async fn a_curve_peaking_above_thirty_decibels_applies_and_applies_again() {
             rate_hz: None,
             flat: false,
             crossfeed: None,
+            speakers: None,
         })
         .await
         .unwrap();

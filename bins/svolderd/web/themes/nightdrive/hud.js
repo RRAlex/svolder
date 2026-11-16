@@ -19,13 +19,22 @@ function inputAndRate(device) {
   return [input?.options?.find((o) => o.on)?.label, rate?.text];
 }
 
-/** What the computer does to the sound, in words, and whether it is worth the amber: the path's
- * flag for the computer, with the route's host EQ when the path has none. */
+/** The path's words that name a stage of the computer's filter chain: the words `chain_words` in
+ * crates/svolder-ipc/src/host/path.rs gives them; change both together. */
+const STAGE_WORDS = ['host EQ on', 'crossfeed on', 'virtual speakers on', 'EQ pass-through'];
+
+/** What the computer does to the sound, in words, and whether it is worth the amber: the stages of the
+ * filter chain the path names (`host EQ on`, `crossfeed on`, ...; the route's host EQ with the fixed
+ * words when the path has none), and the path's flag for the computer. */
 function verdictOf(page) {
   const hop = page?.device?.playing?.path?.hops?.find((h) => h.label === 'computer');
   const eq = page?.host?.route?.host_eq === true;
   const changes = hop ? hop.changes === true : eq;
-  if (eq) return { words: changes ? `${HUD.hostEq} · ${HUD.changes}` : HUD.hostEq, tone: changes ? 'warn' : null };
+  if (eq) {
+    const said = String(page?.device?.playing?.path?.words ?? '').split(' · ').filter((w) => STAGE_WORDS.includes(w));
+    const stage = said.length ? said.join(' · ') : HUD.hostEq;
+    return { words: changes ? `${stage} · ${HUD.changes}` : stage, tone: changes ? 'warn' : null };
+  }
   return changes ? { words: HUD.changes, tone: 'warn' } : { words: '', tone: null };
 }
 

@@ -796,6 +796,7 @@ fn the_captures_levels_are_smoothed_across_its_blocks_as_the_meters_are() {
         bands: [0.0; svolder_host::fft::BANDS],
         left,
         right,
+        levels: Default::default(),
     };
     app.heard_block(&block(0.2, 0.8), t0);
     assert_eq!(app.host.level, Some(f64::from(0.8f32)));
@@ -840,6 +841,7 @@ fn the_captures_level_after_a_quarter_second_is_the_same_in_twelve_blocks_or_one
         bands: [0.0; svolder_host::fft::BANDS],
         left,
         right,
+        levels: Default::default(),
     };
     let mut many = app();
     many.heard_block(&block(0.0, 0.0), t0);

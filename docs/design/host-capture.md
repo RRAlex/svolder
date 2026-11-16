@@ -85,10 +85,32 @@ unavailable card.
 `capture` and `frame` events, the frame's bytes in base64. It is a stream of its own and not part of
 the device's, because frames are the one thing that costs the daemon work in proportion to who
 looks: the device stream is open for every page, and only the page whose card is on show opens
-this one, closes it when the card is not, and so holds the capture only then. The frame is JSON
+this one, closes it when the card is not, and so holds the capture only then (Signal's meters
+the same, on the levels-only form while its Meters view shows). The frame is JSON
 with base64 bytes because a page decodes that with no code of ours; the byte scale is a tuning that
 may change and nothing is promised about it, and the encoder is a small function of ours, since
 the base64 crate is in the tree only as another crate's dependency.
+
+`GET api/v1/host/frames?only=levels` is the same stream with the frames cut down to `{"t", "lv"}`
+(about 45 bytes instead of about 700): the same `hello` and `capture` events, the same holds and
+the same capture, for a page that draws only the meters. Only the exact pair `only=levels` does it;
+any other query is the full stream. The capture's analysis runs for any holder, so the saving is
+the wire's and the page's.
+
+## The levels and the over rule
+
+A frame's `levels` are four bytes, `[rmsL, rmsR, peakL, peakR]`: -72 to 0 dBFS spread linearly
+over 0 to 255 (0.28 dB a step). The RMS and the band bytes are rounded onto that scale. The peak is
+the largest absolute sample since the last frame, with no gaps, and its top value is reserved:
+`peak_byte` gives 255 only when the sample peak is at or above `OVER` (32767/32768, 16-bit positive
+full scale; every deeper format's full scale is above it), and otherwise at most 254. A master
+peaking at -0.1 dBFS therefore reads 254 and never lights an over lamp. The test is `>=` on that
+one constant: a 16-bit full-scale square reaches the tap at exactly `OVER` and a 32-bit float one
+at 1.0, both read 255. Any resampling on the way (the tap's, when the graph runs at another rate,
+or a stream's own into a 48 kHz graph) can overshoot a square or clipped master by up to 1.9 dB and
+light an over that its source never had. `Frame::block()` puts a 255 back as exactly `OVER`, so a joined TUI's lamp
+follows the same rule as a direct one's. How the bytes become a needle is in [the VU
+meter](vu-meter.md).
 
 ## Over the socket
 
@@ -125,7 +147,9 @@ never asks the daemon. In direct mode the TUI records for itself and bins the au
 bands as before; joined, it bins the daemon's 240 down to them. While the connection is opening the
 loop's own `pw-record` keeps feeding the row, and it stops when the daemon's first frame lands, so a
 slow daemon never leaves the row without data and the host is recorded once afterwards (both
-captures are passive, `node.rate = 0`, so the short overlap holds nothing of the graph). A frame
+captures are passive, `node.rate = 0`, so the short overlap holds nothing of the graph). The socket's frames
+are always whole (the levels-only form is the web route's), as the VU rows beside the Spectrum row
+want the bands too. A frame
 lands through `Frame::block()` and `App::heard_frame`, as a block of the loop's own capture does;
 its beat flag starts `Host::pulse` (200 ms), which draws the Spectrum row bold and lifts the
 breathing borders' level for that long (and puts the loop on its fast tick for it; the row pulses

@@ -377,6 +377,16 @@ section unfolded (see "Crossfeed" below). On a short pane the dim line goes firs
 points table, which scrolls to keep the focused point in sight. A daemon that does not offer
 crossfeed shows no row.
 
+Where the daemon also offers [virtual speakers](eq.md#virtual-speakers), that row becomes the
+**Space** row: `Space ‹ Virtual speakers ›`, a choice of **Off**, **Crossfeed** or **Virtual
+speakers** that `←→` or `,` `.` step and `␣` turns off, or on again (the speakers where a set is
+chosen, else crossfeed). Two dim lines under it say what plays: for the speakers the set with its
+choice and term (`SADIE II, D2 · No room · HRTF`), then how loud and how long
+(`7 dB quieter · 5.3 ms`: the loudness change and the length, `cut to 0.5 s` when cut); for
+crossfeed its model and preset, then its numbers. Choosing Virtual speakers with no set chosen
+turns on the first fetched one, and with none fetched opens the set list. `Enter` or `X` open the
+tone screen with the section unfolded, as before.
+
 Below the Loudness row, the pane names the preset the tone control is on, as the tone-control
 screen's header does (see below): `Preset    NAME`, `NAME*` once the curve has moved off the one
 loaded last, `custom` for a curve no preset matches, and `loading NAME` while a recall is still
@@ -651,8 +661,11 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     the daemon speaks for the host, so the group does not change height as playback starts and
     stops: with no player it reads `nothing playing`, and with a player the daemon has not read the
     route for yet, `route not read`, both dim.
+    `untouched` covers the computer and the DAC; what the player does inside itself, such as loudness
+    normalization or its own EQ, happens inside the player, where svolder cannot look.
     The verdict comes first in its own colour — `untouched` (green), what changes the sound (amber:
-    `resampled 44.1 → 48 kHz`, `computer volume 54 %`, `player muted`, `host EQ on`,
+    `resampled 44.1 → 48 kHz`, `computer volume 54 %`, `player muted`, `host EQ on`, `crossfeed on`,
+    `virtual speakers on`, `EQ pass-through`,
     `2 other sounds mixing`, `DAC reads 44.1 kHz`), or, dim, `→ NAME` when the
     default sink is not this DAC (`player → NAME` for a player routed elsewhere), `the DAC listens to
     Optical` when the DAC is on an input the
@@ -679,12 +692,30 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     after the label the row ends with a dim word, `daemon` when the bands come from
     the daemon's capture and `own` when this TUI runs its own. It is a reading, as a meter's row is:
     neither the keys nor the mouse reach it.
+- **`VU L` and `VU R`**, two rows in the Status pane under `Now playing` (and under the cover),
+  drawn only on a terminal of at least 100 columns by 45 rows, while host audio shows and whatever
+  the cover is doing. Each is a needle on a 40-cell track, then its reading in VU and a lamp, as
+  `VU L ───────────────────────────┼┄┄┄┄┄┄┄┄┄┃┄┄   +2.6  ●`. The track's glyphs carry the scale without
+  colour: `─` below 0 VU, `┼` at 0 VU, `┄` above it and `┃` where the needle is. The reading is one
+  decimal with its sign, `< -20` below the scale and `—` while nothing is captured. The lamp is `○`
+  and turns `●` when that channel reaches full scale, and holds for 1.2 seconds. The needle follows
+  the RMS level with a VU meter's swing (about 0.3 seconds to settle) and falls to rest when no
+  audio arrives for half a second. The level that reads 0 VU is `[tui] vu_reference`, from -30 to
+  -6 dBFS, -18 by default (the **Settings** box's **Host audio** category, **VU reference**,
+  steps it a dB at a time); a whole number outside the range is held at the nearest end, and a
+  number with a fraction, a string or a boolean is refused like any other bad `[tui]` value.
+  A pointer resting on the rows says what they are, `┃` the needle and `●` an over held 1.2
+  seconds. The meter reads the sink's monitor, so it follows the computer's volume only where the
+  sink's monitor does. The capture runs while the rows show, except under a box (Settings, help or
+  a menu), and the screen redraws fast only while a needle is off rest or a lamp is lit. Joined to a
+  daemon, the rows use the same frames as the Spectrum row.
 - **`Level from`**, the Status pane's line above `Now playing`: where the level the glow, the
   breathing borders, the focus runner and the title meter follow comes from — `meters` while the
   device's scaled meters stream (one of them has sent a reading within the last ten seconds — the
   values a refresh or a reconnect reads the device for do not count), else `host` while the capture
   of the sink's monitor runs, else `—`, dim. It is one source at a time, never a mix of the two: an
   amp whose meters stream keeps their level, and a DAC, which streams none, takes the host's.
+  While the VU rows show the row ends with `(0 VU = -18 dBFS)`, the reference in use.
 
   The host's level is the louder of the capture's two channels, smoothed against time at the pace
   the meters' level moves at (a meter reporting ten times a second) however many blocks it arrives
@@ -943,6 +974,40 @@ they may cost the graph three rows. When crossfeed turns itself off ([the four
 resets](eq.md#it-turns-itself-off)), a toast says why once: `crossfeed turned off: ...`. A daemon
 that does not serve crossfeed has no section and no `X` key; the key table and the `?` overlay list
 `X`, `␣`, `←→`, `, .` and `Enter` on Crossfeed only where the computer serves it.
+
+#### Space and virtual speakers
+
+Where the computer serves [virtual speakers](eq.md#virtual-speakers) the Crossfeed section is the
+**Space** section. Folded it is one line that leads with what plays, `Space  Virtual speakers · No
+room · HRTF · SADIE II, D2 · −7 dB  (X)`, or `Crossfeed · Bauer · Chu Moy · ...`, or `off`
+(`unavailable: ...` with the reason when the daemon says they cannot be changed now). Unfolded, its
+first row is the choice (`Space  ‹ Virtual speakers ›  Off · Crossfeed · Virtual speakers`, the one
+that plays standing out), and the rows under it belong to the choice:
+
+- **Crossfeed**: the Preset row, then Level, Crossover and Delay, as above;
+- **Virtual speakers**: the **Set** row (the set with its choice and term, `←→` or `,` `.` step
+  through the fetched sets, which rebuilds the chain once while they play and leaves them on or off
+  as they were, `Enter` or `S` open the set list), then the facts read off the daemon's view: the
+  licence line (the licence, the credit words where it asks for them), where the speakers were
+  measured, how long the responses are, how much quieter than Off they play and where the set comes
+  from. From 120 columns two curves stand beside the facts (what the same ear and the other ear hear
+  of a speaker, in dB); below that they are two strips of level blocks under them, which fit 80x24.
+  The facts are never typed into: the keys' two stops are the choice and the set.
+
+`Tab` has the same stops as for crossfeed. When the speakers turn themselves off
+([why](eq.md#virtual-speakers-turn-themselves-off)) a toast says why once.
+
+**`S` opens the set list** over the tone screen or the device screen, where the computer serves the
+speakers (the key table and `?` list it only there). It lists the catalogue's sets and your own,
+each with its choice and term, licence, size and whether it is fetched; `↑↓`, `Home` and `End` move,
+`Tab` and `Shift+Tab` filter the list by **With room · BRIR** and **No room · HRTF**, `Enter`
+fetches the set on the row (with its progress on the row) or, when it is fetched, chooses it and
+closes the list, `x` stops a fetch, `f` asks to forget a fetched set (`y` forgets, anything else
+keeps it), `i` opens a prompt for a file's path to import (`Tab` switches its room, `Enter`
+imports, `Esc` goes back) and `Esc` or `S` closes the list. The daemon owns the sets: with no
+daemon the list shows the fetched sets and says `fetching needs svolderd`, and a fetch or an
+import is refused in words. Leaving the screen, or the program, cancels a fetch in flight. The
+mouse and the tooltips reach the same rows.
 
 #### What the graph draws
 
@@ -1621,7 +1686,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.35.1 │
+│                          v0.36.1 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1693,7 +1758,7 @@ the current one between `┤ ├`:
   it quits, the title meter, whether the intro plays on launch, which effect builds it and whether a
   short sound plays with it, and how often the AutoEq index is fetched again
   (`[autoeq] refresh_weeks`).
-- **Host audio**: whether the TUI reaches the host's own audio, its visualizer, and the cover art.
+- **Host audio**: whether the TUI reaches the host's own audio, its visualizer, the cover art and the VU reference.
 - **Connect** (the Connections category): the daemon's `[web]`, `[mcp]` and `[mqtt]` sections and
   what the daemon says of them, described under "Connect" below.
 

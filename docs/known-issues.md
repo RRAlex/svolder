@@ -241,6 +241,14 @@ that branch rather than listed here.
   listen would fill it. A hearing by the `scan` verb or a walk updates the device's `signal` and its
   series, and the MQTT feed's `signal` follows at the actor's next hearing
   (`bins/svolderd/src/device/publish.rs`, `bins/svolderd/src/device.rs`).
+- [limit] **An own SOFA file that is crafted can tie up a core and cannot be cancelled.** The SOFA
+  reader inflates chunked data with no total cap, so a file under the 64 MiB limit can take a long
+  time. The import runs as a job off the request path, but the job cannot be interrupted once the
+  parser has it (`crates/svolder-speakers/src/sofa.rs`, `parse`).
+- [limit] **A cancelled virtual speakers' fetch can stay alive until the 120 s timeout.** Cancel is
+  seen between reads of the download, not while waiting for the response headers, so a stalled
+  server keeps a cancelled fetch, and the store's gate with it, until the client's timeout
+  (`crates/svolder-speakers/src/fetch.rs`).
 - [trade-off] **MCP judges a built-in setting against the floors it read at call
   time.** A band that another front end lowers after the call and before the writer applies the
   setting is raised back, and was judged against the earlier floor, so a rise can land larger than
@@ -329,7 +337,6 @@ that branch rather than listed here.
 - [trade-off] **Turning the web guest view on or off restarts the web server.** The reload sees a
   changed `[web]` section and stops and starts the server on its address, so open event streams
   end, and a listen port of 0 changes (`bins/svolderd/src/http_slot.rs:93`).
-
 - [trade-off] **A flat chain for crossfeed can sit below 0 dB.** With crossfeed on and the EQ off, the
   chain plays flat at the lowest level its loaded configuration allows (the rule for a change of the
   sink's rate), so a chain loaded with a -6 dB curve keeps -6 dB until it restarts
@@ -372,6 +379,9 @@ that branch rather than listed here.
 - [limit] **`svolder setup` offers no web or MCP step.** The wizard walks the device, its name, the
   passphrase and the daemon; the web page and MCP are turned on afterwards with `svolder web on`,
   `svolder mcp on` or the TUI's Settings (`bins/svolder/src/wizard.rs`).
+- [limit] **`svolder host speakers show` with no daemon names only the saved set's id.** The sets'
+  sidecars are the daemon's to read, so without it the label, licence and loudness of the chosen set
+  are not known to the command (`bins/svolder/src/commands/host_speakers.rs`, `show`).
 - [trade-off] **`svolder set` is outside the volume's glide.** `svolder set volume max`, a raw
   number above three quarters of the range and `svolder raw` on the volume write that step at
   once, as does `svolder set volume up --step N` that lands above three quarters with N of 4 or
@@ -410,7 +420,6 @@ that branch rather than listed here.
   `Client::connect_if_any` and names the socket (`crates/svolder-ipc/src/socket/client.rs`,
   `bins/svolder/src/commands/device.rs`, `bins/svolder/src/commands/device/devices.rs`,
   `bins/svolder/src/commands/capture/handover.rs`).
-
 - [trade-off] **`svolder host crossfeed` with no daemon assumes 48 kHz.** `show` has no sink to ask,
   so it works the delay floor out at 48 kHz; a daemon uses the sink's rate, so the two can differ by a
   few hundredths of a millisecond (`bins/svolder/src/commands/host_crossfeed.rs`, `offline`).
@@ -448,6 +457,9 @@ that branch rather than listed here.
   Status pane carries no word for it, and the TUI's player watcher and sink poll still start for a
   daemon that is gone, so the screen keeps what it last drew (`bins/svolder/src/tui/start.rs`,
   `bins/svolder/src/commands/demo.rs`).
+- [limit] **The own-file prompt of the virtual speakers' set list has no path completion.** `Tab`
+  there switches the file's room, so a path is typed whole, and the daemon reads it on its own
+  machine (`bins/svolder/src/tui/boxes/speakers.rs`).
 - [trade-off] **A quit with Settings writes queued behind a held lock gives the later ones up.**
   Settings writes run one at a time, each waiting up to two seconds for the file's lock; when one
   fails at quit (a lock the daemon holds past its wait) the writes still queued fail the same way,
@@ -581,6 +593,11 @@ that branch rather than listed here.
   with no word that the daemon restarted. A writer switched to read-only on the add page leaves
   their walk running until it ends or hits the 10-minute idle bound
   (`bins/svolderd/web/core/popups/devices/walk-wire.js`).
+- [limit] **A fetch of a virtual speakers' set shows no progress on the web page.** The route
+  answers once, when the download, check and conversion are done, and the daemon's job events do not
+  reach the page, so a running fetch says "Fetching..." with Cancel and no count; the TUI and the
+  CLI show one (`bins/svolderd/web/core/popups/speakers/wire.js`). A progress bar needs the
+  speakers' job stream forwarded to the web events.
 - [trade-off] **The Devices popup words some readings as numbers.** A choice's raw value (the input)
   and a readout's (the sample rate) have no words in the page's model, so their range under a graph
   and in its text alternative is drawn as numbers, and the readings table shows the daemon's words
@@ -627,6 +644,19 @@ that branch rather than listed here.
   cancelled stops waiting at once, but a download already under way runs on its blocking thread to
   its limit (20 seconds for a correction, 60 for the index), since the HTTP client has no cancel
   (`bins/svolderd/src/handler/autoeq.rs`, `crates/svolder-autoeq/src/client.rs`).
+- [trade-off] **The Directions picture draws only the two measured angles.** The view carries no
+  per-angle ear differences, so a No room · HRTF set shows its two speakers and not every measured
+  angle; that needs a field in the view (`bins/svolderd/web/core/popups/speakers/pictures.js`).
+- [trade-off] **The room choice cards pick the set in use, else the first fetched one.** There is no
+  "last used per room" memory (`bins/svolderd/web/core/popups/speakers/draw.js`).
+- [trade-off] **The W2 glow's red over zone is under 3:1 against the face.** In the warm backlight
+  glow the zone's red (`.sg-w2 .zone`) reads about 2.0 to 2.8 to 1 against the amber face, below
+  the 3:1 that graphics ask for. The numerals' `+` signs still mark the zone, and the look was kept
+  as built (`bins/svolderd/web/themes/signal/style.css`).
+- [observed] **At 900 px wide Signal's Player hop label can be clipped.** The label ("Fake Player",
+  its 48 kHz line) was seen cut at the left edge of the line at that width in the stills; where
+  the labels are placed is `bins/svolderd/web/themes/signal/draw/line.js`.
+
 ## Maintainer notes
 
 ### Bluetooth and sessions
@@ -654,6 +684,14 @@ that branch rather than listed here.
   unit whose spawn failed at a reload is retried, and logged, at every probe end; `start_unwatched`
   appends the actor it starts to the set, so the order differs from the file's until the next reload
   (`bins/svolderd/src/handler/probe.rs`, `bins/svolderd/src/handler.rs`).
+- [bug] **An own set's id is 32 bits of the source's SHA-256, and a save overwrites the id.** `own-`
+  plus 8 hex characters, and `Store::save` replaces an existing id, the pinned one included. Sixteen
+  hex characters, or refusing a save over the pinned id whose source differs, would close it
+  (`crates/svolder-speakers/src/import.rs`).
+- [limit] **With no live updates, a sink rate change does not re-check the set's WAV.** The chain is
+  not watched then, and `rebuild_for_missing_set` runs from `watch` only. svolder never removes a
+  pinned WAV, so only one deleted by hand reaches it (`crates/svolder-host/src/eq/control.rs`,
+  `step`).
 - [trade-off] **`Client::request` skips a mismatched response id.** `Client::request`'s reply loop
   skips a `Reply::Response` whose id does not match the pending request (`_ => continue`) rather
   than reporting a protocol desync. Every caller today awaits each request to its end on its
@@ -778,6 +816,17 @@ that branch rather than listed here.
 - [debt] **The computer EQ's process scan runs on the async threads.** `chains()` and `Argv::find`
   read `/proc` synchronously, and are called from `status`, `stop_process` and now `exited`: small,
   and blocking (`crates/svolder-host/src/eq/manage.rs`, `crates/svolder-host/src/eq/process.rs`).
+- [debt] **Crashed virtual speakers' writes leave files nothing sweeps.** A store write goes through
+  `<id>.tmp-<pid>` and a download through `.<id>.part`; after a crash they stay, since `list()`
+  ignores them and only the import folder is swept at the daemon's start. A start sweep would do
+  (`crates/svolder-speakers/src/store.rs`, `write_atomic`; `fetch.rs`, `Part`).
+- [debt] **The controller's set reads run under its lock.** `refresh_sets` (a read and SHA-256 of
+  every set, up to about 20 MB) runs at every speakers op and every computer construction, inside
+  `HostService::reconfigure` with its `running` lock held, and `analysis::analyse` (about 4 ms at
+  48 kHz, 12 ms at 192 kHz in release, 5 to 10 times that on a Raspberry Pi) runs in the same read.
+  The clock's refresh reads sidecars only. Reading and checking only the chosen set, and moving the
+  analysis to `spawn_blocking` or to import time with a cached sidecar, would remove the pause
+  (`crates/svolder-host/src/eq/control/vs.rs`, `speakers`, `with_speakers`, `read_sets`).
 - [test, with Bifrost 3 testing] **The shared listen is proven on fakes and on one device.** Every
   actor looks for its device through one `Scanner`: the listen that runs hears every device
   looked for while it runs, answers each the moment it is heard (the one that leaves nobody
@@ -871,6 +920,16 @@ that branch rather than listed here.
 
 ### TUI: event loop and opening devices
 
+- [trade-off] **A joined TUI takes the whole frames stream for the VU rows.** The socket's frames
+  request has no levels-only form, so a joined TUI whose visualizer, title meter and effects are
+  all off still receives the bands (about 700 bytes a frame) when only the VU rows want a level;
+  the web route has `?only=levels` for this
+  (`bins/svolder/src/tui/run/host/frames.rs`, `Backend::host_frames`).
+- [trade-off] **The VU rows hold the host's capture from 100 by 45, with everything else off.** The
+  capture runs while the rows show, which is a size-only rule: a terminal of 100 columns by 45 rows
+  or more starts `pw-record` even when the visualizer, the title meter and the effects are off and
+  nothing else wants a level. `host_audio = false` is the way to switch it off
+  (`bins/svolder/src/tui/app/meters.rs`).
 - [trade-off] **`render::frame_areas` derives the layout the screens drew.** `frame_areas` calls
   the same pure layout functions (`curve_of`, `fault_line`, `logo_of`, each screen's `frames_of`)
   that the screens' `draw` functions use, rather than reading it back from them: the alternative
@@ -1127,3 +1186,10 @@ that branch rather than listed here.
   dies between leaves it there (a temporary home, so nothing outlives the run); `make network-check`
   asks about the host target only (`scripts/web-checks/snippets.py`,
   `scripts/web-checks/node/fixtures/ember-parts.json`).
+- [test] **The preamp lab has no "choose a set mid-drag" event.** Its world has no store or
+  convolver model; the speakers take no part in the preamp, which
+  `the_speakers_take_no_part_of_the_preamp` pins (`crates/svolder-host/src/eq/lab.rs`,
+  `crates/svolder-host/src/eq/control/tests/vs.rs`).
+- [test] **The catalogue's sources are checked only by hand.** `make speakers-catalogue-check` needs
+  the network and is not in `make check`; it also shows any storage host a redirect leads to that
+  the catalogue does not list.

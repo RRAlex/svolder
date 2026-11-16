@@ -119,16 +119,42 @@ async fn admitted(web: &Web, request: Request) -> Result<Request, Response> {
             "a request's body is JSON (Content-Type: application/json)",
         ));
     }
-    let (parts, body) = request.into_parts();
+    let (mut parts, body) = request.into_parts();
     // The head has its timeout in the loop; the body gets the same, so a body that trickles or
     // stops cannot hold a connection.
-    // The one path that takes a file has a larger cap of its own.
-    let cap = match parts.uri.path() == super::writes::UPLOAD_PATH {
-        true => super::writes::UPLOAD_BODY_MAX,
-        false => MAX_BODY,
+    // The paths that take a file have a larger cap of their own.
+    // The import's cap is a signed-in writer's: anyone else is read at the ordinary one, and a
+    // writer waits for one of the few slots before its body is read.
+    let path = parts.uri.path().to_string();
+    let writes = super::writes::writer(web, &parts.headers).is_ok();
+    let cap = match path.as_str() {
+        super::writes::UPLOAD_PATH => super::writes::UPLOAD_BODY_MAX,
+        super::writes::IMPORT_PATH if writes => super::writes::IMPORT_BODY_MAX,
+        _ => MAX_BODY,
+    };
+    if path == super::writes::IMPORT_PATH && writes {
+        match super::writes::import_permit() {
+            Some(permit) => {
+                parts.extensions.insert(permit);
+            }
+            None => {
+                return Err(refusal(
+                    svolder_ipc::Response::error(
+                        svolder_ipc::CODE_USAGE,
+                        super::writes::IMPORT_BUSY,
+                    )
+                    .with_reason(svolder_ipc::Reason::Busy),
+                ));
+            }
+        }
+    }
+    // A file takes longer to arrive than a few keys.
+    let span = match path == super::writes::IMPORT_PATH && writes {
+        true => super::writes::IMPORT_BODY_TIMEOUT,
+        false => crate::http::HEADER_TIMEOUT,
     };
     let read = axum::body::to_bytes(body, cap);
-    match tokio::time::timeout(crate::http::HEADER_TIMEOUT, read).await {
+    match tokio::time::timeout(span, read).await {
         Ok(Ok(bytes)) => Ok(Request::from_parts(parts, Body::from(bytes))),
         Ok(Err(e)) if too_long(&e) => Err(error(
             StatusCode::PAYLOAD_TOO_LARGE,

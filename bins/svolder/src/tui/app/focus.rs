@@ -70,6 +70,7 @@ impl App {
             | Intent::ReadPresets
             | Intent::AutoEqSearch { .. }
             | Intent::AutoEqImport { .. }
+            | Intent::Speakers(_)
             | Intent::HostEq(_)
             | Intent::MoveToDac(_)
             | Intent::Tui(_)
@@ -218,7 +219,7 @@ impl App {
             // section (unfolded while the keys are in it) and the points.
             let stops = [
                 ToneRow::Mode,
-                ToneRow::Crossfeed(super::Xf::Preset),
+                ToneRow::Crossfeed(self.xf_first()),
                 ToneRow::Point(self.tone.point),
             ];
             let at = match self.tone.row {

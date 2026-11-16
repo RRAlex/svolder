@@ -438,8 +438,9 @@ fn the_status_pane_does_not_grow_with_no_cover_to_show() {
     let mut app = covered();
     app.host.cover.hash = None;
     let plain = heights(&app, area(100, 45)).0;
-    assert_eq!(plain[2], 8);
+    // The pane's usual eight rows and the VU meter's three.
+    assert_eq!(plain[2], 8 + 3);
     let mut app = covered();
     app.host.cover.font = None;
-    assert_eq!(heights(&app, area(160, 50)).0[2], 8);
+    assert_eq!(heights(&app, area(160, 50)).0[2], 8 + 3);
 }

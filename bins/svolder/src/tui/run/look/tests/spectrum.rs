@@ -142,6 +142,7 @@ fn a_moving_spectrum_row_redraws_fast_while_it_is_on_the_screen() {
         bands: [0.8; svolder_host::fft::BANDS],
         left: 0.5,
         right: 0.5,
+        levels: Default::default(),
     };
     app.heard_block(&block, t0);
     let off = Effects::new(false, &EffectsConfig::default());
@@ -162,6 +163,67 @@ fn a_moving_spectrum_row_redraws_fast_while_it_is_on_the_screen() {
     assert_eq!(tick_period(&app, &off), slow, "the row settled");
 }
 
+/// The VU rows redraw at the Spectrum row's pace only while a needle is off rest or a lamp is lit,
+/// with the capture running: silence settles them, and the loop is back at its slow tick, as it is
+/// for the Spectrum row; below 100 by 45, or with no capture, it never leaves it.
+#[test]
+fn the_vu_rows_redraw_at_the_spectrum_pace_only_while_they_move() {
+    let mut app = gungnir();
+    app.host.linked = true;
+    app.host.capturing = true;
+    app.size = (100, 45);
+    let t0 = Instant::now();
+    let off = Effects::new(false, &EffectsConfig::default());
+    let slow = Duration::from_millis(250);
+    let block = |db: f32, peak: f32| {
+        let rms = 10f32.powf(db / 20.0);
+        svolder_host::Block {
+            bands: [0.0; svolder_host::fft::BANDS],
+            left: rms,
+            right: rms,
+            levels: svolder_host::Levels {
+                rms: [rms; 2],
+                peak: [peak; 2],
+            },
+        }
+    };
+    // Silence from the start: nothing moves.
+    app.heard_block(&block(-120.0, 0.0), t0);
+    assert_eq!(
+        tick_period(&app, &off),
+        slow,
+        "a silent capture redrew fast"
+    );
+    // Music: the needles are off rest.
+    for n in 0..30u32 {
+        app.heard_block(
+            &block(-18.0, 0.5),
+            t0 + Duration::from_millis(33 * u64::from(n)),
+        );
+    }
+    assert_eq!(tick_period(&app, &off), SPECTRUM_TICK);
+    app.size = (99, 45);
+    assert_eq!(tick_period(&app, &off), slow, "below 100 by 45");
+    app.size = (100, 45);
+    app.host.capturing = false;
+    assert_eq!(tick_period(&app, &off), slow, "no capture");
+    app.host.capturing = true;
+    // Silence again: the needle falls to rest and the slow tick comes back once it lands.
+    let mut at = Duration::from_millis(33 * 30);
+    app.heard_block(&block(-120.0, 0.0), t0 + at);
+    while tick_period(&app, &off) == SPECTRUM_TICK {
+        at += Duration::from_millis(33);
+        assert!(at < Duration::from_secs(3), "the needle never settled");
+        app.heard_block(&block(-120.0, 0.0), t0 + at);
+    }
+    assert_eq!(tick_period(&app, &off), slow);
+    // A lit lamp moves it, for 1.2 s.
+    app.heard_block(&block(-120.0, 1.0), t0 + at);
+    assert_eq!(tick_period(&app, &off), SPECTRUM_TICK);
+    app.tick(t0 + at + Duration::from_millis(1201));
+    assert_eq!(tick_period(&app, &off), slow);
+}
+
 /// The spectrum alone ticks at twenty frames a second; a drag the user drives while it moves
 /// keeps the thirty.
 #[test]
@@ -178,6 +240,7 @@ fn the_spectrum_alone_ticks_at_twenty_frames_and_a_drag_keeps_thirty() {
         bands: [0.8; svolder_host::fft::BANDS],
         left: 0.5,
         right: 0.5,
+        levels: Default::default(),
     };
     app.heard_block(&block, app.now);
     let off = Effects::new(false, &EffectsConfig::default());

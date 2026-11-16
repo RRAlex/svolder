@@ -1,19 +1,21 @@
 /* SPDX-FileCopyrightText: 2026 the svolder authors */
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// The Sound popup's wire: a strip of two tabs, EQ library and Crossfeed, over the two parts that
-// already draw into a popup's frame. The EQ library part (popups/eq-library) is today's popup,
-// drawn into a view of the frame that adds the tab strip, the pill bar of its three pages and one
-// line naming what its page is about; the Crossfeed part (popups/crossfeed) draws into another.
-// A view only draws while its tab is the one shown, so the part of the tab that is not shown
-// cannot paint over the other: the EQ library part is not closed when the person goes to the
-// Crossfeed tab (its search, its preview and what is typed stay and are drawn again on the way
-// back), the Crossfeed part is.
+// The Sound popup's wire: a strip of three tabs, EQ library, Crossfeed and Virtual speakers, over
+// the three parts that already draw into a popup's frame. The EQ library part (popups/eq-library)
+// is today's popup, drawn into a view of the frame that adds the tab strip, the pill bar of its
+// three pages and one line naming what its page is about; the other two parts (popups/crossfeed,
+// popups/speakers) draw into views of their own. A view only draws while its tab is the one shown,
+// so the part of a tab that is not shown cannot paint over the other: the EQ library part is not
+// closed when the person goes to another tab (its search, its preview and what is typed stay and
+// are drawn again on the way back), the other two are.
 //
-// The router's page says the tab: `crossfeed` is the Crossfeed tab, any other (an EQ library page
-// or none) the EQ library's. The tab strip and the pills are buttons with `data-popup-page`, so
-// the frame's click steps the router. Left and Right on a tab move to the other tab.
+// The router's page says the tab: `crossfeed` and `speakers` are their tabs, any other (an EQ
+// library page or none) the EQ library's. The tab strip and the pills are buttons with
+// `data-popup-page`, so the frame's click steps the router. Left and Right on a tab move to the
+// next or the previous tab.
 
-import { CROSSFEED } from '../listed.js';
+import { CROSSFEED, SPEAKERS } from '../listed.js';
+import { wire as speakersWire } from '../speakers/wire.js';
 import { wire as crossfeedWire } from '../crossfeed/wire.js';
 import { wire as eqWire } from '../eq-library/wire.js';
 import { barId } from '../frame.js';
@@ -27,7 +29,8 @@ import {
 export function wire({ core, frame }) {
   const doc = frame.el.ownerDocument;
   const store = core.model;
-  /** The tab shown (`eq` or `xf`), the router's page and the EQ library page the EQ tab opens at. */
+  /** The tab shown (`eq`, `xf` or `sp`), the router's page and the EQ library page the EQ tab
+   * opens at. */
   let current = null;
   let page = null;
   let eqAt = eqPage(null);
@@ -38,7 +41,13 @@ export function wire({ core, frame }) {
     const cf = store.page().host?.computer?.eq?.crossfeed;
     return cf ? cf.on === true : null;
   };
-  const bar = () => barHtml({ page, eqAt, on: crossfeedOn() });
+  const speakersOn = () => {
+    const sp = store.page().host?.computer?.eq?.speakers;
+    return sp ? sp.on === true : null;
+  };
+  const bar = () => barHtml({
+    page, eqAt, on: crossfeedOn(), speakersOn: speakersOn(),
+  });
 
   /** A view of the frame for the part of `tab`: what it draws gets the strip and the title of the
    * popup, and nothing it draws shows while the other tab is the one shown. */
@@ -69,9 +78,10 @@ export function wire({ core, frame }) {
   const parts = {
     eq: eqWire({ core, frame: viewFor('eq') }),
     xf: crossfeedWire({ core, frame: viewFor('xf') }),
+    sp: speakersWire({ core, frame: viewFor('sp') }),
   };
 
-  /** The strip again, when what it says changed (crossfeed went on or off). */
+  /** The strip again, when what it says changed (a switch of crossfeed or the speakers). */
   function putBar() {
     if (open) frame.put(barId(frame.name), bar());
   }
@@ -85,7 +95,7 @@ export function wire({ core, frame }) {
         open = true;
         offs = [store.on('host', putBar), store.on('model', putBar), core.computer.on(putBar)];
       }
-      if (current === 'xf' && tab !== 'xf') parts.xf.hide();
+      for (const other of ['xf', 'sp']) if (current === other && tab !== other) parts[other].hide();
       current = tab;
       parts[tab].show(to);
     },
@@ -93,6 +103,7 @@ export function wire({ core, frame }) {
       if (!open) return;
       parts.eq.hide();
       parts.xf.hide();
+      parts.sp.hide();
       open = false;
       current = null;
       for (const off of offs) off();
@@ -102,7 +113,9 @@ export function wire({ core, frame }) {
       if (parts[current]?.onKey(event)) return true;
       const onTab = doc.activeElement?.closest?.('.fp-tabs');
       if (!onTab || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return false;
-      const to = current === 'eq' ? CROSSFEED : eqAt;
+      const order = [eqAt, CROSSFEED, SPEAKERS];
+      const at = order.findIndex((one) => tabOf(one) === current);
+      const to = order[(at + (event.key === 'ArrowRight' ? 1 : -1) + order.length) % order.length];
       core.router.step(to);
       doc.getElementById(tabId(tabOf(to)))?.focus({ preventScroll: true });
       return true;

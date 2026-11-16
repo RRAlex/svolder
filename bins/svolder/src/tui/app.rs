@@ -50,6 +50,7 @@ use crate::recovery::Failure;
 
 use super::boxes::connections::Connections;
 use super::boxes::presets::PresetsBox;
+use super::boxes::speakers::SpeakersBox;
 use super::boxes::toast::{Toast, ToastKind};
 use super::decoration::effects::Effects;
 use super::decoration::mascot::Mascot;
@@ -81,6 +82,7 @@ mod pointer;
 mod readings;
 mod session;
 mod side;
+pub(crate) mod speakers;
 mod tone;
 mod tone_state;
 
@@ -98,6 +100,7 @@ pub use readings::Reading;
 pub(crate) use readings::Readings;
 pub(crate) use session::Session;
 pub(crate) use side::SWITCH_ROW;
+pub use speakers::Space;
 /// What the computer's edit line calls its fields.
 pub(crate) fn point_line_names() -> [(&'static str, &'static str); 3] {
     point_line::NAMES
@@ -417,6 +420,8 @@ pub(crate) struct Moved {
     pub(crate) confirming: bool,
     /// Whether the preset list is open.
     pub(crate) presets: bool,
+    /// Whether the virtual speakers' set list is open.
+    pub(crate) sets: bool,
     /// Whether a band's edit line is open.
     pub(crate) edit_line: bool,
     /// Whether the quit question is open.
@@ -486,6 +491,9 @@ pub struct App {
     pub devices: DevicesScreen,
     /// The saved presets, the preset list over the screens, the AutoEq index and the computer EQ.
     pub presets: PresetsBox,
+    /// The virtual speakers' set list, the catalogue the daemon last gave and the fetch in
+    /// flight.
+    pub speakers_box: Box<SpeakersBox>,
     /// What the mouse is doing: the drags it holds, the climb it started, its last press and the
     /// tooltip it asks for.
     pub(crate) pointer: Pointer,
@@ -577,6 +585,7 @@ impl App {
                 editor: None,
                 confirm: None,
             },
+            speakers_box: Box::default(),
             presets: PresetsBox {
                 saved: Vec::new(),
                 preset_list: None,
@@ -594,6 +603,7 @@ impl App {
                 point_line: None,
                 xf_line: None,
                 xf_note: None,
+                sp_note: None,
                 header_loudness: false,
                 mode_before_flat: None,
                 mode_before_loudness: None,
@@ -895,6 +905,7 @@ impl App {
             split: self.tui.device_split.to_bits(),
             confirming: self.devices.confirm.is_some(),
             presets: self.presets.preset_list.is_some() || self.presets.device_list.is_some(),
+            sets: self.speakers_box.list.is_some(),
             edit_line: self.tone.edit_line.is_some(),
             quitting: self.overlays.quitting,
         }

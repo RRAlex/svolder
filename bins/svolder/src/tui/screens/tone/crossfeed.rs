@@ -18,17 +18,22 @@ use ratatui::widgets::{Axis, Chart, Dataset, GraphType, Paragraph};
 use svolder_host::eq::crossfeed::CrossfeedView;
 
 use crate::tui::app::crossfeed::{self, XfLine};
-use crate::tui::app::{App, ToneRow, Xf};
+use crate::tui::app::speakers as words;
+use crate::tui::app::{App, Space, ToneRow, Xf};
 use crate::tui::layout_tier::Tier;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::screens::device::{self, row_style};
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::{self, CURSOR_WIDTH};
 
+use super::speakers;
+
 /// Columns of the label every row opens with.
-const LABEL: usize = 10;
+pub(super) const LABEL: usize = 10;
 /// Rows of values the unfolded section has under its line: Level, Crossover and Delay.
 const VALUE_ROWS: u16 = 3;
+/// The same where the space choice is the line: the Crossfeed row comes under it as well.
+const SPACE_ROWS: u16 = 4;
 /// Columns the block beside the Points table takes in the wide tier.
 pub(super) const BESIDE_WIDTH: u16 = 40;
 /// What the folded line ends on, which `X` does.
@@ -45,6 +50,9 @@ pub(super) struct Layout {
     pub below: u16,
     /// Whether the rest of the section sits beside the Points table.
     pub beside: bool,
+    /// Whether the section is the virtual speakers' block, which the Points table gives rows up
+    /// to ([`super::rows`]) so the graph keeps its own.
+    pub boxed: bool,
 }
 
 impl Layout {
@@ -53,6 +61,7 @@ impl Layout {
         line: 0,
         below: 0,
         beside: false,
+        boxed: false,
     };
 
     /// The rows the line and what sits under it take together.
@@ -68,22 +77,41 @@ pub(super) fn layout(app: &App, area: Rect) -> Layout {
     }
     let unfolded = app.xf_unfolded();
     let wide = Tier::of(area).wide;
+    // The virtual speakers unfold into a block of their own, as wide as the screen.
+    if unfolded && app.space_shown() && app.space_now() == Space::Speakers {
+        return Layout {
+            line: speakers::height(wide),
+            below: 0,
+            beside: false,
+            boxed: true,
+        };
+    }
+    let rows = match app.space_shown() {
+        true => SPACE_ROWS,
+        false => VALUE_ROWS,
+    };
+    // Where the space choice leads, the Crossfeed row stays whole under it, also in the wide tier.
+    let line = match (app.space_shown(), unfolded && wide) {
+        (true, true) => 2,
+        _ => 1,
+    };
     Layout {
-        line: 1,
-        below: if unfolded && !wide { VALUE_ROWS } else { 0 },
+        line,
+        below: if unfolded && !wide { rows } else { 0 },
         beside: unfolded && wide,
+        boxed: false,
     }
 }
 
 /// A row being put together, with the places in it a click lands on, in cells from its start.
-struct Built {
+pub(super) struct Built {
     spans: Vec<Span<'static>>,
     hits: Vec<(usize, usize, Hit)>,
     col: usize,
 }
 
 impl Built {
-    fn new() -> Built {
+    pub(super) fn new() -> Built {
         Built {
             spans: Vec::new(),
             hits: Vec::new(),
@@ -92,7 +120,12 @@ impl Built {
     }
 
     /// Append `text` in `style`, a click on it being `hit`.
-    fn put(&mut self, text: impl Into<String>, style: ratatui::style::Style, hit: Option<Hit>) {
+    pub(super) fn put(
+        &mut self,
+        text: impl Into<String>,
+        style: ratatui::style::Style,
+        hit: Option<Hit>,
+    ) {
         let text = text.into();
         let width = widgets::text::cells(&text);
         if let Some(hit) = hit {
@@ -103,7 +136,7 @@ impl Built {
     }
 
     /// The line, the cursor in front of it, and where the row stands out when `focused`.
-    fn finish(
+    pub(super) fn finish(
         self,
         focused: bool,
         stale: bool,
@@ -252,7 +285,7 @@ fn folded_row(
 }
 
 /// Draw one built row into `cell` and push the hits of its parts.
-fn put_row(
+pub(super) fn put_row(
     frame: &mut Frame,
     hits: &mut HitMap,
     cell: Rect,
@@ -267,6 +300,118 @@ fn put_row(
         }
         .intersection(cell);
         hits.push(spot, hit);
+    }
+}
+
+/// The Space row of the unfolded section: `Space  ‹ Virtual speakers ›  Off · Crossfeed · Virtual
+/// speakers`, the one that plays standing out.
+pub(super) fn space_row(
+    app: &App,
+    theme: &Theme,
+    width: usize,
+) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
+    let plain = ratatui::style::Style::default();
+    let (lit, dim) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let arrow = theme.style(Role::ModeArrow);
+    let row = Hit::Crossfeed(Xf::Space);
+    let now = app.space_now();
+    let mut built = Built::new();
+    built.put(format!("{:<LABEL$}", Xf::Space.label()), plain, Some(row));
+    built.put("\u{2039} ", arrow, Some(Hit::CrossfeedStep(Xf::Space, -1)));
+    built.put(now.word(), lit, Some(row));
+    built.put(" \u{203a}", arrow, Some(Hit::CrossfeedStep(Xf::Space, 1)));
+    built.put("   ", plain, Some(row));
+    for (at, space) in Space::ALL.into_iter().enumerate() {
+        if at > 0 {
+            built.put(" \u{b7} ", dim, Some(row));
+        }
+        built.put(
+            space.word(),
+            if space == now { lit } else { dim },
+            Some(row),
+        );
+    }
+    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
+    built.finish(focused, !app.session.connected, theme, width)
+}
+
+/// The folded line where the space choice leads: `Space  Virtual speakers · No room · HRTF · SADIE
+/// II, D2 · −7 dB  (X)`.
+fn space_folded_row(
+    app: &App,
+    theme: &Theme,
+    width: usize,
+) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
+    let plain = ratatui::style::Style::default();
+    let dim = theme.style(Role::Dim);
+    let row = Hit::Crossfeed(Xf::Space);
+    let unavailable = app
+        .speakers()
+        .and_then(|view| view.unavailable.clone())
+        .or_else(|| app.crossfeed().and_then(|view| view.unavailable.clone()));
+    let body = match (
+        unavailable,
+        app.space_now(),
+        app.speakers(),
+        app.crossfeed(),
+    ) {
+        (Some(why), ..) => format!("unavailable: {why}"),
+        (None, Space::Speakers, Some(view), _) => format!(
+            "Virtual speakers \u{b7} {} \u{b7} {}",
+            words::set_words(view),
+            words::level_signed(view)
+        ),
+        (None, Space::Crossfeed, _, Some(view)) => format!(
+            "Crossfeed \u{b7} {} \u{b7} {:.0} % \u{b7} {:.0} Hz \u{b7} {}",
+            crossfeed::words_of(view),
+            view.amount_pct,
+            view.crossover_hz,
+            match view.delay_settable {
+                true => format!("{:.2} ms", view.delay_ms),
+                false => "no delay".to_string(),
+            }
+        ),
+        _ => "off".to_string(),
+    };
+    let room = width.saturating_sub(CURSOR_WIDTH + LABEL + 1 + FOLDED_KEY.len() + 2);
+    let style = match app.space_now() {
+        Space::Off => dim,
+        _ => plain,
+    };
+    let mut built = Built::new();
+    built.put(format!("{:<LABEL$} ", Xf::Space.label()), plain, Some(row));
+    built.put(
+        widgets::text::cut_to_cells(&body, room.saturating_sub(1)),
+        style,
+        Some(row),
+    );
+    built.put(format!("  {FOLDED_KEY}"), dim, Some(row));
+    built.finish(false, !app.session.connected, theme, width)
+}
+
+/// The rows the unfolded crossfeed has under the section's line in the narrow tiers: the Preset
+/// row too where the space choice is the line.
+fn rows_under(app: &App) -> &'static [Xf] {
+    match app.space_shown() {
+        true => &[Xf::Preset, Xf::Level, Xf::Crossover, Xf::Delay],
+        false => &[Xf::Level, Xf::Crossover, Xf::Delay],
+    }
+}
+
+/// The value rows of the block beside the Points table.
+const BLOCK_ROWS: [Xf; 3] = [Xf::Level, Xf::Crossover, Xf::Delay];
+
+/// One of the crossfeed's rows.
+fn crossfeed_row(
+    app: &App,
+    view: &CrossfeedView,
+    row: Xf,
+    theme: &Theme,
+    width: usize,
+) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
+    match row {
+        Xf::Preset => preset_row(app, view, theme, width),
+        _ => value_row(app, view, row, theme, width),
     }
 }
 
@@ -285,23 +430,31 @@ pub(super) fn draw(
     };
     let width = usize::from(area.width);
     let unfolded = app.xf_unfolded();
-    let first = match unfolded {
-        true => preset_row(app, view, theme, width),
-        false => folded_row(app, view, theme, width),
+    let space = app.space_shown();
+    if unfolded && space && app.space_now() == Space::Speakers {
+        speakers::draw(frame, area, app, (theme, tier), hits);
+        return;
+    }
+    let first = match (space, unfolded) {
+        (true, true) => space_row(app, theme, width),
+        (true, false) => space_folded_row(app, theme, width),
+        (false, true) => preset_row(app, view, theme, width),
+        (false, false) => folded_row(app, view, theme, width),
     };
     // A click anywhere on the row's own cells is the row; the narrower hits sit over it.
     let line_row = Rect { height: 1, ..area }.intersection(area);
-    hits.push(line_row, Hit::Crossfeed(Xf::Preset));
+    let head = match space {
+        true => Xf::Space,
+        false => Xf::Preset,
+    };
+    hits.push(line_row, Hit::Crossfeed(head));
     put_row(frame, hits, area, first);
     if !unfolded {
         return;
     }
     match beside {
         None => {
-            for (at, row) in [Xf::Level, Xf::Crossover, Xf::Delay]
-                .into_iter()
-                .enumerate()
-            {
+            for (at, row) in rows_under(app).iter().enumerate() {
                 let y = area.y + 1 + u16::try_from(at).unwrap_or(0);
                 if y >= area.bottom() {
                     break;
@@ -311,15 +464,32 @@ pub(super) fn draw(
                     height: 1,
                     ..area
                 };
-                hits.push(cell, Hit::Crossfeed(row));
-                put_row(frame, hits, cell, value_row(app, view, row, theme, width));
+                hits.push(cell, Hit::Crossfeed(*row));
+                put_row(
+                    frame,
+                    hits,
+                    cell,
+                    crossfeed_row(app, view, *row, theme, width),
+                );
             }
         }
-        Some(block_area) => draw_block(frame, block_area, view, app, (theme, tier), hits),
+        Some(block_area) => {
+            // Under the Space row the Preset row has the whole width.
+            if space && area.height > 1 {
+                let cell = Rect {
+                    y: area.y + 1,
+                    height: 1,
+                    ..area
+                };
+                hits.push(cell, Hit::Crossfeed(Xf::Preset));
+                put_row(frame, hits, cell, preset_row(app, view, theme, width));
+            }
+            draw_block(frame, block_area, view, app, (theme, tier), hits);
+        }
     }
 }
 
-/// The block beside the Points table: the three value rows, then the two curves.
+/// The block beside the Points table: the value rows, then the two curves.
 fn draw_block(
     frame: &mut Frame,
     area: Rect,
@@ -328,7 +498,7 @@ fn draw_block(
     (theme, tier): (&Theme, Tier),
     hits: &mut HitMap,
 ) {
-    let focused = app.xf_row().is_some_and(|row| row != Xf::Preset);
+    let focused = app.xf_row().is_some_and(|row| BLOCK_ROWS.contains(&row));
     let block = tier
         .block()
         .border_style(device::contour(
@@ -344,10 +514,8 @@ fn draw_block(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let width = usize::from(inner.width);
-    for (at, row) in [Xf::Level, Xf::Crossover, Xf::Delay]
-        .into_iter()
-        .enumerate()
-    {
+    let rows = &BLOCK_ROWS;
+    for (at, row) in rows.iter().enumerate() {
         let y = inner.y + u16::try_from(at).unwrap_or(0);
         if y >= inner.bottom() {
             return;
@@ -357,37 +525,54 @@ fn draw_block(
             height: 1,
             ..inner
         };
-        hits.push(cell, Hit::Crossfeed(row));
-        put_row(frame, hits, cell, value_row(app, view, row, theme, width));
+        hits.push(cell, Hit::Crossfeed(*row));
+        put_row(
+            frame,
+            hits,
+            cell,
+            crossfeed_row(app, view, *row, theme, width),
+        );
     }
     // The picture of the two curves, from the view's own numbers, where it fits.
-    let top = inner.y + VALUE_ROWS + 1;
+    let top = inner.y + u16::try_from(rows.len()).unwrap_or(3) + 1;
     if inner.bottom() < top + 4 || view.curve.hz.is_empty() {
         return;
     }
+    let rect = Rect {
+        y: top - 1,
+        height: inner.bottom() + 1 - top,
+        ..inner
+    };
+    draw_curves(
+        frame,
+        rect,
+        (&view.curve.hz, &view.curve.same_db, &view.curve.other_db),
+        theme,
+    );
+}
+
+/// Draw two curves over `area`: a key line first, then the chart of `same` and `other` in dB
+/// against `hz`, over 20 Hz to 20 kHz.
+pub(super) fn draw_curves(
+    frame: &mut Frame,
+    area: Rect,
+    (hz, same_db, other_db): (&[f64], &[f64], &[f64]),
+    theme: &Theme,
+) {
     let (same, other) = (theme.style(Role::CurveSum), theme.style(Role::SelectName));
     let key = Line::from(vec![
         Span::raw(" ".repeat(CURSOR_WIDTH)),
         Span::styled("\u{2500} same ear  ", same),
         Span::styled("\u{2500} other ear", other),
     ]);
-    frame.render_widget(
-        Paragraph::new(key),
-        Rect {
-            y: top - 1,
-            height: 1,
-            ..inner
-        },
-    );
+    frame.render_widget(Paragraph::new(key), Rect { height: 1, ..area });
     let series = |db: &[f64]| -> Vec<(f64, f64)> {
-        view.curve
-            .hz
-            .iter()
+        hz.iter()
             .zip(db)
             .map(|(hz, db)| (hz.log10(), db.clamp(CURVE_DB[0], CURVE_DB[1])))
             .collect()
     };
-    let (same_data, other_data) = (series(&view.curve.same_db), series(&view.curve.other_db));
+    let (same_data, other_data) = (series(same_db), series(other_db));
     let datasets = vec![
         Dataset::default()
             .marker(Marker::Braille)
@@ -411,9 +596,9 @@ fn draw_block(
     frame.render_widget(
         chart,
         Rect {
-            y: top,
-            height: inner.bottom() - top,
-            ..inner
+            y: area.y + 1,
+            height: area.height.saturating_sub(1),
+            ..area
         },
     );
 }

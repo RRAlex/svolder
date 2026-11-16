@@ -2363,7 +2363,8 @@ def the_player(b, d):
     headline = b.page("__core.model.page().host.track.headline")
     got = b.page("""({ title: document.querySelector('#sg-player .sg-title').textContent,
       path: [...document.querySelectorAll('#sg-player .sg-pathlist li b')].map((x) => x.textContent),
-      verdict: document.querySelector('#sg-player .sg-verdict')?.textContent,
+      verdict: [...(document.querySelector('#sg-player .sg-verdict')?.childNodes ?? [])]
+        .filter((n) => !n.classList?.contains('sg-sr')).map((n) => n.textContent).join(''),
       want: __core.model.device().playing.path.words })""")
     check('  it names the track and puts the path in words with its verdict',
           got['title'] == headline and got['path'] == ['player', 'computer', 'DAC'] and got['verdict'] == got['want'], got)
@@ -2610,6 +2611,8 @@ def the_computer(b, d):
     acting = b.page("""[...document.querySelectorAll('#sg-cfacts *')].filter((e) => e.matches(
       'button, input, select, textarea, a, [tabindex], [role=slider], [data-act]') || e.tabIndex >= 0).length""")
     check('  nothing in the facts can be focused or acts', acting == 0, acting)
+    b.page("document.querySelector('#sg-cfacts dl').scrollIntoView({ block: 'center' })")
+    time.sleep(0.2)
     click_el(b, '#sg-cfacts dl')
     b.press('Enter')
     time.sleep(0.3)

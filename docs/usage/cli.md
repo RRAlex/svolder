@@ -1059,6 +1059,7 @@ Usage: svolder host [OPTIONS] <COMMAND>
 Commands:
   eq         An equalizer on what the computer plays
   crossfeed  Cross a little of each channel into the other for headphones, through the daemon
+  speakers   Two virtual speakers on headphones, through the daemon
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1349,6 +1350,88 @@ daemon that answers with host audio off shows them as off. Every verb with no da
 `svolder daemon install`; a daemon that does not offer crossfeed (an older one) exits 7
 (`svolder daemon restart`). See [exit codes](exit-codes.md).
 
+### host speakers
+
+Hear the computer's sound as from two speakers in front of you, on headphones: the computer's
+virtual speakers. There are two choices, each shown with
+its technical term: **With room · BRIR** (the speakers in a measured room) and **No room · HRTF**
+(the same speakers in the open). A set is fetched once from a curated catalogue, or imported from
+your own file, and kept on this computer. With no verb the command prints the state; a verb changes
+it. Every verb goes through `svolderd`, which owns the filter chain, the sets and every rule that
+keeps the speakers from being left on, so the CLI never starts a chain by itself (`--transport`
+does not change that). Turning them on turns the crossfeed off, and the answer says so.
+
+```
+Two virtual speakers on headphones, through the daemon
+
+Usage: svolder host speakers [OPTIONS] [COMMAND]
+
+Commands:
+  show    Print the state: whether they play, the chosen set, its licence and its loudness change
+  on      Turn the virtual speakers on, with the chosen set
+  off     Turn the virtual speakers off
+  list    List the sets: the catalogue's, and the ones you imported, with which are fetched
+  fetch   Download a catalogue set, check it and keep it on this computer
+  use     Choose a fetched set (a rebuild of the chain, with one short gap when they play)
+  import  Import a SOFA file, or a WAV of 4 or 14 channels, as your own set
+  forget  Remove a fetched or imported set from this computer
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the state, the list or the saved set as the daemon sends it, as JSON
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help (see more with '--help')
+```
+
+```
+$ svolder host speakers list --room with
+ID        CHOICE              LABEL         LICENCE     STATE
+example   With room · BRIR    Example hall  CC-BY-4.0   not fetched (8.1 MB)
+$ svolder host speakers fetch example
+svolder: fetching example (8.1 MB)
+svolder: fetching example: 50 %
+svolder: fetched Example hall (example): With room · BRIR, 7.0 dB quieter
+$ svolder host speakers use example --on
+svolder: virtual speakers set: Example hall (example) · With room · BRIR
+svolder: virtual speakers on
+$ svolder host speakers
+virtual speakers: on
+set: Example hall (example)
+choice: With room · BRIR
+licence: CC-BY-4.0
+angles: left 30.0 deg, right 330.0 deg, 1.5 m
+length: 480 ms
+loudness: 7.0 dB quieter than with them off
+```
+
+The lines `show` prints are: `virtual speakers:` on or off (with the reason after a colon when it
+cannot be changed now), the `set` (label and id, or `none chosen`), its `choice`, `licence`,
+`credit` (where the licence asks for one), `source` page, the `angles` the speakers were measured
+at, the `length` of the responses (`cut to 0.5 s` when they were shortened), the `loudness` change
+against off (a quieter sound is the usual price) and the `note` of the last reset. `--json` prints
+the daemon's view as one object, also after `on`, `off` and `use`.
+
+The verbs: `on` and `off`; `list [--room with|no]` (the catalogue's sets and your own, with which
+are fetched; `--json` prints the daemon's list); `fetch ID` (downloads, checks and converts one,
+printing progress to standard error; Ctrl-C, SIGTERM or a closed terminal cancels the download on
+the daemon and exits 130); `use ID` (chooses a fetched set, which rebuilds the chain once, with one
+short gap, only while they play; `--on` also turns them on); `import FILE [--label NAME] [--room
+with|no]` (a SOFA file, or a WAV of 4 or 14 channels, as your own set: the daemon reads the file, so
+it must be on the computer the daemon runs on, and the path is made absolute first); `forget ID`
+(removes a set; refused while it plays or a fetch is running). `fetch`, `import` and `forget` print
+`--json` as the saved set, or `{"forgot":"ID"}`. A daemon set up to fetch nothing says so in `list`
+and refuses `fetch` with the step of importing a file.
+
+With no daemon running, or one that does not answer, `show` cannot know whether they play: its
+first line is `virtual speakers: unknown: …` with what the saved state says (`on` or `off`), then
+the saved set's id; nothing else is claimed of the set. Every verb with no daemon exits 3, naming
+`svolder daemon install`; a daemon that does not offer the speakers (an older one) exits 7
+(`svolder daemon restart`). See [exit codes](exit-codes.md).
+
 ## capture
 
 Record everything svolder learns about a device into one plain text file, to send to the
@@ -1430,7 +1513,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.35.1
+svolder 0.36.1
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

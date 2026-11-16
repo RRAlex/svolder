@@ -353,7 +353,7 @@ def phone(b, d, theme):
     page_shown = r0['page'] and r0['page']['shown'] and not r0['side']
     check(f'nothing_scrolls_sideways {tag}: on a phone the popup opens on its EQ library tab, the page '
           'shown, the tabs and the pills inside the window',
-          opened is True and page_shown and r0['over'] == [0, 0] and all(strip) and len(strip) == 5, [r0, strip])
+          opened is True and page_shown and r0['over'] == [0, 0] and all(strip) and len(strip) == 6, [r0, strip])
     press_on(b, f'#popup-sound-pill-autoeq')
     put_text(b, pid('query'), 'hd 650')
     b.press('Enter')

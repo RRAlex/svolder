@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::host;
 
 /// The tool names, each with whether it changes a device.
-pub(super) const TOOLS: [(&str, bool); 13] = [
+pub(super) const TOOLS: [(&str, bool); 14] = [
     ("list_devices", false),
     ("get_state", false),
     ("get_link_history", false),
@@ -25,6 +25,7 @@ pub(super) const TOOLS: [(&str, bool); 13] = [
     ("host_mute", true),
     ("set_host_eq", true),
     ("set_host_crossfeed", true),
+    ("set_host_speakers", true),
 ];
 
 /// A call's arguments, checked: a name the tool does not take is refused, and each is read
@@ -98,6 +99,9 @@ pub(super) fn definition(name: &'static str, write: bool) -> Tool {
     if name == "set_host_crossfeed" {
         return host::crossfeed_definition();
     }
+    if name == "set_host_speakers" {
+        return host::speakers_definition();
+    }
     let device = json!({
         "type": "string",
         "description": "The device's name from list_devices; may be left out when there is one device"
@@ -146,7 +150,7 @@ pub(super) fn definition(name: &'static str, write: bool) -> Tool {
             &["name"],
         ),
         "get_host" => (
-            "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q), its crossfeed (on or off, model, preset or custom, amount in percent, feed level, crossover, delay and its floor, the output, a note when it turned itself off) and the player (title, artist, album, status); each is null while it is not available, and `unavailable` says why.",
+            "", // the words come from `host::get_host_description`
             json!({}),
             &[],
         ),
@@ -199,6 +203,10 @@ pub(super) fn definition(name: &'static str, write: bool) -> Tool {
     });
     let Value::Object(schema) = schema else {
         unreachable!("an object literal");
+    };
+    let description = match name {
+        "get_host" => host::get_host_description(),
+        _ => description.to_string(),
     };
     let mut tool = Tool::new(name, description, Arc::new(schema));
     tool.annotations = Some(ToolAnnotations::new().read_only(!write));

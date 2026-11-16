@@ -138,6 +138,40 @@ pub struct RouteFacts {
     /// (with no player's stream known: whether the filter feeds the sink at all; never for
     /// `Elsewhere`, whose stream does not play into this sink).
     pub host_eq: bool,
+    /// Which stages of that chain play, when the daemon's EQ view told: `None` where only the
+    /// route was read (the chain is then just "on"). The route alone cannot tell them apart.
+    pub stages: Option<ChainStages>,
+}
+
+/// Which stages of the computer's filter chain change the sound.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChainStages {
+    /// The EQ points are in use.
+    pub eq: bool,
+    /// The crossfeed plays.
+    pub crossfeed: bool,
+    /// The virtual speakers play.
+    pub speakers: bool,
+}
+
+impl ChainStages {
+    /// The stages the computer's EQ view says are on; `None` when the view cannot vouch for them
+    /// (the controls are unavailable, an older svolder's chain, or no stage on and no word that
+    /// the chain is a kept pass-through), so the line says only that a chain is on.
+    pub fn of_view(view: &crate::eq::EqView) -> Option<Self> {
+        use crate::eq::{LEGACY_NOTE, PASSTHROUGH_NOTE};
+        if view.unavailable.is_some() || view.note.as_deref() == Some(LEGACY_NOTE) {
+            return None;
+        }
+        let stages = Self {
+            eq: view.on,
+            crossfeed: view.crossfeed.as_ref().is_some_and(|xf| xf.on),
+            speakers: view.speakers.as_ref().is_some_and(|sp| sp.on),
+        };
+        let any = stages.eq || stages.crossfeed || stages.speakers;
+        (any || view.note.as_deref() == Some(PASSTHROUGH_NOTE)).then_some(stages)
+    }
 }
 
 /// The sink a route ends in.
@@ -378,6 +412,7 @@ impl<'a> Graph<'a> {
             player_match,
             others_mixing: u32::try_from(others_mixing).unwrap_or(u32::MAX),
             host_eq,
+            stages: None,
         }
     }
 

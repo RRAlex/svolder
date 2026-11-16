@@ -213,6 +213,15 @@ impl App {
         }
         let change = match setting {
             Setting::Key(key) => {
+                if let TuiSettingKind::Number { get, min, max, .. } = &key.kind {
+                    // A number steps by one and stops at its ends, as a volume does.
+                    let now = get(&self.tui);
+                    let next = (now + dir.signum() as i64).clamp(*min, *max);
+                    return match next == now {
+                        true => Vec::new(),
+                        false => vec![Intent::Tui(TuiChange::Set(key, TuiValue::Number(next)))],
+                    };
+                }
                 let TuiSettingKind::Word { words, .. } = &key.kind else {
                     return self.turned(setting).map(Intent::Tui).into_iter().collect();
                 };

@@ -170,6 +170,9 @@ pub(in crate::tui) struct Watching {
     pub(super) computer: Box<computer::ComputerLink>,
 }
 
+/// The longest leaving the TUI waits for a fetch in flight to be cancelled on the daemon.
+const FETCH_LEAVE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 impl Watching {
     /// Reach the host this session runs on, for the loop to follow from its first turn — or
     /// nothing of it at all under `SVOLDER_HOST=off`, which the app is told so its Settings row
@@ -271,7 +274,12 @@ impl Watching {
     /// Release whatever this holds as the TUI leaves, saying `svolder: releasing NAME…` on
     /// stderr if it takes more than half a second. The caller has restored the terminal, so
     /// the line lands on the user's own screen.
-    pub(in crate::tui) async fn release(self) {
+    pub(in crate::tui) async fn release(mut self) {
+        // A fetch in flight is stopped and its cancel is out before the runtime goes (a bounded
+        // wait), so the daemon does not go on with a set nobody waits for.
+        if let Some(fetching) = self.jobs.fetching.take() {
+            fetching.finish(FETCH_LEAVE_WAIT).await;
+        }
         if let Some(backend) = self.backend {
             backend.release(&self.app.session.device_name).await;
         }

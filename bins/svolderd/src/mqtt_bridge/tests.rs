@@ -1405,10 +1405,14 @@ async fn a_retained_preset_command_is_not_acted_on() {
 /// What a switch was told of the crossfeed: on or off, and a model's word with a preset's name.
 type CrossfeedCall = (Option<bool>, Option<(String, String)>);
 
+/// What a switch was told of the virtual speakers: on or off, and a set's id.
+type SpeakersCall = (Option<bool>, Option<String>);
+
 /// A switch that records what it was told and answers as `answer` says.
 struct RecordingSwitch {
     calls: std::sync::Mutex<Vec<bool>>,
     crossfeeds: std::sync::Mutex<Vec<CrossfeedCall>>,
+    speakers: std::sync::Mutex<Vec<SpeakersCall>>,
     answer: Result<(), String>,
 }
 
@@ -1425,6 +1429,11 @@ impl crate::host::EqSwitch for RecordingSwitch {
         choice: Option<(String, String)>,
     ) -> Result<(), String> {
         self.crossfeeds.lock().unwrap().push((on, choice));
+        self.answer.clone()
+    }
+
+    async fn speakers(&self, on: Option<bool>, set: Option<String>) -> Result<(), String> {
+        self.speakers.lock().unwrap().push((on, set));
         self.answer.clone()
     }
 }
@@ -1477,6 +1486,7 @@ async fn with_computer_at(
     let switch = Arc::new(RecordingSwitch {
         calls: std::sync::Mutex::new(Vec::new()),
         crossfeeds: std::sync::Mutex::new(Vec::new()),
+        speakers: std::sync::Mutex::new(Vec::new()),
         answer,
     });
     task.follow_computer(ComputerLink {
@@ -1966,4 +1976,263 @@ async fn the_countdown_to_the_next_attempt_rounds_up_to_whole_seconds() {
     tokio::time::advance(Duration::from_millis(1000)).await;
     assert_eq!(retry(&bridge), Some(0), "the wait has run out");
     drop(set);
+}
+
+/// A computer view whose controller serves the virtual speakers: two fetched sets, `chosen` the
+/// id of the chosen one, playing when `on`.
+fn speakers_computer_view(on: bool, chosen: Option<&str>) -> svolder_ipc::host::HostView {
+    use svolder_host::eq::speakers::SetView;
+    let set = |id: &str, label: &str, with: bool| SetView {
+        id: id.into(),
+        room: if with { "with" } else { "no" }.into(),
+        room_name: if with { "With room" } else { "No room" }.into(),
+        term: if with { "BRIR" } else { "HRTF" }.into(),
+        label: label.into(),
+        licence: "CC-BY-4.0".into(),
+        credit: None,
+        source_url: "https://example.org/set".into(),
+    };
+    let mut view = computer_view(false, None, 0.0);
+    view.eq.as_mut().unwrap().speakers = Some(svolder_host::eq::SpeakersView {
+        on,
+        set: chosen.map(str::to_string),
+        licence: "CC-BY-4.0".into(),
+        sets: vec![set("a", "Set A", false), set("b", "Set B", true)],
+        ..Default::default()
+    });
+    view
+}
+
+fn speakers_calls(switch: &RecordingSwitch) -> Vec<SpeakersCall> {
+    switch.speakers.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn the_speakers_are_announced_and_their_states_follow_the_view() {
+    let (mut task, tx, _switch) =
+        with_computer(speakers_computer_view(true, Some("a")), Ok(())).await;
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 4);
+    assert!(
+        published
+            .configs
+            .contains_key("homeassistant/select/svolder_computer/computer_speakers_set/config")
+    );
+    let state = published.speakers_state.clone().unwrap();
+    assert_eq!(
+        (state.on, state.set.as_str()),
+        ("ON", "Set A · No room · HRTF")
+    );
+    assert!(state.attributes.contains("CC-BY-4.0"));
+
+    tx.send_replace(speakers_computer_view(false, Some("b")));
+    task.changed("computer");
+    task.publish_computer();
+    let state = task
+        .computer
+        .as_ref()
+        .unwrap()
+        .speakers_state
+        .clone()
+        .unwrap();
+    assert_eq!(
+        (state.on, state.set.as_str()),
+        ("OFF", "Set B · With room · BRIR")
+    );
+
+    // A controller that no longer serves the speakers takes its entities down, not the EQ's.
+    tx.send_replace(computer_view(false, None, 0.0));
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.speakers_state, None);
+}
+
+#[tokio::test]
+async fn speakers_commands_reach_the_controller_as_one_change_each() {
+    let (mut task, _tx, switch) =
+        with_computer(speakers_computer_view(false, Some("a")), Ok(())).await;
+    task.message("svolder/computer/computer_speakers/set", b"ON", false);
+    task.message("svolder/computer/computer_speakers/set", b" off ", false);
+    task.message(
+        "svolder/computer/computer_speakers_set/set",
+        " set b \u{b7} with room \u{b7} brir ".as_bytes(),
+        false,
+    );
+    settle(&mut task).await;
+    let mut calls = speakers_calls(&switch);
+    calls.sort();
+    let mut want: Vec<SpeakersCall> = vec![
+        (Some(true), None),
+        (Some(false), None),
+        (None, Some("b".into())),
+    ];
+    want.sort();
+    assert_eq!(calls, want);
+    assert!(computer_calls(&switch).is_empty() && crossfeed_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn speakers_commands_the_host_cannot_take_do_nothing() {
+    // ON with no set chosen, an unknown set, a payload that is no text or no switch word, a
+    // controller without speakers, one whose speakers are unavailable, host audio off.
+    let (mut task, _tx, switch) = with_computer(speakers_computer_view(false, None), Ok(())).await;
+    task.message("svolder/computer/computer_speakers/set", b"ON", false);
+    task.message("svolder/computer/computer_speakers/set", b"toggle", false);
+    for body in [&b"nonsense"[..], b"Set A", &[0xff]] {
+        task.message("svolder/computer/computer_speakers_set/set", body, false);
+    }
+    settle(&mut task).await;
+    assert!(speakers_calls(&switch).is_empty());
+    let mut unavailable = speakers_computer_view(false, Some("a"));
+    unavailable
+        .eq
+        .as_mut()
+        .unwrap()
+        .speakers
+        .as_mut()
+        .unwrap()
+        .unavailable = Some("computer controls unavailable: x".into());
+    for view in [
+        computer_view(false, None, 0.0),
+        unavailable,
+        svolder_ipc::host::HostView::default(),
+    ] {
+        let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
+        task.message("svolder/computer/computer_speakers/set", b"OFF", false);
+        task.message(
+            "svolder/computer/computer_speakers_set/set",
+            "Set A \u{b7} No room \u{b7} HRTF".as_bytes(),
+            false,
+        );
+        settle(&mut task).await;
+        assert!(speakers_calls(&switch).is_empty());
+    }
+}
+
+/// [`speakers_computer_view`] with the crossfeed served too, on or off as `crossfeed_on` says.
+fn both_computer_view(
+    crossfeed_on: bool,
+    speakers_on: bool,
+    chosen: Option<&str>,
+) -> svolder_ipc::host::HostView {
+    let mut view = speakers_computer_view(speakers_on, chosen);
+    view.eq.as_mut().unwrap().crossfeed = crossfeed_computer_view(crossfeed_on, "bauer", None)
+        .eq
+        .unwrap()
+        .crossfeed;
+    view
+}
+
+#[tokio::test]
+async fn a_set_that_goes_leaves_the_select_unknown_and_the_attributes_empty() {
+    let (mut task, tx, _switch) =
+        with_computer(speakers_computer_view(false, Some("a")), Ok(())).await;
+    task.publish_computer();
+    let state = task
+        .computer
+        .as_ref()
+        .unwrap()
+        .speakers_state
+        .clone()
+        .unwrap();
+    assert!(state.attributes_payload().contains("CC-BY-4.0"));
+    // The chosen set is forgotten: the view keeps the choice's id away and lists only "b".
+    let mut view = speakers_computer_view(false, None);
+    view.eq
+        .as_mut()
+        .unwrap()
+        .speakers
+        .as_mut()
+        .unwrap()
+        .sets
+        .remove(0);
+    tx.send_replace(view);
+    task.changed("computer");
+    task.publish_computer();
+    let state = task
+        .computer
+        .as_ref()
+        .unwrap()
+        .speakers_state
+        .clone()
+        .unwrap();
+    assert_eq!(
+        (state.set_payload(), state.attributes_payload()),
+        ("None", "{}")
+    );
+}
+
+#[tokio::test]
+async fn the_set_list_changing_announces_the_select_again_with_the_new_options() {
+    let (mut task, tx, _switch) = with_computer(speakers_computer_view(false, None), Ok(())).await;
+    task.publish_computer();
+    let topic = "homeassistant/select/svolder_computer/computer_speakers_set/config";
+    let before = task.computer.as_ref().unwrap().configs[topic].clone();
+    assert!(!before.contains("Set C"));
+    let mut view = speakers_computer_view(false, None);
+    let speakers = view.eq.as_mut().unwrap().speakers.as_mut().unwrap();
+    let mut third = speakers.sets[0].clone();
+    (third.id, third.label) = ("c".into(), "Set C".into());
+    speakers.sets.push(third);
+    tx.send_replace(view);
+    task.changed("computer");
+    task.publish_computer();
+    let after = task.computer.as_ref().unwrap().configs[topic].clone();
+    assert!(after.contains("Set C · No room · HRTF"), "{after}");
+}
+
+#[tokio::test]
+async fn the_speakers_going_on_shows_the_crossfeed_switch_off_in_the_same_pass() {
+    let (mut task, tx, _switch) =
+        with_computer(both_computer_view(true, false, Some("a")), Ok(())).await;
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.crossfeed_state.as_ref().map(|s| s.0), Some("ON"));
+    assert_eq!(published.speakers_state.as_ref().map(|s| s.on), Some("OFF"));
+    tx.send_replace(both_computer_view(false, true, Some("a")));
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.crossfeed_state.as_ref().map(|s| s.0), Some("OFF"));
+    assert_eq!(published.speakers_state.as_ref().map(|s| s.on), Some("ON"));
+}
+
+#[tokio::test]
+async fn a_refused_speakers_command_is_followed_by_the_views_state() {
+    let (mut task, _tx, switch) =
+        with_computer(speakers_computer_view(false, Some("a")), Err("no".into())).await;
+    task.publish_computer();
+    task.message("svolder/computer/computer_speakers/set", b"ON", false);
+    settle(&mut task).await;
+    assert_eq!(speakers_calls(&switch), [(Some(true), None)]);
+    assert!(task.computer.as_ref().unwrap().dirty);
+    task.publish_computer();
+    assert_eq!(
+        task.computer
+            .as_ref()
+            .unwrap()
+            .speakers_state
+            .as_ref()
+            .map(|s| s.on),
+        Some("OFF")
+    );
+}
+
+#[tokio::test]
+async fn a_retained_speakers_command_and_one_with_commands_off_do_nothing() {
+    let (mut task, _tx, switch) =
+        with_computer(speakers_computer_view(false, Some("a")), Ok(())).await;
+    task.message("svolder/computer/computer_speakers/set", b"ON", true);
+    task.message(
+        "svolder/computer/computer_speakers_set/set",
+        "Set B \u{b7} With room \u{b7} BRIR".as_bytes(),
+        true,
+    );
+    task.config.commands = false;
+    task.message("svolder/computer/computer_speakers/set", b"ON", false);
+    settle(&mut task).await;
+    assert!(speakers_calls(&switch).is_empty());
 }

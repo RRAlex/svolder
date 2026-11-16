@@ -78,6 +78,8 @@ pub enum When {
     OnComputer,
     /// Only while the computer's side is shown and its controller serves crossfeed.
     HasCrossfeed,
+    /// Only while the computer's side is shown and its controller serves virtual speakers.
+    HasSpace,
     /// Only on a wizard step that offers choices.
     Choosing,
     /// Only on a wizard step that takes a typed line.
@@ -114,6 +116,8 @@ pub struct Scene {
     pub on_computer: bool,
     /// Whether the computer's side is shown with crossfeed to change.
     pub has_crossfeed: bool,
+    /// Whether the computer's side is shown with virtual speakers to choose.
+    pub has_space: bool,
     /// Whether it has no volume for the keys to move: a flag that reads false by default, so a
     /// screen that says nothing of it leaves the key worth pressing.
     pub no_volume: bool,
@@ -155,6 +159,7 @@ impl Scene {
             has_computer: app.computer_offered(),
             on_computer: app.on_computer(),
             has_crossfeed: app.crossfeed_shown(),
+            has_space: app.space_shown(),
             no_volume: app.volume().is_none(),
             no_toggle: !app.has_toggle_or_host_rows(),
             no_identify: !app.identify_offered(),
@@ -566,6 +571,21 @@ static HINTS: &[KeyHint] = &[
         group: ACTIONS,
         toggles: None,
         long: None,
+    },
+    // The virtual speakers' set list, from either screen where the computer serves them: a box
+    // of its own, which names its own keys on itself. The space choice itself is the crossfeed
+    // section's first row, whose keys are the ones above.
+    KeyHint {
+        code: KeyCode::Char('S'),
+        label: "S",
+        does: "toggle speaker sets",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasSpace,
+        group: ACTIONS,
+        toggles: None,
+        long: Some(
+            "open or close the virtual speakers' sets: fetch, choose, forget, import a file",
+        ),
     },
     // The computer's table of points, on the tone-control screen's computer side.
     KeyHint {
@@ -1037,6 +1057,7 @@ pub fn hidden_in(hint: &KeyHint, scene: Scene) -> bool {
         When::HasComputer | When::OnComputer => !scene.has_computer,
         // Crossfeed's keys are not listed where the computer serves none.
         When::HasCrossfeed => !scene.has_crossfeed,
+        When::HasSpace => !scene.has_space,
         _ => false,
     }
 }
@@ -1065,6 +1086,7 @@ pub fn available_in(hint: &KeyHint, scene: Scene) -> bool {
         When::HasComputer => scene.has_computer,
         When::OnComputer => scene.on_computer,
         When::HasCrossfeed => scene.has_crossfeed,
+        When::HasSpace => scene.has_space,
         When::Choosing => !scene.typing,
         When::Typing => scene.typing,
         When::Backable => scene.can_go_back,

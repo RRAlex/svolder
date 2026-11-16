@@ -73,6 +73,7 @@ mod jobs;
 mod look;
 mod open;
 mod reopen;
+mod speakers;
 #[cfg(test)]
 mod test_support;
 mod watching;
@@ -662,7 +663,7 @@ where
 {
     let mut turns = Turns::new(tick_period(&watching.app, &look.effects));
     loop {
-        watching = match before_frame(adder, &mut seams, watching, look, &mut turns).await {
+        watching = match boxed(before_frame(adder, &mut seams, watching, look, &mut turns)).await {
             Ok(next) => next,
             Err(end) => return end,
         };
@@ -677,7 +678,7 @@ where
                 why: Some(why),
             };
         }
-        watching = match race(&mut seams, watching, look, &mut turns).await {
+        watching = match boxed(race(&mut seams, watching, look, &mut turns)).await {
             Ok(next) => next,
             Err(end) => return end,
         };
@@ -707,26 +708,26 @@ where
     let search_due = watching.jobs.due_at();
     tokio::select! {
         event = seams.events.next() => {
-            watching = match on_terminal_event(event, seams, watching, look, turns).await {
+            watching = match boxed(on_terminal_event(event, seams, watching, look, turns)).await {
                 Ok(next) => next,
                 Err(end) => return Err(end),
             };
         }
         update = next_status(watching.backend.as_mut()), if watching.feed_open => {
-            watching = match on_update(update, seams, watching, look, turns).await {
+            watching = match boxed(on_update(update, seams, watching, look, turns)).await {
                 Ok(next) => next,
                 Err(end) => return Err(end),
             };
         }
         _ = turns.timers.ticks.tick() => on_tick(&mut watching).await,
         _ = turns.timers.relist.tick(), if relisting(&watching) || waiting(&watching) => {
-            watching = match on_relist(seams, watching, look, turns).await {
+            watching = match boxed(on_relist(seams, watching, look, turns)).await {
                 Ok(next) => next,
                 Err(end) => return Err(end),
             };
         }
         answered = recv_reconnect(&mut watching.reconnect), if watching.reconnect.is_some() => {
-            watching = match on_daemon_back(answered, seams, watching, look, turns).await {
+            watching = match boxed(on_daemon_back(answered, seams, watching, look, turns)).await {
                 Ok(next) => next,
                 Err(end) => return Err(end),
             };
@@ -778,7 +779,7 @@ where
         answer = computer::answered(&mut watching.computer.answers),
             if watching.computer.answers.is_some() =>
         {
-            watching = match on_computer_answer(*answer, seams, watching, look, turns).await {
+            watching = match boxed(on_computer_answer(*answer, seams, watching, look, turns)).await {
                 Ok(next) => next,
                 Err(end) => return Err(end),
             };
@@ -793,7 +794,7 @@ where
             watching.jobs.send_due();
         }
         done = jobs::next(&mut watching.jobs.ended) => {
-            watching = match on_job_done(done, seams, watching, look, turns).await {
+            watching = match boxed(on_job_done(done, seams, watching, look, turns)).await {
                 Ok(next) => next,
                 Err(end) => return Err(end),
             };
@@ -983,6 +984,10 @@ where
             if let Some(backend) = watching.backend.as_mut() {
                 let now = Instant::now();
                 watching.feed_open = heard(update, backend, &mut watching.app, now).await;
+            }
+            // The view's sets changed under the open set list: it reads the catalogue again.
+            if let Some(call) = watching.app.owed_sets_call() {
+                input::start_speakers(&mut watching, call);
             }
         }
     }
@@ -1215,6 +1220,23 @@ fn carried(flow: Flow, adding: &mut bool) -> Result<Watching, LoopEnd> {
         }
         Flow::Ended(end) => Err(end),
     }
+}
+
+/// The largest future [`boxed`] has been given, in bytes, for the test that bounds it.
+#[cfg(test)]
+pub(super) static LARGEST_BOXED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Put a handler's future on the heap, so the loop's own future stays small. A turn's handler is
+/// large (it holds what it carries out across its awaits); in a test the largest one seen is
+/// kept, so a handler that grows shows in a size bound rather than as a silent allocation.
+fn boxed<F: std::future::Future>(future: F) -> std::pin::Pin<Box<F>> {
+    #[cfg(test)]
+    LARGEST_BOXED.fetch_max(
+        std::mem::size_of::<F>(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    Box::pin(future)
 }
 
 #[cfg(test)]

@@ -563,6 +563,9 @@ async fn the_owner_start_turns_a_crossfeed_found_on_off() {
         crossfeed: Some(CrossfeedSettings::for_model(Model::Bauer)),
         crossfeed_on: true,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -603,6 +606,9 @@ async fn the_owner_start_removes_a_chain_that_ran_for_crossfeed_alone() {
         crossfeed: Some(CrossfeedSettings::for_model(Model::Meier)),
         crossfeed_on: true,
         flat: true,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -737,7 +743,7 @@ async fn a_rebuild_at_the_same_rate_keeps_the_stage_while_the_view_says_on() {
     let (mut control, chain, params) = both_on().await;
     control.apply().await.unwrap();
     assert!(control.view().crossfeed.unwrap().on);
-    assert!(control.xf_dirty, "the new chain's stage is owed");
+    assert!(control.stage_dirty, "the new chain's stage is owed");
     let sends = params.sent().len();
     looks(&mut control, 1).await;
     let sent = stage_sends(&params, sends);
@@ -893,6 +899,9 @@ async fn a_container_restart_with_crossfeed_found_on_applies_the_eq_again_with_i
         crossfeed: Some(CrossfeedSettings::for_model(Model::Bauer)),
         crossfeed_on: true,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     };
     state.save(&dir.state()).unwrap();
     // The container's chain died with the crash: the chain says it does not run.
@@ -997,6 +1006,9 @@ async fn a_chain_replaced_from_outside_after_the_stage_was_sent_to_it_gets_the_s
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     });
     looks(&mut control, 1).await;
     assert!(!control.view().crossfeed.unwrap().on);
@@ -1067,6 +1079,9 @@ async fn a_state_adopted_over_a_stage_sent_to_the_node_says_the_stage_may_still_
         crossfeed: None,
         crossfeed_on: false,
         flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
     });
     assert!(
         control.owed.as_ref().is_some_and(|owed| owed.plays),

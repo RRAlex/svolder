@@ -123,6 +123,8 @@ export function createLive({ core, root, signal, view }) {
       open.dataset.hop = hop?.id ?? '';
       open.innerHTML = (hop ? openers[hop.kind] : openers.none)?.(page, hop, view) ?? '';
       placeOpen(open);
+      // The level meters' needles and readings are put back where the meters stand now.
+      view.openDrawn?.(open);
       if (focused) open.querySelector(focused)?.focus({ preventScroll: true });
     },
     shelf(page) {

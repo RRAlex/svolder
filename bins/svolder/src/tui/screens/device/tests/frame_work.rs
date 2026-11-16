@@ -17,6 +17,7 @@ fn playing_covered(area: Rect) -> App {
         bands: std::array::from_fn(|band| band as f32 / 7.0),
         left: 0.5,
         right: 0.5,
+        levels: Default::default(),
     };
     app.heard_block(&block, app.now);
     with_art(app, area)

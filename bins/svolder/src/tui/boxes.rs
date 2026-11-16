@@ -8,6 +8,7 @@
 //! - [`editor`]: the device editor, one `[[device]]` block as rows over the device list.
 //! - [`edit_line`]: one band's frequency, gain and Q typed as numbers.
 //! - [`presets`]: the named tone curves that fit the device's tone control.
+//! - [`speakers`]: the virtual speakers' set list: the catalogue, a fetch, an import.
 //! - [`device_presets`]: the presets a device keeps itself: its slots and its built-in settings.
 //! - [`connections`]: the Settings box's Connections category, the daemon's `[mcp]` and `[mqtt]`.
 //! - [`web_box`]: the Settings box's Web UI box, its link, pairing code and token tail.
@@ -19,6 +20,7 @@ pub(super) mod device_presets;
 pub(super) mod edit_line;
 pub(super) mod editor;
 pub(super) mod presets;
+pub(super) mod speakers;
 pub(super) mod toast;
 pub(super) mod tooltip;
 pub(super) mod web_box;

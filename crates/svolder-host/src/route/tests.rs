@@ -493,3 +493,83 @@ fn a_linked_stream_elsewhere_wins_over_an_unlinked_one() {
         }
     );
 }
+
+/// A view with the stages `eq`, `crossfeed` and `speakers` on, and `note` as its note.
+fn view_with(eq: bool, crossfeed: bool, speakers: bool, note: Option<&str>) -> crate::eq::EqView {
+    use crate::eq::{CrossfeedView, EqView, SpeakersView};
+    EqView {
+        on: eq,
+        crossfeed: Some(CrossfeedView {
+            on: crossfeed,
+            ..CrossfeedView::default()
+        }),
+        speakers: Some(SpeakersView {
+            on: speakers,
+            ..SpeakersView::default()
+        }),
+        note: note.map(str::to_string),
+        ..EqView::default()
+    }
+}
+
+fn stages(eq: bool, crossfeed: bool, speakers: bool) -> Option<ChainStages> {
+    Some(ChainStages {
+        eq,
+        crossfeed,
+        speakers,
+    })
+}
+
+#[test]
+fn stages_of_an_unavailable_view_are_not_known() {
+    let mut view = view_with(false, false, false, Some(crate::eq::PASSTHROUGH_NOTE));
+    view.unavailable = Some("computer controls unavailable: x".into());
+    assert_eq!(ChainStages::of_view(&view), None);
+}
+
+#[test]
+fn stages_of_a_view_with_the_older_svolder_note_are_not_known() {
+    let view = view_with(false, false, false, Some(crate::eq::LEGACY_NOTE));
+    assert_eq!(ChainStages::of_view(&view), None);
+}
+
+#[test]
+fn stages_of_a_view_with_the_pass_through_note_are_none_on() {
+    let view = view_with(false, false, false, Some(crate::eq::PASSTHROUGH_NOTE));
+    assert_eq!(ChainStages::of_view(&view), stages(false, false, false));
+}
+
+#[test]
+fn stages_of_a_view_with_nothing_on_and_no_note_are_not_known() {
+    assert_eq!(
+        ChainStages::of_view(&view_with(false, false, false, None)),
+        None
+    );
+    assert_eq!(ChainStages::of_view(&crate::eq::EqView::default()), None);
+}
+
+#[test]
+fn stages_of_a_view_with_crossfeed_alone() {
+    assert_eq!(
+        ChainStages::of_view(&view_with(false, true, false, None)),
+        stages(false, true, false)
+    );
+}
+
+#[test]
+fn stages_of_a_view_with_the_eq_and_the_speakers() {
+    assert_eq!(
+        ChainStages::of_view(&view_with(true, false, true, None)),
+        stages(true, false, true)
+    );
+}
+
+/// A route from before the stages decodes with none, and one from a newer daemon decodes too.
+#[test]
+fn a_route_with_or_without_stages_decodes() {
+    let old: RouteFacts = serde_json::from_str(r#"{"host_eq": true}"#).unwrap();
+    assert_eq!(old.stages, None);
+    let newer: RouteFacts =
+        serde_json::from_str(r#"{"host_eq": true, "stages": {"eq": true, "later": 1}}"#).unwrap();
+    assert_eq!(newer.stages, stages(true, false, false));
+}

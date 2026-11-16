@@ -240,7 +240,7 @@ daemon with `SVOLDER_HOST=off` draws nothing, and an amp or a preamp gets the ca
   browser may keep, since the address changes with the picture; any other hash is a 404
   (`web/host.rs`). A cover that goes after the page asked for it hides its `<img>`.
 - **The frames.** `GET api/v1/host/frames` (`web/host/frames.rs`) is a stream of its own, for the
-  visualizer, reader-gated as the device stream is (a guest may watch; a rotated token ends it at
+  visualizer (`?only=levels` for the meters), reader-gated as the device stream is (a guest may watch; a rotated token ends it at
   once; with the host off it is a 404). It opens with `retry: 2000` and a `hello` event `{"now_ms",
   "capture": "starting|running|unavailable", "sink": name|null, "why": text|null}`, where `now_ms`
   is the daemon's clock (the page's offset to it comes from here, taken again on each stream; each

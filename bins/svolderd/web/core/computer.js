@@ -134,6 +134,10 @@ export function createPending({ store, fetch }) {
       const now = computer.eq?.crossfeed;
       return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);
     }
+    if (key === 'speakers') {
+      const now = computer.eq?.speakers;
+      return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);
+    }
     const id = /^point:(\d+)$/.exec(key)?.[1];
     if (!id) return false;
     // the point is found by its id: the daemon lists the points by frequency, so it may be

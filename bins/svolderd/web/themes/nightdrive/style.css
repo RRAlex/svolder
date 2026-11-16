@@ -143,7 +143,8 @@
 .nd-has-switch .nd-top { right: calc(var(--nd-clear) + var(--nd-switch, 0px) + 12px); }
 .nd-has-switch .nd-right {
   position: absolute; right: calc(-1 * (var(--nd-switch, 0px) + 12px)); top: calc(var(--nd-sw-stack) - var(--nd-top));
-  max-width: 40vw;
+  /* one line, whatever the stages it names, so the EQ line below it stands where it is placed for one line */
+  max-width: calc(100vw - 24px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .nd-has-switch .nd-eq { top: var(--nd-sw-stack); }
 .nd-has-switch.nd-verdict .nd-eq { top: calc(var(--nd-sw-stack) + var(--nd-hud) * 1.3 + 4px); }

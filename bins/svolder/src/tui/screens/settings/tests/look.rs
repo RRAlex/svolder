@@ -357,12 +357,12 @@ fn config_lines_write_the_table_key_and_value() {
     );
 }
 
-/// The categories group the 33 `[tui]` rows, the AutoEq refresh and the 13 Connect rows, each
+/// The categories group the 34 `[tui]` rows, the AutoEq refresh and the 13 Connect rows, each
 /// once, and every row has an explanation that with its config line fits the box at 80×24.
 #[test]
 fn every_setting_is_in_one_category_and_its_explanation_fits_the_box() {
     let all = every_setting();
-    assert_eq!(all.len(), 47);
+    assert_eq!(all.len(), 48);
     for (at, setting) in all.iter().enumerate() {
         assert!(
             !all[at + 1..].contains(setting),
@@ -647,9 +647,13 @@ fn the_intro_rows_follow_the_intro_row_and_the_sound_toggles() {
     assert!(tui.intro_sound);
 }
 
-/// Whether `setting` is a plain `[tui]` key that holds one word of a list rather than a switch.
+/// Whether `setting` is a plain `[tui]` key that holds one word of a list or a number rather than
+/// a switch.
 fn is_word_key(setting: Setting) -> bool {
-    matches!(setting, Setting::Key(key) if matches!(key.kind, TuiSettingKind::Word { .. }))
+    matches!(
+        setting,
+        Setting::Key(key) if matches!(key.kind, TuiSettingKind::Word { .. } | TuiSettingKind::Number { .. })
+    )
 }
 
 /// Every on/off row flips whichever way `←` or `→` is pressed on it, the same change
@@ -1349,4 +1353,32 @@ fn the_graph_rows_close_the_look_category() {
     );
     assert!(!look.contains(&Setting::AutoEqRefresh));
     assert_eq!(rows(2).last(), Some(&Setting::AutoEqRefresh));
+}
+
+/// The VU reference row steps by one dB on `←` and `→`, either arrow the one way it points, stops
+/// at -30 and -6 without asking for anything, and Space (which turns switches) asks for nothing.
+#[test]
+fn the_vu_reference_row_steps_by_one_and_stops_at_its_ends() {
+    let reference = key("vu_reference");
+    let set = |db| {
+        vec![Intent::Tui(TuiChange::Set(
+            match reference {
+                Setting::Key(key) => key,
+                _ => unreachable!(),
+            },
+            TuiValue::Number(db),
+        ))]
+    };
+    let mut app = app();
+    select(&mut app, reference);
+    assert_eq!(press(&mut app, KeyCode::Right), set(-17));
+    assert_eq!(press(&mut app, KeyCode::Left), set(-19));
+    assert!(press(&mut app, KeyCode::Char(' ')).is_empty());
+    for (db, arrow) in [(-30, KeyCode::Left), (-6, KeyCode::Right)] {
+        app.tui.vu_reference = db;
+        assert!(press(&mut app, arrow).is_empty(), "past {db}");
+    }
+    app.tui.vu_reference = -6;
+    assert_eq!(press(&mut app, KeyCode::Left), set(-7));
+    assert_eq!(reference.value(&app), "-6 dBFS");
 }

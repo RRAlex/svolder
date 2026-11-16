@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The computer's EQ over MQTT: one ON/OFF switch and one read-only preset sensor, and the
-//! crossfeed's switch and preset select ([`crossfeed`]), all under a Home Assistant device of
+//! crossfeed's switch and preset select ([`crossfeed`]) and the virtual speakers' switch and set
+//! select ([`speakers`]), all under a Home Assistant device of
 //! their own, `This computer`. Nothing else of the computer is exposed: no volume, no mute, no
 //! points.
 //!
@@ -13,12 +14,13 @@
 //! them.
 
 use serde_json::{Map, Value as Json, json};
-use svolder_host::eq::{CrossfeedView, EqView};
+use svolder_host::eq::{CrossfeedView, EqView, SpeakersView};
 
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
 pub mod crossfeed;
+pub mod speakers;
 
 /// The bridge-level unit the computer's topics sit under, in place of a device's unit id.
 pub const UNIT: &str = "computer";
@@ -53,18 +55,21 @@ pub fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
         topics::discovery_config(discovery_prefix, "sensor", UNIT, PRESET_KEY),
     ];
     all.extend(crossfeed::topics_of(discovery_prefix, commands));
+    all.extend(speakers::topics_of(discovery_prefix, commands));
     all
 }
 
 /// The computer's discovery entries: the EQ switch (a `binary_sensor` unless `commands`) and
 /// preset sensor, and, when the controller serves crossfeed (`crossfeed` is its view), the
-/// crossfeed switch and preset select. An empty `discovery_prefix` turns discovery off and
-/// returns nothing.
+/// crossfeed switch and preset select, and, when it serves the virtual speakers (`speakers` is
+/// their view), their switch and set select ([`speakers`]). An empty `discovery_prefix` turns
+/// discovery off and returns nothing.
 pub fn entries(
     base_topic: &str,
     discovery_prefix: &str,
     commands: bool,
     crossfeed: Option<&CrossfeedView>,
+    speakers: Option<&SpeakersView>,
 ) -> Vec<DiscoveryEntry> {
     if discovery_prefix.is_empty() {
         return Vec::new();
@@ -100,6 +105,14 @@ pub fn entries(
     ];
     if let Some(view) = crossfeed {
         all.extend(crossfeed::entries(
+            base_topic,
+            discovery_prefix,
+            commands,
+            view,
+        ));
+    }
+    if let Some(view) = speakers {
+        all.extend(self::speakers::entries(
             base_topic,
             discovery_prefix,
             commands,

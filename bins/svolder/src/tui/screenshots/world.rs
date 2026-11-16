@@ -302,10 +302,18 @@ pub(in crate::tui::screenshots) fn block(t: Duration) -> Block {
         let fade = 1.0 - k as f64 / 24.0;
         *band = (level(t + BAND_LAG * k as u32, k % 2) * fade) as f32;
     }
+    // The VU meter reads the same signal: its drawing-scale level is -36 dBFS at 0 and -10 dBFS at
+    // 1, and the sample peak runs a little above the RMS.
+    let amplitude = |level: f64| 10f64.powf((-36.0 + 26.0 * level) / 20.0) as f32;
+    let rms = [amplitude(level(t, 0)), amplitude(level(t, 1))];
     Block {
         bands,
         left: level(t, 0) as f32,
         right: level(t, 1) as f32,
+        levels: svolder_host::Levels {
+            rms,
+            peak: rms.map(|rms| (rms * 1.9).min(1.0)),
+        },
     }
 }
 

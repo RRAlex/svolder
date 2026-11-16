@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The computer's tools: `get_host` reads its volume, EQ, crossfeed and player; `set_host_volume`,
-//! `host_mute`, `set_host_eq` and `set_host_crossfeed` change them.
+//! The computer's tools: `get_host` reads its volume, EQ, crossfeed, virtual speakers and player;
+//! `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed` and `set_host_speakers`
+//! change them.
 //!
 //! The volume follows the rules the device's tools follow. It never goes above 100 %. A rise of
 //! more than [`MAX_RISE_DB`] over its lowest level of the last minute asks first, the level in
@@ -14,7 +15,9 @@ use std::sync::Arc;
 
 use rmcp::model::{CallToolRequestParams, Tool, ToolAnnotations};
 use serde_json::{Value, json};
+use svolder_host::eq::SpeakersView;
 use svolder_host::eq::crossfeed::{CrossfeedView, Model, ModelView};
+use svolder_host::eq::speakers::Room;
 use svolder_ipc::host::HostView;
 use svolder_ipc::{HostEqOp, Request, Response};
 use svolder_profiles::tone::preset;
@@ -252,7 +255,59 @@ impl Tools {
         })
         .await?;
         let view = self.host_view().await?;
-        Ok(json!({ "crossfeed": crossfeed_of(&view) }))
+        Ok(json!({ "crossfeed": crossfeed_of(&view), "speakers": speakers_of(&view) }))
+    }
+
+    /// Change the virtual speakers: choose a fetched set, turn them on or off, or both. A set is
+    /// named by its id from `get_host`; nothing is fetched here. Turning them on turns crossfeed
+    /// off in the same update, and the daemon refuses what cannot be (no set chosen, a set not
+    /// fetched, the EQ unavailable) in words the model reads.
+    pub(super) async fn set_host_speakers(&self, request: &CallToolRequestParams) -> Done {
+        let args = Args::new(request, SPEAKERS_ARGS)?;
+        let on = args.flag("on")?;
+        let set = args.text("set")?.map(str::to_string);
+        if set.as_deref().is_some_and(str::is_empty) {
+            return Err("\"set\" is the id of a fetched set from get_host"
+                .to_string()
+                .into());
+        }
+        if on.is_none() && set.is_none() {
+            return Err(format!("give at least one of {}", SPEAKERS_ARGS.join(", ")).into());
+        }
+        if let Some(id) = &set {
+            let view = self.host_view().await?;
+            if let Some(why) = view.eq.as_ref().and_then(|eq| eq.unavailable.as_ref()) {
+                return Err(why.clone().into());
+            }
+            let fetched: Vec<&str> = view
+                .eq
+                .as_ref()
+                .and_then(|eq| eq.speakers.as_ref())
+                .map(|sp| sp.sets.iter().map(|set| set.id.as_str()).collect())
+                .ok_or_else(|| "virtual speakers are not available on this computer".to_string())?;
+            if !fetched.contains(&id.as_str()) {
+                return Err(format!(
+                    "no fetched set {id:?}; the fetched sets are: {}. Sets are fetched with \
+                     `svolder host speakers`, the TUI or the web UI, not through MCP",
+                    if fetched.is_empty() {
+                        "none".to_string()
+                    } else {
+                        fetched.join(", ")
+                    }
+                )
+                .into());
+            }
+        }
+        self.host_send(Request::HostEq {
+            op: HostEqOp::Speakers {
+                on,
+                set,
+                done: true,
+            },
+        })
+        .await?;
+        let view = self.host_view().await?;
+        Ok(json!({ "crossfeed": crossfeed_of(&view), "speakers": speakers_of(&view) }))
     }
 
     /// The device a preset recall is shaped to: the named one, else for a built-in the only or
@@ -343,6 +398,97 @@ fn crossfeed_json(xf: &CrossfeedView) -> Value {
     out
 }
 
+/// The arguments of `set_host_speakers`.
+const SPEAKERS_ARGS: &[&str] = &["on", "set"];
+
+/// The virtual speakers as the tools show them. `curve` (plot data, large) is left out; the
+/// fetched sets are listed, since `set_host_speakers` names one by its id.
+/// The set fields are null while no set is chosen: a 0 dB change would read as a measured one.
+fn speakers_json(sp: &SpeakersView) -> Value {
+    let chosen = sp.set.is_some();
+    let mut out = json!({
+        "on": sp.on,
+        "set": sp.set,
+        "room": sp.room,
+        "room_name": sp.room_name,
+        "term": sp.term,
+        "label": chosen.then_some(&sp.label),
+        "licence": chosen.then_some(&sp.licence),
+        "credit": sp.credit,
+        "source_url": chosen.then_some(&sp.source_url),
+        "angles": chosen.then_some(&sp.angles),
+        "taps_ms": chosen.then_some(sp.taps_ms),
+        "loudness_db": chosen.then_some(sp.loudness_db),
+        "cut": sp.cut,
+        "note": sp.note,
+        "off_reason": sp.off_reason,
+        "sets": sp.sets.iter().map(|set| json!({
+            "id": set.id,
+            "room": set.room,
+            "room_name": set.room_name,
+            "term": set.term,
+            "label": set.label,
+            "licence": set.licence,
+            "credit": set.credit,
+            "source_url": set.source_url,
+        })).collect::<Vec<_>>(),
+    });
+    if let Some(why) = &sp.unavailable {
+        out["unavailable"] = json!(why);
+    }
+    out
+}
+
+/// The virtual speakers of `view`, null when the EQ is unavailable or the daemon has none.
+fn speakers_of(view: &HostView) -> Value {
+    view.eq
+        .as_ref()
+        .filter(|eq| eq.unavailable.is_none())
+        .and_then(|eq| eq.speakers.as_ref())
+        .map_or(Value::Null, speakers_json)
+}
+
+/// The two choices as the descriptions quote them, from the table's own words.
+pub(super) fn room_words() -> String {
+    [Room::With, Room::No]
+        .map(|room| format!("\"{} \u{b7} {}\"", room.name(), room.term()))
+        .join(" or ")
+}
+
+/// The description of `get_host`.
+pub(super) fn get_host_description() -> String {
+    format!(
+        "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q), its crossfeed (on or off, model, preset or custom, amount in percent, feed level, crossover, delay and its floor, the output, a note when it turned itself off), its virtual speakers (on or off, the chosen set and its room as {}, its label and licence, the loudness change, a note when they turned themselves off, and the fetched sets a call can choose from; the set fields are null while no set is chosen) and the player (title, artist, album, status); each is null while it is not available, and `unavailable` says why.",
+        room_words()
+    )
+}
+
+/// The definition of `set_host_speakers`.
+pub(super) fn speakers_definition() -> Tool {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "on": { "type": "boolean", "description": "true to play the virtual speakers, false to stop them; turning them on turns crossfeed off, and needs a chosen set" },
+            "set": { "type": "string", "description": format!("The id of a fetched set, from `speakers.sets` in get_host: {} (the first adds a room's own sound, the second is the free-field head only). Nothing is fetched by this call", room_words()) }
+        },
+        "required": [],
+        "additionalProperties": false
+    });
+    let Value::Object(schema) = schema else {
+        unreachable!("an object literal");
+    };
+    let mut tool = Tool::new(
+        "set_host_speakers",
+        format!(
+            "Change the computer's virtual speakers, which play stereo as if from two speakers in front of the listener, through a measured set ({}): give at least one of on and set. Turning them on turns crossfeed off. The call answers with {{crossfeed, speakers}} as they are after the change, so a crossfeed that went off shows its note. Only a set already fetched can be chosen.",
+            room_words()
+        ),
+        Arc::new(schema),
+    );
+    tool.annotations = Some(ToolAnnotations::new().read_only(false));
+    tool
+}
+
 /// The crossfeed of `view`, null when the EQ is unavailable or the daemon has none.
 fn crossfeed_of(view: &HostView) -> Value {
     view.eq
@@ -391,7 +537,7 @@ pub(super) fn crossfeed_definition() -> Tool {
         false => "none".to_string(),
     });
     let properties = json!({
-        "on": { "type": "boolean", "description": "true to turn the crossfeed on, false to turn it off; turning it on never raises the level" },
+        "on": { "type": "boolean", "description": "true to turn the crossfeed on, false to turn it off; turning it on never raises the level and turns the virtual speakers off" },
         "model": { "type": "string", "enum": Model::ALL.map(Model::word), "description": "The model; a different one loads its default preset" },
         "preset": { "type": "string", "description": format!("A preset's name within the model, loaded after a model change; {presets}") },
         "level_pct": {
@@ -421,7 +567,7 @@ pub(super) fn crossfeed_definition() -> Tool {
     };
     let mut tool = Tool::new(
         "set_host_crossfeed",
-        "Change the computer's crossfeed, which feeds a low-passed, delayed copy of each channel into the other: give at least one of on, model, preset, level_pct, crossover_hz and delay_ms, and the call answers with the crossfeed as it is after the change.",
+        "Change the computer's crossfeed, which feeds a low-passed, delayed copy of each channel into the other: give at least one of on, model, preset, level_pct, crossover_hz and delay_ms, and the call answers with {crossfeed, speakers} as they are after the change. Turning the crossfeed on turns the virtual speakers off, which the answer's speakers note says.",
         Arc::new(schema),
     );
     tool.annotations = Some(ToolAnnotations::new().read_only(false));
@@ -442,6 +588,7 @@ fn host_json(view: &HostView) -> Value {
         "volume": volume_json(view),
         "eq": eq,
         "crossfeed": crossfeed_of(view),
+        "speakers": speakers_of(view),
         "player": player,
     });
     if let Some(why) = view.eq.as_ref().and_then(|eq| eq.unavailable.as_ref()) {

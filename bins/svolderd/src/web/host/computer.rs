@@ -12,6 +12,11 @@
 //!   "delay_ms"?, "done"?}`: change the computer's crossfeed (`HostEqOp::Crossfeed`; the daemon
 //!   holds the values to the model's ranges and says what it refuses in words, a 409). `done` is
 //!   false while a drag goes on and, when absent, true; a body that names nothing is a 409.
+//! - `api/v1/host/speakers` `{"on"?, "set"?, "done"?}`: change the virtual speakers
+//!   (`HostEqOp::Speakers`; `set` is the id of a fetched set, which rebuilds the chain once; turning
+//!   them on turns the crossfeed off in the same update and the other way round; the daemon says
+//!   what it refuses in words, a 409). `done` as for the crossfeed; a body that names nothing is a
+//!   409. Fetching, importing and forgetting sets are routes of their own.
 //! - `api/v1/host/eq/preset` `{"name", "device"?, "confirm"?}`: a preset recalled on the
 //!   computer.
 //! - `api/v1/host/eq/points` `{"type", "f", "g", "q"}`: add a point; a value outside the hand
@@ -52,6 +57,7 @@ pub(super) fn routes() -> Router<Web> {
         .route("/api/v1/host/mute", post(mute))
         .route("/api/v1/host/eq", post(mode))
         .route("/api/v1/host/crossfeed", post(crossfeed))
+        .route("/api/v1/host/speakers", post(speakers))
         .route("/api/v1/host/eq/preset", post(preset))
         .route("/api/v1/host/eq/points", post(add))
         .route("/api/v1/host/eq/points/{n}", post(set))
@@ -92,7 +98,19 @@ fn answer(said: Answer) -> Response {
         Answer::Error { code, message, .. } if code == CODE_COMPUTER_UNAVAILABLE => {
             error(StatusCode::SERVICE_UNAVAILABLE, message)
         }
-        Answer::Error { message, .. } => error(StatusCode::CONFLICT, message),
+        Answer::Error {
+            message, reason, ..
+        } => {
+            // The reason rides with the words, as `router::refusal` carries it: a page acts on the
+            // reason (`missing`: read the sets again), never on the words.
+            let mut body = serde_json::json!({ "error": message });
+            if let Some(reason) = reason {
+                body["reason"] = serde_json::json!(reason);
+            }
+            let mut response = axum::Json(body).into_response();
+            *response.status_mut() = StatusCode::CONFLICT;
+            response
+        }
         Answer::Ask {
             message,
             name,
@@ -248,6 +266,37 @@ async fn crossfeed(
                     amount_pct: asked.amount_pct,
                     crossover_hz: asked.crossover_hz,
                     delay_ms: asked.delay_ms,
+                    done: asked.done,
+                },
+            )
+            .await
+        }
+        Err(refused) => *refused,
+    }
+}
+
+/// What `speakers` takes: the fields of `HostEqOp::Speakers`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Speakers {
+    on: Option<bool>,
+    set: Option<String>,
+    #[serde(default = "done_by_default")]
+    done: bool,
+}
+
+/// Change the computer's virtual speakers.
+async fn speakers(State(web): State<Web>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if let Err(refused) = writer(&web, &headers) {
+        return refused;
+    }
+    match parse::<Speakers>(&body) {
+        Ok(asked) => {
+            eq(
+                &web,
+                HostEqOp::Speakers {
+                    on: asked.on,
+                    set: asked.set,
                     done: asked.done,
                 },
             )
