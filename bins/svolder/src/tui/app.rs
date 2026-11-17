@@ -626,6 +626,7 @@ impl App {
                 daemon_gone: false,
                 passphrase_note: None,
                 facts: None,
+                awaiting_fresh: false,
             },
             host: Host::new(now),
             mascot: Mascot::new(now),

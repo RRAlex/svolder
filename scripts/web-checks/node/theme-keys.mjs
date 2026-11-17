@@ -72,6 +72,7 @@ const WORDS = {
     [['↑', '↓', '←', '→'], '#sg-vtrack, #sg-cvtrack', 'Volume one step'],
     [['Page Up', 'Page Down'], '#sg-vtrack, #sg-cvtrack', 'Volume ten steps'],
     ['Home', '#sg-vtrack, #sg-cvtrack', 'Volume to its lowest'],
+    [['Enter', 'Space'], '.sg-vface', 'Change the meter glow'],
     [['↑', '↓', '←', '→'], '.sg-scale', 'The scale one step'],
     [['Page Up', 'Page Down'], '.sg-scale', 'The scale ten steps'],
     ['Home', '.sg-scale', 'The scale to its lowest'],

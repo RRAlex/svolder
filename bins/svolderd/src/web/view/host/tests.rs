@@ -224,6 +224,55 @@ fn the_path_is_untouched_when_every_hop_is() {
     assert!(path.hops[2].detail.contains("48 kHz"), "{:?}", path.hops[2]);
 }
 
+/// The device's own volume below 0 dB reaches the card: the DAC hop names it and the title says
+/// what the device then does; at 0 dB neither says anything of it.
+#[test]
+fn the_card_names_what_the_dac_itself_changes() {
+    let view = host(Some(track_view()), Some(route("Schiit Gungnir 2")));
+    let p = profile_named("gungnir2-v2");
+    let name = info("Gungnir 2");
+    let card = |volume: &str, connected: bool| {
+        let mut name = name.clone();
+        name.connected = connected;
+        let readings = [
+            read(&p, "input", "1"),
+            read(&p, "sample_rate", "2"),
+            read(&p, "usb1_connected", "true"),
+            read(&p, "usb2_connected", "false"),
+            read(&p, "volume", volume),
+        ];
+        let s = Snapshot {
+            host: &view,
+            access: OPEN,
+            ..shot(&name, &p, &readings)
+        };
+        playing(&s, Family::Dac)
+            .and_then(|card| card.path)
+            .expect("a path")
+    };
+    // A link that is down claims nothing of the device's own stage from the readings it holds.
+    let path = card("117", false);
+    assert!(!path.title.contains("then"), "{}", path.title);
+    assert!(!path.hops[2].changes);
+    let path = card("117", true);
+    assert_eq!(path.class, "ok");
+    assert!(
+        path.title
+            .contains("the Gungnir 2 then lowers it by 3.3 dB"),
+        "{}",
+        path.title
+    );
+    assert!(path.hops[2].changes);
+    assert!(
+        path.hops[2].detail.ends_with("volume \u{2212}3.3 dB"),
+        "{:?}",
+        path.hops[2]
+    );
+    let path = card("127", true);
+    assert!(!path.title.contains("then"), "{}", path.title);
+    assert!(!path.hops[2].changes);
+}
+
 /// The device's own sample-rate reading is what the last hop is judged by: another rate names
 /// itself, no reading says what is not known.
 #[test]
@@ -489,4 +538,24 @@ fn a_dac_with_no_input_control_reads_untouched_on_the_page() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!((path.class, path.words.as_str()), ("ok", "untouched"));
+}
+
+/// The link pill says the readings are old while the link is down and, once it is back, until the
+/// daemon has heard the device again (the stale flag), and not otherwise.
+#[test]
+fn the_link_says_when_the_readings_are_from_before_a_drop() {
+    let mut device = info("Gungnir 2");
+    assert!(!crate::web::view::link_of(&device).old);
+    device.stale = true;
+    assert!(
+        crate::web::view::link_of(&device).old,
+        "back but not heard again"
+    );
+    device.connected = false;
+    assert!(crate::web::view::link_of(&device).old, "down");
+    device.stale = false;
+    assert!(
+        crate::web::view::link_of(&device).old,
+        "down is old whatever the flag"
+    );
 }

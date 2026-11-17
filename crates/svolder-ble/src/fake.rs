@@ -1067,7 +1067,7 @@ mod tests {
     }
 
     /// `SVOLDER_FAKE_QUIET_SAME=1` makes a repeated Command of any control go unreported; unset,
-    /// only the tone-control mode is silent on a repeat.
+    /// every repeat is reported.
     #[test]
     fn the_quiet_same_knob_reaches_the_fake() {
         for (set, reports) in [

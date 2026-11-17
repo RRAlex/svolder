@@ -4,7 +4,7 @@
 //! The path verdict: the hops from the player to the DAC, judged against what the device reports.
 
 use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
-use svolder_profiles::Profile;
+use svolder_profiles::{EqMode, Profile, roles, safety, units};
 use svolder_proto::FunctionId;
 
 /// The USB vendor id Schiit's devices carry.
@@ -20,8 +20,113 @@ const UNTOUCHED: &str = "untouched";
 const UNTOUCHED_NOTE: &str = "the player may still change the sound itself (loudness \
                               normalization, its own EQ)";
 
+/// What the device's own stage does to the sound it receives: its volume below 0 dB, its tone
+/// control when it shapes the sound, its balance off centre.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DacStage {
+    /// The device's volume in dB, from the profile's own table; negative infinity for silence.
+    /// `None` when the device has no volume in dB or has not said.
+    pub volume_db: Option<f64>,
+    /// Whether the tone control is on EQ or loudness.
+    pub tone: bool,
+    /// Whether the balance is off its centre.
+    pub balance: bool,
+    /// Whether the device's mute is on.
+    pub muted: bool,
+    /// Whether its phase invert is on.
+    pub phase: bool,
+    /// Whether its NOS (non-oversampling) filter is on.
+    pub nos: bool,
+}
+
+impl DacStage {
+    /// The volume as a drop worth naming: below 0 dB by at least what one decimal shows.
+    fn lowers(&self) -> Option<f64> {
+        self.volume_db.filter(|db| *db < -0.05)
+    }
+
+    /// Whether the stage changes the sound at all.
+    pub fn changes(&self) -> bool {
+        self.lowers().is_some() || self.tone || self.balance || self.muted || self.phase || self.nos
+    }
+
+    /// The stage as short hop words: `volume -3.3 dB`, `tone control`, `balance off centre`.
+    fn hop_words(&self) -> Vec<String> {
+        let mut words = Vec::new();
+        if let Some(db) = self.lowers() {
+            words.push(match db.is_finite() {
+                true => format!(
+                    "volume {}",
+                    units::amount_text(units::Amount::of(db), Some("dB"))
+                ),
+                false => "volume silent".to_string(),
+            });
+        }
+        if self.tone {
+            words.push("tone control".to_string());
+        }
+        if self.balance {
+            words.push("balance off centre".to_string());
+        }
+        if self.muted {
+            words.push("muted".to_string());
+        }
+        if self.phase {
+            words.push("phase inverted".to_string());
+        }
+        if self.nos {
+            words.push("NOS filter".to_string());
+        }
+        words
+    }
+
+    /// The stage as a clause that follows `the sound is untouched`: `the Bifrost 3 then lowers it
+    /// by 3.3 dB, shapes it with its tone control and shifts the balance`. `None` while the
+    /// stage changes nothing.
+    fn clause(&self, name: &str) -> Option<String> {
+        let mut doings = Vec::new();
+        if let Some(db) = self.lowers() {
+            doings.push(match db.is_finite() {
+                true => format!("lowers it by {:.1} dB", -db),
+                false => "silences it".to_string(),
+            });
+        }
+        if self.tone {
+            doings.push("shapes it with its tone control".to_string());
+        }
+        if self.balance {
+            doings.push("shifts the balance".to_string());
+        }
+        if self.phase {
+            doings.push("inverts the phase".to_string());
+        }
+        if self.nos {
+            doings.push("uses its NOS filter".to_string());
+        }
+        let who = match name.is_empty() {
+            true => "the DAC".to_string(),
+            false => format!("the {name}"),
+        };
+        let mut clauses = Vec::new();
+        if let Some(last) = doings.pop() {
+            let doings = match doings.is_empty() {
+                true => last,
+                false => format!("{} and {last}", doings.join(", ")),
+            };
+            clauses.push(format!("{who} then {doings}"));
+        }
+        if self.muted {
+            clauses.push(match clauses.is_empty() {
+                true => format!("{who} is muted"),
+                false => "it is muted".to_string(),
+            });
+        }
+        (!clauses.is_empty()).then(|| clauses.join("; "))
+    }
+}
+
 /// What the device itself reports of its end of the path.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DacFacts {
     /// The device's display name, such as `Gungnir 2`.
     pub display: String,
@@ -33,6 +138,8 @@ pub struct DacFacts {
     /// reading for each; `None` for one with a single USB port or no such readings. A port whose
     /// reading has not been said is `None` inside.
     pub usb_ports: Option<[Option<bool>; 2]>,
+    /// What the device's own volume, tone control and balance do to the sound.
+    pub stage: DacStage,
 }
 
 /// Which USB port the computer feeds, judged from the device's own port readings.
@@ -72,11 +179,42 @@ impl DacFacts {
             Some(raw(control.id).map(|raw| raw == 1))
         };
         let usb_ports = connected("usb1_connected").zip(connected("usb2_connected"));
+        let volume_db = roles::volume(profile)
+            .filter(|control| safety::in_db(control))
+            .and_then(|control| {
+                let amount = units::amount(control, raw(control.id)?)?;
+                Some(amount.number().unwrap_or(f64::NEG_INFINITY))
+            });
+        let tone = profile.eq.as_ref().is_some_and(|eq| {
+            raw(eq.mode_id())
+                .and_then(|raw| u8::try_from(raw).ok())
+                .and_then(EqMode::from_raw)
+                .is_some_and(|mode| mode != EqMode::Flat)
+        });
+        let balance = profile.control_by_key("balance").is_some_and(|control| {
+            let (Some(center), Some(raw)) = (control.center, raw(control.id)) else {
+                return false;
+            };
+            raw != center
+        });
+        let toggle = |key: &str| {
+            profile
+                .control_by_key(key)
+                .is_some_and(|control| raw(control.id) == Some(1))
+        };
         DacFacts {
             display: profile.display.clone(),
             input,
             rate_hz: reading("sample_rate").as_deref().and_then(rate_hz),
             usb_ports: usb_ports.map(|(one, two)| [one, two]),
+            stage: DacStage {
+                volume_db,
+                tone,
+                balance,
+                muted: toggle("mute"),
+                phase: toggle("phase"),
+                nos: toggle("nos"),
+            },
         }
     }
 
@@ -152,6 +290,9 @@ pub struct PathLine {
     /// untouched path (with `player assumed` after it when the stream was only assumed); the
     /// short words (`→ SINK`, `player → SINK`) for a sound that goes elsewhere.
     pub words: Vec<String>,
+    /// What the device's own stage does after the path (`the Bifrost 3 then lowers it by 3.3
+    /// dB`); `None` while it changes nothing, and for a sound that does not reach the device.
+    pub dac_stage: Option<String>,
 }
 
 impl PathLine {
@@ -163,7 +304,9 @@ impl PathLine {
     /// The whole sentence behind the short words, for a tooltip: for a sound that goes elsewhere
     /// (`the computer plays to DELL S2721QS`), and for an untouched path, which says where the
     /// verdict starts (the player's output) and that the player may still change the sound
-    /// itself. `None` for any other verdict.
+    /// itself, with what the device's own stage then does when it changes the sound; for a
+    /// changed path, the changes it names and that stage, when there is one. `None` for any other
+    /// verdict, and for a changed path whose DAC stage changes nothing.
     pub fn sentence(&self) -> Option<String> {
         match &self.verdict {
             Verdict::NotThisDac { sink, by_player } => {
@@ -175,10 +318,19 @@ impl PathLine {
                     Some(rest) if !rest.is_empty() => format!(" ({})", rest.join(", ")),
                     _ => String::new(),
                 };
+                let stage = self
+                    .dac_stage
+                    .as_ref()
+                    .map(|stage| format!("; {stage}"))
+                    .unwrap_or_default();
                 Some(format!(
-                    "{UNTOUCHED} from the player's output on{extra}; {UNTOUCHED_NOTE}"
+                    "{UNTOUCHED} from the player's output on{extra}{stage}; {UNTOUCHED_NOTE}"
                 ))
             }
+            Verdict::Changed => self
+                .dac_stage
+                .as_ref()
+                .map(|stage| format!("{}; {stage}", self.words.join(", "))),
             _ => None,
         }
     }
@@ -264,6 +416,7 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
             hops: Vec::new(),
             verdict: Verdict::Unknown,
             words: vec!["the computer's sink was not read".to_string()],
+            dac_stage: None,
         };
     };
     if !sink_is_dac(sink, dac) {
@@ -280,6 +433,7 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
                 input: input.clone(),
             },
             words: vec![format!("the DAC listens to {input}")],
+            dac_stage: None,
         };
     }
     if let UsbFeed::Other { input, computer } = dac.usb_feed() {
@@ -292,6 +446,7 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
                 format!("the DAC listens to {input}"),
                 format!("the computer is on USB {computer}"),
             ],
+            dac_stage: None,
         };
     }
 
@@ -317,6 +472,7 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
         hops: vec![player, computer, device],
         verdict,
         words,
+        dac_stage: dac.stage.clause(&dac.display),
     }
 }
 
@@ -326,6 +482,7 @@ fn elsewhere(words: String, sink: String, by_player: bool) -> PathLine {
         hops: Vec::new(),
         verdict: Verdict::NotThisDac { sink, by_player },
         words: vec![words],
+        dac_stage: None,
     }
 }
 
@@ -495,10 +652,11 @@ fn dac_hop(
         }
         _ => {}
     }
+    detail.extend(dac.stage.hop_words());
     Hop {
         label: "DAC".to_string(),
         detail: detail.join(", "),
-        changes: changes.len() > before,
+        changes: changes.len() > before || dac.stage.changes(),
         unknown: unknown.len() > unknown_before,
     }
 }

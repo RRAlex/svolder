@@ -60,4 +60,7 @@ pub struct Session {
     /// Status pane draws its `Device` row from it and words the link with its flags; `None`
     /// until a backend has said.
     pub facts: Option<crate::backend::DeviceRow>,
+    /// Whether the link dropped and no status has come since it: what is shown is from before
+    /// the drop, even once the link is back, until the first fresh reading.
+    pub awaiting_fresh: bool,
 }

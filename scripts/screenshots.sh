@@ -64,7 +64,7 @@ for name in dac amp tone telemetry devices; do
 done
 
 # The animation is AVIF over AV1 (libaom), 4:4:4, -crf 30, -cpu-used 4. Measured on 2026-10-09 for
-# 304 frames of 1920x1360 (before the 24 px margin; now 1968x1408): 4:2:0 646 KB, 4:4:4 784 KB.
+# 304 frames of 1920x1360 (before the 24 px margin; now 1968x1578, the 120x45 frame): 4:2:0 646 KB, 4:4:4 784 KB.
 # 4:4:4 keeps the thin coloured rules and text edges of the Tone screen free of the pink fringe
 # 4:2:0 leaves, and stays far under the 2 MB budget, so crf 30 is kept. -auto-alt-ref 0 is needed:
 # with libaom's alt-ref frames on, this content makes the encoder abort on an assertion. One

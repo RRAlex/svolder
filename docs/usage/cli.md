@@ -769,8 +769,9 @@ svolder: recall is an action: it is sent, never read; svolder set recall 1-3 sen
 
 Set one control's value, or recall or save one of the device's own presets. The value can be a
 number, a name (for named controls), a unit-suffixed number, `min`, `max`, or `up`/`down` to adjust
-by steps. Without `--no-wait`, the command waits for the device's confirmation (exit code 4 if
-timeout).
+by steps. Without `--no-wait`, the command waits for the device's own report of that control
+received after the write; when none arrives within 2 seconds it says `sent, not confirmed` with the
+device's last report and exits with code 4 (`svolder get KEY` or `svolder status` reads it back).
 
 ```
 Set one control's value, or recall or save a preset
@@ -1002,11 +1003,14 @@ A device that does not come back exits 3, naming what happened and then the one 
 svolder: connection failed: device did not reconnect within 20s. If it does not come back, run `svolder doctor`
 ```
 
-and through the daemon, it is the subscription going quiet:
+and through the daemon, a daemon that stopped is said so:
 
 ```
-svolder: connection failed: the daemon stopped sending events. If it does not come back, run `svolder doctor`
+svolder: The svolder daemon stopped. Start it again with `svolder daemon restart`
 ```
+
+(a daemon that still answers but stopped sending prints `connection failed: the daemon stopped
+sending events` with the same `svolder doctor` step).
 
 Example (interrupted with Ctrl-C; here shown with `timeout` to end the demonstration):
 
@@ -1513,7 +1517,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.36.1
+svolder 0.36.4
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

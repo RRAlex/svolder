@@ -31,6 +31,8 @@ pub(crate) enum Line {
 pub(crate) struct LineReader<R> {
     inner: R,
     buf: Vec<u8>,
+    /// Set once a last line came back that the peer closed without a newline.
+    cut: bool,
     /// The most bytes `buf` has held at once.
     #[cfg(test)]
     high_water: usize,
@@ -41,9 +43,15 @@ impl<R: AsyncBufRead + Unpin> LineReader<R> {
         Self {
             inner,
             buf: Vec::new(),
+            cut: false,
             #[cfg(test)]
             high_water: 0,
         }
+    }
+
+    /// Whether the last line returned ended at the stream's end without a newline.
+    pub(crate) fn cut_short(&self) -> bool {
+        self.cut
     }
 
     /// The next line, or [`Line::TooLong`] once one runs past the cap.
@@ -55,6 +63,7 @@ impl<R: AsyncBufRead + Unpin> LineReader<R> {
                 if self.buf.is_empty() {
                     return Ok(Line::Eof);
                 }
+                self.cut = true;
                 if self.buf.last() == Some(&b'\r') {
                     self.buf.pop();
                 }

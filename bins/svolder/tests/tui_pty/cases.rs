@@ -794,6 +794,32 @@ fn a_cover_that_goes_takes_the_picture_off_the_screen() {
     }
 }
 
+/// A device taken off the air leaves its last readings on screen: the header says they are from
+/// before the link dropped, beside the hollow dot, in the real binary on a pty.
+#[test]
+#[ignore = "runs the real binary in a pty: make tui-harness"]
+fn a_link_that_drops_marks_the_readings_as_old() {
+    let cue = crate::common::TempDir::new("link-gone");
+    let file = cue.path().join("gone");
+    let file_text = file.display().to_string();
+    // The header's text row is what is left of the width after the wordmark: 160 columns leave
+    // room for the whole words beside the unit's digits.
+    let tui = Tui::start_plain_with_env(
+        160,
+        WIDE.1,
+        Responder::None,
+        "",
+        &[("SVOLDER_FAKE_GONE_FILE", file_text.as_str())],
+    );
+    wait_values_read(&tui);
+    tui.wait_for_text("● connected");
+    assert!(!tui.screen_text().contains("readings from before"));
+    std::fs::write(&file, b"").expect("the cue");
+    tui.wait_for_text("○ disconnected");
+    tui.wait_for_text("readings from before the link dropped");
+    tui.quit();
+}
+
 /// A resize draws the picture again for the new size: the art is sized for the box the new
 /// frame has.
 #[test]

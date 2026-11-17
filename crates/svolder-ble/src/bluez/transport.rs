@@ -4,7 +4,7 @@
 //! The BlueZ central transport: scan for Forkbeard devices, connect, write TX frames,
 //! and stream RX notifications, over btleplug.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Display;
 use std::future::Future;
@@ -15,7 +15,8 @@ use crate::log::LogLevel;
 
 use async_trait::async_trait;
 use btleplug::api::{
-    Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType,
+    Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, PeripheralProperties,
+    ScanFilter, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::FutureExt;
@@ -25,7 +26,7 @@ use svolder_proto::UnitId;
 
 use super::releases::{Hold, Peer, Releases, deliver_or_release};
 use super::{
-    RX_UUID, SERVICE_UUID, TX_UUID, advertisement_from_manufacturer_data, forkbeard_advertisement,
+    RX_UUID, TX_UUID, advertisement_from_manufacturer_data, forkbeard_advertisement,
     map_btleplug_error,
 };
 use crate::advert::Advertisement;
@@ -237,6 +238,8 @@ impl BluezTransport {
         // at that moment.
         let mut touched: HashSet<PeripheralId> = HashSet::new();
         let mut listed: HashSet<PeripheralId> = HashSet::new();
+        // Devices whose events are not read (see [`worth_a_read`]).
+        let mut set_aside: HashSet<PeripheralId> = HashSet::new();
         let mut found: Vec<(Peripheral, Advertisement)> = Vec::new();
         loop {
             let event = tokio::select! {
@@ -262,6 +265,19 @@ impl BluezTransport {
             let Some(id) = advertising_device(&event) else {
                 continue;
             };
+            // The adapter reports every device nearby, so most events name one that is not a
+            // Forkbeard: svolder adds no D-Bus read of its own for those (btleplug still reads
+            // once per event).
+            let carried = match &event {
+                CentralEvent::ManufacturerDataAdvertisement {
+                    manufacturer_data, ..
+                } => Some(manufacturer_data),
+                _ => None,
+            };
+            if !worth_a_read(&mut set_aside, id, carried) {
+                touched.remove(id);
+                continue;
+            }
             touched.insert(id.clone());
             if listed.contains(id) {
                 continue;
@@ -273,6 +289,7 @@ impl BluezTransport {
                 continue;
             };
             let Some(advert) = forkbeard_advertisement(&props) else {
+                set_aside_after_read(&mut set_aside, id, &props);
                 continue;
             };
             if !wanted(&advert) {
@@ -308,7 +325,7 @@ impl BluezTransport {
             let sweep = async {
                 for peripheral in self.adapter.peripherals().await.unwrap_or_default() {
                     let id = peripheral.id();
-                    if listed.contains(&id) || !touched.contains(&id) {
+                    if listed.contains(&id) || set_aside.contains(&id) || !touched.contains(&id) {
                         continue;
                     }
                     let Ok(Some(props)) = peripheral.properties().await else {
@@ -610,8 +627,8 @@ impl Transport for BluezTransport {
     }
 }
 
-/// What a scan asks of the adapter: discovery of the Forkbeard service started, and stopped.
-/// The BlueZ adapter is the one there is; a test stands in its own to see what is asked when.
+/// What a scan asks of the adapter: discovery started, and stopped. The BlueZ adapter is the
+/// one there is; a test stands in its own to see what is asked when.
 trait Discovery: Clone + Send + Sync + 'static {
     /// Start discovering, bounded by [`OP_TIMEOUT`].
     fn start(&self) -> BoxFuture<'static, Result<(), BleError>>;
@@ -619,14 +636,20 @@ trait Discovery: Clone + Send + Sync + 'static {
     fn stop(&self) -> BoxFuture<'static, ()>;
 }
 
+/// The filter a scan starts with: none. BlueZ 5.87 crashes `bluetoothd` when a discovery
+/// filter names service UUIDs and a nearby device advertises one of them, so the adapter
+/// reports every device and the scan keeps the ones whose manufacturer data parses as a
+/// Forkbeard advertisement (see [`forkbeard_advertisement`]).
+fn scan_filter() -> ScanFilter {
+    ScanFilter::default()
+}
+
 impl Discovery for Adapter {
     fn start(&self) -> BoxFuture<'static, Result<(), BleError>> {
         let adapter = self.clone();
         async move {
             bounded(
-                adapter.start_scan(ScanFilter {
-                    services: vec![SERVICE_UUID],
-                }),
+                adapter.start_scan(scan_filter()),
                 "starting the scan timed out",
             )
             .await
@@ -763,6 +786,43 @@ fn advertising_device(event: &CentralEvent) -> Option<&PeripheralId> {
         | CentralEvent::ManufacturerDataAdvertisement { id, .. }
         | CentralEvent::RssiUpdate { id, .. } => Some(id),
         _ => None,
+    }
+}
+
+/// Whether an event for a device is worth a properties read, remembering the devices that
+/// are not. A device is set aside once its manufacturer data, in an event or in a read,
+/// does not parse as a Forkbeard advertisement or it has none; from then on its events cost
+/// a set lookup. Manufacturer data that parses brings the device back, which is also how a
+/// device whose data BlueZ had not filled in at the first read is read again: the data
+/// arrives as an event of its own. `manufacturer_data` is what the event carries, when it
+/// carries any.
+fn worth_a_read<I: Clone + Eq + std::hash::Hash>(
+    set_aside: &mut HashSet<I>,
+    id: &I,
+    manufacturer_data: Option<&HashMap<u16, Vec<u8>>>,
+) -> bool {
+    match manufacturer_data {
+        Some(data) if advertisement_from_manufacturer_data(data, None).is_some() => {
+            set_aside.remove(id);
+            true
+        }
+        Some(_) => {
+            set_aside.insert(id.clone());
+            false
+        }
+        None => !set_aside.contains(id),
+    }
+}
+
+/// Set a device aside after a properties read that found no Forkbeard advertisement and no
+/// manufacturer data that could become one (see [`worth_a_read`]).
+fn set_aside_after_read<I: Clone + Eq + std::hash::Hash>(
+    set_aside: &mut HashSet<I>,
+    id: &I,
+    props: &PeripheralProperties,
+) {
+    if advertisement_from_manufacturer_data(&props.manufacturer_data, None).is_none() {
+        set_aside.insert(id.clone());
     }
 }
 

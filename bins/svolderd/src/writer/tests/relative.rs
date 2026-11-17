@@ -74,7 +74,7 @@ fn only_a_timeout_answer_says_the_write_may_have_landed() {
     )));
     assert!(!timed_out(&Response::error(
         CODE_USAGE,
-        "no confirmation within 2s"
+        "sent, not confirmed: no report from the device within 2s"
     )));
     assert!(!timed_out(&Response::Ack));
 }

@@ -16,6 +16,7 @@ export const MOTION_WORDS = Object.freeze({ full: 'Full', calm: 'Calm', still: '
 /** The HUD's fixed words: the path's verdict, the EQ line's names and the amp's note. */
 export const HUD = Object.freeze({
   hostEq: 'host EQ on',
+  dac: 'DAC',
   changes: 'changes the sound',
   eq: 'EQ',
   off: 'OFF',

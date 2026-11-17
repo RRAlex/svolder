@@ -19,12 +19,15 @@ itself, the socket it serves, the configuration file both sides read, and the wi
 them.
 
 A device that does not come back is not scanned for over and over at the same rate: the waits
-between reconnect attempts are 2, 5, 15, 30 and then 60 seconds, the last step repeating for as long
-as the device stays away. Every attempt scans the adapter, so a daemon configured for a DAC that is
-switched off would otherwise keep that adapter discovering for as long as it is off — power spent on
-a device that is not there, and a scan every other user of the radio on the host has to share the
-air with. Two things end a wait where it stands and start the schedule over, so acting on a device
-you have just switched back on never waits out a long step.
+between reconnect attempts are 2, 5, 15 and then 30 seconds, the last step repeating for as long
+as the device stays away. One attempt is itself cut off after 45 seconds (listen, connect,
+service discovery and the first refresh; releasing its link can take up to about 13 seconds more,
+so about a minute in the worst case): a step that never answers fails it with a reason in the log,
+and the next wait follows the schedule. Every attempt scans the adapter, so a daemon configured
+for a DAC that is switched off would otherwise keep that adapter discovering for as long as it
+is off — power spent on a device that is not there, and a scan every other user of the radio on
+the host has to share the air with. Two things end a wait where it stands and start the schedule
+over, so acting on a device you have just switched back on never waits out a long step.
 
 One is a command that needs the link — a `set`, an `eq` write, a passphrase change — which is still
 refused while the link is down, as it always is. The other is a `reload` (or a SIGHUP, an `add`, a
@@ -1181,7 +1184,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.36.1 on /run/user/1000/svolder.sock
+daemon: 0.36.4 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 web: listening on 127.0.0.1:8738 (token, writes)

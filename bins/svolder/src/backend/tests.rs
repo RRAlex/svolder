@@ -241,6 +241,70 @@ fn every_write_failure_names_a_step_and_keeps_its_code() {
     assert_eq!(daemon.next, next_step(Kind::DaemonError));
 }
 
+/// A write over a connection the daemon's going away broke (a broken pipe, a reset) says the
+/// daemon stopped, in words and with a step of its own, exits with the link code, and never
+/// names the raw socket error or the device.
+#[test]
+fn a_write_over_a_dead_daemon_says_the_daemon_stopped() {
+    use std::io::{Error, ErrorKind};
+    for kind in [ErrorKind::BrokenPipe, ErrorKind::ConnectionReset] {
+        let err = remote::write_failure(Err(svolder_ipc::IpcError::from_wire(Error::from(kind))))
+            .failure();
+        assert_eq!(err.code, 3, "{kind:?}");
+        assert_eq!(err.what, "The svolder daemon stopped.");
+        assert_eq!(err.next, next_step(Kind::DaemonStopped));
+        assert!(!err.to_string().contains("socket io"), "{err}");
+    }
+}
+
+/// A feed that cannot be opened because the daemon went away says so alone, with the step of
+/// starting it, and not as "connection failed".
+#[test]
+fn a_feed_over_a_dead_daemon_is_not_a_failed_connection() {
+    let err = remote::daemon_link_error(svolder_ipc::IpcError::DaemonGone);
+    let failure = Failure::from_ble(&err);
+    assert_eq!(failure.what, "The svolder daemon stopped.");
+    assert_eq!(failure.next, next_step(Kind::DaemonStopped));
+    assert_eq!(failure.code, 3);
+    let other = remote::daemon_link_error(svolder_ipc::IpcError::Protocol("odd".into()));
+    assert!(
+        other.to_string().starts_with("connection failed"),
+        "{other}"
+    );
+}
+
+/// A snapshot, a reload or a device list asked mid-session of a daemon that is gone says it
+/// stopped; first contact keeps the no-daemon words.
+#[tokio::test]
+async fn a_mid_session_loss_says_the_daemon_stopped() {
+    use crate::test_support::stub_daemon::stub_daemon;
+
+    let daemon = stub_daemon().await;
+    let socket = daemon.socket.clone();
+    let backend = Backend::stub_remote(&socket).await;
+    daemon.stop().await;
+    let Backend::Remote(remote) = &backend else {
+        panic!("a daemon backend");
+    };
+    let snapshot = remote
+        .snapshot_request()
+        .await
+        .expect_err("nothing answers");
+    assert_eq!(snapshot.what, "The svolder daemon stopped.");
+    assert!(
+        snapshot.next.contains("svolder daemon restart"),
+        "{}",
+        snapshot.next
+    );
+    let reload = remote.reload().await.expect_err("nothing answers");
+    assert_eq!(reload.what, "The svolder daemon stopped.");
+    let rows = remote.device_rows().await.expect_err("nothing answers");
+    assert_eq!(rows.what, "The svolder daemon stopped.");
+    let first = remote::device_rows(&socket).await.expect_err("no daemon");
+    assert!(first.next.contains("daemon install"), "{}", first.next);
+    backend.close().await;
+}
+
 /// A backend whose reconnect attempt is still inside a connect that takes `connect_time`, so
 /// closing it waits that long.
 async fn reconnecting_for(connect_time: Duration) -> Backend {

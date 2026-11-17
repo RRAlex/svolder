@@ -23,6 +23,19 @@ async fn a_second_bind_is_refused_while_the_first_lives() {
     .expect("test timed out");
 }
 
+/// A bind in a directory that is not there says so in the socket's own words: the daemon that
+/// cannot start is not "stopped".
+#[tokio::test]
+async fn a_bind_in_a_missing_directory_keeps_its_own_words() {
+    let path = temp_socket().join("missing").join("dir").join("s.sock");
+    let err = bind_listener(&path)
+        .await
+        .expect_err("no directory to bind in");
+    assert!(matches!(err, IpcError::Io(_)), "{err:?}");
+    assert!(!err.daemon_gone());
+    assert!(!err.to_string().contains("stopped"), "{err}");
+}
+
 #[tokio::test]
 async fn stale_socket_file_is_replaced() {
     tokio::time::timeout(Duration::from_secs(5), async {

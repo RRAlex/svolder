@@ -203,7 +203,7 @@ async fn a_daemon_restarted_under_the_tui_is_reopened_without_a_key() {
 /// With nothing answering for the whole wait the TUI says what it always said, and `r` still
 /// reopens the device once a daemon is back.
 #[tokio::test]
-async fn nothing_answering_for_the_wait_is_a_lost_device_and_r_still_reopens() {
+async fn nothing_answering_for_the_wait_says_the_daemon_stopped_and_r_still_reopens() {
     use crate::test_support::stub_daemon::{stub_daemon, stub_daemon_at};
 
     let first = stub_daemon().await;
@@ -248,7 +248,7 @@ async fn nothing_answering_for_the_wait_is_a_lost_device_and_r_still_reopens() {
     assert_eq!(end.code, 0, "{:?}", end.why);
     let frames = drawn(&frames);
     assert!(
-        any_frame(&frames, "device did not come back"),
+        any_frame(&frames, "The svolder daemon stopped."),
         "the window ran out without a word"
     );
     assert!(
@@ -423,7 +423,7 @@ async fn every_path_that_takes_the_link_down_draws_the_strip_down() {
 
     let (backend, _gate, app) = up_since_one_second().await;
     let mut watching = super::test_support::watching(backend, app, None);
-    watching.gone();
+    watching.gone(true);
     assert_eq!(strip_end(&watching.app, 6_000), Some(0.0), "gone");
     watching.close().await;
 

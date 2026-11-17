@@ -76,7 +76,7 @@ pub fn map_btleplug_error(err: &btleplug::Error) -> BleError {
     match err {
         PermissionDenied | NoAdapterAvailable => BleError::Adapter(err.to_string()),
         DeviceNotFound => BleError::NotFound,
-        _ => BleError::Connection(err.to_string()),
+        _ => BleError::from_bluez_text(err.to_string()),
     }
 }
 
@@ -202,6 +202,14 @@ mod tests {
         assert!(matches!(e, BleError::Adapter(_)));
         let e = map_btleplug_error(&btleplug::Error::DeviceNotFound);
         assert!(matches!(e, BleError::NotFound));
+    }
+
+    #[test]
+    fn maps_an_adapter_already_busy_to_words_not_bluez_text() {
+        let busy = btleplug::Error::Other("Operation already in progress".into());
+        let e = map_btleplug_error(&busy);
+        assert!(matches!(e, BleError::Adapter(_)), "{e:?}");
+        assert!(!e.to_string().contains("Operation already"), "{e}");
     }
 
     #[test]

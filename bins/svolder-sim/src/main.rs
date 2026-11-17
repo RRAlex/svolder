@@ -94,7 +94,7 @@ struct Args {
     #[arg(long)]
     silent_recall: bool,
     /// Report a change only: a Command equal to the value a control holds gets no Status, on
-    /// every control. Without it only the tone-control mode is silent on a repeat.
+    /// every control. Without it the simulator is silent only on a repeated tone-control mode.
     #[arg(long)]
     quiet_same: bool,
     /// Accept every pairing request a central makes (Just Works), as a Forkbeard device does
@@ -129,7 +129,9 @@ fn seed_device(
     let mut device = FakeDevice::from_profile(profile, unit, args.firmware, passphrase)
         .report_aliases(args.loki_reports == LokiReports::Short)
         .silent_recall(args.silent_recall)
-        .quiet_same(args.quiet_same);
+        .quiet_same(args.quiet_same)
+        // The official app answers every report of the mode with a write of it.
+        .quiet_mode(true);
     if args.faults {
         for control in &profile.controls {
             if control.kind == svolder_profiles::ControlKind::Fault {

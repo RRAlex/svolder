@@ -39,7 +39,7 @@ const TOO_OLD_STEP: &str = "Run `svolder daemon restart`";
 /// The failure a daemon's reply earns when it is not the answer a write asked for: the code and
 /// words it refused with, which become this process's exit code unchanged, a reply of another
 /// kind, or a connection that failed.
-fn write_failure<E: std::fmt::Display>(reply: Result<Response, E>) -> WriteError {
+pub(super) fn write_failure(reply: Result<Response, IpcError>) -> WriteError {
     match reply {
         Ok(Response::Error {
             code,
@@ -53,6 +53,11 @@ fn write_failure<E: std::fmt::Display>(reply: Result<Response, E>) -> WriteError
             CODE_LINK,
             next_step(Kind::DaemonError),
             format!("the daemon sent an unexpected reply: {other:?}"),
+        ),
+        Err(e) if e.daemon_gone() => refused(
+            CODE_LINK,
+            next_step(Kind::DaemonStopped),
+            crate::recovery::DAEMON_STOPPED,
         ),
         Err(e) => refused(CODE_LINK, next_step(Kind::DaemonError), e.to_string()),
     }
@@ -347,7 +352,7 @@ impl RemoteBackend {
         let socket = self.socket.clone();
         let device = self.device.clone();
         async move {
-            let mut client = connect_to(&socket).await?;
+            let mut client = connect_midsession(&socket).await?;
             let ask = Request::State { device };
             match request(&mut client, &socket, ask).await? {
                 Response::Values { values, .. } => Ok(values),
@@ -459,7 +464,7 @@ impl RemoteBackend {
     /// leaving the request client to whatever the caller sends next — a reload is asked for in
     /// the middle of a session, not while opening one.
     pub(super) async fn reload(&self) -> Result<Vec<String>, Failure> {
-        let mut client = connect_to(&self.socket).await?;
+        let mut client = connect_midsession(&self.socket).await?;
         match request_within(
             &mut client,
             &self.socket,
@@ -476,7 +481,7 @@ impl RemoteBackend {
     /// The daemon's device list as it stands now, over a connection of this call's own, so a
     /// listing never waits behind a read or a write on the request connection.
     pub(super) async fn device_rows(&self) -> Result<Vec<DeviceRow>, Failure> {
-        device_rows(&self.socket).await
+        rows_on(connect_midsession(&self.socket).await?, &self.socket).await
     }
 
     /// A future asking the daemon for its own version and what it says of itself, over a
@@ -603,13 +608,13 @@ impl RemoteBackend {
         }
         let client = Client::connect(&self.socket)
             .await
-            .map_err(|e| BleError::Connection(e.to_string()))?;
+            .map_err(daemon_link_error)?;
         let device = self.device.clone();
         let events = match host {
             true => client.subscribe_with_host(device).await,
             false => client.subscribe(device).await,
         }
-        .map_err(|e| BleError::Connection(e.to_string()))?;
+        .map_err(daemon_link_error)?;
         self.events = Some(events);
         self.host_feed = host;
         Ok(())
@@ -672,7 +677,11 @@ impl RemoteBackend {
 /// A listing needs no session, so it does not open one: the daemon already holds the links
 /// and knows which of them are up.
 pub(super) async fn device_rows(path: &Path) -> Result<Vec<DeviceRow>, Failure> {
-    let mut client = connect_to(path).await?;
+    rows_on(connect_to(path).await?, path).await
+}
+
+/// [`device_rows`] over a connection already made.
+async fn rows_on(mut client: Client, path: &Path) -> Result<Vec<DeviceRow>, Failure> {
     match request(&mut client, path, Request::Devices).await? {
         Response::Devices { devices } => Ok(devices.iter().map(device_row).collect()),
         other => Err(unexpected(&other)),
@@ -764,6 +773,24 @@ pub(super) fn device_row(info: &DeviceInfo) -> DeviceRow {
     }
 }
 
+/// What a failure to reach the daemon for a subscription is as a [`BleError`]: the daemon's
+/// going away carries its own words ([`Failure::from_ble`] shows them alone), anything else is a
+/// failed connection in its own words.
+pub(super) fn daemon_link_error(err: IpcError) -> BleError {
+    match err.daemon_gone() {
+        true => BleError::Connection(crate::recovery::DAEMON_STOPPED.to_string()),
+        false => BleError::Connection(err.to_string()),
+    }
+}
+
+/// [`connect_to`] for a session already under way: nothing answering there now means the daemon
+/// that was serving it stopped, which is said so, not as a daemon that was never installed.
+async fn connect_midsession(path: &Path) -> Result<Client, Failure> {
+    Client::connect(path)
+        .await
+        .map_err(|e| Failure::from_ipc(&e))
+}
+
 async fn connect_to(path: &Path) -> Result<Client, Failure> {
     Client::connect(path)
         .await
@@ -803,7 +830,7 @@ async fn request_within(
             reason,
         }) => Err(Failure::from_daemon_on(socket, code, message, reason)),
         Ok(response) => Ok(response),
-        Err(e) => Err(Failure::of(Kind::DaemonError, e.to_string())),
+        Err(e) => Err(Failure::from_ipc(&e)),
     }
 }
 

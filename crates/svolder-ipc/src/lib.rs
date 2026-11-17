@@ -38,7 +38,7 @@ pub use config::{
 };
 pub use error::{ConfigError, IpcError};
 pub use host::{
-    CaptureKind, CaptureView, DacFacts, FrameView, Hop, HostView, HostVolume, PathLine,
+    CaptureKind, CaptureView, DacFacts, DacStage, FrameView, Hop, HostView, HostVolume, PathLine,
     PlayingView, Verdict, path_line, run_eq_op, sink_is_dac,
 };
 pub use passphrase_note::{PassphraseNote, passphrase_verdict};

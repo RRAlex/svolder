@@ -21,6 +21,7 @@ use ratatui::widgets::{Clear, Paragraph};
 use svolder_host::Button;
 use svolder_profiles::{Control, ControlKind};
 
+use crate::format::READINGS_OLD;
 use crate::tui::app::{App, Pane, Screen, Xf};
 use crate::tui::host::HostRow;
 use crate::tui::keys;
@@ -417,6 +418,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         Hit::ListRow(row) => list_row(app, row),
         Hit::Connection => match app.session.connected {
             true => lines(&["connected"]),
+            false if app.readings_old() => lines(&["link lost · r reopens", READINGS_OLD]),
             false => lines(&["link lost · r reopens"]),
         },
         Hit::MouseMark => lines(&[

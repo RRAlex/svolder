@@ -1111,15 +1111,52 @@ fn the_path_row_judges_the_usb_ports() {
 fn the_path_row_names_every_hop_after_the_verdict() {
     let app = daemon_hosting(gungnir_route(|route| route.host_eq = true));
     let line = app.host_path().expect("a path");
-    let columns = widgets::rows::Columns::fit(120, host::PATH.len(), 0);
+    let columns = widgets::rows::Columns::fit(160, host::PATH.len(), 0);
     let (row, dim) = path_row(&line, &Theme::new(false), columns);
     let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(
         said.trim_end(),
         "Path host EQ on · player 48 kHz S16LE, volume 100 % → computer 48 kHz S32LE, \
-         volume 100 % → DAC USB 1, 48 kHz"
+         volume 100 % → DAC USB 1, 48 kHz, volume -6.0 dB, tone control, NOS filter"
     );
     assert!(!dim);
+}
+
+/// A DAC volume below 0 dB is part of the path: the row's DAC hop names it in the warning colour
+/// and the verdict stays the path's own; at 0 dB the hop says nothing of it.
+#[test]
+fn the_path_row_names_the_dac_volume_below_0_db() {
+    let mut app = daemon_hosting(gungnir_route(|_| {}));
+    hear(
+        &mut app,
+        vec![
+            vo("10", Some("volume"), json!(117), "-3.3 dB"),
+            vo("11", Some("balance"), json!(64), "0"),
+            vo("4", Some("nos"), json!(0), "off"),
+            vo("12.50", None, json!(1), "1"),
+        ],
+    );
+    let line = app.host_path().expect("a path");
+    assert_eq!(line.words_line(), "untouched");
+    assert_eq!(
+        line.dac_stage.as_deref(),
+        Some("the Gungnir 2 then lowers it by 3.3 dB")
+    );
+    let columns = widgets::rows::Columns::fit(200, host::PATH.len(), 0);
+    let (row, _) = path_row(&line, &Theme::new(false), columns);
+    let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
+    assert!(
+        said.trim_end()
+            .ends_with("→ DAC USB 1, 48 kHz, volume -3.3 dB"),
+        "{said}"
+    );
+
+    hear(
+        &mut app,
+        vec![vo("10", Some("volume"), json!(127), "0.0 dB")],
+    );
+    let line = app.host_path().expect("a path");
+    assert_eq!(line.dac_stage, None);
 }
 
 /// An Eitr 2 has no input choice and takes USB alone, so its Path row reads `untouched` once

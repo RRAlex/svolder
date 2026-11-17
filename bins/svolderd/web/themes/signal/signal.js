@@ -30,6 +30,7 @@
 import { PHONE_MAX_PX } from '../../core/phone.js';
 import { registerTheme } from '../../core/registry.js';
 import { createAct } from '../../core/act.js';
+import { deviceOld } from '../../core/old-readings.js';
 import { ampScreen, viaScreen } from './draw/amp.js';
 import { declaredScreen, hopTools } from './draw/hop.js';
 import { card, heldCard, stateCard } from './draw/card.js';
@@ -95,7 +96,10 @@ function ampOpener(page, hop) {
   const row = (page.fleet?.hops ?? []).find((one) => one.device === hop.url);
   const dac = row && (page.fleet?.devices ?? []).find((device) => device.url === row.after);
   const tools = row ? hopTools(row, page.fleet.hops, inertPage(page), { remove: false, form: true }) : '';
-  return ampScreen(modelOf(page, hop), { dac: dac?.name ?? null, linkId: row?.id ?? null, tools });
+  const device = modelOf(page, hop);
+  return ampScreen(device, {
+    dac: dac?.name ?? null, linkId: row?.id ?? null, tools, old: deviceOld(device),
+  });
 }
 
 /** What a device hop opens, by the family of the device: a DAC's first screen (only for the device

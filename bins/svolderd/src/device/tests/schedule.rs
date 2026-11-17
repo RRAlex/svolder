@@ -4,7 +4,7 @@
 use super::*;
 
 /// The retry schedule paces the attempts a device that is not there earns: the waits are
-/// 2, 5, 15, 30 and 60 seconds, and the last one repeats for as long as the device stays
+/// 2, 5, 15 and 30 seconds, and the last one repeats for as long as the device stays
 /// away.
 ///
 /// Every attempt scans the adapter, so a fixed short retry is what keeps a radio
@@ -32,7 +32,7 @@ async fn the_retry_schedule_paces_the_attempts_a_missing_device_earns() {
     }
     assert_eq!(
         gaps,
-        [2, 5, 15, 30, 60, 60].map(Duration::from_secs),
+        [2, 5, 15, 30, 30, 30].map(Duration::from_secs),
         "the attempts were not paced by the schedule"
     );
 }
@@ -51,7 +51,7 @@ async fn a_command_that_needs_the_link_ends_the_wait_and_restarts_the_schedule()
     )
     .expect("the actor starts");
 
-    // Five failures in, the actor is waiting out the schedule's last and longest step.
+    // Five failures in, the actor is waiting out the schedule's last step.
     let mut last = next_attempt(&mut seen).await;
     for _ in 0..4 {
         last = next_attempt(&mut seen).await;
@@ -59,12 +59,12 @@ async fn a_command_that_needs_the_link_ends_the_wait_and_restarts_the_schedule()
     settle_into_the_wait().await;
     assert_eq!(
         handle.describe().retry_in_secs,
-        Some(60),
+        Some(30),
         "the wait the device reports is not the schedule's last step"
     );
 
     // The command is refused, as it is whenever the link is down, and the attempt it
-    // asks for runs there and then rather than a minute later.
+    // asks for runs there and then rather than after the wait.
     let refused = ask(
         &handle,
         Command::Set {
@@ -171,7 +171,7 @@ async fn a_changed_entry_during_the_wait_ends_it_and_restarts_the_schedule() {
     )
     .expect("the actor starts");
 
-    // Five failures in, the actor is waiting out the schedule's last and longest step.
+    // Five failures in, the actor is waiting out the schedule's last step.
     let mut last = next_attempt(&mut seen).await;
     for _ in 0..4 {
         last = next_attempt(&mut seen).await;
@@ -282,5 +282,127 @@ async fn a_connect_restarts_the_schedule() {
         next_attempt(&mut seen).await - dropped,
         RETRY_SCHEDULE[0],
         "the schedule did not start again from its first step"
+    );
+}
+
+/// A link whose first write never answers, as a BlueZ that stopped replying mid-connect does.
+struct StalledWrite(Box<dyn svolder_ble::Link>);
+
+#[async_trait::async_trait]
+impl svolder_ble::Link for StalledWrite {
+    async fn write(&self, _frame: &[u8]) -> Result<(), BleError> {
+        std::future::pending().await
+    }
+
+    fn notifications(&self) -> svolder_ble::Notifications {
+        self.0.notifications()
+    }
+
+    async fn disconnect(&self) -> Result<(), BleError> {
+        self.0.disconnect().await
+    }
+}
+
+/// A transport over the fake device whose connect succeeds but whose link then stalls.
+struct StallsAfterConnect(svolder_ble::FakeTransport);
+
+#[async_trait::async_trait]
+impl Transport for StallsAfterConnect {
+    async fn scan(&self, window: Duration) -> Result<svolder_ble::Advertisements, BleError> {
+        self.0.scan(window).await
+    }
+
+    async fn held(&self) -> Result<svolder_ble::Advertisements, BleError> {
+        self.0.held().await
+    }
+
+    async fn connect(&self, unit: UnitId) -> Result<Box<dyn svolder_ble::Link>, BleError> {
+        let link = self.0.connect(unit).await?;
+        Ok(Box::new(StalledWrite(link)))
+    }
+}
+
+/// One connect attempt is bounded as a whole: a step that never answers (here the refresh
+/// write after the connect, which no per-call deadline covers) fails the attempt with a reason
+/// once [`ATTEMPT_BOUND`](crate::device::link::ATTEMPT_BOUND) has passed, and the next attempt
+/// follows the schedule.
+#[tokio::test(start_paused = true)]
+async fn a_stalled_step_fails_the_attempt_at_the_bound_and_the_schedule_goes_on() {
+    let registry = Registry::builtin().expect("the built-in profiles load");
+    let profile = registry.get("gungnir2-v2").expect("a built-in").clone();
+    let shared: Arc<dyn Transport> = Arc::new(StallsAfterConnect(
+        svolder_ble::FakeTransport::from_profile(
+            &profile,
+            "0102030405060708".parse().expect("a valid unit id"),
+            3,
+            Passphrase::from_text("1234").expect("four digits"),
+        ),
+    ));
+    crate::log::hold_lines();
+    let handle = spawn(
+        Arc::clone(&shared),
+        Arc::new(registry),
+        fake_config("auto"),
+        scan_for(&shared),
+    )
+    .expect("the actor starts");
+
+    tokio::time::sleep(crate::device::link::ATTEMPT_BOUND + Duration::from_secs(1)).await;
+
+    assert_eq!(
+        handle.describe().retry_in_secs,
+        Some(1),
+        "the attempt did not end at its bound and wait out the first step"
+    );
+    let lines = crate::log::held_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|(_, line)| line.contains("did not finish within")),
+        "no line names the bound: {lines:?}"
+    );
+}
+
+/// A transport whose listen never ends, as an adapter that stopped answering a scan does.
+struct StalledScan;
+
+#[async_trait::async_trait]
+impl Transport for StalledScan {
+    async fn scan(&self, _window: Duration) -> Result<svolder_ble::Advertisements, BleError> {
+        std::future::pending().await
+    }
+
+    async fn held(&self) -> Result<svolder_ble::Advertisements, BleError> {
+        std::future::pending().await
+    }
+
+    async fn connect(&self, _unit: UnitId) -> Result<Box<dyn svolder_ble::Link>, BleError> {
+        Err(BleError::NotFound)
+    }
+}
+
+/// The bound also covers the search for the device: a listen that never answers fails the
+/// attempt at the bound, with the reason naming the search.
+#[tokio::test(start_paused = true)]
+async fn a_stalled_search_fails_the_attempt_at_the_bound_and_the_schedule_goes_on() {
+    let shared: Arc<dyn Transport> = Arc::new(StalledScan);
+    crate::log::hold_lines();
+    let handle = spawn(
+        Arc::clone(&shared),
+        Arc::new(Registry::builtin().expect("the built-in profiles load")),
+        fake_config("auto"),
+        scan_for(&shared),
+    )
+    .expect("the actor starts");
+
+    tokio::time::sleep(crate::device::link::ATTEMPT_BOUND + Duration::from_secs(1)).await;
+
+    assert_eq!(handle.describe().retry_in_secs, Some(1));
+    let lines = crate::log::held_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|(_, line)| line.contains("looking for the device")),
+        "no line names the search: {lines:?}"
     );
 }

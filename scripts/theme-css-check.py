@@ -174,6 +174,7 @@ PURE = {
     # the key table's readers; binding a table is `core.keys.bind`
     "keys.js": {"FRAME_KEYS", "HELP", "RESERVED", "TYPING", "capsOf", "keysOf", "listed",
                 "zoneOf", "zonesOf"},
+    "old-readings.js": {"deviceOld"},  # a pure function of one device's model (the frame owns the badge)
     "registry.js": {"registerTheme"},  # how a theme tells the page it exists
     "repeat.js": {"REPEAT_AFTER_MS", "REPEAT_EVERY_MS"},
     "table.js": {"isLong"},

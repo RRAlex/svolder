@@ -104,10 +104,7 @@ pub(super) async fn eq_op(socket: &Path, op: HostEqOp) -> Result<(), Failure> {
             crate::recovery::Kind::DaemonError,
             format!("the daemon answered {other:?}"),
         )),
-        Err(e) => Err(Failure::of(
-            crate::recovery::Kind::DaemonError,
-            e.to_string(),
-        )),
+        Err(e) => Err(Failure::from_ipc(&e)),
     }
 }
 

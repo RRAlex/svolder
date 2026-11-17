@@ -89,6 +89,7 @@ export const AMP = {
   askUnlink: (name) => `Unlink the ${name}? It stays in svolder\u2019s list and stands alone; nothing on the device changes.`,
   faults: 'Faults',
   reading: 'Reading the amp\u2026',
+  old: 'readings from before the link dropped',
   showDevice: (name) => `Show ${name}`,
 };
 

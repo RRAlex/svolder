@@ -569,7 +569,14 @@ fn every_target_has_its_text_within_forty_cells() {
         &["Play", "the player on this computer"],
     );
     app.session.connected = false;
-    check(Hit::Connection, &app, &["link lost · r reopens"]);
+    check(
+        Hit::Connection,
+        &app,
+        &[
+            "link lost · r reopens",
+            "readings from before the link dropped",
+        ],
+    );
     app.tui.vu_reference = -20;
     check(
         Hit::Vu,

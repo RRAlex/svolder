@@ -563,10 +563,15 @@ impl Session {
     /// is awaited, a recall guard that falls due writes its refresh then, not when this returns,
     /// and no report of the awaited id in that refresh's burst is taken for the echo.
     ///
-    /// A command of the value the device already held may get no echo, as a unit that reports a
-    /// change only says nothing: when the wait ends with the timeout and the device's last report
-    /// of that function, on a link not known to be stale, is the value sent, the device is where
-    /// the write asked it to be and the answer is that report, not the timeout.
+    /// The answer is the device's own report of the function, received after the write went out:
+    /// never an older reading. A report of the value written is the echo and ends the wait at
+    /// once; of a frame carrying several reports of the function, the one of the value written
+    /// wins. A report of another value may be one the device sent before the write and the link
+    /// delivered after it (or the late echo of an earlier write), so it is only held: if the echo
+    /// follows before the timeout it is the answer, and if not the wait ends with
+    /// [`BleError::Unconfirmed`], which says what the device last reported. A wait that ends with
+    /// no report at all is [`BleError::Timeout`]. Both say the command was sent and not confirmed,
+    /// even when the device held the value written.
     ///
     /// Cancel-safe in the way of [`Session::recv`]: a call dropped before its write has returned
     /// may still have sent the frame, and an action's guard is armed before that write, so it
@@ -584,20 +589,19 @@ impl Session {
         confirmed
     }
 
-    /// The end of the wait for an echo that never came, once the frame is out: the held report
-    /// when the device already held the value `message` writes, as heard on this link, and the
-    /// timeout otherwise.
-    fn unechoed(&self, message: &Message) -> Result<Message, BleError> {
-        let id = self.read_as(message.id);
-        match self.state.get(id) {
-            Some(held)
-                if !self.state.is_stale()
-                    && self.state.heard(id)
-                    && held.value == message.value =>
-            {
-                Ok(held.clone())
+    /// The end of a wait with no echo: the timeout, or what the device last reported of the
+    /// function when it reported another value than the one written.
+    fn unconfirmed(&mut self, held: Option<Message>) -> BleError {
+        let within = self.config.set_timeout;
+        match held {
+            Some(report) => {
+                let reading = svolder_profiles::describe(&self.profile, &report);
+                let said = format!("{} = {}", reading.label, reading.display);
+                // Readers of the stream see the device's last report of the function.
+                self.queue_pending(vec![report]);
+                BleError::Unconfirmed { within, said }
             }
-            _ => Err(BleError::Timeout(self.config.set_timeout)),
+            None => BleError::Timeout(within),
         }
     }
 
@@ -613,6 +617,7 @@ impl Session {
         // A refresh the guard writes while the echo is awaited brings a burst of its own, which
         // may report the target too: until that burst is over no report of the target is the echo.
         let mut refreshed = false;
+        let mut held: Option<Message> = None;
         let target = self.read_as(message.id);
         let frame = encode_command(&message, self.passphrase)?;
         self.write_owed_refresh().await?;
@@ -624,13 +629,13 @@ impl Session {
             .await
             .is_err()
         {
-            return Err(BleError::Timeout(self.config.set_timeout));
+            return Err(BleError::NotSent(self.config.set_timeout));
         }
         self.write(&frame).await?;
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                return self.unechoed(&message);
+                return Err(self.unconfirmed(held));
             }
             self.flush_replies().await?;
             // A recall guard falling due ends the wait early, to write its refresh.
@@ -658,10 +663,30 @@ impl Session {
                         return Err(BleError::PassphraseRejected);
                     }
                     let mut messages = n.messages;
-                    let echo = messages.iter().position(|m| m.id == target && !burst_open);
+                    let echo = if burst_open {
+                        None
+                    } else {
+                        // The report of the value written wins, else the last one of the frame.
+                        messages
+                            .iter()
+                            .position(|m| m.id == target && same_value(&m.value, &message.value))
+                            .filter(|_| target == message.id)
+                            .or_else(|| messages.iter().rposition(|m| m.id == target))
+                    };
                     match echo {
                         Some(at) => {
                             let confirmed = messages.remove(at);
+                            // A report of another value waits in case the device's echo follows
+                            // it; a later report of the function replaces it. A function that
+                            // is read back (a query) answers with a value of its own.
+                            if target == message.id
+                                && !same_value(&confirmed.value, &message.value)
+                                && self.profile.reports_back(target)
+                            {
+                                held = Some(confirmed);
+                                self.queue_pending(messages);
+                                continue;
+                            }
                             self.accepted = true;
                             // Whatever of this function is queued was read before the echo.
                             self.pending.retain(|m| m.id != target);
@@ -676,7 +701,7 @@ impl Session {
                 }
                 Ok(None) => return Err(self.drop_link()),
                 Err(_) if Instant::now() >= deadline => {
-                    return self.unechoed(&message);
+                    return Err(self.unconfirmed(held));
                 }
                 Err(_) => {
                     self.write_owed_refresh().await?;
@@ -1349,3 +1374,17 @@ fn no_connection(deadline: Duration, last: Option<BleError>) -> BleError {
 
 #[cfg(test)]
 mod tests;
+
+/// Whether two values are the same number, whatever their wire types: a boolean counts as 0 or
+/// 1 and an integer by its value, so a unit that reports a control in another width than the
+/// profile writes it in still confirms the write. Other values must be equal.
+fn same_value(a: &Value, b: &Value) -> bool {
+    let widen = |v: &Value| match v {
+        Value::Bool(on) => Some(i64::from(*on)),
+        other => other.as_i64(),
+    };
+    match (widen(a), widen(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}

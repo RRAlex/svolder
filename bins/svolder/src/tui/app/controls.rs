@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use crossterm::event::KeyCode;
 use svolder_host::Button;
-use svolder_ipc::host::{DacFacts, PathLine, ROUTE_NOT_READ, Verdict, path_line};
+use svolder_ipc::host::{DacFacts, DacStage, PathLine, ROUTE_NOT_READ, Verdict, path_line};
 use svolder_profiles::roles;
 use svolder_profiles::{Control, ControlKind, Family, Profile, Registry};
 
@@ -233,6 +233,7 @@ impl App {
             hops: Vec::new(),
             verdict: Verdict::Unknown,
             words: vec![words.to_string()],
+            dac_stage: None,
         };
         if self.host.playing.is_none() {
             return Some(unknown(NOTHING_PLAYING));
@@ -246,10 +247,17 @@ impl App {
     /// What the device reports of its end of the path: its name, the input it reads, the sample
     /// rate it reads and which USB ports are connected, as far as the profile names them and the
     /// device has said.
+    ///
+    /// While the link is down the readings held are from before the drop, so the DAC's own stage
+    /// is not claimed from them.
     fn dac_facts(&self) -> DacFacts {
-        DacFacts::read(&self.profile, |id| {
+        let mut facts = DacFacts::read(&self.profile, |id| {
             self.readings.values.get(&id)?.raw_or_flag()
-        })
+        });
+        if self.readings_old() {
+            facts.stage = DacStage::default();
+        }
+        facts
     }
 
     /// The Host group's rows, in the order the Controls pane draws them under the device's own:

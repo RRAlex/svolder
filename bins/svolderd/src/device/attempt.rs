@@ -19,7 +19,7 @@ use svolder_proto::{Passphrase, UnitId};
 
 use super::entry::resolve_profile;
 use super::history::wall_ms;
-use super::link::AttemptEnd;
+use super::link::{ATTEMPT_BOUND, AttemptEnd, timed_out};
 use super::passphrase::{REFUSED_LINE, resolve_passphrase};
 use super::{Actor, Command, Commands};
 use crate::log;
@@ -205,6 +205,9 @@ impl Actor {
 /// what that listen hears and connected again, once: `episode` says whether the drop is spent
 /// already, and the one handed back says it now is.
 ///
+/// The whole attempt, listen and connect together, is held to [`ATTEMPT_BOUND`]: a step that
+/// never answers fails it with the reason, leaving the retry to the schedule.
+///
 /// `cancel`, when raised before the connect finishes, closes the session here instead of
 /// handing it back live.
 pub(super) async fn connect_attempt(
@@ -221,21 +224,27 @@ pub(super) async fn connect_attempt(
         session: mut existing,
         mut episode,
     } = carried;
+    let deadline = tokio::time::Instant::now() + ATTEMPT_BOUND;
     loop {
-        let (advert, heard_at_ms) =
-            match discover(&transport, &scanner, unit, episode.listen_against()).await {
-                Ok(found) => found,
-                Err(message) => {
-                    return Attempt {
-                        advert: None,
-                        heard_at_ms: None,
-                        session: existing,
-                        outcome: Err(message),
-                        episode,
-                        entry: config.passphrase,
-                    };
-                }
-            };
+        let found = tokio::time::timeout_at(
+            deadline,
+            discover(&transport, &scanner, unit, episode.listen_against()),
+        )
+        .await
+        .unwrap_or_else(|_| Err(timed_out("looking for the device")));
+        let (advert, heard_at_ms) = match found {
+            Ok(found) => found,
+            Err(message) => {
+                return Attempt {
+                    advert: None,
+                    heard_at_ms: None,
+                    session: existing,
+                    outcome: Err(message),
+                    episode,
+                    entry: config.passphrase,
+                };
+            }
+        };
         if cancel.load(Ordering::SeqCst) {
             // The actor stopped waiting while this attempt listened: connect nothing, hand
             // back what it carried.
@@ -284,7 +293,14 @@ pub(super) async fn connect_attempt(
                 Session::new(Arc::clone(&transport), advert.clone(), profile, passphrase)
             }
         };
-        let outcome = session.connect().await.map_err(|e| e.to_string());
+        let outcome = match tokio::time::timeout_at(deadline, session.connect()).await {
+            Ok(connected) => connected.map_err(|e| e.to_string()),
+            Err(_) => {
+                // The connect is dropped mid-call: release whatever it had opened.
+                session.close().await;
+                Err(timed_out("connecting"))
+            }
+        };
         if cancel.load(Ordering::SeqCst) {
             // The actor stopped waiting for this attempt: nothing else can release a link this
             // connect opened, so close it here before handing the session back.

@@ -69,6 +69,10 @@ pub fn link_down(down: &str, retry_in_secs: Option<u64>) -> String {
     }
 }
 
+/// What a front end says of the values it shows while the link is down: they are the last ones
+/// the device sent, and the first fresh reading clears the words.
+pub const READINGS_OLD: &str = "readings from before the link dropped";
+
 /// What the link's flags say in words: `passphrase refused` when the device has refused the
 /// passphrase on the link the daemon holds, `readings stale` when the readings held are older
 /// than the link's last drop, both joined by ` · ` when both are so, and `None` for neither.

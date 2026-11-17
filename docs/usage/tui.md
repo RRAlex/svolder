@@ -135,8 +135,13 @@ Switching to a device the daemon has not found yet, from the Devices screen, sho
 panel on that device. The menu, Devices, Settings and help work on every landing. Every keystroke
 sends immediately; a row shows the last value the device confirmed, so a dropped command is visible
 as a row that doesn't move. A lost connection hollows the header's connection dot, turns a small
-spinner in front of it, and greys every control out at its last-known value; the screen wakes back
-up on the first status the device sends after it reconnects, and the spinner with it.
+spinner in front of it, and greys every control out at its last-known value, and the header says
+`readings from before the link dropped` after the connection words in the warning colour (`readings
+stale`, then `stale`, where the row is too narrow; the pointer resting on the connection words says
+it in full); the daemon stopping does the same, and the TUI then says `The svolder daemon stopped.`
+with `svolder daemon restart` under `a`, looks for the daemon again every 2 seconds and picks it up
+by itself when it answers. The screen wakes back up on the first status the device sends after it
+reconnects, and the spinner and the words with it.
 
 The terminal is claimed and the Svolder wordmark intro begins (see "Palette and the wordmark" below)
 before the device is even opened, so the seconds a connect takes are spent on the mark rather than
@@ -662,7 +667,10 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     stops: with no player it reads `nothing playing`, and with a player the daemon has not read the
     route for yet, `route not read`, both dim.
     `untouched` covers the computer and the DAC; what the player does inside itself, such as loudness
-    normalization or its own EQ, happens inside the player, where svolder cannot look.
+    normalization or its own EQ, happens inside the player, where svolder cannot look. The DAC's own
+    stage is named on its hop in the warning colour while it changes the sound: `volume -3.3 dB`
+    below 0 dB, `tone control` on EQ or loudness, `balance off centre`; the verdict stays what the
+    path up to the DAC says.
     The verdict comes first in its own colour — `untouched` (green), what changes the sound (amber:
     `resampled 44.1 → 48 kHz`, `computer volume 54 %`, `player muted`, `host EQ on`, `crossfeed on`,
     `virtual speakers on`, `EQ pass-through`,
@@ -1686,7 +1694,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.36.1 │
+│                          v0.36.4 │
 │                                  │
 │             Settings             │
 │               Help               │

@@ -26,7 +26,7 @@ mod views;
 
 pub use eq_op::run_eq_op;
 pub use path::{
-    DacFacts, Hop, PathLine, ROUTE_NOT_READ, SCHIIT_VENDOR_ID, Verdict, path_line, rate_hz,
-    sink_is_dac,
+    DacFacts, DacStage, Hop, PathLine, ROUTE_NOT_READ, SCHIIT_VENDOR_ID, Verdict, path_line,
+    rate_hz, sink_is_dac,
 };
 pub use views::{CaptureKind, CaptureView, FrameView, HostView, HostVolume, PlayingView};

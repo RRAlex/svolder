@@ -85,7 +85,10 @@ pub(in crate::tui) use connect::TokenSite;
 use computer::ComputerLink;
 #[cfg(test)]
 use connect::daemon_answered;
-use connect::{Reconnect, daemon_answers_within, daemon_back, recv_reconnect, recv_version};
+use connect::{
+    Reconnect, daemon_answers_every, daemon_answers_within, daemon_back, recv_reconnect,
+    recv_version,
+};
 use devices::{
     Added, RELIST_BOUND, RELIST_PERIOD, Removed, Switched, add_device, preset_landed, relist_held,
     relisted, relisting, remove_device, switch, switch_device, switch_via, update_device,
@@ -117,6 +120,10 @@ pub(super) use watching::{Kept, Shown, Watching};
 /// reconnect has spent the connect deadline, and the daemon's ends when it stops publishing,
 /// so by the time this is said the link is gone rather than going.
 const GONE: &str = "device did not come back";
+/// What is said once no daemon answers on the socket any more, with the daemon's own stop
+/// stated first and the readings on screen owned up to.
+const DAEMON_STOPPED_SHOWN: &str =
+    "The svolder daemon stopped. The readings shown are from before the stop.";
 /// How long a TUI on a daemon waits for a daemon to answer on its socket again after the
 /// connection to it closed, before it gives the device up as gone. A `daemon restart` waits up
 /// to five seconds for the old daemon to let go of the socket and then starts the new one,
@@ -127,6 +134,8 @@ const DAEMON_WAIT: Duration = Duration::from_secs(30);
 const DAEMON_POLL_FIRST: Duration = Duration::from_millis(100);
 /// The longest pause between looks at the socket.
 const DAEMON_POLL_MAX: Duration = Duration::from_secs(1);
+/// The pause between looks at the socket once the wait for the daemon has given up.
+const DAEMON_SLOW_POLL: Duration = Duration::from_secs(2);
 /// What is said once the device is open again on a daemon that came back.
 const RECONNECTED: &str = "reconnected to the daemon";
 /// What is said once there is no device left to read from at all.

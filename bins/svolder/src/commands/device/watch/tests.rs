@@ -260,3 +260,29 @@ async fn a_live_status_of_a_gated_readout_shows_its_derived_value() {
         ]
     );
 }
+
+/// A feed that ends because the daemon stopped says so, in the words every command uses; one
+/// that ends with the daemon still answering keeps the link's words.
+#[tokio::test]
+async fn a_feed_that_ended_with_the_daemon_gone_says_the_daemon_stopped() {
+    use crate::test_support::stub_daemon::stub_daemon;
+
+    let daemon = stub_daemon().await;
+    let backend = Backend::stub_remote(&daemon.socket).await;
+    let still_up = feed_ended(&backend).await;
+    assert!(
+        still_up.what.contains("stopped sending events"),
+        "{}",
+        still_up.what
+    );
+    daemon.stop().await;
+    let gone = feed_ended(&backend).await;
+    assert_eq!(gone.what, "The svolder daemon stopped.");
+    assert!(
+        gone.next.contains("svolder daemon restart"),
+        "{}",
+        gone.next
+    );
+    assert_eq!(gone.code, 3);
+    backend.close().await;
+}

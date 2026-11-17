@@ -312,7 +312,7 @@ impl DirectBackend {
             }
             Ok(None) => {}
             // A write that timed out may have landed, so its step stays.
-            Err(WriteError::Ble(BleError::Timeout(_))) => {}
+            Err(WriteError::Ble(BleError::Timeout(_) | BleError::Unconfirmed { .. })) => {}
             // A write that was refused never changed the device, so the step before it stands.
             Err(_) => {
                 self.sent.remove(&id);

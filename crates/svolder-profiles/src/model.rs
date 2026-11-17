@@ -421,6 +421,13 @@ impl Profile {
             .map(|a| (a, slot))
     }
 
+    /// Whether the device reports a write to `id` back as the value of that function: a control,
+    /// or the tone control's mode, loudness or a band parameter. Any other id (a query, an
+    /// unnamed function) answers with a value of its own.
+    pub fn reports_back(&self, id: FunctionId) -> bool {
+        self.control_by_id(id).is_some() || self.eq.as_ref().is_some_and(|eq| eq.owns(id))
+    }
+
     /// The control id a status on `id` is read as: the control at `id` itself, else the control
     /// with a `reads` entry that `id` equals or lies under, else `id` unchanged.
     pub fn read_as(&self, id: FunctionId) -> FunctionId {

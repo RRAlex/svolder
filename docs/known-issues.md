@@ -48,9 +48,10 @@ that branch rather than listed here.
   follows can itself be refused for several seconds by an adapter that has just released the
   device. A refusal is therefore reported seconds after the first refused answer, and a device that
   another central takes in the window is not read at all (`crates/svolder-ble/src/episode.rs`).
-- [limit] **Discovery cannot be limited to LE.** svolder starts discovery with a service filter
-  only, and btleplug 0.13 asks BlueZ for discovery over both transports, so a dual-mode controller
-  runs BR/EDR inquiry alongside LE scanning for the whole window (seen on a TP-Link UB500 pair);
+- [limit] **Discovery cannot be limited to LE.** svolder starts discovery with no service filter
+  (BlueZ 5.87 crashes when one matches), and btleplug 0.13 asks BlueZ for discovery over both
+  transports, so a dual-mode controller runs BR/EDR inquiry alongside LE scanning for the whole
+  window (seen on a TP-Link UB500 pair);
   an LE-only discovery tried by hand did not reduce missed windows
   (`crates/svolder-ble/src/bluez/transport.rs`).
 - [limit] **The signal strength is the advertisement's from before the connect.** A device shows
@@ -85,16 +86,14 @@ that branch rather than listed here.
   missed by a whole 5-second `svolder scan` window about a quarter of the time on a TP-Link UB500
   central, and by several windows in a row now and then; svolder cannot change a device's
   interval, and whether Forkbeard devices advertise that slowly is unknown.
-- [observed, with Bifrost 3 testing] **Whether a unit echoes a write of the value it already holds
-  is unverified.** svolder's fake device and simulator answer a repeated tone-control mode with no
-  Status and every other repeat with one (all of them silent with `--quiet-same` or
-  `SVOLDER_FAKE_QUIET_SAME=1`); the official app needs the silence on the mode, or it writes the
-  mode forever. A write svolder makes of the value a device holds and gets no echo for is answered
-  with that value after the set timeout, not with an error, but a unit that does echo a repeat
-  answers at once. A waited Loki Max band write of the held value lands as a value, so a unit
-  that echoes repeats more than 2 s late and stays silent after a recall could have that late echo
-  read as the post-recall report. The Bifrost 3 settles which it does
-  (`crates/svolder-fake/src/device.rs`, `crates/svolder-ble/src/session.rs`).
+- [observed, with Bifrost 3 testing] **A late echo after a write that was not confirmed.** A
+  Bifrost 3 echoes every write, repeats of the held value and of the tone-control mode included.
+  A write svolder makes is answered with the device's own report received after it; one that gets
+  no report within the set timeout, or only a report of another value (which cannot be told from
+  one the device sent before the write), is answered "sent, not confirmed" (code 4) with that last
+  report in words, never with an older reading. A unit that echoes repeats more than 2 s late and
+  stays silent after a recall could have that late echo read as the post-recall report
+  (`crates/svolder-ble/src/session.rs`).
 - [observed, with hardware] **Loki Max band reports are unverified.** Which id a real Loki Max
   reports a band on is unknown. svolder reads a band from a report on `6.<b>` or on any
   `6.<b>.<n>` as well as on `6.<b>.3`, so any of them lands; a report on a form outside those
@@ -543,6 +542,11 @@ that branch rather than listed here.
   refuses a write while the daemon says its file is missing, but the TUI's writers go straight to
   the file, so a write made there recreates it from the template and the daemon's next reload takes
   it as the whole configuration, dropping every device (`bins/svolder/src/tui/run/`).
+
+- [limit] **The path line counts the DAC's tone control as shaping whenever it is on.** A tone mode
+  of EQ or loudness is named as the DAC shaping the sound even with every band at 0 dB, and the
+  verdict stays `untouched` while the DAC lowers the volume: the DAC's stage is its own clause after
+  the verdict (`crates/svolder-ipc/src/host/path.rs`, `DacStage`).
 
 ### Web UI
 

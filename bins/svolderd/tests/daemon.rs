@@ -1052,29 +1052,6 @@ async fn a_silent_recall_over_the_socket_is_followed_by_one_refresh() {
     .expect("test timed out");
 }
 
-/// A write of the value a control holds, to a unit that reports a change only: the daemon waits
-/// out the set timeout and answers with the value the device holds, not with an error.
-async fn a_repeat_answers_with_what_the_device_holds(
-    profile: &str,
-    knobs: &[(&str, &str)],
-    requests: Vec<Request>,
-) {
-    let mut envs = vec![("SVOLDER_FAKE_PROFILE", profile)];
-    envs.extend_from_slice(knobs);
-    let (mut guard, socket) = spawn_daemon_with_env(CONFIG, &envs);
-    let mut client = connect(&mut guard, &socket).await;
-    wait_until_connected(&mut guard, &mut client).await;
-    for request in requests {
-        let label = format!("{request:?}");
-        let answer = client.request(request).await.expect("a reply");
-        assert!(
-            matches!(answer, Response::Value(_)),
-            "{label} answered {answer:?}; the daemon said: {:?}",
-            guard.said()
-        );
-    }
-}
-
 fn set_request(key: &str, value: &str) -> Request {
     Request::Set {
         device: None,
@@ -1085,8 +1062,8 @@ fn set_request(key: &str, value: &str) -> Request {
     }
 }
 
-/// The tone-control mode set to the mode the device is already in is not an error, and the
-/// writes after it still go through.
+/// The tone-control mode set to the mode the device is already in is answered with the mode, as
+/// the unit reports every write, and the writes after it still go through.
 #[tokio::test]
 async fn a_mode_set_to_the_mode_already_on_is_answered_with_the_mode() {
     tokio::time::timeout(TEST_TIMEOUT, async {
@@ -1095,23 +1072,28 @@ async fn a_mode_set_to_the_mode_already_on_is_answered_with_the_mode() {
             mode: mode.into(),
             no_wait: false,
         };
+        let (mut guard, socket) =
+            spawn_daemon_with_env(CONFIG, &[("SVOLDER_FAKE_PROFILE", "bifrost3")]);
+        let mut client = connect(&mut guard, &socket).await;
+        wait_until_connected(&mut guard, &mut client).await;
         // flat is the resting mode; eq, then eq again, then flat.
-        a_repeat_answers_with_what_the_device_holds(
-            "bifrost3",
-            &[],
-            vec![mode("flat"), mode("eq"), mode("eq"), mode("flat")],
-        )
-        .await;
+        for request in [mode("flat"), mode("eq"), mode("eq"), mode("flat")] {
+            let answer = client.request(request.clone()).await.expect("a reply");
+            assert!(
+                matches!(answer, Response::Value(_)),
+                "{request:?} answered {answer:?}"
+            );
+        }
     })
     .await
     .expect("test timed out");
 }
 
-/// Under `quiet_same` a toggle, a selector, a volume step that lands on the held value and a
-/// band set to its value are each answered with what the device holds, and the write queue
-/// carries on.
+/// Under `quiet_same` a toggle, a selector, a volume step and a band are echoed when they change
+/// the device; the repeat of each gets no echo and is answered "sent, not confirmed" (code 4),
+/// never with the reading the device held, and the write queue carries on.
 #[tokio::test]
-async fn repeats_to_a_unit_that_reports_changes_only_are_answered_with_the_value() {
+async fn repeats_to_a_unit_that_reports_changes_only_are_sent_not_confirmed() {
     tokio::time::timeout(Duration::from_secs(60), async {
         let band = |value: f64| Request::EqSet {
             device: None,
@@ -1120,21 +1102,36 @@ async fn repeats_to_a_unit_that_reports_changes_only_are_answered_with_the_value
             value,
             no_wait: false,
         };
-        a_repeat_answers_with_what_the_device_holds(
-            "gungnir2-v2",
-            &[("SVOLDER_FAKE_QUIET_SAME", "1")],
-            vec![
-                set_request("mute", "on"),
-                set_request("mute", "on"),
-                set_request("input", "4"),
-                set_request("input", "4"),
-                set_request("volume", "100"),
-                set_request("volume", "100"),
-                band(3.0),
-                band(3.0),
+        let (mut guard, socket) = spawn_daemon_with_env(
+            CONFIG,
+            &[
+                ("SVOLDER_FAKE_PROFILE", "gungnir2-v2"),
+                ("SVOLDER_FAKE_QUIET_SAME", "1"),
             ],
-        )
-        .await;
+        );
+        let mut client = connect(&mut guard, &socket).await;
+        wait_until_connected(&mut guard, &mut client).await;
+        for request in [
+            set_request("mute", "on"),
+            set_request("input", "4"),
+            set_request("volume", "100"),
+            band(3.0),
+        ] {
+            let label = format!("{request:?}");
+            let echoed = client.request(request.clone()).await.expect("a reply");
+            assert!(
+                matches!(echoed, Response::Value(_)),
+                "{label} answered {echoed:?}; the daemon said: {:?}",
+                guard.said()
+            );
+            let repeat = client.request(request).await.expect("a reply");
+            assert!(
+                matches!(&repeat, Response::Error { code, message, .. }
+                    if *code == svolder_ipc::CODE_TIMEOUT
+                        && message.starts_with("sent, not confirmed")),
+                "{label} repeated answered {repeat:?}"
+            );
+        }
     })
     .await
     .expect("test timed out");
@@ -1153,20 +1150,24 @@ async fn a_loki_max_band_repeat_does_not_wedge_the_line() {
         );
         let mut client = connect(&mut guard, &socket).await;
         wait_until_connected(&mut guard, &mut client).await;
-        for _ in 0..2 {
-            let answer = set(&mut client, "band1", "20").await;
-            assert!(
-                matches!(answer, Response::Value(_)),
-                "{answer:?}; the daemon said: {:?}",
-                guard.said()
-            );
-        }
+        let answer = set(&mut client, "band1", "20").await;
+        assert!(
+            matches!(answer, Response::Value(_)),
+            "{answer:?}; the daemon said: {:?}",
+            guard.said()
+        );
+        let repeat = set(&mut client, "band1", "20").await;
+        assert!(
+            matches!(&repeat, Response::Error { message, .. }
+                if message.starts_with("sent, not confirmed")),
+            "{repeat:?}"
+        );
         let saved = set(&mut client, "save", "1").await;
         assert!(matches!(saved, Response::Ack), "{saved:?}");
         let recalled = set(&mut client, "recall", "1").await;
         assert!(matches!(recalled, Response::Ack), "{recalled:?}");
         let again = set(&mut client, "band1", "20").await;
-        assert!(matches!(again, Response::Value(_)), "{again:?}");
+        assert!(matches!(again, Response::Error { .. }), "{again:?}");
         assert_eq!(band1_raw(&mut client).await, Some(20));
     })
     .await

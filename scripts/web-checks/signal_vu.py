@@ -21,6 +21,8 @@ the needle's own settling.
   a_hidden_page_holds_no_stream_after_the_grace         hidden: none after 2.5 s, shown: held again
   the_capture_state_is_said_and_the_needles_rest        unavailable: a note and the left stop
   the_markup_has_no_style_attribute                     the drawn section carries none
+  the_now_playing_bar_clears_its_buttons_at_390_360_320   no part of the bar's row leaves it or lies over another,
+                                        the progress bar clear of the transport buttons, no scroll
   the_layout_holds_at_390_900_1020_1239_1240_1241_1280   no horizontal scroll, dials inside the area and side by
                                         side, the curve at least 300 px wide from 720 px, the third column from
                                         1240 px, beside the volume below it
@@ -35,7 +37,8 @@ the needle's own settling.
                                         constant level writes nothing and asks for no frame
   a_stored_reference_that_is_not_a_whole_number_is_refused   the default applies
   a_guest_turns_the_glow_too                            display choices need no write right
-Stills (each glow at 1280, 900 and 390) go under target/web-shots/signal/vu/, or VU_STILLS=dir (Chromium run).
+Stills (each glow at 1280x900, 900x1000, 390x1100 and the phone's 390x844) go under
+target/web-shots/signal/vu/, or VU_STILLS=dir (Chromium run); VU_STILLS_ONLY=1 draws only them.
 Usage: python3 signal_vu.py chromium|firefox"""
 import json
 import os
@@ -415,6 +418,30 @@ def layout(b, d):
             check(f'  and they are beside the volume at {w}', got['beside'], got)
 
 
+def now_playing_clear(b, d):
+    load(b, d)
+    # the pinned bar on phones: nothing of the row leaves it or lies over another part of it
+    for w in (390, 360, 320):
+        b.resize(w, 844)
+        time.sleep(0.6)
+        got = b.page("""(() => { const R = (e) => e.getBoundingClientRect();
+          const np = R(document.querySelector('.sg-np'));
+          const parts = [...document.querySelectorAll('.sg-np > *')].filter((e) => R(e).width > 0)
+            .map((e) => [e.className, R(e)]);
+          const out = parts.filter(([, r]) => r.left < np.left - 1 || r.right > np.right + 1).map(([c]) => c);
+          const hit = [];
+          for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+            const a = parts[i][1], c = parts[j][1];
+            if (a.left < c.right - 0.5 && c.left < a.right - 0.5 && a.top < c.bottom - 0.5 && c.top < a.bottom - 0.5)
+              hit.push(parts[i][0] + '/' + parts[j][0]); }
+          const bar = document.querySelector('.sg-bar'), buttons = [...document.querySelectorAll('.sg-transport button')];
+          const over = buttons.some((x) => R(x).left < R(bar).right && R(bar).left < R(x).right
+            && R(x).top < R(bar).bottom && R(bar).top < R(x).bottom);
+          return { out, hit, over, bar: R(bar).width, scroll: document.documentElement.scrollWidth - window.innerWidth }; })()""")
+        check(f'the_now_playing_bar_clears_its_buttons_at_{w}',
+              not got['out'] and not got['hit'] and not got['over'] and got['bar'] >= 40 and got['scroll'] <= 0, got)
+
+
 def reduced_motion(b, d):
     load(b, d)
     # one frame, then two animation frames: an eased needle is still near its stop, a settled one is at the angle
@@ -523,19 +550,19 @@ STILLS = os.environ.get('VU_STILLS', f'{SHOTS}/vu')
 
 
 def pictures():
-    """Stills for the user: each glow at 1280, 900 and 390 (the needles on a canned level, one lamp lit)."""
+    """Stills for the user: each glow at four sizes (the needles on a canned level, one lamp lit)."""
     os.makedirs(STILLS, exist_ok=True)
     d = common.Daemon('gungnir2-v2', host='fake', fleet=FLEET)
     try:
-        for size in ((1280, 900), (900, 1000), (390, 1100)):
+        for size in ((1280, 900), (900, 1000), (390, 1100), (390, 844)):
             b = make(size)
             try:
                 load(b, d)
-                b.page('__feed([191, 160, 200, 255])')
+                b.page('__feed([191, 160, 255, 200])')
                 for step in range(3):
                     time.sleep(1.6)
                     glow_now = b.page(f"document.querySelector('{AREA}').className.match(/sg-(w\\d)/)[1]")
-                    shot = f'{STILLS}/vu-{size[0]}-{glow_now}.png'
+                    shot = f'{STILLS}/vu-{size[0]}x{size[1]}-{glow_now}.png'
                     with open(shot, 'wb') as f:
                         f.write(b.shot())
                     print('shot', shot)
@@ -546,25 +573,27 @@ def pictures():
         d.stop()
 
 
-run('opens', opens)
-run('needles', needles)
-run('lamp', lamp)
-run('reference', reference)
-run('glow', glow)
-run('kept', kept)
-run('refused', refused, storage=False)
-run('spectrum', spectrum)
-run('hidden', hidden)
-run('capture', capture_state)
-run('markup', markup)
-run('layout', layout)
-run('reduced', reduced_motion, reduced=True)
-run('leaving', leaving)
-run('rest', at_rest)
-run('storedref', stored_ref)
-run('reset', reset_focus)
-run('writes', writes)
-run('guest', guest, web='guest = "read"')
+if not os.environ.get('VU_STILLS_ONLY'):
+    run('opens', opens)
+    run('needles', needles)
+    run('lamp', lamp)
+    run('reference', reference)
+    run('glow', glow)
+    run('kept', kept)
+    run('refused', refused, storage=False)
+    run('spectrum', spectrum)
+    run('hidden', hidden)
+    run('capture', capture_state)
+    run('markup', markup)
+    run('layout', layout)
+    run('nowbar', now_playing_clear)
+    run('reduced', reduced_motion, reduced=True)
+    run('leaving', leaving)
+    run('rest', at_rest)
+    run('storedref', stored_ref)
+    run('reset', reset_focus)
+    run('writes', writes)
+    run('guest', guest, web='guest = "read"')
 if browser == 'chromium':
     pictures()
 print(f'signal_vu.py {browser}: {passed} passed, {len(fails)} failed in {time.time() - t0:.0f} s')

@@ -19,7 +19,7 @@ pub fn code_for(err: &BleError) -> u8 {
         | BleError::Bootloader
         | BleError::PassphraseRejected
         | BleError::Adapter(_) => CODE_LINK,
-        BleError::Timeout(_) => CODE_TIMEOUT,
+        BleError::Timeout(_) | BleError::Unconfirmed { .. } | BleError::NotSent(_) => CODE_TIMEOUT,
         BleError::Proto(_) | BleError::Profile(_) => CODE_USAGE,
     }
 }

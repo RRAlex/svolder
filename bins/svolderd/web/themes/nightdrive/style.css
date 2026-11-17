@@ -50,6 +50,8 @@
   --frame-scrim: rgba(5, 3, 10, .72);
   --frame-shadow: 0 12px 32px rgba(0, 0, 0, .55);
   --frame-toast-shadow: 0 14px 34px -12px rgba(0, 0, 0, .8);
+  /* a toast and the `old readings` badge stand above the dash: one row of keys, two on a phone (below) */
+  --frame-toast-lift: 84px;
   --frame-field-bg: rgba(5, 3, 10, .6);
   --frame-field-border: var(--nd-cyan);
   --frame-danger: var(--nd-bad);
@@ -475,6 +477,7 @@
 
 /* a phone (a narrow window, or a short one held sideways): 44 px keys */
 @media (max-width: 719px), (max-height: 499px) {
+  :root[data-theme="nightdrive"] { --frame-toast-lift: 128px; }
   .nd-dash { flex-wrap: wrap; gap: 8px 12px; }
   .nd-k { min-width: 44px; height: 44px; }
   .nd-opt { min-height: 44px; }

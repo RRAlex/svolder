@@ -658,8 +658,11 @@ def the_hud_text(b, d):
     check('  the EQ line reads the model\'s gains', got['eq'] is not None and got['eq'].startswith('EQ')
           and [x.lstrip('+-') for x in nums if x[:1] in '+-0123456789'] == gains, [got['eq'], gains])
     host_eq = b.page('__core.model.page().host?.route?.host_eq === true')
-    check('  the verdict is the model\'s host EQ (nothing when it is off)',
-          (got['right'] != '') == bool(host_eq) and 'bad' not in got['tone'], [got['right'], host_eq])
+    # the DAC's own stage (its volume below 0 dB, its tone control) is the verdict's `DAC ...` part
+    computer = [w for w in (got['right'] or '').split(' \u00b7 ') if w and not w.startswith('DAC ')
+                and not w.startswith('volume') and w not in ('tone control', 'muted', 'balance off centre')]
+    check('  the verdict is the model\'s host EQ (nothing but the DAC\'s own stage when it is off)',
+          (computer != []) == bool(host_eq) and 'bad' not in got['tone'], [got['right'], host_eq])
     check('  the volume is drawn as the outrun SVG', b.page("!!document.querySelector('.nd-vol svg.nd-odb')"))
     check('  no page error', errors(b) == [], errors(b)[:3])
 

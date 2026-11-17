@@ -11,6 +11,10 @@ image; not the scene or a layer hidden from the page's reader) may overlap it.
   nothing_stands_under_the_menu_button       at the top of the page, also with a long device name
                                              (scrolled content passes under the opaque button, by design)
   the_button_stays_pinned_over_scrolling_content   the same rectangle after a scroll, an opaque backdrop
+  the_old_readings_badge_is_the_same_in_every_theme   a lost link (its card) or a lost stream shows `old readings`
+                                             in the frame, named `readings from before the link dropped`,
+                                             fixed in the window's bottom left, clear of the menu button, taking no pointer event from the controls it may lie over,
+                                             and gone with the first fresh reading, at 1280 by 800, 412 by 915 and 360 by 780
 Usage: python3 frame_button.py chromium|firefox"""
 import sys
 import time
@@ -150,6 +154,67 @@ def run(who, daemon):
             b.close()
 
 
+OLD_WORDS = 'readings from before the link dropped'
+INTERACTIVE = ('button, a[href], input, select, textarea, summary, [role=slider], [role=button], '
+               '[role=switch], [role=tab], [tabindex]:not([tabindex="-1"])')
+OLD = """(() => { const e = document.getElementById('fx-old'); if (!e) return null;
+  const cs = getComputedStyle(e); const r = e.getBoundingClientRect();
+  const btn = document.querySelector('#frame .fxbtn').getBoundingClientRect();
+  const under = (() => { const was = e.hidden; e.hidden = true; const out = [];
+    for (let i = 0; i <= 8; i++) for (let j = 0; j <= 2; j++) {
+      const x = r.left + 1 + (r.width - 2) * i / 8, y = r.top + 1 + (r.height - 2) * j / 2;
+      const hit = document.elementFromPoint(x, y);
+      const hot = hit && hit.closest(%s);
+      const pinned = (n) => { for (let e = n; e && e !== document.body; e = e.parentElement) { const p = getComputedStyle(e).position; if (p === 'fixed' || p === 'sticky') return true; } return false; };
+      if (hot && (pinned(hot) || hot.closest('.nd-dash, .sg-now'))) out.push((hot.id ? '#' + hot.id : hot.tagName.toLowerCase()) + '.' + String(hot.getAttribute('class') || '').split(' ')[0]); }
+    e.hidden = was; return [...new Set(out)]; })();
+  return { shown: !e.hidden && cs.display !== 'none' && r.width > 0, text: e.textContent.trim(),
+    title: e.title, aria: document.querySelector('#frame .fxsr').textContent, position: cs.position,
+    inWindow: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight,
+    bottomLeft: r.left < innerWidth / 2 && r.top > innerHeight / 2,
+    clearOfButton: r.right <= btn.left || r.left >= btn.right || r.bottom <= btn.top || r.top >= btn.bottom,
+    root: document.documentElement.dataset.readingsOld || null, under, pe: cs.pointerEvents }; })()""" % repr(INTERACTIVE)
+CARD = """(() => { const url = __core.model.shown(); const down = %s !== null;
+  __core.model.applyPart(url, 'link', { word: down ? 'not connected' : 'connected', state: down ? 'off' : 'on', old: down });
+  __core.model.applyPart(url, 'card', %s); return 1; })()"""
+WARN = ('{ kind: "warn", title: "Gungnir 2 is out of reach", detail: "Not connected.", faults: [], '
+        'retry_in: 5, try_now: true }')
+
+
+def old_badge(daemon):
+    """The badge on every theme, both ways it comes: the lost-link card up, then gone."""
+    for label, size in [('1280x800', (1280, 800)), ('412x915', (412, 915)), ('360x780', (360, 780))]:
+        b = make(size)
+        try:
+            b.goto(f'{daemon.url}?theme=ember&effects=off', settle=1.0)
+            b.page(BOOT)
+            for theme in b.page(LISTED):
+                b.goto(f'{daemon.url}?theme={theme}&effects=off', settle=1.0)
+                if b.page(BOOT) != theme:
+                    continue
+                time.sleep(0.5)
+                quiet = b.page(OLD)
+                check(f'the_old_readings_badge_is_the_same_in_every_theme: {theme} at {label} shows none while '
+                      f'the link is up', quiet and not quiet['shown'] and quiet['root'] is None, quiet)
+                b.page(CARD % (WARN, WARN))
+                got = poll(lambda: (lambda g: g if g and g['shown'] else None)(b.page(OLD)), 5.0)
+                check(f'the_old_readings_badge_is_the_same_in_every_theme: {theme} at {label} shows `old readings` '
+                      f'named `{OLD_WORDS}`, fixed in the bottom left, clear of the menu button, and never over a fixed control (a bottom bar, the dash), taking no click from a control under it',
+                      bool(got) and got['text'] == 'old readings' and got['title'] == OLD_WORDS
+                      and got['aria'] == OLD_WORDS and got['position'] == 'fixed' and got['inWindow']
+                      and got['bottomLeft'] and got['clearOfButton'] and got['root'] == 'true' and got['pe'] == 'none' and got['under'] == [], got)
+                b.page(CARD % ('null', 'null'))
+                gone = poll(lambda: (lambda g: g if g and not g['shown'] else None)(b.page(OLD)), 5.0)
+                check(f'the_old_readings_badge_is_the_same_in_every_theme: {theme} at {label} drops it with the '
+                      f'card', bool(gone) and gone['root'] is None, gone)
+                b.page("__core.model.setState('lost')")
+                lost = poll(lambda: (lambda g: g if g and g['shown'] else None)(b.page(OLD)), 5.0)
+                check(f'the_old_readings_badge_is_the_same_in_every_theme: {theme} at {label} shows it for a '
+                      f'lost stream too', bool(lost), lost)
+        finally:
+            b.close()
+
+
 d = common.Daemon('gungnir2-v2', host='fake')
 g = common.Daemon('gungnir2-v2', host='fake', web='guest = "read"')
 long = common.Daemon('gungnir2-v2', host='fake', name='A device with a very long name that goes on and on')
@@ -157,6 +222,7 @@ try:
     run('a signed-in viewer', d)
     run('a guest', g)
     run('a device with a very long name', long)
+    old_badge(d)
 finally:
     d.stop()
     g.stop()

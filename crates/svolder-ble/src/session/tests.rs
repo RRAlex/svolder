@@ -1573,39 +1573,274 @@ async fn quiet_session() -> Session {
     s
 }
 
-/// A write of the value the device holds gets no echo from a unit that reports a change only: the
-/// answer after the timeout is the device's own report of it, and a write of another value that is
-/// not echoed is still the timeout.
+/// A unit that reports a change only gives a repeated write no echo: that is sent and not
+/// confirmed, never answered with the report it held; a change is echoed as usual.
 #[tokio::test(start_paused = true)]
-async fn a_write_of_the_held_value_with_no_echo_answers_with_the_held_report() {
+async fn a_write_of_the_held_value_with_no_echo_is_not_confirmed() {
     let mut s = quiet_session().await;
-    let held = s.state().get(FunctionId::one(10)).cloned().expect("volume");
     let began = Instant::now();
-    let answer = s
-        .set(Message::command(held.id, held.value.clone()))
-        .await
-        .expect("the report");
-    assert_eq!(answer, held);
-    assert_eq!(
-        began.elapsed(),
-        s.config.set_timeout,
-        "it still waits the timeout"
-    );
-    // A change is echoed as usual, and its repeat is the held report again.
+    let err = s.set(volume(63)).await.unwrap_err();
+    assert!(matches!(err, BleError::Timeout(_)), "got {err:?}");
+    assert_eq!(began.elapsed(), s.config.set_timeout);
     let changed = s.set(volume(77)).await.unwrap();
     assert_eq!(changed.value, Value::U8(77));
-    assert_eq!(s.set(volume(77)).await.unwrap().value, Value::U8(77));
-    // A link that came back marks every reading stale, and a refresh that missed this one marks
-    // the state fresh again: what the device held on the earlier link is no reason to call a
-    // repeat written now answered.
-    s.state.set_stale(true);
-    s.state.set_stale(false);
     let err = s.set(volume(77)).await.unwrap_err();
     assert!(matches!(err, BleError::Timeout(_)), "got {err:?}");
-    // Not held, not echoed: an id the fake never reports and a value that differs from none.
+}
+
+/// A link that, as a write goes out, has an older report of one function reach the host first:
+/// a status the device sent before the write, delivered after it.
+struct StaleLink {
+    inner: Arc<dyn Link>,
+    fake: Arc<FakeTransport>,
+    stale: Message,
+}
+
+struct StaleTransport {
+    inner: Arc<FakeTransport>,
+    stale: Message,
+}
+
+#[async_trait::async_trait]
+impl Transport for StaleTransport {
+    async fn scan(&self, window: Duration) -> Result<crate::Advertisements, BleError> {
+        self.inner.scan(window).await
+    }
+
+    async fn connect(&self, unit: svolder_proto::UnitId) -> Result<Box<dyn Link>, BleError> {
+        let inner: Arc<dyn Link> = Arc::from(self.inner.connect(unit).await?);
+        Ok(Box::new(StaleLink {
+            inner,
+            fake: Arc::clone(&self.inner),
+            stale: self.stale.clone(),
+        }))
+    }
+}
+
+#[async_trait::async_trait]
+impl Link for StaleLink {
+    async fn write(&self, frame: &[u8]) -> Result<(), BleError> {
+        let writes_it = svolder_proto::decode_command(frame)
+            .map(|c| c.body.messages.iter().any(|m| m.id == self.stale.id))
+            .unwrap_or(false);
+        if writes_it {
+            self.fake.push(std::slice::from_ref(&self.stale));
+        }
+        self.inner.write(frame).await
+    }
+
+    fn notifications(&self) -> Notifications {
+        self.inner.notifications()
+    }
+
+    async fn disconnect(&self) -> Result<(), BleError> {
+        self.inner.disconnect().await
+    }
+}
+
+/// A session on the fake gungnir2-v2 whose link delivers `stale` ahead of the device's echo of
+/// any write of `stale.id`.
+async fn stale_session(stale: Message) -> Session {
+    let registry = Registry::builtin().unwrap();
+    let fake = Arc::new(
+        FakeTransport::from_knobs(&registry, |name| match name {
+            "SVOLDER_FAKE_PASSPHRASE" => Some("none".into()),
+            _ => None,
+        })
+        .unwrap(),
+    );
+    let profile = registry.get("gungnir2-v2").unwrap().clone();
+    let advert = Advertisement {
+        manufacturer: fake.device().lock().unwrap().manufacturer_data(),
+        rssi: Some(-50),
+        record: None,
+    };
+    let transport = StaleTransport { inner: fake, stale };
+    let mut s = Session::new(Arc::new(transport), advert, profile, Passphrase::NONE);
+    s.connect().await.unwrap();
+    s
+}
+
+/// A report of the written function that was sent before the write and arrives after it is not
+/// the device's answer to it: the echo that follows is.
+#[tokio::test(start_paused = true)]
+async fn a_stale_report_delivered_after_the_write_is_not_taken_for_the_echo() {
+    let mut s = stale_session(Message::status(FunctionId::one(10), Value::U8(5))).await;
+    let answer = s.set(volume(77)).await.expect("the device's echo");
+    assert_eq!(
+        answer.value,
+        Value::U8(77),
+        "the echo, not the older report"
+    );
+    // Nothing of the older report is left to be read as a later status.
+    assert_eq!(
+        s.state().get(FunctionId::one(10)).unwrap().value,
+        Value::U8(77)
+    );
+}
+
+/// A session on a fake the device of which never hears a write of volume, with the fake to push
+/// the device's own reports through.
+async fn deaf_volume_session() -> (Session, Arc<FakeTransport>) {
+    let registry = Registry::builtin().unwrap();
+    let fake = Arc::new(
+        FakeTransport::from_knobs(&registry, |name| match name {
+            "SVOLDER_FAKE_PASSPHRASE" => Some("none".into()),
+            _ => None,
+        })
+        .unwrap(),
+    );
+    let profile = registry.get("gungnir2-v2").unwrap().clone();
+    let advert = Advertisement {
+        manufacturer: fake.device().lock().unwrap().manufacturer_data(),
+        rssi: Some(-50),
+        record: None,
+    };
+    let deaf = DeafTransport {
+        inner: Arc::clone(&fake),
+        deaf_to: FunctionId::one(10),
+    };
+    let mut s = Session::new(Arc::new(deaf), advert, profile, Passphrase::NONE);
+    s.connect().await.unwrap();
+    (s, fake)
+}
+
+/// Report volume `raw` through `fake` after each delay, as the device sending its own reports.
+fn say_volume(
+    fake: &Arc<FakeTransport>,
+    reports: &[(Duration, u8)],
+) -> tokio::task::JoinHandle<()> {
+    let fake = Arc::clone(fake);
+    let reports = reports.to_vec();
+    tokio::spawn(async move {
+        let mut at = Duration::ZERO;
+        for (when, raw) in reports {
+            tokio::time::sleep(when - at).await;
+            at = when;
+            fake.push(&[Message::status(FunctionId::one(10), Value::U8(raw))]);
+        }
+    })
+}
+
+/// A report of another value is held, whatever its age: the echo of the value written that
+/// follows it after 300 ms, or after 1.5 s, is the answer.
+#[tokio::test(start_paused = true)]
+async fn an_echo_after_a_report_of_another_value_is_the_answer() {
+    for echo_at in [300, 1500] {
+        let (mut s, fake) = deaf_volume_session().await;
+        let say = say_volume(
+            &fake,
+            &[
+                (Duration::from_millis(10), 40),
+                (Duration::from_millis(echo_at), 90),
+            ],
+        );
+        let began = Instant::now();
+        let answer = s.set(volume(90)).await.expect("the echo");
+        say.await.unwrap();
+        assert_eq!(answer.value, Value::U8(90), "echo at {echo_at} ms");
+        assert_eq!(began.elapsed(), Duration::from_millis(echo_at));
+    }
+}
+
+/// With no echo after a report of another value, the wait runs to the timeout and the answer is
+/// "sent, not confirmed" with what the device last reported, never that value as the echo.
+#[tokio::test(start_paused = true)]
+async fn no_echo_after_a_report_of_another_value_says_what_it_last_reported() {
+    let (mut s, fake) = deaf_volume_session().await;
+    let say = say_volume(&fake, &[(Duration::from_millis(100), 40)]);
+    let began = Instant::now();
+    let err = s.set(volume(90)).await.expect_err("not confirmed");
+    say.await.unwrap();
+    assert!(matches!(err, BleError::Unconfirmed { .. }), "got {err:?}");
+    assert!(
+        err.to_string()
+            .starts_with("sent, not confirmed: the device last reported Volume = "),
+        "got {err}"
+    );
+    assert_eq!(began.elapsed(), s.config.set_timeout);
+    // The device's last report is still there for the stream's readers.
+    let queued = s.recv().await.expect("the held report");
+    assert_eq!(queued.value, Value::U8(40));
+}
+
+/// In a frame carrying a report of another value and one of the value written, the written
+/// value wins, whichever comes first.
+#[tokio::test(start_paused = true)]
+async fn the_value_written_wins_within_one_frame() {
+    for order in [[40, 90], [90, 40]] {
+        let (mut s, fake) = deaf_volume_session().await;
+        let pusher = Arc::clone(&fake);
+        let say = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let reports = order.map(|raw| Message::status(FunctionId::one(10), Value::U8(raw)));
+            pusher.push(&reports);
+        });
+        let answer = s.set(volume(90)).await.expect("the echo");
+        say.await.unwrap();
+        assert_eq!(answer.value, Value::U8(90), "order {order:?}");
+    }
+}
+
+/// A write whose echo never comes is reported as sent and not confirmed, in those words, and an
+/// older reading of the function is never given as its answer, the held value included.
+#[tokio::test(start_paused = true)]
+async fn a_missing_echo_is_sent_not_confirmed_even_for_the_held_value() {
+    let mut s = quiet_session().await;
+    let held = s.state().get(FunctionId::one(10)).cloned().expect("volume");
     let err = s
-        .set(Message::command(FunctionId::one(200), Value::Data(vec![])))
+        .set(Message::command(held.id, held.value.clone()))
         .await
-        .unwrap_err();
+        .expect_err("no echo came: not an answer");
     assert!(matches!(err, BleError::Timeout(_)), "got {err:?}");
+    assert!(
+        err.to_string().starts_with("sent, not confirmed"),
+        "got {err}"
+    );
+}
+
+/// A stale report of a tone control's mode or of a band's gain, delivered after the write, is not
+/// the echo either: the echo that follows is.
+#[tokio::test(start_paused = true)]
+async fn a_stale_tone_report_delivered_after_the_write_is_not_taken_for_the_echo() {
+    let eq = Registry::builtin()
+        .unwrap()
+        .get("gungnir2-v2")
+        .unwrap()
+        .eq
+        .clone()
+        .expect("a tone control");
+    let gain = eq.band_id(0, svolder_profiles::EqParam::Gain).unwrap();
+    for (id, old, new) in [(eq.mode_id(), 1, 2), (gain, 20, 70)] {
+        let mut s = stale_session(Message::status(id, Value::U8(old))).await;
+        let answer = s
+            .set(Message::command(id, Value::U8(new)))
+            .await
+            .expect("the device's echo");
+        assert_eq!(answer.value, Value::U8(new), "{id:?}");
+    }
+}
+
+/// An echo matches by value whatever its type: a write declared u8 and reported as u16 with the
+/// same value is confirmed, and with another value it is held and ends unconfirmed.
+#[tokio::test(start_paused = true)]
+async fn an_echo_matches_by_value_whatever_its_type() {
+    let (mut s, fake) = deaf_volume_session().await;
+    let pusher = Arc::clone(&fake);
+    let say = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        pusher.push(&[Message::status(FunctionId::one(10), Value::U16(90))]);
+    });
+    let answer = s.set(volume(90)).await.expect("the same value, wider");
+    say.await.unwrap();
+    assert_eq!(answer.value, Value::U16(90));
+
+    let pusher = Arc::clone(&fake);
+    let say = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        pusher.push(&[Message::status(FunctionId::one(10), Value::U16(40))]);
+    });
+    let err = s.set(volume(90)).await.expect_err("another value");
+    say.await.unwrap();
+    assert!(matches!(err, BleError::Unconfirmed { .. }), "got {err:?}");
 }

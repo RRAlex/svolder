@@ -194,10 +194,11 @@ it.
 ### The simulator's repeats and its advertising
 
 `svolder-sim --quiet-same` has the simulated device report a change only: a Command equal to the
-value a control holds gets no Status, on every control. Without it only the tone-control mode is
-silent on a repeat, since the official app answers every report of the mode with a write of it, and
-every other control reports a repeat as it reports any write. The in-process fake takes the same
-knob as `SVOLDER_FAKE_QUIET_SAME=1`.
+value a control holds gets no Status, on every control. Without it the simulator is silent only on
+a repeat of the tone-control mode, since the official app answers every report of the mode with a
+write of it, and every other control reports a repeat as it reports any write. The in-process fake
+reports every repeat, the mode's included, as a unit does, and takes the quiet knob as
+`SVOLDER_FAKE_QUIET_SAME=1`.
 
 The simulator advertises again after a link to it closes, in either layout, with the same payload
 and passcode field, so a central that scans again finds it. `make e2e` shows it with a connect, a

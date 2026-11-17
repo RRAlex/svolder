@@ -40,6 +40,7 @@ agree:
 | several devices and no `-d` | 2 | `-d NAME`, or `default_device` in the config |
 | connect refused, or a write rejected by a passphrase | 3 | give svolder the device's passcode (`svolder setup`, the Devices screen's `u`, or `passphrase` in the config); if it is lost, `auto` reads it from the device — see ["Forgot the passphrase"](cli.md#forgot-the-passphrase) |
 | a device dropped during `watch` or the TUI | 3 | the reconnect notice, then "if it does not come back, `svolder doctor`" |
+| the daemon stopped under a command, `watch` or the TUI | 3 | `svolder daemon restart` (the TUI picks the daemon up again by itself once it answers) |
 | the daemon answered with an error | its own | `svolder daemon logs` |
 | the daemon's `config.toml` is gone (a reload, or a write that would start a new file) | 1 | restore the file, then run the verb again |
 | the daemon is older than this svolder and lacks what is asked (a walk, a device edit, `identify`) | 7 | `svolder daemon restart` |

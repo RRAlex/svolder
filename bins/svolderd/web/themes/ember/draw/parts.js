@@ -354,7 +354,14 @@ function playing(device, page, { oob } = {}) {
   const head = `<div class="np-head"> <span class="np-cover" aria-hidden="true">${cover}</span> ${who} ${p.buttons ? `${transport(t)} ` : ''}${fold} </div>`;
   const prog = '<div class="np-prog"><span class="np-t np-el"></span><span class="np-bar"><i></i></span><span class="np-t np-len"></span></div>';
   const path = p.path;
-  const hops = path ? path.hops.map((h) => `<span class="np-hop${h.changes ? ' changes' : ''}"><b>${esc(h.label)}</b> ${esc(h.detail)}</span>`).join('') : '';
+  // A chip keeps its words short: the DAC's volume in dB reads as the bare level, the whole words
+  // are the chip's tooltip.
+  const hopChip = (h) => {
+    const short = h.label === 'DAC' ? h.detail.replace(/volume (?=\S+ dB)/, '') : h.detail;
+    const full = short === h.detail ? '' : attr('title', `${h.label} ${h.detail}`);
+    return `<span class="np-hop${h.changes ? ' changes' : ''}"${full}><b>${esc(h.label)}</b> ${esc(short)}</span>`;
+  };
+  const hops = path ? path.hops.map(hopChip).join('') : '';
   const verdict = path?.title
     ? `<span aria-hidden="true">${esc(path.words)}</span><span class="np-sr">${esc(path.title)}</span>`
     : (path ? esc(path.words) : '');

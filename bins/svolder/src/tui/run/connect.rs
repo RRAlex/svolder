@@ -632,6 +632,17 @@ pub(super) async fn daemon_answers_within(socket: &std::path::Path, window: Dura
     }
 }
 
+/// Whether a daemon answers on `socket`, looking again every `pause` for as long as it takes;
+/// true once one does.
+pub(super) async fn daemon_answers_every(socket: &std::path::Path, pause: Duration) -> bool {
+    loop {
+        tokio::time::sleep(pause).await;
+        if svolder_ipc::is_running(socket).await {
+            return true;
+        }
+    }
+}
+
 /// Wait for the end of the wait for a daemon, while one is under way.
 pub(super) async fn recv_reconnect(wait: &mut Option<Reconnect>) -> bool {
     match wait {
@@ -653,13 +664,14 @@ pub(super) async fn daemon_back<O: Open>(
     screen: &mut dyn Shown,
 ) -> Flow {
     if !answered {
-        watching.gone();
+        watching.gone(true);
+        watching.keep_looking_for_daemon(socket);
         return Flow::Continue(watching);
     }
     match switch_via(opener, &mut watching, None, Some(socket), look, screen).await {
         Switched::GaveUp => return gave_up(watching),
         Switched::Opened => watching.app.notify(RECONNECTED),
-        Switched::Stayed => watching.gone(),
+        Switched::Stayed => watching.gone(false),
     }
     Flow::Continue(watching)
 }

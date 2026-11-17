@@ -19,6 +19,8 @@ pub(crate) struct LinkModel {
     pub(crate) word: &'static str,
     /// `on`, `wait` or `off`.
     pub(crate) state: &'static str,
+    /// Whether the readings are from before a drop of the link (until the first fresh one).
+    pub(crate) old: bool,
 }
 
 impl From<&view::LinkView> for LinkModel {
@@ -26,6 +28,7 @@ impl From<&view::LinkView> for LinkModel {
         LinkModel {
             word: link.word,
             state: link.state,
+            old: link.old,
         }
     }
 }

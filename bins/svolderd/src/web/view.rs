@@ -174,6 +174,9 @@ pub(crate) struct LinkView {
     pub(crate) word: &'static str,
     /// Its class: `on`, `wait` or `off`.
     pub(crate) state: &'static str,
+    /// Whether what the page shows of the device is from before a drop: the link is down, or the
+    /// daemon has not heard the device since it came back.
+    pub(crate) old: bool,
 }
 
 /// A card above the view.
@@ -305,14 +308,17 @@ pub(crate) fn link_of(info: &DeviceInfo) -> LinkView {
         (true, _) => LinkView {
             word: "connected",
             state: "on",
+            old: info.stale,
         },
         (false, Some(_)) => LinkView {
             word: "not connected",
             state: "off",
+            old: true,
         },
         (false, None) => LinkView {
             word: "connecting…",
             state: "wait",
+            old: true,
         },
     }
 }

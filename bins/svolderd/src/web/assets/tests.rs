@@ -91,6 +91,7 @@ fn the_pages_scripts_are_served_and_the_licence_is_not() {
         "core/analysis.js",
         "core/repeat.js",
         "core/title.js",
+        "core/old-readings.js",
         "core/viz-model.js",
         "core/vu-model.js",
         "core/registry.js",

@@ -44,6 +44,31 @@ async fn no_daemon_is_the_no_daemon_failure() {
     );
 }
 
+/// A daemon that closes the connection before it answers is the stopped daemon, in the same words
+/// every command uses, not a raw socket error.
+#[tokio::test]
+async fn a_daemon_that_closes_before_it_answers_is_said_to_have_stopped() {
+    let socket = fresh_socket();
+    let listener = tokio::net::UnixListener::bind(&socket).expect("a listener binds");
+    let hang_up = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("a client connects");
+        let mut line = String::new();
+        let mut reader = tokio::io::BufReader::new(stream);
+        tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line)
+            .await
+            .expect("the request arrives");
+    });
+    let failure = reload_on(&socket).await.expect_err("no answer");
+    hang_up.await.expect("the listener ran");
+    let _ = std::fs::remove_file(&socket);
+    assert_eq!(failure.what, "The svolder daemon stopped.");
+    assert!(
+        failure.next.contains("svolder daemon restart"),
+        "{}",
+        failure.next
+    );
+}
+
 /// A daemon that is stopping refuses the reload with its reason, and the next step is not to fix
 /// a file.
 #[tokio::test]

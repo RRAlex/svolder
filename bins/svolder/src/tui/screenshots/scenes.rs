@@ -26,8 +26,9 @@ use crate::tui::screenshots::world::{
 
 mod record;
 
-/// The terminal every picture is drawn on, in columns and rows.
-pub(in crate::tui::screenshots) const SIZE: (u16, u16) = (120, 40);
+/// The terminal the animation and the mascot are drawn on, in columns and rows: tall enough for the
+/// VU rows of the device screen.
+pub(in crate::tui::screenshots) const SIZE: (u16, u16) = (120, 45);
 
 /// The time between two frames of a picture: about 30 frames a second.
 const FRAME: Duration = Duration::from_millis(33);
@@ -65,6 +66,15 @@ impl Still {
         Still::Telemetry,
         Still::Devices,
     ];
+
+    /// The terminal the still is drawn on: the device screen of the Gungnir 2 is tall enough for
+    /// its VU rows, the others keep the shorter terminal their screens fill.
+    pub(in crate::tui::screenshots) fn size(self) -> (u16, u16) {
+        match self {
+            Still::Dac => SIZE,
+            _ => (SIZE.0, 40),
+        }
+    }
 
     /// The name its files and the guard's messages carry.
     pub(in crate::tui::screenshots) fn name(self) -> &'static str {
@@ -117,7 +127,7 @@ pub(in crate::tui::screenshots) fn still_with(
     still: Still,
     tweak: impl FnOnce(&mut App),
 ) -> Shot {
-    still_sized(correction, still, SIZE, tweak)
+    still_sized(correction, still, still.size(), tweak)
 }
 
 /// [`still_with`] on a terminal `size` columns by rows.

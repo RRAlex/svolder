@@ -200,7 +200,13 @@ secure origin, so over plain HTTP the icon opens a browser tab.
 
 The header's switcher lists the configured devices, each with its family (`DAC`, `amp`, `preamp`); a
 click shows that device, and its address, `./?device=NAME`, can be bookmarked. One device shows its
-name alone. The link's pill sits at the right. A device that is not reachable shows a card over its
+name alone. The link's pill sits at the right. While the device's link is down, or is back and the
+daemon has not heard the device yet (or the page lost its link to svolder), every theme shows the
+same small badge, `old readings`, fixed at the bottom left of the window, above a theme's bottom
+bar, and named `readings from before the link dropped` (a screen reader is told when it appears);
+the first fresh reading takes it away. A linked amp shown from the DAC's page says the same on its
+own screen in Signal when its link drops; Night drive's top line also names the DAC's own stage. A
+device that is not reachable shows a card over its
 screen: `NAME is out of reach` with `Next attempt in N s.`, a countdown and, for a browser that may
 write, a Try now button that ends the wait; `Looking for NAME…` for a device with no link yet in
 this daemon's run (a daemon restart included: it shows no knob until the link is back), which
@@ -252,7 +258,10 @@ output, such as loudness normalization or its own EQ, happens where svolder cann
 verdict's tooltip says so. A DAC's page has a path line; an amp's or a preamp's has none. On a
 desktop the card's height is fixed, so a path with more to say than fits ends in a chip of three
 dots (the verdict first, always; the dots' tooltip lists the hops left out, and a screen reader
-still reads them).
+still reads them). While the DAC's own stage changes the sound (its volume below 0 dB, its tone
+control on EQ or loudness, its balance off centre) the DAC's hop says so (`volume -3.3 dB`), and the
+verdict's tooltip adds what the DAC then does (`the Bifrost 3 then lowers it by 3.3 dB`, `shapes it
+with its tone control`, `shifts the balance`).
 
 **The visualizer.** Beside Now playing (the band's right half on a desktop, a 180 px card under the
 volume on a phone, under the meters on an amp's page) the page draws what the computer plays, live,

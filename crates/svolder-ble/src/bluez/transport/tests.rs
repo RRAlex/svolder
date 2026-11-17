@@ -4,6 +4,7 @@
 use super::*;
 use crate::test_support::unit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use svolder_proto::ADVERT_COMPANY_ID;
 
 /// A device a scan has just heard is the one a connect takes, once: the connect after it
 /// looks for the device again.
@@ -239,4 +240,58 @@ async fn a_failed_first_start_is_stopped_and_retried_once() {
     assert_eq!(discovery.starts.load(Ordering::SeqCst), 2);
     assert_eq!(discovery.stops.load(Ordering::SeqCst), 1);
     drop(scan);
+}
+
+/// A scan starts without a service filter: BlueZ 5.87 crashes when one matches a device.
+#[test]
+fn a_scan_starts_without_a_service_filter() {
+    assert!(scan_filter().services.is_empty());
+}
+
+fn data(id: u16, bytes: &[u8]) -> HashMap<u16, Vec<u8>> {
+    HashMap::from([(id, bytes.to_vec())])
+}
+
+/// A device whose manufacturer data does not parse is set aside at once and costs no read on
+/// its later events; data that parses brings it back.
+#[test]
+fn a_foreign_device_costs_no_read_after_its_first_event() {
+    let mut set_aside = HashSet::new();
+    let foreign = data(0x004C, &[1, 2, 3]);
+    assert!(!worth_a_read(&mut set_aside, &"tv", Some(&foreign)));
+    assert!(!worth_a_read(&mut set_aside, &"tv", None), "an rssi event");
+    assert!(
+        worth_a_read(&mut set_aside, &"amp", None),
+        "a device not yet judged is read"
+    );
+    let record = crate::test_support::hex("02000000000001020304050607088a53f037030001070000000000");
+    let parsed = data(ADVERT_COMPANY_ID, &record);
+    assert!(worth_a_read(&mut set_aside, &"tv", Some(&parsed)));
+    assert!(worth_a_read(&mut set_aside, &"tv", None));
+}
+
+/// A read that finds no Forkbeard data sets the device aside; one whose data parses does not (its
+/// UUIDs may not be filled in yet).
+#[test]
+fn a_read_with_no_forkbeard_data_sets_the_device_aside() {
+    let mut set_aside = HashSet::new();
+    let props = PeripheralProperties::default();
+    set_aside_after_read(&mut set_aside, &"bare", &props);
+    assert!(!worth_a_read(&mut set_aside, &"bare", None));
+}
+
+/// A read of a device whose manufacturer data parses but whose services are not filled in yet
+/// leaves it in: the UUIDs arrive later, and its next event is read again.
+#[test]
+fn a_read_with_forkbeard_data_but_no_services_keeps_the_device_in() {
+    let mut set_aside = HashSet::new();
+    let props = PeripheralProperties {
+        manufacturer_data: data(
+            ADVERT_COMPANY_ID,
+            &crate::test_support::hex("02000000000001020304050607088a53f037030001070000000000"),
+        ),
+        ..Default::default()
+    };
+    set_aside_after_read(&mut set_aside, &"amp", &props);
+    assert!(worth_a_read(&mut set_aside, &"amp", None));
 }

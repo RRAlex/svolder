@@ -213,7 +213,9 @@ def a_switch(b, d):
                    ".join(' ') + ' ' + [...document.querySelectorAll('#p-volume [aria-label], #p-tone [aria-label], #p-presets [aria-label]')]"
                    ".map((e) => e.getAttribute('aria-label')).join(' ')")
     # the path's own words (its computer hop line, `computer volume N %`, `computer muted`) are the one exception
-    own = re.sub(r'computer(: [^\n]*| (volume \d+ ?%|muted))', '', below.lower())
+    # and the path's note of which hops change the sound (the DAC's own stage counts as one)
+    own = re.sub(r'hops? change the sound: [^\n]*', '', below.lower())
+    own = re.sub(r'computer(: [^\n]*| (volume \d+ ?%|muted))', '', own)
     check(f'{name}: below the switch nothing says computer', 'computer' not in own, below[:300])
     check(f'{name}: the flip posted nothing', posts(b) == [], posts(b))
     click(b, '[data-act="side"][data-side="dac"]')

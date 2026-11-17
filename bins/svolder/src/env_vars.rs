@@ -121,8 +121,8 @@ const ENV_VARS: &[EnvVar] = &[
         read_by: "svolder, svolderd",
         dev_only: false,
         what: "`1` makes the fake device report a change only: a Command equal to the value a \
-               control holds gets no Status, on every control. Unset by default: only the \
-               tone-control mode is silent on a repeat, and every other control is reported.",
+               control holds gets no Status, on every control. Unset by default: every \
+               write is reported, a repeat included.",
     },
     EnvVar {
         name: "SVOLDER_FAKE_SEVER_AFTER_MS",

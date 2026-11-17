@@ -230,6 +230,24 @@ fn the_vu_rows_are_in_the_device_still_from_100_by_45_and_read_the_seeded_signal
         );
     }
     assert!(tall.contains("(0 VU = -18 dBFS)"), "{tall}");
-    // The README's size (120 by 40) is below 100 by 45 in height: its stills carry no meter.
-    assert!(!rows((120, 40)).contains("VU L"));
+    // Below 45 rows the stills carry no meter.
+    assert!(!rows((120, 44)).contains("VU L"));
+}
+
+#[test]
+fn the_readme_device_still_draws_the_vu_rows() {
+    let shot = text(&still(&stand_in(), Still::Dac).buffer).join("\n");
+    assert!(shot.contains("VU L") && shot.contains("VU R"), "{shot}");
+}
+
+#[test]
+fn only_the_device_still_is_drawn_tall_and_the_others_stay_120_by_40() {
+    for s in Still::ALL {
+        let want = if s == Still::Dac {
+            (120, 45)
+        } else {
+            (120, 40)
+        };
+        assert_eq!(s.size(), want, "{}", s.name());
+    }
 }

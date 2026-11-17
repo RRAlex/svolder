@@ -12,7 +12,7 @@ use svolder_ipc::ValueObject;
 use crate::backend::{Backend, Failure, Globals, OnlyWhile, Update};
 use crate::commands::interrupts::Presses;
 use crate::format::print_value;
-use crate::recovery::Kind;
+use crate::recovery::{DAEMON_STOPPED, Kind};
 
 use super::{exit_for, open_watched, print_values};
 
@@ -198,15 +198,7 @@ async fn watch_loop<F: Future<Output = ()>>(
                 Ok(Some(Update::Recalled(_) | Update::Host(_))) => continue,
                 // The link is gone for good: the session spent its reconnect deadline and the
                 // grace after it, or the daemon's stream ended.
-                Ok(None) => {
-                    let what = match backend.connect_deadline() {
-                        Some(deadline) => format!(
-                            "connection failed: device did not reconnect within {deadline:?}"
-                        ),
-                        None => "connection failed: the daemon stopped sending events".to_string(),
-                    };
-                    return Failure::of(Kind::Dropped, what).report();
-                }
+                Ok(None) => return feed_ended(backend).await.report(),
                 Err(e) => {
                     eprintln!("svolder: {e}");
                     return exit_for(&e);
@@ -214,6 +206,24 @@ async fn watch_loop<F: Future<Output = ()>>(
             },
         }
     }
+}
+
+/// Why a feed that ended did: a daemon that no longer answers on its socket stopped, and any
+/// other end is the link, which spent its reconnect deadline or (through a daemon that still
+/// answers) went quiet.
+async fn feed_ended(backend: &Backend) -> Failure {
+    if let Some(socket) = backend.daemon_socket()
+        && !svolder_ipc::is_running(&socket).await
+    {
+        return Failure::of(Kind::DaemonStopped, DAEMON_STOPPED);
+    }
+    let what = match backend.connect_deadline() {
+        Some(deadline) => {
+            format!("connection failed: device did not reconnect within {deadline:?}")
+        }
+        None => "connection failed: the daemon stopped sending events".to_string(),
+    };
+    Failure::of(Kind::Dropped, what)
 }
 
 #[cfg(test)]

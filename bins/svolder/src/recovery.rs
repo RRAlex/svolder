@@ -53,6 +53,8 @@ pub enum Kind {
     UnknownProduct,
     /// Nothing is listening on the daemon's socket.
     NoDaemon,
+    /// The daemon that was answering went away under the command: the device is not at fault.
+    DaemonStopped,
     /// A flag, a value or an environment knob the command line got wrong.
     Usage,
 }
@@ -64,7 +66,7 @@ impl Kind {
         dead_code,
         reason = "the table is walked by the test that checks every step"
     )]
-    pub const ALL: [Kind; 14] = [
+    pub const ALL: [Kind; 15] = [
         Kind::NoAdapter,
         Kind::AdapterMissing,
         Kind::NothingInRange,
@@ -78,6 +80,7 @@ impl Kind {
         Kind::ConfigUnreadable,
         Kind::UnknownProduct,
         Kind::NoDaemon,
+        Kind::DaemonStopped,
         Kind::Usage,
     ];
 
@@ -101,7 +104,8 @@ impl Kind {
             | Kind::Dropped
             | Kind::DaemonError
             | Kind::AutospawnFailed
-            | Kind::NoDaemon => CODE_LINK,
+            | Kind::NoDaemon
+            | Kind::DaemonStopped => CODE_LINK,
         }
     }
 }
@@ -161,9 +165,20 @@ pub fn next_step(kind: Kind) -> &'static str {
             "Run `svolder profiles list`; user profiles live in ~/.config/svolder/profiles"
         }
         Kind::NoDaemon => "Run `svolder daemon install`, or drop `--transport daemon`",
+        Kind::DaemonStopped => DAEMON_STOPPED_STEP,
         Kind::Usage => "See `svolder --help`",
     }
 }
+
+/// What to do once the daemon has stopped: start it again.
+const DAEMON_STOPPED_STEP: &str = "Start it again with `svolder daemon restart`";
+
+/// What is said when the daemon went away, in the words of [`svolder_ipc::IpcError::DaemonGone`].
+pub const DAEMON_STOPPED: &str = "The svolder daemon stopped.";
+
+/// The step after a write that was sent and not confirmed: the device may have applied it.
+const UNCONFIRMED_STEP: &str =
+    "Read it back with `svolder get KEY` (or `svolder status`); the device may have applied it";
 
 /// The step after the daemon's "not found yet": it is still looking, so the device is what to
 /// check.
@@ -177,6 +192,8 @@ pub fn daemon_step(code: u8, message: &str, reason: Option<Reason>) -> &'static 
     match (code, reason_of(code, message, reason)) {
         (CODE_USAGE, _) => next_step(Kind::Usage),
         (_, Some(Reason::NotFoundYet)) => NOT_FOUND_STEP,
+        (CODE_TIMEOUT, _) if message.starts_with("sent, not confirmed") => UNCONFIRMED_STEP,
+        (CODE_TIMEOUT, _) if message.starts_with("not sent") => next_step(Kind::Dropped),
         _ => next_step(Kind::DaemonError),
     }
 }
@@ -270,6 +287,15 @@ impl Failure {
         }
     }
 
+    /// A failure of the conversation with the daemon: the daemon going away says so and names
+    /// the step of starting it again, every other error is a daemon error in its own words.
+    pub fn from_ipc(err: &svolder_ipc::IpcError) -> Failure {
+        match err.daemon_gone() {
+            true => Failure::of(Kind::DaemonStopped, DAEMON_STOPPED),
+            false => Failure::of(Kind::DaemonError, err.to_string()),
+        }
+    }
+
     /// A direct session's own failure, with the exit code its kind earns and the step that
     /// kind of trouble calls for.
     ///
@@ -278,7 +304,15 @@ impl Failure {
     pub fn from_ble(err: &BleError) -> Failure {
         Failure {
             code: code_for(err),
-            what: err.to_string(),
+            // The daemon's going away stands alone, without the link's "connection failed".
+            what: match err {
+                _ if daemon_stopped(err) => DAEMON_STOPPED.to_string(),
+                // The adapter's busy words alone; the daemon's own log keeps the prefix.
+                BleError::Adapter(words) if words == svolder_ble::error::ADAPTER_BUSY => {
+                    words.clone()
+                }
+                _ => err.to_string(),
+            },
             next: ble_next_step(err).to_string(),
             reason: None,
         }
@@ -338,6 +372,18 @@ impl Failure {
     }
 }
 
+/// The step after an adapter that another scan or connection holds: the svolder daemon, when one
+/// runs, is the usual holder.
+const ADAPTER_BUSY_STEP: &str = "The svolder daemon, if it runs, holds it: `svolder status` shows \
+     it; stop it with `svolder daemon stop` or wait, then try again";
+
+/// Whether `err` is the daemon's going away, which `daemon_link_error` (backend/remote.rs)
+/// carries as a [`BleError::Connection`] holding exactly [`DAEMON_STOPPED`]; nothing may wrap
+/// those words.
+fn daemon_stopped(err: &BleError) -> bool {
+    matches!(err, BleError::Connection(words) if words == DAEMON_STOPPED)
+}
+
 /// The step a [`BleError`] calls for, by what the error says went wrong.
 ///
 /// A frame that could not be encoded or decoded is the one departure from the table: the link
@@ -346,9 +392,12 @@ impl Failure {
 fn ble_next_step(err: &BleError) -> &'static str {
     match err {
         BleError::NotFound => next_step(Kind::NothingInRange),
+        BleError::Adapter(words) if words == svolder_ble::error::ADAPTER_BUSY => ADAPTER_BUSY_STEP,
         BleError::Adapter(_) => next_step(Kind::AdapterMissing),
         BleError::PassphraseRejected => next_step(Kind::Refused),
-        BleError::Connection(_) | BleError::Timeout(_) | BleError::Bootloader => {
+        _ if daemon_stopped(err) => next_step(Kind::DaemonStopped),
+        BleError::Timeout(_) | BleError::Unconfirmed { .. } => UNCONFIRMED_STEP,
+        BleError::Connection(_) | BleError::NotSent(_) | BleError::Bootloader => {
             next_step(Kind::Dropped)
         }
         BleError::Proto(_) | BleError::Profile(_) => INSPECT,
@@ -363,7 +412,7 @@ pub fn code_for(err: &BleError) -> u8 {
         | BleError::Bootloader
         | BleError::PassphraseRejected
         | BleError::Adapter(_) => CODE_LINK,
-        BleError::Timeout(_) => CODE_TIMEOUT,
+        BleError::Timeout(_) | BleError::Unconfirmed { .. } | BleError::NotSent(_) => CODE_TIMEOUT,
         BleError::Proto(_) | BleError::Profile(_) => CODE_USAGE,
     }
 }
@@ -386,6 +435,33 @@ mod tests {
                 "{kind:?}: {next}"
             );
         }
+    }
+
+    /// A daemon that went away reads as the words and the start command, with the link code,
+    /// never as a device fault; any other IPC error stays a daemon error.
+    #[test]
+    fn a_daemon_that_went_away_is_said_so_and_never_blames_the_device() {
+        let gone = Failure::from_ipc(&svolder_ipc::IpcError::from_wire(std::io::Error::from(
+            std::io::ErrorKind::BrokenPipe,
+        )));
+        assert_eq!(gone.code, 3);
+        assert_eq!(
+            gone.to_string(),
+            "The svolder daemon stopped. Start it again with `svolder daemon restart`"
+        );
+        assert_eq!(gone.what, svolder_ipc::IpcError::DaemonGone.to_string());
+        let other = Failure::from_ipc(&svolder_ipc::IpcError::Protocol("odd".into()));
+        assert!(other.what.contains("odd") && other.next.contains("daemon logs"));
+    }
+
+    /// A busy adapter names the daemon and `svolder status` as the step, and never sends the
+    /// user to `svolder doctor`, which is what hit the busy adapter.
+    #[test]
+    fn a_busy_adapter_is_not_sent_to_doctor() {
+        let busy = Failure::from_ble(&BleError::from_bluez_text("Operation already in progress"));
+        assert_eq!(busy.what, svolder_ble::error::ADAPTER_BUSY);
+        assert!(busy.next.contains("svolder status"), "{}", busy.next);
+        assert!(!busy.next.contains("doctor"), "{}", busy.next);
     }
 
     /// A failure reads as what happened and then what to do, and keeps the code its kind
@@ -429,7 +505,7 @@ mod tests {
     fn a_ble_failure_keeps_its_own_code_and_takes_its_kind_s_step() {
         let timeout = Failure::from_ble(&BleError::Timeout(Duration::from_secs(2)));
         assert_eq!(timeout.code, 4);
-        assert_eq!(timeout.next, next_step(Kind::Dropped));
+        assert_eq!(timeout.next, UNCONFIRMED_STEP);
         let adapter = Failure::from_ble(&BleError::Adapter("no adapter named hci9".into()));
         assert_eq!(adapter.code, Kind::AdapterMissing.code());
         assert_eq!(adapter.next, next_step(Kind::AdapterMissing));

@@ -446,7 +446,7 @@ async fn the_link_part_holds_no_menu_button() {
     let link = said["device"]["link"].as_object().expect("the link part");
     let mut keys: Vec<&str> = link.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["state", "word"]);
+    assert_eq!(keys, ["old", "state", "word"]);
     device.stop().await;
 }
 

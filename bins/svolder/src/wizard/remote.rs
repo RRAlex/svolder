@@ -132,7 +132,7 @@ impl RemoteWalk {
                 format!("the daemon sent an unexpected reply: {other:?}"),
             ),
             Err(IpcError::Refused(answer)) => self.failure(Ok(*answer)),
-            Err(e) => Failure::of(Kind::DaemonError, e.to_string()),
+            Err(e) => Failure::from_ipc(&e),
         }
     }
 
@@ -516,7 +516,7 @@ fn started_badly(socket: &std::path::Path, reply: Result<Response, IpcError>) ->
             format!("the daemon sent an unexpected reply: {other:?}"),
         ),
         Err(IpcError::Refused(answer)) => started_badly(socket, Ok(*answer)),
-        Err(e) => Failure::of(Kind::DaemonError, e.to_string()),
+        Err(e) => Failure::from_ipc(&e),
     }
 }
 

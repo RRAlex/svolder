@@ -19,20 +19,38 @@ use crate::locks::locked;
 use crate::log;
 
 /// How long the actor waits between failed discover-and-connect attempts, one step per
-/// consecutive failure, the last one repeating as long as the device stays away.
+/// consecutive failure: 2, 5, 15 and then 30 seconds, the last step repeating as long as the
+/// device stays away.
 ///
-/// Growing the steps avoids scanning continuously for a device that is off — power spent on a
+/// Growing the steps avoids scanning continuously for a device that is off (power spent on a
 /// device that is not there, and a scan every other user of the radio on the host has to share
-/// the air with — while the last step (within a minute) still picks it back up promptly. A
-/// command that needs the link, or a changed configuration entry, ends the wait early (see
+/// the air with), while the cap picks up a device that came back within 30 seconds.
+/// A command that needs the link, or a changed configuration entry, ends the wait early (see
 /// [`Command::ends_the_wait`]).
-pub(super) const RETRY_SCHEDULE: [Duration; 5] = [
+pub(super) const RETRY_SCHEDULE: [Duration; 4] = [
     Duration::from_secs(2),
     Duration::from_secs(5),
     Duration::from_secs(15),
     Duration::from_secs(30),
-    Duration::from_secs(60),
 ];
+
+/// How long one discover-and-connect attempt runs before it is cut off: the listen, the connect,
+/// the service discovery, the subscribe and the first refresh.
+///
+/// A plain attempt is about 25 seconds at worst; one whose automatic code was refused listens
+/// and connects a second time under the same bound, and an expiry there costs one retry. A BlueZ
+/// call that never answers would otherwise hold the retry loop for as long as it likes. Past the
+/// bound the attempt fails with [`timed_out`], its link is released (up to about 13 seconds
+/// more: a disconnect and the close grace), and the next retry follows [`RETRY_SCHEDULE`].
+pub(super) const ATTEMPT_BOUND: Duration = Duration::from_secs(45);
+
+/// The failure reason for an attempt that ran past [`ATTEMPT_BOUND`] in `step`.
+pub(super) fn timed_out(step: &str) -> String {
+    format!(
+        "the connect attempt did not finish within {} s ({step})",
+        ATTEMPT_BOUND.as_secs()
+    )
+}
 
 /// What the supervision loop woke up for.
 pub(super) enum Woke {

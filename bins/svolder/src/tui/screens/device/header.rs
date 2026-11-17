@@ -11,6 +11,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::format::READINGS_OLD;
 use crate::tui::app::{App, Screen};
 use crate::tui::decoration::wordmark::{self, Size};
 use crate::tui::layout_tier::Tier;
@@ -317,12 +318,33 @@ pub(in crate::tui::screens) fn header_built(
     let faults = fault_spans(app, theme);
     let mouse = mouse_span(app, theme);
     let clock = Span::raw(app.clock.clone());
+    // While the link is down every value on screen is from before it dropped: the header says so
+    // in the warning role, in the longest words that leave the device's name [`NAME_KEPT`] cells.
+    let old = app.readings_old().then(|| {
+        let fixed: usize = lead.iter().map(Span::width).sum::<usize>()
+            + after.iter().map(Span::width).sum::<usize>()
+            + words.width()
+            + faults.iter().map(Span::width).sum::<usize>()
+            + mouse.width()
+            + 1
+            + clock.width();
+        let room = width.saturating_sub(fixed + cells(&app.session.product).min(NAME_KEPT));
+        [READINGS_OLD, READINGS_STALE, STALE]
+            .into_iter()
+            .map(|text| format!("{OLD_GAP}{text}"))
+            .find(|text| cells(text) <= room)
+            .map_or_else(Span::default, |text| {
+                Span::styled(text, theme.style(Role::Warn))
+            })
+    });
+    let old = old.unwrap_or_default();
 
     // The device's name gives way to everything else on the line: what follows it, the mouse
     // indicator and the clock stay whole, with a blank between, however long the name is.
     let kept: usize = lead.iter().map(Span::width).sum::<usize>()
         + after.iter().map(Span::width).sum::<usize>()
         + words.width()
+        + old.width()
         + faults.iter().map(Span::width).sum::<usize>()
         + mouse.width()
         + 1
@@ -336,10 +358,11 @@ pub(in crate::tui::screens) fn header_built(
     spans.extend(after);
     marks.push((
         Line::from(spans.clone()).width(),
-        words.width(),
+        words.width() + old.width(),
         Hit::Connection,
     ));
     spans.push(words);
+    spans.push(old);
     if !faults.is_empty() {
         let before = Line::from(spans.clone()).width();
         marks.push((before, faults.iter().map(Span::width).sum(), Hit::FaultMark));
@@ -356,6 +379,16 @@ pub(in crate::tui::screens) fn header_built(
     line.push_span(clock);
     (line, marks)
 }
+
+/// [`READINGS_OLD`] where the header has no room for it.
+const READINGS_STALE: &str = "readings stale";
+/// [`READINGS_STALE`] where the header has no room for that either.
+const STALE: &str = "stale";
+/// The cells of the device's name the header keeps whole before the words on the readings give
+/// way.
+const NAME_KEPT: usize = 8;
+/// The words between the link's state and what it says of the readings.
+const OLD_GAP: &str = " · ";
 
 /// The most cells of the computer EQ's name the header keeps.
 const HOST_EQ_NAME_MAX: usize = 24;

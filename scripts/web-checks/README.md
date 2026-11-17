@@ -329,6 +329,9 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   longer followed, the union of several owners' wants) and its actions (each posts today's
   request; a guest's or a read-only page's send nothing; a refusal is toasted and the model read again; the volume's cap and the raise that
   waits for a live stream; a device switch and its address), over fake streams, clocks and posts.
+- `node/core-old-readings.mjs`: the frame's badge on readings from before a link dropped (the lost-link card
+  or a lost stream shows it, the card going or the stream opening clears it; a resting page, a dim or fault
+  card and no device shown do not).
 - `node/core-title.mjs`: the tab's title the core keeps for every theme (the device, the status words,
   the parts a theme adds).
 - `node/core-repeat.mjs`: the held `−` and `+` the core gives every theme (a step at the press, the
@@ -587,7 +590,9 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `frame_button.py`: the frame's menu button is the same in every theme the registry lists (Night drive
   too): 44 by 44 px, 8 px from the top and the right, at 1280x800, 768x1024, 412x915 and 360x780, for a
   signed-in viewer and a guest, and nothing the theme draws stands under it, with the scrolled case really
-  scrolling where a page can.
+  scrolling where a page can. It also checks the frame's `old readings` badge in every theme (a lost-link
+  card or a lost stream shows it, named `readings from before the link dropped`, fixed bottom left and clear
+  of the button; the card going takes it away).
 - `space_key.py`: the frame's Space key in all four themes: on the page body one press of the player's button
   is posted (relative `api/v1/host/press`) and the page does not scroll; on a focused button that button is
   activated and nothing is posted; an open menu owns the key; in a text field it types; with no player on the page

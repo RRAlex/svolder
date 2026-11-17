@@ -69,6 +69,7 @@ async fn reload_on(socket: &Path) -> Result<String, Failure> {
             Kind::DaemonError,
             format!("the daemon answered {other:?} rather than reloading"),
         )),
+        Err(e) if e.daemon_gone() => Err(Failure::from_ipc(&e)),
         Err(e) => Err(Failure::of(
             Kind::DaemonError,
             format!("the daemon did not reload: {e}"),

@@ -70,6 +70,18 @@ ok('the_verdict_shows_when_the_computer_changes_the_sound', () => {
   assert.equal(topLine(page({ host: { route: { host_eq: false } } }), 'open').right, '');
 });
 
+ok('the_top_line_names_the_dacs_own_stage', () => {
+  const hops = [{ label: 'DAC', detail: 'USB, 96 kHz, volume \u22123.3 dB, tone control', changes: true }];
+  const p = page({}, { playing: { path: { ...pathOf(false), hops } } });
+  const t = topLine(p, 'open');
+  assert.equal(t.right, 'DAC volume \u22123.3 dB \u00b7 tone control');
+  assert.equal(t.tone, 'warn');
+  const both = topLine(page({ host: { route: { host_eq: true } } }, { playing: { path: { ...pathOf(true), hops } } }), 'open');
+  assert.match(both.right, /^host EQ on .* \u00b7 DAC volume/);
+  const flat = [{ label: 'DAC', detail: 'USB, 96 kHz', changes: false }];
+  assert.equal(topLine(page({}, { playing: { path: { ...pathOf(false), hops: flat } } }), 'open').right, '');
+});
+
 ok('the_verdict_names_the_stage_the_path_names', () => {
   const route = { host: { route: { host_eq: true } } };
   const through = (words) => ({ playing: { path: { ...pathOf(true), words } } });

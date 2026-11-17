@@ -81,10 +81,13 @@ function about(device, linkId, tools) {
 /** The open area of the amp `device`: power, meters, the amp itself. `dac` is the name of the DAC
  * the line shows (for the note that the level is its), `linkId` the configuration's id of the hop
  * that links the amp; `tools` is what the hop's own buttons draw (its note, its moves). */
-export function ampScreen(device, { dac, linkId, tools = '' }) {
+export function ampScreen(device, { dac, linkId, tools = '', old = false }) {
   if (!device) return `<p class="sg-note">${esc(AMP.reading)}</p>`;
   const powerBox = power(device);
-  return `<section id="sg-amp-power" class="sg-ampcol sg-box2">${powerBox}`
+  // A linked amp is not the device shown: its own link's drop is said here, beside its readings.
+  // The line is always there (hidden while the link is up), so the power box never moves when it drops.
+  const stale = `<p class="sg-note sg-old${old ? '' : ' sg-off'}"${old ? ` title="${esc(AMP.old)}"` : ' aria-hidden="true"'}>${esc(AMP.old)}</p>`;
+  return `<section id="sg-amp-power" class="sg-ampcol sg-box2">${stale}${powerBox}`
     + `<p class="sg-note">${esc(AMP.noVolume(dac))}</p></section>`
     + `<section id="sg-amp-meters" class="sg-ampcol">${meters(device)}</section>`
     + `<section id="sg-amp-about" class="sg-ampcol">${about(device, linkId, tools)}</section>`;

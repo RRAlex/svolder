@@ -2,7 +2,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 // The frame: what the page draws over every theme and never hands to one. The menu's button (over
 // the slot a theme anchors it to, else at the top right), the menu it opens (menu.js), the picker
-// of themes (picker.js), the toasts (toast.js) and the keys: every key goes to the top modal of
+// of themes (picker.js), the toasts (toast.js), the badge on readings from before a link dropped
+// (old-readings.js) and the keys: every key goes to the top modal of
 // the core's stack while one is open (modal.js); else the reserved key `T` opens the picker
 // whatever the theme does with its keys, unless a sheet of the theme's own stands over the page
 // (`?` opens the Help popup under the same rule, through the router; no key table binds it),
@@ -36,6 +37,7 @@
 
 import { HELP, TYPING } from './keys.js';
 import { createMenu, inMenu, menuOwns } from './menu.js';
+import { createOldBadge } from './old-readings.js';
 import { createPicker } from './picker.js';
 import { dismissToast, toast } from './toast.js';
 
@@ -121,6 +123,8 @@ export function createFrame({ window, core, pick }) {
   // First in the page, so the button is the first stop of the Tab key; its layer is above the
   // theme's by z-index, not by order.
   document.body.prepend(root);
+  // The mark on readings from before a link dropped, which every theme shows alike.
+  createOldBadge({ document, root, store: core.model });
 
   // ---- where the button sits ----
   let slot = null;

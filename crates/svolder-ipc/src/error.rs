@@ -10,9 +10,14 @@ use svolder_profiles::tone::preset::NameRefusal;
 /// A failure in the socket protocol or transport.
 #[derive(Debug, thiserror::Error)]
 pub enum IpcError {
-    /// The underlying socket I/O failed.
+    /// The underlying socket I/O failed for a reason that is not the daemon going away (a
+    /// permission, a path too long); the ones that mean it went are [`IpcError::DaemonGone`].
     #[error("socket io: {0}")]
     Io(#[from] std::io::Error),
+    /// The daemon went away under a conversation: the pipe broke, the connection was reset or
+    /// closed mid-reply, or the socket is missing or refused. The device is not at fault.
+    #[error("The svolder daemon stopped.")]
+    DaemonGone,
     /// A line could not be encoded or decoded as JSON.
     #[error("protocol json: {0}")]
     Json(#[from] serde_json::Error),
@@ -35,6 +40,29 @@ pub enum IpcError {
     /// No daemon is listening on the socket.
     #[error("no daemon is listening")]
     NotRunning,
+}
+
+impl IpcError {
+    /// The error for a read or write that failed on a conversation already under way: a broken
+    /// pipe, a reset or aborted connection and a stream cut short mean the daemon went away
+    /// ([`IpcError::DaemonGone`]); any other failure stays [`IpcError::Io`]. Only the client's
+    /// wire reads and writes call this, so the daemon's own socket errors (a bind that cannot
+    /// find its directory) keep their words.
+    pub fn from_wire(err: std::io::Error) -> IpcError {
+        use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, UnexpectedEof};
+        match err.kind() {
+            BrokenPipe | ConnectionReset | ConnectionAborted | UnexpectedEof => {
+                IpcError::DaemonGone
+            }
+            _ => IpcError::Io(err),
+        }
+    }
+
+    /// Whether the daemon is not there to talk to: it went away mid-conversation, or nothing
+    /// listens on the socket.
+    pub fn daemon_gone(&self) -> bool {
+        matches!(self, IpcError::DaemonGone | IpcError::NotRunning)
+    }
 }
 
 /// The words of a refused answer: its message, or a note when the answer is of another kind.
@@ -172,4 +200,51 @@ pub(crate) fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
         .map_or(0, |last| last.chars().count())
         + 1;
     (line, column)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Error, ErrorKind};
+
+    use super::*;
+
+    /// A wire failure that means the peer went away is the one typed case, in plain words.
+    #[test]
+    fn wire_failures_that_mean_the_daemon_went_are_one_typed_case() {
+        for kind in [
+            ErrorKind::BrokenPipe,
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::UnexpectedEof,
+        ] {
+            let err = IpcError::from_wire(Error::from(kind));
+            assert!(matches!(err, IpcError::DaemonGone), "{kind:?}: {err:?}");
+            assert!(err.daemon_gone());
+            assert_eq!(err.to_string(), "The svolder daemon stopped.");
+        }
+    }
+
+    /// An error that is not a wire failure, and every error through `?` (a bind on a missing
+    /// directory included), keeps its own words; a missing listener counts as gone.
+    #[test]
+    fn other_io_failures_stay_io_and_no_listener_counts_as_gone() {
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::NotFound,
+            ErrorKind::ConnectionRefused,
+        ] {
+            let wire = IpcError::from_wire(Error::from(kind));
+            assert!(matches!(wire, IpcError::Io(_)), "{wire:?}");
+            assert!(!wire.daemon_gone());
+        }
+        let bind = IpcError::from(Error::from(ErrorKind::NotFound));
+        assert!(matches!(bind, IpcError::Io(_)), "{bind:?}");
+        assert!(
+            IpcError::from(Error::from(ErrorKind::BrokenPipe))
+                .to_string()
+                .starts_with("socket io")
+        );
+        assert!(IpcError::NotRunning.daemon_gone());
+        assert!(!IpcError::Protocol("x".into()).daemon_gone());
+    }
 }

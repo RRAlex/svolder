@@ -1089,9 +1089,7 @@ impl Task {
         tokio::spawn(async move {
             match outcome.await {
                 Ok(Outcome::Done(Response::Error { message, .. })) => {
-                    log::warn(&format!(
-                        "{who}: the switch to EQ was not written: {message}"
-                    ));
+                    log::warn(&format!("{who}: the switch to EQ: {message}"));
                 }
                 Ok(Outcome::Cancelled(why)) => {
                     log::warn(&format!("{who}: the switch to EQ was not written: {why}"));
@@ -2342,7 +2340,7 @@ fn timed_out(response: &Response) -> bool {
     else {
         return false;
     };
-    message.starts_with("no confirmation within ") || message.contains(" did not answer within ")
+    message.starts_with("sent, not confirmed") || message.contains(" did not answer within ")
 }
 
 /// The answer for a device whose actor has stopped.

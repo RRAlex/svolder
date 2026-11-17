@@ -8,6 +8,41 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.36.4
+
+- **Phone fixes**: on a phone, Signal's toasts and the "old readings" mark sit above the taller
+  Now playing bar, and Ember's path chip for the DAC shows its volume as the bare level, so the
+  row of chips stays whole.
+
+## 0.36.3
+
+- **Reconnects come sooner**: the daemon retries a missing device after 2, 5 and 15 seconds and
+  then every 30 seconds (it waited up to a minute before), and one connect attempt is cut off
+  after 45 seconds with its reason in the log, so a stuck Bluetooth call no longer holds up
+  reconnecting.
+- **"The svolder daemon stopped."**: when the daemon goes away, the TUI and every command say so
+  in those words, with the command that starts it again, instead of a raw "Broken pipe" or a
+  claim that the device did not come back; the TUI picks the daemon up again by itself when it
+  returns. `scan` and `doctor` on a busy adapter say it is busy with another scan or connection.
+- **A write is confirmed by the device**: the answer to a write is the device's own report
+  received after it; on a weak link an older report is no longer shown as the answer, and when
+  none arrives within 2 seconds the command says "sent, not confirmed" with the device's last
+  report (exit code 4).
+- **Old readings are marked**: while the link is down, or the daemon stopped, the TUI and every
+  web theme mark the readings as from before the drop, until the first fresh reading.
+- **The path line names what the DAC changes**: a volume below 0 dB, a tone control that is not
+  flat, a balance off centre, mute, phase invert and the NOS filter.
+- **Signal on a phone**: the Now playing time no longer runs out of its row; the progress bar
+  takes its own line above the buttons.
+- **README pictures**: the device screen and the animation show the VU rows, and a new Signal
+  phone picture shows the level meters.
+
+## 0.36.2
+
+- **svolder no longer crashes `bluetoothd` on BlueZ 5.87 when it scans**: the scan asks the
+  adapter for every device and keeps the Forkbeards by their advertisement, where it used to
+  filter by service, which BlueZ 5.87 cannot do without crashing.
+
 ## 0.36.1
 
 - **`untouched` says what it cannot see**: the signal path's verdict covers the computer and the

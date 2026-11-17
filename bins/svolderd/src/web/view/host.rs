@@ -9,11 +9,12 @@
 
 use svolder_host::Progress;
 use svolder_ipc::host::{
-    DacFacts, HostView, PathLine, PlayingView, ROUTE_NOT_READ, Verdict, path_line, sink_is_dac,
+    DacFacts, DacStage, HostView, PathLine, PlayingView, ROUTE_NOT_READ, Verdict, path_line,
+    sink_is_dac,
 };
 use svolder_profiles::Family;
 
-use super::{Access, Snapshot};
+use super::{Access, Snapshot, minus};
 
 /// The Now playing card of a device's screen.
 #[derive(Debug)]
@@ -224,7 +225,13 @@ fn dac_facts(s: &Snapshot) -> DacFacts {
             ..DacFacts::default()
         };
     };
-    DacFacts::read(profile, |id| s.raw(id))
+    let mut facts = DacFacts::read(profile, |id| s.raw(id));
+    // The readings held while the link is down are from before the drop: the device's own stage
+    // is not claimed from them.
+    if !s.info.connected {
+        facts.stage = DacStage::default();
+    }
+    facts
 }
 
 /// The path line as the card shows it.
@@ -241,7 +248,7 @@ fn path(line: &PathLine) -> Path {
             .iter()
             .map(|hop| Hop {
                 label: hop.label.clone(),
-                detail: hop.detail.clone(),
+                detail: minus(&hop.detail),
                 changes: hop.changes,
                 unknown: hop.unknown,
             })

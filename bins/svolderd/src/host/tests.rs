@@ -534,6 +534,7 @@ async fn the_fake_host_plays_a_fixed_track_with_its_cover_and_route() {
             input: None,
             rate_hz: sink.rate_hz,
             usb_ports: None,
+            stage: Default::default(),
         }
     ));
     assert_eq!(
@@ -706,6 +707,7 @@ async fn the_changed_fake_route_changes_everything() {
         input: None,
         rate_hz: Some(FAKE_RATE_HZ),
         usb_ports: None,
+        stage: Default::default(),
     };
     let line = svolder_ipc::host::path_line(&facts, &dac);
     assert_eq!(line.verdict, svolder_ipc::host::Verdict::Changed);
@@ -734,6 +736,7 @@ async fn the_fake_route_follows_the_fake_computers_eq() {
         input: Some("USB".to_string()),
         rate_hz: Some(FAKE_RATE_HZ),
         usb_ports: None,
+        stage: Default::default(),
     };
     let verdict = || async {
         let facts = routes.read(Some(track("x", None))).await.expect("a route");
@@ -807,6 +810,7 @@ async fn the_fake_route_follows_the_fake_computers_volume() {
         input: Some("USB".to_string()),
         rate_hz: Some(FAKE_RATE_HZ),
         usb_ports: None,
+        stage: Default::default(),
     };
     let line = || async {
         let facts = routes.read(Some(track("x", None))).await.expect("a route");

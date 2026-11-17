@@ -13,6 +13,7 @@ fn dac() -> DacFacts {
         input: Some("USB".into()),
         rate_hz: Some(48_000),
         usb_ports: None,
+        stage: Default::default(),
     }
 }
 
@@ -867,8 +868,144 @@ fn an_assumed_player_keeps_its_words_in_the_untouched_sentence() {
 }
 
 #[test]
-fn a_changed_path_has_no_sentence() {
+fn a_changed_path_with_no_dac_stage_has_no_sentence() {
     let mut route = clean();
     route.sink.as_mut().unwrap().volume_milli = Some(540);
     assert_eq!(path_line(&route, &dac()).sentence(), None);
+}
+
+/// A Bifrost 3 read with its volume at `volume`, its tone control at `mode` and its balance at
+/// `balance` (raw values).
+fn bifrost_reading(volume: i64, mode: i64, balance: i64) -> DacFacts {
+    let bifrost = builtin("bifrost3");
+    let id = |key: &str| bifrost.control_by_key(key).expect(key).id;
+    let (select, rate, vol, bal) = (id("input"), id("sample_rate"), id("volume"), id("balance"));
+    let mode_id = bifrost.eq.as_ref().expect("an EQ").mode_id();
+    DacFacts::read(&bifrost, |asked| match asked {
+        asked if asked == select => Some(1),
+        asked if asked == rate => Some(2),
+        asked if asked == vol => Some(volume),
+        asked if asked == bal => Some(balance),
+        asked if asked == mode_id => Some(mode),
+        _ => None,
+    })
+}
+
+/// The route of a Bifrost 3 playing at 48 kHz.
+fn bifrost_route() -> RouteFacts {
+    RouteFacts {
+        sink: Some(SinkFacts {
+            usb_product: Some("Bifrost 3".into()),
+            ..schiit_sink()
+        }),
+        ..clean()
+    }
+}
+
+#[test]
+fn the_dac_adds_nothing_at_0_db_flat_and_centred() {
+    let facts = bifrost_reading(127, 1, 64);
+    assert!(!facts.stage.changes());
+    let line = path_line(&bifrost_route(), &facts);
+    assert_eq!(line.dac_stage, None);
+    assert!(line.hops.iter().all(|hop| !hop.changes));
+    assert!(!line.sentence().unwrap().contains("then"));
+}
+
+#[test]
+fn the_dac_names_a_volume_below_0_db() {
+    // Raw 117 is -3.3 dB on the DAC's table.
+    let line = path_line(&bifrost_route(), &bifrost_reading(117, 1, 64));
+    assert_eq!(line.verdict, Verdict::Untouched);
+    assert_eq!(line.words, vec!["untouched".to_string()]);
+    assert_eq!(
+        line.dac_stage.as_deref(),
+        Some("the Bifrost 3 then lowers it by 3.3 dB")
+    );
+    assert_eq!(
+        line.sentence().as_deref(),
+        Some(
+            "untouched from the player's output on; the Bifrost 3 then lowers it by 3.3 dB; the \
+             player may still change the sound itself (loudness normalization, its own EQ)"
+        )
+    );
+    let dac = &line.hops[2];
+    assert!(dac.changes);
+    assert_eq!(dac.detail, "USB, 48 kHz, volume -3.3 dB");
+}
+
+#[test]
+fn the_dac_names_its_tone_control_and_balance_and_combines_them() {
+    let tone = path_line(&bifrost_route(), &bifrost_reading(127, 2, 64));
+    assert_eq!(
+        tone.dac_stage.as_deref(),
+        Some("the Bifrost 3 then shapes it with its tone control")
+    );
+    let loud = path_line(&bifrost_route(), &bifrost_reading(127, 3, 64));
+    assert_eq!(loud.dac_stage, tone.dac_stage);
+    let balance = path_line(&bifrost_route(), &bifrost_reading(127, 1, 70));
+    assert_eq!(
+        balance.dac_stage.as_deref(),
+        Some("the Bifrost 3 then shifts the balance")
+    );
+    let all = path_line(&bifrost_route(), &bifrost_reading(117, 2, 70));
+    assert_eq!(
+        all.dac_stage.as_deref(),
+        Some(
+            "the Bifrost 3 then lowers it by 3.3 dB, shapes it with its tone control and shifts \
+             the balance"
+        )
+    );
+    assert_eq!(
+        all.hops[2].detail,
+        "USB, 48 kHz, volume -3.3 dB, tone control, balance off centre"
+    );
+}
+
+#[test]
+fn a_silent_dac_volume_is_named_and_a_changed_path_gets_a_sentence_for_it() {
+    let line = path_line(&bifrost_route(), &bifrost_reading(0, 1, 64));
+    assert_eq!(
+        line.dac_stage.as_deref(),
+        Some("the Bifrost 3 then silences it")
+    );
+    let mut route = bifrost_route();
+    route.sink.as_mut().unwrap().volume_milli = Some(540);
+    let line = path_line(&route, &bifrost_reading(117, 1, 64));
+    assert_eq!(line.verdict, Verdict::Changed);
+    assert_eq!(
+        line.sentence().as_deref(),
+        Some("computer volume 54 %; the Bifrost 3 then lowers it by 3.3 dB")
+    );
+}
+
+#[test]
+fn the_dac_names_its_mute_phase_and_nos_filter() {
+    let mut facts = bifrost_reading(127, 1, 64);
+    facts.stage.muted = true;
+    let line = path_line(&bifrost_route(), &facts);
+    assert_eq!(line.dac_stage.as_deref(), Some("the Bifrost 3 is muted"));
+    assert_eq!(line.hops[2].detail, "USB, 48 kHz, muted");
+    facts.stage.phase = true;
+    facts.stage.nos = true;
+    let line = path_line(&bifrost_route(), &facts);
+    assert_eq!(
+        line.dac_stage.as_deref(),
+        Some("the Bifrost 3 then inverts the phase and uses its NOS filter; it is muted")
+    );
+    assert_eq!(
+        line.hops[2].detail,
+        "USB, 48 kHz, muted, phase inverted, NOS filter"
+    );
+}
+
+#[test]
+fn the_dac_reads_its_toggles_from_the_profile() {
+    let bifrost = builtin("bifrost3");
+    let id = |key: &str| bifrost.control_by_key(key).expect(key).id;
+    let (mute, phase, nos) = (id("mute"), id("phase"), id("nos"));
+    let facts = DacFacts::read(&bifrost, |asked| {
+        Some(i64::from(asked == mute || asked == phase || asked == nos))
+    });
+    assert!(facts.stage.muted && facts.stage.phase && facts.stage.nos);
 }

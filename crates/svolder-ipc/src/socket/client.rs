@@ -124,20 +124,30 @@ impl Client {
         let id = self.next_id;
         self.next_id += 1;
         let line = to_line(&RequestLine { id, request })?;
-        self.write.write_all(line.as_bytes()).await?;
+        self.write
+            .write_all(line.as_bytes())
+            .await
+            .map_err(IpcError::from_wire)?;
         *sent = true;
         loop {
-            let bytes = match self.lines.next_line().await? {
+            let bytes = match self.lines.next_line().await.map_err(IpcError::from_wire)? {
                 Line::Bytes(bytes) => bytes,
                 Line::TooLong => {
                     self.broken = true;
                     return Err(IpcError::ReplyTooLong);
                 }
                 Line::Eof => {
-                    return Err(IpcError::Protocol("daemon closed the connection".into()));
+                    return Err(IpcError::DaemonGone);
                 }
             };
-            match serde_json::from_slice::<Reply>(&bytes)? {
+            let reply = match serde_json::from_slice::<Reply>(&bytes) {
+                Ok(reply) => reply,
+                // A reply the daemon was killed in the middle of writing ends at the stream's
+                // end without its newline.
+                Err(_) if self.lines.cut_short() => return Err(IpcError::DaemonGone),
+                Err(e) => return Err(e.into()),
+            };
+            match reply {
                 Reply::Response { id: rid, response } if rid == id => return Ok(response),
                 // The server refuses a line it cannot read under id 0 (it has no id to give),
                 // and this sends one request at a time, so that refusal is this request's.
@@ -206,16 +216,19 @@ impl Client {
         let id = self.next_id;
         self.next_id += 1;
         let line = to_line(&RequestLine { id, request })?;
-        self.write.write_all(line.as_bytes()).await?;
+        self.write
+            .write_all(line.as_bytes())
+            .await
+            .map_err(IpcError::from_wire)?;
         if !waits {
             return Ok(events_of(self.lines, self.write));
         }
         let first = loop {
-            let bytes = match self.lines.next_line().await? {
+            let bytes = match self.lines.next_line().await.map_err(IpcError::from_wire)? {
                 Line::Bytes(bytes) => bytes,
                 Line::TooLong => return Err(IpcError::ReplyTooLong),
                 Line::Eof => {
-                    return Err(IpcError::Protocol("daemon closed the connection".into()));
+                    return Err(IpcError::DaemonGone);
                 }
             };
             match serde_json::from_slice::<Reply>(&bytes) {
@@ -330,6 +343,65 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             let path = temp_socket();
             assert!(!is_running(&path).await);
+        })
+        .await
+        .expect("test timed out");
+    }
+
+    /// A daemon that closes the connection before it answers is the typed "daemon gone" case,
+    /// not a protocol fault.
+    #[tokio::test]
+    async fn a_connection_closed_before_the_reply_is_the_daemon_gone() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let path = temp_socket();
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                // Read the request, then close without a reply: a clean end of the stream.
+                let mut line = String::new();
+                let mut reader = BufReader::new(stream);
+                tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line)
+                    .await
+                    .unwrap();
+                drop(reader);
+            });
+            let mut client = Client::connect(&path).await.unwrap();
+            let err = client
+                .request(Request::State { device: None })
+                .await
+                .unwrap_err();
+            let _ = std::fs::remove_file(&path);
+            assert!(matches!(err, IpcError::DaemonGone), "{err:?}");
+        })
+        .await
+        .expect("test timed out");
+    }
+
+    /// A reply cut off mid-line when the daemon died is the daemon gone, not a JSON error.
+    #[tokio::test]
+    async fn a_reply_cut_off_mid_line_is_the_daemon_gone() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let path = temp_socket();
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line)
+                    .await
+                    .unwrap();
+                let mut stream = reader.into_inner();
+                tokio::io::AsyncWriteExt::write_all(&mut stream, b"{\"id\":1,\"respo")
+                    .await
+                    .unwrap();
+            });
+            let mut client = Client::connect(&path).await.unwrap();
+            let err = client
+                .request(Request::State { device: None })
+                .await
+                .unwrap_err();
+            let _ = std::fs::remove_file(&path);
+            assert!(matches!(err, IpcError::DaemonGone), "{err:?}");
         })
         .await
         .expect("test timed out");

@@ -145,8 +145,21 @@ impl App {
     /// clock's now. Every path that changes the link goes through here, so the header and the
     /// strip never disagree.
     pub fn link_changed(&mut self, connected: bool) {
+        // Nothing heard yet is nothing from before a drop.
+        if self.readings.values.is_empty() {
+            self.session.awaiting_fresh = false;
+        } else if !connected {
+            self.session.awaiting_fresh = true;
+        }
         self.session.connected = connected;
         self.readings.link.record(graph::wall_ms(), connected);
+    }
+
+    /// Whether the values on screen are from before the link dropped: the link is down, or is
+    /// back and no status has come since, and the device has said something earlier. A device that
+    /// was never heard has nothing to be old.
+    pub fn readings_old(&self) -> bool {
+        (!self.session.connected || self.session.awaiting_fresh) && !self.readings.values.is_empty()
     }
 
     /// Fold in one reading as of `now`, as [`App::apply`] says a status is folded in; `live`
@@ -158,6 +171,9 @@ impl App {
             return;
         };
         self.readings.unreported.remove(&id);
+        if self.session.connected {
+            self.session.awaiting_fresh = false;
+        }
         if let Entry::Occupied(mut pending) = self.readings.pending.entry(id) {
             let answered = pending.get_mut().answered(value.raw.as_i64());
             if answered {

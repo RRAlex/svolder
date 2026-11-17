@@ -227,8 +227,16 @@ impl Watching {
     /// Say that the device did not come back: the app's values can no longer be updated, so the
     /// link is drawn down as well as reported, and nothing is retrying it, so the header's
     /// spinner stops.
-    pub(super) fn gone(&mut self) {
-        self.app.write_failed(&Failure::of(Kind::Dropped, GONE));
+    ///
+    /// When `daemon_stopped`, it is the daemon that went: the words say so, with the step of
+    /// starting it and a note that the readings are from before the stop, and the device is not
+    /// blamed. Otherwise a daemon answered and the device did not come back.
+    pub(super) fn gone(&mut self, daemon_stopped: bool) {
+        let failure = match daemon_stopped {
+            true => Failure::of(Kind::DaemonStopped, DAEMON_STOPPED_SHOWN),
+            false => Failure::of(Kind::Dropped, GONE),
+        };
+        self.app.write_failed(&failure);
         self.app.link_changed(false);
         self.app.session.feed_open = false;
         self.app.host.daemon = None;
@@ -251,6 +259,22 @@ impl Watching {
         let looking = socket.clone();
         let probe = tokio::spawn(async move {
             let _ = tx.send(daemon_answers_within(&looking, window).await);
+        });
+        self.reconnect = Some(Reconnect {
+            socket,
+            answer,
+            probe,
+        });
+    }
+
+    /// Keep looking for a daemon on `socket` at a slow pace, with no end, once the wait for it
+    /// has given up: a daemon started again (by the step the words give) is taken up without a
+    /// key, as one that came back inside the wait is.
+    pub(super) fn keep_looking_for_daemon(&mut self, socket: PathBuf) {
+        let (tx, answer) = tokio::sync::oneshot::channel();
+        let looking = socket.clone();
+        let probe = tokio::spawn(async move {
+            let _ = tx.send(daemon_answers_every(&looking, DAEMON_SLOW_POLL).await);
         });
         self.reconnect = Some(Reconnect {
             socket,

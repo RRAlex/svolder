@@ -414,13 +414,11 @@ fn passphrase_clear_without_yes_on_a_non_tty_stdin_refuses() {
 #[test]
 fn eq_mode_sets_on_a_device_with_tone_control() {
     // gungnir2-v2 has a 5-band eq (id 12).
-    // The fake rests in flat, and a unit reports a change of the mode only, so a change is the
-    // write that is answered at once.
     let (code, out, err) = svolder(&["eq", "mode", "eq"]);
     assert_eq!(code, 0, "out={out} err={err}");
     assert!(out.contains("Tone control mode = eq"), "{out}");
-    // Each run starts a fresh fake in flat, so this writes the mode it is already in: no Status
-    // comes back, and the answer is still the mode, not an error.
+    // Each run starts a fresh fake in flat, so this writes the mode it is already in: the unit
+    // reports every write, so the answer is the mode.
     let (code, out, err) = svolder(&["eq", "mode", "flat"]);
     assert_eq!(code, 0, "out={out} err={err}");
     assert!(out.contains("Tone control mode = flat"), "{out}");

@@ -459,7 +459,7 @@ async fn the_fleet_lists_every_device_with_its_link_and_the_hops() {
     assert_eq!(devices[0]["family"], "dac");
     assert_eq!(
         devices[0]["link"],
-        json!({"word": "connected", "state": "on"})
+        json!({"word": "connected", "state": "on", "old": false})
     );
     assert_eq!(devices[1]["family"], "amp");
     assert_eq!(devices[1]["url"], "Aegir%202");

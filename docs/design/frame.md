@@ -363,13 +363,13 @@ a default for each.
 | `--frame-scrim` | the veil behind a sheet |
 | `--frame-shadow`, `--frame-toast-shadow` | the menu's and the picker's shadow; a toast's |
 | `--frame-radius`, `--frame-tap` | the menu's corner; the least height of a row under a finger |
-| `--frame-font`, `--frame-mono` | the type, and the type of a key's name |
-| `--frame-toast-lift` | how far above the page's bottom a toast stands |
+| `--frame-font`, `--frame-mono`, `--frame-toast-lift` | the type, and the type of a key's name; how far above the page's bottom a toast stands |
 | `--frame-field-bg`, `--frame-field-border` | an input field's ground and border |
 | `--frame-danger`, `--frame-ok`, `--frame-warn` | a thing that removes; connected or fine; not connected or to mind |
 | `--frame-graph-series`, `--frame-graph-grid`, `--frame-graph-target` | a graph's line, its grid and its target curve |
 | `--frame-graph-gap`, `--frame-graph-compare` | the shaded gap between a fit and its target, and a second measurement's target curve |
 | `--frame-offline` | the words of a device that is not there |
+| the `old readings` badge (`core/old-readings.js`) | shown while the shown device's readings are from before a drop; fixed bottom left, above a toast's lift, from `--frame-surface`, `--frame-warn` and `--frame-toast-lift`; it takes no pointer event, so a control under it stays in reach |
 | `--frame-popup-in` | how a popup's box comes in: an animation, set inside `@media (prefers-reduced-motion: no-preference)`; no default, and no theme sets it ([popups.md](popups.md)) |
 
 The colour tokens are those whose default holds a colour (the shadows count). Every theme sets each

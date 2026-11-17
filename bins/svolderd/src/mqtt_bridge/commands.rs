@@ -344,10 +344,9 @@ impl BridgeTask {
             Outcome::Cancelled(why) => Response::error(CODE_LINK, why.to_string()),
         };
         match &response {
-            Response::Error { message, .. } => log::warn(&format!(
-                "mqtt: {name}: {} not written: {message}",
-                control.1
-            )),
+            Response::Error { message, .. } => {
+                log::warn(&format!("mqtt: {name}: {}: {message}", control.1))
+            }
             Response::Identify { sent, .. } => log::info(&identify_line(&name, *sent)),
             _ => log::debug(&format!("mqtt: {name}: {} written", control.1)),
         }

@@ -193,6 +193,11 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/title.js"),
     ),
     (
+        "core/old-readings.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/old-readings.js"),
+    ),
+    (
         "core/registry.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/registry.js"),

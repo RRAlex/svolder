@@ -6,8 +6,8 @@ after the Battle of Svolder, won by Sweyn Forkbeard, son of Harald Bluetooth.
 
 <img src="docs/images/svolder.avif" width="100%" alt="svolder starting in a terminal: sparks build
 the svolder wordmark and fly into the header of a Gungnir 2's screen, where So What by Miles Davis
-plays; the volume steps up, then the tone-control screen shows the Sennheiser HD 800 S correction
-as one band rises">
+plays and the VU meters swing; the volume steps up, then the tone-control screen shows the
+Sennheiser HD 800 S correction as one band rises">
 
 We come in peace: svolder is a fan's homage to Schiit's engineering, and Schiit Audio has not made,
 endorsed or reviewed it (see [LEGAL.md](LEGAL.md)). If you find it useful, the best way to say
@@ -54,13 +54,17 @@ the marks of a Warm and a Sennheiser HD 800 S recall">
 
 ### Web themes on a phone
 
-<img src="docs/images/web-phone-paper.webp" width="32%" alt="Paper on a phone: squared paper with a
+<img src="docs/images/web-phone-paper.webp" width="48%" alt="Paper on a phone: squared paper with a
 serif Gungnir 2 title, the volume −26.1 dB in red with a ruler, written controls (− quieter, mute,
 louder +), the tone graph with its five bands and the first rows of the band table"> <img
-src="docs/images/web-phone-signal.webp" width="32%" alt="Signal on a phone, scrolled: the signal path as a
-strip along the top with PipeWire, the Gungnir 2 chosen and an amp, then the tone graph, the mode,
-the input and the presets, with the Now playing bar pinned at the bottom"> <img
-src="docs/images/web-phone-nightdrive.webp" width="32%" alt="Night drive on a phone: a striped sun
+src="docs/images/web-phone-signal.webp" width="48%" alt="Signal on a phone, scrolled: the signal path as a
+strip along the top with This computer, the Gungnir 2 chosen and an amp, then the tone graph, the
+mode, the input and the presets, with the Now playing bar pinned at the bottom"> <img
+src="docs/images/web-phone-signal-vu.webp" width="48%" alt="Signal on a phone, on the computer's
+side of the chain: the signal path strip with This computer chosen, the volume 42 %, and two
+backlit VU meters, L and R, with their needles on the 0 VU scale and a lit peak lamp on L, the
+reference 0 VU = −18 dBFS and the tone section below"> <img
+src="docs/images/web-phone-nightdrive.webp" width="48%" alt="Night drive on a phone: a striped sun
 over a dusk sky, the live spectrum as cyan mountains and a floor of lit cells rolling toward you, the
 volume −26.1 dB as a large neon number under the device line and the EQ gains, and under the scene
 the strip with − Mute +, the input, the track, the transport and Device">
@@ -68,9 +72,8 @@ the strip with − Mute +, the input, the track, the transport and Device">
 ### Terminal
 
 <img src="docs/images/dac.webp" width="100%" alt="The device screen of a Gungnir 2: its controls
-with the volume bar's clipping-risk zone, the host's volume, transport and spectrum, the tone
-control, and the status with the link history, the level's source and Now playing So What by Miles
-Davis">
+with the volume bar's clipping-risk zone, transport and spectrum, the tone control, and the status with the link history, the level's source, Now playing So What by Miles
+Davis and the L and R VU meters with their needles on the 0 VU scale">
 
 <img src="docs/images/tone.webp" width="100%" alt="The tone-control screen of a Gungnir 2 with the
 Sennheiser HD 800 S correction from AutoEq, measured by oratory1990, fitted to its five bands: the

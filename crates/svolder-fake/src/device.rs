@@ -32,6 +32,8 @@ pub struct FakeDevice {
     silent_recall: bool,
     /// Whether a Command equal to the value a control holds goes unreported, for every control.
     quiet_same: bool,
+    /// Whether the tone-control mode goes unreported on a Command equal to the mode the device is in.
+    quiet_mode: bool,
 }
 
 /// A meter a signal can play on: the function it reports under, the phase a signal reads it
@@ -82,6 +84,7 @@ impl FakeDevice {
             report_aliases: false,
             silent_recall: false,
             quiet_same: false,
+            quiet_mode: false,
         }
     }
 
@@ -102,10 +105,17 @@ impl FakeDevice {
     }
 
     /// Have every control stay silent on a Command equal to the value it holds, as a unit that
-    /// reports changes only would. Off by default, when only the tone-control mode is silent on
-    /// a repeat and every other control reports it.
+    /// reports changes only would. Off by default, when every control reports a repeat.
     pub fn quiet_same(mut self, on: bool) -> Self {
         self.quiet_same = on;
+        self
+    }
+
+    /// Have the tone-control mode stay silent on a Command equal to the mode the device is in.
+    /// Off by default: a unit reports every write, a repeat included. `svolder-sim` turns it on,
+    /// since the official app answers every report of the mode with a write of it.
+    pub fn quiet_mode(mut self, on: bool) -> Self {
+        self.quiet_mode = on;
         self
     }
 
@@ -192,9 +202,9 @@ impl FakeDevice {
                     .as_ref()
                     .is_some_and(|eq| eq.mode_id() == id);
                 self.state.insert(id, msg.value.clone());
-                // A unit reports the tone-control mode when it changes and says nothing on a
-                // Command equal to the mode it is in; `quiet_same` extends that to every control.
-                if repeat && (is_mode || self.quiet_same) {
+                // A unit reports every write, a repeat included; `quiet_mode` silences a repeat of
+                // the mode and `quiet_same` a repeat of every control.
+                if repeat && ((is_mode && self.quiet_mode) || self.quiet_same) {
                     continue;
                 }
                 out.push(frame(&[Message::status(
@@ -1280,12 +1290,18 @@ mod tests {
         profile.eq.expect("a tone control").mode_id()
     }
 
-    /// The mode is reported when it changes and not on a Command equal to the mode the device is
-    /// in, on every profile with a tone control.
+    /// With `quiet_mode` the mode is reported when it changes and not on a Command equal to the
+    /// mode the device is in, on every profile with a tone control; without it a repeat is reported.
     #[test]
-    fn the_mode_is_reported_on_a_change_and_silent_on_a_repeat() {
+    fn the_mode_is_reported_on_a_change_and_silent_on_a_repeat_when_quiet() {
         for name in ["bifrost3", "gungnir2-v2"] {
-            let mut d = named(name);
+            let mut loud = named(name);
+            let mode = mode_of(name);
+            for _ in 0..2 {
+                let said = send(&mut loud, Message::command(mode, Value::U8(2)));
+                assert_eq!(said.len(), 1, "{name}: every write is reported");
+            }
+            let mut d = named(name).quiet_mode(true);
             let mode = mode_of(name);
             let set = |d: &mut FakeDevice, raw: u8| send(d, Message::command(mode, Value::U8(raw)));
             let changed = set(&mut d, 2);
@@ -1299,7 +1315,7 @@ mod tests {
                 "{name}: the next change is reported"
             );
             // The resting mode is flat: writing it while flat is a repeat too.
-            let mut flat = named(name);
+            let mut flat = named(name).quiet_mode(true);
             assert!(
                 set(&mut flat, 1).is_empty(),
                 "{name}: flat over flat is silent"
@@ -1307,9 +1323,9 @@ mod tests {
         }
     }
 
-    /// Every control but the mode is echoed on a repeat unless `quiet_same` is on.
+    /// Every control is echoed on a repeat unless `quiet_same` is on.
     #[test]
-    fn a_control_but_the_mode_still_echoes_a_repeat() {
+    fn a_control_echoes_a_repeat() {
         let mut d = named("gungnir2-v2");
         let set = |d: &mut FakeDevice| send(d, Message::command(FunctionId::one(2), Value::U8(4)));
         assert_eq!(set(&mut d).len(), 1);

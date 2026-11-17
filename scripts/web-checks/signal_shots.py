@@ -120,7 +120,7 @@ def phone():
             start(b, d)
             shoot(b, 'phone-dac')
             # scrolled so that the pinned Now playing bar covers only the gap before the next section
-            b.page('window.scrollTo(0, 222)')
+            b.page('window.scrollTo(0, 284)')
             time.sleep(0.8)
             shoot(b, 'phone-tone')
             b.page('window.scrollTo(0, 900)')

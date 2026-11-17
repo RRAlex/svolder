@@ -74,7 +74,7 @@ pub(crate) async fn device_request(
     match request_on_own_connection(socket, request, Some(DEFAULT_REQUEST_TIMEOUT)).await {
         Ok(answer) => Ok(Some(answer)),
         Err(IpcError::Refused(answer)) => Ok(Some(*answer)),
-        Err(e) => Err(Failure::of(Kind::DaemonError, e.to_string())),
+        Err(e) => Err(Failure::from_ipc(&e)),
     }
 }
 
@@ -93,7 +93,7 @@ pub(crate) async fn preset_request(
     match request_on_own_connection(socket, request, Some(DEFAULT_REQUEST_TIMEOUT)).await {
         Ok(answer) => Ok(Some(answer)),
         Err(IpcError::Refused(answer)) => Ok(Some(*answer)),
-        Err(e) => Err(Failure::of(Kind::DaemonError, e.to_string())),
+        Err(e) => Err(Failure::from_ipc(&e)),
     }
 }
 

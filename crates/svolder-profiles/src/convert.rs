@@ -322,6 +322,18 @@ impl EqSpec {
         FunctionId::two(self.id, self.mode_sub)
     }
 
+    /// Whether `id` is one of the tone control's own: the mode, the loudness, or a parameter of
+    /// one of its bands.
+    pub fn owns(&self, id: FunctionId) -> bool {
+        id == self.mode_id()
+            || id == self.loudness_id()
+            || (1..=self.bands.len()).any(|band| {
+                [EqParam::Frequency, EqParam::Gain, EqParam::Q]
+                    .into_iter()
+                    .any(|param| self.band_id(band - 1, param) == Some(id))
+            })
+    }
+
     /// Function id of the loudness strength, `E.loudness_sub`.
     pub fn loudness_id(&self) -> FunctionId {
         FunctionId::two(self.id, self.loudness_sub)

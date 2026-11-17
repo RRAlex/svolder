@@ -4,6 +4,7 @@
 //! The device screen's header: the wordmark, the fault glyph, the link dot and the device name.
 
 use super::*;
+use crate::tui::test_support::hear_one;
 
 /// At 100 columns the header carries the small mark on row 1, the device line beside it on row 2
 /// and the tab strip on row 3. The test reads the mark's rows from `wordmark::lines` instead of a
@@ -77,7 +78,7 @@ fn a_link_that_went_down_hollows_the_header_dot_and_dims_the_rows() {
     let buffer = screen(&app);
     assert_eq!(
         text(&buffer)[0],
-        " svolder  Gungnir 2 · fw 3 · 0102…08  ⠋ ○ disconnected            mouse:on 14:02",
+        " svolder  Gungnir 2 · fw 3 · 0102…08  ⠋ ○ disconnected · stale    mouse:on 14:02",
     );
     // The first letter of the label of the focused row, then of a row that is not.
     for (y, letter, row) in [(3, "I", "Input"), (4, "P", "Phase invert")] {
@@ -222,4 +223,73 @@ fn the_header_reports_its_logo_where_it_draws_it() {
             None => panic!("every screen's header carries a logo"),
         }
     }
+}
+
+/// The row of `buffer` that carries the link words, the mouse mark and the clock.
+fn device_row(buffer: &Buffer) -> String {
+    text(buffer)
+        .into_iter()
+        .find(|row| row.contains("mouse:"))
+        .expect("a header row")
+}
+
+/// While the link is down the header says the values on screen are from before it dropped, in
+/// the longest words the row has room for, at once and in the warning role; the first status
+/// after the link is back clears it, and the line keeps its width, so nothing around it moves.
+#[test]
+fn a_link_down_marks_the_readings_as_from_before_the_drop_until_a_fresh_one() {
+    let theme = Theme::new(false);
+    let mut app = mockup_app();
+    let live = device_row(&frame_with_theme(&app, 140, 24, &theme));
+    assert!(!live.contains("readings"), "{live}");
+    app.apply(Update::Connection { connected: false }, Instant::now());
+    let down = device_row(&frame_with_theme(&app, 140, 24, &theme));
+    assert!(
+        down.contains("○ disconnected · readings from before the link dropped"),
+        "{down}"
+    );
+    assert!(down.ends_with("mouse:on 14:02"), "{down}");
+    assert_eq!(down.chars().count(), live.chars().count());
+    // A row narrower than the long words has the shorter ones, and the narrowest the shortest.
+    let narrow = device_row(&frame_with_theme(&app, 110, 24, &theme));
+    assert!(
+        narrow.contains("○ disconnected · readings stale"),
+        "{narrow}"
+    );
+    let buffer = frame_with_theme(&app, 140, 24, &theme);
+    let y = u16::try_from(
+        text(&buffer)
+            .iter()
+            .position(|row| row.contains("mouse:"))
+            .unwrap(),
+    )
+    .unwrap();
+    let at = down.find("readings").expect("the words");
+    let cell = buffer.cell((u16::try_from(down[..at].chars().count()).unwrap(), y));
+    assert_eq!(
+        cell.map(|cell| cell.fg),
+        Some(theme.style(Role::Warn).fg.unwrap_or_default())
+    );
+    // The link back is not a fresh reading: the words stay until the device says something.
+    app.apply(Update::Connection { connected: true }, Instant::now());
+    let back = device_row(&frame_with_theme(&app, 140, 24, &theme));
+    assert!(
+        back.contains("● connected · readings from before"),
+        "{back}"
+    );
+    hear_one(&mut app, "10", 100);
+    let fresh = device_row(&frame_with_theme(&app, 140, 24, &theme));
+    assert!(!fresh.contains("readings"), "{fresh}");
+}
+
+/// A device never heard has no readings to be old: the waiting panel's header says only that it
+/// is disconnected.
+#[test]
+fn a_device_never_heard_has_no_old_readings() {
+    let mut app = mockup_app();
+    app.readings.values.clear();
+    app.apply(Update::Connection { connected: false }, Instant::now());
+    let top = device_row(&frame_with_theme(&app, 140, 24, &Theme::new(false)));
+    assert!(top.contains("○ disconnected"), "{top}");
+    assert!(!top.contains("readings") && !top.contains("stale"), "{top}");
 }

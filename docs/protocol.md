@@ -297,13 +297,12 @@ Bands: Yggdrasil/Gungnir/Bifrost 3 have 5 bands (centres 40, 160, 632, 2515, 100
 Mimir/Mesh Card/Eitr have 3 bands (63, 630, 6300 Hz). The Bifrost 3 converts as the Yggdrasil
 does: the same bands, frequency windows and scales, and gain and Q ranges.
 
-The app sends the mode (`E.50`) back as a Command whenever a mode Status arrives, with no
-comparison against the mode it shows, sometimes twice. That is a UI side effect, not a protocol
-rule: a Command equal to the current mode changes nothing, and svolder does not copy the echo. A
-device reports the mode when it changes and stays silent on a Command equal to the mode it is in,
-and the app depends on that: a device that answered every Command of the mode with a Status would
-make it write the mode forever. Whether a real unit is silent on a repeat is unverified;
-svolder's fake device and simulator are, for the mode.
+The app sends the mode (`E.50`) back as a Command when a mode Status arrives, with no comparison
+against the mode it shows, sometimes twice. That is a UI side effect, not a protocol rule: a
+Command equal to the current mode changes nothing, and svolder does not copy the echo. With a unit
+that reports every repeat the write-back cannot be unconditional, and its condition is not
+established here. A device that is already in a mode and is sent that mode reports it again, as it
+reports every write, a repeat included (seen on a Bifrost 3).
 
 Bifrost 3 extras: subsystems 1 Main PIC and 2 DSP, output levels
 2.0 Vrms single-ended and 4.0 Vrms balanced, and a 128-step attenuation table (-100..0 dB).

@@ -57,9 +57,11 @@ The actor's life is a loop of two states (`device/link.rs`):
 
 - **Disconnected.** `ensure_connected` runs a discover-and-connect attempt (`device/attempt.rs`) in
   a task of its own and keeps answering commands while it runs. A failed attempt waits the next step
-  of `RETRY_SCHEDULE`: 2, 5, 15, 30, then 60 seconds, repeating the last. A command that needs the
-  link, a `Wake`, or a changed configuration entry ends the wait early and restarts the schedule
-  (`Command::ends_the_wait`); a bare profile reload does not.
+  of `RETRY_SCHEDULE`: 2, 5, 15, then 30 seconds, repeating the last. One attempt is cut off at
+  `ATTEMPT_BOUND` (45 s over the listen and the connect, a refusal pass included): it fails with a
+  `timed_out` reason, its link is released (up to about 13 s more) and the schedule goes on. A
+  command that needs the link, a `Wake`, or a changed configuration entry ends the wait early and
+  restarts the schedule (`Command::ends_the_wait`); a bare profile reload does not.
 - **Connected.** `serve_connected` selects between the command channel and `Session::recv`. Every
   status is folded into the session's `DeviceState`, published as an `Event::Status` to every
   subscriber, and added to the ring of the last half hour of readings (`device/ring.rs`,
