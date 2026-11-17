@@ -3,8 +3,8 @@
 
 use super::*;
 
-/// The sequences the ordinary gate runs: a fixed block of seeds (300 sequences, a few seconds), so a failure is the same on
-/// every machine.
+/// The sequences the ordinary gate runs: a fixed block of seeds (300 sequences under each model of
+/// node ids, a few seconds), so a failure is the same on every machine.
 const SHORT_FIRST: u64 = 1;
 const SHORT_RUNS: u64 = 300;
 
@@ -17,7 +17,8 @@ fn from_env(name: &str, default: u64) -> u64 {
 
 #[test]
 fn the_lab_finds_nothing_in_a_short_run() {
-    let failures = run_seeds(SHORT_FIRST, SHORT_RUNS);
+    let mut failures = run_seeds(SHORT_FIRST, SHORT_RUNS, Ids::Fresh);
+    failures.extend(run_seeds(SHORT_FIRST, SHORT_RUNS, Ids::Reused));
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
@@ -30,7 +31,12 @@ const TARGETED_RUNS: u64 = 300;
 
 #[test]
 fn the_lab_finds_nothing_in_a_short_targeted_run() {
-    let failures = run_targeted_seeds(TARGETED_FIRST, TARGETED_RUNS);
+    let mut failures = run_targeted_seeds(TARGETED_FIRST, TARGETED_RUNS, Ids::Fresh);
+    failures.extend(run_targeted_seeds(
+        TARGETED_FIRST,
+        TARGETED_RUNS,
+        Ids::Reused,
+    ));
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
@@ -42,10 +48,13 @@ fn the_lab_finds_nothing_in_a_long_run() {
     let first = from_env("SVOLDER_LAB_SEED", 1_000);
     let runs = from_env("SVOLDER_LAB_RUNS", 5_000);
     let started = std::time::Instant::now();
-    let mut failures = run_seeds(first, runs);
-    failures.extend(run_targeted_seeds(first, runs));
+    let mut failures = Vec::new();
+    for ids in [Ids::Fresh, Ids::Reused] {
+        failures.extend(run_seeds(first, runs, ids));
+        failures.extend(run_targeted_seeds(first, runs, ids));
+    }
     eprintln!(
-        "preamp lab: seeds {first}..{} ({runs} runs of each profile) in {:.0?}, {} failed",
+        "preamp lab: seeds {first}..{} ({runs} runs of each profile, fresh and reused ids) in {:.0?}, {} failed",
         first + runs,
         started.elapsed(),
         failures.len()
@@ -66,7 +75,7 @@ fn the_model_reverts_slots_on_a_rate_change_and_keeps_the_preamp() {
         pre: 0.5,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
     };
-    let mut node = Node::start(3, &conf, 0);
+    let mut node = Node::start(3, 3, &conf, 0);
     let live = vec![("l01:b0".to_string(), 2.0), ("lpre:Mult".to_string(), 0.9)];
     for (name, value) in &live {
         node.ports.insert(name.clone(), held_value(name, *value));

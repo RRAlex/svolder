@@ -333,11 +333,15 @@ async fn the_reaper_thread_is_named() {
     let f = Fixture::new();
     let conf = f.dir.join("reap.conf");
     let held = spawn_detached(&f.dir.join("pipewire"), &conf).expect("it starts");
-    let named = std::fs::read_dir("/proc/self/task")
-        .unwrap()
-        .flatten()
-        .filter_map(|task| std::fs::read_to_string(task.path().join("comm")).ok())
-        .any(|comm| comm.trim() == "svolder-eq-reap");
+    // The new thread names itself once it runs, which a loaded machine may delay.
+    let named = until(|| {
+        std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .flatten()
+            .filter_map(|task| std::fs::read_to_string(task.path().join("comm")).ok())
+            .any(|comm| comm.trim() == "svolder-eq-reap")
+    })
+    .await;
     held.signal(libc::SIGTERM);
     assert!(named, "no thread is named svolder-eq-reap");
 }

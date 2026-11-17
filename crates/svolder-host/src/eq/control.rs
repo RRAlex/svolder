@@ -39,7 +39,7 @@ use svolder_profiles::tone::preset::{from_computer, host_correction};
 use super::HostEqState;
 use super::crossfeed::{CrossfeedSettings, CrossfeedView, OffReason, Stage};
 use super::live::{
-    CONFIG_RATE_HZ, OutputSink, SHAPE, SLOTS, SlotShape, crossfeed_params, preamp_params,
+    CONFIG_RATE_HZ, NodeKey, OutputSink, SHAPE, SLOTS, SlotShape, crossfeed_params, preamp_params,
     slot_params, speakers_params,
 };
 use super::manage::{
@@ -225,8 +225,9 @@ type Stamp = (SystemTime, u64, u64);
 /// What the chain was last known to run as, for the values sent to it.
 #[derive(Debug, Clone, Copy, Default)]
 struct Sent {
-    /// The node the values went to; a restart of the chain is a new one.
-    id: Option<u32>,
+    /// The node the values went to; a restart of the chain is another one, under a new id or
+    /// the same one (see [`NodeKey`]).
+    node: Option<NodeKey>,
     /// The rate the coefficients were worked out for.
     rate: Option<u32>,
 }
@@ -545,7 +546,7 @@ impl EqControl {
     /// The chain was just applied or read, with its config worked out at `rate_hz`: it holds
     /// the config's values.
     fn fresh_chain(&mut self, rate_hz: u32) {
-        // The chain is a new node: the id the session kept is not it, and the values it sent
+        // The chain is a new node: the one the session kept is not it, and the values it sent
         // are not on it.
         self.params.new_chain();
         self.unknown = false;
@@ -553,7 +554,7 @@ impl EqControl {
         self.held = false;
         self.dirty.clear();
         self.sent = Sent {
-            id: None,
+            node: None,
             rate: Some(rate_hz),
         };
         self.last_values.clear();
@@ -1388,18 +1389,18 @@ impl EqControl {
     }
 
     /// Send every slot that moved, and the preamp, in one call. Whether they went (or there was
-    /// nothing to send). A node found under another id whose line also fails counts as a failed
+    /// nothing to send). Another node found whose line also fails counts as a failed
     /// tick like any other; reaching `FAIL_LIMIT` that way takes the node changing again between
     /// the look and the send, that many times inside `FAIL_WINDOW`.
     async fn send_dirty(&mut self) -> bool {
         if self.send_dirty_once().await {
             return true;
         }
-        // A node found under another id than the one looked at (the chain was replaced since,
-        // or the kept node was dropped and found again) gets no line. It is looked at, and the
-        // line goes once more.
+        // Another node than the one looked at (the chain was replaced since, under a new id or
+        // the same one, and the kept node was dropped and found again) gets no line. It is
+        // looked at, and the line goes once more.
         match self.params.node().await {
-            Some(node) if self.sent.id != Some(node.id) => self.send_dirty_once().await,
+            Some(node) if self.sent.node != Some(node.key()) => self.send_dirty_once().await,
             _ => false,
         }
     }
@@ -1468,7 +1469,7 @@ impl EqControl {
             && node
                 .rate_hz
                 .is_some_and(|rate| self.sent.rate.is_some_and(|sent| sent != rate));
-        if self.sent.id != Some(node.id) || rate_moved {
+        if self.sent.node != Some(node.key()) || rate_moved {
             self.watch().await;
             if !self.runs || !self.live_now() || (self.dirty.is_empty() && !self.stage_dirty) {
                 return false;
@@ -1520,7 +1521,7 @@ impl EqControl {
             true => params.extend(preamp),
             false => params.splice(0..0, preamp).for_each(drop),
         }
-        let Some(vouched) = self.sent.id else {
+        let Some(vouched) = self.sent.node else {
             self.stage_dirty |= sent_stage;
             return false;
         };
@@ -1576,7 +1577,9 @@ impl EqControl {
             return;
         };
         self.exit.arm(&self.chain);
-        let restarted = self.sent.id.is_some_and(|id| id != node.id);
+        // PipeWire gives a freed id to a later object, so a chain started again may be listed
+        // under the old one's id: its serial tells it.
+        let restarted = self.sent.node.is_some_and(|sent| sent != node.key());
         let rate_changed = node
             .rate_hz
             .is_some_and(|rate| self.sent.rate.is_some_and(|sent| sent != rate));
@@ -1695,7 +1698,7 @@ impl EqControl {
             }
             let before = self.sent.rate;
             self.sent = Sent {
-                id: Some(node.id),
+                node: Some(node.key()),
                 rate: node.rate_hz.or(self.sent.rate),
             };
             // The curve was checked at the old rate; at this one it may not be playable (a
@@ -1778,7 +1781,7 @@ impl EqControl {
             self.watch_due = self.check.is_some();
             return;
         }
-        self.sent.id = Some(node.id);
+        self.sent.node = Some(node.key());
         if let Some(rate) = node.rate_hz {
             self.sent.rate = Some(rate);
         }
@@ -1902,7 +1905,7 @@ impl EqControl {
         }
         if self.watch_due || self.ticks.is_multiple_of(WATCH_EVERY) {
             self.watch().await;
-            self.params.settle(self.sent.id).await;
+            self.params.settle(self.sent.node).await;
             self.finish_reset().await;
         }
         if !self.runs || !self.live_now() {

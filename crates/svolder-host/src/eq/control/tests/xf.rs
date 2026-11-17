@@ -675,6 +675,24 @@ async fn a_chain_that_restarts_turns_the_stage_off() {
 }
 
 #[tokio::test]
+async fn a_chain_that_restarts_under_the_same_id_turns_the_stage_off() {
+    let (mut control, chain, params) = both_on().await;
+    looks(&mut control, 1).await;
+    // PipeWire lists the new node under the old one's id: only its serial is its own.
+    let mut again = node(1, Some(48_000));
+    again
+        .params
+        .extend(crate::eq::live::crossfeed_params(&CrossfeedStage::bypass()));
+    again.serial = Some(9);
+    params.set_node(Some(again));
+    looks(&mut control, 1).await;
+    let xf = control.view().crossfeed.unwrap();
+    assert!(!xf.on);
+    assert_eq!(xf.off_reason.as_deref(), Some("chain-restarted"));
+    assert_eq!(removes(&chain), 0, "the EQ's chain stays");
+}
+
+#[tokio::test]
 async fn a_graceful_stop_leaves_no_stage_and_no_flat_chain() {
     let dir = Dir::new();
     let (mut control, chain, params) = setup(Keep::File(dir.state()));
@@ -717,6 +735,7 @@ async fn a_new_rate_sends_the_stage_again_and_is_no_reset() {
         params.set_node(Some({
             let mut n = LiveNode {
                 id: 1,
+                serial: Some(1),
                 rate_hz: Some(44_100),
                 sink: None,
                 playing: false,
@@ -1307,7 +1326,7 @@ async fn a_restart_or_a_rate_change_forgets_what_the_old_graph_held() {
     params.set_node(Some(node(77, Some(48_000))));
     for _ in 0..WATCH_EVERY {
         control.tick().await;
-        if control.sent.id == Some(77) {
+        if control.sent.node.is_some_and(|node| node.id == 77) {
             assert!(control.confirmed.is_empty(), "{:?}", control.confirmed);
             return;
         }

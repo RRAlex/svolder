@@ -553,7 +553,7 @@ pub use crossfeed::{
     CrossfeedSettings, CrossfeedView, Model as CrossfeedModel, Stage as CrossfeedStage,
     StageResponse, stage_response,
 };
-pub use live::{LiveNode, PREAMP, PreampCarrier, SHAPE, SlotShape};
+pub use live::{LiveNode, NodeKey, PREAMP, PreampCarrier, SHAPE, SlotShape};
 pub(crate) use manage::checked_request;
 pub use manage::{
     ApplyRequest, Chain, EqFailure, Host, SpeakersConf, Status, UNIT, check_playable, lowered_note,

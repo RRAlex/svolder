@@ -1141,22 +1141,20 @@ struct ParamsInner {
     sent: Vec<Vec<(String, f64)>>,
     forgotten: usize,
     holds: bool,
-    /// The node id kept since the last look, as the real session keeps it until it is told to
-    /// look again.
-    kept: Option<u32>,
     /// The output the computer plays into, as the last look at the graph saw it.
     output: Option<crate::eq::live::OutputSink>,
 }
 
 impl Default for FakeParams {
-    /// A fake with a node (id 1, 48 kHz) that takes every send, whose preamp ports hold +60 dB,
-    /// which bounds no preamp a controller sends, and that lists the crossfeed stage's controls
-    /// as a current chain does.
+    /// A fake with a node (id 1, serial 1, 48 kHz) that takes every send, whose preamp ports hold
+    /// +60 dB, which bounds no preamp a controller sends, and that lists the crossfeed stage's
+    /// controls as a current chain does.
     fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(ParamsInner {
                 node: Some(LiveNode {
                     id: 1,
+                    serial: Some(1),
                     rate_hz: Some(48_000),
                     sink: None,
                     playing: false,
@@ -1173,7 +1171,6 @@ impl Default for FakeParams {
                 sent: Vec::new(),
                 forgotten: 0,
                 holds: true,
-                kept: None,
                 output: None,
             })),
         }
@@ -1275,9 +1272,7 @@ impl FakeParams {
 #[async_trait]
 impl Params for FakeParams {
     async fn node(&mut self) -> Option<LiveNode> {
-        let mut inner = self.lock();
-        inner.kept = inner.node.as_ref().map(|node| node.id);
-        inner.node.clone()
+        self.lock().node.clone()
     }
 
     async fn sink_rate(&mut self) -> Option<u32> {
@@ -1288,20 +1283,19 @@ impl Params for FakeParams {
         self.lock().output.clone()
     }
 
-    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
+    async fn send(&mut self, node: crate::eq::NodeKey, params: &[(String, f64)]) -> bool {
         let mut inner = self.lock();
-        let Some(current) = inner.node.as_ref().map(|node| node.id) else {
+        // The node as it is now, as the real session reads the graph again before every line.
+        let Some(key) = inner.node.as_ref().map(LiveNode::key) else {
             return false;
         };
-        let id = inner.kept.unwrap_or(current);
-        if id != node {
+        if key != node {
             return false;
         }
-        inner.kept = Some(id);
         if !inner.takes {
             return false;
         }
-        inner.lines.push(set_param_line(id, params));
+        inner.lines.push(set_param_line(key.id, params));
         inner.sent.push(params.to_vec());
         if inner.holds
             && let Some(node) = inner.node.as_mut()
@@ -1316,6 +1310,5 @@ impl Params for FakeParams {
     fn forget_node(&mut self) {
         let mut inner = self.lock();
         inner.forgotten += 1;
-        inner.kept = None;
     }
 }

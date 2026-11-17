@@ -189,13 +189,14 @@ The controller keeps two facts apart: whether a chain runs (`runs`) and whether 
   allows until it restarts.
 - **Four resets to off**, each with a note and a reason: the owner starts and finds it on
   (`restart`), the output the stage was turned on for is not the output any more (`output-changed`,
-  from the 1 s look of the same `pw-dump` that reads the node), the chain restarted, a new node id
-  (`chain-restarted`), and a graceful stop (`stopped`). A chain that runs for crossfeed alone is
-  removed by every reset; any other has the stage turned off live, or is applied again without it
-  when its configuration may hold the stage or live updates fail. A reset whose chain part fails is
-  retried once a second and the note says so. A change of the sink's rate is no reset: the stage is
-  sent again for the new rate, or turned off with a note when it cannot play there (no rate in the
-  engine's ranges reaches that branch, so it has no test).
+  from the 1 s look of the same `pw-dump` that reads the node), the chain restarted, a new node
+  (`chain-restarted`, told by its `object.serial`: PipeWire may list it under the old id), and a
+  graceful stop (`stopped`). A chain that runs for crossfeed alone is removed by every reset; any
+  other has the stage turned off live, or is applied again without it when its configuration may
+  hold the stage or live updates fail. A reset whose chain part fails is retried once a second and
+  the note says so. A change of the sink's rate is no reset: the stage is sent again for the new
+  rate, or turned off with a note when it cannot play there (no rate in the engine's ranges reaches
+  that branch, so it has no test).
 - **Reverts are seen.** A look that finds any port (the preamp, the stage's mixer or a slot) at a
   value other than the one the look before held at its sent value, at the same node and rate, sends
   everything again (at most 4 times in 5 s, then crossfeed turns off with a note). A port the look

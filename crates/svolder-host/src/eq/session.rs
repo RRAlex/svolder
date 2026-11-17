@@ -10,14 +10,22 @@
 //! node (and `quit` when it is closed); its output is read only for a refusal and for the word
 //! that it has connected.
 //!
-//! The node's id is found through `pw-dump` and kept until [`Params::forget_node`], a write
-//! `pw-cli` cannot take, or a `set-param` it refuses. Its output is read for that last one: a
-//! restart of the chain gives the node a new id, and `pw-cli` answers a line for the old one
-//! with `Error: "set-param: unknown global '33'"`. The session then finds the node again and
-//! sends the newest value of every port it has been given, since what was refused, and what
-//! sat in the pipe when a `pw-cli` died, is not known to have landed. [`Params::settle`] does
-//! that without a new value to send. Whoever polls the chain's rate still forgets the node and
-//! reads it again: that read is also the rate.
+//! The node is found through `pw-dump`; [`Params::node`] keeps it until [`Params::forget_node`], a
+//! write `pw-cli` cannot take, or a `set-param` it refuses. Its output is read for that last one: a chain that
+//! restarted under another id answers a line for the old one with `Error: "set-param: unknown
+//! global '33'"`. The session then finds the node again and sends the newest value of every port
+//! it has been given, since what was refused, and what sat in the pipe when a `pw-cli` died, is
+//! not known to have landed. [`Params::settle`] does that without a new value to send. Whoever
+//! polls the chain's rate still forgets the node and reads it again: that read is also the rate.
+//!
+//! A chain that restarted under the same id (PipeWire gives a freed id to a later object) is not
+//! refused, and only a look tells it from the old one, by its `object.serial`: a send names the
+//! node its caller looked at ([`NodeKey`]), the node is read again before every line, and a node
+//! that is another one gets nothing until the caller has looked at it. That read is `pw-dump` of
+//! the node's object alone (13 to 23 ms and 9 to 13 ms of CPU on a private graph of 550 objects,
+//! where the whole graph's dump takes 105 to 165 ms), given at most `KEY_WITHIN`: one a line,
+//! two when `pw-cli` was started for it, twice that when the line is tried again, so a send holds
+//! its caller for at most a second on these reads.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -31,7 +39,9 @@ use tokio::net::unix::pipe::Sender;
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
 
-use super::live::{LiveNode, OutputSink, output_sink, preamp_params, props_of, set_param_line};
+use super::live::{
+    LiveNode, NodeKey, OutputSink, key_of, output_sink, preamp_params, props_of, set_param_line,
+};
 use super::paths::{is_executable, on_path};
 use crate::route::PwDump;
 
@@ -48,6 +58,10 @@ const WRITE_WITHIN: Duration = Duration::from_secs(1);
 /// line given before that is refused as an unknown global.
 const READY_WITHIN: Duration = Duration::from_millis(500);
 
+/// How long the read of the node before a line gets (`pw-dump` of that object alone); one that
+/// takes longer reads as the node gone, and the line waits for the next tick.
+const KEY_WITHIN: Duration = Duration::from_millis(250);
+
 /// How long `pw-cli` gets to end after `quit` before it is killed.
 const QUIT_WITHIN: Duration = Duration::from_secs(1);
 
@@ -60,10 +74,10 @@ pub trait Params: Send + Sync {
 
     /// Send `params` to the node `node`, in one call: the one the caller has looked at, and
     /// never another. `false` when they did not go: no node, no `pw-cli`, one that could not be
-    /// started or fed yet, or a node found under another id than `node` (the chain was replaced
-    /// since the caller looked). The caller keeps what it meant to send, looks again and sends
-    /// the newest value.
-    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool;
+    /// started or fed yet, or another node found than `node` (the chain was replaced since the
+    /// caller looked, under another id or the same one). The caller keeps what it meant to send,
+    /// looks again and sends the newest value.
+    async fn send(&mut self, node: NodeKey, params: &[(String, f64)]) -> bool;
 
     /// The rate the default output runs at, for an apply while no chain is there to show it:
     /// `None` when it cannot be read.
@@ -89,9 +103,9 @@ pub trait Params: Send + Sync {
 
     /// Put right what `pw-cli` is known to have refused since the last call: find the node
     /// again and send the newest value of every port. `true` when nothing was refused or the
-    /// repair went through. A caller with nothing to send calls it on its tick, with the id of
-    /// the node it has looked at (`None` when it has looked at none: nothing is sent then).
-    async fn settle(&mut self, _node: Option<u32>) -> bool {
+    /// repair went through. A caller with nothing to send calls it on its tick, with the node it
+    /// has looked at (`None` when it has looked at none: nothing is sent then).
+    async fn settle(&mut self, _node: Option<NodeKey>) -> bool {
         true
     }
 }
@@ -159,6 +173,15 @@ pub(super) trait Link: Send + Sync {
 
     /// Read the live chain's node from the graph; `None` when it is not there, or not listed.
     async fn read_node(&mut self) -> Option<LiveNode>;
+
+    /// Which node the live chain's is under `id` now, read from the graph (that object alone
+    /// where the link can): `None` when the object under `id` is not the chain's node.
+    async fn read_key(&mut self, id: u32) -> Option<NodeKey> {
+        self.read_node()
+            .await
+            .map(|node| node.key())
+            .filter(|key| key.id == id)
+    }
 
     /// The rate the default output runs at.
     async fn sink_rate(&mut self) -> Option<u32>;
@@ -271,18 +294,28 @@ impl<L: Link> Session<L> {
         refused
     }
 
+    /// Whether the object under `key`'s id is still the node `key`, read from the graph now. A
+    /// chain restarted from outside may be listed under the kept node's id, which `pw-cli` does
+    /// not refuse, so the kept node is not trusted for a line: the node is read again before
+    /// every one (that object alone, see [`Link::read_key`]), and only its serial tells. When it
+    /// is gone or another node the kept node is dropped and the next line carries every port.
+    async fn still(&mut self, key: NodeKey) -> bool {
+        if self.link.read_key(key.id).await == Some(key) {
+            return true;
+        }
+        self.node = None;
+        self.outbox.mark_full();
+        false
+    }
+
     /// Give `params` (or every port, after a restart or a refusal) to `pw-cli`.
-    async fn deliver(&mut self, id: u32, params: &[(String, f64)]) -> bool {
+    async fn deliver(&mut self, key: NodeKey, params: &[(String, f64)]) -> bool {
         self.outbox.record(params);
         // A line that fails is tried once more, after the node is found again and `pw-cli` is
         // started if it is gone.
         for _ in 0..2 {
             self.take_refusal();
-            let Some(node) = self.node().await else {
-                return false;
-            };
-            if node.id != id {
-                self.outbox.mark_full();
+            if !self.still(key).await {
                 return false;
             }
             match self.link.ensure_running() {
@@ -292,11 +325,15 @@ impl<L: Link> Session<L> {
                     // again.
                     self.outbox.mark_full();
                     self.link.wait_ready().await;
+                    // The chain may have been replaced while `pw-cli` started.
+                    if !self.still(key).await {
+                        return false;
+                    }
                 }
                 Some(false) => {}
             }
             let line = self.outbox.line(params);
-            if self.link.write(node.id, &line).await {
+            if self.link.write(key.id, &line).await {
                 self.outbox.delivered();
                 return true;
             }
@@ -325,7 +362,7 @@ impl<L: Link> Params for Session<L> {
         self.link.output()
     }
 
-    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
+    async fn send(&mut self, node: NodeKey, params: &[(String, f64)]) -> bool {
         let sent = self.deliver(node, params).await;
         if !sent {
             self.outbox.mark_full();
@@ -343,7 +380,7 @@ impl<L: Link> Params for Session<L> {
         self.outbox.new_chain();
     }
 
-    async fn settle(&mut self, node: Option<u32>) -> bool {
+    async fn settle(&mut self, node: Option<NodeKey>) -> bool {
         self.take_refusal();
         match (self.outbox.repair_due(), node) {
             (false, _) => true,
@@ -573,6 +610,10 @@ impl Link for PwLink {
         Some(node)
     }
 
+    async fn read_key(&mut self, id: u32) -> Option<NodeKey> {
+        key_of(&self.dump.read_one(id, KEY_WITHIN).await?, id)
+    }
+
     async fn sink_rate(&mut self) -> Option<u32> {
         super::live::default_sink_rate(&self.dump.read().await?)
     }
@@ -596,7 +637,7 @@ impl Params for PwCliSession {
         self.session.output()
     }
 
-    async fn send(&mut self, node: u32, params: &[(String, f64)]) -> bool {
+    async fn send(&mut self, node: NodeKey, params: &[(String, f64)]) -> bool {
         self.session.send(node, params).await
     }
 
@@ -608,7 +649,7 @@ impl Params for PwCliSession {
         self.session.new_chain();
     }
 
-    async fn settle(&mut self, node: Option<u32>) -> bool {
+    async fn settle(&mut self, node: Option<NodeKey>) -> bool {
         self.session.settle(node).await
     }
 }

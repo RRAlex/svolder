@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use common::{TempDir, install_script, lines};
 use svolder_host::eq::live::{props_of, set_param_line, slot_params};
-use svolder_host::eq::{Params, PwCliSession};
+use svolder_host::eq::{NodeKey, Params, PwCliSession};
 use svolder_host::fake::FakeParams;
 use svolder_host::route::PwDump;
 
@@ -29,15 +29,42 @@ fn fixture_id() -> u32 {
         .id
 }
 
-/// The fixture with the chain's node under another id, as a restarted chain has.
-fn with_node_id(id: u32) -> String {
+/// The chain's node in the fixture.
+fn fixture_key() -> NodeKey {
+    props_of(&fixture())
+        .expect("the chain is in the fixture")
+        .key()
+}
+
+/// The fixture with the chain's node under `id` and the serial `serial`, as a restarted chain
+/// has.
+fn with_node(id: u32, serial: u64) -> String {
     let mut objects: Vec<serde_json::Value> = serde_json::from_str(&fixture()).unwrap();
     let node = objects
         .iter_mut()
         .find(|o| o["id"].as_u64() == Some(u64::from(fixture_id())))
         .unwrap();
     node["id"] = id.into();
+    node["info"]["props"]["object.serial"] = serial.into();
     serde_json::to_string(&objects).unwrap()
+}
+
+/// The serial of the node a restart puts under `id` in [`with_node_id`].
+fn restarted_serial(id: u32) -> u64 {
+    10_000 + u64::from(id)
+}
+
+/// The fixture with the chain's node under another id (and serial), as a restarted chain has.
+fn with_node_id(id: u32) -> String {
+    with_node(id, restarted_serial(id))
+}
+
+/// The node [`with_node_id`] lists.
+fn restarted(id: u32) -> NodeKey {
+    NodeKey {
+        id,
+        serial: Some(restarted_serial(id)),
+    }
 }
 
 /// The fixture with no object showing a format, as a suspended sink is dumped.
@@ -207,7 +234,7 @@ async fn one_pw_cli_carries_many_sends() {
     for step in 1..=5 {
         assert!(
             session
-                .send(fixture_id(), &gain(f64::from(step) / 10.0))
+                .send(fixture_key(), &gain(f64::from(step) / 10.0))
                 .await
         );
     }
@@ -233,10 +260,10 @@ async fn a_dead_pw_cli_is_restarted_and_the_newest_value_sent() {
     // This pw-cli takes one line and ends.
     tools.cli("read line\necho \"$line\" >> \"$LOG\"\n");
     let mut session = tools.session();
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
     tools.wait_for(2).await;
     tools.wait_dead().await;
-    assert!(session.send(fixture_id(), &gain(0.2)).await);
+    assert!(session.send(fixture_key(), &gain(0.2)).await);
     let log = tools.wait_for(4).await;
     assert_eq!(log.iter().filter(|line| *line == "start").count(), 2);
     assert_eq!(log.last(), Some(&line_for(&gain(0.2))));
@@ -248,18 +275,18 @@ async fn settle_restarts_a_pw_cli_that_ended_and_sends_the_newest_values() {
     // This pw-cli takes one line and ends without applying it.
     tools.cli("read line\nexit 0\n");
     let mut session = tools.session();
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
     tools.wait_dead().await;
     tools.cli(
         "while read line; do [ \"$line\" = quit ] && exit 0; echo \"$line\" >> \"$LOG\"; done\n",
     );
     // No new value: the tick's settle alone puts the unapplied value right.
-    assert!(session.settle(Some(fixture_id())).await);
+    assert!(session.settle(Some(fixture_key())).await);
     let log = tools.wait_for(3).await;
     assert_eq!(log.len(), 3, "{log:?}");
     assert_eq!(log[2], line_for(&gain(0.1)));
     // Settled: nothing more to do.
-    assert!(session.settle(Some(fixture_id())).await);
+    assert!(session.settle(Some(fixture_key())).await);
     assert_eq!(tools.log().len(), 3);
     session.close().await;
 }
@@ -272,13 +299,13 @@ async fn a_line_lost_with_a_dead_pw_cli_is_sent_again_after_the_restart() {
     let mut session = tools.session();
     // The first line may or may not be written before the process is gone.
     let _ = session
-        .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+        .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
         .await;
     tools.wait_dead().await;
     tools.cli(
         "while read line; do [ \"$line\" = quit ] && exit 0; echo \"$line\" >> \"$LOG\"; done\n",
     );
-    assert!(session.send(fixture_id(), &gain(0.3)).await);
+    assert!(session.send(fixture_key(), &gain(0.3)).await);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !tools.log().iter().any(|line| line.starts_with("set-param")) && Instant::now() < deadline
     {
@@ -299,7 +326,7 @@ async fn a_new_chain_does_not_inherit_the_values_sent_to_the_old_one() {
     tools.cli("exit 0\n");
     let mut session = tools.session();
     let _ = session
-        .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+        .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
         .await;
     tools.wait_dead().await;
     // An apply put a new chain in place: what was sent to the old one is not on it.
@@ -307,7 +334,7 @@ async fn a_new_chain_does_not_inherit_the_values_sent_to_the_old_one() {
     tools.cli(
         "while read line; do [ \"$line\" = quit ] && exit 0; echo \"$line\" >> \"$LOG\"; done\n",
     );
-    assert!(session.send(fixture_id(), &gain(0.3)).await);
+    assert!(session.send(fixture_key(), &gain(0.3)).await);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !tools.log().iter().any(|line| line.starts_with("set-param")) && Instant::now() < deadline
     {
@@ -327,11 +354,11 @@ async fn a_dead_pw_cli_is_not_started_again_within_the_gap() {
     let tools = Tools::new("session-gap");
     tools.cli("read line\necho \"$line\" >> \"$LOG\"\n");
     let mut session = tools.session().with_restart_gap(Duration::from_secs(3600));
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
     tools.wait_for(2).await;
     tools.wait_dead().await;
     assert!(
-        !session.send(fixture_id(), &gain(0.2)).await,
+        !session.send(fixture_key(), &gain(0.2)).await,
         "the caller keeps the value to send again"
     );
     assert_eq!(
@@ -345,21 +372,20 @@ async fn a_new_node_id_is_found_before_the_next_send() {
     let tools = Tools::new("session-new-id");
     let mut session = tools.session();
     let old = fixture_id();
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
     // The chain restarted: its node has another id, and the next dump says so.
     tools.dump(&with_node_id(999));
-    // Without a reason to look again the kept id is used.
-    assert!(session.send(fixture_id(), &gain(0.2)).await);
+    // The graph is read again before the line: the caller has not looked at the new node.
+    assert!(!session.send(fixture_key(), &gain(0.2)).await);
     session.forget_node();
     assert_eq!(session.node().await.expect("found again").id, 999);
-    assert!(session.send(999, &gain(0.3)).await);
-    let log = tools.wait_for(4).await;
+    assert!(session.send(restarted(999), &gain(0.3)).await);
+    let log = tools.wait_for(3).await;
     assert!(log[1].starts_with(&format!("set-param {old} ")));
-    assert!(log[2].starts_with(&format!("set-param {old} ")));
-    assert!(log[3].starts_with("set-param 999 "), "{log:?}");
-    // After forget_node no line names the old id.
+    assert!(log[2].starts_with("set-param 999 "), "{log:?}");
+    // After the restart no line names the old id.
     assert!(
-        log[3..]
+        log[2..]
             .iter()
             .all(|line| !line.contains(&format!("set-param {old} ")))
     );
@@ -380,18 +406,21 @@ async fn refused_send_is_repaired(label: &str, reused: bool) {
     let tools = Tools::new(label);
     picky_cli_saying(&tools, reused);
     let mut session = tools.session();
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
+    // The first line is taken before the chain goes.
+    tools.wait_for(2).await;
     // The chain restarted under another id; nothing tells the session but pw-cli's answer.
-    tools.dump(&with_node_id(999));
     std::fs::write(tools.dir.join("valid"), "999").unwrap();
     let slot = slot_params(7, Some(&pk()), 48_000);
     assert!(
-        session.send(fixture_id(), &slot).await,
+        session.send(fixture_key(), &slot).await,
         "written to the old id, refused"
     );
     wait_for_file(&tools.dir.join("refused")).await;
     wait_for_refusal(&session).await;
-    assert!(session.send(999, &gain(0.4)).await);
+    // Only now is the new node in the graph: the line went out before it was listed.
+    tools.dump(&with_node_id(999));
+    assert!(session.send(restarted(999), &gain(0.4)).await);
     let log = tools.wait_for(3).await;
     assert_eq!(log.len(), 3, "{log:?}");
     let last = &log[2];
@@ -414,26 +443,29 @@ async fn settle_repairs_a_refusal_without_a_new_value() {
     picky_cli(&tools);
     let mut session = tools.session();
     assert!(
-        session.settle(Some(999)).await,
+        session.settle(Some(restarted(999))).await,
         "nothing sent, nothing to repair"
     );
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
-    tools.dump(&with_node_id(999));
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
+    // The first line is taken before the chain goes.
+    tools.wait_for(2).await;
     std::fs::write(tools.dir.join("valid"), "999").unwrap();
     assert!(
         session
-            .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+            .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
             .await
     );
     wait_for_file(&tools.dir.join("refused")).await;
     wait_for_refusal(&session).await;
-    assert!(session.settle(Some(999)).await);
+    // Only now is the new node in the graph: the line went out before it was listed.
+    tools.dump(&with_node_id(999));
+    assert!(session.settle(Some(restarted(999))).await);
     let log = tools.wait_for(3).await;
     assert_eq!(log.len(), 3, "{log:?}");
     assert!(log[2].starts_with("set-param 999 "));
     assert!(log[2].contains("\"lpre:Mult\" 0.1") && log[2].contains("\"l07:b0\""));
     // Settled: nothing more to do.
-    assert!(session.settle(Some(999)).await);
+    assert!(session.settle(Some(restarted(999))).await);
     assert_eq!(tools.log().len(), 3);
     session.close().await;
 }
@@ -461,7 +493,7 @@ async fn no_node_means_no_send_and_no_pw_cli() {
     tools.dump("[]");
     let mut session = tools.session();
     assert_eq!(session.node().await, None);
-    assert!(!session.send(fixture_id(), &gain(0.1)).await);
+    assert!(!session.send(fixture_key(), &gain(0.1)).await);
     assert!(tools.log().is_empty());
 }
 
@@ -483,20 +515,23 @@ async fn a_node_found_under_another_id_than_the_callers_gets_no_line() {
     let tools = Tools::new("session-unvouched");
     picky_cli_saying(&tools, false);
     let mut session = tools.session();
-    assert!(session.send(fixture_id(), &gain(0.1)).await);
-    tools.dump(&with_node_id(999));
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
+    // The first line is taken before the chain goes.
+    tools.wait_for(2).await;
     std::fs::write(tools.dir.join("valid"), "999").unwrap();
     // Written to the old id and refused; the chain has another node now.
     assert!(
         session
-            .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+            .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
             .await
     );
     wait_for_file(&tools.dir.join("refused")).await;
     wait_for_refusal(&session).await;
+    // Only now is the new node in the graph: the line went out before it was listed.
+    tools.dump(&with_node_id(999));
     // The caller has not looked at node 999: nothing is written to it, and it is told so.
-    assert!(!session.send(fixture_id(), &gain(0.4)).await);
-    assert!(!session.settle(Some(fixture_id())).await);
+    assert!(!session.send(fixture_key(), &gain(0.4)).await);
+    assert!(!session.settle(Some(fixture_key())).await);
     assert!(!session.settle(None).await);
     let log = tools.log();
     assert!(
@@ -504,9 +539,58 @@ async fn a_node_found_under_another_id_than_the_callers_gets_no_line() {
         "{log:?}"
     );
     // Looked at, it gets the newest value of every port.
-    assert!(session.send(999, &gain(0.4)).await);
+    assert!(session.send(restarted(999), &gain(0.4)).await);
     let log = tools.wait_for(3).await;
     assert!(log[2].starts_with("set-param 999 "), "{log:?}");
+    session.close().await;
+}
+
+#[tokio::test]
+async fn a_node_found_again_under_the_same_id_is_another_node_and_gets_no_line() {
+    let tools = Tools::new("session-same-id");
+    let mut session = tools.session();
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
+    // The chain started again and PipeWire gave its node the old id: only the serial tells.
+    let id = fixture_id();
+    tools.dump(&with_node(id, restarted_serial(id)));
+    session.forget_node();
+    let again = session.node().await.expect("found again").key();
+    assert_eq!(again.id, id);
+    assert_ne!(again, fixture_key(), "another node");
+    // The caller has looked at the old node only: nothing is written to the new one.
+    assert!(!session.send(fixture_key(), &gain(0.4)).await);
+    assert!(!session.settle(Some(fixture_key())).await);
+    let lines = |log: &[String]| {
+        log.iter()
+            .filter(|line| line.starts_with("set-param"))
+            .count()
+    };
+    assert_eq!(lines(&tools.log()), 1, "{:?}", tools.log());
+    // Looked at, it gets the newest value.
+    assert!(session.send(again, &gain(0.4)).await);
+    let log = tools.wait_for(3).await;
+    assert_eq!(lines(&log), 2, "{log:?}");
+    assert!(log[2].contains("\"lpre:Mult\" 0.4"), "{log:?}");
+    session.close().await;
+}
+
+#[tokio::test]
+async fn a_chain_restarted_under_the_same_id_gets_no_line_though_the_node_is_kept() {
+    let tools = Tools::new("session-same-id-kept");
+    let mut session = tools.session();
+    assert!(session.send(fixture_key(), &gain(0.1)).await);
+    // The chain started again under the old id, and nothing made the session look: `pw-cli`
+    // would take a line for that id, and it would reach the new node.
+    let id = fixture_id();
+    tools.dump(&with_node(id, restarted_serial(id)));
+    assert!(!session.send(fixture_key(), &gain(0.4)).await);
+    assert!(!session.settle(Some(fixture_key())).await);
+    let lines = |log: &[String]| {
+        log.iter()
+            .filter(|line| line.starts_with("set-param"))
+            .count()
+    };
+    assert_eq!(lines(&tools.log()), 1, "{:?}", tools.log());
     session.close().await;
 }
 
@@ -528,10 +612,10 @@ async fn pw_cli_is_given_only_set_param_lines_for_the_named_node() {
     let mut session = tools.session();
     assert!(
         session
-            .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+            .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
             .await
     );
-    assert!(session.send(fixture_id(), &gain(0.5)).await);
+    assert!(session.send(fixture_key(), &gain(0.5)).await);
     session.close().await;
     let log = tools.log();
     assert!(log.len() >= 3, "{log:?}");
@@ -549,17 +633,21 @@ async fn pw_cli_is_given_only_set_param_lines_for_the_named_node() {
 async fn the_fake_records_the_lines_a_session_would_send() {
     let mut fake = FakeParams::new();
     let params = gain(0.25);
-    assert!(fake.send(1, &params).await);
+    let key = NodeKey {
+        id: 1,
+        serial: Some(1),
+    };
+    assert!(fake.send(key, &params).await);
     fake.takes(false);
-    assert!(!fake.send(1, &gain(0.5)).await);
+    assert!(!fake.send(key, &gain(0.5)).await);
     fake.takes(true);
     fake.set_node(None);
-    assert!(!fake.send(1, &gain(0.5)).await);
+    assert!(!fake.send(key, &gain(0.5)).await);
     assert_eq!(fake.lines(), vec![set_param_line(1, &params)]);
     assert_eq!(fake.sent(), vec![params]);
     fake.forget_node();
     assert_eq!(fake.forgotten(), 1);
-    assert!(fake.settle(Some(1)).await);
+    assert!(fake.settle(Some(key)).await);
 }
 
 #[tokio::test]
@@ -567,20 +655,23 @@ async fn the_full_send_after_a_refusal_keeps_the_callers_order() {
     let tools = Tools::new("session-refused-order");
     picky_cli_saying(&tools, false);
     let mut session = tools.session();
-    assert!(session.send(fixture_id(), &gain(0.9)).await);
-    tools.dump(&with_node_id(999));
+    assert!(session.send(fixture_key(), &gain(0.9)).await);
+    // The first line is taken before the chain goes.
+    tools.wait_for(2).await;
     std::fs::write(tools.dir.join("valid"), "999").unwrap();
     assert!(
         session
-            .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+            .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
             .await
     );
     wait_for_file(&tools.dir.join("refused")).await;
     wait_for_refusal(&session).await;
+    // Only now is the new node in the graph: the line went out before it was listed.
+    tools.dump(&with_node_id(999));
     // A cut goes before the boost it makes room for: the caller's order survives the repair.
     let mut falling = gain(0.2);
     falling.extend(slot_params(7, Some(&pk()), 48_000));
-    assert!(session.send(999, &falling).await);
+    assert!(session.send(restarted(999), &falling).await);
     let log = tools.wait_for(3).await;
     let last = &log[2];
     let (pre, slot) = (last.find("\"lpre:Mult\""), last.find("\"l07:b0\""));
@@ -598,21 +689,24 @@ async fn the_full_send_after_a_refusal_puts_the_rest_before_a_rising_preamp() {
     let mut session = tools.session();
     let mut first = slot_params(3, Some(&pk()), 48_000);
     first.extend(gain(0.5));
-    assert!(session.send(fixture_id(), &first).await);
-    tools.dump(&with_node_id(999));
+    assert!(session.send(fixture_key(), &first).await);
+    // The first line is taken before the chain goes.
+    tools.wait_for(2).await;
     std::fs::write(tools.dir.join("valid"), "999").unwrap();
     assert!(
         session
-            .send(fixture_id(), &slot_params(7, Some(&pk()), 48_000))
+            .send(fixture_key(), &slot_params(7, Some(&pk()), 48_000))
             .await
     );
     wait_for_file(&tools.dir.join("refused")).await;
     wait_for_refusal(&session).await;
+    // Only now is the new node in the graph: the line went out before it was listed.
+    tools.dump(&with_node_id(999));
     // A preamp that rises goes after every other port: the other slots' newest values never
     // play under the risen preamp.
     let mut rising = slot_params(7, Some(&pk()), 48_000);
     rising.extend(gain(0.9));
-    assert!(session.send(999, &rising).await);
+    assert!(session.send(restarted(999), &rising).await);
     let log = tools.wait_for(3).await;
     let last = &log[2];
     let (rest, pre) = (last.find("\"l03:b0\""), last.find("\"lpre:Mult\""));

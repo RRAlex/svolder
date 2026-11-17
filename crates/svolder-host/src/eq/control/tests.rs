@@ -666,9 +666,12 @@ async fn sorting_moves_no_slot_and_a_tie_keeps_its_order() {
     );
 }
 
+/// The node under `id`, its serial the id: a test that restarts the chain under the same id
+/// gives the new node a serial of its own.
 fn node(id: u32, rate_hz: Option<u32>) -> LiveNode {
     LiveNode {
         id,
+        serial: Some(u64::from(id)),
         rate_hz,
         sink: None,
         playing: false,
@@ -1474,6 +1477,7 @@ async fn the_fake_chain_refuses_what_the_real_host_refuses() {
 fn legacy_node() -> LiveNode {
     LiveNode {
         id: 1,
+        serial: Some(1),
         rate_hz: Some(48_000),
         sink: None,
         playing: false,
@@ -1923,6 +1927,40 @@ async fn a_restarted_chain_is_capped_by_the_preamp_its_config_was_written_with()
     let conf: Vec<(u8, SourceFilter)> = treble.into_iter().zip(1..).map(|(f, s)| (s, f)).collect();
     let over = over_unity(&conf, 192_000, &[preamp_only(&last)], 192_000);
     assert!(over <= 0.01, "{over} dB over unity back at 192 kHz");
+}
+
+#[tokio::test]
+async fn a_chain_restarted_under_the_same_id_is_capped_by_the_config_it_started_from() {
+    let (mut control, _, params) = setup(Keep::Memory);
+    control.set_on(true).await.unwrap();
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    // A boost made live and kept: the config on disk holds it, the running chain was applied flat.
+    control.edit(gain(0, 6.0, true)).await.unwrap();
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    // The chain's node starts again from the config on disk, and PipeWire lists it under the old
+    // node's id: only its serial is new.
+    let boost = [(1, pk(1000.0, 6.0, 1.0))];
+    let conf_db = played_preamp(&correction(vec![boost[0].1.clone()], 0.0), 48_000);
+    params.set_node(Some(LiveNode {
+        serial: Some(2),
+        ..playing(1, &boost, conf_db, 48_000)
+    }));
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    // Softened live: the node goes back to the boost it started from on a change of rate, under
+    // the preamp last sent.
+    control.edit(gain(0, 0.0, true)).await.unwrap();
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    let last = params.sent().last().cloned().expect("a send");
+    let over = over_unity(&boost, 48_000, &[preamp_only(&last)], 48_000);
+    assert!(over <= 0.01, "{over} dB over unity once the slots go back");
 }
 
 #[tokio::test]

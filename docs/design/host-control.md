@@ -74,8 +74,9 @@ publishes its `EqView` on a watch channel that readers take without waiting for 
   PipeWire does not take live changes: the controller says so once (`this computer's PipeWire takes
   EQ changes when a drag ends`) and applies on release, a rewrite and a restart, from then on.
 - **The rate.** Every 20th tick (about a second) the node and its running sample rate are read. A
-  new node or a new rate marks every slot dirty and they are sent again at the new rate; a chain
-  built from the config alone holds 48 kHz coefficients until then.
+  new node (a new `object.serial`, whatever its id) or a new rate marks every slot dirty and they
+  are sent again at the new rate; a chain built from the config alone holds 48 kHz coefficients
+  until then.
 - **Failure.** Thirty failed sends in 5 s make the controls unavailable (`computer controls
   unavailable: <why>`, as a missing `pw-cli` or `pipewire` does). A `pw-cli` restart is ridden out.
 - **Never on its own.** Nothing applies at start; `set_on(true)` is the user's action. Only in a

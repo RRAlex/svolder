@@ -8,6 +8,20 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.36.6
+
+- **Computer EQ, a safer restart**: PipeWire can give a restarted EQ chain the same node id it
+  had before. svolder now tells the chain apart by its serial, which PipeWire never reuses, and
+  checks the chain before each change it sends, so a restarted chain is always seen as new: its
+  preamp is capped by the settings it started with, and the crossfeed and virtual speakers turn
+  off as for any restart. Before, after a boost was softened, a rate change could play a chain
+  that came back under its old id louder than unity.
+
+## 0.36.5
+
+- **Tests**: the check that the EQ chain's reaper thread is named waits for the thread to name
+  itself, so it no longer fails on a slow machine.
+
 ## 0.36.4
 
 - **Phone fixes**: on a phone, Signal's toasts and the "old readings" mark sit above the taller

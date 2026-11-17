@@ -80,6 +80,12 @@ impl PwDump {
     pub async fn read(&self) -> Option<String> {
         output_within(&self.program, &[], self.timeout).await
     }
+
+    /// [`PwDump::read`] of the object `id` alone (and what `pw-dump` lists with it), given
+    /// `timeout`: a fraction of the whole graph's cost.
+    pub async fn read_one(&self, id: u32, timeout: Duration) -> Option<String> {
+        output_within(&self.program, &[&id.to_string()], timeout).await
+    }
 }
 
 /// How the followed player's stream was found among the streams of the graph.

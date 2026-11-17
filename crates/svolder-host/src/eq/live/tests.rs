@@ -295,6 +295,7 @@ fn the_node_is_read_from_the_live_chain_fixture() {
     .unwrap();
     let node = props_of(&dump).expect("the chain is in the dump");
     assert_eq!(node.id, 32);
+    assert_eq!(node.serial, Some(42));
     assert_eq!(node.rate_hz, Some(48_000));
     assert_eq!(node.params["lpre:Mult"], 0.5);
     assert!(near(node.params["l07:b0"], 1.043953));
@@ -303,6 +304,59 @@ fn the_node_is_read_from_the_live_chain_fixture() {
     assert_eq!(node.params["l01:b0"], 1.0);
     assert!(near(node.params["l01:b1"], -1.861408));
     assert!(!node.params.contains_key("channelmix.min-volume"));
+}
+
+#[test]
+fn the_serial_is_read_as_a_number_or_a_string_and_may_be_missing() {
+    let dump = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/pw-dump/live-chain.json"
+    ))
+    .unwrap();
+    let with_serial = |serial: Option<serde_json::Value>| {
+        let mut objects: Vec<serde_json::Value> = serde_json::from_str(&dump).unwrap();
+        let node = objects
+            .iter_mut()
+            .find(|object| object["id"] == 32)
+            .unwrap();
+        let props = node["info"]["props"].as_object_mut().unwrap();
+        match serial {
+            Some(serial) => props.insert("object.serial".into(), serial),
+            None => props.remove("object.serial"),
+        };
+        props_of(&serde_json::to_string(&objects).unwrap()).unwrap()
+    };
+    let node = with_serial(Some(serde_json::json!("4294967999")));
+    assert_eq!(node.key().serial, Some(4_294_967_999));
+    let node = with_serial(None);
+    assert_eq!(
+        node.key(),
+        NodeKey {
+            id: 32,
+            serial: None
+        }
+    );
+}
+
+#[test]
+fn the_key_under_an_id_is_the_chains_node_or_none() {
+    let dump = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/pw-dump/live-chain.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        key_of(&dump, 32),
+        Some(NodeKey {
+            id: 32,
+            serial: Some(42)
+        })
+    );
+    // The chain's output stream, another node, an id nothing has.
+    assert_eq!(key_of(&dump, 36), None);
+    assert_eq!(key_of(&dump, 17), None);
+    assert_eq!(key_of(&dump, 9_999), None);
+    assert_eq!(key_of("not json", 32), None);
 }
 
 #[test]
@@ -840,6 +894,7 @@ fn speakers_params_name_the_mixer_ports_for_both_ears() {
 fn a_node_has_the_speakers_controls_only_when_the_conf_had_the_stage() {
     let mut node = LiveNode {
         id: 1,
+        serial: None,
         rate_hz: Some(48_000),
         sink: None,
         playing: false,

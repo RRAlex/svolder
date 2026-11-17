@@ -5,8 +5,8 @@
 //! events against a model of what PipeWire really plays.
 //!
 //! The model is a [`World`]: the config on disk, the running node (the config it was started
-//! from, its id, the value of every port as the node holds it), the sink's rate, a `pw-cli`
-//! that can die, the state file and a clock. [`ModelChain`] and [`ModelParams`] are the
+//! from, its id and serial, the value of every port as the node holds it), the sink's rate, a
+//! `pw-cli` that can die, the state file and a clock. [`ModelChain`] and [`ModelParams`] are the
 //! controller's `Chain` and `Params` over it, and [`Lab`] drives an [`EqControl`] and the
 //! outside world (the command line, PipeWire, the sink) through [`Event`]s. After every event
 //! and every tick of 50 ms [`Lab::check`] works out the curve the node plays (the ports it
@@ -17,17 +17,20 @@
 //! What the model takes from PipeWire, with where it was measured:
 //!
 //! - A node starts from the config on disk: every slot, the crossfeed stage and the preamp take
-//!   the config's values, and the node keeps that config to go back to. A restart of the chain is a new node (a new
-//!   id), and so is an apply.
+//!   the config's values, and the node keeps that config to go back to. A restart of the chain is
+//!   a new node, and so is an apply: always a new serial, and a new id or, as PipeWire gives a
+//!   freed id to a later object (the host e2e saw it), on every other start the id of the node
+//!   gone. Every block of seeds runs under both: [`Ids`].
 //! - A change of the sink's rate rebuilds the graph: every slot goes back to the config the node
 //!   started from (not the file as it is now), and the preamp keeps the value it was last set
-//!   to. The node keeps its id. This is the "slots revert to the applied config while the
-//!   preamp keeps its live value" the host e2e's step E2 measured (+5.82 dB over unity on a
+//!   to. The node keeps its id and serial. This is the "slots revert to the applied config while
+//!   the preamp keeps its live value" the host e2e's step E2 measured (+5.82 dB over unity on a
 //!   private PipeWire before the cap), and spike notes' "a rate change re-instantiates the
 //!   graph".
 //! - A control value is an f32, and a `bq_raw` coefficient is held to plus or minus 10.
 //! - A `set-param` to an id that is not the node's does nothing, and `pw-cli` says so (the
-//!   refusal the session reads). A line is applied whole or not at all.
+//!   refusal the session reads); one to the id of a node gone that the new node was given lands
+//!   on the new node. A line is applied whole or not at all.
 //! - `pw-cli` can die, and one that dies mid-line may or may not have applied the line.
 //! - A new node may be listed late (a service manager returns when the unit is active, before
 //!   the node is in the graph): until then it plays but cannot be found.
@@ -37,6 +40,7 @@
 //! A sequence is a list of events and nothing else is random while it runs, so a failing seed
 //! reproduces and a failing sequence shrinks.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -219,6 +223,8 @@ fn held_value(name: &str, value: f64) -> f32 {
 #[derive(Debug, Clone)]
 struct Node {
     id: u32,
+    /// Its `object.serial`, which no other node is given.
+    serial: u64,
     /// From when it can be found in the graph.
     listed_at_ms: u64,
     /// The config it started from, which a change of rate goes back to.
@@ -228,9 +234,10 @@ struct Node {
 }
 
 impl Node {
-    fn start(id: u32, conf: &Conf, listed_at_ms: u64) -> Node {
+    fn start(id: u32, serial: u64, conf: &Conf, listed_at_ms: u64) -> Node {
         let mut node = Node {
             id,
+            serial,
             listed_at_ms,
             started_from: conf.clone(),
             ports: HashMap::new(),
@@ -312,6 +319,12 @@ struct World {
     conf: Option<Conf>,
     node: Option<Node>,
     next_id: u32,
+    /// The id of the last node that went, which the next node may be given again.
+    freed_id: Option<u32>,
+    /// The serial of the last node started.
+    next_serial: u64,
+    /// Whether a new node may take the id of the node gone before it ([`Ids`]).
+    reuse_ids: bool,
     /// How long after its start a node is listed.
     list_delay_ms: u64,
     /// The controller's own apply put the node now there (not an outside start).
@@ -351,6 +364,29 @@ struct World {
     broken: Vec<String>,
     /// What happened, when a run is traced.
     trace: Option<Vec<String>>,
+}
+
+/// The ids the model gives new nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ids {
+    /// Every new node a new id.
+    Fresh,
+    /// Every other new node the id of the node gone before it, as PipeWire may: only the serial
+    /// tells the two apart.
+    Reused,
+}
+
+/// The environment variable that, set (to anything), makes [`Ids::Reused`] the model of a lab
+/// that no block of seeds chose one for: a single sequence (a `holds` case, `lab_trace`). The
+/// blocks of seeds (the short runs and `make preamp-lab`) run both models whatever it says.
+pub const REUSE_IDS_ENV: &str = "SVOLDER_LAB_REUSE_IDS";
+
+thread_local! {
+    /// The model of ids the labs made on this thread use.
+    static IDS: Cell<Ids> = Cell::new(match std::env::var_os(REUSE_IDS_ENV) {
+        Some(_) => Ids::Reused,
+        None => Ids::Fresh,
+    });
 }
 
 type Shared = Arc<Mutex<World>>;
@@ -401,19 +437,37 @@ impl World {
         HostEqState::load(&self.state_path()).ok().flatten()
     }
 
-    /// Start a node from the config on disk.
+    /// Start a node from the config on disk, in place of the one there, under a new id and a new
+    /// serial. Under [`Ids::Reused`] every other node takes the id of the node gone before it, as
+    /// PipeWire gives a freed id to a later object.
     fn start_node(&mut self, ours: bool) {
-        self.next_id += 1;
-        self.node = self
-            .conf
-            .as_ref()
-            .map(|conf| Node::start(self.next_id, conf, self.clock_ms + self.list_delay_ms));
+        self.next_serial += 1;
+        let freed = self
+            .node
+            .take()
+            .map(|node| node.id)
+            .or(self.freed_id.take());
+        let id = match freed {
+            Some(id) if self.reuse_ids && self.next_serial.is_multiple_of(2) => id,
+            _ => {
+                self.next_id += 1;
+                self.next_id
+            }
+        };
+        self.node = self.conf.as_ref().map(|conf| {
+            Node::start(
+                id,
+                self.next_serial,
+                conf,
+                self.clock_ms + self.list_delay_ms,
+            )
+        });
         self.node_is_ours = ours;
         self.lost_line = false;
         if ours {
             self.unreconciled = false;
         }
-        let id = self.next_id;
+        let serial = self.next_serial;
         let pre = self
             .node
             .as_ref()
@@ -423,7 +477,7 @@ impl World {
             RATES.map(|rate| format!("{:.2}", dense_peak(&sets, rate)))
         });
         self.note(|| {
-            format!("node {id} starts from the config on disk (ours: {ours}), preamp {pre:?}, slot peaks at the rates {peaks:?}")
+            format!("node {id} (serial {serial}) starts from the config on disk (ours: {ours}), preamp {pre:?}, slot peaks at the rates {peaks:?}")
         });
     }
 
@@ -483,7 +537,9 @@ impl World {
 
     /// Stop the chain and take its files away; the state file says off.
     fn remove_chain(&mut self) {
-        self.node = None;
+        if let Some(node) = self.node.take() {
+            self.freed_id = Some(node.id);
+        }
         self.conf = None;
         if let Some(mut state) = self.state() {
             state.on = false;
@@ -725,6 +781,7 @@ impl Link for ModelLink {
         let mut world = world(&self.world);
         let found = world.listed().map(|node| LiveNode {
             id: node.id,
+            serial: Some(node.serial),
             rate_hz: Some(world.sink_rate),
             sink: None,
             playing: false,
@@ -1265,6 +1322,9 @@ impl Lab {
             conf: None,
             node: None,
             next_id: 30,
+            freed_id: None,
+            next_serial: 0,
+            reuse_ids: IDS.get() == Ids::Reused,
             list_delay_ms: 0,
             node_is_ours: false,
             cli: Cli::default(),
@@ -1884,17 +1944,23 @@ fn report(seed: u64, failure: &Failure, sequence: fn(u64) -> (u32, Vec<Event>)) 
     text
 }
 
-/// Run seeds `first..first + runs`, on every core; the reports of the ones that failed.
-pub fn run_seeds(first: u64, runs: u64) -> Vec<String> {
-    run_block(first, runs, sequence_of)
+/// Run seeds `first..first + runs` with the model of ids `ids`, on every core; the reports of the
+/// ones that failed.
+pub fn run_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of, ids)
 }
 
 /// [`run_seeds`] on the targeted profile ([`generate_targeted`]).
-pub fn run_targeted_seeds(first: u64, runs: u64) -> Vec<String> {
-    run_block(first, runs, sequence_of_targeted)
+pub fn run_targeted_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of_targeted, ids)
 }
 
-fn run_block(first: u64, runs: u64, sequence: fn(u64) -> (u32, Vec<Event>)) -> Vec<String> {
+fn run_block(
+    first: u64,
+    runs: u64,
+    sequence: fn(u64) -> (u32, Vec<Event>),
+    ids: Ids,
+) -> Vec<String> {
     let next = AtomicUsize::new(0);
     let reported = AtomicUsize::new(0);
     let failures = Mutex::new(Vec::new());
@@ -1904,6 +1970,7 @@ fn run_block(first: u64, runs: u64, sequence: fn(u64) -> (u32, Vec<Event>)) -> V
     std::thread::scope(|scope| {
         for _ in 0..threads {
             scope.spawn(|| {
+                IDS.set(ids);
                 loop {
                     let at = next.fetch_add(1, Ordering::SeqCst) as u64;
                     if at >= runs {
@@ -1917,6 +1984,7 @@ fn run_block(first: u64, runs: u64, sequence: fn(u64) -> (u32, Vec<Event>)) -> V
                             true => report(seed, &failure, sequence),
                             false => format!("seed {seed}: {}", failure.what),
                         };
+                        let text = format!("[ids {ids:?}] {text}");
                         crate::locked(&failures).push((seed, text));
                     }
                 }

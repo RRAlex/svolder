@@ -154,6 +154,11 @@ def node(name, d=None):
     return None
 
 
+def which(o):
+    """A node's id and object.serial: PipeWire gives a freed id to a later object, never a serial."""
+    return (o['id'], o['info']['props'].get('object.serial')) if o else None
+
+
 def wait_until(what, fn, deadline=15.0, every=0.1):
     t0 = time.monotonic()
     while time.monotonic() - t0 < deadline:
@@ -640,10 +645,10 @@ def chain_playing():
 
 
 def tone_link_ids():
-    """The ids of the links from the tone stream's node."""
+    """The links from the tone stream's node, each as which() tells it (PipeWire gives link ids again too)."""
     d = dump()
     tone = {o['id'] for o in d if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('node.name') == 'svtone'}
-    return sorted(o['id'] for o in d if o['type'].endswith('Link') and o['info']['output-node-id'] in tone)
+    return sorted(which(o) for o in d if o['type'].endswith('Link') and o['info']['output-node-id'] in tone)
 
 
 def go_quiet():
@@ -937,8 +942,8 @@ def main():
     conn.eq({'op': 'set', 'index': 1, 'f': 1500.0, 'g': 0.0, 'done': True})
     wait_until('the peak at 1.5 kHz', lambda: point()['f'] == 1500.0, 5)
     time.sleep(0.6)
-    chain_before = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
-    say('C  before the drag: chain node %d, pids %s; load %s' % (chain_before[0], chain_before[1], _load()))
+    chain_before = (which(node(CHAIN)), _private_pids('host-eq.conf'))
+    say('C  before the drag: chain node (id, serial) %s, pids %s; load %s' % (chain_before[0], chain_before[1], _load()))
     th.start()
     t0 = time.monotonic()
     late = 0
@@ -960,9 +965,8 @@ def main():
     polling.set()
     th.join(2)
     poll_conn.close()
-    chain_node = node(CHAIN)
-    chain_after = (chain_node['id'] if chain_node else None, _private_pids('host-eq.conf'))
-    say('C  after the drag: chain node %s, pids %s; load %s' % (chain_after[0], chain_after[1], _load()))
+    chain_after = (which(node(CHAIN)), _private_pids('host-eq.conf'))
+    say('C  after the drag: chain node (id, serial) %s, pids %s; load %s' % (chain_after[0], chain_after[1], _load()))
     time.sleep(0.3)
     x, fr = rec.finish()
     check(reached, 'the level settles at the model after the last value')
@@ -1055,7 +1059,7 @@ def main():
     # E2. After a live softening, a forced rate change never plays over unity. The graph goes back
     # to the config's coefficients (the hot curve the chain was applied with, a +6 dB peak on the
     # tone); the preamp does not, so it must never have risen past what that curve needs.
-    old_id = node(CHAIN)['id']
+    old = which(node(CHAIN))
     go_quiet()   # a chain nothing plays through is removed at once (with a stream it stays as a pass-through)
     conn.eq({'op': 'mode', 'on': False})
     wait_until('the view to say off', lambda: conn.view()['eq']['on'] is False, 5)
@@ -1064,10 +1068,11 @@ def main():
     conn.eq({'op': 'set', 'index': 1, 'kind': 'PK', 'f': 1000.0, 'g': 6.0, 'q': 1.0, 'done': True})
     wait_until('the view to say on', lambda: conn.view()['eq']['on'] is True, 10)
     wait_until('the chain\'s node', lambda: node(CHAIN), 10)
-    new_id = node(CHAIN)['id']
-    say('E2 the chain\'s node id: %d before the chain was taken away, %d after it started again' % (old_id, new_id))
-    check(old_id != new_id,
-          'a chain started again is a node under a new id (%d, then %d): the controller tells a restart by its id' % (old_id, new_id))
+    new = which(node(CHAIN))
+    say('E2 the chain\'s node (id, serial): %s before the chain was taken away, %s after it started again' % (old, new))
+    check(new[1] is not None and old[1] != new[1],
+          'a chain started again is a node under a new serial (%s, then %s; the id may come again: %d, then %d): '
+          'the controller tells a restart by its serial' % (old[1], new[1], old[0], new[0]))
     applied = conn.view()
     ok, _, lv_hot = wait_level(base, expected_db(applied, RATE), 0.15, 15)
     check(ok, 'the +6 dB peak on the tone, applied, plays as the model says (%+.3f dB)' % (lv_hot or 0))
@@ -1109,7 +1114,7 @@ def main():
     for i in range(15):
         conn.eq({'op': 'add', 'kind': 'PK', 'f': 120.0 * 1.4 ** i, 'g': 0.5 if i % 2 else -0.5, 'q': 1.0})
     wait_until('16 points', lambda: len(conn.view()['eq']['points']) == 16, 5)
-    chain16 = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain16 = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     # The drag moves the point under the tone (1 kHz), by -3 dB: that is a 3 dB change at the tone,
     # ten times the tolerance, and a cut leaves the preamp where E2 capped it. The level is
     # read before the drag and after it: a line that is cut or refused leaves the chain at the
@@ -1131,7 +1136,7 @@ def main():
           'with 16 points the drag lands as the model says (%+.3f dB, model %+.3f), the level moved %+.3f dB '
           '(about -3) and the view says live' % (lv16 or 0, expected_db(full, RATE), moved))
     after16 = node(CHAIN)
-    check(after16 is not None and (after16['id'], _private_pids('host-eq.conf')) == chain16,
+    check(after16 is not None and (which(after16), _private_pids('host-eq.conf')) == chain16,
           'the chain was not restarted during the 16-point drag')
     for _ in range(15):
         conn.eq({'op': 'remove', 'index': 2})
@@ -1142,11 +1147,11 @@ def main():
     rec = Recording()
     time.sleep(0.6)
     conn.eq({'op': 'mode', 'on': False})
-    f_id, f_links = node(CHAIN)['id'], tone_link_ids()
+    f_id, f_links = which(node(CHAIN)), tone_link_ids()
     wait_until('the view to say off', lambda: conn.view()['eq']['on'] is False, 5)
     # With the tone playing the chain stays as a flat pass-through: the same node, the same links.
     time.sleep(1.0)
-    check(node(CHAIN) is not None and node(CHAIN)['id'] == f_id and tone_link_ids() == f_links,
+    check(node(CHAIN) is not None and which(node(CHAIN)) == f_id and tone_link_ids() == f_links,
           'F Off with a stream playing keeps the chain (node %s) and the tone\'s links %s (now %s)' % (f_id, f_links, tone_link_ids()))
     check(conn.view()['eq']['note'] == 'chain kept as a pass-through until idle', 'F the view says the chain is kept (%r)' % conn.view()['eq']['note'])
     # The pass-through plays flat under the preamp the chain was loaded with (a rate change puts the
@@ -1182,7 +1187,7 @@ def main():
     conn.eq({'op': 'mode', 'on': True})
     wait_until('the chain\'s node', lambda: node(CHAIN), 10)
     wait_until('the view to say on', lambda: conn.view()['eq']['on'], 5)
-    chain_x = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain_x = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     check(conn.view()['eq']['preamp_db'] == 0.0 and not conn.view()['eq']['crossfeed']['on'],
           'the EQ is flat, the preamp 0 dB and the crossfeed off')
     block = play(1000)
@@ -1216,8 +1221,8 @@ def main():
         check(got is not None and db_of(got[0]) <= 0.1 and db_of(got[1]) <= 0.1,
               'a mono %g Hz tone plays at %+.2f / %+.2f dB re the input, never above it (the preamp rule)'
               % (f, db_of(got[0]), db_of(got[1])) if got else 'mono tone recorded')
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_x,
-          'turning crossfeed on did not restart the chain (node %d, pids %s)' % chain_x)
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_x,
+          'turning crossfeed on did not restart the chain (node %s, pids %s)' % chain_x)
 
     # X2b. the delay, live: 0.60 ms in total
     conn.eq({'op': 'crossfeed', 'delay_ms': 0.6})
@@ -1231,7 +1236,7 @@ def main():
         '%.3f ms (%.1f samples added, engine %d)' % (total_ms, added, rd[4]))
     check(0.6 - 1.3 * 1000 / rate <= total_ms <= 0.6 + 0.3 * 1000 / rate,
           'the total lag is %.3f ms for a 0.60 ms ask, within one sample (%.3f ms), live' % (total_ms, 1000 / rate))
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_x, 'the delay change did not restart the chain')
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_x, 'the delay change did not restart the chain')
 
     # X2c. M/S bass, 50 % at 120 Hz: the bass goes to both channels, the highs stay put
     conn.eq({'op': 'crossfeed', 'model': 'mid-side'})
@@ -1248,7 +1253,7 @@ def main():
     check(ms2k is not None and abs(db_of(ms2k[0]) - pre) <= 0.2 and db_of(ms2k[1]) < -45,
           'a left-only 2 kHz tone stays on the left, unchanged but for the preamp (%+.2f dB left, preamp %+.2f dB; %.1f dB right)'
           % (db_of(ms2k[0]), pre, db_of(ms2k[1])) if ms2k else 'M/S 2 kHz recorded')
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_x, 'the model change did not restart the chain')
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_x, 'the model change did not restart the chain')
 
     # X2e. a change sent while nothing plays (the chain idle): it holds when the sound starts again
     conn.eq({'op': 'crossfeed', 'model': 'bauer'})
@@ -1382,13 +1387,13 @@ def main():
         conn.eq({'op': 'crossfeed', 'on': True})
         wait_until('the chain\'s node', lambda: node(CHAIN), 10)
         wait_until('the tone to play through the chain', chain_playing, 10)
-        ids = (node(CHAIN)['id'], _private_pids('host-eq.conf'), tone_link_ids())
-        sinks = sorted(o['id'] for o in dump() if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('media.class') == 'Audio/Sink')
+        ids = (which(node(CHAIN)), _private_pids('host-eq.conf'), tone_link_ids())
+        sinks = sorted(which(o) for o in dump() if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('media.class') == 'Audio/Sink')
         check(tone_links() == [CHAIN], 'X5 (%s) the tone is linked to the chain only (%s)' % (how, tone_links()))
         conn.eq({'op': 'crossfeed', 'on': False})
         time.sleep(1.5)
-        now = (node(CHAIN)['id'] if node(CHAIN) else None, _private_pids('host-eq.conf'), tone_link_ids())
-        sinks_now = sorted(o['id'] for o in dump() if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('media.class') == 'Audio/Sink')
+        now = (which(node(CHAIN)), _private_pids('host-eq.conf'), tone_link_ids())
+        sinks_now = sorted(which(o) for o in dump() if o['type'].endswith('Node') and (o.get('info') or {}).get('props', {}).get('media.class') == 'Audio/Sink')
         check(now == ids and sinks_now == sinks,
               'X5 (%s) crossfeed off keeps the chain node, its process, the stream\'s links and the sinks: %s -> %s' % (how, ids, now))
         v = conn.view()
@@ -1575,14 +1580,14 @@ def main():
     conn.eq({'op': 'mode', 'on': True})
     wait_until('the chain\'s node', lambda: node(CHAIN), 10)
     check(settles(lambda: tone_links() == [CHAIN], 10.0), 'the tone plays through the chain')
-    chain_v0 = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain_v0 = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     conn.eq({'op': 'speakers', 'set': sid})
     vsv = conn.view()['eq']['speakers']
     check(vsv['set'] == sid and vsv['on'] is False and vsv['room_name'] == 'With room' and vsv['term'] == 'BRIR',
           'the view says %s chosen, off, "%s · %s"' % (vsv['set'], vsv['room_name'], vsv['term']))
     conf_path = chain_conf()
     check(conf_path is not None and os.path.exists(conf_path), 'the chain\'s config is readable (%s)' % conf_path)
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_v0 and 'lvs:Gain 1' not in chain_params()
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_v0 and 'lvs:Gain 1' not in chain_params()
           and 'vLL' not in open(conf_path).read(),
           'choosing a set while the speakers are off changed nothing: same chain, no stage in the graph or the config')
     check(conn.view()['eq']['preamp_db'] == 0.0, 'the EQ is flat, the preamp 0 dB')
@@ -1605,7 +1610,7 @@ def main():
     vs_null('V1 bypass (set loaded, speakers off) left-only 1 kHz', 1000)
     vs_bypass_exact('V1')
     vs_forget_refused(conn, sid, swav, 'V1 off but loaded')
-    chain_off = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain_off = (which(node(CHAIN)), _private_pids('host-eq.conf'))
 
     # V6b. the WAV is gone while the stage is OFF but loaded: a rate change rebuilds the chain without the stage and
     # says so; the chain stays alive and never goes silent
@@ -1619,11 +1624,11 @@ def main():
     tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '0')
     wait_until('the sink back at 48000', lambda: sink_rate() == 48000, 6)
     vs_null('V6b chain after the fallback (speakers off) left-only 1 kHz', 1000, bypass_ports=False)
-    chain_untouched = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain_untouched = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     r = conn.eq({'op': 'speakers', 'set': sid, 'on': True}, expect_ack=False)
     check(r.get('result') != 'ack' and 'missing or damaged' in json.dumps(r),
           'turning on a set whose WAV is missing is refused in words (%s)' % json.dumps(r)[:160])
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_untouched and conn.view()['eq']['speakers']['on'] is False,
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_untouched and conn.view()['eq']['speakers']['on'] is False,
           'the refusal left the chain and the speakers as they were')
     entry = vs_import(conn, fixture)
     check(entry['id'] == sid and os.path.exists(swav), 'the set is back as %s' % sid)
@@ -1642,7 +1647,7 @@ def main():
     conn.eq({'op': 'speakers', 'set': sid, 'on': True})
     check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0 and len(_private_pids('host-eq.conf')) == 1 and node(CHAIN), 10.0),
           'the speakers are on with the set back')
-    chain_v1 = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain_v1 = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     vsv = conn.view()['eq']['speakers']
     check(vsv['on'] is True and vsv['set'] == sid, 'the view says the virtual speakers are on')
     for f in (100, 1000, 5000):
@@ -1659,14 +1664,14 @@ def main():
     sweep = vs_oracle(RATE, swav, grid)
     worst = max(max(20 * math.log10(abs(r['ll'] + r['rl'])), 20 * math.log10(abs(r['lr'] + r['rr']))) for r in sweep)
     check(worst <= 0.0, 'the engine\'s mono response is at most %+.2f dB re the input over 20 Hz to 20 kHz (400 points)' % worst)
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_v1, 'measuring did not restart the chain (node %d, pids %s)' % chain_v1)
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_v1, 'measuring did not restart the chain (node %s, pids %s)' % chain_v1)
     # off and on again: no rebuild either way, and off is the bit-exact bypass again
     conn.eq({'op': 'speakers', 'on': False})
     vs_null('V1b bypass after the speakers were on, left-only 1 kHz', 1000)
     vs_bypass_exact('V1b')
     conn.eq({'op': 'speakers', 'on': True})
     check(settles(lambda: chain_params().get('lvs:Gain 2') == 1.0, 6.0), 'the speakers play again')
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_v1, 'off and on again did not restart the chain')
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_v1, 'off and on again did not restart the chain')
     vs_case(conn, 'V2b after off and on', 1000, swav, 'left')
 
     # V10. the chain process's CPU while a tone plays through the speakers (recorded, not a gate)
@@ -1765,10 +1770,10 @@ def main():
           'a chain for the speakers alone runs, the EQ off')
     wait_until('the tone to play through the chain', chain_playing, 10)
     check(settles(lambda: tone_links() == [CHAIN], 10.0), 'the tone is linked to the chain')
-    chain_pt = (node(CHAIN)['id'], _private_pids('host-eq.conf'))
+    chain_pt = (which(node(CHAIN)), _private_pids('host-eq.conf'))
     conn.eq({'op': 'speakers', 'on': False})
     v = conn.view()['eq']
-    check((node(CHAIN)['id'], _private_pids('host-eq.conf')) == chain_pt and v['note'] and 'pass-through' in v['note'] and v['speakers']['on'] is False,
+    check((which(node(CHAIN)), _private_pids('host-eq.conf')) == chain_pt and v['note'] and 'pass-through' in v['note'] and v['speakers']['on'] is False,
           'off kept the chain as a pass-through (%r), same node and process' % v['note'])
     null_test('V11 pass-through (speakers off, EQ off) left-only 1 kHz', 1000, block)
     go_quiet()

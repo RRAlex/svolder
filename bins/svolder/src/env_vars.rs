@@ -517,6 +517,14 @@ const ENV_VARS: &[EnvVar] = &[
                5000 (`RUNS=` on the make line).",
     },
     EnvVar {
+        name: "SVOLDER_LAB_REUSE_IDS",
+        read_by: "svolder-host test suite",
+        dev_only: true,
+        what: "Set to anything, a single preamp-lab sequence (a `holds` case, `lab_trace`) gives \
+               every other new node the id of the node gone before it, as PipeWire may. The \
+               blocks of seeds (the short runs and `make preamp-lab`) run both models anyway.",
+    },
+    EnvVar {
         name: "SVOLDER_WRITE_FIXTURES",
         read_by: "svolderd test suite",
         dev_only: true,

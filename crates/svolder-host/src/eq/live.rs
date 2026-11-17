@@ -553,7 +553,27 @@ pub fn set_param_line(node: u32, params: &[(String, f64)]) -> String {
     line
 }
 
+/// Which node a look found: its object id, which PipeWire gives to a later object once this one
+/// is gone (a chain started again is often listed under the id of the one it replaced), and its
+/// `object.serial`, which PipeWire never gives again while it runs. Two looks found the same node
+/// when both are equal; a dump that lists no serial leaves the id alone to tell by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeKey {
+    /// The object id, which a `set-param` names.
+    pub id: u32,
+    /// The `object.serial`; `None` when the dump does not list it.
+    pub serial: Option<u64>,
+}
+
 impl LiveNode {
+    /// Which node this is (see [`NodeKey`]).
+    pub fn key(&self) -> NodeKey {
+        NodeKey {
+            id: self.id,
+            serial: self.serial,
+        }
+    }
+
     /// Whether the node has the preamp control a current chain lists (even before any set). A
     /// node without it is a chain an older svolder built, which none of the sends here fit.
     pub fn has_preamp_control(&self) -> bool {
@@ -583,8 +603,12 @@ impl LiveNode {
 /// The live chain's node as `pw-dump` shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiveNode {
-    /// The node's object id, which a restart of the chain changes.
+    /// The node's object id, which a `set-param` names. A chain started again may be listed under
+    /// the same id: [`LiveNode::key`] tells two nodes apart.
     pub id: u32,
+    /// The node's `object.serial`, which no other node is given while PipeWire runs; `None`
+    /// when the dump does not list it.
+    pub serial: Option<u64>,
     /// The rate the sink the chain plays into is running at; `None` when that sink is not
     /// found or has no format yet. The chain's own node does not show it.
     pub rate_hz: Option<u32>,
@@ -599,6 +623,31 @@ pub struct LiveNode {
     /// The values the chain's slots, preamp and crossfeed stage hold, by port name (`l07:b0`,
     /// `lmix:Gain 2`).
     pub params: HashMap<String, f64>,
+}
+
+/// An object's `object.serial`, which `pw-dump` prints as a number or a string.
+fn serial_of(object: &Value) -> Option<u64> {
+    match &object["info"]["props"]["object.serial"] {
+        Value::String(text) => text.parse().ok(),
+        value => value.as_u64(),
+    }
+}
+
+/// Which node is the live chain's under `id` in `dump` (a dump of that object alone will do):
+/// `None` when the object under `id` is not the chain's `Audio/Sink` node [`NODE_NAME`].
+pub fn key_of(dump: &str, id: u32) -> Option<NodeKey> {
+    let objects: Vec<Value> = serde_json::from_str(dump).ok()?;
+    let node = objects
+        .iter()
+        .find(|object| object["id"].as_u64() == Some(u64::from(id)))?;
+    let props = &node["info"]["props"];
+    let chain = node["type"].as_str().is_some_and(|t| t.ends_with("Node"))
+        && props["node.name"].as_str() == Some(NODE_NAME)
+        && props["media.class"].as_str() == Some("Audio/Sink");
+    chain.then(|| NodeKey {
+        id,
+        serial: serial_of(node),
+    })
 }
 
 /// The live chain's node in `dump` (`pw-dump`'s output): the `Audio/Sink` node named
@@ -616,6 +665,7 @@ pub fn props_of(dump: &str) -> Option<LiveNode> {
     };
     let node = node_named(NODE_NAME, Some("Audio/Sink"))?;
     let id = u32::try_from(node["id"].as_u64()?).ok()?;
+    let serial = serial_of(node);
     let mut params = HashMap::new();
     for props in node["info"]["params"]["Props"]
         .as_array()
@@ -656,6 +706,7 @@ pub fn props_of(dump: &str) -> Option<LiveNode> {
     });
     Some(LiveNode {
         id,
+        serial,
         rate_hz,
         sink: sink_name,
         playing: objects.iter().any(|link| {

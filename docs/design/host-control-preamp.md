@@ -88,9 +88,14 @@ Three more rules keep that true when something else changes the chain:
   bounds nothing, checks no send and makes no foreign resend, and the first look that finds it run
   takes the bound and sends everything again (every slot, the stage and the preamp). Up to one watch
   period (1 s) of the saved config plays first.
-- The session sends only to the node id the controller looked at. When the node it finds is under
-  another id (a refusal dropped the kept node, or a write failed and it was found again), the line
-  is not written; the controller looks at that node and sends once more.
+- The session sends only to the node the controller looked at, told by its id and `object.serial`
+  (PipeWire gives a freed id to a later object, never a serial). `pw-cli` does not refuse a line to
+  a node that replaced the old one under its id, so the session reads the node again before every
+  line: `pw-dump` of that object alone (about 13 ms and 9 ms of CPU on a private graph of 550
+  objects, where the whole graph's dump takes about 105 ms and 99 ms), given at most 250 ms. That
+  is one read a line, two when `pw-cli` is started for it and twice that when the line is tried
+  again, so one send holds the controller at most a second on these reads. When the node it finds
+  is another one, the line is not written; the controller looks at that node and sends once more.
 - The config on disk is written with the preamp it needs at its own rate, so a chain that starts
   again from it is capped by that number and not by the preamp the points state. A state file that
   the command line wrote is checked at the running rate and sent whole on the first look after the
@@ -124,21 +129,23 @@ until they appear.
 
 ## The preamp lab
 
-`make preamp-lab` is the safeguard for all of the above: the controller driven through seeded
-random sequences of events against a model of what PipeWire plays (`eq/lab.rs`). The model holds
-the config on disk, the node (its id, the config it started from, every port's value as an f32,
-coefficients held to ±10), the sink's rate, a `pw-cli` that can die, the state file and a clock.
-It takes from PipeWire what was measured on a private instance: a rate change puts the slots back
-to the config the node started from and leaves the preamp as last set; a restart is a new node
-from the config on disk; a `set-param` to an id that is not the node's does nothing; a line is
-applied whole or not at all. The events are hand edits (drags and releases), points added and
-removed, preset loads harder and softer than the loaded curve, the EQ on and off, command-line
-applies with the state file written before or after the daemon's look, state reloads, node
-restarts, rate changes among 44.1 to 192 kHz, `pw-cli` deaths (also mid-line), refused sends, a
-write that fails once, refusals the session reads zero to two reads late (its reader task sets
-the flag a moment after `pw-cli` prints it), a failed Off or apply, nodes that are listed late,
-daemon restarts and ticks of 50 ms. A rate event with the rate the sink already runs at models a
-rebuild of the graph, which puts the slots back without a change of rate.
+`make preamp-lab` is the safeguard for all of the above: the controller driven through seeded random
+sequences of events against a model of what PipeWire plays (`eq/lab.rs`). The model holds the config
+on disk, the node (its id and serial, the config it started from, every port's value as an f32,
+coefficients held to ±10), the sink's rate, a `pw-cli` that can die, the state file and a clock. It
+takes from PipeWire what was measured on a private instance: a rate change puts the slots back to
+the config the node started from and leaves the preamp as last set; a restart is a new node from the
+config on disk, under a new serial and a new id, and every block of seeds runs a second time with
+every other start given the old id, as PipeWire may (`SVOLDER_LAB_REUSE_IDS=1` picks that model for
+a single sequence, such as `lab_trace`); a `set-param` to an id that is not the node's does nothing;
+a line is applied whole or not at all. The events are hand edits (drags and releases), points added
+and removed, preset loads harder and softer than the loaded curve, the EQ on and off, command-line
+applies with the state file written before or after the daemon's look, state reloads, node restarts,
+rate changes among 44.1 to 192 kHz, `pw-cli` deaths (also mid-line), refused sends, a write that
+fails once, refusals the session reads zero to two reads late (its reader task sets the flag a
+moment after `pw-cli` prints it), a failed Off or apply, nodes that are listed late, daemon restarts
+and ticks of 50 ms. A rate event with the rate the sink already runs at models a rebuild of the
+graph, which puts the slots back without a change of rate.
 
 After every event and every tick the curve the node plays (its ports, as the model holds them)
 times the preamp it plays must peak at most 0.01 dB over unity over the whole band at the current

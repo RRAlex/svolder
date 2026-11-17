@@ -670,7 +670,7 @@ host-e2e: deps-build ## The computer EQ end to end on a private PipeWire
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder-host --example vs_expect
 	@bash scripts/host-e2e/run.sh
 
-#: Random event sequences against a model of PipeWire.
+#: Random event sequences against a model of PipeWire, each block under fresh and reused node ids.
 #: SEED=<number>   the first sequence's seed (default 1000)
 #: RUNS=<number>   how many sequences (default 5000)
 preamp-lab: deps-build ## Long run of the computer EQ's preamp lab
