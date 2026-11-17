@@ -8,6 +8,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.36.7
+
+- **Tests**: the virtual speakers download tests no longer depend on the order a folder lists
+  its files in, which differs between filesystems.
+
 ## 0.36.6
 
 - **Computer EQ, a safer restart**: PipeWire can give a restarted EQ chain the same node id it
