@@ -300,6 +300,21 @@ function legendHtml(preview, compare) {
   return `<ul class="fpe-legend">${list.join('')}</ul>`;
 }
 
+/** The preamp's small scale: five major ticks over minor ones and a needle where `db` stands between
+ * `PREAMP_FLOOR_DB` and 0 (a picture only: the number beside it says the value). */
+const PREAMP_FLOOR_DB = -12;
+export function preampScale(db) {
+  const at = Math.min(1, Math.max(0, (Number(db) - PREAMP_FLOOR_DB) / -PREAMP_FLOOR_DB));
+  const x = (74 * at).toFixed(1);
+  const ticks = Array.from({ length: 13 }, (_, i) => {
+    const major = i % 3 === 0;
+    const tx = (i * 74) / 12;
+    return `<path class="fpe-mini-tick${major ? ' major' : ''}" d="M${tx.toFixed(1)} 0v${major ? 8 : 4}"/>`;
+  }).join('');
+  return '<svg class="fpe-mini" viewBox="0 -2 74 12" width="74" height="12" aria-hidden="true">'
+    + `${ticks}<path class="fpe-mini-needle" d="M${x} -2v12"/></svg>`;
+}
+
 /** The numbers of one preview, as rows: the fit and the worst miss for a device, the preamp for
  * the computer, and the line that says how far to lower the volume when the bands boost. */
 function numbersHtml(preview, computer) {
@@ -314,7 +329,8 @@ function numbersHtml(preview, computer) {
     });
   } else if (computer) {
     list.push({
-      label: esc(WORDS.preamp), value: esc(WORDS.preampValue(dbText(preview.preamp_db))),
+      label: esc(WORDS.preamp),
+      value: esc(WORDS.preampValue(dbText(preview.preamp_db))) + preampScale(preview.preamp_db),
     });
   }
   let out = rows(list);

@@ -17,6 +17,7 @@ use svolder_host::{Button, NowPlaying, RouteFacts, SinkState, Status};
 use svolder_ipc::host::{HostView, HostVolume, PlayingView};
 
 use super::widgets::marquee::Marquee;
+use super::widgets::slow_scroll::SlowScroll;
 
 pub mod vu;
 
@@ -158,6 +159,8 @@ pub struct Host {
     /// Where the `Now playing` row's words have been carried, for words too long for it: out
     /// and back for as long as they are, starting again with every new track.
     pub marquee: Marquee,
+    /// Where the Controls pane's Path row has been scrolled to while it is cut and in sight.
+    pub path_scroll: SlowScroll,
     /// Which of the Transport row's buttons its cursor is on, an index into [`Button::ALL`].
     pub button: usize,
     /// Whether the loop has a capture of the sink's monitor running.
@@ -202,6 +205,7 @@ impl Host {
             cover: Box::default(),
             daemon: None,
             marquee: Marquee::new(now),
+            path_scroll: SlowScroll::new(now),
             button: 0,
             capturing: false,
             from_daemon: false,

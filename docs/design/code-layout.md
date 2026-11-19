@@ -75,7 +75,7 @@ frame's text is the same with every effect off. That is why `audio_level.rs` (ho
 music is) is not in it: the Status pane and the Controls pane read it too.
 
 **The daemon.** `bins/svolderd/src/main.rs` opens with the daemon at a glance, one line per
-module. The MQTT bridge is `mqtt_bridge`, split by what its task does: the connection, the
+module. The MQTT client is `mqtt_bridge`, split by what its task does: the connection, the
 discovery, the state it publishes and the commands it takes. `http_slot` holds one of the two
 HTTP servers (the web UI or the MCP server) and is the one place the steps that bring it in line
 with its configuration section are written, so a fix reaches both.

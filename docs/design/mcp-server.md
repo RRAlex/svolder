@@ -45,11 +45,11 @@ a secret the owner has replaced.
 
 ## The tools
 
-`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers fourteen, listed in `TOOLS`: `list_devices`,
+`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers fifteen, listed in `TOOLS`: `list_devices`,
 `get_state`, `get_link_history`, `list_presets` and `get_host` read; `set_control`, `load_preset`,
-`mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed` and
-`set_host_speakers` write. `get_host`, `set_host_volume`, `host_mute`, `set_host_eq`,
-`set_host_crossfeed` and `set_host_speakers` are the computer's
+`mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed`,
+`set_host_loudness` and `set_host_speakers` write. `get_host`, `set_host_volume`, `host_mute`,
+`set_host_eq`, `set_host_crossfeed`, `set_host_loudness` and `set_host_speakers` are the computer's
 (`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to 100 becomes dB as `60 * log10(percent /
 100)`, the floors hold it under `host:volume`, and a rise past `MAX_RISE_DB` asks as the device's
 does; a volume not read yet counts as 1 %. An unmute always asks, as the device's does.
@@ -60,10 +60,17 @@ setting, because a client may hold an older list. A device refusal is a tool err
 only a tool that does not exist is a protocol error. `get_host` reads the crossfeed beside the EQ,
 and `set_host_crossfeed` sends one `HostEqOp::Crossfeed`; its enums and ranges are built from the
 models table of `svolder-host`. It never asks: turning the crossfeed on lowers the preamp first, so
-it cannot raise the level. `get_host` also reads the virtual speakers (the view without its curves,
-with the fetched sets), and `set_host_speakers {on?, set?}` sends one `HostEqOp::Speakers`, and both
-speakers and crossfeed tools answer with both views (one turns the other off): a set is chosen by
-the id of one already fetched, and no tool fetches.
+it cannot raise the level. `get_host` also reads the loudness (the view without its curve) and
+`set_host_loudness {on?, strength_pct?, reference_pct?, reference?: "now"}` sends one
+`HostEqOp::Loudness`. It never asks either, since loudness only cuts; it refuses `reference_pct`
+together with `reference: "now"`, and a refusal of the controller is a tool error the model reads.
+`get_host` also carries `path` (the untouched-path verdict, judged against the DACs it knows, or the
+computer's side alone for another sink) and `config` (the PipeWire config check), both from
+`svolder-ipc`'s judges, read once per call within a second
+([host-config-check.md](host-config-check.md)). `get_host` also reads the virtual speakers (the view
+without its curves, with the fetched sets), and `set_host_speakers {on?, set?}` sends one
+`HostEqOp::Speakers`, and both speakers and crossfeed tools answer with both views (one turns the
+other off): a set is chosen by the id of one already fetched, and no tool fetches.
 
 Every tool goes through `Fleet`, the same request path the socket's clients use
 (`bins/svolderd/src/fleet.rs`), so a value is validated and refused exactly as `svolder set` refuses

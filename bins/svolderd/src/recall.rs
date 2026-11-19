@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Recalling a tone-control preset, or applying a built-in setting, on a device the daemon holds:
-//! the part the MCP server's `load_preset` and the MQTT bridge's preset select share. Both find
+//! the part the MCP server's `load_preset` and the MQTT client's preset select share. Both find
 //! the preset among the ones that fit the device (or the setting among the device's own) and plan
 //! the writes from the device's current readings; this module holds the finding, the planning and
 //! the words, and the device's writer ([`crate::writer`]) sends the commands in order, stopping at

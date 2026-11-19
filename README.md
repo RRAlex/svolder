@@ -140,11 +140,10 @@ commands = true           # let Home Assistant change things; leave it out for r
 max_volume_db = -20.0     # Home Assistant never sets the volume above this
 ```
 
-Then run `svolder daemon restart`; `svolder daemon status` says when the bridge is connected. With
-the MQTT integration on the same broker, each device appears with its controls.
+Then run `svolder daemon restart`; `svolder daemon status` says when the MQTT client is connected.
+With the MQTT integration on the same broker, each device appears with its controls.
 [contrib/home-assistant](contrib/home-assistant/README.md) has the broker and login steps and a
-dashboard to paste in, and [MQTT and Home Assistant](docs/usage/mqtt.md) has every entity and
-topic.
+dashboard to paste in, and [MQTT and Home Assistant](docs/usage/mqtt.md) has every entity and topic.
 
 <img src="docs/images/ha-dashboard.webp" width="78%" alt="The svolder dashboard in Home Assistant
 for a Gungnir 2, in the svolder theme: the volume slider, the input with its balance gauge, the tone
@@ -176,7 +175,7 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
             └──────────┬────────┴────────┬────────┴──────┬───────┘
                        ▼                 ▼               ▼
               ┌──────────────────── servers (thin) ─────────────────┐
-              │  IPC server · web server · MCP server · MQTT bridge │
+              │  IPC server · web server · MCP server · MQTT client │
               └──────────────────────────┬──────────────────────────┘
                                          ▼
               ┌──────────── core: one model, one set of ops ────────┐

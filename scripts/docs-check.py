@@ -17,8 +17,15 @@
 #      the Rust sources under bins/ and crates/, that looks like a repo path names a tracked file
 #      or folder (or the tail of one, at a `/` boundary); PATH_ALLOW lists the spans that are not
 #      repo paths, each with its reason.
+#   f. no shipped string or doc says "bit-perfect" or "bit-exact": the word is `untouched`. It
+#      scans the Rust under bins/ and crates/ (`///` lines too, which are clap's `--help` text;
+#      not plain `//` comments, which describe what the code measures), the web `.js` under
+#      bins/ (not `//` lines), docs/usage and docs/glossary.md. A line that tests the words are absent
+#      (`contains("bit-...")`) and the glossary's "Never worded" line are skipped. The e2e and
+#      design docs may say bit-exact of what they measured.
 #
-# `--self-test` runs the path matcher of (e) over a fixed list and exits 0 when it behaves.
+# `--self-test` runs the path matcher of (e) and the matcher of (f) over fixed lists and exits 0
+# when they behave.
 import glob
 import os
 import re
@@ -225,6 +232,7 @@ PATH_ALLOW = {
     ("docs/usage/web-ui.md", "api/v1/devices/DEVICE/"): "a URL path of the web API",
     ("bins/svolderd/src/web/api.rs", "api/v1/"): "a URL path of the web API",
     ("docs/design/host-audio.md", "svolder/host-eq.toml"): "a file under the user's config folder",
+    ("docs/design/host-audio.md", "svolder/host-eq-settings.toml"): "a file under the user's config folder",
     ("crates/svolder-host/src/eq/manage.rs", "svolder/host-eq.toml"): "a file under the user's config folder",
     ("docs/design/tone-control-and-presets.md", "results/INDEX.md"): "a file of the AutoEq repository, not of this one",
     ("docs/usage/eq.md", "results/INDEX.md"): "a file of the AutoEq repository, not of this one",
@@ -286,6 +294,44 @@ def span_problems(path, n, line, index, problems):
         if cand is None or (path, span) in PATH_ALLOW or path_exists(cand, index):
             continue
         problems.append((path, n, f"no such path `{span}`"))
+
+
+BIT_RE = re.compile(r"\bbit[- ]?(perfect|exact)\b", re.IGNORECASE)
+
+
+def bit_claim(path, line):
+    """Whether `line` of `path` words a claim the shipped words never make."""
+    if not BIT_RE.search(line):
+        return False
+    if path.endswith((".rs", ".js")):
+        stripped = line.lstrip()
+        # A plain `//` comment (and a `//!` module note) is not shipped; a `///` line is, as
+        # clap's `--help` text.
+        if stripped.startswith("//") and not stripped.startswith("///"):
+            return False
+        if path.endswith(".js") and stripped.startswith("///"):
+            return False
+        # A test that the words are absent from what svolder says.
+        if re.search(r"contains\(\s*\"bit[- ]", line):
+            return False
+    if path == "docs/glossary.md" and "Never worded" in line:
+        return False
+    return True
+
+
+def check_bits(problems):
+    for path in tracked_files():
+        scanned = (
+            path.startswith(("bins/", "crates/")) and path.endswith(".rs")
+            or path.startswith("bins/") and path.endswith(".js") and not path.endswith(".min.js")
+            or path.startswith("docs/usage/") and path.endswith(".md")
+            or path == "docs/glossary.md"
+        )
+        if not scanned or not os.path.isfile(os.path.join(ROOT, path)):
+            continue
+        for n, line in enumerate(read(path).split("\n"), 1):
+            if bit_claim(path, line):
+                problems.append((path, n, 'says "bit-perfect" or "bit-exact"; the word is `untouched`'))
 
 
 def shipped_markdown_files(files):
@@ -351,6 +397,26 @@ def self_test():
             print(f"self-test: `{span}`: candidate {got_cand}, passes {got_ok}; "
                   f"expected {cand}, {ok}")
             bad += 1
+    bits = [
+        ("bins/svolder/src/x.rs", 'let word = "bit-perfect";', True),
+        ("crates/svolder-ipc/src/x.rs", 'format!("{n} bit-exact")', True),
+        ("docs/usage/tui.md", "a Bit-Perfect path", True),
+        ("docs/usage/tui.md", "the bit exact stream", True),
+        ("bins/svolder/src/x/tests.rs", 'assert!(!text.contains("bit-perfect"));', False),
+        ("bins/svolder/src/x.rs", "// the chain is bit-exact when flat", False),
+        ("bins/svolder/src/cli.rs", "    /// Prints a bit-perfect path", True),
+        ("bins/svolderd/web/core/x.js", "const w = 'bit-perfect';", True),
+        ("bins/svolderd/web/core/x.js", "// the chain is bit-exact", False),
+        ("docs/usage/tui.md", "a 16-bit exactly sized buffer", False),
+        ("docs/glossary.md", '  the DAC. Never worded "bit-perfect".', False),
+        ("docs/glossary.md", "a bit-perfect claim", True),
+        ("docs/usage/tui.md", 'Never worded "bit-perfect"', True),
+        ("docs/usage/tui.md", "the path is untouched", False),
+    ]
+    for path, line, want in bits:
+        if bit_claim(path, line) != want:
+            print(f"self-test: bit_claim({path!r}, {line!r}) should be {want}")
+            bad += 1
     return 1 if bad else 0
 
 
@@ -363,6 +429,7 @@ def main(argv):
     check_sizes(hard)
     check_tags(hard if TAGS_FAIL else soft)
     check_paths(hard)
+    check_bits(hard)
     if merge:
         for entry in sorted(os.listdir(os.path.join(ROOT, "docs"))):
             if entry not in DOCS:

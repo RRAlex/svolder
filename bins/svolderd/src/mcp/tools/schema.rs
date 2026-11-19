@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::host;
 
 /// The tool names, each with whether it changes a device.
-pub(super) const TOOLS: [(&str, bool); 14] = [
+pub(super) const TOOLS: [(&str, bool); 15] = [
     ("list_devices", false),
     ("get_state", false),
     ("get_link_history", false),
@@ -26,6 +26,7 @@ pub(super) const TOOLS: [(&str, bool); 14] = [
     ("set_host_eq", true),
     ("set_host_crossfeed", true),
     ("set_host_speakers", true),
+    ("set_host_loudness", true),
 ];
 
 /// A call's arguments, checked: a name the tool does not take is refused, and each is read
@@ -98,6 +99,9 @@ impl<'a> Args<'a> {
 pub(super) fn definition(name: &'static str, write: bool) -> Tool {
     if name == "set_host_crossfeed" {
         return host::crossfeed_definition();
+    }
+    if name == "set_host_loudness" {
+        return host::loudness_definition();
     }
     if name == "set_host_speakers" {
         return host::speakers_definition();

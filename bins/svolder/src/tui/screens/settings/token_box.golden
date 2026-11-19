@@ -1,0 +1,56 @@
+=== 80 columns
+ svolder  Gungnir 2  ● connected                                       mouse:on 
+─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────── ? help ─ esc menu ─
+┌ Settings ─ tab→ ─ ¹Look ─ ²Effects ─ ³Behaviour ─ ⁴Host audio ─┤ ⁵Connect ├──┐
+│   Web UI             …                    │                                  │
+│   MCP server       ‹ off | on ›           │                                  │
+│   MCP listen         loopback:8737        │  The bearer token a client       │
+│   MCP writes       ‹ read-only | writes › │  sends. v or Enter opens it in   │
+│ ▶ MCP ┌ MCP token ───────────────────────────────────────────────────┐ies    │
+│   MCP │                                                              │he     │
+│   MQTT│ fake-token-0123456789-abcdefghijklmnop-x3fQ                  │lay's  │
+│   MQTT│                                                              │ R     │
+│   MQTT│ from svolder's own file                                      │ion.   │
+│   MQTT│ /home/user/.local/state/svolder/mcp-token                    │       │
+│   MQTT│ click the token to copy it; the box closes by itself after a │       │
+│   MQTT│ minute                                                       │       │
+│   MQTT│                                                              │       │
+│       │ c copies it · Esc closes                                     │volde  │
+│       └──────────────────────────────────────────────────────────────┘       │
+│                                           │                                  │
+│                                           │                                  │
+│                                           │                                  │
+│                                           │                                  │
+│                                           │                                  │
+└ ~/.config/svolder/config.toml ──────────────────────────────────── esc close ┘
+=== 120 columns
+ █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀                                                                                         
+ ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2  ● connected                                                        mouse:on 
+─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
+┌ Settings ─ tab→ ─ ¹Look ─ ²Effects ─ ³Behaviour ─ ⁴Host audio ─┤ ⁵Connect ├──────────────────────────────────────────┐
+│   Web UI             …                    │                                                                          │
+│   MCP server       ‹ off | on ›           │                                                                          │
+│   MCP listen         loopback:8737        │  The bearer token a client sends. v or Enter opens it in a box for a     │
+│   MCP writes       ‹ read-only | writes › │  minute, c copies it to the clipboard (to the terminal, and to the       │
+│ ▶ MCP token          (revealed)           │  display's tool where there is one), R replaces it after a question.     │
+│   MCP status         listening            │                                                                          │
+│   MQTT client      ‹ off | on ›           │  [mcp] token_file, or SVOLDER_MCP_TOKEN                                  │
+│   MQTT broker host   not s┌ MCP token ───────────────────────────────────────────────────┐te/svolder/mcp-token       │
+│   MQTT broker port   1883 │                                                              │                           │
+│   MQTT commands    ‹ read-│ fake-token-0123456789-abcdefghijklmnop-x3fQ                  │                           │
+│   MQTT username      not s│                                                              │                           │
+│   MQTT password      not s│ from svolder's own file                                      │                           │
+│   MQTT status        off  │ /home/user/.local/state/svolder/mcp-token                    │                           │
+│                           │ click the token to copy it; the box closes by itself after a │                           │
+│                           │ minute                                                       │                           │
+│                           │                                                              │                           │
+│                           │ c copies it · Esc closes                                     │                           │
+│                           └──────────────────────────────────────────────────────────────┘                           │
+│                                           │                                                                          │
+│                                           │                                                                          │
+│                                           │                                                                          │
+│                                           │                                                                          │
+│                                           │                                                                          │
+│                                           │                                                                          │
+│                                           │                                                                          │
+└ ~/.config/svolder/config.toml ──────────────────────────────────────────────────────────────────────────── esc close ┘

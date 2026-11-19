@@ -24,16 +24,9 @@ use common::TempPath;
 
 /// A fresh, empty `XDG_CONFIG_HOME` for one test.
 fn scratch(what: &str) -> TempPath {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_nanos();
-    TempPath(std::env::temp_dir().join(format!(
-        "svolder-eq-presets-{what}-{}-{n}-{seq}",
-        std::process::id()
-    )))
+    TempPath(common::short_join(&common::short_unique(&format!(
+        "eqp-{what}"
+    ))))
 }
 
 /// Run the CLI over the in-process fake transport, `xdg` as its config and state home — a

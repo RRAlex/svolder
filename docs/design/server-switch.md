@@ -81,17 +81,20 @@ The TUI has the same two switches in Settings, Connect (the Web UI box and the M
 It sends the switch to a daemon that has it and otherwise writes the file with the same writers and
 sends `reload`.
 
-## The MQTT bridge's keys
+## The MQTT client's keys
 
-`svolder mqtt on|off`, `mqtt set host|port|username VALUE` and `mqtt password` follow the same rule
-through `Request::MqttSet { op }` (feature `mqtt_set`; `MqttOp` is `enabled`, `host`, `port`,
-`username` or `password`, the last two taking `null` to clear), answered with `Response::MqttSet`
-carrying the bridge's `MqttStatus`. The handler (`handler/mqtt_set.rs`) writes the one key with
+`svolder mqtt on|off`, `mqtt set host|port|username VALUE`, `mqtt set commands on|off` and `mqtt
+password` follow the same rule through `Request::MqttSet { op }` (feature `mqtt_set`; `MqttOp` is
+`enabled`, `commands`, `host`, `port`, `username` or `password`, the last two taking `null` to
+clear), answered with `Response::MqttSet` carrying the bridge's `MqttStatus`. The handler
+(`handler/mqtt_set.rs`) writes the one key with
 `Config::update_mqtt` through `edit_then_reload`, so the reload restarts the bridge on the new
 section. The verb then asks `version` for up to three seconds while the status is still a plain
 `connecting`, so the line it prints can name a refused login. A refused login is a note, not a
 failure: the key is written and the bridge runs; the verb fails only when the daemon did not act
-(`on` with the bridge still off, `off` with it still running).
+(`on` with the bridge still off, `off` with it still running, `commands` with a `Connected` that
+reports the other mode). With the client off, any key but `enabled` prints the status with what it
+saved, `mqtt: off (saved: KEY = VALUE)`.
 
 `MqttOp`'s `Debug` prints a password as `***`, no answer carries it, and the verb reads it from a
 terminal without echo or from the first line of standard input, never from an argument.

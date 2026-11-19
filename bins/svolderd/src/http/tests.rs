@@ -18,7 +18,13 @@ fn serve_ok() -> (SocketAddr, CancellationToken) {
     let stop = CancellationToken::new();
     let serve: Serve<Full<Bytes>> =
         Arc::new(|_| Box::pin(async { Response::new(Full::new(Bytes::from_static(b"ok"))) }));
-    tokio::spawn(accept_loop(listener, serve, stop.clone(), "test"));
+    tokio::spawn(accept_loop(
+        listener,
+        serve,
+        stop.clone(),
+        "test",
+        Activity::default(),
+    ));
     (addr, stop)
 }
 
@@ -85,7 +91,13 @@ async fn a_long_answer_is_not_an_idle_connection() {
             Response::new(StreamBody::new(Box::pin(ticks) as _))
         })
     });
-    tokio::spawn(accept_loop(listener, serve, stop.clone(), "test"));
+    tokio::spawn(accept_loop(
+        listener,
+        serve,
+        stop.clone(),
+        "test",
+        Activity::default(),
+    ));
     let mut stream = TcpStream::connect(addr).await.unwrap();
     stream
         .write_all(
@@ -158,4 +170,110 @@ async fn a_server_with_no_auth_is_refused_off_loopback_before_its_token_is_read(
         !read.load(std::sync::atomic::Ordering::SeqCst),
         "the token was read"
     );
+}
+
+/// A loop on a free loopback port whose answer counts the connection, as a server with no token
+/// does, or does not, as `pass` says.
+fn serve_counting(pass: bool) -> (SocketAddr, CancellationToken, Activity) {
+    let listener = bind("127.0.0.1:0".parse().unwrap()).expect("a free port");
+    let addr = listener.local_addr().unwrap();
+    let stop = CancellationToken::new();
+    let activity = Activity::default();
+    let serve: Serve<Full<Bytes>> = Arc::new(move |mut request| {
+        let counted = request
+            .extensions_mut()
+            .remove::<crate::activity::Counted>()
+            .expect("the loop hands each request its connection");
+        if pass && request.headers().contains_key("x-pass") {
+            counted.pass();
+        }
+        Box::pin(async { Response::new(Full::new(Bytes::from_static(b"ok"))) })
+    });
+    tokio::spawn(accept_loop(
+        listener,
+        serve,
+        stop.clone(),
+        "test",
+        activity.clone(),
+    ));
+    (addr, stop, activity)
+}
+
+/// One request on a connection kept open, its answer read.
+async fn held(addr: SocketAddr) -> TcpStream {
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    ask(&mut stream, addr, true).await;
+    stream
+}
+
+/// One request on `stream`, carrying `x-pass` when `pass`, answered 200.
+async fn ask(stream: &mut TcpStream, addr: SocketAddr, pass: bool) {
+    let mark = if pass { "x-pass: 1\r\n" } else { "" };
+    stream
+        .write_all(format!("GET / HTTP/1.1\r\nHost: {addr}\r\n{mark}\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut head = vec![0u8; 512];
+    let read = stream.read(&mut head).await.unwrap();
+    assert!(String::from_utf8_lossy(&head[..read]).starts_with("HTTP/1.1 200"));
+}
+
+/// Two held connections read open 2, and 0 once they close; the one client is seen.
+#[tokio::test]
+async fn held_connections_are_open_until_they_close() {
+    let (addr, stop, activity) = serve_counting(true);
+    let first = held(addr).await;
+    let second = held(addr).await;
+    tokio::time::timeout(Duration::from_secs(10), activity.until(|now| now.open == 2))
+        .await
+        .expect("both connections count");
+    let now = activity.snapshot();
+    assert_eq!((now.hour, now.day), (1, 1));
+    drop(first);
+    drop(second);
+    tokio::time::timeout(Duration::from_secs(10), activity.until(|now| now.open == 0))
+        .await
+        .expect("the closed connections stop counting");
+    assert_eq!(activity.snapshot().day, 1);
+    stop.cancel();
+}
+
+/// A server that stops reads 0 open: its connections are aborted and their guards drop.
+#[tokio::test]
+async fn a_stopped_server_has_nothing_open() {
+    let (addr, stop, activity) = serve_counting(true);
+    let _held = held(addr).await;
+    tokio::time::timeout(Duration::from_secs(10), activity.until(|now| now.open == 1))
+        .await
+        .expect("the connection counts");
+    stop.cancel();
+    tokio::time::timeout(Duration::from_secs(10), activity.until(|now| now.open == 0))
+        .await
+        .expect("a stop closes the count");
+}
+
+/// On one kept-alive connection a first request that fails and a second that passes count the
+/// connection once, from the passing one.
+#[tokio::test]
+async fn a_keep_alive_connection_counts_from_the_request_that_passes() {
+    let (addr, stop, activity) = serve_counting(true);
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    ask(&mut stream, addr, false).await;
+    let before = activity.snapshot();
+    assert_eq!((before.open, before.day), (0, 0));
+    ask(&mut stream, addr, true).await;
+    ask(&mut stream, addr, true).await;
+    let after = activity.snapshot();
+    assert_eq!((after.open, after.day), (1, 1));
+    stop.cancel();
+}
+
+/// A request the server never passes leaves the connection uncounted.
+#[tokio::test]
+async fn a_connection_the_server_does_not_pass_is_not_counted() {
+    let (addr, stop, activity) = serve_counting(false);
+    let _held = held(addr).await;
+    let now = activity.snapshot();
+    assert_eq!((now.open, now.hour, now.day), (0, 0, 0));
+    stop.cancel();
 }

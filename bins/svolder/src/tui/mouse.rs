@@ -16,7 +16,7 @@ use ratatui::layout::{Position, Rect};
 
 use super::app::curve_drag::{self, Gesture};
 use super::app::glide::Bar;
-use super::app::{App, Intent, Pane, Screen, SettingsBox, Side, ToneRow, Xf};
+use super::app::{App, Intent, Ld, Pane, Screen, SettingsBox, Side, ToneRow, Xf};
 use super::boxes::device_presets;
 
 /// The longest two left presses on the same cell can be apart and still make a double-click:
@@ -54,6 +54,11 @@ pub enum Hit {
     /// Focus the Loudness half and toggle it, off its bar; the wheel over it steps the strength
     /// instead.
     Loudness,
+    /// The Controls pane's Path row, every line it wraps to: a tooltip with the whole path.
+    Path,
+    /// The config chip in the Path row, drawn over the row's own [`Hit::Path`]: a click opens the
+    /// PipeWire config box as `k` does, and a tooltip says how many lines pass.
+    Config,
     /// Focus this pane.
     PaneHeader(Pane),
     /// Focus this band, 0-based.
@@ -81,6 +86,16 @@ pub enum Hit {
     /// Step this row of the Crossfeed section one way (`-1` back, `1` on): the `‹` and `›` of
     /// its select.
     CrossfeedStep(Xf, i64),
+    /// Focus this row of the computer's Loudness section, which unfolds it on the tone screen;
+    /// the wheel over it steps the row.
+    Ld(Ld),
+    /// The `‹ on ›` of the Loudness row: a click turns loudness on or off.
+    LdOn,
+    /// Step this row of the Loudness section one way (`-1` back, `1` on).
+    LdStep(Ld, i64),
+    /// The cells of the Loudness row's strength bar, drawn over the row's own [`Hit::Ld`]: a
+    /// click sets the strength the cell stands for; the wheel steps it.
+    LdBar,
     /// Show this screen.
     Tab(Screen),
     /// A word on a pane's top border, which a click presses the key of.
@@ -104,6 +119,8 @@ pub enum Hit {
     SettingRow(usize),
     /// The link the Web UI box shows, on every line it wraps to, which a click copies and opens.
     WebLink,
+    /// The token the MCP token box shows, on every line it wraps to, which a click copies.
+    McpToken,
     /// Step the Settings box's selected row back, the way `←` does: the `‹` before its value.
     SettingPrev,
     /// Step the Settings box's selected row on, the way `→` does: the `›` after its value.
@@ -314,6 +331,16 @@ pub enum MouseAction {
         /// The step: `-1`, `0` or `1`.
         step: i64,
     },
+    /// Focus this row of the Loudness section and, from a `‹` or `›`, step it that way (`0`:
+    /// only focus).
+    Ld {
+        /// The row.
+        row: Ld,
+        /// The step: `-1`, `0` or `1`.
+        step: i64,
+    },
+    /// Turn loudness on or off.
+    LdOn,
     /// Click one cell of a computer point's row.
     PointField {
         /// The point, 0-based.
@@ -671,6 +698,7 @@ fn resolve_box_click(hits: &HitMap, event: MouseEvent, app: &App) -> Option<Mous
         Hit::SettingNext => Some(MouseAction::Key(KeyCode::Right)),
         Hit::EscMark => Some(MouseAction::Key(KeyCode::Esc)),
         Hit::WebLink => Some(MouseAction::Intent(Intent::OpenWebLink)),
+        Hit::McpToken => Some(MouseAction::Intent(Intent::CopyToken)),
         Hit::SettingCategory(category) => {
             Some(MouseAction::Setting(SettingsBox { category, row: 0 }))
         }
@@ -711,6 +739,10 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::CrossfeedStep(row, step) => Some(MouseAction::Crossfeed { row, step }),
         Hit::CrossfeedOn => Some(MouseAction::CrossfeedOn),
         Hit::CrossfeedModel(dir) => Some(MouseAction::CrossfeedModel(dir)),
+        Hit::Ld(row) => Some(MouseAction::Ld { row, step: 0 }),
+        Hit::LdStep(row, step) => Some(MouseAction::Ld { row, step }),
+        Hit::LdOn => Some(MouseAction::LdOn),
+        Hit::LdBar => bar_press(hits, Bar::Ld, x),
         Hit::Side(side) => Some(MouseAction::Target(Some(side))),
         Hit::Target => Some(MouseAction::Target(None)),
         // The edit line is drawn over the tone-control screen only, so on the device screen's
@@ -741,9 +773,10 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::Loudness => Some(MouseAction::ToggleTone(ToneRow::Loudness)),
         Hit::Curve => resolve_press(hits, (x, y), app, Gesture::Move),
         Hit::Transport(button) => Some(MouseAction::Transport(button)),
+        Hit::Config => Some(MouseAction::Key(KeyCode::Char('k'))),
         Hit::Toast => Some(MouseAction::DismissToast),
         // These only say what they are to a resting pointer.
-        Hit::Connection | Hit::MouseMark | Hit::FaultMark | Hit::Vu => None,
+        Hit::Connection | Hit::MouseMark | Hit::FaultMark | Hit::Vu | Hit::Path => None,
         // The menu answers its own clicks.
         Hit::MenuEntry(_) | Hit::MenuOutside => None,
         // The preset list answers its own clicks.
@@ -753,7 +786,8 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         | Hit::SettingPrev
         | Hit::SettingNext
         | Hit::SettingCategory(_)
-        | Hit::WebLink => None,
+        | Hit::WebLink
+        | Hit::McpToken => None,
     }
 }
 
@@ -782,6 +816,15 @@ fn resolve_wheel(hits: &HitMap, x: u16, y: u16, app: &App, dir: i64) -> Option<M
             row,
             step: dir.signum(),
         }),
+        Hit::Ld(row) | Hit::LdStep(row, _) => Some(MouseAction::Ld {
+            row,
+            step: dir.signum(),
+        }),
+        Hit::LdBar => Some(MouseAction::Ld {
+            row: Ld::Strength,
+            step: dir.signum(),
+        }),
+        Hit::LdOn => None,
         Hit::Curve => {
             let curve = hits.area_of(Hit::Curve)?;
             let band =

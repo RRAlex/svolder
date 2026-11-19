@@ -286,7 +286,7 @@ pub(crate) async fn reload_daemon_quietly(g: &Globals<'_>, config: &Config) -> O
 }
 
 /// Tell a running daemon that a preset was written to `path`, when it reads that very file, so
-/// its MQTT bridge offers the new list. Nothing is said, and nothing else is done, where there
+/// its MQTT client offers the new list. Nothing is said, and nothing else is done, where there
 /// is no daemon, where it reads another file, or where the reload fails. A direct transport
 /// (`--transport ble` or `fake`) names where the device is reached, not whether a daemon beside
 /// this process holds the file, so it tells one as any other does.

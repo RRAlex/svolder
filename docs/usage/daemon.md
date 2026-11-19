@@ -374,9 +374,9 @@ path makes `~/.config/svolder/profiles`, the same directory the CLI reads — an
 running devices against what the file now says: an added device gets a session, a removed one's
 session ends, and one still configured keeps its connection, without a restart.
 
-The MQTT bridge follows the same reload: the same `[mqtt]` section keeps its connection and
-publishes the new device set, a changed one restarts the bridge, and a removed one stops it (see
-["MQTT and Home Assistant"](mqtt.md#mqtt-and-home-assistant)). `svolderd` runs the Bluetooth
+The MQTT client follows the same reload: the same `[mqtt]` section keeps its connection and
+publishes the new device set, a changed one restarts the MQTT client, and a removed one stops it
+(see ["MQTT and Home Assistant"](mqtt.md#mqtt-and-home-assistant)). `svolderd` runs the Bluetooth
 service, adapter and config checks from ["doctor"](cli.md#doctor) against itself at startup and logs
 their lines, so a daemon that starts unhealthy says why in its own log before anything asks it a
 question.
@@ -736,10 +736,11 @@ docker logs -f svolder
   `enabled = true` under `[web]` (or `[mcp]`), reloads, and the verb prints
   `web: listening on 0.0.0.0:8738 (token, writes)`; `web off` and `mcp off` turn it off again. No
   restart is needed either way. `svolder web token` prints the token the sign-in page takes.
-- `svolder mqtt on`, `svolder mqtt set host|port|username VALUE` and `svolder mqtt password` set up
-  the Home Assistant bridge the same way (see ["MQTT and Home Assistant"](mqtt.md)); a compose file
-  can set `SVOLDER_MQTT_ENABLED`, `SVOLDER_MQTT_HOST`, `SVOLDER_MQTT_PORT`, `SVOLDER_MQTT_USERNAME`
-  and `SVOLDER_MQTT_PASSWORD` instead.
+- `svolder mqtt on`, `svolder mqtt set host|port|username VALUE`, `svolder mqtt set commands on|off`
+  and `svolder mqtt password` set up the Home Assistant MQTT client the same way (see ["MQTT and
+  Home Assistant"](mqtt.md)); a compose file can set `SVOLDER_MQTT_ENABLED`, `SVOLDER_MQTT_HOST`,
+  `SVOLDER_MQTT_PORT`,
+  `SVOLDER_MQTT_USERNAME` and `SVOLDER_MQTT_PASSWORD` instead.
 - `docker logs -f svolder` follows the daemon's log, where its warnings go: the daemon writes to
   the container's own log, which only the host reads (`podman logs` under Podman). Inside the
   container `svolder daemon logs` reads nothing and says so, naming both commands, and
@@ -929,7 +930,7 @@ writers send it only to a daemon that reads the same file, and say nothing, see
 effect at once (`svolder daemon restart` stops and starts the daemon and sends none).
 
 `version` (`{"cmd":"version"}`) answers `{"result":"version","version":"...","mqtt":{...}}`: the
-daemon's own package version, and where its MQTT bridge stands — `{"state":"off"}`,
+daemon's own package version, and where its MQTT client stands — `{"state":"off"}`,
 `{"state":"connecting","host":"...","port":1883}` (with `"retry_in_secs"` while it waits between
 attempts), `{"state":"trouble","host":"...","port":1883,"problem":"refused"}` (`problem` is
 `refused`, `unreachable` or `tls`; with `"retry_in_secs"` as `connecting` has it), or
@@ -952,13 +953,17 @@ The reply carries `"web":{...}` for the web UI the same way, `{"state":"off"}`,
 (`auth` is `token` or `none`, `guest` is `none` or `read`) or
 `{"state":"failed","listen":"...","error":"..."}`, and `"web_token":{...}` with the same shape as
 `mcp_token` while the web UI has a token, both of which `daemon status` and the TUI's Web UI box
-read. A client that does not know the `mqtt`, `mcp`, `config`, `log`, `mcp_token`, `web` or
-`web_token` field ignores it, a daemon too old to send one answers without it, and a `state` a
-client does not know decodes as unknown rather than failing the reply. `"config_changed":true`
-appears only while the configuration file's modification time differs from the one the daemon's
-snapshot was read at (a hand edit not yet reloaded); a daemon too old to send it reads as
-unchanged. `"config_missing":true` appears (with `config_changed`) only while the file the daemon
-read is gone; a daemon too old to send it reads as there. `stop` (`{"cmd":"stop"}`)
+read. The reply carries `"activity":{"mcp":{...},"web":{...}}` for each of the two servers that
+serves, each `{"open":2,"hour":3,"day":5,"counted_secs":86400}` (plus `"capped":true` while the
+table of clients was full, see "What a client is" under `daemon status`); a server that is off or
+failed has no entry, and a daemon too old to count sends none, which a front end shows as nothing,
+never as a zero. A client that does not know the `mqtt`, `mcp`, `config`, `log`, `mcp_token`, `web`,
+`web_token` or `activity` field ignores it, a daemon too old to send one answers without it, and a
+`state` a client does not know decodes as unknown rather than failing the reply.
+`"config_changed":true` appears only while the configuration file's modification time differs from
+the one the daemon's snapshot was read at (a hand edit not yet reloaded); a daemon too old to send
+it reads as unchanged. `"config_missing":true` appears (with `config_changed`) only while the file
+the daemon read is gone; a daemon too old to send it reads as there. `stop` (`{"cmd":"stop"}`)
 answers `{"result":"stopping"}` and then ends the daemon's accept loop, as a SIGTERM would;
 `daemon stop` (below) sends it when systemd is not managing the daemon.
 
@@ -1022,26 +1027,27 @@ its sound takes to the default sink:
 `{"result":"host","available":true,"playing":{"title":…,"artist":…,"album":…,"player":…,"status":"playing","length_us":…,"progress":{"position_us":…,"rate_milli":1000,"read_at_ms":…},"cover":"<hash>"},"route":{"sink":{…},"player":{…},"player_match":"pid","others_mixing":0,"host_eq":true,"stages":{"eq":true,"crossfeed":false,"speakers":false}},"now_ms":…}`.
 `available` is `false` (and nothing else but `now_ms` follows) when the host side is off: `[host]
 enabled = false`, `SVOLDER_HOST=off` in the daemon's environment, or no session bus. `playing` is
-absent while there is no player. `route.stages` (`eq`, `crossfeed`, `speakers`) says which
-stages of the computer's filter chain play when `host_eq` is true and the daemon's EQ view can
-vouch for them; it is `null` otherwise, and a client then says only that a chain is on. `route` is
-there only while a front end that shows the path is
-connected (a `subscribe` that asked for the host, the event stream of a DAC's web page), since the
-daemon reads the PipeWire graph only then, at once and then every two seconds; a plain `host`
-request from a script finds it absent unless one of those is open. Lengths and positions are in microseconds, the rate in
-thousandths (1000 is the normal rate), `read_at_ms` and `now_ms` in unix milliseconds on the
-daemon's clock, and a volume in thousandths on `wpctl`'s scale (1000 is 100 %). `host_press`
-(`{"cmd":"host_press","button":"next"}`, `button` being `previous`, `play`, `pause` or `next`)
-presses that button on the followed player and answers `{"result":"ack"}`, or an error when the word
-is no button, the host side is off, there is no player or the player refused. The computer's own
-volume is `{"cmd":"host_volume","pct":40}`, a whole percent from 0 to 100 on the wire (more is refused; a boosted
-sink is shown as read, above 100, and never written), and `host_mute` takes `muted`. A `subscribe` that
-carries `"host":true` (`{"cmd":"subscribe","device":null,"host":true}`; without it, as before, no
-host events and no route reads) also gets the view as a `{"event":"host",…}` event, whatever device
-it names (a selector that names no device gets its error and the stream ends), once after the
-connection snapshot and then each time the player or the route changes; a daemon from before the
-field ignores it and sends none, and a client from before the event decodes it as one it does not
-know and skips it.
+absent while there is no player. `route.stages` (`eq`, `crossfeed`, `speakers`) says which stages of
+the computer's filter chain play when `host_eq` is true and the daemon's EQ view can vouch for them;
+it is `null` otherwise, and a client then says only that a chain is on. The daemon reads the
+PipeWire graph for `route` while a front end that shows the path is connected (a `subscribe` that
+asked for the host, the event stream of a DAC's web page: every two seconds), every 30 s while the
+MQTT client is connected, and once, within one second, for a plain `host` request (a script,
+`svolder host check`, `svolder doctor`, MCP `get_host`; requests that arrive together share the
+read). See [host-config-check.md](../design/host-config-check.md#reads). Lengths and positions are
+in microseconds, the rate in thousandths (1000 is the normal rate), `read_at_ms` and `now_ms` in
+unix milliseconds on the daemon's clock, and a volume in thousandths on `wpctl`'s scale (1000 is 100
+%). `host_press` (`{"cmd":"host_press","button":"next"}`, `button` being `previous`, `play`, `pause`
+or `next`) presses that button on the followed player and answers `{"result":"ack"}`, or an error
+when the word is no button, the host side is off, there is no player or the player refused. The
+computer's own volume is `{"cmd":"host_volume","pct":40}`, a whole percent from 0 to 100 on the wire
+(more is refused; a boosted sink is shown as read, above 100, and never written), and `host_mute`
+takes `muted`. A `subscribe` that carries `"host":true`
+(`{"cmd":"subscribe","device":null,"host":true}`; without it, as before, no host events and no route
+reads) also gets the view as a `{"event":"host",…}` event, whatever device it names (a selector that
+names no device gets its error and the stream ends), once after the connection snapshot and then
+each time the player or the route changes; a daemon from before the field ignores it and sends none,
+and a client from before the event decodes it as one it does not know and skips it.
 
 `web_pair` and `web_link` ask the web UI for a pairing code or a link code (see
 ["Signing in"](web-ui.md#signing-in) under "Web UI"):
@@ -1104,7 +1110,7 @@ removes the unit files.
 ### daemon status
 
 Unit states when systemd manages the daemon, the socket otherwise; the daemon's own version, its
-MQTT bridge, its MCP server, its web UI and the devices it holds either way. The bridge's line
+MQTT client, its MCP server, its web UI and the devices it holds either way. The MQTT client's line
 follows the daemon's: `mqtt: off`, `mqtt: connecting to HOST:PORT` — with `(retry in N s)` while it
 waits between attempts — `mqtt: not connected to HOST:PORT: WHY` once an attempt failed in a way
 with words (`the broker refused the login (check username and password)`, `not reachable`,
@@ -1112,16 +1118,28 @@ with words (`the broker refused the login (check username and password)`, `not r
 or `(commands on)` (see
 ["MQTT and Home Assistant"](mqtt.md#mqtt-and-home-assistant)); a daemon too old to report one gets
 no such line, and a state a newer daemon reports that this `svolder` does not know reads
-`mqtt: unknown`.
+`mqtt: unknown`. (`svolder mqtt set KEY VALUE` and `mqtt password` print the same line after they
+write a key; while the client is off it adds what it saved, `mqtt: off (saved: host = broker.lan)`,
+and `mqtt set commands on|off` fails with `(written, and the daemon has not acted on it: svolder
+daemon status)` when the bridge still reports the other mode.)
 
-The MCP server's line follows the bridge's: `mcp: off`, `mcp: listening on ADDR (token, read-only)`
-— `writes` where the write tools are offered, `no auth` in place of `token` for `auth = "none"` — or
-`mcp: cannot listen on ADDR: WHY`, with the same rules for a daemon too old to report one (no line)
-and a state this `svolder` does not know (`mcp: unknown`). The web UI's line follows it: `web: off`,
-`web: listening on ADDR (token, writes)` — `read-only` in place of `writes`, `no auth` in place of
-`token`, and `, guest read` after them where visitors may look — or
-`web: cannot listen on ADDR: WHY`, with the same two rules (`web: unknown`). A device the daemon is
-waiting to try again for carries the wait, as whole seconds.
+The MCP server's line follows the MQTT client's: `mcp: off`, `mcp: listening on ADDR (token,
+read-only)` — `writes` where the write tools are offered, `no auth` in place of `token` for `auth =
+"none"` — or `mcp: cannot listen on ADDR: WHY`, with the same rules for a daemon too old to report
+one (no line) and a state this `svolder` does not know (`mcp: unknown`). The web UI's line follows
+it: `web: off`, `web: listening on ADDR (token, writes)` — `read-only` in place of `writes`, `no
+auth` in place of `token`, and `, guest read` after them where visitors may look — or `web: cannot
+listen on ADDR: WHY`, with the same two rules (`web: unknown`). A device the daemon is waiting to
+try again for carries the wait, as whole seconds.
+
+While a server serves, and the daemon counts, a line follows its own: `mcp clients: 2 connections
+open; 3 clients in the past hour, 5 in the past day` after the MCP server's line and `web clients:
+...` after the web UI's. A window the daemon has not lived through yet is said as what it saw:
+`mcp clients: 0 connections open; 5 clients since the daemon started 40 min ago` (an hour or more
+in, `3 clients in the past hour, 5 since the daemon started 6 h ago`, and a day or more in, `in the
+past day`); a full table says `at least 5`. A server that is off or failed, and a daemon that does
+not count, get no such line. The TUI's Connect category and Web UI box say the same counts in the
+same words (the Web UI box in its short form).
 
 A daemon whose `config.toml` changed since its last reload (a hand edit it has not taken) gets a
 line after its version lines, `config: PATH changed since the last reload: svolder daemon reload
@@ -1184,15 +1202,46 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.36.7 on /run/user/1000/svolder.sock
+daemon: 0.37.2 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
+mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day
 web: listening on 127.0.0.1:8738 (token, writes)
+web clients: 1 connection open; 1 client in the past hour, 2 in the past day
 device bifrost: connected (Bifrost 3)
 device gungnir: not connected, next attempt in 15 s (Gungnir 2)
 also running: svolderd pid 4711 on /tmp/svolder-firstrun/svolder.sock — stop it with: svolder --socket /tmp/svolder-firstrun/svolder.sock daemon stop
 log: the journal
 ```
+
+#### What a client is
+
+The counts are of clients, which are addresses, not people. A client is a distinct peer address that
+passed the server's token check: for the MCP server a request that carries the bearer token, for
+the web UI a request that carries this server's sign-in cookie. A connection that only ever sends a
+wrong token, a guest (`guest = "read"`) or a signed-out visitor, and the sign-in POST itself (the
+next request, with the cookie, counts) is never counted, open or seen. A server with no token
+(`auth = "none"`) counts every request that reaches it (the MCP server before its `Host` check, the
+web UI after its own).
+
+- **Open** is the connections of those clients now: it counts from the connection's first request
+  that passed until it closes. An MCP client mostly holds no connection between calls, so its
+  server often reads 0 open; a web page holds its event stream, so the web UI's open is about open
+  tabs.
+- **The past hour and the past day** are the distinct clients seen within those windows. A client
+  with a connection open is always seen; one without was seen when its last connection closed.
+  Before the daemon has run an hour or a day the line says what it saw instead of claiming the
+  window.
+- **One address is one client.** Programs on this computer that reach the server through the same
+  address read as one client: `127.0.0.1` and `::1` are two, and the computer's own network address
+  is another (an IPv4 address that arrives as an IPv6 one folds into its IPv4 address); an IPv6
+  temporary address counts apart from the stable one; clients behind a NAT or a proxy read as one.
+- **In memory only.** Nothing is written, logged or sent but the counts. An address is held as a
+  64-bit hash under keys drawn at random when the daemon starts, so no address is stored, and none
+  can be read back from anything the daemon sends, shows or logs. The table holds at most 4096
+  clients; one more drops the oldest with no connection open, and the line then says `at least` for
+  the day (the hour's figure can also fall short while that lasts). The counts survive a reload and
+  a restart of a server and end with the daemon.
 
 ### daemon logs
 

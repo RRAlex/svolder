@@ -356,6 +356,16 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
             watching.app.touched(&intents);
             take_intents(intents, opener, watching, mouse, look, screen).await
         }
+        MouseAction::Ld { row, step } => {
+            let intents = watching.app.click_ld(row, step);
+            watching.app.touched(&intents);
+            take_intents(intents, opener, watching, mouse, look, screen).await
+        }
+        MouseAction::LdOn => {
+            let intents = watching.app.ld_toggle(None);
+            watching.app.touched(&intents);
+            take_intents(intents, opener, watching, mouse, look, screen).await
+        }
         MouseAction::CrossfeedOn => {
             let intents = watching.app.xf_toggle(None);
             watching.app.touched(&intents);

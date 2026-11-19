@@ -9,6 +9,9 @@
 //! it borrows descriptor 3 and writes the environment, and neither is safe beside another
 //! thread reading either of them.
 
+#[path = "../../svolder-host/tests/common/short_socket.rs"]
+mod short_socket;
+
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -44,6 +47,7 @@ impl Handler for Answering {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     }
 
@@ -62,15 +66,9 @@ impl Drop for TempSocket {
     }
 }
 
-/// A socket path of this test's own.
+/// A socket path of this test's own, short whatever `TMPDIR` is.
 fn temp_socket() -> TempSocket {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_nanos();
-    TempSocket(
-        std::env::temp_dir().join(format!("svolder-adoption-{}-{n}.sock", std::process::id())),
-    )
+    TempSocket(short_socket::short_socket("svolder-adoption"))
 }
 
 /// Set `name`, or remove it when `value` is `None`.

@@ -802,12 +802,7 @@ fn the_web_row_grades_the_server_and_its_token_file() {
 /// A fake daemon on a fresh socket that reads one request line and answers it with `reply`, or
 /// holds the connection without answering when there is none.
 fn fake_daemon(reply: Option<svolder_ipc::socket::protocol::Reply>) -> std::path::PathBuf {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let socket = std::env::temp_dir().join(format!(
-        "svolder-doctor-fake-{}-{seq}.sock",
-        std::process::id()
-    ));
+    let socket = crate::test_support::short_socket("svolder-doctor-fake");
     let _ = std::fs::remove_file(&socket);
     let listener = tokio::net::UnixListener::bind(&socket).expect("the socket binds");
     tokio::spawn(async move {
@@ -847,6 +842,7 @@ async fn the_daemon_answer_is_the_version_mcp_and_web_of_a_version_reply_and_not
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         },
     }));
     let info = daemon_answer(&socket).await.expect("a version answer");
@@ -907,7 +903,7 @@ async fn outcomes_over_a_scratch_home_are_the_rows_run_prints() {
 /// listening, a connect is what would start the service.
 #[tokio::test]
 async fn outcomes_without_connecting_leave_the_socket_alone() {
-    let dir = crate::test_support::temp_dir("doctor-no-connect");
+    let dir = crate::test_support::short_dir("doctor-no-connect");
     let socket = dir.as_ref().join("sv.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).expect("the socket binds");
     listener.set_nonblocking(true).expect("non-blocking");
@@ -935,7 +931,7 @@ async fn outcomes_without_connecting_leave_the_socket_alone() {
 /// service. The run reads the config file it is given and reports a row for its device.
 #[tokio::test]
 async fn a_look_with_a_configured_device_does_not_connect_to_the_socket() {
-    let dir = crate::test_support::temp_dir("doctor-device-no-connect");
+    let dir = crate::test_support::short_dir("doctor-device-no-connect");
     let socket = dir.as_ref().join("sv.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).expect("the socket binds");
     listener.set_nonblocking(true).expect("non-blocking");
@@ -1053,6 +1049,7 @@ async fn the_daemon_answer_carries_the_changed_config_words() {
             features: Vec::new(),
             config_changed: true,
             config_missing: false,
+            activity: None,
         },
     }));
     let info = daemon_answer(&socket).await.expect("a version answer");
@@ -1087,7 +1084,7 @@ fn the_mqtt_row_grades_the_bridge_in_words() {
         retry_in_secs: Some(4),
     };
     let refused = mqtt_row(&on, false, Some(&trouble(MqttProblem::Refused, 1883))).expect("a row");
-    assert_eq!(refused.check, "MQTT bridge");
+    assert_eq!(refused.check, "MQTT client");
     assert_eq!(refused.state, State::Fail);
     assert_eq!(
         refused.reason,
@@ -1167,4 +1164,82 @@ fn the_mqtt_row_grades_the_bridge_in_words() {
     let row = mqtt_row(&tls_port, false, None).expect("a row");
     assert_eq!(row.state, State::Warn);
     assert!(row.reason.contains("TLS"), "{}", row.reason);
+}
+
+/// The PipeWire config row is the check's summary in its words, from the route a daemon read:
+/// a pass when the config lets the sound through, a note otherwise (never a warning), and no row
+/// without a route.
+#[test]
+fn the_config_row_says_what_the_check_found() {
+    let route = |name: &str| {
+        let path = format!(
+            "{}/../../crates/svolder-host/tests/fixtures/pw-dump/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let dump = std::fs::read_to_string(path).expect("the fixture");
+        svolder_host::route(&dump, None, "").expect("a dump")
+    };
+    assert_eq!(config_row(None), None);
+
+    let mut changed = route("narrow-sink.json");
+    let row = config_row(Some(&changed)).expect("a row");
+    assert_eq!((row.check, row.state), ("PipeWire config", State::Note));
+    assert!(
+        row.reason.starts_with("changes the sound: ")
+            && row.reason.ends_with(" (svolder host check)"),
+        "{}",
+        row.reason
+    );
+
+    changed.setup = None;
+    let row = config_row(Some(&changed)).expect("a row");
+    assert_eq!(row.state, State::Note);
+    assert_eq!(row.reason, "not read (svolderd's version differs)");
+
+    // A config that lets it through: the clock settings read and every line passing.
+    let mut untouched = route("schiit-sink.json");
+    let setup = untouched.setup.as_mut().expect("setup facts");
+    setup.clock = Some(svolder_host::ClockFacts {
+        rate: Some(48_000),
+        allowed_rates: vec![
+            44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+        ],
+        force_rate: None,
+    });
+    let row = config_row(Some(&untouched)).expect("a row");
+    assert_eq!(
+        (row.state, row.reason.as_str()),
+        (State::Pass, "lets it through untouched")
+    );
+
+    let none = svolder_host::RouteFacts::default();
+    let row = config_row(Some(&none)).expect("a row");
+    assert_eq!(row.reason, "not read");
+}
+
+/// A daemon that answers the version and shows a route gets the config row, placed with the
+/// other daemon rows; one that shows none gets no row.
+#[tokio::test]
+async fn the_route_is_asked_of_the_daemon_the_doctor_found() {
+    use crate::test_support::stub_daemon::stub_daemon;
+    let daemon = stub_daemon().await;
+    assert_eq!(
+        crate::commands::host_check::route_on(&daemon.socket).await,
+        None
+    );
+    let dump = std::fs::read_to_string(format!(
+        "{}/../../crates/svolder-host/tests/fixtures/pw-dump/schiit-sink.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("the fixture");
+    let route = svolder_host::route(&dump, None, "").expect("a dump");
+    daemon.hosts(svolder_ipc::host::HostView {
+        available: true,
+        route: Some(route.clone()),
+        ..Default::default()
+    });
+    assert_eq!(
+        crate::commands::host_check::route_on(&daemon.socket).await,
+        Some(route)
+    );
 }

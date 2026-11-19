@@ -49,7 +49,7 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Readout**: a control the device reports and nobody sets; it appears in the TUI, the web page
   and Home Assistant with no Rust written for it.
 - **Key**: a profile control's name (`volume`). Not a keyboard key, and not a TOML key.
-- **Reserved key**: one of the eight keys the MQTT bridge's own entities take (`link`, `signal`,
+- **Reserved key**: one of the eight keys the MQTT client's own entities take (`link`, `signal`,
   `firmware`, `dsp_firmware`, `identify`, `eq_mode`, `eq_preset`, `eq_loudness`); a profile
   control keyed like one fails to load.
 - **Firmware subsystem**: a part of a device that has a firmware build of its own (1 the main
@@ -92,7 +92,8 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Fleet**: the trait the daemon's HTTP servers reach its devices through.
 - **Slot**: the holder of one HTTP server (web or MCP) that brings it in line with its config.
 - **Handler**: the code that answers a socket request.
-- **Bridge**: the daemon's MQTT task, which publishes devices for Home Assistant.
+- **MQTT client** (internally the bridge): the daemon's MQTT task, which publishes devices for Home
+  Assistant.
 - **Recall**: applying a named tone curve to a device as one batch of writes.
 - **Ring**: the daemon's recent history of readings, which the web strip and `history` draw.
 - **Scanner**: the one shared listening window for devices that are looked for.
@@ -142,6 +143,16 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Fit**: choosing bands so that they match a headphone correction as closely as the device's
   bands allow.
 - **APO**: Equalizer APO's parametric text, the format AutoEq writes.
+- **Loudness (computer)**: a stage of the computer's filter chain that takes the middle and the
+  top of the band down as the computer's volume falls under a **reference**, following the
+  equal-loudness contours of ISO 226, so the bass is kept. It only cuts, and it follows the
+  computer's own volume. Not the device's own **Loudness** mode; see
+  [loudness.md](design/loudness.md).
+- **Reference** (loudness): the computer volume at and above which loudness is flat, 100 % by
+  default.
+- **Strength** (loudness): how much of the curve plays, 0 to 100 %.
+- **Depth** (loudness): how many dB the volume sits under the reference, counted to 40 and scaled
+  by the strength.
 - **Crossfeed**: feeding a low-passed, delayed copy of each channel into the other channel at a set
   level. The computer's has four models (Bauer, Linkwitz, Meier,
   Mid/Side bass); see [crossfeed.md](design/crossfeed.md).
@@ -186,10 +197,20 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
   player's stream, what else mixes into the sink and whether the Computer EQ is in front of it.
 - **Path line**: the route and the DAC's own readings turned into one line from the player to the
   DAC: its hops and a verdict, `untouched` or the hop that changes the signal, or no verdict when
-  the computer plays elsewhere. Never worded "bit-perfect".
-- **Watcher**: a held claim on the route: while one exists the daemon reads `pw-dump` (at most every
-  2 s), and with none it reads nothing. A web page of a DAC and a TUI that asked for the host hold
-  one for as long as they are connected.
+  the computer plays elsewhere. Never worded "bit-perfect". It covers what enters the system's
+  audio pipeline from the player's stream on, and judges up to 24 bits: what a player does before
+  its stream (normalization, ReplayGain, its own volume or EQ, float maths, a file or a stream as
+  its source) is outside it, and the untouched sentence says so.
+- **PipeWire config check**: whether the PipeWire config would let a single player reach the DAC
+  untouched, whatever plays: seven lines (rates, forced rate, dither, 24-bit output, no plug,
+  stereo to stereo, no filter in the sink), each pass, fail or unknown, with a summary and a chip
+  (`config ✓`, `config N`, `config ?`). Shown by `svolder host check` (not `svolder setup`, which
+  is the guided first run), the TUI's `k` box, the web popup and Home Assistant's
+  `computer_config`. It reads only; what it cannot judge it says (the limit sentence).
+- **Watcher**: a held claim on the route: while one exists the daemon reads `pw-dump` (every 2 s for
+  a fast one, every 30 s for the MQTT client's slow one), and with none it reads only once for a
+  one-shot `host` request. A web page of a DAC and a TUI that asked for the host hold a fast one for
+  as long as they are connected.
 - **Frame** (an analysis frame): what the **analyser** makes of the sound about 30 times a second:
   per channel 240 one-byte bands at 1/24 octave from 20 Hz, the RMS and peak of each channel, a
   beat flag, a tempo and a beat phase, and the capture's time on the daemon's clock. The byte
@@ -370,6 +391,6 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 
 - **Discovery**: the configs svolder publishes so Home Assistant makes an entity per control.
 - **Base topic**: the prefix every MQTT topic starts with. **Retained** messages keep their last
-  value on the broker; the **will** marks the bridge unavailable if it dies.
+  value on the broker; the **will** marks the MQTT client unavailable if it dies.
 - **MCP tool**: one action the MCP server offers an agent. The server is **stateless**: each request
   stands alone, with a **bearer token** for sign-in.

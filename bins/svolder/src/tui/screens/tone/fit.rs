@@ -178,8 +178,8 @@ pub(super) fn draw_side(
     frame.render_widget(Paragraph::new(lines), text);
 }
 
-/// The Correction pane on the computer: the preset the points came from and the preamp, and that
-/// nothing is fitted there.
+/// The Correction pane on the computer: the preset the points came from and the preamp (and that
+/// the level is held, while it is), and that nothing is fitted there.
 pub(super) fn draw_computer_side(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let block = Block::bordered()
         .border_style(device::contour(
@@ -201,6 +201,14 @@ pub(super) fn draw_computer_side(frame: &mut Frame, area: Rect, app: &App, theme
         )));
         let preamp = super::points::preamp_text(eq.preamp_db);
         lines.push(Line::raw(widgets::text::cut_to_cells(&preamp, width)));
+        // A level held for a stream that plays is said under the preamp it holds.
+        if eq.note.as_deref() == Some(svolder_host::eq::LEVEL_HELD_NOTE) {
+            lines.extend(
+                widgets::text::wrap(svolder_host::eq::LEVEL_HELD_NOTE, width)
+                    .into_iter()
+                    .map(|line| Line::from(Span::styled(line, theme.style(Role::Warn)))),
+            );
+        }
         lines.push(Line::default());
     }
     let dim = theme.style(Role::Dim);

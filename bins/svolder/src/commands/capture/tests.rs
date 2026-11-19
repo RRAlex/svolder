@@ -14,7 +14,7 @@ use svolder_ipc::checks::{self, State, SystemdFacts};
 
 use super::*;
 use crate::commands::daemon::test_support::{Tools, a_daemon_on, no_units, units_in};
-use crate::test_support::temp_dir;
+use crate::test_support::short_dir;
 
 /// The host a stopped daemon would be started on: one with no daemon to start, which counts how
 /// often it was asked for one.
@@ -87,7 +87,7 @@ impl Rig {
 
     /// A rig whose `systemctl` shows the units `show` makes of the socket path.
     fn with_units(what: &str, show: impl FnOnce(&str) -> String) -> Rig {
-        let dir = temp_dir(what);
+        let dir = short_dir(what);
         let host = CountingHost::new(&dir.0);
         let socket = dir.0.join("sv.sock").display().to_string();
         Rig {

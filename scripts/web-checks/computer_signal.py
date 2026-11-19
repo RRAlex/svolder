@@ -904,8 +904,9 @@ def guest(b, d):
     check('a_guest_sees_the_computer_inert: the guest has the hop',
           b.page(f"!!document.querySelector('{HOP}')"))
     flip(b, 'computer')
-    # the level meters' choices (glow, view, reference) are the viewer's own display and write nothing
-    inert = b.page("[...document.querySelectorAll('#sg-open [data-act]:not(#sg-cvu *), #sg-shelf [data-act], #sg-shelf select')]"
+    # the level meters' choices (glow, view, reference) are the viewer's own display and write nothing; the
+    # config chip opens the read-only PipeWire config popup, which a guest has too
+    inert = b.page("[...document.querySelectorAll('#sg-open [data-act]:not(#sg-cvu *, #sg-config), #sg-shelf [data-act]:not(#sg-config), #sg-shelf select')]"
                    ".filter((e) => e.getAttribute('aria-disabled') !== 'true' && !e.disabled).map((e) => e.id)")
     check('a_guest_sees_the_computer_inert: every computer control is inert', inert == [], inert)
     check('a_guest_sees_the_computer_inert: the track too',

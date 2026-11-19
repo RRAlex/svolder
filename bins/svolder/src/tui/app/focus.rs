@@ -7,7 +7,7 @@
 use svolder_profiles::{EqParam, EqSpec};
 use svolder_proto::FunctionId;
 
-use super::{App, Intent, Pane, SWITCH_ROW, Screen, ToneRow, cycled};
+use super::{App, Intent, Ld, Pane, SWITCH_ROW, Screen, ToneRow, cycled};
 
 /// Whether `intent` writes a value the user chose on a row of a list rather than on a control
 /// row of the device: a setting, the connection, a device's place in the list, a preset or an
@@ -106,7 +106,7 @@ impl App {
                 ToneRow::Loudness => self.profile.eq.as_ref().map(EqSpec::loudness_id),
                 ToneRow::Band => self.band_cursor(),
                 ToneRow::Target => Some(SWITCH_ROW),
-                ToneRow::Point(_) | ToneRow::Crossfeed(_) => None,
+                ToneRow::Point(_) | ToneRow::Crossfeed(_) | ToneRow::Ld(_) => None,
             },
             (Screen::Device, Pane::Status) => None,
             (Screen::Telemetry | Screen::Devices | Screen::Settings | Screen::Setup, _) => None,
@@ -188,9 +188,11 @@ impl App {
         match row {
             ToneRow::Mode => self.flat(),
             ToneRow::Loudness => self.loudness(),
-            ToneRow::Band | ToneRow::Point(_) | ToneRow::Target | ToneRow::Crossfeed(_) => {
-                Vec::new()
-            }
+            ToneRow::Band
+            | ToneRow::Point(_)
+            | ToneRow::Target
+            | ToneRow::Crossfeed(_)
+            | ToneRow::Ld(_) => Vec::new(),
         }
     }
 
@@ -214,19 +216,23 @@ impl App {
     /// The pane landed in earns the light that runs round its contour, unless the keys have
     /// gone nowhere.
     pub(super) fn cycle_pane(&mut self, dir: isize) -> Vec<Intent> {
-        if self.screen == Screen::Tone && self.crossfeed_shown() {
-            // The computer side with crossfeed has three stops: the header, the Crossfeed
-            // section (unfolded while the keys are in it) and the points.
-            let stops = [
-                ToneRow::Mode,
-                ToneRow::Crossfeed(self.xf_first()),
-                ToneRow::Point(self.tone.point),
-            ];
-            let at = match self.tone.row {
-                ToneRow::Crossfeed(_) => 1,
-                ToneRow::Point(_) => 2,
-                _ => 0,
-            };
+        if self.screen == Screen::Tone && (self.crossfeed_shown() || self.ld_shown()) {
+            // The computer side with sections has a stop each, in the chain's order: the header,
+            // the points (the EQ), the Loudness section and the Crossfeed section, each unfolded
+            // while the keys are in it.
+            let mut stops = vec![ToneRow::Mode, ToneRow::Point(self.tone.point)];
+            if self.ld_shown() {
+                stops.push(ToneRow::Ld(Ld::Strength));
+            }
+            if self.crossfeed_shown() {
+                stops.push(ToneRow::Crossfeed(self.xf_first()));
+            }
+            let at = stops
+                .iter()
+                .position(|stop| {
+                    std::mem::discriminant(stop) == std::mem::discriminant(&self.tone.row)
+                })
+                .unwrap_or(0);
             self.tone.xf_line = None;
             self.tone.row = stops[cycled(at, dir, stops.len())];
             self.frame_flags.pane_changed = true;
@@ -242,7 +248,7 @@ impl App {
                     true => ToneRow::Point(self.tone.point),
                     false => ToneRow::Band,
                 },
-                ToneRow::Point(_) | ToneRow::Crossfeed(_) => ToneRow::Mode,
+                ToneRow::Point(_) | ToneRow::Crossfeed(_) | ToneRow::Ld(_) => ToneRow::Mode,
             };
             self.frame_flags.pane_changed = true;
             return Vec::new();

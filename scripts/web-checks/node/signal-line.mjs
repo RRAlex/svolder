@@ -44,8 +44,8 @@ const hop = (id, kind, name, after, more = {}) => ({
   id, kind, name, note: null, after, device: null, live: false, ...more,
 });
 const pathOf = (computer = false, dac = false, unknown = false) => ({
-  class: 'ok',
-  words: '',
+  verdict: 'untouched',
+  words: [],
   hops: [
     { label: 'player', detail: '96 kHz S16LE', changes: false },
     { label: 'computer', detail: '96 kHz S32LE', changes: computer },

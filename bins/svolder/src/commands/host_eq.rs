@@ -37,8 +37,12 @@ pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
         HostCommand::Eq {
             command: HostEqCommand::Status { json },
         } => host_status(g, json).await,
+        HostCommand::Check { json, player } => super::host_check::run(g, json, player).await,
         HostCommand::Crossfeed { json, command } => {
             super::host_crossfeed::run(g, json, command).await
+        }
+        HostCommand::Loudness { json, command } => {
+            super::host_loudness::run(g, json, command).await
         }
         HostCommand::Speakers { json, command } => {
             super::host_speakers::run(g, json, command).await
@@ -56,7 +60,7 @@ fn live() -> Host {
 }
 
 /// Where this machine's computer EQ keeps its saved state, made absolute.
-fn state_path() -> std::path::PathBuf {
+pub(super) fn state_path() -> std::path::PathBuf {
     which::absolute(&svolder_ipc::config::host_eq_state_path())
 }
 

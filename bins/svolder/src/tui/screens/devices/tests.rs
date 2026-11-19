@@ -78,7 +78,7 @@ fn the_device_list_names_every_device_its_product_and_its_state() {
     let mut expected = vec![
         " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
         "─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─",
-        "┌ Devices ────────────────────────────────── new ─ update ─ x remove ─ refresh ┐",
+        "┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐",
         "│ ▶ bifrost   Bifrost 3   connected                                            │",
         "│   gungnir   Gungnir 2   disconnected (current)                               │",
     ];
@@ -205,7 +205,7 @@ fn the_editor_draws_the_device_over_the_list_it_is_about() {
         &[
             " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
             "─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─",
-            "┌ Devices ────────────────────────────────── new ─ update ─ x remove ─ refresh ┐",
+            "┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐",
             "│ ▶ bifrost   Bifrost 3   connected                                            │",
             "│   gungnir   Gungnir 2   disconnected (current)                               │",
             "│                                                                              │",
@@ -218,7 +218,7 @@ fn the_editor_draws_the_device_over_the_list_it_is_about() {
             "│           │   Profile     ‹ automatic ›                          │           │",
             "│           │   Default     [ ] no                                 │           │",
             "│           │                                                      │           │",
-            "│           │ Enter saves · Esc cancels                            │           │",
+            "│           │ b identify · Enter saves · Esc cancels               │           │",
             "│           └──────────────────────────────────────────────────────┘           │",
             "│                                                                              │",
             "│                                                                              │",
@@ -326,7 +326,7 @@ fn the_removal_asks_about_the_device_it_would_take_away() {
         &[
             " svolder  Gungnir 2  ● connected                                  mouse:on 14:02",
             "─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─",
-            "┌ Devices ────────────────────────────────── new ─ update ─ x remove ─ refresh ┐",
+            "┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐",
             "│ ▶ bifrost   Bifrost 3   connected                                            │",
             "│   gungnir   Gungnir 2   disconnected (current)                               │",
             "│                                                                              │",
@@ -681,7 +681,7 @@ fn the_more_mark_on_the_border_is_not_a_click_target() {
         "the title"
     );
     assert_eq!(
-        hits.hit_at(40, 2),
+        hits.hit_at(14, 2),
         Some(&Hit::Tab(Screen::Device)),
         "the border beside the mark"
     );
@@ -866,5 +866,92 @@ fn the_not_opened_panel_pads_its_words_and_is_as_tall_as_they_are() {
         rows[top + 4].starts_with('└') || rows[top + 4].starts_with('╰'),
         "no blank row before the bottom border: {:?}",
         rows[top + 4]
+    );
+}
+
+/// The list's top border carries `b identify` between `update` and `x remove`, in the key
+/// colours; with the cursor on a Mesh Card, which offers no identify, the whole word is faint.
+#[test]
+fn the_border_says_b_identify_and_dims_it_on_a_device_with_no_identify() {
+    let border = "┌ Devices";
+    let mut a = app(daemon_rows());
+    let lines = text(&frame(&a, 80, 24));
+    let top = &lines[2];
+    let at = |word: &str| {
+        top.find(word)
+            .unwrap_or_else(|| panic!("no {word:?} in {top:?}"))
+    };
+    assert!(
+        at("update") < at("b identify") && at("b identify") < at("x remove"),
+        "{top:?}"
+    );
+
+    let buffer = frame(&a, 80, 24);
+    assert_ne!(
+        crate::tui::test_support::style_of(&buffer, border, "b identify"),
+        crate::tui::test_support::style_at(&buffer, border, "b identify", 2),
+        "an available word draws its key apart from its name"
+    );
+
+    a.devices.rows[0].profile = Some("meshcard".into());
+    let buffer = frame(&a, 80, 24);
+    assert_eq!(
+        crate::tui::test_support::style_of(&buffer, border, "b identify"),
+        crate::tui::test_support::style_at(&buffer, border, "b identify", 2),
+        "the word is faint whole on a device with no identify"
+    );
+}
+
+/// The editor's key line leads with `b identify`, faint while the cursor is in the Name row,
+/// where `b` is a letter, and on a device with no identify.
+#[test]
+fn the_editor_key_line_offers_identify_and_dims_it_where_b_would_type() {
+    let mut a = editing(daemon_rows());
+    let buffer = frame(&a, 80, 24);
+    let same = |buffer: &Buffer| {
+        crate::tui::test_support::style_of(buffer, "b identify ·", "b identify")
+            == crate::tui::test_support::style_at(buffer, "b identify ·", "b identify", 2)
+    };
+    assert!(same(&buffer), "the Name row types b, so the word is faint");
+    a.key(KeyEvent::from(KeyCode::Down));
+    assert!(
+        !same(&frame(&a, 80, 24)),
+        "the Passphrase row leaves b free"
+    );
+    a.devices.rows[0].profile = Some("meshcard".into());
+    assert!(same(&frame(&a, 80, 24)), "a Mesh Card offers no identify");
+}
+
+/// On a border too short for every word the words drop from the right: at 60 columns `refresh`
+/// goes, at 50 `x remove` goes with it, and `b identify` stays while `update` does. The frame
+/// never draws narrower than 80 columns, so this asks the border's own fit rule.
+#[test]
+fn a_short_border_drops_refresh_first_then_x_remove() {
+    let theme = Theme::new(false);
+    let scene = crate::tui::keys::Scene::of(&app(daemon_rows()));
+    let words = |width: u16| {
+        let room = crate::tui::widgets::actions::action_room(width, " Devices ".chars().count());
+        let (line, _) = crate::tui::widgets::actions::actions_title(
+            &super::ACTIONS,
+            None,
+            room,
+            Screen::Devices,
+            &scene,
+            &theme,
+        );
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    };
+    let sixty = words(60);
+    assert!(
+        sixty.contains("b identify") && sixty.contains("x remove") && !sixty.contains("refresh"),
+        "{sixty:?}"
+    );
+    let fifty = words(50);
+    assert!(
+        fifty.contains("b identify") && !fifty.contains("x remove"),
+        "{fifty:?}"
     );
 }

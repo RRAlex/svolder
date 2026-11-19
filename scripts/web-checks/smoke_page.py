@@ -13,6 +13,7 @@ import json
 import sys
 
 import common
+import parts
 from smoke_probe import PROBE
 
 CALM_SECS = 6.0  # how long the amp's signal is watched for meter splats (s)
@@ -21,8 +22,10 @@ fails = []
 passed = 0
 
 
-def check(name, cond, detail=''):
+def check(name, cond, detail='', timing=False):
     global passed
+    if not parts.counts(timing):
+        return
     if cond:
         passed += 1
         print('ok  ', name)
@@ -457,54 +460,61 @@ def repick():
 
 
 def calm_rhythm():
-    """A meter's emission is a resting source for the rhythm; its red-zone kick stirs."""
+    """A meter's emission is a resting source for the rhythm; its red-zone kick stirs. The meter
+    splats are the logic part; the frame rates of a handle of its own, below and in the red zone,
+    are the timing part."""
     amp = common.Daemon('fake-amp', name='Amp', env={'SVOLDER_FAKE_SIGNAL': '1'})
-    b = make(size=(1280, 900))
+    b = None
     try:
-        load(b, amp.url)
-        b.sleep(1.0)
-        # the fake's signal comes in bursts, some into the red zone; the page's readings must
-        # reach the smoke (the calm rate is measured elsewhere, the rule is proved in node)
-        b.page("""(() => { window.__red = []; window.__fr = [];
-          setInterval(() => {
-            const r = document.querySelector('sv-meters').readings();
-            if (Math.max(...r.map((x) => x ?? 0)) >= 0.93) window.__red.push(performance.now());
-          }, 40);
-          setInterval(() => window.__fr.push([performance.now(),
-            window.__fx.stats().frames, window.__fx.stats().splats.meter]), 250);
-          return 1; })()""")
-        b.sleep(CALM_SECS)
-        red, fr = b.page('window.__red'), b.page('window.__fr')
-        emitted = fr[-1][2] - fr[0][2] if len(fr) > 1 else 0
-        print(f'      amp with a signal, no pointer: {emitted} meter splats in {CALM_SECS:.0f} s; '
-              f'red seen in {len(red)} samples')
-        check('an amp playing: the page feeds the readings to the smoke (meter splats counted)',
-              emitted > 0, emitted)
-        b.close()
-        # a handle of our own: a meter under the red zone is calm, one in it stirs
-        b = make(size=(1280, 900))
-        load(b, amp.url + '?effects=off')
-        b.ev("window.__mk({ x: 640, y: 600, radius: 100, meters: [{ x: 600, y: 500 },"
-             " { x: 680, y: 500 }] }, 0.5)")
-        b.ev('window.__h.meters([0.6, 0.5])')
-        b.sleep(3.5)
-        f0 = b.ev('window.__h.stats().frames')
-        b.sleep(2.0)
-        low = (b.ev('window.__h.stats().frames') - f0) / 2.0
-        # just into the red zone: its kick stirs, and its agitation is too small to make a note
-        b.ev('window.__h.meters([0.935, 0.5])')
-        b.sleep(0.5)
-        f0 = b.ev('window.__h.stats().frames')
-        b.sleep(2.0)
-        red = (b.ev('window.__h.stats().frames') - f0) / 2.0
-        print(f'      own handle: meters at 0.6 -> {low:.1f} frames a second; one at 0.935 -> '
-              f'{red:.1f}')
-        check('meters below the red zone: the calm rate', 14 <= low <= 26, low)
-        check('a meter in its red zone stirs: nearly every animation frame (> 40 a second)',
-              red > 40, red)
-        check('no page error', errors(b) == [], errors(b))
+        if parts.part_has('logic'):
+            b = make(size=(1280, 900))
+            load(b, amp.url)
+            b.sleep(1.0)
+            # the fake's signal comes in bursts, some into the red zone; the page's readings must
+            # reach the smoke (the calm rate is measured elsewhere, the rule is proved in node)
+            b.page("""(() => { window.__red = []; window.__fr = [];
+              setInterval(() => {
+                const r = document.querySelector('sv-meters').readings();
+                if (Math.max(...r.map((x) => x ?? 0)) >= 0.93) window.__red.push(performance.now());
+              }, 40);
+              setInterval(() => window.__fr.push([performance.now(),
+                window.__fx.stats().frames, window.__fx.stats().splats.meter]), 250);
+              return 1; })()""")
+            b.sleep(CALM_SECS)
+            red, fr = b.page('window.__red'), b.page('window.__fr')
+            emitted = fr[-1][2] - fr[0][2] if len(fr) > 1 else 0
+            print(f'      amp with a signal, no pointer: {emitted} meter splats in {CALM_SECS:.0f} s; '
+                  f'red seen in {len(red)} samples')
+            check('an amp playing: the page feeds the readings to the smoke (meter splats counted)',
+                  emitted > 0, emitted)
+            b.close()
+            b = None
+        if parts.part_has('timing'):
+            # a handle of our own: a meter under the red zone is calm, one in it stirs
+            b = make(size=(1280, 900))
+            load(b, amp.url + '?effects=off')
+            b.ev("window.__mk({ x: 640, y: 600, radius: 100, meters: [{ x: 600, y: 500 },"
+                 " { x: 680, y: 500 }] }, 0.5)")
+            b.ev('window.__h.meters([0.6, 0.5])')
+            b.sleep(3.5)
+            f0 = b.ev('window.__h.stats().frames')
+            b.sleep(2.0)
+            low = (b.ev('window.__h.stats().frames') - f0) / 2.0
+            # just into the red zone: its kick stirs, and its agitation is too small to make a note
+            b.ev('window.__h.meters([0.935, 0.5])')
+            b.sleep(0.5)
+            f0 = b.ev('window.__h.stats().frames')
+            b.sleep(2.0)
+            red = (b.ev('window.__h.stats().frames') - f0) / 2.0
+            print(f'      own handle: meters at 0.6 -> {low:.1f} frames a second; one at 0.935 -> '
+                  f'{red:.1f}')
+            check('meters below the red zone: the calm rate', 14 <= low <= 26, low, timing=True)
+            check('a meter in its red zone stirs: nearly every animation frame (> 40 a second)',
+                  red > 40, red, timing=True)
+            check('no page error', errors(b) == [], errors(b), timing=True)
     finally:
-        b.close()
+        if b is not None:
+            b.close()
         amp.stop()
 
 
@@ -573,9 +583,13 @@ if browser == 'chromium':
     # Firefox's WebDriver scripts see the page's prototypes through wrappers, so the counters
     # `cost` hangs on them would not see the page's own calls
     sections.append(cost)
+# the timing part runs only the sections that hold timing cases; calm_rhythm splits itself
+TIMING_SECTIONS = ('calm_rhythm',)
 only = sys.argv[2:]
 for section in sections:
-    if not only or section.__name__ in only:
+    if only and section.__name__ not in only:
+        continue
+    if parts.part_has('logic') or section.__name__ in TIMING_SECTIONS:
         section()
-print(f'smoke_page.py {browser}: {passed} passed, {len(fails)} failed')
+print(f'smoke_page.py {browser}{parts.part_tag()}: {passed} passed, {len(fails)} failed')
 sys.exit(1 if fails else 0)

@@ -305,10 +305,11 @@ pub(super) fn watching(backend: Backend, app: App, device: Option<&str>) -> Watc
         web_check: None,
         web_copy: None,
         web_copy_next: None,
+        setup: Box::default(),
         reconnect: None,
         host_refresh: None,
         host: HostLink::none(),
-        jobs: super::jobs::Jobs::default(),
+        jobs: Box::default(),
         computer: Box::default(),
     }
 }

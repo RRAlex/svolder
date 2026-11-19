@@ -6,12 +6,12 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 Signal is the page's third theme. It draws the sound's way from the player to the ears as one line
 and makes the line the page: each hop on it is something the sound passes through, and choosing a
-hop boxes it and opens what that hop offers underneath. It is dark only, on a warm near-black
-ground, in the system's own type. It is plain ES modules with no build step, in
-`bins/svolderd/web/themes/signal/`, and one entry in `bins/svolderd/src/web/themes.rs`. It is built
-on the core alone: it shares no file with Ember or Paper, and what it needs of the core is in
-the last section. [Web themes](web-themes.md) says what a theme is; [the frame](frame.md) says what
-the page keeps for itself.
+hop boxes it and opens what that hop offers underneath. It is dark only, on a near-black ground
+(deep blue in Blueprint, the default palette), in the system's own type. It is plain ES modules with
+no build step, in `bins/svolderd/web/themes/signal/`, and one entry in
+`bins/svolderd/src/web/themes.rs`. It is built on the core alone: it shares no file with Ember or
+Paper, and what it needs of the core is in the last section. [Web themes](web-themes.md) says what a
+theme is; [the frame](frame.md) says what the page keeps for itself.
 
 In this theme's words, **the signal path** is the line. The word *Signal* alone is the theme's name
 and, in the device's facts, the strength of the Bluetooth link; the two are never mixed.
@@ -32,7 +32,9 @@ The hops, left to right, are:
    the sink's rate and volume and, when the host EQ is on, `host EQ on`. On a DAC's page, before the
    route is first read, it says `route not read`; on an amp's page, which holds no route, it is
    drawn without facts and without words.
-3. **The shown device**, boxed when chosen: amber, as is every device svolder drives. Its words are
+3. **The shown device**, boxed when chosen: in the device colour (cyan in Blueprint, amber in Warm
+   amber), as is every device svolder drives; where this page says amber for the device, that is
+   Warm amber's colour. Its words are
    the path's reading of its input and what the link from the computer does: `arrives as sent`
    when the DAC reads the rate the computer sends, else `changes the sound`. While the DAC's
    rate is not read it says neither, as nothing was checked.
@@ -272,20 +274,30 @@ space and a slash, or six hops after the DAC, and every control is 44 px.
 
 ## Look
 
-The tokens are in `style.css` on `:root[data-theme="signal"]`.
+The tokens are in `style.css` on `:root[data-theme="signal"]`, which holds Blueprint, the default
+palette; the values below are Blueprint's (Warm amber's are the `data-palette="amber"` block).
+Every colour of the theme and of its popups is one of them, and the frame's `--frame-*` tokens are
+`var()` of them.
 
 | Token | Value |
 | --- | --- |
-| ground, and its glow | `#0f0d0b`, `#17130f`: `radial-gradient(ellipse at 50% 70%, glow 0%, ground 70%)` |
-| ink, mid, dim | `#f4eee5`, `#ada396`, `#897f73` |
-| faint, thin (a thin stretch) | `#6b6258`, `#7a7064` |
-| player, computer, device | `#7cc27e`, `#ead27a`, `#f0a73a` |
+| ground, and its glow | `#08121f`, `#0f2038`: `radial-gradient(ellipse at 50% 70%, glow 0%, ground 70%)` |
+| panel (the popups), well, hover, field, track | `#0c1b30`, `#07111e`, `#14294a`, `#07101c`, `#1a2d48` |
+| ink, mid, dim | `#e9f2ff`, `#9bb4d2`, `#809dc2` |
+| faint, thin (a thin stretch) | `#4a6788`, `#4a7aa8` |
+| accent, device | `#4fd6f0`, `#4fd6f0` (the accent is the volume's fill, the curve, the focus ring and every popup's edge; the device is the hop's own colour) |
+| player, computer | `#72e0a0`, `#f0df7c` |
 | bad (a lost link) | `#e0613c` |
-| edge, box fill, box glow | `rgba(255,236,212,.14)`, `rgba(240,167,58,.06)`, `0 0 30px rgba(240,167,58,.1)` |
+| tint (the lines' colour as `r, g, b`) | `170, 210, 255`: edge, hair, line and the grids are the tint at .14, .08, .19 and .02 to .07 |
+| box fill, box glow | `rgba(79,214,240,.07)` and `0 0 30px rgba(79,214,240,.11)` (Phosphor, and Oxblood and brass: their accent at .07 and .11; Warm amber: its accent at .06 and .1) |
+| lamps | `--sg-lamp-*`: the popups' lit lamp (a hot colour, its core, its edge and its glow) |
+
+The menu's *Palette* row chooses one of four palettes and the popups have a look of their own:
+see [Signal's palettes and popups](web-signal-popups.md).
 
 Text on the ground reads at 4.5 to 1 or better; the faint colour is for lines and never for text,
 and a declared hop's words use the dim one. There is no scheme switch and no effects, and the only
-picture of the music is the computer's Spectrum line, so the theme gives the menu no rows of its own. The menu button is the plain ink circle. The
+picture of the music is the computer's Spectrum line, so the menu's rows are *Add to the chain…* and the palettes. The menu button is the plain ink circle. The
 preview is the line with five hops and the DAC boxed. Signal needs `meters` and `host`, and its
 only scheme is `dark`. The fonts are the system's, so the page makes no new request.
 
@@ -303,7 +315,8 @@ allows. Browser storage is only through `core.prefs`, under `svolder.theme.signa
 | `draw/` | one file per section: `line.js` (the wire, dots, labels, box, strip, the loop), `volume.js`, `tone.js`, `choices.js`, `playing.js`, `shelf.js`, `facts.js`, `amp.js`, `hop.js`, `player.js`, `computer.js`, `card.js`, `vu.js` (the dials), `spectrum.js` (the line), and the small `word.js`, `esc.js` |
 | `*-wire.js` (`vu-wire.js`: the glow, the reference, the streams and the clock), `strip-wire.js`, `lists.js`, `ask.js` (the core's list and inline ask in Signal's classes and words), `device-list.js` | the hands: what a tap, a drag, a key, a list or a question does |
 | `slim.js`, `place.js` (the core's `placeFractions` with Signal's fill class), `words.js`, `presets.js` | the slim bar, pure maths and fixed words; the drag and the keys of a track are the core's `gestures.js` |
-| `driver.js`, `preview.js`, `style.css` | the test driver, the picker's picture, the tokens and every section |
+| `palette.js` | the palettes' ids and names, the root's attribute and the menu's Palette rows ([web-signal-popups.md](web-signal-popups.md)) |
+| `driver.js`, `preview.js`, `style.css` | the test driver, the picker's picture, the tokens, the palettes, every section and the popups' look |
 
 Pure modules take the model and return text or numbers; drawing modules return markup; wiring
 modules are the only ones that listen. Signal reaches a device only through `core.actions`, and

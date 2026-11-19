@@ -156,7 +156,7 @@ pub(crate) static THEMES: &[Theme] = &[
         blurb: "the line the sound takes",
         styles: ["style.css"],
         color_scheme: "dark",
-        theme_color: "#0f0d0b",
+        theme_color: "#08121f",
         theme_color_dark: None,
         schemes: ["dark"],
         scripts: [],
@@ -173,7 +173,7 @@ pub(crate) static THEMES: &[Theme] = &[
             js "draw/amp.js", js "amp-wire.js", js "device-list.js", js "draw/hop.js",
             js "hops-wire.js", js "draw/player.js", js "draw/computer.js", js "draw/card.js",
             js "card-wire.js", js "driver.js", js "morph.js", js "computer-wire.js", js "shelf-asks.js",
-            js "draw/vu.js", js "draw/spectrum.js", js "vu-wire.js"
+            js "draw/vu.js", js "draw/spectrum.js", js "vu-wire.js", js "palette.js"
         ]
     },
     theme! {

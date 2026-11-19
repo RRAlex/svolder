@@ -277,6 +277,10 @@ impl App {
             self.tone.xf_note = note;
         }
         self.note_speakers_view();
+        // A section the view no longer has gives the keys back to the mode row.
+        if matches!(self.tone.row, ToneRow::Ld(_)) && !self.ld_shown() {
+            self.tone.row = ToneRow::Mode;
+        }
         let applied = self.computer_preset();
         if self.presets.computer_flattened.is_some()
             && applied.as_ref() == self.presets.computer_flattened.as_ref()
@@ -369,7 +373,9 @@ impl App {
         };
         self.tone.row = match (self.side, self.tone.row) {
             (Side::Computer, ToneRow::Band | ToneRow::Loudness) => ToneRow::Point(self.tone.point),
-            (Side::Dac, ToneRow::Point(_) | ToneRow::Crossfeed(_)) => ToneRow::Band,
+            (Side::Dac, ToneRow::Point(_) | ToneRow::Crossfeed(_) | ToneRow::Ld(_)) => {
+                ToneRow::Band
+            }
             (_, row) => row,
         };
         if self.screen == Screen::Device {

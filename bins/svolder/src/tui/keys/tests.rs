@@ -192,6 +192,17 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     app.flip_side();
                 }
             }
+            if hint.when == When::HasLoudness {
+                app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_loudness(
+                    true,
+                    (50.0, 100.0),
+                    Some(35.0),
+                    13.7,
+                ));
+                app.flip_side();
+                // the section's own keys act with the keys in it
+                app.focus_ld(crate::tui::app::Ld::Strength);
+            }
             if hint.when == When::HasCrossfeed {
                 app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
                     false,
@@ -211,6 +222,10 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
                     &[],
                 ));
                 app.flip_side();
+            }
+            if hint.when == When::HasSetup {
+                // The check is on offer where host audio shows.
+                app.host.linked = true;
             }
             if hint.label == "< > |" {
                 // the bar's keys act on the bar the last frame drew

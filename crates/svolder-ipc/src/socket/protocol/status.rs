@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The answers that describe one subsystem: readings, recalls, link changes, and the status of
-//! the MQTT bridge, the MCP server and the web server.
+//! the MQTT client, the MCP server and the web server.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +40,7 @@ pub struct LinkChange {
     pub connected: bool,
 }
 
-/// Where a daemon's MQTT bridge stands, as `version` reports it.
+/// Where a daemon's MQTT client stands, as `version` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum MqttStatus {
@@ -85,7 +85,7 @@ pub enum MqttStatus {
     Unknown,
 }
 
-/// Why a daemon's MQTT bridge cannot reach its broker, as far as the failed attempt says.
+/// Why a daemon's MQTT client cannot reach its broker, as far as the failed attempt says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MqttProblem {

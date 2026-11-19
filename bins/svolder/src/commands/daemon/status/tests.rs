@@ -16,7 +16,7 @@ use crate::commands::daemon::POLL;
 use crate::commands::daemon::test_support::{
     FAKE_LOG, FakeDaemon, Tools, VERSION, a_daemon_on, installed_units, no_units,
 };
-use crate::test_support::temp_dir;
+use crate::test_support::short_dir;
 
 /// A device's line names the product either way, and says how long the daemon is leaving
 /// a device that is away alone for when the daemon reports a wait. A daemon too old to
@@ -183,7 +183,7 @@ fn the_mcp_line_says_where_the_server_stands() {
 #[tokio::test]
 async fn status_prints_no_mqtt_line_for_a_daemon_that_reports_none() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-no-bridge");
+    let dir = short_dir("daemon-status-no-bridge");
     let socket = dir.0.join("svolder.sock");
     let served = a_daemon_on(&socket).await;
 
@@ -211,7 +211,7 @@ async fn status_prints_no_mqtt_line_for_a_daemon_that_reports_none() {
 #[tokio::test]
 async fn status_prints_the_unit_states_and_what_the_daemon_answers() {
     let tools = Tools::new(&installed_units("/run/user/1000/svolder.sock"));
-    let dir = temp_dir("daemon-status");
+    let dir = short_dir("daemon-status");
     let socket = dir.0.join("svolder.sock");
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let served = tokio::spawn({
@@ -309,7 +309,7 @@ async fn status_prints_the_unit_states_and_what_the_daemon_answers() {
 #[tokio::test]
 async fn status_without_a_daemon_names_the_socket_and_the_fallback_log() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-bare");
+    let dir = short_dir("daemon-status-bare");
     let socket = dir.0.join("svolder.sock");
     let log = dir.0.join("svolderd.log");
 
@@ -335,7 +335,7 @@ async fn status_prints_the_log_a_daemon_reports_else_the_fallback() {
         (None, format!("log: {fallback}")),
     ] {
         let tools = Tools::new(&no_units());
-        let dir = temp_dir("daemon-status-log");
+        let dir = short_dir("daemon-status-log");
         let socket = dir.0.join("svolder.sock");
         let (stop, served) = a_logging_daemon(&socket, reported).await;
 
@@ -366,6 +366,7 @@ impl Handler for LogDaemon {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     }
 
@@ -422,7 +423,7 @@ async fn a_daemon_of(
 #[tokio::test]
 async fn status_names_every_other_svolderd_of_this_user_and_what_stops_each() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-others");
+    let dir = short_dir("daemon-status-others");
     let socket = dir.0.join("svolder.sock");
     let elsewhere = PathBuf::from("/tmp/svolder-firstrun/svolder.sock");
     let running = vec![
@@ -523,6 +524,7 @@ async fn status_prints_no_mismatch_for_a_daemon_of_its_own_version() {
                     features: Vec::new(),
                     config_changed: false,
                     config_missing: false,
+                    activity: None,
                 },
                 _ => Response::Ack,
             }
@@ -536,7 +538,7 @@ async fn status_prints_no_mismatch_for_a_daemon_of_its_own_version() {
         }
     }
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-same");
+    let dir = short_dir("daemon-status-same");
     let socket = dir.0.join("svolder.sock");
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let served = tokio::spawn({
@@ -580,7 +582,7 @@ async fn status_says_a_current_daemon_that_names_no_log_writes_no_file() {
         ("0.0.1", format!("log: {fallback}")),
     ] {
         let tools = Tools::new(&no_units());
-        let dir = temp_dir("daemon-status-nofile");
+        let dir = short_dir("daemon-status-nofile");
         let socket = dir.0.join("svolder.sock");
         let (stop, served) = a_daemon_of(&socket, version, None).await;
         let lines = status_lines(&tools.ctl(), &socket, Path::new(fallback), &[]).await;
@@ -618,7 +620,7 @@ fn silent_daemon(socket: &Path, first: Option<svolder_ipc::Response>) {
 #[tokio::test]
 async fn status_gives_up_on_a_daemon_that_never_answers_the_version() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-silent");
+    let dir = short_dir("daemon-status-silent");
     let socket = dir.0.join("svolder.sock");
     silent_daemon(&socket, None);
 
@@ -644,7 +646,7 @@ async fn status_gives_up_on_a_daemon_that_never_answers_the_version() {
 #[tokio::test]
 async fn status_gives_up_on_a_daemon_that_never_lists_its_devices() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-silent-devices");
+    let dir = short_dir("daemon-status-silent-devices");
     let socket = dir.0.join("svolder.sock");
     // One connection answers its first request and holds, so the device ask over the same
     // connection never gets its answer.
@@ -662,6 +664,7 @@ async fn status_gives_up_on_a_daemon_that_never_lists_its_devices() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }),
     );
 
@@ -682,7 +685,7 @@ async fn status_gives_up_on_a_daemon_that_never_lists_its_devices() {
 #[tokio::test]
 async fn status_in_a_container_names_the_containers_log() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-status-container");
+    let dir = short_dir("daemon-status-container");
     let socket = dir.0.join("svolder.sock");
     let (stop, served) = a_daemon_of(&socket, env!("CARGO_PKG_VERSION"), None).await;
     let ctl = tools.ctl().in_container();
@@ -723,6 +726,7 @@ impl Handler for Says {
                 features: Vec::new(),
                 config_changed: self.config_changed,
                 config_missing: self.config_missing,
+                activity: None,
             },
             _ => Response::Ack,
         }
@@ -739,7 +743,7 @@ impl Handler for Says {
 /// `status` for a daemon that says what it says of its file.
 async fn status_of(tag: &str, says: Says) -> Vec<String> {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir(tag);
+    let dir = short_dir(tag);
     let socket = dir.0.join("svolder.sock");
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let served = tokio::spawn({
@@ -817,5 +821,111 @@ async fn status_says_a_changed_config_with_the_daemons_file_and_the_reload() {
         gone[at + 1],
         daemon_version::config_missing_line("/config/config.toml"),
         "{gone:?}"
+    );
+}
+
+/// A daemon that answers a `version` with both servers listening and the given activity.
+struct ClientsDaemon(Option<svolder_ipc::Activity>);
+
+#[async_trait::async_trait]
+impl Handler for ClientsDaemon {
+    async fn handle(&self, _request: Request) -> Response {
+        Response::Version {
+            version: VERSION.to_string(),
+            mqtt: None,
+            mcp: Some(McpStatus::Listening {
+                listen: "127.0.0.1:8737".parse().unwrap(),
+                auth: svolder_ipc::config::McpAuth::Token,
+                writes: false,
+            }),
+            config: None,
+            log: None,
+            mcp_token: None,
+            web: Some(WebStatus::Listening {
+                listen: "127.0.0.1:8738".parse().unwrap(),
+                auth: svolder_ipc::config::WebAuth::Token,
+                writes: true,
+                guest: svolder_ipc::config::WebGuest::None,
+            }),
+            web_token: None,
+            features: Vec::new(),
+            config_changed: false,
+            config_missing: false,
+            activity: self.0,
+        }
+    }
+
+    async fn subscribe(
+        &self,
+        _device: Option<String>,
+    ) -> futures::stream::BoxStream<'static, Event> {
+        futures::stream::pending().boxed()
+    }
+}
+
+/// `status` lines of a daemon that reports `activity`.
+async fn status_with_activity(tag: &str, activity: Option<svolder_ipc::Activity>) -> Vec<String> {
+    let tools = Tools::new(&no_units());
+    let dir = short_dir(tag);
+    let socket = dir.0.join("svolder.sock");
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let served = tokio::spawn({
+        let socket = socket.clone();
+        async move {
+            let _ = svolder_ipc::serve(&socket, Arc::new(ClientsDaemon(activity)), async {
+                let _ = stopped.await;
+            })
+            .await;
+        }
+    });
+    for _ in 0..100 {
+        if svolder_ipc::is_running(&socket).await {
+            break;
+        }
+        tokio::time::sleep(POLL).await;
+    }
+    let lines = status_lines(&tools.ctl(), &socket, &dir.0.join("svolderd.log"), &[]).await;
+    let _ = stop.send(());
+    let _ = served.await;
+    lines
+}
+
+/// A daemon that reports its clients gets one line per server after that server's status line,
+/// in the words every front end shares; one that reports none gets no such line.
+#[tokio::test]
+async fn status_prints_the_clients_of_each_server_and_none_for_a_daemon_that_says_nothing() {
+    let counts = |open, hour, day| svolder_ipc::ServerActivity {
+        open,
+        hour,
+        day,
+        counted_secs: svolder_ipc::DAY_SECS,
+        capped: false,
+    };
+    let activity = svolder_ipc::Activity {
+        mcp: Some(counts(2, 3, 5)),
+        web: Some(counts(1, 1, 4)),
+    };
+    let lines = status_with_activity("daemon-status-clients", Some(activity)).await;
+    let at = |prefix: &str| {
+        lines
+            .iter()
+            .position(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no {prefix} line in {lines:?}"))
+    };
+    assert_eq!(
+        lines[at("mcp clients: ")],
+        "mcp clients: 2 connections open; 3 clients in the past hour, 5 in the past day"
+    );
+    assert_eq!(
+        lines[at("web clients: ")],
+        "web clients: 1 connection open; 1 client in the past hour, 4 in the past day"
+    );
+    assert_eq!(at("mcp clients: "), at("mcp: ") + 1, "{lines:?}");
+    assert_eq!(at("web clients: "), at("web: ") + 1, "{lines:?}");
+
+    let none = status_with_activity("daemon-status-no-clients", None).await;
+    assert!(
+        !none.iter().any(|line| line.contains("clients")),
+        "{none:?}"
     );
 }

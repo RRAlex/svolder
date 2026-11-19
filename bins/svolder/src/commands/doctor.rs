@@ -45,11 +45,14 @@ const CONFIG_FILE: &str = "Config file";
 /// Whether the MCP server can serve and does, as the row is named.
 const MCP_SERVER: &str = "MCP server";
 
-/// Whether the MQTT bridge can reach its broker and does, as the row is named.
-const MQTT_BRIDGE: &str = "MQTT bridge";
+/// Whether the MQTT client can reach its broker and does, as the row is named.
+const MQTT_BRIDGE: &str = "MQTT client";
 
 /// Whether the web UI can serve and does, as the row is named.
 const WEB_UI: &str = "Web UI";
+
+/// Whether the PipeWire config lets the sound through untouched, as the row is named.
+const PIPEWIRE_CONFIG: &str = "PipeWire config";
 
 /// What `doctor` was asked for.
 pub struct DoctorOpts {
@@ -180,6 +183,11 @@ async fn outcomes_over(g: &Globals<'_>, dev: bool, connect: bool, path: &Path) -
         reported_web = info.web;
         reported_mqtt = info.mqtt;
     }
+    // The route is the daemon's own read: this run starts nothing and reads no graph itself.
+    if let Some(path) = version_asked_of(daemon.as_deref(), g.transport) {
+        let route = super::host_check::route_on(path).await;
+        outcomes.extend(config_row(route.as_ref()));
+    }
     let env_token = std::env::var_os(token::Store::MCP.env_var).is_some_and(|v| !v.is_empty());
     outcomes.extend(mcp_row(
         &config.mcp,
@@ -214,6 +222,30 @@ const DAEMON_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 /// nothing answers within a few seconds or what answers is no version.
 async fn daemon_answer(socket: &Path) -> Option<svolder_ipc::socket::daemon_version::DaemonInfo> {
     svolder_ipc::socket::daemon_version::version_within(socket, DAEMON_WAIT).await
+}
+
+/// The row for the PipeWire config, from the route a daemon read: the check's summary in its
+/// words, with where to see the lines when it is not all clear. No route, no row. A summary is
+/// information, never a warning: a config that changes the sound is the reader's to judge.
+fn config_row(route: Option<&svolder_host::RouteFacts>) -> Option<Outcome> {
+    let check = svolder_ipc::host::setup_check(route?);
+    let words = check.summary_words();
+    let words = words.strip_prefix("PipeWire config ").unwrap_or(&words);
+    let (state, reason) = match check.summary {
+        svolder_ipc::host::SetupSummary::Untouched => (State::Pass, words.to_string()),
+        svolder_ipc::host::SetupSummary::Changes(_)
+        | svolder_ipc::host::SetupSummary::Unread(_) => {
+            (State::Note, format!("{words} (svolder host check)"))
+        }
+        svolder_ipc::host::SetupSummary::NotRead
+        | svolder_ipc::host::SetupSummary::OtherVersion => (State::Note, words.to_string()),
+    };
+    Some(Outcome {
+        check: PIPEWIRE_CONFIG,
+        state,
+        reason,
+        fix: None,
+    })
 }
 
 /// The row for the web UI, when `[web]` turns it on or the daemon reports it running.
@@ -313,7 +345,7 @@ fn web_row(
     }
 }
 
-/// The row for the MQTT bridge, when `[mqtt]` turns it on or the daemon reports it running.
+/// The row for the MQTT client, when `[mqtt]` turns it on or the daemon reports it running.
 ///
 /// It looks and changes nothing. It fails, in the broker's own words, on a bridge the daemon says
 /// cannot reach its broker (the login refused, nothing answering, a TLS port); it warns on a

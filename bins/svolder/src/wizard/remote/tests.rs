@@ -305,7 +305,7 @@ async fn a_wizard_over_a_daemon_walks_there_and_skips_the_adapter_step() {
 #[tokio::test]
 async fn no_daemon_is_the_local_walk_and_an_old_daemon_is_refused() {
     tokio::time::timeout(BOUND, async {
-        let none = crate::test_support::temp_dir("remote-none");
+        let none = crate::test_support::short_dir("remote-none");
         let mut wizard = Wizard::starting_at(FakeEffects::healthy(), Step::Scan, Given::default());
         wizard.attach(&none.join("no.sock")).await.unwrap();
         assert!(!wizard.is_remote());

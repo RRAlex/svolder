@@ -147,6 +147,8 @@ pub(in crate::tui) struct Watching {
     /// A check on whether the link on show is still open, asked of the daemon, while it is on
     /// its way.
     pub(super) web_check: Option<tokio::sync::oneshot::Receiver<super::web_box::Checked>>,
+    /// The PipeWire config box's own reads, where no daemon gives the route.
+    pub(super) setup: Box<super::setup::SetupLink>,
     /// A copy for the Web UI box (a clipboard tool, and a browser for a click), off the loop,
     /// while it is on its way.
     pub(super) web_copy: Option<tokio::sync::oneshot::Receiver<super::web_box::Copied>>,
@@ -165,7 +167,7 @@ pub(in crate::tui) struct Watching {
     pub(super) host: HostLink,
     /// The slow work the preset list asks for, run off the loop: the AutoEq index and files,
     /// and the computer EQ.
-    pub(super) jobs: jobs::Jobs,
+    pub(super) jobs: Box<jobs::Jobs>,
     /// The computer's volume and EQ, which the loop reaches for the whole session.
     pub(super) computer: Box<computer::ComputerLink>,
 }

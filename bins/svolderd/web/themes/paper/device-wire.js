@@ -6,6 +6,7 @@
 // write goes through `core.actions` (the power and the switches are logged by `act`). A viewer who
 // may not write taps the same words and the core says why nothing happens.
 
+import { SETUP } from '../../core/popups/listed.js';
 import { ink } from './draw/notes.js';
 import { trackLine } from './notes.js';
 import { WORDS, dateWords } from './words.js';
@@ -26,6 +27,12 @@ export function wireDevice({
   on('playing', (el, what) => {
     if (what === 'transport') core.actions.press(el.dataset.button);
   });
+
+  // The config chip among the notes opens the PipeWire config popup. On a phone the notes stand
+  // after their sections, outside the band, so the sheet hears the tap.
+  root.addEventListener('click', (event) => {
+    if (event.target.closest?.('.pn[data-act="config"]')) core.router.open(SETUP);
+  }, { signal });
 
   on('power', (el, what) => {
     const p = store.device()?.power;

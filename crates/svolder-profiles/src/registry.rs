@@ -21,7 +21,7 @@ use crate::schema::{BuiltinSettingsDef, ControlDef, ConvertDef, EqDef, KindDef, 
 
 const MAX_EXTENDS_DEPTH: usize = 8;
 
-/// The keys the MQTT bridge's own entities are published under, which no profile control may
+/// The keys the MQTT client's own entities are published under, which no profile control may
 /// take: a control with one would replace the entity, duplicate its unique id or have its
 /// commands swallowed (the identify button's topic). `svolder-mqtt` asserts its own keys are
 /// these.
@@ -640,7 +640,7 @@ fn build_control(profile: &str, def: &ControlDef) -> Result<Control, ProfileErro
         .any(|reserved| reserved.eq_ignore_ascii_case(&def.key))
     {
         return Err(fail(
-            "this key is reserved for the MQTT bridge's own entities; choose another key",
+            "this key is reserved for the MQTT client's own entities; choose another key",
         ));
     }
     for (name, set) in [
@@ -933,7 +933,7 @@ fn build_action(profile: &str, def: &ControlDef) -> Result<Action, ProfileError>
         .any(|reserved| reserved.eq_ignore_ascii_case(&def.key))
     {
         return Err(fail(
-            "this key is reserved for the MQTT bridge's own entities; choose another key",
+            "this key is reserved for the MQTT client's own entities; choose another key",
         ));
     }
     // The save role is the one front ends ask about before they send, so it must say it overwrites.

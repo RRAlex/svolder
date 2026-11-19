@@ -7,6 +7,7 @@ It does not replace smoke_core.py, smoke_page.py or the others: `make web-checks
 import sys
 
 import common
+import parts
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
 fails = []
@@ -16,8 +17,10 @@ MAX_V = 75  # cells a second
 MAX_DYE = 1
 
 
-def check(name, cond, detail=''):
+def check(name, cond, detail='', timing=False):
     global passed
+    if not parts.counts(timing):
+        return
     if cond:
         passed += 1
         print('ok  ', name)
@@ -71,16 +74,17 @@ def run():
         check('after a stroke every texel of both grids is finite and bounded',
               bool(grids) and grids['bad'] == 0 and grids['maxV'] < MAX_V
               and grids['maxDye'] < MAX_DYE, grids)
-        b.sleep(3.0)
-        f0 = b.page('window.__fx.stats().frames')
-        b.sleep(3.0)
-        rate = (b.page('window.__fx.stats().frames') - f0) / 3.0
-        print(f'      calm rate: {rate:.1f} simulated frames a second')
-        calm = b.page("import(new URL('assets/themes/ember/smoke-model.js', document.baseURI).href)"
-                      '.then((m) => m.TUNING.calmFps)')
-        lo, hi = 0.7 * calm, 1.3 * calm  # 14 to 26 at the approved 20
-        check(f'rests at the calm rate ({lo:g} to {hi:g} simulated frames a second)',
-              lo <= rate <= hi, rate)
+        if parts.part_has('timing'):
+            b.sleep(3.0)
+            f0 = b.page('window.__fx.stats().frames')
+            b.sleep(3.0)
+            rate = (b.page('window.__fx.stats().frames') - f0) / 3.0
+            print(f'      calm rate: {rate:.1f} simulated frames a second')
+            calm = b.page("import(new URL('assets/themes/ember/smoke-model.js', "
+                          "document.baseURI).href).then((m) => m.TUNING.calmFps)")
+            lo, hi = 0.7 * calm, 1.3 * calm  # 14 to 26 at the approved 20
+            check(f'rests at the calm rate ({lo:g} to {hi:g} simulated frames a second)',
+                  lo <= rate <= hi, rate, timing=True)
         check('no page error', errors(b) == [], errors(b))
     finally:
         b.close()
@@ -88,5 +92,5 @@ def run():
 
 
 run()
-print(f'smoke_quick.py {browser}: {passed} passed, {len(fails)} failed')
+print(f'smoke_quick.py {browser}{parts.part_tag()}: {passed} passed, {len(fails)} failed')
 sys.exit(1 if fails else 0)

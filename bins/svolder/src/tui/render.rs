@@ -254,6 +254,11 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme, hits: &mut HitMap) -> F
         boxes.push(drawn);
         modal = Some(drawn);
     }
+    if app.overlays.setup.is_some() {
+        hits.deselect();
+        let drawn = screens::setup::draw(frame, body, app, theme);
+        stack_box(Some(drawn), hits, &mut boxes, &mut modal);
+    }
     if app.overlays.quitting {
         hits.deselect();
         let drawn = screens::quit::draw(frame, area, app, theme);

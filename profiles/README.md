@@ -55,7 +55,7 @@ in the schema denies unknown fields, so a misspelt key fails the load with the p
 | Key | Meaning |
 | --- | --- |
 | `id` | Required. The function id as a list of one to three bytes: `[10]`, `[21, 2]`. Unique across the resolved profile. Function 250 (the passphrase) and the firmware-update family `210` (but `210.2.x`, the version readout) cannot be a control: the profile fails to load, naming the id. |
-| `key` | Required. The control's stable name, used on the command line, in MQTT and by the web page. Case does not matter when keys are compared. Eight keys are the bridge's own and fail the load, naming the key: `link`, `signal`, `firmware`, `dsp_firmware`, `identify`, `eq_mode`, `eq_preset` and `eq_loudness`. |
+| `key` | Required. The control's stable name, used on the command line, in MQTT and by the web page. Case does not matter when keys are compared. Eight keys are the MQTT client's own and fail the load, naming the key: `link`, `signal`, `firmware`, `dsp_firmware`, `identify`, `eq_mode`, `eq_preset` and `eq_loudness`. |
 | `label` | Required. What a person reads. |
 | `kind` | Required. `select`, `toggle`, `level`, `readout`, `meter`, `fault` or `action`. |
 | `value_type` | Overrides the wire type a kind carries by default: `u8`, `u16`, `u32`, `i8`, `i16`, `i32`, `bool` or `data`. A toggle or fault is `bool`, a meter `u16`, the rest `u8`. |

@@ -626,6 +626,8 @@ fn save(dir: &Dir, on: bool) {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
     .save(&dir.state())
     .expect("the state is saved");
@@ -867,6 +869,8 @@ fn save_crossfeed_on(dir: &Dir, flat: bool) -> HostEqState {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     };
     state.save(&dir.state()).expect("the state is saved");
     state
@@ -989,4 +993,71 @@ async fn in_a_container_a_crash_with_crossfeed_on_applies_the_eq_again_with_it_o
     );
     let saved = HostEqState::load(&dir.state()).unwrap().unwrap();
     assert!(saved.on && !saved.crossfeed_on);
+}
+
+/// A volume write hands the controller's loudness the reading it got back without waiting for the
+/// controller (held here, as a tick holds it through a `pw-dump`), and the next tick follows it
+/// before any look reads the graph.
+#[tokio::test]
+async fn a_volume_write_hands_the_loudness_its_reading_without_the_controllers_lock() {
+    let sink = FakeSink::new(Some(sink_state(0.5)));
+    let chain = FakeChain::new();
+    let params = FakeParams::new();
+    params.with_loudness_ports();
+    params.level_from(&sink);
+    let computer = computer_over(&sink, &chain, &params, Keep::Memory);
+    computer
+        .eq_op(
+            HostEqOp::Loudness {
+                on: Some(true),
+                strength_pct: None,
+                reference_pct: None,
+                reference_now: None,
+                done: true,
+            },
+            &[],
+            |_| Vec::new(),
+            |_| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+    let control = computer.control().unwrap().clone();
+    for _ in 0..30 {
+        control.lock().await.tick().await;
+    }
+    let volume = |computer: &Computer| computer.eq_view().loudness.unwrap().volume_pct;
+    assert_eq!(volume(&computer), Some(50.0), "the look's reading");
+    {
+        let _held = control.lock().await;
+        tokio::time::timeout(Duration::from_secs(5), computer.set_volume(25))
+            .await
+            .expect("the write does not wait for the controller")
+            .unwrap();
+    }
+    let reads = params.reads();
+    control.lock().await.tick().await;
+    assert_eq!(params.reads(), reads, "no look on that tick");
+    assert_eq!(volume(&computer), Some(25.0), "the write's reading");
+}
+
+/// The switch the MQTT bridge holds writes the loudness as a finished change: the strength is
+/// snapped (37 to 35) and the state file holds a `[loudness]` table with it.
+#[tokio::test(start_paused = true)]
+async fn the_bridges_loudness_write_is_kept_in_the_state_file() {
+    let dir = Dir::new();
+    save(&dir, false);
+    let rig = rig_keeping(Keep::File(dir.state()));
+    settle().await;
+    rig.service
+        .eq_switch()
+        .loudness(Some(true), Some(37.0))
+        .await
+        .expect("the loudness write");
+    let text = std::fs::read_to_string(dir.state()).expect("the state file was written");
+    assert!(
+        text.contains("[loudness]"),
+        "no [loudness] table in:\n{text}"
+    );
+    assert!(text.contains("on = true"), "{text}");
+    assert!(text.contains("strength_pct = 35"), "{text}");
 }

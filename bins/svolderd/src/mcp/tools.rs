@@ -196,6 +196,7 @@ impl Tools {
             "set_host_eq" => self.set_host_eq(&request, caller).await,
             "set_host_crossfeed" => self.set_host_crossfeed(&request).await,
             "set_host_speakers" => self.set_host_speakers(&request).await,
+            "set_host_loudness" => self.set_host_loudness(&request).await,
             _ => self.mute(&request, caller).await,
         };
         Ok(match outcome {

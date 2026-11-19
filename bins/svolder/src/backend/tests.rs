@@ -19,7 +19,7 @@ fn globals<'a>(transport: &'a str, socket: Option<&'a str>) -> Globals<'a> {
 /// A unique socket path for this case, inside a directory of the case's own that is
 /// removed with the socket in it when the case lets go of the directory, however it ends.
 fn temp_socket() -> (crate::test_support::TempDir, std::path::PathBuf) {
-    let dir = crate::test_support::temp_dir("backend-unit");
+    let dir = crate::test_support::short_dir("backend-unit");
     let socket = dir.0.join("svolder.sock");
     (dir, socket)
 }

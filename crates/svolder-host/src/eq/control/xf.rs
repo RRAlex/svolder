@@ -17,7 +17,8 @@
 //!   rate and the next look plays the stage worked out at the old rate, its delay in other whole
 //!   samples. It is re-folded whenever the model, the amount, the crossover or the delay move
 //!   it. One update lowers the preamp before the stage turns on or grows, and raises it after the
-//!   stage turns off or shrinks, so no update plays above unity, even between two values.
+//!   stage turns off or shrinks, so no whole update plays above unity (PipeWire applies a live line
+//!   port by port, so a half-applied line can still play above it: a documented known issue).
 //! - **Resets to off**, each with a note and a reason in the view: the owner starts and finds
 //!   it on ([`OffReason::Restart`]), the output the stage was turned on for is not the output any
 //!   more (the 1 s look reads it from the same `pw-dump` as the node), the chain restarted (a new
@@ -46,6 +47,17 @@ impl EqControl {
         self.sent.rate.or(self.known_rate).unwrap_or(CONFIG_RATE_HZ)
     }
 
+    /// The rate a stage turned on now runs at: the sink's own when no chain runs (the chain
+    /// started for it is built at that rate), else the rate the stage is worked out for.
+    pub(super) async fn stage_start_rate(&mut self) -> u32 {
+        if !self.runs
+            && let Some(rate) = self.params.sink_rate().await
+        {
+            return rate;
+        }
+        self.rate()
+    }
+
     /// Whether a chain from the stage's own point of view may be playing the stage: it is on,
     /// or a reset that has not reached the chain yet is owed.
     fn stage_may_play(&self) -> bool {
@@ -54,11 +66,21 @@ impl EqControl {
 
     /// What the stage takes off the preamp ([`config_stage_cost_db`]: the stage worked out at the
     /// rate last looked at, played at any usual rate, since the sink may have moved since and a
-    /// line may still carry it); 0 when the stage is off. The newest answer is kept: the view asks
-    /// for it on every tick.
+    /// line may still carry it), and never less than the stage the last line put on the node costs
+    /// at the rate it was worked out at; 0 when no stage plays. The newest answer for the
+    /// settings is kept: the view asks for it on every tick.
     pub(super) fn stage_gain(&self) -> f64 {
-        if !self.stage_may_play() || self.legacy {
+        if self.legacy {
             return 0.0;
+        }
+        // The stage the last line put on the node, worked out at the rate of that line: it plays
+        // until a line carries another, whatever the rate or the settings say since.
+        let sent = self
+            .stage_sent
+            .as_ref()
+            .map_or(0.0, |(settings, at)| config_stage_cost_db(settings, *at));
+        if !self.stage_may_play() {
+            return sent;
         }
         let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
         let mut cache = crate::locked(&self.gain_cache);
@@ -66,11 +88,18 @@ impl EqControl {
             && *at == rate
             && *settings == self.xf
         {
-            return *db;
+            return db.max(sent);
         }
         let db = config_stage_cost_db(&self.xf, rate);
         *cache = Some((self.xf.clone(), rate, db));
-        db
+        db.max(sent)
+    }
+
+    /// Whether a config may hold the stage on: the one on disk (`xf_conf`), or the one the
+    /// running chain was started from, which a change of the sink's rate puts back. Taking the
+    /// stage out of such a chain is an apply: a live send leaves it in the config.
+    pub(super) fn conf_holds_stage(&self) -> bool {
+        self.xf_conf || self.loaded_xf.is_some()
     }
 
     /// Whether the stage is sent to a running chain, as the EQ's points are.
@@ -98,9 +127,10 @@ impl EqControl {
         self.xf_conf = state.crossfeed_on;
         if state.crossfeed_on {
             self.reset_xf(OffReason::Restart, RESTART_NOTE.to_string(), true);
-        } else if self.flat {
+        } else if self.flat && !self.ld_keeps_chain() {
             // A pass-through kept for a stream when the owner went: the crossfeed was off
-            // already, so the chain is removed with no word about the crossfeed.
+            // already, so the chain is removed with no word about the crossfeed. One that runs
+            // for loudness is kept.
             self.owed = Some(Owed {
                 plays: false,
                 tried: None,
@@ -174,6 +204,7 @@ impl EqControl {
             // that says on is not turned off here. A chain that ran for crossfeed alone is gone.
             self.owed = None;
             self.xf_conf = false;
+            self.loaded_xf = None;
             self.sp.conf_on = false;
             self.sp.loaded = None;
             self.pin();
@@ -181,6 +212,7 @@ impl EqControl {
                 self.runs = false;
                 self.flat = false;
             }
+            self.ld_gone();
             let _ = self.save_state();
             return;
         }
@@ -215,7 +247,7 @@ impl EqControl {
     /// removed, a live one gets the bypass (the preamp rises after it), and one whose config may
     /// hold the stage, or that refuses the send, is applied again without it. Whether it is off.
     async fn physical_off(&mut self) -> bool {
-        if self.flat && !self.space_on() {
+        if self.flat && !self.keeps_chain() {
             return self.turn_off().await.is_ok();
         }
         let owed = self.owed.take();
@@ -223,7 +255,7 @@ impl EqControl {
             // Whether the chain holds the speakers' stage is read now: the send carries it.
             self.has_speakers_ports().await;
         }
-        if !self.xf_conf
+        if !self.conf_holds_stage()
             && !self.sp.conf_on
             && self.stage_by_live()
             && (self.xf_ports || self.sp.ports)
@@ -248,9 +280,10 @@ impl EqControl {
         }
     }
 
-    /// Stop gracefully: the crossfeed turns off (and a chain that ran for it alone is removed), so
-    /// that a stop leaves no stage in the path. The daemon's stop and a TUI with no daemon at its
-    /// quit call it.
+    /// Stop gracefully: the crossfeed and the virtual speakers turn off (and a chain that ran for
+    /// them alone is removed), so that a stop leaves no stage in the path; the loudness stage is
+    /// sent flat, its chain kept.
+    /// The daemon's stop and a TUI with no daemon at its quit call it.
     pub async fn shutdown(&mut self) {
         // A pass-through chain kept for a stream goes with the stop.
         if self.passthrough() && self.owed.is_none() {
@@ -273,10 +306,17 @@ impl EqControl {
                 true,
             );
         }
+        // The loudness stage goes flat at once; its settings stay, and so does a chain that runs
+        // for it (the next owner finds it and follows the volume).
+        self.ld_stop_now();
         if let Some(owed) = self.owed.as_mut() {
             owed.tried = None;
         }
         self.finish_reset().await;
+        // The reset's line carried it; when none went (nothing owed), the stop sends its own.
+        if !self.dirty.is_empty() && self.runs && self.live_now() {
+            let _ = self.send_dirty().await;
+        }
         self.publish();
     }
 
@@ -373,6 +413,11 @@ impl EqControl {
             )
         })?;
         let want = edit.on.unwrap_or(self.xf_on);
+        if want
+            && let Some(refused) = over_stage_rate("crossfeed runs", self.stage_start_rate().await)
+        {
+            return Err(refused);
+        }
         if want {
             Stage::of(&next, rate).map_err(|why| {
                 refusal(
@@ -549,9 +594,10 @@ impl EqControl {
     }
 
     async fn xf_stop_inner(&mut self) -> Result<(), EqFailure> {
-        if self.flat {
+        if self.flat && !self.ld_keeps_chain() {
             // With a stream playing through the chain it stays as a pass-through (the stage goes
-            // to the bypass live); else it is removed.
+            // to the bypass live); else it is removed. Loudness on keeps it: the stage goes off
+            // as from any chain that stays.
             let was_for = self.xf_for.take();
             self.xf_on = false;
             match self.keep_passthrough().await {
@@ -572,7 +618,7 @@ impl EqControl {
         // back up after it.
         self.xf_on = false;
         self.xf_for = None;
-        if !self.xf_conf && self.stage_by_live() && self.has_ports().await {
+        if !self.conf_holds_stage() && self.stage_by_live() && self.has_ports().await {
             self.stage_dirty = true;
             self.look_first = true;
             if self.send_dirty().await {

@@ -376,3 +376,59 @@ async fn the_guest_switch_is_refused_for_each_reason() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), BOTH_OFF);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The `activity` a `version` reply carries.
+async fn activity_of(daemon: &Daemon) -> svolder_ipc::Activity {
+    match daemon.handle(Request::Version).await {
+        Response::Version {
+            activity: Some(activity),
+            ..
+        } => activity,
+        other => panic!("no activity in {other:?}"),
+    }
+}
+
+/// One request on its own connection, answered.
+async fn touch(addr: std::net::SocketAddr) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let request = format!("GET /nothing HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 "), "{reply}");
+}
+
+/// `version` carries the MCP server's counts while it serves and none while it is off, and the
+/// day's count survives the server being stopped and started again by a switch.
+#[tokio::test]
+async fn version_carries_the_counts_of_a_serving_server_and_they_outlive_a_restart() {
+    let (dir, _path, daemon) = daemon_on("activity", BOTH_OFF);
+    let off = activity_of(&daemon).await;
+    assert_eq!((off.mcp, off.web), (None, None));
+
+    let (_, mcp) = stands(switch(&daemon, Server::Mcp, true).await);
+    let McpStatus::Listening { listen, .. } = mcp else {
+        panic!("not listening: {mcp:?}");
+    };
+    let fresh = activity_of(&daemon)
+        .await
+        .mcp
+        .expect("counts while it serves");
+    assert_eq!((fresh.hour, fresh.day), (0, 0));
+    touch(listen).await;
+    let seen = activity_of(&daemon)
+        .await
+        .mcp
+        .expect("counts while it serves");
+    assert_eq!((seen.hour, seen.day), (1, 1));
+
+    switch(&daemon, Server::Mcp, false).await;
+    assert_eq!(activity_of(&daemon).await.mcp, None);
+    switch(&daemon, Server::Mcp, true).await;
+    let after = activity_of(&daemon).await.mcp.expect("counts again");
+    assert_eq!((after.open, after.day), (0, 1));
+    assert_eq!(activity_of(&daemon).await.web, None);
+    daemon.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}

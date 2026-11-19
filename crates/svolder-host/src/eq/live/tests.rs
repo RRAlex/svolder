@@ -46,41 +46,53 @@ fn the_live_conf_has_sixteen_slots_per_channel_and_the_preamp_first() {
         lines[2],
         "                    { type = builtin name = l02 label = bq_raw config = { coefficients = [ { rate = 48000 b0 = 1 b1 = 0 b2 = 0 a0 = 1 a1 = 0 a2 = 0 } ] } }"
     );
-    // lpre, 16 slots, rpre, 16 slots, then the end of the list.
+    // lpre, 16 slots, the loudness stage, rpre, 16 slots, the loudness stage, then the end.
     assert!(lines[16].contains("name = l16 "));
-    assert!(lines[17].contains("name = rpre "));
-    assert!(lines[18].contains("name = r01 "));
-    assert!(lines[33].contains("name = r16 "));
-    // Then the crossfeed stage: six nodes a channel, after both channels' slots.
-    assert!(lines[34].contains("name = ldir "));
-    assert!(lines[39].contains("name = lmix "));
-    assert!(lines[40].contains("name = rdir "));
-    assert!(lines[45].contains("name = rmix "));
-    assert_eq!(lines[46], "                ]");
-    assert_eq!(lines[47], "                links = [");
+    assert!(lines[17].contains("name = lld1 "));
+    assert!(lines[18].contains("name = lld2 "));
+    assert!(lines[19].contains("name = rpre "));
+    assert!(lines[20].contains("name = r01 "));
+    assert!(lines[35].contains("name = r16 "));
+    assert!(lines[36].contains("name = rld1 "));
+    assert!(lines[37].contains("name = rld2 "));
+    // Then the crossfeed stage: six nodes a channel, after both channels' loudness stages.
+    assert!(lines[38].contains("name = ldir "));
+    assert!(lines[43].contains("name = lmix "));
+    assert!(lines[44].contains("name = rdir "));
+    assert!(lines[49].contains("name = rmix "));
+    assert_eq!(lines[50], "                ]");
+    assert_eq!(lines[51], "                links = [");
     assert_eq!(
-        lines[48],
+        lines[52],
         "                    { output = \"lpre:Out\" input = \"l01:In\" }"
     );
     assert_eq!(
-        lines[63],
+        lines[67],
         "                    { output = \"l15:Out\" input = \"l16:In\" }"
     );
     assert_eq!(
-        lines[64],
+        lines[68],
+        "                    { output = \"l16:Out\" input = \"lld1:In\" }"
+    );
+    assert_eq!(
+        lines[69],
+        "                    { output = \"lld1:Out\" input = \"lld2:In\" }"
+    );
+    assert_eq!(
+        lines[70],
         "                    { output = \"rpre:Out\" input = \"r01:In\" }"
     );
     // The stage's links follow the slots'; then the end of the list, the inputs and the outputs.
-    assert_eq!(lines[96], "                ]");
+    assert_eq!(lines[104], "                ]");
     assert_eq!(
-        lines[97],
+        lines[105],
         "                inputs  = [ \"lpre:In\" \"rpre:In\" ]"
     );
     assert_eq!(
-        lines[98],
+        lines[106],
         "                outputs = [ \"lmix:Out\" \"rmix:Out\" ]"
     );
-    assert_eq!(lines[99], "            }");
+    assert_eq!(lines[107], "            }");
     // Round the graph it is the frame every chain has.
     assert!(conf.contains("node.name = \"svolder_eq\""));
     assert!(conf.contains("filter.smart.target = { node.name = \"sink\" }"));
@@ -517,17 +529,17 @@ fn the_stage_links_tee_each_channel_to_both_outputs() {
     let conf = render_live_conf(&one_point(), 0.0, "sink", Route::Smart, 48_000);
     let link = |from: &str, to: &str| format!("{{ output = \"{from}\" input = \"{to}\" }}");
     for (from, to) in [
-        ("l16:Out", "ldir:In"),
-        ("l16:Out", "ls:In"),
-        ("r16:Out", "lx:In"),
+        ("lld2:Out", "ldir:In"),
+        ("lld2:Out", "ls:In"),
+        ("rld2:Out", "lx:In"),
         ("lx:Out", "lsum:In 1"),
         ("ls:Out", "lsum:In 2"),
         ("lsum:Out", "ldel:In"),
         ("ldir:Out", "lmix:In 1"),
         ("ldel:Out", "lmix:In 2"),
-        ("r16:Out", "rdir:In"),
-        ("r16:Out", "rs:In"),
-        ("l16:Out", "rx:In"),
+        ("rld2:Out", "rdir:In"),
+        ("rld2:Out", "rs:In"),
+        ("lld2:Out", "rx:In"),
         ("rx:Out", "rsum:In 1"),
         ("rs:Out", "rsum:In 2"),
         ("rsum:Out", "rdel:In"),
@@ -538,6 +550,96 @@ fn the_stage_links_tee_each_channel_to_both_outputs() {
     }
     // The graph's outputs are the mixers, not the last slots.
     assert!(!conf.contains("outputs = [ \"l16:Out\""));
+    // Slot 16 feeds the loudness stage alone.
+    assert_eq!(conf.matches("output = \"l16:Out\"").count(), 1);
+    assert_eq!(conf.matches("output = \"r16:Out\"").count(), 1);
+}
+
+const LOUDNESS_LEFT: &str = r#"                    { type = builtin name = lld1 label = bq_raw config = { coefficients = [ { rate = 48000 b0 = 1 b1 = 0 b2 = 0 a0 = 1 a1 = 0 a2 = 0 } ] } }
+                    { type = builtin name = lld2 label = bq_raw config = { coefficients = [ { rate = 48000 b0 = 1 b1 = 0 b2 = 0 a0 = 1 a1 = 0 a2 = 0 } ] } }"#;
+
+/// The loudness stage is the same identity text in every config, whatever the route, the
+/// crossfeed stage written or the speakers' set; the speakers' links are the ones they were.
+#[test]
+fn the_conf_always_holds_the_loudness_stage_at_the_identity() {
+    let stage = Stage::of(&crate::eq::crossfeed::CrossfeedSettings::default(), 48_000).unwrap();
+    let speakers = SpeakersGraph::new(Path::new("/state/svolder/speakers/s.wav"), true).unwrap();
+    let confs = [
+        render_live_conf(&one_point(), 0.0, "sink", Route::Smart, 48_000),
+        render_live_conf(&one_point(), 0.0, "sink", Route::Default, 48_000),
+        render_live_conf_with(&one_point(), 0.0, "sink", Route::Smart, 48_000, &stage),
+        speakers_conf(false),
+        render_live_conf_full(
+            &one_point(),
+            0.0,
+            "sink",
+            Route::Default,
+            48_000,
+            &stage,
+            Some(&speakers),
+        ),
+    ];
+    for conf in &confs {
+        assert_eq!(
+            between(conf, "name = lld1 ", "name = rpre ").join("\n"),
+            LOUDNESS_LEFT
+        );
+        let right = between(conf, "name = rld1 ", "name = ldir ").join("\n");
+        assert_eq!(right, LOUDNESS_LEFT.replace("name = l", "name = r"));
+        let link = |from: &str, to: &str| format!("{{ output = \"{from}\" input = \"{to}\" }}");
+        for (from, to) in [
+            ("l16:Out", "lld1:In"),
+            ("lld1:Out", "lld2:In"),
+            ("r16:Out", "rld1:In"),
+            ("rld1:Out", "rld2:In"),
+        ] {
+            assert_eq!(conf.matches(&link(from, to)).count(), 1, "{from} -> {to}");
+        }
+    }
+    // Only the config's rate moves the text of the stage.
+    let at_96 = render_live_conf(&one_point(), 0.0, "sink", Route::Smart, 96_000);
+    assert!(
+        at_96.contains(
+            "name = lld1 label = bq_raw config = { coefficients = [ { rate = 96000 b0 = 1 "
+        )
+    );
+}
+
+#[test]
+fn loudness_params_name_both_sections_on_both_channels_with_a0_one() {
+    let stage = [[0.5, -0.25, 0.0, -0.75, 0.0], [2.0, -1.5, 0.0, 0.125, 0.0]];
+    let params = loudness_params(&stage);
+    assert_eq!(params.len(), 24);
+    let names: Vec<&str> = params.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names[0], "lld1:b0");
+    assert_eq!(names[5], "lld1:a2");
+    assert_eq!(names[6], "lld2:b0");
+    assert_eq!(names[12], "rld1:b0");
+    assert_eq!(names[23], "rld2:a2");
+    let get = |name: &str| params.iter().find(|(n, _)| n == name).unwrap().1;
+    for channel in ["l", "r"] {
+        assert_eq!(get(&format!("{channel}ld1:a0")), 1.0);
+        assert_eq!(get(&format!("{channel}ld2:a0")), 1.0);
+        assert_eq!(get(&format!("{channel}ld1:b0")), 0.5);
+        assert_eq!(get(&format!("{channel}ld1:a1")), -0.75);
+        assert_eq!(get(&format!("{channel}ld2:b1")), -1.5);
+        assert_eq!(get(&format!("{channel}ld2:a1")), 0.125);
+    }
+    // Every port it names is one the conf writes (a0 included), and the identity is the conf's.
+    let conf = render_live_conf(&one_point(), 0.0, "sink", Route::Smart, 48_000);
+    let identity = loudness_params(&[[1.0, 0.0, 0.0, 0.0, 0.0]; 2]);
+    for (name, value) in identity {
+        let (node, port) = name.split_once(':').unwrap();
+        let line = conf
+            .lines()
+            .find(|l| l.contains(&format!("name = {node} ")))
+            .unwrap();
+        assert!(
+            line.contains(&format!("{port} = {} ", num(value)))
+                || line.contains(&format!("{port} = {} }}", num(value))),
+            "{name}: {line}"
+        );
+    }
 }
 
 #[test]
@@ -652,6 +754,23 @@ fn a_current_chain_lists_the_crossfeed_controls() {
     let mut partial = node.clone();
     partial.params.remove("rmix:Gain 2");
     assert!(!partial.has_crossfeed_controls());
+}
+
+#[test]
+fn a_chain_from_0_36_has_no_loudness_controls_and_the_new_one_has() {
+    let old = props_of(&fixture("live-chain-crossfeed.json")).unwrap();
+    assert!(old.has_crossfeed_controls());
+    assert!(!old.has_loudness_controls());
+    let node = props_of(&fixture("live-chain-loudness.json")).unwrap();
+    assert!(node.has_preamp_control());
+    assert!(node.has_crossfeed_controls());
+    assert!(node.has_loudness_controls());
+    assert_eq!(node.params["lld1:b0"], 1.0);
+    assert_eq!(node.params["rld2:a0"], 1.0);
+    // One port missing is not a current chain.
+    let mut partial = node.clone();
+    partial.params.remove("rld2:a2");
+    assert!(!partial.has_loudness_controls());
 }
 
 #[test]

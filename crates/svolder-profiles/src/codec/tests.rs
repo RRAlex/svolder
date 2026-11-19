@@ -648,7 +648,7 @@ fn a_short_key_gets_no_near_miss_suggestion() {
 }
 
 /// The words a device with no tone control is refused in, which the CLI, the daemon and the
-/// MQTT bridge all show as the error's own text.
+/// MQTT client all show as the error's own text.
 #[test]
 fn no_tone_control_is_said_in_the_words_every_front_end_shows() {
     assert_eq!(

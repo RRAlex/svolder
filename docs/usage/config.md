@@ -165,10 +165,10 @@ schema = 1
 # Whether a command that finds no daemon listening starts one of its own.
 # autospawn = true
 
-# svolderd's bridge to an MQTT broker for Home Assistant, off until enabled with a host.
+# svolderd's MQTT client, for Home Assistant, off until enabled with a host.
 [mqtt]
 
-# Whether the bridge runs at all.
+# Whether the MQTT client runs at all.
 # enabled = false
 
 # The broker's host.
@@ -192,7 +192,7 @@ schema = 1
 # The discovery prefix Home Assistant watches; empty turns discovery off.
 # discovery_prefix = "homeassistant"
 
-# Whether the bridge takes commands back, through the same validation `svolder set` uses.
+# Whether the MQTT client takes commands back, through the same validation `svolder set` uses.
 # commands = false
 
 # An optional cap, in dB, on a volume command's value; no cap while absent.
@@ -349,6 +349,9 @@ schema = 1
 
 # Whether a pointer resting on a target shows a one-line tip.
 # tooltips = true
+
+# Whether the Now playing and Path rows scroll slowly when too long for their row.
+# scroll_long_lines = true
 
 # Whether the wordmark intro plays while the device opens.
 # intro = true

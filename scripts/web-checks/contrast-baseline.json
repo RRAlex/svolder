@@ -17,6 +17,42 @@
   "ratio": 2.864,
   "need": 3.0
  },
+ "ember.dark|config|button#fx-button|edge": {
+  "ratio": 1.247,
+  "need": 3.0
+ },
+ "ember.dark|config|button#popup-setup-close|edge": {
+  "ratio": 1.31,
+  "need": 3.0
+ },
+ "ember.dark|config|button.big.step|edge": {
+  "ratio": 1.657,
+  "need": 3.0
+ },
+ "ember.dark|config|button.btn.mute|edge": {
+  "ratio": 1.657,
+  "need": 3.0
+ },
+ "ember.dark|config|button.btn|edge": {
+  "ratio": 1.657,
+  "need": 3.0
+ },
+ "ember.dark|config|button.go.np-btn|edge": {
+  "ratio": 1.698,
+  "need": 3.0
+ },
+ "ember.dark|config|button.next.np-btn|edge": {
+  "ratio": 1.698,
+  "need": 3.0
+ },
+ "ember.dark|config|button.np-btn.prev|edge": {
+  "ratio": 1.698,
+  "need": 3.0
+ },
+ "ember.dark|config|button.viz-graph|edge": {
+  "ratio": 1.738,
+  "need": 3.0
+ },
  "ember.dark|devices|button#popup-devices-close|edge": {
   "ratio": 1.31,
   "need": 3.0
@@ -142,7 +178,7 @@
   "need": 3.0
  },
  "ember.dark|guest|button.viz-graph|edge": {
-  "ratio": 1.744,
+  "ratio": 1.738,
   "need": 3.0
  },
  "ember.dark|help|button#popup-help-close|edge": {
@@ -197,6 +233,10 @@
   "ratio": 1.738,
   "need": 3.0
  },
+ "ember.dark|setup|button#popup-setup-close|edge": {
+  "ratio": 1.31,
+  "need": 3.0
+ },
  "ember.dark|sound|button#popup-sound-close|edge": {
   "ratio": 1.31,
   "need": 3.0
@@ -219,6 +259,10 @@
  },
  "nightdrive.dark|blank|button.fi-btn.fpw-choice|edge": {
   "ratio": 2.792,
+  "need": 3.0
+ },
+ "nightdrive.dark|config|text|text-large": {
+  "ratio": 1.003,
   "need": 3.0
  },
  "nightdrive.dark|devices|button#popup-devices-identify|edge": {
@@ -317,6 +361,30 @@
   "ratio": 2.792,
   "need": 3.0
  },
+ "paper.dark|config|button#p-pt-1|edge": {
+  "ratio": 1.089,
+  "need": 3.0
+ },
+ "paper.dark|config|button#p-pt-2|edge": {
+  "ratio": 1.089,
+  "need": 3.0
+ },
+ "paper.dark|config|button#p-pt-3|edge": {
+  "ratio": 1.089,
+  "need": 3.0
+ },
+ "paper.dark|config|button#p-pt-4|edge": {
+  "ratio": 1.016,
+  "need": 3.0
+ },
+ "paper.dark|config|button#p-pt-5|edge": {
+  "ratio": 2.896,
+  "need": 3.0
+ },
+ "paper.dark|config|span.pn.red|text": {
+  "ratio": 4.2,
+  "need": 4.5
+ },
  "paper.dark|eq-library|.fp-graph gap|graph": {
   "ratio": 1.901,
   "need": 3.0
@@ -355,6 +423,22 @@
  },
  "paper.light|blank|button.fi-btn.fpw-choice|edge": {
   "ratio": 2.409,
+  "need": 3.0
+ },
+ "paper.light|config|button#p-pt-1|edge": {
+  "ratio": 1.117,
+  "need": 3.0
+ },
+ "paper.light|config|button#p-pt-2|edge": {
+  "ratio": 1.117,
+  "need": 3.0
+ },
+ "paper.light|config|button#p-pt-3|edge": {
+  "ratio": 1.117,
+  "need": 3.0
+ },
+ "paper.light|config|button#p-pt-4|edge": {
+  "ratio": 1.333,
   "need": 3.0
  },
  "paper.light|devices|button#popup-devices-identify|edge": {
@@ -479,6 +563,22 @@
  },
  "signal.dark|blank|button.fi-btn.fpw-choice|edge": {
   "ratio": 2.864,
+  "need": 3.0
+ },
+ "signal.dark|config|button#fx-button|edge": {
+  "ratio": 1.546,
+  "need": 3.0
+ },
+ "signal.dark|config|button#sg-tr-0|edge": {
+  "ratio": 1.763,
+  "need": 3.0
+ },
+ "signal.dark|config|button#sg-tr-1|edge": {
+  "ratio": 1.763,
+  "need": 3.0
+ },
+ "signal.dark|config|button#sg-tr-2|edge": {
+  "ratio": 1.765,
   "need": 3.0
  },
  "signal.dark|devices|button#popup-devices-close|edge": {

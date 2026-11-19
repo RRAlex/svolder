@@ -390,6 +390,8 @@ fn status_words_name_a_pass_through_and_a_chain_for_crossfeed_alone() {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     };
     let words = |crossfeed_on| {
         Status {
@@ -402,4 +404,97 @@ fn status_words_name_a_pass_through_and_a_chain_for_crossfeed_alone() {
     };
     assert!(words(true).contains("running for crossfeed alone"));
     assert!(words(false).contains("kept as a pass-through until idle (running)"));
+}
+
+/// The stage-cost and played-peak memos answer what a fresh computation does, whatever order the
+/// settings, curves and rates come in: a key that forgets an input (the crossover, say, which an
+/// undelayed Meier stage's cost moves with) serves one stage's cost for another.
+#[test]
+fn the_memos_answer_what_a_fresh_computation_does() {
+    use crate::eq::crossfeed::Model;
+    let mut settings = Vec::new();
+    for model in Model::ALL {
+        for (amount, crossover, delay) in [
+            (0.5, 2000.0, None),
+            (0.5, 300.0, None),
+            (0.2, 700.0, None),
+            (0.5, 700.0, Some(0.5)),
+        ] {
+            let mut s = CrossfeedSettings::for_model(model);
+            s.amount = amount;
+            s.crossover_hz = crossover;
+            s.delay_ms = delay;
+            settings.push(s);
+        }
+    }
+    let rates = [44_100u32, 96_000, 384_000];
+    let fresh: Vec<Vec<u64>> = settings
+        .iter()
+        .map(|s| {
+            rates
+                .iter()
+                .map(|rate| fresh_stage_cost_db(s, *rate).to_bits())
+                .collect()
+        })
+        .collect();
+    for round in 0..2 {
+        for (i, s) in settings.iter().enumerate() {
+            for k in 0..rates.len() {
+                let at = (k + i + round) % rates.len();
+                let rate = rates[at];
+                assert_eq!(
+                    config_stage_cost_db(s, rate).to_bits(),
+                    fresh[i][at],
+                    "{s:?} at {rate}"
+                );
+            }
+        }
+    }
+    let curves: Vec<Vec<[f64; 5]>> = [3.0, 6.0, 9.0]
+        .iter()
+        .map(|g| {
+            let c = Correction {
+                preamp_db: 0.0,
+                filters: vec![
+                    SourceFilter {
+                        kind: FilterKind::Peaking,
+                        f: 1_000.0,
+                        g: *g,
+                        q: 4.0,
+                    },
+                    SourceFilter {
+                        kind: FilterKind::HighShelf,
+                        f: 12_000.0,
+                        g: -6.0,
+                        q: 0.7,
+                    },
+                ],
+            };
+            live::played_sets(&c, 44_100).0
+        })
+        .collect();
+    let centres = [1_000.0, 12_000.0];
+    // The same sets peak differently at different rates, so a key without the rate would serve one
+    // rate's peak at another.
+    for sets in &curves {
+        let mut peaks: Vec<u64> = rates
+            .iter()
+            .map(|rate| response::played_peak_db_of(sets, &centres, *rate).to_bits())
+            .collect();
+        peaks.dedup();
+        assert!(peaks.len() > 1, "the curve peaks the same at every rate");
+    }
+    for round in 0..3 {
+        for (i, sets) in curves.iter().enumerate() {
+            for k in 0..rates.len() {
+                let rate = rates[(k + i + round) % rates.len()];
+                let direct = response::played_peak_db_of(sets, &centres, rate);
+                assert_eq!(
+                    played_peak(sets, &centres, rate).to_bits(),
+                    direct.to_bits(),
+                    "curve {i} at {rate}"
+                );
+            }
+        }
+    }
 }

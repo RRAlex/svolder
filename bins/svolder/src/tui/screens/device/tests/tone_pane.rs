@@ -249,3 +249,180 @@ fn a_short_tone_pane_gives_up_the_crossfeed_summary_first_and_the_row_stays() {
         "the table keeps a row: {plain:#?}"
     );
 }
+
+/// The computer's `Mode ‹ Off | EQ ›` in the Tone pane is drawn as the Controls pane's
+/// `Target ‹ NAME | Computer ›` is: the side in force, the other side, the label and the arrows
+/// take the same styles, with the keys on the row and off it, whichever side is chosen, in 16
+/// colours and in monochrome.
+#[test]
+fn the_mode_choice_is_styled_as_the_target_choice_in_the_tone_pane() {
+    use crate::tui::test_support::{style_at, style_of};
+    for mono in [false, true] {
+        let theme = Theme::new(mono);
+        for eq_on in [false, true] {
+            let mut app = mockup_app();
+            app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+                eq_on,
+                &[("PK", 1000.0, 0.0, 1.0)],
+            ));
+            app.flip_side();
+            assert!(app.on_computer());
+            let volume = app.volume().expect("a volume").id;
+            app.set_selected(
+                app.rows()
+                    .iter()
+                    .position(|row| row.control.id == volume)
+                    .expect("the volume row"),
+            );
+            let name = app.session.product.clone();
+            let both = |app: &App| {
+                let buffer = frame_with_theme(app, 140, 40, &theme);
+                let (on, off) = match eq_on {
+                    true => ("EQ", "Off"),
+                    false => ("Off", "EQ"),
+                };
+                let target = [
+                    style_of(&buffer, "Target ‹ ", "Computer"),
+                    style_of(&buffer, "Target ‹ ", &name),
+                    style_of(&buffer, "Target ‹ ", "Target"),
+                    style_of(&buffer, "Target ‹ ", "‹"),
+                    style_of(&buffer, "Target ‹ ", "›"),
+                    style_at(&buffer, "Target ‹ ", "Target", 6),
+                ];
+                let mode = [
+                    style_of(&buffer, "Mode", on),
+                    style_of(&buffer, "Mode", off),
+                    style_of(&buffer, "Mode", "Mode"),
+                    style_of(&buffer, "Mode", "‹"),
+                    style_of(&buffer, "Mode", "›"),
+                    style_at(&buffer, "Mode", "Mode", 4),
+                ];
+                (target, mode)
+            };
+            app.tone.row = ToneRow::Point(0);
+            let (target_rest, mode_rest) = both(&app);
+            assert_eq!(mode_rest, target_rest, "mono={mono} on={eq_on} at rest");
+            app.key(crossterm::event::KeyEvent::from(KeyCode::Up));
+            assert!(app.switch_focused());
+            let (target_keys, _) = both(&app);
+            app.set_selected(app.selected());
+            app.pane = Pane::Tone;
+            app.tone.row = ToneRow::Mode;
+            assert!(!app.switch_focused());
+            let (_, mode_keys) = both(&app);
+            assert_eq!(mode_keys, target_keys, "mono={mono} on={eq_on} keys on");
+            assert_ne!(mode_keys[0], mode_keys[1], "the two sides differ");
+            assert_ne!(mode_keys, mode_rest, "the keys show");
+        }
+    }
+}
+
+/// The Tone pane's Space row and Crossfeed row are drawn as the `Target` choice is: the word in
+/// force in its chosen style, and with the keys on the row the box on the label and that word
+/// only, the rest of the row plain, in 16 colours and in monochrome.
+#[test]
+fn the_pane_s_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
+    use crate::tui::app::Xf;
+    use crate::tui::test_support::{computer_eq_with_speakers, style_at, style_of};
+    for mono in [false, true] {
+        let theme = Theme::new(mono);
+        let mut app = mockup_app();
+        app.host.computer.eq = Some(computer_eq_with_speakers(false, None, &[]));
+        app.flip_side();
+        let volume = app.volume().expect("a volume").id;
+        app.set_selected(
+            app.rows()
+                .iter()
+                .position(|row| row.control.id == volume)
+                .expect("the volume row"),
+        );
+        let name = app.session.product.clone();
+        let shot = |app: &App| frame_with_theme(app, 140, 40, &theme);
+        let target = |app: &App| {
+            let buffer = shot(app);
+            [
+                style_of(&buffer, "Target ‹ ", "Computer"),
+                style_of(&buffer, "Target ‹ ", &name),
+                style_of(&buffer, "Target ‹ ", "Target"),
+                style_at(&buffer, "Target ‹ ", "Target", 6),
+            ]
+        };
+        app.tone.row = ToneRow::Point(0);
+        let rest = target(&app);
+        let space = |buffer: &Buffer| {
+            [
+                style_of(buffer, "Space", "Off"),
+                style_of(buffer, "Space", "‹"),
+                style_of(buffer, "Space", "Space"),
+                style_at(buffer, "Space", "Space", 5),
+            ]
+        };
+        let buffer = shot(&app);
+        assert_eq!(space(&buffer)[0], rest[0], "mono={mono} Space at rest");
+        app.key(crossterm::event::KeyEvent::from(KeyCode::Up));
+        let keys = target(&app);
+        app.set_selected(app.selected());
+        app.focus_crossfeed(Xf::Space);
+        assert!(!app.switch_focused());
+        let buffer = shot(&app);
+        let drawn = space(&buffer);
+        assert_eq!(drawn[0], keys[0], "mono={mono} Space keys on");
+        assert_eq!(drawn[2], keys[2], "mono={mono} Space label");
+        assert_eq!(drawn[3], keys[3], "mono={mono} Space pad");
+
+        // the Crossfeed row, on
+        app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
+            true, "bauer", None,
+        ));
+        app.tone.row = ToneRow::Point(0);
+        let rest = shot(&app);
+        assert_eq!(
+            style_of(&rest, "Crossfeed ‹", "on"),
+            target(&app)[0],
+            "mono={mono} on at rest"
+        );
+        app.focus_crossfeed(Xf::Preset);
+        let buffer = shot(&app);
+        let row = "Crossfeed ‹";
+        assert_eq!(style_of(&buffer, row, "on"), keys[0], "mono={mono} on keys");
+        assert_eq!(
+            style_of(&buffer, row, "Crossfeed"),
+            keys[2],
+            "mono={mono} label"
+        );
+        assert_eq!(
+            style_at(&buffer, row, "Crossfeed", 9),
+            keys[3],
+            "mono={mono} pad"
+        );
+        assert!(
+            !style_of(&buffer, row, "Bauer")
+                .2
+                .contains(Modifier::REVERSED),
+            "the model words are not boxed"
+        );
+    }
+}
+
+/// With the chain's running not verified, the Mode row's `›` is still the step-on hit.
+#[test]
+fn the_pane_s_mode_arrows_keep_their_hits_when_the_chain_is_not_verified() {
+    let mut app = mockup_app();
+    let mut eq = crate::tui::test_support::computer_eq(false, &[("PK", 1000.0, 0.0, 1.0)]);
+    eq.running_unknown = true;
+    app.host.computer.eq = Some(eq);
+    app.flip_side();
+    let (buffer, hits) = crate::tui::test_support::drawn(&app, 140, 40);
+    let row = text(&buffer)
+        .iter()
+        .position(|row| row.contains("Mode"))
+        .and_then(|y| u16::try_from(y).ok())
+        .expect("the Mode row");
+    let at = |symbol: &str| {
+        (CONTROLS_WIDTH..buffer.area.width)
+            .find(|&x| buffer.cell((x, row)).is_some_and(|c| c.symbol() == symbol))
+            .expect("the arrow")
+    };
+    assert_eq!(hits.hit_at(at("‹"), row), Some(&Hit::ModePrev));
+    assert_eq!(hits.hit_at(at("›"), row), Some(&Hit::ModeNext));
+}

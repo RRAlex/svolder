@@ -83,12 +83,12 @@ fn every_preset_draws_the_conventions_at_every_depth() {
             let marker = buffer.cell((x, y)).expect("the marker cell");
             assert_eq!(marker.symbol(), "▶", "{drawn}");
             assert_eq!(marker.fg, theme.accent(), "{drawn}");
-            for cell in [marker, buffer.cell((x + 2, y)).expect("the row's label")] {
-                assert!(
-                    cell.modifier.contains(Modifier::REVERSED | Modifier::BOLD),
-                    "{drawn}: the selected row is not inverse video and bold"
-                );
-            }
+            // the row is a choice: its label takes the selected style, the marker keeps the accent
+            let label = buffer.cell((x + 2, y)).expect("the row's label");
+            assert!(
+                label.modifier.contains(Modifier::REVERSED | Modifier::BOLD),
+                "{drawn}: the selected row is not inverse video and bold"
+            );
 
             // The empty segments of the volume bar, dotted and faint.
             let y = text(&buffer)

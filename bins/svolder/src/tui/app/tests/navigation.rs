@@ -377,3 +377,45 @@ fn the_device_editor_opens_on_u_and_c_no_longer_does() {
     assert!(app.devices.editor.is_none(), "c still opens the editor");
     assert_eq!(app.screen, Screen::Device);
 }
+
+/// In the device editor `b` identifies the device being edited from every row that takes no
+/// letters, and types a `b` in the Name row; a device that offers no identify gets nothing.
+#[test]
+fn b_in_the_device_editor_identifies_that_device_unless_the_name_row_takes_it() {
+    let mut app = listing();
+    ch(&mut app, 'u');
+    ch(&mut app, 'b');
+    assert!(
+        app.devices
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.device.name == "gungnirb")
+    );
+    for _ in 0..3 {
+        press(&mut app, KeyCode::Down);
+        assert_eq!(
+            ch(&mut app, 'b'),
+            vec![Intent::Identify(Some("gungnir".into()))]
+        );
+        assert!(
+            app.devices.editor.is_some(),
+            "identify leaves the editor open"
+        );
+    }
+    // The device being edited, not the one on show.
+    app.devices.editor = None;
+    app.set_selected(1);
+    ch(&mut app, 'u');
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        ch(&mut app, 'b'),
+        vec![Intent::Identify(Some("bifrost".into()))]
+    );
+    // A Mesh Card offers none: the key still sends, as on the list, and the refusal is the
+    // daemon's toast.
+    app.devices.rows[1].profile = Some("meshcard".into());
+    assert_eq!(
+        ch(&mut app, 'b'),
+        vec![Intent::Identify(Some("bifrost".into()))]
+    );
+}

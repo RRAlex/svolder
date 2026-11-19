@@ -22,6 +22,7 @@ import { ember, mine } from './bind.js';
 import {
   daemonNow, elapsedUs, fraction, timeWords,
 } from '../../core/clock.js';
+import { SETUP } from '../../core/popups/listed.js';
 
 /** A number a `data-` attribute holds, or null when it holds none. */
 const number = (text) => (text === undefined || text === '' ? null : Number(text));
@@ -266,6 +267,10 @@ export function installPlaying() {
     const button = event.target.closest?.('#part-playing [data-press]');
     if (button) {
       ember.core.actions.press(button.dataset.press);
+      return;
+    }
+    if (event.target.closest?.('#part-playing [data-config]')) {
+      ember.core.router.open(SETUP);
       return;
     }
     const root = part();

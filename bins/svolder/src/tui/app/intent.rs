@@ -177,13 +177,13 @@ pub enum ConnChange {
     McpListen(std::net::SocketAddr),
     /// Whether the MCP server offers the tools that change a device.
     McpWrites(bool),
-    /// Whether the MQTT bridge runs.
+    /// Whether the MQTT client runs.
     MqttEnabled(bool),
     /// The broker's host.
     MqttHost(String),
     /// The broker's port.
     MqttPort(u16),
-    /// Whether the bridge takes commands.
+    /// Whether the MQTT client takes commands.
     MqttCommands(bool),
     /// The broker's username, or `None` to take it away.
     MqttUsername(Option<String>),

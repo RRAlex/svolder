@@ -340,12 +340,123 @@ that branch rather than listed here.
   chain plays flat at the lowest level its loaded configuration allows (the rule for a change of the
   sink's rate), so a chain loaded with a -6 dB curve keeps -6 dB until it restarts
   (`crates/svolder-host/src/eq/control.rs`, `preamp`).
-- [bug] **Crossfeed settings changed before any chain was applied are lost at a restart.** With no
-  state file the settings live in memory only and are written when a chain is applied
-  (`crates/svolder-host/src/eq/control/xf.rs`).
 - [trade-off] **A crossfeed reset whose chain part fails is retried every second without a limit.** The
   view's note says so; the retries stop when the host accepts the change
   (`crates/svolder-host/src/eq/control/xf.rs`, `finish_reset`).
+- [limit] **Computer EQ live updates are not retried once given up.** After 30 failed sends the
+  controller gives up live updates ("pw-cli would not take the changes") and never tries again,
+  although `pw-cli` works again about a second after a refusal window; only an apply (an edit, a
+  preset or a toggle) clears it. A chain left that way can play a curve at a different rate than
+  the one it was built for (filters shifted in frequency, under unity) while the view says
+  `pw-cli` refused (`crates/svolder-host/src/eq/control.rs`).
+- [limit] **A third graph rebuild can still hide a computer EQ edit.** An edit is sent again once,
+  a look later, when no look saw it land; a third rebuild of the audio graph between that resend
+  and the next look leaves the chain at the configuration's value until the next edit while the view
+  says live. It takes three aligned rebuilds, rarer than the two the resend covers; under unity
+  (`crates/svolder-host/src/eq/control.rs`, `docs/design/host-control-preamp.md`).
+- [limit] **A restart with no daemon running plays the older computer EQ config.** Once the rate
+  plays the points again after a rate that did not, nothing rewrites the configuration; a chain that
+  restarts while no daemon runs plays the older one (consistent, under unity) until the daemon's
+  first look (`crates/svolder-host/src/eq/manage.rs`).
+- [limit] **Loudness follows the computer's sink volume only.** An application's own volume slider
+  (a per-stream volume) never reaches the sink, so loudness cannot see it and does not follow it
+  (`crates/svolder-host/src/eq/control/ld.rs`).
+- [limit] **Loudness follows a volume change made outside svolder within a second.** A change made
+  through svolder is followed on the next 50 ms tick; one made elsewhere (a desktop volume key) is
+  read at the chain's one-second look, so the tone lags it by up to a second. It is cut-only, so
+  never louder; it is heard as a short late tilt (`crates/svolder-host/src/eq/control/ld.rs`).
+- [observed] **Each loudness step resets the changed EQ filters inside PipeWire.** PipeWire 1.6.2
+  clears a filter's state when its coefficients change, so every line of a loudness glide leaves a
+  ~3 ms low tick, about 11 dB or more under the music; a glide makes about 20 a second. Not heard
+  on music in a listening test (`crates/svolder-host/src/eq/control/ld.rs`).
+- [limit] **The loudness curve is within 2.7 dB of ISO 226:2003 at its deepest.** Two shelves with
+  four constants fit the contours to 0.7 dB at 5 dB of depth and 2.7 dB at 40; no four constants do
+  better at 40 dB under the 6 dB treble cap (`crates/svolder-host/src/eq/loudness.rs`,
+  `scripts/loudness-fit.py`).
+- [trade-off] **A new owner over a chain that holds a loudness stage plays one tick quieter.** A
+  daemon or TUI that starts over a node left holding a stage begins from a depth of 0, so its first
+  line steps the stage to 0.5 dB and its low section is cut for the stage the node held: up to about
+  6 dB quieter across the band at strength 100 % for one tick, then the look settles it. Never
+  louder (`crates/svolder-host/src/eq/control/ld.rs`).
+- [trade-off] **A loudness glide can dip a little under its target.** A line toward a shallower
+  depth cuts its low section for the high shelves the node may still hold: about 0.15 dB across the
+  band at the end of a glide up, and up to about 1.5 dB while a look finds `pw-cli` lagging, until a
+  look confirms the node and puts the exact stage on. Quieter, never louder
+  (`crates/svolder-host/src/eq/control/ld.rs`, `ld_line`).
+- [limit] **The first second after the first volume write may follow the default sink alone.** A
+  write's reading is the default sink's; the other node's share in the path is learned at the next
+  look (1.0 until then), so with that node under 100 % loudness follows the default sink's volume
+  alone for up to a second. Cut-only, corrected by the next look
+  (`crates/svolder-host/src/eq/control/ld.rs`, `ld_take_hint`).
+- [limit] **The path verdict and the PipeWire config check stop at the player's stream and the
+  sink's converter.** They judge what enters the system's audio pipeline from the player and every
+  hop after it, at most 24 bits: svolder cannot see inside a player (its own normalization,
+  ReplayGain, volume, EQ or float maths), whether the music is a file or a stream, an S32 stream's
+  bits below the top 24, a float stream's bits beyond the sink, or anything past the sink's
+  converter (ALSA `hw`, the USB driver, the DAC). The words say so
+  (`crates/svolder-ipc/src/host/path.rs`, `setup.rs`).
+- [limit] **A pro-audio sink's AUX channels against a stereo stream read `channels remapped`.** An
+  `AUX0 AUX1` sink fed an `FL FR` stream is called changed, though PipeWire may copy the channels
+  one to one; it is to be settled with a capture (`crates/svolder-ipc/src/host/path.rs`,
+  `channel_words`).
+- [limit] **A stream rate missing from `clock.allowed-rates`, into a sink fixed at the stream's
+  rate, may hide a resample.** The path line does not name it; the config check's `rates` line fails
+  it (`crates/svolder-ipc/src/host/path.rs`, `computer_hop`).
+- [limit] **A continuous rate range in a card's `stream0` file lists no rate.** The kernel's offer
+  then reads as unknown rather than a list, and the sink's own offer is used
+  (`crates/svolder-host/src/route/asound.rs`, `kernel_offer`).
+- [limit] **A float stream into a sink of 24 bits or more is not judged for width.** A float's bits
+  beyond the sink, and an S32 stream's low 8 bits into S24, are outside the check (the first entry)
+  (`crates/svolder-ipc/src/host/path.rs`, `width_words`).
+- [limit] **Home Assistant, MCP and `svolder host check` do not tell DACs of one family name
+  apart.** The judged DAC is the first DAC-family device whose name matches the sink, so a config
+  with two Schiit DACs of one family name is not told apart
+  (`bins/svolderd/src/mqtt_bridge/computer.rs`, `bins/svolderd/src/mcp/tools/host.rs` `path_of`,
+  `bins/svolder/src/commands/host_check.rs` `lines`).
+- [limit] **On the CLI and MCP a Bluetooth or virtual sink passes `no plug` as "not an ALSA sink",
+  and the path can read `untouched` up to that sink.** `svolder host check` and MCP `get_host`
+  judge the computer's side for any sink (`dac` null). After a Bluetooth sink a lossy codec
+  changes the sound; after a virtual sink (an EQ app, a loopback) processing does. Both are past
+  the sink, where the check cannot see, so the verdict is true only up to that sink. The TUI, the
+  web page and Home Assistant read `not_this_dac` for such a sink
+  (`crates/svolder-ipc/src/host/setup.rs`, `crates/svolder-ipc/src/host/path.rs`,
+  [host-config-check.md](design/host-config-check.md)).
+- [limit] **A DAC that has not connected since svolderd started is not recognised as the sink's
+  DAC.** Its profile comes with its first connection, so the Home Assistant path sensor reads
+  `not_this_dac` and the PipeWire config sensor reads unknown until it connects: never a false OK
+  (`bins/svolderd/src/mqtt_bridge/computer.rs`).
+- [observed] **PipeWire can play a half-applied filter for one quantum after a live update.**
+  PipeWire's filter chain applies a live control update one value at a time, and nothing stops the
+  audio thread from playing in between. Rarely (measured about 1 in 6,000 risky updates on PipeWire
+  1.6.2; at ten glide ends a day, roughly once every year or two) one quantum, about 1/50 s at 1024
+  samples and 48 kHz (a smaller quantum makes it likelier), plays a half-applied filter. A small
+  step is harmless (a loudness glide step: about +0.3 dB). These are loud:
+  - the daemon stopping gracefully, a TUI with no daemon quitting, a reconfigure that halts the
+    computer's side, or loudness turned off, while loudness plays at a depth: +31 to +43 dB in the
+    bass measured, up to +50 dB worked out;
+  - the end of a loudness glide back to flat: +29 dB in the bass measured;
+  - adding or removing a computer EQ point, a live preset recall that changes the number of points,
+    the EQ turned on or off live: an unstable filter or full scale measured;
+  - dragging an existing point: up to about +17 dB worked out, not measured;
+  - switching the virtual speakers or crossfeed: up to about 6 dB worked out.
+
+  After a bad quantum the chain recovers by itself. Live edits of the computer EQ have had this
+  since they began (0.35), so v0.36.7 has it. svolder cannot close it without giving up live updates
+  or a much larger redesign; the fix belongs in PipeWire. The order in which svolder sends a stage's
+  values keeps every whole section quiet, and the preamp lab proves that; it cannot see a tear
+  inside one section (`crates/svolder-host/src/eq/control/ld.rs`, `ld_line`;
+  `crates/svolder-host/src/eq/live.rs`).
+- [trade-off] **With no identified player the computer's hop skips the width, channel and
+  stream-filter words.** The player hop already says unknown, so the later words would only repeat
+  it (`crates/svolder-ipc/src/host/path.rs`, `computer_hop`).
+- [trade-off] **`dmix` always reads as a change.** With an ALSA `dmix` device the path says `ALSA
+  dmix mixes` and the `no plug` line fails, even when nothing else plays: other ALSA clients can mix
+  in at any time, so svolder never calls it untouched (`crates/svolder-ipc/src/host/setup.rs`,
+  `plug_line`).
+- [trade-off] **The `24-bit output` line fails on every 16-bit sink.** It judges the sink's format,
+  not the stream's, on every surface, so a 16-bit stream through an S16LE sink that is exact still
+  reads `PipeWire config changes the sound: 1` while the path says `untouched`
+  (`crates/svolder-ipc/src/host/setup.rs`, `format_line`).
 
 ### CLI
 
@@ -381,6 +492,10 @@ that branch rather than listed here.
 - [limit] **`svolder host speakers show` with no daemon names only the saved set's id.** The sets'
   sidecars are the daemon's to read, so without it the label, licence and loudness of the chosen set
   are not known to the command (`bins/svolder/src/commands/host_speakers.rs`, `show`).
+- [limit] **`svolder host check` with no daemon and no `--player` reads the player as unknown.** The
+  verdict is then `unknown`: following the MPRIS player as the daemon does is outside its one
+  `pw-dump` read, so name the player with `--player` (`bins/svolder/src/commands/host_check.rs`,
+  `own_route`).
 - [trade-off] **`svolder set` is outside the volume's glide.** `svolder set volume max`, a raw
   number above three quarters of the range and `svolder raw` on the volume write that step at
   once, as does `svolder set volume up --step N` that lands above three quarters with N of 4 or
@@ -451,6 +566,9 @@ that branch rather than listed here.
   attached over SSH) makes the copy tools run against that session's clipboard, which is the
   computer's, not the one you sit at, and the note says `copied with xclip` without naming it
   (`bins/svolder/src/tui/clipboard.rs`).
+- [limit] **`svolder demo` fails to start under a long `TMPDIR`.** It makes its private directory,
+  and so its daemon socket, under the temp directory; a `TMPDIR` of over about 90 bytes makes the
+  socket path pass 108 bytes (`bins/svolder/src/commands/demo.rs`).
 - [limit] **A demo whose daemon died says so with a toast, not a word on the screen.** When the
   daemon that `svolder tui --demo` started ends, the TUI toasts it at once and again every 30 s; the
   Status pane carries no word for it, and the TUI's player watcher and sink poll still start for a
@@ -547,6 +665,10 @@ that branch rather than listed here.
   of EQ or loudness is named as the DAC shaping the sound even with every band at 0 dB, and the
   verdict stays `untouched` while the DAC lowers the volume: the DAC's stage is its own clause after
   the verdict (`crates/svolder-ipc/src/host/path.rs`, `DacStage`).
+- [trade-off] **A long Path row scrolls its config chip with it.** With `scroll_long_lines` on (the
+  default) a Path row wider than its room scrolls and the chip is in sight only part of the time;
+  with scrolling off the verdict is cut with `…` so the chip stays whole. `k` always opens the box
+  (`bins/svolder/src/tui/screens/device/controls.rs`, `path_rows`).
 
 ### Web UI
 
@@ -644,6 +766,13 @@ that branch rather than listed here.
   input chips beside the key, an amp's gauges beside it and a phone held sideways (landscape) with
   the key have been measured by the checks only, never looked at
   (`bins/svolderd/web/themes/nightdrive/draw/dash.js`).
+- [limit] **Below 1280 px with the visualizer on, the config chip pushes the last hops of a changed
+  path into the dots chip.** One of three hops at 820 px and two at 1100 px move there; the hops
+  stay in the verdict's words and the dots chip's tooltip, and `playing.py` pins the counts
+  (`bins/svolderd/web/themes/ember`, `signal`).
+- [limit] **On a phone Paper's moved notes stand outside `#p-notes`, and a redraw while the config
+  chip has focus drops the focus.** The popup's Escape returns to the chip by its id, `p-config`
+  (`bins/svolderd/web/themes/paper`).
 - [trade-off] **A cancelled AutoEq download runs out its thread.** A preview or import that is
   cancelled stops waiting at once, but a download already under way runs on its blocking thread to
   its limit (20 seconds for a correction, 60 for the index), since the HTTP client has no cancel
@@ -657,7 +786,12 @@ that branch rather than listed here.
   glow the zone's red (`.sg-w2 .zone`) reads about 2.0 to 2.8 to 1 against the amber face, below
   the 3:1 that graphics ask for. The numerals' `+` signs still mark the zone, and the look was kept
   as built (`bins/svolderd/web/themes/signal/style.css`).
-- [observed] **At 900 px wide Signal's Player hop label can be clipped.** The label ("Fake Player",
+- [trade-off] **Signal's browser bar colour follows the theme, not the palette.** Someone who keeps
+  Warm amber, Phosphor or Oxblood and brass in Signal gets Blueprint's deep blue bar over their
+  ground, because the colour the page tells the browser is one per theme. Following the palette
+  would mean `paintChrome` taking its ground (`bins/svolderd/src/web/themes.rs`,
+  `bins/svolderd/web/core/scheme.js`). - [observed] **At 900 px wide Signal's Player hop label can
+  be clipped.** The label ("Fake Player",
   its 48 kHz line) was seen cut at the left edge of the line at that width in the stills; where
   the labels are placed is `bins/svolderd/web/themes/signal/draw/line.js`.
 
@@ -740,9 +874,12 @@ that branch rather than listed here.
   unit that systemd restarts itself (`Restart=on-failure`) may also be restarted through apply by
   the watch; a second apply replaces the first and never stacks
   (`crates/svolder-host/src/eq/control/exit.rs`).
-- [limit] **The crossfeed stage's rate fold stops at 384 kHz.** A Meier stage with a delay, worked
-  out at a usual rate and played at 705.6 or 768 kHz, can add up to about 2.1 dB over its fold; no
-  DAC in the docs runs there (`crates/svolder-host/src/eq/manage.rs` (`CONFIG_STAGE_RATES`)).
+- [limit] **Crossfeed and the virtual speakers run up to 384 kHz.** Above it they turn off with a
+  note and turning them on is refused: their headroom is shown up to it
+  (`crates/svolder-host/src/eq/manage.rs` (`STAGE_RATE_MAX_HZ`)).
+- [limit] **Sinks above 768 kHz are not covered by the stage cost.** A stage a configuration holds
+  is built again with the graph at whatever rate the sink moves to, until the next look turns it
+  off (about a second); its cost takes in rates up to 768 kHz (`CONFIG_STAGE_RATES`), not above.
 - [limit] **The chain's f32 coefficients cannot hold low, sharp bands at high rates.** An HSC at 20
   Hz, -12 dB, Q 0.1 or a PK at 20 Hz, -12 dB, Q 10 at 176.4 kHz play more than 3 dB off at DC or
   their centre, and an LSC at 21.5 Hz, +9.63 dB, Q 1.91 at 384 kHz plays +3.5 dB at DC for +9.6; the
@@ -800,7 +937,7 @@ that branch rather than listed here.
   the page drops them client-side; the series route's `secs` over the ring's half hour is held to it
   and not refused (`bins/svolderd/src/web/events.rs`, `bins/svolderd/src/web/events/device.rs`,
   `bins/svolderd/src/web/api.rs`).
-- [debt] **The MQTT bridge still fits inline on its own task.** The page model, the MCP tools, a
+- [debt] **The MQTT client still fits inline on its own task.** The page model, the MCP tools, a
   recall through the fleet and a computer recall make an imported preset's first fit on a blocking
   thread (`recall::warm`), but the bridge's state publish reads which preset is on
   (`preset_state`) and its preset select recalls through `writer.recall`, both from synchronous
@@ -856,6 +993,24 @@ that branch rather than listed here.
 - [test] **Nothing guards the capture's held sink reader.** The daemon builds the capture's look
   with `sink.held()` so the two readers cost one `wpctl` call a beat; a test of the sink proves the
   sharing, and none proves the daemon's wiring uses it (`bins/svolderd/src/host.rs`).
+- [debt] **The no-daemon TUI hands its sink task the loudness hint through a static.** `LOOP_HINT`
+  is process-wide because the TUI makes `HostLink::session` before `ComputerLink::live`; wiring the
+  hint through the first would remove it. Harmless: one loop per process
+  (`bins/svolder/src/tui/run/computer.rs`).
+- [debt] **Which flag sends a full line to a graph that has not run, one tick after an apply, is not
+  pinned.** `resend` set by the `save_state` foreign-stamp check, or `reload` (which re-adopts the
+  whole state and re-arms `unvouched`); harmless, an extra full line
+  (`crates/svolder-host/src/eq/control.rs`).
+- [debt] **`dacs_of` repeats the web view's reading fold.** It copies `Snapshot::raw`'s four-line
+  reading-to-integer fold and the `dac_facts` rule that clears a stage while the link is down; one
+  shared helper would end it (`bins/svolderd/src/mqtt_bridge/computer.rs`,
+  `bins/svolderd/src/web/view.rs`).
+- [test] **Two web tests fail under heavy load.**
+  `two_recalls_waiting_for_fits_end_on_the_later_request_whichever_fit_ends_first` uses real fit
+  timing and failed in 2 of 3 full runs, passing alone;
+  `a_page_with_no_device_gets_the_model_fleet_and_host` failed once in 4 on the order of the playing
+  and paused events (`bins/svolderd/src/web/view/tests.rs`,
+  `bins/svolderd/src/web/events/tests.rs`).
 
 ### CLI
 
@@ -1197,3 +1352,12 @@ that branch rather than listed here.
 - [test] **The catalogue's sources are checked only by hand.** `make speakers-catalogue-check` needs
   the network and is not in `make check`; it also shows any storage host a redirect leads to that
   the catalogue does not list.
+- [test] **The contrast sweep measures a failing config but not an unknown chip.** No fake knob
+  produces `config ?`, and `contrast-baseline.json` may need a refresh for the `config/*` states
+  after a full browser run (`scripts/web-checks/sweep_states.py`, `visit_config`).
+- [test] **`tui_pty` has no case for a failing config through the demo daemon.**
+  `SVOLDER_FAKE_CONFIG` does not reach the demo's daemon; the failing box is covered by unit tests
+  (`bins/svolder/tests`).
+- [test] **`doctor`'s PipeWire config row has no test of its wiring.** `config_row` and `route_on`
+  are tested; the call in `outcomes_over` that feeds the row from the probed daemon is not
+  (`bins/svolder/src/commands/doctor.rs`).

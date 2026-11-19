@@ -136,7 +136,7 @@ pub struct ListenDefaults {
     pub web_enabled: Option<String>,
     /// The MCP server's default `enabled` (`SVOLDER_MCP_ENABLED`), as the variable spells it.
     pub mcp_enabled: Option<String>,
-    /// The MQTT bridge's default `enabled` (`SVOLDER_MQTT_ENABLED`), as the variable spells it.
+    /// The MQTT client's default `enabled` (`SVOLDER_MQTT_ENABLED`), as the variable spells it.
     pub mqtt_enabled: Option<String>,
     /// The broker's default `host` (`SVOLDER_MQTT_HOST`).
     pub mqtt_host: Option<String>,

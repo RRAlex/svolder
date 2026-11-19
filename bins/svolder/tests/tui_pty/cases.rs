@@ -1171,11 +1171,16 @@ fn the_mascots_entrance_and_exit_leave_no_stray_cells_outside_its_box() {
         idle.extend(changed_outside(&before, &grid(&tui), home));
     }
     // The cursor row's highlight sweeps along it, a different cell each time it is looked at.
-    // So does the marquee of the Now playing row.
-    let moving = [
+    // So does the marquee of the Now playing row, and the slow scroll of a cut Path row.
+    let mut moving = vec![
         usize::from(tui.find("▶ Input").1),
         usize::from(tui.find("Now playing").1),
     ];
+    moving.extend(
+        tui.screen_text()
+            .lines()
+            .position(|line| line.contains(" Path ")),
+    );
     let stray_of = |look: &Look| -> Vec<(usize, usize)> {
         let mut stray = changed_outside(&before, look, home);
         stray.retain(|cell| !idle.contains(cell) && !moving.contains(&cell.1));

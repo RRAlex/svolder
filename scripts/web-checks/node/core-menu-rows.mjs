@@ -160,9 +160,10 @@ ok('the_pages_list_is_one_the_core_can_read_and_holds_help', () => {
   assert.doesNotThrow(() => checkListed(POPUPS));
   assert.deepEqual(POPUPS.map((popup) => [popup.name, popup.row.label, popup.row.sees]),
     [['devices', 'Devices…', 'everyone'], ['sound', 'Sound…', 'writer'],
-      ['help', 'Help…', 'everyone']]);
+      ['setup', 'PipeWire config…', 'everyone'], ['help', 'Help…', 'everyone']]);
   assert.equal(POPUPS[0].stays, true, 'Devices stays through a change of the shown device');
-  assert.ok(!POPUPS[1].stays && !POPUPS[2].stays, 'Sound and Help do not');
+  assert.ok(!POPUPS[1].stays && !POPUPS[2].stays && !POPUPS[3].stays,
+    'Sound, PipeWire config and Help do not');
 });
 
 ok('no_row_of_the_frames_names_a_device', () => {

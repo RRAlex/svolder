@@ -644,7 +644,8 @@ fn every_target_has_its_text_within_forty_cells() {
         text(Hit::ListRow(0), &devices),
         Some(lines(&[
             "gungnir",
-            "Enter switches · c changes · x removes"
+            "Enter switches · u updates",
+            "b identifies · x removes"
         ]))
     );
 }

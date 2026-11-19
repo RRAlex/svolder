@@ -40,7 +40,7 @@ tasks add the rest of the open area's checks here.
   the_power_switch_writes                       a preamp's shelf has its power, a tap writes it
   the_slim_bar_pins_when_the_line_scrolls_away  64 px under the frame's layer, the chosen hop with the volume
   a_slim_bar_tap_chooses_and_scrolls_up         the tap chooses the hop and the page goes to the top
-  a_linked_amp_is_a_live_dot                    a solid amber dot, followed by the stream; its area: power, meters, the amp
+  a_linked_amp_is_a_live_dot                    a solid dot in the device's colour, followed by the stream; its area: power, meters, the amp
   an_amp_control_writes_to_the_amps_url         power, a switch and Identify post to the amp's route, never the DAC's
   the_dac_keeps_its_volume_written_while_the_amp_is_chosen   the DAC's label carries the volume and follows it
   the_dacs_name_opens_the_device_list           a second tap on the shown device's name lists the devices
@@ -62,6 +62,7 @@ tasks add the rest of the open area's checks here.
   the_menu_button_clears_the_strip              a 44 px button over no hop, dot, wire or box (360, 390, 719 px)
   the_strips_dots_stop                          reduced motion and a hidden page, at 390 px
   focus_clears_the_pinned_block_with_both_lines the stub and the quiet word both under the strip
+  the_palettes_are_a_menu_choice                four palettes in the menu by their own names, kept per browser; each recolours the whole theme, the hops keep their meaning and the dials their glow
 Usage: python3 signal_theme.py chromium|firefox"""
 import json
 import math
@@ -203,7 +204,7 @@ def the_mount(b, d):
       menu: document.querySelector('meta[name=theme-color]').content })""")
     check('  and leaves nothing of Ember',
           on == {'theme': 'signal', 'sheets': ['signal'], 'ember': False, 'buttons': 1,
-                 'menu': '#0f0d0b'}, on)
+                 'menu': '#08121f'}, on)
     check('  no page error after the switch', errors(b) == [], errors(b)[:3])
 
 
@@ -283,8 +284,8 @@ def rings_and_dots(b, d):
           got['words'] == 'your headphones · on the desk' and got['italic'] == 'italic', got)
     colours = b.page("""(() => { const f = (s) => getComputedStyle(document.querySelector(s)).fill;
       return [f('.sg-d-player'), f('.sg-d-computer'), f('.sg-d-device.sg-shown'), f('.sg-ring')]; })()""")
-    check('  green for the player, yellow for the computer, amber for the device, the ground in the ring',
-          colours == ['rgb(124, 194, 126)', 'rgb(234, 210, 122)', 'rgb(240, 167, 58)', 'rgb(15, 13, 11)'],
+    check('  green for the player, yellow for the computer, cyan for the device, the ground in the ring',
+          colours == ['rgb(114, 224, 160)', 'rgb(240, 223, 124)', 'rgb(79, 214, 240)', 'rgb(8, 18, 31)'],
           colours)
     check('  no page error', errors(b) == [], errors(b)[:3])
 
@@ -449,7 +450,7 @@ CONTRAST = """() => {
   const num = (c) => c.match(/[\\d.]+/g).map(Number);
   const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92
     : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
-  const grounds = [[15, 13, 11], [23, 19, 15]].map(lum);
+  const grounds = [[8, 18, 31], [15, 32, 56]].map(lum);
   const out = {};
   const seen = (name, el) => { if (!el) { out[name] = null; return; }
     const l = lum(num(getComputedStyle(el).color));
@@ -489,6 +490,90 @@ def contrast():
         forget(b, red)
         b.close()
         red.stop()
+
+# the palettes' names and the colours that carry a meaning, as the mockup the user chose set them
+PALETTES = [
+    ('blueprint', 'Blueprint', {'ground': '#08121f', 'player': '#72e0a0', 'computer': '#f0df7c', 'device': '#4fd6f0',
+                                'accent': '#4fd6f0'}),
+    ('amber', 'Warm amber', {'ground': '#0f0d0b', 'player': '#7cc27e', 'computer': '#ead27a', 'device': '#f0a73a',
+                             'accent': '#f0a73a'}),
+    ('phosphor', 'Phosphor', {'ground': '#0a0e11', 'player': '#4fcfc2', 'computer': '#d9e27a', 'device': '#f0a73a',
+                              'accent': '#62e08a'}),
+    ('oxblood', 'Oxblood and brass', {'ground': '#150a0c', 'player': '#8fc48a', 'computer': '#ecdf9a',
+                                      'device': '#d3a64b', 'accent': '#d3a64b'}),
+]
+PALETTE_NOW = """(() => { const s = getComputedStyle(document.documentElement); const t = (n) => s.getPropertyValue(n).trim();
+  const vu = document.createElement('div'); vu.className = 'sg-vu'; document.getElementById('signal').append(vu);
+  const glow = getComputedStyle(vu).getPropertyValue('--sg-glow').trim(); vu.remove();
+  const dot = (c) => { const e = document.querySelector('.sg-d-' + c); return e ? getComputedStyle(e).fill : null; };
+  return { attr: document.documentElement.dataset.palette ?? null, kept: localStorage.getItem('svolder.theme.signal.palette'),
+    ground: t('--sg-ground'), player: t('--sg-player'), computer: t('--sg-computer'), device: t('--sg-device'),
+    accent: t('--sg-accent'), glow, frameAccent: t('--frame-accent'),
+    bodyBg: getComputedStyle(document.body).backgroundColor, dotPlayer: dot('player'), dotDevice: dot('device') }; })()"""
+MENU_PALETTES = """({ heading: [...document.querySelectorAll('.fxpop .fxh')].map((e) => e.textContent),
+  rows: [...document.querySelectorAll('.fxpop [data-palette]')].map((e) => [e.dataset.palette, e.textContent.trim(),
+    e.getAttribute('role'), e.getAttribute('aria-checked')]) })"""
+
+
+def rgb(hex_):
+    return 'rgb(%d, %d, %d)' % tuple(int(hex_[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def palettes():
+    """The menu's Palette row: four palettes under their own names, kept per browser; each one recolours the
+    whole theme, the hops keep their meaning and the dials keep their glow."""
+    d = common.Daemon('gungnir2-v2', host='fake')
+    b = make()
+    try:
+        forget(b, d)
+        load(b, d, route=True)
+        click_el(b, '.fxbtn')
+        got = poll(lambda: b.page(MENU_PALETTES)['rows'] and b.page(MENU_PALETTES), 3.0)
+        want = [[i, n, 'menuitemradio', 'true' if i == 'blueprint' else 'false'] for i, n, _ in PALETTES]
+        check('the_palettes_are_a_menu_choice: the menu has a Palette heading and the four palettes, by their own '
+              'names, Blueprint on', got and got['heading'].count('Palette') == 1 and got['rows'] == want, got)
+        b.press('Escape')
+        base = b.page(PALETTE_NOW)
+        check('  Blueprint is no attribute and nothing kept; the glow is the dials\' warm one',
+              base['attr'] is None and base['kept'] is None and base['ground'] == '#08121f'
+              and base['glow'] == 'rgba(240, 167, 58, .5)', base)
+        for ident, name, hues in PALETTES[1:] + PALETTES[:1]:
+            click_el(b, '.fxbtn')
+            poll(lambda: b.page("!!document.querySelector('.fxpop [data-palette]')"), 3.0)
+            click_el(b, f'.fxpop [data-palette="{ident}"]')
+            time.sleep(0.4)
+            now = b.page(PALETTE_NOW)
+            check(f'  {name}: the root says so and this browser keeps it',
+                  now['attr'] == (None if ident == 'blueprint' else ident) and now['kept'] == json.dumps(ident), now)
+            check(f'  {name}: the ground, the hops\' colours and the accent are the chosen ones; the page wears them',
+                  all(now[k] == v for k, v in hues.items()) and now['frameAccent'] == hues['accent']
+                  and now['bodyBg'] == rgb(hues['ground']) and now['dotPlayer'] == rgb(hues['player'])
+                  and now['dotDevice'] == rgb(hues['device']), now)
+            check(f'  {name}: the dials keep their warm glow', now['glow'] == base['glow'], now['glow'])
+            if browser == 'chromium' or ident != 'blueprint':
+                load(b, d, route=True)
+                again = b.page(PALETTE_NOW)
+                check(f'  {name}: a new page opens in it', again['attr'] == now['attr'] and again['ground'] == now['ground'],
+                      again)
+        b.page("(localStorage.setItem('svolder.theme.signal.palette', '\"nope\"'), 1)")
+        load(b, d, route=True)
+        odd = b.page(PALETTE_NOW)
+        check('  a kept value that is no palette is Blueprint', odd['attr'] is None and odd['ground'] == '#08121f', odd)
+        click_el(b, '.fxbtn')
+        poll(lambda: b.page("!!document.querySelector('.fxpop [data-palette]')"), 3.0)
+        click_el(b, '.fxpop [data-palette="phosphor"]')
+        time.sleep(0.3)
+        b.press('T')
+        poll(lambda: b.page("!!document.querySelector('#picker .tcard[data-theme=ember]')"), 5.0)
+        click_el(b, '#picker .tcard[data-theme=ember]')
+        poll(lambda: b.page("document.documentElement.dataset.theme") == 'ember', 5.0)
+        left = b.page("document.documentElement.dataset.palette ?? null")
+        check('  another theme shows no palette: leaving Signal takes the attribute off', left is None, left)
+        check('  no page error', errors(b) == [], errors(b)[:3])
+    finally:
+        forget(b, d)
+        b.close()
+        d.stop()
 
 
 DEVICE = 'Gungnir 2'
@@ -1528,8 +1613,8 @@ def a_linked_amp(b, d):
         decl: !!document.querySelector('[data-hop="device:Amp"].sg-decl'),
         after: document.querySelectorAll('[data-flow=after]').length,
         followed: __core.stream.followed() }; })()""")
-    check('a_linked_amp_is_a_live_dot: a solid amber dot, no ring, the thin stretch before it, the amp followed',
-          'sg-dot' in got['cls'] and 'sg-ring' not in got['cls'] and got['fill'] == 'rgb(240, 167, 58)'
+    check('a_linked_amp_is_a_live_dot: a solid cyan dot, no ring, the thin stretch before it, the amp followed',
+          'sg-dot' in got['cls'] and 'sg-ring' not in got['cls'] and got['fill'] == 'rgb(79, 214, 240)'
           and got['decl'] is False and got['after'] == 1 and got['followed'] == [AMP], got)
     check('  the DAC is not followed, only the linked amp',
           DAC_HOP.split(':')[1] not in b.page("__core.stream.followed()"))
@@ -2364,8 +2449,9 @@ def the_player(b, d):
     got = b.page("""({ title: document.querySelector('#sg-player .sg-title').textContent,
       path: [...document.querySelectorAll('#sg-player .sg-pathlist li b')].map((x) => x.textContent),
       verdict: [...(document.querySelector('#sg-player .sg-verdict')?.childNodes ?? [])]
-        .filter((n) => !n.classList?.contains('sg-sr')).map((n) => n.textContent).join(''),
-      want: __core.model.device().playing.path.words })""")
+        .filter((n) => !n.classList?.contains('sg-sr') && !n.classList?.contains('sg-config'))
+        .map((n) => n.textContent).join(''),
+      want: __core.model.device().playing.path.words.join(' · ') })""")
     check('  it names the track and puts the path in words with its verdict',
           got['title'] == headline and got['path'] == ['player', 'computer', 'DAC'] and got['verdict'] == got['want'], got)
     check('  previous, pause and next are its buttons', b.page(PLAYER_BUTTONS) == ['previous', 'pause', 'next'])
@@ -2503,7 +2589,7 @@ PLAYER_COVER = """(() => { const r = (e) => { if (!e) return null; const b = e.g
 def the_player_cover_wide(b, d):
     """The player's area at 1280 px: the cover to the right of the words and the transport, top-aligned
     with the label, as wide as the page allows (a fifth of the area, 200 to 300 px), square, in the
-    amber glow; no picture leaves no box and no second column."""
+    accent glow; no picture leaves no box and no second column."""
     forget(b, d)
     load(b, d)
     hop_click(b, 'player')
@@ -2512,12 +2598,12 @@ def the_player_cover_wide(b, d):
     c = b.page(PLAYER_COVER)
     want = min(300.0, max(200.0, c['pl']['w'] * 0.2))
     check('the_player_cover_is_right_of_the_transport_when_wide: top-aligned with the label, square, '
-          'a fifth of the area (200 to 300 px), inside the window, in the amber glow',
+          'a fifth of the area (200 to 300 px), inside the window, in the accent glow',
           c['cover'] is not None and c['cover']['l'] >= c['transport']['r'] - 0.5
           and c['cover']['l'] >= c['title']['r'] - 0.5 and abs(c['cover']['t'] - c['lbl']['t']) <= 1.5
           and abs(c['cover']['w'] - want) <= 1.5 and abs(c['cover']['h'] - c['cover']['w']) <= 1.0
           and c['cover']['r'] <= c['vw'] + 0.5 and c['sx'] <= c['vw'] + 0.5
-          and 'rgba(240, 167, 58' in (c['shadow'] or ''), c)
+          and 'rgba(79, 214, 240' in (c['shadow'] or ''), c)
     check('  the picture has no small width and height attributes the browser would stretch',
           c['attrs'] == [None, None], c['attrs'])
     own = b.page("document.querySelector('#sg-player .sg-cover img').getAttribute('src')").split('v=')[1]
@@ -2608,7 +2694,8 @@ def the_computer(b, d):
           and 'Other streams' in rows and 'The sound’s way' in rows
           and not {'Volume in PipeWire', 'Muted', 'Host EQ'} & set(rows), got)
     check('  the bottom bar stays', b.page(NOW_HIDDEN) is False)
-    acting = b.page("""[...document.querySelectorAll('#sg-cfacts *')].filter((e) => e.matches(
+    # the config chip is the one thing in the facts that acts: it opens the read-only PipeWire config popup
+    acting = b.page("""[...document.querySelectorAll('#sg-cfacts *:not(#sg-config)')].filter((e) => e.matches(
       'button, input, select, textarea, a, [tabindex], [role=slider], [data-act]') || e.tabIndex >= 0).length""")
     check('  nothing in the facts can be focused or acts', acting == 0, acting)
     b.page("document.querySelector('#sg-cfacts dl').scrollIntoView({ block: 'center' })")
@@ -3621,6 +3708,7 @@ the_phone()
 the_cover_gone()
 the_cap()
 guest_tap()
+palettes()
 contrast()
 print(f'signal_theme.py {browser}: {passed} passed, {len(fails)} failed in {time.time() - t0:.0f} s')
 sys.exit(1 if fails else 0)

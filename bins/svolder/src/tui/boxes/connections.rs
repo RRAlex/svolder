@@ -6,9 +6,9 @@
 //! of its two servers, and the one question or edit line the category can have open.
 //!
 //! Secrets stay out of here by construction. The MQTT password is reduced to whether one is set
-//! the moment the file is read. The token's text is held only while it is revealed, for ten
-//! seconds, and prints as `***` in a `Debug` dump; the rest of the time the category holds only
-//! the mask's last three characters, which say which token is in use.
+//! the moment the file is read. The token's text is held only while it is revealed, for a
+//! minute, in the token box, and prints as `***` in a `Debug` dump; the rest of the time the
+//! category holds only the mask's last three characters, which say which token is in use.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -20,8 +20,8 @@ use svolder_ipc::{Config, McpStatus, MqttStatus, TokenInfo, TokenKind, WebStatus
 use crate::backend::DaemonInfo;
 use crate::tui::boxes::web_box::WebBox;
 
-/// How long a revealed token stays on the screen.
-pub const REVEAL_FOR: Duration = Duration::from_secs(10);
+/// How long the token box stays open, and so how long the token's text is held.
+pub const REVEAL_FOR: Duration = Duration::from_secs(60);
 /// The glyph a hidden character of the token is drawn as.
 const HIDDEN: char = '•';
 /// How many hidden characters the mask draws before the tail.
@@ -34,13 +34,13 @@ pub const PASSWORD_MAX: usize = 128;
 /// The `[mqtt]` keys the category shows, with the password reduced to whether it is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MqttView {
-    /// Whether the bridge is on.
+    /// Whether the MQTT client is on.
     pub enabled: bool,
     /// The broker's host.
     pub host: Option<String>,
     /// The broker's port.
     pub port: u16,
-    /// Whether the bridge takes commands.
+    /// Whether the MQTT client takes commands.
     pub commands: bool,
     /// The broker's username.
     pub username: Option<String>,
@@ -165,6 +165,8 @@ pub enum Modal {
     Rotating,
     /// The Web UI box.
     Web(WebBox),
+    /// The MCP token box.
+    Token,
 }
 
 /// A line being typed into: its text and where the cursor sits, in characters.
@@ -210,10 +212,12 @@ pub struct Connections {
     pub revealed: Option<Revealed>,
     /// Where the daemon says its MCP server stands.
     pub mcp_status: Option<McpStatus>,
-    /// Where the daemon says its MQTT bridge stands.
+    /// Where the daemon says its MQTT client stands.
     pub mqtt_status: Option<MqttStatus>,
     /// Where the daemon says its web UI stands.
     pub web_status: Option<WebStatus>,
+    /// What the daemon says of its servers' clients, when it says.
+    pub activity: Option<svolder_ipc::Activity>,
     /// Where the daemon says its token comes from and its tail, when it says.
     pub daemon_token: Option<TokenInfo>,
     /// Where the daemon says its web token comes from and its tail, when it says.
@@ -273,7 +277,7 @@ impl Connections {
         };
         // A token on show stays while a read finds the same one.
         if view != self.token {
-            self.revealed = None;
+            self.hide_token();
         }
         self.token = view;
     }
@@ -306,7 +310,15 @@ impl Connections {
     /// Drop the token's text once its time has run out at `now`.
     pub fn expire(&mut self, now: Instant) {
         if self.revealed.as_ref().is_some_and(|r| now >= r.until) {
-            self.revealed = None;
+            self.hide_token();
+        }
+    }
+
+    /// Drop the token's text and close the token box that shows it.
+    pub fn hide_token(&mut self) {
+        self.revealed = None;
+        if self.modal == Some(Modal::Token) {
+            self.modal = None;
         }
     }
 
@@ -317,6 +329,7 @@ impl Connections {
         self.mcp_status.clone_from(&info.mcp);
         self.mqtt_status.clone_from(&info.mqtt);
         self.daemon_token.clone_from(&info.mcp_token);
+        self.activity = info.activity;
         self.web_status.clone_from(&info.web);
         self.web_daemon_token.clone_from(&info.web_token);
         self.daemon_up = Some(true);
@@ -327,7 +340,23 @@ impl Connections {
             .map(str::to_string);
         // A token on show is this session's own: it goes once the daemon uses another.
         if matches!(self.token_state(), TokenState::Differs { .. }) {
-            self.revealed = None;
+            self.hide_token();
+        }
+    }
+
+    /// The MCP server's counts, while the daemon says it serves and says counts.
+    pub fn mcp_activity(&self) -> Option<svolder_ipc::ServerActivity> {
+        match self.mcp_status {
+            Some(McpStatus::Listening { .. }) => self.activity.and_then(|a| a.mcp),
+            _ => None,
+        }
+    }
+
+    /// The web UI's counts, while the daemon says it serves and says counts.
+    pub fn web_activity(&self) -> Option<svolder_ipc::ServerActivity> {
+        match self.web_status {
+            Some(WebStatus::Listening { .. }) => self.activity.and_then(|a| a.web),
+            _ => None,
         }
     }
 
@@ -397,6 +426,9 @@ impl Connections {
     /// The daemon has not answered the last ask, so nothing it said stands.
     pub fn daemon_missing(&mut self) {
         self.daemon_up = Some(false);
+        self.mcp_status = None;
+        self.mqtt_status = None;
+        self.activity = None;
         self.config_changed = None;
         self.daemon_token = None;
         self.web_status = None;

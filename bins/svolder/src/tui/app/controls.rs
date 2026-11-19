@@ -181,6 +181,24 @@ impl App {
             .then(|| self.devices.rows.get(self.selected()))
             .flatten()
             .and_then(|row| row.profile.as_deref());
+        self.profile_offers_identify(row)
+    }
+
+    /// Whether the device called `name` offers the cue, by the profile its row names (a name no
+    /// row carries is judged by the profile on show).
+    pub(crate) fn identify_offered_for(&self, name: &str) -> bool {
+        let row = self
+            .devices
+            .rows
+            .iter()
+            .find(|row| row.name.eq_ignore_ascii_case(name))
+            .and_then(|row| row.profile.as_deref());
+        self.profile_offers_identify(row)
+    }
+
+    /// Whether a device whose row names the profile `row` offers the cue: the profile on show
+    /// where that is the one, else a built-in's; a name neither knows offers it.
+    fn profile_offers_identify(&self, row: Option<&str>) -> bool {
         match row {
             Some(name) if name != self.profile.name => {
                 built_in(name).is_none_or(|profile| profile.identify)
@@ -250,7 +268,7 @@ impl App {
     ///
     /// While the link is down the readings held are from before the drop, so the DAC's own stage
     /// is not claimed from them.
-    fn dac_facts(&self) -> DacFacts {
+    pub(super) fn dac_facts(&self) -> DacFacts {
         let mut facts = DacFacts::read(&self.profile, |id| {
             self.readings.values.get(&id)?.raw_or_flag()
         });
@@ -284,7 +302,7 @@ impl App {
 
     /// The Host group's row the keys act on: the one the Controls pane has selected, while the
     /// keys are in the Controls pane.
-    fn focused_host_row(&self) -> Option<HostRow> {
+    pub(crate) fn focused_host_row(&self) -> Option<HostRow> {
         (self.pane == Pane::Controls)
             .then(|| self.host_row())
             .flatten()

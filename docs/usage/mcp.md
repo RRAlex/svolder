@@ -36,8 +36,8 @@ The defaults are `listen = "127.0.0.1:8737"` (this machine only), `auth = "token
 reload the running daemon (SIGHUP) to have it read the section; a reload that changes `[mcp]`
 restarts only the listener, and one that leaves it alone keeps the listener, its port and the last
 minute of levels the volume rule uses. `svolder daemon status` says where it stands, on the line
-after the bridge's, and the TUI's Settings box has a Connect category that switches the server, its
-listen address and its writes, shows the token masked and what the daemon says (see
+after the MQTT client's, and the TUI's Settings box has a Connect category that switches the server,
+its listen address and its writes, shows the token masked and what the daemon says (see
 ["Connect"](tui.md#connect) under "Settings box"):
 
 ```
@@ -78,15 +78,20 @@ uses, and warns on standard error when it is not the one printed (the daemon has
 in its environment, or another state home, as a container does); `--rotate` then refuses, naming
 where the daemon's token lives.
 
+The daemon counts the clients that pass this check, as numbers and in memory only: `svolder daemon
+status` prints them (`mcp clients: ...`), and so does the TUI (see ["What a client
+is"](daemon.md#what-a-client-is)). The TUI shows the token itself, to select or copy, in a box
+opened with `v` on its Connect row.
+
 `auth = "none"` turns the check off, and only for a loopback `listen` address; anywhere else it is a
 config error.
 
 ### Writes and the volume rule
 
 With `writes = false` the server offers five read tools (`get_host` reads the computer) and nothing
-can change. `writes = true` adds nine more: three that change a device, `identify`, which only asks
-the unit to show itself, and five for the computer's volume, EQ, crossfeed and virtual speakers. The
-rule below stands between a model and your amplifier. Set `max_volume_db` too:
+can change. `writes = true` adds ten more: three that change a device, `identify`, which only asks
+the unit to show itself, and six for the computer's volume, mute, EQ, loudness, crossfeed and
+virtual speakers. The rule below stands between a model and your amplifier. Set `max_volume_db` too:
 `svolder doctor` warns when writes are on without it.
 
 - A volume change is measured against the lowest level the daemon saw for that control in the last
@@ -224,22 +229,42 @@ when one device is configured. Results are structured JSON.
   like the others, so a client with an older list that calls it is refused naming the setting.
 - `get_host` — no arguments; answers `{"volume": {percent, muted, sink} | null, "eq": {on, preset,
   preamp_db, points: [{type, frequency_hz, gain_db, q}]} | null, "player": {title, artist, album,
-  status} | null, "crossfeed": {…} | null, "speakers": {…} | null}`. Each is read on its own:
-  `volume` and `player` are null while there is nothing to read, and `eq` is null with `unavailable`
-  saying why when the computer EQ cannot be used. An EQ whose state the daemon could not verify
-  carries `"unverified": true`: `on` is then only what the saved state says. `crossfeed` is the
-  computer's crossfeed beside the EQ: `on`, `model`, `preset` (null for Custom), `edited_from`,
-  `level_pct`, `level_db`, `feed_db`, `crossover_hz`, `delay_ms`, `delay_floor_ms`, `delay_own`,
-  `delay_settable`, `output`, `note`, `off_reason`, and `unavailable` when it cannot be changed now.
-  It is null while the computer EQ cannot be used. The level curves and the table of models are left
-  out (they are plot data; `set_host_crossfeed`'s schema carries the words and ranges). `speakers`
-  is the computer's virtual speakers: `on`, `set` (the chosen set's id), `room` (`with` or `no`),
+  status} | null, "loudness": {…} | null, "crossfeed": {…} | null, "speakers": {…} | null, "path":
+  {…} | null, "config": {…} | null}`. Each is read on its own: `volume` and `player` are null while
+  there is nothing to read, and `eq` is null with `unavailable` saying why when the computer EQ
+  cannot be used. An EQ whose state the daemon could not verify carries `"unverified": true`: `on`
+  is then only what the saved state says. `crossfeed` is the computer's crossfeed beside the EQ:
+  `on`, `model`, `preset` (null for Custom), `edited_from`, `level_pct`, `level_db`, `feed_db`,
+  `crossover_hz`, `delay_ms`, `delay_floor_ms`, `delay_own`, `delay_settable`, `output`, `note`,
+  `off_reason`, and `unavailable` when it cannot be changed now. It is null while the computer EQ
+  cannot be used. The level curves and the table of models are left out (they are plot data;
+  `set_host_crossfeed`'s schema carries the words and ranges). `loudness` is the computer's
+  [loudness](eq.md#loudness): `on`, `strength_pct`, `reference_pct`, `volume_pct` (the computer's
+  volume as read, null until it has been), `depth_db`, `lift_db`, `mids_db` and `treble_db` (the
+  stage's shelf gains), `following` (false while off, muted, unread or unavailable), `note`,
+  `ranges` (`strength_pct` and `reference_pct`, each with `min`, `max` and `step`) and `unavailable`
+  when it cannot follow the volume now (a change is still accepted and saved); the curve is left
+  out. It is null while the computer EQ cannot be used or the daemon has no loudness. `speakers` is
+  the computer's virtual speakers: `on`, `set` (the chosen set's id), `room` (`with` or `no`),
   `room_name` and `term` (`With room` with `BRIR`, or `No room` with `HRTF`), `label`, `licence`,
   `credit`, `source_url`, `angles`, `taps_ms`, `loudness_db` (the seven set fields from `label` on,
   and `set`, are null while no set is chosen), `cut`, `note`, `off_reason`, `unavailable` when they
   cannot be changed now, and `sets`, the fetched sets (`id`, `room`, `room_name`, `term`, `label`,
   `licence`, `credit`, `source_url`) a call can choose from. The four curves and `timing` are left
-  out. It is null while the computer EQ cannot be used or the daemon has no virtual speakers.
+  out. It is null while the computer EQ cannot be used or the daemon has no virtual speakers. `path`
+  is what the computer's path does to the sound, from the player the daemon follows: `verdict`
+  (`untouched`, `changed`, `not_this_dac`, `other_input` or `unknown`), `words` (a list, one entry
+  per change or thing not read), `sentence` (the whole sentence, null when there is none) and `dac`,
+  the name of the configured DAC it was judged with (the DAC the computer's sink is; null when only
+  the computer's side was judged: MCP and `svolder host check` judge the computer's side for any
+  sink, so a Bluetooth or virtual sink can read `untouched` up to that sink, while the TUI, the web
+  page and Home Assistant read `not_this_dac` for a sink that is none of the DACs). `config` is the
+  PipeWire config check: `outcome` (`untouched`, `changes`, `unread`, `not_read` or
+  `other_version`), `summary` (the words, such as `PipeWire config lets it through untouched`),
+  `sink`, `limit` (what the check cannot judge) and `lines`, the seven conditions (`key` one of
+  `rates`, `forced_rate`, `dither`, `format`, `plug`, `stereo`, `filter`, `outcome` `pass`, `fail`
+  or `unknown`, `words`). Both are null while no route is read, so a route not read is `path: null`;
+  they only read. `get_host` reads the route anew when no web page or TUI is keeping one.
 - `set_host_volume` (writes) — `percent`, a whole number from 0 to 100, optional `confirm`. Above
   100 is refused whatever is answered. The rise rule is the one above, on the computer's own scale
   (the cube of the percent, `60 * log10(percent / 100)` dB): a rise of more than 6 dB over the lowest
@@ -253,6 +278,12 @@ when one device is configured. Results are structured JSON.
   it needs one: the named device, or the only one. A preset a connected device plays too asks, since
   the correction would play twice; repeat with `"confirm": true` once the user agreed, which
   flattens that device first.
+- `set_host_loudness` (writes) — the computer's [loudness](eq.md#loudness). Optional `on`,
+  `strength_pct` (0 to 100, snapped to 5), `reference_pct` (1 to 100) and `reference`, the word
+  `"now"` for the computer's volume as it is; at least one must be given, and `reference_pct` with
+  `reference` is refused (a null reads as "not given" in every tool, so a word says it). A value
+  past a range is held to it, and the ranges are in the tool's schema. It never asks: loudness only
+  cuts, so it cannot raise the level. Answers `{"loudness": {…}}`, the object `get_host` carries.
 - `set_host_crossfeed` (writes) — the computer's [crossfeed](eq.md#crossfeed). Optional `on`,
   `model` (`bauer`, `linkwitz`, `meier`, `mid-side`), `preset` (a name of the model), `level_pct`,
   `crossover_hz` and `delay_ms` (a number, or the word `"own"` for the model's own lag: a null reads
@@ -318,7 +349,7 @@ any path but `/mcp` is `404`. TLS is a reverse proxy's job: the listener speaks 
 
 The server follows a reload (SIGHUP, or the `reload` request that the TUI's Connect category, `add`,
 `remove` and `svolder mcp token --rotate` send; `svolder daemon restart` starts the daemon afresh
-instead) like the MQTT bridge: an unchanged `[mcp]` keeps its port, whatever its auth, and a server
+instead) like the MQTT client: an unchanged `[mcp]` keeps its port, whatever its auth, and a server
 with a token reads it again, so a rotated token takes effect at once; a changed one restarts the
 listener; `enabled = false` closes the port. An address that cannot be bound, or a token that cannot
 be had, is logged without the token and shown by `svolder daemon status` as

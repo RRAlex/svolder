@@ -73,7 +73,7 @@ fn panes_need(app: &App, tier: Tier, panes: Rect, spaced: bool) -> u16 {
         app.drawn.controls_switch.get(),
         app.drawn.controls_pending.get(),
     );
-    let lines = controls_lines(app, &theme, room(controls, tier), tier, spaced)
+    let lines = controls_lines(app, &theme, room(controls, tier), tier, spaced, true)
         .lines
         .len();
     app.drawn.controls_switch.set(kept.0);

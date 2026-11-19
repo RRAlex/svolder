@@ -423,6 +423,13 @@ pub struct HostEqState {
     /// across a restart.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub crossfeed_on: bool,
+    /// The crossfeed stage the running chain's config holds, playing or not: a change of the
+    /// sink's rate puts it back on the chain, whatever `crossfeed_on` says since. Written by an
+    /// apply with the stage in the config, cleared by an apply without it and by a remove; the
+    /// next owner pays for it in the preamp and applies the chain again without it. `None` in a
+    /// state from before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossfeed_loaded: Option<crossfeed::CrossfeedSettings>,
     /// Whether the chain runs for crossfeed alone: the EQ is off and plays flat (every slot the
     /// identity, the preamp 0 dB). `on` stays what the EQ itself is; a start that finds `flat`
     /// with `crossfeed_on` removes the chain.
@@ -443,6 +450,10 @@ pub struct HostEqState {
     /// remove; `None` in a state from before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speakers_loaded: Option<String>,
+    /// The loudness's settings, `[loudness]` in the file: whether it is on, its strength and its
+    /// reference. `None` until it is first set; a state from before it loads with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loudness: Option<loudness::LoudnessSettings>,
 }
 
 impl HostEqState {
@@ -471,6 +482,114 @@ impl HostEqState {
     pub fn save(&self, path: &Path) -> Result<(), String> {
         let text = toml::to_string_pretty(self).map_err(|e| format!("{}: {e}", path.display()))?;
         write_atomically(path, text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+    }
+}
+
+/// The settings a front end can change before any chain was ever applied, `host-eq-settings.toml`
+/// beside the state file: the crossfeed's settings, the chosen speakers set and the loudness's
+/// settings, and no curve, target or route (a state file holds those, and none exists until a
+/// chain is applied). The controller writes it only while it has no state to write; the first
+/// state file carries the same settings and takes its place.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct HostEqSettings {
+    /// The crossfeed's settings, as in the state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossfeed: Option<crossfeed::CrossfeedSettings>,
+    /// The id of the chosen virtual-speakers set, as in the state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers: Option<String>,
+    /// The loudness's settings, as in the state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loudness: Option<loudness::LoudnessSettings>,
+}
+
+impl HostEqSettings {
+    /// Where the settings of the state file at `state` live.
+    pub fn path(state: &Path) -> PathBuf {
+        state.with_file_name("host-eq-settings.toml")
+    }
+
+    /// The settings beside the state file at `state`: `Ok(None)` when there is no file, and the
+    /// reason when it cannot be read or is not settings. They are a convenience, never a reason
+    /// to refuse to start: a caller carries on with none and shows the reason where it can. The
+    /// crate prints nothing (a terminal front end is in raw mode).
+    pub fn load(state: &Path) -> Result<Option<HostEqSettings>, String> {
+        let path = Self::path(state);
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        toml::from_str(&text)
+            .map(Some)
+            .map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// Why the settings file beside `state` is ignored, `None` when it reads (or is not there).
+    pub fn unreadable(state: &Path) -> Option<String> {
+        Self::load(state).err()
+    }
+
+    /// Fill what `state` holds no table for from `self`: a state the chain's own apply wrote
+    /// has no crossfeed, speakers or loudness table of settings kept before it existed.
+    /// Loudness comes back with `on` false (a start never begins on).
+    pub fn fill(&self, state: &mut HostEqState) {
+        if state.crossfeed.is_none() {
+            state.crossfeed = self.crossfeed.clone();
+        }
+        if state.speakers.is_none() {
+            state.speakers = self.speakers.clone();
+        }
+        if state.loudness.is_none() {
+            state.loudness = self.loudness.map(|mut loudness| {
+                loudness.on = false;
+                loudness
+            });
+        }
+    }
+
+    /// The settings in effect for the state file at `state`, which a front end with no daemon
+    /// reads: the state file's tables, the settings file filling what the state has none of.
+    /// Every table is `None` when neither has it. The one reading `host crossfeed show`,
+    /// `host speakers show` and `host loudness show` share with the controller's start.
+    pub fn effective(state: &Path) -> HostEqSettings {
+        let mut held = HostEqState::load(state).ok().flatten();
+        let kept = HostEqSettings::load(state)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        if let Some(held) = held.as_mut() {
+            kept.fill(held);
+        }
+        match held {
+            Some(held) => HostEqSettings {
+                crossfeed: held.crossfeed,
+                speakers: held.speakers,
+                loudness: held.loudness,
+            },
+            None => HostEqSettings {
+                loudness: kept.loudness.map(|mut l| {
+                    l.on = false;
+                    l
+                }),
+                ..kept
+            },
+        }
+    }
+
+    /// Write the settings beside the state file at `state`, or take the file away when there are
+    /// none to keep.
+    pub fn save(&self, state: &Path) -> Result<(), String> {
+        let path = Self::path(state);
+        if *self == HostEqSettings::default() {
+            return match std::fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("{}: {e}", path.display())),
+            };
+        }
+        let text = toml::to_string_pretty(self).map_err(|e| format!("{}: {e}", path.display()))?;
+        write_atomically(&path, text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
 
@@ -536,6 +655,7 @@ pub mod crossfeed;
 #[cfg(test)]
 mod lab;
 pub mod live;
+pub mod loudness;
 mod manage;
 pub mod paths;
 pub mod points;
@@ -546,14 +666,18 @@ pub mod speakers;
 mod systemd;
 
 pub use control::{
-    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LEGACY_NOTE, LIVE_NOTE, PASSTHROUGH_NOTE,
-    PointView, SpeakersEdit, kind_word, parse_kind,
+    CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LEGACY_NOTE, LEVEL_HELD_NOTE, LIVE_NOTE,
+    LevelHint, LoudnessEdit, PASSTHROUGH_NOTE, PointView, SpeakersEdit, kind_word, parse_kind,
 };
 pub use crossfeed::{
     CrossfeedSettings, CrossfeedView, Model as CrossfeedModel, Stage as CrossfeedStage,
     StageResponse, stage_response,
 };
 pub use live::{LiveNode, NodeKey, PREAMP, PreampCarrier, SHAPE, SlotShape};
+pub use loudness::{
+    Level, LoudnessChange, LoudnessSettings, LoudnessView, Stage as LoudnessStage,
+    stage as loudness_stage,
+};
 pub(crate) use manage::checked_request;
 pub use manage::{
     ApplyRequest, Chain, EqFailure, Host, SpeakersConf, Status, UNIT, check_playable, lowered_note,

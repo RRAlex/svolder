@@ -31,8 +31,12 @@ export const HELP = 'help';
 /** The name of the Devices popup. */
 export const DEVICES = 'devices';
 
-/** The name of the Sound popup: its tabs are the EQ library, Crossfeed and Virtual speakers. */
+/** The name of the Sound popup: its tabs, in the order of the filter chain, are the EQ library,
+ * Loudness, Crossfeed and Virtual speakers. */
 export const SOUND = 'sound';
+
+/** The router's page of the Sound popup's Loudness tab. */
+export const LOUDNESS = 'loudness';
 
 /** The router's page of the Sound popup's Crossfeed tab; its other pages (`autoeq`, `upload`,
  * `saved`, and none) are the EQ library tab's (eq-library/draw.js). */
@@ -40,6 +44,10 @@ export const CROSSFEED = 'crossfeed';
 
 /** The router's page of the Sound popup's Virtual speakers tab. */
 export const SPEAKERS = 'speakers';
+
+/** The name of the PipeWire config popup: the check of the sink the player's stream reaches
+ * (read-only, the daemon's words), opened from the chip on a theme's path line or from its row. */
+export const SETUP = 'setup';
 
 /** The page of the Devices popup that is about the device at `url` (its URL segment): the page's
  * id in the router, whichever device the page behind shows. */
@@ -51,9 +59,10 @@ export const devicePage = (url) => `d-${url}`;
  * settings, a reader's (a guest, or a page with writes off) the fleet and each device's facts,
  * signal and readings with nothing that writes. It stays through a change of the shown device,
  * which it makes itself. Sound is a writer's only (the daemon reaches the internet for the EQ
- * library, which only a writer asks, and crossfeed is a write) and closes with a change of the
- * shown device: its EQ library tab is about that device. It has no side list: its tabs are the
- * pages (sound/draw.js). */
+ * library, which only a writer asks, and loudness and crossfeed are writes) and closes with a
+ * change of the shown device: its EQ library tab is about that device. It has no side list: its
+ * tabs are the pages (sound/draw.js). PipeWire config is everyone's (it only shows what the
+ * daemon read) and closes with a change of the shown device: it is about that card's path. */
 export const POPUPS = [
   {
     name: DEVICES,
@@ -68,6 +77,12 @@ export const POPUPS = [
     title: 'Sound',
     load: () => import('./sound/wire.js'),
     row: { label: 'Sound…', sees: 'writer' },
+  },
+  {
+    name: SETUP,
+    title: 'PipeWire config',
+    load: () => import('./setup/wire.js'),
+    row: { label: 'PipeWire config…', sees: 'everyone' },
   },
   {
     name: HELP,

@@ -19,25 +19,52 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LAUNCHER="$HERE/private-pipewire.sh"
 ANALYSE="$HERE/analyse.py"
+BITS="$HERE/bits.py"
 REPO=$(cd "$HERE/../.." && pwd)
 
 fail() { echo "host-e2e: FAIL: $*" >&2; exit "${2:-1}"; }
 
+# `run.sh bits` (make host-e2e-bits) runs phase B alone. No environment variable can make a run of
+# only some phases pass for the whole check, so HOST_E2E_ONLY=bits is refused.
+BITS_ONLY=0
+case "${1:-}" in
+  bits) BITS_ONLY=1 ;;
+  "") ;;
+  *) fail "unknown argument '$1' (only 'bits')" 2 ;;
+esac
+[ "${HOST_E2E_ONLY:-}" != bits ] || fail "HOST_E2E_ONLY=bits is not a mode: phase B alone is make host-e2e-bits" 2
+
 # The listing of the user's audio processes the before/after comparison reads.
 ME=$(id -un) || fail "cannot tell who runs this" 2
 [ -n "$ME" ] || fail "cannot tell who runs this" 2
-audio_procs() { ps -o pid,args -u "$ME" | grep -E 'pipewire|wireplumber' | grep -v -E 'grep|host-e2e/run.sh' || true; }
+# By the program's own name, not its command line: another job's shell can carry a word like
+# SVOLDER_WIREPLUMBER= in its arguments.
+# Only the user's session services count: their cgroup is under user@UID.service/session.slice/. A fake
+# `pipewire` script some other job's test starts (comm `pipewire`) lives in that job's own cgroup.
+UID_NUM=$(id -u) || fail "cannot tell who runs this" 2
+audio_procs() {
+  local pid rest
+  ps -o pid=,comm=,args= -u "$ME" | awk '$2 ~ /^(pipewire|pipewire-pulse|wireplumber)$/' | while read -r pid rest; do
+    if grep -q "user@${UID_NUM}\.service/session\.slice/" "/proc/$pid/cgroup" 2>/dev/null; then echo "$pid $rest"; fi
+  done || true
+}
 
 command -v pipewire >/dev/null && command -v pw-dump >/dev/null && command -v pw-cat >/dev/null \
   && command -v pw-record >/dev/null && command -v pw-link >/dev/null && command -v pw-metadata >/dev/null \
   && command -v wpctl >/dev/null && command -v wireplumber >/dev/null && command -v python3 >/dev/null \
-  || fail "needs pipewire, wireplumber and their tools (pw-dump, pw-cat, pw-record, pw-link, pw-metadata, wpctl) and python3 with numpy" 2
+  && command -v paplay >/dev/null && command -v pactl >/dev/null \
+  || fail "needs pipewire, wireplumber and their tools (pw-dump, pw-cat, pw-record, pw-link, pw-metadata, wpctl), paplay and pactl (pulseaudio-utils) and python3 with numpy" 2
 python3 -I -c 'import numpy' 2>/dev/null || fail "python3 needs numpy" 2
 python3 -I "$HERE/vu_selftest.py" || fail "the VU phase's own check (vu_selftest.py) failed" 2
-[ -x "$REPO/target/debug/svolderd" ] || fail "no target/debug/svolderd (make host-e2e builds it)" 2
-[ -x "$REPO/target/debug/examples/xf_expect" ] || fail "no target/debug/examples/xf_expect (make host-e2e builds it)" 2
-[ -x "$REPO/target/debug/examples/vs_expect" ] || fail "no target/debug/examples/vs_expect (make host-e2e builds it)" 2
-echo "== daemon binary: $REPO/target/debug/svolderd, built $(date -r "$REPO/target/debug/svolderd" '+%F %T')"
+python3 -I "$BITS" --selftest || fail "phase B's own check (bits.py --selftest) failed" 2
+# Phase B alone (make host-e2e-bits) needs no daemon (phase C runs target/debug/svolder inside
+# bits.py, which the make target builds).
+if [ "$BITS_ONLY" = 0 ]; then
+  [ -x "$REPO/target/debug/svolderd" ] || fail "no target/debug/svolderd (make host-e2e builds it)" 2
+  [ -x "$REPO/target/debug/examples/xf_expect" ] || fail "no target/debug/examples/xf_expect (make host-e2e builds it)" 2
+  [ -x "$REPO/target/debug/examples/vs_expect" ] || fail "no target/debug/examples/vs_expect (make host-e2e builds it)" 2
+  echo "== daemon binary: $REPO/target/debug/svolderd, built $(date -r "$REPO/target/debug/svolderd" '+%F %T')"
+fi
 
 BEFORE=$(audio_procs)
 [ -n "$BEFORE" ] || fail "cannot see your own PipeWire processes (is your session's PipeWire running?): the before and after comparison would prove nothing" 2
@@ -70,7 +97,7 @@ cleanup() {
       [ "$pid" != "$$" ] || continue
       if { tr '\0' '\n' <"$d/environ" | grep -qxF "SVPW_RUN=$SVPW_RUN"; } 2>/dev/null; then
         case "$(tr '\0' ' ' <"$d/cmdline" 2>/dev/null)" in
-          *pw-cat*|*pw-record*|*svolderd*|*host-eq.conf*|*dbus-daemon*) kill -TERM "$pid" 2>/dev/null ;;
+          *pw-cat*|*pw-record*|*svolderd*|*host-eq.conf*|*bits.conf*|*dbus-daemon*|*pulse.conf*|*paplay*|*pactl*) kill -TERM "$pid" 2>/dev/null ;;
         esac
       fi
     done
@@ -114,6 +141,20 @@ ps -o pid,args -u "$ME" | grep -E 'pipewire|wireplumber' | grep -v -E 'grep|host
 # The proof that the level checks fail on a chain that does nothing: HOST_E2E_BYPASS=1 make host-e2e
 # (never set otherwise). The variable goes in only when it is exactly 1.
 BYPASS=0; [ "${HOST_E2E_BYPASS:-}" = 1 ] && BYPASS=1
+# HOST_E2E_ONLY=L runs the loudness phases alone while they are being worked on: it exits 3 and never prints a
+# PASS line. Said here so a variable left in the environment cannot pass for the whole check unnoticed.
+[ -z "${HOST_E2E_ONLY:-}" ] || echo "host-e2e: HOST_E2E_ONLY=${HOST_E2E_ONLY} is set: a dev run of some phases, it will not report a pass" >&2
+# Phases B and C (bits.py) run first: its own PASS is this script's, and analyse.py's `host-e2e: PASS`
+# stays the last word of a full run. HOST_E2E_ONLY=L (the loudness phases alone) skips it.
+if [ "${HOST_E2E_ONLY:-}" != L ]; then
+  timeout -k 20 "${HOST_E2E_BITS_DEADLINE:-300}" python3 -I "$BITS" &
+  PY=$!
+  wait "$PY"
+  rc=$?
+  PY=
+  [ "$rc" = 0 ] || exit "$rc"
+  if [ "$BITS_ONLY" = 1 ]; then echo "host-e2e-bits: PASS"; exit 0; fi
+fi
 HOST_E2E_BYPASS=$BYPASS timeout -k 20 "${HOST_E2E_DEADLINE:-600}" python3 -I "$ANALYSE" &
 PY=$!
 wait "$PY"

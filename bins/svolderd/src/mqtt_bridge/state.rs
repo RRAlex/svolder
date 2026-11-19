@@ -35,6 +35,16 @@ impl BridgeTask {
             return;
         };
         published.dirty = true;
+        // A DAC's readings (its input, its rate) are part of the path the computer judges.
+        let dac = published
+            .feed
+            .borrow()
+            .profile
+            .as_ref()
+            .is_some_and(|profile| profile.family == svolder_profiles::Family::Dac);
+        if dac && let Some(computer) = self.computer.as_mut() {
+            computer.dirty = true;
+        }
         self.schedule_flush();
     }
 

@@ -204,6 +204,8 @@ more (`output-changed`); the chain restarted (`chain-restarted`); a graceful sto
 set is missing (`set-missing`). The choice is kept, only the switch goes off. A chain that runs for
 the speakers alone (the EQ flat) is removed by every reset; any other has the stage turned off live.
 A rate change is no reset: the stage is sent again, since the rebuilt graph starts from its config.
+Above 384 kHz, the highest rate a stage runs at, the speakers turn off with a note and turning them
+on is refused, as crossfeed is.
 The same tests as crossfeed's hold: off after the owner starts, the output changes, the chain
 restarts and a graceful stop; both EQ and the space choice off means no chain runs; two chains never
 stack; the config never holds the stage on; a WAV that fails the check never reaches a config.

@@ -442,8 +442,13 @@ async fn unavailable_frames_page(
         auth: WebAuth::None,
         ..WebConfig::default()
     };
-    let server =
-        crate::web::WebServer::start(&config, Arc::clone(&dac.fleet), Default::default()).await;
+    let server = crate::web::WebServer::start(
+        &config,
+        Arc::clone(&dac.fleet),
+        Default::default(),
+        Default::default(),
+    )
+    .await;
     let WebStatus::Listening { listen, .. } = server.status() else {
         panic!("not listening: {:?}", server.status());
     };

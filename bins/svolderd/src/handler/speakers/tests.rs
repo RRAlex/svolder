@@ -908,6 +908,8 @@ fn state_holding(
         speakers: chosen.map(str::to_string),
         speakers_on: false,
         speakers_loaded: loaded.map(str::to_string),
+        crossfeed_loaded: None,
+        loudness: None,
     }
 }
 

@@ -3,7 +3,8 @@
 
 //! The path verdict: the hops from the player to the DAC, judged against what the device reports.
 
-use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
+use super::sample::{AlsaName, HwJudge, Sample, alsa_name, base_name, hw_judge, khz, sample_of};
+use svolder_host::{HwState, Layout, PlayerMatch, RouteFacts, SetupFacts, SinkFacts, StreamFacts};
 use svolder_profiles::{EqMode, Profile, roles, safety, units};
 use svolder_proto::FunctionId;
 
@@ -18,7 +19,8 @@ const UNTOUCHED: &str = "untouched";
 /// What follows the words of an untouched path in its tooltip: the verdict cannot see inside
 /// the player.
 const UNTOUCHED_NOTE: &str = "the player may still change the sound itself (loudness \
-                              normalization, its own EQ)";
+                              normalization, ReplayGain, its own EQ); svolder judges up to 24 \
+                              bits";
 
 /// What the device's own stage does to the sound it receives: its volume below 0 dB, its tone
 /// control when it shapes the sound, its balance off centre.
@@ -265,6 +267,29 @@ pub enum Verdict {
     Unknown,
 }
 
+impl Verdict {
+    /// Every key, in the order of the variants.
+    pub const KEYS: [&'static str; 5] = [
+        "untouched",
+        "changed",
+        "not_this_dac",
+        "other_input",
+        "unknown",
+    ];
+
+    /// The stable word every JSON surface carries for the verdict (the web card, Home Assistant,
+    /// MCP, the CLI's `--json`).
+    pub fn key(&self) -> &'static str {
+        match self {
+            Verdict::Untouched => "untouched",
+            Verdict::Changed => "changed",
+            Verdict::NotThisDac { .. } => "not_this_dac",
+            Verdict::OtherInput { .. } => "other_input",
+            Verdict::Unknown => "unknown",
+        }
+    }
+}
+
 /// One hop of the path: the player, the computer, or the DAC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hop {
@@ -412,12 +437,7 @@ fn usb_port_of(label: &str) -> Option<usize> {
 /// best be unknown.
 pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
     let Some(sink) = &route.sink else {
-        return PathLine {
-            hops: Vec::new(),
-            verdict: Verdict::Unknown,
-            words: vec!["the computer's sink was not read".to_string()],
-            dac_stage: None,
-        };
+        return sink_not_read();
     };
     if !sink_is_dac(sink, dac) {
         let name = sink_name(sink);
@@ -450,13 +470,78 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
         };
     }
 
+    let mut side = computer_side(route, sink);
+    let device = dac_hop(sink, dac, &mut side.changes, &mut side.unknown);
+    let (verdict, words) = verdict_of(route, side.changes, side.unknown);
+    PathLine {
+        hops: vec![side.player, side.computer, device],
+        verdict,
+        words,
+        dac_stage: dac.stage.clause(&dac.display),
+    }
+}
+
+/// The path from the player to the computer's sink, with no DAC hop: the verdict the computer
+/// alone earns, for a sink that is no configured DAC and for the checks that judge the
+/// computer's side only. A route with no sink is unknown, and a player that plays to another
+/// sink is a sound that goes elsewhere.
+pub fn computer_line(route: &RouteFacts) -> PathLine {
+    let Some(sink) = &route.sink else {
+        return sink_not_read();
+    };
+    if let PlayerMatch::Elsewhere { sink: other } = &route.player_match {
+        return elsewhere(format!("player → {other}"), other.clone(), true);
+    }
+    let side = computer_side(route, sink);
+    let (verdict, words) = verdict_of(route, side.changes, side.unknown);
+    PathLine {
+        hops: vec![side.player, side.computer],
+        verdict,
+        words,
+        dac_stage: None,
+    }
+}
+
+/// The line for a route whose sink the dump did not name.
+fn sink_not_read() -> PathLine {
+    PathLine {
+        hops: Vec::new(),
+        verdict: Verdict::Unknown,
+        words: vec!["the computer's sink was not read".to_string()],
+        dac_stage: None,
+    }
+}
+
+/// The player's and the computer's hops with what they change and leave unknown.
+struct Side {
+    player: Hop,
+    computer: Hop,
+    changes: Vec<String>,
+    unknown: Vec<String>,
+}
+
+/// Judges the player's and the computer's hops against `sink`.
+fn computer_side(route: &RouteFacts, sink: &SinkFacts) -> Side {
     let mut changes = Vec::new();
     let mut unknown = Vec::new();
     let player = player_hop(route, &mut changes, &mut unknown);
     let computer = computer_hop(route, sink, &mut changes, &mut unknown);
-    let device = dac_hop(sink, dac, &mut changes, &mut unknown);
+    Side {
+        player,
+        computer,
+        changes,
+        unknown,
+    }
+}
 
-    let (verdict, words) = if !changes.is_empty() {
+/// The verdict and words of the changes and unknowns found: a change outranks an unknown, and
+/// an untouched path says so (with `player assumed` after it for an assumed stream).
+fn verdict_of(
+    route: &RouteFacts,
+    changes: Vec<String>,
+    unknown: Vec<String>,
+) -> (Verdict, Vec<String>) {
+    if !changes.is_empty() {
         (Verdict::Changed, changes)
     } else if !unknown.is_empty() {
         (Verdict::Unknown, unknown)
@@ -467,12 +552,6 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
         )
     } else {
         (Verdict::Untouched, vec![UNTOUCHED.to_string()])
-    };
-    PathLine {
-        hops: vec![player, computer, device],
-        verdict,
-        words,
-        dac_stage: dac.stage.clause(&dac.display),
     }
 }
 
@@ -487,7 +566,7 @@ fn elsewhere(words: String, sink: String, by_player: bool) -> PathLine {
 }
 
 /// What a sink is called for people: its description, else its node name.
-fn sink_name(sink: &SinkFacts) -> String {
+pub(super) fn sink_name(sink: &SinkFacts) -> String {
     if sink.description.is_empty() {
         sink.name.clone()
     } else {
@@ -555,7 +634,8 @@ fn stream_volume(stream: &StreamFacts, changes: &mut Vec<String>, unknown: &mut 
     }
 }
 
-/// The computer's hop: the sink's own rate and volume, the EQ and the other sounds.
+/// The computer's hop: the sink's own rate and volume, the EQ and the other sounds, and, when
+/// the route carries its setup, what the sink's converter and ALSA device do to the sound.
 fn computer_hop(
     route: &RouteFacts,
     sink: &SinkFacts,
@@ -564,13 +644,41 @@ fn computer_hop(
 ) -> Hop {
     let before = changes.len();
     let unknown_before = unknown.len();
-    let detail = signal_detail(sink.rate_hz, sink.format.as_deref(), sink.volume_milli);
+    let mut detail = signal_detail(sink.rate_hz, sink.format.as_deref(), sink.volume_milli);
+    let forced = route
+        .setup
+        .as_ref()
+        .and_then(|setup| setup.clock.as_ref())
+        .and_then(|clock| clock.force_rate);
     match (
         identified_stream(route).and_then(|stream| stream.rate_hz),
         sink.rate_hz,
     ) {
         (Some(from), Some(to)) if from != to => {
-            changes.push(format!("resampled {} → {} kHz", khz(from), khz(to)));
+            let cause = if forced.is_some_and(|force| force != from) {
+                " (rate forced)"
+            } else {
+                ""
+            };
+            changes.push(format!("resampled {} → {} kHz{cause}", khz(from), khz(to)));
+        }
+        (Some(from), Some(_)) => {
+            // The sink's Format can still read the stream's rate while the clock is forced to
+            // another: the sound is resampled all the same.
+            if let Some(force) = forced.filter(|force| *force != from) {
+                changes.push(format!(
+                    "resampled {} → {} kHz (rate forced)",
+                    khz(from),
+                    khz(force)
+                ));
+            } else if route
+                .setup
+                .as_ref()
+                .is_some_and(|setup| setup.clock.is_none())
+            {
+                // Without the clock an equal pair of rates does not prove there is no resample.
+                unknown.push("forced rate not read".to_string());
+            }
         }
         (_, None) => unknown.push("computer rate not read".to_string()),
         _ => {}
@@ -591,11 +699,200 @@ fn computer_hop(
         1 => changes.push("1 other sound mixing".to_string()),
         many => changes.push(format!("{many} other sounds mixing")),
     }
+    if let Some(stream) = identified_stream(route) {
+        width_words(stream, sink, changes, unknown);
+    }
+    if let Some(setup) = &route.setup {
+        setup_words(route, sink, setup, &mut detail, changes, unknown);
+    }
     Hop {
         label: "computer".to_string(),
         detail: detail.join(", "),
         changes: changes.len() > before,
         unknown: unknown.len() > unknown_before,
+    }
+}
+
+/// What the setup facts say of the sink's converter and ALSA device, in the order channels,
+/// dither, filters, ALSA (the width, which needs only the two formats, comes before them). A
+/// fact the route does not carry is skipped by the caller (an older svolderd); one it carries as
+/// unread is unknown.
+fn setup_words(
+    route: &RouteFacts,
+    sink: &SinkFacts,
+    setup: &SetupFacts,
+    detail: &mut Vec<String>,
+    changes: &mut Vec<String>,
+    unknown: &mut Vec<String>,
+) {
+    let stream = identified_stream(route);
+    if stream.is_some() {
+        channel_words(setup, detail, changes, unknown);
+    }
+    dither_words(setup, changes, unknown);
+    filter_words(setup, stream.is_some(), changes, unknown);
+    alsa_words(sink, setup, changes, unknown);
+}
+
+/// The width rule: an integer stream into a narrower integer sink is cut; a float stream into
+/// a sink under 24 bits may or may not hold more than the sink does; a format name that is not
+/// known is not judged. Bits count up to 24, where PipeWire's float mix ends.
+fn width_words(
+    stream: &StreamFacts,
+    sink: &SinkFacts,
+    changes: &mut Vec<String>,
+    unknown: &mut Vec<String>,
+) {
+    let Some(to) = sink.format.as_deref() else {
+        return;
+    };
+    let Some(from) = stream.format.as_deref() else {
+        // Only a sink of 24 bits or more (or a float one) takes any stream whole.
+        if !matches!(
+            sample_of(to),
+            Some(Sample::Float | Sample::Int { bits: 24.., .. })
+        ) {
+            unknown.push("player format not read".to_string());
+        }
+        return;
+    };
+    let (read_from, read_to) = (sample_of(from), sample_of(to));
+    for (name, read) in [(from, read_from), (to, read_to)] {
+        let word = format!("format {name} not judged");
+        if read.is_none() && !unknown.contains(&word) {
+            unknown.push(word);
+        }
+    }
+    let (Some(read_from), Some(read_to)) = (read_from, read_to) else {
+        return;
+    };
+    let Sample::Int {
+        bits: sink_bits, ..
+    } = read_to
+    else {
+        return;
+    };
+    match read_from.counted_bits() {
+        Some(counted) if counted > sink_bits => changes.push(format!(
+            "cut to {sink_bits} bits ({} → {})",
+            base_name(from),
+            base_name(to)
+        )),
+        None if sink_bits < 24 => {
+            unknown.push(format!("float stream into a {sink_bits}-bit sink"));
+        }
+        _ => {}
+    }
+}
+
+/// The channel rule: mono on both channels of a stereo sink is no change (both channels are
+/// exact copies); any other count that differs is mixed or upmixed; the same count at other
+/// positions is remapped (positions compare as sets: PipeWire maps by position, not order).
+fn channel_words(
+    setup: &SetupFacts,
+    detail: &mut Vec<String>,
+    changes: &mut Vec<String>,
+    unknown: &mut Vec<String>,
+) {
+    let (Some(from), Some(to)) = (&setup.stream_layout, &setup.sink_layout) else {
+        unknown.push("channels not read".to_string());
+        return;
+    };
+    match (from.channels, to.channels) {
+        (a, b) if a == b => {
+            if !same_positions(from, to) {
+                changes.push("channels remapped".to_string());
+            }
+        }
+        (1, 2) => detail.push("mono on both channels".to_string()),
+        (a, b) if b < a => changes.push(format!("channels {a} → {b} (mixed)")),
+        (a, b) => changes.push(format!("channels {a} → {b} (upmixed)")),
+    }
+}
+
+/// Whether two layouts of the same count hold the same positions; layouts that name none are
+/// taken as equal.
+fn same_positions(a: &Layout, b: &Layout) -> bool {
+    if a.positions.is_empty() || b.positions.is_empty() {
+        return true;
+    }
+    let sorted = |layout: &Layout| {
+        let mut positions = layout.positions.clone();
+        positions.sort();
+        positions
+    };
+    sorted(a) == sorted(b)
+}
+
+/// The sink's converter's dither: on, with noise, or not read.
+fn dither_words(setup: &SetupFacts, changes: &mut Vec<String>, unknown: &mut Vec<String>) {
+    let Some(dither) = &setup.dither else {
+        unknown.push("dither not read".to_string());
+        return;
+    };
+    if !matches!(dither.method.as_str(), "" | "none") {
+        changes.push(format!("dither on ({})", dither.method));
+    }
+    if dither.noise != 0 {
+        changes.push(format!("dither noise {}", dither.noise));
+    }
+}
+
+/// A filter graph inside the sink's converter or the player's stream's.
+fn filter_words(
+    setup: &SetupFacts,
+    stream_known: bool,
+    changes: &mut Vec<String>,
+    unknown: &mut Vec<String>,
+) {
+    let stream = stream_known.then_some(setup.stream_filter);
+    if setup.sink_filter == Some(true) {
+        changes.push("a filter inside the sink".to_string());
+    }
+    if stream == Some(Some(true)) {
+        changes.push("a filter on the player's stream".to_string());
+    }
+    if setup.sink_filter.is_none() || stream == Some(None) {
+        unknown.push("filter not read".to_string());
+    }
+}
+
+/// The ALSA device: `dmix` always mixes (other ALSA clients can share the card, which neither
+/// `hw_params` nor the dump shows); when the card's `hw_params` are open, what differs from the
+/// sink's format is what ALSA converts, and a format the judges cannot read is unknown, never
+/// equal; otherwise the device name says (`plug` converts, `hw` and its kin do not, any other
+/// name is not judged). A sink that is not an ALSA sink is not judged.
+fn alsa_words(
+    sink: &SinkFacts,
+    setup: &SetupFacts,
+    changes: &mut Vec<String>,
+    unknown: &mut Vec<String>,
+) {
+    let Some(alsa) = &setup.alsa else {
+        return;
+    };
+    let name = alsa.path.as_deref().map(|path| (path, alsa_name(path)));
+    if let Some((path, AlsaName::Dmix)) = name {
+        changes.push(format!("ALSA dmix mixes ({path})"));
+    }
+    if let HwState::Open(hw) = &alsa.hw {
+        let channels = setup.sink_layout.as_ref().map(|layout| layout.channels);
+        match hw_judge(sink, channels, hw) {
+            HwJudge::Differs(parts) => {
+                changes.push(format!("ALSA converts {}", parts.join(", ")));
+                return;
+            }
+            HwJudge::Same => return,
+            HwJudge::Unreadable(words) if unknown.contains(&words) => {}
+            HwJudge::Unreadable(words) => unknown.push(words),
+            HwJudge::NotComparable => {}
+        }
+    }
+    match name {
+        None => unknown.push("ALSA device not read".to_string()),
+        Some((path, AlsaName::Plug)) => changes.push(format!("ALSA plug converts ({path})")),
+        Some((_, AlsaName::Dmix | AlsaName::Direct)) => {}
+        Some((path, AlsaName::Other)) => unknown.push(format!("ALSA device {path} not judged")),
     }
 }
 
@@ -609,6 +906,7 @@ fn chain_words(stages: Option<svolder_host::ChainStages>) -> Vec<String> {
     };
     let words: Vec<String> = [
         (stages.eq, "host EQ on"),
+        (stages.loudness, "loudness on"),
         (stages.crossfeed, "crossfeed on"),
         (stages.speakers, "virtual speakers on"),
     ]
@@ -682,16 +980,6 @@ fn signal_detail(
         parts.push(format!("volume {}", percent(milli)));
     }
     parts
-}
-
-/// A rate in kilohertz: `44.1`, `48`, `176.4`; a decimal only when the rate needs one.
-fn khz(rate_hz: u32) -> String {
-    let (whole, rest) = (rate_hz / 1000, rate_hz % 1000);
-    if rest == 0 {
-        return whole.to_string();
-    }
-    let decimals = format!("{rest:03}");
-    format!("{whole}.{}", decimals.trim_end_matches('0'))
 }
 
 /// A volume in thousandths as a percent with its unit: whole when it is, else with one

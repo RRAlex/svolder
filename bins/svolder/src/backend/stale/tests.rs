@@ -32,6 +32,12 @@ async fn daemon_reading(path: &Path) -> StubServer {
     daemon
 }
 
+/// A path as the note writes it: under the home directory with a `~`.
+fn tilde_of(path: &Path) -> String {
+    let home = std::env::var_os("HOME");
+    tilde(path, home.as_deref().map(Path::new))
+}
+
 fn socket_of(daemon: &StubServer) -> String {
     daemon.socket.display().to_string()
 }
@@ -94,8 +100,8 @@ async fn another_path_gets_a_warning_and_no_reload() {
         reload_if_stale(&globals(&socket), &config, &path).await,
         Some(format!(
             "svolderd reads {}, not {}",
-            other.display(),
-            path.display()
+            tilde_of(&other),
+            tilde_of(&path)
         ))
     );
     daemon.says(None, None);
@@ -226,6 +232,7 @@ impl svolder_ipc::Handler for Stalls {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                activity: None,
             },
             Request::Devices if self.devices_answered => Response::Devices {
                 devices: Vec::new(),
@@ -307,6 +314,7 @@ impl svolder_ipc::Handler for Slow {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                activity: None,
             },
             Request::Devices => Response::Devices {
                 devices: Vec::new(),

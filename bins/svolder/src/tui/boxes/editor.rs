@@ -87,6 +87,12 @@ impl DeviceEditor {
         self.device.profile.as_deref().unwrap_or(AUTOMATIC)
     }
 
+    /// Whether the editor's line of keys offers `b identify` at full strength: not in the Name row,
+    /// which types the letter, and only for a device whose profile offers one.
+    pub fn can_identify(&self, app: &App) -> bool {
+        self.focused() != EditorRow::Name && app.identify_offered_for(&self.original)
+    }
+
     /// Move the focus `delta` rows, stopping at each end, with the cursor left at the end of
     /// whatever line the new row is typed into.
     fn move_row(&mut self, delta: isize) {
@@ -283,6 +289,10 @@ pub(in crate::tui) fn key(app: &mut App, code: KeyCode) -> Vec<Intent> {
         KeyCode::Char(' ') if editor.focused() == EditorRow::Default => editor.step(1),
         KeyCode::Tab if editor.focused() == EditorRow::Passphrase => {
             editor.passphrase.key(KeyCode::Tab);
+        }
+        // `b` asks the device being edited to show itself wherever the row takes no letters.
+        KeyCode::Char('b') if editor.focused() != EditorRow::Name => {
+            return vec![Intent::Identify(Some(editor.original.clone()))];
         }
         KeyCode::Char(letter) => editor.typed(letter),
         KeyCode::Backspace => editor.erase(),

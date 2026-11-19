@@ -183,11 +183,11 @@ These keys work on every screen:
   the TUI answers
 - `r` refresh — read every value again
 - `b` identify — ask the unit to show itself (function 200), on the Devices list the one under the
-  cursor. The toast says `identify sent to NAME`, or `identify just sent to NAME; wait 2 s` for a
-  second press inside two seconds, which sends nothing; a device that is down, or a daemon too old
-  to know the request, is said in its own words. It says `sent`: nothing can see the light. On a
-  device whose profile offers no identify (the Mesh Card) the key is dimmed, and the help overlay
-  says `this device offers no identify`
+  cursor, and in the device editor the device being edited. The toast says `identify sent to NAME`,
+  or `identify just sent to NAME; wait 2 s` for a second press inside two seconds, which sends
+  nothing; a device that is down, or a daemon too old to know the request, is said in its own
+  words. It says `sent`: nothing can see the light. On a device whose profile offers no identify
+  (the Mesh Card) the key is dimmed, and the help overlay says `this device offers no identify`
 - `m` mute, on a device whose profile has one
 - `i` flip phase, on a device whose profile has a phase toggle
 - `o` flip NOS, on a device whose profile has a NOS toggle
@@ -279,10 +279,12 @@ and `Now playing` rows are the host's own audio (see "Host audio" below); with `
 or `SVOLDER_HOST=off`, the screen is drawn without any of them.
 
 A pane's top border carries the keys that act on what it shows, right-aligned after its title:
-Controls has `mute`, `0 centre` and `refresh`, Tone control `flat` and `presets`, and Status
-`advice`. A word's key is its bold first letter (or the key itself, as in `0 centre`); a word whose
-key does nothing on this device is dim; a border too short for them all drops the last words, which
-their keys still reach. A click on a word presses its key.
+Controls has `mute`, `0 centre` and `refresh` (and `k check` after them where the PipeWire
+config check is on offer: a DAC's screen or the computer's side, with host audio shown), Tone
+control `flat` and `presets`, and Status `advice`. A word's key is its bold first letter (or the
+key itself, as in `0 centre`); a word whose key does nothing on this device is dim; a border too
+short for them all drops the last words, which their keys still reach. A click on a word presses
+its key.
 
 A terminal larger than 80×24 is laid out in one of two tiers on each axis rather than stretched
 (the bars are the exception: the Controls pane's bars and balance track, and the Tone pane's
@@ -374,8 +376,17 @@ onto them from the bands, and `←→` steps the mode through flat, EQ and loudn
 loudness strength, whichever row is focused. The Mode select's `‹ ›` arrows are in the accent
 whether or not the row is focused.
 
-On the computer's side, where the daemon (or the TUI itself) serves the computer's crossfeed, the
-pane keeps one more row at the bottom, under the points table: `Crossfeed ‹ on › Bauer · Chu Moy`,
+On the computer's side, where the daemon (or the TUI itself) serves the computer's loudness, the
+pane keeps a Loudness row at the bottom, under the points table: `Loudness ‹ on › ████░░ 50 %`, with
+a dim line of what the stage plays at the volume it read under it
+(`ref 100 % · 35 %: bass +7.3 · mids −7.3 dB`; the stage's shelf gains, not the response at three
+frequencies), and a dim "the DAC's loudness is on too" when the device's own Loudness plays as well.
+`←→` step the strength, `␣` turns it on and off (`Enter` too), and `r` sets the reference to the
+current volume; the tone screen (`e`) has the section with its Reference row (see "Loudness" below).
+A daemon that does not offer loudness shows no row.
+
+Under it, where the daemon (or the TUI itself) serves the computer's crossfeed, the
+pane keeps one more row at the bottom, under the loudness: `Crossfeed ‹ on › Bauer · Chu Moy`,
 with a dim line of its numbers under it (`33 % · −9.5 dB · 700 Hz · 0.26 ms`). `←→` or `␣` turn it
 on and off, `,` and `.` pick the preset, and `Enter` or `X` open the tone screen with the crossfeed
 section unfolded (see "Crossfeed" below). On a short pane the dim line goes first, then rows of the
@@ -596,7 +607,9 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
 - **`Now playing`**, the last of the Status pane's host lines: the followed player's track as
   `Title — Artist`, and the player's own name dim after it where there is room. Words longer than
   the row scroll along it a cell every 250 ms, pausing a second at each end, for as long as they are
-  too long, and start again with each new track. With a session bus but no player on it the row
+  too long, and start again with each new track (with `scroll_long_lines = false`, the Effects
+  category's **Scroll long lines** row off, they stand still, cut with `…`). With a session bus but
+  no player on it the row
   reads `—`, dim; with no session bus it is not drawn at all.
 
   The players are the session bus's `org.mpris.MediaPlayer2.*` names, and the one followed is the
@@ -657,36 +670,73 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
   computer's volume is not a row of the group: it is the Volume row, with the `Target` switch over
   it (see "The computer's side" below):
   - `Transport`: `◀◀  ▶  ▮▮  ▶▶` — previous, play, pause and next. `←→` move between the four,
-    `␣`/`Enter` press the one under the cursor, which the focused row draws out of its highlight,
-    and a click presses the one clicked. `▶` is drawn in the accent, bold, while the player plays,
-    and `▮▮` while it is paused. With no player the row is dim, and a press sends nothing and says
-    `no player` in a toast.
+    `␣`/`Enter` press the one under the cursor: on the focused row only the label and that button
+    take the selected style and the other buttons are dim, as on the Target switch, and a click
+    presses the one clicked. `▶` is drawn in the accent, bold, while the player plays, and `▮▮`
+    while it is paused. With no player the row is dim, and a press sends nothing and says `no
+    player` in a toast.
   - `Path`, on a DAC joined to a daemon that speaks for the host, under `Transport`: where the sound
     goes from the player to the DAC, which no key or click reaches. The row is there for as long as
     the daemon speaks for the host, so the group does not change height as playback starts and
     stops: with no player it reads `nothing playing`, and with a player the daemon has not read the
-    route for yet, `route not read`, both dim.
-    `untouched` covers the computer and the DAC; what the player does inside itself, such as loudness
-    normalization or its own EQ, happens inside the player, where svolder cannot look. The DAC's own
-    stage is named on its hop in the warning colour while it changes the sound: `volume -3.3 dB`
-    below 0 dB, `tone control` on EQ or loudness, `balance off centre`; the verdict stays what the
-    path up to the DAC says.
-    The verdict comes first in its own colour — `untouched` (green), what changes the sound (amber:
-    `resampled 44.1 → 48 kHz`, `computer volume 54 %`, `player muted`, `host EQ on`, `crossfeed on`,
-    `virtual speakers on`, `EQ pass-through`,
-    `2 other sounds mixing`, `DAC reads 44.1 kHz`), or, dim, `→ NAME` when the
-    default sink is not this DAC (`player → NAME` for a player routed elsewhere), `the DAC listens to
-    Optical` when the DAC is on an input the
-    computer does not feed (`the DAC listens to USB 1 · the computer is on USB 2` for a DAC on one
-    USB port while the computer is on the other), or what could not be read (`DAC input not read`,
-    `both USB ports connected`); several words are
-    joined by ` · `, as on the web page — then each hop from the player to the DAC with what is
-    known of the signal there (`player 44.1 kHz S16LE, volume 100 % → computer 48 kHz … → DAC
-    USB 1, 48 kHz`), a hop that changes the sound in amber. The row is as wide as
-    the pane, and is cut with `…` where the words run out of room, so the verdict is what shows
-    first. svolder cannot see the bits, so it never says more than the rates, volumes, mixing and
-    EQ show. An amp or a preamp has no row. The daemon reads the route (`pw-dump`, every 2 s) only
-    while a TUI or a web page that shows it is joined.
+    route for yet, `route not read`, both dim. `untouched` covers what enters the computer's audio
+    pipeline from the player's stream, the computer and the DAC; what the player does before its
+    stream, such as loudness normalization, ReplayGain or its own EQ and volume (and whether the
+    music is a local file or streamed), happens inside the player, where svolder cannot look, and
+    svolder judges up to 24 bits. The DAC's own stage is named on its hop in the warning colour
+    while it changes the sound: `volume -3.3 dB` below 0 dB, `tone control` on EQ or loudness,
+    `balance off centre`; the verdict stays what the path up to the DAC says. The verdict comes
+    first in its own colour — `untouched` (green), what changes the sound (amber: `resampled 44.1 →
+    48 kHz`, `resampled 44.1 → 48 kHz (rate forced)`, `computer volume 54 %`, `player muted`, `host
+    EQ on`, `crossfeed on`, `virtual speakers on`, `EQ pass-through`, `cut to 16 bits (S32 → S16)`,
+    `dither on (triangular)`, `channels 6 → 2 (mixed)`, `channels remapped`, `a filter inside the
+    sink`, `ALSA plug converts (…)`, `ALSA dmix mixes (…)`, `2 other sounds mixing`, `DAC reads 44.1
+    kHz`), or, dim, `→ NAME` when the default sink is not this DAC (`player → NAME` for a player
+    routed elsewhere), `the DAC listens to Optical` when the DAC is on an input the computer does
+    not feed (`the DAC listens to USB 1 · the computer is on USB 2` for a DAC on one USB port while
+    the computer is on the other), or what could not be read (`DAC input not read`, `both USB ports
+    connected`); several words are joined by ` · `, as on the web page — then each hop from the
+    player to the DAC with what is known of the signal there (`player 44.1 kHz S16LE, volume 100 % →
+    computer 48 kHz … → DAC USB 1, 48 kHz`), a hop that changes the sound in amber. The row is as
+    wide as the pane. A path longer than that wraps, where the pane has rows to spare, onto
+    continuation lines under the first line's words (three lines at most): the break falls only at a
+    separator, which starts the next line (`→ computer 48 kHz …`), and never inside a hop, so the
+    rows below move down. A pane short of rows gives up the blank lines between its groups before
+    the wrap. Where there is no room for the wrap even then, or a hop is wider than the pane, the
+    line is cut with `…` and scrolls slowly: it holds 2 s on its start, glides left about four cells
+    a second until its end shows, holds 2 s there, jumps back and goes again, with `…` marking each
+    cut edge. It moves only while it is cut and in sight, and stands still while the pointer rests
+    on the row or the Controls cursor is on the Transport row. It costs no redraw beyond the TUI's
+    own quarter-second tick. The Settings box's **Scroll long lines** row (`[tui]
+    scroll_long_lines`, on by default) turns the scroll off, for this row and the `Now playing` row
+    alike: the line is then cut with `…` and stays still. The row is in the Effects category but not
+    under the animation layer: Effects off does not stop the scroll. A pointer resting on the row
+    shows the whole path in a tooltip. svolder cannot see the bits, so it never says more than the
+    rates, volumes, mixing and EQ show. An amp or a preamp has no row. The daemon reads the route
+    (`pw-dump`) every 2 s while a TUI or a web page that shows it is joined (and see
+    [host-config-check.md](../design/host-config-check.md#reads) for the other reads). After the
+    verdict the row wears a **config chip**, `config ✓` when the PipeWire config lets the sound
+    through untouched, `config 2` when two of its seven conditions fail, and `config ?` when a line
+    is not read. There is no chip without a daemon's route (direct mode, or a route not yet read),
+    from a daemon whose route carries no config facts, or while the default sink is not this DAC (it
+    shows while the default sink is this DAC, whatever plays). With `scroll_long_lines` off the
+    verdict is cut with `…` so that the chip stays whole; with it on (the default) the chip scrolls
+    with the rest of the row and is in sight only part of the time. A pointer resting on it shows
+    `config: 5 of 7 pass · k`, and a click on it, or `k` on the Device screen of a DAC or of the
+    computer's side (with `host_audio` on; the Controls border says `k check`), opens the **PipeWire
+    config** box. It is a box over the screen like the quit question: the sink the check judges, the
+    seven lines (`rates`, `forced rate`, `dither`, `24-bit output`, `no plug`, `stereo to stereo`,
+    `no filter in the sink`) each with `✓`, `✗` or `?` and the daemon's words (a failing line in the
+    warning colour), the summary (`PipeWire config lets it through untouched`, `PipeWire config
+    changes the sound: 2`, `PipeWire config not fully read: 1`, `PipeWire config not read`) and,
+    dim, the limit: svolder judges the config from the player's stream on, cannot see inside a
+    player nor past the sink's converter, judges at most 24 bits, and only reads. `k` or `Esc`
+    closes it, and every other key is swallowed while it is open. With a daemon the box shows the
+    daemon's route; with no daemon the TUI reads `pw-dump` itself, once when the box opens and every
+    2 s while it is open (`reading the PipeWire graph…` until the first answer, `svolder could not
+    read the PipeWire graph (pw-dump)` when a read fails: every line then reads not read and the
+    summary `PipeWire config not read`, never the last read's marks), and never with `host_audio`
+    off. The same check is `svolder host check` ([cli](cli.md#host-check)).
   - `Spectrum`, in the wide and tall tiers only and while `visualizer` is on: what the default sink
     plays, in its sixteen bands from 40 Hz to 16 kHz spread over the pane's width to the edge the
     Volume row reaches (between neighbouring bands, on the same log axis; a pane with no more room
@@ -922,21 +972,26 @@ controls cannot be used, the reason stands in the switch's place, on the one hea
 key focuses it: `Target NAME  computer controls unavailable: no pw-cli on this computer`.
 
 On the computer the mode reads `Mode ‹ Off | EQ ›`, with no Loudness, and `←→` or a click on it
-turns the computer EQ on or off. Under the curve the Points pane lists the points, `#  Type  Freq
-Gain  Q`, the type `PK`, `LSC` or `HSC`, up to 16 rows. The pane keeps one height, so it scrolls with
-`↓ more` and `↑ more` on its bottom border, which also says the preamp, and its title says `7 of 16`.
-The keys are the band keys' own on the focused point: `↑↓` move, `←→` step the gain by half a dB, `,`
-and `.` move the frequency a semitone, `[` and `]` the Q, `1`-`9` pick a point, `0` puts every point at
-0 dB, `a` adds a peaking point at 1 kHz, `x` removes the focused one (the only point left is set to 0 dB
-and stays, with its frequency, type and Q), `y` cycles its type PK, LSC, HSC, and `Enter` (or a double-click on a value) opens the edit
-line: frequency, gain and Q typed as numbers, `Tab` between them, `Enter` writes the ones changed,
-each held to the hand range on its own, `Esc` cancels. A click on a Type cell cycles it. In the
-preset list on this side `n` saves the computer's points as a new preset (not the device's curve) and
-`u` does nothing. If the chain's state could not be looked at, the mode reads as the state file says
-with `not verified` after it. A drag on the curve moves a point as it does a band: left for the frequency and gain, right for
-the Q, sent as it moves (at most 20 times a second) and at the release. Hand values stay inside 20 Hz
-to 20 kHz, plus or minus 12 dB and Q 0.1 to 10. The Correction pane, in the wide tier, says that on
-the computer nothing is fitted: every filter plays as written.
+turns the computer EQ on or off. It is drawn as the Target switch is: the side in force bright and
+the other dim, and with the keys on the row the label and the side in force boxed. Under the curve
+the Points pane lists the points, `#  Type  Freq  Gain  Q`, the type `PK`, `LSC` or `HSC`, up to 16
+rows. The pane keeps one height, so it scrolls with `↓ more` and `↑ more` on its bottom border,
+which also says the preamp, and its title says `7 of 16`. The keys are the band keys' own on the
+focused point: `↑↓` move, `←→` step the gain by half a dB, `,` and `.` move the frequency a
+semitone, `[` and `]` the Q, `1`-`9` pick a point, `0` puts every point at 0 dB, `a` adds a peaking
+point at 1 kHz, `x` removes the focused one (the only point left is set to 0 dB and stays, with its
+frequency, type and Q), `y` cycles its type PK, LSC, HSC, and `Enter` (or a double-click on a value)
+opens the edit line: frequency, gain and Q typed as numbers, `Tab` between them, `Enter` writes the
+ones changed, each held to the hand range on its own, `Esc` cancels. A click on a Type cell cycles
+it. In the preset list on this side `n` saves the computer's points as a new preset (not the
+device's curve) and `u` does nothing. If the chain's state could not be looked at, the mode reads as
+the state file says with `not verified` after it. A drag on the curve moves a point as it does a
+band: left for the frequency and gain, right for the Q, sent as it moves (at most 20 times a second)
+and at the release. Hand values stay inside 20 Hz to 20 kHz, plus or minus 12 dB and Q 0.1 to 10.
+The Correction pane, in the wide tier, says that on the computer nothing is fitted: every filter
+plays as written. Under the preamp it says `level held until the music pauses` while a preset
+loaded during playback plays at the earlier curve's lower level (see
+["Presets"](eq.md#presets) in the presets reference).
 
 The Controls pane has the same switch, `Target ‹ NAME | Computer ›`, as a row of its own over the
 Volume row: `↑` from Volume reaches it, and `↓` from the row above lands on it first, a further `↓` going
@@ -951,15 +1006,40 @@ down to 100 % on a step down and goes no higher), `␣`/`Enter` and `m` turn its
 daemon every one of these is a request to it; with no daemon the TUI reads and sets the sink itself,
 and runs the computer EQ's controller of its own.
 
+#### Loudness
+
+On the computer's side the tone screen has a Loudness section under the Points table, for [the
+computer's loudness](eq.md#loudness); the computer's sections follow the filter chain's order, EQ
+(the Response graph and the Points), Loudness, Crossfeed or Space. Folded it is two lines,
+`Loudness  ‹ on › ██████░░░░ 50 %` and a dim readout of what the stage plays at the volume it read
+(`ref 100 % · 35 %: bass +7.3 · mids −7.3 dB`, shortened to what fits; the treble joins when it
+unfolds); it unfolds
+while the keys are in it, with the Reference row under the strength row and the readout under that,
+and folds again when they leave (`Esc`, `Tab` on, a click elsewhere). `Tab` and `↑↓` visit the
+computer's stops in that order: the header, the Points, Loudness, Crossfeed (or Space).
+
+- on the strength row `←→` (or `,` `.`) step the strength by 5 and `␣` or `Enter` turn loudness on
+  and off; on the Reference row `←→` step the reference by 1;
+- `r` on either row sets the reference to the computer's volume as the daemon last read it (a toast
+  says when it has not been read yet);
+- the mouse: a click on the `‹ on ›` word toggles it, a click on the bar sets the strength the
+  clicked cell stands for, the wheel steps the value under it, and `‹ ›` step the reference.
+
+Every number, range and step comes from the daemon's view, so a TUI never shows a value the daemon
+would refuse. Off, the row is dim and the values stay editable; while loudness cannot follow the
+volume the row says why, and a change is still accepted and saved. A daemon that does not serve
+loudness has no section, and the key table and the `?` overlay list its keys only where the computer
+serves it.
+
 #### Crossfeed
 
-On the computer's side the tone screen has a Crossfeed section between the Response graph and the
-Points table, for [the computer's crossfeed](eq.md#crossfeed). Folded it is one line,
+On the computer's side the tone screen has a Crossfeed section under the Points table and the
+Loudness section, for [the computer's crossfeed](eq.md#crossfeed). Folded it is one line,
 `Crossfeed  on · Bauer · Chu Moy · 33 % · 700 Hz · 0.26 ms  (X)`; it unfolds when the keys enter it
 (`Tab`, `↑↓` onto it, `X` or a click) and folds again when they leave (`Tab` on, a click elsewhere,
-`Esc`). On the computer's side `Tab` has three stops when crossfeed is offered: the header, the
-Crossfeed section and the points. `X` jumps to the section from anywhere on the screen and toggles it
-open or shut.
+`Esc`). On the computer's side `Tab` has the stops of what is offered: the header, the points,
+Loudness and the Crossfeed section, in that order. `X` jumps to the section from anywhere on the
+screen and toggles it open or shut.
 
 Unfolded, the section has a Model and Preset row, then Level, Crossover and Delay:
 
@@ -1545,12 +1625,12 @@ across the graph.
 ### Devices screen (`d`)
 
 The configured devices, to switch between, add to, change and remove — always reachable, whether one
-device is configured or several (`↑↓ Enter n c x r`):
+device is configured or several (`↑↓ Enter n u b x r`):
 
 ```
  svolder  Gungnir 2  ● connected                                  mouse:on 14:02
 ─ Controls ── EQ ── Telemetry ──┤ Devices ├───────────────── ? help ─ esc back ─
-┌ Devices ────────────────────────────────── new ─ update ─ x remove ─ refresh ┐
+┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐
 │ ▶ bifrost   Bifrost 3   connected                                            │
 │   gungnir   Gungnir 2   disconnected (current)                               │
 │                                                                              │
@@ -1580,15 +1660,17 @@ daemon: `no daemon …`, then the step `svolder daemon install`, or drop `--tran
 never more than half the screen. The list under it is the configuration's. The device screen reads
 `No device is open` and how to pick one until a device opens.
 
-The list's top border carries `new`, `update`, `x remove` and `refresh`, left of the `more ↑` mark
-while rows are hidden above.
+The list's top border carries `new`, `update`, `b identify`, `x remove` and `refresh`, left of the
+`more ↑` mark while rows are hidden above. `b identify` (a click is the key) asks the device under
+the cursor to show itself, as `b` does everywhere; it is dim while that device's profile offers no
+identify. On a narrow border the words drop from the right: `refresh` first, then `x remove`.
 
 With no device configured the list says so and names the key that adds one. A device that is open
 without an entry in the configuration (the fake transport's one device, say) is listed under the
 message as a row that says it is not configured:
 
 ```
-┌ Devices ────────────────────────────────── new ─ update ─ x remove ─ refresh ┐
+┌ Devices ───────────────────── new ─ update ─ b identify ─ x remove ─ refresh ┐
 │   No devices configured - n adds one                                         │
 │   Gungnir 2   not configured (current)                                       │
 ```
@@ -1633,7 +1715,7 @@ configuration file alone, and draw `-` for what it cannot say.
   │           │   Profile     ‹ automatic ›                          │           │
   │           │   Default     [ ] no                                 │           │
   │           │                                                      │           │
-  │           │ Enter saves · Esc cancels                            │           │
+  │           │ b identify · Enter saves · Esc cancels               │           │
   │           └──────────────────────────────────────────────────────┘           │
   ```
 
@@ -1642,7 +1724,11 @@ configuration file alone, and draw `-` for what it cannot say.
   Profile and Default; `Space` also flips Default; `Backspace`/`Home`/`End` edit the name being
   typed into; `Enter` saves — refusing a blank name, a name another configured device already
   carries, or a code of fewer than four digits (`a code is four digits`), in a Failure toast with
-  the editor still open — and `Esc` cancels, changing nothing.
+  the editor still open — and `Esc` cancels, changing nothing. `b` asks the device being edited to
+  show itself, with the same toasts as `b` on the list (`identify sent to NAME`); the editor's key
+  line says `b identify`, dim in the Name row, where `b` is a letter and is typed, and for a device
+  whose profile offers no identify (there the key still sends and the refusal is the toast). Move to
+  another row to use it. The editor takes no clicks, so there is no clickable word there.
 
   Passphrase is a stepper like Profile, round three answers: `←→` go `none` → `auto` → a code →
   `none`, wrapping at both ends. `none` is a device with no passphrase, `auto` is the code the
@@ -1694,7 +1780,7 @@ three entries:
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.36.7 │
+│                          v0.37.2 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1759,9 +1845,11 @@ the current one between `┤ ├`:
   the graphs cover.
 - **Effects**: the animation layer, then indented beneath it each of its switches (eased values,
   selection glow, shimmer, breathing borders, the focus runner, fault presence, peak hold, list
-  fade, the Mascot switch), then the hue-drift mode, the rainbow-scroll switch and the transition
-  between screens. The Effects row reads `on (inactive)` where the switch is on but the terminal
-  cannot show the animation layer (below truecolor, or in monochrome), since nothing animates there.
+  fade, the Mascot switch), then the hue-drift mode, the rainbow-scroll switch, the transition
+  between screens and the Scroll long lines switch (whether a cut line, such as the Path row,
+  scrolls; it is not under the animation layer). The Effects row reads `on (inactive)` where the
+  switch is on but the terminal cannot show the animation layer (below truecolor, or in
+  monochrome), since nothing animates there.
 - **Behaviour**: mouse capture, whether a resting pointer shows a tooltip, whether `q` asks before
   it quits, the title meter, whether the intro plays on launch, which effect builds it and whether a
   short sound plays with it, and how often the AutoEq index is fetched again
@@ -1884,10 +1972,14 @@ The fifth category edits the daemon's servers instead of `[tui]`, and shows how 
 rows, top to bottom:
 
 - **Web UI** reads the daemon's state alone (`off`, `no daemon`, `listening on …`, cut to the column
-  like any value), and `␣`, `Enter` or an arrow opens the Web UI box over the rows, described under
-  "The Web UI box" below.
-- **MCP server**, **MCP writes** (`read-only` or `read/write`), **MQTT bridge** and **MQTT
-  commands** (`read-only` or `allowed`) are switches: `␣`, `Enter` or either arrow flips one.
+  like any value), as plain text with no arrows, and `␣`, `Enter` or an arrow opens the Web UI box
+  over the rows, described under "The Web UI box" below.
+- **MCP server** (`off` or `on`), **MCP writes** (`read-only` or `writes`), **MQTT client** (`off`
+  or `on`; svolder is the client of the broker named by **MQTT broker host**) and **MQTT commands**
+  (`read-only` or `allowed`) are switches, each drawn as a choice such as `‹ off | on ›` with the
+  value in force lit, like the Target switch: `␣`, `Enter` or either arrow flips one. Turning
+  **MQTT client** on with no broker host set says `set MQTT broker host first` in a toast and moves
+  the cursor to the host row.
 - **MCP listen**, **MQTT broker host**, **MQTT broker port** and **MQTT username** open an edit line over the box on
   `␣`, `Enter` or an arrow: type, `←→`/`Home`/`End`/`Backspace` edit, `Enter` saves and `Esc`
   cancels, and a value that is not an address, a host or a port 1–65535 is refused in a toast with
@@ -1895,19 +1987,26 @@ rows, top to bottom:
   typed. It reads `loopback:8737` for the default `127.0.0.1:8737`, and the right column has the
   address whole.
 - **MCP token** reads masked, `••••••3fQ`: six dots and the token's last three characters (a token
-  shorter than 16 characters shows only the dots). `v` shows the whole token in the right column for
-  10 seconds, and `v` again hides it sooner; `c` copies it the way the Web UI box copies its link
-  (see "The Web UI box"): an OSC 52 sequence to the terminal (wrapped for tmux and GNU screen) and,
-  under a display, the token piped on standard input to `wl-copy`, `xclip` or `xsel`; the notice
-  says what happened (`token copied with wl-copy`, or
-  `token sent to the terminal's clipboard (OSC 52) — if your terminal ignores it, svolder mcp token
+  shorter than 16 characters shows only the dots). `v` or `Enter` (not `␣` or the arrows, which
+  only say what the keys are) opens an `MCP token` box over the rows, drawn like the Web UI box's
+  link: the token whole on a line of its own with a cell of margin each side, so a selection of it
+  with the mouse is the token and nothing else (a token wider than the box's 60-cell line, which a
+  generated one is not, wraps onto more lines of its own), then where it comes from. In the box `c`
+  copies it the way the Web UI box copies its link (see "The Web UI box"): an OSC 52 sequence to the
+  terminal (wrapped for tmux and GNU screen) and, under a display, the token piped on standard input
+  to `wl-copy`, `xclip` or `xsel`; a click on the token copies it too; `Esc`, `q`, `v` and `Enter`
+  close the box. The box closes by itself after a minute and at once when the token changes (a
+  replace, or the daemon using another one), and closing drops the text; while it is open the row
+  reads `(revealed)`. `c` on the row copies without the box; the notice says what happened (`token
+  copied with wl-copy`, or `token sent to the terminal's clipboard (OSC 52) — if your terminal
+  ignores it, svolder mcp token
   prints it`, or that with why a tool did not run),
   never `copied` for the sequence alone, and never holds the token; `R` asks
   `Replace the MCP token? [y/N]` (`n`, `Esc`, `Enter` or `q` cancels) and on `y` writes a fresh
   token and has the daemon reload.
 
   `R` refuses a token from `SVOLDER_MCP_TOKEN` or `token_file`, naming the source, as
-  `svolder mcp token --rotate` does. The token is shown whole only while revealed, and never in a
+  `svolder mcp token --rotate` does. The token is shown whole only in its box, and never in a
   toast or the config line; the three trailing characters of the mask only say which token is in
   use.
 
@@ -1927,11 +2026,20 @@ rows, top to bottom:
   marked `(daemon not running)`, and `v`, `c` and `R` work on it. `v`, `c` and `R` are listed in the
   help overlay's `Settings` section. If the daemon cannot be told to reload after a rotation, the
   notice says so and names `svolder daemon restart`; with no daemon it says none uses the token yet.
-- **MCP status** and **MQTT status** are the daemon's own answers, as `svolder daemon status` words
-  them (`listening`, `failed`, `connecting`, `connected`, `off`, and for a bridge that cannot get
-  in `login refused`, `not reachable` or `TLS port`; the right column has the whole line, such as
-  `mqtt: not connected to HOST:PORT: the broker refused the login (check username and password)`). They are asked again every two seconds while the category shows, so a bridge that connects
-  after a change shows it.
+- **MCP status** and **MQTT status** only report, as plain text with no arrows (as does the MCP
+  token row), and are the daemon's own answers, as `svolder daemon status` words them (`listening`,
+  `failed`, `connecting`, `connected`, `off`, and for an MQTT client that cannot get in `login
+  refused`, `not reachable` or `TLS port`; the right column has the whole line, such as `mqtt: not
+  connected to HOST:PORT: the broker refused the login (check username and password)`). They are
+  asked again every two seconds while the category shows, so a client that connects after a change
+  shows it. While the MCP server serves, its right column adds a line under the status with how
+  many clients use it, in the daemon's own words (`2 connections open; 3 clients in the past hour, 5
+  in the past day`; a window the daemon has not lived through yet reads as what it saw, `5 clients
+  since the daemon started 40 min ago`, and a full table says `at least`), and the Web UI row's
+  right column says the same for the web UI. Only clients that pass the server's token check are
+  counted, and only as counts (see ["daemon status"](daemon.md#what-a-client-is)); a daemon too old
+  to say, a server that is off or failed, or no daemon shows no line, never a zero. The MQTT status
+  row has no counts: svolder is the broker's client, and MQTT 3.1.1 carries no sender.
 - **MQTT password** reads `not set`, `set`, `set — not sent: no username` (a password with no
   username is never sent) or `from SVOLDER_MQTT_PASSWORD` (the variable wins over the file; with no
   username it adds `— not sent: no username`), and never the password. `Enter` opens an edit line
@@ -1945,9 +2053,9 @@ rows, top to bottom:
 
 A change writes only its own key of `[web]`, `[mcp]` or `[mqtt]` into `config.toml`, as the `[tui]`
 writer does for its keys (comments and every other byte stay; a value the file would refuse, such as
-turning the bridge on with no host, is reported as `settings not saved: …` and writes nothing), and
-then sends the daemon a `reload`. A daemon that reads another configuration file than this session's
-— a container's — makes every Connect row read-only: a key reports
+turning the MQTT client on with no host from the CLI, is reported as `settings not saved: …` and
+writes nothing), and then sends the daemon a `reload`. A daemon that reads another configuration
+file than this session's — a container's — makes every Connect row read-only: a key reports
 `read-only here: the daemon reads PATH`, and the right column names that path. The Connect category
 needs a daemon for its status rows; with none they read `no daemon`. While the daemon says its
 `config.toml` changed since its last reload (a hand edit it has not taken) every Connect row's text
@@ -1962,13 +2070,20 @@ it is never announced as a hand edit; no key of the TUI reloads the daemon.
 
 #### The Web UI box
 
-`Enter` on the Connect category's Web UI row opens a box of seven rows over the Settings box, titled
-`Web UI`, with its keys on the last two lines. `↑↓` move the cursor among the rows that take a key
-(the first, State, only reports); `Esc` or `q` closes the box and forgets its codes (`q` here closes
+`Enter` on the Connect category's Web UI row opens a box of seven rows (eight while the daemon says
+how many clients use the web UI) over the Settings box, titled `Web UI`, with its keys on the last
+two lines. `↑↓` move the cursor among the rows that take a key
+(State and Activity only report); `Esc` or `q` closes the box and forgets its codes (`q` here closes
 the box, it does not ask to quit).
 
 - **State** is the daemon's own answer, as `daemon status` words it: `listening on ADDR`, `off`,
   `failed: WHY`, `unknown to this daemon`, or `no daemon`.
+- **Activity** is the web UI's clients in the daemon's short words, `1 open · 4 past hour · 6 past
+  day` (under an hour of daemon life: `1 open · 4 in the last 40 min`; `+` after the count when the
+  table was full), a report row the cursor skips, under State. It is left out when the daemon says
+  none (an older one, or a web UI that does not serve), and when it would push the sign-in QR code
+  off the terminal: the code keeps its room, and the row shows whenever there is room. A daemon that
+  stops answering takes the counts with it.
 - **Web UI** reads `on` or `off`; `Enter` or either arrow turns it, writing `[web] enabled` and
   sending the daemon a reload.
 - **Reach** reads `this computer` (a loopback listen address), `your network` (a wildcard one) or
@@ -2351,6 +2466,9 @@ the tone-control screen, which has no clock. With capture on:
 - click the Mode half (the tone-control screen's header, or the device screen's Tone pane) anywhere
   but its `‹ ›` to toggle the flat mode, focusing it — the same as `f`; click `‹` or `›` to step the
   select instead, like every select's arrows
+- on the computer's side, click the Loudness row's `‹ on ›` word to toggle the computer's loudness,
+  its bar to set the strength the clicked cell stands for, and turn the wheel over it to step it
+  (see "Loudness" under the tone screen)
 - click anywhere on the Loudness half but its bar — the word, the value — to toggle the loudness
   mode, focusing it; the wheel over it steps the strength
 - click a level's bar — the Controls pane's Volume and Balance, the Loudness bar on the Tone control
@@ -2473,16 +2591,14 @@ the screen says where you are and what it takes in three places.
   and `esc menu` or `esc back` at its right end (see the top of "tui" above). Each tab carries the
   key that shows it as its first letter, bold.
 - **The words on a pane's top border** name the keys that act on what the pane shows (see "Device
-  screen" above): `mute`, `0 centre` and `refresh` on Controls, `flat` and `presets` on Tone control
-  and the Response block, `advice` on Status, `0 flatten` on Bands, `refresh` on Telemetry, `new`,
-  `update`, `x remove` and `refresh` on the Devices list. A word's key is its bold first letter, or
-  the key itself where it is not a letter.
-
-  A key that only sometimes does something on the screen showing (`f` and `p` with no tone control,
-  `m` on a device whose profile names no mute, `0` on one with no balance) keeps its word, dim
-  rather than dropped; the help overlay says why. The Devices screen's `d` is always worth pressing,
-  whatever is configured, since it is where a device is added, changed, and removed as well as
-  switched to.
+  screen" above): `mute`, `0 centre`, `refresh` and (with host audio) `k check` on Controls, `flat`
+  and `presets` on Tone control and the Response block, `advice` on Status, `0 flatten` on Bands,
+  `refresh` on Telemetry, `new`, `update`, `b identify`, `x remove` and `refresh` on the Devices
+  list. A word's key is its bold first letter, or the key itself where it is not a letter. A key
+  that only sometimes does something on the screen showing (`f` and `p` with no tone control, `m` on
+  a device whose profile names no mute, `0` on one with no balance) keeps its word, dim rather than
+  dropped; the help overlay says why. The Devices screen's `d` is always worth pressing, whatever is
+  configured, since it is where a device is added, changed, and removed as well as switched to.
 - **`?`** names every other key. The arrows, `Tab`, `Enter` and `␣`, `+`/`=`/`-`, `0`, `1`-`N`, `,`
   `.`, `[` `]`, the shifted arrows and the six uppercase toggles `M`, `E`, `H`, `R`, `F` and `V` are
   drawn on no screen; the overlay lists them, and the uppercase toggles are also rows of the
@@ -2539,22 +2655,22 @@ one-word description in full where the key row abbreviates it (`volume`, `freque
 │ Uppercase letters toggle a TUI mode and save it to the config.             │
 │ Symbols and navigation keys are the same on every screen.                  │
 │                                                                            │
-│ Everywhere                      Controls                                   │
-│ ↑↓        move                  ␣/Enter   toggle/press                     │
-│ ←→        change                +/=/-     volume                           │
-│ m         mute                  0         centre balance                   │
-│ i         phase                 < > |     pane divider                     │
-│ o         NOS                   a         advice, or all clear             │
-│ Tab/⇧Tab  pane                                                             │
-│ f         flat on/off           EQ                                         │
-│ p         presets (a i inside)  1-5       band                             │
-│ b         identify              , . ⇧←→   frequency                        │
-│ r         refresh               [ ] ⇧↑↓   Q                                │
-│ Esc       back, or the menu     Enter     edit band                        │
-│ c         controls              0         flatten                          │
-│ e         tone                  L-drag    point freq/gain                  │
-│ t         telemetry             R-drag    Q, right widens                  │
-│ d         devices               wheel     Q on the curve                   │
+│ Everywhere                           Controls                              │
+│ ↑↓        move                       ␣/Enter   toggle/press                │
+│ ←→        change                     +/=/-     volume                      │
+│ m         mute                       0         centre balance              │
+│ i         phase                      < > |     pane divider                │
+│ o         NOS                        k         config check · needs host   │
+│ Tab/⇧Tab  pane                       a         advice, or all clear        │
+│ f         flat on/off                                                      │
+│ p         presets (a i inside)       EQ                                    │
+│ b         identify                   1-5       band                        │
+│ r         refresh                    , . ⇧←→   frequency                   │
+│ Esc       back, or the menu          [ ] ⇧↑↓   Q                           │
+│ c         controls                   Enter     edit band                   │
+│ e         tone                       0         flatten                     │
+│ t         telemetry                  L-drag    point freq/gain             │
+│ d         devices                    R-drag    Q, right widens             │
 └──────────────────────────────────────────────────────────────────── more ↓ ┘
 ```
 

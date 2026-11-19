@@ -45,6 +45,8 @@ pub enum Bar {
     Row(usize),
     /// The tone control's Loudness bar, wherever it is drawn.
     Loudness,
+    /// The computer's Loudness strength bar: its value is the controller's, not a function's.
+    Ld,
 }
 
 impl Bar {
@@ -53,6 +55,7 @@ impl Bar {
         match self {
             Bar::Row(row) => Hit::LevelBar(row),
             Bar::Loudness => Hit::LoudnessBar,
+            Bar::Ld => Hit::LdBar,
         }
     }
 }
@@ -87,14 +90,17 @@ struct Spec {
 pub struct BarDrag {
     /// The bar being dragged.
     pub(in crate::tui) bar: Bar,
-    /// The function it sets.
-    id: FunctionId,
+    /// The function it sets; none for the computer's strength bar, which the controller owns.
+    id: Option<FunctionId>,
     /// The step the pointer asked of it last that has not been written yet: held while a write
     /// to the function is unanswered, the latest one kept.
     held: Option<i64>,
     /// The value the pointer last asked for, which a release lets go on where it has no cell of
     /// its own.
     last: Option<i64>,
+    /// Whether the computer's strength bar has had a value written to the controller since the
+    /// press: a press on the value it stands at writes nothing.
+    heard: bool,
 }
 
 /// The Volume climbing to a target it is not allowed to jump to.
@@ -147,7 +153,7 @@ impl App {
             .pointer
             .bar_drag
             .as_ref()
-            .filter(|drag| drag.id == id)?;
+            .filter(|drag| drag.id == Some(id))?;
         match self.pointer.climb.as_ref().filter(|climb| climb.id == id) {
             Some(climb) => self.planned_raw(climb.id),
             None => drag.last,
@@ -214,6 +220,7 @@ fn spec(app: &App, bar: Bar) -> Option<Spec> {
                 key: Some(control.key.clone()),
             })
         }
+        Bar::Ld => None,
         Bar::Loudness => Some(Spec {
             id: app.profile.eq.as_ref()?.loudness_id(),
             range: (0, LOUDNESS_MAX),
@@ -226,7 +233,7 @@ fn spec(app: &App, bar: Bar) -> Option<Spec> {
 
 /// What the held bar `drag` sets, or `None` for a bar that is not the control it was pressed on.
 fn drag_spec(app: &App, drag: &BarDrag) -> Option<Spec> {
-    spec(app, drag.bar).filter(|spec| spec.id == drag.id)
+    spec(app, drag.bar).filter(|spec| Some(spec.id) == drag.id)
 }
 
 /// Whether `want` may be asked of the Volume now without the climb: at or below
@@ -292,18 +299,31 @@ fn write(app: &mut App, spec: &Spec, raw: i64) -> Intent {
 /// A left press at column `col` of the bar `bar`, drawn across `area`: focus its row, hold the
 /// bar, and set the value the cell stands for.
 pub(in crate::tui) fn press(app: &mut App, bar: Bar, area: Rect, col: u16) -> Vec<Intent> {
+    if bar == Bar::Ld {
+        app.focus_ld(super::Ld::Strength);
+        app.pointer.bar_drag = Some(BarDrag {
+            bar,
+            id: None,
+            held: None,
+            last: None,
+            heard: false,
+        });
+        return to(app, area, col);
+    }
     let Some(spec) = spec(app, bar) else {
         return Vec::new();
     };
     match bar {
         Bar::Row(row) => app.focus(Pane::Controls, row),
         Bar::Loudness => app.focus_loudness(),
+        Bar::Ld => {}
     }
     app.pointer.bar_drag = Some(BarDrag {
         bar,
-        id: spec.id,
+        id: Some(spec.id),
         held: None,
         last: None,
+        heard: false,
     });
     to(app, area, col)
 }
@@ -315,6 +335,9 @@ pub(in crate::tui) fn to(app: &mut App, area: Rect, col: u16) -> Vec<Intent> {
     let Some(mut drag) = app.pointer.bar_drag.take() else {
         return Vec::new();
     };
+    if drag.bar == Bar::Ld {
+        return ld_to(app, drag, area, col);
+    }
     let Some(spec) = drag_spec(app, &drag) else {
         return Vec::new();
     };
@@ -323,6 +346,41 @@ pub(in crate::tui) fn to(app: &mut App, area: Rect, col: u16) -> Vec<Intent> {
     let writes = aim(app, &spec, &mut drag.held, want, false);
     app.pointer.bar_drag = Some(drag);
     writes
+}
+
+/// The computer's strength bar dragged to column `col`: the value under the pointer (past
+/// either end the end), heard but not saved, and only when it is not the one asked last.
+fn ld_to(app: &mut App, mut drag: BarDrag, area: Rect, col: u16) -> Vec<Intent> {
+    // A press on the value it stands at asks nothing.
+    let writes = match app.ld_strength_at(super::computer_loudness::bar_fraction(area, col)) {
+        Some(value) if drag.last != Some(value as i64) => {
+            drag.last = Some(value as i64);
+            match !drag.heard && app.ld_strength_now() == Some(value) {
+                true => Vec::new(),
+                false => {
+                    drag.heard = true;
+                    app.ld_strength_drag(value, false)
+                }
+            }
+        }
+        _ => Vec::new(),
+    };
+    app.pointer.bar_drag = Some(drag);
+    writes
+}
+
+/// The computer's strength bar let go: the value last asked for is written once more, saved.
+fn ld_end(app: &mut App, drag: &BarDrag, end: Option<(Rect, u16)>) -> Vec<Intent> {
+    let value = match end {
+        Some((area, col)) => app.ld_strength_at(super::computer_loudness::bar_fraction(area, col)),
+        None => drag.last.map(|last| last as f64),
+    };
+    match value {
+        // nothing was heard and nothing changes: a click on the value it already stands at
+        Some(value) if !drag.heard && app.ld_strength_now() == Some(value) => Vec::new(),
+        Some(value) => app.ld_strength_drag(value, true),
+        None => Vec::new(),
+    }
 }
 
 /// Ask for `want` of the bar's function: the Volume through the climb where `want` is above
@@ -535,6 +593,9 @@ pub(in crate::tui) fn release(app: &mut App, end: Option<(Rect, u16)>) -> Vec<In
     let Some(mut drag) = app.pointer.bar_drag.take() else {
         return Vec::new();
     };
+    if drag.bar == Bar::Ld {
+        return ld_end(app, &drag, end);
+    }
     let Some(spec) = drag_spec(app, &drag) else {
         return Vec::new();
     };
@@ -598,6 +659,16 @@ fn press_elsewhere(app: &mut App, action: Option<&crate::tui::mouse::MouseAction
     }
 }
 
+/// Let go of a held computer strength bar where it was last dragged, saved: the bar is taken from
+/// the pointer's state and one `done:true` is answered. Nothing, and the bar kept, for any other
+/// bar or none.
+pub(super) fn stop_ld(app: &mut App) -> Vec<Intent> {
+    let Some(drag) = app.pointer.bar_drag.take_if(|drag| drag.bar == Bar::Ld) else {
+        return Vec::new();
+    };
+    ld_end(app, &drag, None)
+}
+
 /// A key press stops the climb where it is and lets go of a held bar, writing the step held for
 /// it. A held Volume step is written only if it is [`permitted`] still: a key never sends a
 /// raise the climb has not paid for. Called before the key does what it does.
@@ -606,6 +677,9 @@ pub(super) fn stop(app: &mut App) -> Vec<Intent> {
     let Some(drag) = app.pointer.bar_drag.take() else {
         return Vec::new();
     };
+    if drag.bar == Bar::Ld {
+        return ld_end(app, &drag, None);
+    }
     match (drag_spec(app, &drag), drag.held) {
         (Some(spec), Some(held)) if !spec.volume || permitted(app, &spec, held) => {
             instant(app, &spec, &mut None, held, true)

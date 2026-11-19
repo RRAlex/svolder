@@ -738,6 +738,7 @@ pub(crate) fn computer_eq(
         loads: 0,
         crossfeed: None,
         speakers: None,
+        loudness: None,
     })
 }
 
@@ -756,6 +757,32 @@ pub(crate) fn computer_eq_with_crossfeed(
     };
     let mut eq = computer_eq(true, &[("PK", 1000.0, 0.0, 1.0), ("LSC", 100.0, 1.0, 1.0)]);
     eq.crossfeed = Some(CrossfeedView::of(&settings, xf_on, 48_000, None, None));
+    eq
+}
+
+/// A computer EQ with crossfeed (off, Bauer's default) whose view carries the loudness the
+/// controller builds for `strength_pct`, the reference `reference_pct`, `on` or not, the volume
+/// `volume_pct` and the depth `played_d_e` it plays.
+pub(crate) fn computer_eq_with_loudness(
+    on: bool,
+    (strength_pct, reference_pct): (f64, f64),
+    volume_pct: Option<f64>,
+    played_d_e: f64,
+) -> Box<svolder_host::eq::EqView> {
+    use svolder_host::eq::loudness::{Level, LoudnessSettings, LoudnessView};
+    let settings = LoudnessSettings {
+        on,
+        strength_pct,
+        reference_pct,
+    };
+    let level = volume_pct.map(|pct| Level {
+        linear: (pct / 100.0).powi(3),
+        muted: false,
+    });
+    let mut eq = computer_eq_with_crossfeed(false, "bauer", None);
+    eq.loudness = Some(LoudnessView::of(
+        &settings, level, played_d_e, 48_000, None, None,
+    ));
     eq
 }
 
@@ -845,4 +872,59 @@ pub(crate) fn target_sides(
         return (line.trim_end().to_string(), at(name), at("Computer"));
     }
     panic!("no Target line in the frame");
+}
+
+/// What one cell of a drawn frame is styled with: foreground, background and modifiers.
+#[cfg(test)]
+pub(crate) type CellStyle = (Color, Color, Modifier);
+
+/// The style of the first cell of `word` on the first row that holds `row_has`, for the tests
+/// that compare how two rows of a frame draw their words. `word` is looked for from the start of
+/// `row_has` in the row.
+#[cfg(test)]
+pub(crate) fn style_of(buffer: &Buffer, row_has: &str, word: &str) -> CellStyle {
+    style_at(buffer, row_has, word, 0)
+}
+
+/// The style of the cell `past` cells after the first cell of `word` (see [`style_of`]); with the
+/// word's width, the cell right after it.
+#[cfg(test)]
+pub(crate) fn style_at(buffer: &Buffer, row_has: &str, word: &str, past: usize) -> CellStyle {
+    let area = buffer.area;
+    for y in 0..area.height {
+        let line: String = (0..area.width)
+            .map(|x| buffer.cell((x, y)).map_or(" ", |cell| cell.symbol()))
+            .collect();
+        let Some(start) = line.find(row_has) else {
+            continue;
+        };
+        let rest = line[start..]
+            .find(word)
+            .unwrap_or_else(|| panic!("{word:?} not on {line:?}"))
+            + start;
+        let x = u16::try_from(line[..rest].chars().count() + past).expect("a column");
+        let cell = buffer.cell((x, y)).expect("a cell");
+        return (cell.fg, cell.bg, cell.modifier);
+    }
+    panic!(
+        "no row with {row_has:?} in the frame: {:#?}",
+        crate::tui::test_support::text(buffer)
+    );
+}
+
+/// The styles of a two-sided or many-worded choice drawn on the row holding `row_has`: its
+/// chosen word, one other word, its label, the cell right after the label and its `‹`.
+#[cfg(test)]
+pub(crate) fn choice_styles(
+    buffer: &Buffer,
+    row_has: &str,
+    (label, chosen, other): (&str, &str, &str),
+) -> [CellStyle; 5] {
+    [
+        style_of(buffer, row_has, chosen),
+        style_of(buffer, row_has, other),
+        style_of(buffer, row_has, label),
+        style_at(buffer, row_has, label, label.chars().count()),
+        style_of(buffer, row_has, "‹"),
+    ]
 }

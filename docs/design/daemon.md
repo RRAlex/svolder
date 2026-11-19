@@ -34,7 +34,7 @@ devices from the first. While it serves, `stop_or_signal` ends the accept loop o
 `stop` request, or the socket file being unlinked or replaced under the listener (`socket_taken`
 compares the inode it bound, every second). Then `Daemon::shutdown` stops the jobs (the device
 walk's and AutoEq's), the HTTP servers, the host service (after them, so no open page is told on the
-way down that the computer is no longer watched), the MQTT bridge (which says `offline` first), and
+way down that the computer is no longer watched), the MQTT client (which says `offline` first), and
 asks every actor to close at once: the published ones, the ones a reload is starting, and the walk's
 passphrase probe ([device-walk.md](device-walk.md#the-probe)).
 
@@ -42,7 +42,7 @@ passphrase probe ([device-walk.md](device-walk.md#the-probe)).
 handles, the transport, the shared scanner, the registry, the host service (the computer's player,
 cover and route, kept once for every front end; see
 [Host audio](host-audio.md#the-daemons-host-service)) and the slots for the web UI, the MCP server
-and the MQTT bridge. Its `handle_from(origin, request)` answers every socket request;
+and the MQTT client. Its `handle_from(origin, request)` answers every socket request;
 `DaemonFleet` (`bins/svolderd/src/fleet.rs`) lets the web and MCP servers ask the same questions
 in-process, each with its own `Origin`.
 
@@ -50,7 +50,7 @@ in-process, each with its own `Origin`.
 
 `device::spawn` (`bins/svolderd/src/device.rs`) starts a tokio task, the `Actor`, and returns a
 `DeviceHandle`: the command channel, the event broadcast, the `LiveInfo` the `devices` verb reads, a
-`Feed` watch channel (profile, firmware, link state, every confirmed reading) that the MQTT bridge,
+`Feed` watch channel (profile, firmware, link state, every confirmed reading) that the MQTT client,
 the web UI and the writer read, and the device's `Writer`.
 
 The actor's life is a loop of two states (`device/link.rs`):
@@ -277,7 +277,7 @@ it was. It holds one lock for the whole reload, then:
   costs nothing (`DeviceHandle::renamed`).
 - `bridge_to`, `mcp_to` and `web_to` bring each service in line with its section through a slot
   (`Slot` in `bins/svolderd/src/http_slot.rs` for web and MCP, `BridgeSlot` in `handler.rs` for the
-  MQTT bridge): a server already serving the section is kept, a changed one is
+  MQTT client): a server already serving the section is kept, a changed one is
   stopped and replaced. Every slot releases its old server before any starts a new one, so two
   servers that swap ports find them free.
 - `host_to` brings the host service in line with `[host]` and `SVOLDER_HOST` (a player change
@@ -309,6 +309,21 @@ A request reads the snapshot and never the file, so a hand edit shows in the soc
 and the MCP tools alike only after the next reload; `handler/config_write.rs` is the one place the
 socket, the web server and the MCP server reach config writes through, and only a write reads the
 file again, under the writer's lock.
+
+## Client activity
+
+The MCP server and the web UI count who uses them, as numbers (the words and rules are under
+["What a client is"](../usage/daemon.md#what-a-client-is)). A client is an address, counted after
+the check: the shared accept loop (`http.rs`) hands each connection a `Counted` handle, and a server
+calls `pass` on the first request its own check lets through (the MCP token; the web UI's sign-in
+cookie; every request with no token), so a wrong token, a guest or a refused connection never
+counts. One `Activity` (`activity.rs`) per `Slot` outlives a reload and ends with the daemon, in
+memory only: a client is a hash of its canonical address under keys drawn at start-up, at most 4096
+(the oldest idle one makes room and the figure is `capped`, a lower bound), and nothing prints an
+address. Open is a guard dropped with the connection's task. The counts ride the `version` reply
+(`Version.activity`, absent when a server is off or the daemon is old: shown as nothing, never 0),
+worded once by `ServerActivity::line()` and `short()` in svolder-ipc, which say what a window the
+daemon has not lived through saw. MQTT has none: it carries no sender.
 
 ## Principles
 
@@ -347,7 +362,7 @@ panic in one holder must not freeze every later caller.
 
 **The computer's side is read once, and only for those who look.** The host service follows the
 player for every front end, and reads the audio graph only while a page or a TUI that shows the path
-is connected, at most every two seconds; a front end that never shows it (the MQTT bridge, the MCP
+is connected, at most every two seconds; a front end that never shows it (the MQTT client, the MCP
 server, `svolder watch`) never holds the read on. A daemon with no session bus says it has no host
 side and nothing else breaks; a bus that was there and goes away (a user's session bus restarting)
 is looked for every 10 s, and the host comes back with the first look that finds it; so is a bus
@@ -378,6 +393,7 @@ replaced stops rather than serving nobody.
   `bins/svolderd/src/handler/host_tests.rs`.
 - Slots and the fleet: `bins/svolderd/src/http_slot.rs`, `bins/svolderd/src/fleet.rs`; tests in
   `bins/svolderd/src/http_slot/tests.rs`.
+- Client activity: `bins/svolderd/src/activity.rs`; wire types: svolder-ipc `protocol/activity.rs`.
 - The session and the refusal episode: `crates/svolder-ble/src/session.rs` and `episode.rs`; tests
   in `crates/svolder-ble/tests/session.rs` and `crates/svolder-ble/tests/episode.rs`.
 - The volume rule: `crates/svolder-profiles/src/safety.rs` and `roles.rs`; tests in

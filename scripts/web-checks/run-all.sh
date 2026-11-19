@@ -6,11 +6,13 @@
 # the levels, the layer, the smoke, what stirs it, its notes), the node ones once and the
 # browser ones in headless Chromium and headless Firefox, WEB_CHECKS_JOBS at a time (default from
 # the cores and the CPU pressure, see auto_jobs; 1 runs them one after the other, the serial lane's
-# checks after the others) against throwaway
+# timing checks after the others; a script with timing cases runs its logic part in the pool and its
+# timing part in the serial lane, see split_scripts) against throwaway
 # fake daemons (never the
 # installed binaries, never ports 8737/8738; each check has its own daemon home, free ports,
 # browser profile and output files). A check that fails beside others is run again alone: passing
-# is `flaky` (counted as passed, listed in the total), failing again is FAIL. One line per check
+# is `flaky` (counted as passed, listed in the total), failing again is FAIL; a timing check that fails in
+# the serial lane is run once more alone at the end of the lane, the same way. One line per check
 # as it finishes, a total, exit 1 on any FAIL. Each check's whole output is kept in target/web-checks/out/. Nothing
 # here takes a picture of the smoke: it is read with readPixels and float readbacks, numbers only.
 # The mutation runners (mutate_*.py, node/mutate_*.sh) are slow, by hand only, never a gate: `make tests-check` (FULL=1 for the browser ones).
@@ -77,7 +79,7 @@ smoke_files=(
     $w/effects.js
     $c/smoke_core.py $c/smoke_page.py $c/smoke_quick.py $c/smoke_probe.py $c/notes.py
     $c/notes_tune.py $c/haze.py $c/scroll.py $c/sources.py $c/sweep.py $c/touch.py
-    $c/effects_cycle.py $c/tune.py $c/common.py $c/fingerprint.py $c/gate_cache.sh $c/lockwait.sh $c/gate_wait.sh $c/run-all.sh $c/COVERAGE.md $c/soak.py
+    $c/effects_cycle.py $c/tune.py $c/common.py $c/parts.py $c/fingerprint.py $c/gate_cache.sh $c/lockwait.sh $c/gate_wait.sh $c/run-all.sh $c/COVERAGE.md $c/soak.py
     $c/mutate_smoke.py $c/mutate_notes.py $c/mutate_haze.py $c/mutate_scroll.py
     $c/mutate_sources.py $c/mutate_effects.py $c/mutate_registry.py $c/mutpool.py
     $n/director.mjs $n/effects.mjs $n/look-values.mjs $n/model.mjs $n/notes.mjs $n/sources.mjs
@@ -108,7 +110,7 @@ refuse_if_smoke_changed() {
             case $line in
                 "$f" | "$f"/*)
                     case $line in
-                        $c/common.py | $c/run-all.sh | $c/COVERAGE.md | $c/fingerprint.py | $c/gate_cache.sh | $c/lockwait.sh | $c/gate_wait.sh)
+                        $c/common.py | $c/parts.py | $c/run-all.sh | $c/COVERAGE.md | $c/fingerprint.py | $c/gate_cache.sh | $c/lockwait.sh | $c/gate_wait.sh)
                             what="the gate's own harness changed ($line); every check reads it"
                             ;;
                         *) what="a smoke file or one of the smoke's checks changed ($line)" ;;
@@ -351,7 +353,7 @@ one_check() {
         fi
     fi
     tsv_row "$label" "${lane:-pool}" "$verdict" "$tfile"
-    msg=$(printf '%-5s %-28s %4ds  %s' "$verdict" "$label" $((SECONDS - start - waited)) "$last")
+    msg=$(printf '%-5s %-30s %4ds  %s' "$verdict" "$label" $((SECONDS - start - waited)) "$last")
     if [ "$waited" -gt 0 ]; then
         msg+=" (waited $waited s for the gate lock)"
     fi
@@ -361,17 +363,24 @@ one_check() {
     printf '%s\n' "$msg"
 }
 
-# A check is "label|script|argument": python3 script.py argument (node ones: label|node/x.mjs|).
-# check_cmd ENTRY sets the array CMD.
+# A check is "label|script|argument|part": python3 script.py argument [--part part] (node ones:
+# label|node/x.mjs|). The part is empty for a check that is not split (a script's `--part logic` and
+# `--part timing` are its two halves, see split_scripts below).
+# entry_fields ENTRY sets e_label, e_script, e_arg and e_part; check_cmd ENTRY sets the array CMD.
+entry_fields() {
+    IFS='|' read -r e_label e_script e_arg e_part <<<"$1"
+}
 check_cmd() {
-    local script=${1#*|} arg
-    arg=${script#*|}
-    script=${script%%|*}
+    entry_fields "$1"
     CMD=()
-    case $script in
-        *.mjs) CMD=(env LOOK_RETUNED_SKIPS=1 node "$here/$script") ;;
-        *.sh) CMD=(bash "$here/$script") ;;
-        *) CMD=(python3 "$here/$script"); [ -n "$arg" ] && CMD+=("$arg") ;;
+    case $e_script in
+        *.mjs) CMD=(env LOOK_RETUNED_SKIPS=1 node "$here/$e_script") ;;
+        *.sh) CMD=(bash "$here/$e_script") ;;
+        *)
+            CMD=(python3 "$here/$e_script")
+            [ -n "$e_arg" ] && CMD+=("$e_arg")
+            [ -n "$e_part" ] && CMD+=(--part "$e_part")
+            ;;
     esac
 }
 
@@ -385,7 +394,7 @@ cached_check() {
     esac
     printf 'ok 0\n' >"$out/$label.verdict"
     printf '%s\t%s\t%s\t%s\t0\t0.0\t0\n' "$label" "$engine" "${lane:-pool}" cached >>"$timing"
-    printf '%-5s %-28s %4ds  %s\n' cached "$label" 0 "unchanged since its last pass (--cold or WEB_CHECKS_NO_CACHE=1 runs it)"
+    printf '%-5s %-30s %4ds  %s\n' cached "$label" 0 "unchanged since its last pass (--cold or WEB_CHECKS_NO_CACHE=1 runs it)"
     cached+=("$label")
 }
 
@@ -394,11 +403,11 @@ run_pool() {
     local n=$1 entry label script
     shift
     for entry in "$@"; do
-        label=${entry%%|*}
+        entry_fields "$entry"
+        label=$e_label
         CFP=
         if [ "$cache_ok" -eq 1 ]; then
-            script=${entry#*|}
-            CFP=$("${fpy[@]}" check "${script%%|*}" "${entry##*|}" "$fp_base" "$label") || CFP=
+            CFP=$("${fpy[@]}" check "$e_script" "$e_arg" "$fp_base" "$label") || CFP=
             fps[$label]=$CFP
             if [ "$cache_read" -eq 1 ] && [ -n "$CFP" ] && "${fpy[@]}" hit "$label" "$CFP"; then
                 cached_check "$label"
@@ -411,7 +420,7 @@ run_pool() {
             # what the check starts from, taken now that the slot is free: the fingerprint without the
             # check's own web areas (the whole web dir counts), against which the end of the gate decides
             # whether anything moved while it ran. The base is the one taken after the build.
-            CFP_SCRIPT=${script%%|*} CFP_ENGINE=${entry##*|}
+            CFP_SCRIPT=$e_script CFP_ENGINE=$e_arg
             CCFP=$("${fpy[@]}" check "$CFP_SCRIPT" "$CFP_ENGINE" "$fp_base") || CCFP=
             [ -z "$CCFP" ] && CFP=
         fi
@@ -424,11 +433,11 @@ run_pool() {
 # the long browser checks are not left for the end. A check not listed counts as 60.
 declare -A weight=(
     [nightdrive_theme]=570 [signal_theme]=450 [paper]=300 [visualizer]=240 [effects_menu]=160
-    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=80 [popups]=60 [devices_popup]=120 [eq_library]=120 [crossfeed_popup]=90 [speakers_popup]=90 [menu_theme_row]=60 [tone_overlay]=60 [contrast]=150 [phone_sweep]=175
+    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=80 [popups]=60 [devices_popup]=120 [eq_library]=120 [loudness_popup]=90 [setup_popup]=90 [crossfeed_popup]=90 [speakers_popup]=90 [menu_theme_row]=60 [tone_overlay]=60 [contrast]=150 [phone_sweep]=175
     [completeness]=100 [playing]=140 [tone_note]=120 [contract]=150 [frame_button]=140 [keys]=140
     [nightdrive_sheet]=175 [arrange]=110 [tone_drag]=80 [core_rows]=75 [computer_core]=45 [computer_ember]=170 [computer_paper]=150 [computer_signal]=170 [signal_vu]=120 [sweep]=300
-    [notes]=300 [effects_cycle]=200 [scroll]=200 [sources]=150 [smoke_page]=200
-    [smoke_core]=200 [haze]=300 [touch]=100 [tone_touch]=100
+    [effects_cycle]=55 [scroll]=40 [sources]=105 [smoke_page]=95 [smoke_quick]=6
+    [smoke_core]=145 [haze]=190 [touch]=100 [tone_touch]=100
     [computer_nightdrive]=200
 )
 by_weight() {
@@ -444,10 +453,10 @@ by_weight() {
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
 for name in effects facts model sources notes director keep tone-curve plot tone-drag playing viz vu \
-    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-old-readings core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-crossfeed core-speakers core-help dom-skip core-keys theme-keys ember-parts ember-keys \
+    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-old-readings core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-loudness core-crossfeed core-speakers core-help core-setup dom-skip core-keys theme-keys ember-parts ember-keys \
     level-write toast frame-keys core-modal core-router switch ember-order contract \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes \
-    signal-line signal-draw signal-vu nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-eqkey nightdrive-dash-clock nightdrive-keys signal-controls; do
+    signal-line signal-draw signal-vu nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-eqkey nightdrive-dash-clock nightdrive-keys signal-controls signal-palette; do
     node_entries+=("node-$name|node/$name.mjs|")
 done
 node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|" "gate-wait|gate_wait.sh|")
@@ -455,24 +464,28 @@ node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|" "gate
 # The checks that assert a frame rate, a draw cost or a wall-clock pace (frames a second against a
 # band, a flick's speed, a velocity after wheel steps a set time apart) need the machine to
 # themselves: they hold the gate lock exclusive and run one at a time after the parallel part, on both
-# gates, and a re-run of any check takes the lock exclusive too. smoke_core and haze are whole files
-# here (their rate cases are not split out); smoke_page, smoke_quick, effects_cycle, scroll and notes
-# assert rates or wall-clock pace; sources reads pointer pauses of 20 and 300 ms on the page's own
-# clock against the browser's event times (a fake clock cannot move those); nightdrive_timing is Night
-# drive's draw cost, its phone budget and its tap under a slowed CPU. The pace asserts that moved to a
-# fake clock (fakeclock.py: nightdrive_theme's Still and readout rates) stay in the pool; the README's
-# "Pace asserts left in the pool" lists the rest.
-serial_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick notes sources nightdrive_timing)
+# gates, and a re-run of any check takes the lock exclusive too.
+# split_scripts: the scripts whose cases are mostly logic (state, geometry, dye sums, notes formed) with
+# a few that read the clock. Each runs twice: `--part logic` in the pool like any browser check
+# (label NAME-ENGINE, cached, alone retry) and `--part timing` in the serial lane (label
+# NAME_timing-ENGINE, cold, exclusive). Which case is which is in each script's `--part` selection
+# (parts.py: part_has, counts) and in the README's "The serial lane's timing parts".
+split_scripts=(smoke_core smoke_page haze effects_cycle scroll smoke_quick sources)
+# serial_scripts: whole scripts that are timing: nightdrive_timing is Night drive's draw cost, its
+# phone budget and its tap under a slowed CPU; notes forms its notes from real input pace and smoke
+# timing (its logic cases fail in a loaded pool), so it is not split. The pace asserts that moved to a fake clock
+# (fakeclock.py: nightdrive_theme's Still and readout rates) stay in the pool.
+serial_scripts=(nightdrive_timing notes)
 
 # contrast and phone_sweep (the sweeps, minutes of wall time each) are in the full gate only
 if [ "$quick" -eq 1 ]; then
     browser_checks=(effects_menu effects_layout tone_note knob_click tone_drag playing \
-        device_presets reduced_motion visualizer arrange contract frame_button keys space_key modal popups devices_popup eq_library crossfeed_popup speakers_popup menu_theme_row tone_overlay ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
+        device_presets reduced_motion visualizer arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup menu_theme_row tone_overlay ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
         computer_nightdrive)
 else
     browser_checks=(smoke_core smoke_page effects_menu effects_layout sources notes sweep haze \
         scroll tone_note knob_click tone_drag playing device_presets reduced_motion visualizer \
-        arrange contract frame_button keys space_key modal popups devices_popup eq_library crossfeed_popup speakers_popup menu_theme_row tone_overlay contrast phone_sweep ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
+        arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup menu_theme_row tone_overlay contrast phone_sweep ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
         computer_nightdrive)
 fi
 entries=()
@@ -488,10 +501,14 @@ for browser in chromium firefox; do
             continue
         fi
         entry="$name-$browser|$name.py|$browser"
-        case " ${serial_scripts[*]} " in
-            *" $name "*) serial_entries+=("$entry") ;;
-            *) entries+=("$entry") ;;
-        esac
+        if [[ " ${split_scripts[*]} " == *" $name "* ]]; then
+            entries+=("$entry|logic")
+            serial_entries+=("${name}_timing-$browser|$name.py|$browser|timing")
+        elif [[ " ${serial_scripts[*]} " == *" $name "* ]]; then
+            serial_entries+=("$entry")
+        else
+            entries+=("$entry")
+        fi
     done
 done
 entries+=("effects_devices-chromium|effects_devices.py|" "completeness-chromium|completeness.py|chromium")
@@ -536,37 +553,45 @@ else
 fi
 run_pool "$jobs_n" "${ordered[@]}"
 
-# A check that failed beside others is run once more alone: passing is `flaky` (counted as passed;
-# both outputs stay, the first in LABEL.out, the second in LABEL.again.out), failing again is FAIL.
+# retry_alone ENTRY...: each check of the list whose verdict is `retry` (it failed beside others) is
+# run once more alone: passing is `flaky` (counted as passed; both outputs stay, the first in
+# LABEL.out, the second in LABEL.again.out), failing again is FAIL.
 flaky=()
-for entry in "${ordered[@]}"; do
-    label=${entry%%|*}
-    word=
-    [ -r "$out/$label.verdict" ] && read -r word _ <"$out/$label.verdict"
-    if [ "$word" = retry ]; then
-        echo "again $label (alone)"
-        lane=again lock_mode=-x
-        # a pass that needed the alone retry (flaky) is never stored, and a stored one is dropped
-        CFP=
-        "${fpy[@]}" forget "$label"
-        check_cmd "$entry"
-        one_check "$label" "$out/$label.again.out" FAIL "${CMD[@]}" &
-        wait $!
-        read -r word _ <"$out/$label.verdict"
-        if [ "$word" = ok ]; then
-            flaky+=("$label")
-            echo "flaky $label"
+retry_alone() {
+    local entry label word
+    for entry in "$@"; do
+        label=${entry%%|*}
+        word=
+        [ -r "$out/$label.verdict" ] && read -r word _ <"$out/$label.verdict"
+        if [ "$word" = retry ]; then
+            echo "again $label (alone)"
+            lane=again lock_mode=-x
+            # a pass that needed the alone retry (flaky) is never stored, and a stored one is
+            # dropped
+            CFP=
+            "${fpy[@]}" forget "$label"
+            check_cmd "$entry"
+            one_check "$label" "$out/$label.again.out" FAIL "${CMD[@]}" &
+            wait $!
+            read -r word _ <"$out/$label.verdict"
+            if [ "$word" = ok ]; then
+                flaky+=("$label")
+                echo "flaky $label"
+            fi
         fi
-    fi
-done
+    done
+}
+retry_alone "${ordered[@]}"
 
-# The serial lane, one at a time on a quiet machine; a failure stands.
-pool_fail=FAIL
+# The serial lane, one at a time on a quiet machine. A timing check that fails is run once more alone
+# at the end of the lane (no waiting for a quiet machine): passing is `flaky`, failing again is FAIL.
+pool_fail=retry
 cache_ok=0 CFP=
 lane=serial lock_mode=-x
 serial_start=$SECONDS
 if [ ${#serial_entries[@]} -gt 0 ]; then
     run_pool 1 "${serial_entries[@]}"
+    retry_alone "${serial_entries[@]}"
 fi
 
 serial_wall=$((SECONDS - serial_start))

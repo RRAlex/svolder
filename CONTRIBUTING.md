@@ -82,6 +82,7 @@ variable needs `make docs-env`, which regenerates that file's table from the bui
 | `make web-checks-quick` | after a change to the web page, its styles or templates that leaves the smoke alone | node, chromium, firefox and geckodriver, about 38 minutes (much longer with `WEB_CHECKS_JOBS=1`; `WEB_CHECKS_JOBS` sets how many checks run at once) |
 | `make web-checks` | before merging any change to the web page, and whenever a smoke file changed | node, both browsers, over an hour cold (six checks at a time, `WEB_CHECKS_JOBS` sets it); a check whose inputs did not change is reused (`cached`) |
 | `make web-checks-cold` | before a version is tagged for a release build | the same with nothing reused |
+| `make gate` | the slow checks (tests, preamp lab, TUI harness, computer EQ end to end, web checks) in one run, reusing what cannot have changed | what each check needs; ends with a table of seconds |
 | `make e2e` | after a change to the transport, the session, the scanner, the daemon's reconnect or the simulator | two Bluetooth controllers; not part of `make check` |
 | `make docs-check-merge` | before a merge to main | `python3` |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | before a merge, and after editing a doc comment | nothing |
@@ -98,6 +99,26 @@ gate in depth, and [scripts/web-checks/README.md](scripts/web-checks/README.md) 
 proves which rule.
 
 Run `cargo fmt --all` before committing; `make check` fails on a file it would change.
+
+### What `make gate` reuses
+
+`make gate` runs the checks listed in `scripts/gate/checks.conf`, each with the repository paths its
+result depends on. After a pass it stamps the check in `target/gate-stamps`, keyed by the git tree hashes
+of those paths at `HEAD`, the `rustc` version and the check's own parameters (the lab's `SEED` and
+`RUNS`). A later gate with the same key prints `reused (passed at <commit>, <date>)` and skips the check;
+a commit that touches only other paths reuses it, a commit under a listed path reruns it, and so does a
+`Cargo.lock` or toolchain change. When in doubt it runs the check: it never reuses or stamps a check while its paths have uncommitted
+or untracked changes, when git fails, when the tree changed during the run, after a failure, or when
+a make variable (other than `SEED`, `RUNS`, `GATE_*`), `-i`/`-k`, `T`, `CARGO` or an `SVOLDER_*`,
+`RUSTFLAGS` or `CARGO_BUILD_*` setting could change what runs. `GATE_FRESH=1` (exactly 1) runs
+every check and still stamps a pass. `make test` is keyed on the whole tree and runs as `make check`
+runs it, on a private bus with no BlueZ. The lab's
+fixed run (`SEED=1000 RUNS=5000`) is stamped; `make gate GATE_CHECKS=preamp-lab-fresh` takes a new seed
+every time and is never reused. The web checks keep their own result cache (see
+`scripts/web-checks/README.md`); the gate runs them and counts what that cache reused. The gate ends with a
+table of result (`pass`, `fail`, `reused`) and seconds, appended to `GATE_REPORT` when that is set.
+`GATE_CHECKS='test preamp-lab'` picks the checks. `make check` runs `make gate-test`, the self-test of
+the keys.
 
 ### Temporary files
 

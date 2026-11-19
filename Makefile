@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched paper-shots signal-shots nightdrive-shots e2e host-e2e preamp-lab sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall help-check
 
 ##@ Start
 demo-knobs-check: ## Fail if the env line the demos start with does not run
@@ -135,6 +135,11 @@ speakers-fixtures: deps-build ## Rewrite the synthetic SOFA fixtures and test th
 #: Checks each set's checksum and its conversion.
 speakers-catalogue-check: deps-build ## Fetch every catalogue set (network)
 	@sh scripts/speakers/catalogue-check.sh $(ID)
+
+#: Prints the constants pinned in crates/svolder-host/src/eq/loudness.rs; needs python3 with numpy.
+loudness-fit: ## Fit the loudness stage's constants to ISO 226:2003
+	@python3 -c 'import numpy' 2>/dev/null || { echo "loudness-fit: python3-numpy is not installed; install it with: sudo apt install python3-numpy"; exit 1; }
+	@python3 -I scripts/loudness-fit.py
 
 ##@ Release builds (docker)
 ##@ Clean
@@ -203,6 +208,11 @@ tmp-leak-check: ## Fail if the run left a /tmp/svolder directory behind
 	fi; \
 	echo 'tmp-leak-check: every temporary directory the run made is gone'
 
+#: The key and stamp logic of make gate on a throwaway git repository: same tree reused, a listed
+#: path, a dirty tree or GATE_FRESH=1 rerun, a failure leaves no stamp.
+gate-test: ## Self-test of make gate's reuse keys and stamps
+	@bash scripts/gate/gate-test.sh
+
 #: The base of scripts/tmp-base.sh and scripts/tmp_base.py on planted bases (link, file, foreign
 #: owner, wrong mode), under a scratch directory of its own.
 tmp-base-test: ## Self-test of the /tmp/svolder base helper
@@ -217,7 +227,7 @@ CHECK_TESTS := $(if $(shell command -v dbus-daemon 2>/dev/null),check-tests-priv
 #: tests (once, on a private bus with no BlueZ when dbus-daemon is installed; otherwise on the
 #: system bus, then on a private one), the /tmp/svolder base helper and its leak check, and this
 #: help's own check, and the VU needle's golden file against the engine.
-check: tmp-snapshot tmp-base-test deps-check demo-knobs-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check vu-golden-check $(CHECK_TESTS) tmp-leak-check ## Everything a commit must pass (make help T=check)
+check: tmp-snapshot tmp-base-test gate-test deps-check demo-knobs-check fmt-check clippy safety-tests docs-check license-check spdx-check network-check unit-check workflow-check web-snippets theme-css-check routes-doc-check rate-check-test network-check-test release-notes-test deps-test sim-app-test help-check vu-golden-check $(CHECK_TESTS) tmp-leak-check ## Everything a commit must pass (make help T=check)
 
 license-check: deps-check ## Fail on a licence not compatible with GPL-3.0-or-later
 	CARGO=$(CARGO) python3 scripts/check-licenses.py --self-test
@@ -633,7 +643,8 @@ web-checks: deps-build ## Every web check in Chromium and Firefox
 	@bash scripts/web-checks/run-all.sh
 
 #: The full gate with nothing reused from the result cache: required before a version is tagged for a
-#: release build. The serial lane and the node harnesses run cold in every full gate.
+#: release build. The serial lane (the timing parts of the split smoke checks, nightdrive_timing) and the
+#: node harnesses run cold in every full gate.
 #: WEB_CHECKS_JOBS=<number>   how many checks run side by side (default: from the cores and the CPU pressure)
 web-checks-cold: deps-build ## The full web gate, cold (before a tag)
 	@bash scripts/web-checks/run-all.sh --cold
@@ -663,12 +674,33 @@ web-touched: ## Which web checks a change touches
 e2e: deps-build ## End to end over BlueZ
 	@bash scripts/e2e.sh
 
+#: The slow checks of scripts/gate/checks.conf (test, preamp-lab, tui-harness, host-e2e, web-checks),
+#: each skipped when a stamp says it passed on the same git tree hashes of the paths it depends on, the
+#: same rustc and the same parameters; ends with a table of result and seconds. A dirty tree under a
+#: check's paths, a git failure, a tree that changed mid-run, a failure, or a make variable, T, CARGO
+#: or SVOLDER_* setting that changes what runs never reuse or stamp. Stamps live in target/gate-stamps.
+#: GATE_CHECKS='<names>'   run only these (default: all but preamp-lab-fresh, a new seed each time)
+#: GATE_FRESH=1   run every check (a pass is still stamped)
+#: GATE_REPORT=<file>   append the table to this file
+#: SEED=<number>   the lab's seed (default 1000, the stamped regression run)
+#: RUNS=<number>   the lab's sequences (default 5000)
+gate: deps-build ## Slow checks, reusing a pass on unchanged inputs
+	@GATE_CHECKS='$(GATE_CHECKS)' bash scripts/gate/gate.sh run
+
 #: A private PipeWire and WirePlumber: no sound card, never touches your session.
 host-e2e: deps-build ## The computer EQ end to end on a private PipeWire
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolderd
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder-host --example xf_expect
 	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder-host --example vs_expect
+	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder
 	@bash scripts/host-e2e/run.sh
+
+#: Phases B and C of host-e2e alone (bit-exactness through pipe sinks, and `svolder host check` against it):
+#: about a minute on a quiet machine, exclusive like host-e2e. Prints `host-e2e-bits: PASS` (exit 0) or the
+#: failed checks.
+host-e2e-bits: deps-build ## Bit-exact samples and svolder's words, private PipeWire
+	@CARGO_TARGET_DIR="$(CURDIR)/target" $(CARGO) build -q -p svolder
+	@bash scripts/host-e2e/run.sh bits
 
 #: Random event sequences against a model of PipeWire, each block under fresh and reused node ids.
 #: SEED=<number>   the first sequence's seed (default 1000)
@@ -678,6 +710,17 @@ preamp-lab: deps-build ## Long run of the computer EQ's preamp lab
 	trap 'rm -rf "$$scratch"' EXIT; \
 	SVOLDER_LAB_SEED="$(or $(SEED),1000)" SVOLDER_LAB_RUNS="$(or $(RUNS),5000)" TMPDIR="$$scratch" \
 	  $(CARGO) test --release -p svolder-host --lib -- --ignored --nocapture the_lab_finds_nothing_in_a_long_run
+
+#: Writes every lab seed's outcome (each profile, both models of ids) to OUT, one line each;
+#: SEED, RUNS (400) and THREADS (4) choose the block; TRACE=1 adds each run's trace. Two runs,
+#: before and after a change that must not change what the lab finds, give the same file.
+preamp-lab-outcomes: deps-build ## Each lab seed's outcome, for a before/after diff
+	@test -n "$(OUT)" || { echo "preamp-lab-outcomes: set OUT=<file>" >&2; exit 1; }
+	@. scripts/tmp-base.sh; scratch=$$(svtmp_dir sv) || exit 1; \
+	trap 'rm -rf "$$scratch"' EXIT; \
+	SVOLDER_LAB_OUT="$(abspath $(OUT))" SVOLDER_LAB_SEED="$(or $(SEED),1000)" SVOLDER_LAB_RUNS="$(or $(RUNS),400)" \
+	  SVOLDER_LAB_THREADS="$(or $(THREADS),4)" $(if $(TRACE),SVOLDER_LAB_TRACE=1) TMPDIR="$$scratch" \
+	  $(CARGO) test --release -p svolder-host --lib -- --ignored --nocapture --exact eq::lab::tests::lab_outcomes
 
 ##@ Release builds (docker)
 docker: ## Build the container image (skips without Docker)

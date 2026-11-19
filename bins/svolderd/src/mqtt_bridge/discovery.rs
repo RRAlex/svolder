@@ -122,6 +122,8 @@ impl BridgeTask {
             return;
         };
         published.watcher.abort();
+        // The computer's path is judged against the DACs that are published.
+        self.changed(svolder_mqtt::computer::UNIT);
         for topic in published
             .configs
             .keys()

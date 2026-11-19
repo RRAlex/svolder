@@ -21,6 +21,7 @@ use super::auth::{self, MAX_BODY};
 use super::codes::Paired;
 use super::model;
 use super::{Viewer, Web, api, events, guest, pages, themes, viewer};
+use crate::activity::Counted;
 use crate::locks::locked;
 use crate::log;
 
@@ -79,11 +80,29 @@ async fn manifest() -> Response {
 /// `no-store` unless the answer chose its own caching, and the CSP on HTML.
 async fn guard(State(web): State<Web>, request: Request, next: Next) -> Response {
     let mut response = match admitted(&web, request).await {
-        Ok(request) => next.run(request).await,
+        Ok(mut request) => {
+            count(&web, &mut request);
+            next.run(request).await
+        }
         Err(refused) => refused,
     };
     secure(response.headers_mut());
     response
+}
+
+/// Count the request's connection, if the request is one the server serves as signed in: with
+/// `auth = "none"` every request that got past the `Host` check is, and with a token the ones
+/// carrying this server's valid cookie are. A guest (a visitor without a sign-in who is let read)
+/// has passed no token check, nor has a request with a wrong, ended or absent cookie: none of
+/// them is counted. See [`crate::activity`].
+fn count(web: &Web, request: &mut Request) {
+    // Taken out, so no handler holds the connection's handle past the connection.
+    let Some(connection) = request.extensions_mut().remove::<Counted>() else {
+        return;
+    };
+    if !connection.passed() && viewer(web, request.headers()) == Some(Viewer::Signed) {
+        connection.pass();
+    }
 }
 
 /// `request`, when it may go on: its `Host` is one the server answers to, and a POST names an

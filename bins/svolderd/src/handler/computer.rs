@@ -203,7 +203,7 @@ impl Daemon {
         reason = "the refusal is the answer the socket sends as it is"
     )]
     async fn save_computer_curve(&self, name: &str) -> Result<(), Response> {
-        let view = self.host.view_now().await.eq.unwrap_or_default();
+        let view = self.host.eq_now().unwrap_or_default();
         let filters = view
             .points
             .iter()

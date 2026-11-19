@@ -33,7 +33,7 @@ fn graph_height(app: &App, width: u16, height: u16) -> u16 {
 }
 
 #[test]
-fn folded_the_section_is_one_line_between_the_graph_and_the_points() {
+fn folded_the_section_is_one_line_under_the_points() {
     for (width, height) in [(80, 24), (120, 36)] {
         let off = rows(&app_on(Screen::Tone, false, "bauer"), width, height);
         let line = row_with(&off, "Crossfeed").expect("the line");
@@ -46,9 +46,9 @@ fn folded_the_section_is_one_line_between_the_graph_and_the_points() {
             ),
             "{line}"
         );
-        // between the Response block's bottom border and the Points block's top
+        // the chain's order: the Response and Points blocks (the EQ), then the Crossfeed line
         let at = |needle: &str| on.iter().position(|r| r.contains(needle)).unwrap();
-        assert!(at("Response") < at("Crossfeed") && at("Crossfeed") < at("Points"));
+        assert!(at("Response") < at("Points") && at("Points") < at("Crossfeed"));
         assert!(!on.iter().any(|r| r.contains("Level")), "folded");
     }
 }

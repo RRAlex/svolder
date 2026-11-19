@@ -248,6 +248,8 @@ fn now_playing_line(app: &App, theme: &Theme, width: usize) -> Line<'static> {
     let named = !identity.is_empty() && said + IDENTITY_GAP + cells(identity) <= room;
     let shown = match said <= room {
         true => words,
+        // With scrolling off the words are cut with `…` and stay still.
+        false if !app.tui.scroll_long_lines => super::cut_cells(&words, room),
         false => cell_window(&words, app.host.marquee.at(said - room), room),
     };
     let shown = match shown.is_empty() {

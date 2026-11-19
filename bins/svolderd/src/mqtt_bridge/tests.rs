@@ -1408,8 +1408,12 @@ type CrossfeedCall = (Option<bool>, Option<(String, String)>);
 /// What a switch was told of the virtual speakers: on or off, and a set's id.
 type SpeakersCall = (Option<bool>, Option<String>);
 
+/// What a switch was told of the loudness: on or off, and a strength in percent.
+type LoudnessCall = (Option<bool>, Option<f64>);
+
 /// A switch that records what it was told and answers as `answer` says.
 struct RecordingSwitch {
+    loudnesses: std::sync::Mutex<Vec<LoudnessCall>>,
     calls: std::sync::Mutex<Vec<bool>>,
     crossfeeds: std::sync::Mutex<Vec<CrossfeedCall>>,
     speakers: std::sync::Mutex<Vec<SpeakersCall>>,
@@ -1434,6 +1438,11 @@ impl crate::host::EqSwitch for RecordingSwitch {
 
     async fn speakers(&self, on: Option<bool>, set: Option<String>) -> Result<(), String> {
         self.speakers.lock().unwrap().push((on, set));
+        self.answer.clone()
+    }
+
+    async fn loudness(&self, on: Option<bool>, strength_pct: Option<f64>) -> Result<(), String> {
+        self.loudnesses.lock().unwrap().push((on, strength_pct));
         self.answer.clone()
     }
 }
@@ -1484,6 +1493,7 @@ async fn with_computer_at(
     task.config.commands = true;
     let (tx, rx) = watch::channel(view);
     let switch = Arc::new(RecordingSwitch {
+        loudnesses: std::sync::Mutex::new(Vec::new()),
         calls: std::sync::Mutex::new(Vec::new()),
         crossfeeds: std::sync::Mutex::new(Vec::new()),
         speakers: std::sync::Mutex::new(Vec::new()),
@@ -1492,6 +1502,7 @@ async fn with_computer_at(
     task.follow_computer(ComputerLink {
         view: rx,
         switch: switch.clone(),
+        slow: None,
     });
     (task, tx, switch)
 }
@@ -1569,7 +1580,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.state, Some(("ON", "Warm".to_string())));
     assert_eq!(published.available, Some(true));
-    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.configs.len(), 4);
 
     tx.send_replace(computer_view(true, Some("custom"), -3.0));
     task.changed("computer");
@@ -1595,7 +1606,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.available, Some(false));
-    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.configs.len(), 4);
 
     // Host off: everything is taken down.
     tx.send_replace(svolder_ipc::host::HostView::default());
@@ -1637,7 +1648,7 @@ async fn the_crossfeed_is_announced_and_its_states_follow_the_view() {
     .await;
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
-    assert_eq!(published.configs.len(), 4);
+    assert_eq!(published.configs.len(), 6);
     assert!(
         published
             .configs
@@ -1661,7 +1672,7 @@ async fn the_crossfeed_is_announced_and_its_states_follow_the_view() {
     task.changed("computer");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
-    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.configs.len(), 4);
     assert_eq!(published.crossfeed_state, None);
 }
 
@@ -1837,7 +1848,7 @@ async fn a_computer_not_yet_reported_is_not_swept_before_it_is() {
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert!(published.swept);
-    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.configs.len(), 4);
     let [switch, preset, binary, crossfeed] = left_over();
     let seen = watcher.collect(Duration::from_millis(700)).await;
     assert!(
@@ -2013,7 +2024,7 @@ async fn the_speakers_are_announced_and_their_states_follow_the_view() {
         with_computer(speakers_computer_view(true, Some("a")), Ok(())).await;
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
-    assert_eq!(published.configs.len(), 4);
+    assert_eq!(published.configs.len(), 6);
     assert!(
         published
             .configs
@@ -2046,7 +2057,7 @@ async fn the_speakers_are_announced_and_their_states_follow_the_view() {
     task.changed("computer");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
-    assert_eq!(published.configs.len(), 2);
+    assert_eq!(published.configs.len(), 4);
     assert_eq!(published.speakers_state, None);
 }
 
@@ -2235,4 +2246,605 @@ async fn a_retained_speakers_command_and_one_with_commands_off_do_nothing() {
     task.message("svolder/computer/computer_speakers/set", b"ON", false);
     settle(&mut task).await;
     assert!(speakers_calls(&switch).is_empty());
+}
+
+/// A computer view whose controller serves loudness, as `on` and `strength` say.
+fn loudness_computer_view(on: bool, strength: f64) -> svolder_ipc::host::HostView {
+    let mut view = computer_view(false, None, 0.0);
+    view.eq.as_mut().unwrap().loudness = Some(svolder_host::eq::LoudnessView {
+        on,
+        strength_pct: strength,
+        ..Default::default()
+    });
+    view
+}
+
+fn loudness_calls(switch: &RecordingSwitch) -> Vec<LoudnessCall> {
+    switch.loudnesses.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn the_loudness_is_announced_and_its_states_follow_the_view() {
+    let (mut task, tx, _switch) = with_computer(loudness_computer_view(true, 35.0), Ok(())).await;
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 6);
+    assert!(
+        published
+            .configs
+            .contains_key("homeassistant/switch/svolder_computer/computer_loudness/config")
+    );
+    assert!(
+        published.configs.contains_key(
+            "homeassistant/number/svolder_computer/computer_loudness_strength/config"
+        )
+    );
+    assert_eq!(published.loudness_state, Some(("ON", "35".to_string())));
+
+    tx.send_replace(loudness_computer_view(false, 50.0));
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(
+        task.computer.as_ref().unwrap().loudness_state,
+        Some(("OFF", "50".to_string()))
+    );
+
+    // A view without loudness takes its entities down, not the EQ's.
+    tx.send_replace(computer_view(false, None, 0.0));
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 4);
+    assert_eq!(published.loudness_state, None);
+}
+
+#[tokio::test]
+async fn host_audio_off_clears_the_loudness_with_the_computer() {
+    let (mut task, tx, _switch) = with_computer(loudness_computer_view(true, 35.0), Ok(())).await;
+    task.publish_computer();
+    assert!(task.computer.as_ref().unwrap().loudness_state.is_some());
+    tx.send_replace(svolder_ipc::host::HostView::default());
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert!(published.configs.is_empty() && published.loudness_state.is_none());
+}
+
+#[tokio::test]
+async fn loudness_commands_reach_the_controller_as_one_change_each() {
+    let (mut task, _tx, switch) = with_computer(loudness_computer_view(false, 50.0), Ok(())).await;
+    task.message("svolder/computer/computer_loudness/set", b"ON", false);
+    task.message("svolder/computer/computer_loudness/set", b" off ", false);
+    task.message(
+        "svolder/computer/computer_loudness_strength/set",
+        b"35",
+        false,
+    );
+    task.message(
+        "svolder/computer/computer_loudness_strength/set",
+        b" 37.0 ",
+        false,
+    );
+    settle(&mut task).await;
+    assert_eq!(
+        loudness_calls(&switch),
+        [
+            (Some(true), None),
+            (Some(false), None),
+            (None, Some(35.0)),
+            (None, Some(37.0)),
+        ]
+    );
+    // Nothing else of the computer was touched.
+    assert!(computer_calls(&switch).is_empty());
+    assert!(crossfeed_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn bad_loudness_commands_change_nothing() {
+    let (mut task, _tx, switch) = with_computer(loudness_computer_view(true, 35.0), Ok(())).await;
+    for body in [&b"loud"[..], b"", b"NaN", &[0xff]] {
+        task.message(
+            "svolder/computer/computer_loudness_strength/set",
+            body,
+            false,
+        );
+    }
+    task.message("svolder/computer/computer_loudness/set", b"toggle", false);
+    settle(&mut task).await;
+    assert!(loudness_calls(&switch).is_empty());
+}
+
+#[tokio::test]
+async fn a_loudness_command_while_loudness_cannot_follow_the_volume_still_reaches_the_controller() {
+    let mut view = loudness_computer_view(true, 50.0);
+    view.eq
+        .as_mut()
+        .unwrap()
+        .loudness
+        .as_mut()
+        .unwrap()
+        .unavailable = Some("computer controls unavailable: x".into());
+    let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
+    task.message("svolder/computer/computer_loudness/set", b"OFF", false);
+    task.message(
+        "svolder/computer/computer_loudness_strength/set",
+        b"35",
+        false,
+    );
+    settle(&mut task).await;
+    assert_eq!(
+        loudness_calls(&switch),
+        [(Some(false), None), (None, Some(35.0))]
+    );
+}
+
+#[tokio::test]
+async fn a_loudness_command_the_host_cannot_take_does_nothing() {
+    // No loudness in the view, host audio off, no commands, and a retained command: none
+    // reaches the controller.
+    for view in [
+        computer_view(false, None, 0.0),
+        svolder_ipc::host::HostView::default(),
+    ] {
+        let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
+        task.message("svolder/computer/computer_loudness/set", b"ON", false);
+        task.message(
+            "svolder/computer/computer_loudness_strength/set",
+            b"35",
+            false,
+        );
+        settle(&mut task).await;
+        assert!(loudness_calls(&switch).is_empty());
+    }
+    let (mut task, _tx, switch) = with_computer(loudness_computer_view(false, 50.0), Ok(())).await;
+    task.message("svolder/computer/computer_loudness/set", b"ON", true);
+    task.message(
+        "svolder/computer/computer_loudness_strength/set",
+        b"35",
+        true,
+    );
+    task.config.commands = false;
+    task.message("svolder/computer/computer_loudness/set", b"ON", false);
+    settle(&mut task).await;
+    assert!(loudness_calls(&switch).is_empty());
+    assert!(
+        task.retained_commands
+            .contains("svolder/computer/computer_loudness_strength/set")
+    );
+}
+
+#[tokio::test]
+async fn a_refused_loudness_command_is_followed_by_the_views_state() {
+    let (mut task, _tx, switch) =
+        with_computer(loudness_computer_view(false, 50.0), Err("no".into())).await;
+    task.publish_computer();
+    task.message("svolder/computer/computer_loudness/set", b"ON", false);
+    settle(&mut task).await;
+    assert_eq!(loudness_calls(&switch), [(Some(true), None)]);
+    task.publish_computer();
+    assert_eq!(
+        task.computer.as_ref().unwrap().loudness_state,
+        Some(("OFF", "50".to_string()))
+    );
+}
+
+/// A route on a sink named `product` (a Schiit one when `schiit`), the player's stream at
+/// `player_hz`, with `setup` on it.
+fn path_route(
+    product: &str,
+    schiit: bool,
+    player_hz: u32,
+    setup: Option<svolder_host::SetupFacts>,
+) -> svolder_host::RouteFacts {
+    use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
+    RouteFacts {
+        sink: Some(SinkFacts {
+            name: "alsa_output.test".into(),
+            description: product.into(),
+            rate_hz: Some(48_000),
+            format: Some("S32LE".into()),
+            volume_milli: Some(1000),
+            muted: false,
+            usb_vendor_id: schiit.then_some(svolder_ipc::host::SCHIIT_VENDOR_ID),
+            usb_product: schiit.then(|| product.to_string()),
+        }),
+        player: Some(StreamFacts {
+            rate_hz: Some(player_hz),
+            format: Some("S32LE".into()),
+            volume_milli: Some(1000),
+            muted: false,
+        }),
+        player_match: PlayerMatch::Pid,
+        others_mixing: 0,
+        host_eq: false,
+        stages: None,
+        setup,
+    }
+}
+
+/// The config facts of a sink that lets every line through, with a filter in the sink when
+/// `filter` is set.
+fn path_setup(filter: bool) -> svolder_host::SetupFacts {
+    use svolder_host::{AlsaFacts, ClockFacts, Dither, Layout, Rates, SetupFacts, SinkOffer};
+    let stereo = Layout {
+        channels: 2,
+        positions: vec!["FL".into(), "FR".into()],
+    };
+    SetupFacts {
+        offer: Some(SinkOffer {
+            formats: vec!["S32LE".into(), "S24LE".into(), "S16LE".into()],
+            rates: Some(Rates::Range {
+                min: 44_100,
+                max: 384_000,
+            }),
+            layout: Some(stereo.clone()),
+        }),
+        clock: Some(ClockFacts {
+            rate: Some(48_000),
+            allowed_rates: vec![
+                44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+            ],
+            force_rate: None,
+        }),
+        sink_layout: Some(stereo.clone()),
+        stream_layout: Some(stereo),
+        dither: Some(Dither {
+            method: "none".into(),
+            noise: 0,
+        }),
+        sink_filter: Some(filter),
+        stream_filter: Some(false),
+        alsa: Some(AlsaFacts {
+            path: Some("hw:Audio".into()),
+            ..AlsaFacts::default()
+        }),
+        ..SetupFacts::default()
+    }
+}
+
+/// A computer view whose host reports `route`, with the EQ view every computer entity needs.
+fn path_view(route: Option<svolder_host::RouteFacts>) -> svolder_ipc::host::HostView {
+    svolder_ipc::host::HostView {
+        route,
+        ..computer_view(false, None, 0.0)
+    }
+}
+
+/// A task that follows a computer whose view is `view`, beside a Gungnir 2 reading USB 1 at
+/// 48 kHz, holding the route reads through `slow` when it is given.
+async fn with_dac_computer(
+    view: svolder_ipc::host::HostView,
+    slow: Option<crate::host::SlowHolds>,
+) -> (
+    BridgeTask,
+    watch::Sender<svolder_ipc::host::HostView>,
+    Stand,
+) {
+    with_dac_computer_at(1, view, slow).await
+}
+
+/// [`with_dac_computer`] with the task's client connecting to the broker on `port`.
+async fn with_dac_computer_at(
+    port: u16,
+    view: svolder_ipc::host::HostView,
+    slow: Option<crate::host::SlowHolds>,
+) -> (
+    BridgeTask,
+    watch::Sender<svolder_ipc::host::HostView>,
+    Stand,
+) {
+    let (mut task, stand) = published_stand_at("gungnir2-v2", port).await;
+    let profile = svolder_profiles::Registry::builtin()
+        .unwrap()
+        .get("gungnir2-v2")
+        .unwrap()
+        .clone();
+    stand.feed.send_modify(|feed| {
+        feed.readings = vec![
+            crate::web::view::test_support::read(&profile, "input", "USB 1"),
+            crate::web::view::test_support::read(&profile, "sample_rate", "2"),
+            crate::web::view::test_support::read(&profile, "usb1_connected", "true"),
+            crate::web::view::test_support::read(&profile, "usb2_connected", "false"),
+        ];
+    });
+    let (tx, rx) = watch::channel(view);
+    let switch = Arc::new(RecordingSwitch {
+        loudnesses: std::sync::Mutex::new(Vec::new()),
+        calls: std::sync::Mutex::new(Vec::new()),
+        crossfeeds: std::sync::Mutex::new(Vec::new()),
+        speakers: std::sync::Mutex::new(Vec::new()),
+        answer: Ok(()),
+    });
+    task.follow_computer(ComputerLink {
+        view: rx,
+        switch,
+        slow,
+    });
+    (task, tx, stand)
+}
+
+/// What the computer last published for the path sensor and the config sensor, as attribute
+/// JSON.
+fn path_said(task: &BridgeTask) -> (&'static str, serde_json::Value) {
+    let said = task.computer.as_ref().unwrap().path_state.clone().unwrap();
+    (said.state, serde_json::from_str(&said.attributes).unwrap())
+}
+
+fn config_said(task: &BridgeTask) -> (Option<&'static str>, serde_json::Value) {
+    let said = task
+        .computer
+        .as_ref()
+        .unwrap()
+        .config_state
+        .clone()
+        .unwrap();
+    (said.state, serde_json::from_str(&said.attributes).unwrap())
+}
+
+#[tokio::test]
+async fn an_untouched_path_to_the_dac_reads_untouched_with_a_config_that_is_off() {
+    let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
+    let (mut task, _tx, _stand) = with_dac_computer(path_view(Some(route)), None).await;
+    task.publish_computer();
+    let (state, attributes) = path_said(&task);
+    assert_eq!(state, "untouched");
+    assert_eq!(attributes["dac"], "Gungnir 2");
+    assert_eq!(attributes["words"][0], "untouched");
+    assert!(
+        attributes["sentence"]
+            .as_str()
+            .unwrap()
+            .starts_with("untouched")
+    );
+    let (problem, attributes) = config_said(&task);
+    assert_eq!(problem, Some("OFF"));
+    assert_eq!(
+        attributes["summary"],
+        "PipeWire config lets it through untouched"
+    );
+    assert_eq!(attributes["lines"].as_array().unwrap().len(), 7);
+    let published = task.computer.as_ref().unwrap();
+    assert_eq!(published.configs.len(), 4);
+    assert!(
+        published
+            .configs
+            .contains_key("homeassistant/sensor/svolder_computer/computer_path/config")
+    );
+    assert!(
+        published
+            .configs
+            .contains_key("homeassistant/binary_sensor/svolder_computer/computer_config/config")
+    );
+}
+
+#[tokio::test]
+async fn a_changed_path_and_a_failing_config_line_read_changed_and_on() {
+    // The player's stream is 44.1 kHz into a 48 kHz sink: resampled. A filter sits in the sink.
+    let route = path_route("Schiit Gungnir 2", true, 44_100, Some(path_setup(true)));
+    let (mut task, _tx, _stand) = with_dac_computer(path_view(Some(route)), None).await;
+    task.publish_computer();
+    let (state, attributes) = path_said(&task);
+    assert_eq!(state, "changed");
+    assert_eq!(attributes["dac"], "Gungnir 2");
+    assert!(!attributes["words"].as_array().unwrap().is_empty());
+    let (problem, attributes) = config_said(&task);
+    assert_eq!(problem, Some("ON"));
+    let filter = attributes["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| line["key"] == "filter")
+        .unwrap();
+    assert_eq!(filter["outcome"], "fail");
+    assert_eq!(attributes["outcome"], "changes");
+    assert_eq!(attributes["limit"], svolder_ipc::host::SETUP_LIMIT);
+}
+
+#[tokio::test]
+async fn a_sink_that_is_no_configured_dac_reads_not_this_dac_and_names_the_sink() {
+    let route = path_route("DELL S2721QS", false, 48_000, Some(path_setup(false)));
+    let (mut task, _tx, _stand) = with_dac_computer(path_view(Some(route)), None).await;
+    task.publish_computer();
+    let (state, attributes) = path_said(&task);
+    assert_eq!(state, "not_this_dac");
+    assert_eq!(attributes["words"], serde_json::json!(["→ DELL S2721QS"]));
+    assert_eq!(attributes["sentence"], "the computer plays to DELL S2721QS");
+    assert!(attributes["dac"].is_null());
+    let (problem, attributes) = config_said(&task);
+    assert_eq!(problem, None, "the config of another sink is not judged");
+    assert_eq!(attributes, serde_json::json!({}));
+}
+
+/// The path sensor's states are the judge's verdict keys and `not_read`, no other word.
+#[test]
+fn the_path_states_are_the_judges_keys_and_not_read() {
+    let mut keys = svolder_ipc::host::Verdict::KEYS.to_vec();
+    keys.push("not_read");
+    assert_eq!(keys, svolder_mqtt::computer::path::STATES);
+}
+
+#[tokio::test]
+async fn an_unread_route_or_config_is_unknown_never_clean() {
+    let (mut task, tx, _stand) = with_dac_computer(path_view(None), None).await;
+    task.publish_computer();
+    let (state, attributes) = path_said(&task);
+    assert_eq!(state, "not_read");
+    assert_eq!(attributes["words"], serde_json::json!(["route not read"]));
+    assert_eq!(config_said(&task).0, None);
+
+    // A route whose config was not sent (an older daemon): the path is judged, the config is not.
+    tx.send_replace(path_view(Some(path_route(
+        "Schiit Gungnir 2",
+        true,
+        48_000,
+        None,
+    ))));
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(path_said(&task).0, "untouched");
+    let (problem, attributes) = config_said(&task);
+    assert_eq!(problem, None);
+    assert_eq!(
+        attributes["summary"],
+        "PipeWire config not read (svolderd's version differs)"
+    );
+}
+
+#[tokio::test]
+async fn the_path_follows_the_route_and_the_dac_and_goes_with_the_computer() {
+    let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
+    let (mut task, tx, stand) = with_dac_computer(path_view(Some(route.clone())), None).await;
+    task.publish_computer();
+    assert_eq!(path_said(&task).0, "untouched");
+
+    // The DAC's sample rate step moves to 44.1 kHz: the device changed, so the computer is marked.
+    let profile = svolder_profiles::Registry::builtin()
+        .unwrap()
+        .get("gungnir2-v2")
+        .unwrap()
+        .clone();
+    stand.feed.send_modify(|feed| {
+        feed.readings
+            .retain(|m| m.id != profile.control_by_key("sample_rate").unwrap().id);
+        feed.readings.push(crate::web::view::test_support::read(
+            &profile,
+            "sample_rate",
+            "1",
+        ));
+    });
+    task.computer.as_mut().unwrap().dirty = false;
+    task.changed(UNIT);
+    assert!(
+        task.computer.as_ref().unwrap().dirty,
+        "a DAC reading moves the path"
+    );
+    task.publish_computer();
+    assert_eq!(path_said(&task).0, "changed");
+
+    // Host audio off: both entities and their states are taken down with the computer.
+    tx.send_replace(svolder_ipc::host::HostView::default());
+    task.changed("computer");
+    task.publish_computer();
+    let published = task.computer.as_ref().unwrap();
+    assert!(published.path_state.is_none() && published.config_state.is_none());
+    assert!(published.configs.is_empty());
+}
+
+#[tokio::test]
+async fn the_slow_hold_is_kept_while_connected_and_published_and_dropped_otherwise() {
+    use crate::host::{HostMode, HostService};
+    use svolder_ipc::config::HostConfig;
+    let service = HostService::start(&HostConfig::default(), HostMode::Off);
+    let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
+    let (mut task, tx, _stand) =
+        with_dac_computer(path_view(Some(route)), Some(service.slow_holds())).await;
+    task.publish_computer();
+    assert_eq!(
+        service.slow_count(),
+        0,
+        "no hold before the broker is reached"
+    );
+
+    task.computer_link(true);
+    task.publish_computer();
+    assert_eq!(service.slow_count(), 1, "connected and published");
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(
+        service.slow_count(),
+        1,
+        "one hold, however often it publishes"
+    );
+
+    task.computer_link(false);
+    assert_eq!(service.slow_count(), 0, "a lost link lets go at once");
+    task.computer_link(true);
+    task.publish_computer();
+    assert_eq!(service.slow_count(), 1);
+
+    tx.send_replace(svolder_ipc::host::HostView::default());
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(service.slow_count(), 0, "nothing published, nothing held");
+
+    tx.send_replace(path_view(Some(path_route(
+        "Schiit Gungnir 2",
+        true,
+        48_000,
+        None,
+    ))));
+    task.changed("computer");
+    task.publish_computer();
+    assert_eq!(service.slow_count(), 1);
+    task.computer_farewell();
+    assert_eq!(service.slow_count(), 0, "a stop lets go");
+}
+
+/// A config that goes from judged to unjudged resets Home Assistant's sensor to unknown: the
+/// payload sent is `None`, never an empty one (which it ignores, keeping the last state).
+#[cfg(feature = "broker-tests")]
+#[tokio::test]
+async fn a_config_that_stops_being_judged_sends_the_unknown_payload() {
+    let broker = broker::TestBroker::start();
+    let mut watcher = broker::Watcher::connect(broker.port, &["svolder/computer/#"]).await;
+    let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
+    let (mut task, tx, _stand) =
+        with_dac_computer_at(broker.port, path_view(Some(route)), None).await;
+    task.publish_computer();
+    let topic = "svolder/computer/computer_config/state";
+    watcher
+        .wait_for_each(&[(topic, "OFF")], Duration::from_secs(5))
+        .await;
+    // The sink becomes one that is no configured DAC.
+    tx.send_replace(path_view(Some(path_route(
+        "DELL S2721QS",
+        false,
+        48_000,
+        Some(path_setup(false)),
+    ))));
+    task.changed("computer");
+    task.publish_computer();
+    let seen = watcher
+        .wait_for_each(&[(topic, "None")], Duration::from_secs(5))
+        .await;
+    assert_eq!(seen.len(), 1, "the unknown payload arrives: {seen:#?}");
+    let after = watcher.collect(Duration::from_millis(300)).await;
+    assert!(
+        after
+            .iter()
+            .all(|s| s.topic != topic || !s.payload.is_empty()),
+        "an empty payload is ignored by Home Assistant: {after:#?}"
+    );
+}
+
+#[tokio::test]
+async fn the_slow_hold_is_kept_with_discovery_off_too() {
+    use crate::host::{HostMode, HostService};
+    use svolder_ipc::config::HostConfig;
+    let service = HostService::start(&HostConfig::default(), HostMode::Off);
+    let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
+    let (mut task, _tx, _stand) =
+        with_dac_computer(path_view(Some(route)), Some(service.slow_holds())).await;
+    task.config.discovery_prefix = String::new();
+    task.computer_link(true);
+    task.publish_computer();
+    assert!(task.computer.as_ref().unwrap().configs.is_empty());
+    assert_eq!(path_said(&task).0, "untouched", "the state is published");
+    assert_eq!(service.slow_count(), 1, "so the route is read for it");
+}
+
+#[tokio::test]
+async fn forgetting_the_dac_marks_the_computer_for_a_new_judgement() {
+    let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
+    let (mut task, _tx, _stand) = with_dac_computer(path_view(Some(route)), None).await;
+    task.publish_computer();
+    assert_eq!(path_said(&task).1["dac"], "Gungnir 2");
+    assert!(!task.computer.as_ref().unwrap().dirty);
+    task.forget(UNIT);
+    assert!(task.computer.as_ref().unwrap().dirty);
+    task.publish_computer();
+    let (state, attributes) = path_said(&task);
+    assert_eq!(state, "not_this_dac");
+    assert!(attributes["dac"].is_null());
 }

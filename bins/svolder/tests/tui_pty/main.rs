@@ -12,6 +12,8 @@ mod pty;
 mod tap;
 
 mod cases;
+mod config_box;
 mod crossfeed;
+mod loudness;
 mod speakers;
 mod vu;

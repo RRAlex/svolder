@@ -52,11 +52,12 @@ inside the correction format's ranges plays as written and an edit of one field 
 alone; one outside them is refused.
 
 **The preamp is automatic.** It is the lower of a preset's stated preamp and minus the curve's peak,
-sent in the same call as every live update, so the signal never passes unity, mid-drag included: a
-falling preamp goes before the slots and a rising one after. What is measured and refused, the EQ
-turned off by a rate change and an older svolder's chain:
-[host-control-preamp.md](host-control-preamp.md). The line `7 of 16 points · preamp −6.0 dB` says
-how much quieter a boost makes the signal. A hand edit of a preset names it `custom`.
+sent in the same call as every live update, so no whole update passes unity, mid-drag included
+(PipeWire's half-applied update can, rarely; see the limit below): a falling preamp goes before the
+slots and a rising one after. What is measured and refused, the EQ turned off by a rate change and
+an older svolder's chain: [host-control-preamp.md](host-control-preamp.md). The line
+`7 of 16 points · preamp −6.0 dB` says how much quieter a boost makes the signal. A hand edit of a
+preset names it `custom`.
 
 ## The controller
 
@@ -105,10 +106,10 @@ slot renumbering ends the drag with no write. For 2 s after a hold ends a client
 daemon sent before the release and a re-sort reaches it with the next read.
 
 **What the path says.** With a live chain in the path the path changes the sound, and it names the
-stages the daemon's EQ view says play: `host EQ on`, `crossfeed on`, `virtual speakers on`, or
-`EQ pass-through` for the flat chain kept while a stream plays. `RouteFacts.stages` carries them;
-when the view cannot vouch for them (controls unavailable, an older svolder's chain) there is none
-and the path says `host EQ on`.
+stages the daemon's EQ view says play: `host EQ on`, `loudness on`, `crossfeed on`,
+`virtual speakers on`, or `EQ pass-through` for the flat chain kept while a stream plays.
+`RouteFacts.stages` carries them; when the view cannot vouch for them (controls unavailable, an
+older svolder's chain) there is none and the path says `host EQ on`.
 
 **The fake.** `SVOLDER_FAKE_HOST_EQ` and `SVOLDER_FAKE_COMPUTER_VOLUME` give the simulated daemon a
 computer side whose route follows the fake volume and mute; `make demo-computer` runs it.
@@ -224,22 +225,24 @@ Night drive): see [the second page](host-control-themes.md).
 
 ## MCP
 
-`get_host` reads the computer (volume, mute, the EQ and its points, the player, the crossfeed and
-the virtual speakers). `set_host_volume` takes a whole percent from 0 to 100; above 100 is refused
-(the cap is 100 %, not `max_volume_db`). A rise of more than 6 dB on the volume's cubic scale asks
-the client, counted from the lowest level this server saw, so a staircase of small steps asks at the
-sum; a level not read yet counts as 1 %. `host_mute` unmuting asks, muting does not. `set_host_eq`
-takes exactly one of a preset name or `off`; a built-in needs a device with a tone control, a saved
-preset needs none, and a preset on a device too asks the client, repeated with `confirm`.
-`set_host_crossfeed` ([crossfeed](crossfeed.md)) and [`set_host_speakers`](virtual-speakers.md) each
-answer with both, since one on turns the other off. The writes are listed only while `[mcp] writes`
-is on.
+`get_host` reads the computer (volume, mute, the EQ and its points, the player, the loudness, the
+crossfeed and the virtual speakers). `set_host_volume` takes a whole percent from 0 to 100; above
+100 is refused (the cap is 100 %, not `max_volume_db`). A rise of more than 6 dB on the volume's
+cubic scale asks the client, counted from the lowest level this server saw, so a staircase of small
+steps asks at the sum; a level not read yet counts as 1 %. `host_mute` unmuting asks, muting does
+not. `set_host_eq` takes exactly one of a preset name or `off`; a built-in needs a device with a
+tone control, a saved preset needs none, and a preset on a device too asks the client, repeated with
+`confirm`. `set_host_loudness` ([loudness](loudness.md)) takes the strength and the reference and
+never asks, since it only cuts. `set_host_crossfeed` ([crossfeed](crossfeed.md)) and
+[`set_host_speakers`](virtual-speakers.md) each answer with both, since one on turns the other off.
+The writes are listed only while `[mcp] writes` is on.
 
 ## MQTT
 
 Home Assistant gets one device, `This computer`: a switch (a binary sensor with commands off) that
 turns the computer EQ on with its kept points and off, and a sensor naming the applied preset
-(`custom`, or nothing); and a crossfeed and a speakers switch and select. No computer volume, mute
+(`custom`, or nothing); a loudness switch and strength number; and a crossfeed and a speakers
+switch and select. No computer volume, mute
 or point is offered; HA's own media integrations do volume better. A retained command is never acted
 on; ON with nothing kept (the first point flat, no preset) logs that and stays off. With the
 computer not served nothing is announced and the retained entities are cleared at the bridge's
@@ -273,6 +276,26 @@ again if the state says on. Outside Docker the chain stays a user unit, or a det
 
 ## Known limits
 
+- **A live update can play a half-applied filter for one quantum.** PipeWire's filter chain applies
+  a live control update one value at a time, and nothing stops the audio thread from playing in
+  between. Rarely (measured about 1 in 6,000 risky updates on PipeWire 1.6.2; at ten glide ends a
+  day, roughly once every year or two) one quantum, about 1/50 s at 1024 samples and 48 kHz (a
+  smaller quantum makes it likelier), plays a half-applied filter. A small step is harmless (a
+  loudness glide step: about +0.3 dB). These are loud:
+  - the daemon stopping gracefully, a TUI with no daemon quitting, a reconfigure that halts the
+    computer's side, or loudness turned off, while loudness plays at a depth: +31 to +43 dB in the
+    bass measured, up to +50 dB worked out;
+  - the end of a loudness glide back to flat: +29 dB in the bass measured;
+  - adding or removing a computer EQ point, a live preset recall that changes the number of points,
+    the EQ turned on or off live: an unstable filter or full scale measured;
+  - dragging an existing point: up to about +17 dB worked out, not measured;
+  - switching the virtual speakers or crossfeed: up to about 6 dB worked out.
+
+  After a bad quantum the chain recovers by itself. Live edits of the computer EQ have had this
+  since they began (0.35), so v0.36.7 has it. svolder cannot close it without giving up live updates
+  or a much larger redesign; the fix belongs in PipeWire. See
+  [host-control-preamp.md](host-control-preamp.md#what-the-lab-cannot-see) and
+  [known-issues.md](../known-issues.md).
 - **A sample-rate change leaves the sound up to about 2 s shifted, never over unity.** The chain is
   rebuilt with the coefficients it was applied with until the controller reads the rate (about a
   second) and sends every slot again. After a curve was softened by hand the level stays at the

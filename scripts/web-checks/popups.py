@@ -624,8 +624,8 @@ def guest_devices(b, theme):
     time.sleep(0.3)
     rows = b.page("[...document.querySelectorAll('#fx-menu [id^=\"menu-popup-\"]')].map((e) => e.id)")
     b.page('(__core.frame.closeMenu(), 1)')
-    check(f'{tag}: the menu has Devices\' row and Help\'s, not the writer\'s Sound',
-          rows == ['menu-popup-devices', 'menu-popup-help'], rows)
+    check(f'{tag}: the menu has Devices\' row, the read-only PipeWire config row and Help\'s, not the writer\'s Sound',
+          rows == ['menu-popup-devices', 'menu-popup-setup', 'menu-popup-help'], rows)
     b.page("(__core.router.open('devices', 'overview'), 1)")
     stands = ready(b, 'devices')
     time.sleep(1.0)

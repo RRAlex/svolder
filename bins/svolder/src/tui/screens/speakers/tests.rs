@@ -178,7 +178,13 @@ fn the_filter_row_names_the_filter_and_the_choices_with_their_terms() {
         "{filter}"
     );
     assert!(filter.contains("Tab: All"), "{filter}");
-    assert!(!has(&rows, "SADIE II, D2"), "only the sets with a room");
+    // the folded Space line under the box names the chosen set; the list has no row for it
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.contains("SADIE II, D2") && !r.contains("Space")),
+        "only the sets with a room"
+    );
 }
 
 #[test]

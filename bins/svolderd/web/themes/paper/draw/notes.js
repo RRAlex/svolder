@@ -9,7 +9,7 @@
 // out; the last change is the keeper's (`view.changes`, fed by live.js).
 
 import { daemonNow } from '../../../core/clock.js';
-import { notesOf } from '../notes.js';
+import { CONFIG_TICK, notesOf } from '../notes.js';
 import { ARROW, RATE_MATCHES, WORDS } from '../words.js';
 import { esc } from './esc.js';
 import { onComputer } from './side.js';
@@ -37,6 +37,15 @@ export function ink(text) {
   return esc(text)
     .replace(new RegExp(` ?${ARROW} ?`, 'g'), `${ARROW_SVG}<span class="p-sr"> ${WORDS.handArrow} </span>`)
     .replace(RATE_MATCHES, `${RATE_MATCHES}${TICK_SVG}`);
+}
+
+/** The config chip as a button that opens the PipeWire config popup: the daemon's short words with
+ * its tick drawn as a stroke, its summary the accessible name, its class a class of the button. */
+function chipButton(n, i) {
+  const words = esc(n.text).replace(CONFIG_TICK, TICK_SVG);
+  return `<button type="button" id="p-config" class="pn t${tiltOf(n.id)} p-setup ${esc(n.chip)}" data-note="${esc(n.id)}"`
+    + ` data-n="${i}" data-about="${esc(n.about)}" data-act="config" aria-haspopup="dialog"`
+    + `${n.title ? ` title="${esc(n.title)}" aria-label="${esc(n.chipWords)}, ${esc(n.title)}"` : ''}>${words}</button>`;
 }
 
 /** The daemon's clock now, in milliseconds, for the player part `p`, `now` being this browser's. */
@@ -69,9 +78,9 @@ export function notes(page, device, view) {
   const own = notesOf(page, device, { change: view.changes?.last() ?? null, coarse: view.coarse, clockNowMs })
     .filter((n) => n.id !== 'card' && !(flipped && ['volume', 'tone', 'presets'].includes(n.about)));
   return own
-    .map((n, i) => `<span class="pn t${tiltOf(n.id)}${n.red ? ' red' : ''}" data-note="${esc(n.id)}"`
+    .map((n, i) => (n.chip ? chipButton(n, i) : `<span class="pn t${tiltOf(n.id)}${n.red ? ' red' : ''}" data-note="${esc(n.id)}"`
       + ` data-n="${i}"`
       + ` data-about="${esc(n.about)}"${n.title ? ` title="${esc(n.title)}"` : ''}${n.id === 'track' ? trackData(p, p.track, now, n.text) : ''}>`
-      + `${ink(n.text)}</span>`)
+      + `${ink(n.text)}</span>`))
     .join('');
 }

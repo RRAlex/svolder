@@ -20,13 +20,13 @@ Longer, per-subsystem design notes live in `docs/design/`, one file for each par
             └──────────┬────────┴────────┬────────┴──────┬───────┘
                        ▼                 ▼               ▼
               ┌──────────────────── servers (thin) ─────────────────┐
-              │  IPC server · web server · MCP server · MQTT bridge │
+              │  IPC server · web server · MCP server · MQTT client │
               └──────────────────────────┬──────────────────────────┘
                                          ▼
               ┌──────────── core: one model, one set of ops ────────┐
               │  the view (state every surface draws) + event feed  │
               │  device ops → each device's writer; computer ops →  │
-              │  the EQ controller (EQ, crossfeed, preamp)          │
+              │  EQ controller (EQ, loudness, crossfeed, preamp)    │
               │  saved truth: config.toml + host-eq.toml (EQ state) │
               └───────────────┬────────────────────────┬────────────┘
                               ▼                        ▼
@@ -35,8 +35,8 @@ Longer, per-subsystem design notes live in `docs/design/`, one file for each par
                  one writer per device:       capture → spectrum/tempo,
                  volume rule, glides,         EQ filter chain (systemd unit,
                  readings back                detached process or child),
-                                              live sends, crossfeed stage,
-                                              preamp rule
+                                              live sends, loudness, crossfeed
+                                              stage, preamp rule
 ```
 
 Three ideas hold it together.
@@ -44,15 +44,17 @@ Three ideas hold it together.
 - **One writer per thing.** A device has one writer: every write to it, from any front end, goes
   through its queue, which orders them, replaces a slider's superseded value and applies the volume
   rule. The computer's sound has one EQ controller (`EqControl`) that owns the filter chain, the
-  crossfeed stage and the preamp rule. Over a running daemon a front end does not write behind it:
-  `svolder` asks the daemon first (`auto`), and with none running the TUI or the CLI runs the same
-  controller or a direct session itself (the fake transport stands in for BlueZ in demos and tests).
+  loudness and crossfeed stages and the preamp rule. Over a running daemon a front end does not
+  write behind it: `svolder` asks the daemon first (`auto`), and with none running the TUI or the
+  CLI runs the same controller or a direct session itself (the fake transport stands in for BlueZ in
+  demos and tests).
 - **One view, many surfaces.** The core builds the state and the event feed once, and the CLI, the
   TUI, the web page, MCP and MQTT draw or send what it says; the words and ranges they show (a
   crossfeed model's range, a preset's name) come from it and no surface works them out again.
 - **The saved files are the truth.** The devices, presets and servers are saved in `config.toml`,
   written under its lock one writer at a time; the computer EQ and crossfeed are saved in
-  `host-eq.toml` in the state directory, written whole. Live state is rebuilt from them when the
+  `host-eq.toml` in the state directory, written whole (settings changed before any chain was applied
+  wait in `host-eq-settings.toml` beside it, and the first state takes them over). Live state is rebuilt from them when the
   daemon starts, and anything that could surprise starts off, as crossfeed does after every start.
 
 ## Design docs
@@ -65,14 +67,16 @@ Each says how a part works now and the principles behind it.
 - [Profiles](design/profiles.md): the format, how profiles load and resolve, their safety data.
 - [The tone control, presets and AutoEq import](design/tone-control-and-presets.md): the
   parametric EQ model, recall, which preset is on, fitting a headphone correction.
-- [MQTT and Home Assistant](design/mqtt-and-home-assistant.md): the bridge, discovery, commands.
+- [MQTT and Home Assistant](design/mqtt-and-home-assistant.md): the MQTT client, discovery,
+  commands.
 - [The MCP server](design/mcp-server.md): the HTTP server, the tools, the volume rules for a model.
-- [Host audio](design/host-audio.md): the computer's sink, players and capture, and the computer EQ.
+- [Host audio](design/host-audio.md): the computer's sink, players and capture, and the computer EQ; [the config check](design/host-config-check.md).
 - [The daemon's capture](design/host-capture.md): holds, shared capture, frames to web and socket.
 - [The VU meter](design/vu-meter.md): the scale, the reference, the needle's ballistics, the over
   lamp and the golden file both engines follow.
 - [Computer controls](design/host-control.md), [preamp](design/host-control-preamp.md),
-  [crossfeed](design/crossfeed.md), [virtual speakers](design/virtual-speakers.md).
+  [crossfeed](design/crossfeed.md), [loudness](design/loudness.md),
+  [virtual speakers](design/virtual-speakers.md).
 - [The life of one volume change](design/volume-change.md): a key press on the TUI to the reading
   that comes back, step by step.
 - [The terminal UI](design/tui.md): the app and its loop, screens and boxes, the key table and the
@@ -82,7 +86,7 @@ Each says how a part works now and the principles behind it.
 - [The web page's visualizer](design/web-visualizer.md): the looks, cost, the sink label, timing.
 - [Dragging the curve's points](design/web-curve-dragging.md): the Response graph under a mouse and
   a finger: grab reach, the axis hold, Q by wheel, right drag and pinch, the swap hold.
-- [Web themes](design/web-themes.md), [the frame](design/frame.md), [the key table](design/key-table.md), [popups](design/popups.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md): the contract.
+- [Web themes](design/web-themes.md), [the frame](design/frame.md), [the key table](design/key-table.md), [popups](design/popups.md), [Paper](design/web-paper.md), [Signal](design/web-signal.md) with [its palettes and popups](design/web-signal-popups.md), [Night drive](design/web-nightdrive.md) and [its checks](design/web-nightdrive-checks.md): the contract.
 - [Themes and effects](design/themes-and-effects.md): Ember's effects, the smoke, Arrange mode.
 - [The capture file](design/capture.md): what `svolder capture` records, the scrub, and the daemon
   it stops and brings back.
@@ -111,7 +115,7 @@ Each says how a part works now and the principles behind it.
   what the loop does for it in `run/`, and how it is drawn in `screens/`.
 - **`svolderd`** (`bins/svolderd`) is the daemon. It keeps one session to every configured device
   and serves everything else from them: a Unix socket for `svolder`, the computer's player and
-  signal path for every front end, and optionally the web UI, the MCP server and the MQTT bridge to
+  signal path for every front end, and optionally the web UI, the MCP server and the MQTT client to
   Home Assistant. "The daemon at a glance" at the top of `bins/svolderd/src/main.rs` says what each
   module is: `handler` answers a socket request, `writer` is the write queue, `device` holds the
   actor of each device, `host` follows the player, `http_slot` holds one HTTP server, `mqtt_bridge`

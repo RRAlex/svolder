@@ -641,6 +641,12 @@ impl EqControl {
                 "Choose a set from the list first",
             ));
         }
+        if want
+            && let Some(refused) =
+                over_stage_rate("virtual speakers run", self.stage_start_rate().await)
+        {
+            return Err(refused);
+        }
         if want && let Some(id) = &target {
             // A set that is chosen and not playing is not checked until now.
             store.check(id).map_err(|error| unusable(id, &error))?;
@@ -672,6 +678,11 @@ impl EqControl {
                 self.xf_for,
                 self.xf_note,
             ) = was;
+            // A line the change handed to `pw-cli` may land yet (the session repairs a line that
+            // failed with the next one): the stage as it stands goes with the next line.
+            if self.runs && self.sp.ports && self.stage_by_live() {
+                self.stage_dirty = true;
+            }
         } else if (edit.set.is_some() || edit.on == Some(true))
             && let Some(id) = &self.sp.chosen
         {
@@ -792,7 +803,8 @@ impl EqControl {
     }
 
     async fn sp_stop_inner(&mut self) -> Result<(), EqFailure> {
-        if self.flat {
+        // Loudness on keeps a flat chain: the stage goes off as from any chain that stays.
+        if self.flat && !self.ld_keeps_chain() {
             let was_for = self.sp.for_output.take();
             self.sp.on = false;
             match self.keep_passthrough().await {

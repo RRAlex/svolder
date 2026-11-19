@@ -86,6 +86,7 @@ fn route(edit: impl FnOnce(&mut RouteFacts)) -> RouteFacts {
         others_mixing: 0,
         host_eq: false,
         stages: None,
+        setup: None,
     };
     edit(&mut route);
     route

@@ -154,6 +154,41 @@ pub enum HostEqOp {
         #[serde(default = "done_by_default")]
         done: bool,
     },
+    /// Change the computer's loudness: the equal-loudness correction that follows the computer's
+    /// volume. Every field but `done` is optional and only the ones given change. Offer it only
+    /// while the host's `EqView.loudness` is present: a daemon without it cannot parse the op.
+    /// The rules (`LoudnessSettings::change` in svolder-host holds them):
+    ///
+    /// - an op that names nothing at all is refused; a number that is not finite is refused in
+    ///   words;
+    /// - `strength_pct` is snapped to its step (5) and held to 0-100, `reference_pct` to its
+    ///   step (1) and held to 1-100 (the view's `ranges` say so);
+    /// - `reference_now` sets the reference to the computer's volume as last read (refused in
+    ///   words while it has not been read) and is applied before `reference_pct`, which then
+    ///   wins when both are sent;
+    /// - `on` is applied last, so turning on plays the numbers sent with it. A `Loudness` that
+    ///   only sets `on` to its current value changes nothing;
+    /// - `done` false is a drag: the value is heard but not saved; the last value of the drag
+    ///   (and any change that is not a drag) is saved.
+    ///
+    /// A refusal leaves everything as it was.
+    Loudness {
+        /// turn the loudness on or off
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+        /// how much of the correction is given back, in percent
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strength_pct: Option<f64>,
+        /// the volume at and above which the stage is flat, in percent of the volume scale
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference_pct: Option<f64>,
+        /// set the reference to the computer's volume now
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference_now: Option<bool>,
+        /// whether this is the last value of a drag (not a drag: the default)
+        #[serde(default = "done_by_default")]
+        done: bool,
+    },
     /// Save the points as a preset of the user's, under a name
     SaveAs {
         /// the new preset's name
@@ -204,5 +239,33 @@ mod tests {
         ));
         let op: HostEqOp = serde_json::from_str(r#"{"op":"mode","on":true}"#).unwrap();
         assert_eq!(op, HostEqOp::Mode { on: true });
+    }
+
+    #[test]
+    fn a_loudness_op_names_only_what_it_changes_and_done_defaults_true() {
+        let op: HostEqOp = serde_json::from_str(r#"{"op":"loudness","strength_pct":35}"#).unwrap();
+        assert_eq!(
+            op,
+            HostEqOp::Loudness {
+                on: None,
+                strength_pct: Some(35.0),
+                reference_pct: None,
+                reference_now: None,
+                done: true
+            }
+        );
+        let op = HostEqOp::Loudness {
+            on: Some(true),
+            strength_pct: None,
+            reference_pct: None,
+            reference_now: Some(true),
+            done: false,
+        };
+        let text = serde_json::to_string(&op).unwrap();
+        assert_eq!(
+            text,
+            r#"{"op":"loudness","on":true,"reference_now":true,"done":false}"#
+        );
+        assert_eq!(serde_json::from_str::<HostEqOp>(&text).unwrap(), op);
     }
 }

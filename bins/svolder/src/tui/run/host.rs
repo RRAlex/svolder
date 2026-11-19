@@ -217,7 +217,12 @@ impl HostLink {
             let (answers, states) = mpsc::unbounded_channel();
             link.ops = Some(ops);
             link.states = Some(states);
-            link._worker = Some(Aborting(tokio::spawn(serve(sink, asked, answers))));
+            link._worker = Some(Aborting(tokio::spawn(serve(
+                sink,
+                asked,
+                answers,
+                super::computer::loop_hint,
+            ))));
             let mut poll = tokio::time::interval(POLL);
             poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
             link.poll = Some(poll);
@@ -500,13 +505,17 @@ pub(super) async fn next_block(capture: &mut Option<Box<dyn Capture>>) -> Option
     }
 }
 
-/// Run what is asked of `sink` one at a time, in order, answering each with a read of it.
+/// Run what is asked of `sink` one at a time, in order, answering each with a read of it. The read
+/// after a write also goes to the loop's own controller's loudness through the hint `hint` gives,
+/// which never waits for the controller.
 async fn serve(
     sink: Arc<dyn Sink>,
     mut asked: mpsc::UnboundedReceiver<SinkOp>,
     answers: mpsc::UnboundedSender<Option<SinkState>>,
+    hint: fn() -> Option<svolder_host::eq::LevelHint>,
 ) {
     while let Some(op) = asked.recv().await {
+        let wrote = !matches!(op, SinkOp::Read);
         match op {
             SinkOp::Read => {}
             SinkOp::Volume(percent) => {
@@ -516,7 +525,11 @@ async fn serve(
                 sink.toggle_mute().await;
             }
         }
-        if answers.send(sink.read().await).is_err() {
+        let read = sink.read().await;
+        if let (true, Some(state), Some(hint)) = (wrote, &read, hint()) {
+            hint.volume(f64::from(state.volume), state.muted);
+        }
+        if answers.send(read).is_err() {
             return;
         }
     }

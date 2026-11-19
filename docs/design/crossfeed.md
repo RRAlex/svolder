@@ -176,17 +176,23 @@ The controller keeps two facts apart: whether a chain runs (`runs`) and whether 
   noise as the only tolerance (the EQ's preamp beside it forgives 0.008 dB), subtracted from the
   EQ's preamp and re-folded whenever model, level, crossover or delay move it. One update lowers the
   preamp before the stage turns on or grows and raises it after the stage shrinks or turns off, so
-  no step plays above unity. The live stage costs what a configuration-held one does, the most of
-  its worst gain over the usual rates (44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz, and the
-  sink's own) for the stage worked out at the rate last looked at, because a line sent between a
-  rate change and the next look (a crossfeed drag, the 1 s repeat, the session's full repair line)
-  plays the old stage with its delay in other whole samples. Only Meier with an added delay pays: up
-  to about 2 dB more preamp (0.5 ms at 44.1 or 48 kHz: -3.6 to -5.9 dB at 50 %, -2.0 to -3.4 dB at
-  the default level; up to about 3.5 dB at extremes); Bauer, Linkwitz, Mid/Side bass and Meier at
-  its own lag are unchanged. A curve its chain holds that cannot play at 352.8 or 384 kHz is applied
-  again with the points on screen, and the EQ turns off with a note only when that fails. With
-  crossfeed on and the EQ off the flat chain plays at the lowest level its loaded configuration
-  allows until it restarts.
+  no whole step plays above unity (PipeWire's half-applied update, see
+  [known-issues.md](../known-issues.md), is the exception). The live stage costs what a
+  configuration-held one does, the most of its worst gain over the usual rates (44.1, 48, 88.2, 96,
+  176.4, 192, 352.8 and 384 kHz, then 705.6 and 768 kHz, where no stage runs but a
+  configuration-held one is rebuilt until the next look, and the sink's own) for the stage worked
+  out at the rate last looked at, because a line sent between a rate change and the next look (a
+  crossfeed drag, the 1 s repeat, the session's full repair line) plays the old stage with its delay
+  in other whole samples. Such a line also plays the points as they stand under the stage the
+  chain's configuration holds (the rate change put it back), so the preamp is never above what the
+  points need less that stage's cost either (see
+  [host-control-preamp.md](host-control-preamp.md#the-crossfeed-stage)). Only Meier with an added
+  delay pays: up to about 2 dB more preamp (0.5 ms at 44.1 or 48 kHz: -3.6 to -5.9 dB at 50 %, -2.0
+  to -3.4 dB at the default level; up to about 3.5 dB at extremes); Bauer, Linkwitz, Mid/Side bass
+  and Meier at its own lag are unchanged. A curve its chain holds that cannot play at 352.8 or 384
+  kHz is applied again with the points on screen, and the EQ turns off with a note only when that
+  fails. With crossfeed on and the EQ off the flat chain plays at the lowest level its loaded
+  configuration allows until it restarts.
 - **Four resets to off**, each with a note and a reason: the owner starts and finds it on
   (`restart`), the output the stage was turned on for is not the output any more (`output-changed`,
   from the 1 s look of the same `pw-dump` that reads the node), the chain restarted, a new node
@@ -196,12 +202,18 @@ The controller keeps two facts apart: whether a chain runs (`runs`) and whether 
   hold the stage or live updates fail. A reset whose chain part fails is retried once a second and
   the note says so. A change of the sink's rate is no reset: the stage is sent again for the new
   rate, or turned off with a note when it cannot play there (no rate in the engine's ranges reaches
-  that branch, so it has no test).
-- **Reverts are seen.** A look that finds any port (the preamp, the stage's mixer or a slot) at a
-  value other than the one the look before held at its sent value, at the same node and rate, sends
-  everything again (at most 4 times in 5 s, then crossfeed turns off with a note). A port the look
-  before did not yet hold at its sent value (a slow `pw-cli`) is no revert, so a line that is merely
-  late is not sent twice.
+  that branch) or the rate is above 384 kHz, the highest the stage's cost is worked out for (the
+  note says "crossfeed runs only up to 384 kHz"; turning it on there is refused in those words).
+- **Reverts are seen, mostly.** A look that finds any port (the preamp, the stage's mixer or a
+  slot) known to have taken its sent value at another value, at the same node and rate, sends
+  everything again (at most 4 times in 5 s, then crossfeed turns off with a note). A port is known
+  to have taken it when a look found it there, or when a look saw a port of the same line or a
+  later one move to its sent value (`pw-cli` applies each line whole and in order). A rebuild keeps
+  only the preamp, so a line that did not move it cannot be seen to land: a port of such a line
+  that a look still finds off its value a look after the line went is sent again once for that line
+  (whether a rebuild or a slow `pw-cli` kept it off), and is no revert. A line that is merely late
+  is sent at most once more. A third rebuild between that resend and the next look is not seen: the
+  port stays at the config's value until the next edit (under unity; a known limit).
 - **A dead chain is noticed** through `Host::exited` (`control/exit.rs`), one task of the controller
   for the chain's life that only waits and then signals it: it follows the chain (an apply or remove
   is not an exit), resolves when an EQ is on and no process runs it (a unit: only when systemd
@@ -212,8 +224,13 @@ The controller keeps two facts apart: whether a chain runs (`runs`) and whether 
   It is never recreated per tick, and after it resolves the controller applies or removes before
   waiting again.
 - **After a crash** the state's `crossfeed_on` and `flat` make the next owner start take the stage
-  out of the chain, or remove it. Settings changed while no state file exists are kept in memory only
-  until a chain is applied.
+  out of the chain, or remove it. Settings changed while no state file exists are kept in memory
+  only until a chain is applied. `crossfeed_loaded` names the stage the running chain's
+  configuration holds (written by an apply with the stage in it, cleared by one without and by a
+  remove), which a change of the sink's rate puts back whatever crossfeed is set to since: the next
+  owner pays for it in the preamp, at the dearest usual rate, and applies the chain again without
+  it, even with crossfeed off (a re-apply that failed once, then a save that kept the configuration
+  on disk without the stage, then a daemon restart: up to +4.4 dB over unity without this).
 
 Every crossfeed claim above has a test over `FakeChain` and `FakeParams` (the fakes of
 `svolder-host`); the real PipeWire is only touched by `make host-e2e`, on a private one.

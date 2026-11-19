@@ -5,10 +5,13 @@
 //!
 //! Both own an [`EqControl`] and carry out the same [`HostEqOp`]s on it, so the mapping from a
 //! request to the controller lives here once: the wire's 1-based point indexes, the point-type
-//! word ([`parse_kind`]), the crossfeed's fields and the virtual speakers'. What only one of them does (the daemon's
-//! preset lookup and its question about devices, the sink a daemon refuses) stays with it.
+//! word ([`parse_kind`]), the crossfeed's fields, the virtual speakers' and the loudness's. What
+//! only one of them does (the daemon's preset lookup and its question about devices, the sink a
+//! daemon refuses) stays with it.
 
-use svolder_host::eq::{CrossfeedEdit, Edit, EqControl, EqFailure, SpeakersEdit, parse_kind};
+use svolder_host::eq::{
+    CrossfeedEdit, Edit, EqControl, EqFailure, LoudnessEdit, SpeakersEdit, parse_kind,
+};
 use svolder_profiles::tone::apo::SourceFilter;
 
 use crate::HostEqOp;
@@ -81,6 +84,23 @@ pub async fn run_eq_op(control: &mut EqControl, op: HostEqOp) -> Result<(), EqFa
         }
         HostEqOp::Speakers { on, set, done } => {
             control.speakers(SpeakersEdit { on, set, done }).await
+        }
+        HostEqOp::Loudness {
+            on,
+            strength_pct,
+            reference_pct,
+            reference_now,
+            done,
+        } => {
+            control
+                .loudness(LoudnessEdit {
+                    on,
+                    strength_pct,
+                    reference_pct,
+                    reference_now: reference_now.unwrap_or(false),
+                    done,
+                })
+                .await
         }
         HostEqOp::Preset { .. } | HostEqOp::SaveAs { .. } => Err(EqFailure {
             what: "this request is not a change of the controller's".to_string(),

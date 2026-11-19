@@ -82,6 +82,11 @@ below), by any of three ways:
   them: the sign-in page's "or pair this browser" field. One code is open at a time, a new one
   replaces it, it signs in one browser within five minutes, and five wrong tries end it.
 
+The daemon counts the addresses of signed-in browsers, as numbers and in memory only (`web clients:
+...` in `svolder daemon status`, and the TUI's Web UI box): a guest and the sign-in request itself
+are not counted, the next request with the cookie is (see ["What a client
+is"](daemon.md#what-a-client-is)).
+
 A link carries a code and never the token. `xdg-open`'s arguments are readable by every local user
 while it runs, a terminal's scrollback keeps what it printed, and a QR code can be photographed; a
 code is spent the moment it is used and lasts five minutes, where the token is a three-year sign-in.
@@ -238,30 +243,46 @@ playing; a guest, and a page with `[web] writes` off, see the card without them.
 The **signal path** is one line from the player to the DAC: what the hops add up to first, then each
 hop (the player's stream, the computer's sink, the DAC's own input and sample rate). It says
 `untouched` only when every hop is known to leave the signal alone: the stream and the sink at one
-rate, both at 100 % and not muted, no filter chain (EQ, crossfeed, virtual speakers) in the path,
-nothing else mixing in, and the rate the DAC reads equal to the one the computer sends. Otherwise it
-names what changes it (`resampled 44.1 → 48 kHz`, `computer volume 54 %`, `host EQ on`, `crossfeed
-on`, `virtual speakers on`, `EQ pass-through` for the flat chain kept while a stream plays, `DAC
-reads 44.1 kHz`) or what it could not read (`DAC rate not read`, `DAC input not read`), and when the
-computer plays to another sink it says so in short (`→ Speakers`, or `player → Speakers` for a
-player routed elsewhere; the whole sentence, `the computer plays to Speakers`, is the line's
-tooltip). Until the daemon has read the route (the first read is under way, or `pw-dump` is missing)
-the line says `route not read`. While the DAC listens to an input the computer does not feed
-(Optical, Coaxial, AES or BNC) the line says `the DAC listens to Optical` and gives no verdict,
-since the computer's stream is not what the DAC plays. So does a Gungnir 2 or a Yggdrasil on one USB
-port while the computer is on the other (`the DAC listens to USB 1 · the computer is on USB 2`);
-when both ports read connected, or a reading is missing, the line says `both USB ports connected` or
-`USB ports not read` and is never `untouched`. A DAC with no input choice (the Eitr 2, the Mesh
-Card) takes USB alone and counts as on USB. It never says more than the readings show: svolder
-cannot see the bits. `untouched` covers the computer and the DAC; what the player changes before its
-output, such as loudness normalization or its own EQ, happens where svolder cannot look, and the
-verdict's tooltip says so. A DAC's page has a path line; an amp's or a preamp's has none. On a
-desktop the card's height is fixed, so a path with more to say than fits ends in a chip of three
-dots (the verdict first, always; the dots' tooltip lists the hops left out, and a screen reader
-still reads them). While the DAC's own stage changes the sound (its volume below 0 dB, its tone
-control on EQ or loudness, its balance off centre) the DAC's hop says so (`volume -3.3 dB`), and the
-verdict's tooltip adds what the DAC then does (`the Bifrost 3 then lowers it by 3.3 dB`, `shapes it
-with its tone control`, `shifts the balance`).
+rate, both at 100 % and not muted, no filter chain (EQ, loudness, crossfeed, virtual speakers) in
+the path, nothing else mixing in, the sink at least as wide as the stream, no dither, no channel
+mix or remap, no filter graph in a converter, no ALSA `plug` or `dmix` and no card that converts,
+and the rate the DAC reads equal to the one the computer sends. Otherwise it names what changes it
+(`resampled 44.1 → 48 kHz`, `resampled 44.1 → 48 kHz (rate forced)` when a forced clock rate causes
+the resample, `computer volume 54 %`, `host EQ on`, `loudness on`, `crossfeed on`,
+`virtual speakers on`, `EQ pass-through` for the flat chain kept while a stream plays,
+`cut to 16 bits (S32 → S16)`, `dither on (triangular)`, `channels 6 → 2 (mixed)`,
+`channels remapped`, `a filter inside the sink`, `ALSA plug converts (plughw:0,0)`,
+`ALSA dmix mixes (dmix:0)`, `DAC reads 44.1 kHz`) or what it could not read (`DAC rate not read`,
+`DAC input not read`, `dither not read`, `forced rate not read`, `ALSA device not read`),
+and when the computer plays to another sink it says so in short
+(`→ Speakers`, or `player → Speakers` for a player routed elsewhere; the whole sentence,
+`the computer plays to Speakers`, is the line's tooltip). Until the daemon has read the route (the
+first read is under way, or `pw-dump` is missing) the line says `route not read`. While the DAC
+listens to an input the computer does not feed (Optical, Coaxial, AES or BNC) the line says
+`the DAC listens to Optical` and gives no verdict, since the computer's stream is not what the DAC
+plays. So does a Gungnir 2 or a Yggdrasil on one USB port while the computer is on the other
+(`the DAC listens to USB 1 · the computer is on USB 2`); when both ports read connected, or a
+reading is missing, the line says `both USB ports connected` or `USB ports not read` and is never
+`untouched`. A DAC with no input choice (the Eitr 2, the Mesh Card) takes USB alone and counts as on
+USB. It never says more than the readings show: svolder cannot see the bits. `untouched` covers
+what enters the computer's audio pipeline from the player's stream, the computer and the DAC; what
+the player changes before its stream, such as loudness normalization, ReplayGain or its own EQ and
+volume (and whether the music is a local file or streamed), happens where svolder cannot look, and
+the verdict's tooltip says so, and that svolder judges up to 24 bits. A DAC's page has a
+path line; an amp's or a preamp's has none. On a desktop the card's height is fixed, so a path with
+more to say than fits ends in a chip of three dots (the verdict first, always; the dots' tooltip
+lists the hops left out, and a screen reader still reads them). While the DAC's own stage changes
+the sound (its volume below 0 dB, its tone control on EQ or loudness, its balance off centre) the
+DAC's hop says so (`volume -3.3 dB`), and the verdict's tooltip adds what the DAC then does
+(`the Bifrost 3 then lowers it by 3.3 dB`, `shapes it with its tone control`, `shifts the balance`).
+
+**The PipeWire config chip.** Beside the verdict, a short chip says what the PipeWire config does to
+the sound, whatever plays: `config ✓` when all seven conditions pass, `config 2` when two of them
+fail (the config changes the sound), and `config ?` when a line could not be read. Ember, Signal
+(the player screen and the computer's side) and Paper draw it; Night drive has only the menu row.
+The chip is a button: a click opens the PipeWire config popup. It prints the daemon's words and
+judges nothing. There is no chip while no route is read, on an amp's page, when the default sink is
+not the DAC, or while nothing is judged; the popup then says `config not read`.
 
 **The visualizer.** Beside Now playing (the band's right half on a desktop, a 180 px card under the
 volume on a phone, under the meters on an amp's page) the page draws what the computer plays, live,
@@ -521,8 +542,9 @@ theme's name, with a small picture; it opens the picker), then the theme's own r
 headed *Ember's effects*: the three levels below, the one that shows checked, and under them, when
 the screen has a Now playing card, a **Visualizer** switch, then **Arrange sections…**), then
 **Devices…** (the Devices popup, below; read-only for a guest and where `[web] writes` is off), **EQ
-library…** (below; not for a guest, nor where `[web] writes` is off), **Help…** (the Help popup,
-above) and **Sign out**, or **Sign in** for a guest. Another device is shown from the Devices popup.
+library…** (below; not for a guest, nor where `[web] writes` is off), **PipeWire config…** (below;
+everyone's), **Help…** (the Help popup, above) and **Sign out**, or **Sign in** for a guest. Another
+device is shown from the Devices popup.
 A click or a tap picks a row and closes the list, and Escape, `q`, a click outside or the button
 again close it. By keyboard: `Tab` reaches the button first, `Enter` or `Space` opens it, the arrows
 move between the rows (round the ends, skipping any that is disabled), `Enter` or `Space` picks, and
@@ -606,11 +628,13 @@ knows, kept current as devices come and go. It stays open while you look around 
   find-in-page does not look inside it.
 
 **Sound** is the menu's *Sound…* row, in every theme, between *Devices…* and *Help…*, for whoever
-may change things (a guest and a page with `[web] writes` off do not have it). One popup with three
-tabs under its title, **EQ library**, **Crossfeed** and **Virtual speakers**; the tab you leave is
-kept open behind the other. The EQ library tab is about the side the page shows: its title says
-which (`EQ library · Kara`, `EQ library · This computer`), and it closes when another device is
-shown. Its three pages are a row of pills under the tabs, shown only on that tab:
+may change things (a guest and a page with `[web] writes` off do not have it). One popup with up to
+four tabs under its title, **EQ library**, **Loudness**, **Crossfeed** and **Virtual speakers** (the
+order of the filter chain; Loudness only while the daemon offers it, with a dot on its tab while it
+is on); the tab you leave is kept open behind the other. The EQ library tab is about the side the
+page shows: its title says which (`EQ library · Kara`, `EQ library · This computer`), and it closes
+when another device is shown. Its three pages are a row of pills under the tabs, shown only on that
+tab:
 
 - **AutoEq** searches AutoEq's index (through the daemon: the page never reaches the internet). Type
   a headphone's name (at most 60 characters); the search is sent after a short pause, or at once on
@@ -649,6 +673,30 @@ density). There is none for the computer, for a built-in preset or in Flat and L
 Recall, rename and delete stay where each theme shows the presets. The terminal UI draws the fit
 and overwrites a preset with `u`, and `i` imports a file; comparing two measurements is not there
 yet.
+
+**The Loudness tab** sets [the computer's loudness](eq.md#loudness), whichever side the page shows,
+and needs the daemon to offer it: with none (an older daemon) the tab is not in the strip. Its
+header has the on/off switch (the tab's dot follows it); under it, in order:
+
+- a note saying what loudness is, and a dim "The DAC's loudness is on too." when the device's own
+  Loudness is on as well (the two do not conflict; the note says only that both play);
+- **Strength**, a slider in percent (0 to 100, steps of 5): while a pointer holds it each value is
+  heard (sent as not final) and its release is saved; a key on it is one saved change;
+- **Reference**, the volume at which loudness is flat, with `−` and `+` (a press is one step, a hold
+  repeats and one change is saved when it ends) and **Use current volume**, which sets it to the
+  volume the daemon reads;
+- a picture of the stage from 20 Hz to 20 kHz, never above 0 dB, as the daemon plays it now, with a
+  faint second line for the EQ and the loudness together while the EQ is on;
+- the live readout, in a line and in rows: the volume now, the depth under the reference, and the
+  bass, mids and treble gains of the stage (the shelf gains, as `svolder host loudness`
+  prints them). While it is off, muted or the volume is unread it says so, and a note from the
+  daemon is shown in its words. Off, the controls stay editable but dimmed. While loudness cannot
+  follow the volume the note says why and the controls stay live: a change is saved and takes
+  effect when it can follow again.
+
+The page shows the number the daemon holds after each change, and a refusal in the daemon's words
+until the next change. Night drive's top line names `loudness on` among the stages the path says
+play, beside `host EQ on` and `crossfeed on`.
 
 **The Crossfeed tab** sets [the computer's crossfeed](eq.md#crossfeed), whichever side the page
 shows, and needs the daemon to offer it (otherwise the tab says `Crossfeed is not offered here.`,
@@ -696,6 +744,20 @@ again, or what it ended with, when you come back; only **Cancel** stops a fetch.
 Every word, number and picture is the daemon's (`eq.speakers`): `timing` is `{arrivals: {left,
 right: [{ms, db}], tail: {times_ms, left, right} | null}, decay: {times_ms, low, mid, high,
 end_ms}}`, absent from a daemon without it.
+
+**PipeWire config** is the menu's *PipeWire config…* row (plain, with no state text), in every
+theme, for everyone: a guest and a page with `[web] writes` off see it too, since it only shows
+what the daemon read. One popup with the sink the check judges, the one-line summary, then all
+seven lines always listed (`rates`, `forced rate`, `dither`, `24-bit output`, `no plug`,
+`stereo to stereo`, `no filter in the sink`), each with a mark and the daemon's words, a failing
+line in Paper's red pencil and in the warning colour elsewhere, and under them the limit: what the
+check cannot judge. The summary reads `PipeWire config lets it through untouched`, `PipeWire config
+changes the sound: 2`, `PipeWire config not fully read: 1` or `PipeWire config not read`. The popup
+says `config not read` also when the shown device is an amp, the computer plays to another sink or
+nothing plays: the daemon then had nothing to judge, and the popup never claims clean. It closes
+with a change of the shown device, since it is about that device's path. The check judges the
+config from the player's stream on, reads only, and judges at most 24 bits; it cannot see inside a
+player, nor past the sink's converter (ALSA `hw`, USB, the DAC).
 
 **Ember's effects** have three levels, chosen in the menu:
 
@@ -823,7 +885,20 @@ See [Paper](../design/web-paper.md).
 
 **Signal** is the page's third theme: the sound's way from the player to the ears drawn as one line,
 on a dark ground. Pick it from the menu's *Theme* row or with `T`, or open the page with
-`?theme=signal`. It is dark only; the only row it adds to the menu is *Add to the chain…*.
+`?theme=signal`. It is dark only. Its menu has *Add to the chain…* and a *Palette* row, with four
+palettes: *Blueprint* (the default, first in the menu), *Warm amber*, *Phosphor* and *Oxblood and
+brass*. A palette recolours the whole theme, the popups included; the player stays green, the
+computer yellow and the device in the palette's own colour, and the computer's level meters keep
+their warm glow. This browser keeps the choice: someone who never picked a palette gets Blueprint,
+including a browser that had been showing Warm amber by default, and a palette picked on purpose
+(Warm amber too) stays. The browser's address bar takes Blueprint's dark blue, and the theme's card
+in the theme picker is drawn in Blueprint.
+
+Signal's popups (Devices, Sound, Help and the questions) are drawn as part of the same schematic: the
+title is a tab on the box's top edge, dotted wires lead in and out, the side list and the Sound tabs
+are hops on a wire with the one chosen boxed and lit, and a device's readings are terminals on a
+bus with a numeral over a small graph. On a phone the popup fills the screen and the wire comes in
+at the top left.
 
 - **The line.** Left to right: the player (green), the computer (yellow), the device svolder shows
   (amber), then whatever comes after it. A solid dot is something svolder reads, with its live facts
@@ -1101,6 +1176,17 @@ rebuilds it once when the chain does not hold the set yet; off is live; turning 
 crossfeed off in the same update and the other way round. A body that names nothing, a set that is
 not fetched and no set chosen are each a `409` in the daemon's words. The view is `eq.speakers`.
 
+`POST api/v1/host/loudness` is a write like the others (it needs `writes` and a signed-in visitor)
+and changes the computer's loudness:
+`{"on"?, "strength_pct"?, "reference_pct"?, "reference_now"?, "done"?}`. A body that names nothing
+is a `409`, as is a refusal in the daemon's words (a value that is not a finite number). A change
+while loudness is unavailable is accepted and saved. The daemon snaps every number to its step and
+holds it to its range; `done` is false while a drag or a held button goes on and, when absent, true.
+`api/v1/host` carries the view under the computer's `eq` as `loudness`: `on`, `strength_pct`,
+`reference_pct`, `volume_pct`, `depth_db`, `lift_db`, `mids_db`, `treble_db`, `following`, `note`,
+`unavailable`, `curve` (the stage as played, 61 points) and `ranges`; it is absent from a daemon
+without loudness.
+
 `POST api/v1/host/crossfeed` is a write like the others (it needs `writes` and a signed-in visitor)
 and changes the computer's crossfeed: `{"on"?, "model"?, "preset"?, "amount_pct"?, "crossover_hz"?,
 "delay_ms"?, "done"?}`. A body that names nothing is a `409`, as is a refusal in the daemon's words
@@ -1163,6 +1249,7 @@ below are all there is. The table is checked against the daemon's sources and th
 | POST | `api/v1/host/eq/points/N/remove` | not listed |
 | POST | `api/v1/host/eq/preset` | not listed |
 | GET | `api/v1/host/frames` | `?only` |
+| POST | `api/v1/host/loudness` | not listed |
 | POST | `api/v1/host/mute` | not listed |
 | POST | `api/v1/host/press` | not listed |
 | POST | `api/v1/host/speakers` | not listed |

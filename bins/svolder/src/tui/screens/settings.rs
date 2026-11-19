@@ -27,8 +27,8 @@ use ratatui::widgets::{Block, Paragraph};
 use svolder_ipc::config::RefreshWeeks;
 use svolder_ipc::config::{
     COLORS, CONFIRM_QUIT, COVER_ART, GRAPH_SPAN, GRAPHS, HOST_AUDIO, INTRO, INTRO_EFFECT,
-    INTRO_SOUND, LINK_SPAN, MONOCHROME, MOUSE, PALETTE, THEME_BACKGROUND, TITLE_METER, TOOLTIPS,
-    TRANSITION, VISUALIZER, VU_REFERENCE,
+    INTRO_SOUND, LINK_SPAN, MONOCHROME, MOUSE, PALETTE, SCROLL_LONG_LINES, THEME_BACKGROUND,
+    TITLE_METER, TOOLTIPS, TRANSITION, VISUALIZER, VU_REFERENCE,
 };
 use svolder_ipc::token::TokenSource;
 use svolder_ipc::{
@@ -45,14 +45,17 @@ use crate::tui::boxes::web_box::{self as web_state, WebBox, WebRow};
 use crate::tui::keys;
 use crate::tui::layout_tier;
 use crate::tui::mouse::{Hit, HitMap, Selected};
+use crate::tui::screens::switch;
 use crate::tui::theme::{Role, Surface, Theme};
 use crate::tui::widgets;
 
 use super::devices::boxed;
 
+mod token_box;
 mod web_box;
 mod words;
 
+use self::token_box::draw_token_box;
 use self::web_box::draw_web_box;
 use self::words::{
     NOT_SET, access, autoeq_line, connection_line, key_value, listen_word, mcp_word, mqtt_word,
@@ -78,8 +81,9 @@ const LABEL_FIELD: usize = 19;
 const VALUE_FIELD: usize = 13;
 /// Columns the arrows and the value take together: `‹ `, the value field and ` ›`.
 const VALUE_ZONE: usize = VALUE_FIELD + 4;
-/// Columns before the value zone: the cursor's three, the label field and a blank.
-const ZONE_AT: usize = 3 + LABEL_FIELD + 1;
+/// Columns a Connect row's label field takes: its longest label, so a choice such as
+/// `‹ read-only | allowed ›` fits the left column.
+const CONNECT_LABEL_FIELD: usize = 16;
 /// Columns an animation's own row is indented by, under the switch that turns them all.
 const INDENT: usize = 2;
 /// Cells between the right column's text and the rule on its left, and between the text and
@@ -137,19 +141,19 @@ pub enum Setting {
     McpToken,
     /// Where the daemon says its MCP server stands.
     McpStatus,
-    /// Whether the daemon bridges to an MQTT broker.
+    /// Whether the daemon connects to an MQTT broker as a client.
     MqttEnabled,
     /// The broker's host.
     MqttHost,
     /// The broker's port.
     MqttPort,
-    /// Whether the bridge takes commands from the broker.
+    /// Whether the MQTT client takes commands from the broker.
     MqttCommands,
     /// The broker's username.
     MqttUsername,
     /// Whether a broker password is set, and typed here; never shown.
     MqttPassword,
-    /// Where the daemon says its MQTT bridge stands.
+    /// Where the daemon says its MQTT client stands.
     MqttStatus,
 }
 
@@ -187,6 +191,7 @@ pub const CATEGORIES: [(&str, &[Setting]); 5] = [
             Setting::HueDrift,
             Setting::SpectrumDrift,
             Setting::Key(&TRANSITION),
+            Setting::Key(&SCROLL_LONG_LINES),
         ],
     ),
     (
@@ -276,13 +281,47 @@ impl Setting {
             Setting::McpWrites => "MCP writes",
             Setting::McpToken => "MCP token",
             Setting::McpStatus => "MCP status",
-            Setting::MqttEnabled => "MQTT bridge",
+            Setting::MqttEnabled => "MQTT client",
             Setting::MqttHost => "MQTT broker host",
             Setting::MqttPort => "MQTT broker port",
             Setting::MqttCommands => "MQTT commands",
             Setting::MqttUsername => "MQTT username",
             Setting::MqttPassword => "MQTT password",
             Setting::MqttStatus => "MQTT status",
+        }
+    }
+
+    /// The two sides of a switch row and whether the second is in force, drawn as a choice
+    /// (`‹ off | on ›`) like `Target`: the Connect switches and Scroll long lines; `None` for
+    /// every other row.
+    pub(crate) fn switch_sides(self, app: &App) -> Option<((&'static str, &'static str), bool)> {
+        let conn = &app.overlays.conn;
+        Some(match self {
+            Setting::McpEnabled => (("off", "on"), conn.mcp.enabled),
+            Setting::McpWrites => (("read-only", "writes"), conn.mcp.writes),
+            Setting::MqttEnabled => (("off", "on"), conn.mqtt.enabled),
+            Setting::MqttCommands => (("read-only", "allowed"), conn.mqtt.commands),
+            Setting::Key(key) if key.key == SCROLL_LONG_LINES.key => {
+                (("off", "on"), app.tui.scroll_long_lines)
+            }
+            _ => return None,
+        })
+    }
+
+    /// Whether the row only reports (or opens a box) and so draws its value as plain text, with
+    /// no arrows that would make it look like something to turn.
+    pub(crate) fn reports_only(self) -> bool {
+        matches!(
+            self,
+            Setting::WebUi | Setting::McpToken | Setting::McpStatus | Setting::MqttStatus
+        )
+    }
+
+    /// Columns the label field takes before the value.
+    fn label_field(self) -> usize {
+        match self.is_connection() {
+            true => CONNECT_LABEL_FIELD,
+            false => LABEL_FIELD,
         }
     }
 
@@ -502,25 +541,33 @@ pub fn draw(
                 category * SELECTION_STRIDE + index,
                 line_area,
             );
-            let value = widgets::text::cut_to_cells(&setting.value(app), VALUE_FIELD);
-            let zone = inner.x + u16::try_from(ZONE_AT).unwrap_or(0);
-            let end = zone + 2 + u16::try_from(widgets::text::cells(&value)).unwrap_or(0);
-            hits.push(
-                Rect {
-                    x: zone,
-                    width: 2,
-                    ..line_area
-                },
-                Hit::SettingPrev,
-            );
-            hits.push(
-                Rect {
-                    x: end,
-                    width: 2,
-                    ..line_area
-                },
-                Hit::SettingNext,
-            );
+            let zone = inner.x + u16::try_from(3 + setting.label_field() + 1).unwrap_or(0);
+            let shown = match setting.switch_sides(app) {
+                Some(((a, b), _)) => widgets::text::cells(&format!("‹ {a} | {b} ›")) - 4,
+                None => {
+                    let value = widgets::text::cut_to_cells(&setting.value(app), VALUE_FIELD);
+                    widgets::text::cells(&value)
+                }
+            };
+            let end = zone + 2 + u16::try_from(shown).unwrap_or(0);
+            if !setting.reports_only() {
+                hits.push(
+                    Rect {
+                        x: zone,
+                        width: 2,
+                        ..line_area
+                    },
+                    Hit::SettingPrev,
+                );
+                hits.push(
+                    Rect {
+                        x: end,
+                        width: 2,
+                        ..line_area
+                    },
+                    Hit::SettingNext,
+                );
+            }
         }
     }
     let column = Rect {
@@ -620,6 +667,7 @@ fn draw_modal(
             box_area
         }
         Modal::Web(web) => draw_web_box(frame, area, app, web, theme, live_hits),
+        Modal::Token => draw_token_box(frame, area, app, theme, live_hits),
         Modal::Rotating => {
             let lines = vec![
                 Line::from(Span::raw(" Replace the MCP token? [y/N]")),
@@ -779,6 +827,20 @@ fn connection_lines(
                 (Some(status), _) => status.line(),
             };
             say(&text, theme.style(Role::Text));
+            if let Some(counts) = app
+                .overlays
+                .conn
+                .mcp_activity()
+                .filter(|_| app.session.daemon)
+            {
+                say(&counts.line(), theme.style(Role::Text));
+            }
+        }
+        Setting::WebUi => {
+            if let Some(counts) = app.overlays.conn.web_activity() {
+                say("", dim);
+                say(&counts.line(), theme.style(Role::Text));
+            }
         }
         Setting::MqttStatus => {
             say("", dim);
@@ -825,16 +887,6 @@ fn connection_lines(
                 }
                 TokenView::Unreadable(why) => say(why, theme.style(Role::Warn)),
                 TokenView::Unread => {}
-            }
-            if let Some(token) = app.overlays.conn.shown(app.now) {
-                say("", dim);
-                let chars: Vec<char> = token.chars().collect();
-                for piece in chars.chunks(width.max(1)) {
-                    lines.push(Line::from(Span::styled(
-                        piece.iter().collect::<String>(),
-                        theme.style(Role::Text),
-                    )));
-                }
             }
         }
         Setting::MqttPassword => {
@@ -890,28 +942,50 @@ fn row_line(setting: Setting, focused: bool, app: &App, theme: &Theme) -> Line<'
         true => INDENT,
         false => 0,
     };
+    let field = setting.label_field();
     let label = format!(
         "{:indent$}{:<width$}",
         "",
         setting.label(),
-        width = LABEL_FIELD - indent
+        width = field - indent
     );
-    let value = widgets::text::cut_to_cells(&setting.value(app), VALUE_FIELD);
-    let zone = match focused {
-        true => format!("‹ {value} ›"),
-        false => format!("  {value}"),
+    let mut head = Style::default();
+    let (zone, key): (Vec<Span<'static>>, &str) = match setting.switch_sides(app) {
+        Some(((a, b), second)) => {
+            let (label_style, lit, off) = switch::styles(theme, Style::default(), focused);
+            head = label_style;
+            let spans = switch::choice(theme, (a.to_string(), b.to_string()), second, (lit, off));
+            (spans, "")
+        }
+        None => {
+            let value = widgets::text::cut_to_cells(&setting.value(app), VALUE_FIELD);
+            let zone = match focused && !setting.reports_only() {
+                true => format!("‹ {value} ›"),
+                false => format!("  {value}"),
+            };
+            let key = keys::toggled_by(setting)
+                .map_or(if setting.is_connection() { "" } else { " " }, |hint| {
+                    hint.label
+                });
+            (vec![Span::raw(zone)], key)
+        }
     };
-    let key = keys::toggled_by(setting).map_or(" ", |hint| hint.label);
-    let spans = vec![
-        Span::raw(label),
-        Span::raw(" "),
-        Span::raw(widgets::text::pad_cells(&zone, VALUE_ZONE)),
-        Span::styled(key, theme.style(Role::Dim)),
-    ];
+    let mut spans = vec![Span::styled(label, head), Span::raw(" ")];
+    spans.extend(zone);
+    // the zone is padded to where the key column starts
+    let zone_room = match setting.is_connection() {
+        true => usize::from(LEFT_WIDTH) - (3 + field + 1) - widgets::text::cells(key),
+        false => VALUE_ZONE,
+    };
+    let used: usize = spans.iter().skip(2).map(Span::width).sum();
+    spans.push(Span::raw(" ".repeat(zone_room.saturating_sub(used))));
+    spans.push(Span::styled(key, theme.style(Role::Dim)));
     let mut line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
     let blank = usize::from(LEFT_WIDTH).saturating_sub(line.width());
     line.push_span(Span::raw(" ".repeat(blank)));
-    match focused {
+    // a choice is no band: its label and the side in force take the selected style, as the
+    // `Target` switch has it
+    match focused && setting.switch_sides(app).is_none() {
         true => line.style(theme.style(Role::Selected)),
         false => line,
     }

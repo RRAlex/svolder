@@ -220,6 +220,52 @@ fn vu_shots() {
     }
 }
 
+/// The computer's Loudness in the TUI: the device screen's Tone pane and the tone screen, folded and
+/// unfolded, at 80 by 24 and 120 by 40, as PPM files and text twins in the loudness folder of the
+/// screenshots output. The view is the worked example (strength 50 %, reference 100 %, volume 35 %).
+/// Offline: the stand-in correction is worn.
+#[test]
+#[ignore = "draws the Loudness stills: cargo test -p svolder --bin svolder -- --ignored loudness_shots"]
+fn loudness_shots() {
+    use crate::tui::app::{Ld, Screen};
+    let out = out_dir().join("loudness");
+    std::fs::create_dir_all(&out).expect("the output folder");
+    let correction = stand_in();
+    let mut raster = Raster::new(
+        fonts::load_system()
+            .map_err(|m| m.message())
+            .expect("fonts"),
+        scenes_palette(&correction),
+    );
+    for (name, size, screen, unfolded) in [
+        ("pane-80x24", (80, 24), Screen::Device, false),
+        ("pane-120x40", (120, 40), Screen::Device, false),
+        ("tone-80x24", (80, 24), Screen::Tone, false),
+        ("tone-80x24-open", (80, 24), Screen::Tone, true),
+        ("tone-120x40", (120, 40), Screen::Tone, false),
+        ("tone-120x40-open", (120, 40), Screen::Tone, true),
+    ] {
+        let shot = still_sized(&correction, Still::Dac, size, |app| {
+            app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_loudness(
+                true,
+                (50.0, 100.0),
+                Some(35.0),
+                13.7,
+            ));
+            app.flip_side();
+            app.show(screen);
+            if unfolded {
+                app.focus_ld(Ld::Strength);
+            }
+        });
+        let ppm = out.join(format!("{name}.ppm"));
+        let image = raster.paint(&shot.buffer, name).expect("painted");
+        write_ppm(&ppm, &image).expect("written");
+        std::fs::write(out.join(format!("{name}.txt")), still_twin(&shot.buffer))
+            .expect("the text twin");
+    }
+}
+
 /// Give `app` a cover to show beside its Now playing row in a frame `size` large, drawn as
 /// half-blocks from a gradient.
 fn with_half_block_cover(app: &mut crate::tui::app::App, size: (u16, u16)) {

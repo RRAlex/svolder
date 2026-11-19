@@ -13,7 +13,7 @@ use common::{TempDir, install_script, lines};
 use svolder_host::eq::live::{props_of, set_param_line, slot_params};
 use svolder_host::eq::{NodeKey, Params, PwCliSession};
 use svolder_host::fake::FakeParams;
-use svolder_host::route::PwDump;
+use svolder_host::route::{PwDump, computer_level};
 
 /// The fixture of the live chain, as `pw-dump` printed it.
 fn fixture() -> String {
@@ -485,6 +485,49 @@ async fn a_suspended_sink_is_not_a_change_of_rate() {
     let fresh = tools.session();
     let mut fresh = fresh;
     assert_eq!(fresh.node().await.unwrap().rate_hz, None);
+}
+
+/// The level comes from the dump the node was read from: none before a look, no read of its
+/// own after it, and the newest look's after another.
+#[tokio::test]
+async fn the_level_is_kept_from_the_dump_the_node_was_read_from() {
+    let tools = Tools::new("session-level");
+    let reads = tools.dir.join("reads");
+    install_script(
+        &tools.dir.join("pw-dump"),
+        &format!(
+            "#!/bin/sh\necho read >> '{}'\ncat '{}'\n",
+            reads.display(),
+            tools.dir.join("dump.json").display()
+        ),
+    );
+    let mut session = tools.session();
+    assert_eq!(session.level(), None, "no look yet");
+    session.node().await.expect("the chain is there");
+    let first = session.level().expect("the fixture's sink has a volume");
+    assert_eq!(Some(first), computer_level(&fixture()));
+    for _ in 0..3 {
+        assert_eq!(session.level(), Some(first));
+    }
+    assert_eq!(lines(&reads).len(), 1, "asking for the level reads nothing");
+    // The next look reads the volume the graph has now.
+    let mut objects: Vec<serde_json::Value> = serde_json::from_str(&fixture()).unwrap();
+    for object in &mut objects {
+        if object["info"]["props"]["node.name"] == "svolder_e2e_sink" {
+            object["info"]["params"]["Props"][0]["mute"] = true.into();
+        }
+    }
+    tools.dump(&serde_json::to_string(&objects).unwrap());
+    session.forget_node();
+    session.node().await.expect("the chain is there");
+    let second = session.level().expect("still a volume");
+    assert!(second.muted && !first.muted, "{first:?} then {second:?}");
+    assert_eq!(second.linear, first.linear);
+    // A dump with no volume anywhere leaves none.
+    tools.dump("[]");
+    session.forget_node();
+    assert_eq!(session.node().await, None);
+    assert_eq!(session.level(), None);
 }
 
 #[tokio::test]

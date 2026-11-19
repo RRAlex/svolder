@@ -12,6 +12,7 @@
 //! - [`quit`]: the question `q` asks before the TUI quits.
 //! - [`settings`]: the Settings box: every choice the `[tui]` table holds.
 //! - [`telemetry`]: every reading the device has sent, with its wire type and raw value.
+//! - [`setup`]: the PipeWire config box over the device screen.
 //! - [`tone`]: the tone-control screen: the response the bands add up to, and the bands.
 //! - [`wizard`]: one step of the setup wizard.
 
@@ -23,6 +24,7 @@ pub mod menu;
 pub mod presets;
 pub mod quit;
 pub mod settings;
+pub mod setup;
 pub mod speakers;
 pub mod switch;
 pub mod telemetry;

@@ -295,7 +295,7 @@ fn the_fake_transport_runs_a_direct_session() {
     );
 }
 
-/// `daemon status` says where the daemon's MQTT bridge stands, on the line after the daemon's
+/// `daemon status` says where the daemon's MQTT client stands, on the line after the daemon's
 /// own: off with no section, not reachable while no broker answers — with the wait before the next
 /// attempt — and connected, read-only or taking commands. The broker is the in-process one on
 /// 127.0.0.1, and the one that does not answer is a port nothing listens on there.
@@ -783,7 +783,7 @@ fn the_config_steers_a_direct_session() {
 #[tokio::test]
 async fn a_disconnected_device_over_the_daemon_is_named_on_stderr() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon(socket.clone()).await;
         let (code, out, err) = run_svolder(&socket, &["status"]).await;
@@ -806,7 +806,7 @@ async fn a_disconnected_device_over_the_daemon_is_named_on_stderr() {
 #[tokio::test]
 async fn identify_over_a_daemon_that_lost_the_link_says_no_word_about_stale_readings() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon(socket.clone()).await;
         let (code, out, err) = run_svolder(&socket, &["identify"]).await;
@@ -828,7 +828,7 @@ async fn identify_over_a_daemon_that_lost_the_link_says_no_word_about_stale_read
 #[tokio::test]
 async fn a_long_scan_over_the_daemon_is_cut_to_the_daemons_longest_window() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon(socket.clone()).await;
         let said = "svolder: the daemon scans for at most 30 s";
@@ -854,7 +854,7 @@ async fn a_long_scan_over_the_daemon_is_cut_to_the_daemons_longest_window() {
 #[tokio::test]
 async fn get_on_a_device_the_daemon_no_longer_lists_names_the_mismatch() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon_listing(socket.clone(), false).await;
         let (code, out, err) = run_svolder(&socket, &["get", "volume"]).await;
@@ -876,7 +876,7 @@ async fn get_on_a_device_the_daemon_no_longer_lists_names_the_mismatch() {
 #[tokio::test]
 async fn set_on_a_device_the_daemon_no_longer_lists_is_refused() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon_listing(socket.clone(), false).await;
         let (code, out, err) = run_svolder(&socket, &["set", "balance", "5"]).await;
@@ -896,7 +896,7 @@ async fn set_on_a_device_the_daemon_no_longer_lists_is_refused() {
 #[tokio::test]
 async fn doctor_names_the_daemon_it_found_under_v() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon(socket.clone()).await;
         let (_code, out, err) = run_svolder(&socket, &["doctor", "--json"]).await;
@@ -912,7 +912,7 @@ async fn doctor_names_the_daemon_it_found_under_v() {
 #[tokio::test]
 async fn devices_names_its_source_under_v() {
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let dir = TempDir::new("stub");
+        let dir = TempDir::short("stub");
         let socket = dir.join("s.sock");
         let stub = stub_daemon(socket.clone()).await;
         let (code, out, err) = run_svolder(&socket, &["devices"]).await;
@@ -1242,12 +1242,15 @@ async fn devices_over_the_daemon_with_none_configured_prints_the_hint() {
             dir,
             socket: socket.clone(),
         };
+        let mut up = false;
         for _ in 0..500 {
             if socket.exists() && Client::connect(&socket).await.is_ok() {
+                up = true;
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        assert!(up, "the daemon never answered on {}", socket.display());
         let (code, out, err) = svolder(&guard.socket, &["devices"]);
         assert_eq!(code, Some(0), "out={out} err={err}");
         assert!(out.is_empty(), "{out}");
@@ -1754,22 +1757,14 @@ fn a_temp_dir_is_private_unique_and_removed_with_its_contents() {
     assert!(!gone.exists());
 }
 
-/// A temporary path of this test's own.
+/// A temporary path of this test's own, under the short base: a daemon runs in some of them,
+/// and its socket path must be shorter than `SUN_LEN`.
 ///
 /// The counter is what makes the name unique: the clock alone can read the same nanosecond
 /// twice for two of these tests running side by side, and a shared path would put two daemons
 /// on one socket — where the second refuses to start and the first answers for both.
 fn temp_path(suffix: &str) -> PathBuf {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "svolder-backend-test-{}-{n}-{seq}{suffix}",
-        std::process::id()
-    ))
+    common::short_join(&format!("{}{suffix}", common::short_unique("svbe")))
 }
 
 /// The config of a device whose entry is a code the fake device (code `1234`) refuses.

@@ -583,10 +583,7 @@ async fn a_daemon_with_its_host_off_gets_its_own_word_and_exit_6() {
 /// "no computer EQ" of one that answers with none.
 #[tokio::test]
 async fn a_daemon_that_never_answers_is_told_apart_from_one_with_no_computer_eq() {
-    let dir = crate::test_support::TempDir(
-        std::path::PathBuf::from("/tmp/svolder").join(format!("xf-silent-{}", std::process::id())),
-    );
-    std::fs::create_dir_all(&*dir).unwrap();
+    let dir = crate::test_support::short_dir("xf-silent");
     let socket = dir.join("s.sock");
     let listener = tokio::net::UnixListener::bind(&socket).unwrap();
     let _held = tokio::spawn(async move {
@@ -632,4 +629,20 @@ async fn a_word_the_view_does_not_list_is_refused_in_the_daemons_words() {
     .unwrap_err();
     assert_eq!(failure.what, "Alpha has no preset \"Nope\"");
     assert_eq!(failure.next, "The presets are Fancy Name, Plain");
+}
+
+#[test]
+fn show_with_no_daemon_reads_the_settings_kept_before_any_state_existed() {
+    let dir = std::env::temp_dir().join(format!("svolder-xf-saved-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let state = dir.join("host-eq.toml");
+    std::fs::write(
+        dir.join("host-eq-settings.toml"),
+        "[crossfeed]\nmodel = \"bauer\"\namount = 0.33\n",
+    )
+    .unwrap();
+    let (saved, on) = super::saved_at(&state);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(saved.map(|s| s.amount), Some(0.33));
+    assert!(!on);
 }

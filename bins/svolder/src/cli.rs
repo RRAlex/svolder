@@ -47,7 +47,7 @@ mod about {
     pub(super) const DECODE: &str =
         "Decode a captured frame (command or notification) given as hex";
     pub(super) const PROFILES: &str = "Inspect device profiles";
-    pub(super) const MQTT: &str = "Turn the MQTT bridge to Home Assistant on or off, and set its broker, username and password";
+    pub(super) const MQTT: &str = "Turn the MQTT client for Home Assistant on or off, and set its broker, username and password";
     pub(super) const MCP: &str = "Turn the MCP server on or off, or print its bearer token";
     pub(super) const WEB: &str = "Open the web UI, turn it on or off, or print a code or its token";
     pub(super) const CONFIG: &str = "Configuration paths, settings and the template";
@@ -604,6 +604,23 @@ pub(crate) enum HostCommand {
         #[command(subcommand)]
         command: HostEqCommand,
     },
+    /// Check what the computer and its PipeWire config do to the sound
+    ///
+    /// Prints the path from the player through the computer to its sink and whether it leaves
+    /// the sound untouched, then seven conditions of the PipeWire config (rates, forced rate,
+    /// dither, 24-bit output, no plug, stereo to stereo, no filter in the sink), each pass, fail or
+    /// unknown. A failing line is not an error. The daemon's route and its DAC's readings are used
+    /// when one answers; else the graph is read once, read-only, and with no daemon the player is
+    /// not known unless `--player` names it. Exit 6 when the graph cannot be read.
+    Check {
+        /// Print the sink, the path and the config check as one JSON object
+        #[arg(long)]
+        json: bool,
+        /// Judge the stream of this player, by application name or process id (reads the graph
+        /// itself, not the daemon's route)
+        #[arg(long, value_name = "NAME")]
+        player: Option<String>,
+    },
     /// Cross a little of each channel into the other for headphones, through the daemon
     ///
     /// With no verb, print the crossfeed: whether it plays, the model, the preset, the level,
@@ -615,6 +632,19 @@ pub(crate) enum HostCommand {
         json: bool,
         #[command(subcommand)]
         command: Option<HostCrossfeedCommand>,
+    },
+    /// Give the bass and the treble back at a low volume, through the daemon
+    ///
+    /// With no verb, print the loudness: whether it is on, the strength, the reference and, once
+    /// the daemon has read the computer's volume, the depth and what it does to the bass, the
+    /// mids and the treble. The ranges are the daemon's: a value is snapped and held to them, and
+    /// the answer says what was set. Without a daemon only `show` works, from the saved settings.
+    Loudness {
+        /// Print the loudness as the daemon sends it, as one JSON object
+        #[arg(long, global = true)]
+        json: bool,
+        #[command(subcommand)]
+        command: Option<HostLoudnessCommand>,
     },
     /// Two virtual speakers on headphones, through the daemon
     ///
@@ -629,6 +659,31 @@ pub(crate) enum HostCommand {
         json: bool,
         #[command(subcommand)]
         command: Option<HostSpeakersCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum HostLoudnessCommand {
+    /// Print the loudness (what no verb does)
+    Show,
+    /// Turn the loudness on, with the numbers it has
+    On,
+    /// Turn the loudness off
+    Off,
+    /// Set how much of the correction is given back, in percent
+    Strength {
+        /// The percent as a plain number (e.g. `35`); the daemon snaps and holds it to its range
+        /// (`--json` lists `ranges`)
+        #[arg(allow_hyphen_values = true)]
+        percent: String,
+    },
+    /// Set the volume at and above which the loudness is flat, in percent, or `now` for the
+    /// current volume
+    Reference {
+        /// The percent as a plain number (e.g. `80`), or `now`; the daemon holds it to its range
+        /// (`--json` lists `ranges`)
+        #[arg(allow_hyphen_values = true)]
+        value: String,
     },
 }
 
@@ -790,11 +845,11 @@ pub(crate) enum ProfilesCommand {
 
 #[derive(Subcommand)]
 pub(crate) enum MqttCommand {
-    /// Turn the MQTT bridge on: `[mqtt] enabled = true`, which a running daemon acts on at once
+    /// Turn the MQTT client on: `[mqtt] enabled = true`, which a running daemon acts on at once
     On,
-    /// Turn the MQTT bridge off: `[mqtt] enabled = false`, which a running daemon acts on at once
+    /// Turn the MQTT client off: `[mqtt] enabled = false`, which a running daemon acts on at once
     Off,
-    /// Set the broker's host, port or username in `[mqtt]`
+    /// Set the broker's host, port or username, or whether HA may send commands
     Set {
         #[command(subcommand)]
         key: MqttKey,
@@ -817,6 +872,20 @@ pub(crate) enum MqttKey {
     Port { value: u16 },
     /// The username the broker wants; an empty value takes it away
     Username { value: String },
+    /// Whether the bridge takes commands back, so Home Assistant gets controls instead of sensors
+    Commands {
+        /// on subscribes to the `set` topics, off keeps the bridge read-only
+        #[command(subcommand)]
+        mode: CommandsMode,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum CommandsMode {
+    /// `[mqtt] commands = true`, which a running daemon acts on at once
+    On,
+    /// `[mqtt] commands = false`, which a running daemon acts on at once
+    Off,
 }
 
 #[derive(Subcommand)]

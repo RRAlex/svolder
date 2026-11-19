@@ -20,7 +20,11 @@ use crate::eq::{
     Status as EqStatus, played_preamp,
 };
 use crate::players::{Button, Changes, NowPlaying, Players, Status};
+use crate::route::SinkLevel;
 use crate::sink::{Sink, SinkState};
+
+/// A loudness section that changes nothing, on both sections: what a chain's config holds.
+const LOUDNESS_IDENTITY: [[f64; 5]; 2] = [[1.0, 0.0, 0.0, 0.0, 0.0]; 2];
 
 /// A write a [`FakeSink`] was asked for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -535,6 +539,11 @@ struct ChainInner {
     unknown: bool,
     /// The process that runs the chain ended on its own; an apply or a remove clears it.
     dead: bool,
+    /// The live parameters whose node an apply starts again.
+    restarts: Option<FakeParams>,
+    /// Whether a restarted node comes up as a real one does (see
+    /// [`FakeChain::restarts_node_like_pipewire`]).
+    reads_config: bool,
 }
 
 impl FakeChain {
@@ -567,6 +576,21 @@ impl FakeChain {
     /// A chain with nothing applied.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Every apply from now on starts the node of `params` again, as a real chain is started
+    /// again (see [`FakeParams::restart_node`]).
+    pub fn restarts_node_of(&self, params: &FakeParams) {
+        self.lock().restarts = Some(params.clone());
+    }
+
+    /// Like [`FakeChain::restarts_node_of`], and the node comes up as a real one is read: its
+    /// preamp ports hold the config's preamp as `pw-dump` prints it (f32, 6 decimals) and every
+    /// slot lists `b0` at 0 until [`FakeParams::run_graph`].
+    pub fn restarts_node_like_pipewire(&self, params: &FakeParams) {
+        let mut inner = self.lock();
+        inner.restarts = Some(params.clone());
+        inner.reads_config = true;
     }
 
     /// Refuse every call from now on with `failure`, `None` to take calls again.
@@ -614,6 +638,7 @@ impl Chain for FakeChain {
                 .clone()
                 .or_else(|| inner.state.as_ref().and_then(|s| s.crossfeed.clone())),
             crossfeed_on: request.crossfeed.is_some(),
+            crossfeed_loaded: request.crossfeed.clone(),
             flat: request.flat,
             speakers: request
                 .speakers
@@ -625,9 +650,16 @@ impl Chain for FakeChain {
                 .speakers
                 .as_ref()
                 .map(|speakers| speakers.id.clone()),
+            loudness: inner.state.as_ref().and_then(|s| s.loudness),
         };
         inner.state = Some(state.clone());
         inner.dead = false;
+        if let Some(params) = inner.restarts.as_ref() {
+            params.restart_node();
+            if inner.reads_config {
+                params.start_from_config(state.preamp_db);
+            }
+        }
         Ok(state)
     }
 
@@ -641,6 +673,7 @@ impl Chain for FakeChain {
         if let Some(state) = inner.state.as_mut() {
             state.on = false;
             state.speakers_loaded = None;
+            state.crossfeed_loaded = None;
         }
         Ok(())
     }
@@ -1143,6 +1176,22 @@ struct ParamsInner {
     holds: bool,
     /// The output the computer plays into, as the last look at the graph saw it.
     output: Option<crate::eq::live::OutputSink>,
+    /// The computer's volume as the graph holds it now, or the sink it is read from.
+    graph_level: Option<SinkLevel>,
+    level_of: Option<FakeSink>,
+    /// The computer's volume as the last read of the graph saw it.
+    level_read: Option<SinkLevel>,
+    /// Whether the node is kept since the last read (a forget drops it, as the session does).
+    kept: bool,
+    /// How many times the graph was read: a read of the node that was not kept.
+    reads: usize,
+    /// A send lands on the node and is recorded, yet reports failure (`pw-cli` took the line and
+    /// died before saying so).
+    lands_but_fails: bool,
+    /// Each send lands on the node only when the next one is sent (`pw-cli` is a line behind).
+    one_line_late: bool,
+    /// The line waiting to land while `one_line_late`.
+    pending: Vec<(String, f64)>,
 }
 
 impl Default for FakeParams {
@@ -1172,6 +1221,14 @@ impl Default for FakeParams {
                 forgotten: 0,
                 holds: true,
                 output: None,
+                graph_level: None,
+                level_of: None,
+                level_read: None,
+                kept: false,
+                reads: 0,
+                lands_but_fails: false,
+                one_line_late: false,
+                pending: Vec::new(),
             })),
         }
     }
@@ -1194,9 +1251,87 @@ impl FakeParams {
         self.lock().holds = holds;
     }
 
+    /// Whether a send from now on lands (as `holds` says) and is recorded, yet reports failure.
+    pub fn lands_but_fails(&self, on: bool) {
+        self.lock().lands_but_fails = on;
+    }
+
+    /// Whether each send from now on lands on the node only when the next send comes, so a look
+    /// always finds the line before the newest (`pw-cli` applies a line a moment after it is
+    /// written).
+    pub fn lands_one_line_late(&self, on: bool) {
+        self.lock().one_line_late = on;
+    }
+
     /// The node the fake reports from now on, `None` for a chain that is not in the graph.
     pub fn set_node(&self, node: Option<LiveNode>) {
         self.lock().node = node;
+    }
+
+    /// The node starts again, as an apply starts a real chain: under the next id and serial,
+    /// holding none of what was sent to the one before (its preamp ports at +60 dB, which bound
+    /// nothing, and the crossfeed stage's controls at the bypass), with nothing playing through
+    /// it yet.
+    pub fn restart_node(&self) {
+        if let Some(node) = self.lock().node.as_mut() {
+            // A chain that had the loudness stage's controls is started with them, at the
+            // identity its config holds.
+            let loudness = node
+                .params
+                .contains_key("lld1:b0")
+                .then(|| crate::eq::live::loudness_params(&LOUDNESS_IDENTITY));
+            *node = LiveNode {
+                id: node.id + 1,
+                serial: Some(node.serial.unwrap_or(0) + 1),
+                rate_hz: node.rate_hz,
+                sink: node.sink.clone(),
+                playing: false,
+                params: crate::eq::live::preamp_params(60.0)
+                    .into_iter()
+                    .chain(crate::eq::live::crossfeed_params(
+                        &crate::eq::CrossfeedStage::bypass(),
+                    ))
+                    .chain(loudness.into_iter().flatten())
+                    .collect(),
+            };
+        }
+    }
+
+    /// The node holds the preamp `db` of its config, as `pw-dump` prints it (f32, 6 decimals),
+    /// and lists every slot's `b0` at 0, as a graph that has not run does. Not modelled: the
+    /// other controls of an unrun graph read 0 too, the preamp here already holds the config's
+    /// value, and `db` is the whole preamp (a config with a crossfeed stage writes it less the
+    /// stage's cost).
+    pub fn start_from_config(&self, db: f64) {
+        if let Some(node) = self.lock().node.as_mut() {
+            for (name, mult) in crate::eq::live::preamp_params(db) {
+                let printed = format!("{:.6}", mult as f32);
+                node.params.insert(name, printed.parse().unwrap_or(mult));
+            }
+            for slot in 1..=crate::eq::live::SLOTS {
+                for channel in ['l', 'r'] {
+                    node.params.insert(format!("{channel}{slot:02}:b0"), 0.0);
+                }
+            }
+        }
+    }
+
+    /// The graph has run: every slot lists the identity's `b0` (not the config's coefficients).
+    pub fn run_graph(&self) {
+        if let Some(node) = self.lock().node.as_mut() {
+            for slot in 1..=crate::eq::live::SLOTS {
+                for channel in ['l', 'r'] {
+                    node.params.insert(format!("{channel}{slot:02}:b0"), 1.0);
+                }
+            }
+        }
+    }
+
+    /// The sink runs at `rate_hz` from now on; the node keeps its id and serial.
+    pub fn set_rate(&self, rate_hz: Option<u32>) {
+        if let Some(node) = self.lock().node.as_mut() {
+            node.rate_hz = rate_hz;
+        }
     }
 
     /// Whether a stream plays through the chain's sink from now on.
@@ -1249,6 +1384,35 @@ impl FakeParams {
         }
     }
 
+    /// A node as a current chain shows it: the loudness stage's controls, at the identity its
+    /// config holds.
+    pub fn with_loudness_ports(&self) {
+        if let Some(node) = self.lock().node.as_mut() {
+            node.params
+                .extend(crate::eq::live::loudness_params(&LOUDNESS_IDENTITY));
+        }
+    }
+
+    /// The computer's volume the graph holds from now on, which the next read of it sees; `None`
+    /// for one that cannot be read.
+    pub fn set_level(&self, level: Option<SinkLevel>) {
+        let mut inner = self.lock();
+        inner.graph_level = level;
+        inner.level_of = None;
+    }
+
+    /// The computer's volume is `sink`'s from now on (its volume on the cubic scale, cubed, and
+    /// its mute), as the next read of the graph sees it.
+    pub fn level_from(&self, sink: &FakeSink) {
+        self.lock().level_of = Some(sink.clone());
+    }
+
+    /// How many times the graph was read: a look at the node after it was forgotten, as the
+    /// session reads `pw-dump` only then.
+    pub fn reads(&self) -> usize {
+        self.lock().reads
+    }
+
     /// The lines sent so far, as `pw-cli` would be given them.
     pub fn lines(&self) -> Vec<String> {
         self.lock().lines.clone()
@@ -1272,7 +1436,22 @@ impl FakeParams {
 #[async_trait]
 impl Params for FakeParams {
     async fn node(&mut self) -> Option<LiveNode> {
-        self.lock().node.clone()
+        let mut inner = self.lock();
+        if !std::mem::replace(&mut inner.kept, true) {
+            inner.reads += 1;
+            inner.level_read = match &inner.level_of {
+                Some(sink) => sink.state().map(|state| SinkLevel {
+                    linear: f64::from(state.volume).powi(3),
+                    muted: state.muted,
+                }),
+                None => inner.graph_level,
+            };
+        }
+        inner.node.clone()
+    }
+
+    fn level(&self) -> Option<SinkLevel> {
+        self.lock().level_read
     }
 
     async fn sink_rate(&mut self) -> Option<u32> {
@@ -1297,18 +1476,23 @@ impl Params for FakeParams {
         }
         inner.lines.push(set_param_line(key.id, params));
         inner.sent.push(params.to_vec());
+        let landing = match inner.one_line_late {
+            true => std::mem::replace(&mut inner.pending, params.to_vec()),
+            false => params.to_vec(),
+        };
         if inner.holds
             && let Some(node) = inner.node.as_mut()
         {
-            for (name, value) in params {
-                node.params.insert(name.clone(), *value);
+            for (name, value) in landing {
+                node.params.insert(name, value);
             }
         }
-        true
+        !inner.lands_but_fails
     }
 
     fn forget_node(&mut self) {
         let mut inner = self.lock();
         inner.forgotten += 1;
+        inner.kept = false;
     }
 }

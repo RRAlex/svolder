@@ -644,13 +644,29 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
 .np-hop.changes {
   color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
-.np-path.ok .np-verdict {
+.np-path.untouched .np-verdict {
   color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent);
 }
-.np-path.ok .np-verdict::after { content: " ✓"; }
+.np-path.untouched .np-verdict::after { content: " ✓"; }
 .np-path.changed .np-verdict {
   color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
+/* the config check's chip: a button that opens the PipeWire config popup, the colour of its class
+   and a mark in its words (`config ✓`, `config 2`, `config ?`), dashed when nothing was read */
+.np-setup {
+  font: inherit; line-height: inherit; color: var(--dim); background: none; cursor: pointer;
+  border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
+}
+.np-setup.untouched { color: var(--good); border-color: color-mix(in srgb, var(--good) 75%, transparent); }
+.np-setup.changes {
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 75%, transparent);
+}
+.np-setup:is(.unread, .not_read, .other_version) { color: var(--faint); border-style: dashed; border-color: var(--dim); }
+.np-setup:hover { border-color: currentColor; }
+.np-setup { flex: none; }
+/* the verdict and the config chip beside it: the verdict wraps inside the lead */
+.np-lead { display: flex; align-items: center; gap: inherit; min-width: 0; max-width: 100%; }
+.np-lead .np-verdict { min-width: 0; }
 .p-playing.idle { display: flex; align-items: center; height: 72px; padding-block: 0; }
 .np-none { font: var(--t-s)/1.4 var(--f-ui); color: var(--faint); }
 
@@ -787,17 +803,18 @@ html[data-viz=off] .p-viz { display: none; }
 @container app (min-width: 820px) {
   .np { gap: 8px; }
   .p-playing .np-path { gap: 5px; font-size: 11.5px; min-height: 0; }
-  .p-playing :is(.np-hop, .np-verdict, .np-more) { padding: 2px 8px; }
+  .p-playing :is(.np-hop, .np-verdict, .np-more, .np-setup) { padding: 2px 8px; }
 }
 @container app (min-width: 820px) and (max-width: 1099px) {
   .p-playing .np-title { font-size: 18px; }
   .p-playing .np-head { gap: 14px; }
 }
 /* the visualizer off: Now playing alone across the whole band, at the least fixed height that
-   still holds a changed path's two rows of chips (measured at 820 and at 1100, where the cover
-   grows from 64 to 84 px); playing.py checks that every chip stands inside it */
+   still holds a changed path's two rows of chips and the config chip beside its verdict (measured
+   at 820 and at 1100, where the cover grows from 64 to 84 px); playing.py checks that every chip
+   stands inside it */
 @container app (min-width: 820px) {
-  html[data-viz=off] .p-band { grid-template-columns: minmax(0, 1fr); --band-h: 168px; }
+  html[data-viz=off] .p-band { grid-template-columns: minmax(0, 1fr); --band-h: 184px; }
 }
 @container app (min-width: 1100px) {
   html[data-viz=off] .p-band { --band-h: 188px; }

@@ -27,6 +27,7 @@ mod crossfeed;
 mod describe;
 mod host;
 mod identify;
+mod loudness;
 mod presets;
 mod set_control;
 mod speakers;
@@ -87,6 +88,8 @@ struct Scripted {
     /// The climb the writer shows: what [`Fleet::watch`] hands out.
     climb: tokio::sync::watch::Sender<Option<ClimbView>>,
     feed: tokio::sync::watch::Sender<crate::device::Feed>,
+    /// A second device named `second`, with its profile and feed, listed after the first.
+    second: StdMutex<Option<(Profile, tokio::sync::watch::Sender<crate::device::Feed>)>>,
     recalled_watch: tokio::sync::watch::Sender<Option<String>>,
 }
 
@@ -126,6 +129,7 @@ fn scripted_over(profile: Profile, readings: &[(&str, i64)]) -> Arc<Scripted> {
         shown_climb: StdMutex::new(false),
         climb: tokio::sync::watch::channel(None).0,
         feed: tokio::sync::watch::channel(Default::default()).0,
+        second: StdMutex::new(None),
         recalled_watch: tokio::sync::watch::channel(None).0,
     })
 }
@@ -189,9 +193,17 @@ impl Fleet for Scripted {
                 device: "amp".into(),
                 values: self.tone.lock().unwrap().clone(),
             },
-            Request::Devices => Response::Devices {
-                devices: vec![self.resolve(None).expect("the one device")],
-            },
+            Request::Devices => {
+                let mut devices = vec![self.resolve(None).expect("the one device")];
+                if let Some((profile, _)) = &*self.second.lock().unwrap() {
+                    devices.push(DeviceInfo {
+                        name: "second".to_string(),
+                        profile: profile.name.clone(),
+                        ..devices[0].clone()
+                    });
+                }
+                Response::Devices { devices }
+            }
             Request::Identify { .. } => {
                 *self.identifies.lock().unwrap() += 1;
                 self.identify
@@ -322,9 +334,13 @@ impl Fleet for Scripted {
         }
     }
 
-    fn watch(&self, _device: &DeviceInfo) -> Option<Watched> {
+    fn watch(&self, device: &DeviceInfo) -> Option<Watched> {
+        let feed = match &*self.second.lock().unwrap() {
+            Some((_, feed)) if device.name == "second" => feed.subscribe(),
+            _ => self.feed.subscribe(),
+        };
         Some(Watched {
-            feed: self.feed.subscribe(),
+            feed,
             climb: self.climb.subscribe(),
             recalled: self.recalled_watch.subscribe(),
         })
@@ -367,8 +383,11 @@ impl Fleet for Scripted {
         Outcome::Done(Response::Ack)
     }
 
-    fn profile(&self, _device: &DeviceInfo) -> Option<Profile> {
-        Some(self.profile.clone())
+    fn profile(&self, device: &DeviceInfo) -> Option<Profile> {
+        match &*self.second.lock().unwrap() {
+            Some((profile, _)) if device.name == "second" => Some(profile.clone()),
+            _ => Some(self.profile.clone()),
+        }
     }
 
     async fn events(&self) -> BoxStream<'static, Event> {

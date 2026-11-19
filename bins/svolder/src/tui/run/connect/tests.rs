@@ -268,9 +268,9 @@ async fn a_password_into_a_readable_file_is_said_to_tighten_it() {
     watching.close().await;
 }
 
-/// `v` reads the token from the store into the category for ten seconds.
+/// `v` reads the token from the store into the category for a minute.
 #[tokio::test]
-async fn revealing_reads_the_token_for_ten_seconds() {
+async fn revealing_reads_the_token_for_a_minute() {
     let (_daemon, path, watching) = on_a_daemon().await;
     let home = state_home();
     let token = token_under(&home);
@@ -289,6 +289,24 @@ async fn revealing_reads_the_token_for_ten_seconds() {
             .shown(now + connections::REVEAL_FOR + Duration::from_secs(1))
             .is_none()
     );
+    watching.close().await;
+}
+
+/// `v` with no token to read closes the box and says so: no empty box stays open.
+#[tokio::test]
+async fn revealing_with_no_token_closes_the_box_and_says_so() {
+    let (_daemon, path, mut watching) = on_a_daemon().await;
+    let home = state_home();
+    let (mut look, _) = look_over(&home);
+    let opener = opener_on_nothing(path);
+    watching.app.overlays.conn.modal = Some(connections::Modal::Token);
+
+    let watching = taken(Intent::RevealToken, &opener, watching, &mut look).await;
+
+    assert!(watching.app.overlays.conn.modal.is_none());
+    assert!(watching.app.overlays.conn.revealed.is_none());
+    let toast = watching.app.toast().expect("a toast").text.clone();
+    assert!(toast.contains("no token yet"), "{toast}");
     watching.close().await;
 }
 
@@ -839,5 +857,78 @@ async fn a_narrowed_mode_the_daemon_reports_is_a_toast() {
         .unwrap_or_default();
     assert!(shown.contains("0600"), "{shown}");
     assert!(!shown.contains("fake-secret"));
+    watching.close().await;
+}
+
+/// The Web UI and MCP server rows show what the daemon's switch wrote: after each answer the
+/// row reads the new state, and a second press turns it off; a refused switch leaves the row and
+/// says why.
+#[tokio::test]
+async fn a_server_switch_refreshes_its_row_from_the_file_it_wrote() {
+    let (daemon, path, watching) = on_a_daemon().await;
+    daemon.lists_features(&["server_switch"]);
+    daemon.switches_write(&path);
+    let opener = opener_on_nothing(path.clone());
+    let (mut look, _) = look_over(&state_home());
+
+    let watching = taken(
+        Intent::Connection(ConnChange::McpEnabled(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        watching.app.overlays.conn.mcp.enabled,
+        "the MCP row stayed off after the switch"
+    );
+    let watching = taken(
+        Intent::Connection(ConnChange::McpEnabled(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(!watching.app.overlays.conn.mcp.enabled);
+
+    let watching = taken(
+        Intent::Connection(ConnChange::WebEnabled(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(
+        watching.app.overlays.conn.web.enabled,
+        "the web row stayed off after the switch"
+    );
+    let mut watching = taken(
+        Intent::Connection(ConnChange::WebEnabled(false)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(!watching.app.overlays.conn.web.enabled);
+
+    daemon.answers_switch(svolder_ipc::Response::error(
+        svolder_ipc::CODE_USAGE,
+        "the MCP server cannot start",
+    ));
+    watching.app.dismiss_toast();
+    let watching = taken(
+        Intent::Connection(ConnChange::McpEnabled(true)),
+        &opener,
+        watching,
+        &mut look,
+    )
+    .await;
+    assert!(!watching.app.overlays.conn.mcp.enabled);
+    let said = watching
+        .app
+        .toast()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    assert!(said.contains("cannot start"), "{said}");
     watching.close().await;
 }

@@ -16,7 +16,7 @@ use tokio::net::UnixListener;
 use super::*;
 use crate::commands::daemon::test_support::{Tools, a_daemon_on, no_units, units_in};
 use crate::commands::daemon::{SERVICE_UNIT, SOCKET_UNIT};
-use crate::test_support::temp_dir;
+use crate::test_support::{short_dir, temp_dir};
 
 /// A host that finds no daemon to start and counts the times it was asked for one.
 struct CountingHost {
@@ -72,7 +72,7 @@ fn start_calls(tools: &Tools) -> Vec<String> {
 /// service; the holder is found from the unit facts and nothing connects.
 #[tokio::test]
 async fn systemd_with_an_idle_service_is_found_without_connecting() {
-    let dir = temp_dir("handover-idle");
+    let dir = short_dir("handover-idle");
     let socket = dir.0.join("svolder.sock");
     let listener = UnixListener::bind(&socket).expect("the socket is bound");
     let tools = Tools::new(&units_in(
@@ -109,7 +109,7 @@ async fn systemd_with_an_idle_service_is_found_without_connecting() {
 /// so a daemon answering on the path is found, and none is none.
 #[tokio::test]
 async fn idle_units_leave_the_socket_to_be_asked() {
-    let dir = temp_dir("handover-stopped");
+    let dir = short_dir("handover-stopped");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in(
         &socket.display().to_string(),
@@ -145,7 +145,7 @@ async fn idle_units_leave_the_socket_to_be_asked() {
 /// A daemon on a path the units do not listen on is a spawned one, whatever the units say.
 #[tokio::test]
 async fn a_daemon_on_a_path_the_units_do_not_own_is_spawned() {
-    let dir = temp_dir("handover-elsewhere");
+    let dir = short_dir("handover-elsewhere");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in("/run/user/1000/svolder.sock", "active", "active"));
     let served = a_daemon_on(&socket).await;
@@ -174,7 +174,7 @@ async fn a_daemon_on_a_path_the_units_do_not_own_is_spawned() {
 /// transport has no holder at all.
 #[tokio::test]
 async fn a_daemon_without_units_is_spawned_and_the_fake_has_none() {
-    let dir = temp_dir("handover-spawned");
+    let dir = short_dir("handover-spawned");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&no_units());
     let (path, auto) = globals(&socket.display().to_string(), "auto");
@@ -221,7 +221,7 @@ async fn a_daemon_without_units_is_spawned_and_the_fake_has_none() {
 /// What was running comes back, the socket before the service; a spawned daemon is spawned.
 #[tokio::test]
 async fn restore_starts_what_was_active() {
-    let dir = temp_dir("handover-restore");
+    let dir = short_dir("handover-restore");
     let tools = Tools::new(&no_units());
     let host = CountingHost::new(&dir.0);
 
@@ -273,7 +273,7 @@ async fn restore_starts_what_was_active() {
 /// A body that fails still leaves the units started again.
 #[tokio::test]
 async fn away_restores_after_a_body_that_fails() {
-    let dir = temp_dir("handover-fails");
+    let dir = short_dir("handover-fails");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in(&socket.display().to_string(), "active", "active"));
     let host = CountingHost::new(&dir.0);
@@ -311,7 +311,7 @@ async fn away_restores_after_a_body_that_fails() {
 /// A body that returns early, as a Ctrl-C does, still leaves a spawned daemon spawned again.
 #[tokio::test]
 async fn away_restores_after_a_body_that_was_interrupted() {
-    let dir = temp_dir("handover-interrupted");
+    let dir = short_dir("handover-interrupted");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&no_units());
     let host = CountingHost::new(&dir.0);
@@ -350,7 +350,7 @@ async fn away_restores_after_a_body_that_was_interrupted() {
 /// A stop that fails part way still has the restore run, and the body is not run.
 #[tokio::test]
 async fn away_restores_after_a_stop_that_failed() {
-    let dir = temp_dir("handover-stop-fails");
+    let dir = short_dir("handover-stop-fails");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in(&socket.display().to_string(), "active", "active"));
     tools.fail_stop();
@@ -380,7 +380,7 @@ async fn away_restores_after_a_stop_that_failed() {
 /// A restore that fails says the command that brings the daemon back.
 #[tokio::test]
 async fn a_failed_restore_names_the_command() {
-    let dir = temp_dir("handover-names");
+    let dir = short_dir("handover-names");
     let host = CountingHost::new(&dir.0);
     let broken = Ctl::with_systemctl("/bin/false");
 
@@ -419,7 +419,7 @@ async fn a_failed_restore_names_the_command() {
 /// A body that panics still has the restore run, and the panic goes on.
 #[tokio::test]
 async fn away_restores_after_a_body_that_panics() {
-    let dir = temp_dir("handover-panics");
+    let dir = short_dir("handover-panics");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in(&socket.display().to_string(), "active", "active"));
     let host = CountingHost::new(&dir.0);
@@ -450,7 +450,7 @@ async fn away_restores_after_a_body_that_panics() {
 /// A restore that cannot be named by the default command says which socket.
 #[tokio::test]
 async fn a_failed_spawned_restore_names_a_socket_that_is_not_the_default() {
-    let dir = temp_dir("handover-socket");
+    let dir = short_dir("handover-socket");
     let host = CountingHost::new(&dir.0);
     let socket = dir.0.join("elsewhere.sock");
     let failed = restore(
@@ -494,7 +494,7 @@ async fn units_that_settle_end_the_wait() {
 /// A stop that leaves the units inactive shows so to the next look.
 #[tokio::test]
 async fn a_systemd_stop_leaves_the_units_inactive() {
-    let dir = temp_dir("handover-stop-shows");
+    let dir = short_dir("handover-stop-shows");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in(&socket.display().to_string(), "active", "active"));
     let (path, transport) = globals(&socket.display().to_string(), "auto");
@@ -516,7 +516,7 @@ async fn a_systemd_stop_leaves_the_units_inactive() {
 /// A stop that panics part way is still followed by the restore, and the panic is resumed.
 #[tokio::test]
 async fn a_panic_in_the_stop_still_brings_the_units_back() {
-    let dir = temp_dir("handover-stop-panic");
+    let dir = short_dir("handover-stop-panic");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&units_in(&socket.display().to_string(), "active", "active"));
     let host = CountingHost::new(&dir.0);

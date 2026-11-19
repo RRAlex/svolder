@@ -16,6 +16,7 @@
 use std::pin::Pin;
 use std::sync::Mutex;
 
+use crate::activity::Activity;
 use crate::locks::locked;
 use crate::log;
 
@@ -65,6 +66,9 @@ impl Refresher {
 /// The server a daemon runs, and whether its own stop has begun.
 pub struct Slot<S> {
     inner: Mutex<Inner<S>>,
+    /// The server's client counts, which outlive each server the slot starts and end with the
+    /// daemon.
+    activity: Activity,
 }
 
 struct Inner<S> {
@@ -79,6 +83,7 @@ impl<S> Default for Slot<S> {
                 running: None,
                 stopping: false,
             }),
+            activity: Activity::default(),
         }
     }
 }
@@ -166,6 +171,17 @@ impl<S: Server> Slot<S> {
             Some(server) => server.status(),
             None => S::off(),
         }
+    }
+
+    /// The counts of the slot's clients, for a server it starts to record into.
+    pub fn activity(&self) -> Activity {
+        self.activity.clone()
+    }
+
+    /// The counts of the slot's clients while its server serves; none while it is off or failed.
+    pub fn counts(&self) -> Option<svolder_ipc::ServerActivity> {
+        let serving = locked(&self.inner).running.as_ref().is_some_and(S::serving);
+        serving.then(|| self.activity.snapshot())
     }
 
     /// Where the running server's token comes from, for the `version` reply alone.

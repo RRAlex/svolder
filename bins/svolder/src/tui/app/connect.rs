@@ -14,10 +14,10 @@
 use crossterm::event::KeyCode;
 use svolder_ipc::token::TokenSource;
 
-use super::{App, ConnChange, Intent};
+use super::{App, ConnChange, Intent, SettingsBox};
 use crate::tui::boxes::connections::{Field, Line, Modal, TokenView};
 use crate::tui::boxes::web_box::{self, WebBox, WebRow};
-use crate::tui::screens::settings::Setting;
+use crate::tui::screens::settings::{self, Setting};
 
 impl Line {
     /// A line holding `text`, the cursor at its end.
@@ -51,6 +51,15 @@ impl App {
             self.warn(words);
             return Vec::new();
         }
+        if setting == Setting::MqttEnabled
+            && !self.overlays.conn.mqtt.enabled
+            && self.overlays.conn.mqtt.host.is_none()
+        {
+            // the switch cannot go on without a broker: say so and show where it is set
+            self.warn("set MQTT broker host first");
+            self.select_setting(Setting::MqttHost);
+            return Vec::new();
+        }
         let conn = &self.overlays.conn;
         let change = match setting {
             Setting::McpEnabled => ConnChange::McpEnabled(!conn.mcp.enabled),
@@ -62,8 +71,9 @@ impl App {
                 return self.edit(Field::Host, conn.mqtt.host.clone().unwrap_or_default());
             }
             Setting::MqttPort => return self.edit(Field::Port, conn.mqtt.port.to_string()),
+            // Only `v` and Enter (see `settings_box_key`) open the token box.
             Setting::McpToken => {
-                self.notify("v shows the token, c copies it, R replaces it");
+                self.notify("v or Enter shows the token, c copies it, R replaces it");
                 return Vec::new();
             }
             Setting::MqttUsername => {
@@ -79,6 +89,21 @@ impl App {
         vec![Intent::Connection(change)]
     }
 
+    /// Put the Settings cursor on `setting`, in whichever category lists it.
+    fn select_setting(&mut self, setting: Setting) {
+        let found = settings::CATEGORIES
+            .iter()
+            .enumerate()
+            .find_map(|(category, (_, rows))| {
+                rows.iter()
+                    .position(|row| *row == setting)
+                    .map(|row| (category, row))
+            });
+        if let Some((category, row)) = found {
+            self.overlays.settings = Some(SettingsBox { category, row });
+        }
+    }
+
     /// Open the edit line on `field`, holding `text`.
     fn edit(&mut self, field: Field, text: String) -> Vec<Intent> {
         self.overlays.conn.password_shown = false;
@@ -87,9 +112,9 @@ impl App {
         Vec::new()
     }
 
-    /// What `v`, `c` and `R` ask of the token row: to show the token, to copy it, or to ask
-    /// before replacing it. Replacing is refused, naming the source, for a token svolder does
-    /// not own.
+    /// What `v`, `c` and `R` ask of the token row: to open the token box, to copy the token, or
+    /// to ask before replacing it. Replacing is refused, naming the source, for a token svolder
+    /// does not own.
     pub(super) fn token_key(&mut self, key: char) -> Vec<Intent> {
         if let Some(words) = self.overlays.conn.token_refusal() {
             self.warn(words);
@@ -105,10 +130,10 @@ impl App {
             return Vec::new();
         };
         match key {
-            'v' => match self.overlays.conn.revealed.take() {
-                Some(_) => Vec::new(),
-                None => vec![Intent::RevealToken],
-            },
+            'v' => {
+                self.overlays.conn.modal = Some(Modal::Token);
+                vec![Intent::RevealToken]
+            }
             'c' => vec![Intent::CopyToken],
             _ => match source {
                 TokenSource::Generated(_) => {
@@ -151,6 +176,14 @@ impl App {
                 Vec::new()
             }
             Some(Modal::Web(_)) => self.web_box_key(code),
+            Some(Modal::Token) => match code {
+                KeyCode::Char('c') => vec![Intent::CopyToken],
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | 'v') => {
+                    self.overlays.conn.hide_token();
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            },
             None => Vec::new(),
         }
     }

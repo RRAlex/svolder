@@ -37,7 +37,7 @@ session refuse the request in words (a usage error, link or not), and the TUI, t
 Assistant discovery and the MCP tool each leave the cue out, so no front end offers a button that
 sends nothing. `svolder raw 200` still sends the frame, for an owner who wants to see.
 
-The eight keys the MQTT bridge's own entities take are reserved: `build_control` refuses a control
+The eight keys the MQTT client's own entities take are reserved: `build_control` refuses a control
 keyed one of them, in any letter case, naming the key ([the bridge](mqtt-and-home-assistant.md)
 says why). It also refuses a control whose function id is not of the `Normal` class
 (`FunctionId::class`): the passphrase function (250 and below it) and the firmware-update family

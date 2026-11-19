@@ -88,10 +88,10 @@ pub struct Daemon {
     reloading: tokio::sync::Mutex<()>,
     /// Raised by a `stop` request; what the daemon waits on beside the termination signals.
     stop: tokio::sync::Notify,
-    /// The socket the daemon serves on, which makes the MQTT bridge's default client id its
+    /// The socket the daemon serves on, which makes the MQTT client's default client id its
     /// own.
     socket: PathBuf,
-    /// The MQTT bridge, while `[mqtt]` turns one on.
+    /// The MQTT client, while `[mqtt]` turns one on.
     bridge: std::sync::Mutex<BridgeSlot>,
     /// The MCP server, while `[mcp]` turns one on.
     mcp: Slot<McpServer>,
@@ -121,7 +121,7 @@ pub struct Daemon {
     me: std::sync::OnceLock<std::sync::Weak<Daemon>>,
 }
 
-/// The MQTT bridge the daemon runs, the section the next one is started from while the one
+/// The MQTT client the daemon runs, the section the next one is started from while the one
 /// before it stops, and whether the daemon's own stop has begun — after which no bridge is
 /// started at all.
 #[derive(Default)]
@@ -294,7 +294,7 @@ impl Daemon {
         Ok(devices)
     }
 
-    /// Bring the MQTT bridge in line with `mqtt` and the devices as they now stand: a bridge
+    /// Bring the MQTT client in line with `mqtt` and the devices as they now stand: a bridge
     /// already running that section keeps its connection and gets the current devices; one on
     /// a changed section is stopped (`offline` for every device and for itself) and the one
     /// `mqtt` describes, if any, started in its place.
@@ -322,7 +322,7 @@ impl Daemon {
             slot.running.take()
         };
         if let Some(old) = replaced {
-            log::info("mqtt: the [mqtt] section changed; stopping the bridge it described");
+            log::info("mqtt: the [mqtt] section changed; stopping the MQTT client it described");
             old.stop(&devices).await;
         }
         self.start_bridge(mqtt, devices, presets);
@@ -340,6 +340,7 @@ impl Daemon {
         let computer = crate::mqtt_bridge::ComputerLink {
             view: self.host.changes(),
             switch: self.host.eq_switch(),
+            slow: Some(self.host.slow_holds()),
         };
         slot.running = Bridge::start(
             mqtt,
@@ -350,7 +351,7 @@ impl Daemon {
         );
     }
 
-    /// Stop the MQTT bridge, if one runs, with `offline` for every device and for itself.
+    /// Stop the MQTT client, if one runs, with `offline` for every device and for itself.
     ///
     /// Marks the stop first, so a reload running at the same time starts no bridge after it.
     async fn stop_bridge(&self) {
@@ -420,6 +421,7 @@ impl Daemon {
                         mcp,
                         Arc::new(DaemonFleet::new(me, Origin::Mcp, Mode::Ordered)),
                         Arc::clone(&self.mcp_floors),
+                        self.mcp.activity(),
                     )
                     .await,
                 )
@@ -453,6 +455,7 @@ impl Daemon {
                         web,
                         Arc::new(DaemonFleet::new(me, Origin::Web, Mode::Latest)),
                         Arc::clone(&self.web_codes),
+                        self.web.activity(),
                     )
                     .await,
                 )
@@ -577,7 +580,7 @@ impl Daemon {
         names
     }
 
-    /// Where the MQTT bridge stands: off while no section turns it on, and connecting while a
+    /// Where the MQTT client stands: off while no section turns it on, and connecting while a
     /// reload hands over from one section's bridge to the next one's.
     fn mqtt_status(&self) -> MqttStatus {
         let slot = locked(&self.bridge);
@@ -600,7 +603,7 @@ impl Daemon {
         self.stop.notified().await;
     }
 
-    /// Stop the jobs, then the servers, then the computer's player, then the MQTT bridge, then
+    /// Stop the jobs, then the servers, then the computer's player, then the MQTT client, then
     /// ask every actor (the walk's probe among them) to close its session, so the radio is
     /// released before the daemon exits; last, wait for a configuration write already under way,
     /// so the end of the runtime never cuts one.
@@ -1037,6 +1040,10 @@ impl Daemon {
                         .iter()
                         .map(|f| (*f).to_string())
                         .collect(),
+                    activity: Some(svolder_ipc::Activity {
+                        mcp: self.mcp.counts(),
+                        web: self.web.counts(),
+                    }),
                 }
             }
             Request::Stop => {

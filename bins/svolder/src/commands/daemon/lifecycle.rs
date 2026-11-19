@@ -173,7 +173,7 @@ pub(super) async fn wait_for_the_socket_to_close(socket: &Path) -> Result<(), Fa
 }
 
 /// How long a restart waits for the old daemon to exit once its socket is gone: every bounded
-/// step of the daemon's stop, in the order it takes them (jobs, the MQTT bridge, actors, a write
+/// step of the daemon's stop, in the order it takes them (jobs, the MQTT client, actors, a write
 /// under way, the transport's settle, the end of the runtime; `docs/design/jobs.md` lists them
 /// and a test reads the daemon's source to hold the list to it), and two seconds more for the
 /// servers, which stop at once. The socket's lock is held to the end of the process, so the sum

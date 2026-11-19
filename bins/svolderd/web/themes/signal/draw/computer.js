@@ -164,15 +164,21 @@ export const plain = (words) => words.replace(/\bthe computer's\b/gi, "PipeWire'
 /** The verdict's words as markup: with a whole sentence behind them (`path.title`) the short words
  * are hidden from a screen reader and the sentence is read in their place. */
 export const said = (path) => (path.title
-  ? `<span aria-hidden="true">${esc(plain(path.words))}</span><span class="sg-sr">${esc(plain(path.title))}</span>`
-  : esc(plain(path.words)));
+  ? `<span aria-hidden="true">${esc(plain(path.words.join(' · ')))}</span><span class="sg-sr">${esc(plain(path.title))}</span>`
+  : esc(plain(path.words.join(' · '))));
+
+/** The config check's chip, a button beside the verdict that opens the PipeWire config popup: the
+ * daemon's short words, in the colour of its class; nothing when the daemon sent no check. */
+export const configChip = (path) => (path?.config
+  ? `<button type="button" id="sg-config" class="sg-config ${esc(path.config.outcome)}" data-act="config" aria-haspopup="dialog" title="${esc(path.config.summary)}" aria-label="${esc(path.config.chip)}, ${esc(path.config.summary)}">${esc(path.config.chip)}</button>`
+  : '');
 
 /** The path verdict, from the path the shown device reads (its hops' `computer` entry and the
  * words), else nothing. */
 function verdict(path) {
-  if (!path?.words) return '';
+  if (!path?.words?.length) return '';
   const title = path.title ? ` title="${esc(plain(path.title))}"` : '';
-  return `<dt>${esc(COMPUTER.path)}</dt><dd class="${path.class === 'ok' ? 'sg-ok' : 'sg-warn'}"${title}>${said(path)}</dd>`;
+  return `<dt>${esc(COMPUTER.path)}</dt><dd class="${path.verdict === 'untouched' ? 'sg-ok' : 'sg-warn'}"${title}>${said(path)}${configChip(path)}</dd>`;
 }
 
 /** The facts of the route that are not controls: the sound card and its format, the other streams

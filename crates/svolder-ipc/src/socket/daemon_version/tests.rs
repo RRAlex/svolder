@@ -88,12 +88,7 @@ fn mismatch_line_is_the_advice_for_a_daemon_of_another_version() {
 /// A fake daemon on a fresh socket that reads one request line and answers it with `reply`, or
 /// holds the connection without answering when there is none.
 fn fake_daemon(reply: Option<Reply>) -> std::path::PathBuf {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let socket = std::env::temp_dir().join(format!(
-        "svolder-version-fake-{}-{seq}.sock",
-        std::process::id()
-    ));
+    let socket = crate::test_support::temp_socket();
     let _ = std::fs::remove_file(&socket);
     let listener = tokio::net::UnixListener::bind(&socket).expect("the socket binds");
     tokio::spawn(async move {
@@ -131,6 +126,7 @@ async fn a_version_reply_is_a_daemon_info_and_another_reply_is_nothing() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         },
     }));
     assert_eq!(
@@ -146,6 +142,7 @@ async fn a_version_reply_is_a_daemon_info_and_another_reply_is_nothing() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         })
     );
     let _ = std::fs::remove_file(&socket);
@@ -186,6 +183,7 @@ async fn version_on_carries_the_log_with_the_info() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         },
     }));
     let mut client = Client::connect(&socket).await.expect("connects");
@@ -204,6 +202,7 @@ async fn version_on_carries_the_log_with_the_info() {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                activity: None,
             },
             log: Some("journal".into()),
         }
@@ -228,8 +227,7 @@ async fn version_on_names_another_reply_as_unexpected() {
 /// A connection that is lost before the answer is named as no version.
 #[tokio::test]
 async fn version_on_names_a_lost_connection() {
-    let socket =
-        std::env::temp_dir().join(format!("svolder-version-drop-{}.sock", std::process::id()));
+    let socket = crate::test_support::temp_socket();
     let _ = std::fs::remove_file(&socket);
     let listener = tokio::net::UnixListener::bind(&socket).expect("the socket binds");
     tokio::spawn(async move {
@@ -258,6 +256,7 @@ fn a_daemon_supports_what_it_lists() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     assert!(!info.supports("reasons"));
     info.features = vec!["reasons".into()];

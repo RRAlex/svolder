@@ -174,10 +174,10 @@ try:
     check('Enter opens with focus on the checked item', s['open'] and s['focus'] == 'glow', s)
     reached = b.ev(REACHABLE)
     check('the rows the arrows reach with Smoke disabled: the Theme row, Glow, Off, Arrange, Devices, '
-          'Sound, Help (the Device row is disabled with one device, and there is no Sign out with auth '
+          'Sound, PipeWire config, Help (the Device row is disabled with one device, and there is no Sign out with auth '
           'none)',
           reached == ['menu-theme', 'glow', 'off', 'menu-arrange', 'menu-popup-devices',
-                      'menu-popup-sound', 'menu-popup-help'], reached)
+                      'menu-popup-sound', 'menu-popup-setup', 'menu-popup-help'], reached)
     order = []
     for k in ('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp',
               'ArrowRight', 'ArrowLeft', 'End', 'Home'):
@@ -187,7 +187,7 @@ try:
           'the Device row (one device) and reach the Devices and Sound rows; Right is Down and Left is '
           'Up; End and Home jump',
           order == ['off', 'menu-arrange', 'menu-popup-devices', 'menu-popup-sound',
-                    'menu-popup-help', 'menu-popup-sound', 'menu-popup-devices',
+                    'menu-popup-setup', 'menu-popup-sound', 'menu-popup-devices',
                     'menu-popup-sound', 'menu-popup-devices', 'menu-popup-help',
                     'menu-theme'], order)
     b.press('ArrowDown')

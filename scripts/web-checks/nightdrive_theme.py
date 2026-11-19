@@ -1360,8 +1360,8 @@ def the_dash_press_while_faded(b, d):
     check('  no page error', errors(b) == [], errors(b)[:3])
 
 
-# the longest verdict is the three stages of the filter chain, then the path's flag
-LONGEST = 'host EQ on \\u00b7 crossfeed on \\u00b7 virtual speakers on \\u00b7 changes the sound'
+# the longest verdict is the four stages of the filter chain, then the path's flag
+LONGEST = 'host EQ on \\u00b7 loudness on \\u00b7 crossfeed on \\u00b7 virtual speakers on \\u00b7 changes the sound'
 SUN_SCAN = """(() => {
   const num = (c) => c.match(/[\\d.]+/g).map(Number);
   const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92

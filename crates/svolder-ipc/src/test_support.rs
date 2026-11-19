@@ -10,6 +10,11 @@ mod script;
 
 pub(crate) use script::install_script;
 
+#[path = "../../svolder-host/tests/common/short_socket.rs"]
+mod short_socket;
+
+pub(crate) use short_socket::short_dir;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -62,22 +67,10 @@ pub(crate) fn temp_dir(what: &str) -> TempPath {
     TempPath(dir)
 }
 
-/// A unique socket path under the system temp directory.
-///
-/// The counter is what makes two calls in the same nanosecond distinct: tests run on several
-/// threads at once, and a clock coarser than the name it labels would otherwise let two of
-/// them race for the same path.
+/// A unique socket path, short whatever `TMPDIR` is: a socket path must be shorter than
+/// `SUN_LEN` (108 bytes), and `TMPDIR` can be most of that already.
 pub(crate) fn temp_socket() -> PathBuf {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "svolder-test-{}-{n}-{seq}.sock",
-        std::process::id()
-    ))
+    short_socket::short_socket("svolder-test")
 }
 
 /// A `serve()` instance spawned for a test. Dropping it sends the shutdown signal (if not

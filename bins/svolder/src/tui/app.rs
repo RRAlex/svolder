@@ -54,13 +54,14 @@ use super::boxes::speakers::SpeakersBox;
 use super::boxes::toast::{Toast, ToastKind};
 use super::decoration::effects::Effects;
 use super::decoration::mascot::Mascot;
-use super::host::Host;
+use super::host::{Host, HostRow};
 use super::layout_tier::Tier;
 use super::screens::device;
 use super::widgets::graph::{Histories, Link};
 use super::widgets::spinner;
 
 mod advice;
+pub(crate) mod computer_loudness;
 mod connect;
 mod controls;
 pub(crate) mod crossfeed;
@@ -81,11 +82,13 @@ mod point_line;
 mod pointer;
 mod readings;
 mod session;
+mod setup;
 mod side;
 pub(crate) mod speakers;
 mod tone;
 mod tone_state;
 
+pub use computer_loudness::Ld;
 pub(crate) use controls::row_group;
 pub use crossfeed::{Xf, XfLine};
 pub(crate) use devices::DevicesScreen;
@@ -99,6 +102,7 @@ pub(crate) use pointer::Pointer;
 pub use readings::Reading;
 pub(crate) use readings::Readings;
 pub(crate) use session::Session;
+pub(crate) use setup::Chip;
 pub(crate) use side::SWITCH_ROW;
 pub use speakers::Space;
 /// What the computer's edit line calls its fields.
@@ -203,6 +207,9 @@ pub struct SettingsBox {
 pub struct Drawn {
     /// The Controls pane's switch line.
     pub controls_switch: std::cell::Cell<bool>,
+    /// How many cells the Path row's words run past its room in the frame last drawn, while the
+    /// row is cut, in sight and allowed to scroll; `None` otherwise. The tick scrolls by it.
+    pub path_travel: std::cell::Cell<Option<usize>>,
     /// Whether the frame being drawn has drawn the Controls pane's switch so far; it becomes
     /// [`Drawn::controls_switch`] when the pane is done, so the rows read the last frame's answer.
     pub controls_pending: std::cell::Cell<bool>,
@@ -261,6 +268,7 @@ impl Drawn {
     pub fn begin_frame(&self) {
         self.held.set(true);
         self.art_box.replace(None);
+        self.path_travel.set(None);
     }
 
     /// Forget what [`Drawn::begin_frame`] kept: the frame is drawn.
@@ -348,6 +356,7 @@ impl Default for Drawn {
     fn default() -> Self {
         Drawn {
             controls_switch: std::cell::Cell::new(true),
+            path_travel: std::cell::Cell::new(None),
             controls_pending: std::cell::Cell::new(false),
             tone_switch: std::cell::Cell::new(true),
             split: std::cell::Cell::new(None),
@@ -412,6 +421,8 @@ pub(crate) struct Moved {
     pub(crate) menu: Option<usize>,
     /// Whether the help overlay is open.
     pub(crate) help: bool,
+    /// Whether the PipeWire config box is open.
+    pub(crate) setup: bool,
     /// Whether a device is being edited.
     pub(crate) editing: bool,
     /// The device screen's split, as its bits.
@@ -567,6 +578,7 @@ impl App {
                 menu: None,
                 help_open: false,
                 help_scroll: 0,
+                setup: None,
                 quitting: false,
             },
             tui: tui.clone(),
@@ -671,6 +683,12 @@ impl App {
             .easings
             .retain(|_, easing| !easing.landed(now));
         self.advance_climb(now);
+        // The Path row's scroll: held by the pointer on the row or the keys on the transport it
+        // follows, and sent back to its start while the row is not cut and in sight.
+        let still = self.pointer.over_path || self.focused_host_row() == Some(HostRow::Transport);
+        self.host
+            .path_scroll
+            .advance(now, self.drawn.path_travel.get(), still);
         let words = self
             .host
             .now_playing()
@@ -681,11 +699,14 @@ impl App {
             true => 0,
             false => device::art_reserved(self),
         };
-        self.host.marquee.advance(
-            now,
-            words,
-            device::now_playing_room(self.size).saturating_sub(reserved),
-        );
+        match self.tui.scroll_long_lines {
+            true => self.host.marquee.advance(
+                now,
+                words,
+                device::now_playing_room(self.size).saturating_sub(reserved),
+            ),
+            false => self.host.marquee.reset(now),
+        }
     }
 
     /// Note how big the terminal is: what the help overlay and the `Now playing` row's marquee
@@ -909,6 +930,7 @@ impl App {
             sets: self.speakers_box.list.is_some(),
             edit_line: self.tone.edit_line.is_some(),
             quitting: self.overlays.quitting,
+            setup: self.overlays.setup.is_some(),
         }
     }
 }

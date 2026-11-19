@@ -54,6 +54,7 @@ fn an_older_front_end_reads_the_new_version_and_error_answers() {
         features: FEATURES.iter().map(|f| (*f).to_string()).collect(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     })
     .unwrap();
     assert!(
@@ -222,6 +223,7 @@ fn the_legacy_text_of_an_unknown_request_is_still_recognised() {
         features: vec![FEATURE_UNKNOWN_REQUEST_CODE.into()],
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     assert!(!is_unknown_request(Some(&new), code, &message, "walk"));
     assert!(is_unknown_request(

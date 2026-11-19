@@ -24,7 +24,7 @@ use svolder_ipc::{
 };
 
 use super::host_crossfeed::{Answer, Reach, needs_a_daemon, reach, usage};
-use super::host_eq::{eq_op, eq_view, state};
+use super::host_eq::{eq_op, eq_view};
 use crate::backend::{Globals, asks_a_daemon, launch};
 use crate::cli::{HostSpeakersCommand, RoomArg};
 use crate::commands::interrupts::Presses;
@@ -50,6 +50,22 @@ struct Saved {
     on: bool,
 }
 
+/// The chosen set in effect at the state file `path` and its switch: the state's, else the set
+/// kept before any state existed ([`svolder_host::eq::HostEqSettings::effective`]).
+fn saved_at(path: &std::path::Path) -> Saved {
+    let on = svolder_host::eq::HostEqState::load(path)
+        .ok()
+        .flatten()
+        .is_some_and(|state| state.speakers_on);
+    if let Some(why) = svolder_host::eq::HostEqSettings::unreadable(path) {
+        eprintln!("svolder: ignoring the kept computer EQ settings: {why}");
+    }
+    Saved {
+        set: svolder_host::eq::HostEqSettings::effective(path).speakers,
+        on,
+    }
+}
+
 /// `svolder host speakers [--json] [VERB]`.
 pub(crate) async fn run(
     g: &Globals<'_>,
@@ -57,10 +73,7 @@ pub(crate) async fn run(
     command: Option<HostSpeakersCommand>,
 ) -> ExitCode {
     let config = Config::load().map_err(|e| e.to_string());
-    let saved = state().map_or_else(Saved::default, |state| Saved {
-        set: state.speakers,
-        on: state.speakers_on,
-    });
+    let saved = saved_at(&super::host_eq::state_path());
     // Ctrl-C ends a fetch or an import by cancelling its job on the daemon.
     let signals = matches!(
         command,

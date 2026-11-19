@@ -24,6 +24,7 @@
 //! - [`text`]: widths, padding, cutting, wrapping and typed-line windows, in terminal cells.
 //! - [`graph`]: one-row braille history graphs of the readings.
 //! - [`marquee`]: carries words too wide for their row past it.
+//! - [`slow_scroll`]: the slow glide of a cut line, with its holds at both ends.
 //! - [`spinner`]: the glyph in front of a wait the TUI states.
 //! - [`hyperlink`]: the Web UI box's link as a terminal hyperlink.
 //! - [`passphrase_row`]: the Passphrase row as a three-way stepper.
@@ -37,6 +38,7 @@ pub(super) mod meters;
 pub(super) mod passphrase_row;
 pub(super) mod rows;
 pub(super) mod scroll;
+pub(super) mod slow_scroll;
 pub(super) mod spinner;
 pub(super) mod surfaces;
 pub(super) mod text;

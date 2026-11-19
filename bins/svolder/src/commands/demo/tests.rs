@@ -120,7 +120,8 @@ fn only_the_demos_own_names_are_demo_names() {
 #[test]
 fn the_private_directory_is_short_and_private() {
     use std::os::unix::fs::PermissionsExt;
-    let base = base("private");
+    // The base is a short one: the assertion below is about the product's own part of the path.
+    let base = crate::test_support::short_dir("private");
     let one = private_dir(&base).expect("a directory");
     let two = private_dir(&base).expect("another");
     assert_ne!(one, two);
@@ -131,7 +132,6 @@ fn the_private_directory_is_short_and_private() {
     assert_eq!(mode & 0o777, 0o700);
     let socket = one.join(SOCKET_FILE);
     assert!(socket.to_string_lossy().len() < 108);
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The demo's TUI process reaches no host audio of its own whatever the caller said, since its

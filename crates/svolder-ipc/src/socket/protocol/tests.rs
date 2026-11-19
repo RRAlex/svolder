@@ -4,6 +4,7 @@
 use super::*;
 use svolder_proto::{FunctionId, Message, Value};
 
+mod activity;
 mod autoeq;
 mod device_config;
 mod families;
@@ -129,6 +130,7 @@ fn the_mqtt_status_round_trips_through_a_version_reply() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
             .expect("the reply decodes");
@@ -158,6 +160,7 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     })
     .unwrap();
     assert!(newer.contains(r#""mqtt":{"state":"off"}"#), "{newer}");
@@ -182,6 +185,7 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     );
 
@@ -200,6 +204,7 @@ fn the_mqtt_field_is_one_an_older_client_ignores_and_an_older_daemon_leaves_out(
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     );
 }
@@ -220,6 +225,7 @@ fn the_config_path_is_additive() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     let line = serde_json::to_string(&reply).unwrap();
     assert!(
@@ -242,6 +248,7 @@ fn the_config_path_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     );
 }
@@ -282,6 +289,7 @@ fn the_mcp_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
             .expect("the reply decodes");
@@ -299,6 +307,7 @@ fn the_mcp_field_is_additive() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     })
     .unwrap();
     assert!(!without.contains("mcp"), "{without}");
@@ -317,6 +326,7 @@ fn the_mcp_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     );
 }
@@ -358,6 +368,7 @@ fn the_web_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         };
         let back: Response = serde_json::from_str(&serde_json::to_string(&reply).unwrap())
             .expect("the reply decodes");
@@ -376,6 +387,7 @@ fn the_web_field_is_additive() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     let line = serde_json::to_string(&silent).unwrap();
     assert!(!line.contains("\"web"), "{line}");
@@ -394,6 +406,7 @@ fn the_web_field_is_additive() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     );
 }
@@ -666,6 +679,7 @@ fn sample_response_replies() -> Vec<(&'static str, Reply)> {
                     features: Vec::new(),
                     config_changed: false,
                     config_missing: false,
+                    activity: None,
                 },
             },
         ),
@@ -801,6 +815,7 @@ fn the_token_description_is_additive_and_carries_no_token() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     let line = serde_json::to_string(&reply).unwrap();
     assert!(!line.contains(fake), "the reply carries the token");
@@ -836,6 +851,7 @@ fn the_token_description_is_additive_and_carries_no_token() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     })
     .unwrap();
     assert!(!without.contains("mcp_token"), "{without}");
@@ -856,6 +872,7 @@ fn version_reply_carries_the_log_and_decodes_without_it() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     let line = serde_json::to_string(&reply).unwrap();
     assert!(
@@ -876,6 +893,7 @@ fn version_reply_carries_the_log_and_decodes_without_it() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     })
     .unwrap();
     assert!(!none.contains("log"), "{none}");
@@ -1093,6 +1111,7 @@ fn the_oldest_shapes_still_decode() {
             features: Vec::new(),
             config_changed: false,
             config_missing: false,
+            activity: None,
         }
     );
     let device: DeviceInfo = serde_json::from_str(
@@ -1210,6 +1229,7 @@ fn a_version_reply_carries_the_web_fields_and_decodes_without_them() {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     };
     let line = serde_json::to_string(&new).unwrap();
     assert!(line.contains(r#""web":{"state":"off"}"#), "{line}");
@@ -1817,6 +1837,7 @@ fn config_changed_is_sent_only_when_true_and_an_older_reply_reads_unchanged() {
         features: Vec::new(),
         config_changed,
         config_missing: false,
+        activity: None,
     };
     let quiet = serde_json::to_string(&reply(false)).unwrap();
     assert!(!quiet.contains("config_changed"), "{quiet}");
@@ -1855,6 +1876,7 @@ fn config_missing_is_sent_only_when_true_and_an_older_reply_reads_there() {
         features: Vec::new(),
         config_changed: config_missing,
         config_missing,
+        activity: None,
     };
     let quiet = serde_json::to_string(&reply(false)).unwrap();
     assert!(!quiet.contains("config_missing"), "{quiet}");

@@ -33,6 +33,7 @@
 //! transport opens; the refusal when another daemon answers, and the bind, come before any actor
 //! scans or opens a link.
 
+mod activity;
 mod device;
 mod fleet;
 mod handler;

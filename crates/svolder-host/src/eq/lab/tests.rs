@@ -22,6 +22,15 @@ fn the_lab_finds_nothing_in_a_short_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
+/// The short run of the speakers profile ([`generate_speakers`]): the ordinary mix with one event
+/// in eight a change of the virtual speakers.
+#[test]
+fn the_lab_finds_nothing_in_a_short_speakers_run() {
+    let mut failures = run_speakers_seeds(SHORT_FIRST, SHORT_RUNS, Ids::Fresh);
+    failures.extend(run_speakers_seeds(SHORT_FIRST, SHORT_RUNS, Ids::Reused));
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
 /// The short run of the targeted profile ([`generate_targeted`]): nearly half of its events are a
 /// command-line apply, a node that starts again, a refusal read late, a write that fails once or
 /// a drag, and it catches a send to a node other than the one looked at about twice as often as
@@ -40,6 +49,42 @@ fn the_lab_finds_nothing_in_a_short_targeted_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
+/// The short run of the high-rate profile ([`generate_highrate`]): rate changes up to 768 kHz,
+/// above the 384 kHz the stages run at, among crossfeed changes and drags in flight.
+const HIGHRATE_FIRST: u64 = 1;
+const HIGHRATE_RUNS: u64 = 300;
+
+#[test]
+fn the_lab_finds_nothing_in_a_short_highrate_run() {
+    let mut failures = run_highrate_seeds(HIGHRATE_FIRST, HIGHRATE_RUNS, Ids::Fresh);
+    failures.extend(run_highrate_seeds(
+        HIGHRATE_FIRST,
+        HIGHRATE_RUNS,
+        Ids::Reused,
+    ));
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+/// The short run of the loudness profile ([`generate_loudness`]): volume moves through the
+/// daemon and from outside, mutes, loudness changes and rates up to 768 kHz among the ordinary
+/// mix.
+const LOUDNESS_FIRST: u64 = 1;
+const LOUDNESS_RUNS: u64 = 300;
+
+#[test]
+fn the_lab_finds_nothing_in_a_short_loudness_run() {
+    let mut failures = run_loudness_seeds(LOUDNESS_FIRST, LOUDNESS_RUNS, Ids::Fresh);
+    failures.extend(run_loudness_seeds(
+        LOUDNESS_FIRST,
+        LOUDNESS_RUNS,
+        Ids::Reused,
+    ));
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+/// A block of seeds of one profile: the first seed, how many, the model of ids.
+type RunSeeds = fn(u64, u64, Ids) -> Vec<String>;
+
 /// The long run: `make preamp-lab`, with `SVOLDER_LAB_SEED` (the first seed) and
 /// `SVOLDER_LAB_RUNS` (how many) from the environment.
 #[test]
@@ -49,12 +94,26 @@ fn the_lab_finds_nothing_in_a_long_run() {
     let runs = from_env("SVOLDER_LAB_RUNS", 5_000);
     let started = std::time::Instant::now();
     let mut failures = Vec::new();
+    let profiles: [(&str, RunSeeds); 5] = [
+        ("ordinary", run_seeds),
+        ("targeted", run_targeted_seeds),
+        ("speakers", run_speakers_seeds),
+        ("high-rate", run_highrate_seeds),
+        ("loudness", run_loudness_seeds),
+    ];
+    let mut took = [std::time::Duration::ZERO; 5];
     for ids in [Ids::Fresh, Ids::Reused] {
-        failures.extend(run_seeds(first, runs, ids));
-        failures.extend(run_targeted_seeds(first, runs, ids));
+        for ((_, run), took) in profiles.iter().zip(&mut took) {
+            let at = std::time::Instant::now();
+            failures.extend(run(first, runs, ids));
+            *took += at.elapsed();
+        }
+    }
+    for ((name, _), took) in profiles.iter().zip(took) {
+        eprintln!("preamp lab: the {name} profile took {took:.0?}");
     }
     eprintln!(
-        "preamp lab: seeds {first}..{} ({runs} runs of each profile, fresh and reused ids) in {:.0?}, {} failed",
+        "preamp lab: seeds {first}..{} ({runs} runs of each of the five profiles, fresh and reused ids) in {:.0?}, {} failed",
         first + runs,
         started.elapsed(),
         failures.len()
@@ -66,12 +125,89 @@ fn the_lab_finds_nothing_in_a_long_run() {
 fn a_seed_makes_the_same_sequence_every_time() {
     assert_eq!(sequence_of(7), sequence_of(7));
     assert_ne!(sequence_of(7), sequence_of(8));
+    assert_eq!(sequence_of_loudness(7), sequence_of_loudness(7));
+    assert_ne!(sequence_of_loudness(7).1, sequence_of(7).1);
+}
+
+/// The model reads the loudness stage from a config, a rate change puts it back to the config's
+/// (the identity), and an apply keeps the loudness's settings in the state it writes, as the real
+/// host does.
+#[test]
+fn the_model_keeps_the_loudness_stage_and_its_settings() {
+    let request = ApplyRequest {
+        name: "Flat".to_string(),
+        origin: None,
+        correction: Correction {
+            preamp_db: 0.0,
+            filters: vec![point(FilterKind::Peaking, 1000.0, 0.0, 1.0)],
+        },
+        sink: None,
+        slots: Vec::new(),
+        rate_hz: None,
+        flat: true,
+        crossfeed: None,
+        speakers: None,
+    };
+    let (_, conf) = World::stage_apply(request.clone()).unwrap();
+    let identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    for name in ["ld1", "ld2"] {
+        let values: Vec<f64> = PORTS
+            .iter()
+            .map(|port| {
+                conf.ld
+                    .iter()
+                    .find(|(key, _)| *key == format!("{name}:{port}"))
+                    .map(|(_, value)| *value)
+                    .expect("the config's loudness port")
+            })
+            .collect();
+        assert_eq!(values, identity, "{name} is the identity in the config");
+    }
+    let mut node = Node::start(3, 3, &conf, 0);
+    let cut = crate::eq::loudness::stage(12.0, 48_000);
+    for (name, value) in loudness_params(&cut.sections) {
+        node.ports.insert(name.clone(), held_value(&name, value));
+    }
+    assert_ne!(
+        loudness_sets(&node, 'l'),
+        crate::eq::loudness::Stage::identity().sections
+    );
+    node.load_slots();
+    assert_eq!(
+        loudness_sets(&node, 'r'),
+        crate::eq::loudness::Stage::identity().sections,
+        "a rate change puts the stage back"
+    );
+
+    // An apply keeps the settings the state held.
+    let lab = Lab::new(48_000);
+    let settings = crate::eq::loudness::LoudnessSettings {
+        on: true,
+        strength_pct: 40.0,
+        reference_pct: 80.0,
+    };
+    {
+        let world = world(&lab.shared);
+        let mut state = World::stage_apply(request.clone()).unwrap().0;
+        state.loudness = Some(settings);
+        state.save(&world.state_path()).unwrap();
+    }
+    let chain = ModelChain {
+        world: lab.shared.clone(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let state = runtime.block_on(chain.apply(request)).unwrap();
+    assert_eq!(state.loudness, Some(settings));
+    assert_eq!(world(&lab.shared).state().unwrap().loudness, Some(settings));
 }
 
 #[test]
 fn the_model_reverts_slots_on_a_rate_change_and_keeps_the_preamp() {
     let conf = Conf {
         stage: Vec::new(),
+        ld: Vec::new(),
         pre: 0.5,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
     };
@@ -100,6 +236,7 @@ fn a_set_param_to_a_stale_id_does_nothing() {
     let mut world = world(&lab.shared);
     world.conf = Some(Conf {
         stage: Vec::new(),
+        ld: Vec::new(),
         pre: 1.0,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
     });
@@ -167,6 +304,7 @@ fn the_rule_is_checked_on_what_plays() {
         let mut world = world(&lab.shared);
         let mut conf = Conf {
             stage: Vec::new(),
+            ld: Vec::new(),
             pre: 1.0,
             slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
         };
@@ -426,13 +564,28 @@ fn a_daemon_that_restarts_in_the_middle_of_a_drag_puts_the_saved_state_on_the_ch
 }
 
 /// The sequence of `seed` from the profile it fails in: the ordinary mix, else the targeted one,
-/// else (it passes in both) the ordinary mix.
+/// else the speakers one, else the high-rate one, else (it passes in all) the ordinary mix.
 fn chosen_sequence(seed: u64) -> (u32, Vec<Event>) {
-    let targeted = sequence_of_targeted(seed);
     let ordinary = sequence_of(seed);
-    match run_sequence(ordinary.0, &ordinary.1).is_err() {
-        false if run_sequence(targeted.0, &targeted.1).is_err() => targeted,
-        _ => ordinary,
+    if run_sequence(ordinary.0, &ordinary.1).is_err() {
+        return ordinary;
+    }
+    let targeted = sequence_of_targeted(seed);
+    if run_sequence(targeted.0, &targeted.1).is_err() {
+        return targeted;
+    }
+    let speakers = sequence_of_speakers(seed);
+    if run_sequence(speakers.0, &speakers.1).is_err() {
+        return speakers;
+    }
+    let highrate = sequence_of_highrate(seed);
+    if run_sequence(highrate.0, &highrate.1).is_err() {
+        return highrate;
+    }
+    let loudness = sequence_of_loudness(seed);
+    match run_sequence(loudness.0, &loudness.1).is_err() {
+        true => loudness,
+        false => ordinary,
     }
 }
 
@@ -800,6 +953,297 @@ fn a_crossfeed_drag_right_after_a_change_to_384_khz_plays_under_its_preamp() {
     );
 }
 
+/// Seed 1291, shrunk: Meier with a 1 ms delay goes into the config (its live send is refused),
+/// the amount is turned down live at 44.1 kHz, the sink moves to 48 kHz, which puts the config's
+/// stage back on the node, and the next drag line carries the slots without the stage. Its preamp
+/// pays for the config's stage, not only for the one sent live.
+#[test]
+fn a_drag_line_after_a_rate_change_pays_for_the_stage_the_config_holds() {
+    holds_both(
+        384_000,
+        &[
+            crossfeed(Some(true), Some(2), Some(0.998), true),
+            Event::Ticks(25),
+            Event::RefuseSends { ms: 6000 },
+            Event::Add(point(FilterKind::LowShelf, 65.797, -8.8908, 0.9557)),
+            Event::Ticks(30),
+            Event::Rate(44_100),
+            load(vec![
+                point(FilterKind::LowShelf, 3680.3, -0.4797, 4.1582),
+                point(FilterKind::HighShelf, 2189.9, -6.7883, 0.2225),
+                point(FilterKind::Peaking, 2317.2, -11.840, 9.3404),
+            ]),
+            Event::Ticks(58),
+            Event::Drag {
+                pick: 14,
+                kind: Some(FilterKind::HighShelf),
+                f: Some(484.21),
+                g: Some(0.4758),
+                q: None,
+                steps: 4,
+                gap_ticks: 2,
+            },
+            Event::Crossfeed {
+                on: Some(true),
+                model: None,
+                amount_pct: Some(7.4613),
+                delay_ms: None,
+                done: true,
+            },
+            Event::Rate(48_000),
+            Event::Drag {
+                pick: 0,
+                kind: None,
+                f: None,
+                g: Some(1.146),
+                q: None,
+                steps: 1,
+                gap_ticks: 2,
+            },
+        ],
+    );
+}
+
+/// M/S bass at 50 % goes into the config (its live send is refused), the chain
+/// restarts and the apply that would take the stage out fails once, a drag's release then keeps
+/// the config on disk without the stage, and the daemon restarts. The running chain's config
+/// still holds the stage, which the next rate change puts back under a hotter drag's line: the
+/// new daemon knows it from the state file, pays for it and takes it out.
+#[test]
+fn a_stage_the_running_config_holds_is_paid_for_across_a_daemon_restart() {
+    holds_both(
+        48_000,
+        &[
+            load(vec![point(FilterKind::Peaking, 1_000.0, 2.0, 1.0)]),
+            Event::Ticks(25),
+            Event::RefuseSends { ms: 2000 },
+            Event::Crossfeed {
+                on: Some(true),
+                model: Some(3),
+                amount_pct: Some(50.0),
+                delay_ms: None,
+                done: true,
+            },
+            Event::Ticks(60),
+            Event::Fail { kind: 0 },
+            Event::NodeRestart,
+            Event::Ticks(21),
+            drag(0, 2.5),
+            Event::Ticks(45),
+            Event::DaemonRestart,
+            Event::Ticks(45),
+            Event::Rate(44_100),
+            drag(0, 8.0),
+            Event::Ticks(10),
+        ],
+    );
+}
+
+/// Meier at 50 % and 1 ms goes into the config at 352.8 kHz (its live send is
+/// refused) and the sink moves to 705.6 kHz. The graph is built again from its config with that
+/// stage before any look turns crossfeed off there, so the stage's cost takes in the rates a
+/// graph can be rebuilt at, up to 768 kHz, though no stage is run above 384 kHz.
+#[test]
+fn a_config_stage_rebuilt_above_384_khz_plays_under_its_preamp() {
+    holds_both(
+        352_800,
+        &[
+            load(vec![point(FilterKind::Peaking, 1_000.0, 2.0, 1.0)]),
+            Event::Ticks(25),
+            Event::RefuseSends { ms: 2000 },
+            Event::Crossfeed {
+                on: Some(true),
+                model: Some(2),
+                amount_pct: Some(50.0),
+                delay_ms: Some(1.0),
+                done: true,
+            },
+            Event::Ticks(60),
+            Event::Rate(705_600),
+            Event::Ticks(30),
+        ],
+    );
+}
+
+/// A crossfeed drag in flight while the sink moves above 384 kHz: its lines carry the stage worked
+/// out at the rate the kept node still says, the release's look sees the new rate and turns
+/// crossfeed off, and the line that goes with it must not raise the preamp while that stage still
+/// plays. Every tick offset of the move after a look, for a delay of 0.5 and 1 ms, at
+/// 384 to 768 kHz and 352.8 to 705.6 kHz.
+#[test]
+fn a_crossfeed_drag_across_a_move_above_384_khz_plays_under_its_preamp() {
+    let pct = |amount: f64, done: bool| Event::Crossfeed {
+        on: None,
+        model: None,
+        amount_pct: Some(amount),
+        delay_ms: None,
+        done,
+    };
+    for (from, to) in [(384_000, 768_000), (352_800, 705_600)] {
+        for delay in [0.5, 1.0] {
+            for ticks in 20..41 {
+                holds_both(
+                    from,
+                    &[
+                        load(vec![point(FilterKind::Peaking, 1_000.0, 2.0, 1.0)]),
+                        Event::Crossfeed {
+                            on: Some(true),
+                            model: Some(2),
+                            amount_pct: Some(50.0),
+                            delay_ms: Some(delay),
+                            done: true,
+                        },
+                        Event::Ticks(ticks),
+                        pct(49.0, false),
+                        Event::Rate(to),
+                        pct(50.0, false),
+                        Event::Ticks(1),
+                        pct(48.0, false),
+                        Event::Ticks(1),
+                        pct(50.0, true),
+                        Event::Ticks(30),
+                    ],
+                );
+            }
+        }
+    }
+}
+
+/// One row of [`stage_cost_table`]: the stage's settings, and over every rate it may be worked out
+/// at (up to 384 kHz) and every rate it may then play at (up to 768 kHz), the most it adds (by the lab's own evaluator), the most
+/// that is over what the controller takes off for it, and the most over the cost taken at 48 kHz.
+struct CostRow {
+    label: String,
+    worst_db: f64,
+    over_cost_db: f64,
+    over_48k_cost_db: f64,
+}
+
+fn cost_row(label: String, settings: &crate::eq::crossfeed::CrossfeedSettings) -> CostRow {
+    use crate::eq::crossfeed::Stage;
+    use crate::eq::manage::config_stage_cost_db;
+    let at_48k = config_stage_cost_db(settings, 48_000);
+    let mut row = CostRow {
+        label,
+        worst_db: 0.0,
+        over_cost_db: f64::NEG_INFINITY,
+        over_48k_cost_db: f64::NEG_INFINITY,
+    };
+    for worked in RATES {
+        let Ok(stage) = Stage::of(settings, worked) else {
+            continue;
+        };
+        let ports = stage_ports(&stage);
+        let cost = config_stage_cost_db(settings, worked);
+        // No stage runs above 384 kHz, but one a config holds is rebuilt at any rate.
+        for play in RATES.into_iter().chain([705_600, 768_000]) {
+            let gain = stage_gain_db(&ports, play);
+            row.worst_db = row.worst_db.max(gain);
+            row.over_cost_db = row.over_cost_db.max(gain - cost);
+            row.over_48k_cost_db = row.over_48k_cost_db.max(gain - at_48k);
+        }
+    }
+    row
+}
+
+/// Every model's presets, a low Custom amount (seed 1291's 7.5 %), and for a model that plays a
+/// delay, each preset with 0.25, 0.5, 0.75 and 1 ms.
+fn cost_cases() -> Vec<(String, crate::eq::crossfeed::CrossfeedSettings)> {
+    use crate::eq::crossfeed::{CrossfeedChange, CrossfeedSettings};
+    let mut cases = Vec::new();
+    for model in CrossfeedModel::ALL {
+        let spec = model.spec();
+        let mut bases: Vec<(String, CrossfeedSettings)> = spec
+            .presets
+            .iter()
+            .filter_map(|preset| {
+                let settings = CrossfeedSettings::from_preset(model, preset.name)?;
+                Some((format!("{} {}", model.name(), preset.name), settings))
+            })
+            .collect();
+        let low = CrossfeedSettings::for_model(model).change(
+            &CrossfeedChange {
+                amount_pct: Some(7.5),
+                ..CrossfeedChange::default()
+            },
+            48_000,
+        );
+        if let Ok(low) = low {
+            bases.push((format!("{} 7.5 %", model.name()), low));
+        }
+        for (label, settings) in bases {
+            if spec.delay_settable {
+                for ms in [0.25, 0.5, 0.75, 1.0] {
+                    let delayed = settings.change(
+                        &CrossfeedChange {
+                            delay_ms: Some(ms),
+                            ..CrossfeedChange::default()
+                        },
+                        48_000,
+                    );
+                    if let Some(delayed) = delayed.ok().filter(|held| held.delay_ms.is_some()) {
+                        cases.push((format!("{label}, {ms} ms"), delayed));
+                    }
+                }
+            }
+            cases.push((format!("{label}, own lag"), settings));
+        }
+    }
+    cases
+}
+
+/// The worst case of a line of slots under a stage, the one the config holds after a rate change
+/// or the one sent live: for each case of [`cost_cases`], worked out at any of the lab's rates
+/// and played at any of them, the stage's gain by the lab's evaluator less the cost the
+/// controller takes off the preamp for it. The slots' own part is at most 0.008 dB (the EQ's
+/// preamp rounding), so a line plays at most that plus the table's margin over unity:
+/// `cargo test --release -p svolder-host --lib stage_cost_table -- --ignored --nocapture`.
+#[test]
+#[ignore = "a table to read: a few seconds in release"]
+fn stage_cost_table() {
+    let cases = cost_cases();
+    let rows: Vec<CostRow> = std::thread::scope(|scope| {
+        let chunks: Vec<_> = cases
+            .chunks(cases.len().div_ceil(6))
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|(label, settings)| cost_row(label.clone(), settings))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        chunks
+            .into_iter()
+            .flat_map(|chunk| chunk.join().expect("a row"))
+            .collect()
+    });
+    eprintln!(
+        "| stage | worst gain dB | over its cost dB | over the 48 kHz cost dB | line bound dB |"
+    );
+    eprintln!("|---|---|---|---|---|");
+    for row in &rows {
+        eprintln!(
+            "| {} | {:+.3} | {:+.3} | {:+.3} | {:+.3} |",
+            row.label,
+            row.worst_db,
+            row.over_cost_db,
+            row.over_48k_cost_db,
+            row.over_cost_db + 0.008
+        );
+    }
+    let worst = rows
+        .iter()
+        .map(|row| row.over_cost_db)
+        .fold(f64::NEG_INFINITY, f64::max);
+    eprintln!(
+        "{} cases, the most over the cost: {worst:+.4} dB",
+        rows.len()
+    );
+    assert!(worst + 0.008 <= TOLERANCE_DB, "{worst}");
+}
+
 /// The ports of `stage` on the left channel as a node holds them (f32), in the order
 /// [`stage_gain_db`] reads them.
 fn stage_ports(stage: &crate::eq::crossfeed::Stage) -> Vec<f64> {
@@ -1012,5 +1456,1002 @@ fn lab_code() {
     );
     for event in &events {
         eprintln!("{event:?},");
+    }
+}
+
+/// `events` on a sink that starts at `rate`, under both models of node ids, must come to nothing
+/// over unity.
+fn holds_both(rate: u32, events: &[Event]) {
+    let was = IDS.get();
+    for ids in [Ids::Fresh, Ids::Reused] {
+        IDS.set(ids);
+        if let Err(failure) = run_sequence(rate, events) {
+            IDS.set(was);
+            panic!(
+                "[ids {ids:?}] {} (event {})",
+                failure.what,
+                failure.event + 1
+            );
+        }
+    }
+    IDS.set(was);
+}
+
+fn load(filters: Vec<SourceFilter>) -> Event {
+    Event::Load {
+        filters,
+        stated: 0.0,
+    }
+}
+
+/// A boost that needs about -10 dB of preamp, one that needs about -2 dB, and a flat curve.
+fn hot() -> Vec<SourceFilter> {
+    vec![point(FilterKind::Peaking, 100.0, 10.0, 1.0)]
+}
+
+fn gentle() -> Vec<SourceFilter> {
+    vec![point(FilterKind::Peaking, 100.0, 2.0, 1.0)]
+}
+
+fn flat() -> Vec<SourceFilter> {
+    vec![point(FilterKind::Peaking, 1_000.0, 0.0, 1.0)]
+}
+
+/// The serial of the node the world runs.
+fn serial(lab: &Lab) -> Option<u64> {
+    world(&lab.shared).node.as_ref().map(|node| node.serial)
+}
+
+/// A recall that needs more preamp while a stream plays leaves the node as it is (no restart, the
+/// level held), and the node is started again with the curve's own preamp once nothing has
+/// played for the idle time; every step at or under unity, under both models of ids.
+#[test]
+fn a_recall_while_playing_keeps_the_node_and_the_idle_restart_lifts_the_level() {
+    for ids in [Ids::Fresh, Ids::Reused] {
+        IDS.set(ids);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            let mut lab = Lab::new(48_000);
+            for event in [load(hot()), Event::Ticks(30), Event::Playing(true)] {
+                lab.run(&event).await.unwrap();
+            }
+            let started = serial(&lab);
+            let cap = lab.control.view().preamp_db;
+            for event in [
+                load(gentle()),
+                Event::Ticks(30),
+                load(flat()),
+                Event::Ticks(30),
+                Event::Rate(44_100),
+                Event::Ticks(30),
+                load(gentle()),
+                Event::Ticks(90),
+            ] {
+                lab.run(&event).await.unwrap();
+            }
+            assert_eq!(serial(&lab), started, "[{ids:?}] no restart while playing");
+            let view = lab.control.view();
+            assert_eq!(view.note.as_deref(), Some(super::super::LEVEL_HELD_NOTE));
+            assert!(
+                view.preamp_db <= cap + 1e-9,
+                "{} over {cap}",
+                view.preamp_db
+            );
+            for event in [Event::Playing(false), Event::Ticks(45), Event::Ticks(45)] {
+                lab.run(&event).await.unwrap();
+            }
+            assert_ne!(serial(&lab), started, "[{ids:?}] started again once idle");
+            let view = lab.control.view();
+            assert_eq!(view.note, None);
+            assert!(view.preamp_db > -3.0, "the curve's own: {}", view.preamp_db);
+            lab.quiet_tail(0).await.unwrap();
+        });
+    }
+    IDS.set(Ids::Fresh);
+}
+
+/// Held recalls among everything else that can happen while a stream plays: a node that starts
+/// again, the daemon restarting, the EQ off and on, the crossfeed, rate changes, a command-line
+/// apply, then the music pausing.
+#[test]
+fn held_recalls_among_restarts_toggles_crossfeed_and_rates_stay_under_unity() {
+    let crossfeed_on = Event::Crossfeed {
+        on: Some(true),
+        model: Some(2),
+        amount_pct: None,
+        delay_ms: None,
+        done: true,
+    };
+    for rate in [44_100, 96_000, 384_000] {
+        holds_both(
+            rate,
+            &[
+                load(hot()),
+                Event::Ticks(25),
+                Event::Playing(true),
+                load(gentle()),
+                Event::Ticks(25),
+                Event::Rate(48_000),
+                Event::Ticks(25),
+                load(flat()),
+                Event::NodeRestart,
+                Event::Ticks(25),
+                load(hot()),
+                Event::Ticks(5),
+                load(flat()),
+                Event::DaemonRestart,
+                Event::Ticks(45),
+                Event::Toggle(false),
+                Event::Ticks(10),
+                Event::Toggle(true),
+                Event::Ticks(10),
+                crossfeed_on.clone(),
+                load(gentle()),
+                Event::Ticks(25),
+                Event::Rate(rate),
+                Event::Ticks(25),
+                Event::Cli {
+                    filters: hot(),
+                    stated: 0.0,
+                    gap_ticks: 4,
+                },
+                Event::Ticks(25),
+                load(flat()),
+                Event::Ticks(25),
+                Event::Playing(false),
+                Event::Ticks(45),
+                Event::Ticks(45),
+                Event::Playing(true),
+                load(hot()),
+                Event::Ticks(10),
+                load(flat()),
+                Event::DaemonRestart,
+                Event::Playing(false),
+                Event::Ticks(45),
+                Event::Ticks(45),
+            ],
+        );
+    }
+}
+
+/// Seed 4421, shrunk: the EQ turned on by an Add while a stream plays and sends are refused, then
+/// turned off: the pass-through's line fails and so does the remove (armed to fail), so the EQ
+/// stays on with its points, and the session's repair must not play the flat line the controller
+/// took back.
+#[test]
+fn a_failed_pass_through_line_is_not_played_by_the_repair() {
+    holds_both(
+        384_000,
+        &[
+            Event::Playing(true),
+            Event::Fail { kind: 1 },
+            Event::RefuseSends { ms: 6000 },
+            Event::Add(point(FilterKind::HighShelf, 22.5, 27.93, 2.60)),
+            Event::Toggle(false),
+        ],
+    );
+}
+
+/// A speakers start whose line is refused and whose apply fails is taken back, and the session's
+/// repair plays that line, then a held recall goes live: nothing over unity, and once quiet the
+/// speakers play as the view says, under both models of ids. (Without the stage
+/// sent again the model's node holds the convolved sound for about a second, until a look sees
+/// the mixers gone from their sent values and the controller sends the stage: the liveness rule
+/// looks after three quiet seconds, so the controller test is the one that fails without it.)
+#[test]
+fn a_failed_speakers_start_is_not_played_by_the_repair() {
+    let speakers = |on: Option<bool>, set: Option<usize>| Event::Speakers { on, set };
+    let started = [
+        load(hot()),
+        Event::Ticks(25),
+        speakers(Some(true), Some(0)),
+        Event::Ticks(25),
+        speakers(Some(false), None),
+        Event::Ticks(25),
+        Event::Playing(true),
+        Event::RefuseSends { ms: 300 },
+        Event::Fail { kind: 0 },
+        speakers(Some(true), None),
+        Event::Ticks(25),
+        load(flat()),
+    ];
+    for rate in [48_000, 96_000] {
+        let mut quiet = started.to_vec();
+        quiet.extend([Event::Ticks(45), Event::Ticks(45)]);
+        holds_both(rate, &quiet);
+        let mut more = started.to_vec();
+        more.extend([
+            Event::Ticks(45),
+            speakers(Some(true), Some(1)),
+            Event::Ticks(25),
+            Event::Rate(44_100),
+            Event::Ticks(25),
+            speakers(None, Some(0)),
+            Event::Ticks(25),
+        ]);
+        holds_both(rate, &more);
+    }
+}
+
+/// Seed 1204784 of the speakers profile, shrunk: the speakers on, the daemon restarts (and turns
+/// them off), the sink moves to 88.2 kHz where the curve cannot play and the Off it takes fails,
+/// so the EQ is held. The config holding the set must not be rewritten with that curve at that
+/// rate (a coefficient past what the chain holds is clamped to another filter): a chain started
+/// from it played +36 dB over unity.
+#[test]
+fn a_held_eq_does_not_write_a_config_its_rate_cannot_play() {
+    holds_both(
+        48_000,
+        &[
+            Event::Fail { kind: 1 },
+            Event::Load {
+                filters: vec![
+                    point(FilterKind::HighShelf, 134.630_844, -7.100_016, 3.203_622),
+                    point(FilterKind::LowShelf, 163.976_589, -5.388_895, 0.900_216),
+                    point(FilterKind::HighShelf, 3_418.606_45, -12.192_113, 0.547_856),
+                    point(FilterKind::HighShelf, 568.560_955, 14.792_883, 0.461_263),
+                    point(FilterKind::HighShelf, 8_555.592_717, -1.189_629, 5.180_911),
+                    point(FilterKind::Peaking, 3_733.921_516, 4.197_634, 5.433_579),
+                ],
+                stated: 0.0,
+            },
+            Event::Speakers {
+                on: None,
+                set: Some(0),
+            },
+            Event::Speakers {
+                on: Some(true),
+                set: None,
+            },
+            Event::DaemonRestart,
+            Event::Rate(88_200),
+            Event::Drag {
+                pick: 13,
+                kind: None,
+                f: None,
+                g: Some(-0.121_819),
+                q: None,
+                steps: 1,
+                gap_ticks: 2,
+            },
+            Event::NodeRestart,
+        ],
+    );
+}
+
+/// Seed 5625 of the speakers profile, shrunk: the sink moves to 384 kHz, the command line applies
+/// twice (at 48 kHz) and the daemon reads its state, then a speakers change that only saves
+/// writes the config at 384 kHz before the first look has checked the read curve there, where a
+/// shelf at 14.9 Hz is an unstable biquad; a restart started from it.
+#[test]
+fn a_save_writes_no_config_whose_points_do_not_play_at_its_rate() {
+    holds_both(
+        96_000,
+        &[
+            load(vec![point(
+                FilterKind::Peaking,
+                3_731.596_494,
+                -6.156_831,
+                2.731_471,
+            )]),
+            Event::Rate(384_000),
+            load(vec![
+                point(FilterKind::LowShelf, 3_284.618_986, -5.701_621, 19.232_823),
+                point(FilterKind::HighShelf, 787.556_187, -0.008_255, 2.921_328),
+                point(FilterKind::Peaking, 19_678.571_198, -8.733_948, 1.361_537),
+                point(FilterKind::HighShelf, 50.070_908, -4.598_966, 0.201_006),
+            ]),
+            Event::FailNextWrite,
+            Event::Cli {
+                filters: vec![
+                    point(FilterKind::HighShelf, 94.714_457, 3.632_067, 0.810_456),
+                    point(FilterKind::HighShelf, 99.522_498, -9.171_464, 8.038_651),
+                    point(FilterKind::HighShelf, 702.153_719, 7.633_886, 0.956_540),
+                    point(FilterKind::Peaking, 13_141.386_921, -9.094_565, 3.703_136),
+                ],
+                stated: 0.0,
+                gap_ticks: 6,
+            },
+            Event::Cli {
+                filters: vec![
+                    point(FilterKind::Peaking, 11_129.414_841, 22.216_178, 0.230_634),
+                    point(FilterKind::LowShelf, 15_427.440_669, 15.446_583, 0.160_869),
+                    point(FilterKind::LowShelf, 818.875_212, 9.540_379, 1.337_532),
+                    point(FilterKind::HighShelf, 14.896_412, -9.502_625, 2.682_378),
+                ],
+                stated: 0.0,
+                gap_ticks: 2,
+            },
+            Event::Ticks(33),
+            Event::Speakers {
+                on: Some(false),
+                set: None,
+            },
+            Event::NodeRestart,
+        ],
+    );
+}
+
+/// Seed 174734 (found by 11.2's fresh range), shrunk: crossfeed on at 192 kHz, a drag, a command
+/// line apply whose state is read a moment later, an Add and a crossfeed change that keep the
+/// config, then the chain starts again from that config: it must play at or under unity, under
+/// both models of ids.
+#[test]
+fn a_config_kept_after_a_command_line_apply_plays_under_unity_after_a_restart() {
+    use FilterKind::*;
+    holds_both(
+        192_000,
+        &[
+            Event::Crossfeed {
+                on: Some(true),
+                model: None,
+                amount_pct: None,
+                delay_ms: None,
+                done: true,
+            },
+            Event::Drag {
+                pick: 1,
+                kind: Some(HighShelf),
+                f: Some(423.4845873055976),
+                g: Some(-1.408202989873633),
+                q: None,
+                steps: 1,
+                gap_ticks: 0,
+            },
+            Event::Cli {
+                filters: vec![
+                    point(
+                        HighShelf,
+                        12509.412502107398,
+                        23.192142127880878,
+                        5.04698586197951,
+                    ),
+                    point(
+                        Peaking,
+                        10095.335014492344,
+                        -8.020316542853898,
+                        17.475255013543975,
+                    ),
+                    point(
+                        LowShelf,
+                        812.1583379884456,
+                        11.460435518602246,
+                        1.1794288065958174,
+                    ),
+                ],
+                stated: -7.1830887584568455,
+                gap_ticks: 7,
+            },
+            Event::Ticks(15),
+            Event::Add(point(
+                HighShelf,
+                27.868242917855955,
+                -1.5755263490693103,
+                1.9326761521036802,
+            )),
+            Event::Crossfeed {
+                on: None,
+                model: None,
+                amount_pct: Some(47.25390967587871),
+                delay_ms: None,
+                done: true,
+            },
+            Event::NodeRestart,
+        ],
+    );
+}
+
+/// Seed 172526, shrunk: a command-line apply at 384 kHz, a drag, an Add, a rebuild at the rate the
+/// sink already ran at, then the slots go back to the config's at the same node and rate. The
+/// controller must see the slots went back and send them again: the EQ says it is live, and the
+/// node must play the view's points under its preamp, under both models of ids.
+#[test]
+fn seed_172526_slots_that_go_back_after_a_rebuild_at_the_same_rate_are_sent_again() {
+    use FilterKind::*;
+    holds_both(
+        192_000,
+        &[
+            Event::Rate(384_000),
+            Event::Cli {
+                filters: vec![
+                    point(
+                        HighShelf,
+                        111.065_731_339_815,
+                        1.873_768_256_835,
+                        0.121_911_631_354,
+                    ),
+                    point(
+                        Peaking,
+                        171.560_958_187_594,
+                        -8.295_154_317_861,
+                        6.822_640_042_894,
+                    ),
+                ],
+                stated: 0.0,
+                gap_ticks: 5,
+            },
+            Event::Drag {
+                pick: 5,
+                kind: None,
+                f: Some(22.585_386_910_881),
+                g: None,
+                q: None,
+                steps: 1,
+                gap_ticks: 2,
+            },
+            Event::Add(point(
+                HighShelf,
+                448.515_192_736_512,
+                11.409_322_352_350,
+                1.301_883_023_162,
+            )),
+            Event::Rate(384_000),
+            Event::Ticks(25),
+            Event::SlotRevert,
+        ],
+    );
+}
+
+/// Seed 1203992, shrunk: sends refused for six seconds and new nodes listed 1.2 s after they
+/// start, so every edit is an apply; the sink moves to 384 kHz and a preset is loaded there. Once
+/// sends are taken again the EQ says it is live, and the node must play the view's points under its
+/// preamp, under both models of ids.
+#[test]
+fn seed_1203992_edits_applied_while_sends_are_refused_play_as_the_view_says_at_384_khz() {
+    use FilterKind::*;
+    holds_both(
+        44_100,
+        &[
+            Event::ListDelay { ms: 1200 },
+            Event::Ticks(19),
+            Event::Drag {
+                pick: 9,
+                kind: None,
+                f: None,
+                g: Some(1.227919148580213),
+                q: None,
+                steps: 4,
+                gap_ticks: 1,
+            },
+            Event::Drag {
+                pick: 6,
+                kind: None,
+                f: None,
+                g: Some(-0.6184816599785563),
+                q: None,
+                steps: 2,
+                gap_ticks: 2,
+            },
+            Event::Ticks(43),
+            Event::Ticks(10),
+            Event::Ticks(29),
+            Event::Cli {
+                filters: vec![
+                    point(
+                        Peaking,
+                        67.94447787084933,
+                        -3.181307992559713,
+                        1.495510122448422,
+                    ),
+                    point(
+                        LowShelf,
+                        2157.2926616248596,
+                        -11.098614052094783,
+                        9.676562496584866,
+                    ),
+                    point(
+                        LowShelf,
+                        991.9567892083454,
+                        8.494795339212637,
+                        2.159994452856449,
+                    ),
+                    point(
+                        LowShelf,
+                        6480.945200744217,
+                        -10.58763329642574,
+                        1.0166814488876295,
+                    ),
+                    point(
+                        HighShelf,
+                        177.36925087042857,
+                        7.998982252309883,
+                        4.309717876161612,
+                    ),
+                    point(
+                        Peaking,
+                        3426.4302047422516,
+                        -6.210298070400014,
+                        0.7164822053776725,
+                    ),
+                    point(
+                        LowShelf,
+                        4031.5677995807164,
+                        -7.847783936460899,
+                        0.934139040809395,
+                    ),
+                    point(
+                        LowShelf,
+                        35.663777335388694,
+                        0.9292634439869936,
+                        0.11484884954781013,
+                    ),
+                    point(
+                        Peaking,
+                        28.45733942706801,
+                        -1.3077650564946381,
+                        0.9169913220396249,
+                    ),
+                    point(
+                        HighShelf,
+                        4847.967809691437,
+                        7.394210280784854,
+                        1.6540732100860263,
+                    ),
+                    point(
+                        LowShelf,
+                        8122.009023743965,
+                        -8.56772318755124,
+                        0.24069472904506795,
+                    ),
+                    point(
+                        HighShelf,
+                        2319.4595674361476,
+                        4.506803682074853,
+                        0.13858051881096226,
+                    ),
+                    point(
+                        Peaking,
+                        4427.019577405421,
+                        -5.895021583772305,
+                        3.290616503059488,
+                    ),
+                ],
+                stated: 0.0,
+                gap_ticks: 8,
+            },
+            Event::RefuseSends { ms: 6000 },
+            Event::Drag {
+                pick: 12,
+                kind: None,
+                f: None,
+                g: Some(-3.750420217831742),
+                q: None,
+                steps: 0,
+                gap_ticks: 0,
+            },
+            Event::Load {
+                filters: vec![
+                    point(
+                        HighShelf,
+                        690.3436969489012,
+                        0.36512590617011753,
+                        14.89345422248917,
+                    ),
+                    point(
+                        Peaking,
+                        40.97056303858511,
+                        7.673220852402842,
+                        11.401325942739703,
+                    ),
+                    point(
+                        LowShelf,
+                        14.503545544312384,
+                        -18.406952626785632,
+                        0.4110282775149611,
+                    ),
+                ],
+                stated: -14.283884784939326,
+            },
+            Event::Load {
+                filters: vec![
+                    point(
+                        HighShelf,
+                        886.6306790011173,
+                        10.149993517234744,
+                        0.44826486604333754,
+                    ),
+                    point(
+                        LowShelf,
+                        10285.908995008622,
+                        20.031329276345772,
+                        0.6425648893211405,
+                    ),
+                    point(
+                        Peaking,
+                        150.92823780810187,
+                        7.525643516709508,
+                        0.3065162477190401,
+                    ),
+                    point(
+                        LowShelf,
+                        24.685789750424785,
+                        2.50968503575114,
+                        0.8103298969145504,
+                    ),
+                ],
+                stated: 0.0,
+            },
+            Event::Drag {
+                pick: 7,
+                kind: None,
+                f: None,
+                g: Some(4.199783444718847),
+                q: Some(1.030480330774445),
+                steps: 1,
+                gap_ticks: 0,
+            },
+            Event::Drag {
+                pick: 10,
+                kind: Some(LowShelf),
+                f: None,
+                g: Some(7.130925153854925),
+                q: Some(2.061619247491816),
+                steps: 0,
+                gap_ticks: 1,
+            },
+            Event::Toggle(false),
+            Event::Drag {
+                pick: 13,
+                kind: Some(HighShelf),
+                f: Some(95.56496542990641),
+                g: Some(1.8193659879848667),
+                q: None,
+                steps: 4,
+                gap_ticks: 2,
+            },
+            Event::Remove { pick: 4 },
+            Event::Rate(384000),
+            Event::Load {
+                filters: vec![
+                    point(
+                        HighShelf,
+                        349.566057660295,
+                        -11.475427749702115,
+                        9.420934184045729,
+                    ),
+                    point(
+                        Peaking,
+                        25.568077171549344,
+                        8.375414903925613,
+                        0.20179409901524142,
+                    ),
+                    point(
+                        HighShelf,
+                        181.6443600426616,
+                        1.925924496177343,
+                        3.363349427605736,
+                    ),
+                ],
+                stated: -3.573417205191296,
+            },
+            Event::Ticks(32),
+            Event::Ticks(19),
+            Event::Ticks(12),
+        ],
+    );
+}
+
+/// Seed 172526's sequence with a cut in place of the boost: the Add leaves the preamp where it
+/// was, so no port of its line survives the rebuild at the same rate, and the second rebuild
+/// after the repeat must still be put right: the EQ says it is live, and the node must play the
+/// view's points under its preamp, under both models of ids.
+#[test]
+fn seed_172526_with_a_cut_slots_that_go_back_twice_are_sent_again() {
+    use FilterKind::*;
+    holds_both(
+        192_000,
+        &[
+            Event::Rate(384_000),
+            Event::Cli {
+                filters: vec![
+                    point(
+                        HighShelf,
+                        111.065_731_339_815,
+                        1.873_768_256_835,
+                        0.121_911_631_354,
+                    ),
+                    point(
+                        Peaking,
+                        171.560_958_187_594,
+                        -8.295_154_317_861,
+                        6.822_640_042_894,
+                    ),
+                ],
+                stated: 0.0,
+                gap_ticks: 5,
+            },
+            Event::Drag {
+                pick: 5,
+                kind: None,
+                f: Some(22.585_386_910_881),
+                g: None,
+                q: None,
+                steps: 1,
+                gap_ticks: 2,
+            },
+            Event::Add(point(Peaking, 448.515_192_736_512, -6.0, 1.301_883_023_162)),
+            Event::Rate(384_000),
+            Event::Ticks(25),
+            Event::SlotRevert,
+        ],
+    );
+}
+
+/// A command-line apply keeps the loudness's settings in the state it writes, as the real host
+/// does: loudness on stays on across the rebuild and the reload that follows, and plays again on
+/// the new node.
+#[test]
+fn loudness_on_survives_a_command_line_rebuild() {
+    let events = [
+        Event::Toggle(true),
+        Event::Loudness {
+            on: Some(true),
+            strength_pct: None,
+            reference_pct: None,
+            reference_now: false,
+            done: true,
+        },
+        Event::Volume {
+            pct: 30.0,
+            daemon: true,
+        },
+        Event::Ticks(45),
+        Event::Cli {
+            filters: vec![point(FilterKind::Peaking, 500.0, 2.0, 1.0)],
+            stated: 0.0,
+            gap_ticks: 3,
+        },
+        Event::Ticks(45),
+        Event::Reload,
+        Event::Ticks(45),
+        Event::Ticks(45),
+        Event::Ticks(45),
+        Event::Ticks(45),
+    ];
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut lab = Lab::new(48_000);
+        for (at, event) in events.iter().enumerate() {
+            lab.at = at;
+            lab.run(event).await.unwrap();
+        }
+        let saved = world(&lab.shared).state().unwrap().loudness;
+        assert!(saved.is_some_and(|ld| ld.on), "{saved:?}");
+        let view = lab.control.view().loudness.unwrap();
+        assert!(view.on && view.depth_db > 0.0, "{view:?}");
+        assert!(lab.ld_checked, "the loudness's liveness rule was asked");
+    });
+    run_sequence(48_000, &events).unwrap();
+}
+
+/// Seeds 1990 and 3932 of the loudness profile, shrunk: a line toward the identity stage fails
+/// (a `pw-cli` that takes it and dies, a write that fails once), and the session's repair line
+/// sets the ports by name, the low section first. Taken a section at a time, it must not play the
+/// identity low section under the high shelf the node still holds.
+#[test]
+fn a_repair_of_a_line_toward_the_identity_plays_no_part_over_unity() {
+    holds_both(
+        44_100,
+        &[
+            Event::Volume {
+                pct: 79.38238214187305,
+                daemon: true,
+            },
+            Event::Loudness {
+                on: Some(true),
+                strength_pct: None,
+                reference_pct: None,
+                reference_now: false,
+                done: false,
+            },
+            Event::Drag {
+                pick: 13,
+                kind: None,
+                f: None,
+                g: Some(-9.236034009223719),
+                q: Some(0.21422889671437106),
+                steps: 0,
+                gap_ticks: 1,
+            },
+            Event::CliDeath {
+                after_line: Some(false),
+            },
+            Event::Loudness {
+                on: None,
+                strength_pct: None,
+                reference_pct: Some(58.69031068386063),
+                reference_now: false,
+                done: true,
+            },
+            Event::Ticks(5),
+        ],
+    );
+    holds_both(
+        88_200,
+        &[
+            Event::VolumeStep {
+                delta: -1.0,
+                daemon: false,
+            },
+            Event::Loudness {
+                on: Some(true),
+                strength_pct: None,
+                reference_pct: None,
+                reference_now: false,
+                done: false,
+            },
+            Event::Remove { pick: 4 },
+            Event::VolumeStep {
+                delta: 1.0,
+                daemon: false,
+            },
+            Event::FailNextWrite,
+            Event::Ticks(2),
+        ],
+    );
+}
+
+/// A crash takeover over a node left deep (strength 100 %, volume 3 %: about 40 dB of depth),
+/// whose first line is not written (the read of the node before it does not answer) or is taken
+/// and lost: the line after it, taken a section at a time, must still be cut for the deep shelf
+/// the node holds.
+#[test]
+fn a_takeover_whose_first_line_does_not_land_plays_no_part_over_unity() {
+    for lost in [false, true] {
+        holds_both(
+            48_000,
+            &[
+                Event::Loudness {
+                    on: Some(true),
+                    strength_pct: Some(100.0),
+                    reference_pct: None,
+                    reference_now: false,
+                    done: true,
+                },
+                Event::Volume {
+                    pct: 3.0,
+                    daemon: true,
+                },
+                Event::Ticks(45),
+                Event::Ticks(45),
+                Event::Takeover { lost },
+                Event::Ticks(5),
+            ],
+        );
+    }
+}
+
+/// The outcome of every seed of a block, one line each (profile, model of ids, seed, and `ok` or
+/// the failing event and what broke), written to the file `SVOLDER_LAB_OUT`: two runs of it
+/// compare a change to the lab that must not change what it finds. `SVOLDER_LAB_SEED` and
+/// `SVOLDER_LAB_RUNS` choose the block, `SVOLDER_LAB_THREADS` the threads (4 by default). With
+/// `SVOLDER_LAB_TRACE` set, each line is followed by the run's trace (every event, node start and
+/// `set-param` with its preamp): a stricter comparison, for a change to the controller.
+#[test]
+#[ignore = "an equivalence check: make preamp-lab-outcomes"]
+fn lab_outcomes() {
+    let first = from_env("SVOLDER_LAB_SEED", 1_000);
+    let runs = from_env("SVOLDER_LAB_RUNS", 400);
+    let threads = from_env("SVOLDER_LAB_THREADS", 4).max(1);
+    let out = std::env::var_os("SVOLDER_LAB_OUT").expect("SVOLDER_LAB_OUT names the file");
+    let traced = std::env::var_os("SVOLDER_LAB_TRACE").is_some();
+    type Sequence = fn(u64) -> (u32, Vec<Event>);
+    let profiles: [(&str, Sequence); 5] = [
+        ("plain", sequence_of),
+        ("targeted", sequence_of_targeted),
+        ("speakers", sequence_of_speakers),
+        ("highrate", sequence_of_highrate),
+        ("loudness", sequence_of_loudness),
+    ];
+    let jobs: Vec<(usize, Ids, u64)> = (0..profiles.len())
+        .flat_map(|profile| {
+            [Ids::Fresh, Ids::Reused]
+                .into_iter()
+                .flat_map(move |ids| (first..first + runs).map(move |seed| (profile, ids, seed)))
+        })
+        .collect();
+    let next = AtomicUsize::new(0);
+    let lines = Mutex::new(Vec::new());
+    let started = std::time::Instant::now();
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                loop {
+                    let Some(&(profile, ids, seed)) = jobs.get(next.fetch_add(1, Ordering::SeqCst))
+                    else {
+                        return;
+                    };
+                    IDS.set(ids);
+                    let (name, sequence) = profiles[profile];
+                    let (rate, events) = sequence(seed);
+                    let trace = Mutex::new(Vec::new());
+                    let result = run_traced(rate, &events, traced.then_some(&trace));
+                    let outcome = match result {
+                        Ok(()) => "ok".to_string(),
+                        Err(failure) => format!("event {}: {}", failure.event, failure.what),
+                    };
+                    let mut line = format!("{name} {ids:?} {seed} {outcome}");
+                    for step in trace.into_inner().unwrap_or_default() {
+                        line.push_str("\n    ");
+                        line.push_str(&step);
+                    }
+                    crate::locked(&lines).push((profile, ids == Ids::Reused, seed, line));
+                }
+            });
+        }
+    });
+    let mut lines = lines.into_inner().unwrap_or_default();
+    lines.sort_by_key(|(profile, reused, seed, _)| (*profile, *reused, *seed));
+    let text: String = lines.into_iter().map(|(.., line)| line + "\n").collect();
+    std::fs::write(&out, text).expect("the outcomes are written");
+    eprintln!(
+        "lab outcomes: {} sequences on {threads} threads in {:.1?}",
+        jobs.len(),
+        started.elapsed()
+    );
+}
+
+/// [`dense_peak`] leaves out identity slots and nothing else, and gives what [`dense_scan`] of
+/// every slot gives, bit for bit: curves of up to five filters (cuts and boosts to 30 dB, some at
+/// the cut-off near Nyquist, some poles over equal zeros) among identity slots of either zero
+/// sign, at every rate up to 768 kHz, and slots that are all the identity.
+#[test]
+fn the_dense_peak_without_identity_slots_is_the_full_scan_bit_for_bit() {
+    let mut rng = Rng::new(0x1D_E471);
+    let identity = |rng: &mut Rng| {
+        let mut c = [1.0, 0.0, 0.0, 0.0, 0.0];
+        for value in &mut c[1..] {
+            if rng.chance(50) {
+                *value = -0.0;
+            }
+        }
+        c
+    };
+    let mut cases: Vec<(Vec<[f64; 5]>, u32)> = Vec::new();
+    for at in 0..120 {
+        let rate = HIGH_RATES[at % HIGH_RATES.len()];
+        let mut sets: Vec<[f64; 5]> = (0..SLOTS).map(|_| identity(&mut rng)).collect();
+        for _ in 0..rng.below(6) {
+            let mut f = filter(&mut rng, false);
+            if rng.chance(25) {
+                f.f = f64::from(rate) * 0.49;
+            }
+            let c = svolder_profiles::tone::response::coefficients(f.kind, f.f, f.g, f.q, rate);
+            sets[rng.below(SLOTS as u64) as usize] = c.map(|v| f64::from(v as f32));
+        }
+        if rng.chance(20) {
+            // Poles over equal zeros: plays as the identity, but is not the exact one.
+            let (a1, a2) = (rng.range(-1.5, 1.5), rng.range(-0.5, 0.9));
+            sets[rng.below(SLOTS as u64) as usize] = [1.0, a1, a2, a1, a2];
+        }
+        cases.push((sets, rate));
+    }
+    for rate in [44_100, 384_000, 768_000] {
+        cases.push(((0..SLOTS).map(|_| identity(&mut rng)).collect(), rate));
+        // A sharp peak with poles over equal zeros a hair beside it: their angle is a point of
+        // the grid, which moves the zoom on the peak, so leaving that slot out shows.
+        let mut sets: Vec<[f64; 5]> = (0..SLOTS).map(|_| identity(&mut rng)).collect();
+        sets[3] = svolder_profiles::tone::response::coefficients(
+            FilterKind::Peaking,
+            1_000.0,
+            12.0,
+            10.0,
+            rate,
+        );
+        let w = 2.0 * std::f64::consts::PI * 1_001.0 / f64::from(rate);
+        let (a1, a2) = (-2.0 * 0.9 * w.cos(), 0.81);
+        sets[9] = [1.0, a1, a2, a1, a2];
+        cases.push((sets, rate));
+    }
+    for (sets, rate) in &cases {
+        assert_eq!(
+            dense_peak(sets, *rate).to_bits(),
+            dense_scan(sets, *rate).to_bits(),
+            "at {rate} Hz: {sets:?}"
+        );
     }
 }

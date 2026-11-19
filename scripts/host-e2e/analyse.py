@@ -694,6 +694,105 @@ def wait_level(base, want, tol, deadline):
     return False, time.monotonic() - t0, lv
 
 
+# ---- a player through pipewire-pulse (phase R) -------------------------------------------------
+
+# A pulse server of this run (pipewire with the pulse protocol, a client of the private instance):
+# its socket is in the run directory and every pulse tool gets that address and a home of the run's.
+PULSE_DIR = RUN + '/pulse'
+PULSE_SOCK = PULSE_DIR + '/native'
+PULSE_NAME = 'svpulse'
+
+
+def pulse_env():
+    return dict(os.environ, PULSE_SERVER='unix:' + PULSE_SOCK, PULSE_RUNTIME_PATH=PULSE_DIR,
+                HOME=RUN + '/home')
+
+
+def pulse_spawn(*argv, out=subprocess.DEVNULL):
+    p = subprocess.Popen(list(argv), env=pulse_env(), stdout=out, stderr=subprocess.DEVNULL,
+                         stdin=subprocess.DEVNULL, start_new_session=True, text=True)
+    STATE['children'].append(p)
+    return p
+
+
+def pulse_server():
+    """Start the run's pulse server and wait for its socket."""
+    os.makedirs(PULSE_DIR, exist_ok=True)
+    os.makedirs(RUN + '/home', exist_ok=True)
+    with open(RUN + '/pulse.conf', 'w') as f:
+        f.write('context.properties = { log.level = 2 support.dbus = false }\n'
+                'context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }\n'
+                'context.modules = [\n'
+                '  { name = libpipewire-module-protocol-native }\n'
+                '  { name = libpipewire-module-client-node }\n'
+                '  { name = libpipewire-module-adapter }\n'
+                '  { name = libpipewire-module-metadata }\n'
+                '  { name = libpipewire-module-protocol-pulse args = { server.address = [ "unix:%s" ] } }\n'
+                ']\n' % PULSE_SOCK)
+    p = spawn('pipewire', '-c', RUN + '/pulse.conf', log=RUN + '/pulse.log')
+    wait_until('the run\'s pulse socket', lambda: os.path.exists(PULSE_SOCK), 10)
+    return p
+
+
+def pulse_stream():
+    """The pulse player's stream node in the graph, or None."""
+    for o in dump():
+        p = (o.get('info') or {}).get('props', {})
+        if o['type'].endswith('Node') and p.get('media.class') == 'Stream/Output/Audio' \
+                and p.get('application.name') == PULSE_NAME:
+            return o
+    return None
+
+
+def pulse_play(path):
+    """A player as a pulse client (as a desktop player is): paplay of `path`."""
+    p = pulse_spawn('paplay', '--client-name=' + PULSE_NAME, '--stream-name=' + PULSE_NAME, path)
+    wait_until('the pulse stream', pulse_stream, 10)
+    return p
+
+
+def pulse_links():
+    """The pulse stream's links, each as which() tells it, and the names of the nodes they go to."""
+    d = dump()
+    names = {o['id']: (o.get('info') or {}).get('props', {}).get('node.name') for o in d if o['type'].endswith('Node')}
+    st = [o['id'] for o in d if o['type'].endswith('Node')
+          and (o.get('info') or {}).get('props', {}).get('application.name') == PULSE_NAME
+          and o['info']['props'].get('media.class') == 'Stream/Output/Audio']
+    links = [o for o in d if o['type'].endswith('Link') and o['info']['output-node-id'] in st]
+    return sorted(which(o) for o in links), sorted({names.get(o['info']['input-node-id']) for o in links})
+
+
+def pulse_sink_inputs():
+    """The pulse server's sink inputs as (index, sink index)."""
+    r = subprocess.run(['pactl', '-f', 'json', 'list', 'sink-inputs'], env=pulse_env(), capture_output=True,
+                       text=True, timeout=10)
+    try:
+        return sorted((i.get('index'), i.get('sink')) for i in json.loads(r.stdout))
+    except ValueError:
+        return r.stdout.strip()
+
+
+class PulseEvents:
+    """`pactl subscribe` of the run's pulse server: the sink and sink-input events, timed."""
+
+    def __init__(self):
+        self.ev = []
+        self.p = pulse_spawn('pactl', 'subscribe', out=subprocess.PIPE)
+        threading.Thread(target=self.read, daemon=True).start()
+
+    def read(self):
+        for line in self.p.stdout:
+            line = line.strip()
+            if ' on sink #' in line or ' on sink-input #' in line:
+                self.ev.append((time.monotonic(), line))
+
+    def since(self, t):
+        return [line for (at, line) in self.ev if at >= t]
+
+    def close(self):
+        stop(self.p)
+
+
 # ---- the virtual speakers stage: the set, the oracle, the measurements --------------------------
 
 VS_EXPECT = os.path.join(REPO, 'target/debug/examples/vs_expect')
@@ -819,6 +918,435 @@ def vs_case(conn, label, f, wav, side='left'):
     return cl, cr, want_l, want_r
 
 
+# ---- the computer loudness phases (L1-L6) ------------------------------------------------------
+
+# Three tones at once: a bass one, the reference one and a treble one, each at LD_DBFS, so one
+# recording tells the stage's shape. 50, 1000 and 12500 Hz all hold whole cycles in 960 samples
+# (20 ms at 48 kHz), so a window of whole 20 ms blocks leaks nothing between them.
+LD_HZ = (50.0, 1000.0, 12500.0)
+LD_DBFS = -26.0
+LD_BLOCK = 960
+# L2 and L4: each tone against the oracle. 0.3 dB: the oracle is the f64 design and the chain plays
+# f32 coefficients (0.05 dB), the level steps in 0.1 dB, and the volume's glide can leave a brief
+# extra cut of up to about 0.15 dB near its end, so every measure here waits for the glide to settle.
+LD_TOL = 0.3
+# L1 and L3: flat means the baseline within this.
+LD_FLAT_TOL = 0.1
+# The pinned constants (the 1.2 report; crates/svolder-host/src/eq/loudness.rs), written out again
+# here: the oracle is computed in Python, since no `svolder` helper prints it.
+LD_LOW_HZ, LD_LOW_PER_DB = 289.0, 0.53
+LD_HIGH_HZ, LD_HIGH_PER_DB, LD_HIGH_CAP_DB = 7760.0, 0.15, 6.0
+LD_MAX_DEPTH_DB = 40.0
+
+
+def multitone_wav(path, secs=150):
+    """The three tones on both channels, a second at a time (every frequency holds whole cycles)."""
+    n = np.arange(RATE)
+    a = 10 ** (LD_DBFS / 20)
+    x = sum(a * np.sin(2 * np.pi * f * n / RATE) for f in LD_HZ)
+    x = (x * 32767).astype('<i2')
+    block = np.stack([x, x], 1).tobytes()
+    w = wave.open(path, 'wb')
+    w.setnchannels(2)
+    w.setsampwidth(2)
+    w.setframerate(RATE)
+    for _ in range(secs):
+        w.writeframes(block)
+    w.close()
+
+
+def ld_depth(volume_pct, strength_pct=50.0, reference_pct=100.0):
+    """The effective depth in dB for the volume (percent of the scale, the cube root `wpctl` prints):
+    s * clamp(R - V, 0, 40) with the volumes in dB of the cubic gain, to 0.1 dB as the stage is played."""
+    ref_db = 60 * math.log10(reference_pct / 100.0)
+    vol_db = 60 * math.log10(max(volume_pct, 1e-6) / 100.0)
+    d = strength_pct / 100.0 * min(max(ref_db - vol_db, 0.0), LD_MAX_DEPTH_DB)
+    return round(d * 10) / 10
+
+
+def _ld_sections(d_e, rate):
+    g_lo = LD_LOW_PER_DB * d_e
+    g_hi = min(LD_HIGH_PER_DB * d_e, LD_HIGH_CAP_DB)
+
+    def pre(c):
+        return math.tan(math.pi * min(c, rate * 0.45) / rate)
+
+    lz, hz = pre(LD_LOW_HZ), pre(LD_HIGH_HZ)
+    hp = hz * 10 ** (g_hi / 20)
+
+    def section(kz, kp, k):
+        return [k * (1 + kz) / (1 + kp), k * (kz - 1) / (1 + kp), (kp - 1) / (1 + kp)]   # b0, b1, a1
+
+    return [section(lz, lz / 10 ** (g_lo / 20), 1.0), section(hz, hp, hp / hz)]
+
+
+def _ld_db(secs, f, rate):
+    x = math.sin(math.pi * f / rate) ** 2
+
+    def power(p0, p1):
+        return (p0 + p1) ** 2 - 4 * p0 * p1 * x
+
+    return sum(10 * math.log10(power(b0, b1) / power(1.0, a1)) for b0, b1, a1 in secs)
+
+
+def ld_response(d_e, f, rate):
+    """The stage's response at f Hz in dB (loudness::response, written out again): the f64 design
+    minus its peak over DC..Nyquist, so it never boosts. The peak is taken here on f32-rounded coefficients
+    (as the played stage is, the stage's own trim), where loudness::response takes it on the f64 design: under
+    0.001 dB apart."""
+    if d_e <= 0:
+        return 0.0
+    secs = _ld_sections(d_e, rate)
+    held = [[float(np.float32(c)) for c in s] for s in secs]
+    peak = max(max(_ld_db(held, g, rate) for g in np.geomspace(1.0, rate / 2, 600)), _ld_db(held, 0.0, rate), 0.0)
+    return _ld_db(secs, f, rate) - peak
+
+
+def tone_levels(x, fr, t0, t1):
+    """The three tones' levels in dB (full scale) over [t0, t1) s of the recording, in whole 20 ms blocks."""
+    seg = x[int(t0 * fr):int(t1 * fr)]
+    seg = seg[:len(seg) // LD_BLOCK * LD_BLOCK]
+    if len(seg) < 4 * LD_BLOCK:
+        raise Fail('a level window outside the recording')
+    out = {}
+    for f in LD_HZ:
+        k = np.exp(-2j * np.pi * f * np.arange(len(seg)) / fr)
+        out[f] = 20 * math.log10(2 * abs((seg * k).sum()) / len(seg) + 1e-12)
+    return out
+
+
+def ld_measure(secs=1.5):
+    """The three tones' levels through a recorder of its own (a window, not a wait), or None when the
+    window has nothing in it (a chain restarting)."""
+    rec = Recording()
+    time.sleep(secs + 0.3)
+    try:
+        x, fr = rec.finish()
+    except Fail:
+        return None
+    return tone_levels(x, fr, 0.2, len(x) / fr - 0.1)
+
+
+def ld_wait_shape(base, want, tol, deadline):
+    """Measure until every tone is `want` (dB re `base`) +- tol; (reached, seconds taken, the last
+    levels re base or None)."""
+    t0 = time.monotonic()
+    last = None
+    while time.monotonic() - t0 < deadline:
+        lv = ld_measure(1.2)
+        if lv is None:
+            continue
+        last = {f: lv[f] - base[f] for f in LD_HZ}
+        if all(abs(last[f] - want[f]) <= tol for f in LD_HZ):
+            return True, time.monotonic() - t0, last
+    return False, time.monotonic() - t0, last
+
+
+def ld_str(levels):
+    return 'none' if levels is None else ', '.join('%g Hz %+.2f' % (f, levels[f]) for f in LD_HZ)
+
+
+def ld_envelope(x, fr, f, hann_ms=4.0, stride_ms=1.0):
+    """The amplitude of the tone at f Hz as it moves, in dB (full scale): the signal times the tone's
+    phasor, smoothed by a Hann window of `hann_ms` (whole cycles of 1 kHz, and the 50 Hz tone leaks
+    under 0.1 dB), one value per `stride_ms`. Returns (dB values, seconds of each value's window start)."""
+    n = int(round(fr * hann_ms / 1000))
+    hop = int(round(fr * stride_ms / 1000))
+    mixed = x * np.exp(-2j * np.pi * f * np.arange(len(x)) / fr)
+    win = np.hanning(n)
+    env = np.convolve(mixed, win / win.sum(), 'valid')[::hop]
+    return 20 * np.log10(2 * np.abs(env) + 1e-12), np.arange(len(env)) * hop / fr
+
+
+def ld_volume_pct():
+    """The sink's volume in percent as `wpctl` prints it (the cube root of the gain), or None."""
+    m = re.match(r'Volume: ([0-9.]+)', tool('wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@').stdout)
+    return float(m.group(1)) * 100 if m else None
+
+
+def tone_track(x, fr, t0, t1, stride=240):
+    """The three tones' levels in dB (full scale) on sliding 20 ms windows (whole cycles of all three tones, so
+    no leakage between them), one window every `stride` samples (5 ms) over [t0, t1) s: (window start times in
+    s, array of shape (windows, 3) in the order of LD_HZ)."""
+    a = max(int(t0 * fr), 0)
+    seg = x[a:int(t1 * fr)]
+    n = len(seg)
+    if n < 2 * LD_BLOCK:
+        raise Fail('a level window outside the recording')
+    cols = []
+    for f in LD_HZ:
+        c = np.concatenate(([0], np.cumsum(seg * np.exp(-2j * np.pi * f * np.arange(n) / fr))))
+        cols.append(20 * np.log10(2 * np.abs(c[LD_BLOCK:] - c[:-LD_BLOCK]) / LD_BLOCK + 1e-12))
+    return (a + np.arange(n - LD_BLOCK + 1))[::stride] / fr, np.stack(cols, 1)[::stride]
+
+
+def ld_over(ts, lv, base, dry_of):
+    """The worst excess of any tone over its dry level, on every window: `dry_of(start, end)` is the sink volume's own
+    cut in dB over a window (None to skip a window, as the ones across the volume's own edge). Returns (dB, Hz, s)."""
+    worst = (-1e9, None, None)
+    for i, t in enumerate(ts):
+        dry = dry_of(t, t + LD_BLOCK / 48000.0)
+        if dry is None:
+            continue
+        for j, f in enumerate(LD_HZ):
+            ex = float(lv[i, j] - base[f] - dry)
+            if ex > worst[0]:
+                worst = (ex, f, float(t))
+    return worst
+
+
+def ld_l3_read(x, fr, cmd_s, base, want, dry35):
+    """What L3 reads from a recording of the volume going from 35 % to 100 % at `cmd_s` seconds into it.
+    The sink's monitor is after the sink's volume, so the volume's own change is a 27 dB step the instant the sink takes
+    it: it is found (the largest 1 ms jump of the 1 kHz tone within 0.1 s before to 0.4 s after the command) and only
+    the windows across it are skipped; everything after it is read, the glide's first line included. Before it the
+    dry level is the 35 % one, after it 0 dB. Returns a dict."""
+    env, ts = ld_envelope(x, fr, 1000.0)
+    sel = (ts >= cmd_s - 0.1) & (ts <= cmd_s + 0.4)
+    d = np.diff(env[sel])
+    i = int(d.argmax())
+    edge = float(ts[sel][i]) + 0.002            # the centre of the 4 ms window that straddles it
+    before = float(np.median(env[(ts >= edge - 0.05) & (ts <= edge - 0.01)])) if np.any((ts >= edge - 0.05) & (ts <= edge - 0.01)) else float('nan')
+    after = float(np.median(env[(ts >= edge + 0.02) & (ts <= edge + 0.06)]))
+    out = {'edge': edge, 'edge_db': after - before}
+    guard = 0.012
+    keep = (ts >= edge + guard) & (ts <= cmd_s + 4.5)
+    e, t = env[keep], ts[keep]
+    keep_pre = (ts >= cmd_s - 0.1) & (ts <= edge - guard)
+    steps = np.concatenate((np.abs(np.diff(e)), np.abs(np.diff(env[keep_pre]))))
+    out['step'] = float(steps.max())
+    off = np.nonzero(np.abs(e - base[1000.0]) > 0.15)[0]
+    out['settled'] = float(t[off[-1]] - cmd_s) if len(off) else 0.0
+    e20 = e[::20]
+    out['raw_dip'] = float((np.maximum.accumulate(e20) - e20).max())
+    m3 = np.median(np.lib.stride_tricks.sliding_window_view(e20, 3), axis=1)
+    out['dip'] = float((np.maximum.accumulate(m3) - m3).max())
+    out['e20'] = e20
+    # the first lines: 20-60 ms after the volume's edge each tone is still near the L2 shape (the glide has begun by at most
+    # one 0.5 dB step), so a stage that jumps to flat in one line shows at once
+    tt, lv = tone_track(x, fr, edge + 0.02, edge + 0.08)
+    first = {f: float(lv[:, j].mean() - base[f] - (want[f] - dry35)) for j, f in enumerate(LD_HZ)}
+    out['first'] = first
+    t0, lv = tone_track(x, fr, cmd_s - 0.3, cmd_s + 5.0)
+    out['over'] = ld_over(t0, lv, base,
+                          lambda a, b: dry35 if b <= edge - guard else (0.0 if a >= edge + guard else None))
+    return out
+
+
+def loudness_phases(daemon, conn, watch, start_daemon, sock):
+    """Phases L1-L6; returns the (daemon, connection, watch) that are live at the end, loudness off,
+    no chain, the sink at full volume."""
+
+    def ld():
+        return conn.view()['eq']['loudness']
+
+    v = conn.view()['eq']
+    check(v.get('loudness') is not None, 'L the view carries the loudness (%s)' % (v.get('loudness') or {}).get('unavailable'))
+    # L0. the starting state: the EQ on and flat (one PK at 1 kHz, 0 dB), loudness off at its defaults, the sink at full
+    # volume, the three tones playing. The baseline is what that chain plays with loudness off.
+    go_quiet()
+    conn.eq({'op': 'speakers', 'on': False})
+    conn.eq({'op': 'crossfeed', 'on': False})
+    conn.eq({'op': 'set', 'index': 1, 'kind': 'PK', 'f': 1000.0, 'g': 0.0, 'q': 1.0})
+    conn.eq({'op': 'loudness', 'on': False, 'strength_pct': 50, 'reference_pct': 100})
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    conn.ask({'cmd': 'host_mute', 'muted': False})
+    multitone_wav(RUN + '/ld-tone.wav')
+    STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/ld-tone.wav')
+    wait_until('the tone', lambda: node('svtone'))
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    wait_until('the view to say on', lambda: conn.view()['eq']['on'], 5)
+    wait_until('the tones to play through the chain', chain_playing, 10)
+    base = ld_measure(2.0)
+    say('L0 baseline (EQ on and flat, loudness off, volume 100 %%), dB re full scale: %s' % ld_str(base))
+    check(base is not None and all(abs(base[f] - LD_DBFS) <= 0.2 for f in LD_HZ),
+          'L0 the three tones play at %.0f dBFS +- 0.2 through the flat chain (%s)' % (LD_DBFS, ld_str(base)))
+    check(ld()['on'] is False and ld()['strength_pct'] == 50 and ld()['reference_pct'] == 100,
+          'L0 loudness is off at strength 50 %%, reference 100 %% (%s)' % {k: ld()[k] for k in ('on', 'strength_pct', 'reference_pct')})
+
+    # L1. loudness on with the volume at the reference: the stage is flat, the tones are the EQ-only baseline
+    conn.eq({'op': 'loudness', 'on': True})
+    check(settles(lambda: ld()['following'] and ld()['volume_pct'] == 100.0, 8.0),
+          'L1 loudness is on and follows the volume at 100 %% (%s)' % {k: ld()[k] for k in ('on', 'following', 'volume_pct', 'depth_db', 'note')})
+    check(ld()['depth_db'] == 0.0 and ld()['lift_db'] == 0.0 and ld()['mids_db'] == 0.0 and ld()['treble_db'] == 0.0,
+          'L1 at the reference the view reads flat (%s)' % {k: ld()[k] for k in ('depth_db', 'lift_db', 'mids_db', 'treble_db')})
+    ok, took, lv = ld_wait_shape(base, {f: 0.0 for f in LD_HZ}, LD_FLAT_TOL, 8)
+    say('L1 loudness on at the reference, dB re the EQ-only baseline: %s' % ld_str(lv))
+    check(ok, 'L1 with loudness on at the reference every tone is the EQ-only baseline within %.1f dB (%s)' % (LD_FLAT_TOL, ld_str(lv)))
+
+    # L2. volume 35 %, reference 100, strength 50: depth 13.7 dB; each tone against the oracle
+    conn.ask({'cmd': 'host_volume', 'pct': 35})
+    vol = ld_volume_pct()
+    check(vol is not None and abs(vol - 35.0) <= 0.5, 'L2 the sink\'s volume reached 35 %% (wpctl says %s)' % vol)
+    d_e = ld_depth(vol)
+    check(d_e >= 13.0, 'L2 the depth to play is %.1f dB (a volume that did not move would leave it at 0)' % d_e)
+    # The sink's monitor is AFTER the sink's volume (measured: every tone sat 27.36 dB lower at 35 %, which is 60 log10 0.35),
+    # so what a tone reads is the stage's response plus the volume's own cut; `dry` is the volume's cut alone.
+    dry = 60 * math.log10(vol / 100.0)
+    want = {f: ld_response(d_e, f, 48000) + dry for f in LD_HZ}
+    say('L2 volume %.1f %% (wpctl), depth %.1f dB; the monitor is post-volume (cut %.2f dB); oracle with it: %s' % (vol, d_e, dry, ld_str(want)))
+    check(settles(lambda: ld()['following'] and abs(ld()['depth_db'] - d_e) <= 0.1, 10.0),
+          'L2 the view settles at depth %.1f dB (%s)' % (d_e, {k: ld()[k] for k in ('following', 'volume_pct', 'depth_db', 'note')}))
+    lv_view = ld()
+    check(lv_view['volume_pct'] is not None and abs(lv_view['volume_pct'] - vol) <= 1.0,
+          'L2 the view\'s volume_pct (%s) is within 1 of wpctl (%.1f)' % (lv_view['volume_pct'], vol))
+    check(abs(lv_view['lift_db'] - LD_LOW_PER_DB * d_e) <= 0.1 and abs(lv_view['mids_db'] + lv_view['lift_db']) <= 0.1
+          and abs(lv_view['treble_db'] - min(LD_HIGH_PER_DB * d_e, LD_HIGH_CAP_DB)) <= 0.1,
+          'L2 the view reads bass +%.1f, mids %.1f, treble +%.1f dB (the shelf gains %.1f, %.1f, %.1f)'
+          % (lv_view['lift_db'], lv_view['mids_db'], lv_view['treble_db'], LD_LOW_PER_DB * d_e, -LD_LOW_PER_DB * d_e,
+             min(LD_HIGH_PER_DB * d_e, LD_HIGH_CAP_DB)))
+    ok, took, lv = ld_wait_shape(base, want, LD_TOL, 10)
+    say('L2 measured, dB re baseline: %s (oracle %s; after %.1f s)' % (ld_str(lv), ld_str(want), took))
+    check(ok, 'L2 at volume %.0f %% each tone is the oracle within %.1f dB (measured %s, oracle %s)'
+          % (vol, LD_TOL, ld_str(lv), ld_str(want)))
+    l2 = lv
+
+    # L3. back to 100 %: the stage glides out and the tones are flat within 3 s, never above the dry level, with no step
+    # over 1 dB in a millisecond. The sink's own volume change is an instant 27 dB step on the post-volume monitor; it is
+    # found in the recording and only the windows across it are skipped (see ld_l3_read).
+    rec = Recording()
+    time.sleep(0.8)
+    t_cmd = time.monotonic()
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    time.sleep(5.5)
+    x, fr = rec.finish()
+    end = len(x) / fr
+
+    def at(t):
+        return end - (rec.t_stop - t)
+
+    pre = tone_levels(x, fr, at(t_cmd) - 0.45, at(t_cmd) - 0.05)
+    post = tone_levels(x, fr, at(t_cmd) + 3.0, at(t_cmd) + 5.2)
+    r3 = ld_l3_read(x, fr, at(t_cmd), base, want, dry)
+    say('L3 timeline, the 1 kHz tone re baseline every 20 ms from the volume\'s edge: ' + ' '.join('%.2f' % (v - base[1000.0]) for v in r3['e20'][:90]))
+    say('L3 back to 100 %%: the volume\'s own edge %.3f s after the command (%+.1f dB); before %s, after 3 s %s; flat from %.2f s; first lines (20-60 ms after the edge) re the shape %s; '
+        'max 1 ms step %.2f dB; worst excess over dry %+.2f dB (%g Hz at %.2f s); largest fall back during the rise %.2f dB (median of 3: %.2f dB)'
+        % (r3['edge'] - at(t_cmd), r3['edge_db'], ld_str({f: pre[f] - base[f] for f in LD_HZ}), ld_str({f: post[f] - base[f] for f in LD_HZ}), r3['settled'],
+           ld_str(r3['first']), r3['step'], r3['over'][0], r3['over'][1], r3['over'][2] - at(t_cmd), r3['raw_dip'], r3['dip']))
+    check(r3['edge_db'] >= 20.0, 'L3 the sink\'s own volume change is seen on the monitor (%+.1f dB, 27.4 expected)' % r3['edge_db'])
+    check(abs(pre[1000.0] - base[1000.0] - want[1000.0]) <= LD_TOL,
+          'L3 the 1 kHz tone was at the L2 shape before the command (%+.2f dB, oracle %+.2f)' % (pre[1000.0] - base[1000.0], want[1000.0]))
+    check(all(abs(v) <= 0.5 for v in r3['first'].values()),
+          'L3 20-60 ms after the volume\'s edge every tone is still within 0.5 dB of the L2 shape, no jump in the first lines (%s)' % ld_str(r3['first']))
+    check(all(abs(post[f] - base[f]) <= LD_FLAT_TOL for f in LD_HZ),
+          'L3 3 s after the command every tone is the baseline within %.1f dB (%s)' % (LD_FLAT_TOL, ld_str({f: post[f] - base[f] for f in LD_HZ})))
+    check(r3['settled'] <= 3.0, 'L3 the 1 kHz tone is flat (within 0.15 dB of the baseline, ripple of the measure included) %.2f s after the command' % r3['settled'])
+    check(r3['step'] <= STEP_DB, 'L3 no step over %.0f dB in a millisecond from the command on (largest %.2f dB, the volume\'s own edge apart)' % (STEP_DB, r3['step']))
+    # the stage only cuts: no tone above the level the volume alone would give, on any 20 ms window from the command on; and
+    # the rise is steady (the last 0.15 dB of a rise up can fall back by about that much, so a fall back of up to 0.3 dB is allowed)
+    check(r3['over'][0] <= 0.15, 'L3 no tone goes above the dry level (worst %+.2f dB, %g Hz)' % (r3['over'][0], r3['over'][1]))
+    check(r3['dip'] <= 0.3, 'L3 the rise to flat is steady, no fall back over 0.3 dB (%.2f dB)' % r3['dip'])
+    check(settles(lambda: ld()['following'] and ld()['depth_db'] == 0.0, 3.0), 'L3 the view is back at depth 0 dB (%s)' % ld()['depth_db'])
+
+    # L4. 48 -> 96 kHz with loudness on at 35 %: the L2 shape again at the new rate, within 3 s
+    conn.ask({'cmd': 'host_volume', 'pct': 35})
+    check(settles(lambda: ld()['following'] and abs(ld()['depth_db'] - d_e) <= 0.1, 10.0), 'L4 back at depth %.1f dB before the rate change' % d_e)
+    ok, took, lv = ld_wait_shape(base, want, LD_TOL, 10)
+    check(ok, 'L4 at 48 kHz the shape is the oracle again (%s)' % ld_str(lv))
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '96000')
+    check(r.returncode == 0, 'L4 clock.force-rate 96000 set on the private instance')
+    wait_until('the sink at 96000', lambda: sink_rate() == 96000, 8)
+    t_rate = time.monotonic()
+    want96 = {f: ld_response(d_e, f, 96000) + dry for f in LD_HZ}
+    # ONE reading, taken from 3 s after the sink reported the new rate (no retry loop: a stage redesigned late fails)
+    time.sleep(max(0.0, 3.0 - (time.monotonic() - t_rate)))
+    lv96 = ld_measure(1.2)
+    lv = None if lv96 is None else {f: lv96[f] - base[f] for f in LD_HZ}
+    say('L4 at 96 kHz, dB re baseline: %s (oracle %s; one reading from %.1f s after the rate change)' % (ld_str(lv), ld_str(want96), 3.0))
+    check(lv is not None and all(abs(lv[f] - want96[f]) <= LD_TOL for f in LD_HZ),
+          'L4 from 3 s after the rate change to 96 kHz every tone is the oracle at that rate within %.1f dB (measured %s, oracle %s)'
+          % (LD_TOL, ld_str(lv), ld_str(want96)))
+    check(ld()['following'] and abs(ld()['depth_db'] - d_e) <= 0.1, 'L4 the view still follows at depth %.1f dB (%s)' % (d_e, ld()['note']))
+    r = tool('pw-metadata', '-n', 'settings', '0', 'clock.force-rate', '0')
+    check(r.returncode == 0, 'L4 clock.force-rate released')
+    wait_until('the sink back at 48000', lambda: sink_rate() == 48000, 8)
+    ok, took, lv = ld_wait_shape(base, want, LD_TOL, 10)
+    check(ok, 'L4 back at 48 kHz the shape is the oracle again (%s)' % ld_str(lv))
+
+    # L5. a graceful stop: the EQ off first (a chain for loudness alone stays and still cuts), then the daemon stops
+    # while the tones play: the sound is flat after it (the stage is sent flat or the chain ends with the daemon)
+    conn.eq({'op': 'mode', 'on': False})
+    check(settles(lambda: conn.view()['eq']['on'] is False, 5.0), 'L5 the EQ is off')
+    check(node(CHAIN) is not None, 'L5 with the EQ off and loudness on the chain stays (loudness keeps it)')
+    ok, took, lv = ld_wait_shape(base, want, LD_TOL, 8)
+    check(ok, 'L5 a chain for loudness alone still plays the shape (%s, oracle %s)' % (ld_str(lv), ld_str(want)))
+    rec = Recording()
+    time.sleep(0.8)
+    t_stop = time.monotonic()
+    watch.close()
+    conn.ask({'cmd': 'stop'})
+    conn.close()
+    try:
+        code = daemon.wait(10)
+    except subprocess.TimeoutExpired:
+        raise Fail('the daemon did not end after stop')
+    gone = settles(lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 6.0)
+    time.sleep(3.0)     # a recording window after the chain is gone, not a wait for a condition
+    x, fr = rec.finish()
+    end = len(x) / fr
+
+    def at(t):
+        return end - (rec.t_stop - t)
+
+    pre = tone_levels(x, fr, at(t_stop) - 0.45, at(t_stop) - 0.05)
+    post = tone_levels(x, fr, end - 2.0, end - 0.1)
+    tt, lv = tone_track(x, fr, at(t_stop) - 0.3, end)
+    over = ld_over(tt, lv, base, lambda a, b: dry)
+    say('L5 graceful stop: exit %s, chain %s afterwards; before %s, flat window %s; worst excess over dry %+.2f dB (%g Hz)'
+        % (code, 'gone' if gone else 'still there (kept, stage sent flat)', ld_str({f: pre[f] - base[f] for f in LD_HZ}),
+           ld_str({f: post[f] - base[f] - dry for f in LD_HZ}), over[0], over[1]))
+    check(code == 0, 'L5 the daemon ended on stop (exit %s)' % code)
+    check(abs(pre[1000.0] - base[1000.0] - want[1000.0]) <= LD_TOL,
+          'L5 the 1 kHz tone was at the shape before the stop (%+.2f dB, oracle %+.2f)' % (pre[1000.0] - base[1000.0], want[1000.0]))
+    check(all(abs(post[f] - base[f] - dry) <= LD_FLAT_TOL for f in LD_HZ),
+          'L5 after the stop every tone is flat, the baseline cut by the volume alone, within %.1f dB (%s)' % (LD_FLAT_TOL, ld_str({f: post[f] - base[f] - dry for f in LD_HZ})))
+    check(over[0] <= 0.15, 'L5 no tone goes above the dry level across the stop, on any 20 ms window (worst %+.2f dB, %g Hz)' % (over[0], over[1]))
+    daemon, conn = start_daemon()
+    watch = Watch(sock)
+    check(ld()['on'] is True,
+          'L5 loudness stays on across the restart (%s)' % {k: ld()[k] for k in ('on', 'following', 'note')})
+
+    # L6. the daemon killed with the chain cutting: no tone is ever above the dry level, before, during or after
+    conn.eq({'op': 'mode', 'on': True})
+    check(settles(lambda: node(CHAIN) is not None and ld()['following'] and abs(ld()['depth_db'] - d_e) <= 0.1, 12.0),
+          'L6 the restarted daemon follows again at depth %.1f dB (%s)' % (d_e, {k: ld()[k] for k in ('on', 'following', 'depth_db', 'note')}))
+    ok, took, lv = ld_wait_shape(base, want, LD_TOL, 10)
+    check(ok, 'L6 the shape plays again before the kill (%s)' % ld_str(lv))
+    rec = Recording()
+    time.sleep(0.8)
+    t_kill = time.monotonic()
+    os.kill(daemon.pid, signal.SIGKILL)
+    daemon.wait(5)
+    watch.close()
+    conn.close()
+    gone = settles(lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 10.0)
+    time.sleep(3.0)     # a recording window after the chain is gone, not a wait for a condition
+    x, fr = rec.finish()
+    end = len(x) / fr
+
+    def at(t):
+        return end - (rec.t_stop - t)
+
+    pre = tone_levels(x, fr, at(t_kill) - 0.45, at(t_kill) - 0.05)
+    tt, lv = tone_track(x, fr, 0.3, end)
+    over = ld_over(tt, lv, base, lambda a, b: dry)
+    say('L6 daemon killed: chain %s afterwards; 1 kHz before the kill %+.2f dB re baseline; worst excess over dry in the whole recording %+.2f dB (%g Hz)'
+        % ('gone' if gone else 'still there', pre[1000.0] - base[1000.0], over[0], over[1]))
+    check(abs(pre[1000.0] - base[1000.0] - want[1000.0]) <= LD_TOL,
+          'L6 the 1 kHz tone was at the shape before the kill (%+.2f dB, oracle %+.2f)' % (pre[1000.0] - base[1000.0], want[1000.0]))
+    check(over[0] <= 0.15, 'L6 no tone is ever above the dry level at this volume, on any 20 ms window (worst %+.2f dB, %g Hz; limit 0.15)' % (over[0], over[1]))
+    daemon, conn = start_daemon()
+    watch = Watch(sock)
+    conn.eq({'op': 'loudness', 'on': False})
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    go_quiet()
+    wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 15)
+    check(ld()['on'] is False, 'L6 loudness is off again for the phases that follow')
+    say('host-e2e: loudness phases L1-L6 done')
+    return daemon, conn, watch
+
+
 def cpu_seconds(pid):
     """The user plus system CPU time of a process in seconds (clock ticks, so +-0.01 s)."""
     stat = open('/proc/%d/stat' % pid).read()
@@ -885,6 +1413,18 @@ def main():
         return conn.view()['eq']['points'][0]
 
     watch = Watch(sock)
+    if os.environ.get('HOST_E2E_ONLY') == 'L':
+        # A way to iterate on the loudness phases alone: a development aid that can never report a pass (it
+        # exits 3 and prints no PASS line, so a gate that reads "host-e2e: PASS" cannot take it for one).
+        daemon, conn, watch = loudness_phases(daemon, conn, watch, start_daemon, sock)
+        conn.ask({'cmd': 'stop'})
+        watch.close()
+        conn.close()
+        daemon.wait(10)
+        if STATE['failed']:
+            raise Fail('%d check(s) failed: %s' % (len(STATE['failed']), '; '.join(STATE['failed'])))
+        STATE['dev'] = True
+        return
     tone_wav(RUN + '/tone.wav')
     STATE['tone'] = spawn('pw-cat', '-p', '--properties', 'node.name=svtone', RUN + '/tone.wav')
     wait_until('the tone', lambda: node('svtone'))
@@ -1846,6 +2386,8 @@ def main():
     wait_until('no chain', lambda: node(CHAIN) is None and not _private_pids('host-eq.conf'), 15)
     say('host-e2e: virtual speakers phases V0-V11 done')
 
+    daemon, conn, watch = loudness_phases(daemon, conn, watch, start_daemon, sock)
+
     # U. The VU meters' levels: the real capture (pw-record of the sink's monitor) into the daemon, read as the
     # levels-only frames (`?only=levels`) of its web page. The sink is at full volume and unmuted (G left it at 50 %
     # and the V phases put it back; set again here so this phase never depends on them), the EQ and the speakers
@@ -1912,6 +2454,100 @@ def main():
         levels.close()
     go_quiet()
     say('host-e2e: VU phase U done')
+
+    # R. A preset recall while a player plays through pipewire-pulse (as a desktop player does): a
+    # player may pause when its sink is removed, so a recall that needs more preamp than the curve
+    # the chain was started with goes live, no restart: no pulse sink removed or added, the stream
+    # not moved, the same chain node and process. The level is held at the deeper preamp and the
+    # view says so; once nothing has played for the idle time (3 s here) the chain is applied again
+    # and the curve plays at its own level.
+    deep = {'preamp_db': 0.0, 'filters': [{'kind': 'Peaking', 'f': 100.0, 'g': 6.0, 'q': 1.0}]}
+    flat = {'preamp_db': 0.0, 'filters': [{'kind': 'Peaking', 'f': 1000.0, 'g': 0.0, 'q': 1.0}]}
+
+    def recall(name, corr):
+        conn.eq({'op': 'apply', 'name': name, 'correction': corr})
+        wait_until('the view to name %s' % name, lambda: conn.view()['eq']['preset'] == name, 5)
+
+    def chain_ids():
+        return which(node(CHAIN)), _private_pids('host-eq.conf')
+
+    pulse_server()
+    recall('Deep', deep)
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    v = conn.view()['eq']
+    deep_db = v['preamp_db']
+    check(v['on'] and deep_db <= -5.9, 'R the chain starts with the deep curve, preamp %+.2f dB' % deep_db)
+    player = pulse_play(RUN + '/tone.wav')
+    wait_until('the player to play through the chain', chain_playing, 10)
+    ok, _, lv = wait_level(base, expected_db(conn.view(), RATE), 0.1, 10)
+    check(ok, 'R the pulse player plays through the deep curve at the model (%s dB)' % lv)
+    events = PulseEvents()
+    time.sleep(0.5)
+    before = (chain_ids(), pulse_links(), pulse_sink_inputs())
+    say('R  before the recalls: chain %s, pulse stream links %s, sink inputs %s' % before)
+    check(before[1][1] == [CHAIN], 'R the pulse stream is linked to the chain only (%s)' % (before[1][1],))
+    t_recall = time.monotonic()
+    recall('Flat', flat)
+    time.sleep(1.5)
+    v = conn.view()['eq']
+    say('R  Flat while playing: preamp %+.2f dB, note %r, live %s' % (v['preamp_db'], v['note'], v['live']))
+    check(v['note'] == 'level held until the music pauses' and abs(v['preamp_db'] - deep_db) <= 0.01,
+          'R the flat curve plays live with the level held at the deep preamp (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
+    held_want = expected_db(conn.view(), RATE)
+    ok, _, held_lv = wait_level(base, held_want, 0.1, 10)
+    check(ok, 'R the held level is %s dB re the unfiltered tone, the model %+.2f' % (held_lv, held_want))
+    # Back to the deep curve (a lower preamp: live, nothing held), then the flat one again.
+    recall('Deep', deep)
+    time.sleep(0.5)
+    v = conn.view()['eq']
+    check(v['note'] is None and abs(v['preamp_db'] - deep_db) <= 0.01,
+          'R the deep curve again plays at its own preamp, nothing held (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
+    recall('Flat', flat)
+    # Playing on past the idle time keeps it held.
+    time.sleep(5.0)
+    v = conn.view()['eq']
+    after = (chain_ids(), pulse_links(), pulse_sink_inputs())
+    seen = events.since(t_recall)
+    say('R  after the recalls and 5 s of playing: chain %s, pulse stream links %s, sink inputs %s; pulse events %s'
+        % (after + (seen,)))
+    check(after[0] == before[0], 'R no chain restart while the player plays (%s -> %s)' % (before[0], after[0]))
+    check(after[1] == before[1] and after[2] == before[2],
+          'R the pulse stream was not moved: links %s -> %s, sink inputs %s -> %s' % (before[1], after[1], before[2], after[2]))
+    sink_events = [e for e in seen if ' on sink #' in e and ("'remove'" in e or "'new'" in e)]
+    check(not sink_events, 'R no pulse sink removed or added (%s)' % sink_events)
+    check(v['note'] == 'level held until the music pauses', 'R still held while the player plays (%r)' % v['note'])
+    # The music pauses (the player ends): the chain is applied again once idle, the pulse server
+    # sees that sink go, and the curve plays at its own level.
+    t_quiet = time.monotonic()
+    stop(player)
+    wait_until('the player to leave', lambda: not pulse_stream(), 5)
+    restarted = settles(lambda: chain_ids()[0] not in (None, before[0][0]), 15.0)
+    took = time.monotonic() - t_quiet
+    lifted = settles(lambda: conn.view()['eq']['note'] is None and abs(conn.view()['eq']['preamp_db']) <= 0.01)
+    v = conn.view()['eq']
+    seen = events.since(t_quiet)
+    say('R  after the music paused: chain %s after %.1f s, then preamp %+.2f dB, note %r; pulse events %s'
+        % (chain_ids()[0], took, v['preamp_db'], v['note'], seen))
+    check(restarted, 'R the chain is applied again once nothing has played for the idle time (%.1f s)' % took)
+    check(any(' on sink #' in e and "'remove'" in e for e in seen),
+          'R the restart is seen by the pulse server as a sink removed (the event the recall avoided)')
+    check(lifted, 'R the flat curve plays at its own preamp, nothing held (%+.2f dB, note %r)' % (v['preamp_db'], v['note']))
+    player = pulse_play(RUN + '/tone.wav')
+    wait_until('the player to play through the chain', chain_playing, 10)
+    full_want = expected_db(conn.view(), RATE)
+    ok, _, full_lv = wait_level(base, full_want, 0.1, 10)
+    say('R  levels re the unfiltered tone: held %s dB, full %s dB' % (held_lv, full_lv))
+    check(ok, 'R the full level is %s dB re the unfiltered tone, the model %+.2f' % (full_lv, full_want))
+    check(held_lv is not None and full_lv is not None and abs((full_lv - held_lv) + deep_db) <= 0.2,
+          'R the level came up by the deep preamp (%s -> %s dB)' % (held_lv, full_lv))
+    stop(player)
+    events.close()
+    wait_until('the player to leave', lambda: not pulse_stream(), 5)
+    wait_until('the chain\'s sink to stop running', lambda: not chain_playing(), 10)
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    say('host-e2e: pulse recall phase R done')
+
 
     # X4. a restart of the daemon: crossfeed is off after it, and a chain for it alone is gone
     def restart_checks(what):
@@ -2018,6 +2654,9 @@ if __name__ == '__main__':
     code = 0
     try:
         main()
+        if STATE.get('dev'):
+            print('host-e2e: dev run (HOST_E2E_ONLY), the loudness phases alone: not a pass of host-e2e', file=sys.stderr)
+            code = 3
     except Fail as e:
         print('host-e2e: FAIL: %s' % e, file=sys.stderr)
         code = 1

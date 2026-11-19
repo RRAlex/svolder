@@ -21,15 +21,15 @@ no YAML.
 `svolderd` can publish every device it holds to a broker, announced so Home Assistant finds each one
 on its own, and — only when you allow it — take commands back. Only the daemon connects, since it
 holds the devices; a direct session (`--transport ble` or `fake`) publishes nothing, and the CLI and
-the TUI see the bridge through `svolder daemon status`. It speaks MQTT 3.1.1 over plain TCP, with a
-username and password when the broker wants them; there is no TLS. For a broker that only speaks
-TLS, see "A TLS-only broker" below.
+the TUI see the MQTT client through `svolder daemon status`. It speaks MQTT 3.1.1 over plain TCP,
+with a username and password when the broker wants them; there is no TLS. For a broker that only
+speaks TLS, see "A TLS-only broker" below.
 
 ### Turning it on
 
-The bridge is off unless it is turned on: without an `[mqtt]` section, or with `enabled = false`,
-the daemon opens no connection to anything. It needs a broker `host`; everything else is optional.
-Four front doors set the same keys, and the table below says which does what.
+The MQTT client is off unless it is turned on: without an `[mqtt]` section, or with `enabled =
+false`, the daemon opens no connection to anything. It needs a broker `host`; everything else is
+optional. Four front doors set the same keys, and the table below says which does what.
 
 ```toml
 [mqtt]
@@ -47,37 +47,38 @@ max_volume_db = -10.0      # optional cap on a command's volume
 
 | Key | `config.toml` | TUI (Settings, Connect) | CLI | Environment |
 |---|---|---|---|---|
-| on or off | `enabled` | MQTT bridge | `svolder mqtt on`, `off` | `SVOLDER_MQTT_ENABLED` |
+| on or off | `enabled` | MQTT client | `svolder mqtt on`, `off` | `SVOLDER_MQTT_ENABLED` |
 | broker host | `host` | MQTT broker host | `svolder mqtt set host NAME` | `SVOLDER_MQTT_HOST` |
 | broker port | `port` | MQTT broker port | `svolder mqtt set port N` | `SVOLDER_MQTT_PORT` |
 | login name | `username` | MQTT username | `svolder mqtt set username NAME` (empty takes it away) | `SVOLDER_MQTT_USERNAME` |
 | login password | `password` | MQTT password (masked; Tab shows it; an empty line keeps it, Delete twice clears it) | `svolder mqtt password` (typed twice without echo, or the first line of standard input; `--clear`) | `SVOLDER_MQTT_PASSWORD` |
-| commands back | `commands` | MQTT commands | none | none |
+| commands back | `commands` | MQTT commands | `svolder mqtt set commands on`, `off` | none |
 | client id, topics, cap | `client_id`, `base_topic`, `discovery_prefix`, `max_volume_db` | none | none | none |
 
 For `enabled`, `host`, `port` and `username` the file wins: the variable is the default where the
 file has no such key, as `SVOLDER_WEB_ENABLED` is for the web UI, so a container's compose file
-configures the bridge with no file written. `SVOLDER_MQTT_PASSWORD` is the other way round: set and
-not empty, it wins over the file's `password`, so a password need not sit in the file at all. The
-TUI's password row says `from SVOLDER_MQTT_PASSWORD` when this session has the variable set. A value
-the variable cannot take (`SVOLDER_MQTT_PORT=abc`, `SVOLDER_MQTT_ENABLED=maybe`) is refused by the
-variable's name.
+configures the MQTT client with no file written. `SVOLDER_MQTT_PASSWORD` is the other way round: set
+and not empty, it wins over the file's `password`, so a password need not sit in the file at all.
+The TUI's password row says `from SVOLDER_MQTT_PASSWORD` when this session has the variable set. A
+value the variable cannot take (`SVOLDER_MQTT_PORT=abc`, `SVOLDER_MQTT_ENABLED=maybe`) is refused by
+the variable's name.
 
-`svolder mqtt` and the TUI's MQTT rows change the key through the daemon when one runs
-(`mqtt_set`, the same write and reload `svolder web on` makes), so the bridge follows at once, and
-write the file themselves, then tell a daemon that reads it to reload, when none runs. The password goes in the daemon's request and in the file and nowhere else: never an
-argument of a command (a process's arguments are readable by every local user), never printed or
-logged, never read back out by any client, and masked while it is typed. `config.toml` is created
-readable by its owner alone (0600); a file that already exists keeps the mode it has, except that a
-configuration made group- or world-readable is narrowed to 0600 when a password is written into
-it, and the CLI or TUI says so once (a running daemon reports it in its answer, and logs it).
+`svolder mqtt` and the TUI's MQTT rows change the key through the daemon when one runs (`mqtt_set`,
+the same write and reload `svolder web on` makes), so the MQTT client follows at once, and write the
+file themselves, then tell a daemon that reads it to reload, when none runs. The password goes in
+the daemon's request and in the file and nowhere else: never an argument of a command (a process's
+arguments are readable by every local user), never printed or logged, never read back out by any
+client, and masked while it is typed. `config.toml` is created readable by its owner alone (0600); a
+file that already exists keeps the mode it has, except that a configuration made group- or
+world-readable is narrowed to 0600 when a password is written into it, and the CLI or TUI says so
+once (a running daemon reports it in its answer, and logs it).
 
 The web UI and the MCP server have no MQTT settings.
 
 ### Home Assistant's broker wants a login
 
 Home Assistant's Mosquitto broker add-on refuses a client that gives no username, and a client that
-gives a wrong one: the bridge then stays unconnected, and `svolder daemon status` says `not
+gives a wrong one: the MQTT client then stays unconnected, and `svolder daemon status` says `not
 connected to HOST:PORT: the broker refused the login (check username and password)`.
 There is no default username. To give svolder one:
 
@@ -92,7 +93,7 @@ There is no default username. To give svolder one:
    `SVOLDER_MQTT_ENABLED`, `SVOLDER_MQTT_HOST`, `SVOLDER_MQTT_USERNAME` and
    `SVOLDER_MQTT_PASSWORD`.
 
-A bridge that cannot get in says so in words, in the TUI's MQTT status row, in `svolder daemon
+An MQTT client that cannot get in says so in words, in the TUI's MQTT status row, in `svolder daemon
 status` and in a `svolder doctor` row: `connected`; `the broker refused the login (check username
 and password)`; `not reachable`; `port 8883 is TLS, which svolder does not speak` (see "A TLS-only
 broker" below).
@@ -112,14 +113,14 @@ the password in place of the file's, so the password need not sit in the file; a
 username is not sent (MQTT 3.1.1 carries one only with a username), and the daemon's log says so. A
 reload — SIGHUP, or the `reload` request `add` and `remove` send — re-reads the section: the same
 section keeps its connection and publishes the device set the file now names, a changed one stops
-the bridge and starts the one it now describes, and a section taken out stops it.
+the MQTT client and starts the one it now describes, and a section taken out stops it.
 
 ### Topics
 
 For a device with unit id `U` (its sixteen hex characters) and the default `base_topic`:
 
-- `svolder/bridge/availability` — `online` / `offline`, retained. `offline` is the bridge's last
-  will, and what a stop publishes.
+- `svolder/bridge/availability` — `online` / `offline`, retained. `offline` is the MQTT client's
+  last will, and what a stop publishes.
 - `svolder/U/availability` — `online` while the daemon holds the device's link, else `offline`,
   retained.
 - `svolder/U/state` — one retained JSON object with a key per control (the profile's key: `volume`,
@@ -152,7 +153,7 @@ For a device with unit id `U` (its sixteen hex characters) and the default `base
 `mosquitto_sub` (in Debian's and Ubuntu's `mosquitto-clients`) prints what the broker holds and then
 everything published after, one `topic payload` line each. Against a broker on this machine, with a
 daemon holding one device — the `gungnir` of the configuration file above, a Gungnir 2 — its lines
-include the bridge's and the device's availability and the device's state:
+include the MQTT client's and the device's availability and the device's state:
 
 ```
 $ mosquitto_sub -h 127.0.0.1 -t 'svolder/#' -t 'homeassistant/#' -v
@@ -173,14 +174,14 @@ are sensors, listed under "The tone control"; the three are `signal`, `firmware`
 `dsp_firmware`, under "Signal, firmware and Identify".
 
 Each is one JSON object: the entity's `name` and `unique_id` (`svolder_0102030405060708_volume`),
-the state topic and a `value_template` that reads its key out of the state
-(`{{ value_json.volume }}`), both availability topics with `availability_mode` `all` (the link's
-names the bridge's alone, and reads the device's availability as its state), a `device` block — the
-configured name, `Schiit Audio`, the profile's model, the firmware build — and an `origin` block
-naming svolder and its version. A change the device confirms — from the TUI, `svolder set`, or the
-device's own knob — is a new `svolder/0102030405060708/state` line within moments. Stopping the
-daemon prints `offline` for the device and then for the bridge; a daemon killed outright prints the
-bridge's `offline` alone, the broker's last will for it.
+the state topic and a `value_template` that reads its key out of the state (`{{ value_json.volume
+}}`), both availability topics with `availability_mode` `all` (the link's names the MQTT client's
+alone, and reads the device's availability as its state), a `device` block — the configured name,
+`Schiit Audio`, the profile's model, the firmware build — and an `origin` block naming svolder and
+its version. A change the device confirms — from the TUI, `svolder set`, or the device's own knob —
+is a new `svolder/0102030405060708/state` line within moments. Stopping the daemon prints `offline`
+for the device and then for the MQTT client; a daemon killed outright prints the bridge's `offline`
+alone, the broker's last will for it.
 
 ### In Home Assistant
 
@@ -195,20 +196,20 @@ each fault, a measurement sensor per meter (in `%` for a scaled one), a `Link` c
 sensor for the device's link, and the diagnostics of "Signal, firmware and Identify" below.
 
 Home Assistant's MQTT integration has no media player, which is why a device is a set of entities.
-Every entity but the link is unavailable while either the bridge or its device is offline. A device
-with a tone control also gets the preset, the loudness strength and every band's gain, frequency and
-Q (see "The tone control"). Nothing in the firmware-update family or the passphrase function can be
-written or commanded, and the only things published from that family are the two version readings
-(the `Firmware` and `DSP firmware` sensors of "Signal, firmware and Identify"), read-only. The
-eight keys `link`, `signal`, `firmware`, `dsp_firmware`, `identify`, `eq_mode`, `eq_preset` and
-`eq_loudness` belong to the bridge's own entities, so a profile file whose control takes one fails
-to load, naming the key.
+Every entity but the link is unavailable while either the MQTT client or its device is offline. A
+device with a tone control also gets the preset, the loudness strength and every band's gain,
+frequency and Q (see "The tone control"). Nothing in the firmware-update family or the passphrase
+function can be written or commanded, and the only things published from that family are the two
+version readings (the `Firmware` and `DSP firmware` sensors of "Signal, firmware and Identify"),
+read-only. The eight keys `link`, `signal`, `firmware`, `dsp_firmware`, `identify`, `eq_mode`,
+`eq_preset` and `eq_loudness` belong to the MQTT client's own entities, so a profile file whose
+control takes one fails to load, naming the key.
 
 A device taken out of the configuration has its discovery configs, its state and its availability
 cleared at the next reload, so its entities leave Home Assistant. A discovery config the broker
 holds under one of the daemon's devices that no control announces now — a read-only sensor left by a
-run before `commands` was switched on, say — is cleared as the bridge connects, so one control is
-never two entities.
+run before `commands` was switched on, say — is cleared as the MQTT client connects, so one control
+is never two entities.
 
 `contrib/home-assistant/` in the source tree has the broker and login steps, a dashboard to paste
 into Home Assistant's raw configuration editor, the entity names a Gungnir 2 gets, and a recorder
@@ -244,11 +245,11 @@ is not offered, since a press would be a command.
 
 ### Commands
 
-The bridge is read-only unless `commands = true`: it publishes and never subscribes to a command
-topic. Remote control of a DAC's volume over the network is opt-in for the volume-safety reasons
-LEGAL.md gives. With `commands = true`, the level entities are sliders (`number`, with the control's
-minimum, maximum and step), the toggles are switches and the selects are selects, and each writes to
-its own `svolder/U/<key>/set` topic:
+The MQTT client is read-only unless `commands = true`: it publishes and never subscribes to a
+command topic. Remote control of a DAC's volume over the network is opt-in for the volume-safety
+reasons LEGAL.md gives. With `commands = true`, the level entities are sliders (`number`, with the
+control's minimum, maximum and step), the toggles are switches and the selects are selects, and each
+writes to its own `svolder/U/<key>/set` topic:
 
 - a level takes a number in its own units, snapped to the nearest step the device has: `-20` for the
   volume in dB, `0` for a centred balance;
@@ -259,7 +260,7 @@ its own `svolder/U/<key>/set` topic:
 - the `Identify` button's topic takes `PRESS` (see "Signal, firmware and Identify").
 
 A command is acted on only as it is published: one someone published retained, which the broker
-hands to the bridge's subscription on every connect, is never written to the device, and the
+hands to the MQTT client's subscription on every connect, is never written to the device, and the
 daemon's log says so once per topic — the message itself is left on the broker, since it is not the
 bridge's to clear. Each command goes through the daemon's own set path — the one `svolder set`
 takes, with its validation and its refusal of every protected function id — so nothing reaches the
@@ -374,9 +375,9 @@ A preset saved from the TUI's preset list (`n`, `u`, `c`, `x`) or by `svolder eq
 `delete` reaches Home Assistant without a restart: after writing the file, each asks a running
 daemon to reload, but only when that daemon's `version` reply names the same configuration file, and
 says nothing where there is no daemon, where it reads another file, or where the reload fails. A
-direct session has no daemon to tell. On a reload the bridge announces the select's discovery config
-again with the new options, and publishes the device's state. A preset written by hand, or by a
-front end that does not send the reload, is offered at the next reload or restart.
+direct session has no daemon to tell. On a reload the MQTT client announces the select's discovery
+config again with the new options, and publishes the device's state. A preset written by hand, or by
+a front end that does not send the reload, is offered at the next reload or restart.
 
 While a preset is being recalled, or waiting for a tone-control write already in flight, a band,
 loudness or mode command for the same device is held and sent after the recall finishes (the latest
@@ -399,24 +400,48 @@ they match none, and absent until every band has been read. A slot is never the 
 device does not say which slot it was last set from.
 
 A pick of a slot recalls it, and the device reports its bands, which the state then follows. A pick
-of a built-in setting writes the bands it changes as one batch, cuts before boosts. The bridge asks
-about neither, as it asks about no band write. A command of `custom`, of a slot the device does not
-have, or of a save is logged and dropped, and so is a command on the topic of `recall` or `save`:
-saving to a slot is not offered. A retained command is never acted on.
+of a built-in setting writes the bands it changes as one batch, cuts before boosts. The MQTT client
+asks about neither, as it asks about no band write. A command of `custom`, of a slot the device does
+not have, or of a save is logged and dropped, and so is a command on the topic of `recall` or
+`save`: saving to a slot is not offered. A retained command is never acted on.
 
 ### The computer's EQ
 
-One more Home Assistant device, `This computer`, carries the computer's EQ, crossfeed and virtual
-speakers and nothing else of the computer: no volume, no mute and no points.
+One more Home Assistant device, `This computer`, carries the computer's EQ, loudness, crossfeed and
+virtual speakers, and two read-only sensors of what its path does to the sound (below); nothing else
+of the computer: no volume, no mute and no points.
 
 | Entity | Topics | What |
 |---|---|---|
 | `switch.this_computer_eq` | `B/computer/computer_eq/state` (`ON`/`OFF`) and `.../set` | the EQ on or off; a `binary_sensor` while `commands` is off |
 | `sensor.this_computer_eq_preset` | `B/computer/computer_eq_preset/state` | the preset the points came from, `custom` after a hand edit, empty while the EQ is off |
+| `switch.this_computer_loudness` | `B/computer/computer_loudness/state` (`ON`/`OFF`) and `.../set` | [loudness](eq.md#loudness) on or off; a `binary_sensor` while `commands` is off |
+| `number.this_computer_loudness_strength` | `B/computer/computer_loudness_strength/state` and `.../set` | the loudness strength in %, with the daemon's own minimum, maximum and step (0 to 100, 5), a slider; a `sensor` while `commands` is off |
 | `switch.this_computer_crossfeed` | `B/computer/computer_crossfeed/state` (`ON`/`OFF`) and `.../set` | [crossfeed](eq.md#crossfeed) on or off; a `binary_sensor` while `commands` is off |
 | `select.this_computer_crossfeed_preset` | `B/computer/computer_crossfeed_preset/state` and `.../set` | the model and preset; a `sensor` while `commands` is off |
 | `switch.this_computer_virtual_speakers` | `B/computer/computer_speakers/state` (`ON`/`OFF`) and `.../set` | [virtual speakers](eq.md#virtual-speakers) on or off; a `binary_sensor` while `commands` is off |
 | `select.this_computer_virtual_speakers_set` | `B/computer/computer_speakers_set/state` and `.../set`, attributes on `.../attributes` | the fetched set; a `sensor` while `commands` is off |
+| `sensor.this_computer_path` | `B/computer/computer_path/state`, attributes on `.../attributes` | the path's verdict: `untouched`, `changed`, `not_this_dac`, `other_input`, `unknown`, or `not_read` while there is no route; attributes `words` (a list), `sentence` and `dac` |
+| `binary_sensor.this_computer_pipewire_config` | `B/computer/computer_config/state` (`ON`/`OFF`), attributes on `.../attributes` | a problem sensor of the PipeWire config check: `ON` while a line fails; attributes `outcome`, `summary`, `sink`, `limit` and `lines` (`key`, `outcome`, `words`) |
+
+The two path entities are read-only whatever `commands` says, and are announced while host audio is
+on. The **Path** sensor says what the computer's sound does before the DAC, judged as the web page
+judges it: `not_this_dac` names the sink in its words (the computer plays to another sink than a
+configured DAC), `other_input` is a DAC listening to an input the computer does not feed, `unknown`
+is something that could not be read, and `not_read` is no route read yet, or a route with no sink.
+Its `dac` attribute names the DAC the path was judged with. Home Assistant (like the TUI and the web
+page) judges against svolder's DACs only, so another sink is `not_this_dac`; MCP and `svolder host
+check` judge the computer's side for any sink and can read `untouched` up to it. The **PipeWire
+config** sensor is `ON` (a problem) while a line of the config check fails (the sound is changed
+before it leaves the computer), `OFF` while all seven pass, and has no state in Home Assistant,
+which shows it as unknown, while the config is not fully read, or not judged: no route, or a sink
+that is no configured DAC (another sink, or a DAC that has not connected since svolderd started,
+whose profile comes with its first connection). Not judged has `{}` for attributes; a DAC sink that
+is not fully read has the full attributes with `outcome` `unread`. Never `off` for what was not
+checked. The keys are the ones every JSON surface of svolder uses, and `limit` is what the check
+cannot judge. While MQTT is connected and these states are published (discovery on or off) the
+daemon reads the route every 30 s for them (one `pw-dump`), and stops when the broker goes. They
+never write anything to PipeWire.
 
 `ON` turns the EQ on with the points the daemon keeps; `OFF` removes it and keeps them. With no
 points kept yet (nothing applied or edited since the daemon first ran), `ON` leaves the EQ off and
@@ -424,6 +449,12 @@ logs a line. A retained command is never acted on. The entities appear while the
 computer's controls; when it cannot (for example no `pw-cli`), they say unavailable, and with host
 audio off nothing is announced. When the daemon cannot tell whether the chain runs, the switch
 reports the state the daemon saved, which is what it last applied.
+
+The two loudness entities are announced only while the daemon serves loudness; an older daemon
+has none. The strength is told while loudness is off too, as what it will play when turned on. A
+strength past the range is held to it by the daemon (250 becomes 100, snapped to its step); only a
+number that is not finite is refused, and a refusal is logged. The reference, the volume and the
+readout are no entities. A retained command is never acted on.
 
 The crossfeed select's options are the daemon's own table, so they follow it: `Bauer · Jan Meier`,
 `Bauer · Chu Moy`, `Bauer · bs2b default`, `Linkwitz`, `Meier · Default`, `Meier · Rockbox`,
@@ -465,14 +496,14 @@ name or password" or "not authorized" is a refused login; one that does not answ
 name does not resolve, is not reachable; and one that accepts the connection and drops it on port
 8883 is a TLS listener spoken to in plain text.
 
-The daemon's log names the broker and the client id once, as the bridge starts —
-`mqtt: connecting to HOST:PORT as ID, read-only` or `taking commands` — then says
-`mqtt: connected to HOST:PORT` on every connect, and the reason each time the broker could not be
-reached: once at the default level, and at `debug` for every attempt after that fails the same way.
-A subscription the broker refuses — an ACL that denies the command topics, say — is logged at warn,
-naming the filter. The daemon's stop — `svolder daemon stop`, the `stop` request, SIGTERM or SIGINT
-— publishes `offline` for every device and for the bridge before it disconnects; a daemon killed
-outright leaves the broker to publish the bridge's last will.
+The daemon's log names the broker and the client id once, as the MQTT client starts — `mqtt:
+connecting to HOST:PORT as ID, read-only` or `taking commands` — then says `mqtt: connected to
+HOST:PORT` on every connect, and the reason each time the broker could not be reached: once at the
+default level, and at `debug` for every attempt after that fails the same way. A subscription the
+broker refuses — an ACL that denies the command topics, say — is logged at warn, naming the filter.
+The daemon's stop — `svolder daemon stop`, the `stop` request, SIGTERM or SIGINT — publishes
+`offline` for every device and for the MQTT client before it disconnects; a daemon killed outright
+leaves the broker to publish the MQTT client's last will.
 
 ### A TLS-only broker
 

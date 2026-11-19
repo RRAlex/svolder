@@ -10,11 +10,13 @@
 //! read. The picture is read for each new cover address and kept as the one current cover,
 //! named by the first 16 hex characters of its SHA-256 and served only under that name.
 //!
-//! The route is read out of `pw-dump` only while someone holds a [`Watcher`] (a `Subscribe`
-//! connection that asked for the host, the event stream of a DAC's web page): at once for the
-//! first, then every two seconds, and never two reads closer than that, so a player change or a
-//! sink switch shows up on the next read. With nobody watching the daemon does no work for the
-//! route and keeps none.
+//! The route is read out of `pw-dump` while someone holds a [`Watcher`]: a fast one (a `Subscribe`
+//! connection that asked for the host, the event stream of a DAC's web page) reads at once for
+//! the first, then every two seconds, never two reads closer than that, so a player change or a
+//! sink switch shows up on the next read; a slow one (the MQTT client while it is connected) reads
+//! every 30 s. A one-shot `host` request with no fast watcher reads once within a second, and
+//! requests that arrive while a read runs share it. With none of these the daemon does no work
+//! for the route and keeps none.
 //!
 //! The capture of what the computer plays is kept here too, once for every front end: while
 //! any [`FramesHold`] exists (the frames stream of a web page, the frames connection of a
@@ -44,8 +46,9 @@ use svolder_host::fake::FakePlayers;
 use svolder_host::fake::{FakeChain, FakeParams, FakeSink};
 use svolder_host::route::{ChainStages, PlayerMatch, PwDump, SinkFacts, StreamFacts, route};
 use svolder_host::{
-    Button, Frame, FrameCapture, Mpris, NoBus, NowPlaying, Players, Progress, PwFrames, RouteFacts,
-    Sink, SinkState, Status, Wpctl, unix_ms,
+    AlsaFacts, Asound, Button, ClockFacts, Dither, Frame, FrameCapture, Layout, Mpris, NoBus,
+    NowPlaying, Players, Progress, PwFrames, Rates, RouteFacts, SetupFacts, Sink, SinkOffer,
+    SinkState, Status, Wpctl, fill_alsa, unix_ms,
 };
 use svolder_ipc::config::HostConfig;
 use svolder_ipc::host::{
@@ -71,8 +74,16 @@ pub(crate) use computer::{Computer, EqRefusal, is_unavailable};
 /// none.
 const BUS_RETRY: Duration = Duration::from_secs(10);
 
-/// The least time between two route reads while someone watches.
+/// The least time between two route reads while a page or a TUI watches (a fast watcher).
 const ROUTE_EVERY: Duration = Duration::from_secs(2);
+
+/// The longest a one-shot request waits for its own route read: under the CLI's wait for an
+/// answer, so a stalled PipeWire costs the request its route and nothing else.
+const ROUTE_NOW_WITHIN: Duration = Duration::from_secs(1);
+
+/// The least time between two route reads while only slow watchers are held (the MQTT client,
+/// which publishes the computer's path and config).
+const ROUTE_EVERY_SLOW: Duration = Duration::from_secs(30);
 
 /// How many times a cover address is read in all: a player may name a picture a moment before
 /// it has written it, so a miss is followed by a second read 1 s after the first and a third
@@ -261,8 +272,12 @@ pub(crate) struct FakeKnobs {
     /// The display name of the fake device, which the fake route's sink is named for.
     pub(crate) display: String,
     /// Whether the fake route changes the signal in every way it can: a quieter player, a
-    /// resample, a quieter sink, the host EQ and other sounds mixing.
+    /// resample, a quieter sink with a narrower format and dither, the host EQ and other sounds
+    /// mixing.
     pub(crate) route_changed: bool,
+    /// Whether the fake route's PipeWire config fails the rates, forced rate and filter lines of
+    /// the config check.
+    pub(crate) setup_fail: bool,
     /// Whether the fake host has no capture to give: it reports the capture unavailable.
     pub(crate) capture_off: bool,
     /// The fake track's title in place of the fixed one, for a card whose title is cut.
@@ -295,6 +310,7 @@ impl Default for FakeKnobs {
             cover_next_file: None,
             display: "Gungnir 2".to_string(),
             route_changed: false,
+            setup_fail: false,
             capture_off: false,
             title: None,
             eq: FakeEq::Live,
@@ -314,6 +330,8 @@ impl FakeKnobs {
     /// `SVOLDER_FAKE_COVER_GONE_FILE`, `SVOLDER_FAKE_COVER_NEXT_FILE` and
     /// `SVOLDER_FAKE_PLAYER_GONE_FILE` as paths (unset when empty),
     /// `SVOLDER_FAKE_ROUTE=changed` for the route that alters the signal,
+    /// `SVOLDER_FAKE_CONFIG=fail` for a PipeWire config that fails the rates, forced rate and
+    /// filter lines,
     /// `SVOLDER_FAKE_CAPTURE=off` for a host with no capture, `SVOLDER_FAKE_TITLE` for the
     /// fake track's title (unset when empty), `SVOLDER_FAKE_HOST_EQ` as `release` for an EQ whose
     /// live changes never read back or `off` for a computer with no `pw-cli`, and the display name of the profile
@@ -337,6 +355,8 @@ impl FakeKnobs {
             cover_next_file: path("SVOLDER_FAKE_COVER_NEXT_FILE"),
             route_changed: knob("SVOLDER_FAKE_ROUTE")
                 .is_some_and(|route| route.trim().eq_ignore_ascii_case("changed")),
+            setup_fail: knob("SVOLDER_FAKE_CONFIG")
+                .is_some_and(|setup| setup.trim().eq_ignore_ascii_case("fail")),
             capture_off: knob("SVOLDER_FAKE_CAPTURE")
                 .is_some_and(|capture| capture.trim().eq_ignore_ascii_case("off")),
             title: knob("SVOLDER_FAKE_TITLE")
@@ -462,6 +482,7 @@ impl Parts {
             routes: Some(Arc::new(FakeRoute {
                 display: knobs.display,
                 changed: knobs.route_changed,
+                setup_fail: knobs.setup_fail,
                 computer: Some(Arc::clone(&computer)),
             })),
             covers: Arc::new(|url| {
@@ -493,7 +514,12 @@ impl Parts {
                         .map(|mpris| Arc::new(mpris) as Arc<dyn Players>)
                 })
             }),
-            routes: PwDump::from_env().map(|dump| Arc::new(PwRoutes(dump)) as Arc<dyn Routes>),
+            routes: PwDump::from_env().map(|dump| {
+                Arc::new(PwRoutes {
+                    dump,
+                    asound: Asound::from_env(),
+                }) as Arc<dyn Routes>
+            }),
             covers: Arc::new(move |url| cover::cover(url, &places)),
             helpers: Vec::new(),
             frames: match (PwFrames::from_env(), Wpctl::from_env()) {
@@ -518,17 +544,22 @@ fn fake_computer(
     volume_pct: u8,
     speakers: Option<Arc<SpeakersStore>>,
 ) -> Computer {
-    let sink: Arc<dyn Sink> = Arc::new(FakeSink::new(Some(SinkState {
+    let fake_sink = FakeSink::new(Some(SinkState {
         volume: f32::from(volume_pct) / 100.0,
         muted: false,
         name: format!("Schiit {display}"),
         target: Some(FAKE_SINK_NODE.to_string()),
-    })));
+    }));
+    let sink: Arc<dyn Sink> = Arc::new(fake_sink.clone());
     let controller = match eq {
         FakeEq::Off => Err("no pw-cli on this computer".to_string()),
         _ => {
             let params = FakeParams::new();
             params.holds(eq == FakeEq::Live);
+            // A current chain, whose looks read the fake sink's volume: the loudness follows it
+            // live.
+            params.with_loudness_ports();
+            params.level_from(&fake_sink);
             let control =
                 EqControl::new(Arc::new(FakeChain::new()), Box::new(params), Keep::Memory);
             Ok(match speakers {
@@ -567,18 +598,24 @@ fn fake_players(title: Option<&str>) -> FakePlayers {
     .answering()
 }
 
-/// The real route: `pw-dump`, read for the player being followed.
-struct PwRoutes(PwDump);
+/// The real route: `pw-dump`, read for the player being followed, and the ALSA card's own files
+/// for the sink's last hop.
+struct PwRoutes {
+    dump: PwDump,
+    asound: Asound,
+}
 
 #[async_trait]
 impl Routes for PwRoutes {
     async fn read(&self, player: Option<NowPlaying>) -> Option<RouteFacts> {
-        let dump = self.0.read().await?;
+        let dump = self.dump.read().await?;
         let pid = player.as_ref().and_then(|player| player.pid);
         let identity = player
             .as_ref()
             .map_or("", |player| player.identity.as_str());
-        route(&dump, pid, identity)
+        let mut facts = route(&dump, pid, identity)?;
+        fill_alsa(&mut facts, &self.asound);
+        Some(facts)
     }
 }
 
@@ -592,20 +629,77 @@ struct FakeRoute {
     display: String,
     /// Whether the route changes the signal (see [`FakeKnobs::route_changed`]).
     changed: bool,
+    /// Whether the PipeWire config fails three lines (see [`FakeKnobs::setup_fail`]).
+    setup_fail: bool,
     /// The fake computer, whose EQ the route follows.
     computer: Option<Arc<Computer>>,
 }
 
 impl FakeRoute {
     /// The stages of the fake computer's chain that change the sound: the EQ with a curve that is
-    /// not flat, the crossfeed and the virtual speakers; `None` while none does.
+    /// not flat, the loudness while it cuts, the crossfeed and the virtual speakers; `None` while
+    /// none does.
     fn chain_stages(&self) -> Option<ChainStages> {
         let eq = self.computer.as_ref()?.eq_view();
         let stages = ChainStages {
             eq: eq.on && eq.points.iter().any(|point| point.g != 0.0),
             ..ChainStages::of_view(&eq).unwrap_or_default()
         };
-        (stages.eq || stages.crossfeed || stages.speakers).then_some(stages)
+        (stages.eq || stages.loudness || stages.crossfeed || stages.speakers).then_some(stages)
+    }
+}
+
+impl FakeRoute {
+    /// The config facts of the fake sink: a USB DAC on `hw:Audio` that takes every standard rate
+    /// up to 384 kHz in 16, 24 and 32 bits, every rate allowed, no forced rate, no dither, no
+    /// filter and two channels. `changed` adds triangular dither, and `setup_fail` allows two
+    /// rates only, forces one and puts a filter in the sink.
+    fn setup_facts(&self) -> SetupFacts {
+        let stereo = Layout {
+            channels: 2,
+            positions: vec!["FL".to_string(), "FR".to_string()],
+        };
+        let standard = vec![
+            44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+        ];
+        let clock = if self.setup_fail {
+            ClockFacts {
+                rate: Some(FAKE_RATE_HZ),
+                allowed_rates: vec![48_000, 96_000],
+                force_rate: Some(96_000),
+            }
+        } else {
+            ClockFacts {
+                rate: Some(FAKE_RATE_HZ),
+                allowed_rates: standard,
+                force_rate: None,
+            }
+        };
+        SetupFacts {
+            offer: Some(SinkOffer {
+                formats: ["S32LE", "S24LE", "S16LE"].map(str::to_string).to_vec(),
+                rates: Some(Rates::Range {
+                    min: 44_100,
+                    max: 384_000,
+                }),
+                layout: Some(stereo.clone()),
+            }),
+            forced_format: None,
+            node_rates: Vec::new(),
+            clock: Some(clock),
+            sink_layout: Some(stereo.clone()),
+            stream_layout: Some(stereo),
+            dither: Some(Dither {
+                method: if self.changed { "triangular" } else { "none" }.to_string(),
+                noise: 0,
+            }),
+            sink_filter: Some(self.setup_fail),
+            stream_filter: Some(false),
+            alsa: Some(AlsaFacts {
+                path: Some("hw:Audio".to_string()),
+                ..AlsaFacts::default()
+            }),
+        }
     }
 }
 
@@ -626,7 +720,7 @@ impl Routes for FakeRoute {
             name: FAKE_SINK_NODE.to_string(),
             description: product.clone(),
             rate_hz: Some(FAKE_RATE_HZ),
-            format: Some("S32LE".to_string()),
+            format: Some(if self.changed { "S16LE" } else { "S32LE" }.to_string()),
             volume_milli: Some(volume_milli),
             muted,
             usb_vendor_id: Some(SCHIIT_VENDOR_ID),
@@ -634,7 +728,7 @@ impl Routes for FakeRoute {
         };
         let stream = StreamFacts {
             rate_hz: Some(if self.changed { 44_100 } else { FAKE_RATE_HZ }),
-            format: Some("S16LE".to_string()),
+            format: Some(if self.changed { "S32LE" } else { "S16LE" }.to_string()),
             volume_milli: Some(if self.changed { 910 } else { 1000 }),
             muted: false,
         };
@@ -658,6 +752,7 @@ impl Routes for FakeRoute {
             } else {
                 stages
             },
+            setup: Some(self.setup_facts()),
         })
     }
 }
@@ -666,8 +761,18 @@ impl Routes for FakeRoute {
 struct Shared {
     /// The view, which the task publishes and everyone reads.
     view: watch::Sender<HostView>,
-    /// How many [`Watcher`]s are held.
+    /// How many fast [`Watcher`]s are held (a page or a TUI): the route is read every
+    /// [`ROUTE_EVERY`] and the computer's volume is followed while there is one.
     watchers: watch::Sender<usize>,
+    /// How many slow [`Watcher`]s are held (the MQTT client): the route alone is read, every
+    /// [`ROUTE_EVERY_SLOW`], while only these are held.
+    slow: watch::Sender<usize>,
+    /// Where the route comes from, while a run has one: a one-shot `host` request reads it when
+    /// no watcher keeps a route.
+    routes: Mutex<Option<Arc<dyn Routes>>>,
+    /// The last one-shot route read and when it ended: a request that arrived before that moment
+    /// shares it instead of running a read of its own (see [`HostService::route_shared`]).
+    shot: tokio::sync::Mutex<Option<(tokio::time::Instant, Option<RouteFacts>)>>,
     /// How many [`FramesHold`]s are held: the capture runs while there is one.
     holds: watch::Sender<usize>,
     /// The frames of the running capture, to every hold.
@@ -735,7 +840,7 @@ pub(crate) struct HostService {
 }
 
 /// What turns the computer EQ on and off for a front end that holds no controller of its own: the
-/// MQTT bridge.
+/// MQTT client.
 #[async_trait::async_trait]
 pub(crate) trait EqSwitch: Send + Sync {
     /// Turn the EQ on with the points kept, or off, which keeps them.
@@ -750,6 +855,9 @@ pub(crate) trait EqSwitch: Send + Sync {
 
     /// Change the virtual speakers: turn them on or off, or choose a fetched set by its id.
     async fn speakers(&self, on: Option<bool>, set: Option<String>) -> Result<(), String>;
+
+    /// Change the loudness: turn it on or off, or set its strength in percent.
+    async fn loudness(&self, on: Option<bool>, strength_pct: Option<f64>) -> Result<(), String>;
 }
 
 /// The computer's controller as the service holds it, reached when a switch is turned.
@@ -818,19 +926,64 @@ impl EqSwitch for SharedSwitch {
             .await
             .map_err(|refusal| refusal.to_string())
     }
+
+    async fn loudness(&self, on: Option<bool>, strength_pct: Option<f64>) -> Result<(), String> {
+        let computer = locked(&self.0.computer)
+            .clone()
+            .ok_or_else(|| "computer controls unavailable: host audio is off".to_string())?;
+        computer
+            .eq_op(
+                HostEqOp::Loudness {
+                    on,
+                    strength_pct,
+                    reference_pct: None,
+                    reference_now: None,
+                    done: true,
+                },
+                &[],
+                |_| Vec::new(),
+                |_| async { Ok(()) },
+            )
+            .await
+            .map_err(|refusal| refusal.to_string())
+    }
 }
 
-/// A hold on the route reads: while one exists the route is read and kept up to date. Dropping
-/// it lets go.
+/// A hold on the route reads: while one exists the route is read and kept up to date. A fast
+/// hold ([`HostService::watching`]) is a page or a TUI looking and reads every 2 s, with the
+/// computer's volume; a slow one ([`SlowHolds::hold`]) reads the route alone every
+/// 30 s. Dropping it lets go.
 pub(crate) struct Watcher {
     shared: Arc<Shared>,
+    slow: bool,
 }
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        self.shared
-            .watchers
-            .send_modify(|count| *count = count.saturating_sub(1));
+        let count = if self.slow {
+            &self.shared.slow
+        } else {
+            &self.shared.watchers
+        };
+        count.send_modify(|count| *count = count.saturating_sub(1));
+    }
+}
+
+/// What makes slow holds on the route reads: kept by a front end that holds one while it is
+/// connected (the MQTT client).
+#[derive(Clone)]
+pub(crate) struct SlowHolds {
+    shared: Arc<Shared>,
+}
+
+impl SlowHolds {
+    /// A slow hold, held until it is dropped.
+    pub(crate) fn hold(&self) -> Watcher {
+        self.shared.slow.send_modify(|count| *count += 1);
+        Watcher {
+            shared: Arc::clone(&self.shared),
+            slow: true,
+        }
     }
 }
 
@@ -900,6 +1053,9 @@ impl HostService {
             shared: Arc::new(Shared {
                 view: watch::channel(HostView::default()).0,
                 watchers: watch::channel(0).0,
+                slow: watch::channel(0).0,
+                routes: Mutex::new(None),
+                shot: tokio::sync::Mutex::new(None),
                 holds: watch::channel(0).0,
                 frames: broadcast::channel(FRAMES_BACKLOG).0,
                 capture: watch::channel(CaptureState::off()).0,
@@ -1037,8 +1193,9 @@ impl HostService {
         launch(&mut running, &self.shared, parts, container);
     }
 
-    /// [`HostService::stop`] after the computer's crossfeed is turned off: the daemon's graceful
-    /// stop. A chain that ran for crossfeed alone is removed first.
+    /// [`HostService::stop`] after the computer's controls stop gracefully: crossfeed and the
+    /// virtual speakers turn off (a chain that ran for them alone is removed) and the loudness
+    /// stage is sent flat with its chain kept. This is the daemon's graceful stop.
     pub(crate) async fn shutdown(&self) {
         let computer = locked(&self.shared.computer).clone();
         if let Some(computer) = computer {
@@ -1060,19 +1217,73 @@ impl HostService {
         stamped(self.shared.view.borrow().clone())
     }
 
-    /// The host as it stands, with the computer's EQ as it is this moment and its volume read now
-    /// when nobody watches and so none is kept, for a one-shot `host` request.
+    /// The host as it stands, with the computer's EQ as it is this moment, its volume read now
+    /// when nobody watches and so none is kept, and the route read now unless a fast watcher
+    /// keeps a young one, for a one-shot `host` request. The two reads run together, and the
+    /// route read gives up after [`ROUTE_NOW_WITHIN`], keeping the route the view had.
     pub(crate) async fn view_now(&self) -> HostView {
         let mut view = self.view();
-        let Some(computer) = locked(&self.shared.computer).clone() else {
+        let computer = locked(&self.shared.computer).clone();
+        let read_route = *self.shared.watchers.borrow() == 0;
+        let route = async {
+            if !read_route {
+                return None;
+            }
+            tokio::time::timeout(ROUTE_NOW_WITHIN, self.route_shared())
+                .await
+                .ok()
+                .flatten()
+        };
+        let volume = async {
+            match (&computer, &view.volume) {
+                (Some(computer), None) => computer.read_volume().await,
+                _ => None,
+            }
+        };
+        let (route, volume) = tokio::join!(route, volume);
+        if route.is_some() {
+            view.route = route;
+        }
+        let Some(computer) = computer else {
             return view;
         };
         // The controller's own newest view, not the one the throttle last let through.
         view.eq = Some(computer.eq_view());
-        if view.volume.is_none() {
-            view.volume = computer.read_volume().await;
+        if volume.is_some() {
+            view.volume = volume;
         }
         view
+    }
+
+    /// The computer's EQ as it is this moment, with nothing else read; `None` with no computer.
+    pub(crate) fn eq_now(&self) -> Option<svolder_host::eq::EqView> {
+        let computer = locked(&self.shared.computer).clone()?;
+        Some(computer.eq_view())
+    }
+
+    /// [`route_now`](Self::route_now), shared: requests take turns at the one read, and one that
+    /// arrived before a read ended takes its answer instead of reading again, so several
+    /// clients asking together run one `pw-dump`. A read the request's timeout cuts off leaves
+    /// nothing behind, and the next request in turn reads for itself.
+    async fn route_shared(&self) -> Option<RouteFacts> {
+        let arrived = tokio::time::Instant::now();
+        let mut last = self.shared.shot.lock().await;
+        if let Some((_, route)) = last.as_ref().filter(|(ended, _)| *ended > arrived) {
+            return route.clone();
+        }
+        let route = self.route_now().await;
+        *last = Some((tokio::time::Instant::now(), route.clone()));
+        route
+    }
+
+    /// The route read now for the followed player, with the chain's stages; `None` with no route
+    /// reader or when the read finds nothing.
+    async fn route_now(&self) -> Option<RouteFacts> {
+        let routes = locked(&self.shared.routes).clone()?;
+        let players = locked(&self.shared.players).clone();
+        let player = players.and_then(|players| players.now_playing());
+        let route = routes.read(player).await?;
+        Some(with_stages(route, &self.shared))
     }
 
     /// The computer's controls, or the sentence that says why there are none.
@@ -1171,6 +1382,12 @@ impl HostService {
         *self.shared.watchers.borrow()
     }
 
+    /// How many slow [`Watcher`]s are held now.
+    #[cfg(test)]
+    pub(crate) fn slow_count(&self) -> usize {
+        *self.shared.slow.borrow()
+    }
+
     /// Wait until no [`Watcher`] is held, or `limit` passes: whether none is. A task that lets go
     /// of its hold only when it next looks at the channel it answers on, which a loaded machine
     /// can put off for longer than any sleep loop guesses.
@@ -1206,10 +1423,26 @@ impl HostService {
         })
     }
 
-    /// Hold the route reads for as long as the returned value lives.
+    /// Hold the route reads for as long as the returned value lives, every 2 s, and the
+    /// computer's volume with them.
     pub(crate) fn watching(&self) -> Watcher {
         self.shared.watchers.send_modify(|count| *count += 1);
         Watcher {
+            shared: Arc::clone(&self.shared),
+            slow: false,
+        }
+    }
+
+    /// Hold the route reads for as long as the returned value lives, every 30 s while no fast
+    /// hold is there, and no volume read.
+    #[cfg(test)]
+    pub(crate) fn watching_slow(&self) -> Watcher {
+        self.slow_holds().hold()
+    }
+
+    /// What makes slow holds, for a front end that keeps one while it is connected.
+    pub(crate) fn slow_holds(&self) -> SlowHolds {
+        SlowHolds {
             shared: Arc::clone(&self.shared),
         }
     }
@@ -1228,6 +1461,7 @@ fn halt(running: &mut Running, shared: &Shared) {
     let mut gate = locked(&shared.generation);
     *gate += 1;
     *locked(&shared.players) = None;
+    *locked(&shared.routes) = None;
     // The computer's controls end with this run: its crossfeed is turned off first, by a task of
     // its own where no one waits for it (a reload, a drop); the daemon's stop waits for it.
     if let Some(computer) = locked(&shared.computer).take()
@@ -1581,12 +1815,14 @@ async fn serve(
 ) -> bool {
     let held = shared.current(generation, || {
         *locked(&shared.players) = Some(Arc::clone(&players));
+        *locked(&shared.routes) = routes.clone();
     });
     if held.is_none() {
         return false;
     }
     let mut changes = players.changes();
     let mut watchers = shared.watchers.subscribe();
+    let mut slow = shared.slow.subscribe();
     let mut state = State {
         now: players.now_playing(),
         ..State::default()
@@ -1600,9 +1836,13 @@ async fn serve(
     let mut last_read: Option<Instant> = None;
     let mut reading: Option<Reading> = None;
     loop {
-        let watched = *watchers.borrow() > 0;
+        // The period follows who is held now: a fast hold joining makes the next read due at
+        // once when the last one is older than its period, one leaving stretches it again.
+        let fast = *watchers.borrow() > 0;
+        let watched = fast || *slow.borrow() > 0;
+        let every = if fast { ROUTE_EVERY } else { ROUTE_EVERY_SLOW };
         let route_due = (watched && routes.is_some() && reading.is_none())
-            .then(|| last_read.map_or_else(Instant::now, |at| at + ROUTE_EVERY));
+            .then(|| last_read.map_or_else(Instant::now, |at| at + every));
         let cover_due = state.cover_due();
         tokio::select! {
             change = changes.next() => {
@@ -1619,7 +1859,20 @@ async fn serve(
                 if changed.is_err() {
                     break;
                 }
-                if *watchers.borrow_and_update() == 0 {
+                watchers.borrow_and_update();
+                if *watchers.borrow() == 0 && *slow.borrow() == 0 {
+                    reading = None;
+                    if state.route.take().is_some() {
+                        emit(&state);
+                    }
+                }
+            }
+            changed = slow.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                slow.borrow_and_update();
+                if *watchers.borrow() == 0 && *slow.borrow() == 0 {
                     reading = None;
                     if state.route.take().is_some() {
                         emit(&state);
@@ -1663,6 +1916,7 @@ async fn serve(
     drop(reading);
     shared.current(generation, || {
         *locked(&shared.players) = None;
+        *locked(&shared.routes) = None;
         *locked(&shared.cover) = None;
         publish(shared, HostView::default());
     });

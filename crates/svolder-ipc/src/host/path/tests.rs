@@ -4,7 +4,10 @@
 use super::*;
 use crate::host::HostView;
 use svolder_host::route::ChainStages;
-use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};
+use svolder_host::{
+    AlsaFacts, ClockFacts, Dither, HwParams, HwState, KernelOffer, Layout, PlayerMatch, Rates,
+    RouteFacts, SetupFacts, SinkFacts, SinkOffer, StreamFacts,
+};
 
 /// The device the routes below end in.
 fn dac() -> DacFacts {
@@ -50,6 +53,7 @@ pub(in crate::host) fn clean() -> RouteFacts {
         others_mixing: 0,
         host_eq: false,
         stages: None,
+        setup: None,
     }
 }
 
@@ -71,7 +75,7 @@ fn untouched_when_every_hop_leaves_it_alone() {
         line.sentence().as_deref(),
         Some(
             "untouched from the player's output on; the player may still change the sound \
-             itself (loudness normalization, its own EQ)"
+             itself (loudness normalization, ReplayGain, its own EQ); svolder judges up to 24 bits"
         )
     );
     let labels: Vec<_> = line.hops.iter().map(|hop| hop.label.as_str()).collect();
@@ -204,10 +208,23 @@ fn chain(eq: bool, crossfeed: bool, speakers: bool) -> RouteFacts {
     route.host_eq = true;
     route.stages = Some(ChainStages {
         eq,
+        loudness: false,
         crossfeed,
         speakers,
     });
     route
+}
+
+#[test]
+fn loudness_is_named_after_the_eq_and_before_the_crossfeed() {
+    let mut route = chain(true, true, false);
+    route.stages.as_mut().unwrap().loudness = true;
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Changed);
+    assert_eq!(line.words, ["host EQ on", "loudness on", "crossfeed on"]);
+    let mut alone = chain(false, false, false);
+    alone.stages.as_mut().unwrap().loudness = true;
+    assert_eq!(path_line(&alone, &dac()).words, ["loudness on"]);
 }
 
 #[test]
@@ -863,7 +880,7 @@ fn an_assumed_player_keeps_its_words_in_the_untouched_sentence() {
     assert_eq!(
         sentence,
         "untouched from the player's output on (player assumed); the player may still change the \
-         sound itself (loudness normalization, its own EQ)"
+         sound itself (loudness normalization, ReplayGain, its own EQ); svolder judges up to 24 bits"
     );
 }
 
@@ -926,7 +943,8 @@ fn the_dac_names_a_volume_below_0_db() {
         line.sentence().as_deref(),
         Some(
             "untouched from the player's output on; the Bifrost 3 then lowers it by 3.3 dB; the \
-             player may still change the sound itself (loudness normalization, its own EQ)"
+             player may still change the sound itself (loudness normalization, ReplayGain, its own \
+             EQ); svolder judges up to 24 bits"
         )
     );
     let dac = &line.hops[2];
@@ -1008,4 +1026,814 @@ fn the_dac_reads_its_toggles_from_the_profile() {
         Some(i64::from(asked == mute || asked == phase || asked == nos))
     });
     assert!(facts.stage.muted && facts.stage.phase && facts.stage.nos);
+}
+
+// ---- the setup judges ----
+
+/// A layout of the given positions.
+fn layout(positions: &[&str]) -> Layout {
+    Layout {
+        channels: positions.len() as u32,
+        positions: positions.iter().map(|p| p.to_string()).collect(),
+    }
+}
+
+/// Setup facts under which [`clean`]'s route stays untouched: a wide offer, the clock allowing
+/// the sink's rate, stereo on both sides, no dither, no filter, an ALSA `hw:` device.
+pub(in crate::host) fn clean_setup() -> SetupFacts {
+    SetupFacts {
+        offer: Some(SinkOffer {
+            formats: vec!["S32LE".into(), "S24LE".into(), "S16LE".into()],
+            rates: Some(Rates::Range {
+                min: 44_100,
+                max: 384_000,
+            }),
+            layout: Some(layout(&["FL", "FR"])),
+        }),
+        forced_format: None,
+        node_rates: Vec::new(),
+        clock: Some(ClockFacts {
+            rate: Some(48_000),
+            allowed_rates: vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+            force_rate: None,
+        }),
+        sink_layout: Some(layout(&["FL", "FR"])),
+        stream_layout: Some(layout(&["FL", "FR"])),
+        dither: Some(Dither {
+            method: "none".into(),
+            noise: 0,
+        }),
+        sink_filter: Some(false),
+        stream_filter: Some(false),
+        alsa: Some(AlsaFacts {
+            path: Some("hw:Audio".into()),
+            card: Some(3),
+            device: Some(0),
+            subdevice: Some(0),
+            hw: HwState::NotRead,
+            kernel: Some(KernelOffer {
+                formats: vec!["S32_LE".into()],
+                rates: vec![44_100, 48_000],
+            }),
+        }),
+    }
+}
+
+/// [`clean`] with its setup facts, changed by `edit`.
+fn judged(edit: impl FnOnce(&mut RouteFacts, &mut SetupFacts)) -> RouteFacts {
+    let mut route = clean();
+    let mut setup = clean_setup();
+    edit(&mut route, &mut setup);
+    route.setup = Some(setup);
+    route
+}
+
+/// The words and verdict of `route` against the test device.
+fn judge(route: &RouteFacts) -> (Verdict, Vec<String>) {
+    let line = path_line(route, &dac());
+    (line.verdict, line.words)
+}
+
+fn words(list: &[&str]) -> Vec<String> {
+    list.iter().map(|w| w.to_string()).collect()
+}
+
+#[test]
+fn clean_setup_facts_keep_the_path_untouched() {
+    let (verdict, said) = judge(&judged(|_, _| {}));
+    assert_eq!(verdict, Verdict::Untouched);
+    assert_eq!(said, words(&["untouched"]));
+}
+
+#[test]
+fn facts_an_older_daemon_did_not_send_add_no_word() {
+    // The setup facts are skipped; the two formats an older daemon does send are still judged.
+    let mut route = clean();
+    route.sink.as_mut().unwrap().format = Some("S16LE".into());
+    route.player.as_mut().unwrap().format = Some("S32LE".into());
+    assert!(route.setup.is_none());
+    assert_eq!(
+        judge(&route),
+        (Verdict::Changed, words(&["cut to 16 bits (S32 → S16)"]))
+    );
+    route.sink.as_mut().unwrap().format = Some("S32LE".into());
+    assert_eq!(judge(&route), (Verdict::Untouched, words(&["untouched"])));
+}
+
+#[test]
+fn a_narrower_sink_cuts_the_bits() {
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("S32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S16LE".into());
+    });
+    let (verdict, said) = judge(&route);
+    assert_eq!(verdict, Verdict::Changed);
+    assert_eq!(said, words(&["cut to 16 bits (S32 → S16)"]));
+    let line = path_line(&route, &dac());
+    assert!(line.hops[1].changes);
+}
+
+#[test]
+fn format_names_lose_their_endian_and_planar_suffix() {
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("S24P".into());
+        route.sink.as_mut().unwrap().format = Some("S16BE".into());
+    });
+    assert_eq!(judge(&route).1, words(&["cut to 16 bits (S24 → S16)"]));
+}
+
+#[test]
+fn an_s32_stream_into_s24_has_no_word() {
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("S32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S24LE".into());
+    });
+    assert_eq!(judge(&route), (Verdict::Untouched, words(&["untouched"])));
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("S32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S24_32LE".into());
+    });
+    assert_eq!(judge(&route).0, Verdict::Untouched);
+}
+
+#[test]
+fn a_float_stream_into_a_narrow_sink_is_unknown() {
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("F32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S16LE".into());
+    });
+    assert_eq!(
+        judge(&route),
+        (
+            Verdict::Unknown,
+            words(&["float stream into a 16-bit sink"])
+        )
+    );
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("F32P".into());
+        route.sink.as_mut().unwrap().format = Some("S24LE".into());
+    });
+    assert_eq!(judge(&route).0, Verdict::Untouched);
+}
+
+#[test]
+fn a_format_name_svolder_does_not_know_is_unknown() {
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("S8X".into());
+    });
+    assert_eq!(
+        judge(&route),
+        (Verdict::Unknown, words(&["format S8X not judged"]))
+    );
+    let route = judged(|route, _| {
+        route.sink.as_mut().unwrap().format = Some("DSD".into());
+    });
+    assert_eq!(judge(&route).1, words(&["format DSD not judged"]));
+}
+
+#[test]
+fn channels_that_differ_are_named() {
+    let down = judged(|_, setup| setup.sink_layout = Some(layout(&["MONO"])));
+    assert_eq!(
+        judge(&down),
+        (Verdict::Changed, words(&["channels 2 → 1 (mixed)"]))
+    );
+    let up = judged(|_, setup| {
+        setup.sink_layout = Some(layout(&["FL", "FR", "FC", "LFE", "RL", "RR"]));
+    });
+    assert_eq!(judge(&up).1, words(&["channels 2 → 6 (upmixed)"]));
+    let remapped = judged(|_, setup| setup.sink_layout = Some(layout(&["FL", "FC"])));
+    assert_eq!(judge(&remapped).1, words(&["channels remapped"]));
+}
+
+#[test]
+fn channel_positions_compare_as_sets() {
+    let route = judged(|_, setup| setup.sink_layout = Some(layout(&["FR", "FL"])));
+    assert_eq!(judge(&route).0, Verdict::Untouched);
+}
+
+#[test]
+fn mono_into_stereo_is_no_change_and_the_detail_says_so() {
+    let route = judged(|_, setup| setup.stream_layout = Some(layout(&["MONO"])));
+    let line = path_line(&route, &dac());
+    assert_eq!(line.verdict, Verdict::Untouched);
+    assert_eq!(line.words, words(&["untouched"]));
+    assert_eq!(
+        line.hops[1].detail,
+        "48 kHz S32LE, volume 100 %, mono on both channels"
+    );
+}
+
+#[test]
+fn a_layout_not_read_on_either_side_is_unknown() {
+    for side in 0..2 {
+        let route = judged(|_, setup| match side {
+            0 => setup.stream_layout = None,
+            _ => setup.sink_layout = None,
+        });
+        assert_eq!(
+            judge(&route),
+            (Verdict::Unknown, words(&["channels not read"]))
+        );
+    }
+}
+
+#[test]
+fn dither_on_the_sink_is_named() {
+    let on = judged(|_, setup| {
+        setup.dither = Some(Dither {
+            method: "triangular".into(),
+            noise: 0,
+        })
+    });
+    assert_eq!(
+        judge(&on),
+        (Verdict::Changed, words(&["dither on (triangular)"]))
+    );
+    let noise = judged(|_, setup| {
+        setup.dither = Some(Dither {
+            method: "none".into(),
+            noise: 4,
+        })
+    });
+    assert_eq!(judge(&noise).1, words(&["dither noise 4"]));
+    let absent = judged(|_, setup| setup.dither = None);
+    assert_eq!(
+        judge(&absent),
+        (Verdict::Unknown, words(&["dither not read"]))
+    );
+}
+
+#[test]
+fn a_filter_inside_a_converter_is_named() {
+    let sink = judged(|_, setup| setup.sink_filter = Some(true));
+    assert_eq!(
+        judge(&sink),
+        (Verdict::Changed, words(&["a filter inside the sink"]))
+    );
+    let stream = judged(|_, setup| setup.stream_filter = Some(true));
+    assert_eq!(
+        judge(&stream).1,
+        words(&["a filter on the player's stream"])
+    );
+    let both = judged(|_, setup| {
+        setup.sink_filter = Some(true);
+        setup.stream_filter = Some(true);
+    });
+    assert_eq!(
+        judge(&both).1,
+        words(&[
+            "a filter inside the sink",
+            "a filter on the player's stream"
+        ])
+    );
+    let unread = judged(|_, setup| setup.sink_filter = None);
+    assert_eq!(
+        judge(&unread),
+        (Verdict::Unknown, words(&["filter not read"]))
+    );
+    let unread = judged(|_, setup| setup.stream_filter = None);
+    assert_eq!(judge(&unread).1, words(&["filter not read"]));
+}
+
+fn open(format: &str, rate: u32, channels: u32) -> HwState {
+    HwState::Open(HwParams {
+        format: format.into(),
+        rate,
+        channels,
+    })
+}
+
+fn with_alsa(path: Option<&str>, hw: HwState) -> RouteFacts {
+    judged(|_, setup| {
+        let alsa = setup.alsa.as_mut().unwrap();
+        alsa.path = path.map(str::to_string);
+        alsa.hw = hw;
+    })
+}
+
+#[test]
+fn an_open_card_equal_to_the_sink_is_no_word_whatever_the_name() {
+    for path in ["hw:Audio", "plughw:1", "default", "front:3"] {
+        let route = with_alsa(Some(path), open("S32_LE", 48_000, 2));
+        assert_eq!(
+            judge(&route),
+            (Verdict::Untouched, words(&["untouched"])),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn an_open_card_that_differs_says_what_alsa_converts() {
+    let route = with_alsa(Some("hw:Audio"), open("S16_LE", 48_000, 2));
+    assert_eq!(
+        judge(&route),
+        (Verdict::Changed, words(&["ALSA converts S32LE → S16_LE"]))
+    );
+    let route = with_alsa(Some("hw:Audio"), open("S32_LE", 44_100, 6));
+    assert_eq!(
+        judge(&route).1,
+        words(&["ALSA converts 48 → 44.1 kHz, channels 2 → 6"])
+    );
+    let route = with_alsa(Some("hw:Audio"), open("S24_3LE", 48_000, 2));
+    assert_eq!(judge(&route).1, words(&["ALSA converts S32LE → S24_3LE"]));
+}
+
+#[test]
+fn a_closed_card_is_judged_by_its_name() {
+    for hw in [HwState::Closed, HwState::NotRead] {
+        let plug = with_alsa(Some("plughw:1"), hw.clone());
+        assert_eq!(
+            judge(&plug),
+            (Verdict::Changed, words(&["ALSA plug converts (plughw:1)"]))
+        );
+        let plain = with_alsa(Some("plug:hw:0"), hw.clone());
+        assert_eq!(judge(&plain).1, words(&["ALSA plug converts (plug:hw:0)"]));
+        let dmix = with_alsa(Some("dmix:0"), hw.clone());
+        assert_eq!(
+            judge(&dmix),
+            (Verdict::Changed, words(&["ALSA dmix mixes (dmix:0)"]))
+        );
+        for fine in ["hw:Audio", "front:3", "hdmi:0", "iec958:3"] {
+            let route = with_alsa(Some(fine), hw.clone());
+            assert_eq!(judge(&route).0, Verdict::Untouched, "{fine}");
+        }
+        let other = with_alsa(Some("default"), hw.clone());
+        assert_eq!(
+            judge(&other),
+            (Verdict::Unknown, words(&["ALSA device default not judged"]))
+        );
+        let none = with_alsa(None, hw);
+        assert_eq!(
+            judge(&none),
+            (Verdict::Unknown, words(&["ALSA device not read"]))
+        );
+    }
+}
+
+#[test]
+fn a_sink_that_is_not_alsa_is_not_judged_for_alsa() {
+    let route = judged(|_, setup| setup.alsa = None);
+    assert_eq!(judge(&route).0, Verdict::Untouched);
+}
+
+#[test]
+fn a_profile_name_is_never_a_verdict() {
+    // An iec958 route that converts is named as converting, one that does not is silent.
+    let converts = with_alsa(Some("iec958:3"), open("S16_LE", 48_000, 2));
+    assert_eq!(judge(&converts).0, Verdict::Changed);
+    let same = with_alsa(Some("iec958:3"), open("S32_LE", 48_000, 2));
+    assert_eq!(judge(&same).0, Verdict::Untouched);
+}
+
+#[test]
+fn a_forced_rate_that_causes_the_resample_is_named() {
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(48_000);
+    });
+    assert_eq!(
+        judge(&route),
+        (
+            Verdict::Changed,
+            words(&["resampled 44.1 → 48 kHz (rate forced)"])
+        )
+    );
+}
+
+/// The computer-side judgement of `route` (no DAC hop, so a sink rate other than the test
+/// device's is not a DAC word).
+fn judge_computer(route: &RouteFacts) -> (Verdict, Vec<String>) {
+    let line = computer_line(route);
+    (line.verdict, line.words)
+}
+
+#[test]
+fn a_forced_rate_over_a_sink_still_reading_the_stream_rate_is_named() {
+    // The sink's Format still reads 44100 while the clock is forced to 48000: the sound is
+    // resampled all the same, in the path line and the computer line alike.
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(48_000);
+    });
+    let expected = (
+        Verdict::Changed,
+        words(&["resampled 44.1 → 48 kHz (rate forced)"]),
+    );
+    assert_eq!(judge_computer(&route), expected);
+    let (verdict, said) = judge(&route);
+    assert_eq!(verdict, Verdict::Changed);
+    assert!(said.contains(&expected.1[0]), "{said:?}");
+}
+
+#[test]
+fn a_forced_rate_equal_to_the_stream_rate_is_no_word_at_any_sink_rate() {
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(44_100);
+    });
+    assert_eq!(
+        judge_computer(&route),
+        (Verdict::Untouched, words(&["untouched"]))
+    );
+}
+
+#[test]
+fn no_forced_rate_and_no_stream_rate_invent_no_word() {
+    let route = judged(|route, _| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+    });
+    assert_eq!(
+        judge_computer(&route),
+        (Verdict::Untouched, words(&["untouched"]))
+    );
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = None;
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(48_000);
+    });
+    assert!(
+        !judge_computer(&route)
+            .1
+            .iter()
+            .any(|w| w.contains("forced")),
+        "a stream rate not read gives no forced-rate word"
+    );
+}
+
+#[test]
+fn a_forced_rate_the_stream_already_has_is_no_word() {
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(48_000);
+        setup.clock.as_mut().unwrap().force_rate = Some(48_000);
+    });
+    assert_eq!(judge(&route).0, Verdict::Untouched);
+}
+
+#[test]
+fn a_forced_rate_over_a_third_sink_rate_is_named() {
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(96_000);
+    });
+    assert_eq!(
+        judge(&route).1,
+        words(&["resampled 44.1 → 48 kHz (rate forced)"])
+    );
+}
+
+#[test]
+fn a_resample_the_force_did_not_cause_has_no_suffix() {
+    let route = judged(|route, _| route.player.as_mut().unwrap().rate_hz = Some(44_100));
+    assert_eq!(judge(&route).1, words(&["resampled 44.1 → 48 kHz"]));
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(48_000);
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(48_000);
+    });
+    assert_eq!(
+        judge_computer(&route).1,
+        words(&["resampled 48 → 44.1 kHz"])
+    );
+}
+
+#[test]
+fn a_clock_not_read_with_equal_rates_is_unknown_never_untouched() {
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock = None;
+    });
+    let (verdict, said) = judge_computer(&route);
+    assert_eq!(verdict, Verdict::Unknown);
+    assert!(
+        said.iter().any(|w| w.contains("forced rate not read")),
+        "{said:?}"
+    );
+    // A route that carries no setup at all (an older daemon) stays as it was.
+    let mut older = clean();
+    older.player.as_mut().unwrap().rate_hz = Some(44_100);
+    older.sink.as_mut().unwrap().rate_hz = Some(44_100);
+    older.setup = None;
+    assert_eq!(judge_computer(&older).0, Verdict::Untouched);
+}
+
+#[test]
+fn the_new_words_come_in_the_stated_order_after_the_old_ones() {
+    let route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        route.player.as_mut().unwrap().format = Some("S32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S16LE".into());
+        route.others_mixing = 1;
+        setup.sink_layout = Some(layout(&["MONO"]));
+        setup.dither = Some(Dither {
+            method: "triangular".into(),
+            noise: 0,
+        });
+        setup.sink_filter = Some(true);
+        let alsa = setup.alsa.as_mut().unwrap();
+        alsa.path = Some("plughw:1".into());
+    });
+    assert_eq!(
+        judge(&route),
+        (
+            Verdict::Changed,
+            words(&[
+                "resampled 44.1 → 48 kHz",
+                "1 other sound mixing",
+                "cut to 16 bits (S32 → S16)",
+                "channels 2 → 1 (mixed)",
+                "dither on (triangular)",
+                "a filter inside the sink",
+                "ALSA plug converts (plughw:1)",
+            ])
+        )
+    );
+}
+
+#[test]
+fn a_change_outranks_an_unknown() {
+    let route = judged(|_, setup| {
+        setup.dither = None;
+        setup.sink_filter = Some(true);
+    });
+    assert_eq!(
+        judge(&route),
+        (Verdict::Changed, words(&["a filter inside the sink"]))
+    );
+}
+
+#[test]
+fn the_new_words_never_say_bit_perfect_or_a_stage_word() {
+    // The five words themes/nightdrive/hud.js 24 (`STAGE_WORDS`) picks out of the path.
+    const STAGE_WORDS: [&str; 5] = [
+        "host EQ on",
+        "loudness on",
+        "crossfeed on",
+        "virtual speakers on",
+        "EQ pass-through",
+    ];
+    let mut routes = vec![
+        judged(|route, setup| {
+            route.player.as_mut().unwrap().format = Some("F32LE".into());
+            route.sink.as_mut().unwrap().format = Some("S16LE".into());
+            setup.sink_layout = None;
+            setup.dither = None;
+            setup.sink_filter = None;
+        }),
+        judged(|route, setup| {
+            route.player.as_mut().unwrap().format = Some("S8X".into());
+            setup.sink_layout = Some(layout(&["MONO"]));
+            setup.dither = Some(Dither {
+                method: "triangular".into(),
+                noise: 4,
+            });
+            setup.sink_filter = Some(true);
+            setup.stream_filter = Some(true);
+            setup.clock.as_mut().unwrap().force_rate = Some(48_000);
+            route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        }),
+    ];
+    for path in ["plughw:1", "dmix:0", "default"] {
+        routes.push(with_alsa(Some(path), HwState::Closed));
+    }
+    routes.push(with_alsa(Some("hw:0"), open("S16_LE", 44_100, 6)));
+    for route in routes {
+        let text = all_text(&path_line(&route, &dac()));
+        let lower = text.to_lowercase();
+        assert!(
+            !lower.contains("bit-perfect") && !lower.contains("bit-exact"),
+            "{text}"
+        );
+        let line = computer_line(&route);
+        for word in &line.words {
+            assert!(
+                STAGE_WORDS.iter().all(|stage| !word.contains(stage)),
+                "{word} holds a stage word"
+            );
+        }
+    }
+}
+
+#[test]
+fn computer_line_is_the_first_two_hops_without_a_dac_hop() {
+    let mut route = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.dither = Some(Dither {
+            method: "triangular".into(),
+            noise: 0,
+        });
+    });
+    for host_eq in [false, true] {
+        route.host_eq = host_eq;
+        let full = path_line(&route, &dac());
+        let line = computer_line(&route);
+        assert_eq!(line.hops, full.hops[..2].to_vec());
+        assert_eq!(line.verdict, full.verdict);
+        assert_eq!(line.dac_stage, None);
+    }
+    let clean = computer_line(&judged(|_, _| {}));
+    assert_eq!(clean.verdict, Verdict::Untouched);
+    assert_eq!(clean.words, words(&["untouched"]));
+    assert_eq!(clean.hops.len(), 2);
+}
+
+#[test]
+fn computer_line_judges_no_sink_and_a_player_elsewhere() {
+    let none = computer_line(&RouteFacts::default());
+    assert_eq!(none.verdict, Verdict::Unknown);
+    assert_eq!(none.words, words(&["the computer's sink was not read"]));
+    let mut route = clean();
+    route.player_match = PlayerMatch::Elsewhere {
+        sink: "HDMI".into(),
+    };
+    let line = computer_line(&route);
+    assert_eq!(
+        line.verdict,
+        Verdict::NotThisDac {
+            sink: "HDMI".into(),
+            by_player: true
+        }
+    );
+}
+
+#[test]
+fn computer_line_keeps_the_dac_out_of_the_verdict() {
+    // A DAC that reads another rate changes path_line's verdict, never computer_line's.
+    let route = judged(|_, _| {});
+    let off = DacFacts {
+        rate_hz: Some(44_100),
+        ..dac()
+    };
+    assert_eq!(path_line(&route, &off).verdict, Verdict::Changed);
+    assert_eq!(computer_line(&route).verdict, Verdict::Untouched);
+}
+
+// ---- fix 1 ----
+
+#[test]
+fn a_stream_format_not_read_is_unknown_into_a_narrow_sink() {
+    for with_setup in [false, true] {
+        let mut route = if with_setup {
+            judged(|_, _| {})
+        } else {
+            clean()
+        };
+        route.player.as_mut().unwrap().format = None;
+        route.sink.as_mut().unwrap().format = Some("S16LE".into());
+        assert_eq!(
+            judge(&route),
+            (Verdict::Unknown, words(&["player format not read"]))
+        );
+        // A sink of 24 bits or more, or a float one, needs no stream format.
+        for wide in ["S24LE", "S32LE", "F32P"] {
+            route.sink.as_mut().unwrap().format = Some(wide.into());
+            assert_eq!(judge(&route).0, Verdict::Untouched, "{wide}");
+        }
+    }
+}
+
+#[test]
+fn an_hw_format_the_judge_cannot_read_is_not_equal() {
+    for format in ["FLOAT_LE", "IEC958_SUBFRAME_LE", ""] {
+        // The device name still rules: plug converts whatever the card shows.
+        let plug = with_alsa(Some("plughw:1"), open(format, 48_000, 2));
+        assert_eq!(
+            judge(&plug),
+            (Verdict::Changed, words(&["ALSA plug converts (plughw:1)"])),
+            "{format}"
+        );
+        let hw = with_alsa(Some("hw:Audio"), open(format, 48_000, 2));
+        assert_eq!(judge(&hw).0, Verdict::Unknown, "{format}");
+    }
+    let hw = with_alsa(Some("hw:Audio"), open("FLOAT_LE", 48_000, 2));
+    assert_eq!(judge(&hw).1, words(&["ALSA format FLOAT_LE not judged"]));
+    let hw = with_alsa(Some("hw:Audio"), open("", 48_000, 2));
+    assert_eq!(judge(&hw).1, words(&["ALSA format not read"]));
+}
+
+#[test]
+fn dmix_is_changed_whatever_the_card_shows() {
+    let route = with_alsa(Some("dmix:0"), open("S32_LE", 48_000, 2));
+    assert_eq!(
+        judge(&route),
+        (Verdict::Changed, words(&["ALSA dmix mixes (dmix:0)"]))
+    );
+}
+
+#[test]
+fn laptop_bifrost_stays_untouched_on_both_profiles() {
+    // The real laptop values: stream0's three formats and eight rates, hw_params S32_LE 2ch 44100
+    // on iec958:3 and on front:3, closed while idle.
+    let kernel = KernelOffer {
+        formats: vec!["S16_LE".into(), "S24_3LE".into(), "S32_LE".into()],
+        rates: vec![
+            44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+        ],
+    };
+    let device = DacFacts {
+        rate_hz: Some(44_100),
+        ..dac()
+    };
+    for path in ["iec958:3", "front:3"] {
+        for hw in [open("S32_LE", 44_100, 2), HwState::Closed] {
+            let mut route = judged(|route, setup| {
+                route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+                route.player.as_mut().unwrap().rate_hz = Some(44_100);
+                let alsa = setup.alsa.as_mut().unwrap();
+                alsa.path = Some(path.into());
+                alsa.kernel = Some(kernel.clone());
+                alsa.hw = hw.clone();
+            });
+            for format in ["S16LE", "S32LE", "F32LE"] {
+                route.player.as_mut().unwrap().format = Some(format.into());
+                let line = path_line(&route, &device);
+                assert_eq!(line.verdict, Verdict::Untouched, "{path} {format}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_24_bit_containers_compare_by_width() {
+    for (sink, hw) in [
+        ("S24_32LE", "S24_LE"),
+        ("S24LE", "S24_3LE"),
+        ("S24LE", "S24_LE"),
+    ] {
+        let route = judged(|route, setup| {
+            route.sink.as_mut().unwrap().format = Some(sink.into());
+            setup.alsa.as_mut().unwrap().hw = open(hw, 48_000, 2);
+        });
+        assert_eq!(judge(&route).0, Verdict::Untouched, "{sink} {hw}");
+    }
+}
+
+#[test]
+fn mono_into_six_channels_is_upmixed() {
+    let route = judged(|_, setup| {
+        setup.stream_layout = Some(layout(&["MONO"]));
+        setup.sink_layout = Some(layout(&["FL", "FR", "FC", "LFE", "RL", "RR"]));
+    });
+    assert_eq!(judge(&route).1, words(&["channels 1 → 6 (upmixed)"]));
+}
+
+#[test]
+fn a_stream_that_is_not_the_players_is_not_judged() {
+    let mut route = judged(|route, setup| {
+        route.player_match = PlayerMatch::NotFound;
+        route.player.as_mut().unwrap().format = Some("F32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S16LE".into());
+        setup.stream_layout = None;
+        setup.stream_filter = None;
+        setup.sink_layout = Some(layout(&["MONO"]));
+    });
+    route.player = None;
+    let said = judge(&route).1;
+    assert_eq!(said, words(&["player not identified"]));
+}
+
+#[test]
+fn an_unreadable_sink_format_is_named_as_the_sinks_not_alsas() {
+    let route = judged(|route, setup| {
+        route.sink.as_mut().unwrap().format = Some("DSD".into());
+        setup.alsa.as_mut().unwrap().hw = open("S32_LE", 48_000, 2);
+    });
+    assert_eq!(judge(&route).1, words(&["format DSD not judged"]));
+}
+
+/// Every verdict's key, spelled out: JSON consumers (the web card, Home Assistant, MCP, the CLI's
+/// `--json`) read these, so a renamed key must fail here.
+#[test]
+fn the_verdict_keys_are_pinned() {
+    let all = [
+        (Verdict::Untouched, "untouched"),
+        (Verdict::Changed, "changed"),
+        (
+            Verdict::NotThisDac {
+                sink: "DELL".into(),
+                by_player: false,
+            },
+            "not_this_dac",
+        ),
+        (
+            Verdict::OtherInput {
+                input: "Optical".into(),
+            },
+            "other_input",
+        ),
+        (Verdict::Unknown, "unknown"),
+    ];
+    for (verdict, key) in &all {
+        assert_eq!(verdict.key(), *key);
+    }
+    assert_eq!(all.len(), Verdict::KEYS.len());
+    assert_eq!(
+        all.iter().map(|(_, key)| *key).collect::<Vec<_>>(),
+        Verdict::KEYS
+    );
 }

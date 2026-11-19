@@ -292,7 +292,7 @@ async fn the_device_verbs_write_through_a_daemon_that_runs_and_never_behind_it()
     assert!(failure.what.contains("no longer configured"), "{failure}");
 
     // No daemon at all: the caller's own writer stands.
-    let gone = std::env::temp_dir().join(format!("svolder-no-daemon-{}.sock", std::process::id()));
+    let gone = crate::test_support::short_socket("svolder-no-daemon");
     let gone = gone.display().to_string();
     let g = Globals {
         socket: Some(&gone),
@@ -359,7 +359,7 @@ async fn the_autoeq_verbs_ask_a_daemon_that_has_the_feature() {
     );
 
     // Nothing on the socket.
-    let gone = std::env::temp_dir().join(format!("svolder-no-autoeq-{}.sock", std::process::id()));
+    let gone = crate::test_support::short_socket("svolder-no-autoeq");
     let gone = gone.display().to_string();
     let none = Globals {
         socket: Some(&gone),

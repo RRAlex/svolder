@@ -61,7 +61,7 @@ ok('the_red_order_is_card_volume_peak_path_passphrase', () => {
   assert.equal(without((d) => { d.card = null; }), 'volume-0');
   assert.equal(without((d) => { d.volume.notes = []; }), 'peak');
   assert.equal(without((d) => { d.tone.peak = null; }), 'path');
-  assert.equal(without((d) => { d.playing.path.class = 'ok'; }), 'passphrase');
+  assert.equal(without((d) => { d.playing.path.verdict = 'untouched'; }), 'passphrase');
   assert.equal(without((d) => { d.facts.passphrase_note = null; }), undefined);
   // The path note is blue words when another note is the red one.
   const again = pageOf('playing-changed-route');

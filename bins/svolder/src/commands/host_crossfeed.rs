@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use svolder_host::eq::{CrossfeedSettings, CrossfeedView};
 use svolder_ipc::{CODE_COMPUTER_UNAVAILABLE, Client, Config, HostEqOp, Request, Response};
 
-use super::host_eq::{eq_op, eq_view, state};
+use super::host_eq::{eq_op, eq_view};
 use crate::backend::{ASK_WAIT, Globals, asks_a_daemon, launch};
 use crate::cli::HostCrossfeedCommand;
 use crate::recovery::{Failure, Kind};
@@ -43,9 +43,7 @@ pub(crate) async fn run(
     command: Option<HostCrossfeedCommand>,
 ) -> ExitCode {
     let config = Config::load().map_err(|e| e.to_string());
-    let state = state();
-    let saved_on = state.as_ref().is_some_and(|state| state.crossfeed_on);
-    let saved = state.and_then(|state| state.crossfeed);
+    let (saved, saved_on) = saved_at(&super::host_eq::state_path());
     match answer(
         g,
         config.as_ref().map_err(String::as_str),
@@ -66,6 +64,22 @@ pub(crate) async fn run(
         }
         Err(failure) => failure.report(),
     }
+}
+
+/// The crossfeed settings in effect at the state file `path` and its switch: the state's, else
+/// the settings kept before any state existed ([`svolder_host::eq::HostEqSettings::effective`]).
+fn saved_at(path: &std::path::Path) -> (Option<CrossfeedSettings>, bool) {
+    let on = svolder_host::eq::HostEqState::load(path)
+        .ok()
+        .flatten()
+        .is_some_and(|state| state.crossfeed_on);
+    if let Some(why) = svolder_host::eq::HostEqSettings::unreadable(path) {
+        eprintln!("svolder: ignoring the kept computer EQ settings: {why}");
+    }
+    (
+        svolder_host::eq::HostEqSettings::effective(path).crossfeed,
+        on,
+    )
 }
 
 /// What `command` (show, with none) does and says. `saved` is the settings the state file keeps

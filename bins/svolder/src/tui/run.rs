@@ -73,6 +73,7 @@ mod jobs;
 mod look;
 mod open;
 mod reopen;
+mod setup;
 mod speakers;
 #[cfg(test)]
 mod test_support;
@@ -248,6 +249,8 @@ struct Timers {
     config_poll: tokio::time::Interval,
     /// Asks the daemon whether the link the Web UI box shows is still open.
     web_poll: tokio::time::Interval,
+    /// Reads the graph again while the PipeWire config box is open and no daemon gives the route.
+    setup_poll: tokio::time::Interval,
 }
 
 impl Timers {
@@ -267,6 +270,9 @@ impl Timers {
         // While the Web UI box shows a link, the daemon is asked each second whether a browser
         // has used it.
         let web_poll = delayed(web_box::CHECK_PERIOD);
+        // While the PipeWire config box is open with no daemon to give the route, the graph is
+        // read again every couple of seconds.
+        let setup_poll = delayed(crate::tui::boxes::setup::READ_PERIOD);
         // The first look at the file's state is the one the session's start makes, so this clock
         // starts a period from now.
         let mut config_poll =
@@ -279,6 +285,7 @@ impl Timers {
             conn_poll,
             config_poll,
             web_poll,
+            setup_poll,
         }
     }
 
@@ -758,6 +765,18 @@ where
         {
             web_check_back(&mut watching, checked);
         }
+        // The config box asks for its first read as it opens, then again on its own clock.
+        _ = std::future::ready(()), if setup::first_due(&watching) => {
+            setup::read(&mut watching);
+            // The clock's overdue tick would send a second read straight after this one.
+            turns.timers.setup_poll.reset();
+        }
+        _ = turns.timers.setup_poll.tick(), if setup::polling(&watching) => {
+            setup::read(&mut watching);
+        }
+        read = setup::recv(&mut watching.setup.pending), if watching.setup.pending.is_some() => {
+            setup::answered(&mut watching, read.flatten());
+        }
         _ = turns.timers.web_poll.tick(), if web_box::checking(&watching, Instant::now()) => {
             web_box::check(&mut watching, Instant::now());
         }
@@ -903,6 +922,11 @@ where
             tooltip::hover(&mut watching.app, &turns.hits, &event, Instant::now());
             let over = turns.hits.hit_at(event.column, event.row) == Some(&mouse::Hit::WebLink);
             let was_over = std::mem::replace(&mut watching.app.pointer.over_link, over);
+            // Resting on the Path row holds its scroll; no frame is owed for that.
+            watching.app.pointer.over_path = matches!(
+                turns.hits.hit_at(event.column, event.row),
+                Some(mouse::Hit::Path | mouse::Hit::Config)
+            );
             // Motion that changes nothing visible (the pointer still resting on the
             // same target) asks for no frame: a terminal reports hundreds a second.
             turns.quiet = before == watching.app.pointer.tooltip.map(|t| (t.hit, t.shown))
@@ -916,6 +940,7 @@ where
             // pointer's rest on the link.
             tooltip::hover(&mut watching.app, &turns.hits, &event, Instant::now());
             watching.app.pointer.over_link = false;
+            watching.app.pointer.over_path = false;
             // A click, on an action or not, ends the intro's exit.
             if matches!(event.kind, MouseEventKind::Down(_)) {
                 look.effects.end_reform();

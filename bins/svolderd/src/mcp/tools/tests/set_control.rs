@@ -346,7 +346,7 @@ fn the_write_tools_are_listed_only_with_writes() {
             .collect()
     };
     assert_eq!(names(false).len(), 5);
-    assert_eq!(names(true).len(), 14);
+    assert_eq!(names(true).len(), 15);
     for tool in Tools::new(fleet, true, None).list() {
         let description = tool.description.expect("a description");
         assert!(description.ends_with('.'), "{description}");

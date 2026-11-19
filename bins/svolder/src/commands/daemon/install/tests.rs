@@ -10,7 +10,7 @@ use super::*;
 use crate::commands::daemon::test_support::{
     Tools, a_daemon_on, installed_units, no_units, shown_units, stopped_units, units_in,
 };
-use crate::test_support::temp_dir;
+use crate::test_support::{short_dir, temp_dir};
 
 /// A target that writes into `dir` and installs a daemon from `bindir`.
 fn target(dir: &Path, socket: &Path, runtime: Option<&Path>) -> Target {
@@ -39,7 +39,7 @@ fn root_target(dir: &Path, socket: &Path) -> Target {
 async fn install_writes_both_units_for_this_machine_and_enables_them() {
     let tools = Tools::new(&no_units());
     let home = temp_dir("daemon-install");
-    let runtime = temp_dir("daemon-runtime");
+    let runtime = short_dir("daemon-runtime");
     let socket = runtime.0.join("svolder.sock");
     let target = target(&home.0, &socket, Some(&runtime.0));
 
@@ -103,7 +103,7 @@ async fn install_writes_both_units_for_this_machine_and_enables_them() {
 #[tokio::test]
 async fn a_socket_outside_the_runtime_directory_is_written_as_itself() {
     let tools = Tools::new(&no_units());
-    let home = temp_dir("daemon-install-elsewhere");
+    let home = short_dir("daemon-install-elsewhere");
     let socket = home.0.join("elsewhere").join("svolder.sock");
     let target = target(&home.0, &socket, Some(&home.0));
 
@@ -128,7 +128,7 @@ async fn a_socket_outside_the_runtime_directory_is_written_as_itself() {
 async fn install_on_demand_enables_the_socket_and_not_the_service() {
     let tools = Tools::new(&no_units());
     let home = temp_dir("daemon-install-on-demand");
-    let runtime = temp_dir("daemon-on-demand-runtime");
+    let runtime = short_dir("daemon-on-demand-runtime");
     let target = target(&home.0, &runtime.0.join("svolder.sock"), Some(&runtime.0));
 
     assert_eq!(
@@ -163,7 +163,7 @@ async fn install_on_demand_enables_the_socket_and_not_the_service() {
 async fn an_install_that_stopped_partway_still_says_what_it_wrote() {
     let nowhere = temp_dir("daemon-no-systemctl");
     let home = temp_dir("daemon-install-stopped");
-    let runtime = temp_dir("daemon-stopped-runtime");
+    let runtime = short_dir("daemon-stopped-runtime");
     let target = target(&home.0, &runtime.0.join("svolder.sock"), Some(&runtime.0));
 
     let installed = install_into(&Ctl::in_dir(&nowhere.0), &target, false).await;
@@ -197,7 +197,7 @@ async fn an_install_that_stopped_partway_still_says_what_it_wrote() {
 async fn install_on_nixos_prints_the_home_manager_block_and_writes_nothing() {
     let tools = Tools::new(&no_units());
     let home = temp_dir("daemon-install-nixos");
-    let runtime = temp_dir("daemon-nixos-runtime");
+    let runtime = short_dir("daemon-nixos-runtime");
     let mut target = target(&home.0, &runtime.0.join("svolder.sock"), Some(&runtime.0));
     target.nixos = true;
 
@@ -232,7 +232,7 @@ async fn install_on_nixos_prints_the_home_manager_block_and_writes_nothing() {
 async fn install_in_a_container_says_the_daemon_is_the_container() {
     let tools = Tools::new(&no_units());
     let home = temp_dir("daemon-install-container");
-    let runtime = temp_dir("daemon-container-runtime");
+    let runtime = short_dir("daemon-container-runtime");
     let mut target = target(&home.0, &runtime.0.join("svolder.sock"), Some(&runtime.0));
     target.container = true;
 
@@ -262,7 +262,7 @@ fn nixos_beats_container_beats_systemd() {
 async fn install_in_a_container_says_the_shared_container_sentence() {
     let tools = Tools::new(&no_units());
     let home = temp_dir("daemon-install-container-sentence");
-    let runtime = temp_dir("daemon-container-sentence-runtime");
+    let runtime = short_dir("daemon-container-sentence-runtime");
     let mut target = target(&home.0, &runtime.0.join("svolder.sock"), Some(&runtime.0));
     target.container = true;
 
@@ -281,7 +281,7 @@ async fn install_in_a_container_says_the_shared_container_sentence() {
 async fn install_stops_the_daemon_svolder_started_before_it_enables_the_units() {
     let tools = Tools::new(&no_units());
     let home = temp_dir("daemon-install-over-a-daemon");
-    let runtime = temp_dir("daemon-install-over-runtime");
+    let runtime = short_dir("daemon-install-over-runtime");
     let socket = runtime.0.join("svolder.sock");
     let target = target(&home.0, &socket, Some(&runtime.0));
     let served = a_daemon_on(&socket).await;
@@ -337,7 +337,7 @@ async fn install_stops_the_daemon_svolder_started_before_it_enables_the_units() 
 async fn install_without_a_systemctl_leaves_a_running_daemon_alone() {
     let nowhere = temp_dir("daemon-install-no-systemctl");
     let home = temp_dir("daemon-install-bare");
-    let runtime = temp_dir("daemon-install-bare-runtime");
+    let runtime = short_dir("daemon-install-bare-runtime");
     let socket = runtime.0.join("svolder.sock");
     let target = target(&home.0, &socket, Some(&runtime.0));
     let served = a_daemon_on(&socket).await;
@@ -371,7 +371,7 @@ async fn install_without_a_systemctl_leaves_a_running_daemon_alone() {
 #[tokio::test]
 async fn install_where_systemd_already_owns_the_daemon_stops_nothing_itself() {
     let home = temp_dir("daemon-install-over-systemd");
-    let runtime = temp_dir("daemon-install-over-systemd-runtime");
+    let runtime = short_dir("daemon-install-over-systemd-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&installed_units(&socket.display().to_string()));
     let target = target(&home.0, &socket, Some(&runtime.0));
@@ -406,7 +406,7 @@ async fn install_where_systemd_already_owns_the_daemon_stops_nothing_itself() {
 #[tokio::test]
 async fn install_over_stopped_units_stops_the_daemon_svolder_started() {
     let home = temp_dir("daemon-install-over-stopped-units");
-    let runtime = temp_dir("daemon-install-over-stopped-runtime");
+    let runtime = short_dir("daemon-install-over-stopped-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&stopped_units(&socket.display().to_string()));
     let target = target(&home.0, &socket, Some(&runtime.0));
@@ -437,7 +437,7 @@ async fn install_over_stopped_units_stops_the_daemon_svolder_started() {
 async fn uninstall_disables_both_units_and_removes_the_files() {
     let tools = Tools::new(&installed_units(RUNTIME_LISTEN_STREAM));
     let home = temp_dir("daemon-uninstall");
-    let runtime = temp_dir("daemon-uninstall-runtime");
+    let runtime = short_dir("daemon-uninstall-runtime");
     let target = target(&home.0, &runtime.0.join("svolder.sock"), Some(&runtime.0));
     install_into(&tools.ctl(), &target, false)
         .await
@@ -482,7 +482,7 @@ async fn install_as_root_writes_the_units_and_leaves_enabling_to_each_user() {
         ),
     ] {
         let tools = Tools::new(&no_units());
-        let home = temp_dir("daemon-root-install");
+        let home = short_dir("daemon-root-install");
         let socket = home.0.join("svolder.sock");
         let target = root_target(&home.0, &socket);
 
@@ -508,7 +508,7 @@ async fn install_as_root_writes_the_units_and_leaves_enabling_to_each_user() {
 #[test]
 fn uninstall_as_root_removes_the_files_and_asks_systemd_nothing() {
     let tools = Tools::new(&no_units());
-    let home = temp_dir("daemon-root-uninstall");
+    let home = short_dir("daemon-root-uninstall");
     let target = root_target(&home.0, &home.0.join("svolder.sock"));
     std::fs::create_dir_all(&target.dir).expect("the unit directory exists");
     for (name, text) in target.units() {
@@ -576,7 +576,7 @@ fn root_units_default_to_the_system_wide_directory() {
 #[tokio::test]
 async fn install_moves_a_socket_unit_running_on_another_path() {
     let home = temp_dir("daemon-install-moves-the-socket");
-    let runtime = temp_dir("daemon-install-moves-runtime");
+    let runtime = short_dir("daemon-install-moves-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&installed_units("/run/user/1000/elsewhere.sock"));
     let target = target(&home.0, &socket, Some(&runtime.0));
@@ -610,7 +610,7 @@ async fn install_moves_a_socket_unit_running_on_another_path() {
 #[tokio::test]
 async fn install_moving_the_socket_on_demand_enables_the_socket_alone() {
     let home = temp_dir("daemon-install-moves-on-demand");
-    let runtime = temp_dir("daemon-install-moves-on-demand-runtime");
+    let runtime = short_dir("daemon-install-moves-on-demand-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&installed_units("/run/user/1000/elsewhere.sock"));
     let target = target(&home.0, &socket, Some(&runtime.0));
@@ -643,7 +643,7 @@ async fn install_moving_the_socket_on_demand_enables_the_socket_alone() {
 #[tokio::test]
 async fn install_reports_the_stop_of_a_moved_unit_when_the_enable_fails() {
     let home = temp_dir("daemon-install-moves-then-fails");
-    let runtime = temp_dir("daemon-install-moves-then-fails-runtime");
+    let runtime = short_dir("daemon-install-moves-then-fails-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&installed_units("/run/user/1000/elsewhere.sock"));
     tools.fail_enable();
@@ -665,7 +665,7 @@ async fn install_reports_the_stop_of_a_moved_unit_when_the_enable_fails() {
 #[tokio::test]
 async fn install_leaves_a_socket_unit_on_its_own_path_running() {
     let home = temp_dir("daemon-install-same-path");
-    let runtime = temp_dir("daemon-install-same-path-runtime");
+    let runtime = short_dir("daemon-install-same-path-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&installed_units(&socket.display().to_string()));
     let target = target(&home.0, &socket, Some(&runtime.0));
@@ -687,7 +687,7 @@ async fn install_leaves_a_socket_unit_on_its_own_path_running() {
 #[tokio::test]
 async fn install_moving_the_socket_stops_the_daemon_on_the_new_path() {
     let home = temp_dir("daemon-install-move-over-a-daemon");
-    let runtime = temp_dir("daemon-install-move-over-runtime");
+    let runtime = short_dir("daemon-install-move-over-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&installed_units("/run/user/1000/elsewhere.sock"));
     let target = target(&home.0, &socket, Some(&runtime.0));
@@ -715,7 +715,7 @@ async fn install_moving_the_socket_stops_the_daemon_on_the_new_path() {
 #[tokio::test]
 async fn install_over_stopped_units_on_another_path_stops_no_unit() {
     let home = temp_dir("daemon-install-stopped-elsewhere");
-    let runtime = temp_dir("daemon-install-stopped-elsewhere-runtime");
+    let runtime = short_dir("daemon-install-stopped-elsewhere-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&units_in(
         "/run/user/1000/elsewhere.sock",
@@ -749,7 +749,7 @@ async fn install_over_stopped_units_on_another_path_stops_no_unit() {
 #[tokio::test]
 async fn install_over_units_that_are_starting_stops_nothing_itself() {
     let home = temp_dir("daemon-install-over-starting-units");
-    let runtime = temp_dir("daemon-install-over-starting-runtime");
+    let runtime = short_dir("daemon-install-over-starting-runtime");
     let socket = runtime.0.join("svolder.sock");
     let tools = Tools::new(&units_in(
         &socket.display().to_string(),

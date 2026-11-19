@@ -101,7 +101,7 @@ pub enum Origin {
     Socket,
     /// The MCP server.
     Mcp,
-    /// The MQTT bridge.
+    /// The MQTT client.
     Mqtt,
     /// The web UI.
     Web,
@@ -124,7 +124,7 @@ impl Origin {
         match self {
             Origin::Socket => "the terminal",
             Origin::Mcp => "the MCP server",
-            Origin::Mqtt => "the MQTT bridge",
+            Origin::Mqtt => "the MQTT client",
             Origin::Web => "the web page",
         }
     }

@@ -300,12 +300,7 @@ impl Drop for Removed {
 /// request is given, with no version: the request ends rather than living for the session.
 #[tokio::test]
 async fn a_daemon_that_never_answers_the_version_request_is_given_up_on() {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_nanos();
-    let socket =
-        std::env::temp_dir().join(format!("svolder-silent-{}-{n}.sock", std::process::id()));
+    let socket = crate::test_support::short_socket("svolder-silent");
     let listener = tokio::net::UnixListener::bind(&socket).expect("the socket binds");
     let _removed = Removed(socket.clone());
     let silent = tokio::spawn(async move {

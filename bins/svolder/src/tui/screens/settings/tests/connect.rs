@@ -8,19 +8,19 @@ use super::*;
 /// The Connect category at 80×24 on its first row, with the token masked.
 const CONNECT_MOCKUP: [&str; 22] = [
     "┌ Settings ─ tab→ ─ ¹Look ─ ²Effects ─ ³Behaviour ─ ⁴Host audio ─┤ ⁵Connect ├──┐",
-    "│ ▶ Web UI              ‹ … ›               │                                  │",
-    "│   MCP server            off               │                                  │",
-    "│   MCP listen            loopback:8737     │  The web UI serves this          │",
-    "│   MCP writes            read-only         │  screen's controls to a browser  │",
-    "│   MCP token             ••••••3fQ         │  on this computer or your        │",
-    "│   MCP status            listening         │  network. Enter opens its box:   │",
-    "│   MQTT bridge           off               │  on and off, how far it          │",
-    "│   MQTT broker host      not set           │  reaches, a link or a pairing    │",
-    "│   MQTT broker port      1883              │  code to sign a browser in, and  │",
-    "│   MQTT commands         read-only         │  its token.                      │",
-    "│   MQTT username         not set           │                                  │",
-    "│   MQTT password         not set           │  [web] enabled = false, listen   │",
-    "│   MQTT status           off               │  = \"127.0.0.1:8738\"              │",
+    "│ ▶ Web UI             …                    │                                  │",
+    "│   MCP server       ‹ off | on ›           │                                  │",
+    "│   MCP listen         loopback:8737        │  The web UI serves this          │",
+    "│   MCP writes       ‹ read-only | writes › │  screen's controls to a browser  │",
+    "│   MCP token          ••••••3fQ            │  on this computer or your        │",
+    "│   MCP status         listening            │  network. Enter opens its box:   │",
+    "│   MQTT client      ‹ off | on ›           │  on and off, how far it          │",
+    "│   MQTT broker host   not set              │  reaches, a link or a pairing    │",
+    "│   MQTT broker port   1883                 │  code to sign a browser in, and  │",
+    "│   MQTT commands    ‹ read-only | allowed ›│  its token.                      │",
+    "│   MQTT username      not set              │                                  │",
+    "│   MQTT password      not set              │  [web] enabled = false, listen   │",
+    "│   MQTT status        off                  │  = \"127.0.0.1:8738\"              │",
     "│                                           │                                  │",
     "│                                           │                                  │",
     "│                                           │                                  │",
@@ -49,7 +49,7 @@ fn the_token_row_is_masked_and_names_its_source_and_keys() {
         "the box draws the token while it is hidden"
     );
     assert!(all.contains("from svolder's own file"), "{all}");
-    assert!(all.contains("copies it to the clipboard"), "{all}");
+    assert!(all.contains("v or Enter opens it"), "{all}");
 }
 
 /// A token of fewer than 16 characters is masked without a tail.
@@ -59,50 +59,38 @@ fn a_short_token_shows_no_tail() {
     assert_eq!(connections::mask(FAKE_TOKEN), "••••••3fQ");
 }
 
-/// The token is drawn in the right column while it is revealed and not a frame past its ten
-/// seconds, whatever the loop has done since: the draw reads `app.now`, and a tick drops the
-/// text.
+/// The token is drawn in its box while it is revealed and not a frame past its minute, whatever
+/// the loop has done since: the draw reads `app.now`, and a tick drops the text and the box.
 #[test]
-fn a_revealed_token_is_drawn_for_ten_seconds_on_app_now() {
+fn a_revealed_token_is_drawn_for_a_minute_on_app_now() {
     let mut app = connect_app();
     select(&mut app, Setting::McpToken);
     let start = app.now;
+    press(&mut app, KeyCode::Char('v'));
     app.overlays
         .conn
         .reveal(FAKE_TOKEN.to_string(), start + connections::REVEAL_FOR);
-    assert!(
-        right_words(&app).replace(' ', "").contains(FAKE_TOKEN),
-        "the revealed token is not drawn"
-    );
-    assert!(
-        shown(&app).contains("(revealed)"),
-        "the row does not say it is revealed"
-    );
+    assert!(shown(&app).contains(FAKE_TOKEN), "the token is not drawn");
+    assert_eq!(Setting::McpToken.value(&app), "(revealed)");
 
-    app.now = start + Duration::from_secs(9);
-    assert!(
-        right_words(&app).replace(' ', "").contains(FAKE_TOKEN),
-        "gone before its ten seconds"
-    );
+    app.now = start + Duration::from_secs(59);
+    assert!(shown(&app).contains(FAKE_TOKEN), "gone before its minute");
 
-    app.now = start + Duration::from_secs(10);
-    let all = shown(&app);
+    app.now = start + Duration::from_secs(60);
     assert!(
-        !all.contains("fake-token") && !all.contains("3fQ\n"),
-        "the token is still drawn at ten seconds"
+        !shown(&app).contains("fake-token"),
+        "the token is still drawn at a minute"
     );
 
     app.now = start;
-    app.tick(start + Duration::from_secs(11));
+    app.tick(start + Duration::from_secs(61));
     assert!(
         app.overlays.conn.revealed.is_none(),
         "a tick keeps the text past its time"
     );
     app.now = start;
     assert!(
-        !shown(&app)
-            .replace(['│', ' ', '\n'], "")
-            .contains(FAKE_TOKEN),
+        !shown(&app).contains("fake-token") && app.overlays.conn.modal.is_none(),
         "the token is drawn after the tick dropped it"
     );
 }
@@ -153,6 +141,7 @@ fn the_status_rows_say_what_the_daemon_answers() {
 #[test]
 fn the_connect_switches_ask_for_the_other_way() {
     let mut app = connect_app();
+    app.overlays.conn.mqtt.host = Some("broker.example.com".into());
     for (setting, want) in [
         (Setting::McpEnabled, ConnChange::McpEnabled(true)),
         (Setting::McpWrites, ConnChange::McpWrites(true)),
@@ -272,6 +261,10 @@ fn the_token_keys_reveal_copy_and_rotate_after_a_question() {
         vec![Intent::RevealToken]
     );
     assert_eq!(press(&mut app, KeyCode::Char('c')), vec![Intent::CopyToken]);
+    // `c` on the row copies without the box; in the box it copies and the box stays.
+    assert!(press(&mut app, KeyCode::Esc).is_empty());
+    assert_eq!(press(&mut app, KeyCode::Char('c')), vec![Intent::CopyToken]);
+    assert!(app.overlays.conn.modal.is_none());
 
     assert!(press(&mut app, KeyCode::Char('R')).is_empty());
     assert_eq!(app.overlays.conn.modal, Some(Modal::Rotating));
@@ -287,12 +280,17 @@ fn the_token_keys_reveal_copy_and_rotate_after_a_question() {
     );
     assert!(app.overlays.conn.modal.is_none());
 
-    // `v` while the token shows hides it.
+    // `v` opens the box and `v` again closes it, dropping the token.
+    assert_eq!(
+        press(&mut app, KeyCode::Char('v')),
+        vec![Intent::RevealToken]
+    );
     app.overlays
         .conn
         .reveal(FAKE_TOKEN.to_string(), app.now + connections::REVEAL_FOR);
     assert!(press(&mut app, KeyCode::Char('v')).is_empty());
     assert!(app.overlays.conn.revealed.is_none());
+    assert!(app.overlays.conn.modal.is_none());
 }
 
 /// A token from the environment or a file is not rotated: the key says so, naming the source,
@@ -509,6 +507,7 @@ fn with_no_daemon_the_row_is_the_sessions_own_and_marked() {
         vec![Intent::RevealToken]
     );
     assert_eq!(press(&mut app, KeyCode::Char('c')), vec![Intent::CopyToken]);
+    press(&mut app, KeyCode::Esc);
     press(&mut app, KeyCode::Char('R'));
     assert_eq!(app.overlays.conn.modal, Some(Modal::Rotating));
 }
@@ -640,4 +639,343 @@ fn the_app_takes_the_refresh_from_the_config() {
         .expect("a config");
     app.take_config(&config);
     assert_eq!(app.presets.autoeq_weeks, Never);
+}
+
+/// The switch rows draw as a two-way choice, the side in force lit and the label of the row
+/// kept, whether or not the cursor is on them; the rows that only report or open something draw
+/// as plain text, with no arrows.
+#[test]
+fn the_switch_rows_draw_as_choices_and_the_status_rows_as_plain_text() {
+    let mut app = connect_app();
+    app.overlays.conn.mqtt.host = Some("broker.example.com".into());
+    let row_of = |app: &App, label: &str| {
+        box_rows(app)
+            .into_iter()
+            .find(|row| row.contains(label))
+            .unwrap_or_else(|| panic!("no row {label}"))
+    };
+    for (label, choice) in [
+        ("MCP server", "‹ off | on ›"),
+        ("MCP writes", "‹ read-only | writes ›"),
+        ("MQTT client", "‹ off | on ›"),
+        ("MQTT commands", "‹ read-only | allowed ›"),
+    ] {
+        // the cursor elsewhere: the choice is still drawn whole
+        select(&mut app, Setting::McpToken);
+        assert!(
+            row_of(&app, label).contains(choice),
+            "{label}: {}",
+            row_of(&app, label)
+        );
+    }
+    app.overlays.conn.mcp.enabled = true;
+    app.overlays.conn.mcp.writes = true;
+    app.overlays.conn.mqtt.enabled = true;
+    app.overlays.conn.mqtt.commands = true;
+    for (setting, label, choice) in [
+        (Setting::McpEnabled, "MCP server", "‹ off | on ›"),
+        (Setting::McpWrites, "MCP writes", "‹ read-only | writes ›"),
+        (Setting::MqttEnabled, "MQTT client", "‹ off | on ›"),
+        (
+            Setting::MqttCommands,
+            "MQTT commands",
+            "‹ read-only | allowed ›",
+        ),
+    ] {
+        for focused in [false, true] {
+            select(&mut app, if focused { setting } else { Setting::McpToken });
+            assert!(
+                row_of(&app, label).contains(choice),
+                "{label}: {}",
+                row_of(&app, label)
+            );
+        }
+    }
+    // a status row, focused: no arrows
+    for setting in [
+        Setting::McpStatus,
+        Setting::MqttStatus,
+        Setting::McpToken,
+        Setting::WebUi,
+    ] {
+        select(&mut app, setting);
+        let row = box_rows(&app)
+            .into_iter()
+            .find(|row| row.contains('▶'))
+            .unwrap();
+        let left: String = row.chars().take(44).collect();
+        assert!(
+            !left.contains('‹') && !left.contains('›'),
+            "{setting:?}: {row}"
+        );
+    }
+}
+
+/// The choice's lit side is the value in force: the style of `on` differs from `off`'s.
+#[test]
+fn the_choice_lights_the_side_in_force() {
+    let mut app = connect_app();
+    let lit = |app: &App, side: &str| {
+        let buffer = frame(app, 80, 24);
+        let rows = text(&buffer);
+        let y = rows.iter().position(|r| r.contains("MCP server")).unwrap();
+        let x = rows[y].find("‹ off | on ›").unwrap();
+        let offset = if side == "on" { 8 } else { 2 };
+        let at = rows[y][..x].chars().count() + offset;
+        buffer[(u16::try_from(at).unwrap(), u16::try_from(y).unwrap())].style()
+    };
+    select(&mut app, Setting::McpToken);
+    let (off_style, on_style) = (lit(&app, "off"), lit(&app, "on"));
+    assert_ne!(off_style, on_style, "both sides look alike while off");
+    app.overlays.conn.mcp.enabled = true;
+    assert_eq!(lit(&app, "on"), off_style, "the lit side did not move");
+    assert_eq!(lit(&app, "off"), on_style);
+}
+
+/// Turning the MQTT client on with no broker host says why at once and puts the cursor on the
+/// host row; with a host it asks for the change.
+#[test]
+fn the_mqtt_client_cannot_go_on_without_a_host_and_says_so() {
+    let mut app = connect_app();
+    select(&mut app, Setting::MqttEnabled);
+    for key in [KeyCode::Char(' '), KeyCode::Right, KeyCode::Enter] {
+        assert!(press(&mut app, key).is_empty());
+        let toast = app.toast().map(|t| t.text.clone()).unwrap_or_default();
+        assert!(toast.contains("set MQTT broker host first"), "{toast}");
+        assert_eq!(app.overlays.settings.map(current), Some(Setting::MqttHost));
+        select(&mut app, Setting::MqttEnabled);
+    }
+    // turning it off needs no host
+    app.overlays.conn.mqtt.enabled = true;
+    assert_eq!(
+        press(&mut app, KeyCode::Char(' ')),
+        vec![Intent::Connection(ConnChange::MqttEnabled(false))]
+    );
+}
+
+/// No row, tooltip or help text of the category calls the MQTT row a bridge.
+#[test]
+fn the_row_is_the_mqtt_client() {
+    assert_eq!(Setting::MqttEnabled.label(), "MQTT client");
+    let mut app = connect_app();
+    select(&mut app, Setting::MqttEnabled);
+    let all = shown(&app);
+    assert!(!all.contains("bridge"), "{all}");
+    assert!(!Setting::MqttCommands.label().contains("bridge"));
+}
+
+/// The themes a focused row is checked at: monochrome, then each colour depth.
+fn depth_themes() -> Vec<(String, Theme)> {
+    let mut themes = vec![(
+        "monochrome".to_string(),
+        Theme::from_config(&svolder_ipc::TuiConfig::default(), true, ColorDepth::Ansi16),
+    )];
+    for depth in [
+        ColorDepth::Ansi16,
+        ColorDepth::Ansi256,
+        ColorDepth::TrueColor,
+    ] {
+        themes.push((format!("{depth:?}"), theme_for("amber", depth)));
+    }
+    themes
+}
+
+/// The focused switch row is no band: its label and the side in force take the selected style,
+/// the other side does not, and the cells after the choice are plain, at every depth.
+#[test]
+fn a_focused_switch_row_marks_its_label_and_side_in_force_not_the_row() {
+    for (name, theme) in depth_themes() {
+        let selected = theme.style(Role::Selected).add_modifier;
+        for (setting, label, off, on) in [
+            (Setting::McpEnabled, "MCP server", "off", "on"),
+            (Setting::McpWrites, "MCP writes", "read-only", "writes"),
+            (Setting::MqttEnabled, "MQTT client", "off", "on"),
+            (
+                Setting::MqttCommands,
+                "MQTT commands",
+                "read-only",
+                "allowed",
+            ),
+        ] {
+            for second in [false, true] {
+                let mut app = connect_app();
+                app.overlays.conn.mqtt.host = Some("broker.example.com".into());
+                match setting {
+                    Setting::McpEnabled => app.overlays.conn.mcp.enabled = second,
+                    Setting::McpWrites => app.overlays.conn.mcp.writes = second,
+                    Setting::MqttEnabled => app.overlays.conn.mqtt.enabled = second,
+                    _ => app.overlays.conn.mqtt.commands = second,
+                }
+                select(&mut app, setting);
+                let buffer = frame_with_theme(&app, 80, 24, &theme);
+                let rows = text(&buffer);
+                let y = rows.iter().position(|r| r.contains(label)).unwrap();
+                let chars: Vec<char> = rows[y].chars().collect();
+                let at = |word: &str, from: usize| {
+                    let w: Vec<char> = word.chars().collect();
+                    (from..chars.len())
+                        .find(|&i| chars[i..].starts_with(&w))
+                        .unwrap()
+                };
+                let styled = |x: usize| {
+                    buffer
+                        .cell((u16::try_from(x).unwrap(), u16::try_from(y).unwrap()))
+                        .unwrap()
+                        .modifier
+                        .contains(selected)
+                };
+                let lead = at(label, 0);
+                let arrows = at("‹", lead);
+                let first = arrows + 2;
+                let second_at = at(" | ", first) + 3;
+                let (lit, dim) = match second {
+                    true => (second_at, first),
+                    false => (first, second_at),
+                };
+                let _ = (off, on);
+                let ctx = format!("{name} {label} second={second}");
+                assert!(styled(lead), "{ctx}: the label is not selected");
+                assert!(styled(lit), "{ctx}: the side in force is not selected");
+                assert!(!styled(dim), "{ctx}: the other side looks selected");
+                let end = at("›", second_at) + 1;
+                assert!(!styled(end), "{ctx}: the row is still a band");
+            }
+        }
+    }
+}
+
+/// Each switch row's `‹` and `›` are its Prev and Next hits, by cell, and the rule beside the
+/// row is neither.
+#[test]
+fn the_switch_rows_arrows_are_their_hits_and_the_rule_is_not() {
+    for setting in [
+        Setting::McpEnabled,
+        Setting::McpWrites,
+        Setting::MqttEnabled,
+        Setting::MqttCommands,
+    ] {
+        let mut app = connect_app();
+        select(&mut app, setting);
+        let (buffer, _, hits) = drawn(&app, 80, 24);
+        let rows = text(&buffer);
+        let y = rows
+            .iter()
+            .position(|r| r.contains(setting.label()))
+            .unwrap();
+        let chars: Vec<char> = rows[y].chars().collect();
+        let open = chars.iter().position(|c| *c == '‹').unwrap();
+        let close = chars.iter().position(|c| *c == '›').unwrap();
+        let y = u16::try_from(y).unwrap();
+        let hit = |x: usize| hits.hit_at(u16::try_from(x).unwrap(), y).cloned();
+        assert_eq!(hit(open), Some(Hit::SettingPrev), "{setting:?} ‹");
+        assert_eq!(hit(close), Some(Hit::SettingNext), "{setting:?} ›");
+        let rule = chars.iter().rposition(|c| *c == '│').unwrap();
+        let rule = chars[..rule].iter().rposition(|c| *c == '│').unwrap();
+        assert!(close < rule, "{setting:?}: the choice reaches the rule");
+        for x in [rule, rule + 1] {
+            assert!(
+                !matches!(hit(x), Some(Hit::SettingPrev | Hit::SettingNext)),
+                "{setting:?}: cell {x} past the choice is an arrow hit"
+            );
+        }
+    }
+}
+
+/// The MCP status row's right column and the Web UI row's carry the daemon's words for the
+/// counts (`line()`), and a daemon that says none, or a server that is off, shows no count.
+#[test]
+fn the_connect_rows_say_the_clients_the_daemon_counts() {
+    let mut app = connect_app();
+    app.overlays.conn.web_status = Some(svolder_ipc::WebStatus::Listening {
+        listen: "127.0.0.1:8738".parse().unwrap(),
+        auth: svolder_ipc::config::WebAuth::Token,
+        writes: true,
+        guest: svolder_ipc::config::WebGuest::None,
+    });
+    let said = activity_said();
+    app.overlays.conn.activity = Some(said);
+    select(&mut app, Setting::McpStatus);
+    let words = right_words(&app);
+    assert!(words.contains(&said.mcp.unwrap().line()), "{words}");
+    select(&mut app, Setting::WebUi);
+    let words = right_words(&app);
+    assert!(words.contains(&said.web.unwrap().line()), "{words}");
+    // An older daemon says nothing: no count anywhere.
+    app.overlays.conn.activity = None;
+    for setting in [Setting::McpStatus, Setting::WebUi] {
+        select(&mut app, setting);
+        assert!(
+            !right_words(&app).contains(&said_line(setting)),
+            "{setting:?}"
+        );
+    }
+    // A server that is off shows none, whatever the last answer held.
+    app.overlays.conn.activity = Some(said);
+    app.overlays.conn.mcp_status = Some(McpStatus::Off);
+    app.overlays.conn.web_status = Some(svolder_ipc::WebStatus::Off);
+    for setting in [Setting::McpStatus, Setting::WebUi] {
+        select(&mut app, setting);
+        assert!(
+            !right_words(&app).contains(&said_line(setting)),
+            "{setting:?}"
+        );
+    }
+}
+
+/// The daemon's `line()` for `setting`'s server in [`activity_said`].
+fn said_line(setting: Setting) -> String {
+    let said = activity_said();
+    match setting {
+        Setting::McpStatus => said.mcp.unwrap().line(),
+        _ => said.web.unwrap().line(),
+    }
+}
+
+/// A daemon that stops answering takes its counts with it: no count on the MCP row, frozen or
+/// not.
+#[test]
+fn counts_go_when_the_daemon_stops_answering() {
+    let mut app = connect_app();
+    app.overlays.conn.activity = Some(activity_said());
+    app.overlays.conn.mqtt_status = Some(MqttStatus::Off);
+    select(&mut app, Setting::McpStatus);
+    assert!(right_words(&app).contains(&said_line(Setting::McpStatus)));
+    app.overlays.conn.daemon_missing();
+    assert_eq!(app.overlays.conn.activity, None);
+    assert_eq!(app.overlays.conn.mqtt_status, None);
+    assert!(!right_words(&app).contains(&said_line(Setting::McpStatus)));
+    // A session that knows no daemon is up shows none either, whatever it holds.
+    app.overlays.conn.activity = Some(activity_said());
+    app.overlays.conn.mcp_status = Some(McpStatus::Listening {
+        listen: "127.0.0.1:8737".parse().unwrap(),
+        auth: McpAuth::Token,
+        writes: false,
+    });
+    app.session.daemon = false;
+    assert!(!right_words(&app).contains(&said_line(Setting::McpStatus)));
+}
+
+/// The MQTT status column is the same with counts as without.
+#[test]
+fn the_mqtt_status_column_ignores_the_counts() {
+    let mut app = connect_app();
+    select(&mut app, Setting::MqttStatus);
+    let before = box_rows(&app);
+    app.overlays.conn.activity = Some(activity_said());
+    assert_eq!(box_rows(&app), before);
+}
+
+/// `daemon_said` keeps the daemon's `activity` and drops it when a later answer has none.
+#[test]
+fn daemon_said_keeps_and_drops_the_activity() {
+    let mut app = connect_app();
+    let own = app.config_path.clone();
+    let mut info = daemon_with_config(None);
+    info.activity = Some(activity_said());
+    app.overlays.conn.daemon_said(&info, &own);
+    assert_eq!(app.overlays.conn.activity, Some(activity_said()));
+    app.overlays
+        .conn
+        .daemon_said(&daemon_with_config(None), &own);
+    assert_eq!(app.overlays.conn.activity, None);
 }

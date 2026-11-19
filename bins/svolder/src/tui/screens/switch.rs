@@ -3,6 +3,8 @@
 
 //! The switch between the device and the computer, `Target ‹ NAME | Computer ›`: one
 //! drawing for the Controls pane and the tone-control screen, so their words cannot drift apart.
+//! [`styles`] and [`choice`] are the drawing of every choice among words (the computer's
+//! `Mode ‹ Off | EQ ›`, the Space and Crossfeed rows too), so none looks different from it.
 
 use ratatui::style::Style;
 use ratatui::text::Span;
@@ -35,6 +37,45 @@ pub(crate) fn fits(room: usize) -> bool {
     ) >= MIN_NAME
 }
 
+/// The styles of a two-way choice: the label's, the chosen side's and the other side's.
+///
+/// While the keys are on it (`focused`) the label and the chosen side take the selected role's
+/// box and the other side is plain dim with no box, so the side in force is what stands out on a
+/// line the cursor is on. Otherwise the label keeps `head`, the chosen side is the select-name
+/// role and the other dim. Every two-way choice (`Target`, the computer's `Mode`) takes these.
+pub(crate) fn styles(theme: &Theme, head: Style, focused: bool) -> (Style, Style, Style) {
+    match focused {
+        true => (
+            theme.style(Role::Selected),
+            theme.style(Role::Selected),
+            theme.style(Role::Dim),
+        ),
+        false => (head, theme.style(Role::SelectName), theme.style(Role::Dim)),
+    }
+}
+
+/// The spans of `‹ A | B ›` with the second side chosen where `second` holds, the chosen side in
+/// `lit` and the other in `off` (from [`styles`]), the arrows and the bar in the arrow role.
+pub(crate) fn choice(
+    theme: &Theme,
+    (a, b): (String, String),
+    second: bool,
+    (lit, off): (Style, Style),
+) -> Vec<Span<'static>> {
+    let arrow = theme.style(Role::ModeArrow);
+    let (first, last) = match second {
+        true => (off, lit),
+        false => (lit, off),
+    };
+    vec![
+        Span::styled("‹ ", arrow),
+        Span::styled(a, first),
+        Span::styled(" | ", arrow),
+        Span::styled(b, last),
+        Span::styled(" ›", arrow),
+    ]
+}
+
 /// The switch in `room` cells, the label in `head`; `None` where there is no room for it.
 ///
 /// While the keys are on it (`focused`) the label and the side shown take the selected role's
@@ -56,31 +97,17 @@ pub(crate) fn draw(
     }
     let label = LABEL;
     let name = cut_cells(product, left);
-    let (head, lit, off) = match focused {
-        true => (
-            theme.style(Role::Selected),
-            theme.style(Role::Selected),
-            theme.style(Role::Dim),
-        ),
-        false => (head, theme.style(Role::SelectName), theme.style(Role::Dim)),
-    };
-    let arrow = theme.style(Role::ModeArrow);
-    let (dac, comp) = match app.on_computer() {
-        true => (off, lit),
-        false => (lit, off),
-    };
+    let (head, lit, off) = styles(theme, head, focused);
     let first = widgets::text::cells(label) + 1 + 2;
     let (name_w, computer_w) = (widgets::text::cells(&name), widgets::text::cells(COMPUTER));
     let second = first + name_w + 3;
-    let spans = vec![
-        Span::styled(label.to_string(), head),
-        Span::raw(" "),
-        Span::styled("‹ ", arrow),
-        Span::styled(name, dac),
-        Span::styled(" | ", arrow),
-        Span::styled(COMPUTER, comp),
-        Span::styled(" ›", arrow),
-    ];
+    let mut spans = vec![Span::styled(label.to_string(), head), Span::raw(" ")];
+    spans.extend(choice(
+        theme,
+        (name, COMPUTER.to_string()),
+        app.on_computer(),
+        (lit, off),
+    ));
     Some(Switch {
         spans,
         names: [

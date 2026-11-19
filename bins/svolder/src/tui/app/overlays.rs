@@ -5,6 +5,7 @@
 //! question, and what the Settings box's Connect category knows.
 
 use crate::tui::boxes::connections::Connections;
+use crate::tui::boxes::setup::SetupBox;
 
 use super::SettingsBox;
 
@@ -30,6 +31,8 @@ pub struct Overlays {
     /// How many rows of keys the help overlay has been scrolled past, for the terminals it
     /// holds more keys than. Starts again at the top every time the overlay opens.
     pub help_scroll: usize,
+    /// The PipeWire config box, while it is open over the device screen.
+    pub setup: Option<Box<SetupBox>>,
     /// Whether the question `q` asks before the TUI quits is open.
     pub quitting: bool,
 }

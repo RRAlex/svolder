@@ -38,6 +38,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::activity::{Activity, Counted};
 use crate::fleet::Fleet;
 #[cfg(test)]
 use crate::http::bind;
@@ -145,6 +146,14 @@ impl McpAuth for NoAuth {
     }
 }
 
+/// What a server is started over besides its config and its check: the fleet its tools reach, the
+/// volume floors it keeps and the counts it records its clients in.
+struct Wiring {
+    fleet: Arc<dyn Fleet>,
+    floors: Arc<Floors>,
+    activity: Activity,
+}
+
 /// The daemon's end of the MCP server `[mcp]` describes: serving, or failed to start.
 pub struct McpServer {
     config: McpConfig,
@@ -174,6 +183,7 @@ impl McpServer {
         config: &McpConfig,
         fleet: Arc<dyn Fleet>,
         floors: Arc<Floors>,
+        activity: Activity,
     ) -> McpServer {
         let wanted = config.clone();
         let prepared = prepare(
@@ -200,7 +210,18 @@ impl McpServer {
                 (Arc::clone(&auth) as Arc<dyn McpAuth>, Some(auth))
             }
         };
-        match McpServer::launch(config, listener, auth, token, fleet, floors, None) {
+        match McpServer::launch(
+            config,
+            listener,
+            auth,
+            token,
+            Wiring {
+                fleet,
+                floors,
+                activity,
+            },
+            None,
+        ) {
             Ok(server) => server,
             Err(message) => McpServer::failed(config, message),
         }
@@ -216,6 +237,29 @@ impl McpServer {
         McpServer::start_with_fleet(config, auth, token, Arc::new(crate::fleet::Unavailable))
     }
 
+    /// [`McpServer::start_with`] counting its clients in `activity`.
+    #[cfg(test)]
+    fn start_counting(
+        config: &McpConfig,
+        auth: Arc<dyn McpAuth>,
+        token: Option<Arc<TokenAuth>>,
+        activity: Activity,
+    ) -> Result<McpServer, String> {
+        let listener = bind(config.listen).map_err(|e| e.to_string())?;
+        McpServer::launch(
+            config,
+            listener,
+            auth,
+            token,
+            Wiring {
+                fleet: Arc::new(crate::fleet::Unavailable),
+                floors: Arc::default(),
+                activity,
+            },
+            None,
+        )
+    }
+
     /// [`McpServer::start_with`] over a fleet of the test's own.
     #[cfg(test)]
     fn start_with_fleet(
@@ -225,7 +269,18 @@ impl McpServer {
         fleet: Arc<dyn Fleet>,
     ) -> Result<McpServer, String> {
         let listener = bind(config.listen).map_err(|e| e.to_string())?;
-        McpServer::launch(config, listener, auth, token, fleet, Arc::default(), None)
+        McpServer::launch(
+            config,
+            listener,
+            auth,
+            token,
+            Wiring {
+                fleet,
+                floors: Arc::default(),
+                activity: Activity::default(),
+            },
+            None,
+        )
     }
 
     /// Serve on `listener`. `inner` stands in for rmcp's service where a test wants to see
@@ -235,10 +290,14 @@ impl McpServer {
         listener: TcpListener,
         auth: Arc<dyn McpAuth>,
         token: Option<Arc<TokenAuth>>,
-        fleet: Arc<dyn Fleet>,
-        floors: Arc<Floors>,
+        wiring: Wiring,
         inner: Option<Inner>,
     ) -> Result<McpServer, String> {
+        let Wiring {
+            fleet,
+            floors,
+            activity,
+        } = wiring;
         let addr = listener.local_addr().map_err(|e| e.to_string())?;
         let stop = CancellationToken::new();
         let inner =
@@ -248,7 +307,13 @@ impl McpServer {
             let shared = Arc::clone(&shared);
             Box::pin(async move { answer(&shared, request).await })
         });
-        let task = tokio::spawn(http::accept_loop(listener, serve, stop.clone(), "mcp"));
+        let task = tokio::spawn(http::accept_loop(
+            listener,
+            serve,
+            stop.clone(),
+            "mcp",
+            activity,
+        ));
         let server = McpServer {
             config: config.clone(),
             state: State::Serving(Serving {
@@ -409,12 +474,17 @@ struct Shared {
     inner: Inner,
 }
 
-/// One request's answer: refused unless the auth allows it, 404 off `/mcp`, rmcp's otherwise.
+/// One request's answer: refused unless the auth allows it (a request that passes counts its
+/// connection, see [`crate::activity`]), 404 off `/mcp`, rmcp's otherwise.
 /// The credential is removed before the request goes on, so nothing downstream can see it,
 /// log it or echo it.
 async fn answer(shared: &Shared, mut request: Request<Incoming>) -> Response<Body> {
     if !shared.auth.allows(request.headers()) {
         return unauthorized();
+    }
+    // The check passed: the connection counts from here, open and seen.
+    if let Some(connection) = request.extensions_mut().remove::<Counted>() {
+        connection.pass();
     }
     if request.uri().path() != PATH {
         return refusal(StatusCode::NOT_FOUND);

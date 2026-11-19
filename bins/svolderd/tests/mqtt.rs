@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The MQTT bridge end to end: a real `svolderd` over the fake device, bridged to a broker
+//! The MQTT client end to end: a real `svolderd` over the fake device, bridged to a broker
 //! running in this process on 127.0.0.1 — `rumqttd`, a port of each case's own — and watched
 //! from there by a client of the case's own, as Home Assistant would watch it.
 
@@ -1931,6 +1931,60 @@ async fn the_crossfeed_states_reach_their_own_topics_over_the_broker() {
                 .all(|s| s.payload == "Linkwitz"),
             "{held:#?}"
         );
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// The loudness's two state topics follow a command on each, and the controller's snap (37 to 35)
+/// shows in the strength state and in the daemon's view. The fake computer keeps its state in
+/// memory, so the state file is not seen here.
+#[tokio::test]
+async fn the_loudness_commands_reach_the_controller_over_the_broker() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let config = bridged(broker.port, "commands = true\n");
+        let (mut child, socket) = spawn_daemon_isolated(&config, &FAKE_COMPUTER);
+        let mut client = connect(&mut child, &socket).await;
+        wait_until_connected(&mut child, &mut client).await;
+        let switch_state = computer_topic("computer_loudness/state");
+        let strength_state = computer_topic("computer_loudness_strength/state");
+        let mut first = watch(&broker).await;
+        first.wait_for_each(&[(&switch_state, "OFF")], STEP).await;
+        let mut watcher = watch(&broker).await;
+
+        // A command sent before the bridge's subscription is in place is lost, so it is sent
+        // again until its state comes.
+        for (command, body, topic, want) in [
+            ("computer_loudness/set", "ON", &switch_state, "ON"),
+            (
+                "computer_loudness_strength/set",
+                "37",
+                &strength_state,
+                "35",
+            ),
+        ] {
+            let mut seen = false;
+            for _ in 0..10 {
+                watcher.publish(&computer_topic(command), body).await;
+                let got = watcher.collect(Duration::from_millis(700)).await;
+                if got.iter().any(|s| &s.topic == topic && s.payload == want) {
+                    seen = true;
+                    break;
+                }
+            }
+            assert!(seen, "{want} never reached {topic}");
+        }
+
+        let Response::Host(view) = client.request(Request::Host).await.expect("an answer") else {
+            panic!("not a host answer");
+        };
+        let loudness = view
+            .eq
+            .and_then(|eq| eq.loudness)
+            .expect("the fake computer serves loudness");
+        assert!(loudness.on);
+        assert_eq!(loudness.strength_pct, 35.0);
     })
     .await
     .expect("test timed out");

@@ -17,6 +17,11 @@ mod script;
 
 pub(crate) use script::install_script;
 
+#[path = "../../../crates/svolder-host/tests/common/short_socket.rs"]
+mod short_socket;
+
+pub(crate) use short_socket::short_socket;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -59,6 +64,12 @@ pub(crate) fn temp_dir(what: &str) -> TempDir {
     ));
     std::fs::create_dir_all(&dir).expect("the temporary directory is made");
     TempDir(dir)
+}
+
+/// Like [`temp_dir`], for a case that binds a socket in it: the directory is short whatever
+/// `TMPDIR` is, because a socket path over `SUN_LEN` (108 bytes) cannot be bound.
+pub(crate) fn short_dir(what: &str) -> TempDir {
+    TempDir(short_socket::short_dir(what))
 }
 
 /// Every running `svolderd` that was started on `socket`, by pid.

@@ -154,6 +154,33 @@ fn the_correction_pane_says_nothing_is_fitted_on_the_computer() {
     }
 }
 
+/// A level held for a stream that plays is said under the preamp in the Correction pane; the
+/// view's other notes are not said there.
+#[test]
+fn the_correction_pane_says_when_the_level_is_held() {
+    let mut app = computer_app();
+    app.key(KeyEvent::from(KeyCode::Char('C')));
+    let held = svolder_host::eq::LEVEL_HELD_NOTE;
+    assert!(!rows_of(&app, 140, 40).join(" ").contains(held));
+    if let Some(eq) = app.host.computer.eq.as_mut() {
+        eq.note = Some(held.to_string());
+    }
+    // The pane is narrow: the note wraps under the preamp, a line of its own for the last word.
+    let rows = rows_of(&app, 140, 40);
+    let at = rows
+        .iter()
+        .position(|row| row.contains("level held until the music"));
+    assert!(
+        at.is_some_and(|at| rows[at + 1].contains("│ pauses ")),
+        "{rows:?}"
+    );
+    if let Some(eq) = app.host.computer.eq.as_mut() {
+        eq.note = Some(svolder_host::eq::PASSTHROUGH_NOTE.to_string());
+    }
+    let rows = rows_of(&app, 140, 40);
+    assert!(!holds(&rows, "level held"), "{rows:?}");
+}
+
 /// A chain whose running could not be told is shown as the state file says and marked not
 /// verified; a verified one carries no mark.
 #[test]
@@ -438,4 +465,178 @@ fn only_the_switchs_own_keys_act_on_the_target_row() {
         );
     }
     assert!(app.switch_focused());
+}
+
+/// The computer's `Mode ‹ Off | EQ ›` is drawn as `Target ‹ NAME | Computer ›` is, in the header of
+/// the tone screen: the side in force, the other side, the label and the arrows take the same
+/// styles, with the keys on the row and off it, whichever side is chosen, in 16 colours and in
+/// monochrome.
+#[test]
+fn the_mode_choice_is_styled_as_the_target_choice_on_the_tone_screen() {
+    use crate::tui::test_support::{style_at, style_of};
+    for mono in [false, true] {
+        let theme = Theme::new(mono);
+        for eq_on in [false, true] {
+            let mut app = computer_app();
+            app.host.computer.eq = Some(crate::tui::test_support::computer_eq(
+                eq_on,
+                &[("PK", 1000.0, 3.0, 1.4)],
+            ));
+            app.screen = Screen::Tone;
+            app.flip_side();
+            let name = app.session.product.clone();
+            let both = |app: &App| {
+                let buffer = frame_with_theme(app, 120, 30, &theme);
+                let (on, off) = match eq_on {
+                    true => ("EQ", "Off"),
+                    false => ("Off", "EQ"),
+                };
+                let target = [
+                    style_of(&buffer, "Target ‹ ", "Computer"),
+                    style_of(&buffer, "Target ‹ ", &name),
+                    style_of(&buffer, "Target ‹ ", "Target"),
+                    style_of(&buffer, "Target ‹ ", "‹"),
+                    style_of(&buffer, "Target ‹ ", "›"),
+                    style_at(&buffer, "Target ‹ ", "Target", 6),
+                ];
+                let mode = [
+                    style_of(&buffer, "Mode", on),
+                    style_of(&buffer, "Mode", off),
+                    style_of(&buffer, "Mode", "Mode"),
+                    style_of(&buffer, "Mode", "‹"),
+                    style_of(&buffer, "Mode", "›"),
+                    style_at(&buffer, "Mode", "Mode", 4),
+                ];
+                (target, mode)
+            };
+            // keys on neither, on the switch, on the mode
+            app.tone.row = ToneRow::Band;
+            let (target_rest, mode_rest) = both(&app);
+            assert_eq!(mode_rest, target_rest, "mono={mono} on={eq_on} at rest");
+            app.tone.row = ToneRow::Target;
+            let (target_keys, _) = both(&app);
+            app.tone.row = ToneRow::Mode;
+            let (_, mode_keys) = both(&app);
+            assert_eq!(mode_keys, target_keys, "mono={mono} on={eq_on} keys on");
+            assert_ne!(mode_keys[0], mode_keys[1], "the two sides differ");
+            assert_ne!(mode_keys, mode_rest, "the keys show");
+        }
+    }
+}
+
+/// With the chain's running not verified, the `›` of the Mode select is still the step-on hit and
+/// the words after it are the Mode half's own.
+#[test]
+fn the_mode_arrows_keep_their_hits_when_the_chain_is_not_verified() {
+    let mut app = computer_app();
+    app.flip_side();
+    app.host
+        .computer
+        .eq
+        .as_mut()
+        .expect("an eq")
+        .running_unknown = true;
+    let (buffer, hits) = crate::tui::test_support::drawn(&app, 120, 30);
+    let rows = crate::tui::test_support::text(&buffer);
+    let row = rows
+        .iter()
+        .position(|row| row.contains("Mode"))
+        .and_then(|y| u16::try_from(y).ok())
+        .expect("the Mode row");
+    let mode = u16::try_from(rows[usize::from(row)].find("Mode").expect("Mode")).expect("a column");
+    let at = |symbol: &str| {
+        (mode..buffer.area.width)
+            .find(|&x| buffer.cell((x, row)).is_some_and(|c| c.symbol() == symbol))
+            .expect("the arrow on the Mode row")
+    };
+    assert_eq!(hits.hit_at(at("‹"), row), Some(&Hit::ModePrev));
+    assert_eq!(hits.hit_at(at("›"), row), Some(&Hit::ModeNext));
+}
+
+/// The Space row's three words and the unfolded Crossfeed row's on/off word are drawn as the
+/// `Target` choice is: the chosen word in its chosen style, the other words dim, and with the keys
+/// on the row the box is on the label and the chosen word only, in 16 colours and in monochrome.
+#[test]
+fn the_space_and_crossfeed_rows_are_styled_as_the_target_choice() {
+    use crate::tui::app::Xf;
+    use crate::tui::test_support::{choice_styles, computer_eq_with_speakers, style_at, style_of};
+    for mono in [false, true] {
+        let theme = Theme::new(mono);
+        let mut app = computer_app();
+        app.host.computer.eq = Some(computer_eq_with_speakers(false, None, &[]));
+        app.screen = Screen::Tone;
+        app.flip_side();
+        let name = app.session.product.clone();
+        let shot = |app: &App| frame_with_theme(app, 120, 40, &theme);
+        // Target's: chosen, unchosen, label, the cell after the label
+        let target = |app: &App| {
+            let buffer = shot(app);
+            [
+                style_of(&buffer, "Target ‹ ", "Computer"),
+                style_of(&buffer, "Target ‹ ", &name),
+                style_of(&buffer, "Target ‹ ", "Target"),
+                style_at(&buffer, "Target ‹ ", "Target", 6),
+            ]
+        };
+        // (folded, the Space row is one dim line, not a choice, until the keys are on it)
+        app.tone.row = ToneRow::Target;
+        let keys = target(&app);
+        app.focus_crossfeed(Xf::Space);
+        let buffer = shot(&app);
+        let space = choice_styles(&buffer, "Space", ("Space", "Off", "Crossfeed"));
+        assert_eq!(space[..4], keys[..], "mono={mono} Space keys on");
+        // the list's own chosen word (the second `Off`) is boxed alike, the rest of the row plain
+        let line = text(&buffer)
+            .into_iter()
+            .find(|row| row.contains("Space"))
+            .expect("the Space row");
+        let list = line.find("Off ·").expect("the list");
+        let x = u16::try_from(line[..list].chars().count()).expect("a column");
+        let y = text(&buffer)
+            .iter()
+            .position(|row| row == &line)
+            .and_then(|y| u16::try_from(y).ok())
+            .expect("a row");
+        let cell = buffer.cell((x, y)).expect("a cell");
+        assert_eq!(
+            (cell.fg, cell.bg, cell.modifier),
+            keys[0],
+            "mono={mono} list"
+        );
+        let virtual_speakers = style_of(&buffer, "Space", "Virtual speakers");
+        assert_eq!(virtual_speakers, keys[1], "mono={mono} the unchosen words");
+
+        // the Crossfeed row, on, unfolded while the keys are on it
+        let mut app = computer_app();
+        app.host.computer.eq = Some(crate::tui::test_support::computer_eq_with_crossfeed(
+            true, "bauer", None,
+        ));
+        app.screen = Screen::Tone;
+        app.flip_side();
+        app.tone.row = ToneRow::Target;
+        let keys = target(&app);
+        app.focus_crossfeed(Xf::Preset);
+        let buffer = shot(&app);
+        let row = "Crossfeed on";
+        // the box sits on what `←→` move: the label and the preset's name, not on/off or the model
+        assert_eq!(
+            style_of(&buffer, row, "bs2b default"),
+            keys[0],
+            "mono={mono} preset"
+        );
+        let on = style_of(&buffer, row, "on");
+        assert!(!on.2.contains(Modifier::REVERSED), "{on:?}");
+        assert_eq!(
+            style_of(&buffer, row, "Crossfeed"),
+            keys[2],
+            "mono={mono} label"
+        );
+        assert_eq!(
+            style_at(&buffer, row, "Crossfeed", 9),
+            keys[3],
+            "mono={mono} pad"
+        );
+        let model = style_of(&buffer, row, "Bauer");
+        assert!(!model.2.contains(Modifier::REVERSED), "{model:?}");
+    }
 }

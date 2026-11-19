@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # A Home Assistant dashboard for one svolder DAC with a five-band tone control (Gungnir 2,
-# Yggdrasil, Bifrost 3), built from the entities svolderd's MQTT bridge announces with
+# Yggdrasil, Bifrost 3), built from the entities svolderd's MQTT client announces with
 # `commands = true`, and drawn in the `svolder` theme from themes/svolder.yaml (without the theme
 # installed, the view keeps Home Assistant's own). Paste it into a new dashboard's raw
 # configuration editor, then replace every `gungnir` with your device's entity prefix. README.md

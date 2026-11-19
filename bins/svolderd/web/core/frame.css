@@ -756,6 +756,18 @@
   outline: 2px solid var(--frame-accent); outline-offset: 2px; border-radius: 4px;
 }
 .fp-note.fp-failed { color: var(--frame-danger); }
+/* the PipeWire config popup (popups/setup/draw.js): the sink, the summary with its dot, a line's
+   label with its dot and its `fails` tag, and a failing line's words */
+.fpk-sink {
+  margin: 0 0 12px; font: 600 15px/1.3 var(--frame-font); overflow-wrap: anywhere;
+}
+.fpk-sum {
+  display: flex; gap: 10px; align-items: center; margin: 0 0 10px;
+  font: 600 15px/1.35 var(--frame-font);
+}
+.fpk-sum .fp-dot { width: 12px; height: 12px; }
+.fpk-lab { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.fpk-fail { color: var(--frame-warn); }
 /* the Overview's line that config.toml changed since the last reload: the ink of the theme's own
  * surface and an accent edge, so it reads in every theme without its own colours */
 .fp-note.fp-config {
@@ -910,6 +922,11 @@
 .fpe-why { margin: 4px 0 0; font-size: 12.5px; }
 .fpe-ask { margin: 6px 0 0; }
 .fpe-ask:empty { display: none; }
+/* the preamp's small scale beside its number: ticks and a needle, the colours of the tokens */
+.fpe-mini { display: block; margin: 4px 0 0 auto; overflow: visible; }
+.fpe-mini-tick { stroke: var(--frame-line-strong); stroke-width: 1; }
+.fpe-mini-tick.major { stroke: var(--frame-dim); }
+.fpe-mini-needle { stroke: var(--frame-accent); stroke-width: 2; stroke-linecap: round; }
 .fpe-saved-words:empty { display: none; }
 .fpe-lower { margin-top: 8px; color: var(--frame-warn); }
 /* a popup's header tools (a switch) and the bar under the header (tabs, pills): the bar does not
@@ -932,10 +949,13 @@
 .fpx-switch.on .fpx-switch-track { border-color: var(--frame-accent); background: var(--frame-accent); }
 .fpx-switch.on .fpx-switch-knob { left: 19px; background: var(--frame-on-accent); }
 .fp-bar { flex: none; padding: 0 12px; border-bottom: 1px solid var(--frame-line); }
-.fp-tabs { display: flex; gap: 4px; }
+/* four tabs do not fit a phone: the strip scrolls sideways in one line (a theme may squeeze
+   them instead) */
+.fp-tabs { position: relative; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.fp-tabs::-webkit-scrollbar { display: none; }
 .fp-tab {
-  display: inline-flex; align-items: center; gap: 8px; min-height: var(--frame-tap); padding: 0 14px;
-  border: 0; border-bottom: 3px solid transparent; background: none; color: var(--frame-dim);
+  display: inline-flex; flex: none; align-items: center; gap: 8px; min-height: var(--frame-tap);
+  padding: 0 14px; white-space: nowrap; border: 0; border-bottom: 3px solid transparent; background: none; color: var(--frame-dim);
   font: 500 14px var(--frame-font); cursor: pointer;
 }
 .fp-tab:hover { background: var(--frame-hover); }
@@ -968,7 +988,7 @@
 .fpx-menu::after { content: '▾'; flex: none; margin-left: 8px; color: var(--frame-dim); }
 .fpx-menu.fpx-custom { border-color: var(--frame-accent); }
 .fpx-steps { display: inline-flex; gap: 6px; }
-.fpx-step { min-width: var(--frame-tap); padding: 0; font-size: 20px; line-height: 1; }
+.fpx-step { min-width: var(--frame-tap); padding: 0; font-size: 20px; line-height: 1; text-align: center; }
 /* the picture: the response plot with its strokes (the same ear in the ink, the other ear in the
    accent), its keys and its axis, and the same strokes in the muted tokens while crossfeed is off */
 .fpx-plot { aspect-ratio: 5 / 2; overflow: hidden; }
@@ -997,6 +1017,57 @@
 }
 .fpx-value { color: var(--frame-ink); font-variant-numeric: tabular-nums; text-align: right; }
 .fpx-grey .fpx-label, .fpx-grey .fpx-value { color: var(--frame-faint); }
+/* the Loudness tab of the Sound popup (popups/loudness/draw.js): a slider and a stepper with their
+   values, the stage's curve with the faint line of the EQ and the stage together, the readout */
+.fpl { display: grid; gap: 12px; }
+.fpl > * { margin: 0; }
+.fpl-row { display: grid; grid-template-columns: minmax(76px, 92px) minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: var(--frame-tap); }
+.fpl-row.ref { grid-template-columns: minmax(76px, 92px) minmax(0, 1fr); }
+/* the slider: a 6 px track in the dim token inside a 44 px hit area, a thumb in the accent */
+.fpl input[type="range"] {
+  -webkit-appearance: none; appearance: none; box-sizing: content-box; width: 100%; min-width: 0;
+  height: 6px; margin: 0; padding: 19px 0; border: 0; border-radius: 3px; cursor: pointer;
+  background: var(--frame-dim) content-box; color: var(--frame-on-accent);
+}
+.fpl input[type="range"]:disabled { cursor: default; }
+.fpl input[type="range"]::-webkit-slider-runnable-track { height: 6px; background: transparent; }
+.fpl input[type="range"]::-moz-range-track { height: 6px; background: transparent; }
+.fpl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 22px; height: 22px; margin-top: -8px;
+  border-radius: 50%; border: 2px solid var(--frame-surface); background: var(--frame-accent);
+}
+.fpl input[type="range"]::-moz-range-thumb {
+  box-sizing: border-box; width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid var(--frame-surface); background: var(--frame-accent);
+}
+.fpl input[type="range"]:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
+.fpl-val { min-width: 4.2em; text-align: right; color: var(--frame-ink); font-variant-numeric: tabular-nums; }
+.fpl-steps { display: inline-flex; align-items: center; gap: 6px; }
+.fpl-steps .fpx-step { border-color: var(--frame-dim); }
+.fpl-ref { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.fpl-ref .fpl-val { min-width: 3.6em; }
+.fpl-picture { margin: 0; }
+.fpl-readings { display: grid; gap: 10px; }
+.fpl-readings > * { margin: 0; }
+.fpl-curve { height: 132px; overflow: hidden; }
+.fpl-curve svg { display: block; width: 100%; height: 100%; }
+.fpl-curve path { vector-effect: non-scaling-stroke; }
+.fpl-zero { fill: none; stroke: var(--frame-graph-target); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.fpl-line { fill: none; stroke: var(--frame-accent); stroke-width: 2.2; }
+.fpl-fill { fill: var(--frame-graph-gap); stroke: none; }
+.fpl-with { fill: none; stroke: var(--frame-graph-compare); stroke-width: 1.5; stroke-dasharray: 2 3; }
+.fpl-stage-key { border-top-color: var(--frame-accent); }
+.fpl-legend { margin: 0; }
+.fpl-readout { color: var(--frame-dim); font: 400 13px/1.4 var(--frame-font); font-variant-numeric: tabular-nums; }
+.fpl-rows { display: grid; }
+.fpl-rows .fpx-row { grid-template-columns: minmax(0, 1fr) auto; }
+.fpl-off .fpl-line { stroke: var(--frame-faint); }
+.fpl-off .fpl-fill { fill: var(--frame-hover); }
+.fpl-off .fpl-stage-key { border-top-color: var(--frame-faint); }
+.fpl-off .fpl-val, .fpl-off .fpx-value { color: var(--frame-dim); }
+.fpl-off input[type="range"]::-webkit-slider-thumb { background: var(--frame-surface); border-color: var(--frame-dim); }
+.fpl-off input[type="range"]::-moz-range-thumb { background: var(--frame-surface); border-color: var(--frame-dim); }
+.fpl .fi-btn[aria-disabled="true"], .fpl .fi-btn:disabled { opacity: 1; color: var(--frame-dim); }
 /* the Virtual speakers tab of the Sound popup (popups/speakers): three views side by side from
    1200 px and one at a time (chips) below, the two choices, the response, the sets, an own file */
 .fp-box:has(.fps) { width: min(1200px, 100%); }

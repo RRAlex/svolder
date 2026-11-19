@@ -40,7 +40,7 @@ pub(super) fn refresh_word(weeks: RefreshWeeks) -> String {
     }
 }
 
-/// What the token row says while the token is on show; the token itself is in the right column.
+/// What the token row says while the token is on show in its box.
 const REVEALED: &str = "(revealed)";
 /// What a row says of a value the file leaves out.
 pub(super) const NOT_SET: &str = "not set";
@@ -215,19 +215,19 @@ pub fn explain(setting: Setting) -> Cow<'static, str> {
              the tools that look."
         }
         Setting::McpToken => {
-            "The bearer token a client sends. v shows it for 10 s, c copies it to the \
-             clipboard (to the terminal, and to the display's tool where there is one), R \
-             replaces it after a question."
+            "The bearer token a client sends. v or Enter opens it in a box for a minute, c \
+             copies it to the clipboard (to the terminal, and to the display's tool where \
+             there is one), R replaces it after a question."
         }
         Setting::McpStatus => "Where the daemon says its MCP server stands. The daemon answers.",
         Setting::MqttEnabled => {
-            "Whether the daemon bridges its devices to an MQTT broker, for Home Assistant. It \
-             needs a broker host."
+            "Whether the daemon connects to an MQTT broker as a client and publishes its devices, \
+             for Home Assistant. It needs a broker host: turning it on without one says so."
         }
         Setting::MqttHost => "The broker's host name or address. Enter types it.",
         Setting::MqttPort => "The broker's port. Enter types it.",
         Setting::MqttCommands => {
-            "Whether the bridge takes commands back from the broker and writes them to the \
+            "Whether the MQTT client takes commands back from the broker and writes them to the \
              devices. Read-only only reports."
         }
         Setting::MqttUsername => {
@@ -239,7 +239,7 @@ pub fn explain(setting: Setting) -> Cow<'static, str> {
             "The broker's password. Enter types it, masked (Tab shows it); Delete twice on \
              the line clears it. Never read back. SVOLDER_MQTT_PASSWORD in the daemon's environment wins."
         }
-        Setting::MqttStatus => "Where the daemon says its MQTT bridge stands. The daemon answers.",
+        Setting::MqttStatus => "Where the daemon says its MQTT client stands. The daemon answers.",
         Setting::AutoEqRefresh => {
             "How old the cached AutoEq index may get before the search fetches it again: never, \
              or 1 to 99 weeks. Ctrl-R in the search fetches it at once whatever this says."

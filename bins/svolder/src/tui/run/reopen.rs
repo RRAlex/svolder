@@ -210,10 +210,11 @@ impl<O: Open> Opener<O> {
             web_check: None,
             web_copy: None,
             web_copy_next: None,
+            setup: Box::default(),
             reconnect: None,
             host_refresh: None,
             host: HostLink::none(),
-            jobs: jobs::Jobs::default(),
+            jobs: Box::default(),
             computer: Box::default(),
         })
     }
@@ -414,10 +415,11 @@ impl<O: Open> Opener<O> {
             web_check: None,
             web_copy: None,
             web_copy_next: None,
+            setup: Box::default(),
             reconnect: None,
             host_refresh: None,
             host: HostLink::none(),
-            jobs: jobs::Jobs::default(),
+            jobs: Box::default(),
             computer: Box::default(),
         }
     }

@@ -94,3 +94,53 @@ fn the_words_beside_a_cover_keep_their_floor_at_every_size() {
         assert!(room >= words_beside_art(), "{width}x{height}: {room} cells");
     }
 }
+
+/// With a Path row that wraps or is cut the pane's lines are still built at most twice per frame,
+/// at every size where the pane is short of rows: once to measure, once to draw.
+#[test]
+fn a_path_row_that_wraps_or_is_cut_adds_no_builds_under_a_cover() {
+    for (width, height) in sizes() {
+        for covered in [true, false] {
+            let app = match covered {
+                true => {
+                    let mut app = playing_covered(Rect::new(0, 0, width, height));
+                    app.host.fold_daemon(
+                        svolder_ipc::host::HostView {
+                            volume: None,
+                            eq: None,
+                            available: true,
+                            playing: None,
+                            route: Some(super::host_group::gungnir_route(|_| {})),
+                            now_ms: 0,
+                        },
+                        app.now,
+                    );
+                    app
+                }
+                false => {
+                    super::host_group::daemon_hosting(super::host_group::gungnir_route(|_| {}))
+                }
+            };
+            let at = format!("{width}x{height} covered {covered}");
+            let shown = text(&frame(&app, width, height));
+            assert!(
+                shown.iter().any(|row| row.contains(" Path ")),
+                "{at}: no Path row"
+            );
+            let done = work_of(&app, width, height);
+            assert!(
+                done.get("controls_lines").is_some_and(|n| *n <= 2),
+                "{at}: {done:?}"
+            );
+        }
+    }
+}
+
+/// Sizes from the smallest to roomy ones, so some leave the Controls pane short of the rows a
+/// wrapped path needs.
+fn sizes() -> Vec<(u16, u16)> {
+    (24..=40)
+        .step_by(2)
+        .flat_map(|height| (110..=240).step_by(10).map(move |width| (width, height)))
+        .collect()
+}

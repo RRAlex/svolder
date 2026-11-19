@@ -11,18 +11,12 @@ use svolder_ipc::{
 
 use super::*;
 use crate::test_support::stub_daemon::{StubServer, stub_daemon_at};
-use crate::test_support::temp_dir;
+use crate::test_support::{short_dir, temp_dir};
 
 /// A socket path short enough for any `TMPDIR`: a socket's path has about a hundred bytes, and a
 /// case whose stub could not be reached there would be a case about no daemon at all.
 fn short_socket() -> std::path::PathBuf {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .subsec_nanos();
-    std::env::temp_dir().join(format!("svk1-{}-{seq}-{nanos:x}.sock", std::process::id()))
+    crate::test_support::short_socket("svk1")
 }
 
 /// A stub daemon on a short socket that a client reaches: a case that starts a daemon fails
@@ -252,7 +246,7 @@ async fn an_answer_that_leaves_the_server_as_it_was_fails_the_verb() {
 /// nothing. Here the path is longer than a socket's path may be.
 #[tokio::test]
 async fn a_socket_that_cannot_be_tried_fails_the_verb_and_writes_nothing() {
-    let dir = temp_dir("switch-unreachable");
+    let dir = short_dir("switch-unreachable");
     let own = dir.0.join("config.toml");
     let long = dir.0.join(format!("{}.sock", "s".repeat(200)));
 

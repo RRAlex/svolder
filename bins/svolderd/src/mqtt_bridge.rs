@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The MQTT bridge: one task beside the device actors that publishes every device the daemon
+//! The MQTT client: one task beside the device actors that publishes every device the daemon
 //! holds to the broker `[mqtt]` names, announced for Home Assistant's discovery.
 //!
 //! It reads each device only through its actor's feed. It publishes: the device's availability
@@ -94,6 +94,9 @@ pub struct ComputerLink {
     pub view: watch::Receiver<svolder_ipc::host::HostView>,
     /// Turns the EQ on or off.
     pub switch: Arc<dyn EqSwitch>,
+    /// Makes the slow hold on the route reads the bridge keeps while the computer's entities are
+    /// published (one `pw-dump` every 30 s); `None` where nothing reads a route.
+    pub slow: Option<crate::host::SlowHolds>,
 }
 
 /// The daemon's end of a running bridge.

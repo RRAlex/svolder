@@ -13,7 +13,7 @@ use svolder_ipc::{Event, Handler, Request, Response};
 use super::*;
 use crate::commands::daemon::test_support::{Tools, installed_units, no_units};
 use crate::commands::daemon::{POLL, RUNTIME_LISTEN_STREAM};
-use crate::test_support::{install_script, temp_dir};
+use crate::test_support::{install_script, short_dir, temp_dir};
 
 /// `logs` reads the journal where systemd keeps it, following it when asked, and tells
 /// `journalctl` to page nothing and stamp in ISO form.
@@ -337,7 +337,7 @@ async fn a_daemon_that_never_answers_does_not_hold_logs_up() {
         }
     }
 
-    let dir = temp_dir("daemon-logs-mute");
+    let dir = short_dir("daemon-logs-mute");
     let socket = dir.0.join("svolder.sock");
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let served = tokio::spawn({

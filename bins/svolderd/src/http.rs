@@ -20,6 +20,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::activity::Activity;
 use crate::log;
 
 /// How many connections are served at once; one more is closed as soon as it is accepted.
@@ -134,11 +135,17 @@ pub type Serve<B> = Arc<dyn Fn(Request<Incoming>) -> Answer<B> + Send + Sync>;
 /// Accept connections until `stop`, each served on a task of its own by `serve`. One past
 /// [`MAX_CONNECTIONS`] is closed as soon as it is accepted; on the way out every connection still open
 /// is aborted and waited for. `name` heads the log line of a failed accept.
+///
+/// Each request carries its connection's [`Counted`](crate::activity::Counted) in its extensions.
+/// The server takes it out and calls `pass` once a request passes its check, so no handler holds
+/// it past the connection and a connection that never passes is never counted. The peer's address
+/// goes no further than the hash `activity` keeps.
 pub async fn accept_loop<B>(
     listener: TcpListener,
     serve: Serve<B>,
     stop: CancellationToken,
     name: &'static str,
+    activity: Activity,
 ) where
     B: hyper::body::Body + Send + 'static,
     B::Data: Send,
@@ -150,8 +157,8 @@ pub async fn accept_loop<B>(
             () = stop.cancelled() => break,
             accepted = listener.accept() => accepted,
         };
-        let stream = match accepted {
-            Ok((stream, _)) => stream,
+        let (stream, peer) = match accepted {
+            Ok(accepted) => accepted,
             Err(e) => {
                 // Out of descriptors, most likely: waiting is kinder than spinning.
                 log::warn(&format!("{name}: accept failed: {e}"));
@@ -163,6 +170,7 @@ pub async fn accept_loop<B>(
         if connections.len() >= MAX_CONNECTIONS {
             continue;
         }
+        let counted = activity.accepted(peer.ip());
         let serve = Arc::clone(&serve);
         connections.spawn(async move {
             let served = hyper::server::conn::http1::Builder::new()
@@ -171,7 +179,8 @@ pub async fn accept_loop<B>(
                 .max_buf_size(MAX_HEAD_BYTES)
                 .serve_connection(
                     TokioIo::new(stream),
-                    service_fn(move |request| {
+                    service_fn(move |mut request| {
+                        request.extensions_mut().insert(counted.clone());
                         let answer = serve(request);
                         async move { Ok::<_, Infallible>(answer.await) }
                     }),

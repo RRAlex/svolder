@@ -79,6 +79,7 @@ impl BridgeTask {
     fn client_event(&mut self, event: ClientEvent) {
         match event {
             ClientEvent::Connected => {
+                self.computer_link(true);
                 self.last_lost = None;
                 log::info(&format!(
                     "mqtt: connected to {}",
@@ -86,6 +87,7 @@ impl BridgeTask {
                 ));
             }
             ClientEvent::Lost { reason, retry_in } => {
+                self.computer_link(false);
                 let line = format!(
                     "mqtt: {}: {reason}; retrying in {} s",
                     address(self.host(), self.config.port),

@@ -17,6 +17,7 @@ import subprocess
 import sys
 
 import common
+import parts
 
 browser = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else 'chromium'
 BASELINE_ONLY = '--baseline' in sys.argv
@@ -37,8 +38,10 @@ passed = 0
 shown = 0
 
 
-def check(name, cond, detail=''):
+def check(name, cond, detail='', timing=False):
     global passed
+    if not parts.counts(timing):
+        return
     if cond:
         passed += 1
         print('ok  ', name)
@@ -374,7 +377,9 @@ def wide(dac, two, glow):
         lo, hi = 0.85 * calm, 1.15 * calm  # 17 to 23 at the approved 20
         check(f'untouched for {CALM_SECS} s the page runs at the calm rate ({rate:.1f} frames a '
               f'second; {lo:g} to {hi:g})',
-              lo <= rate <= hi, rate)
+              lo <= rate <= hi, rate, timing=True)
+        if not parts.part_has('logic'):
+            return  # the timing part ends with the calm rate; the rest of the page is the logic part
         sl, sr, bh, band = alphas(b, [left, right, bottom, BAND])
         side = (sl['mean'] + sr['mean']) / 2
         whole_first = alphas(b, [[0, 0, 2560, 1440]])[0]['mean']
@@ -596,10 +601,10 @@ def pace_check(dac):
               f'{got["along_t4"]:.1f} (baseline: {base["along_t4"]:.1f}), the centroid\'s 2 s '
               f'travel {got["travel_2s"]:.0f} px (baseline: {base["travel_2s"]:.0f})')
         check('a stroke\'s dye along its path at 4 s beats the baseline\'s',
-              got['along_t4'] > base['along_t4'], [got, base])
+              got['along_t4'] > base['along_t4'], [got, base], timing=True)
         check('  and its centroid travels further in 2 s',
-              got['travel_2s'] > base['travel_2s'], [got, base])
-        check('  no page error', errors(b) == [], errors(b))
+              got['travel_2s'] > base['travel_2s'], [got, base], timing=True)
+        check('  no page error', errors(b) == [], errors(b), timing=True)
     finally:
         b.close()
 
@@ -640,14 +645,14 @@ def run():
     two = common.Daemon('gungnir2-v2', more=[('Second', '1112131415161718')])
     try:
         if 'wide' in want:
-            wide(dac, two, glow_peak(dac))
-        if 'phone' in want:
+            wide(dac, two, glow_peak(dac) if parts.part_has('logic') else None)
+        if 'phone' in want and parts.part_has('logic'):
             phone(dac, glow_peak(dac))
-        if 'colour' in want:
+        if 'colour' in want and parts.part_has('logic'):
             colour(dac)
-        if 'steady' in want:
+        if 'steady' in want and parts.part_has('logic'):
             steady(dac)
-        if 'pace' in want:
+        if 'pace' in want and parts.part_has('timing'):
             pace_check(dac)
     finally:
         dac.stop()
@@ -659,5 +664,5 @@ if __name__ == '__main__':
         baseline()
     else:
         run()
-    print(f'haze.py {browser}: {passed} passed, {len(fails)} failed')
+    print(f'haze.py {browser}{parts.part_tag()}: {passed} passed, {len(fails)} failed')
     sys.exit(1 if fails else 0)

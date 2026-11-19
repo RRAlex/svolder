@@ -356,8 +356,8 @@ running theme and written at once; the box's bottom border names the file. A fai
 toast and the in-memory setting stays for the session.
 
 **Secrets stay out of the TUI's state.** `Connections` (`boxes/connections.rs`) holds the token's
-masked tail and the MQTT password only as set or unset; the token's text is held for ten seconds
-while revealed, and prints as `***` in a `Debug` dump.
+masked tail and the MQTT password only as set or unset; the token's text is held for a minute in the
+token box, dropped when it closes or the token changes, and prints as `***` in a `Debug` dump.
 
 **The tier is computed once and read back.** Layout, hit rectangles, the curve's cells and the
 traced frames all come from `Tier::of` on the same area. A second computation somewhere is a click

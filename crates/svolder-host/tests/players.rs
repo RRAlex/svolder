@@ -45,7 +45,7 @@ impl PrivateBus {
     /// Start one, or `None` (with a line saying the case is skipped) when the host has no
     /// `dbus-daemon`.
     fn start(label: &str) -> Option<Self> {
-        let dir = TempDir::new(label);
+        let dir = TempDir::short(label);
         let listen = format!("--address=unix:path={}", dir.join("bus").display());
         let spawned = Command::new("dbus-daemon")
             .args(["--session", "--print-address", "--nofork", &listen])
@@ -499,7 +499,7 @@ async fn a_bus_without_a_player_follows_none_and_presses_reach_nothing() {
 #[test]
 fn a_bus_that_never_answers_is_given_up_on_without_holding_anything_up() {
     // A socket that takes connections and never says a word, as a stuck bus does.
-    let dir = TempDir::new("mpris-silent");
+    let dir = TempDir::short("mpris-silent");
     let socket = dir.join("bus");
     let silent = std::os::unix::net::UnixListener::bind(&socket).expect("the silent bus binds");
     let live = PrivateBus::start("mpris-silent-live");
@@ -1241,7 +1241,7 @@ async fn a_failed_pid_lookup_is_asked_again_on_the_next_signal() {
 /// more thread blocked in libdbus per look.
 #[tokio::test]
 async fn a_look_at_a_bus_that_never_answered_does_not_add_a_blocked_connect() {
-    let dir = TempDir::new("mpris-silent-twice");
+    let dir = TempDir::short("mpris-silent-twice");
     let socket = dir.join("bus");
     let silent = std::os::unix::net::UnixListener::bind(&socket).expect("the silent bus binds");
     let accepted = Arc::new(Mutex::new(Vec::new()));
@@ -1276,7 +1276,7 @@ async fn a_look_says_whether_the_bus_is_absent_or_silent() {
     let missing = Mpris::look("unix:path=/nonexistent/svolder-test-bus").await;
     assert_eq!(missing.err(), Some(NoBus::Absent), "no socket");
 
-    let dir = TempDir::new("mpris-silent-says");
+    let dir = TempDir::short("mpris-silent-says");
     let socket = dir.join("bus");
     let silent = std::os::unix::net::UnixListener::bind(&socket).expect("the silent bus binds");
     let accepted = Arc::new(Mutex::new(Vec::new()));

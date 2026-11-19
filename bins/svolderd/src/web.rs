@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
+use crate::activity::Activity;
 use crate::fleet::Fleet;
 use crate::http::{self, Serve, allowed_hosts, blocking, prepare};
 use crate::http_slot::{Refresher, Server};
@@ -279,6 +280,7 @@ impl WebServer {
         config: &WebConfig,
         fleet: Arc<dyn Fleet>,
         codes: codes::SharedCodes,
+        activity: Activity,
     ) -> WebServer {
         let wanted = config.clone();
         let prepared = prepare(
@@ -301,7 +303,15 @@ impl WebServer {
             ));
             Key::new(&token)
         });
-        match WebServer::launch(config, listener, key, fleet, Assets::from_env(), codes) {
+        match WebServer::launch(
+            config,
+            listener,
+            key,
+            fleet,
+            Assets::from_env(),
+            codes,
+            activity,
+        ) {
             Ok(server) => server,
             Err(message) => WebServer::failed(config, message),
         }
@@ -315,6 +325,7 @@ impl WebServer {
         fleet: Arc<dyn Fleet>,
         assets: Assets,
         codes: codes::SharedCodes,
+        activity: Activity,
     ) -> Result<WebServer, String> {
         let addr = listener.local_addr().map_err(|e| e.to_string())?;
         let stop = CancellationToken::new();
@@ -329,7 +340,13 @@ impl WebServer {
                 }
             })
         });
-        let task = tokio::spawn(http::accept_loop(listener, serve, stop.clone(), "web"));
+        let task = tokio::spawn(http::accept_loop(
+            listener,
+            serve,
+            stop.clone(),
+            "web",
+            activity,
+        ));
         let server = WebServer {
             config: config.clone(),
             state: State::Serving(Serving {

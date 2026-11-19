@@ -51,6 +51,7 @@ fn route(product: &str) -> RouteFacts {
         others_mixing: 0,
         host_eq: false,
         stages: None,
+        setup: None,
     }
 }
 
@@ -212,7 +213,10 @@ fn the_path_is_untouched_when_every_hop_is() {
     let view = host(Some(track_view()), Some(route("Schiit Gungnir 2")));
     let card = card_on(&view, Some("2"), OPEN).expect("a card");
     let path = card.path.expect("a path");
-    assert_eq!((path.class, path.words.as_str()), ("ok", "untouched"));
+    assert_eq!(
+        (path.verdict, path.words.join(" · ").as_str()),
+        ("untouched", "untouched")
+    );
     assert!(
         path.title.contains("may still change the sound itself"),
         "{}",
@@ -255,7 +259,7 @@ fn the_card_names_what_the_dac_itself_changes() {
     assert!(!path.title.contains("then"), "{}", path.title);
     assert!(!path.hops[2].changes);
     let path = card("117", true);
-    assert_eq!(path.class, "ok");
+    assert_eq!(path.verdict, "untouched");
     assert!(
         path.title
             .contains("the Gungnir 2 then lowers it by 3.3 dB"),
@@ -282,7 +286,7 @@ fn the_path_is_judged_by_the_devices_own_readings() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
+        (path.verdict, path.words.join(" · ").as_str()),
         ("changed", "DAC reads 44.1 kHz")
     );
     assert!(path.hops[2].changes);
@@ -290,7 +294,7 @@ fn the_path_is_judged_by_the_devices_own_readings() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
+        (path.verdict, path.words.join(" · ").as_str()),
         ("unknown", "DAC rate not read")
     );
 }
@@ -304,19 +308,22 @@ fn a_dac_on_another_input_or_none_read_is_no_clean_line() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
-        ("other", "the DAC listens to Optical")
+        (path.verdict, path.words.join(" · ").as_str()),
+        ("other_input", "the DAC listens to Optical")
     );
     assert!(path.hops.is_empty());
     let path = card_with(&view, Some("USB 2"), Some("2"), OPEN)
         .and_then(|card| card.path)
         .expect("a path");
-    assert_eq!((path.class, path.words.as_str()), ("ok", "untouched"));
+    assert_eq!(
+        (path.verdict, path.words.join(" · ").as_str()),
+        ("untouched", "untouched")
+    );
     let path = card_with(&view, None, Some("2"), OPEN)
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
+        (path.verdict, path.words.join(" · ").as_str()),
         ("unknown", "DAC input not read")
     );
 }
@@ -330,9 +337,9 @@ fn a_dac_on_the_usb_port_the_computer_is_not_on_is_no_clean_line() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
+        (path.verdict, path.words.join(" · ").as_str()),
         (
-            "other",
+            "other_input",
             "the DAC listens to USB 1 · the computer is on USB 2"
         )
     );
@@ -341,7 +348,7 @@ fn a_dac_on_the_usb_port_the_computer_is_not_on_is_no_clean_line() {
         .and_then(|card| card.path)
         .expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
+        (path.verdict, path.words.join(" · ").as_str()),
         ("unknown", "both USB ports connected")
     );
 }
@@ -357,8 +364,8 @@ fn a_player_routed_elsewhere_says_so() {
     let path = card_on(&view, Some("2"), OPEN)
         .and_then(|card| card.path)
         .expect("a path");
-    assert_eq!(path.class, "other");
-    assert_eq!(path.words, "player \u{2192} LG TV");
+    assert_eq!(path.verdict, "not_this_dac");
+    assert_eq!(path.words.join(" · "), "player \u{2192} LG TV");
     assert_eq!(path.title, "the player plays to LG TV");
     assert!(path.hops.is_empty());
 }
@@ -370,8 +377,8 @@ fn a_sound_that_goes_elsewhere_says_so() {
     let path = card_on(&view, Some("2"), OPEN)
         .and_then(|card| card.path)
         .expect("a path");
-    assert_eq!(path.class, "other");
-    assert_eq!(path.words, "→ Schiit Bifrost 3");
+    assert_eq!(path.verdict, "not_this_dac");
+    assert_eq!(path.words.join(" · "), "→ Schiit Bifrost 3");
     assert_eq!(path.title, "the computer plays to Schiit Bifrost 3");
     assert!(path.hops.is_empty());
 }
@@ -382,7 +389,7 @@ fn no_route_says_so_and_no_track_has_no_path() {
     let unread = card_on(&host(Some(track_view()), None), Some("2"), OPEN).expect("a card");
     let path = unread.path.expect("a path");
     assert_eq!(
-        (path.class, path.words.as_str()),
+        (path.verdict, path.words.join(" · ").as_str()),
         ("unknown", "route not read")
     );
     assert!(path.hops.is_empty());
@@ -537,7 +544,10 @@ fn a_dac_with_no_input_control_reads_untouched_on_the_page() {
     let path = playing(&s, Family::Dac)
         .and_then(|card| card.path)
         .expect("a path");
-    assert_eq!((path.class, path.words.as_str()), ("ok", "untouched"));
+    assert_eq!(
+        (path.verdict, path.words.join(" · ").as_str()),
+        ("untouched", "untouched")
+    );
 }
 
 /// The link pill says the readings are old while the link is down and, once it is back, until the
@@ -558,4 +568,270 @@ fn the_link_says_when_the_readings_are_from_before_a_drop() {
         crate::web::view::link_of(&device).old,
         "down is old whatever the flag"
     );
+}
+
+/// The config facts of a sink that lets every line through: a USB DAC on `hw:Audio` taking
+/// 44.1 to 384 kHz in 32, 24 and 16 bits, every rate allowed, no dither and no filter.
+fn passing_setup() -> svolder_host::SetupFacts {
+    use svolder_host::{AlsaFacts, ClockFacts, Dither, Layout, Rates, SetupFacts, SinkOffer};
+    let stereo = Layout {
+        channels: 2,
+        positions: vec!["FL".into(), "FR".into()],
+    };
+    SetupFacts {
+        offer: Some(SinkOffer {
+            formats: vec!["S32LE".into(), "S24LE".into(), "S16LE".into()],
+            rates: Some(Rates::Range {
+                min: 44_100,
+                max: 384_000,
+            }),
+            layout: Some(stereo.clone()),
+        }),
+        clock: Some(ClockFacts {
+            rate: Some(48_000),
+            allowed_rates: vec![
+                44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+            ],
+            force_rate: None,
+        }),
+        sink_layout: Some(stereo.clone()),
+        stream_layout: Some(stereo),
+        dither: Some(Dither {
+            method: "none".into(),
+            noise: 0,
+        }),
+        sink_filter: Some(false),
+        stream_filter: Some(false),
+        alsa: Some(AlsaFacts {
+            path: Some("hw:Audio".into()),
+            ..AlsaFacts::default()
+        }),
+        ..SetupFacts::default()
+    }
+}
+
+/// A route on the DAC's own sink with `setup` on it.
+fn route_with(setup: Option<svolder_host::SetupFacts>) -> RouteFacts {
+    RouteFacts {
+        setup,
+        ..route("Schiit Gungnir 2")
+    }
+}
+
+/// The card of a Gungnir 2 whose route carries `setup`.
+fn setup_card(setup: Option<svolder_host::SetupFacts>) -> Playing {
+    let view = host(Some(track_view()), Some(route_with(setup)));
+    card_on(&view, Some("2"), OPEN).expect("a card")
+}
+
+/// A DAC's card carries the config check of its sink: the class, the chip, the summary and the
+/// seven lines in the judge's words.
+#[test]
+fn the_path_carries_the_config_check_while_the_sink_is_the_dac() {
+    let card = setup_card(Some(passing_setup()));
+    let setup = card.path.expect("a path").setup.expect("a check");
+    assert_eq!(setup.outcome, "untouched");
+    assert_eq!(setup.limit, svolder_ipc::host::SETUP_LIMIT);
+    assert_eq!(setup.chip, "config ✓");
+    assert_eq!(setup.summary, "PipeWire config lets it through untouched");
+    assert_eq!(setup.lines.len(), 7);
+    let keys: Vec<_> = setup.lines.iter().map(|line| line.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "rates",
+            "forced_rate",
+            "dither",
+            "format",
+            "plug",
+            "stereo",
+            "filter"
+        ]
+    );
+    assert!(setup.lines.iter().all(|line| line.outcome == "pass"));
+    assert_eq!(setup.lines[3].label, "24-bit output");
+    assert_eq!(setup.lines[3].words, "S32LE in use");
+
+    let mut facts = passing_setup();
+    facts.dither.as_mut().expect("dither").method = "triangular".into();
+    let setup = setup_card(Some(facts))
+        .path
+        .expect("a path")
+        .setup
+        .expect("a check");
+    assert_eq!(setup.outcome, "changes");
+    assert_eq!(setup.chip, "config 1");
+    assert_eq!(setup.summary, "PipeWire config changes the sound: 1");
+    assert_eq!(setup.lines[2].outcome, "fail");
+    assert_eq!(setup.lines[2].words, "triangular");
+
+    let mut facts = passing_setup();
+    facts.sink_filter = None;
+    let setup = setup_card(Some(facts))
+        .path
+        .expect("a path")
+        .setup
+        .expect("a check");
+    assert_eq!((setup.outcome, setup.chip.as_str()), ("unread", "config ?"));
+    assert_eq!(setup.lines[6].outcome, "unknown");
+}
+
+/// A route from an older daemon (no config facts) says so, never a clean check.
+#[test]
+fn an_older_daemons_route_has_an_unread_config() {
+    let setup = setup_card(None)
+        .path
+        .expect("a path")
+        .setup
+        .expect("a check");
+    assert_eq!(setup.outcome, "other_version");
+    assert_eq!(
+        setup.summary,
+        "PipeWire config not read (svolderd's version differs)"
+    );
+}
+
+/// The check is the DAC's only while the sink is the DAC: another sink gets none, and so does a
+/// card with no route yet.
+#[test]
+fn another_sink_or_no_route_has_no_config_check() {
+    let other = host(Some(track_view()), Some(route_with(Some(passing_setup()))));
+    let mut other = other;
+    let facts = other.route.as_mut().expect("a route");
+    let sink = facts.sink.as_mut().expect("a sink");
+    sink.usb_product = Some("Schiit Bifrost 3".into());
+    sink.description = "Schiit Bifrost 3".into();
+    let card = card_on(&other, Some("2"), OPEN).expect("a card");
+    assert!(card.path.expect("a path").setup.is_none());
+
+    let none = card_on(&host(Some(track_view()), None), Some("2"), OPEN).expect("a card");
+    assert!(none.path.expect("a path").setup.is_none());
+}
+
+/// A line of the check that changes is something a viewer sees, so the card key changes with it.
+#[test]
+fn the_key_holds_the_config_check() {
+    let mut card = setup_card(Some(passing_setup()));
+    let first = card.key();
+    let setup = card
+        .path
+        .as_mut()
+        .and_then(|path| path.setup.as_mut())
+        .expect("a check");
+    setup.lines[0].words.push('!');
+    let words = card.key();
+    assert_ne!(words, first, "a line's words");
+    let setup = card
+        .path
+        .as_mut()
+        .and_then(|path| path.setup.as_mut())
+        .expect("a check");
+    setup.lines[0].outcome = "fail";
+    assert_ne!(card.key(), words, "a line's outcome");
+    card.path.as_mut().expect("a path").setup = None;
+    assert_ne!(card.key(), first, "the check itself");
+}
+
+/// The JSON the page reads: `playing.path.config` with the outcome, the chip, the summary, the
+/// limit, the sink and the lines, and no `config` key at all when there is no check.
+#[test]
+fn the_models_json_carries_the_config_check_or_none() {
+    use crate::web::model::PlayingModel;
+    let card = setup_card(Some(passing_setup()));
+    let json = serde_json::to_value(PlayingModel::from(&card)).expect("json");
+    let setup = &json["path"]["config"];
+    assert!(
+        json["path"]["setup"].is_null(),
+        "the key is `config`, as on every surface"
+    );
+    assert_eq!(setup["outcome"], "untouched");
+    assert_eq!(setup["limit"], svolder_ipc::host::SETUP_LIMIT);
+    assert!(setup["class"].is_null(), "the old key is gone");
+    assert_eq!(json["path"]["verdict"], "untouched");
+    assert_eq!(json["path"]["words"], serde_json::json!(["untouched"]));
+    assert_eq!(setup["chip"], "config ✓");
+    assert_eq!(
+        setup["summary"],
+        "PipeWire config lets it through untouched"
+    );
+    assert_eq!(setup["sink"], "Schiit Gungnir 2");
+    assert_eq!(setup["lines"].as_array().map(Vec::len), Some(7));
+    assert_eq!(
+        setup["lines"][3],
+        serde_json::json!({
+            "key": "format",
+            "label": "24-bit output",
+            "outcome": "pass",
+            "words": "S32LE in use"
+        })
+    );
+
+    let none = host(Some(track_view()), None);
+    let card = card_on(&none, Some("2"), OPEN).expect("a card");
+    let json = serde_json::to_value(PlayingModel::from(&card)).expect("json");
+    assert!(json["path"].get("config").is_none(), "{json}");
+}
+
+/// The themes' CSS and JS hold literal copies of the judge's keys (a chip's class, a dot, the
+/// verdicts that say the sound goes elsewhere). Each key a theme styles or compares must still be
+/// the judge's, so a renamed key fails here rather than leaving a chip unstyled.
+#[test]
+fn the_themes_spell_the_judges_keys() {
+    use svolder_ipc::host::{SetupSummary, Verdict};
+    let ember = include_str!("../../../../web/themes/ember/style.css");
+    let signal = include_str!("../../../../web/themes/signal/style.css");
+    let paper = include_str!("../../../../web/themes/paper/style.css");
+    let wire = include_str!("../../../../web/core/popups/devices/wire.js");
+    let popup = include_str!("../../../../web/core/popups/setup/draw.js");
+    let signal_js = include_str!("../../../../web/themes/signal/draw/player.js");
+    let paper_js = include_str!("../../../../web/themes/paper/notes.js");
+    // Every chip outcome has a rule on the chip's own selector: `.np-setup` in Ember,
+    // `.sg-config` in Signal, `.p-setup` in Paper (plain for `untouched`), written as
+    // `<chip>.<key>` or inside a `<chip>:is(.a, .b)` list. A key's name elsewhere in the sheet
+    // does not count, so deleting a chip rule fails here.
+    let styled = |css: &str, chip: &str, key: &str| {
+        css.contains(&format!("{chip}.{key}"))
+            || css.match_indices(&format!("{chip}:is(")).any(|(at, _)| {
+                let list = &css[at..];
+                let list = &list[..list.find(')').unwrap_or(list.len())];
+                list.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                    .any(|part| part == format!(".{key}"))
+            })
+    };
+    for key in SetupSummary::KEYS {
+        for (name, css, chip) in [
+            ("ember", ember, ".np-setup"),
+            ("signal", signal, ".sg-config"),
+        ] {
+            assert!(styled(css, chip, key), "{name} styles no `{chip}.{key}`");
+        }
+        if key != "untouched" {
+            assert!(
+                styled(paper, ".p-setup", key),
+                "paper styles no `.p-setup.{key}`"
+            );
+        }
+    }
+    // Ember colours the verdict line by the verdicts it marks.
+    for key in ["untouched", "changed"] {
+        assert!(Verdict::KEYS.contains(&key));
+        assert!(
+            ember.contains(&format!(".np-path.{key} ")),
+            "ember `.np-path.{key}`"
+        );
+    }
+    // The devices popup treats these verdicts as a sound that goes elsewhere.
+    for key in ["not_this_dac", "other_input"] {
+        assert!(Verdict::KEYS.contains(&key));
+        assert!(wire.contains(&format!("'{key}'")), "wire.js `{key}`");
+    }
+    // The config popup's dots and the themes' comparisons.
+    for key in ["untouched", "changes"] {
+        assert!(SetupSummary::KEYS.contains(&key));
+        assert!(
+            popup.contains(&format!("{key}: '")),
+            "setup/draw.js dot for `{key}`"
+        );
+    }
+    assert!(signal_js.contains("=== 'untouched'") && paper_js.contains("=== 'changed'"));
 }

@@ -12,7 +12,11 @@ Each entry is a rule of the web UI's effects layer and the check that proves it.
 smoke's model and director are proved in node, on a fake clock and a seeded random, with no GPU and
 no browser; the browser checks hold what needs a real page or a GPU. A test is named by its title in
 the file (`ok('...')`, shortened where the title is long); a browser check by the function or
-section that holds it. [README.md](README.md) lists the check files and the gates.
+section that holds it. [README.md](README.md) lists the check files and the gates. A check named here
+for `smoke_core.py`, `smoke_page.py`, `haze.py`, `effects_cycle.py`, `scroll.py`, `smoke_quick.py`
+or `sources.py` runs in one of two parts (`--part logic`, in the pool, or `--part timing`, in
+the serial lane); the table "The serial lane's timing parts" in the README says which cases are in the
+timing part; `notes.py` is not split and runs whole in the serial lane.
 
 What the browser checks hold: finite and bounded fields, the calm rate as measured, the haze's
 density, side bars and legibility against Glow, away and lost grey, real touch panning, the wheel,
@@ -1098,6 +1102,25 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   390 px (no overflow, bar and page inside the window, steppers 44 px, the page behind unmoved), a press -> a request ->
   the view, the keyboard and Escape, the frame tokens, and a guest's daemon with no row
   (`WEB_CHECK_SHOTS=<folder>` writes `<theme>-crossfeed-<wide|phone>-<on|off>.png`).
+  The Loudness tab (`core/popups/loudness/`, the lane `setComputerLoudness` of `core/computer-actions.js`, the held key `loudness`;
+  the tab is second in the strip, EQ library | Loudness | Crossfeed | Virtual speakers, and left out while the host offers no
+  `eq.loudness`), in `core-loudness.mjs` (28 cases on the real core over a jsdom page and a fake host that applies the op as
+  the contract says): the draws from views (the worked example 35 % of a 100 % reference: depth 13.7, bass +7.3, mids -7.3,
+  treble +2.1; at the reference, flat and no minus on a zero; off dimmed; a note; unavailable; none; a hostile note escaped;
+  the DAC hint), the faint line of the stage and the EQ together (only while the EQ plays, the axes widening for a boost),
+  the steps from the view's range, what is asked laid over the view, the tab order and the arrows in chain order, the
+  switch and the tab's dot, a slider drag as `done: false` requests with one `done: true` at release and the slider never
+  drawn again under the hand (the readout follows the stream meanwhile), a key as one `done: true` request, a reference
+  press and a hold, "Use current volume" (`reference_now`, replacing a reference asked and the reverse, left alone by a
+  field that is not the reference), the answer and the stream update in either order, a refusal in the tab's words, a 404
+  from an older daemon and no answer (one request, no retry), a guest with no way in, Escape ending a hold, a stream that
+  changes nothing keeping the controls and the focus. In a browser, `loudness_popup.py` (23 checks per theme and engine, the
+  readout numbers from an overlay of the worked example until the controller's live read exists): the tab order, geometry
+  wide and at 390 px (the four tabs inside the window, nothing scrolls sideways, buttons and rows 44 px), a real drag, the
+  keyboard and Escape, "Use current volume" and the switch, the frame tokens (switch, curve, faint line), reduced motion, and
+  the daemon's own view and route with no overlay (`WEB_CHECK_SHOTS=<folder>` writes
+  `<theme>-loudness-<wide|phone>-<on|off|ref>.png`). `sweep_states.py` visits `sound/loudness` for the contrast and phone
+  sweeps; `nightdrive-hud.mjs` and `nightdrive_theme.py` name `loudness on` in the verdict.
   The Virtual speakers tab (`core/popups/speakers/`, `core/speakers-actions.js`, the held key
   `speakers`), in
   `core-speakers.mjs` (30 cases on the real core over a jsdom page and a fake daemon): the three
@@ -1958,7 +1981,7 @@ The theme Signal (design sections 3, 8 and 9), built on the core alone. Its fram
 the line of hops, its dots and the choice of a hop. The open area below the line is filled by the
 later tasks through `openers`.
 
-- Registration: Signal is the third theme, dark only, on the ground `#0f0d0b`, with no rows of its own
+- Registration: Signal is the third theme, dark only, on the ground `#08121f` (Blueprint's), with no rows of its own
   in the frame's menu. Proved by the Rust tests `signal_is_listed_dark_only` and
   `the_list_is_the_pickers_and_the_registrys_data`; the picker lists Ember, Paper and Signal and
   Signal's card has its name, its blurb and a picture (`signal_theme.py`
@@ -2054,7 +2077,7 @@ later tasks through `openers`.
   followed devices). The completeness test now asserts the drawn hook of every preset, slot, setting, mode,
   loudness and transport target (it asserted nothing for them) and walks the amp's area; the no-style and
   escaping tests cover a linked amp. In the browser (`signal_theme.py`, both browsers):
-  `a_linked_amp_is_a_live_dot` (solid amber, the thin stretch, followed by the stream, its area),
+  `a_linked_amp_is_a_live_dot` (solid, in the device's colour, the thin stretch, followed by the stream, its area),
   `an_amp_control_writes_to_the_amps_url` (power, a switch, Identify; the needles move in place; no request
   to the DAC), `the_dac_keeps_its_volume_written_while_the_amp_is_chosen` (follows a volume change, the slim
   bar says the same), `the_dacs_name_opens_the_device_list`, `a_chosen_amp_that_leaves_the_fleet_gives_the_box_back_to_the_dac`
@@ -2570,6 +2593,7 @@ dash and the sheet come with the later tasks.
   broken stylesheet (the scene's share, the volume's width, a 40 px key, a 4 px hit area, the sheet at 40 %, a window-wide volume, a name that does not
   wrap), the menu button against a header that does not pin it, the rotation against a sheet that closes on a resize, and the request log's
   band write against a wrong band.
+- Signal's palettes (`node/signal-palette.mjs`): `the_default_palette_is_blueprint_and_leads_the_menu`, `a_person_who_never_chose_gets_blueprint` (no kept value, an unknown one), `a_kept_choice_stays_warm_amber_included` (each palette round-trips through the prefs), `the_root_wears_no_attribute_for_the_default_and_one_for_the_others` and `the_bare_root_carries_the_default_palettes_tokens` (style.css: the bare root is Blueprint's ground, Warm amber a `data-palette="amber"` block, no blueprint block).
 - The controls' writes (`node/nightdrive-controls.mjs`, and `node/signal-controls.mjs` for Signal's): `a_scale_step_asked_after_a_switch_is_written_to_the_new_device_only` (a write to device A in flight, the
   device B shown, a step on B: B has its own run and nothing more reaches A) and `a_scale_keeps_one_write_in_flight_and_the_latest_waiting`.
 - The states (`node/nightdrive-states.mjs`): `the_mood_of_each_state` (every state and the order they win in: a lost stream, then a page

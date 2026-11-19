@@ -241,27 +241,27 @@ parsed as a browser parses it and a history; it lays nothing out, knows no `iner
 media query, so those are the browser's to prove.
 
 In a browser, one check for every popup and theme: `scripts/web-checks/popups.py` loops over the
-four themes and over the rows of its `POPUPS` table (the sample, Devices, the EQ library and Help),
-at 1280 px and at 390 px, in Chromium and Firefox. It proves what node cannot see: nothing under the
-popup's folder is requested before the first open; the box is on top at its centre and the veil at
-the window's corners (`elementFromPoint`, over Night drive's canvas and Ember's smoke); the page
-behind is inert; Tab stays inside, past a control the layout does not show; the list and the page
-stand side by side; the colours are the theme's tokens in each scheme; nothing scrolls sideways; a
-list's panel stands inside the box, on top, and goes with its chip when the pane is scrolled; Escape
-closes an inline ask and then the popup, with the focus back where it was; Back closes it; a press
-in a field that is let go on the veil keeps the popup and a click on the veil closes it; the veil
-contains its overscroll (in Chromium a wheel over it leaves the page where it was; Firefox keeps the
-rule in its compositor, which a WebDriver wheel does not pass through, so there the sheet's values
-are read); the box opens with no animation; on a phone the box is the window and shows the list or
-the page. A popup is a row there (`title`, `folder`, `add`, `entries`, `ask`, `form`, `list`,
-`extra`), never a loop or a check of its own. The check opens a popup by a real click and steps by
-one, and fails when the router says in the console that a popup's entry was pushed with no tap or
-key ([frame.md](frame.md#the-history)); at its end an open by script, with no tap behind it, is
-said. Help's row has cases of its own (its `extra`): the menu's row and `?` by real clicks and keys,
-for a writer and a guest, the tab's title, Back from a page to the list to closed, a page with no
-control scrolled by the keyboard, and a click on empty ground. The stack's own rules (who owns a
-key, the steps of the history, a device or theme switch) stay in `modal.py`, on its probe modal and
-popup.
+four themes and over the rows of its `POPUPS` table (the sample, Devices, Sound and Help; the
+PipeWire config popup has its own check, `setup_popup.py`), at 1280 px and at 390 px, in Chromium
+and Firefox. It proves what node cannot see: nothing under the popup's folder is requested before
+the first open; the box is on top at its centre and the veil at the window's corners
+(`elementFromPoint`, over Night drive's canvas and Ember's smoke); the page behind is inert; Tab
+stays inside, past a control the layout does not show; the list and the page stand side by side; the
+colours are the theme's tokens in each scheme; nothing scrolls sideways; a list's panel stands
+inside the box, on top, and goes with its chip when the pane is scrolled; Escape closes an inline
+ask and then the popup, with the focus back where it was; Back closes it; a press in a field that is
+let go on the veil keeps the popup and a click on the veil closes it; the veil contains its
+overscroll (in Chromium a wheel over it leaves the page where it was; Firefox keeps the rule in its
+compositor, which a WebDriver wheel does not pass through, so there the sheet's values are read);
+the box opens with no animation; on a phone the box is the window and shows the list or the page. A
+popup is a row there (`title`, `folder`, `add`, `entries`, `ask`, `form`, `list`, `extra`), never a
+loop or a check of its own. The check opens a popup by a real click and steps by one, and fails when
+the router says in the console that a popup's entry was pushed with no tap or key
+([frame.md](frame.md#the-history)); at its end an open by script, with no tap behind it, is said.
+Help's row has cases of its own (its `extra`): the menu's row and `?` by real clicks and keys, for a
+writer and a guest, the tab's title, Back from a page to the list to closed, a page with no control
+scrolled by the keyboard, and a click on empty ground. The stack's own rules (who owns a key, the
+steps of the history, a device or theme switch) stay in `modal.py`, on its probe modal and popup.
 
 ## Help
 
@@ -303,19 +303,35 @@ stream and is the one popup that stays through a device switch. Its profile choi
 from a button in the page pane, as a list in a popup is (the pane is a place for lists); the modal's
 `onKey` hands Escape and the arrows to it. [devices-popup.md](devices-popup.md) has it whole.
 
+## PipeWire config
+
+`core/popups/setup/` is the config check's popup (popup id `setup`, row *PipeWire config…*): the
+sink, the summary and the seven lines in the daemon's words (`path.config` of the card), with the
+limit sentence. It prints and judges nothing; the words come from `svolder-ipc`
+([host-config-check.md](host-config-check.md)). With no config on the card it says `config not
+read`.
+
 ## Sound
 
-The menu's *Sound…* row (`core/popups/sound/`, a writer's) is one popup with three tabs, *EQ
-library*, *Crossfeed* and *Virtual speakers*. The frame's `draw` takes `head` (header tools, the tab
-strip's neighbours) and `bar` (a strip under the header that does not scroll); a popup with no side
-list is `fp-single`. `listed.js` lists `sound` (no `entries`); the EQ library has no listed popup of
-its own: its folder `popups/eq-library/` is the Sound popup's first tab, drawn into a view of the
-frame by `popups/sound/wire.js`, with its three pages as pills under the tabs. The Crossfeed tab is
-`popups/crossfeed/` (draw and wire): a header switch, Model and Preset menus, the two level curves
-and Level, Crossover and Delay steppers (one lane `actions.computer.setCrossfeed`: fields merged,
-the newest wins), every word and range from the daemon's view ([crossfeed.md](crossfeed.md)). The
-tabs are a tablist whose panel is the page pane (the tabs' `aria-controls` is
-`popupPanelId('sound')`).
+The menu's *Sound…* row (`core/popups/sound/`, a writer's) is one popup with up to four tabs, *EQ
+library*, *Loudness*, *Crossfeed* and *Virtual speakers* (the filter chain's order). The frame's
+`draw` takes `head` (header tools, the tab strip's neighbours) and `bar` (a strip under the header
+that does not scroll); a popup with no side list is `fp-single`. `listed.js` lists `sound` (no
+`entries`); the EQ library has no listed popup of its own: its folder `popups/eq-library/` is the
+Sound popup's first tab, drawn into a view of the frame by `popups/sound/wire.js`, with its three
+pages as pills under the tabs. The Loudness tab is `popups/loudness/` (`draw.js` the markup as
+strings, `wire.js` the part that reads and writes; router page `loudness`, left out of the strip
+while `eq.loudness` is absent from the host view): a header switch, a strength slider (`done: false`
+while a pointer drags it, `done: true` on its release or a key), the reference with `−`, `+` and
+"Use current volume" (`reference_now`), the host's stage curve with a faint line for the EQ and the
+loudness together, and the live readout, with its calls (`actions.computer.setComputerLoudness`: one
+request at a time, fields merged, the newest wins) in `core/computer-actions.js`; its markup is the
+`fpl-*` classes of `frame.css` (read through the `--frame-*` tokens alone); every number comes from
+the daemon's view ([loudness.md](loudness.md)). The Crossfeed tab is `popups/crossfeed/` (draw and
+wire): a header switch, Model and Preset menus, the two level curves and Level, Crossover and Delay
+steppers (one lane `actions.computer.setCrossfeed`: fields merged, the newest wins), every word and
+range from the daemon's view ([crossfeed.md](crossfeed.md)). The tabs are a tablist whose panel is
+the page pane (the tabs' `aria-controls` is `popupPanelId('sound')`).
 
 The Virtual speakers tab is `popups/speakers/` (`draw.js` the markup, `pictures.js` the pictures
 as strings, `wire.js` the part that reads and writes), with its calls in `core/speakers-actions.js`

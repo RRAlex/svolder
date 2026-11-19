@@ -15,6 +15,8 @@ use svolder_ipc::WebStatus;
 pub enum WebRow {
     /// Where the daemon says its web UI stands.
     State,
+    /// How many clients the daemon counts; a report like State, never a stop.
+    Activity,
     /// Whether `[web]` turns it on.
     #[default]
     WebUi,
@@ -31,7 +33,7 @@ pub enum WebRow {
 }
 
 impl WebRow {
-    /// The rows the cursor stops on, in order: State only reports.
+    /// The rows the cursor stops on, in order: State and Activity only report.
     pub const STOPS: [WebRow; 6] = [
         WebRow::WebUi,
         WebRow::Reach,
@@ -45,6 +47,7 @@ impl WebRow {
     pub fn label(self) -> &'static str {
         match self {
             WebRow::State => "State",
+            WebRow::Activity => "Activity",
             WebRow::WebUi => "Web UI",
             WebRow::Reach => "Reach",
             WebRow::Guest => "Guest view",

@@ -152,19 +152,32 @@ fp hit sp-chromium "$(fp check b.py chromium "$fp_base" sp-chromium)" && bad "a 
 fp_base=$(fp base)
 # a pass that needed the alone retry is never stored: run the retry loop of run-all.sh itself with
 # stub checks, and see what it asks the cache to do
-loop=$(sed -n '/^flaky=()/,/^done$/p' "$here/run-all.sh")
+loop=$(sed -n '/^retry_alone() {/,/^}/p' "$here/run-all.sh")
 rl=$tmp/retrylog; : >"$rl"
 rfpy() { echo "fpy $*" >>"$rl"; }
 check_cmd() { CMD=(true); }
 one_check() { echo "one_check CFP=[$CFP]" >>"$rl"; printf 'ok 1\n' >"$out/$1.verdict"; }
 (
     fpy=(rfpy); out=$tmp/gateout; ordered=("rt-chromium|rt.py|chromium"); declare -A fps=([rt-chromium]=abc)
+    flaky=()
     printf 'retry 1\n' >"$out/rt-chromium.verdict"
-    eval "$loop" >/dev/null
+    eval "$loop"
+    retry_alone "${ordered[@]}" >/dev/null
 )
 grep -q "fpy forget rt-chromium" "$rl" && ok "the alone retry drops the check's record" || bad "the alone retry drops the check's record"
 grep -q "one_check CFP=\[\]" "$rl" && ok "the alone retry runs with no fingerprint to store" || bad "the alone retry runs with no fingerprint to store"
 grep -q "fpy store" "$rl" && bad "the alone retry stores nothing" || ok "the alone retry stores nothing"
+# a retry that fails again stands: the verdict stays FAIL and the check is not listed as flaky
+one_check() { printf 'FAIL 1\n' >"$out/$1.verdict"; }
+got=$(
+    fpy=(rfpy); out=$tmp/gateout; ordered=("rf-chromium|rf.py|chromium"); flaky=()
+    printf 'retry 1\n' >"$out/rf-chromium.verdict"
+    eval "$loop"
+    retry_alone "${ordered[@]}" >/dev/null
+    read -r word _ <"$out/rf-chromium.verdict"
+    echo "$word flaky=${#flaky[@]}"
+)
+[ "$got" = "FAIL flaky=0" ] && ok "a retry that fails again stands (FAIL, not flaky)" || bad "a retry that fails again stands (got: $got)"
 # every env var a check reads is a subset switch (a pass is never stored) or on the neutral list
 python3 - "$here" <<'PY' && ok "every env var a check reads is classified" || bad "every env var a check reads is classified"
 import os, re, sys

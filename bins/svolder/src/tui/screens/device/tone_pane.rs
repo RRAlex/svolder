@@ -4,6 +4,7 @@
 //! The Tone pane: the tone control's mode, its loudness strength and a row per band, and
 //! the mode line and band readings the tone-control screen draws the same way.
 
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use svolder_profiles::convert::{frequency_text, gain_text};
 use svolder_profiles::{EqMode, EqParam, EqSpec};
@@ -15,6 +16,8 @@ use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::{self, CURSOR_WIDTH, LOUDNESS_WIDTH, MISSING};
 
 use super::{raw_of, row_style};
+use crate::tui::screens::switch;
+use crate::tui::screens::tone::computer_loudness as ld_tone;
 
 /// Columns the Tone pane's own label column takes.
 const TONE_FIELD: usize = 10;
@@ -55,6 +58,19 @@ pub(super) struct TonePane {
     pub(super) bands_from: usize,
     /// The Crossfeed row at the pane's bottom, on the computer side with crossfeed.
     pub(super) crossfeed: Option<CrossfeedRow>,
+    /// The Loudness row over it, in the chain's order, on the computer side with loudness.
+    pub(super) loudness: Option<LoudnessRow>,
+}
+
+/// Where the Loudness row sits in the Tone pane.
+pub(super) struct LoudnessRow {
+    /// The interior line it landed on.
+    pub(super) line: u16,
+    /// The dim lines under it, each a click on the row.
+    pub(super) under: u16,
+    /// The places in it a click lands on, as a first cell and a width from the line's start,
+    /// cursor included, each with its hit.
+    pub(super) spots: Vec<(usize, usize, crate::tui::mouse::Hit)>,
 }
 
 /// Where the Crossfeed row sits in the Tone pane.
@@ -138,18 +154,22 @@ pub(super) fn tone_lines_in(
         loudness_bar,
         bands_from: 0,
         crossfeed: None,
+        loudness: None,
     }
 }
 
 /// The Tone pane on the computer side: the mode as `‹ Off | EQ ›`, the preset the points came
 /// from, and a row per point.
 fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize) -> TonePane {
-    let mode_raw = computer_mode_spans(app, theme, TONE_FIELD);
-    let mode_width: usize = mode_raw.iter().map(Span::width).sum();
-    let mode = tone_row(
-        mode_raw,
-        app.tone.row == ToneRow::Mode,
-        app,
+    let mode_focused = app.tone.row == ToneRow::Mode;
+    let (mode_raw, mode_width) =
+        computer_mode_spans(app, theme, TONE_FIELD, Style::default(), mode_focused);
+    // The row carries the cursor but no box of its own: the choice draws its focus as Target's
+    // does, on the label and the side in force.
+    let mode = row_style(
+        widgets::rows::with_cursor(Line::from(mode_raw), mode_focused, theme),
+        false,
+        !app.session.connected,
         theme,
         max_width,
     );
@@ -187,17 +207,45 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         (Some(view), false) => vec![summary_line(view, theme)],
         (None, _) => Vec::new(),
     };
+    // The Loudness row sits over the Crossfeed row (the chain's order: the points, loudness,
+    // crossfeed), with its dim readout under it where the pane has the room.
+    let ld = app.loudness_view().filter(|_| app.ld_shown());
+    let ld_dim = match (ld, max_height) {
+        (None, _) => false,
+        (Some(_), usize::MAX) => true,
+        (Some(_), h) => h >= head + 2 + usize::from(xf.is_some()) + 2,
+    };
+    // The line saying the device's own loudness plays too, where there is room for it.
+    let said_inline = ld.is_some_and(|view| {
+        crate::tui::app::computer_loudness::readout(
+            view,
+            true,
+            false,
+            max_width.saturating_sub(CURSOR_WIDTH),
+        )
+        .contains(crate::tui::app::computer_loudness::DAC_HINT)
+    });
+    let ld_hint = ld_dim
+        && app.dac_loudness_on()
+        && !said_inline
+        && match max_height {
+            usize::MAX => true,
+            h => h >= head + 2 + usize::from(xf.is_some()) + 3,
+        };
+    let ld_rows = ld.map_or(0, |_| 1 + usize::from(ld_dim) + usize::from(ld_hint));
     let (shown, gap) = match (xf, max_height) {
         (None, _) => (0, false),
         (Some(_), usize::MAX) => (details.len(), true),
         (Some(_), h) => {
-            let room = h >= head + 1 + 2 + details.len();
+            let room = h >= head + 1 + 2 + details.len() + ld_rows;
             (if room { details.len() } else { 0 }, room)
         }
     };
-    let reserved = match xf {
-        Some(_) => 1 + shown + usize::from(gap),
-        None => 0,
+    let xf_rows = xf.map_or(0, |_| 1 + shown);
+    let tail = ld_rows + xf_rows;
+    let reserved = match (xf, ld) {
+        (None, None) => 0,
+        _ => tail + usize::from(gap),
     };
     let visible = match max_height {
         usize::MAX => points.len(),
@@ -228,15 +276,37 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
             max_width,
         ));
     }
-    let crossfeed = xf.map(|view| {
-        // Under the table, at the pane's bottom where its height is known.
+    // Under the table, at the pane's bottom where its height is known.
+    if tail > 0 {
         let target = match max_height {
             usize::MAX => lines.len() + usize::from(gap),
-            h => h - 1 - shown,
+            h => h - tail,
         };
         while lines.len() < target {
             lines.push(Line::default());
         }
+    }
+    let loudness = ld.map(|view| {
+        let at = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+        let row = ld_tone::strength_row(app, view, theme, max_width);
+        lines.push(row.line);
+        let mut under = 0;
+        if ld_dim {
+            lines
+                .push(ld_tone::readout_row(app, view, theme, max_width, ld_tone::Under::Pane).line);
+            under += 1;
+        }
+        if ld_hint {
+            lines.push(ld_tone::hint_row(app, theme, max_width).line);
+            under += 1;
+        }
+        LoudnessRow {
+            line: at,
+            under,
+            spots: row.spots,
+        }
+    });
+    let crossfeed = xf.map(|view| {
         let (line, arrows) = match app.space_shown() {
             true => space_line(app, theme, max_width),
             false => crossfeed_line(app, view, theme, max_width),
@@ -254,6 +324,7 @@ fn computer_lines(app: &App, theme: &Theme, max_width: usize, max_height: usize)
         loudness_bar: 0,
         bands_from: first,
         crossfeed,
+        loudness,
     }
 }
 
@@ -266,14 +337,15 @@ fn crossfeed_line(
     max_width: usize,
 ) -> (Line<'static>, (usize, usize)) {
     let focused = app.tone.row == ToneRow::Crossfeed(Xf::Preset);
-    let (lit, other) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let (head, lit, other) = switch::styles(theme, Style::default(), focused);
     let arrow = theme.style(Role::ModeArrow);
     let word = if view.on { "on" } else { "off" };
     let room = max_width.saturating_sub(CURSOR_WIDTH + TONE_FIELD + 2 + word.len() + 2 + 1);
     let spans = vec![
-        widgets::rows::label("Crossfeed", TONE_FIELD),
+        Span::styled("Crossfeed", head),
+        Span::raw(" ".repeat(TONE_FIELD - "Crossfeed".len())),
         Span::styled("\u{2039} ", arrow),
-        Span::styled(word, if view.on { lit } else { other }),
+        Span::styled(word, if view.on || focused { lit } else { other }),
         Span::styled(" \u{203a}", arrow),
         Span::raw(" "),
         Span::raw(widgets::text::cut_to_cells(
@@ -285,18 +357,21 @@ fn crossfeed_line(
         CURSOR_WIDTH + TONE_FIELD,
         CURSOR_WIDTH + TONE_FIELD + 2 + word.len() + 1,
     );
+    // the cursor marks the row; the focus is the label and the word, as the Target switch has it
     let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
-    let line = row_style(line, focused, !app.session.connected, theme, max_width);
+    let line = row_style(line, false, !app.session.connected, theme, max_width);
     (line, arrows)
 }
 
 /// The Space row of the pane: `Space ‹ Virtual speakers ›`, and where its `‹` and `›` sit.
 fn space_line(app: &App, theme: &Theme, max_width: usize) -> (Line<'static>, (usize, usize)) {
     let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
-    let (lit, arrow) = (theme.style(Role::SelectName), theme.style(Role::ModeArrow));
+    let (head, lit, _) = switch::styles(theme, Style::default(), focused);
+    let arrow = theme.style(Role::ModeArrow);
     let word = app.space_now().word();
     let spans = vec![
-        widgets::rows::label("Space", TONE_FIELD),
+        Span::styled("Space", head),
+        Span::raw(" ".repeat(TONE_FIELD - "Space".len())),
         Span::styled("\u{2039} ", arrow),
         Span::styled(word, lit),
         Span::styled(" \u{203a}", arrow),
@@ -306,7 +381,7 @@ fn space_line(app: &App, theme: &Theme, max_width: usize) -> (Line<'static>, (us
         CURSOR_WIDTH + TONE_FIELD + 2 + widgets::text::cells(word) + 1,
     );
     let line = widgets::rows::with_cursor(Line::from(spans), focused, theme);
-    let line = row_style(line, focused, !app.session.connected, theme, max_width);
+    let line = row_style(line, false, !app.session.connected, theme, max_width);
     (line, arrows)
 }
 
@@ -353,40 +428,46 @@ fn summary_line(view: &svolder_host::eq::crossfeed::CrossfeedView, theme: &Theme
     ))
 }
 
-/// The computer's mode as a select with both its names: `‹ Off | EQ ›`, the one in force standing
-/// out, in a label column `field` cells wide.
-fn computer_mode_spans(app: &App, theme: &Theme, field: usize) -> Vec<Span<'static>> {
-    let on = app.computer_eq().is_some_and(|eq| eq.on);
-    let (lit, other) = (theme.style(Role::SelectName), theme.style(Role::Dim));
-    let arrow = theme.style(Role::ModeArrow);
-    let mut spans = vec![
-        widgets::rows::label("Mode", field),
-        Span::styled("‹ ", arrow),
-        Span::styled("Off", if on { other } else { lit }),
-        Span::styled(" | ", arrow),
-        Span::styled("EQ", if on { lit } else { other }),
-        Span::styled(" ›", arrow),
-    ];
-    // What the state file says, where the chain could not be looked at: never drawn as verified.
-    if app.computer_eq().is_some_and(|eq| eq.running_unknown) {
-        spans.push(Span::styled(" not verified", other));
-    }
-    spans
-}
+/// The mode's label.
+const MODE_LABEL: &str = "Mode";
 
-/// The mode line of the computer side: no loudness.
-fn computer_mode_line(
+/// The computer's mode as a two-way choice, `‹ Off | EQ ›`, drawn as the `Target` switch is
+/// ([`switch::styles`], [`switch::choice`]): the one in force and the label stand out, in the
+/// selected role's box while the keys are on the row (`focused`), the other side dim. The label
+/// is in the style `head` and a column `field` cells wide.
+fn computer_mode_spans(
     app: &App,
     theme: &Theme,
     field: usize,
-    max_width: usize,
-) -> (Line<'static>, ModeHalves) {
-    let raw = computer_mode_spans(app, theme, field);
-    let width: usize = raw.iter().map(Span::width).sum();
+    head: Style,
+    focused: bool,
+) -> (Vec<Span<'static>>, usize) {
+    let on = app.computer_eq().is_some_and(|eq| eq.on);
+    let (head, lit, off) = switch::styles(theme, head, focused);
+    // only the word takes the label's style: the blanks up to the arrows stay plain
+    let pad = " ".repeat(field.saturating_sub(widgets::text::cells(MODE_LABEL)));
+    let mut spans = vec![Span::styled(MODE_LABEL, head), Span::raw(pad)];
+    spans.extend(switch::choice(
+        theme,
+        ("Off".to_string(), "EQ".to_string()),
+        on,
+        (lit, off),
+    ));
+    // where the choice ends, before anything said after it
+    let choice_width = spans.iter().map(Span::width).sum();
+    // What the state file says, where the chain could not be looked at: never drawn as verified.
+    if app.computer_eq().is_some_and(|eq| eq.running_unknown) {
+        spans.push(Span::styled(" not verified", off));
+    }
+    (spans, choice_width)
+}
+
+/// The mode line of the computer side: no loudness.
+fn computer_mode_line(app: &App, theme: &Theme, field: usize) -> (Line<'static>, ModeHalves) {
     let focused = app.tone.row == ToneRow::Mode;
-    let spare = usize::from(1 + width < max_width);
+    let (raw, width) = computer_mode_spans(app, theme, field, theme.style(Role::Header), focused);
     let mut spans = vec![Span::raw(" ")];
-    spans.extend(standing_out(raw, focused, theme, width + spare));
+    spans.extend(raw);
     let end: usize = spans.iter().map(Span::width).sum();
     let line = Line::from(spans);
     let halves = ModeHalves {
@@ -468,7 +549,7 @@ pub(in crate::tui::screens) fn mode_line(
     max_width: usize,
 ) -> (Line<'static>, ModeHalves) {
     if app.on_computer() {
-        return computer_mode_line(app, theme, field, max_width);
+        return computer_mode_line(app, theme, field);
     }
     let mode_raw = mode_spans(app, eq, theme, field);
     let mode_focused = app.tone.row == ToneRow::Mode;

@@ -858,7 +858,7 @@ fn a_control_keyed_like_a_bridge_entity_is_a_load_error() {
                 }) => {
                     assert_eq!(named, key);
                     assert!(reason.contains("reserved"), "{reason}");
-                    assert!(reason.contains("MQTT bridge"), "{reason}");
+                    assert!(reason.contains("MQTT client"), "{reason}");
                 }
                 other => panic!("{key}: {other:?}"),
             }

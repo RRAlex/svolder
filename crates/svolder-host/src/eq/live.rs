@@ -17,6 +17,10 @@
 //! bit-exact: [`render_live_conf`] writes it so, and [`render_live_conf_with`] writes a given
 //! stage for a chain that cannot be set live.
 //!
+//! Between slot 16 and the crossfeed stage each channel holds the loudness stage, two first-order
+//! `bq_raw` sections (`ld1`, `ld2`). The config always holds them as the identity and no render
+//! parameter changes that; [`loudness_params`] sets them live.
+//!
 //! After the crossfeed stage a chain may hold the virtual speakers' stage: four `convolver`s
 //! (`vLL`, `vLR`, `vRL`, `vRR`, channels 0 to 3 of one WAV) and two mixers (`lvs`, `rvs`) that
 //! hold the dry sound (`Gain 1`) and the convolved one (`Gain 2` and `Gain 3`). Off is a bypass
@@ -150,8 +154,8 @@ pub(super) fn played_sets(correction: &Correction, rate_hz: u32) -> (Vec<[f64; 5
 
 /// Whether `[b0, b1, b2, a1, a2]` has its numerator equal to its denominator once rounded to
 /// f32 (a 0 dB filter): the identity whatever its poles. It is sent as the exact identity, so
-/// it is bit-exact however the chain's maths is compiled (a fused multiply-add leaves rounding
-/// error in poles near the unit circle).
+/// it is exactly the identity however the chain's maths is compiled (a fused multiply-add leaves
+/// rounding error in poles near the unit circle).
 fn is_identity(set: &[f64; 5]) -> bool {
     let [b0, b1, b2, a1, a2] = set.map(|c| c as f32);
     b0 == 1.0 && b1 == a1 && b2 == a2
@@ -190,6 +194,9 @@ fn stage_raw([b0, b1, b2, a1, a2]: [f64; 5]) -> [f64; 6] {
     [b0, b1, b2, 1.0, a1, a2]
 }
 
+/// A loudness section that changes nothing: what the config always holds.
+const LOUDNESS_IDENTITY: [f64; 5] = [1.0, 0.0, 0.0, 0.0, 0.0];
+
 /// The nodes of the crossfeed stage of `channel`, as the config writes them, holding `stage`.
 fn stage_nodes(channel: char, stage: &Stage, rate_hz: u32) -> String {
     let mut out = String::new();
@@ -221,11 +228,14 @@ fn stage_nodes(channel: char, stage: &Stage, rate_hz: u32) -> String {
     out
 }
 
-/// The links of the crossfeed stage of `channel`: its own channel's last slot feeds the direct
-/// and side paths, the other channel's feeds the cross path (the other channel's slot 16 so
-/// tees to this channel's cross node).
+/// The names of a channel's two loudness sections, between its last slot and the crossfeed stage.
+const LOUDNESS_NODES: [&str; 2] = ["ld1", "ld2"];
+
+/// The links of the crossfeed stage of `channel`: its own channel's loudness stage (the node
+/// after slot 16) feeds the direct and side paths, the other channel's feeds the cross path (the
+/// other channel's loudness stage so tees to this channel's cross node).
 fn stage_links(channel: char, other: char) -> String {
-    let last = format!("{SLOTS:02}");
+    let last = LOUDNESS_NODES[1];
     let mut out = String::new();
     for (from, to) in [
         (format!("{channel}{last}:Out"), format!("{channel}dir:In")),
@@ -281,8 +291,9 @@ fn preamp_node(channel: char, db: f64) -> String {
 }
 
 /// The complete PipeWire config of the live chain in front of the sink `target`, for `route`:
-/// the frame of [`render_conf`](super::render_conf) round a graph of `lpre → l01 … l16` and
-/// `rpre → r01 … r16`, the slots holding `points` (their coefficients worked out for a sink
+/// the frame of [`render_conf`](super::render_conf) round a graph of
+/// `lpre → l01 … l16 → lld1 → lld2` and `rpre → r01 … r16 → rld1 → rld2` (the last two the loudness
+/// stage, at the identity), the slots holding `points` (their coefficients worked out for a sink
 /// running at `rate_hz`), the preamp `preamp_db` and the crossfeed stage OFF (a bypass). The
 /// node is called [`NODE_NAME`].
 pub fn render_live_conf(
@@ -446,6 +457,19 @@ pub fn render_live_conf_full(
             );
             previous = name;
         }
+        for name in LOUDNESS_NODES {
+            let name = format!("{channel}{name}");
+            let _ = writeln!(
+                nodes,
+                "                    {}",
+                raw_node(&name, stage_raw(LOUDNESS_IDENTITY), rate_hz)
+            );
+            let _ = writeln!(
+                links,
+                "                    {{ output = \"{previous}:Out\" input = \"{name}:In\" }}"
+            );
+            previous = name;
+        }
     }
     for channel in CHANNELS {
         nodes.push_str(&stage_nodes(channel, stage, rate_hz));
@@ -529,6 +553,21 @@ pub fn crossfeed_params(stage: &Stage) -> Vec<(String, f64)> {
     params
 }
 
+/// The parameters that set the loudness stage to `stage` on both channels, in one `set-param`:
+/// the two sections' coefficients (`lld1:b0 … rld2:a2`, `a0` sent as 1). Each section is
+/// `[b0, b1, b2, a1, a2]`; both channels play the same stage.
+pub fn loudness_params(stage: &[[f64; 5]; 2]) -> Vec<(String, f64)> {
+    let mut params = Vec::new();
+    for channel in CHANNELS {
+        for (name, section) in LOUDNESS_NODES.iter().zip(stage) {
+            for (port, value) in RAW_PORTS.iter().zip(stage_raw(*section)) {
+                params.push((format!("{channel}{name}:{port}"), value));
+            }
+        }
+    }
+    params
+}
+
 /// The parameters that set the virtual speakers' stage on or off on both ears: the three gains
 /// of `lvs` and `rvs`. Off is the dry sound alone (1, 0, 0), on the convolved sound alone
 /// (0, 1, 1). Both are live: no rebuild.
@@ -587,6 +626,15 @@ impl LiveNode {
     /// and is rebuilt once when crossfeed is first turned on.
     pub fn has_crossfeed_controls(&self) -> bool {
         crossfeed_params(&Stage::bypass())
+            .iter()
+            .all(|(name, _)| self.params.contains_key(name))
+    }
+
+    /// Whether the node has the loudness stage's controls (every port [`loudness_params`]
+    /// lists). A chain built before the stage existed has the preamp's and the crossfeed's and
+    /// not these: it plays, and is rebuilt once when loudness is first turned on.
+    pub fn has_loudness_controls(&self) -> bool {
+        loudness_params(&[LOUDNESS_IDENTITY; 2])
             .iter()
             .all(|(name, _)| self.params.contains_key(name))
     }

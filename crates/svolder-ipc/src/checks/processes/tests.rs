@@ -253,10 +253,7 @@ fn a_process_of_this_users_wearing_the_daemons_name_is_found_on_the_socket_it_ho
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
 
-    let dir = crate::test_support::TempPath(
-        std::env::temp_dir().join(format!("svolder-processes-{}", std::process::id())),
-    );
-    std::fs::create_dir_all(&dir).expect("a directory for the socket");
+    let dir = crate::test_support::TempPath(crate::test_support::short_dir("svolder-processes"));
     let listening = dir.join("svolder.sock");
     let _ = std::fs::remove_file(&listening);
     let listener =

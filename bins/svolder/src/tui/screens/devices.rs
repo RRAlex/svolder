@@ -51,7 +51,7 @@ const GAP: usize = 2;
 const TITLE: &str = " Devices ";
 
 /// The words in the list's top border.
-const ACTIONS: [Action; 4] = [
+const ACTIONS: [Action; 5] = [
     Action {
         code: KeyCode::Char('n'),
         word: "new",
@@ -59,6 +59,10 @@ const ACTIONS: [Action; 4] = [
     Action {
         code: KeyCode::Char('u'),
         word: "update",
+    },
+    Action {
+        code: KeyCode::Char('b'),
+        word: "b identify",
     },
     Action {
         code: KeyCode::Char('x'),
@@ -86,7 +90,7 @@ const EDITOR_INNER_WIDTH: usize = (EDITOR_WIDTH - 2) as usize;
 /// the box's border leave of the row.
 const TYPED_ROOM: usize = EDITOR_INNER_WIDTH - CURSOR_WIDTH - FIELD - 1;
 /// What the editor says its keys are.
-const EDITOR_KEYS: [(&str, &str); 2] = [("Enter", "saves"), ("Esc", "cancels")];
+const EDITOR_KEYS: [(&str, &str); 3] = [("b", "identify"), ("Enter", "saves"), ("Esc", "cancels")];
 /// What answers the question a removal asks.
 const REMOVE_KEYS: [(&str, &str); 2] = [("Enter", "removes"), ("Esc", "cancels")];
 
@@ -382,10 +386,7 @@ fn draw_editor(
         .map(|(index, row)| {
             editor_line(*row, editor, index == editor.row, theme, EDITOR_INNER_WIDTH)
         })
-        .chain([
-            Line::default(),
-            widgets::surfaces::modal_keys(&EDITOR_KEYS, theme),
-        ])
+        .chain([Line::default(), editor_keys(editor, app, theme)])
         .collect();
     let height = u16::try_from(lines.len() + 2).unwrap_or(u16::MAX);
     let box_area = boxed(area, EDITOR_WIDTH, height);
@@ -407,6 +408,23 @@ fn draw_editor(
         }
     }
     box_area
+}
+
+/// The editor's line of keys. `b identify` is drawn faint, whole, where the key would not send
+/// an identify: in the Name row, which types the letter, and on a device whose profile offers
+/// none.
+fn editor_keys(editor: &DeviceEditor, app: &App, theme: &Theme) -> Line<'static> {
+    let line = widgets::surfaces::modal_keys(&EDITOR_KEYS, theme);
+    if editor.can_identify(app) {
+        return line;
+    }
+    let faint = theme.style(Role::Faint);
+    let mut spans = line.spans;
+    // After the leading blank, spans 1 and 2 are the `b` and ` identify` of the first entry.
+    for span in spans.iter_mut().skip(1).take(2) {
+        span.style = faint;
+    }
+    Line::from(spans)
 }
 
 /// One editor row: the cursor, the label, and what the row holds — the name being typed, the

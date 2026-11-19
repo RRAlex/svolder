@@ -154,6 +154,9 @@ impl App {
             {
                 return self.token_key(key);
             }
+            KeyCode::Enter if self.selected_setting() == Some(Setting::McpToken) => {
+                return self.token_key('v');
+            }
             KeyCode::Char(' ') | KeyCode::Enter => return self.toggle_setting(),
             KeyCode::Left => return self.step_setting(-1),
             KeyCode::Right => return self.step_setting(1),

@@ -8,11 +8,11 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use svolder_host::Button;
-use svolder_ipc::host::{PathLine, Verdict};
+use svolder_ipc::host::PathLine;
 use svolder_profiles::{Control, ControlKind, Placed};
 use svolder_proto::FunctionId;
 
-use crate::tui::app::{App, Reading, Side, row_group};
+use crate::tui::app::{App, Chip, Reading, Side, row_group};
 use crate::tui::audio_level::LevelFrom;
 use crate::tui::host::{self, HostRow};
 use crate::tui::layout_tier::Tier;
@@ -22,7 +22,7 @@ use crate::tui::widgets::graph::{self, Aggregate, Series, Shape};
 use crate::tui::widgets::rows::Columns;
 use crate::tui::widgets::{self, CURSOR_WIDTH, MISSING};
 
-use super::{cut_cells, row_style};
+use super::{cut_cells, path_line, row_style};
 use crate::tui::screens::switch;
 
 /// One row of the Controls pane: what it draws, and how it draws it.
@@ -56,6 +56,37 @@ pub(super) struct Controls {
     /// The interior line the switch is drawn on, over the Volume row's bar or as the Host
     /// group's Volume row, where there is one.
     pub(super) switch: Option<u16>,
+    /// Where the Path row landed, when the pane draws one.
+    pub(super) path: Option<PathDrawn>,
+    /// How many of the lines are the blanks that set the groups apart.
+    pub(super) blanks: usize,
+}
+
+/// Where the Path row landed in the Controls pane and how it was laid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PathDrawn {
+    /// The interior line the row starts on.
+    pub(super) top: u16,
+    /// How many lines it takes: more than one where it wrapped.
+    pub(super) height: u16,
+    /// Whether it wrapped onto continuation lines.
+    pub(super) wrapped: bool,
+    /// How many cells it runs past its room, where it is cut and scrolls.
+    pub(super) travel: Option<usize>,
+    /// Where the config chip landed, when the row wears one that is whole in sight.
+    pub(super) chip: Option<ChipAt>,
+}
+
+/// Where the config chip landed in the Path row: its line (0 is the row's first), the cell its
+/// words start on after the pane's cursor column, and their width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ChipAt {
+    /// The line of the row it is on.
+    pub(super) line: u16,
+    /// The first cell of its words, from the line's start before the cursor column.
+    pub(super) x: u16,
+    /// Its width in cells.
+    pub(super) width: u16,
 }
 
 /// The Controls pane: one row per control a user can set, then the meters the device
@@ -73,10 +104,25 @@ pub(super) fn controls_pane(
     tier: Tier,
     height: usize,
 ) -> Controls {
-    let spaced = controls_lines(app, theme, room, tier, true);
-    match spaced.lines.len() <= height {
-        true => spaced,
-        false => controls_lines(app, theme, room, tier, false),
+    // The pane is built once with the groups spaced and the path wrapped; the other layouts'
+    // heights follow from it (the blanks, the path's extra lines), so only the one chosen is
+    // built, if it is another. In the order of what is given up first: the blank lines between
+    // the groups, then the wrap (the path is cut and scrolls); a row is never lost.
+    let spaced = controls_lines(app, theme, room, tier, true, true);
+    let (lines, blanks) = (spaced.lines.len(), spaced.blanks);
+    let extra = spaced.path.map_or(0, |path| usize::from(path.height) - 1);
+    let wrapped = extra > 0;
+    if lines <= height {
+        return spaced;
+    }
+    match (wrapped, lines - blanks <= height, lines - extra <= height) {
+        // Packed still wraps the path.
+        (true, true, _) => controls_lines(app, theme, room, tier, false, true),
+        // Spaced, with the path cut.
+        (true, false, true) => controls_lines(app, theme, room, tier, true, false),
+        (true, false, false) => controls_lines(app, theme, room, tier, false, false),
+        // Nothing wrapped: packed is all there is to give up.
+        (false, _, _) => controls_lines(app, theme, room, tier, false, true),
     }
 }
 
@@ -86,13 +132,15 @@ fn spacing_group(control: &Control) -> (u8, bool) {
     (row_group(control), control.center.is_some())
 }
 
-/// The Controls pane's lines, its groups a blank line apart where `spaced`.
+/// The Controls pane's lines, its groups a blank line apart where `spaced`, and a Path row too
+/// long for its room wrapped onto continuation lines where `wrap` (else cut, and scrolled).
 pub(super) fn controls_lines(
     app: &App,
     theme: &Theme,
     room: usize,
     tier: Tier,
     spaced: bool,
+    wrap: bool,
 ) -> Controls {
     #[cfg(test)]
     crate::tui::test_support::work::tick("controls_lines");
@@ -118,6 +166,8 @@ pub(super) fn controls_lines(
         host: Vec::new(),
         spectrum: None,
         switch: None,
+        path: None,
+        blanks: 0,
     };
     // The row index a `Row`, `ToggleOf`, `Select…` or `Level` hit is keyed by: the position
     // among the writable rows only, the same order `App::rows` lists them in.
@@ -128,6 +178,7 @@ pub(super) fn controls_lines(
         let group = spacing_group(control);
         if spaced && last_group.is_some_and(|last| last != group) {
             pane.lines.push(Line::default());
+            pane.blanks += 1;
         }
         last_group = Some(group);
         let top = u16::try_from(pane.lines.len()).unwrap_or(u16::MAX);
@@ -152,7 +203,7 @@ pub(super) fn controls_lines(
             };
             let line = widgets::rows::with_cursor(line, focused && (n == 0 || switch), theme);
             // The switch line is not banded: the side shown is the box that stands out on it.
-            let banded = focused && !(switch && n == 0);
+            let banded = focused && !(switch && n == 0) && control.kind != ControlKind::Select;
             pane.lines.push(band(line, banded, row.stale, theme, room));
         }
         // Only the rows a user can set are rows a click can focus; the meters are a readout.
@@ -169,7 +220,14 @@ pub(super) fn controls_lines(
         meter_graphs(app, theme, room, &mut pane);
     }
     if app.host_shown() {
-        host_group(app, theme, columns, spaced, path.as_ref(), &mut pane);
+        host_group(
+            app,
+            theme,
+            columns,
+            (spaced, wrap),
+            path.as_ref(),
+            &mut pane,
+        );
         if spectrum {
             let (line, dim) = spectrum_line(app, theme, columns);
             let line = widgets::rows::with_cursor(line, false, theme);
@@ -213,7 +271,13 @@ fn row_lines(
         .or_else(|| app.eased_raw(control.id, app.now));
     match control.kind {
         ControlKind::Select => {
-            let line = widgets::rows::select_line(control, reading, theme, columns);
+            let line = widgets::rows::select_line(
+                control,
+                reading,
+                theme,
+                columns,
+                row.focused && !app.switch_focused(),
+            );
             if reading.and_then(Reading::raw_i64).is_some() {
                 let width = u16::try_from(line.width()).unwrap_or(0);
                 extras.push((top, CURSOR_OFFSET + field, 1, Hit::SelectPrev(index)));
@@ -465,12 +529,13 @@ fn host_group(
     app: &App,
     theme: &Theme,
     columns: Columns,
-    spaced: bool,
+    (spaced, wrap): (bool, bool),
     path: Option<&PathLine>,
     pane: &mut Controls,
 ) {
     if spaced {
         pane.lines.push(Line::default());
+        pane.blanks += 1;
     }
     pane.lines.push(Line::from(vec![
         Span::raw(" ".repeat(CURSOR_WIDTH)),
@@ -529,62 +594,169 @@ fn host_group(
         // On the device's side the Volume row is the switch line itself: it wears the cursor.
         let marked = focused || (on_switch && !app.on_computer());
         let line = widgets::rows::with_cursor(line, marked, theme);
+        // The Transport row is a choice among buttons: it takes no band, only its label and the
+        // button in force stand out.
+        let banded = focused && *row != HostRow::Transport;
         pane.lines
-            .push(band(line, focused, dim, theme, columns.room()));
+            .push(band(line, banded, dim, theme, columns.room()));
         pane.host.push(top);
         // The path is a reading under the transport it follows, which no key reaches.
         if let (HostRow::Transport, Some(path)) = (row, path) {
-            let (line, dim) = path_row(path, theme, columns);
-            let line = widgets::rows::with_cursor(line, false, theme);
-            pane.lines
-                .push(band(line, false, dim, theme, columns.room()));
+            let top = u16::try_from(pane.lines.len()).unwrap_or(u16::MAX);
+            let chip = app.path_chip();
+            let rows = path_rows(app, path, chip.as_ref(), theme, columns, wrap);
+            pane.path = Some(PathDrawn {
+                top,
+                height: u16::try_from(rows.lines.len()).unwrap_or(1),
+                wrapped: rows.wrapped,
+                travel: rows.travel,
+                chip: chip.and_then(|chip| chip_at(&rows.lines, &chip.words)),
+            });
+            for line in rows.lines {
+                let line = widgets::rows::with_cursor(line, false, theme);
+                pane.lines
+                    .push(band(line, false, false, theme, columns.room()));
+            }
         }
     }
 }
 
-/// Columns between the path's verdict and its hops.
-const PATH_GAP: &str = " · ";
-/// What joins one hop of the path to the next.
-const HOP_JOIN: &str = " → ";
+/// The Path row as the pane lays it out.
+struct PathRows {
+    /// The row's lines: one, or the continuation lines it wrapped onto.
+    lines: Vec<Line<'static>>,
+    /// Whether the row wrapped onto more than one line.
+    wrapped: bool,
+    /// How many cells the row's words run past its room, where it is cut and scrolls.
+    travel: Option<usize>,
+}
 
-/// The Path row, and whether it is drawn dim: the verdict first, in the colour of what it says,
-/// then each hop from the player to the DAC as its label and what is known of the signal there,
-/// the hop that changes the signal in the warning colour. The row is cut at its right edge, its
-/// tail replaced by `…`, wherever the words run out of room.
-pub(super) fn path_row(path: &PathLine, theme: &Theme, columns: Columns) -> (Line<'static>, bool) {
-    let verdict_role = match path.verdict {
-        Verdict::Untouched => Role::Good,
-        Verdict::Changed => Role::Warn,
-        Verdict::NotThisDac { .. } | Verdict::OtherInput { .. } | Verdict::Unknown => Role::Dim,
+/// The Path row in `columns`: on one line where the words fit; else, where `wrap` allows, on
+/// the fewest lines the hop separators break them into (three at most, a stage never broken),
+/// each continuation indented under the first line's words; else cut at the right edge. A cut
+/// row scrolls slowly past its room while the `scroll_long_lines` setting is on, from the
+/// offset the app holds, and ends in `…` while it is off.
+fn path_rows(
+    app: &App,
+    path: &PathLine,
+    chip: Option<&Chip>,
+    theme: &Theme,
+    columns: Columns,
+    wrap: bool,
+) -> PathRows {
+    let stages = path_line::stages_with(path, chip);
+    let room = columns.room().saturating_sub(columns.field());
+    let label = || widgets::rows::label(host::PATH, columns.field());
+    let one = |spans: Vec<Span<'static>>, travel| PathRows {
+        lines: vec![Line::from(
+            std::iter::once(label()).chain(spans).collect::<Vec<_>>(),
+        )],
+        wrapped: false,
+        travel,
     };
-    let mut parts = vec![(path.words_line(), theme.style(verdict_role))];
-    for (at, hop) in path.hops.iter().enumerate() {
-        let join = match at {
-            0 => PATH_GAP,
-            _ => HOP_JOIN,
-        };
-        let style = match hop.changes {
-            true => theme.style(Role::Warn),
-            false => theme.style(Role::Dim),
-        };
-        let words = match hop.detail.is_empty() {
-            true => hop.label.clone(),
-            false => format!("{} {}", hop.label, hop.detail),
-        };
-        parts.push((format!("{join}{words}"), style));
+    let width = path_line::full_width(&stages);
+    if width <= room {
+        return one(path_spans(&stages, theme, room), None);
     }
-    let mut room = columns.room().saturating_sub(columns.field());
-    let mut spans = vec![widgets::rows::label(host::PATH, columns.field())];
-    for (text, style) in parts {
-        let shown = cut_cells(&text, room);
+    if wrap && let Some(lines) = path_line::wrap(&stages, room, path_line::MAX_LINES) {
+        let lines = lines
+            .into_iter()
+            .enumerate()
+            .map(|(at, parts)| {
+                let lead = match at {
+                    0 => label(),
+                    _ => Span::raw(" ".repeat(columns.field())),
+                };
+                let words = parts
+                    .into_iter()
+                    .map(|(text, role)| Span::styled(text, theme.style(role)));
+                Line::from(std::iter::once(lead).chain(words).collect::<Vec<_>>())
+            })
+            .collect();
+        return PathRows {
+            lines,
+            wrapped: true,
+            travel: None,
+        };
+    }
+    if !app.tui.scroll_long_lines || room == 0 {
+        return one(path_spans(&stages, theme, room), None);
+    }
+    let travel = width - room;
+    let offset = usize::from(app.host.path_scroll.offset).min(travel);
+    one(
+        path_line::window(&stages, theme, offset, room),
+        Some(travel),
+    )
+}
+
+/// Where the chip's `words` stand in the lines of the Path row, when a span ends in them whole:
+/// the stage is one span, so a chip cut at the right edge or scrolled partly out is not found,
+/// and a click there reaches the row as it does elsewhere.
+pub(super) fn chip_at(lines: &[Line<'static>], words: &str) -> Option<ChipAt> {
+    let wide = widgets::text::cells(words);
+    for (at, line) in lines.iter().enumerate() {
+        let mut x = 0;
+        for span in &line.spans {
+            let width = span.width();
+            if span.content.ends_with(words)
+                && width <= wide + widgets::text::cells(path_line::PATH_GAP)
+            {
+                return Some(ChipAt {
+                    line: u16::try_from(at).ok()?,
+                    x: u16::try_from(x + width - wide).ok()?,
+                    width: u16::try_from(wide).ok()?,
+                });
+            }
+            x += width;
+        }
+    }
+    None
+}
+
+/// The stages of the path as spans cut to `room` cells, the tail replaced by `…` where the
+/// words run out of room.
+fn path_spans(stages: &[path_line::Stage], theme: &Theme, mut room: usize) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    // The verdict is cut so that the chip after it stays whole.
+    let chip_width = stages.iter().find(|stage| stage.chip).map_or(0, |stage| {
+        widgets::text::cells(&format!("{}{}", stage.join, stage.words))
+    });
+    for (at, stage) in stages.iter().enumerate() {
+        let text = format!("{}{}", stage.join, stage.words);
+        let keep = match (at, chip_width) {
+            (0, width) if width > 0 && room > width => width,
+            _ => 0,
+        };
+        let shown = cut_cells(&text, room - keep);
+        if keep > 0 && shown != text {
+            spans.push(Span::styled(shown, theme.style(stage.role)));
+            let chip = &stages[1];
+            spans.push(Span::styled(
+                format!("{}{}", chip.join, chip.words),
+                theme.style(chip.role),
+            ));
+            break;
+        }
         room = room.saturating_sub(widgets::text::cells(&shown));
         let cut = shown != text;
-        spans.push(Span::styled(shown, style));
+        spans.push(Span::styled(shown, theme.style(stage.role)));
         if cut {
             break;
         }
     }
-    (Line::from(spans), false)
+    spans
+}
+
+/// The Path row on one line, cut at its right edge, its tail replaced by `…`, wherever the words
+/// run out of room: the verdict first, in the colour of what it says, then each hop from the
+/// player to the DAC, the hop that changes the signal in the warning colour.
+#[cfg(test)]
+pub(super) fn path_row(path: &PathLine, theme: &Theme, columns: Columns) -> Line<'static> {
+    let room = columns.room().saturating_sub(columns.field());
+    let mut spans = vec![widgets::rows::label(host::PATH, columns.field())];
+    spans.extend(path_spans(&path_line::stages(path), theme, room));
+    Line::from(spans)
 }
 
 /// What the computer's volume row says `muted` with, after its bar.
@@ -725,7 +897,12 @@ fn transport_line(
     columns: Columns,
     focused: bool,
 ) -> (Line<'static>, Vec<(u16, u16)>) {
-    let mut spans = vec![widgets::rows::label(host::TRANSPORT, columns.field())];
+    // With the keys on the row only its label and the button under the cursor take the selected
+    // style, as the Target switch has it; the other buttons are dim.
+    let (head, lit, other) = switch::styles(theme, Style::default(), focused);
+    let mut label = widgets::rows::label(host::TRANSPORT, columns.field());
+    label.style = head;
+    let mut spans = vec![label];
     let mut at = columns.field();
     let mut buttons = Vec::with_capacity(host::GLYPHS.len());
     let last = host::GLYPHS.len() - 1;
@@ -734,13 +911,15 @@ fn transport_line(
             spans.push(Span::raw(" ".repeat(host::BUTTON_GAP)));
             at += host::BUTTON_GAP;
         }
-        let mut style = match app.host.lit() == Some(button) {
-            true => theme.style(Role::Cursor).add_modifier(Modifier::BOLD),
-            false => Style::default(),
+        let state = theme.style(Role::Cursor).add_modifier(Modifier::BOLD);
+        let style = match (app.host.lit() == Some(button), focused) {
+            // the cursor's button shows the selected box, even over the state's accent
+            (true, true) if app.host.button() == button => lit.add_modifier(Modifier::BOLD),
+            (true, _) => state,
+            (false, true) if app.host.button() == button => lit,
+            (false, true) => other,
+            (false, false) => Style::default(),
         };
-        if focused && app.host.button() == button {
-            style = style.remove_modifier(Modifier::REVERSED);
-        }
         let span = Span::styled(*glyph, style);
         let width = span.width();
         spans.push(span);

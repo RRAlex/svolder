@@ -22,6 +22,9 @@ use tokio::sync::broadcast;
 /// The id the scripted daemon gives the first job it starts.
 pub(crate) const FIRST_JOB: JobId = 31;
 
+/// How long a case waits on the daemon's side of a job: its start, a cancel.
+const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// How a job ends.
 #[derive(Clone)]
 enum Ending {
@@ -109,14 +112,18 @@ impl SpeakersScript {
         self.start_held.send_replace(false);
     }
 
-    /// Wait until a job has been made.
+    /// Wait until a job has been made; a case fails, rather than hangs, if none is within 5 s.
     pub(crate) async fn job_started(&self) {
-        self.started.notified().await;
+        tokio::time::timeout(WAIT, self.started.notified())
+            .await
+            .expect("a job was made on the stub daemon within 5 s");
     }
 
-    /// Wait until a cancel has arrived.
+    /// Wait until a cancel has arrived; a case fails, rather than hangs, if none does within 5 s.
     pub(crate) async fn cancel_arrived(&self) {
-        self.cancel_seen.notified().await;
+        tokio::time::timeout(WAIT, self.cancel_seen.notified())
+            .await
+            .expect("a cancel arrived at the stub daemon within 5 s");
     }
 
     /// The catalogue says whether the daemon can fetch.
@@ -282,3 +289,5 @@ pub(crate) fn set(id: &str, room: svolder_ipc::SpeakersRoom) -> SpeakersSet {
         cut: false,
     }
 }
+
+mod tests;

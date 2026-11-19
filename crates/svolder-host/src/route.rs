@@ -26,6 +26,15 @@ use serde_json::Value;
 use crate::eq::NODE_NAME;
 use crate::sink::output_within;
 
+mod asound;
+mod setup;
+
+pub use asound::{ASOUND_DIR_ENV, Asound, fill_alsa, hw_state, kernel_offer};
+pub use setup::{
+    AlsaFacts, ClockFacts, Dither, HwParams, HwState, KernelOffer, Layout, Rates, SetupFacts,
+    SinkOffer,
+};
+
 /// The environment variable naming the `pw-dump` to run, for [`PwDump::from_env`]; unset or
 /// empty, it is `pw-dump` on `PATH`.
 pub const PW_DUMP_ENV: &str = "SVOLDER_PW_DUMP";
@@ -122,6 +131,15 @@ fn lenient_match<'de, D: serde::Deserializer<'de>>(
     Ok(PlayerMatch::deserialize(value).unwrap_or(PlayerMatch::NotFound))
 }
 
+/// A [`SetupFacts`] from the wire, with one this build cannot read dropped to `None` so the
+/// rest of a newer daemon's facts still decode.
+fn lenient_setup<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<SetupFacts>, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    Ok(Option::<SetupFacts>::deserialize(value).ok().flatten())
+}
+
 /// What the dump says about the route from the followed player to the default sink.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -147,6 +165,14 @@ pub struct RouteFacts {
     /// Which stages of that chain play, when the daemon's EQ view told: `None` where only the
     /// route was read (the chain is then just "on"). The route alone cannot tell them apart.
     pub stages: Option<ChainStages>,
+    /// What the dump says of the PipeWire setup between the player and the sink (see
+    /// [`SetupFacts`]); `None` from an older svolderd, or when what was sent does not decode (a
+    /// newer one): its checks are then skipped, never guessed.
+    #[serde(
+        deserialize_with = "lenient_setup",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub setup: Option<SetupFacts>,
 }
 
 /// Which stages of the computer's filter chain change the sound.
@@ -155,6 +181,8 @@ pub struct RouteFacts {
 pub struct ChainStages {
     /// The EQ points are in use.
     pub eq: bool,
+    /// The loudness stage cuts: it is on and the computer's volume is under its reference.
+    pub loudness: bool,
     /// The crossfeed plays.
     pub crossfeed: bool,
     /// The virtual speakers play.
@@ -164,19 +192,26 @@ pub struct ChainStages {
 impl ChainStages {
     /// The stages the computer's EQ view says are on; `None` when the view cannot vouch for them
     /// (the controls are unavailable, an older svolder's chain, or no stage on and no word that
-    /// the chain is a kept pass-through), so the line says only that a chain is on.
+    /// the chain is a kept pass-through or runs for loudness), so the line says only that a chain
+    /// is on. A chain that runs for loudness while the volume is at its reference changes nothing:
+    /// it is told as a pass-through.
     pub fn of_view(view: &crate::eq::EqView) -> Option<Self> {
         use crate::eq::{LEGACY_NOTE, PASSTHROUGH_NOTE};
         if view.unavailable.is_some() || view.note.as_deref() == Some(LEGACY_NOTE) {
             return None;
         }
+        let loudness_on = view
+            .loudness
+            .as_ref()
+            .is_some_and(|ld| ld.on && ld.unavailable.is_none());
         let stages = Self {
             eq: view.on,
+            loudness: loudness_on && view.loudness.as_ref().is_some_and(|ld| ld.depth_db > 0.0),
             crossfeed: view.crossfeed.as_ref().is_some_and(|xf| xf.on),
             speakers: view.speakers.as_ref().is_some_and(|sp| sp.on),
         };
-        let any = stages.eq || stages.crossfeed || stages.speakers;
-        (any || view.note.as_deref() == Some(PASSTHROUGH_NOTE)).then_some(stages)
+        let any = stages.eq || stages.loudness || stages.crossfeed || stages.speakers;
+        (any || loudness_on || view.note.as_deref() == Some(PASSTHROUGH_NOTE)).then_some(stages)
     }
 }
 
@@ -238,6 +273,35 @@ pub fn route(dump: &str, player_pid: Option<u32>, player_identity: &str) -> Opti
 const SINK_CLASS: &str = "Audio/Sink";
 const STREAM_CLASS: &str = "Stream/Output/Audio";
 
+/// The computer's volume and mute as the graph holds them: what the signal is given by the
+/// sink and, while the computer EQ's chain is in the path, by the chain's node too.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SinkLevel {
+    /// The linear gain (1.0 is full): the master `volume` times the lowest channel volume of the
+    /// sink, times the chain node's. PipeWire reports the cube of the scale `wpctl` prints.
+    pub linear: f64,
+    /// Whether the sink, or the chain node in the path, is muted, hard or soft.
+    pub muted: bool,
+}
+
+/// The computer's volume and mute read out of `dump` (`pw-dump`'s output), as the route line
+/// reads them: the default sink's (the one behind the chain when the chain is the default),
+/// times the chain node's while that node feeds the sink, in either route. `None` when `dump`
+/// is not a JSON array, names no sink, or no node in the path reports a channel volume.
+pub fn computer_level(dump: &str) -> Option<SinkLevel> {
+    let objects: Vec<Value> = serde_json::from_str(dump).ok()?;
+    Graph::new(&objects).level()
+}
+
+/// The sink a route ends in and the computer EQ's nodes round it.
+struct Ends<'a> {
+    sink: Option<&'a Value>,
+    filter_in: Option<&'a Value>,
+    filter_out: Option<&'a Value>,
+    /// Whether the chain's output stream is linked into `sink`.
+    filter_feeds: bool,
+}
+
 /// The objects of a dump that a route reads, indexed by id.
 struct Graph<'a> {
     nodes: Vec<&'a Value>,
@@ -247,6 +311,8 @@ struct Graph<'a> {
     links: Vec<(u64, u64)>,
     /// The `name` of the default audio sink.
     default_sink: Option<String>,
+    /// The clock the `settings` metadata gives.
+    clock: Option<ClockFacts>,
 }
 
 impl<'a> Graph<'a> {
@@ -257,6 +323,7 @@ impl<'a> Graph<'a> {
             devices: HashMap::new(),
             links: Vec::new(),
             default_sink: None,
+            clock: None,
         };
         for object in objects {
             let Some(id) = object.get("id").and_then(Value::as_u64) else {
@@ -291,13 +358,24 @@ impl<'a> Graph<'a> {
         }
     }
 
-    /// Remembers the default audio sink's name when `metadata` is the `default` one.
+    /// Remembers the default audio sink's name when `metadata` is the `default` one, and the
+    /// clock when it is `settings`.
     fn add_metadata(&mut self, metadata: &Value) {
-        if metadata["props"]["metadata.name"].as_str() != Some("default") {
-            return;
+        let entries = metadata["metadata"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice);
+        match metadata["props"]["metadata.name"].as_str() {
+            Some("default") => {}
+            Some("settings") => {
+                self.clock = setup::clock_of(entries);
+                return;
+            }
+            _ => return,
         }
-        let entries = metadata["metadata"].as_array().into_iter().flatten();
-        for entry in entries.filter(|entry| entry["key"].as_str() == Some("default.audio.sink")) {
+        for entry in entries
+            .iter()
+            .filter(|entry| entry["key"].as_str() == Some("default.audio.sink"))
+        {
             // The value is JSON, already parsed by pw-dump, or still a string of it.
             let name = match &entry["value"] {
                 Value::String(text) => serde_json::from_str::<Value>(text)
@@ -347,7 +425,9 @@ impl<'a> Graph<'a> {
         }
     }
 
-    fn facts(&self, player_pid: Option<u32>, identity: &str) -> RouteFacts {
+    /// Where the sound ends: the sink the default leads to (the one behind the chain when the
+    /// chain is the default), the computer EQ's nodes and whether its output feeds that sink.
+    fn ends(&self) -> Ends<'a> {
         let filter_in = self.node_named(NODE_NAME, SINK_CLASS);
         let filter_out = self.node_named(&format!("{NODE_NAME}.output"), STREAM_CLASS);
         let default = self
@@ -362,12 +442,35 @@ impl<'a> Graph<'a> {
             (Some(default), Some(filter), None) if same(default, filter) => None,
             (default, ..) => default,
         };
-        let sink_id = sink.and_then(node_id);
-        let filter_id = filter_in.and_then(node_id);
-        let filter_feeds = match (filter_out.and_then(node_id), sink_id) {
+        let filter_feeds = match (filter_out.and_then(node_id), sink.and_then(node_id)) {
             (Some(output), Some(sink)) => self.linked(output, sink),
             _ => false,
         };
+        Ends {
+            sink,
+            filter_in,
+            filter_out,
+            filter_feeds,
+        }
+    }
+
+    /// The computer's volume and mute: the sink's, times the computer EQ's node's while that
+    /// node feeds the sink (the same reading the route's `volume_milli` and `muted` make).
+    fn level(&self) -> Option<SinkLevel> {
+        let ends = self.ends();
+        let filter = ends.filter_in.filter(|_| ends.filter_feeds);
+        level_of(ends.sink?, filter)
+    }
+
+    fn facts(&self, player_pid: Option<u32>, identity: &str) -> RouteFacts {
+        let Ends {
+            sink,
+            filter_in,
+            filter_out,
+            filter_feeds,
+        } = self.ends();
+        let sink_id = sink.and_then(node_id);
+        let filter_id = filter_in.and_then(node_id);
         let filter_id = filter_id.filter(|_| filter_feeds);
 
         let streams: Vec<Stream> = self
@@ -419,6 +522,11 @@ impl<'a> Graph<'a> {
             others_mixing: u32::try_from(others_mixing).unwrap_or(u32::MAX),
             host_eq,
             stages: None,
+            setup: Some(setup::read(
+                sink,
+                chosen.map(|stream| stream.node),
+                self.clock.clone(),
+            )),
         }
     }
 
@@ -610,6 +718,20 @@ fn apply_filter(facts: &mut SinkFacts, sink: Option<&Value>, filter: &Value) {
         facts.volume_milli = Some(milli_of(sink_volume * filter_volume));
     }
     facts.muted |= muted(filter);
+}
+
+/// The level of `sink`, with the chain node `filter` counted when it is in the path: a node
+/// without channel volumes counts as full.
+fn level_of(sink: &Value, filter: Option<&Value>) -> Option<SinkLevel> {
+    let volumes = (linear_volume(sink), filter.and_then(linear_volume));
+    let linear = match volumes {
+        (None, None) => return None,
+        (sink, filter) => sink.unwrap_or(1.0) * filter.unwrap_or(1.0),
+    };
+    Some(SinkLevel {
+        linear,
+        muted: muted(sink) || filter.is_some_and(muted),
+    })
 }
 
 fn same(a: &Value, b: &Value) -> bool {

@@ -274,6 +274,7 @@ fn the_table_lists_the_keys_in_template_order() {
             "theme_background",
             "mouse",
             "tooltips",
+            "scroll_long_lines",
             "intro",
             "intro_effect",
             "intro_sound",

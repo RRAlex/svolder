@@ -6,7 +6,7 @@ use crate::writer::Glided;
 use svolder_ipc::{CODE_LINK, CODE_USAGE, Reason};
 
 /// A daemon with no devices over the fake transport, whose socket and files are paths
-/// nothing reads: only its MQTT bridge is asked about.
+/// nothing reads: only its MQTT client is asked about.
 pub(super) fn daemon() -> Daemon {
     let registry = Arc::new(Registry::builtin().expect("the built-in profiles load"));
     let profile = registry.get("gungnir2-v2").expect("a built-in").clone();

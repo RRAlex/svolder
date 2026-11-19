@@ -14,7 +14,7 @@ use crate::commands::daemon::POLL;
 use crate::commands::daemon::test_support::{
     FakeDaemon, Tools, a_daemon_on, installed_units, no_units, shown_units, stopped_units, units_in,
 };
-use crate::test_support::temp_dir;
+use crate::test_support::short_dir;
 
 /// A host with no daemon to start, for a case that must not start one.
 struct NoDaemon(PathBuf);
@@ -45,7 +45,7 @@ impl Host for NoDaemon {
 /// listens on the socket in hand.
 #[tokio::test]
 async fn stop_and_restart_ask_systemd_where_it_manages_the_daemon() {
-    let dir = temp_dir("daemon-stop");
+    let dir = short_dir("daemon-stop");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&installed_units(&socket.display().to_string()));
 
@@ -73,7 +73,7 @@ async fn stop_and_restart_ask_systemd_where_it_manages_the_daemon() {
 #[tokio::test]
 async fn stop_asks_the_daemon_on_a_socket_the_unit_does_not_listen_on() {
     let tools = Tools::new(&installed_units("/run/user/1000/svolder.sock"));
-    let dir = temp_dir("daemon-stop-elsewhere");
+    let dir = short_dir("daemon-stop-elsewhere");
     let socket = dir.0.join("svolder.sock");
     let served = a_daemon_on(&socket).await;
 
@@ -98,7 +98,7 @@ async fn stop_asks_the_daemon_on_a_socket_the_unit_does_not_listen_on() {
 #[tokio::test]
 async fn stop_without_systemd_asks_the_daemon_and_takes_no_for_an_answer() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-stop-bare");
+    let dir = short_dir("daemon-stop-bare");
     let socket = dir.0.join("svolder.sock");
 
     stop_on(&tools.ctl(), &socket)
@@ -141,7 +141,7 @@ async fn stop_without_systemd_asks_the_daemon_and_takes_no_for_an_answer() {
 #[tokio::test]
 async fn restart_without_systemd_starts_a_daemon_and_names_the_log_when_it_cannot() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-restart-bare");
+    let dir = short_dir("daemon-restart-bare");
     let socket = dir.0.join("svolder.sock");
 
     let failure = restart_on(&tools.ctl(), &NoDaemon(dir.0.clone()), &socket, false)
@@ -168,7 +168,7 @@ fn inactive_service_units(listen: &str) -> String {
 #[tokio::test]
 async fn restart_if_running_with_nothing_running_does_nothing() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-restart-if-none");
+    let dir = short_dir("daemon-restart-if-none");
     let socket = dir.0.join("svolder.sock");
 
     restart_on(&tools.ctl(), &NoDaemon(dir.0.clone()), &socket, true)
@@ -187,7 +187,7 @@ async fn restart_if_running_with_nothing_running_does_nothing() {
 /// for nothing.
 #[tokio::test]
 async fn restart_if_running_leaves_a_stopped_service_alone() {
-    let dir = temp_dir("daemon-restart-if-inactive");
+    let dir = short_dir("daemon-restart-if-inactive");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&inactive_service_units(&socket.display().to_string()));
 
@@ -202,7 +202,7 @@ async fn restart_if_running_leaves_a_stopped_service_alone() {
 /// started again, as without units.
 #[tokio::test]
 async fn restart_if_running_with_stopped_units_restarts_a_daemon_that_answers() {
-    let dir = temp_dir("daemon-restart-if-stopped-units");
+    let dir = short_dir("daemon-restart-if-stopped-units");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&stopped_units(&socket.display().to_string()));
     let served = a_daemon_on(&socket).await;
@@ -223,7 +223,7 @@ async fn restart_if_running_with_stopped_units_restarts_a_daemon_that_answers() 
 /// With both units installed and stopped and no daemon answering, nothing is restarted.
 #[tokio::test]
 async fn restart_if_running_with_stopped_units_and_no_daemon_does_nothing() {
-    let dir = temp_dir("daemon-restart-if-stopped-none");
+    let dir = short_dir("daemon-restart-if-stopped-none");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&stopped_units(&socket.display().to_string()));
 
@@ -238,7 +238,7 @@ async fn restart_if_running_with_stopped_units_and_no_daemon_does_nothing() {
 /// With the service active, `--if-running` restarts it through systemd.
 #[tokio::test]
 async fn restart_if_running_restarts_an_active_service() {
-    let dir = temp_dir("daemon-restart-if-active");
+    let dir = short_dir("daemon-restart-if-active");
     let socket = dir.0.join("svolder.sock");
     let tools = Tools::new(&installed_units(&socket.display().to_string()));
 
@@ -262,7 +262,7 @@ async fn restart_if_running_restarts_an_active_service() {
 #[tokio::test]
 async fn restart_if_running_restarts_a_daemon_that_answers() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-restart-if-answers");
+    let dir = short_dir("daemon-restart-if-answers");
     let socket = dir.0.join("svolder.sock");
     let served = a_daemon_on(&socket).await;
 
@@ -300,7 +300,7 @@ fn hold_the_lock(socket: &Path, hold: Duration) -> std::thread::JoinHandle<()> {
 #[tokio::test]
 async fn restart_waits_for_the_old_daemon_to_release_its_lock() {
     let tools = Tools::new(&no_units());
-    let dir = temp_dir("daemon-restart-lock");
+    let dir = short_dir("daemon-restart-lock");
     let socket = dir.0.join("svolder.sock");
     let served = a_daemon_on(&socket).await;
     let hold = Duration::from_millis(600);
@@ -321,7 +321,7 @@ async fn restart_waits_for_the_old_daemon_to_release_its_lock() {
 /// With the lock held past the bound, the wait ends and says so rather than hanging.
 #[tokio::test]
 async fn waiting_for_the_old_daemon_gives_up_at_its_bound() {
-    let dir = temp_dir("daemon-lock-bound");
+    let dir = short_dir("daemon-lock-bound");
     let socket = dir.0.join("svolder.sock");
     let holder = hold_the_lock(&socket, Duration::from_millis(500));
     assert!(!wait_for_the_old_daemon_to_exit(&socket, Duration::from_millis(100)).await);
@@ -335,7 +335,7 @@ async fn waiting_for_the_old_daemon_gives_up_at_its_bound() {
 /// A stop of a spawned daemon whose lock stays held fails, with the failure naming the wait.
 #[tokio::test]
 async fn stop_spawned_fails_with_one_error_when_the_lock_stays_held() {
-    let dir = temp_dir("daemon-stop-spawned-lock");
+    let dir = short_dir("daemon-stop-spawned-lock");
     let socket = dir.0.join("svolder.sock");
     let served = a_daemon_on(&socket).await;
     let holder = hold_the_lock(&socket, Duration::from_millis(600));
@@ -354,7 +354,7 @@ async fn stop_spawned_fails_with_one_error_when_the_lock_stays_held() {
 #[tokio::test]
 async fn restart_if_running_restarts_a_service_that_is_starting_or_reloading() {
     for state in ["activating", "reloading"] {
-        let dir = temp_dir(&format!("daemon-restart-if-{state}"));
+        let dir = short_dir(&format!("daemon-restart-if-{state}"));
         let socket = dir.0.join("svolder.sock");
         let tools = Tools::new(&units_in(&socket.display().to_string(), "active", state));
         restart_on(&tools.ctl(), &NoDaemon(dir.0.clone()), &socket, true)

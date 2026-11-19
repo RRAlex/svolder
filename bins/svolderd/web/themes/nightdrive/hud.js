@@ -21,7 +21,7 @@ function inputAndRate(device) {
 
 /** The path's words that name a stage of the computer's filter chain: the words `chain_words` in
  * crates/svolder-ipc/src/host/path.rs gives them; change both together. */
-const STAGE_WORDS = ['host EQ on', 'crossfeed on', 'virtual speakers on', 'EQ pass-through'];
+const STAGE_WORDS = ['host EQ on', 'loudness on', 'crossfeed on', 'virtual speakers on', 'EQ pass-through'];
 
 /** The words of the DAC hop's detail that name the DAC's own stage: the words `DacStage::hop_words` in
  * crates/svolder-ipc/src/host/path.rs gives them (a volume reads `volume -3.3 dB`); change both together. */
@@ -45,14 +45,14 @@ function verdictOf(page) {
 }
 
 /** What the computer does to the sound, in words, and whether it is worth the amber: the stages of the
- * filter chain the path names (`host EQ on`, `crossfeed on`, ...; the route's host EQ with the fixed
+ * filter chain the path names (`host EQ on`, `loudness on`, `crossfeed on`, ...; the route's host EQ with the fixed
  * words when the path has none), and the path's flag for the computer. */
 function computerVerdict(page) {
   const hop = page?.device?.playing?.path?.hops?.find((h) => h.label === 'computer');
   const eq = page?.host?.route?.host_eq === true;
   const changes = hop ? hop.changes === true : eq;
   if (eq) {
-    const said = String(page?.device?.playing?.path?.words ?? '').split(' · ').filter((w) => STAGE_WORDS.includes(w));
+    const said = (page?.device?.playing?.path?.words ?? []).filter((w) => STAGE_WORDS.includes(w));
     const stage = said.length ? said.join(' · ') : HUD.hostEq;
     return { words: changes ? `${stage} · ${HUD.changes}` : stage, tone: changes ? 'warn' : null };
   }

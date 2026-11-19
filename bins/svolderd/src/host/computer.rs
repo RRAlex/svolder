@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::Shared;
-use svolder_host::eq::{EqControl, EqView, Keep, PwCliSession};
+use svolder_host::eq::{EqControl, EqView, Keep, LevelHint, PwCliSession};
 use svolder_host::{Sink, SinkState};
 use svolder_ipc::HostEqOp;
 use svolder_ipc::host::{HostVolume, run_eq_op};
@@ -125,6 +125,8 @@ struct VolumeWrites {
 struct Eq {
     control: Arc<Mutex<EqControl>>,
     view: watch::Receiver<EqView>,
+    /// Where a volume write puts what it read back, for the loudness: never behind the lock.
+    hint: LevelHint,
 }
 
 impl Computer {
@@ -136,6 +138,7 @@ impl Computer {
             sink,
             eq: eq.map(|control| Eq {
                 view: control.watcher(),
+                hint: control.level_hint(),
                 control: Arc::new(Mutex::new(control)),
             }),
         }
@@ -162,6 +165,11 @@ impl Computer {
                     Box::new(session),
                     Keep::File(svolder_ipc::config::host_eq_state_path()),
                 );
+                if let Some(why) = control.settings_unread() {
+                    crate::log::warn(&format!(
+                        "host: ignoring the kept computer EQ settings: {why}"
+                    ));
+                }
                 match speakers {
                     Some(store) => control.with_speakers(store),
                     None => control,
@@ -265,11 +273,18 @@ impl Computer {
             .map_err(|why| format!("{UNAVAILABLE}: {why}"))
     }
 
+    /// Read the sink after a write, and hand the controller's loudness what it read: the
+    /// controller takes it on its next tick, and the write never waits for its lock (a tick holds
+    /// it through a `pw-dump`).
     async fn read_back(&self, sink: &Arc<dyn Sink>) -> Result<HostVolume, String> {
-        sink.read()
+        let state = sink
+            .read()
             .await
-            .map(volume_of)
-            .ok_or_else(|| "the computer's sound could not be read back".to_string())
+            .ok_or_else(|| "the computer's sound could not be read back".to_string())?;
+        if let Ok(eq) = &self.eq {
+            eq.hint.volume(f64::from(state.volume), state.muted);
+        }
+        Ok(volume_of(state))
     }
 
     fn control(&self) -> Result<&Arc<Mutex<EqControl>>, String> {
@@ -298,7 +313,8 @@ impl Computer {
     }
 
     /// Stop the computer's controls gracefully: the crossfeed turns off (and a chain that ran for
-    /// it alone is removed) before the controller goes.
+    /// it alone is removed), and the loudness stage is sent flat with its chain kept, before the
+    /// controller goes.
     pub(crate) async fn shutdown(&self) {
         if let Ok(control) = self.control() {
             control.lock().await.shutdown().await;

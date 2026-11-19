@@ -12,6 +12,7 @@ import sys
 import urllib.request
 
 import common
+import parts
 
 HARD_SECS = 6  # how long the same place is stroked hard and pressed (s)
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
@@ -20,8 +21,10 @@ passed = 0
 shown = 0
 
 
-def check(name, cond, detail=''):
+def check(name, cond, detail='', timing=False):
     global passed
+    if not parts.counts(timing):
+        return
     if cond:
         passed += 1
         print('ok  ', name)
@@ -269,6 +272,27 @@ def dot_of(b):
                 " return [g.cx + g.radius * Math.sin(a), g.cy - g.radius * Math.cos(a)]; })()")
 
 
+def pause_case(b):
+    """Coalesced moves 12 ms apart count their pushes, a pause of 300 ms between two moves starts a
+    fresh stroke and the next move after 20 ms pushes: the page's own clock against the browser's
+    event times (the timing part)."""
+    n0 = splats(b, 'pointer')
+    pg(b, 'window.__coal(77, 4, 12)')
+    b.sleep(0.4)
+    n1 = splats(b, 'pointer')
+    check('a pointermove with 4 coalesced events counts 3 pushes (the first has no earlier '
+          'move to measure from)', n1 - n0 == 3, [n0, n1], timing=True)
+    n2 = pg(b, '''(async () => {
+      const at = () => window.__st().splats.pointer, mv = window.__mv, s = window.__sleep;
+      const c0 = at();
+      window.dispatchEvent(mv(79, 100, 600)); await s(300);
+      window.dispatchEvent(mv(79, 200, 600)); await s(20);
+      window.dispatchEvent(mv(79, 215, 600)); await s(150);
+      return at() - c0; })()''')
+    check('a pause of 300 ms between two moves starts a fresh stroke (no push), the next move '
+          'after 20 ms does push (one push in all)', n2 == 1, n2, timing=True)
+
+
 def run():
     dac = common.Daemon('gungnir2-v2')
     two = common.Daemon('gungnir2-v2', more=[('Second', '1112131415161718')])
@@ -276,6 +300,9 @@ def run():
     try:
         # ---- the pointer: velocity always, dye only when pressed
         load(b, dac.url)
+        if not parts.part_has('logic'):
+            pause_case(b)
+            return
         s0 = stats(b)
         check('the handle reports its splat counts (stats().splats)', 'splats' in s0, s0)
         cx, cy, r = dial(b)
@@ -346,23 +373,9 @@ def run():
         # burst in one frame is bounded
         def pointer_splats():
             return splats(b, 'pointer')
-        n0 = pointer_splats()
-        pg(b, 'window.__coal(77, 4, 12)')
-        b.sleep(0.4)
-        n1 = pointer_splats()
-        check('a pointermove with 4 coalesced events counts 3 pushes (the first has no earlier '
-              'move to measure from)', n1 - n0 == 3, [n0, n1])
-        n2 = pg(b, '''(async () => {
-          const at = () => window.__st().splats.pointer, mv = window.__mv, s = window.__sleep;
-          const c0 = at();
-          window.dispatchEvent(mv(79, 100, 600)); await s(300);
-          window.dispatchEvent(mv(79, 200, 600)); await s(20);
-          window.dispatchEvent(mv(79, 215, 600)); await s(150);
-          return at() - c0; })()''')
+        if parts.part_has('timing'):
+            pause_case(b)
         n3 = pointer_splats()
-        n2, n1 = n2, 0
-        check('a pause of 300 ms between two moves starts a fresh stroke (no push), the next move '
-              'after 20 ms does push (one push in all)', n2 == 1, n2)
         pg(b, 'window.__coal(80, 60, 3)')
         b.sleep(0.5)
         n4 = pointer_splats()
@@ -725,5 +738,5 @@ def run():
 
 
 run()
-print(f'sources.py {browser}: {passed} passed, {len(fails)} failed')
+print(f'sources.py {browser}{parts.part_tag()}: {passed} passed, {len(fails)} failed')
 sys.exit(1 if fails else 0)

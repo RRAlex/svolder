@@ -194,8 +194,17 @@ const ENV_VARS: &[EnvVar] = &[
         dev_only: true,
         what: "With `SVOLDER_HOST=fake`, `changed` makes the fake route alter the signal in every \
                way a route can (the player at 91 % and 44.1 kHz into a sink at 48 kHz and 54 %, \
-               the host EQ on, two other sounds mixing), so a check can see a changed path \
-               line. Unset by default: the route is untouched.",
+               the host EQ on, two other sounds mixing, a 16-bit sink under a 32-bit stream and \
+               triangular dither), so a check can see a changed path line and a failing config. \
+               Unset by default: the route is untouched.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_CONFIG",
+        read_by: "svolderd",
+        dev_only: true,
+        what: "With `SVOLDER_HOST=fake`, `fail` gives the fake route a PipeWire config that fails \
+               the rates, forced rate and filter lines of the config check, so a check can see \
+               the failing lines. Unset by default: every line passes.",
     },
     EnvVar {
         name: "SVOLDER_FAKE_CAPTURE",
@@ -264,10 +273,10 @@ const ENV_VARS: &[EnvVar] = &[
         name: "SVOLDER_MQTT_ENABLED",
         read_by: "svolder, svolderd",
         dev_only: false,
-        what: "Whether the MQTT bridge runs when `config.toml` has no `[mqtt] enabled` key (an \
+        what: "Whether the MQTT client runs when `config.toml` has no `[mqtt] enabled` key (an \
                `enabled` in the file wins): `1` turns it on, `0` leaves it off; `true`, `false`, \
                `yes`, `no`, `on` and `off` are read too, and another value is refused by name. \
-               The bridge also needs a host. Unset by default, which is off; an empty value \
+               The MQTT client also needs a host. Unset by default, which is off; an empty value \
                counts as unset.",
     },
     EnvVar {
@@ -455,13 +464,27 @@ const ENV_VARS: &[EnvVar] = &[
     },
     EnvVar {
         name: "SVOLDER_PW_DUMP",
-        read_by: "svolderd",
+        read_by: "svolder, svolderd",
         dev_only: true,
-        what: "The `pw-dump` binary the daemon reads the PipeWire graph through, to find the \
-               default sink, the followed player's stream and what else plays into the sink; \
-               it is run read-only, only while a front end that shows the path is connected \
-               (a `subscribe` that asked for the host, the event stream of a DAC's web page), \
-               once at once and then every two seconds. Default `pw-dump` on `PATH`.",
+        what: "The `pw-dump` binary svolderd and the CLI and TUI read the PipeWire graph \
+               through, to find the default sink, the followed player's stream, what else plays \
+               into the sink and the PipeWire config's settings; it is run read-only. The daemon \
+               reads it at once and then every two seconds while a front end that shows the \
+               path is connected (a `subscribe` that asked for the host, the event stream of a \
+               DAC's web page), every 30 s for a client that only publishes (MQTT), and once for \
+               a one-shot `host` request (`svolder host check`, `svolder doctor`, MCP `get_host`, \
+               a script); `svolder host check` with `--player`, or with no daemon, reads it \
+               itself, once, and a TUI with no daemon every two seconds \
+               while its PipeWire config box is open. Default `pw-dump` on `PATH`.",
+    },
+    EnvVar {
+        name: "SVOLDER_ASOUND_DIR",
+        read_by: "svolder, svolderd",
+        dev_only: true,
+        what: "A directory read in place of `/proc/asound` for the sound card's facts (the \
+               formats `cardN/streamD` offers and the `cardN/pcmDp/subS/hw_params` of the \
+               playing device's substream), so a test gives the PipeWire config check a card's \
+               files of its own. The files are only read. Default `/proc/asound`.",
     },
     EnvVar {
         name: "SVOLDER_PW_CLI",
@@ -523,6 +546,28 @@ const ENV_VARS: &[EnvVar] = &[
         what: "Set to anything, a single preamp-lab sequence (a `holds` case, `lab_trace`) gives \
                every other new node the id of the node gone before it, as PipeWire may. The \
                blocks of seeds (the short runs and `make preamp-lab`) run both models anyway.",
+    },
+    EnvVar {
+        name: "SVOLDER_LAB_OUT",
+        read_by: "svolder-host test suite, make",
+        dev_only: true,
+        what: "The file `make preamp-lab-outcomes` writes every seed's outcome to, one line each \
+               (`OUT=` on the make line); it also takes `SVOLDER_LAB_SEED` and `SVOLDER_LAB_RUNS` \
+               (default 400).",
+    },
+    EnvVar {
+        name: "SVOLDER_LAB_THREADS",
+        read_by: "svolder-host test suite, make",
+        dev_only: true,
+        what: "How many threads `make preamp-lab-outcomes` runs on. Default 4 (`THREADS=` on the \
+               make line).",
+    },
+    EnvVar {
+        name: "SVOLDER_LAB_TRACE",
+        read_by: "svolder-host test suite, make",
+        dev_only: true,
+        what: "Set to anything, `make preamp-lab-outcomes` writes each run's trace (every event, \
+               node start and `set-param`) under its outcome line (`TRACE=1` on the make line).",
     },
     EnvVar {
         name: "SVOLDER_WRITE_FIXTURES",

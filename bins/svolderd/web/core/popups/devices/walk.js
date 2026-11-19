@@ -52,7 +52,7 @@ const WARNING_STEP = 'linked';
 
 /** Who started a walk that is not this page's, as the daemon names it (its log's word) and as the
  * page says it. A terminal's walk is "the terminal", whichever client of the socket it is. */
-const FOREIGN_ORIGINS = { socket: 'the terminal', mcp: 'the MCP server', mqtt: 'the MQTT bridge' };
+const FOREIGN_ORIGINS = { socket: 'the terminal', mcp: 'the MCP server', mqtt: 'the MQTT client' };
 
 /** The page's own words. */
 export const WALK_WORDS = {

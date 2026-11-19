@@ -14,9 +14,9 @@ const WEB_LINK_HINT: &str = "Ctrl+click opens it; Shift+right-click copies it";
 /// What the box says under a link that replaced one a browser used.
 const WEB_LINK_REPLACED: &str = "the last link no longer works; a fresh one is shown";
 
-/// The Web UI box: seven `label · value` lines, the QR codes below them where the box has room
-/// (the sign-in link's, and the guest page's while the guest view is on), the question before
-/// the token is replaced while it is up, and its keys. Answers the cells it fills.
+/// The Web UI box: up to eight `label · value` lines, the QR codes below them where the box has
+/// room (the sign-in link's, and the guest page's while the guest view is on), the question
+/// before the token is replaced while it is up, and its keys. Answers the cells it fills.
 pub(super) fn draw_web_box(
     frame: &mut Frame,
     area: Rect,
@@ -59,19 +59,40 @@ fn web_box_lines(
     theme: &Theme,
 ) -> (u16, Vec<Line<'static>>, Vec<(usize, u16)>) {
     let qrs = web_qrs(app, web);
-    if let Some(width) = side_by_side_width(&qrs).filter(|width| *width <= area.width) {
-        let (lines, link_lines, fits) = web_box_at(app, web, area, theme, width, &qrs, true);
-        if fits {
-            return (width, lines, link_lines);
+    let side_width = side_by_side_width(&qrs).filter(|width| *width <= area.width);
+    let stacked_width = WEB_WIDTH.min(area.width);
+    // Side by side where the terminal is wide enough, else stacked: the lines, and whether the
+    // codes (or none) fit.
+    let draw = |with_activity: bool| {
+        if let Some(width) = side_width {
+            let (lines, link_lines, fits) =
+                web_box_at(app, web, area, theme, width, &qrs, (true, with_activity));
+            if fits {
+                return (width, lines, link_lines, true);
+            }
         }
+        let (lines, link_lines, fits) = web_box_at(
+            app,
+            web,
+            area,
+            theme,
+            stacked_width,
+            &qrs,
+            (false, with_activity),
+        );
+        (stacked_width, lines, link_lines, fits)
+    };
+    // The Activity row goes first when it would push the QR codes off: the codes matter more.
+    let (width, lines, link_lines, fits) = draw(true);
+    if fits || activity_row(app).is_none() {
+        return (width, lines, link_lines);
     }
-    let width = WEB_WIDTH.min(area.width);
-    let (lines, link_lines, _) = web_box_at(app, web, area, theme, width, &qrs, false);
+    let (width, lines, link_lines, _) = draw(false);
     (width, lines, link_lines)
 }
 
-/// The Web UI box's lines at `width`, with the QR codes `qrs` side by side or stacked, and
-/// whether the codes (or none) fit.
+/// The Web UI box's lines at `width`, with the QR codes `qrs` side by side or stacked (`layout.0`)
+/// and the Activity row kept or not (`layout.1`), and whether the codes (or none) fit.
 fn web_box_at(
     app: &App,
     web: &WebBox,
@@ -79,11 +100,12 @@ fn web_box_at(
     theme: &Theme,
     width: u16,
     qrs: &[Qr],
-    side: bool,
+    layout: (bool, bool),
 ) -> (Vec<Line<'static>>, Vec<(usize, u16)>, bool) {
+    let (side, with_activity) = layout;
     let across = usize::from(width.saturating_sub(2));
     let room = across.saturating_sub(WEB_LABEL + 1);
-    let values = web_values(app, web);
+    let values = web_values(app, web, with_activity);
     let mut lines: Vec<Line<'static>> = Vec::new();
     // The lines the link's text fills, with each one's width in cells: what a click opens.
     let mut link_lines: Vec<(usize, u16)> = Vec::new();
@@ -159,7 +181,7 @@ fn web_box_at(
 }
 
 /// The value each row of the Web UI box shows, in row order.
-fn web_values(app: &App, web: &WebBox) -> [(WebRow, String); 7] {
+fn web_values(app: &App, web: &WebBox, with_activity: bool) -> Vec<(WebRow, String)> {
     let conn = &app.overlays.conn;
     let direct = conn.daemon_up != Some(true);
     let ask = |code: &Option<web_state::Code>, pairing: bool, makes: &str| match (code, direct) {
@@ -175,11 +197,16 @@ fn web_values(app: &App, web: &WebBox) -> [(WebRow, String); 7] {
         TokenView::Unreadable(_) => "unreadable".to_string(),
         TokenView::Unread => "…".to_string(),
     };
-    [
-        (
-            WebRow::State,
-            web_state::state_word(conn.web_status.as_ref(), conn.daemon_up, app.session.daemon),
-        ),
+    let mut rows = vec![(
+        WebRow::State,
+        web_state::state_word(conn.web_status.as_ref(), conn.daemon_up, app.session.daemon),
+    )];
+    // The daemon's own short words for the counts: no row for a daemon that says none, or a web
+    // UI that does not serve.
+    if with_activity {
+        rows.extend(activity_row(app));
+    }
+    rows.extend([
         (
             WebRow::WebUi,
             match conn.web.enabled {
@@ -198,7 +225,15 @@ fn web_values(app: &App, web: &WebBox) -> [(WebRow, String); 7] {
         (WebRow::Link, ask(&web.link, false, "l makes one")),
         (WebRow::Pairing, ask(&web.pair, true, "p makes one")),
         (WebRow::Token, token),
-    ]
+    ]);
+    rows
+}
+
+/// The Activity row: the daemon's short words for the web UI's counts; none for a daemon that
+/// says none, or a web UI that does not serve.
+fn activity_row(app: &App) -> Option<(WebRow, String)> {
+    let counts = app.overlays.conn.web_activity()?;
+    Some((WebRow::Activity, counts.short()))
 }
 
 /// `text` wrapped to the Web UI box's width less a cell of margin each side, dimmed, with one

@@ -357,12 +357,12 @@ fn config_lines_write_the_table_key_and_value() {
     );
 }
 
-/// The categories group the 34 `[tui]` rows, the AutoEq refresh and the 13 Connect rows, each
+/// The categories group the 35 `[tui]` rows, the AutoEq refresh and the 13 Connect rows, each
 /// once, and every row has an explanation that with its config line fits the box at 80×24.
 #[test]
 fn every_setting_is_in_one_category_and_its_explanation_fits_the_box() {
     let all = every_setting();
-    assert_eq!(all.len(), 48);
+    assert_eq!(all.len(), 49);
     for (at, setting) in all.iter().enumerate() {
         assert!(
             !all[at + 1..].contains(setting),
@@ -371,7 +371,7 @@ fn every_setting_is_in_one_category_and_its_explanation_fits_the_box() {
         assert!(!explain(*setting).is_empty());
     }
     let longest = CATEGORIES.iter().map(|(_, rows)| rows.len()).max();
-    assert_eq!(longest, Some(13), "Effects is the longest category");
+    assert_eq!(longest, Some(14), "Effects is the longest category");
     // At 80×24 the right column's text is 30 cells wide and has the box's 20 inner rows less
     // the two above it and a blank one below.
     let tui = TuiConfig {
@@ -662,6 +662,7 @@ fn is_word_key(setting: Setting) -> bool {
 fn arrows_flip_every_on_off_row_either_way() {
     for setting in every_setting() {
         let mut baseline = app();
+        baseline.overlays.conn.mqtt.host = Some("broker.example.com".into());
         select(&mut baseline, setting);
         let want = press(&mut baseline, KeyCode::Char(' '));
         if want.is_empty() {
@@ -687,6 +688,7 @@ fn arrows_flip_every_on_off_row_either_way() {
         }
         for arrow in [KeyCode::Left, KeyCode::Right] {
             let mut app = app();
+            app.overlays.conn.mqtt.host = Some("broker.example.com".into());
             select(&mut app, setting);
             assert_eq!(press(&mut app, arrow), want, "{setting:?} on {arrow:?}");
         }
@@ -875,6 +877,10 @@ fn a_row_a_tui_wide_key_turns_names_that_key_in_its_own_dimmed_column() {
             let y = u16::try_from(row).expect("a row index") + 3;
             let key_cell = buffer.cell((41, y)).expect("a cell in the key column");
             let Some(hint) = keys::toggled_by(*setting) else {
+                // a choice fills the column with its own words
+                if setting.switch_sides(&app).is_some() {
+                    continue;
+                }
                 assert_eq!(
                     key_cell.symbol(),
                     " ",
@@ -1143,7 +1149,7 @@ fn the_effects_rows_fade_with_the_distance_from_the_focus() {
             Some((y as u16, at))
         })
         .collect();
-    assert_eq!(lines.len(), 13, "{lines:?}");
+    assert_eq!(lines.len(), 14, "{lines:?}");
     crate::tui::test_support::assert_list_faded(&plain, &faded, &lines, 2..LEFT_WIDTH, &theme);
 
     let q = theme_for("amber", ColorDepth::Ansi256);
@@ -1158,7 +1164,7 @@ fn the_effects_rows_fade_with_the_distance_from_the_focus() {
 #[test]
 fn the_list_fade_row_sits_after_peak_hold_and_flips() {
     let effects = rows(1);
-    assert_eq!(effects.len(), 13);
+    assert_eq!(effects.len(), 14);
     let peak = effects
         .iter()
         .position(|row| *row == Setting::Effect(EffectSwitch::PeakHold))
@@ -1202,6 +1208,59 @@ fn the_tooltips_row_sits_after_mouse_capture_and_flips() {
             TuiValue::Bool(false)
         ))]
     );
+}
+
+/// The Effects category lists `Scroll long lines` after `Transition`, on by default, and Space
+/// flips it; the key it writes is `[tui] scroll_long_lines`.
+#[test]
+fn the_scroll_long_lines_row_sits_after_transition_and_flips() {
+    let effects = rows(1);
+    let transition = effects
+        .iter()
+        .position(|row| *row == Setting::Key(&TRANSITION))
+        .unwrap();
+    let row = effects[transition + 1];
+    assert_eq!(row, Setting::Key(&SCROLL_LONG_LINES));
+    assert_eq!(row.label(), "Scroll long lines");
+    let mut app = app();
+    select(&mut app, row);
+    assert_eq!(row.value(&app), "on");
+    assert_eq!(
+        press(&mut app, KeyCode::Char(' ')),
+        vec![Intent::Tui(TuiChange::Set(
+            &SCROLL_LONG_LINES,
+            TuiValue::Bool(false)
+        ))]
+    );
+    assert_eq!(
+        config_line(row, &TuiConfig::default()),
+        "[tui] scroll_long_lines = true"
+    );
+}
+
+/// The Scroll long lines row draws as a choice like `Target`, `‹ off | on ›`, whether or not the
+/// cursor is on it, and the side in force follows the setting.
+#[test]
+fn the_scroll_long_lines_row_draws_as_a_choice() {
+    let mut app = app();
+    let row = Setting::Key(&SCROLL_LONG_LINES);
+    for focused in [false, true] {
+        select(
+            &mut app,
+            if focused {
+                row
+            } else {
+                Setting::Key(&TRANSITION)
+            },
+        );
+        let line = text(&drawn(&app, 80, 24).0)
+            .into_iter()
+            .find(|line| line.contains("Scroll long lines"))
+            .expect("the row is in the Effects list");
+        assert!(line.contains("‹ off | on ›"), "{line}");
+    }
+    app.tui.scroll_long_lines = false;
+    assert_eq!(row.value(&app), "off");
 }
 
 /// The Effects category lists `Mascot` after `List fade`, among the indented switches the master

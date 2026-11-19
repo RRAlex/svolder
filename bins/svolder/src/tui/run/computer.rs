@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use svolder_host::eq::{EqControl, EqFailure, EqView};
+use svolder_host::eq::{EqControl, EqFailure, EqView, LevelHint};
 use svolder_ipc::host::run_eq_op;
 use svolder_ipc::{HostEqOp, Request, Response};
 use tokio::sync::{Mutex, mpsc, watch};
@@ -105,6 +105,19 @@ struct Waiting {
     idle: tokio::sync::Notify,
 }
 
+/// The level hint of the loop's own controller, once [`ComputerLink::live`] made one: the loop's
+/// sink task (`host::serve`, made before the controller) hands it what a volume write
+/// read back, so the loudness follows the write on its next tick without the controller's lock.
+static LOOP_HINT: std::sync::Mutex<Option<LevelHint>> = std::sync::Mutex::new(None);
+
+/// The loop's own controller's level hint, while there is one.
+pub(super) fn loop_hint() -> Option<LevelHint> {
+    LOOP_HINT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /// The computer's controls, as the loop reaches them.
 #[derive(Default)]
 pub(in crate::tui) struct ComputerLink {
@@ -167,6 +180,10 @@ impl ComputerLink {
     pub(in crate::tui) fn live() -> ComputerLink {
         match crate::commands::host_eq::session_control() {
             Ok(control) => {
+                *LOOP_HINT
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(control.level_hint());
                 ComputerLink::over(control.with_speakers_dir(&svolder_ipc::config::speakers_dir()))
             }
             Err(why) => ComputerLink {
@@ -177,17 +194,17 @@ impl ComputerLink {
     }
 
     /// Leave the computer as a quit should: the loop's own controller stops ticking, then turns
-    /// the crossfeed and the virtual speakers off (a chain that ran for them alone is removed), so quitting leaves no stage
-    /// in the sound's path. Nothing when the loop has no controller of its own: a daemon's is the
-    /// daemon's to stop.
+    /// the crossfeed and the virtual speakers off (a chain that ran for them alone is removed) and
+    /// sends the loudness stage flat, so quitting leaves no stage in the sound's path. Nothing
+    /// when the loop has no controller of its own: a daemon's is the daemon's to stop.
     pub(in crate::tui) async fn shutdown(&mut self) {
         let Some(control) = self.control.take() else {
             return;
         };
-        // The quit lets what waits run, except crossfeed and speakers changes (one asked a moment
-        // before the quit must not turn it on again after the shutdown): the user's last EQ edit
-        // is applied or kept. A change that is running is not cancelled, and neither is a tick:
-        // the shutdown takes the lock after them.
+        // The quit lets what waits run, except crossfeed, speakers and loudness changes (one asked
+        // a moment before the quit must not turn it on again after the shutdown): the user's last
+        // EQ edit is applied or kept. A change that is running is not cancelled, and neither is a
+        // tick: the shutdown takes the lock after them.
         self.quitting
             .store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(queue) = self.queue.clone() {
@@ -443,7 +460,10 @@ async fn run(
 ) -> Option<Answer> {
     let mut control = control.lock().await;
     if quitting.load(std::sync::atomic::Ordering::SeqCst)
-        && matches!(op, HostEqOp::Crossfeed { .. } | HostEqOp::Speakers { .. })
+        && matches!(
+            op,
+            HostEqOp::Crossfeed { .. } | HostEqOp::Speakers { .. } | HostEqOp::Loudness { .. }
+        )
     {
         return None;
     }

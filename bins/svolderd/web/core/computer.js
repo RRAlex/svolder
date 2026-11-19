@@ -134,6 +134,10 @@ export function createPending({ store, fetch }) {
       const now = computer.eq?.crossfeed;
       return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);
     }
+    if (key === 'loudness') {
+      const now = computer.eq?.loudness;
+      return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);
+    }
     if (key === 'speakers') {
       const now = computer.eq?.speakers;
       return Boolean(now) && Object.entries(value).every(([field, v]) => now[field] === v);

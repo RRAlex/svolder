@@ -16,6 +16,7 @@ import os
 import sys
 
 import common
+import parts
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
 # the sections to run (SCROLL_SECTIONS, comma-separated), for the mutation runner; default all
@@ -41,14 +42,20 @@ REST_SECS = 12  # the length of the no-bias run (s)
 REST_SEEDS = (3,)  # the seeded draws of the no-bias run, one fresh page each
 
 
-def check(name, cond, detail=''):
+def check(name, cond, detail='', timing=False):
     global passed
+    if not parts.counts(timing):
+        return
     if cond:
         passed += 1
         print('ok  ', name)
     else:
         fails.append(name)
         print('FAIL', name, detail)
+
+
+def check_t(name, cond, detail=''):
+    check(name, cond, detail, timing=True)
 
 
 def make(**kw):
@@ -160,13 +167,21 @@ def scroll_splats(b):
     return pg(b, 'window.__fx.stats().splats.scroll')
 
 
+def two_frames(b, secs=3.0):
+    """Wait until the smoke has drawn two more frames, so a read sees the scroll applied."""
+    f0, waited = pg(b, 'window.__fx.stats().frames'), 0.0
+    while waited < secs and pg(b, 'window.__fx.stats().frames') < f0 + 2:
+        b.sleep(0.05)
+        waited += 0.05
+
+
 def desktop():
     dac = common.Daemon('gungnir2-v2')
     b = make(size=(1280, 700))
     try:
         load(b, dac.url)
         room = pg(b, 'document.documentElement.scrollHeight - innerHeight')
-        check('the DAC page scrolls at 1280x700', room > 300, room)
+        check_t('the DAC page scrolls at 1280x700', room > 300, room)
         v0 = vel(b)
         s0 = scroll_splats(b)
         steps(b, 5, 100, 0.05)
@@ -174,16 +189,16 @@ def desktop():
         v1 = vel(b)
         print(f'      5 wheel steps down: mean vy {v0["mean"]:.3f} -> {v1["mean"]:.3f}, '
               f'max |v| {v1["max"]:.1f}, scroll splats {s0} -> {scroll_splats(b)}')
-        check('wheel steps down: the velocity rises along the scroll (the mean vy goes up by '
-              f'{SCROLL_RISE:g} cells a second or more, and the peak reaches {SCROLL_PEAK:g})',
-              v1['mean'] - v0['mean'] > SCROLL_RISE and v1['max'] >= SCROLL_PEAK, [v0, v1])
-        check('  and the scroll splats were applied', scroll_splats(b) > s0, [s0, scroll_splats(b)])
+        check_t('wheel steps down: the velocity rises along the scroll (the mean vy goes up by '
+                f'{SCROLL_RISE:g} cells a second or more, and the peak reaches {SCROLL_PEAK:g})',
+                v1['mean'] - v0['mean'] > SCROLL_RISE and v1['max'] >= SCROLL_PEAK, [v0, v1])
+        check_t('  and the scroll splats were applied', scroll_splats(b) > s0, [s0, scroll_splats(b)])
         steps(b, 8, -100, 0.05)
         b.sleep(0.15)
         v2 = vel(b)
         print(f'      8 wheel steps back up: mean vy {v1["mean"]:.3f} -> {v2["mean"]:.3f}')
-        check('wheel steps up: the velocity falls along the scroll (the mean vy goes down)',
-              v2['mean'] < v1['mean'] - SCROLL_RISE, [v1, v2])
+        check_t('wheel steps up: the velocity falls along the scroll (the mean vy goes down)',
+                v2['mean'] < v1['mean'] - SCROLL_RISE, [v1, v2])
         # a momentum-like burst: 30 steps in 0.5 s
         b.resize(1280, 200)  # a short window: the 30 steps then outrun maxScrollPush
         do(b, 'window.__fx.haze(false); scrollTo(0, 0);')
@@ -197,12 +212,12 @@ def desktop():
         v3 = vel(b)
         print(f'      burst of 30 steps of {step} px in 0.5 s: max |v| {v3["max"]:.1f} '
               f'(bound {BURST_MAX}), non-finite texels {v3["bad"]}')
-        check(f'a burst of 30 steps in 0.5 s: the greatest speed stays under {BURST_MAX:g}',
-              v3['max'] < BURST_MAX, v3)
-        check('  and every texel of both grids is finite', v3['bad'] == 0, v3)
+        check_t(f'a burst of 30 steps in 0.5 s: the greatest speed stays under {BURST_MAX:g}',
+                v3['max'] < BURST_MAX, v3)
+        check_t('  and every texel of both grids is finite', v3['bad'] == 0, v3)
         b.sleep(1.5)
         v4 = vel(b)
-        check('  and the smoke is still finite a little later', v4['bad'] == 0, v4)
+        check_t('  and the smoke is still finite a little later', v4['bad'] == 0, v4)
         # a few seconds after the scroll: calm again, and the scroll splats have stopped
         b.sleep(3.0)
         n0, f0 = scroll_splats(b), pg(b, 'window.__fx.stats().frames')
@@ -210,10 +225,10 @@ def desktop():
         n1, f1 = scroll_splats(b), pg(b, 'window.__fx.stats().frames')
         print(f'      5 s after the burst: scroll splats {n0} -> {n1}, '
               f'{(f1 - f0) / 2:.1f} frames/s')
-        check('a few seconds after a scroll the scroll splats have stopped', n1 == n0, [n0, n1])
-        check('  and the rhythm is back at the calm rate (under 30 frames a second)',
-              (f1 - f0) / 2 < 30, [f0, f1])
-        check('no page error (desktop)', errors(b) == [], errors(b))
+        check_t('a few seconds after a scroll the scroll splats have stopped', n1 == n0, [n0, n1])
+        check_t('  and the rhythm is back at the calm rate (under 30 frames a second)',
+                (f1 - f0) / 2 < 30, [f0, f1])
+        check_t('no page error (desktop)', errors(b) == [], errors(b))
     finally:
         b.close()
         dac.stop()
@@ -316,6 +331,7 @@ def smear():
         b.sleep(1.0)
         steps(b, 8, -50, 0.04)
         b.sleep(0.15)
+        two_frames(b)
         y = pg(b, 'scrollY')
         after = pg(b, rows)
         # the cut was at the viewport's top, which is `top` px down the page: `top` px down the
@@ -343,6 +359,7 @@ def smear():
         b.sleep(1.0)
         steps(b, 12, -50, 0.04)
         b.sleep(0.15)
+        two_frames(b)
         got = pg(b, f'window.__strip(0, 0, 1280, {STRIP_ROWS})')
         print(f'      600 px down and back (the hold is half a viewport, 350 px): the farthest '
               f'strip (rows 0-{STRIP_ROWS}) max {got["max"]:.4f} (bound {STRIP_MAX})')
@@ -378,26 +395,33 @@ def touch_pan():
         y1 = b.ev('scrollY')
         print(f'      touch pan up 400 px: scrollY {y0} -> {y1}, mean vy {v0["mean"]:.3f} -> '
               f'{v1["mean"]:.3f}, scroll splats {s0} -> {scroll_splats(b)}')
-        check('a vertical touch pan scrolls the page', y1 > y0 + 50, [y0, y1])
-        check('  the velocity rises along the scroll (the mean vy goes up)',
-              v1['mean'] - v0['mean'] > PAN_RISE, [v0, v1])
-        check('  nothing prevented a touch move', b.ev('window.__prevented') == 0)
-        check('  and no page error', b.errors == [], b.errors)
+        check_t('a vertical touch pan scrolls the page', y1 > y0 + 50, [y0, y1])
+        check_t('  the velocity rises along the scroll (the mean vy goes up)',
+                v1['mean'] - v0['mean'] > PAN_RISE, [v0, v1])
+        check_t('  nothing prevented a touch move', b.ev('window.__prevented') == 0)
+        check_t('  and no page error', b.errors == [], b.errors)
     finally:
         b.close()
         dac.stop()
 
 
+# What each section reads: the velocity after wheel steps and pans a set time apart is timing (the
+# desktop and touch sections); the dye, the splats and the cloud's place are logic
+TIMING_SECTIONS = ('desktop', 'touch')
+
 if __name__ == '__main__':
-    if 'desktop' in SECTIONS:
+    def wanted(name):
+        return name in SECTIONS and parts.part_has('timing' if name in TIMING_SECTIONS else 'logic')
+
+    if wanted('desktop'):
         desktop()
-    if 'short' in SECTIONS:
+    if wanted('short'):
         short()
-    if 'rest' in SECTIONS:
+    if wanted('rest'):
         rest()
-    if 'smear' in SECTIONS:
+    if wanted('smear'):
         smear()
-    if 'touch' in SECTIONS and browser == 'chromium':
+    if wanted('touch') and browser == 'chromium':
         touch_pan()
-    print(f'scroll.py {browser}: {passed} passed, {len(fails)} failed')
+    print(f'scroll.py {browser}{parts.part_tag()}: {passed} passed, {len(fails)} failed')
     sys.exit(1 if fails else 0)

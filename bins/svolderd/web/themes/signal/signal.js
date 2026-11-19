@@ -25,12 +25,14 @@
 //   strip-wire.js the finger on the phone's strip (the line under 720 px, drawn by draw/line.js)
 //   words.js     the fixed words and the small lines worked out from the model
 //   driver.js    the test driver the contract and completeness checks drive
+//   palette.js   the palettes the viewer chooses from (the menu's Palette rows) and their attribute
 //   preview.js   the picture of the theme in the frame's menu and picker
 
 import { PHONE_MAX_PX } from '../../core/phone.js';
 import { registerTheme } from '../../core/registry.js';
 import { createAct } from '../../core/act.js';
 import { deviceOld } from '../../core/old-readings.js';
+import { SETUP } from '../../core/popups/listed.js';
 import { ampScreen, viaScreen } from './draw/amp.js';
 import { declaredScreen, hopTools } from './draw/hop.js';
 import { card, heldCard, stateCard } from './draw/card.js';
@@ -58,6 +60,7 @@ import { HOPS } from './words.js';
 import { KEYS, ZONES } from './key-table.js';
 import { wirePlaying } from './playing-wire.js';
 import { wirePresets } from './presets-wire.js';
+import { applyPalette, clearPalette, paletteOf, paletteRows } from './palette.js';
 import { preview } from './preview.js';
 import { wireSlim } from './slim.js';
 import { wireStrip } from './strip-wire.js';
@@ -317,12 +320,24 @@ function mount(root, core, { signal }) {
   wireTone({ root, core, live, act, keep, shelfKeep, signal });
   const release = core.freeze.createRelease(root.ownerDocument, shelfKeep, signal);
   wireAmp({ root, core, live, act, view, keep, signal });
+  // The config chip is in the open area on the player's screen and in the shelf on the computer's.
+  root.addEventListener('click', (event) => {
+    if (event.target.closest?.('[data-act="config"]')) core.router.open(SETUP);
+  }, { signal });
   root.querySelector('#sg-open').addEventListener('click', (event) => {
     if (!event.target.closest?.('[data-act="show-device"]')) return;
     const hop = view.hops().find((one) => one.id === view.chosen && one.via);
     if (hop) core.actions.showDevice(hop.url);
   }, { signal });
   const hops = wireHops({ root, core, live, view, keep, signal });
+  // The palette is this browser's choice, kept like the theme's other view choices.
+  const look = { palette: paletteOf(core.prefs.get('palette', null)) };
+  applyPalette(root.ownerDocument, look.palette);
+  const choosePalette = (id) => {
+    look.palette = paletteOf(id);
+    applyPalette(root.ownerDocument, look.palette);
+    core.prefs.set('palette', look.palette);
+  };
   wireControls({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wirePresets({ root, core, live, act, view, keep: shelfKeep, release, signal });
   wireComputer({ root, core, live, act, view, keep, shelfKeep, release, signal });
@@ -355,7 +370,11 @@ function mount(root, core, { signal }) {
   // entry cannot be read.
   core.keys.bind(KEYS, { signal });
   return {
-    menuRows: () => menuRows({ core, hops, signal }),
+    menuRows: () => [
+      ...menuRows({ core, hops, signal }),
+      { kind: 'sep' },
+      ...paletteRows({ state: look, choose: choosePalette, signal }),
+    ],
     keys: KEYS,
     zones: ZONES,
     unmount() {
@@ -365,6 +384,7 @@ function mount(root, core, { signal }) {
       loop.stop();
       live.stop();
       core.frame.anchor(null);
+      clearPalette(root.ownerDocument);
       root.replaceChildren();
     },
   };

@@ -108,6 +108,11 @@ def self_test():
              (verdict('k|text', 4.6, 4.5, base), 'ok'), (verdict('j|text', 4.3, 4.5, base, True), 'new'),
              (verdict('j|text', 4.5, 4.5, base, True), 'ok'), (verdict('k|text', 2.8, 4.5, base, True), 'known'),
              (verdict('k|text', 2.5, 4.5, base, True), 'worse')]
+    # a theme's other palette is held to the default palette's pairs
+    pal = {'t.dark|s|b|edge': {'ratio': 2.0, 'need': 3.0}}
+    cases += [(verdict('t.dark.blue|s|b|edge', 2.0, 3.0, pal), 'known'), (verdict('t.dark.blue|s|b|edge', 1.5, 3.0, pal), 'worse'),
+              (verdict('t.dark.blue|s|c|edge', 2.0, 3.0, pal), 'new'), (verdict('t.dark|s|c|edge', 2.0, 3.0, pal), 'new'),
+              (baseline_key('t.dark.blue|s|b|edge'), 't.dark|s|b|edge'), (baseline_key('t.dark|s|b|edge'), 't.dark|s|b|edge')]
     for got, want in cases:
         if got != want:
             bad.append(f'verdict: got {got}, want {want}')
@@ -120,14 +125,26 @@ def self_test():
 PICTURE_ROOM = 0.35
 
 
+PALETTE_TAG = re.compile(r'^([a-z0-9_-]+\.[a-z]+)\.[a-z0-9_-]+\|')
+
+
+def baseline_key(key):
+    """The key a pair is compared with in the baseline: a pair of a theme's other palette (`signal.dark.phosphor|...`)
+    is held to the same pair of the theme's default palette (`signal.dark|...`): a palette may fail where the default
+    fails today and no worse, and nowhere else."""
+    return PALETTE_TAG.sub(r'\1|', key)
+
+
 def verdict(key, got, need, baseline, picture=False):
     """`ok` (at the WCAG threshold, whatever the ground), `known` (below it, in the baseline, not worse), `worse` or
     `new`. Only the comparison with a baseline pair has room: a pair read off a picture is drawn a little
     differently by the two engines, and the baseline is written from one of them."""
     if got >= need:
         return 'ok'
-    if key not in baseline:
+    base = baseline_key(key)
+    if base not in baseline:
         return 'new'
+    key = base
     room = PICTURE_ROOM if picture else 0.0
     return 'known' if got >= baseline[key]['ratio'] - SLACK - room else 'worse'
 
@@ -652,14 +669,14 @@ def write_palette(run, folder):
 # (the artefact class: a sample that manufactures a failure), each with what was found there (a name and a reason: the
 # guard fails on any other)
 ALLOWED_GAPS = [   # [(regex on the key, what was found and why the sample is right)]
-    (r'^nightdrive\.dark\|(page|guest|off)\|text\|text-large$',
+    (r'^nightdrive\.dark\|(page|guest|off|config)\|text\|text-large$',
      'the rotated pink dB label stands over the scene\'s pink neon line (same colour): 1.0:1 where they cross'),
     (r'\|button#(p|sg)-pt-\d\|edge$',
      'a 12 to 14 px point marker on a tone graph: the plot\'s own curve and grid run through its 6 px ring'),
-    (r'^paper\.dark\|page\|span\.pn\.red\|text$',
+    (r'^paper\.dark\|(page|config)\|span\.pn\.red\|text$',
      'the red pencil ellipse drawn around the note is a background in the text\'s own colour and runs through its box'),
     (r'^signal\.dark\|(guest|off)\|button#sg-mode-flat\[off\]\|text-disabled$',
-     'the selected mode button is filled orange by a background image: its grey words really sit on orange (inactive)'),
+     'the selected mode button is filled with the accent (cyan in the default Blueprint; in the other palettes orange, green or brass) under the page\'s gradient: its dark words at .55 opacity are legible in a guest still of Blueprint and sit at the computed 2.3:1, an inactive control read off a sample that includes the glow around the chip (a palette\'s pair uses the default palette\'s key here)'),
 ]
 GAP = 1.0
 
@@ -722,14 +739,21 @@ def child(theme, out):
         b.preload(modal.HOOK + ' ' + S.WARNS)
         S.open_page(b, rig.writer, theme)
         schemes = dict(S.themes_of(b))[theme]
-        for n, scheme in enumerate(schemes):
-            tag = f'{theme}.{scheme}'
+        # a theme with palettes (Signal's) is swept once in each: its own list, read from the page
+        palettes = S.palettes_of(b, theme)
+        for n, (scheme, palette) in enumerate((s, p) for s in schemes for p in palettes):
+            # the first palette is the theme's default, whose pairs keep the theme's plain tag
+            tag = f'{theme}.{scheme}' if palette == palettes[0] else f'{theme}.{scheme}.{palette}'
             for who, daemon, visit in S.visitors(rig):
                 S.open_page(b, daemon, theme)
                 S.set_scheme(b, scheme, schemes)
+                S.set_palette(b, theme, palette)
 
-                def probe(state, who=who, tag=tag):
+                def probe(state, who=who, tag=tag, palette=palette):
                     run.last = state
+                    if palettes[0] is not None and palette != palettes[0]:
+                        check(f'contrast ({tag}): the page still wears its palette at {state}',
+                              S.palette_held(b, palette), state)
                     found = analyse(b, run, tag, state)
                     if who == 'writer' and state == 'page' and theme in THEME_GRAPH:
                         box = THEME_GRAPH[theme]
@@ -739,9 +763,9 @@ def child(theme, out):
                     if state == 'eq-library/autoeq/preview':
                         check(f'contrast ({tag}): the EQ library\'s graph has its series, target and gap',
                               set(POPUP_GRAPH) <= found, sorted(set(POPUP_GRAPH) - found))
-                    if palette_dir and state == 'page':
+                    if palette_dir and state == 'page' and palette == palettes[0]:
                         ground_of(b, tag, run)
-                    if palette_dir and state == 'help/here' and tag not in run.palette:
+                    if palette_dir and state == 'help/here' and palette == palettes[0] and tag not in run.palette:
                         palette_of(b, tag, run)
                     # a Tab, so the control that holds the focus shows its ring
                     b.press('Tab')
@@ -819,7 +843,7 @@ def report(run, update, wall):
     check('contrast: no pair is new or worse than the baseline', not fails, fails[:3])
     check('contrast: the sweep measured pairs in every state it visits', len(run.pairs) > 100, len(run.pairs))
     check('contrast: no more than eight pairs are not measurable (six today) (a ground that turned unreadable adds some)',
-          len(run.unmeasured) <= 8, sorted(run.unmeasured)[:5])
+          len({baseline_key(k) for k in run.unmeasured}) <= 8, sorted(run.unmeasured)[:5])
     print(f'contrast: {len(run.pairs)} pairs in {int(wall)} s: {ok} pass, {len(known)} known failures in the baseline, '
           f'{len(fails)} new or worse; {len(run.unmeasured)} not measurable')
     for key, why in sorted(run.unmeasured.items()):
@@ -828,10 +852,10 @@ def report(run, update, wall):
         print(f'  now passes, can leave the baseline: {key}')
     wide = {k: v for k, v in run.gaps.items() if v[0] - v[1] > GAP}
     for key, (computed, sampled, why, state) in sorted(wide.items()):
-        named = next((why_ for pattern, why_ in ALLOWED_GAPS if re.search(pattern, key)), None)
+        named = next((why_ for pattern, why_ in ALLOWED_GAPS if re.search(pattern, baseline_key(key))), None)
         print(f'  sampled far below computed: {key}: computed {computed}, sampled {sampled} ({why}; at {state}; '
               f'{run.pairs.get(key, {}).get("note", "")})' + (f'; allowed: {named}' if named else ''))
-    unexplained = sorted(k for k in wide if not any(re.search(pattern, k) for pattern, _ in ALLOWED_GAPS))
+    unexplained = sorted(k for k in wide if not any(re.search(pattern, baseline_key(k)) for pattern, _ in ALLOWED_GAPS))
     check('contrast: no pair reads more than 1.0 lower off its picture than the colours compute to, without a named reason',
           not unexplained, unexplained[:5])
     narrowed = any(os.environ.get(v) for v in ('WEB_CHECK_THEMES', 'WEB_CHECK_WHO'))
@@ -845,7 +869,7 @@ def report(run, update, wall):
         out = {'licence_1': 'SPDX-FileCopyrightText: 2026 the svolder authors',
                'licence_2': 'SPDX-License-Identifier: GPL-3.0-or-later'}
         out.update({k: {'ratio': p['ratio'], 'need': p['need']} for k, p in sorted(run.pairs.items())
-                    if p['ratio'] < p['need']})
+                    if p['ratio'] < p['need'] and baseline_key(k) == k})
         with open(f'{HERE}/contrast-baseline.json', 'w') as f:
             json.dump(out, f, indent=1)
             f.write('\n')

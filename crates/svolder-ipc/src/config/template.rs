@@ -66,11 +66,11 @@ impl Config {
             config.daemon.autospawn,
         );
         out.push_str(
-            "\n# svolderd's bridge to an MQTT broker for Home Assistant, off until enabled with a host.\n[mqtt]\n",
+            "\n# svolderd's MQTT client, for Home Assistant, off until enabled with a host.\n[mqtt]\n",
         );
         commented(
             &mut out,
-            "Whether the bridge runs at all.",
+            "Whether the MQTT client runs at all.",
             "enabled",
             config.mqtt.enabled,
         );
@@ -113,7 +113,7 @@ impl Config {
         );
         commented(
             &mut out,
-            "Whether the bridge takes commands back, through the same validation `svolder set` uses.",
+            "Whether the MQTT client takes commands back, through the same validation `svolder set` uses.",
             "commands",
             config.mqtt.commands,
         );

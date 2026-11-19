@@ -52,6 +52,7 @@ in this order — `✓` pass, `!` warn, `✗` fail, `·` a fact worth recording 
 | Devices | (devices configured) one row per device: connected where a daemon holds it — no scan is run for one, since a device a central holds stops advertising — else seen in a scan and how loud, or not seen in the windows this verb listened |
 | MCP server | (`[mcp]` on, or a daemon reporting one) the address the daemon listens on and how requests prove themselves (`listening on 127.0.0.1:8737 (token, read-only)`); fails when the daemon could not bind the address or read the token, when a token file group or others can read, or when a named `token_file` is missing; reads no token and creates none |
 | Web UI | (`[web]` on, or a daemon reporting one) the address the daemon listens on and how a browser proves itself (`listening on 127.0.0.1:8738 (token, writes)`); fails when the daemon could not bind the address or read the token, when `auth = "none"` is on an address that is not loopback, and when a token file group or others can read, or a named `token_file` is missing; warns when the section is on and the daemon says its web UI is off; notes a listen address off loopback, which serves plain HTTP on the network; reads no token and creates none |
+| PipeWire config | (a daemon answering with a route) the PipeWire config check's summary: `✓` when it lets the sound through untouched, a note otherwise, pointing to `svolder host check` for the lines |
 | Container | (inside one) the D-Bus socket bind-mounted, an adapter visible, no systemd expected |
 | Extended advertising, bluetoothd plugins, WirePlumber (`--dev` only) | fewer than two adapters report extended advertising; bluetoothd running with the `midi` and LE Audio plugins excluded; WirePlumber's BLE MIDI monitor disabled |
 
@@ -1062,7 +1063,9 @@ Usage: svolder host [OPTIONS] <COMMAND>
 
 Commands:
   eq         An equalizer on what the computer plays
+  check      Check what the computer and its PipeWire config do to the sound
   crossfeed  Cross a little of each channel into the other for headphones, through the daemon
+  loudness   Give the bass and the treble back at a low volume, through the daemon
   speakers   Two virtual speakers on headphones, through the daemon
   help       Print this message or the help of the given subcommand(s)
 
@@ -1077,8 +1080,8 @@ Options:
 
 ### host eq
 
-The group's first subcommand, with `apply`, `remove` and `status` below it. (`host crossfeed`, the
-group's other one, is described in its own section.)
+The group's first subcommand, with `apply`, `remove` and `status` below it. (`host crossfeed`,
+`host loudness` and `host speakers`, the group's other ones, are described in their own sections.)
 
 ```
 An equalizer on what the computer plays
@@ -1202,7 +1205,9 @@ from `SVOLDER_WIREPLUMBER`, else `wireplumber` on `PATH`, as `wireplumber --vers
 
 svolder writes these files for the computer EQ and nothing else: `~/.config/svolder/host-eq.conf`
 (the complete PipeWire config, run as `pipewire -c`), the unit or the autostart entry, the pid file
-of a process, and `~/.local/state/svolder/host-eq.toml`. `host eq remove` deletes what apply wrote.
+of a process, `~/.local/state/svolder/host-eq.toml`, and `~/.local/state/svolder/host-eq-settings.toml`
+(only the crossfeed, speakers and loudness settings changed before any chain was applied; the
+controller writes and deletes it). `host eq remove` deletes what apply wrote and leaves that file.
 PipeWire's own configuration directories, `filter-chain.service` and every unit but svolder's own
 are never touched.
 
@@ -1277,6 +1282,77 @@ with `on`, `running` (`null` when it could not be told), `name`, `origin`, `targ
 `manager`, `previous_default`, `preamp_db`, `filters` (each `type`, `f`, `g`, `q`) and `problem`;
 with nothing ever applied it prints `{"on":false,"running":null}`; a state file that cannot be read
 says so, `host EQ: unknown: …`, instead of reading as off.
+
+### host check
+
+Say whether the computer lets a player's sound through to the DAC untouched, and why not when it
+does not. It prints the path from the player through the computer to the sink, with the verdict
+(`untouched`, or what changes the sound), then the **PipeWire config** check: seven conditions of
+the PipeWire config (rates, forced rate, dither, 24-bit output, no plug, stereo to stereo, no
+filter in the sink), each `pass`, `fail` or `unknown`, and what they add up to. It only reads, and
+the only thing it runs is `pw-dump`.
+
+```
+$ svolder host check --player "Fixture Player"
+player → computer → bits S16LE triangular dither: resampled 48 → 96 kHz (rate forced) · dither on (triangular)
+  player: 48 kHz S16LE, volume 100 %
+  computer: 48 kHz S16LE, volume 100 %
+PipeWire config changes the sound: 3
+  rates                  pass     48 kHz allowed
+  forced rate            fail     96 kHz forced: every other rate is resampled
+  dither                 fail     triangular
+  24-bit output          fail     S16LE in use
+  no plug                pass     not an ALSA sink
+  stereo to stereo       pass     FL FR
+  no filter in the sink  pass     none
+  svolder judges the PipeWire config from the player’s stream on. It cannot see inside a
+  player, nor past the sink’s converter (ALSA hw, USB, the DAC), and it judges at most 24
+  bits. It only reads: it never changes a setting.
+```
+
+The output above is from a test graph (the default sink is a pipe sink that dithers, with the
+clock forced to 96 kHz, and the player plays into it), so the seven lines judge the sink the first
+line names. When the path has no hops (another sink, another input) a `config judged on:` line
+names it. A failing line is not an error: the command exits 0 and the summary says `PipeWire
+config changes the sound: 3`. A line that could not be read says `unknown`, never `pass`
+(`PipeWire config not fully read: 1`, or `PipeWire config not read` when there is no sink to
+judge). The limit sentence closes the text.
+The check is of what enters the system's audio pipeline from the player and every hop after it. It
+cannot see inside the player (its own normalization, ReplayGain, volume or EQ), whether the music
+is a local file or a stream, what ALSA does past the sink's converter, the USB driver or the DAC,
+and it judges at most 24 bits.
+
+With a daemon answering, `check` uses the daemon's route (the player it follows) and its DACs'
+readings: when the sink is one of your DACs the verdict is the DAC's, with its input and rate; for
+any other sink it is the computer's side alone (`path.dac` is null, and the path may read
+`untouched` up to that sink: a Bluetooth or virtual sink changes the sound past it, which the
+check cannot see). The TUI, the web page and Home Assistant judge against your DACs only, and
+read `not_this_dac` for a sink that is none of them. With no daemon the player is not known, so the
+verdict reads `unknown` until `--player NAME` names it (an application name or a process id), which
+also makes the command read the graph itself instead of using the daemon's route. When it reads the
+graph itself (no daemon route, or `--player`), `SVOLDER_HOST=off` or `fake` gives exit 6 with "host
+audio is off for this process", and a graph `pw-dump` cannot print gives exit 6 too ([exit
+codes](exit-codes.md)); with a daemon's route printed the exit is 0.
+
+`--json` prints one object:
+
+```
+{"sink":"Bifrost 3",
+ "path":{"verdict":"untouched","words":["untouched"],"sentence":"...","dac":"Bifrost 3"},
+ "config":{"sink":"Bifrost 3","outcome":"untouched",
+           "summary":"PipeWire config lets it through untouched",
+           "limit":"...","lines":[{"key":"rates","outcome":"pass","words":"..."}, ...]}}
+```
+
+The keys are the same on every JSON surface of svolder (the web card, MCP, Home Assistant; the
+top-level `sink` is kept for scripts, and `path.dac` is null when only the computer's side was
+judged, see above): the path `verdict` is `untouched`, `changed`, `not_this_dac`, `other_input` or
+`unknown`; `words` is a list; the config `outcome` is `untouched`, `changes`, `unread`, `not_read`
+or `other_version`; the lines' `key` is `rates`, `forced_rate`, `dither`, `format`, `plug`, `stereo`
+or `filter`, and each line's `outcome` is `pass`, `fail` or `unknown`. `limit` is the sentence of
+what the check cannot judge. `svolder doctor` shows the same check as a `PipeWire config` row, only
+while a daemon answers with a route: a `✓` when the config lets the sound through, a note (`·`)
+otherwise, never a warning.
 
 ### host crossfeed
 
@@ -1353,6 +1429,80 @@ assumed 48 kHz); `--json` carries the saved switch in `on` and the reason in `un
 daemon that answers with host audio off shows them as off. Every verb with no daemon exits 3, naming
 `svolder daemon install`; a daemon that does not offer crossfeed (an older one) exits 7
 (`svolder daemon restart`). See [exit codes](exit-codes.md).
+
+### host loudness
+
+Give the bass and the treble back at a low volume: the computer's [loudness](eq.md#loudness) (what
+it does, strength and reference). With no verb it prints the state; a verb changes it. Every verb
+goes through `svolderd`, which owns the filter chain and follows the computer's volume, so the CLI
+never starts one by itself (`--transport` does not change that).
+
+```
+Give the bass and the treble back at a low volume, through the daemon
+
+Usage: svolder host loudness [OPTIONS] [COMMAND]
+
+Commands:
+  show       Print the loudness (what no verb does)
+  on         Turn the loudness on, with the numbers it has
+  off        Turn the loudness off
+  strength   Set how much of the correction is given back, in percent
+  reference  Set the volume at and above which the loudness is flat, in percent, or `now` for the current volume
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the loudness as the daemon sends it, as one JSON object
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help (see more with '--help')
+```
+
+```
+$ svolder host loudness
+loudness: on
+strength: 50 %
+reference: 100 %
+volume: 35.0 %
+depth: 13.7 dB
+bass: +7.3 dB
+mids: −7.3 dB
+treble: +2.1 dB
+$ svolder host loudness strength 70
+loudness strength: 70 %
+$ svolder host loudness reference now
+loudness reference: 35 % (the current volume)
+$ svolder host loudness off
+loudness off
+```
+
+The lines are: `loudness:` on or off (with the reason after a colon when it cannot follow the volume
+now), the `strength` and the `reference` in percent, and, once the daemon has read the computer's
+volume, the `volume`, the `depth` (how far under the reference the stage plays, in dB) and the shelf
+gains it plays at that volume: the `bass` (how far it stands above the middle), the `mids` (how far
+the middle sits under it) and the `treble` (how far the top stands above the middle), then the
+`note` the daemon left, if any. The three gains are the stage's own, not the response at three
+frequencies. `--json` prints the daemon's view as one object, also after a verb: `on`,
+`strength_pct`, `reference_pct`, `volume_pct`, `depth_db`, `lift_db`, `mids_db`, `treble_db`,
+`following`, `note`, `unavailable`, `curve` (the stage as played now, 61 points) and `ranges`.
+
+The verbs: `on` and `off`; `strength PERCENT` (0 to 100, snapped to 5); `reference PERCENT` (1 to
+100) or `reference now` (the volume as it is). Numbers are plain (`strength 70`); a trailing `%` is
+accepted but never needed. A value past a range is held to it by the daemon, and the answer says
+what it holds. Turning loudness on never asks: it only cuts.
+
+With no daemon running, or one that does not answer, `show` cannot know whether loudness plays (a
+TUI with no daemon may be following the volume): its first line is `loudness: unknown: …` with what
+the saved settings say (`on` or `off`), read from the state file, else from the settings kept before
+any state existed, and the other lines are those settings. The offline `--json` holds no volume
+(`volume_pct` is null), `following` false, the reason in `unavailable` and a flat readout and curve,
+since what the stage plays is not known. A daemon that answers with host audio off shows loudness as
+off, whatever the saved state holds. Every verb with no daemon exits 3, naming
+`svolder daemon install`; one with host audio off exits 6; a daemon that does not offer loudness (an
+older one) exits 7 (`svolder daemon restart`); a refusal or a bad value exits 1. See [exit
+codes](exit-codes.md).
 
 ### host speakers
 
@@ -1517,7 +1667,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.36.7
+svolder 0.37.2
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

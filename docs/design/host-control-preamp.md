@@ -99,15 +99,37 @@ Three more rules keep that true when something else changes the chain:
 - The config on disk is written with the preamp it needs at its own rate, so a chain that starts
   again from it is capped by that number and not by the preamp the points state. A state file that
   the command line wrote is checked at the running rate and sent whole on the first look after the
-  daemon reads it, whatever the rate.
+  daemon reads it, whatever the rate. No config is written whose points do not play at its rate
+  (the EQ waiting for a rate its curve plays at, or points read from a state file the first look
+  has not checked yet): it would hold coefficients the chain clamps to other filters, or an
+  unstable one, and a chain that starts again would play them.
 
 The price is plain: after a curve is softened live, the level stays at the applied curve's preamp
 until the next apply. What applies is turning the EQ off and on, loading a preset softer than the
-applied curve, an edit made while the EQ is off, an edit when live updates are not available, and
-a restart of the chain (which loads the config on disk). A hand edit that softens the curve, a
-point's new type, and a point added or removed all go live and do not apply. The node bound has the
-same price: a user whose chain was sent to by a command-line apply before the daemon's reload
-plays quieter than the points need, until the next apply.
+applied curve while nothing plays, an edit made while the EQ is off, an edit when live updates are
+not available, and a restart of the chain (which loads the config on disk). A hand edit that
+softens the curve, a point's new type, and a point added or removed all go live and do not apply.
+The node bound has the same price: a user whose chain was sent to by a command-line apply before
+the daemon's reload plays quieter than the points need, until the next apply.
+
+## A softer preset while a stream plays
+
+An apply restarts the chain: its sink is removed and made again, and a player that follows the sink
+(a pulse client such as a desktop music player) may pause on the removal. So a preset that needs
+more preamp than the cap allows, loaded while a stream plays through the chain, is not applied: it
+goes live like a drag, the curve changes at once and the preamp stays at the cap (a flat preset
+after one that needed -6.2 dB plays 6.2 dB quieter than it should, never over unity). The view's
+note says `level held until the music pauses`. The state file and the config on disk keep the curve
+with its own preamp. Once nothing has played through the chain for the idle time (30 s, the
+pass-through's), the chain is applied again with the points as they stand, and the cap lifts; a
+stream that plays at that check keeps the level held another period. With nothing playing the preset
+applies at once, as before. A preset that needs less preamp than the cap goes live and holds nothing
+(and a chain this controller applied, read back at the preamp its config holds, bounds nothing: the
+read-back is f32 at six decimals, a hair off); the EQ turned off while the level is held keeps the
+chain as a pass-through for the stream (off with nothing playing removes it, and the next on applies
+the curve whole); a daemon that starts over a chain left holding a lower preamp than the saved state
+needs (it stopped while the level was held) plays under that preamp and lifts it the same way once
+idle. Rate changes, crossfeed and the speakers while the level is held go by the rules above.
 
 ## The crossfeed stage
 
@@ -118,6 +140,49 @@ stage worked out for the old rate (the preamp rule counts both). For Bauer's def
 crossover an anti-phase signal adds `|1 - a·LP/2| + |a·LP/2|`, about 1.41. So M/S bass plays about
 3.1 dB under the input at every frequency: a tone at 2 kHz is unchanged apart from that preamp.
 `make host-e2e` measures these levels on a private PipeWire.
+
+A rate change puts the stage back to the one the chain's config holds, with the slots, and a line
+carries the stage only when it moved, so a drag's line sent before the next look plays the points
+as they stand under the config's stage. The preamp is therefore also never above what the points
+need less what the config's stage costs. It bites only when the points need more preamp than the
+config's curve and the config holds a dearer stage than the one sent live: a config holds the
+stage only when its live send failed or live updates are off, and the stage sent live since is
+cheaper (Meier with a 1 ms delay in the config, then its amount turned down to 7.5 %, then a
+point dragged up: without the rule, +0.49 dB over unity). The level is then held down by the
+difference, so the chain is applied again once nothing has played for the idle time, as after a
+held recall, which takes the stage out of the config. A state file that says its config holds
+the stage does not say the rate the stage was worked out at, so it is paid for at whichever usual
+rate costs the most (Meier at 0.25 ms worked out at 44.1 kHz costs 0.37 dB more than at 48 kHz)
+until the reset it owes takes the stage out. The lab's `stage_cost_table` (an ignored test,
+`cargo test --release -p svolder-host --lib stage_cost_table -- --ignored --nocapture`) prints,
+for every model's presets with and without a delay, the most the stage adds against its cost over
+every rate it may be worked out at and played at.
+
+## The loudness stage
+
+The loudness stage ([loudness.md](loudness.md)) sits after the EQ's sixteenth slot and costs the
+preamp nothing, and it is outside every preamp sum. Its f32 maximum over DC to Nyquist is at most
+0 dB at every rate and every depth, it never raises any frequency, and its two sections in a
+configuration are the identity, so:
+
+- the preamp's value is never changed by loudness: not by the stage's depth, not by a volume
+  change, and a loudness line carries no preamp of its own;
+- the cap a configuration puts on the live preamp (`cap_at`, the configuration's own preamp), the
+  total a recall wants (`wanted_total`), what a held level is capped at, the cost of the stage a
+  configuration holds (`loaded_stage_db`, `config_stage_cost_db`), the test for lifting a held level
+  and the preamp `save_state` keeps all leave the stage out. In particular a configuration's
+  identity sections are unity, so the level rule of a recall and the held level's cap are the ones
+  of a chain with no loudness stage, and a chain read back at its configuration's preamp bounds
+  nothing;
+- no order between a loudness line and any other line is needed for the level, and a rate change
+  between a stage worked out and played gives the same maximum, because the maximum over the unit
+  circle does not depend on the rate.
+
+The stage has an order of its own inside its line, because the sections of one line may land in any
+order and a line half-landed at a section boundary must stay under unity
+([the proof](loudness.md#why-it-is-never-louder), the order in
+[following it](loudness.md#following-it)). The proof holds for whole sections: see
+[the limit below](#what-the-lab-cannot-see).
 
 ## A chain from an older svolder
 
@@ -143,9 +208,11 @@ and removed, preset loads harder and softer than the loaded curve, the EQ on and
 applies with the state file written before or after the daemon's look, state reloads, node restarts,
 rate changes among 44.1 to 192 kHz, `pw-cli` deaths (also mid-line), refused sends, a write that
 fails once, refusals the session reads zero to two reads late (its reader task sets the flag a
-moment after `pw-cli` prints it), a failed Off or apply, nodes that are listed late, daemon restarts
-and ticks of 50 ms. A rate event with the rate the sink already runs at models a rebuild of the
-graph, which puts the slots back without a change of rate.
+moment after `pw-cli` prints it), a failed Off or apply, nodes that are listed late, daemon
+restarts, a stream that starts or stops playing through the chain, and ticks of 50 ms (the lab's
+controllers idle after 60 ticks, so a sequence sees a held level lifted). A rate event with the rate
+the sink already runs at models a rebuild of the graph, which puts the slots back without a change
+of rate.
 
 After every event and every tick the curve the node plays (its ports, as the model holds them)
 times the preamp it plays must peak at most 0.01 dB over unity over the whole band at the current
@@ -155,27 +222,77 @@ reads the state file (an event or a tick's reload), and no panic.
 
 The rule that nothing plays over unity says nothing about whether the EQ still works, so a second
 one asks after three seconds with no event, once, while nothing is armed to fail (a refused send,
-a node not listed yet) and the controller can tell what the node plays. A `pw-cli` that ended after
-taking a line is started again at the next look, within a second, and the newest values are sent; a
-graph rebuilt at the rate the controller last read puts the slots back, and the look sees it, since
-any port the look before held at its sent value that now differs is a revert and is sent again. A
-daemon that starts over a node it did not start compares its slots and preamp with the saved points
-at the first look and, where they differ, sends the saved state through the normal update (preamp
-first when it falls, never above the node's own preamp unless that is the -120 dB floor): the saved
-file wins. A controller that says it is on and live must have a node that plays the points it shows,
+a node not listed yet, a `pw-cli` that a refused send ended and that may not be started again for
+up to a second) and the controller can tell what the node plays. A `pw-cli` that ended after
+taking a line is started again at the next look, within a second, and the newest values are sent.
+A graph rebuilt at the rate the controller last read puts every slot and the stage back and keeps
+the preamp. A port known to have taken its sent value that a look finds at another value is a
+revert, and everything is sent again. A port is known to have taken it when a look found it there,
+or when a look saw a port move to the value of the same line or a later one: `pw-cli` applies each
+line whole and in order, so a line whose preamp a look saw land put its slots in too. A line that
+left the preamp where it was leaves nothing that survives a rebuild, so a look cannot tell a rebuild
+before it from a `pw-cli` that has not applied the line yet: a port that a look still finds off its
+value although its line went before the look before is sent again, once for that line (the newest
+values, not counted as a revert). So the slots are put right within about two seconds of one or two
+rebuilds. A third rebuild that lands between that resend and the next look leaves the slot at the
+config's value until the next edit, under unity, while the view says live (a known limit). A daemon
+that starts over a node it did not start compares its slots and preamp with the saved points at the
+first look and, where they differ, sends the saved state through the normal update (preamp first
+when it falls, never above the node's own preamp unless that is the -120 dB floor): the saved file
+wins. A controller that says it is on and live must have a node that plays the points it shows,
 at the rate the sink runs at, under the preamp it shows, within 0.05 dB at every frequency of a
 grid. One that is off, with a curve that plays at the sink's rate, must turn on when asked.
 
-The short run is two blocks of 300 seeds. The first draws every kind of event with its usual
-weight. The second, the targeted profile, takes nearly half of its events from a command-line
-apply, a node that starts again, a refusal read late, a write that fails once and drags: the
-compound that can leave a chain replaced while a line is refused or lost. Against a copy that
-sends a line to a node other than the one it looked at, it fails 132 of 5000 seeds where the
-first block fails 58. It draws from a stream of its own, so the first block's seeds do not depend
-on it. Every sequence ends with a quiet tail: the faults armed and not used are disarmed, the
-daemon reads the state file and the world is left alone for 90 ticks, so the liveness rule is
-asked of the state the sequence ended in. A failing seed prints the shrunk
-sequence; `SVOLDER_LAB_SEED=<seed> cargo test -p svolder-host --lib lab_trace -- --ignored
---nocapture` prints what happened step by step. The short run is part of `make check`;
+The short run is five blocks of 300 seeds. The first draws every kind of event with its usual
+weight. The second, the targeted profile, takes nearly half of its events from a command-line apply,
+a node that starts again, a refusal read late, a write that fails once and drags: the compound that
+can leave a chain replaced while a line is refused or lost. Against a copy that sends a line to a
+node other than the one it looked at, it fails 132 of 5000 seeds where the first block fails 58. The
+third, the speakers profile, makes one event in eight a change of the virtual speakers (a set
+chosen, on, off): the model's controller has a store of two sets, the model renders the speakers'
+stage in a config with a set and reads its mixers back, the unity rule adds what those mixers make
+of a set scaled to -0.1 dB, and the liveness rule asks that the speakers play as the view says. The
+fourth, the high-rate profile, starts the sink at any of the usual rates or 705.6 or 768 kHz and
+spends about a third of its events on rate changes among them, a quarter on crossfeed changes (drags
+in flight and their ends) and the rest on ticks, drags of the points and the ordinary mix: against
+the controller before the stage was priced at the rate it was worked out at, it fails 2 of 3000
+seeds (+1.9 and +2.4 dB at 768 kHz). The fifth, the loudness profile, spends about 40 % of its
+events on the computer's volume (a key's step, a jump to 0 or 100 %, from inside svolder or from
+outside), 5 % on mutes, 13 % on loudness changes (on, off, strength, reference as a number or as the
+volume now, drags and releases), 8 % on rate changes up to 768 kHz, 2 % on daemon takeovers (half of
+them with a first line that does not land) and 12 % on ticks. The model holds the loudness stage's
+ports, the unity rule counts the stage and holds the stage alone to unity, and a liveness rule asks
+that the played depth follows the volume. Each profile draws from a stream of its own, so the first
+block's seeds do not depend on the others. Every sequence ends with a quiet tail: the faults armed
+and not used are disarmed, the daemon reads the state file and the world is left alone for 90 ticks,
+so the liveness rule is asked of the state the sequence ended in. A failing seed prints the shrunk
+sequence;
+`SVOLDER_LAB_SEED=<seed> cargo test -p svolder-host --lib lab_trace -- --ignored --nocapture` prints
+what happened step by step. The short run is part of `make check`;
 `make preamp-lab SEED=<first> RUNS=<count>` runs the long one (5000 sequences of each profile by
 default).
+
+## What the lab cannot see
+
+The lab, the unity rule and the proofs above work at the granularity of whole filter updates and
+sections: a line's sections land in some order, and every state made of whole sections stays under
+unity. They do not see a tear inside one section.
+
+PipeWire's filter chain applies a live control update one value at a time, and nothing stops the
+audio thread from playing in between. Rarely (measured about 1 in 6,000 risky updates on PipeWire
+1.6.2; at ten glide ends a day, roughly once every year or two) one quantum, about 1/50 s at 1024
+samples and 48 kHz (a smaller quantum makes it likelier), plays a half-applied filter. A small step
+is harmless (a loudness glide step: about +0.3 dB). These are loud:
+
+- the daemon stopping gracefully, a TUI with no daemon quitting, a reconfigure that halts the
+  computer's side, or loudness turned off, while loudness plays at a depth: +31 to +43 dB in the
+  bass measured, up to +50 dB worked out;
+- the end of a loudness glide back to flat: +29 dB in the bass measured;
+- adding or removing a computer EQ point, a live preset recall that changes the number of points,
+  the EQ turned on or off live: an unstable filter or full scale measured;
+- dragging an existing point: up to about +17 dB worked out, not measured;
+- switching the virtual speakers or crossfeed: up to about 6 dB worked out.
+
+After a bad quantum the chain recovers by itself. Live edits of the computer EQ have had this since
+they began (0.35), so v0.36.7 has it. svolder cannot close it without giving up live updates or a
+much larger redesign; the fix belongs in PipeWire. See [known-issues.md](../known-issues.md).

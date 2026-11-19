@@ -403,6 +403,23 @@
 .pn.t3 { transform: rotate(.75deg); }
 .pn.t4 { transform: rotate(1.5deg); }
 .p-card .pn { margin: 0; }
+/* the config chip, a note that is a button: blue ink underlined; in red pencil, ringed, when lines
+   fail; dim when nothing was read */
+.pn.p-setup {
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 5px;
+}
+.pn.p-setup.changes {
+  color: var(--paper-pencil); text-decoration: none; border: 1.6px solid var(--paper-pencil);
+  border-radius: 50% / 48%; padding: 0 .6em .08em;
+}
+.pn.p-setup:is(.unread, .not_read, .other_version) { color: var(--paper-print-dim); }
+/* the popup's failing lines in the same pencil */
+:root[data-theme="paper"] [data-popup="setup"] :is(.fpk-fail, .fp-tag) { color: var(--paper-pencil); }
+:root[data-theme="paper"] [data-popup="setup"] .fp-tag { border-color: var(--paper-pencil); }
+:root[data-theme="paper"] [data-popup="setup"] .fp-dot.warn {
+  background: var(--paper-pencil); border-color: var(--paper-pencil);
+}
 /* the arrow and the tick are strokes in the note's own colour; the word `to` is for the ear */
 .p-arrow, .p-tick {
   display: inline-block; height: auto; fill: none; stroke: currentColor; stroke-width: 1.6;

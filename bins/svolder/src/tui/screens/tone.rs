@@ -25,6 +25,7 @@
 //!
 //! - [`fit`]: what the screen adds for an imported preset: the target curve and a side pane.
 //! - [`mod@points`]: the computer's side: its curve and the Points table.
+//! - [`computer_loudness`]: the computer's Loudness section under the table.
 
 use std::sync::Arc;
 
@@ -279,8 +280,24 @@ pub fn draw(
             false => (bands, None),
         };
         points::draw_points(frame, table, app, (theme, tier), hits);
+        if let (Some(block), true) = (beside, app.ld_unfolded()) {
+            computer_loudness::draw_block(frame, block, app, (theme, tier));
+        }
+        if xf.ld > 0 {
+            let ld_area = Rect {
+                height: xf.ld.min(xf_area.height),
+                ..xf_area
+            };
+            computer_loudness::draw(frame, ld_area, app, theme, hits);
+        }
         if xf.line > 0 {
-            crossfeed::draw(frame, xf_area, beside, app, (theme, tier), hits);
+            let rest = Rect {
+                y: xf_area.y + xf.ld,
+                height: xf_area.height.saturating_sub(xf.ld),
+                ..xf_area
+            };
+            let beside = beside.filter(|_| !app.ld_unfolded());
+            crossfeed::draw(frame, rest, beside, app, (theme, tier), hits);
         }
         return header_rows;
     }
@@ -351,19 +368,24 @@ fn rows(area: Rect, bands: usize, split: bool, xf: crossfeed::Layout) -> (Tier, 
         .saturating_add(BANDS_CHROME + tier.top());
     // The virtual speakers' block gives the graph its rows back out of the table's (which
     // scrolls): the graph keeps room for a data row, its axis and its borders.
+    // The Loudness rows come out of the table's empty rows, not the graph's.
+    if xf.ld > 0 {
+        table = table.saturating_sub(xf.ld).max(MIN_TABLE);
+    }
     if xf.boxed {
         let spare = body
             .height
             .saturating_sub(xf.height() + tier.row_gap() + MIN_GRAPH);
         table = table.min(spare.max(MIN_TABLE));
     }
-    // The Crossfeed section's line sits between the graph and the Points table, with the rows
-    // it unfolds into under the line in the narrow tiers.
-    let [response, xf_area, _, bands] = Layout::vertical([
+    // The chain's order, top to bottom: the EQ (the graph and the Points table), then the
+    // Loudness rows and the Crossfeed section's line with the rows it unfolds into under it in
+    // the narrow tiers.
+    let [response, _, bands, xf_area] = Layout::vertical([
         Constraint::Min(0),
-        Constraint::Length(xf.height()),
         Constraint::Length(tier.row_gap()),
         Constraint::Length(table),
+        Constraint::Length(xf.height()),
     ])
     .areas(body);
     (tier, [header, response, bands, xf_area])
@@ -451,6 +473,7 @@ fn curve_area_in(area: Rect, bands: usize, side: bool, split: bool, xf: crossfee
 }
 
 mod bands;
+pub(in crate::tui::screens) mod computer_loudness;
 mod crossfeed;
 mod fit;
 mod header;

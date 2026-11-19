@@ -167,6 +167,8 @@ pub(crate) struct StubDaemon {
     /// Whether a `server_switch` leaves the servers as `version` says them, as a daemon whose
     /// reload has not run yet does.
     switch_stuck: Mutex<bool>,
+    /// The configuration file a `server_switch` writes its `enabled` key into, as a daemon does.
+    switch_file: Mutex<Option<std::path::PathBuf>>,
     /// Whether each subscription asked for the host's view, in the order they were made.
     host_asked: Mutex<Vec<bool>>,
     /// How many `host` requests it has answered.
@@ -359,6 +361,7 @@ impl Handler for StubDaemon {
                     config_missing: self
                         .config_missing
                         .load(std::sync::atomic::Ordering::SeqCst),
+                    activity: None,
                 }
             }
             Request::WebLinkOpen { code } => {
@@ -424,6 +427,16 @@ impl Handler for StubDaemon {
                     .push((server, enabled));
                 if let Some(refusal) = self.switch_refusal.lock().expect("the refusal").clone() {
                     return refusal;
+                }
+                if let Some(path) = self.switch_file.lock().expect("the file").clone() {
+                    let _ = match server {
+                        svolder_ipc::Server::Web => {
+                            svolder_ipc::Config::update_web(&path, |web| web.enabled = enabled)
+                        }
+                        svolder_ipc::Server::Mcp => {
+                            svolder_ipc::Config::update_mcp(&path, |mcp| mcp.enabled = enabled)
+                        }
+                    };
                 }
                 let mut says = self.says.lock().expect("the status");
                 if !*self.switch_stuck.lock().expect("the flag") {
@@ -1032,7 +1045,7 @@ impl StubServer {
         self.handler.mqtt_ops.lock().expect("the record").clone()
     }
 
-    /// Say `status` for the MQTT bridge in `version` and in every `mqtt_set` answer from now on.
+    /// Say `status` for the MQTT client in `version` and in every `mqtt_set` answer from now on.
     pub(crate) fn says_mqtt(&self, status: svolder_ipc::MqttStatus) {
         self.handler.says.lock().expect("the status").mqtt = Some(status);
     }
@@ -1049,6 +1062,12 @@ impl StubServer {
     /// Answer every `server_switch` and `guest_switch` request with `answer` from now on.
     pub(crate) fn answers_switch(&self, answer: Response) {
         *self.handler.switch_refusal.lock().expect("the refusal") = Some(answer);
+    }
+
+    /// Have every `server_switch` write its `enabled` key into the file at `path`, as a daemon
+    /// does before it answers.
+    pub(crate) fn switches_write(&self, path: &std::path::Path) {
+        *self.handler.switch_file.lock().expect("the file") = Some(path.to_path_buf());
     }
 
     /// Answer every `server_switch` request with the servers as they stood before it.
@@ -1270,18 +1289,9 @@ impl std::ops::Deref for SocketFile {
     }
 }
 
-/// A socket path no other case has.
+/// A socket path no other case has, short whatever `TMPDIR` is.
 pub(crate) fn fresh_socket() -> PathBuf {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "svolder-remote-{}-{n}-{seq}.sock",
-        std::process::id()
-    ))
+    super::short_socket("svolder-remote")
 }
 
 /// Serve a stub daemon on `socket` and wait for it to answer: a second daemon on the socket
@@ -1338,6 +1348,7 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         mqtt_ops: Mutex::default(),
         mqtt_tightens: Mutex::new(false),
         switch_stuck: Mutex::new(false),
+        switch_file: Mutex::new(None),
         host_asked: Mutex::default(),
         host_snapshots: std::sync::atomic::AtomicUsize::new(0),
         frames: Mutex::new(None),
@@ -1354,21 +1365,37 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let path = socket.clone();
     let served = Arc::clone(&handler);
-    tokio::spawn(async move {
-        let _ = serve(&path, served, async {
+    let mut serving = tokio::spawn(async move {
+        serve(&path, served, async {
             let _ = rx.await;
         })
-        .await;
+        .await
     });
+    // A stub that is not up fails the case here: handed on, it is a daemon a case waits on for
+    // ever (a job that never starts, a cancel that never arrives).
     for _ in 0..500 {
         if Client::connect(&socket).await.is_ok() {
-            break;
+            return StubServer {
+                socket,
+                handler,
+                shutdown: Some(tx),
+            };
+        }
+        if serving.is_finished() {
+            let why = match (&mut serving).await {
+                Ok(Err(e)) => e.to_string(),
+                Ok(Ok(())) => "it stopped".into(),
+                Err(e) => e.to_string(),
+            };
+            panic!(
+                "the stub daemon could not serve on {} ({} bytes): {why}",
+                socket.display(),
+                socket.as_os_str().len()
+            );
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    StubServer {
-        socket,
-        handler,
-        shutdown: Some(tx),
-    }
+    panic!("the stub daemon never answered on {}", socket.display());
 }
+
+mod tests;

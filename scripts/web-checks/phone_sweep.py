@@ -42,8 +42,10 @@ from modal import check, poll
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TARGET_MIN = 24
-# a box that scrolls sideways on purpose: `signature -> why` (none today: every one found is a failure)
-SCROLLS = {}
+# a box that scrolls sideways on purpose: `signature -> why` (every other one found is a failure)
+SCROLLS = {
+    'div.fp-tabs': 'the Sound popup\'s four tabs run in one line that scrolls sideways (the shown tab is scrolled into view)',
+}
 SLACK = 1.0
 
 MEASURE = r"""(() => {

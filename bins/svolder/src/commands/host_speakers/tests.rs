@@ -785,3 +785,15 @@ fn the_help_shows_each_choice_with_its_technical_term() {
         assert_eq!(value.get_name(), room.word());
     }
 }
+
+#[test]
+fn show_with_no_daemon_reads_the_set_kept_before_any_state_existed() {
+    let dir = std::env::temp_dir().join(format!("svolder-sp-saved-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let state = dir.join("host-eq.toml");
+    std::fs::write(dir.join("host-eq-settings.toml"), "speakers = \"set-a\"\n").unwrap();
+    let saved = super::saved_at(&state);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(saved.set.as_deref(), Some("set-a"));
+    assert!(!saved.on);
+}

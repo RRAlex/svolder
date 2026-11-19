@@ -289,6 +289,8 @@ fn state() -> HostEqState {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
 }
 
@@ -495,6 +497,36 @@ fn the_chosen_set_is_kept_while_off_and_the_on_flag_only_while_it_plays() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(
         text.contains("speakers = \"dummy-d2\"") && !text.contains("speakers_on"),
+        "{text}"
+    );
+    assert_eq!(HostEqState::load(&path), Ok(Some(before)));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_state_without_loudness_loads_with_none_and_one_with_it_round_trips() {
+    let dir = scratch("loudness-state");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("host-eq.toml");
+    std::fs::write(&path, STATE_0_34).unwrap();
+    let state = HostEqState::load(&path).unwrap().expect("a state");
+    assert_eq!(state.loudness, None);
+    state.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("loudness"),
+        "an unset one adds no key: {text}"
+    );
+    let mut before = state;
+    before.loudness = Some(loudness::LoudnessSettings {
+        on: true,
+        strength_pct: 35.0,
+        reference_pct: 80.0,
+    });
+    before.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("[loudness]") && text.contains("strength_pct = 35.0"),
         "{text}"
     );
     assert_eq!(HostEqState::load(&path), Ok(Some(before)));

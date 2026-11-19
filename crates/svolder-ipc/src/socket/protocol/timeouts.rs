@@ -26,7 +26,7 @@ pub const JOB_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(3
 /// What the daemon gives each actor beyond the farewell bound to close its session as it stops.
 pub const ACTOR_STOP_MARGIN: std::time::Duration = std::time::Duration::from_secs(6);
 
-/// The longest the daemon waits, as it stops, for the MQTT bridge to say `offline` and
+/// The longest the daemon waits, as it stops, for the MQTT client to say `offline` and
 /// disconnect: the broker's own wait and a moment.
 pub const BRIDGE_STOP_BOUND: std::time::Duration = std::time::Duration::from_secs(4);
 

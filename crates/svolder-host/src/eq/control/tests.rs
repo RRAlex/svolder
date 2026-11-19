@@ -28,6 +28,10 @@ impl Dir {
     fn state(&self) -> PathBuf {
         self.0.join("host-eq.toml")
     }
+
+    fn settings(&self) -> PathBuf {
+        self.0.join("host-eq-settings.toml")
+    }
 }
 
 impl Drop for Dir {
@@ -37,7 +41,11 @@ impl Drop for Dir {
 }
 
 mod exit;
+mod held;
 mod idle;
+mod kept;
+mod ld;
+mod loudness_settings;
 mod passthrough;
 mod vs;
 mod xf;
@@ -101,6 +109,8 @@ fn saved(path: &Path, filters: Vec<SourceFilter>, slots: Vec<u8>, on: bool) {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
     .save(path)
     .unwrap();

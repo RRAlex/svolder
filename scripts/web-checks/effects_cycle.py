@@ -11,6 +11,7 @@ import json
 import sys
 
 import common
+import parts
 from smoke_probe import PROBE
 
 browser = sys.argv[1] if len(sys.argv) > 1 else 'chromium'
@@ -18,8 +19,10 @@ fails = []
 passed = 0
 
 
-def check(name, cond, detail=''):
+def check(name, cond, detail='', timing=False):
     global passed
+    if not parts.counts(timing):
+        return
     if cond:
         passed += 1
         print('ok  ', name)
@@ -89,6 +92,11 @@ def pace(b, secs=2.0):
     return (f1 - f0) / secs, (d1 - d0) / max(1, f1 - f0)
 
 
+def summary():
+    print(f'effects_cycle {browser}{parts.part_tag()}: {passed} passed, {len(fails)} failed')
+    return 1 if fails else 0
+
+
 def run():
     dac = common.Daemon('gungnir2-v2')
     b = make(size=(1280, 900))
@@ -134,7 +142,8 @@ def run():
 
         # ---- ten Smoke -> Glow -> Smoke rounds
         b.sleep(1.0)
-        rate0, per0 = pace(b)
+        timed = parts.part_has('timing')
+        rate0, per0 = pace(b) if timed else (0.0, 0.0)  # the rates are the timing part's
         shade0 = json.dumps(b.page('window.__fx.stats().shade'))
         worst = {'live': 0, 'canvases': 0}
         for _ in range(10):
@@ -157,20 +166,24 @@ def run():
         check('  one live context and one canvas at a time', worst['live'] <= 1
               and worst['canvases'] <= 1 and s['live'] == 1, [worst, s])
         b.sleep(1.5)
-        rate1, per1 = pace(b)
-        print(f'      calm rate {rate0:.1f} -> {rate1:.1f} frames/s; draw calls per frame '
-              f'{per0:.1f} -> {per1:.1f}')
+        rate1, per1 = pace(b) if timed else (0.0, 0.0)
+        if timed:
+            print(f'      calm rate {rate0:.1f} -> {rate1:.1f} frames/s; draw calls per frame '
+                  f'{per0:.1f} -> {per1:.1f}')
         calm = b.page("import(new URL('assets/themes/ember/smoke-model.js', document.baseURI).href)"
                       '.then((m) => m.TUNING.calmFps)')
         lo, hi = 0.7 * calm, 1.3 * calm  # 14 to 26 at the approved 20
-        check(f'  the calm rate after ({lo:g} to {hi:g} frames a second)', lo <= rate1 <= hi, rate1)
+        check(f'  the calm rate after ({lo:g} to {hi:g} frames a second)', lo <= rate1 <= hi, rate1,
+              timing=True)
         check('  one animation loop: draw calls per simulated frame as before (within 15 %)',
-              per0 > 0 and abs(per1 - per0) <= 0.15 * per0, (per0, per1))
+              per0 > 0 and abs(per1 - per0) <= 0.15 * per0, (per0, per1), timing=True)
         shade1 = json.dumps(b.page('window.__fx.stats().shade'))
         check('  the page\'s shade is the one it drew', shade1 == shade0, (shade0, shade1))
         check('  no page error and no popup', errors(b) == [] and b.ev('window.__toasts') == [],
               [errors(b), b.ev('window.__toasts')])
         b.close()
+        if not parts.part_has('logic'):
+            return summary()  # the rest is the logic part's
 
         # ---- a context lost and given back, on a smoke of its own (the page's effects off)
         for what in ('a settle (a forced roll pending)', "a climb's stream", 'the control'):
@@ -237,8 +250,7 @@ def run():
         b.close()
     finally:
         dac.stop()
-    print(f'effects_cycle {browser}: {passed} passed, {len(fails)} failed')
-    return 1 if fails else 0
+    return summary()
 
 
 if __name__ == '__main__':

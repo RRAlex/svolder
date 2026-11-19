@@ -247,9 +247,9 @@ and the question first, as a draw does, so a held one never keeps the next Escap
 (`settingId('passphrase', 'ask')`, outside the place the wire puts): `<name> is playing: if the
 new code is not the device's, it refuses the link and the sound stops until the code is right.`,
 *Keep the current one* focused, *Change passphrase*. A device is playing when it is connected,
-its card has a track that plays and its path does not say the sound goes elsewhere (class
-`other`: another sink, or another input of the DAC). Keep or Escape sends nothing; the answer
-closes the question and the refusal, if any, reads at the form.
+its card has a track that plays and its path does not say the sound goes elsewhere (verdict
+`not_this_dac` or `other_input`: another sink, or another input of the DAC). Keep or Escape sends
+nothing; the answer closes the question and the refusal, if any, reads at the form.
 
 ### Remove…
 

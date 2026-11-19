@@ -88,7 +88,7 @@ its own task, so a long request holds up none on another (a test pins it).
 
 `Daemon::shutdown` runs in this order: the walk's and AutoEq's jobs (up to `JOB_STOP_BOUND`, 3 s;
 a job still running is given up on and reported cancelled), the MCP and web servers, the host, the
-MQTT bridge, every actor at once, the walk's probe among them (up to `SHUTDOWN_DEADLINE`, the
+MQTT client, every actor at once, the walk's probe among them (up to `SHUTDOWN_DEADLINE`, the
 farewell bound and six seconds),
 and last any configuration write already under way (up to `WRITE_SETTLE_BOUND`, 3 s). `svolderd`
 builds its runtime by hand and ends it with `shutdown_timeout(RUNTIME_STOP_BOUND)` (3 s): dropping
@@ -98,7 +98,7 @@ write; it can cut a read or a job's stuck thread.
 
 After `Daemon::shutdown`, `main` settles the transport (`CLOSE_GRACE`, 8 s: connects and releases
 still in flight) and then ends the runtime. The bounded steps are therefore: jobs (`JOB_STOP_BOUND`
-3 s; the walk's and AutoEq's run at once), the MQTT bridge (`BRIDGE_STOP_BOUND`, 4 s), actors
+3 s; the walk's and AutoEq's run at once), the MQTT client (`BRIDGE_STOP_BOUND`, 4 s), actors
 (`FAREWELL_BOUND` 24 s and `ACTOR_STOP_MARGIN` 6 s; all asked at once), writes (`WRITE_SETTLE_BOUND`
 3 s), the transport's settle (8 s) and the runtime's end (`RUNTIME_STOP_BOUND` 3 s): 51 s. The MCP
 and web servers stop on a cancel and a join of their accept loop, and the host aborts its tasks;

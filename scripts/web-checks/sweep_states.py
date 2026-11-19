@@ -51,6 +51,9 @@ class Rig:
                                 more=[SECOND, THIRD])
         self.off = self._make(common.Daemon, host='fake', web='auth = "none"\nwrites = false', env=NO_AUTOEQ,
                               more=[SECOND, THIRD])
+        # the fake host whose PipeWire config fails: the `config N` chip, Paper's pencil, the popup's failing lines
+        self.config = self._make(common.Daemon, host='fake',
+                                 env={**NO_AUTOEQ, 'SVOLDER_FAKE_CONFIG': 'fail'})
         self.blank = self._make(common.Daemon, blank=True,
                                 env={**NO_AUTOEQ, 'SVOLDER_FAKE_MORE': f'bifrost3@{BIFROST}'})
 
@@ -87,6 +90,28 @@ def themes_of(b):
     """`[(id, [schemes])]` as the page lists them."""
     return [(t[0], t[1] or ['dark']) for t in b.page(
         "__core.registry.list().map((e) => [e.id, e.schemes])")]
+
+
+def palettes_of(b, theme):
+    """The ids of the palettes a theme offers, the default first; `[None]` for a theme with none."""
+    if theme != 'signal':
+        return [None]
+    return b.page("import(new URL('assets/themes/signal/palette.js', document.baseURI))"
+                ".then((m) => m.PALETTES.map((p) => p.id))")
+
+
+def set_palette(b, theme, palette):
+    """Dress the page in the palette `palette` of `theme` (the default one, or none: as it is)."""
+    if palette is None or palette == palettes_of(b, theme)[0]:
+        return
+    b.page(f"(localStorage.setItem('svolder.theme.signal.palette', {json.dumps(json.dumps(palette))}),"
+           f" document.documentElement.dataset.palette = {json.dumps(palette)}, 1)")
+    time.sleep(0.3)
+
+
+def palette_held(b, palette):
+    """Whether the page still wears `palette` (a remount would have put Blueprint back)."""
+    return b.page("document.documentElement.dataset.palette ?? null") == (None if palette is None else palette)
 
 
 def set_scheme(b, scheme, schemes):
@@ -201,7 +226,7 @@ def visit_writer(b, probe, d, rig):
                                                     'refused-name')}
     expected |= {'devices/d-Second/dimmed', 'devices/d-Second/remove-ask', 'devices/add/warning',
                  'devices/add/scan', 'devices/add/pick', 'eq-library/autoeq/empty', 'eq-library/autoeq/preview',
-                 'eq-library/autoeq', 'eq-library/upload', 'eq-library/saved', 'sound/crossfeed'}
+                 'eq-library/autoeq', 'eq-library/upload', 'eq-library/saved', 'sound/loudness', 'sound/crossfeed'}
     probe = Tracker(probe, expected)
     b.page(BODY)
     probe('page')
@@ -260,9 +285,10 @@ def visit_writer(b, probe, d, rig):
                 time.sleep(0.4)
                 probe('eq-library/autoeq/preview')
         shut(b, 'sound')
-    # the other pages of the EQ library tab, and the Crossfeed tab
+    # the other pages of the EQ library tab, and the Loudness and Crossfeed tabs
     for page, label in (('autoeq', 'eq-library/autoeq'), ('upload', 'eq-library/upload'),
-                        ('saved', 'eq-library/saved'), ('crossfeed', 'sound/crossfeed')):
+                        ('saved', 'eq-library/saved'), ('loudness', 'sound/loudness'),
+                        ('crossfeed', 'sound/crossfeed')):
         if open_to(b, 'sound', page, probe, label):
             shut(b, 'sound')
     probe.done('writer')
@@ -292,6 +318,20 @@ def visit_reader(b, probe, daemon_kind):
         if open_to(b, 'help', 'here', probe, 'guest/help/here'):
             shut(b, 'help')
     probe.done(daemon_kind)
+
+
+def visit_config(b, probe):
+    """A page whose config check fails: the page with the chip on show (Signal's on the player's screen), the
+    popup with its failing lines, and the blank page's popup that has nothing to say (`config not read`) is the
+    blank visit's. An unread chip (`config ?`) has no fake of its own: known-issues-owed."""
+    probe = Tracker(probe, {'config/page', 'config/popup'})
+    b.page(BODY)
+    b.page("(document.querySelector('.sg-hop[data-hop=\"player\"]')?.click(), 1)")
+    time.sleep(0.5)
+    probe('config/page')
+    if open_to(b, 'setup', None, probe, 'config/popup'):
+        shut(b, 'setup')
+    probe.done('config')
 
 
 def visit_blank(b, probe):
@@ -331,8 +371,9 @@ def visitors(rig, who=None):
     every = [('writer', rig.writer, lambda b, probe: visit_writer(b, probe, rig.writer, rig)),
              ('guest', rig.guest, lambda b, probe: visit_reader(b, probe, 'guest')),
              ('off', rig.off, lambda b, probe: visit_reader(b, probe, 'off')),
-             ('blank', rig.blank, lambda b, probe: visit_blank(b, probe))]
-    keep = os.environ.get('WEB_CHECK_WHO', 'writer,guest,off,blank').split(',')
+             ('blank', rig.blank, lambda b, probe: visit_blank(b, probe)),
+             ('config', rig.config, lambda b, probe: visit_config(b, probe))]
+    keep = os.environ.get('WEB_CHECK_WHO', 'writer,guest,off,blank,config').split(',')
     if who:
         keep = [v for v in who.split(',') if v in keep]
     return [v for v in every if v[0] in keep]

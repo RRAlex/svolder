@@ -58,6 +58,10 @@ mod status;
 mod art;
 // the Host group
 mod host_group;
+// the Path row where it is too long for its room
+mod path_scroll;
+// the PipeWire config chip and its box
+mod setup_box;
 // meter rows
 mod meters;
 // tiers, sizes, panes and borders

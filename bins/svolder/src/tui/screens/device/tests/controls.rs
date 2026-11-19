@@ -206,9 +206,20 @@ fn the_selected_rows_cursor_carries_the_accent_colour() {
 fn the_selected_row_is_reversed_to_the_panes_inner_right_edge() {
     let theme = Theme::new(true);
     let mut app = mockup_app();
-    app.set_selected(0); // Input, a short row
+    hear(
+        &mut app,
+        vec![converted("10", "volume", 63, "63 (-26.1 dB)", -26.1, "dB")],
+    );
+    app.settle();
+    let toggle = app
+        .rows()
+        .iter()
+        .position(|row| row.control.kind == svolder_profiles::ControlKind::Toggle)
+        .expect("a toggle row");
+    app.set_selected(toggle);
+    let label = app.rows()[toggle].control.label.clone();
     let buffer = frame_with_theme(&app, 80, 24, &theme);
-    let cells = row_cells(&buffer, "Input");
+    let cells = row_cells(&buffer, &label);
     let border = cells
         .iter()
         .position(|cell| cell.symbol() == "│")
@@ -339,7 +350,8 @@ fn a_focused_controls_row_is_selected_across_the_pane() {
             vec![converted("10", "volume", 63, "63 (-26.1 dB)", -26.1, "dB")],
         );
         app.settle();
-        for (selection, label) in [(0, "Input"), (4, "Volume")] {
+        {
+            let (selection, label) = (4, "Volume");
             app.set_selected(selection);
             let buffer = frame(&app, width, height);
             let cells = controls_row_cells(&buffer, label);
@@ -876,4 +888,33 @@ fn the_switch_fits_the_controls_pane_at_80_columns() {
     assert!(!app.switch_available());
     assert!(press(&mut app, KeyCode::Up).is_empty());
     assert!(!app.switch_focused());
+}
+
+/// A select row (Input) is a choice among values: with the keys on it only its label and its
+/// value take the selected style, as the Target switch has it, and no band runs across the pane.
+#[test]
+fn a_focused_select_row_marks_its_label_and_value_not_the_row() {
+    let theme = Theme::new(false);
+    let selected = theme.style(Role::Selected);
+    let mut app = mockup_app();
+    app.set_selected(0);
+    let buffer = frame(&app, 80, 24);
+    let cells = controls_row_cells(&buffer, "Input");
+    let is_selected = |cell: &ratatui::buffer::Cell| cell.modifier.contains(selected.add_modifier);
+    let label = cells
+        .iter()
+        .position(|c| c.symbol() == "I")
+        .expect("the label");
+    assert!(is_selected(&cells[label]), "the label is not selected");
+    let value = cells
+        .iter()
+        .position(|c| c.symbol() == "‹")
+        .expect("the arrows")
+        + 2;
+    assert!(is_selected(&cells[value]), "the value is not selected");
+    let last = last_character(&cells);
+    assert!(
+        !is_selected(&cells[last + 1]),
+        "the select row is still a band"
+    );
 }

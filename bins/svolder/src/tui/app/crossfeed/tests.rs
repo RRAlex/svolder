@@ -59,14 +59,16 @@ fn the_section_folds_when_the_keys_leave_it() {
     let mut app = app_on(Screen::Tone, false, "bauer", None);
     press(&mut app, KeyCode::Char('X'));
     assert!(app.xf_unfolded());
-    press(&mut app, KeyCode::Tab);
-    assert!(matches!(app.tone.row, ToneRow::Point(_)) && !app.xf_unfolded());
+    // the chain's order: the header, the points, then the sections
     press(&mut app, KeyCode::Tab);
     assert_eq!(app.tone.row, ToneRow::Mode);
+    assert!(!app.xf_unfolded());
+    press(&mut app, KeyCode::Tab);
+    assert!(matches!(app.tone.row, ToneRow::Point(_)));
     press(&mut app, KeyCode::Tab);
     assert!(
         app.xf_unfolded(),
-        "Tab from the header goes into the section"
+        "Tab from the points goes into the section"
     );
     press(&mut app, KeyCode::Esc);
     assert_eq!(app.screen, Screen::Tone, "Esc folds before it leaves");
@@ -74,7 +76,7 @@ fn the_section_folds_when_the_keys_leave_it() {
 }
 
 #[test]
-fn up_and_down_reach_the_rows_between_the_mode_and_the_points() {
+fn up_and_down_reach_the_points_and_then_the_rows_of_the_section() {
     let mut app = app_on(Screen::Tone, false, "bauer", None);
     app.tone.row = ToneRow::Mode;
     let mut seen = Vec::new();
@@ -85,12 +87,12 @@ fn up_and_down_reach_the_rows_between_the_mode_and_the_points() {
     assert_eq!(
         seen,
         [
+            ToneRow::Point(0),
+            ToneRow::Point(1),
             ToneRow::Crossfeed(Xf::Preset),
             ToneRow::Crossfeed(Xf::Level),
             ToneRow::Crossfeed(Xf::Crossover),
             ToneRow::Crossfeed(Xf::Delay),
-            ToneRow::Point(0),
-            ToneRow::Point(1),
         ]
     );
 }
@@ -452,7 +454,11 @@ fn a_click_on_a_point_closes_an_open_edit_line_and_no_key_is_swallowed() {
     assert!(app.tone.xf_line.is_none(), "the line is closed, not hidden");
     assert!(!app.modal_open());
     press(&mut app, KeyCode::Tab);
-    assert_eq!(app.tone.row, ToneRow::Mode, "Tab works");
+    assert_eq!(
+        app.tone.row,
+        ToneRow::Crossfeed(Xf::Preset),
+        "Tab works: from the points it goes to the section"
+    );
     // also when something other than focus_point moved the keys
     app.focus_crossfeed(Xf::Level);
     press(&mut app, KeyCode::Enter);

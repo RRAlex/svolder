@@ -853,7 +853,7 @@ ok('the_players_path_names_the_computer_by_its_audio_server', () => {
   assert.ok(html.includes('PipeWire volume 54 %') && html.includes('PipeWire muted'), html);
   assert.ok(!/computer/i.test(html.slice(html.indexOf('sg-pathlist'), html.indexOf('</ul>'))), 'no hop says computer');
   // the verdict under the hops says it the same way
-  page.device.playing.path = { ...page.device.playing.path, words: 'the computer resamples; the computer is untouched' };
+  page.device.playing.path = { ...page.device.playing.path, words: ['the computer resamples; the computer is untouched'] };
   const verdict = playerScreen(page, 1_700_000_100_000);
   assert.ok(verdict.includes('PipeWire resamples; PipeWire is untouched'), verdict);
   assert.ok(!/computer/i.test(verdict.slice(verdict.indexOf('sg-verdict'))), 'the verdict does not say computer');
@@ -1307,7 +1307,7 @@ ok('the_verdict_names_pipewire_never_the_computer', () => {
   // the real strings of the daemon in the facts block, in every state of the route
   for (const words of ['computer volume 54 %, computer muted', "the computer's sink was not read", 'the computer is on USB 2', '\u2192 X']) {
     const page = hosted();
-    page.device.playing.path = { class: 'warn', words, hops: [], title: words.startsWith('\u2192') ? 'the computer plays to X' : '' };
+    page.device.playing.path = { verdict: 'changed', words: [words], hops: [], title: words.startsWith('\u2192') ? 'the computer plays to X' : '' };
     const on = side({ route: { ...ROUTE, host_eq: true, others_mixing: 2 } });
     on.page.device.playing.path = page.device.playing.path;
     const html = computerFacts(on.page) + shelves.computer(on.page, { id: 'computer', kind: 'computer' }, on.view);

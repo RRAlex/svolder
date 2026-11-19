@@ -1453,3 +1453,36 @@ fn on_the_computer_side(watching: &mut Watching) -> usize {
     watching.app.set_selected(volume);
     volume
 }
+
+/// The hint the sink task of [`a_volume_write_hands_its_reading_to_the_loops_loudness`] reaches.
+static WRITE_HINT: std::sync::OnceLock<svolder_host::eq::LevelHint> = std::sync::OnceLock::new();
+
+fn write_hint() -> Option<svolder_host::eq::LevelHint> {
+    Some(WRITE_HINT.get_or_init(Default::default).clone())
+}
+
+/// A volume the loop writes hands its read-back to the loop's own controller's loudness, without
+/// the controller; a plain read hands nothing.
+#[tokio::test]
+async fn a_volume_write_hands_its_reading_to_the_loops_loudness() {
+    use super::{SinkOp, serve};
+    use tokio::sync::mpsc;
+    let sink = FakeSink::new(Some(svolder_host::SinkState {
+        volume: 0.5,
+        muted: false,
+        name: "Fake".to_string(),
+        target: None,
+    }));
+    let (ops, asked) = mpsc::unbounded_channel();
+    let (answers, mut states) = mpsc::unbounded_channel();
+    let task = tokio::spawn(serve(std::sync::Arc::new(sink), asked, answers, write_hint));
+    ops.send(SinkOp::Read).unwrap();
+    states.recv().await.unwrap();
+    assert_eq!(write_hint().unwrap().peek(), None, "a read hands nothing");
+    ops.send(SinkOp::Volume(25)).unwrap();
+    states.recv().await.unwrap();
+    let level = write_hint().unwrap().peek().expect("the write's reading");
+    assert!((level.linear - 0.25f64.powi(3)).abs() < 1e-9, "{level:?}");
+    assert!(!level.muted);
+    task.abort();
+}

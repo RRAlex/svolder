@@ -1307,7 +1307,10 @@ async fn the_path_has_its_verdict_and_its_hops() {
     let model = crate::web::model::device_model(&s);
     let path = model.playing.and_then(|p| p.path).expect("the path");
     assert!(!path.words.is_empty(), "{path:?}");
-    assert!(path.words.contains("computer volume 54 %"), "{path:?}");
+    assert!(
+        path.words.join(" · ").contains("computer volume 54 %"),
+        "{path:?}"
+    );
     dac.stop().await;
 }
 

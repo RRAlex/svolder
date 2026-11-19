@@ -334,6 +334,8 @@ async fn a_direct_tui_never_shows_the_eq_on_with_no_chain() {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
     .save(&path)
     .unwrap();
@@ -540,6 +542,41 @@ async fn a_quit_wins_over_a_queued_crossfeed_on() {
     assert!(
         chain.calls().is_empty(),
         "the queued crossfeed never ran: {:?}",
+        chain.calls()
+    );
+}
+
+/// A loudness change still waiting its turn when the loop quits is dropped too: no chain is
+/// applied for it after the quit.
+#[tokio::test]
+async fn a_quit_wins_over_a_queued_loudness_on() {
+    let chain = Arc::new(FakeChain::new());
+    let control = EqControl::new(chain.clone(), Box::new(FakeParams::new()), Keep::Memory);
+    let mut link = ComputerLink::over(control);
+    let held = link
+        .control
+        .clone()
+        .expect("a controller")
+        .lock_owned()
+        .await;
+    link.direct(HostEqOp::Loudness {
+        on: Some(true),
+        strength_pct: None,
+        reference_pct: None,
+        reference_now: None,
+        done: true,
+    })
+    .expect("a controller");
+    tokio::task::yield_now().await;
+    let release = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+    });
+    link.shutdown().await;
+    release.await.unwrap();
+    assert!(
+        chain.calls().is_empty(),
+        "the queued loudness never ran: {:?}",
         chain.calls()
     );
 }

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The computer's tools: `get_host` reads its volume, EQ, crossfeed, virtual speakers and player;
-//! `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed` and `set_host_speakers`
-//! change them.
+//! `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed`, `set_host_speakers` and
+//! `set_host_loudness` change them.
 //!
 //! The volume follows the rules the device's tools follow. It never goes above 100 %. A rise of
 //! more than [`MAX_RISE_DB`] over its lowest level of the last minute asks first, the level in
@@ -17,9 +17,14 @@ use rmcp::model::{CallToolRequestParams, Tool, ToolAnnotations};
 use serde_json::{Value, json};
 use svolder_host::eq::SpeakersView;
 use svolder_host::eq::crossfeed::{CrossfeedView, Model, ModelView};
+use svolder_host::eq::loudness::{LoudnessRanges, LoudnessView};
 use svolder_host::eq::speakers::Room;
-use svolder_ipc::host::HostView;
+use svolder_ipc::host::{
+    DacFacts, DacStage, HostView, PathLine, SETUP_LIMIT, computer_line, path_line, setup_check,
+    sink_is_dac,
+};
 use svolder_ipc::{HostEqOp, Request, Response};
+use svolder_profiles::Family;
 use svolder_profiles::tone::preset;
 
 use super::{
@@ -62,7 +67,39 @@ impl Tools {
     pub(super) async fn get_host(&self, request: &CallToolRequestParams) -> Done {
         Args::new(request, &[])?;
         let view = self.host_view().await?;
-        Ok(host_json(&view))
+        Ok(host_json(&view, &self.dacs().await))
+    }
+
+    /// What each configured DAC reports of its end of the path: every device whose profile is a
+    /// DAC and that the fleet follows, in the daemon's order.
+    async fn dacs(&self) -> Vec<DacFacts> {
+        let Response::Devices { devices } = self.fleet.request(Request::Devices).await else {
+            return Vec::new();
+        };
+        devices
+            .iter()
+            .filter_map(|device| {
+                let profile = self.fleet.profile(device)?;
+                if profile.family != Family::Dac {
+                    return None;
+                }
+                let watched = self.fleet.watch(device)?;
+                let feed = watched.feed.borrow();
+                let mut facts = DacFacts::read(&profile, |id| {
+                    let value = &feed.readings.iter().find(|m| m.id == id)?.value;
+                    value.as_i64().or_else(|| match value {
+                        svolder_proto::Value::Bool(on) => Some(i64::from(*on)),
+                        _ => None,
+                    })
+                });
+                // The readings held while the link is down are from before the drop: the
+                // device's own stage is not claimed from them.
+                if !feed.connected {
+                    facts.stage = DacStage::default();
+                }
+                Some(facts)
+            })
+            .collect()
     }
 
     pub(super) async fn set_host_volume(
@@ -207,6 +244,50 @@ impl Tools {
             Some(eq) => json!({ "eq": eq_json(eq) }),
             None => json!({ "eq": null }),
         })
+    }
+
+    /// Change the loudness: one [`HostEqOp::Loudness`]. The controller snaps the values to their
+    /// steps, holds them to their ranges and words every refusal; `reference: "now"` asks it to
+    /// take the computer's volume as the reference.
+    pub(super) async fn set_host_loudness(&self, request: &CallToolRequestParams) -> Done {
+        let args = Args::new(request, LOUDNESS_ARGS)?;
+        let on = args.flag("on")?;
+        let strength_pct = args.number("strength_pct")?;
+        let reference_pct = args.number("reference_pct")?;
+        let reference_now = match args.text("reference")? {
+            None => None,
+            Some(NOW) => Some(true),
+            Some(word) => {
+                return Err(format!(
+                    "reference must be {NOW:?} (got {word:?}); give a number as reference_pct"
+                )
+                .into());
+            }
+        };
+        if reference_now.is_some() && reference_pct.is_some() {
+            return Err("give reference_pct or reference \"now\", not both"
+                .to_string()
+                .into());
+        }
+        if on.is_none()
+            && strength_pct.is_none()
+            && reference_pct.is_none()
+            && reference_now.is_none()
+        {
+            return Err(format!("give at least one of {}", LOUDNESS_ARGS.join(", ")).into());
+        }
+        self.host_send(Request::HostEq {
+            op: HostEqOp::Loudness {
+                on,
+                strength_pct,
+                reference_pct,
+                reference_now,
+                done: true,
+            },
+        })
+        .await?;
+        let view = self.host_view().await?;
+        Ok(json!({ "loudness": loudness_of(&view) }))
     }
 
     /// Change the crossfeed. Turning it on never asks: the preamp rule lowers the level first, so
@@ -358,6 +439,83 @@ fn eq_json(eq: &svolder_host::eq::EqView) -> Value {
     out
 }
 
+/// The arguments of `set_host_loudness`.
+const LOUDNESS_ARGS: &[&str] = &["on", "strength_pct", "reference_pct", "reference"];
+
+/// The word of `reference` for the computer's volume now.
+const NOW: &str = "now";
+
+/// The loudness as the tools show it. `curve` (plot data, large) is left out on purpose.
+fn loudness_json(ld: &LoudnessView) -> Value {
+    let range = |r: &svolder_host::eq::crossfeed::Range| json!({ "min": r.min, "max": r.max, "step": r.step });
+    let mut out = json!({
+        "on": ld.on,
+        "strength_pct": ld.strength_pct,
+        "reference_pct": ld.reference_pct,
+        "volume_pct": ld.volume_pct,
+        "depth_db": ld.depth_db,
+        "lift_db": ld.lift_db,
+        "mids_db": ld.mids_db,
+        "treble_db": ld.treble_db,
+        "following": ld.following,
+        "note": ld.note,
+        "ranges": {
+            "strength_pct": range(&ld.ranges.strength_pct),
+            "reference_pct": range(&ld.ranges.reference_pct),
+        },
+    });
+    if let Some(why) = &ld.unavailable {
+        out["unavailable"] = json!(why);
+    }
+    out
+}
+
+/// The loudness of `view`, null when the EQ is unavailable or the daemon has none.
+fn loudness_of(view: &HostView) -> Value {
+    view.eq
+        .as_ref()
+        .filter(|eq| eq.unavailable.is_none())
+        .and_then(|eq| eq.loudness.as_ref())
+        .map_or(Value::Null, loudness_json)
+}
+
+/// The definition of `set_host_loudness`; the ranges and steps are the view's own.
+pub(super) fn loudness_definition() -> Tool {
+    let ranges = LoudnessRanges::default();
+    let (strength, reference) = (ranges.strength_pct, ranges.reference_pct);
+    let properties = json!({
+        "on": { "type": "boolean", "description": "true to turn the loudness on, false to turn it off" },
+        "strength_pct": {
+            "type": "number", "minimum": strength.min, "maximum": strength.max,
+            "description": format!("How much of the correction is given back, in percent, held to {} to {} and snapped in steps of {}", strength.min, strength.max, strength.step)
+        },
+        "reference_pct": {
+            "type": "number", "minimum": reference.min, "maximum": reference.max,
+            "description": format!("The volume at and above which the stage is flat, in percent of the volume scale, held to {} to {} and snapped in steps of {}", reference.min, reference.max, reference.step)
+        },
+        "reference": {
+            "type": "string", "enum": [NOW],
+            "description": "\"now\" takes the computer's volume now as the reference; not with reference_pct"
+        }
+    });
+    let schema = json!({
+        "type": "object",
+        "properties": properties,
+        "required": [],
+        "additionalProperties": false
+    });
+    let Value::Object(schema) = schema else {
+        unreachable!("an object literal");
+    };
+    let mut tool = Tool::new(
+        "set_host_loudness",
+        "Change the computer's loudness, which lifts the bass and the treble against the mids as the volume falls below its reference: give at least one of on, strength_pct, reference_pct and reference, and the call answers with {loudness} as it is after the change. It only ever cuts, never raises the level.",
+        Arc::new(schema),
+    );
+    tool.annotations = Some(ToolAnnotations::new().read_only(false));
+    tool
+}
+
 /// The arguments of `set_host_crossfeed`.
 const CROSSFEED_ARGS: &[&str] = &[
     "on",
@@ -458,7 +616,7 @@ pub(super) fn room_words() -> String {
 /// The description of `get_host`.
 pub(super) fn get_host_description() -> String {
     format!(
-        "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q), its crossfeed (on or off, model, preset or custom, amount in percent, feed level, crossover, delay and its floor, the output, a note when it turned itself off), its virtual speakers (on or off, the chosen set and its room as {}, its label and licence, the loudness change, a note when they turned themselves off, and the fetched sets a call can choose from; the set fields are null while no set is chosen) and the player (title, artist, album, status); each is null while it is not available, and `unavailable` says why.",
+        "Read the computer's volume (percent, muted, the sink), its EQ (on or off, the preset it came from or custom, the preamp in dB and each point's type, frequency, gain and Q), its crossfeed (on or off, model, preset or custom, amount in percent, feed level, crossover, delay and its floor, the output, a note when it turned itself off), its loudness (on or off, strength and reference in percent with their ranges, the volume, the depth, `lift_db` (the bass over the mids), `mids_db` (the mids' cut) and `treble_db` (the top over the mids) in dB, whether it follows the volume now, a note), its virtual speakers (on or off, the chosen set and its room as {}, its label and licence, the set's level change, a note when they turned themselves off, and the fetched sets a call can choose from; the set fields are null while no set is chosen) and the player (title, artist, album, status), the path of the sound (`path`: the verdict, its words (a list, one per change or thing not read), the sentence behind them when there is one, and `dac`, the name of the DAC it was judged with; the verdict is `untouched`, `changed`, `not_this_dac` (the sound goes to another sink), `other_input` (the DAC listens to an input the computer does not feed) or `unknown`; when the computer's sink is one of the configured DACs the path is judged to that DAC and `dac` names it, else the computer's side alone is judged and `dac` is null) and the PipeWire config (`config`: the `sink` it judged, its `outcome` (`untouched`, `changes`, `unread`, `not_read` or `other_version`), summary, the `limit` of what it can judge and seven lines, each with a `key`, an `outcome` of `pass`, `fail` or `unknown`, and the `words` of what was found); each is null while it is not available, `path` and `config` while no route is read, and `unavailable` says why.",
         room_words()
     )
 }
@@ -574,7 +732,49 @@ pub(super) fn crossfeed_definition() -> Tool {
     tool
 }
 
-fn host_json(view: &HostView) -> Value {
+/// The path of `view`'s route judged: the DAC's when the sink is one of `dacs`, else the
+/// computer's alone; null with no route.
+fn path_of(view: &HostView, dacs: &[DacFacts]) -> Value {
+    let Some(route) = &view.route else {
+        return Value::Null;
+    };
+    let dac = route
+        .sink
+        .as_ref()
+        .and_then(|sink| dacs.iter().find(|dac| sink_is_dac(sink, dac)));
+    let line: PathLine = match dac {
+        Some(dac) => path_line(route, dac),
+        None => computer_line(route),
+    };
+    json!({
+        "verdict": line.verdict.key(),
+        "words": line.words,
+        "sentence": line.sentence(),
+        "dac": dac.map(|dac| dac.display.clone()),
+    })
+}
+
+/// The config check of `view`'s route: its sink, summary and the seven lines; null with no route.
+fn config_of(view: &HostView) -> Value {
+    let Some(route) = &view.route else {
+        return Value::Null;
+    };
+    let check = setup_check(route);
+    let lines: Vec<Value> = check
+        .lines
+        .iter()
+        .map(|line| json!({ "key": line.key, "outcome": line.outcome.key(), "words": line.words }))
+        .collect();
+    json!({
+        "sink": check.sink,
+        "outcome": check.summary.key(),
+        "summary": check.summary_words(),
+        "limit": SETUP_LIMIT,
+        "lines": lines,
+    })
+}
+
+fn host_json(view: &HostView, dacs: &[DacFacts]) -> Value {
     let eq = view
         .eq
         .as_ref()
@@ -589,7 +789,10 @@ fn host_json(view: &HostView) -> Value {
         "eq": eq,
         "crossfeed": crossfeed_of(view),
         "speakers": speakers_of(view),
+        "loudness": loudness_of(view),
         "player": player,
+        "path": path_of(view, dacs),
+        "config": config_of(view),
     });
     if let Some(why) = view.eq.as_ref().and_then(|eq| eq.unavailable.as_ref()) {
         out["unavailable"] = json!(why);

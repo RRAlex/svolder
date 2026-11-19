@@ -8,6 +8,7 @@
 #![allow(dead_code, reason = "each test binary uses the part of this it needs")]
 
 mod script;
+mod short_socket;
 
 #[allow(
     unused_imports,
@@ -25,16 +26,29 @@ pub struct TempDir(PathBuf);
 impl TempDir {
     /// A fresh directory whose name says which case made it.
     pub fn new(label: &str) -> Self {
+        Self::under(Some(&std::env::temp_dir()), label)
+    }
+
+    /// [`TempDir::new`] under the short base, for a case that binds a socket in it: a socket
+    /// path must be shorter than `SUN_LEN` (108 bytes).
+    pub fn short(label: &str) -> Self {
+        Self::under(None, label)
+    }
+
+    fn under(base: Option<&Path>, label: &str) -> Self {
         static SEQ: AtomicUsize = AtomicUsize::new(0);
         let seq = SEQ.fetch_add(1, Ordering::SeqCst);
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("the clock is past 1970")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "svolder-host-{label}-{}-{seq}-{at}",
-            std::process::id()
-        ));
+        let dir = match base {
+            Some(base) => base.join(format!(
+                "svolder-host-{label}-{}-{seq}-{at}",
+                std::process::id()
+            )),
+            None => short_socket::short_join(&short_socket::short_unique(&format!("host-{label}"))),
+        };
         std::fs::create_dir_all(&dir).expect("the case's directory is made");
         Self(dir)
     }

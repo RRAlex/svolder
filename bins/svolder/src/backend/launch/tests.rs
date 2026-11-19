@@ -9,7 +9,7 @@ use svolder_ipc::{Client, Request, Response};
 
 use super::*;
 use crate::backend::Globals;
-use crate::test_support::{daemons_on, install_script, temp_dir};
+use crate::test_support::{daemons_on, install_script, short_dir};
 
 /// The environment entry `name=value` as a child takes it.
 fn entry(name: &str, value: impl AsRef<OsStr>) -> (OsString, OsString) {
@@ -215,7 +215,7 @@ async fn nothing_listening_and_no_systemd_autospawns_one_daemon_for_two_clients(
     let Some(binary) = prebuilt_daemon() else {
         return;
     };
-    let root = temp_dir("launch-autospawn");
+    let root = short_dir("launch-autospawn");
     let socket = root.0.join("svolder.sock");
     let _daemons = Daemons(socket.clone());
     let host = TestHost::without_systemd(&root.0, Some(binary));
@@ -254,7 +254,7 @@ async fn nothing_listening_and_no_systemd_autospawns_one_daemon_for_two_clients(
 /// that installs one.
 #[tokio::test]
 async fn autospawn_off_falls_back_to_a_direct_session_and_transport_daemon_fails_cleanly() {
-    let root = temp_dir("launch-no-autospawn");
+    let root = short_dir("launch-no-autospawn");
     let socket = root.0.join("svolder.sock");
     let at = socket.to_string_lossy().into_owned();
     let host = TestHost::without_systemd(&root.0, None);
@@ -292,7 +292,7 @@ async fn autospawn_off_falls_back_to_a_direct_session_and_transport_daemon_fails
 /// is the one the verb runs on: nothing of this process's own is spawned.
 #[tokio::test]
 async fn an_installed_socket_unit_is_started_rather_than_a_daemon_of_this_process_s_own() {
-    let root = temp_dir("launch-socket-unit");
+    let root = short_dir("launch-socket-unit");
     let socket = root.0.join("svolder.sock");
     let at = socket.to_string_lossy().into_owned();
     let host = TestHost::with_socket_unit(
@@ -322,7 +322,7 @@ async fn an_installed_socket_unit_is_started_rather_than_a_daemon_of_this_proces
 /// session of its own instead.
 #[tokio::test]
 async fn a_socket_unit_that_holds_the_path_is_never_raced_by_an_autospawn() {
-    let root = temp_dir("launch-socket-unit-active");
+    let root = short_dir("launch-socket-unit-active");
     let socket = root.0.join("svolder.sock");
     let at = socket.to_string_lossy().into_owned();
     let host = TestHost::with_socket_unit(
@@ -386,7 +386,7 @@ fn a_daemon_is_only_handed_a_transport_it_opens() {
 /// A daemon that is already answering is the answer: systemd is not asked anything.
 #[tokio::test]
 async fn a_daemon_that_answers_ends_the_chain_at_once() {
-    let root = temp_dir("launch-answering");
+    let root = short_dir("launch-answering");
     let socket = root.0.join("svolder.sock");
     let at = socket.to_string_lossy().into_owned();
     let _listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind the test socket");
@@ -417,7 +417,7 @@ async fn a_daemon_that_answers_ends_the_chain_at_once() {
 /// and with nothing at all rather than starting one.
 #[tokio::test]
 async fn a_probe_finds_the_daemon_that_is_there_and_starts_none() {
-    let root = temp_dir("launch-probe");
+    let root = short_dir("launch-probe");
     let socket = root.0.join("svolder.sock");
     let at = socket.to_string_lossy().into_owned();
     // Autospawn is on and there is a daemon to start, so a chain would have started one.
@@ -441,7 +441,7 @@ async fn a_probe_finds_the_daemon_that_is_there_and_starts_none() {
 /// its own, and `--transport daemon` says both what it wanted and what stopped it.
 #[tokio::test]
 async fn with_no_daemon_to_start_the_verb_still_runs_and_daemon_says_why_it_cannot() {
-    let root = temp_dir("launch-no-binary");
+    let root = short_dir("launch-no-binary");
     let socket = root.0.join("svolder.sock");
     let at = socket.to_string_lossy().into_owned();
     let host = TestHost::without_systemd(&root.0, None);
@@ -480,7 +480,7 @@ async fn with_no_daemon_to_start_the_verb_still_runs_and_daemon_says_why_it_cann
 /// on its way out is in that log, under whatever was there before.
 #[tokio::test]
 async fn a_daemon_that_stops_at_once_says_so_in_the_log_the_message_names() {
-    let root = temp_dir("launch-daemon-stops");
+    let root = short_dir("launch-daemon-stops");
     let socket = root.0.join("svolder.sock");
     let refuses = root.0.join("svolderd");
     install_script(
@@ -524,7 +524,7 @@ async fn a_daemon_that_stops_at_once_says_so_in_the_log_the_message_names() {
 /// while that other daemon is still starting: the socket answers a moment later.
 #[tokio::test]
 async fn a_daemon_that_lost_the_lock_finds_the_winner_answering() {
-    let root = temp_dir("launch-daemon-loses");
+    let root = short_dir("launch-daemon-loses");
     let socket = root.0.join("svolder.sock");
     let loses = root.0.join("svolderd");
     install_script(&loses, "#!/bin/sh\nexit 3\n");
@@ -548,7 +548,7 @@ async fn a_daemon_that_lost_the_lock_finds_the_winner_answering() {
 /// daemon that comes next.
 #[tokio::test]
 async fn a_daemon_that_never_answers_is_not_left_behind() {
-    let root = temp_dir("launch-daemon-hangs");
+    let root = short_dir("launch-daemon-hangs");
     let socket = root.0.join("svolder.sock");
     let sleeps = root.0.join("svolderd");
     // `exec` so the sleeping process is the one that was started, and the signal that ends
@@ -575,7 +575,7 @@ async fn an_autospawned_daemon_is_told_the_socket_and_keeps_no_handover() {
     let Some(binary) = prebuilt_daemon() else {
         return;
     };
-    let root = temp_dir("launch-environment");
+    let root = short_dir("launch-environment");
     let socket = root.0.join("svolder.sock");
     let _daemons = Daemons(socket.clone());
     let host = TestHost::without_systemd(&root.0, Some(binary));

@@ -260,6 +260,7 @@ fn said(version: &str) -> DaemonInfo {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
     }
 }
 

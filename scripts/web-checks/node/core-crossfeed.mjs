@@ -290,7 +290,7 @@ const press = (r, id, type) => r.$(id).dispatchEvent(new r.window.MouseEvent(typ
 }));
 
 await ok('the_row_is_sound_a_writers_between_devices_and_help_with_no_side_list', async () => {
-  assert.deepEqual(POPUPS.map((one) => one.name), ['devices', SOUND, 'help']);
+  assert.deepEqual(POPUPS.map((one) => one.name), ['devices', SOUND, 'setup', 'help']);
   const entry = POPUPS.find((one) => one.name === SOUND);
   assert.equal(entry.row.label, 'Sound…');
   assert.equal(entry.row.sees, 'writer');

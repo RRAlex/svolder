@@ -22,11 +22,14 @@
 
 mod eq_op;
 mod path;
+mod sample;
+mod setup;
 mod views;
 
 pub use eq_op::run_eq_op;
 pub use path::{
-    DacFacts, DacStage, Hop, PathLine, ROUTE_NOT_READ, SCHIIT_VENDOR_ID, Verdict, path_line,
-    rate_hz, sink_is_dac,
+    DacFacts, DacStage, Hop, PathLine, ROUTE_NOT_READ, SCHIIT_VENDOR_ID, Verdict, computer_line,
+    path_line, rate_hz, sink_is_dac,
 };
+pub use setup::{SETUP_LIMIT, SetupCheck, SetupLine, SetupOutcome, SetupSummary, setup_check};
 pub use views::{CaptureKind, CaptureView, FrameView, HostView, HostVolume, PlayingView};

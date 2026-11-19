@@ -103,6 +103,26 @@ fn words_too_long_for_the_row_are_carried_by_its_marquee() {
     );
 }
 
+/// With `scroll_long_lines` off the words are cut with `…` and the marquee does not move, however
+/// long the tick clock runs.
+#[test]
+fn with_scrolling_off_the_now_playing_words_are_cut_and_still() {
+    let long = "A Very Long Title That Goes On And On Past The End Of The Row";
+    let mut app = hearing(Some(track(long)));
+    app.tui.scroll_long_lines = false;
+    app.host.marquee.offset = 3;
+    let room = now_playing_room((80, 24));
+    app.resize(80, 24);
+    for secs in [1, 5, 30] {
+        app.tick(app.now + Duration::from_secs(secs));
+    }
+    assert_eq!(app.host.marquee.offset, 0);
+    let row = text(&screen(&app))[22].clone();
+    let words = format!("{long} — Miles Davis");
+    let shown: String = words.chars().take(room - 1).collect();
+    assert_eq!(row, format!("│ Now playing: {shown}…│"));
+}
+
 /// A guard: the row already measured cells. A long title of wide glyphs stays inside its pane:
 /// the pane's right border is still drawn in the row's last cell, and a wide glyph is never left
 /// half-drawn against it.
@@ -903,8 +923,8 @@ fn the_transport_row_lights_the_button_the_player_is_on() {
     }
 }
 
-/// On the focused Transport row the button under its cursor is drawn out of the row's
-/// highlight, and with no player the whole row is dim.
+/// On the focused Transport row only the label and the button under its cursor take the selected
+/// style, as the Target switch has it: the other buttons are dim and the row is no band.
 #[test]
 fn the_transport_rows_cursor_stands_out_and_no_player_dims_it() {
     let theme = Theme::new(false);
@@ -913,18 +933,28 @@ fn the_transport_rows_cursor_stands_out_and_no_player_dims_it() {
     app.host.button = 3;
     let buffer = frame_with_theme(&app, 80, 24, &theme);
     assert!(text(&buffer)[13].starts_with("│ ▶ Transport    ◀◀  ▶  ▮▮  ▶▶"));
-    let reversed = |x: u16| {
-        buffer
-            .cell((x, 13))
-            .expect("a button")
-            .modifier
-            .contains(Modifier::REVERSED)
+    let selected = theme.style(Role::Selected);
+    let dim = theme.style(Role::Dim);
+    let cell_is = |x: u16, style: ratatui::style::Style| {
+        let cell = buffer.cell((x, 13)).expect("a cell");
+        cell.modifier.contains(style.add_modifier) && style.fg.is_none_or(|fg| cell.fg == fg)
     };
     assert!(
-        !reversed(28),
-        "the button under the cursor is in the row's highlight"
+        cell_is(7, selected),
+        "the label is not in the selected style"
     );
-    assert!(reversed(17) && reversed(24), "the row is not highlighted");
+    assert!(
+        cell_is(28, selected),
+        "the button under the cursor is not selected"
+    );
+    assert!(
+        cell_is(17, dim) && cell_is(24, dim),
+        "the other buttons are not dim"
+    );
+    assert!(
+        !cell_is(34, selected) || selected == ratatui::style::Style::default(),
+        "the row is still a band"
+    );
 
     let mut none = sinking(0.54, false, "USB DAC");
     none.host.found_bus(None, none.now);
@@ -1001,6 +1031,7 @@ pub(super) fn gungnir_route(
         others_mixing: 0,
         host_eq: false,
         stages: None,
+        setup: None,
     };
     edit(&mut route);
     route
@@ -1112,14 +1143,13 @@ fn the_path_row_names_every_hop_after_the_verdict() {
     let app = daemon_hosting(gungnir_route(|route| route.host_eq = true));
     let line = app.host_path().expect("a path");
     let columns = widgets::rows::Columns::fit(160, host::PATH.len(), 0);
-    let (row, dim) = path_row(&line, &Theme::new(false), columns);
+    let row = path_row(&line, &Theme::new(false), columns);
     let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(
         said.trim_end(),
         "Path host EQ on · player 48 kHz S16LE, volume 100 % → computer 48 kHz S32LE, \
          volume 100 % → DAC USB 1, 48 kHz, volume -6.0 dB, tone control, NOS filter"
     );
-    assert!(!dim);
 }
 
 /// A DAC volume below 0 dB is part of the path: the row's DAC hop names it in the warning colour
@@ -1143,7 +1173,7 @@ fn the_path_row_names_the_dac_volume_below_0_db() {
         Some("the Gungnir 2 then lowers it by 3.3 dB")
     );
     let columns = widgets::rows::Columns::fit(200, host::PATH.len(), 0);
-    let (row, _) = path_row(&line, &Theme::new(false), columns);
+    let row = path_row(&line, &Theme::new(false), columns);
     let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         said.trim_end()
@@ -1514,4 +1544,41 @@ fn the_spectrum_row_says_whether_the_daemon_or_the_own_capture_feeds_it() {
     );
     let (rows, _) = spectrum_of(&app, 130, 30);
     assert!(rows.iter().any(|row| row.contains(" daemon ")), "{rows:#?}");
+}
+
+/// With the cursor on the button the player is on (Play while it plays), that button shows the
+/// selected box, in monochrome and in colour; the state's accent is what shows it elsewhere.
+#[test]
+fn the_cursor_shows_on_the_button_the_player_is_on() {
+    let config = TuiConfig::default();
+    for (name, theme) in [
+        (
+            "monochrome",
+            Theme::from_config(&config, true, ColorDepth::Ansi16),
+        ),
+        ("16", Theme::from_config(&config, false, ColorDepth::Ansi16)),
+        (
+            "256",
+            Theme::from_config(&config, false, ColorDepth::Ansi256),
+        ),
+        (
+            "true",
+            Theme::from_config(&config, false, ColorDepth::TrueColor),
+        ),
+    ] {
+        let mut app = transporting(svolder_host::Status::Playing);
+        app.set_selected(app.rows().len());
+        app.host.button = 1;
+        let buffer = frame_with_theme(&app, 80, 24, &theme);
+        let play = buffer.cell((21, 13)).expect("the play button");
+        let prev = buffer.cell((17, 13)).expect("the previous button");
+        assert!(
+            play.modifier.contains(Modifier::REVERSED),
+            "{name}: the cursor is not shown on the playing button"
+        );
+        assert!(
+            !prev.modifier.contains(Modifier::REVERSED),
+            "{name}: another button looks selected"
+        );
+    }
 }

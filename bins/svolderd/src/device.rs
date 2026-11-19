@@ -220,7 +220,7 @@ pub struct LiveInfo {
     pub ring: Arc<Mutex<ring::Ring>>,
 }
 
-/// What the MQTT bridge reads one device through, kept by its actor: the name the file gives
+/// What the MQTT client reads one device through, kept by its actor: the name the file gives
 /// it, its profile once the device has been seen, its firmware, its link, and every reading it
 /// has confirmed. The bridge only ever reads this; what it writes goes through the command
 /// channel, as every other request does.
@@ -266,7 +266,7 @@ pub struct DeviceHandle {
     pub events: broadcast::Sender<Event>,
     /// Identity and link state, as the actor last left them.
     pub info: Arc<Mutex<LiveInfo>>,
-    /// What the MQTT bridge reads the device through; clone it for a receiver of one's own.
+    /// What the MQTT client reads the device through; clone it for a receiver of one's own.
     pub feed: watch::Receiver<Feed>,
 }
 
@@ -617,7 +617,7 @@ struct Actor {
     scanner: Arc<Scanner>,
     events: broadcast::Sender<Event>,
     info: Arc<Mutex<LiveInfo>>,
-    /// What the MQTT bridge reads this device through.
+    /// What the MQTT client reads this device through.
     feed: watch::Sender<Feed>,
     /// The live session, absent while a connect attempt owns it.
     session: Option<Session>,

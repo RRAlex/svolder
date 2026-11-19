@@ -133,6 +133,26 @@ export function createComputerActions({
     else refusals.forEach((fn) => fn(why));
   });
 
+  // Loudness: one lane too, the fields of one request merged newest-last. A "use current volume"
+  // (`reference_now`) is one-shot: it is sent but not held as a value, and a reference typed after
+  // it (or before it) replaces it, the latest intent winning. A refusal goes to the popup that
+  // listens (its own words), else to a toast.
+  const loud = { body: null, shown: {} };
+  const loudRefusals = new Set();
+  held.listen((type) => {
+    if (type === 'settled' && held.get('loudness') === null) loud.shown = {};
+  });
+  const loudnessLane = lane('loudness', 'api/v1/host/loudness', () => {
+    const { body } = loud;
+    loud.body = null;
+    return body;
+  }, (why) => {
+    loud.shown = {};
+    loud.body = null;
+    if (loudRefusals.size === 0) toast(why);
+    else loudRefusals.forEach((fn) => fn(why));
+  });
+
   /** Per point as the caller numbers it (1-based): the id (slot) of the point it names, found when
    * its first change came and kept until the edit ends, so another front end's re-sort that moves
    * the point to another place cannot send the changes to a neighbour; what waits to be sent, what
@@ -348,6 +368,32 @@ export function createComputerActions({
     onCrossfeedRefusal(fn) {
       refusals.add(fn);
       return () => refusals.delete(fn);
+    },
+
+    /** Change the loudness: `fields` is any of `on`, `strength_pct`, `reference_pct` and
+     * `reference_now` (true: the volume the host reads now); `done` is false while a drag or a
+     * repeat goes on and true at its end (and for a single change). The newest value of each
+     * field wins; one request at a time. */
+    setComputerLoudness(fields, { done = true } = {}) {
+      const queued = { ...(loud.body ?? {}) };
+      const shown = { ...loud.shown };
+      if ('reference_pct' in fields) delete queued.reference_now;
+      if (fields.reference_now) {
+        delete queued.reference_pct;
+        delete shown.reference_pct;
+      }
+      const values = { ...fields };
+      delete values.reference_now;
+      loud.body = { ...queued, ...fields, done };
+      loud.shown = { ...shown, ...values };
+      return loudnessLane({ ...loud.shown });
+    },
+    /** The loudness fields this viewer has asked for and the model has not yet answered. */
+    loudnessAsked: () => held.get('loudness')?.value ?? {},
+    /** `fn(words)` hears each refusal of a loudness write; returns the way to stop. */
+    onLoudnessRefusal(fn) {
+      loudRefusals.add(fn);
+      return () => loudRefusals.delete(fn);
     },
 
     /** Recall the preset `name` on the computer. When a connected device plays it too the daemon

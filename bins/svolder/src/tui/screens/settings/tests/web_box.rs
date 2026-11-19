@@ -406,6 +406,14 @@ fn web_box_golden_text() -> String {
     }
     let mut loopback = web_box_guest(true, true);
     loopback.overlays.conn.web.listen = "127.0.0.1:8738".parse().unwrap();
+    // The Activity row under State, the daemon's short words, at the narrowest and a wide box.
+    for width in [80, 200] {
+        let mut counted = web_box_guest(true, true);
+        counted.overlays.conn.activity = Some(activity_said());
+        out.push_str(&format!("=== {width} columns: activity\n"));
+        out.push_str(&web_box_text(&counted, width, 70));
+        out.push('\n');
+    }
     out.push_str("=== 120 columns: loopback\n");
     out.push_str(&web_box_text(&loopback, 120, 46));
     out.push('\n');
@@ -609,17 +617,6 @@ fn a_replaced_link_says_the_last_one_was_used() {
     );
 }
 
-/// The cell `(column, row)` where `needle` starts in the frame `app` draws at `width`×`height`.
-fn find_at(app: &App, width: u16, height: u16, needle: &str) -> (u16, u16) {
-    for (row, line) in text(&frame(app, width, height)).iter().enumerate() {
-        if let Some(byte) = line.find(needle) {
-            let column = line[..byte].chars().count();
-            return (u16::try_from(column).unwrap(), u16::try_from(row).unwrap());
-        }
-    }
-    panic!("{needle:?} is not drawn");
-}
-
 /// A left click on the link's text, on every line of it where it wraps, asks to open it; on its
 /// label, on another row, or with no link on show, it asks for nothing.
 #[test]
@@ -751,4 +748,65 @@ fn the_box_says_how_to_use_the_link_as_a_terminal_link() {
     let rows = shown(&app);
     assert!(rows.contains("Ctrl+click"), "{rows}");
     assert!(rows.contains("Shift+right-click copies"), "{rows}");
+}
+
+/// The box's Activity row reports the web UI's counts in the daemon's short words, sits under
+/// State, shows nothing for a daemon that says none or a web UI that is off, and the cursor
+/// never lands on it.
+#[test]
+fn the_web_boxs_activity_row_reports_and_is_not_a_stop() {
+    let mut app = web_box_guest(false, false);
+    let said = activity_said();
+    app.overlays.conn.activity = Some(said);
+    let words = said.web.unwrap().short();
+    let rows = text(&frame(&app, 80, 24));
+    let at = rows
+        .iter()
+        .position(|r| r.contains("Activity"))
+        .expect("a row");
+    assert!(rows[at].contains(&words), "{}", rows[at]);
+    assert!(rows[at - 1].contains("State"), "{rows:#?}");
+    assert!(
+        !crate::tui::boxes::web_box::WebRow::STOPS
+            .contains(&crate::tui::boxes::web_box::WebRow::Activity)
+    );
+    for key in [
+        KeyCode::Up,
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Down,
+        KeyCode::Down,
+    ] {
+        let _ = press(&mut app, key);
+        let Some(Modal::Web(web)) = app.overlays.conn.modal.as_ref() else {
+            panic!("the box closed")
+        };
+        assert_ne!(web.row, crate::tui::boxes::web_box::WebRow::Activity);
+    }
+    app.overlays.conn.activity = None;
+    assert!(!shown(&app).contains("Activity"), "{}", shown(&app));
+    app.overlays.conn.activity = Some(said);
+    app.overlays.conn.web_status = Some(svolder_ipc::WebStatus::Off);
+    assert!(!shown(&app).contains("Activity"), "{}", shown(&app));
+}
+
+/// Where the Activity row would push the QR code off the terminal, the row is dropped and the
+/// code stays; with one more row of room, both show.
+#[test]
+fn the_activity_row_gives_way_to_the_qr_code() {
+    let mut app = web_box_guest(false, true);
+    let rows_of = |app: &App, rows: u16| text(&frame(app, 120, rows)).join("\n");
+    // Only the QR code paints cells white.
+    let coded = |app: &App, rows: u16| white_cells(&frame(app, 120, rows)) > 0;
+    // Find the shortest terminal that draws the code with no Activity row.
+    let tight = (20..70)
+        .find(|rows| coded(&app, *rows))
+        .expect("a height that fits the code");
+    app.overlays.conn.activity = Some(activity_said());
+    assert!(coded(&app, tight), "the code is dropped for the row");
+    let shown = rows_of(&app, tight);
+    assert!(!shown.contains("Activity"), "{shown}");
+    assert!(coded(&app, tight + 1));
+    let roomy = rows_of(&app, tight + 1);
+    assert!(roomy.contains("Activity"), "{roomy}");
 }

@@ -16,6 +16,9 @@ use std::time::Duration;
 
 use svolder_ipc::{Client, Request, Response};
 
+#[path = "../../../../crates/svolder-host/tests/common/short_socket.rs"]
+mod short_socket;
+
 /// How long any one test may take before it is a failure rather than a hang.
 ///
 /// Every wait inside a test is a fraction of this, so a test that stalls fails at the step
@@ -121,6 +124,8 @@ impl Drop for ChildGuard {
 /// daemons is one config file and one socket shared between them — the second daemon refuses
 /// to start, and the first loses its socket when the other's guard removes the directory.
 /// Creating the directory rather than creating it if absent keeps a reused name loud.
+/// The directory is under a short base, not `TMPDIR`: the daemon's socket is in it, and a socket
+/// path must be shorter than `SUN_LEN` (108 bytes).
 pub fn temp_dir() -> PathBuf {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -128,7 +133,7 @@ pub fn temp_dir() -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("a clock after 1970")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("svolderd-test-{}-{n}-{seq}", std::process::id()));
+    let dir = short_socket::short_join(&format!("svolderd-test-{}-{n}-{seq}", std::process::id()));
     std::fs::create_dir(&dir).expect("create the test directory");
     dir
 }
@@ -336,6 +341,7 @@ fn daemon_command(dir: &Path, stderr: Option<Stdio>) -> Command {
         .env_remove("SVOLDER_FAKE_COVER_GONE_AFTER_MS")
         .env_remove("SVOLDER_FAKE_PLAYER_GONE_AFTER_MS")
         .env_remove("SVOLDER_FAKE_ROUTE")
+        .env_remove("SVOLDER_FAKE_CONFIG")
         .env_remove("SVOLDER_FAKE_CAPTURE")
         .env_remove("SVOLDER_FAKE_HOST_EQ")
         .env_remove("SVOLDER_FAKE_TITLE")

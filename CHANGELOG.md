@@ -8,6 +8,279 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.37.2
+
+- **Coming from 0.36.7?** This release also carries 0.36.8 to 0.37.1, listed below it. Two items
+  matter most. A safety fix (0.36.11): the computer EQ could play over unity, in one case up to
+  about 4.5 dB for about a second, in the other with clamped filters after a later restart of the
+  chain (up to +36 dB in the worst lab case); both are fixed. And a known issue (0.37.0): PipeWire
+  can rarely play a half-applied filter for one quantum after a live update, which can be loud while
+  loudness plays at a depth; see Known issues under 0.37.0.
+- **The MCP token opens in a box you can copy from.** In the TUI's Settings, Connect category, `v`
+  or `Enter` on the MCP token row opens an `MCP token` box like the Web UI box's link: the token
+  whole on a line of its own, so a selection with the mouse is the token and nothing else. `c` or a
+  click on it copies it, `Esc` closes it, and it closes by itself after a minute (before, the token
+  was printed for 10 seconds in the right column, cut into pieces beside the other column's text).
+- **How many clients use the MCP server and the web UI.** The daemon counts each server's open
+  connections and the distinct clients seen in the past hour and the past day (addresses, not
+  people: programs on this computer that use the same loopback address are one), in memory only and
+  as counts: no address is stored, logged or shown, and the counts end with the daemon. Only a
+  connection that passes the token check counts: a wrong token, a guest or a signed-out visitor
+  never does (a server with no token counts every connection). `svolder daemon status` prints `mcp
+  clients: ...` and `web clients: ...` lines after each server's line, the TUI's Connect category
+  shows the same words under the MCP status and the Web UI row, and the Web UI box has an Activity
+  row. An older daemon, or a server that is off, shows nothing. MQTT has no counts, since MQTT
+  carries no sender.
+- **`svolder mqtt set commands on|off`** turns the MQTT client's command topics on or off from the
+  command line, as the TUI's MQTT commands row does. With a daemon it asks the daemon and fails if
+  the client still reports the other mode; with none it writes `commands` to the file. With the
+  client off, every `mqtt set` verb and `mqtt password` prints what it saved (`mqtt: off (saved:
+  host = broker.lan)`).
+- **The web UI's Signal theme starts in the Blueprint palette** (it was Warm amber, which looked too
+  much like Ember), and Blueprint leads the Palette menu. A palette you picked yourself stays, Warm
+  amber included, and is still one click away. The browser's address bar takes Blueprint's blue
+  (known issue: it does that for the other palettes too).
+- **Contributors**: svolder-ipc `Activity`, `ServerActivity` (`line()`, `short()`),
+  `Version.activity` and `DaemonInfo.activity`; svolderd's `activity.rs` tracker (hashed addresses,
+  4096 clients, hour and day windows on tokio's clock), `Slot::activity()`, the `Counted` handle in
+  each request's extensions and an `Activity` passed to `accept_loop`; the TUI's `Modal::Token`
+  (`screens/settings/token_box.rs`) and `WebRow::Activity`; Signal's `style.css` root now holds
+  Blueprint's tokens and Warm amber is the `data-palette="amber"` block, `palette.js` lists
+  Blueprint first (`DEFAULT_PALETTE`), and the node check `signal-palette.mjs`; the design section
+  "Client activity" in `docs/design/daemon.md`.
+
+## 0.37.1
+
+- **The path says `untouched` only when nothing in the computer changes the sound.** The signal path
+  line (web, TUI) used to check the rates, the volumes and the filter chain. It now also names a
+  sink narrower than the stream (`cut to 16 bits (S32 → S16)`), dither, a channel mix or remap, a
+  filter graph in a converter, ALSA `plug` or `dmix` and a card that converts, and a clock rate
+  forced so that a stream is resampled (`resampled 44.1 → 48 kHz (rate forced)`). What could not be
+  read is said as unknown, never as clean. The note under `untouched` says that the player may still
+  change the sound itself (loudness normalization, ReplayGain, its own EQ) and that svolder judges
+  up to 24 bits.
+- **A PipeWire config check**: seven conditions of the PipeWire config (rates, forced rate, dither,
+  24-bit output, no plug, stereo to stereo, no filter in the sink), each pass, fail or unknown,
+  with a summary (`PipeWire config lets it through untouched`, `PipeWire config changes the sound:
+  2`) and the limit of what it cannot judge. It is read only: the same read-only `pw-dump` svolder
+  already runs, plus the card's `/proc/asound` files, and nothing is ever changed. A one-shot
+  `host` request (the CLI, `doctor`, MCP) reads it once, shared among requests that arrive together.
+  - **CLI**: `svolder host check [--json] [--player NAME]` prints the path from the player through
+    the computer to its sink and the seven lines (`--json` has `path.dac` and `config.sink` too, as
+    MCP and Home Assistant do; for a sink that is none of your DACs the CLI and MCP judge the
+    computer's side alone, where the TUI, the web and Home Assistant read `not_this_dac`); a failing
+    line is not an error, exit 6 when the graph cannot be read. `svolder doctor` gains a `PipeWire
+    config` row.
+  - **TUI**: the Device screen's Path row wears a `config ✓` / `config N` / `config ?` chip right
+    after the verdict, and `k` (or a click on the chip) opens a PipeWire config box with the lines.
+    Without a daemon the TUI reads `pw-dump` itself while the box is open.
+  - **Web**: the same chip beside the verdict in Ember, Signal and Paper, and a *PipeWire config…*
+    row in the menu (every theme) that opens a popup listing all seven lines and the limit.
+  - **MCP**: `get_host` gains `path` and `config`.
+  - **Home Assistant**: `This computer` gains a `Path` sensor and a `PipeWire config` problem sensor
+    (`computer_config`), both read-only. While MQTT is connected the daemon reads the route every
+    30 s for them.
+  - **One set of keys on every JSON surface**: the path verdict is `untouched`, `changed`,
+    `not_this_dac`, `other_input` or `unknown`; the config check's outcome is `untouched`,
+    `changes`, `unread`, `not_read` or `other_version`, and a line's `pass`, `fail` or `unknown`;
+    `words` is a list everywhere; `config.limit` carries the limit sentence.
+- **What the verdict covers.** svolder asserts only what enters the system's audio pipeline from the
+  player (the player's stream) and every hop after it. Whether the music is a local file or a
+  stream, and anything the player does before its stream, is outside it, and svolder reads no music
+  file to judge it (only what enters the pipeline from the player). What the check does not see:
+  inside a player, past the sink's converter (ALSA `hw`, the USB driver, the DAC), and bits above
+  24. These limits are under Known issues.
+- **Contributors**: `RouteFacts.setup` (`SetupFacts`) read from the same `pw-dump`, the new
+  `Asound`/`fill_alsa` read of `/proc/asound` (`SVOLDER_ASOUND_DIR`, dev-only), `Verdict::KEYS`,
+  `SetupOutcome::KEYS`, `SetupSummary::KEYS` and `SETUP_LIMIT` in svolder-ipc as the one judge,
+  `computer_line`, `setup_check`, the daemon's slow watchers (`SlowHolds`) and one-shot `host`
+  reads, `SVOLDER_FAKE_CONFIG` (dev-only, `fail`) and a changed fake route with a narrow sink and
+  dither; host-e2e gains phase B (`make host-e2e-bits`: known 16- and 24-bit samples through pipe
+  sinks of a private PipeWire, with negative controls) and phase C (`svolder host check --json` on
+  the same rows); the node harness `core-setup.mjs` and the browser check `setup_popup.py`;
+  `scripts/docs-check.py` fails on "bit-perfect" or "bit-exact" in shipped words; the design page
+  `docs/design/host-config-check.md`.
+
+## 0.37.0
+
+- **Loudness for the computer's sound**: as the computer's volume falls under a reference, a stage
+  in the computer EQ's filter chain takes the middle and the top of the band down, so the bass stays
+  where the volume left it (after the equal-loudness contours of ISO 226:2003). It only cuts: it
+  never raises a frequency and never moves the EQ's preamp, so it is never louder than without it
+  (apart from the PipeWire behaviour under Known issues below). It follows the computer's own
+  volume: a change made through svolder on the next 50 ms tick, one made elsewhere (a desktop key)
+  within a second, the stage gliding about 10 dB of depth a second; muted or unread, it holds. While
+  it cannot follow the volume (for example a chain that takes no live updates, or one held for a
+  sample rate) a change is still accepted and saved from every surface and takes effect when it can
+  follow again. A computer EQ chain made by an earlier version is rebuilt once, the first time
+  loudness is turned on, so a player that is playing may pause briefly. Strength is 0 to 100 %
+  (default 50 %) and the reference 1 to 100 % (default 100 %), also set to the current volume with
+  one key, button or word. The readout says what the stage plays
+  at the volume it read (at 35 % with strength 50 %: bass +7.3, mids −7.3, treble +2.1 dB). It works
+  with the EQ off (the chain plays flat for loudness alone), stays on across restarts, plays at
+  every sample rate up to 768 kHz, and a graceful stop sends it flat. It is not the device's own
+  Loudness mode; where both are on the screens say so. It is on every surface, and shown only while
+  the daemon serves it:
+  - **TUI**: a Loudness row on the computer's Tone pane (`Loudness ‹ on › ████░░ 50 %` with a dim
+    line of the stage's gains) and a section on the tone screen with a Reference row; `←→`
+    strength, `␣` on and off, `r` the reference is the current volume, the mouse on the switch and
+    the bar. The computer's rows and the tone screen's sections now follow the chain's order: EQ,
+    Loudness, Crossfeed or Space (the Crossfeed section is under the Points table, not over it).
+  - **Web**: a Loudness tab in the Sound popup, second after EQ library, with a switch, a strength
+    slider, the reference with "Use current volume", the stage's curve and the live readout, in
+    every theme; Night drive's top line says "loudness on".
+  - **CLI**: `svolder host loudness [--json] [show|on|off|strength N|reference N|reference now]`.
+  - **MCP**: `get_host` carries `loudness`, and the new write tool `set_host_loudness` (under
+    `[mcp] writes`) sets it.
+  - **MQTT and Home Assistant**: a Loudness switch and a Loudness strength number on `This
+    computer`.
+- **Fixed: a false "level held until the music pauses" note.** After a preset was applied, the
+  computer EQ could say its level was held, and restart the chain once idle, because the preamp read
+  back from PipeWire at six decimals (a preamp of −6 or −2 dB read back a hair low) counted as a
+  lower cap. The note and the idle restart came with 0.36.11, which was not published; v0.36.7, the
+  last published version, does not have them, so no published version showed this note. A preamp
+  read back at the configuration's own value now bounds nothing.
+- **Fixed: a fresh chain gave up live updates while loudness glided.** With the EQ turned on, a
+  preset recalled or the daemon restarted at a low volume, the check that a chain takes live
+  changes could count the glide's own lines, which land a tick late, as refusals about half the
+  time, so the computer said it takes changes only when a drag ends and loudness froze. The check
+  now counts a hit for the value it was armed with or any value sent for that port since. Loudness
+  is new in this version, so no published version had this problem.
+- **Fixed: crossfeed, speakers and loudness settings changed before any chain was applied were lost
+  at a restart.** They are now kept in `host-eq-settings.toml` beside the computer EQ's state file
+  and read back at the start (with loudness and crossfeed off, as after any restart).
+- **Known issues** (all in `docs/known-issues.md`):
+  - **PipeWire can play a half-applied filter for one quantum after a live update.** PipeWire's
+    filter chain applies a live control update one value at a time, and nothing stops the audio
+    thread from playing in between. Rarely (measured about 1 in 6,000 risky updates on PipeWire
+    1.6.2; at ten glide ends a day, roughly once every year or two) one quantum, about 1/50 s at
+    1024 samples and 48 kHz (a smaller quantum makes it likelier), plays a half-applied filter. A
+    small step is harmless (a loudness glide step: about +0.3 dB). These are loud:
+    - the daemon stopping gracefully, a TUI with no daemon quitting, a reconfigure that halts the
+      computer's side, or loudness turned off, while loudness plays at a depth: +31 to +43 dB in the
+      bass measured, up to +50 dB worked out;
+    - the end of a loudness glide back to flat: +29 dB in the bass measured;
+    - adding or removing a computer EQ point, a live preset recall that changes the number of
+      points, the EQ turned on or off live: an unstable filter or full scale measured;
+    - dragging an existing point: up to about +17 dB worked out, not measured;
+    - switching the virtual speakers or crossfeed: up to about 6 dB worked out.
+
+    After a bad quantum the chain recovers by itself. Live edits of the computer EQ have had this
+    since they began (0.35), so v0.36.7 has it. svolder cannot close it without giving up live
+    updates or a much larger redesign; the fix belongs in PipeWire.
+  - Each loudness step resets the changed filters' state inside PipeWire, a short (about 3 ms) low
+    tick, about 11 dB or more under the music, that a listening test did not hear.
+- **Contributors**: `crates/svolder-host/src/eq/loudness.rs` (settings, the maths, the view; the
+  constants come from `make loudness-fit`, the ISO 226:2003 fit in `scripts/loudness-fit.py`, which
+  needs `python3-numpy`), `eq/control/ld.rs` (the controller: level, glide, `keeps_chain()`,
+  `LevelHint` for a lock-free volume write), `HostEqOp::Loudness`, `EqView.loudness`, `[loudness]`
+  in `host-eq.toml` and `POST api/v1/host/loudness`; the chain's two identity sections per
+  channel (`ld1`, `ld2`) after slot 16 and `route::computer_level`/`Params::level` reading the
+  volume from the dump the look already takes; `ChainStages.loudness` and the path word "loudness
+  on"; `make preamp-lab` runs five profiles (the fifth, loudness, with the stage in the model, the
+  stage alone held to unity, a liveness rule and directed cases for its seeds), and host-e2e gains
+  phases L1 to L6; the node harness `core-loudness.mjs`, the browser check `loudness_popup.py`;
+  the first-live-value read-back keeps the value it was armed with (`ReadBack`) and
+  `FakeParams::lands_one_line_late`; the preamp lab, `FakeParams` (`set_level`, `reads`,
+  `with_loudness_ports`) and the TUI's no-daemon controller carry loudness; test sockets and
+  temporary directories fit the socket path length under any `TMPDIR`; `HostEqSettings` and
+  `host-eq-settings.toml` (settings kept before any chain was applied; a malformed file is logged
+  and ignored); `make gate` reuses a passed slow check whose inputs are unchanged and lists every
+  check's duration; the preamp lab runs about 5 times faster, with `make preamp-lab-outcomes` and
+  `TRACE=1`; the env table gains `SVOLDER_LAB_OUT`, `SVOLDER_LAB_THREADS` and `SVOLDER_LAB_TRACE`;
+  the MCP `get_host` loudness field is `lift_db`, as in the view.
+
+## 0.36.11
+
+- **A preset recalled while music plays no longer pauses it**: loading a preset on the computer
+  while music plays used to restart the computer EQ's chain, which paused players such as Spotify
+  (going from a curve with a deep preamp, such as -6.2 dB, to Flat). Now the preset plays at once
+  with the level held at the earlier curve's preamp, the computer side says "level held until the
+  music pauses", and about 30 seconds after the music stops the chain starts again at the preset's
+  own level.
+- **Safety: the computer EQ could play over unity for up to about a second.** Two cases, both fixed.
+  With crossfeed's Meier or M/S bass model held in the EQ's configuration (after a live update
+  failed), dragging an EQ point up as the sink changed rate could play up to about 4.5 dB above
+  unity. And the computer EQ could write its configuration at a sample rate its curve cannot play
+  (while waiting for a rate it plays at, or within about a second of reading a command-line apply);
+  a later restart of the chain then played clamped filters (up to +36 dB over unity in the worst lab
+  case) or an unstable one. Both were present in 0.36.7 (the second since the
+  virtual speakers, 0.36.0, for one path, and older for the other). Both are gone: the preamp always
+  pays for the stage the configuration holds, and no configuration is written whose points do not
+  play at its rate.
+- **A computer EQ edit could be lost to quick graph rebuilds**: two rebuilds of the audio graph at
+  the same sample rate within about two seconds (skipping quickly through tracks of mixed rates)
+  could leave the chain playing the curve it was last applied with instead of your edit, while the
+  computer side showed the edit as live. A new boost or cut was not heard (never over unity).
+  The controller now sends the edit again when a look still finds it missing.
+- **After a failed live change the chain is put right**: after a refused line followed by a failed
+  turn-off or apply, the computer EQ could keep playing the change it had taken back (flat, or
+  virtual speakers on) while the view said otherwise; the next line now corrects it.
+- **Crossfeed and the virtual speakers run up to 384 kHz**; an output above that turns them off with
+  a note, and turning them on there is refused (with the EQ off too). Meier with a delay may play up
+  to about 1 dB quieter at extremes: its level now also covers the moment a graph is rebuilt at
+  705.6 or 768 kHz.
+- **Contributors**: `EqControl::cap_at` also bounds the preamp by the points' own preamp less the
+  configuration's stage cost; `HostEqState` gains `crossfeed_loaded`, priced at the dearest usual
+  rate by the next owner, which applies the chain again without it; `LEVEL_HELD_NOTE` and the idle
+  lift of a held recall; `STAGE_RATE_MAX_HZ` (384 kHz) while `CONFIG_STAGE_RATES` folds play rates
+  up to 768 kHz; `EqControl::reverted` confirms the ports of every line up to the newest one a look
+  saw land (`line_of`) and sends a line no look saw land again once (`chased`); `make preamp-lab`
+  runs four profiles (ordinary, targeted, speakers, high-rate) and gains `Event::Playing`, directed
+  cases for seeds 1291, 172526 and 1203992 and the daemon-restart case, and an ignored
+  `stage_cost_table`; host-e2e gains phase R (a paplay stream through a private pipewire-pulse) and
+  needs `paplay` and `pactl`.
+
+## 0.36.10
+
+- **Identify from the Devices list**: `b identify` is a word on the Devices list's top border,
+  between `update` and `x remove` (click it or press `b`: the device under the cursor shows
+  itself), and the device editor (`u`) takes `b` for the device being edited, on every row but
+  Name.
+- **Connect rows that say what they are**: in Settings › Connect the "MQTT bridge" row is now
+  **MQTT client** (as are the CLI help, `svolder doctor` and the daemon's words; config keys, the
+  `svolder mqtt` verbs and the MQTT topics are unchanged). MCP server, MCP writes, MQTT client and
+  MQTT commands are drawn as choices (`‹ off | on ›`) with the value in force lit; status rows are
+  plain text. Turning the MQTT client on with no broker host says "set MQTT broker host first".
+  The MCP server and Web UI rows now change as soon as the daemon answers (before, they kept the
+  old state until another setting changed).
+- **The selection reads clearly**: the Controls pane's Transport and Input rows highlight only the
+  label and the value in force, as the Target choice does, not the whole line.
+- **The Path line fits**: a path longer than its row wraps at its ` · ` and ` → ` separators onto
+  up to three lines when the pane has room, and otherwise scrolls slowly, holding still under the
+  pointer; hovering it shows the whole path. A new **Scroll long lines** setting (Settings ›
+  Effects, `[tui] scroll_long_lines`) stops it and the Now playing line from scrolling.
+- **Contributors**: `switch::styles`/`choice` draw every TUI choice; `widgets/slow_scroll.rs`
+  (time-pure offsets), `screens/device/path_line.rs`, `Hit::Path`; the TUI rereads the config after
+  every daemon switch answer.
+
+## 0.36.9
+
+- **Signal's popups in its own look**: Devices, Sound, Help and the questions share the theme's
+  schematic look: the title is a tab on the box's top edge, dotted wires lead in and out, the side
+  list and the Sound tabs are hops on a wire with the chosen one boxed and lit, and a device's
+  readings are terminals on a bus with a thin numeral over a small graph.
+- **Signal palettes**: a Palette row in Signal's menu: Warm amber (the default), Phosphor, Blueprint,
+  and Oxblood and brass. A palette recolours the whole theme, popups included; the hops keep their
+  meaning and the computer's level meters keep their warm glow. The choice is kept per browser.
+- **The TUI's choices read the same way**: the computer's `Mode ‹ Off | EQ ›` (Tone pane and the EQ
+  screen's top right), the Space row and the crossfeed on/off word are drawn like `Target`: the
+  value in force is bright, the others dim, and with the keys on a row only its label and the value
+  the arrows move take the selected box.
+- **A Preamp scale**: the EQ library preview's Preamp row gains a small scale (ticks and a needle) in
+  every theme.
+- **Contributors**: Signal's colours are tokens end to end (`--sg-*`), the palettes are
+  `data-palette` rules in `style.css` with `themes/signal/palette.js`; `contrast.py` sweeps Signal
+  once per palette; `switch::styles` and `switch::choice` are the TUI's one drawing of a choice.
+
+## 0.36.8
+
+- **Contributors: a shorter web gate**: seven of the smoke checks (smoke_core, smoke_page, haze,
+  effects_cycle, scroll, smoke_quick, sources) take `--part logic|timing|all`; their logic part runs in
+  the parallel pool and only their timing part (`NAME_timing-ENGINE`) in the serial lane, beside notes
+  and nightdrive_timing, which stay whole. A failed serial check is re-run once alone and listed as
+  flaky when it then passes. The serial lane goes from about 35 to about 17 minutes.
+
 ## 0.36.7
 
 - **Tests**: the virtual speakers download tests no longer depend on the order a folder lists

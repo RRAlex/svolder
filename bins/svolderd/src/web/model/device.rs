@@ -786,12 +786,44 @@ pub(crate) struct TrackModel {
 /// The path the sound takes to the device.
 #[derive(Debug, Serialize)]
 pub(crate) struct PathModel {
-    /// `ok`, `changed`, `other` or `unknown`.
-    pub(crate) class: &'static str,
-    pub(crate) words: String,
+    /// The judge's verdict key (`Verdict::key`): `untouched`, `changed`, `not_this_dac`,
+    /// `other_input` or `unknown`.
+    pub(crate) verdict: &'static str,
+    /// The words of the verdict, one per change or thing not read.
+    pub(crate) words: Vec<String>,
     /// The whole sentence behind short words, for a tooltip; empty when there is none.
     pub(crate) title: String,
     pub(crate) hops: Vec<HopModel>,
+    /// The PipeWire config check of the sink while it is this DAC; absent for another sink.
+    #[serde(rename = "config", skip_serializing_if = "Option::is_none")]
+    pub(crate) setup: Option<SetupModel>,
+}
+
+/// The PipeWire config check of the sink, in the judge's words.
+#[derive(Debug, Serialize)]
+pub(crate) struct SetupModel {
+    /// The judge's summary key (`SetupSummary::key`): `untouched`, `changes`, `unread`,
+    /// `not_read` or `other_version`.
+    pub(crate) outcome: &'static str,
+    /// What the check cannot judge, the judge's sentence.
+    pub(crate) limit: &'static str,
+    /// The short chip: `config ✓`, `config 2` or `config ?`.
+    pub(crate) chip: String,
+    pub(crate) summary: String,
+    /// The sink the check judges.
+    pub(crate) sink: String,
+    pub(crate) lines: Vec<SetupLineModel>,
+}
+
+/// One line of the config check.
+#[derive(Debug, Serialize)]
+pub(crate) struct SetupLineModel {
+    pub(crate) key: String,
+    /// The condition as a row's name.
+    pub(crate) label: &'static str,
+    /// `pass`, `fail` or `unknown`.
+    pub(crate) outcome: &'static str,
+    pub(crate) words: String,
 }
 
 /// One hop of the path.
@@ -820,7 +852,7 @@ impl From<&Playing> for PlayingModel {
                 progress: track.progress,
             }),
             path: playing.path.as_ref().map(|path| PathModel {
-                class: path.class,
+                verdict: path.verdict,
                 words: path.words.clone(),
                 title: path.title.clone(),
                 hops: path
@@ -833,6 +865,23 @@ impl From<&Playing> for PlayingModel {
                         unknown: hop.unknown,
                     })
                     .collect(),
+                setup: path.setup.as_ref().map(|setup| SetupModel {
+                    outcome: setup.outcome,
+                    limit: setup.limit,
+                    chip: setup.chip.clone(),
+                    summary: setup.summary.clone(),
+                    sink: setup.sink.clone(),
+                    lines: setup
+                        .lines
+                        .iter()
+                        .map(|line| SetupLineModel {
+                            key: line.key.clone(),
+                            label: line.label,
+                            outcome: line.outcome,
+                            words: line.words.clone(),
+                        })
+                        .collect(),
+                }),
             }),
         }
     }

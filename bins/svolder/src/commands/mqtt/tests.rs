@@ -14,13 +14,7 @@ use crate::test_support::stub_daemon::{StubServer, stub_daemon_at};
 use crate::test_support::temp_dir;
 
 fn short_socket() -> std::path::PathBuf {
-    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .subsec_nanos();
-    std::env::temp_dir().join(format!("svm9-{}-{seq}-{nanos:x}.sock", std::process::id()))
+    crate::test_support::short_socket("svm9")
 }
 
 async fn stub_daemon() -> StubServer {
@@ -60,7 +54,10 @@ async fn with_a_daemon_each_verb_is_one_request_and_this_side_writes_nothing() {
         lines.push(done.line);
     }
     assert_eq!(daemon.mqtt_ops(), ops);
-    assert_eq!(lines[0], "mqtt: off", "off until it is turned on");
+    assert_eq!(
+        lines[0], "mqtt: off (saved: host = ha.lan)",
+        "off until it is turned on, and the key is confirmed"
+    );
     assert_eq!(lines[4], "mqtt: connected to stub:1883 (read-only)");
     assert_eq!(lines[5], "mqtt: off");
     assert_eq!(daemon.reloads(), 0, "the daemon reloads itself");
@@ -291,4 +288,134 @@ async fn a_narrowed_mode_the_daemon_reports_is_a_note() {
         .await
         .expect("applied");
     assert!(other.notes.iter().all(|n| !n.contains("0600")));
+}
+
+/// `mqtt set commands on|off` parses as a pair of sub-verbs, like `web guest on|off`.
+#[test]
+fn set_commands_parses_on_and_off() {
+    use clap::Parser;
+    for (word, want) in [("on", true), ("off", false)] {
+        let cli = crate::cli::Cli::try_parse_from(["svolder", "mqtt", "set", "commands", word])
+            .expect("parses");
+        let Some(crate::cli::Command::Mqtt {
+            command:
+                MqttCommand::Set {
+                    key: MqttKey::Commands { mode },
+                },
+        }) = cli.command
+        else {
+            panic!("not mqtt set commands");
+        };
+        assert_eq!(matches!(mode, crate::cli::CommandsMode::On), want);
+    }
+    assert!(
+        crate::cli::Cli::try_parse_from(["svolder", "mqtt", "set", "commands", "maybe"]).is_err()
+    );
+}
+
+/// With a daemon, `commands` is one request and this side writes nothing.
+#[tokio::test]
+async fn commands_with_a_daemon_is_one_request_and_this_side_writes_nothing() {
+    let dir = temp_dir("mqtt-commands");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_MQTT_SET]);
+    daemon.says_mqtt(MqttStatus::Connected {
+        host: "stub".into(),
+        port: 1883,
+        commands: true,
+    });
+    let done = apply(&daemon.socket, &own, MqttOp::Commands { commands: true })
+        .await
+        .expect("applied");
+    assert_eq!(done.line, "mqtt: connected to stub:1883 (commands on)");
+    daemon.says_mqtt(MqttStatus::Connected {
+        host: "stub".into(),
+        port: 1883,
+        commands: false,
+    });
+    apply(&daemon.socket, &own, MqttOp::Commands { commands: false })
+        .await
+        .expect("applied");
+    assert_eq!(
+        daemon.mqtt_ops(),
+        [
+            MqttOp::Commands { commands: true },
+            MqttOp::Commands { commands: false }
+        ]
+    );
+    assert!(!own.exists(), "the daemon is the writer");
+}
+
+/// A daemon whose bridge still says the other mode has not acted on the change.
+#[tokio::test]
+async fn commands_the_daemon_has_not_acted_on_fail() {
+    let dir = temp_dir("mqtt-commands-stale");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_MQTT_SET]);
+    daemon.says_mqtt(MqttStatus::Connected {
+        host: "stub".into(),
+        port: 1883,
+        commands: false,
+    });
+    let failed = apply(&daemon.socket, &own, MqttOp::Commands { commands: true })
+        .await
+        .expect_err("not acted");
+    assert!(failed.to_string().contains("has not acted"), "{failed}");
+    // The other direction: an off ask against a bridge still taking commands.
+    daemon.says_mqtt(MqttStatus::Connected {
+        host: "stub".into(),
+        port: 1883,
+        commands: true,
+    });
+    let failed = apply(&daemon.socket, &own, MqttOp::Commands { commands: false })
+        .await
+        .expect_err("not acted");
+    assert!(failed.to_string().contains("has not acted"), "{failed}");
+    // Other states pass: the bridge is off or still connecting, and the file says it.
+    daemon.says_mqtt(MqttStatus::Off);
+    apply(&daemon.socket, &own, MqttOp::Commands { commands: true })
+        .await
+        .expect("an off bridge passes");
+}
+
+/// With no daemon the key is written to this side's own file.
+#[tokio::test]
+async fn commands_with_no_daemon_is_written_to_the_own_file() {
+    let dir = temp_dir("mqtt-commands-alone");
+    let own = dir.0.join("config.toml");
+    let done = apply(&short_socket(), &own, MqttOp::Commands { commands: true })
+        .await
+        .expect("written");
+    assert_eq!(
+        done.line,
+        format!("mqtt: commands = true in {}", own.display())
+    );
+    assert!(Config::load_from(&own).unwrap().mqtt.commands);
+}
+
+/// `commands on` asks for `true` and `off` for `false`.
+#[test]
+fn commands_on_and_off_ask_for_true_and_false() {
+    for (mode, want) in [(CommandsMode::On, true), (CommandsMode::Off, false)] {
+        let op = op_for(MqttCommand::Set {
+            key: MqttKey::Commands { mode },
+        })
+        .expect("an op");
+        assert_eq!(op, MqttOp::Commands { commands: want });
+    }
+}
+
+/// With the client off, a key is confirmed as saved.
+#[tokio::test]
+async fn a_key_set_while_the_client_is_off_is_confirmed_as_saved() {
+    let dir = temp_dir("mqtt-saved");
+    let own = dir.0.join("config.toml");
+    let daemon = stub_daemon().await;
+    daemon.lists_features(&[FEATURE_MQTT_SET]);
+    let done = apply(&daemon.socket, &own, MqttOp::Commands { commands: true })
+        .await
+        .expect("applied");
+    assert_eq!(done.line, "mqtt: off (saved: commands = true)");
 }

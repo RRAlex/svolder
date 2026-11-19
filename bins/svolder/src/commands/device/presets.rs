@@ -557,7 +557,7 @@ async fn do_save(
 /// up as every name is ([`preset::same_name`]), `new` is written without the blanks round it
 /// and refused where [`preset::new_name`] refuses it (`custom` included), and a built-in's name
 /// is refused on either side. A running daemon that reads this file is told to reload, so its
-/// MQTT bridge offers the new list.
+/// MQTT client offers the new list.
 pub async fn eq_rename(g: &Globals<'_>, old: &str, new: &str) -> ExitCode {
     if preset::is_builtin(old) {
         return Failure::of(

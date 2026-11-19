@@ -22,7 +22,7 @@ use svolder_host::Button;
 use svolder_profiles::{Control, ControlKind};
 
 use crate::format::READINGS_OLD;
-use crate::tui::app::{App, Pane, Screen, Xf};
+use crate::tui::app::{App, Ld, Pane, Screen, Xf};
 use crate::tui::host::HostRow;
 use crate::tui::keys;
 use crate::tui::mouse::{Hit, HitMap};
@@ -254,6 +254,7 @@ fn shows_value(hit: Hit) -> bool {
             | Hit::ModeNext
             | Hit::Loudness
             | Hit::LoudnessBar
+            | Hit::LdBar
             | Hit::Transport(_)
     )
 }
@@ -352,6 +353,17 @@ fn lines(parts: &[&str]) -> Option<Vec<String>> {
     )
 }
 
+/// The Path row's tooltip: the whole path, broken at its separators into lines of at most
+/// [`MAX_WIDTH`] cells.
+fn path_tip(app: &App) -> Option<Vec<String>> {
+    let path = app.host_path()?;
+    Some(crate::tui::screens::device::path_tip_lines(
+        &path,
+        app.path_chip().as_ref(),
+        MAX_WIDTH,
+    ))
+}
+
 /// What a tooltip on `hit` says, or `None` for a hit with no tooltip: menu entries, the Settings
 /// box's rows, the toast, the pane headers and the rest that nothing is worth saying about.
 /// Each line is at most [`MAX_WIDTH`] cells.
@@ -367,6 +379,8 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         | Hit::ToggleOf(row)
         | Hit::SelectPrev(row)
         | Hit::SelectNext(row) => control_row(app, row),
+        Hit::Path => path_tip(app),
+        Hit::Config => app.path_chip().and_then(|chip| lines(&[&chip.tip])),
         Hit::Row(..) | Hit::PaneHeader(_) => None,
         Hit::Mode | Hit::ModePrev | Hit::ModeNext => {
             lines(&["Mode", "a click toggles · ‹ › steps it"])
@@ -409,6 +423,22 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         Hit::Crossfeed(row) | Hit::CrossfeedStep(row, _) => {
             lines(&[row.label(), "← → steps · wheel too · Enter types a number"])
         }
+        Hit::LdOn => lines(&[
+            "Loudness",
+            "a click turns it on or off · it follows the computer's volume",
+        ]),
+        Hit::LdBar => lines(&[
+            "Loudness strength",
+            "click or drag the bar · the wheel steps it",
+        ]),
+        Hit::Ld(Ld::Reference) | Hit::LdStep(Ld::Reference, _) => lines(&[
+            "Loudness reference",
+            "← → steps it · r: the current volume · flat at and above it",
+        ]),
+        Hit::Ld(Ld::Strength) | Hit::LdStep(Ld::Strength, _) => lines(&[
+            "Loudness",
+            "← → strength · ␣ on/off · r: reference = current volume",
+        ]),
         Hit::Curve => lines(&["Response curve", "drag · right-drag widens · wheel sets Q"]),
         Hit::Divider => lines(&["Pane divider", "drag · double-click resets · < > nudge"]),
         Hit::Transport(button) => {
@@ -444,6 +474,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         Hit::Footer(_)
         | Hit::SettingRow(_)
         | Hit::WebLink
+        | Hit::McpToken
         | Hit::SettingPrev
         | Hit::SettingNext
         | Hit::SettingCategory(_)
@@ -549,7 +580,11 @@ fn list_row(app: &App, row: usize) -> Option<Vec<String>> {
         }
         Screen::Devices => {
             let device = app.devices.rows.get(row)?;
-            lines(&[&device.name, "Enter switches · c changes · x removes"])
+            lines(&[
+                &device.name,
+                "Enter switches · u updates",
+                "b identifies · x removes",
+            ])
         }
         _ => None,
     }

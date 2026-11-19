@@ -363,10 +363,17 @@ function playing(device, page, { oob } = {}) {
   };
   const hops = path ? path.hops.map(hopChip).join('') : '';
   const verdict = path?.title
-    ? `<span aria-hidden="true">${esc(path.words)}</span><span class="np-sr">${esc(path.title)}</span>`
-    : (path ? esc(path.words) : '');
-  const words = path ? `<span class="np-verdict"${attr('title', path.title || null)}>${verdict}</span>${hops}` : '';
-  return `${root} ${np} ${head} ${prog} <p class="np-path${path ? ` ${esc(path.class)}` : ''}">${words}</p> </div> </section>`;
+    ? `<span aria-hidden="true">${esc(path.words.join(' · '))}</span><span class="np-sr">${esc(path.title)}</span>`
+    : (path ? esc(path.words.join(' · ')) : '');
+  // The config check's chip, in the daemon's words; no chip when it sent none (a sink that is not
+  // this DAC, or no route).
+  const cfg = path?.config;
+  const chip = cfg ? `<button type="button" id="np-config" class="np-setup ${esc(cfg.outcome)}" data-config aria-haspopup="dialog"${attr('title', cfg.summary)}${attr('aria-label', `${cfg.chip}, ${cfg.summary}`)}>${esc(cfg.chip)}</button>` : '';
+  // With a chip the verdict and the chip are one lead: a long verdict wraps inside it, so the chip
+  // stays beside the verdict and takes no row of its own.
+  const lead = `<span class="np-verdict"${attr('title', path?.title || null)}>${verdict}</span>`;
+  const words = path ? `${chip ? `<span class="np-lead">${lead}${chip}</span>` : lead}${hops}` : '';
+  return `${root} ${np} ${head} ${prog} <p class="np-path${path ? ` ${esc(path.verdict)}` : ''}">${words}</p> </div> </section>`;
 }
 
 /**

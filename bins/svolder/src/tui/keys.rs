@@ -76,10 +76,15 @@ pub enum When {
     HasComputer,
     /// Only while the computer's side is shown.
     OnComputer,
+    /// Only while the computer's side is shown and its controller serves loudness.
+    HasLoudness,
     /// Only while the computer's side is shown and its controller serves crossfeed.
     HasCrossfeed,
     /// Only while the computer's side is shown and its controller serves virtual speakers.
     HasSpace,
+    /// Only on a DAC's screen, or the computer's side, while host audio shows: where the PipeWire
+    /// config check is on offer.
+    HasSetup,
     /// Only on a wizard step that offers choices.
     Choosing,
     /// Only on a wizard step that takes a typed line.
@@ -114,10 +119,14 @@ pub struct Scene {
     pub has_computer: bool,
     /// Whether the computer's side is shown.
     pub on_computer: bool,
+    /// Whether the computer's side is shown with loudness to change.
+    pub has_loudness: bool,
     /// Whether the computer's side is shown with crossfeed to change.
     pub has_crossfeed: bool,
     /// Whether the computer's side is shown with virtual speakers to choose.
     pub has_space: bool,
+    /// Whether the PipeWire config check is on offer.
+    pub has_setup: bool,
     /// Whether it has no volume for the keys to move: a flag that reads false by default, so a
     /// screen that says nothing of it leaves the key worth pressing.
     pub no_volume: bool,
@@ -158,8 +167,10 @@ impl Scene {
             has_balance: app.balance().is_some(),
             has_computer: app.computer_offered(),
             on_computer: app.on_computer(),
+            has_loudness: app.ld_shown(),
             has_crossfeed: app.crossfeed_shown(),
             has_space: app.space_shown(),
+            has_setup: app.setup_offered(),
             no_volume: app.volume().is_none(),
             no_toggle: !app.has_toggle_or_host_rows(),
             no_identify: !app.identify_offered(),
@@ -520,6 +531,28 @@ static HINTS: &[KeyHint] = &[
         toggles: None,
         long: Some(PRESETS_LONG),
     },
+    // The computer's loudness comes before its crossfeed, as the chain does: its keys act on its
+    // rows while the keys are in them (`Tab` and `↑↓` reach them).
+    KeyHint {
+        code: KeyCode::Char(' '),
+        label: "\u{2423} on Loudness",
+        does: "loudness on/off",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasLoudness,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    KeyHint {
+        code: KeyCode::Right,
+        label: "\u{2190}\u{2192} on Loudness",
+        does: "strength / reference · r: volume",
+        screens: &[Screen::Device, Screen::Tone],
+        when: When::HasLoudness,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
     // The computer's crossfeed: `X` goes to its section on the tone screen (unfolding it) and
     // out of it again (folding it); the other keys act on its rows while the keys are in them.
     KeyHint {
@@ -741,6 +774,18 @@ static HINTS: &[KeyHint] = &[
         does: "identify",
         screens: EVERY_SCREEN,
         when: When::CanIdentify,
+        group: ACTIONS,
+        toggles: None,
+        long: None,
+    },
+    // The PipeWire config check: the seven lines that say whether the config lets the sound
+    // through untouched.
+    KeyHint {
+        code: KeyCode::Char('k'),
+        label: "k",
+        does: "config check",
+        screens: &[Screen::Device],
+        when: When::HasSetup,
         group: ACTIONS,
         toggles: None,
         long: None,
@@ -1056,6 +1101,7 @@ pub fn hidden_in(hint: &KeyHint, scene: Scene) -> bool {
         // The computer's keys are not listed where its controls are not there at all.
         When::HasComputer | When::OnComputer => !scene.has_computer,
         // Crossfeed's keys are not listed where the computer serves none.
+        When::HasLoudness => !scene.has_loudness,
         When::HasCrossfeed => !scene.has_crossfeed,
         When::HasSpace => !scene.has_space,
         _ => false,
@@ -1085,8 +1131,10 @@ pub fn available_in(hint: &KeyHint, scene: Scene) -> bool {
         When::CanIdentify => !scene.no_identify,
         When::HasComputer => scene.has_computer,
         When::OnComputer => scene.on_computer,
+        When::HasLoudness => scene.has_loudness,
         When::HasCrossfeed => scene.has_crossfeed,
         When::HasSpace => scene.has_space,
+        When::HasSetup => scene.has_setup,
         When::Choosing => !scene.typing,
         When::Typing => scene.typing,
         When::Backable => scene.can_go_back,

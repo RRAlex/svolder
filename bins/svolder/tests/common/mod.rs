@@ -16,6 +16,17 @@ mod script;
 )]
 pub use script::install_script;
 
+#[path = "../../../../crates/svolder-host/tests/common/short_socket.rs"]
+mod short_socket;
+
+/// The directory a case makes a daemon's directory in: a socket path must be shorter than
+/// `SUN_LEN` (108 bytes), and `TMPDIR` can be most of that already.
+#[allow(
+    unused_imports,
+    reason = "each test binary uses the part of this it needs"
+)]
+pub use short_socket::{short_join, short_unique};
+
 /// Whether `stderr` says the system bus has no BlueZ to answer: the bus replies that the name
 /// `org.bluez` has no service behind it, which is what a machine with a system D-Bus and no
 /// BlueZ (a CI runner) says to every adapter lookup. A case that needs BlueZ's own answer
@@ -157,12 +168,24 @@ pub struct TempDir(PathBuf);
 impl TempDir {
     /// Make a directory whose name starts `svolder-<tag>-<pid>-`.
     pub fn new(tag: &str) -> TempDir {
+        Self::under(Some(&std::env::temp_dir()), tag)
+    }
+
+    /// [`TempDir::new`] under the short base, for a case that binds a socket in it.
+    pub fn short(tag: &str) -> TempDir {
+        Self::under(None, tag)
+    }
+
+    fn under(base: Option<&Path>, tag: &str) -> TempDir {
         use std::os::unix::fs::DirBuilderExt;
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         loop {
             let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path =
-                std::env::temp_dir().join(format!("svolder-{tag}-{}-{seq}", std::process::id()));
+            let name = format!("svolder-{tag}-{}-{seq}", std::process::id());
+            let path = match base {
+                Some(base) => base.join(name),
+                None => short_join(&name),
+            };
             match std::fs::DirBuilder::new().mode(0o700).create(&path) {
                 Ok(()) => return TempDir(path),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

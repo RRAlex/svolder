@@ -120,7 +120,7 @@ impl Drop for Rig {
 fn scratch(what: &str) -> Rig {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let seq = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("sveq-{what}-{}-{seq}", std::process::id()));
+    let dir = common::short_join(&format!("sveq-{what}-{}-{seq}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     // The runtime directory is private to its user, as the real one is.

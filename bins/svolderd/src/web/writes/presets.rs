@@ -3,7 +3,7 @@
 
 //! The user's presets from the page: save the bands as a new preset, rename one, delete one.
 //! Each edits the daemon's `config.toml` through the core's writers, under their lock, then
-//! has the daemon reload it, as `svolder eq save` does, so the MQTT bridge's preset list
+//! has the daemon reload it, as `svolder eq save` does, so the MQTT client's preset list
 //! follows. A name is refused in the core's one wording ([`preset::new_name`]); a built-in is
 //! never touched; a taken name is never overwritten.
 

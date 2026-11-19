@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! svolder's MQTT bridge to Home Assistant: topic names, discovery configs, the state and meter
+//! svolder's MQTT client to Home Assistant: topic names, discovery configs, the state and meter
 //! payloads and command parsing, all pure functions, and in [`client`] the one piece that does
 //! I/O, the connection to the broker. `svolderd` feeds them its devices.
 //!

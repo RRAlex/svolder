@@ -118,3 +118,28 @@ fn host_crossfeed_takes_json_before_or_after_its_verb() {
         .expect("a hyphen value reaches the command");
     assert!(cli.command.is_some());
 }
+
+/// `host loudness` takes `--json` before or after its verb, and `reference now` is a verb.
+#[test]
+fn host_loudness_takes_json_before_or_after_its_verb() {
+    for args in [
+        ["svolder", "host", "loudness", "--json", "strength", "35"],
+        ["svolder", "host", "loudness", "strength", "35", "--json"],
+    ] {
+        let cli = Cli::try_parse_from(args).expect("parses");
+        let Some(Command::Host {
+            command: HostCommand::Loudness { json, command },
+        }) = cli.command
+        else {
+            panic!("not host loudness");
+        };
+        assert!(json, "{args:?}");
+        assert!(matches!(
+            command,
+            Some(HostLoudnessCommand::Strength { .. })
+        ));
+    }
+    let cli =
+        Cli::try_parse_from(["svolder", "host", "loudness", "reference", "now"]).expect("parses");
+    assert!(cli.command.is_some());
+}

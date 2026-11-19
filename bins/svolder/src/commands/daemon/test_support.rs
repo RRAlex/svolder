@@ -114,6 +114,7 @@ impl Handler for StoppingDaemon {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                activity: None,
             },
             _ => Response::Ack,
         }
@@ -130,14 +131,19 @@ impl Handler for StoppingDaemon {
 /// Serve a daemon that stops when asked on `socket`, and answer once it is listening.
 pub(crate) async fn a_daemon_on(socket: &Path) -> tokio::task::JoinHandle<()> {
     let handler = Arc::new(StoppingDaemon(tokio::sync::Notify::new()));
+    let bind_error = Arc::new(std::sync::Mutex::new(None::<String>));
     let served = tokio::spawn({
         let socket = socket.to_path_buf();
         let stops = Arc::clone(&handler);
+        let bind_error = Arc::clone(&bind_error);
         async move {
-            let _ = svolder_ipc::serve(&socket, handler, async move {
+            let ended = svolder_ipc::serve(&socket, handler, async move {
                 stops.0.notified().await;
             })
             .await;
+            if let Err(e) = ended {
+                *bind_error.lock().expect("the error slot") = Some(e.to_string());
+            }
         }
     });
     for _ in 0..500 {
@@ -146,6 +152,12 @@ pub(crate) async fn a_daemon_on(socket: &Path) -> tokio::task::JoinHandle<()> {
         }
         tokio::time::sleep(POLL).await;
     }
+    assert!(
+        svolder_ipc::is_running(socket).await,
+        "the stub daemon is not running on {}: {:?}",
+        socket.display(),
+        bind_error.lock().expect("the error slot")
+    );
     served
 }
 
@@ -208,6 +220,7 @@ impl Handler for FakeDaemon {
                 features: Vec::new(),
                 config_changed: false,
                 config_missing: false,
+                activity: None,
             },
             Request::Devices => Response::Devices {
                 devices: vec![

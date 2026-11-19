@@ -20,6 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod activity;
 mod autoeq;
 mod codes;
 mod device_config;
@@ -35,6 +36,7 @@ mod status;
 mod timeouts;
 mod walk;
 
+pub use activity::{Activity, DAY_SECS, ServerActivity};
 pub use autoeq::{
     AUTOEQ_GROUPS_MAX, AUTOEQ_QUERY_MAX, AutoEqGroup, AutoEqMeasurement, AutoEqOp, AutoEqPreview,
     AutoEqSaved, AutoEqSearch, AutoEqTarget, AutoEqVariant,
@@ -366,7 +368,7 @@ pub enum Response {
     },
     /// The reply to an `mqtt_set` request: where the bridge stands after it.
     MqttSet {
-        /// the MQTT bridge
+        /// the MQTT client
         status: MqttStatus,
         /// whether the write narrowed a group- or world-readable configuration file to 0600
         /// because a password went into it
@@ -386,12 +388,12 @@ pub enum Response {
         /// the configured name of every device now running
         devices: Vec<String>,
     },
-    /// The version of the daemon answering, and where its MQTT bridge, its MCP server and its web
+    /// The version of the daemon answering, and where its MQTT client, its MCP server and its web
     /// UI stand.
     Version {
         /// the daemon's version, as its package declares it
         version: String,
-        /// the daemon's MQTT bridge; absent from a daemon too old to have one
+        /// the daemon's MQTT client; absent from a daemon too old to have one
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mqtt: Option<MqttStatus>,
         /// the daemon's MCP server; absent from a daemon too old to have one
@@ -430,6 +432,10 @@ pub enum Response {
         /// absent while it is there, and from a daemon too old to say
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         config_missing: bool,
+        /// how many clients the MCP server and the web UI have had, as counts; absent from a
+        /// daemon too old to count
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        activity: Option<Activity>,
     },
     /// The reply to `stop`, sent before the daemon ends its accept loop.
     Stopping,

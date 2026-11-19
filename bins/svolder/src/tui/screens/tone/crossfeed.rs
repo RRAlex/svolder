@@ -23,6 +23,7 @@ use crate::tui::app::{App, Space, ToneRow, Xf};
 use crate::tui::layout_tier::Tier;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::screens::device::{self, row_style};
+use crate::tui::screens::switch;
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets::{self, CURSOR_WIDTH};
 
@@ -44,6 +45,8 @@ const CURVE_DB: [f64; 2] = [-30.0, 3.0];
 /// The rows the section takes on a frame `area` large.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct Layout {
+    /// Rows of the Loudness section above the Crossfeed line, in the chain's order.
+    pub ld: u16,
     /// Rows of its line: 1 with crossfeed to show, else none.
     pub line: u16,
     /// Rows under the line, taken from the graph while the keys are in the section.
@@ -58,6 +61,7 @@ pub(super) struct Layout {
 impl Layout {
     /// No section: a daemon without crossfeed, or the device's side.
     pub const NONE: Layout = Layout {
+        ld: 0,
         line: 0,
         below: 0,
         beside: false,
@@ -66,12 +70,24 @@ impl Layout {
 
     /// The rows the line and what sits under it take together.
     pub fn height(self) -> u16 {
-        self.line + self.below
+        self.ld + self.line + self.below
     }
 }
 
-/// The section's layout for `app` on a frame `area` large.
+/// The sections' layout for `app` on a frame `area` large: the Loudness rows, then the
+/// Crossfeed section.
 pub(super) fn layout(app: &App, area: Rect) -> Layout {
+    let base = crossfeed_layout(app, area);
+    Layout {
+        ld: super::computer_loudness::height(app),
+        // the unfolded Loudness section has its curve in the block beside the Points table too
+        beside: base.beside || (app.ld_unfolded() && Tier::of(area).wide),
+        ..base
+    }
+}
+
+/// The Crossfeed section's own layout.
+fn crossfeed_layout(app: &App, area: Rect) -> Layout {
     if !app.crossfeed_shown() {
         return Layout::NONE;
     }
@@ -80,6 +96,7 @@ pub(super) fn layout(app: &App, area: Rect) -> Layout {
     // The virtual speakers unfold into a block of their own, as wide as the screen.
     if unfolded && app.space_shown() && app.space_now() == Space::Speakers {
         return Layout {
+            ld: 0,
             line: speakers::height(wide),
             below: 0,
             beside: false,
@@ -96,6 +113,7 @@ pub(super) fn layout(app: &App, area: Rect) -> Layout {
         _ => 1,
     };
     Layout {
+        ld: 0,
         line,
         below: if unfolded && !wide { rows } else { 0 },
         beside: unfolded && wide,
@@ -104,14 +122,14 @@ pub(super) fn layout(app: &App, area: Rect) -> Layout {
 }
 
 /// A row being put together, with the places in it a click lands on, in cells from its start.
-pub(super) struct Built {
+pub(in crate::tui::screens) struct Built {
     spans: Vec<Span<'static>>,
     hits: Vec<(usize, usize, Hit)>,
     col: usize,
 }
 
 impl Built {
-    pub(super) fn new() -> Built {
+    pub(in crate::tui::screens) fn new() -> Built {
         Built {
             spans: Vec::new(),
             hits: Vec::new(),
@@ -119,8 +137,27 @@ impl Built {
         }
     }
 
+    /// The cells of the row so far, the cursor's included.
+    pub(in crate::tui::screens) fn col(&self) -> usize {
+        self.col
+    }
+
+    /// Append `spans` that are `cells` wide together, a click on them being `hit`.
+    pub(in crate::tui::screens) fn put_spans(
+        &mut self,
+        spans: Vec<Span<'static>>,
+        cells: usize,
+        hit: Option<Hit>,
+    ) {
+        if let Some(hit) = hit {
+            self.hits.push((self.col, cells, hit));
+        }
+        self.col += cells;
+        self.spans.extend(spans);
+    }
+
     /// Append `text` in `style`, a click on it being `hit`.
-    pub(super) fn put(
+    pub(in crate::tui::screens) fn put(
         &mut self,
         text: impl Into<String>,
         style: ratatui::style::Style,
@@ -135,8 +172,16 @@ impl Built {
         self.spans.push(Span::styled(text, style));
     }
 
+    /// Append a row's `label`, `LABEL` cells wide: the word in `style`, the blanks after it plain,
+    /// a click on either being `hit`.
+    fn label(&mut self, label: &str, style: ratatui::style::Style, hit: Hit) {
+        self.put(label.to_string(), style, Some(hit));
+        let pad = LABEL.saturating_sub(widgets::text::cells(label));
+        self.put(" ".repeat(pad), ratatui::style::Style::default(), Some(hit));
+    }
+
     /// The line, the cursor in front of it, and where the row stands out when `focused`.
-    pub(super) fn finish(
+    pub(in crate::tui::screens) fn finish(
         self,
         focused: bool,
         stale: bool,
@@ -145,6 +190,21 @@ impl Built {
     ) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
         let line = widgets::rows::with_cursor(Line::from(self.spans), focused, theme);
         (row_style(line, focused, stale, theme, width), self.hits)
+    }
+}
+
+impl Built {
+    /// The line with the cursor in front of it where `focused`, and no box over the row: the
+    /// focus is drawn by the parts that took [`switch::styles`]' chosen style.
+    pub(in crate::tui::screens) fn finish_marked(
+        self,
+        focused: bool,
+        stale: bool,
+        theme: &Theme,
+        width: usize,
+    ) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
+        let line = widgets::rows::with_cursor(Line::from(self.spans), focused, theme);
+        (row_style(line, false, stale, theme, width), self.hits)
     }
 }
 
@@ -157,7 +217,11 @@ fn preset_row(
     width: usize,
 ) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
     let plain = ratatui::style::Style::default();
-    let (lit, dim) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Preset);
+    // `←→` step the preset: the label and the preset's name take the focus, the on/off word
+    // keeps its own bright/dim.
+    let (head, lit, _) = switch::styles(theme, plain, focused);
+    let (on, dim) = (theme.style(Role::SelectName), theme.style(Role::Dim));
     let arrow = theme.style(Role::ModeArrow);
     let row = Hit::Crossfeed(Xf::Preset);
     let model = view
@@ -167,25 +231,35 @@ fn preset_row(
         .map_or(view.model.as_str(), |m| m.name.as_str());
     let preset = view.preset.as_deref().unwrap_or("Custom");
     let mut built = Built::new();
-    built.put(format!("{:<LABEL$}", Xf::Preset.label()), plain, Some(row));
+    built.label(Xf::Preset.label(), head, row);
     built.put(
-        if view.on { "on " } else { "off" },
-        if view.on { lit } else { dim },
+        if view.on { "on" } else { "off" },
+        if view.on { on } else { dim },
         Some(Hit::CrossfeedOn),
     );
+    if view.on {
+        built.put(" ", plain, Some(Hit::CrossfeedOn));
+    }
     built.put("  ", plain, Some(row));
     built.put("\u{2039} ", arrow, Some(Hit::CrossfeedModel(-1)));
     built.put(model.to_string(), plain, Some(row));
     built.put(" \u{203a}", arrow, Some(Hit::CrossfeedModel(1)));
     built.put("  ", plain, Some(row));
     built.put("\u{2039} ", arrow, Some(Hit::CrossfeedStep(Xf::Preset, -1)));
-    built.put(preset.to_string(), plain, Some(row));
+    built.put(
+        preset.to_string(),
+        if focused { lit } else { plain },
+        Some(row),
+    );
     built.put(" \u{203a}", arrow, Some(Hit::CrossfeedStep(Xf::Preset, 1)));
     if let Some(from) = view.edited_from.as_ref().filter(|_| view.preset.is_none()) {
-        built.put(format!("  edited from {from}"), dim, None);
+        built.put(
+            format!("  edited from {from}"),
+            theme.style(Role::Dim),
+            None,
+        );
     }
-    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Preset);
-    built.finish(focused, !app.session.connected, theme, width)
+    built.finish_marked(focused, !app.session.connected, theme, width)
 }
 
 /// A value row: `Level      ‹ 37 % · −8.6 dB ›`, or the edit line in its place.
@@ -311,12 +385,13 @@ pub(super) fn space_row(
     width: usize,
 ) -> (Line<'static>, Vec<(usize, usize, Hit)>) {
     let plain = ratatui::style::Style::default();
-    let (lit, dim) = (theme.style(Role::SelectName), theme.style(Role::Dim));
+    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
+    let (head, lit, dim) = switch::styles(theme, plain, focused);
     let arrow = theme.style(Role::ModeArrow);
     let row = Hit::Crossfeed(Xf::Space);
     let now = app.space_now();
     let mut built = Built::new();
-    built.put(format!("{:<LABEL$}", Xf::Space.label()), plain, Some(row));
+    built.label(Xf::Space.label(), head, row);
     built.put("\u{2039} ", arrow, Some(Hit::CrossfeedStep(Xf::Space, -1)));
     built.put(now.word(), lit, Some(row));
     built.put(" \u{203a}", arrow, Some(Hit::CrossfeedStep(Xf::Space, 1)));
@@ -331,8 +406,7 @@ pub(super) fn space_row(
             Some(row),
         );
     }
-    let focused = app.tone.row == ToneRow::Crossfeed(Xf::Space);
-    built.finish(focused, !app.session.connected, theme, width)
+    built.finish_marked(focused, !app.session.connected, theme, width)
 }
 
 /// The folded line where the space choice leads: `Space  Virtual speakers · No room · HRTF · SADIE

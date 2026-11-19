@@ -388,8 +388,13 @@ async fn an_address_in_use_leaves_a_failed_server() {
         auth: AuthKind::None,
         ..config()
     };
-    let second =
-        McpServer::start(&taken, Arc::new(crate::fleet::Unavailable), Arc::default()).await;
+    let second = McpServer::start(
+        &taken,
+        Arc::new(crate::fleet::Unavailable),
+        Arc::default(),
+        Activity::default(),
+    )
+    .await;
     assert!(!second.serving());
     let McpStatus::Failed { listen, error } = second.status() else {
         panic!("expected a failed server");
@@ -415,8 +420,13 @@ async fn a_token_that_cannot_be_had_fails_the_server_without_naming_it() {
         token_file: Some(file.display().to_string()),
         ..config()
     };
-    let server =
-        McpServer::start(&config, Arc::new(crate::fleet::Unavailable), Arc::default()).await;
+    let server = McpServer::start(
+        &config,
+        Arc::new(crate::fleet::Unavailable),
+        Arc::default(),
+        Activity::default(),
+    )
+    .await;
     let status = server.status();
     let McpStatus::Failed { error, .. } = &status else {
         panic!("expected a failed server");
@@ -447,8 +457,13 @@ async fn a_token_file_that_is_a_pipe_fails_the_server_at_once() {
         ..config()
     };
     let started = std::time::Instant::now();
-    let server =
-        McpServer::start(&config, Arc::new(crate::fleet::Unavailable), Arc::default()).await;
+    let server = McpServer::start(
+        &config,
+        Arc::new(crate::fleet::Unavailable),
+        Arc::default(),
+        Activity::default(),
+    )
+    .await;
     assert!(started.elapsed() < Duration::from_secs(2));
     let McpStatus::Failed { error, .. } = server.status() else {
         panic!("expected a failed server");
@@ -532,8 +547,11 @@ async fn the_credential_is_removed_before_the_request_goes_on() {
         listener,
         auth.clone(),
         Some(auth),
-        Arc::new(crate::fleet::Unavailable),
-        Arc::default(),
+        Wiring {
+            fleet: Arc::new(crate::fleet::Unavailable),
+            floors: Arc::default(),
+            activity: Activity::default(),
+        },
         Some(echo),
     )
     .unwrap();
@@ -568,4 +586,61 @@ async fn stopping_closes_the_port() {
     let (server, addr) = serve(&config());
     server.stop().await;
     assert!(TcpStream::connect(addr).await.is_err());
+}
+
+/// A request with a wrong token on loopback leaves the counts at nothing: open 0, seen 0.
+#[tokio::test]
+async fn a_wrong_token_is_never_counted() {
+    let activity = Activity::default();
+    let auth = Arc::new(TokenAuth::new(TOKEN));
+    let server = McpServer::start_counting(&config(), auth.clone(), Some(auth), activity.clone())
+        .expect("the server binds");
+    let McpStatus::Listening { listen: addr, .. } = server.status() else {
+        panic!("not listening");
+    };
+    assert_eq!(list(addr, Some("fake-wrong-token"), &[]).await.status, 401);
+    assert_eq!(list(addr, None, &[]).await.status, 401);
+    let now = activity.snapshot();
+    assert_eq!((now.open, now.hour, now.day), (0, 0, 0));
+    server.stop().await;
+}
+
+/// A request with the right token counts its connection, open while it lasts and seen after.
+#[tokio::test]
+async fn the_right_token_is_counted() {
+    let activity = Activity::default();
+    let auth = Arc::new(TokenAuth::new(TOKEN));
+    let server = McpServer::start_counting(&config(), auth.clone(), Some(auth), activity.clone())
+        .expect("the server binds");
+    let McpStatus::Listening { listen: addr, .. } = server.status() else {
+        panic!("not listening");
+    };
+    assert_eq!(list(addr, Some(TOKEN), &[]).await.status, 200);
+    tokio::time::timeout(Duration::from_secs(10), activity.until(|now| now.open == 0))
+        .await
+        .expect("the closed connection stops counting");
+    let now = activity.snapshot();
+    assert_eq!((now.hour, now.day), (1, 1));
+    // A refused request from the same address does not change what was counted.
+    assert_eq!(list(addr, Some("fake-wrong-token"), &[]).await.status, 401);
+    assert_eq!(activity.snapshot().day, 1);
+    server.stop().await;
+}
+
+/// A server with no token counts every connection that sends a request.
+#[tokio::test]
+async fn a_server_with_no_token_counts_every_connection() {
+    let activity = Activity::default();
+    let config = McpConfig {
+        auth: AuthKind::None,
+        ..config()
+    };
+    let server = McpServer::start_counting(&config, Arc::new(NoAuth), None, activity.clone())
+        .expect("the server binds");
+    let McpStatus::Listening { listen, .. } = server.status() else {
+        panic!("not listening");
+    };
+    assert_eq!(list(listen, None, &[]).await.status, 200);
+    assert_eq!(activity.snapshot().day, 1);
+    server.stop().await;
 }

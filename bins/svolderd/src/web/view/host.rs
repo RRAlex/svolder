@@ -9,8 +9,8 @@
 
 use svolder_host::Progress;
 use svolder_ipc::host::{
-    DacFacts, DacStage, HostView, PathLine, PlayingView, ROUTE_NOT_READ, Verdict, path_line,
-    sink_is_dac,
+    DacFacts, DacStage, HostView, PathLine, PlayingView, ROUTE_NOT_READ, SETUP_LIMIT, SetupCheck,
+    Verdict, path_line, setup_check, sink_is_dac,
 };
 use svolder_profiles::Family;
 
@@ -58,16 +58,51 @@ pub(crate) struct Track {
 /// The path line: the hops and what they add up to.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Path {
-    /// What the path does to the signal: `ok` (untouched), `changed`, `other` (the sound goes
-    /// elsewhere) or `unknown`.
-    pub(crate) class: &'static str,
+    /// What the path does to the signal, as the judge keys it (`Verdict::key`): `untouched`,
+    /// `changed`, `not_this_dac`, `other_input` or `unknown`.
+    pub(crate) verdict: &'static str,
     /// The hops, player to DAC; none when the sound goes to another sink.
     pub(crate) hops: Vec<Hop>,
-    /// The words of the verdict.
-    pub(crate) words: String,
+    /// The words of the verdict, one per change or thing not read.
+    pub(crate) words: Vec<String>,
     /// The whole sentence behind short words (`the computer plays to DELL S2721QS`), for a
     /// tooltip; empty when the words say it all.
     pub(crate) title: String,
+    /// The PipeWire config check of the sink, while the sink is this DAC; `None` for another
+    /// sink.
+    pub(crate) setup: Option<SetupView>,
+}
+
+/// The config check of the sink as the card shows it, in the judge's words.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SetupView {
+    /// What the lines add up to, as the judge keys it (`SetupSummary::key`): `untouched`,
+    /// `changes`, `unread`, `not_read` or `other_version`.
+    pub(crate) outcome: &'static str,
+    /// What the check cannot judge, the judge's sentence.
+    pub(crate) limit: &'static str,
+    /// The short chip: `config ✓`, `config 2` or `config ?`.
+    pub(crate) chip: String,
+    /// The summary in words (`PipeWire config lets it through untouched`).
+    pub(crate) summary: String,
+    /// The sink the check judges, as people name it.
+    pub(crate) sink: String,
+    /// The lines of the check, in the judge's order.
+    pub(crate) lines: Vec<SetupLineView>,
+}
+
+/// One line of the config check.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SetupLineView {
+    /// The condition's stable key (`rates`, `forced_rate`, `dither`, `format`, `plug`, `stereo`,
+    /// `filter`).
+    pub(crate) key: String,
+    /// The condition as a row's name (`24-bit output`).
+    pub(crate) label: &'static str,
+    /// `pass`, `fail` or `unknown`.
+    pub(crate) outcome: &'static str,
+    /// What was found.
+    pub(crate) words: String,
 }
 
 /// One hop of the path.
@@ -115,13 +150,30 @@ impl Playing {
         if let Some(path) = &self.path {
             key.push_str(&format!(
                 "{SEP}path={}{SEP}{}{SEP}{}",
-                path.class, path.words, path.title
+                path.verdict,
+                path.words.join(" · "),
+                path.title
             ));
             for hop in &path.hops {
                 key.push_str(&format!(
                     "{SEP}{}{SEP}{}{SEP}{}{SEP}{}",
                     hop.label, hop.detail, hop.changes, hop.unknown
                 ));
+            }
+            match &path.setup {
+                None => key.push_str(&format!("{SEP}config=none")),
+                Some(setup) => {
+                    key.push_str(&format!(
+                        "{SEP}config={}{SEP}{}{SEP}{}{SEP}{}",
+                        setup.outcome, setup.chip, setup.summary, setup.sink
+                    ));
+                    for line in &setup.lines {
+                        key.push_str(&format!(
+                            "{SEP}{}{SEP}{}{SEP}{}{SEP}{}",
+                            line.key, line.label, line.outcome, line.words
+                        ));
+                    }
+                }
             }
         }
         key
@@ -147,13 +199,21 @@ pub(crate) fn playing_of(
     let track = host.playing.as_ref().map(track);
     let path = match (&track, &host.route, &device) {
         // Only a DAC takes sound over the computer's audio: an amp or a preamp has no path.
-        (Some(_), Some(route), Some((Family::Dac, dac))) => Some(path(&path_line(route, dac))),
+        (Some(_), Some(route), Some((Family::Dac, dac))) => {
+            let setup = route
+                .sink
+                .as_ref()
+                .is_some_and(|sink| sink_is_dac(sink, dac))
+                .then(|| setup_view(&setup_check(route)));
+            Some(path(&path_line(route, dac), setup))
+        }
         // The first read still in flight, or no `pw-dump`: the line says so, as the TUI's does.
         (Some(_), None, Some((Family::Dac, _))) => Some(Path {
-            class: "unknown",
+            verdict: Verdict::Unknown.key(),
             hops: Vec::new(),
-            words: ROUTE_NOT_READ.to_string(),
+            words: vec![ROUTE_NOT_READ.to_string()],
             title: String::new(),
+            setup: None,
         }),
         _ => None,
     };
@@ -234,15 +294,31 @@ fn dac_facts(s: &Snapshot) -> DacFacts {
     facts
 }
 
-/// The path line as the card shows it.
-fn path(line: &PathLine) -> Path {
+/// The config check as the card shows it.
+fn setup_view(check: &SetupCheck) -> SetupView {
+    SetupView {
+        outcome: check.summary.key(),
+        limit: SETUP_LIMIT,
+        chip: check.chip(),
+        summary: check.summary_words(),
+        sink: check.sink.clone(),
+        lines: check
+            .lines
+            .iter()
+            .map(|line| SetupLineView {
+                key: line.key.clone(),
+                label: line.label(),
+                outcome: line.outcome.key(),
+                words: line.words.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// The path line as the card shows it, with the config check of its sink when there is one.
+fn path(line: &PathLine, setup: Option<SetupView>) -> Path {
     Path {
-        class: match line.verdict {
-            Verdict::Untouched => "ok",
-            Verdict::Changed => "changed",
-            Verdict::NotThisDac { .. } | Verdict::OtherInput { .. } => "other",
-            Verdict::Unknown => "unknown",
-        },
+        verdict: line.verdict.key(),
         hops: line
             .hops
             .iter()
@@ -253,8 +329,9 @@ fn path(line: &PathLine) -> Path {
                 unknown: hop.unknown,
             })
             .collect(),
-        words: line.words_line(),
+        words: line.words.clone(),
         title: line.sentence().unwrap_or_default(),
+        setup,
     }
 }
 

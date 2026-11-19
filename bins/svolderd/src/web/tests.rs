@@ -22,7 +22,13 @@ fn loopback() -> WebConfig {
 
 #[tokio::test]
 async fn a_server_listens_and_stopping_closes_the_port() {
-    let server = WebServer::start(&loopback(), Arc::new(Unavailable), Default::default()).await;
+    let server = WebServer::start(
+        &loopback(),
+        Arc::new(Unavailable),
+        Default::default(),
+        Default::default(),
+    )
+    .await;
     let WebStatus::Listening {
         listen,
         auth,
@@ -41,7 +47,13 @@ async fn a_server_listens_and_stopping_closes_the_port() {
 
 #[tokio::test]
 async fn an_address_in_use_leaves_a_failed_server() {
-    let first = WebServer::start(&loopback(), Arc::new(Unavailable), Default::default()).await;
+    let first = WebServer::start(
+        &loopback(),
+        Arc::new(Unavailable),
+        Default::default(),
+        Default::default(),
+    )
+    .await;
     let WebStatus::Listening { listen, .. } = first.status() else {
         panic!("not listening");
     };
@@ -49,7 +61,13 @@ async fn an_address_in_use_leaves_a_failed_server() {
         listen,
         ..loopback()
     };
-    let second = WebServer::start(&taken, Arc::new(Unavailable), Default::default()).await;
+    let second = WebServer::start(
+        &taken,
+        Arc::new(Unavailable),
+        Default::default(),
+        Default::default(),
+    )
+    .await;
     assert!(!second.serving());
     let WebStatus::Failed {
         listen: asked,
@@ -78,7 +96,13 @@ async fn a_token_that_cannot_be_had_fails_the_server_without_naming_it() {
         token_file: Some(file.display().to_string()),
         ..loopback()
     };
-    let server = WebServer::start(&config, Arc::new(Unavailable), Default::default()).await;
+    let server = WebServer::start(
+        &config,
+        Arc::new(Unavailable),
+        Default::default(),
+        Default::default(),
+    )
+    .await;
     let status = server.status();
     let WebStatus::Failed { error, .. } = &status else {
         panic!("expected a failed server");
@@ -103,7 +127,13 @@ async fn a_token_server_says_where_its_token_comes_from() {
         token_file: Some(file.display().to_string()),
         ..loopback()
     };
-    let server = WebServer::start(&config, Arc::new(Unavailable), Default::default()).await;
+    let server = WebServer::start(
+        &config,
+        Arc::new(Unavailable),
+        Default::default(),
+        Default::default(),
+    )
+    .await;
     let info = server.token_info().expect("a token's description");
     assert_eq!(info.kind, svolder_ipc::TokenKind::File);
     assert_eq!(info.tail, "789");
@@ -301,4 +331,103 @@ async fn a_page_open_at_shutdown_never_hears_the_host_go() {
             "the page was told the computer went: {seen}"
         );
     }
+}
+
+/// One `GET /api/v1/session` on its own connection with `cookie` (a full `Cookie` header value),
+/// read to the end.
+async fn get_session(addr: std::net::SocketAddr, cookie: Option<&str>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let cookie = cookie
+        .map(|c| format!("Cookie: {c}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "GET /api/v1/session HTTP/1.1\r\nHost: {addr}\r\n{cookie}Connection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 "), "{reply}");
+}
+
+/// A token-auth web server over a fake token, counting into the returned activity.
+async fn counting_server(
+    dir: &std::path::Path,
+    guest: svolder_ipc::config::WebGuest,
+) -> (WebServer, std::net::SocketAddr, Activity) {
+    let file = token_file(dir, "web", FAKE_TOKEN);
+    let config = WebConfig {
+        guest,
+        ..with_token_file(&file, true)
+    };
+    let activity = Activity::default();
+    let server = WebServer::start(
+        &config,
+        Arc::new(Unavailable),
+        Default::default(),
+        activity.clone(),
+    )
+    .await;
+    let WebStatus::Listening { listen, .. } = server.status() else {
+        panic!("not listening: {:?}", server.status());
+    };
+    (server, listen, activity)
+}
+
+const FAKE_TOKEN: &str = "fake-web-token-0123456789abcdefghijklmnopq";
+
+/// With a token, a request with no sign-in, a wrong cookie or an ended one is never counted, and
+/// neither is a guest, whom `guest = "read"` lets read without one; one with this server's valid
+/// cookie is counted.
+#[tokio::test]
+async fn only_a_signed_in_request_is_counted() {
+    use svolder_ipc::config::WebGuest;
+    let dir = std::env::temp_dir().join(format!("svolderd-web-count-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for guest in [WebGuest::None, WebGuest::Read] {
+        let (server, addr, activity) = counting_server(&dir, guest).await;
+        let name = auth::cookie_name(addr.port());
+        let wrong = format!(
+            "{name}={}",
+            auth::mint("fake-another-token", auth::now_secs())
+        );
+        get_session(addr, None).await;
+        get_session(addr, Some(&wrong)).await;
+        let ended = format!(
+            "{name}={}",
+            auth::mint(FAKE_TOKEN, auth::now_secs() - auth::LOGIN_LIFE - 1)
+        );
+        get_session(addr, Some(&ended)).await;
+        let none = activity.snapshot();
+        assert_eq!(
+            (none.open, none.hour, none.day),
+            (0, 0, 0),
+            "guest {guest:?}"
+        );
+        let right = format!("{name}={}", auth::mint(FAKE_TOKEN, auth::now_secs()));
+        get_session(addr, Some(&right)).await;
+        let signed = activity.snapshot();
+        assert_eq!((signed.hour, signed.day), (1, 1), "guest {guest:?}");
+        server.stop().await;
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// With no sign-in at all (`auth = "none"`) every request that is served counts.
+#[tokio::test]
+async fn a_web_server_with_no_sign_in_counts_every_connection() {
+    let activity = Activity::default();
+    let server = WebServer::start(
+        &loopback(),
+        Arc::new(Unavailable),
+        Default::default(),
+        activity.clone(),
+    )
+    .await;
+    let WebStatus::Listening { listen, .. } = server.status() else {
+        panic!("not listening");
+    };
+    get_session(listen, None).await;
+    assert_eq!(activity.snapshot().day, 1);
+    server.stop().await;
 }

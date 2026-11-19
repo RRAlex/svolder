@@ -288,6 +288,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/popups/popups.js"),
     ),
     (
+        "core/popups/loudness/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/loudness/draw.js"),
+    ),
+    (
+        "core/popups/loudness/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/loudness/wire.js"),
+    ),
+    (
         "core/popups/crossfeed/draw.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/crossfeed/draw.js"),
@@ -376,6 +386,16 @@ const FILES: &[Entry] = &[
         "core/popups/help/wire.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/help/wire.js"),
+    ),
+    (
+        "core/popups/setup/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/setup/draw.js"),
+    ),
+    (
+        "core/popups/setup/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/setup/wire.js"),
     ),
     (
         "core/popups/sound/draw.js",

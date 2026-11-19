@@ -49,4 +49,9 @@ pub struct Pointer {
     /// Whether the pointer rests on the Web UI box's link, as the last frame's hits have it: the
     /// box draws every line of the link underlined while it does.
     pub over_link: bool,
+    /// Whether the pointer rests on the Controls pane's Path row, as the last frame's hits have
+    /// it: the row's scroll stands still while it does. It is read from the last pointer move
+    /// only, so a layout that moves under a resting pointer, or a pointer that leaves the
+    /// terminal, keeps it until the next move.
+    pub over_path: bool,
 }

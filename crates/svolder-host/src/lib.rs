@@ -46,7 +46,11 @@ pub mod vu;
 pub use analysis::{Analyser, Frame};
 pub use capture::{Block, Capture, FrameCapture, Levels, PwFrames, PwRecord, pw_record_args};
 pub use players::{Button, Mpris, NoBus, NowPlaying, Players, Progress, Status, unix_ms};
-pub use route::{ChainStages, PlayerMatch, PwDump, RouteFacts, SinkFacts, StreamFacts, route};
+pub use route::{
+    ASOUND_DIR_ENV, AlsaFacts, Asound, ChainStages, ClockFacts, Dither, HwParams, HwState,
+    KernelOffer, Layout, PlayerMatch, PwDump, Rates, RouteFacts, SetupFacts, SinkFacts, SinkOffer,
+    StreamFacts, fill_alsa, route,
+};
 pub use sink::{Sink, SinkState, Wpctl};
 
 /// The environment variable that turns every host part off for the process when it reads

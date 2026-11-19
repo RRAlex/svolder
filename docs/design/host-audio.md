@@ -135,6 +135,8 @@ library: nodes, ports, links, clients, devices and the `default` metadata.
   through the filter (never for `Elsewhere`).
 - **A USB sink** gives `usb_vendor_id` and `usb_product` from its device object
   (`device.vendor.id`, `device.product.name`, on `device.bus = "usb"`); any other bus gives none.
+- **The config facts** (`RouteFacts.setup`, from the same dump plus the card's `/proc/asound`), the
+  slow watchers, one-shot reads and the fakes: [host-config-check.md](host-config-check.md).
 
 The tests run against `crates/svolder-host/tests/fixtures/pw-dump/`: real `pw-dump` output from
 the development machine (anonymised, trimmed to the objects a route reads) and files derived from
@@ -206,15 +208,17 @@ route. The view is sent on change only. A bus that cannot be reached, or one tha
   a miss (the TUI reads it with `Backend::host_cover`). A new address clears the old cover at
   once. An address that gave no picture is read again 1 s and then 3 s later (a player may name a
   picture before it has written it), then left. A player that quits clears the cover with the track.
-- **The route** is read out of `pw-dump` only while a `Watcher` is held: by each `Subscribe`
+- **The route** is read out of `pw-dump` while a `Watcher` is held, and once for a one-shot `host`
+  request ([reads](host-config-check.md#reads)). A fast watcher is held by each `Subscribe`
   connection that asked for the host (`host: true`) for its life and by the event stream of each
   web page of a DAC (an amp's page shows no path, so its stream holds none); a page hidden for 2 s
   lets its stream go, so a background tab holds no route reads. The first watcher gets a read at
   once, then one every 2 s, never two closer: a player change does not force a read inside the 2 s
-  (a player that quits is dropped at once), and a sink switch shows on the next read. With nobody
-  watching there is no `pw-dump` run and no route kept; the in-process readers that never show the
-  host (the MQTT bridge, the MCP server) read `Daemon::device_events`, which holds no watcher. The
-  web model names the applied preset from `host-eq.toml`, read only when the filter is in the path.
+  (a player that quits is dropped at once), and a sink switch shows on the next read. The MQTT
+  client holds a slow one (a read every 30 s while it publishes the path). With none of these and
+  no request there is no `pw-dump` run and no route kept; the MCP server's tools read
+  `Daemon::device_events`, which holds no watcher. The web model names the applied preset from
+  `host-eq.toml`, read only when the filter is in the path.
 - **The presses** go to the followed player through `Players::press`; `Request::HostPress` names the
   button as a word, and answers `Ack` when the player took it, an error for an unknown word, a host
   that is off, no player, or a player that refused.
@@ -225,8 +229,9 @@ route. The view is sent on change only. A bus that cannot be reached, or one tha
   `SVOLDER_FAKE_PLAYER_GONE_AFTER_MS` drop its art or its player after a delay, `..._GONE_FILE`
   (what the checks use) when the named file appears, `..._COVER_NEXT_FILE` moves it to a second
   track with a second cover then; `SVOLDER_FAKE_ROUTE=changed` makes the route
-  alter the signal in every way (a quieter player and sink, a resample, the host EQ, two other sounds), for a long changed
-  path line; `SVOLDER_FAKE_TITLE` names the track, for a title too long for a phone's folded line.
+  alter the signal in every way (a quieter player and sink, a resample, the host EQ, two other
+  sounds, a 16-bit sink under a 32-bit stream, dither), for a long changed path line;
+  `SVOLDER_FAKE_TITLE` names the track, for a title too long for a phone's folded line.
 - **The capture** is held, not followed: one capture runs in the daemon while a page's frames
   stream or a joined TUI's frames connection lives, and nothing runs without one
   ([host-capture.md](host-capture.md)).
@@ -247,7 +252,8 @@ the cache directories readable.
 
 **What it leaves out, and what comes later.** No audio travels over the network, nothing seeks,
 lists or looks up lyrics, no cover is looked up anywhere, and Home Assistant gets the computer EQ's
-switch and preset only. The TUI's direct mode still captures for itself.
+switch and preset, the computer's path verdict and the PipeWire config check (the last two
+read-only). The TUI's direct mode still captures for itself.
 
 ## A joined TUI
 
@@ -280,14 +286,6 @@ Host group while the daemon speaks for the host, so the group keeps its height a
 stops; the TUI draws no elapsed time or progress bar, which is the web card's. `[tui]
 host_audio = false` wins: nothing is asked for, and a view that arrives is dropped.
 
-## Fakes
-
-`crates/svolder-host/src/fake.rs` holds a stand-in for each source that answers from what a test
-gave it and records what it was asked; a clone shares its original's state, so a test keeps one and
-hands the other to the code under test. This is what lets the TUI's buffer tests cover every state,
-including each part missing. `FakePlayers::answering` makes the players answer a press as a real
-player would, which the daemon's fake host and its tests use.
-
 ## The computer EQ
 
 The computer EQ (the manager in `crates/svolder-host/src/eq/manage.rs`) puts a correction in front
@@ -316,12 +314,12 @@ service and restarts on failure) when the user manager answers, else a detached 
 with an autostart entry (`render_desktop`) and a pid file in the private runtime directory.
 `SVOLDER_HOST_EQ_MANAGER` chooses.
 
-**What it writes.** Apart from PipeWire's and WirePlumber's own runtime state, svolder writes four
-kinds of file and nothing else: `svolder/host-eq.conf` in the configuration directory, the unit
-`svolder-host-eq.service` or the autostart entry `svolder-host-eq.desktop`, the state file
-`svolder/host-eq.toml` (`HostEqState`) and, for a process, its pid file. `remove` deletes what
-`apply` wrote. PipeWire's own configuration directories, its `filter-chain.service` and every other
-unit are left alone.
+**What it writes.** Apart from PipeWire's and WirePlumber's own runtime state, svolder writes five
+kinds of file and nothing else: `svolder/host-eq.conf` in the configuration directory, the unit or
+autostart entry (`svolder-host-eq.service`, `svolder-host-eq.desktop`), the state file
+`svolder/host-eq.toml` (`HostEqState`), a process's pid file, and `svolder/host-eq-settings.toml`
+(settings kept before any state existed; the controller owns it). `remove` deletes what `apply`
+wrote, not that file. PipeWire's own configuration and every other unit are left alone.
 
 **What it applies.** `host_correction` turns a preset into a `Correction`: an imported preset's
 filters and stated preamp; a band preset's bands as peaking filters with a preamp of minus the
@@ -356,11 +354,13 @@ under the user's directories, and nothing else: the module cannot open a socket.
 **Never say clean when it is not.** The path says `untouched` only when every hop is known to leave
 the signal alone, and names the hop that does not; what could not be read is said as unknown, and
 the words never claim the bits are exact, since svolder cannot see the bits. A path that cannot be
-judged (another sink, another input) gives no verdict at all.
+judged (another sink, another input) gives no verdict at all. A player's own normalization, volume
+or EQ, its source, and anything past the sink's converter are outside it, as the untouched sentence
+says; facts an older daemon did not send are skipped, never invented.
 
 **Watching changes nothing, and costs nothing when nobody looks.** The route is only read, and only
 while a page or a TUI that shows it is connected, at most once in two seconds; the player is only
-asked, and sent a press the user made.
+asked, and sent a press the user made. The route and the config check run only `pw-dump`.
 
 **Capture only an output, keep nothing.** The argument list is fixed and tested, no microphone is
 reachable, and samples never leave memory. This is a privacy promise a user can read in one

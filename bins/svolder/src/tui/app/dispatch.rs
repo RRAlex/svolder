@@ -35,9 +35,12 @@ impl App {
         {
             true => {
                 self.pointer.climb = None;
+                // The computer's strength is the controller's, not a step held for a device:
+                // what was heard is saved.
+                let saved = glide::stop_ld(self);
                 self.pointer.bar_drag = None;
                 divider::release(self);
-                Vec::new()
+                saved
             }
             false => {
                 divider::release(self);
@@ -48,6 +51,7 @@ impl App {
         // A box open over the screen takes the mouse, so a drag it opened over would never see
         // its button let go.
         if self.modal_open() {
+            intents.extend(glide::stop_ld(self));
             self.pointer.curve_drag = None;
             self.pointer.bar_drag = None;
             divider::release(self);
@@ -98,6 +102,9 @@ impl App {
         }
         if self.overlays.help_open {
             return self.help_key(key.code);
+        }
+        if self.overlays.setup.is_some() {
+            return self.setup_key(key.code);
         }
         if self.overlays.settings.is_some() {
             return self.settings_box_key(key.code);
@@ -163,7 +170,11 @@ impl App {
             KeyCode::BackTab => return self.cycle_pane(-1),
             _ => {}
         }
-        // The Crossfeed rows take their keys (`Esc` folds the section) before the global ones.
+        // The Loudness and Crossfeed rows take their keys (`Esc` folds the section) before the
+        // global ones.
+        if let Some(intents) = self.ld_key(code) {
+            return intents;
+        }
         if let Some(intents) = self.xf_key(code) {
             return intents;
         }
@@ -344,6 +355,10 @@ impl App {
             KeyCode::Char('o') => self.flip_key("nos"),
             KeyCode::Char('X') if self.crossfeed_shown() => self.jump_to_crossfeed(),
             KeyCode::Char('S') if self.space_shown() => self.open_sets(),
+            KeyCode::Char('k') if self.screen == Screen::Device && self.setup_offered() => {
+                self.open_setup();
+                Vec::new()
+            }
             KeyCode::Char('a') if self.screen == Screen::Tone && self.on_computer() => return None,
             KeyCode::Char('a') => {
                 self.advise_key();
@@ -452,7 +467,7 @@ impl App {
         if self.screen != screen {
             // The Crossfeed focus belongs to the screen it was made on; the screen shown next
             // opens on its own row (`X` and Enter put the keys in the section after this).
-            if matches!(self.tone.row, ToneRow::Crossfeed(_)) {
+            if matches!(self.tone.row, ToneRow::Crossfeed(_) | ToneRow::Ld(_)) {
                 self.tone.row = ToneRow::Mode;
             }
             self.tone.xf_line = None;
@@ -514,9 +529,9 @@ impl App {
     }
 
     /// Whether a box is open over the screen that takes every key while it is: the help
-    /// overlay, the menu, the Settings box, the device editor, the question a removal asks, the preset list, a band's edit
-    /// line, or the question `q` asks. Everything around it is drawn dimmed, and nothing the
-    /// screen under it earned plays.
+    /// overlay, the menu, the PipeWire config box, the Settings box, the device editor, the
+    /// question a removal asks, the preset list, a band's edit line, or the question `q` asks.
+    /// Everything around it is drawn dimmed, and nothing the screen under it earned plays.
     pub(crate) fn modal_open(&self) -> bool {
         self.overlays.help_open
             || self.overlays.menu.is_some()
@@ -529,6 +544,7 @@ impl App {
             || self.tone.edit_line.is_some()
             || self.tone.point_line.is_some()
             || self.tone.xf_line.is_some()
+            || self.overlays.setup.is_some()
             || self.overlays.quitting
     }
 }

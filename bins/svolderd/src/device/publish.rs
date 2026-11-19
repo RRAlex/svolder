@@ -4,7 +4,7 @@
 //! What the actor reports: statuses and faults as events, and the link, identity, signal strength
 //! and profile to the live info and the feed, with the time each reading was heard.
 //!
-//! The handle, the event subscribers and the MQTT bridge read the device through these, never
+//! The handle, the event subscribers and the MQTT client read the device through these, never
 //! through the actor itself.
 
 use std::sync::Arc;

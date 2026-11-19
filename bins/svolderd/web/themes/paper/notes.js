@@ -14,6 +14,10 @@ import { ARROW, RATE_MATCHES } from './words.js';
 /** The notes that may be red, most urgent first. */
 export const RED_ORDER = ['card', 'volume', 'peak', 'path', 'passphrase'];
 
+/** The marker the config chip's words carry in place of the daemon's tick (`✓`, a glyph Paper's
+ * faces lack): the notes' drawing turns it into an ink tick. A private-use character. */
+export const CONFIG_TICK = '\uE001';
+
 /** A model's own arrow (U+2192) is said as ours. */
 export const handed = (text) => String(text).replaceAll('→', ARROW);
 
@@ -76,7 +80,7 @@ const rateIn = (detail) => /\d+(?:\.\d+)? kHz/.exec(detail ?? '')?.[0] ?? null;
 function pathWords(path) {
   const hops = path.hops ?? [];
   const rates = hops.map((h) => rateIn(h.detail)).filter(Boolean);
-  const words = path.words ?? '';
+  const words = (path.words ?? []).join(' · ');
   let text = words;
   if (rates.length > 1) {
     const same = rates.every((r) => r === rates[0]);
@@ -85,9 +89,9 @@ function pathWords(path) {
   }
   const changing = hops.filter((h) => h.changes);
   let red = null;
-  if (path.class === 'changed' && changing.length === 1) {
+  if (path.verdict === 'changed' && changing.length === 1) {
     red = `${changing[0].label}: ${changing[0].detail}, the only hop that changes the sound`;
-  } else if (path.class === 'changed' && changing.length > 1) {
+  } else if (path.verdict === 'changed' && changing.length > 1) {
     red = `${changing.length} hops change the sound: ${changing.map((h) => h.label).join(' and ')}`;
   }
   return { text, red };
@@ -185,6 +189,13 @@ export function notesOf(page, device, { change = null, coarse = false, clockNowM
   if (p?.path) {
     const { text, red } = pathWords(p.path);
     add('path', 'playing', text, red ? 'path' : null, red, p.path.title ?? '');
+    // The config check's chip, in the daemon's words: its outcome, and its summary as the title.
+    const cfg = p.path.config;
+    if (cfg?.chip) {
+      add('config', 'playing', cfg.chip.replaceAll('\u2713', CONFIG_TICK), null, null, cfg.summary ?? '');
+      notes[notes.length - 1].chip = cfg.outcome;
+      notes[notes.length - 1].chipWords = cfg.chip;
+    }
   }
   const track = p?.track;
   if (track) {
@@ -218,5 +229,6 @@ export function notesOf(page, device, { change = null, coarse = false, clockNowM
     text: n.id === redId && n.redText ? n.redText : n.text,
     red: n.id === redId,
     title: n.title,
+    ...(n.chip ? { chip: n.chip, chipWords: n.chipWords } : {}),
   }));
 }

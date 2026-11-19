@@ -91,26 +91,39 @@ impl Columns {
     }
 }
 
-/// One select row: the raw value and the name the profile gives it.
+/// One select row: the raw value and the name the profile gives it. With the keys on the row
+/// (`focused`) only its label and the value in force take the selected style, as the `Target`
+/// switch has it ([`crate::tui::screens::switch::styles`]); the arrows keep their own role.
 pub fn select_line(
     control: &Control,
     reading: Option<&Reading>,
     theme: &Theme,
     columns: Columns,
+    focused: bool,
 ) -> Line<'static> {
-    let mut spans = vec![label(&control.label, columns.field)];
+    let (head, lit, _) = crate::tui::screens::switch::styles(theme, Style::default(), focused);
+    let mut name_label = label(&control.label, columns.field);
+    name_label.style = head;
+    let arrow = theme.style(Role::ModeArrow);
+    let (arrow, value) = match focused {
+        true => (arrow, lit),
+        false => (Style::default(), Style::default()),
+    };
+    let mut spans = vec![name_label];
     match reading.and_then(Reading::raw_i64) {
         None => spans.push(Span::raw(MISSING)),
         Some(raw) => {
-            spans.push(Span::raw(format!("‹ {raw}")));
+            spans.push(Span::styled("‹ ", arrow));
+            spans.push(Span::styled(raw.to_string(), value));
             if let Some(name) = u8::try_from(raw).ok().and_then(|v| control.value_name(v)) {
-                spans.push(Span::raw(" · "));
-                spans.push(Span::styled(
-                    name.to_string(),
-                    theme.style(Role::SelectName),
-                ));
+                spans.push(Span::styled(" · ", value));
+                let style = match focused {
+                    true => lit,
+                    false => theme.style(Role::SelectName),
+                };
+                spans.push(Span::styled(name.to_string(), style));
             }
-            spans.push(Span::raw(" ›"));
+            spans.push(Span::styled(" ›", arrow));
         }
     }
     Line::from(spans)

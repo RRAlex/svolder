@@ -48,8 +48,8 @@ fn signal_is_listed_dark_only() {
     assert_eq!(signal.styles, ["themes/signal/style.css"]);
     assert_eq!(signal.schemes, ["dark"]);
     assert_eq!(signal.color_scheme, "dark");
-    assert_eq!(signal.colour_for(Some("dark")), "#0f0d0b");
-    assert_eq!(signal.colour_for(None), "#0f0d0b");
+    assert_eq!(signal.colour_for(Some("dark")), "#08121f");
+    assert_eq!(signal.colour_for(None), "#08121f");
     assert!(signal.scripts.is_empty() && signal.metas.is_empty());
 }
 
@@ -176,7 +176,7 @@ fn the_list_is_the_pickers_and_the_registrys_data() {
             "scripts": [],
             "metas": [],
             "color_scheme": "dark",
-            "theme_color": "#0f0d0b",
+            "theme_color": "#08121f",
             "theme_color_dark": null,
             "schemes": ["dark"],
         }, {

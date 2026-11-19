@@ -551,6 +551,8 @@ fn eq_state(target: &str, on: bool, origin: Option<&str>) -> svolder_host::eq::H
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
 }
 

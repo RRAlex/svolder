@@ -196,15 +196,13 @@ pub(super) async fn changed<O: Open>(
             Ok(Some(line)) => {
                 super::devices::ask_again(watching);
                 reread(watching, site);
-                if let ConnChange::WebGuest(read) = change {
-                    guest_switched(opener, watching, *read);
+                // The rows show what the file holds, which the daemon has just written.
+                match Config::load_from(&opener.path) {
+                    Ok(config) => watching.app.take_config(&config),
+                    Err(e) => watching.app.warn(format!("configuration not read: {e}")),
                 }
-                if matches!(switch, Switch::Mqtt(_)) {
-                    // The rows show what the file holds, which the daemon has just written.
-                    match Config::load_from(&opener.path) {
-                        Ok(config) => watching.app.take_config(&config),
-                        Err(e) => watching.app.warn(format!("configuration not read: {e}")),
-                    }
+                if let ConnChange::WebGuest(read) = change {
+                    guest_switched(watching, *read);
                 }
                 if let Some(line) = line {
                     watching.app.warn(line);
@@ -268,13 +266,9 @@ pub(super) async fn changed<O: Open>(
 const GUEST_ON_WARNING: &str =
     "guest view on: anyone on your network can look at the devices, read-only";
 
-/// The daemon switched the guest view: the file's `[web]` is taken in, the sign-in codes the
+/// The daemon switched the guest view: the sign-in codes the
 /// restarted web server dropped are asked for again, and turning the view on says who can look.
-fn guest_switched<O: Open>(opener: &Opener<O>, watching: &mut Watching, read: bool) {
-    match Config::load_from(&opener.path) {
-        Ok(config) => watching.app.take_config(&config),
-        Err(e) => watching.app.warn(format!("configuration not read: {e}")),
-    }
+fn guest_switched(watching: &mut Watching, read: bool) {
     let dropped = super::web_box::server_restarted(watching);
     let pairing = dropped == super::web_box::Dropped::Pairing;
     // Under `auth = "none"` no view is read-only: the daemon's own line says so instead.
@@ -431,7 +425,7 @@ async fn switch_through(socket: &Path, switch: Switch) -> Result<Option<Option<S
     }
 }
 
-/// Put the token on show for [`REVEAL_FOR`].
+/// Put the token in the token box for [`REVEAL_FOR`]; where it cannot be read the box closes.
 pub(super) fn reveal(watching: &mut Watching, site: &TokenSite) {
     match site.peek(watching.app.overlays.conn.mcp.token_file.as_deref()) {
         Ok(Some(token)) => {
@@ -442,8 +436,14 @@ pub(super) fn reveal(watching: &mut Watching, site: &TokenSite) {
                 .conn
                 .reveal(token.value().to_string(), until);
         }
-        Ok(None) => watching.app.warn("no token yet"),
-        Err(e) => watching.app.warn(e.to_string()),
+        Ok(None) => {
+            watching.app.overlays.conn.hide_token();
+            watching.app.warn("no token yet");
+        }
+        Err(e) => {
+            watching.app.overlays.conn.hide_token();
+            watching.app.warn(e.to_string());
+        }
     }
 }
 

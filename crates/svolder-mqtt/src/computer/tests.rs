@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use svolder_host::eq::crossfeed::{Model, ModelView};
-use svolder_host::eq::{CrossfeedView, PointView, SpeakersView};
+use svolder_host::eq::{CrossfeedView, LoudnessView, PointView, SpeakersView};
 
 use super::*;
 
@@ -163,19 +163,21 @@ fn a_controller_without_crossfeed_announces_none_and_topics_of_lists_every_entit
         entries("svolder", "homeassistant", true, None, None).len(),
         2
     );
+    assert_eq!(
+        entries_of("svolder", "homeassistant", true, &EqView::default()).len(),
+        4
+    );
     for commands in [true, false] {
-        let view = xf_view(true, "meier", None);
-        let speakers = sp_view(false, None);
-        let announced: Vec<String> = entries(
-            "svolder",
-            "homeassistant",
-            commands,
-            Some(&view),
-            Some(&speakers),
-        )
-        .into_iter()
-        .map(|e| e.topic)
-        .collect();
+        let eq = EqView {
+            crossfeed: Some(xf_view(true, "meier", None)),
+            speakers: Some(sp_view(false, None)),
+            loudness: Some(ld_view(true, 35.0)),
+            ..Default::default()
+        };
+        let announced: Vec<String> = entries_of("svolder", "homeassistant", commands, &eq)
+            .into_iter()
+            .map(|e| e.topic)
+            .collect();
         assert_eq!(topics_of("homeassistant", commands), announced);
     }
     assert!(topics_of("", true).is_empty());
@@ -412,4 +414,304 @@ fn an_option_that_differs_only_in_case_is_matched_exactly_first() {
         speakers::parse_set(&view, "ROOM · no room · hrtf"),
         Some("a".to_string())
     );
+}
+
+fn ld_view(on: bool, strength_pct: f64) -> LoudnessView {
+    LoudnessView {
+        on,
+        strength_pct,
+        ..Default::default()
+    }
+}
+
+fn eq_with_loudness(view: Option<LoudnessView>) -> EqView {
+    EqView {
+        loudness: view,
+        ..Default::default()
+    }
+}
+
+/// The loudness entities (the last two of `all`) each have their own stable `unique_id` and sit on
+/// the same device as the EQ switch (the first).
+fn assert_loudness_identity(all: &[DiscoveryEntry]) {
+    assert_eq!(
+        all[2].payload["unique_id"],
+        "svolder_computer_computer_loudness"
+    );
+    assert_eq!(
+        all[3].payload["unique_id"],
+        "svolder_computer_computer_loudness_strength"
+    );
+    let ids: Vec<_> = all.iter().map(|e| &e.payload["unique_id"]).collect();
+    for (i, id) in ids.iter().enumerate() {
+        assert!(!ids[..i].contains(id), "unique_id {id} is used twice");
+    }
+    for e in &all[2..] {
+        assert_eq!(e.payload["device"], all[0].payload["device"]);
+    }
+}
+
+#[test]
+fn the_loudness_entities_are_a_switch_and_a_number_with_the_views_ranges() {
+    let mut view = ld_view(true, 35.0);
+    view.ranges.strength_pct = svolder_host::eq::crossfeed::Range {
+        min: 0.0,
+        max: 100.0,
+        step: 5.0,
+    };
+    let eq = eq_with_loudness(Some(view));
+    let all = entries_of("svolder", "homeassistant", true, &eq);
+    assert_eq!(all.len(), 6);
+    assert_eq!(
+        all[2].topic,
+        "homeassistant/switch/svolder_computer/computer_loudness/config"
+    );
+    assert_eq!(all[2].payload["name"], "Loudness");
+    assert_eq!(
+        all[2].payload["command_topic"],
+        "svolder/computer/computer_loudness/set"
+    );
+    assert_eq!(
+        all[2].payload["state_topic"],
+        "svolder/computer/computer_loudness/state"
+    );
+    assert_eq!(
+        all[3].topic,
+        "homeassistant/number/svolder_computer/computer_loudness_strength/config"
+    );
+    assert_eq!(all[3].payload["name"], "Loudness strength");
+    assert_eq!(
+        all[3].payload["command_topic"],
+        "svolder/computer/computer_loudness_strength/set"
+    );
+    assert_eq!(all[3].payload["min"], 0);
+    assert_eq!(all[3].payload["max"], 100);
+    assert_eq!(all[3].payload["step"], 5);
+    assert_eq!(all[3].payload["unit_of_measurement"], "%");
+    assert_loudness_identity(&all);
+    // The ranges are the view's: a view with other ones moves the bounds.
+    let mut other = ld_view(true, 35.0);
+    other.ranges.strength_pct = svolder_host::eq::crossfeed::Range {
+        min: 10.0,
+        max: 80.0,
+        step: 2.5,
+    };
+    let all = entries_of(
+        "svolder",
+        "homeassistant",
+        true,
+        &eq_with_loudness(Some(other)),
+    );
+    assert_eq!(all[3].payload["min"], 10);
+    assert_eq!(all[3].payload["max"], 80);
+    assert_eq!(all[3].payload["step"], 2.5);
+}
+
+#[test]
+fn without_commands_the_loudness_is_a_binary_sensor_and_a_sensor() {
+    let eq = eq_with_loudness(Some(ld_view(false, 50.0)));
+    let all = entries_of("svolder", "homeassistant", false, &eq);
+    assert_eq!(
+        all[2].topic,
+        "homeassistant/binary_sensor/svolder_computer/computer_loudness/config"
+    );
+    assert_eq!(
+        all[3].topic,
+        "homeassistant/sensor/svolder_computer/computer_loudness_strength/config"
+    );
+    for e in &all[2..4] {
+        assert!(e.payload.get("command_topic").is_none());
+        assert!(e.payload.get("min").is_none());
+    }
+    assert_loudness_identity(&all);
+}
+
+#[test]
+fn a_view_without_loudness_announces_none_and_an_empty_prefix_nothing() {
+    assert_eq!(
+        entries_of("svolder", "homeassistant", true, &eq_with_loudness(None)).len(),
+        4
+    );
+    assert!(
+        entries_of(
+            "svolder",
+            "",
+            true,
+            &eq_with_loudness(Some(ld_view(true, 35.0)))
+        )
+        .is_empty()
+    );
+    // The sweep still knows the topics, whatever the view holds.
+    let topics = topics_of("homeassistant", true);
+    assert!(topics.contains(
+        &"homeassistant/number/svolder_computer/computer_loudness_strength/config".to_string()
+    ));
+}
+
+#[test]
+fn the_loudness_states_follow_the_view_and_the_strength_parses() {
+    assert_eq!(
+        loudness::state(&ld_view(true, 35.0)),
+        ("ON", "35".to_string())
+    );
+    assert_eq!(
+        loudness::state(&ld_view(false, 52.5)),
+        ("OFF", "52.5".to_string())
+    );
+    assert_eq!(loudness::parse_strength(" 40 "), Some(40.0));
+    assert_eq!(loudness::parse_strength("37.5"), Some(37.5));
+    assert_eq!(loudness::parse_strength("loud"), None);
+    assert_eq!(loudness::parse_strength("NaN"), None);
+    assert_eq!(loudness::parse_strength("inf"), None);
+    assert_eq!(loudness::parse_strength(""), None);
+}
+
+fn path_entries(commands: bool) -> Vec<DiscoveryEntry> {
+    let all = entries_of("svolder", "homeassistant", commands, &EqView::default());
+    all[all.len() - 2..].to_vec()
+}
+
+#[test]
+fn the_path_sensor_and_the_config_problem_sensor_are_read_only_discovery_entries() {
+    for commands in [true, false] {
+        let both = path_entries(commands);
+        assert_eq!(
+            both[0].topic,
+            "homeassistant/sensor/svolder_computer/computer_path/config"
+        );
+        assert_eq!(
+            both[1].topic,
+            "homeassistant/binary_sensor/svolder_computer/computer_config/config"
+        );
+        for entry in &both {
+            assert!(entry.payload.get("command_topic").is_none());
+            assert_eq!(entry.payload["device"]["name"], "This computer");
+            assert_eq!(entry.payload["availability_mode"], "all");
+        }
+        assert_eq!(both[0].payload["name"], "Path");
+        assert_eq!(
+            both[0].payload["unique_id"],
+            "svolder_computer_computer_path"
+        );
+        assert_eq!(
+            both[0].payload["state_topic"],
+            "svolder/computer/computer_path/state"
+        );
+        assert_eq!(
+            both[0].payload["json_attributes_topic"],
+            "svolder/computer/computer_path/attributes"
+        );
+        assert_eq!(both[0].payload["device_class"], "enum");
+        assert_eq!(
+            both[0].payload["options"],
+            serde_json::json!([
+                "untouched",
+                "changed",
+                "not_this_dac",
+                "other_input",
+                "unknown",
+                "not_read"
+            ])
+        );
+        assert_eq!(both[1].payload["name"], "PipeWire config");
+        assert_eq!(both[1].payload["device_class"], "problem");
+        assert_eq!(both[1].payload["payload_on"], "ON");
+        assert_eq!(both[1].payload["payload_off"], "OFF");
+        assert_eq!(
+            both[1].payload["state_topic"],
+            "svolder/computer/computer_config/state"
+        );
+        assert_eq!(
+            both[1].payload["json_attributes_topic"],
+            "svolder/computer/computer_config/attributes"
+        );
+    }
+}
+
+#[test]
+fn the_path_entities_are_cleared_with_the_computer_and_an_empty_prefix_has_none() {
+    for commands in [true, false] {
+        let topics = topics_of("homeassistant", commands);
+        for entry in path_entries(commands) {
+            assert!(topics.contains(&entry.topic), "{}", entry.topic);
+        }
+    }
+    assert!(path::topics_of("").is_empty());
+    assert!(path::entries("svolder", "").is_empty());
+}
+
+#[test]
+fn the_path_state_carries_its_words_sentence_and_dac() {
+    let said = path::path_state(
+        path::CHANGED,
+        &["dither".to_string()],
+        Some("dither; the DAC lowers it"),
+        Some("Bifrost 3"),
+    );
+    assert_eq!(said.state, "changed");
+    let attributes: serde_json::Value = serde_json::from_str(&said.attributes).unwrap();
+    assert_eq!(
+        attributes,
+        serde_json::json!({
+            "words": ["dither"],
+            "sentence": "dither; the DAC lowers it",
+            "dac": "Bifrost 3",
+        })
+    );
+    let other = path::path_state(path::NOT_THIS_DAC, &["→ DELL".to_string()], None, None);
+    let attributes: serde_json::Value = serde_json::from_str(&other.attributes).unwrap();
+    assert!(attributes["sentence"].is_null() && attributes["dac"].is_null());
+}
+
+#[test]
+fn the_config_state_is_on_for_a_failing_line_off_for_a_clean_one_and_none_unread() {
+    let lines = [
+        path::ConfigLine {
+            key: "rates",
+            outcome: "pass",
+            words: "all allowed",
+        },
+        path::ConfigLine {
+            key: "filter",
+            outcome: "fail",
+            words: "a filter runs",
+        },
+    ];
+    let on = path::config_state(
+        Some(true),
+        "changes",
+        "summary",
+        "Bifrost 3",
+        "limit",
+        &lines,
+    );
+    assert_eq!(on.state, Some("ON"));
+    let attributes: serde_json::Value = serde_json::from_str(&on.attributes).unwrap();
+    assert_eq!(attributes["outcome"], "changes");
+    assert_eq!(attributes["summary"], "summary");
+    assert_eq!(attributes["limit"], "limit");
+    assert_eq!(attributes["sink"], "Bifrost 3");
+    assert_eq!(attributes["lines"][1]["key"], "filter");
+    assert_eq!(attributes["lines"][1]["outcome"], "fail");
+    assert_eq!(attributes["lines"][0]["words"], "all allowed");
+    assert_eq!(
+        path::config_state(Some(false), "untouched", "ok", "x", "l", &lines).state,
+        Some("OFF")
+    );
+    assert_eq!(
+        path::config_state(None, "unread", "u", "x", "l", &lines).state,
+        None
+    );
+    let none = path::config_unjudged();
+    assert_eq!((none.state, none.attributes.as_str()), (None, "{}"));
+}
+
+#[test]
+fn the_config_payload_is_none_for_an_unjudged_state_never_empty() {
+    let on = path::config_state(Some(true), "k", "x", "y", "l", &[]);
+    let off = path::config_state(Some(false), "k", "x", "y", "l", &[]);
+    assert_eq!((on.payload(), off.payload()), ("ON", "OFF"));
+    let unread = path::config_state(None, "k", "x", "y", "l", &[]);
+    assert_eq!(unread.payload(), "None");
+    assert_eq!(path::config_unjudged().payload(), "None");
 }

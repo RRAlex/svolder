@@ -770,6 +770,14 @@ and MCP asks for `confirm`; the CLI's `host eq apply` asks the same way. The poi
 the live editing are in ["The computer's side"](tui.md#the-computers-side-c) of the TUI reference and
 ["The switch to this computer"](web-ui.md#the-page) of the web page.
 
+A preset loaded on the computer while music plays through the computer EQ never restarts its
+chain, which would take the sink from under the player (some players pause then): it plays at
+once. One that needs more headroom than the curve the chain started with plays at the earlier,
+lower level, and the computer side says `level held until the music pauses`; about 30 s after the
+music stops, the chain starts again with the preset at its own level. With nothing playing a preset
+plays at its own level at once. Why the level is held:
+[`host-control-preamp.md`](../design/host-control-preamp.md#a-softer-preset-while-a-stream-plays).
+
 Loading a preset, from either front end, sends the same sequence: the gains that go down first, then
 every frequency and Q change, then the gains that go up, and the mode last when it becomes EQ — so
 the curve is complete before the device applies it — or first when it becomes Flat or Loudness, with
@@ -815,6 +823,82 @@ modes, including the Loudness note — a contour that tracks the DAC's own volum
 full volume and not drawn until it is measured on a real device — under
 ["What the graph draws"](tui.md#what-the-graph-draws); and typing a band's exact frequency, gain and
 Q under ["The edit line (`Enter`)"](tui.md#the-edit-line-enter).
+
+## Loudness
+
+Loudness is a setting of the computer's sound, beside the computer EQ. Below full volume the ear
+hears the bass and the top of the band less than the middle; loudness gives that back by taking the
+middle and the top down as the computer's volume falls, so the bass stays where the volume left it.
+It only cuts: it never raises any frequency and never moves the EQ's preamp, so turning it on can
+make the sound quieter and never louder or clipped, apart from a rare PipeWire behaviour after a
+live update (see [known issues](../known-issues.md)). It follows the computer's own volume (the
+Volume row of the computer's side: the sink's volume, and the chain's while the chain is in the
+path), not the volume of a device and not an application's own slider. It works from the TUI (the
+computer's Tone pane and the tone screen), the web page's Sound… popup,
+[`svolder host loudness`](cli.md#host-loudness), the MCP server's `set_host_loudness` and Home
+Assistant; all of them change the same one setting, kept by the daemon (or by a TUI with no daemon),
+so the last change wins. They offer it only while the daemon serves loudness; an older daemon has
+none. The maths is in [the design page](../design/loudness.md).
+
+The **computer's** loudness and a **device's own** Loudness (a mode of the device's tone control)
+are different things. The screens keep them apart by place, the computer's side and the device's
+side, and while both are on they show a dim "the DAC's loudness is on too" hint; nothing blocks
+either.
+
+- **Strength** is how much of the loudness curve plays, 0 to 100 % in steps of 5 (default 50 %).
+- **Reference** is the volume at which loudness is flat, 1 to 100 % of the volume scale (default 100
+  %: flat only at full volume). Lower the volume under it and the stage deepens, down to 40 dB below
+  it. At the reference and above it plays nothing, and a volume boosted past 100 % is flat too. "Use
+  the current volume" (`r` in the TUI, a button on the web page, `reference now` on the command
+  line, `reference: "now"` for MCP) sets the reference to the volume as it is now, which is what to
+  press after setting the volume you listen at most.
+- **The readout** says what the stage plays at the volume it read: the depth below the reference in
+  dB, the bass (how far it stands above the middle), the mids (how far the middle sits under the
+  bass) and the treble (how far the top stands above the middle). At 35 % with the reference at 100
+  % and strength 50 %, that is a depth of 13.7 dB, bass +7.3, mids −7.3, treble +2.1. These are the
+  shelf gains of the stage, not the response at three frequencies. The mids fall faster than the
+  volume knob does (1.27 times as fast at 50 %); that is the volume cut taken in the middle.
+
+### On, off, and following the volume
+
+Loudness has its own switch, apart from the EQ's and crossfeed's, and it plays with each on or off.
+A step of the computer's volume made through svolder is followed on the next 50 ms tick, one made
+elsewhere (a desktop key) within a second; the stage glides about 10 dB of depth a second, so a
+jump in volume is not a jump in tone. Muted, or with the volume not read, it holds where it is, and
+the view says it is not following.
+
+Turned on with the EQ off, the chain plays flat for loudness alone. Turning the EQ off with loudness
+on keeps the chain, and so does turning crossfeed or the virtual speakers off; with the EQ,
+loudness, crossfeed and the virtual speakers all off no chain runs. Loudness plays at every rate,
+705.6 and 768 kHz included (crossfeed and the speakers stop at 384 kHz).
+
+Unlike crossfeed, loudness **stays on** across restarts (except from settings kept before any chain
+was applied, which come back off): it can only make the sound quieter, so nothing needs turning off.
+A graceful stop of the daemon (or a TUI with no daemon quitting) sends the stage flat and keeps a
+chain that ran for loudness alone, playing flat until the next daemon or TUI starts and follows the
+volume again. A crash leaves the last stage until then (quieter, never louder). Where loudness
+cannot follow the volume (a chain from an older svolder, a chain held for a sample rate its curve
+cannot play at, or a PipeWire that does not take live updates) it says it is unavailable and why
+instead of rebuilding the chain on every step. A change made meanwhile, from any surface, is still
+accepted and saved, and takes effect when loudness can follow again. A chain built before the
+loudness stage is rebuilt once when loudness is turned on.
+
+### The saved state
+
+The computer EQ's state file (`~/.local/state/svolder/host-eq.toml`) keeps loudness as a table
+beside the crossfeed's:
+
+```toml
+[loudness]
+on = true
+strength_pct = 50.0
+reference_pct = 100.0
+```
+
+`on` is saved and survives a restart; settings kept in `host-eq-settings.toml` (no chain was ever
+applied) come back with loudness off. The settings are kept across applies, and the chain's own
+configuration always holds the stage flat: the volume-dependent stage is only ever sent live.
+Settings changed before any chain was applied wait in `host-eq-settings.toml`, as crossfeed's do.
 
 ## Crossfeed
 
@@ -888,16 +972,18 @@ Turning the EQ off while crossfeed plays, or on while it is flat, changes nothin
 chain is rebuilt.
 
 A crossfeed adds sound, so its loudest point is looked at: the preamp is the EQ's less the
-crossfeed's worst gain at any frequency and any usual rate (44.1 to 384 kHz), rounded up to 0.1 dB,
+crossfeed's worst gain at any frequency and any usual rate (44.1 to 768 kHz), rounded up to 0.1 dB,
 and follows every change of model, level, crossover or delay. An update lowers the preamp before the
-crossfeed grows and raises it after the crossfeed shrinks, so nothing plays above 0 dB at any
-frequency, even between two values, and turning crossfeed on never asks. Meier with a delay plays
+crossfeed grows and raises it after the crossfeed shrinks, so no whole update plays above 0 dB at
+any frequency (a half-applied PipeWire update can, rarely; see [known issues](../known-issues.md)),
+and turning crossfeed on never asks. Meier with a delay plays
 about 1 to 2 dB quieter for the rate rule (up to about 3.5 dB at extremes), so a change of the
-output's rate (44.1 to 384 kHz) never takes it over 0 dB; the other models are unchanged. The rule
+output's rate (44.1 to 768 kHz) never takes it over 0 dB; the other models are unchanged. The rule
 is per frequency, as the EQ's: a peak in the samples of a loud, wide mix can still be a few tenths
-of a dB higher. With crossfeed on and the EQ off, the level stays at the lowest one the loaded chain
-allows until the chain restarts (a chain whose loaded curve took 6 dB off keeps those 6 dB while it
-plays flat).
+of a dB higher. Crossfeed and the virtual speakers run up to 384 kHz: an output above that turns
+them off with a note, and turning them on there is refused. With crossfeed on and the EQ off, the
+level stays at the lowest one the loaded chain allows until the chain restarts (a chain whose
+loaded curve took 6 dB off keeps those 6 dB while it plays flat).
 
 ### It turns itself off
 
@@ -906,6 +992,7 @@ remember turning on:
 
 - the daemon (or a TUI with no daemon) starts and finds it on;
 - the output the computer plays into changes (read once a second from the sound server);
+- the output's rate goes above 384 kHz (reason `output-changed`);
 - the filter chain restarts;
 - the daemon stops gracefully;
 - a TUI with no daemon quits;
@@ -913,25 +1000,30 @@ remember turning on:
   off with the same note as a stop (`svolder stopped`), though the daemon keeps running.
 
 Each reset leaves a note and a reason in the view (`restart`, `output-changed`, `chain-restarted`,
-`stopped`): "crossfeed turned off: it is off after a restart", and the TUI shows it as a toast
-once. The settings (model, numbers) are kept, only the switch goes off. A chain that runs for
-crossfeed alone is removed by a reset; a chain with an EQ goes on playing the EQ. If the
-sound server refuses the change the reset is tried again once a second and the note says so. A
-change of the sink's sample rate is no reset: the crossfeed is worked out again for the new rate
-(or turned off, with a note, when it cannot play at it). When live updates are unavailable, a
-change rebuilds the chain with the crossfeed in its configuration, and the next start of the daemon
-takes it out again. A chain left by an older svolder cannot take crossfeed and is rebuilt once
-when it is first turned on; a held curve the chain cannot carry says why in the view's
+`stopped`): "crossfeed turned off: it is off after a restart", and the TUI shows it as a toast once.
+The settings (model, numbers) are kept, only the switch goes off. A chain that runs for crossfeed
+alone is removed by a reset (one that also runs for loudness stays, flat); a chain with an EQ goes
+on playing the EQ. If the sound server refuses the change the reset is tried again once a second and
+the note says so. A change of the sink's sample rate is no reset: the crossfeed is worked out again
+for the new rate (or turned off, with a note, when it cannot play at it). When live updates are
+unavailable, a change rebuilds the chain with the crossfeed in its configuration, and the next start
+of the daemon takes it out again. A chain left by an older svolder cannot take crossfeed and is
+rebuilt once when it is first turned on; a held curve the chain cannot carry says why in the view's
 `unavailable` instead, and the controls dim.
 
 ### The saved state
 
 The state file of the computer EQ (`~/.local/state/svolder/host-eq.toml`) keeps the model, preset,
-level, crossover and delay under `crossfeed`, and two flags: `crossfeed_on` (the stage was last
-on) and `flat` (the chain was applied only for crossfeed). After a crash the next start reads them
-and takes the stage out of the chain, or removes the chain, so nothing stays on. Settings you
-change while the EQ was never applied and no state file exists exist only in memory until a chain
-is applied.
+level, crossover and delay under `crossfeed`, two flags: `crossfeed_on` (the stage was last on)
+and `flat` (the chain was applied only for crossfeed), and `crossfeed_loaded`, the stage the
+running chain's own configuration holds, if any (it holds one only when a live update failed).
+After a crash or a restart the next start reads them and takes the stage out of the chain, or
+removes the chain, so nothing stays on; until then the level pays for that stage. Settings you
+change while the EQ was never applied and no state file exists (the crossfeed's settings, the
+chosen speakers set and the loudness's settings) are kept in `~/.local/state/svolder/host-eq-settings.toml`
+until a chain is applied, and read back at the next start. That file holds only those settings: no
+curve, target or route, and starting from it applies nothing and turns nothing on (loudness comes
+back off). The first state file carries the same settings and takes the file's place.
 
 ## Virtual speakers
 

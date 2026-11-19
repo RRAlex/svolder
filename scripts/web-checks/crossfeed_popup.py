@@ -89,7 +89,10 @@ TABS = "[...document.querySelectorAll('#popup-sound .fp-tab, #popup-sound .fp-pi
 GEOMETRY = """(() => { const w = innerWidth;
   const inside = (q) => [...document.querySelectorAll(q)].every((e) => { const r = e.getBoundingClientRect(); return r.left >= 0 && r.right <= w + 0.5; });
   const steps = [...document.querySelectorAll('#popup-sound .fpx-step')].map((e) => { const r = e.getBoundingClientRect(); return Math.min(r.width, r.height); });
-  return { bar: inside('#popup-sound .fp-tab, #popup-sound .fp-pill'), body: inside('#popup-sound .fp-page *'),
+  const strip = document.querySelector('#popup-sound .fp-tabs'), on = document.querySelector('#popup-sound .fp-tab.on');
+  const shown = !strip || !on || (on.getBoundingClientRect().left >= strip.getBoundingClientRect().left - 1
+    && on.getBoundingClientRect().right <= strip.getBoundingClientRect().right + 1);
+  return { bar: inside('#popup-sound .fp-tabs, #popup-sound .fp-pill') && shown, body: inside('#popup-sound .fp-page *'),
     steps, button: document.getElementById('fx-button').getBoundingClientRect().toJSON(), scroll: scrollY }; })()"""
 
 
@@ -135,7 +138,8 @@ def case(b, theme):
     opened = by_the_menu(b, 'sound')
     pills = b.page(f"{TABS}.map((e) => e.textContent.trim())")
     check(f'the_menu_row_opens_sound_and_the_tabs_switch {tag}: Sound… opens on the EQ library tab',
-          opened is True and pills == ['EQ library', 'Crossfeed', 'Virtual speakers', 'AutoEq', 'Upload a file', 'Saved presets'], pills)
+          opened is True and pills == ['EQ library', 'Loudness', 'Crossfeed', 'Virtual speakers', 'AutoEq', 'Upload a file',
+                    'Saved presets'], pills)
     geometry(b, tag, 'wide, EQ library', behind)
     shot(b, theme, 'wide-eq-library')
     tab(b, 'xf')
@@ -185,7 +189,7 @@ def case(b, theme):
     time.sleep(0.4)
     fwd = [page_of(b), b.page('document.activeElement.id')]
     check(f'the_keyboard_and_escape {tag}: the arrows move between the tabs',
-          back == ['autoeq', 'popup-sound-tab-eq'] and fwd == ['crossfeed', 'popup-sound-tab-xf'], [back, fwd])
+          back == ['loudness', 'popup-sound-tab-ld'] and fwd == ['crossfeed', 'popup-sound-tab-xf'], [back, fwd])
     seen = []
     for _ in range(14):
         b.press('Tab')
@@ -285,7 +289,7 @@ def no_way_in(b, theme):
     b.page("(__core.router.open('sound', 'crossfeed'), 1)")
     time.sleep(0.5)
     check(f'{tag}: no Sound row, and an open by the router draws nothing',
-          rows == ['menu-popup-devices', 'menu-popup-help']
+          rows == ['menu-popup-devices', 'menu-popup-setup', 'menu-popup-help']
           and b.page("!document.getElementById('popup-sound')") is True, rows)
 
 

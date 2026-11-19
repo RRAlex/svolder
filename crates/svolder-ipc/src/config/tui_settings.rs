@@ -288,6 +288,21 @@ pub static TOOLTIPS: TuiSetting = TuiSetting {
     kind: switch!(tooltips),
 };
 
+/// `scroll_long_lines`: whether a line too long for its row scrolls past it.
+pub static SCROLL_LONG_LINES: TuiSetting = TuiSetting {
+    key: "scroll_long_lines",
+    label: "Scroll long lines",
+    help: text!(
+        "Whether the Now playing row and the Path row, where it cannot wrap onto spare rows, \
+         scroll slowly past their room when too long. Off cuts them with … and leaves them \
+         still."
+    ),
+    template: text!(
+        "Whether the Now playing and Path rows scroll slowly when too long for their row."
+    ),
+    kind: switch!(scroll_long_lines),
+};
+
 /// `intro`: whether the wordmark intro plays while the device opens.
 pub static INTRO: TuiSetting = TuiSetting {
     key: "intro",
@@ -538,7 +553,7 @@ pub static LINK_SPAN: TuiSetting = TuiSetting {
 
 /// Every plain key of the `[tui]` table, in the order the template lists them and the writer
 /// appends them.
-pub static TUI_SETTINGS: [&TuiSetting; 20] = [
+pub static TUI_SETTINGS: [&TuiSetting; 21] = [
     &PALETTE,
     &ACCENT,
     &COLORS,
@@ -546,6 +561,7 @@ pub static TUI_SETTINGS: [&TuiSetting; 20] = [
     &THEME_BACKGROUND,
     &MOUSE,
     &TOOLTIPS,
+    &SCROLL_LONG_LINES,
     &INTRO,
     &INTRO_EFFECT,
     &INTRO_SOUND,

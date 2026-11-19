@@ -18,6 +18,10 @@
 //! not known to have landed. [`Params::settle`] does that without a new value to send. Whoever
 //! polls the chain's rate still forgets the node and reads it again: that read is also the rate.
 //!
+//! The dump that gives the node also gives the output sink ([`Params::output`]) and the
+//! computer's volume ([`Params::level`]): no read is made for them, so they are what the last
+//! look saw, and `None` before any look.
+//!
 //! A chain that restarted under the same id (PipeWire gives a freed id to a later object) is not
 //! refused, and only a look tells it from the old one, by its `object.serial`: a send names the
 //! node its caller looked at ([`NodeKey`]), the node is read again before every line, and a node
@@ -43,7 +47,7 @@ use super::live::{
     LiveNode, NodeKey, OutputSink, key_of, output_sink, preamp_params, props_of, set_param_line,
 };
 use super::paths::{is_executable, on_path};
-use crate::route::PwDump;
+use crate::route::{PwDump, SinkLevel, computer_level};
 
 /// The environment variable naming the `pw-cli` to run; `pw-cli` on `PATH` when unset or empty.
 pub const PW_CLI_ENV: &str = "SVOLDER_PW_CLI";
@@ -89,6 +93,13 @@ pub trait Params: Send + Sync {
     /// the chain is the default), as the last look at the graph saw it: it is read with the node,
     /// from the same dump, so asking costs nothing. `None` when no look saw one.
     fn output(&self) -> Option<OutputSink> {
+        None
+    }
+
+    /// The computer's volume and mute (the sink's, times the chain node's while the chain is in
+    /// the path), as the last look at the graph read them: read with the node, from the same
+    /// dump, so asking costs nothing and no look is made for it. `None` when no look read one.
+    fn level(&self) -> Option<SinkLevel> {
         None
     }
 
@@ -188,6 +199,11 @@ pub(super) trait Link: Send + Sync {
 
     /// The output the graph showed the last time the node was read.
     fn output(&self) -> Option<OutputSink> {
+        None
+    }
+
+    /// The computer's volume the graph showed the last time the node was read.
+    fn level(&self) -> Option<SinkLevel> {
         None
     }
 
@@ -362,6 +378,10 @@ impl<L: Link> Params for Session<L> {
         self.link.output()
     }
 
+    fn level(&self) -> Option<SinkLevel> {
+        self.link.level()
+    }
+
     async fn send(&mut self, node: NodeKey, params: &[(String, f64)]) -> bool {
         let sent = self.deliver(node, params).await;
         if !sent {
@@ -409,6 +429,8 @@ struct PwLink {
     rate: Option<u32>,
     /// The output the last read of the graph showed.
     output: Option<OutputSink>,
+    /// The computer's volume the last read of the graph showed.
+    level: Option<SinkLevel>,
 }
 
 /// The real [`Params`]: one held-open `pw-cli`, and `pw-dump` to find the node.
@@ -429,6 +451,7 @@ impl PwCliSession {
                 started: None,
                 rate: None,
                 output: None,
+                level: None,
             }),
         }
     }
@@ -602,6 +625,7 @@ impl Link for PwLink {
     async fn read_node(&mut self) -> Option<LiveNode> {
         let dump = self.dump.read().await?;
         self.output = output_sink(&dump);
+        self.level = computer_level(&dump);
         let mut node = props_of(&dump)?;
         match node.rate_hz {
             Some(rate) => self.rate = Some(rate),
@@ -621,6 +645,10 @@ impl Link for PwLink {
     fn output(&self) -> Option<OutputSink> {
         self.output.clone()
     }
+
+    fn level(&self) -> Option<SinkLevel> {
+        self.level
+    }
 }
 
 #[async_trait]
@@ -635,6 +663,10 @@ impl Params for PwCliSession {
 
     fn output(&self) -> Option<OutputSink> {
         self.session.output()
+    }
+
+    fn level(&self) -> Option<SinkLevel> {
+        self.session.level()
     }
 
     async fn send(&mut self, node: NodeKey, params: &[(String, f64)]) -> bool {

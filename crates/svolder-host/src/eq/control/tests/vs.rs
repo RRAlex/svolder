@@ -61,7 +61,7 @@ fn vnode(id: u32, rate_hz: u32) -> LiveNode {
 }
 
 /// Four diracs: a set a convolver could play.
-fn put_set(store: &Store, id: &str, label: &str) {
+pub(super) fn put_set(store: &Store, id: &str, label: &str) {
     put_set_at(store, id, label, 10);
 }
 
@@ -574,6 +574,32 @@ async fn a_failed_speakers_start_leaves_crossfeed_playing() {
     assert!(!view.speakers.unwrap().on);
 }
 
+/// A speakers start whose live line is refused and whose fallback apply fails too is taken back,
+/// but the session repairs a failed line with the next one: the stage goes again, off, within
+/// the next look, so the repair cannot leave the speakers playing under a preamp that rises.
+#[tokio::test]
+async fn a_failed_speakers_start_sends_the_stage_off_again() {
+    let mut rig = playing().await;
+    rig.control.speakers(spk_off()).await.unwrap();
+    looks(&mut rig.control, 1).await;
+    rig.params.takes(false);
+    rig.hook
+        .set(|call| matches!(call, ChainCall::Apply(_)).then(no));
+    let sent_before = rig.params.sent().len();
+    assert!(rig.control.speakers(spk_on()).await.is_err());
+    assert_eq!(rig.params.sent().len(), sent_before, "the line was refused");
+    rig.hook.set(|_| None);
+    rig.params.takes(true);
+    let sends = rig.params.sent().len();
+    looks(&mut rig.control, 3).await;
+    let sent = &rig.params.sent()[sends..];
+    assert!(
+        sent.iter().any(|send| gain2(send) == Some(0.0)),
+        "the stage goes again, off: {sent:?}"
+    );
+    assert!(!speakers(&rig.control).on);
+}
+
 // ----- the resets -----
 
 /// A state file the way a session that crashed with the speakers on left it.
@@ -595,6 +621,8 @@ fn crashed_with_speakers_on(dir: &Dir, flat: bool) {
         speakers: Some("set-a".into()),
         speakers_on: true,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -787,6 +815,39 @@ async fn a_new_rate_sends_the_stage_again_and_is_no_reset() {
     let sent = rig.params.sent();
     assert_eq!(gain2(sent.last().expect("sent")), Some(1.0));
     assert!(sent.len() > sends);
+}
+
+/// The stages run up to 384 kHz: a sink that moves above it turns the speakers off with a note
+/// that says why, and turning them on there is refused in words.
+#[tokio::test]
+async fn above_384_khz_the_speakers_turn_off_and_are_refused() {
+    let mut rig = playing().await;
+    rig.params.set_node(Some(vnode(1, 705_600)));
+    looks(&mut rig.control, 2).await;
+    let view = speakers(&rig.control);
+    assert!(!view.on, "off above 384 kHz");
+    assert!(
+        view.note
+            .as_deref()
+            .is_some_and(|note| note.contains("384 kHz")),
+        "{:?}",
+        view.note
+    );
+    assert_eq!(gain2(rig.params.sent().last().expect("sent")), Some(0.0));
+    let refused = rig.control.speakers(spk_on()).await.unwrap_err();
+    assert!(refused.what.contains("384 kHz"), "{refused:?}");
+}
+
+/// With no chain running the rate is the sink's own: the speakers turned on there above 384 kHz
+/// are refused, and no chain is applied for them.
+#[tokio::test]
+async fn the_speakers_on_with_no_chain_above_384_khz_are_refused() {
+    let mut rig = rig_with_set_chosen().await;
+    rig.params.set_node(Some(vnode(1, 705_600)));
+    let refused = rig.control.speakers(spk_on()).await.unwrap_err();
+    assert!(refused.what.contains("384 kHz"), "{refused:?}");
+    assert!(applies(&rig.chain).is_empty(), "no chain for them");
+    assert!(!speakers(&rig.control).on);
 }
 
 #[tokio::test]
@@ -1385,4 +1446,29 @@ async fn speakers_alone_stay_on_at_a_rate_their_kept_points_cannot_play_at() {
         "the saved preamp is a curve's, not the floor: {}",
         state.preamp_db
     );
+}
+
+/// The speakers turned off on a chain that runs flat for them while loudness is on: the chain
+/// stays (loudness keeps it), the speakers go off live.
+#[tokio::test]
+async fn speakers_off_with_loudness_on_keeps_the_chain() {
+    let mut rig = rig();
+    rig.params.with_loudness_ports();
+    rig.control.speakers(spk_set("set-a")).await.unwrap();
+    rig.control.speakers(spk_on()).await.unwrap();
+    assert!(rig.control.runs && rig.control.flat);
+    rig.control
+        .loudness(LoudnessEdit {
+            on: Some(true),
+            done: true,
+            ..LoudnessEdit::default()
+        })
+        .await
+        .unwrap();
+    rig.control.speakers(spk_off()).await.unwrap();
+    assert_eq!(removes(&rig.chain), 0, "loudness keeps the chain");
+    assert!(rig.control.runs && rig.control.flat);
+    assert!(!rig.control.view().speakers.unwrap().on);
+    looks(&mut rig.control, 40).await;
+    assert_eq!(removes(&rig.chain), 0, "not a pass-through that idles away");
 }

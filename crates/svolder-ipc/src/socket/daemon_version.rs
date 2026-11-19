@@ -9,7 +9,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{Client, McpStatus, MqttStatus, Reason, Request, Response, TokenInfo, WebStatus};
+use crate::{
+    Activity, Client, McpStatus, MqttStatus, Reason, Request, Response, TokenInfo, WebStatus,
+};
 
 /// How a daemon's version stands against this svolder's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +128,7 @@ pub fn is_version(text: &str) -> bool {
 pub struct DaemonInfo {
     /// The daemon's version.
     pub version: String,
-    /// Where its MQTT bridge stands, when it says.
+    /// Where its MQTT client stands, when it says.
     pub mqtt: Option<MqttStatus>,
     /// Where its MCP server stands, when it says.
     pub mcp: Option<McpStatus>,
@@ -146,6 +148,8 @@ pub struct DaemonInfo {
     /// Whether its configuration file is gone (`config_changed` is then true too); false for a
     /// daemon too old to say.
     pub config_missing: bool,
+    /// How many clients its MCP server and web UI have had, when it says.
+    pub activity: Option<Activity>,
 }
 
 impl DaemonInfo {
@@ -254,6 +258,7 @@ pub async fn version_on(client: &mut Client) -> Result<VersionReply, Unanswered>
             features,
             config_changed,
             config_missing,
+            activity,
         }) => Ok(VersionReply {
             info: DaemonInfo {
                 version,
@@ -266,6 +271,7 @@ pub async fn version_on(client: &mut Client) -> Result<VersionReply, Unanswered>
                 features,
                 config_changed,
                 config_missing,
+                activity,
             },
             log,
         }),

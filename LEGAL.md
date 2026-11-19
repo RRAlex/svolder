@@ -53,7 +53,7 @@ as amended by Bill C-244 (diagnosis, maintenance and repair) and Bill C-294 (int
 - **No servers of its own.** svolder talks to the devices over Bluetooth LE on the computer it runs
   on, and to that computer's own audio system when host audio is on. It contacts no server of its
   own, and collects no data. The one exception is yours to make: if you configure the optional MQTT
-  bridge, the daemon publishes your devices' state to the broker you name, and nowhere else.
+  client, the daemon publishes your devices' state to the broker you name, and nowhere else.
   The MCP server and the web UI, when you turn them on, answer on the addresses you name and
   fetch nothing from elsewhere: the page's fonts and scripts are served by svolderd itself.
 - **What the web UI carries.** Besides the crates the binaries are built from, `svolderd` serves

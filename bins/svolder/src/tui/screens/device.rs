@@ -22,7 +22,7 @@ use ratatui::widgets::Paragraph;
 use svolder_proto::FunctionId;
 
 use crate::tui::app::divider::Split;
-use crate::tui::app::{App, Holding, Pane, Screen};
+use crate::tui::app::{App, Holding, Ld, Pane, Screen};
 use crate::tui::keys::Scene;
 use crate::tui::layout_tier::{self, Tier};
 use crate::tui::mouse::{Hit, HitMap};
@@ -34,6 +34,7 @@ use crate::tui::widgets::actions::Action;
 mod art;
 mod controls;
 mod header;
+mod path_line;
 pub(crate) mod split;
 mod status;
 mod tone_pane;
@@ -100,6 +101,17 @@ const CONTROLS_ACTIONS: [Action; 3] = [
     Action {
         code: KeyCode::Char('r'),
         word: "refresh",
+    },
+];
+
+/// The words in the Controls pane's top border where the PipeWire config check is on offer.
+const CONTROLS_ACTIONS_CHECK: [Action; 4] = [
+    CONTROLS_ACTIONS[0],
+    CONTROLS_ACTIONS[1],
+    CONTROLS_ACTIONS[2],
+    Action {
+        code: KeyCode::Char('k'),
+        word: "k check",
     },
 ];
 
@@ -218,6 +230,15 @@ pub fn draw(
     (rows, spectrum)
 }
 
+/// The lines of the Path row's tooltip, each at most `width` cells.
+pub(crate) fn path_tip_lines(
+    path: &svolder_ipc::host::PathLine,
+    chip: Option<&crate::tui::app::Chip>,
+    width: usize,
+) -> Vec<String> {
+    path_line::tip_lines(&path_line::stages_with(path, chip), width)
+}
+
 /// Draw the Controls pane into `area` and push the hits of its rows, the Host group's rows and
 /// the bars and links beside them. Answers with where each control row landed, and where the
 /// Spectrum row did when it is in sight.
@@ -238,7 +259,10 @@ fn draw_controls(
             lines: controls.lines,
             focus: Pane::Controls,
             title_hit: Some(Hit::PaneHeader(Pane::Controls)),
-            actions: &CONTROLS_ACTIONS,
+            actions: match app.setup_offered() {
+                true => &CONTROLS_ACTIONS_CHECK[..],
+                false => &CONTROLS_ACTIONS[..],
+            },
         },
         app,
         theme,
@@ -284,6 +308,31 @@ fn draw_controls(
     for (offset, top) in controls.host.iter().enumerate() {
         let row = pane_row(inner, *top);
         hits.push(row, Hit::Row(Pane::Controls, controls.rows.len() + offset));
+    }
+    // The Path row, every line it wraps to, shows the whole path in a tooltip; a cut row that
+    // is in sight scrolls, which the tick reads off what this frame found.
+    if let Some(path) = controls.path {
+        let area = Rect {
+            x: inner.x,
+            y: inner.y.saturating_add(path.top),
+            width: inner.width,
+            height: path.height,
+        }
+        .intersection(inner);
+        if !area.is_empty() {
+            hits.push(area, Hit::Path);
+            app.drawn.path_travel.set(path.travel);
+            // The chip is a target of its own over the row's: a click opens the config box.
+            if let Some(chip) = path.chip {
+                let chip = Rect {
+                    x: inner.x + u16::try_from(widgets::CURSOR_WIDTH).unwrap_or(0) + chip.x,
+                    y: area.y.saturating_add(chip.line),
+                    width: chip.width,
+                    height: 1,
+                };
+                hits.push(chip.intersection(area), Hit::Config);
+            }
+        }
     }
     let spectrum = controls
         .spectrum
@@ -353,6 +402,24 @@ fn draw_tone(
         rows.push((eq.mode_id(), mode_row));
         for (point, top) in tone.bands.iter().enumerate() {
             hits.push(pane_row(inner, *top), Hit::Point(tone.bands_from + point));
+        }
+        if let Some(ld) = &tone.loudness {
+            let row = pane_row(inner, ld.line);
+            hits.push(row, Hit::Ld(Ld::Strength));
+            for under in 1..=ld.under {
+                hits.push(pane_row(inner, ld.line + under), Hit::Ld(Ld::Strength));
+            }
+            for (at, cells, hit) in &ld.spots {
+                let spot = Rect {
+                    x: row.x.saturating_add(u16::try_from(*at).unwrap_or(u16::MAX)),
+                    width: u16::try_from(*cells).unwrap_or(0),
+                    ..row
+                };
+                match hit {
+                    Hit::LdBar => hits.push_bar(spot.intersection(row), spot, *hit),
+                    _ => hits.push(spot.intersection(row), *hit),
+                }
+            }
         }
         if let Some(xf) = &tone.crossfeed {
             let row = pane_row(inner, xf.line);

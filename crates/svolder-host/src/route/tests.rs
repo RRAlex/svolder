@@ -13,6 +13,12 @@ const HOST_EQ_DEFAULT: &str = include_str!("../../tests/fixtures/pw-dump/host-eq
 const LIVE_CHAIN: &str = include_str!("../../tests/fixtures/pw-dump/live-chain.json");
 const SWITCHED: &str = include_str!("../../tests/fixtures/pw-dump/sink-switched.json");
 const ELSEWHERE: &str = include_str!("../../tests/fixtures/pw-dump/stream-elsewhere.json");
+const LEVEL_MUTED_HARD: &str = include_str!("../../tests/fixtures/pw-dump/level-muted-hard.json");
+const LEVEL_MUTED_SOFT: &str = include_str!("../../tests/fixtures/pw-dump/level-muted-soft.json");
+const LEVEL_UNEQUAL: &str = include_str!("../../tests/fixtures/pw-dump/level-unequal.json");
+const LEVEL_NO_VOLUMES: &str = include_str!("../../tests/fixtures/pw-dump/level-no-volumes.json");
+const LEVEL_DEFAULT_MUTED: &str =
+    include_str!("../../tests/fixtures/pw-dump/level-default-muted.json");
 const SCHIIT: &str = include_str!("../../tests/fixtures/pw-dump/schiit-sink.json");
 
 /// The `pw-cat` client's pid in `one-stream.json`, its only running stream.
@@ -233,6 +239,86 @@ fn the_facts_survive_the_wire() {
         serde_json::from_str::<RouteFacts>(&text).expect("it reads back"),
         found
     );
+}
+
+#[test]
+fn an_older_daemons_facts_read_with_no_setup() {
+    let mut found = facts(HOST_EQ, Some(PW_CAT_PID), "");
+    found.setup = None;
+    let mut wire = serde_json::to_value(&found).expect("it serialises");
+    assert!(
+        wire.get("setup").is_none(),
+        "facts without setup write no setup key"
+    );
+    wire.as_object_mut().expect("an object").remove("setup");
+    let read: RouteFacts = serde_json::from_value(wire).expect("0.37.0's facts decode");
+    assert_eq!(read.setup, None);
+    assert_eq!(read, found);
+}
+
+#[test]
+fn the_setup_facts_survive_the_wire() {
+    let layout = |positions: &[&str]| Layout {
+        channels: positions.len() as u32,
+        positions: positions.iter().map(|p| p.to_string()).collect(),
+    };
+    let mut found = facts(HOST_EQ, Some(PW_CAT_PID), "");
+    found.setup = Some(SetupFacts {
+        offer: Some(SinkOffer {
+            formats: vec!["S32LE".into(), "S16LE".into()],
+            rates: Some(Rates::Range {
+                min: 44_100,
+                max: 192_000,
+            }),
+            layout: Some(layout(&["FL", "FR"])),
+        }),
+        forced_format: Some("S32LE".into()),
+        node_rates: vec![44_100, 48_000],
+        clock: Some(ClockFacts {
+            rate: Some(48_000),
+            allowed_rates: vec![44_100, 48_000, 96_000],
+            force_rate: Some(96_000),
+        }),
+        sink_layout: Some(layout(&["FL", "FR"])),
+        stream_layout: Some(layout(&["FL", "FR", "FC"])),
+        dither: Some(Dither {
+            method: "triangular".into(),
+            noise: 2,
+        }),
+        sink_filter: Some(false),
+        stream_filter: Some(true),
+        alsa: Some(AlsaFacts {
+            path: Some("hw:0".into()),
+            card: Some(0),
+            device: Some(0),
+            subdevice: Some(0),
+            hw: HwState::Open(HwParams {
+                format: "S32_LE".into(),
+                rate: 48_000,
+                channels: 2,
+            }),
+            kernel: Some(KernelOffer {
+                formats: vec!["S16_LE".into(), "S32_LE".into()],
+                rates: vec![44_100, 48_000],
+            }),
+        }),
+    });
+    let text = serde_json::to_string(&found).expect("it serialises");
+    assert_eq!(
+        serde_json::from_str::<RouteFacts>(&text).expect("it reads back"),
+        found
+    );
+}
+
+#[test]
+fn a_setup_this_build_cannot_read_is_dropped() {
+    let mut found = facts(HOST_EQ, Some(PW_CAT_PID), "");
+    found.setup = None;
+    let mut wire = serde_json::to_value(&found).expect("it serialises");
+    wire["setup"] = serde_json::json!({"offer": {"rates": {"steps": 3}}});
+    let read: RouteFacts = serde_json::from_value(wire).expect("the rest still decodes");
+    assert_eq!(read.setup, None);
+    assert_eq!(read, found);
 }
 
 /// The idle Firefox stream carries a channel volume of 0.749985 (linear, which `wpctl` shows
@@ -515,9 +601,41 @@ fn view_with(eq: bool, crossfeed: bool, speakers: bool, note: Option<&str>) -> c
 fn stages(eq: bool, crossfeed: bool, speakers: bool) -> Option<ChainStages> {
     Some(ChainStages {
         eq,
+        loudness: false,
         crossfeed,
         speakers,
     })
+}
+
+/// A view of a chain that runs flat for loudness alone, the stage at `depth_db`.
+fn loudness_alone(depth_db: f64) -> crate::eq::EqView {
+    crate::eq::EqView {
+        loudness: Some(crate::eq::LoudnessView {
+            on: true,
+            depth_db,
+            ..crate::eq::LoudnessView::default()
+        }),
+        ..view_with(false, false, false, None)
+    }
+}
+
+#[test]
+fn stages_of_a_chain_for_loudness_alone() {
+    assert_eq!(
+        ChainStages::of_view(&loudness_alone(9.0)),
+        Some(ChainStages {
+            loudness: true,
+            ..ChainStages::default()
+        })
+    );
+    assert_eq!(
+        ChainStages::of_view(&loudness_alone(0.0)),
+        stages(false, false, false),
+        "at the reference it changes nothing: a pass-through"
+    );
+    let mut off = loudness_alone(9.0);
+    off.loudness.as_mut().unwrap().on = false;
+    assert_eq!(ChainStages::of_view(&off), None);
 }
 
 #[test]
@@ -572,4 +690,102 @@ fn a_route_with_or_without_stages_decodes() {
     let newer: RouteFacts =
         serde_json::from_str(r#"{"host_eq": true, "stages": {"eq": true, "later": 1}}"#).unwrap();
     assert_eq!(newer.stages, stages(true, false, false));
+}
+
+/// The sink's linear volume in the fixtures (0.24 on the `wpctl` scale, cubed).
+const SINK_LINEAR: f64 = 0.013822;
+
+fn level(dump: &str) -> SinkLevel {
+    computer_level(dump).expect("the fixture has a volume")
+}
+
+fn same_gain(got: f64, want: f64) -> bool {
+    (got - want).abs() < 1e-12
+}
+
+#[test]
+fn the_level_of_the_smart_route_is_the_sinks_times_the_filters() {
+    let found = level(HOST_EQ);
+    assert!(same_gain(found.linear, SINK_LINEAR * 0.125), "{found:?}");
+    assert!(!found.muted);
+}
+
+#[test]
+fn the_level_of_the_default_route_is_the_same_gain() {
+    // The default sink is the chain's own: the device is what its output feeds.
+    assert_eq!(computer_level(HOST_EQ_DEFAULT), computer_level(HOST_EQ));
+}
+
+#[test]
+fn with_no_chain_in_the_path_the_level_is_the_sinks_alone() {
+    let found = level(ONE_STREAM);
+    assert!(same_gain(found.linear, SINK_LINEAR), "{found:?}");
+    assert!(!found.muted);
+}
+
+#[test]
+fn a_chain_that_feeds_no_sink_is_not_in_the_path() {
+    let mut objects: Vec<serde_json::Value> = serde_json::from_str(HOST_EQ).unwrap();
+    objects.retain(|object| object["info"]["props"]["node.name"] != "svolder_eq.output");
+    let found = level(&serde_json::to_string(&objects).unwrap());
+    assert!(same_gain(found.linear, SINK_LINEAR), "{found:?}");
+}
+
+#[test]
+fn a_muted_level_is_read_hard_or_soft_and_in_either_route() {
+    for dump in [LEVEL_MUTED_HARD, LEVEL_MUTED_SOFT, LEVEL_DEFAULT_MUTED] {
+        assert!(level(dump).muted);
+    }
+    // The sink's soft mute leaves the gain as it was.
+    assert!(same_gain(
+        level(LEVEL_MUTED_SOFT).linear,
+        SINK_LINEAR * 0.125
+    ));
+}
+
+#[test]
+fn the_lowest_channel_counts_in_the_level() {
+    let found = level(LEVEL_UNEQUAL);
+    assert!(same_gain(found.linear, SINK_LINEAR * 0.064), "{found:?}");
+}
+
+#[test]
+fn a_graph_with_no_channel_volumes_has_no_level() {
+    assert_eq!(computer_level(LEVEL_NO_VOLUMES), None);
+    assert_eq!(computer_level("not json"), None);
+    assert_eq!(computer_level("[]"), None);
+}
+
+/// A node that lists no volume counts as full: the other one alone is the level.
+#[test]
+fn a_node_without_volumes_counts_as_full() {
+    let dump = edited(HOST_EQ, "svolder_eq", |node| {
+        props_of(node)
+            .as_object_mut()
+            .unwrap()
+            .remove("channelVolumes");
+    });
+    assert!(same_gain(level(&dump).linear, SINK_LINEAR));
+}
+
+/// The level and the route line read one way: where the chain is in the path, the route's
+/// volume is the level's gain on the `wpctl` scale and the mutes agree.
+#[test]
+fn the_level_and_the_route_agree_on_every_fixture() {
+    for dump in [
+        ONE_STREAM,
+        HOST_EQ,
+        HOST_EQ_DEFAULT,
+        LIVE_CHAIN,
+        LEVEL_MUTED_HARD,
+        LEVEL_MUTED_SOFT,
+        LEVEL_UNEQUAL,
+        LEVEL_NO_VOLUMES,
+        LEVEL_DEFAULT_MUTED,
+    ] {
+        let sink = facts(dump, None, "").sink.expect("a sink");
+        let found = computer_level(dump);
+        assert_eq!(sink.volume_milli, found.map(|l| milli_of(l.linear)));
+        assert_eq!(sink.muted, found.is_some_and(|l| l.muted));
+    }
 }

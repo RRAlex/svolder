@@ -100,9 +100,14 @@ def gate_entries(root):
     names = []
     for arr in re.findall(r'browser_checks=\((.*?)\)', text, re.S):
         names += arr.replace('\\', ' ').split()
+    split = re.search(r'split_scripts=\((.*?)\)', text, re.S)
+    split = split.group(1).split() if split else []
     for name in dict.fromkeys(names):
         for engine in ('chromium', 'firefox'):
             found.append((f'{name}-{engine}', f'{name}.py', 'browser'))
+            if name in split:
+                # the same script's timing part, run in the serial lane under its own label
+                found.append((f'{name}_timing-{engine}', f'{name}.py', 'browser'))
     listed = ' '.join(line for line in text.splitlines() if 'entries+=(' in line)
     for label, script in re.findall(r'"([\w-]+)\|([\w./]+)\|\w*"', listed):
         kind = 'browser' if script.endswith('.py') else 'node' if script.endswith('.mjs') else 'gate'
@@ -238,6 +243,12 @@ def touched(root, changed):
     unrecorded the browser labels with no load record."""
     entries = gate_entries(root)
     loads = known_loads(root)
+    # a timing part loads what its script's other part does: its load record is the script's
+    for label, _, _ in entries:
+        if '_timing-' in label and label not in loads:
+            base = label.replace('_timing-', '-')
+            if base in loads:
+                loads[label] = loads[base]
     _, mapped = read_map(root)
     files, all_web = {}, set()
     for label, script, kind in entries:
@@ -352,6 +363,7 @@ else
     browser_checks=(one paper \\
         computer_one sweepy)
 fi
+split_scripts=(sweepy)
 entries+=("solo-chromium|solo.py|" "pre|pre.py|")
 ''')
     _write(root, CHECKS + 'node/alpha.mjs', "import('../../../bins/svolderd/web/core/a.js'); import './dom.mjs';\n")
@@ -395,9 +407,10 @@ entries+=("solo-chromium|solo.py|" "pre|pre.py|")
 
     everything = sorted(l for l, _, _ in gate_entries(root))
     assert 'label' not in everything, 'a comment is no entry'
+    assert 'sweepy_timing-firefox' in everything and 'one_timing-firefox' not in everything, everything
     commit()
     # a fresh worktree: no map, no record, so every browser check lacks one
-    every_browser = labels('one', 'paper', 'computer_one', 'sweepy') + ['pre', 'solo-chromium']
+    every_browser = labels('one', 'paper', 'computer_one', 'sweepy', 'sweepy_timing') + ['pre', 'solo-chromium']
     every_browser.sort()
     got, warn = after(WEB + 'core/b.js')
     assert [g for g in got if not g.startswith(('node', 'gate'))] == every_browser, got
@@ -432,6 +445,7 @@ entries+=("solo-chromium|solo.py|" "pre|pre.py|")
     _write(root, 'target/web-checks/deps/sweepy-chromium@2.txt', '/assets/themes/nightdrive/n.js\n')
     got, _ = after(WEB + 'themes/paper/p.js')
     assert 'sweepy-chromium' in got and 'one-chromium' not in got, got
+    assert 'sweepy_timing-chromium' in got, 'a timing part shares its script\'s load record'
     got, _ = after(WEB + 'themes/nightdrive/n.js')
     assert 'sweepy-chromium' in got, got
     # a stale entry: knob.js left out of one check's entry, another check names it

@@ -364,22 +364,22 @@ fn the_overlay_on_an_80_by_24_terminal() {
         "│ Uppercase letters toggle a TUI mode and save it to the config.             │",
         "│ Symbols and navigation keys are the same on every screen.                  │",
         "│                                                                            │",
-        "│ Everywhere                      Controls                                   │",
-        "│ ↑↓        move                  ␣/Enter   toggle/press                     │",
-        "│ ←→        change                +/=/-     volume                           │",
-        "│ m         mute                  0         centre balance                   │",
-        "│ i         phase                 < > |     pane divider                     │",
-        "│ o         NOS                   a         advice, or all clear             │",
-        "│ Tab/⇧Tab  pane                                                             │",
-        "│ f         flat on/off           EQ                                         │",
-        "│ p         presets (a i inside)  1-5       band                             │",
-        "│ b         identify              , . ⇧←→   frequency                        │",
-        "│ r         refresh               [ ] ⇧↑↓   Q                                │",
-        "│ Esc       back, or the menu     Enter     edit band                        │",
-        "│ c         controls              0         flatten                          │",
-        "│ e         tone                  L-drag    point freq/gain                  │",
-        "│ t         telemetry             R-drag    Q, right widens                  │",
-        "│ d         devices               wheel     Q on the curve                   │",
+        "│ Everywhere                           Controls                              │",
+        "│ ↑↓        move                       ␣/Enter   toggle/press                │",
+        "│ ←→        change                     +/=/-     volume                      │",
+        "│ m         mute                       0         centre balance              │",
+        "│ i         phase                      < > |     pane divider                │",
+        "│ o         NOS                        k         config check · needs host   │",
+        "│ Tab/⇧Tab  pane                       a         advice, or all clear        │",
+        "│ f         flat on/off                                                      │",
+        "│ p         presets (a i inside)       EQ                                    │",
+        "│ b         identify                   1-5       band                        │",
+        "│ r         refresh                    , . ⇧←→   frequency                   │",
+        "│ Esc       back, or the menu          [ ] ⇧↑↓   Q                           │",
+        "│ c         controls                   Enter     edit band                   │",
+        "│ e         tone                       0         flatten                     │",
+        "│ t         telemetry                  L-drag    point freq/gain             │",
+        "│ d         devices                    R-drag    Q, right widens             │",
         "└──────────────────────────────────────────────────────────────────── more ↓ ┘",
     ];
     assert_eq!(boxed, wanted);
@@ -746,6 +746,7 @@ fn the_overlay_is_drawn_in_the_themes_colours_and_greys_only_what_does_nothing()
 
     for (depth, theme) in modal_themes() {
         let mut app = app_showing(Screen::Device);
+        app.host.linked = true;
         app.overlays.help_open = true;
         let buffer = frame_with(&app, 140, 45, &theme);
         let at = view(area(140, 45), &app).area;

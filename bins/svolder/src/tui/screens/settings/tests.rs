@@ -177,6 +177,22 @@ fn daemon_with_config(config: Option<&str>) -> DaemonInfo {
         features: Vec::new(),
         config_changed: false,
         config_missing: false,
+        activity: None,
+    }
+}
+
+/// What the daemon says of its clients, both servers serving, an hour of daemon life behind it.
+fn activity_said() -> svolder_ipc::Activity {
+    let counts = |open, hour, day| svolder_ipc::ServerActivity {
+        open,
+        hour,
+        day,
+        counted_secs: svolder_ipc::DAY_SECS,
+        capped: false,
+    };
+    svolder_ipc::Activity {
+        mcp: Some(counts(2, 3, 5)),
+        web: Some(counts(1, 4, 6)),
     }
 }
 
@@ -196,8 +212,20 @@ fn right_words(app: &App) -> String {
         .join(" ")
 }
 
+/// The cell `(column, row)` where `needle` starts in the frame `app` draws at `width`×`height`.
+fn find_at(app: &App, width: u16, height: u16, needle: &str) -> (u16, u16) {
+    for (row, line) in text(&frame(app, width, height)).iter().enumerate() {
+        if let Some(byte) = line.find(needle) {
+            let column = line[..byte].chars().count();
+            return (u16::try_from(column).unwrap(), u16::try_from(row).unwrap());
+        }
+    }
+    panic!("{needle:?} is not drawn");
+}
+
 mod connect;
 mod look;
 mod mqtt;
 mod rows;
+mod token_box;
 mod web_box;

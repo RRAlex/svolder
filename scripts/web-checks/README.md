@@ -66,7 +66,7 @@ of a run on a quiet machine appear in `target/web-checks/timing.tsv`.
 |---|---|---|
 | A task (in the implementer's own worktree) | `make web-touched` names the checks the change affects (below); `cargo fmt` and `clippy` on the touched crates, `cargo test -p <crate>`, `make web-snippets`, the node harnesses (`node scripts/web-checks/node/NAME.mjs`, seconds each), and the browser checks the change touches by name, in Chromium: `python3 scripts/web-checks/NAME.py chromium`. For a whole web change `make web-checks-task` | 1 to 6 minutes by name; the task gate about 30 minutes |
 | A lane end (the review) | `make check`, `make web-checks-task`; the checks that changed, in both engines by name | 10 to 20 minutes plus the task gate |
-| A merge to main | `make check`, `make web-checks` (the full gate: every check, Firefox included; a pool check whose inputs did not change is `cached`, see the result cache), `make host-e2e` once, `make e2e` once when the Bluetooth path changed | a second gate in a row runs only the serial lane (about 30 minutes) and the node harnesses; a cold gate 35 to 120 minutes of web gate, plus 12 of `make check` |
+| A merge to main | `make check`, `make web-checks` (the full gate: every check, Firefox included; a pool check whose inputs did not change is `cached`, see the result cache), `make host-e2e` once, `make e2e` once when the Bluetooth path changed | a second gate in a row runs only the serial lane (about 12 minutes plus `nightdrive_timing`: the other serial entries took 728 s on a quiet machine, against 2100 s for the whole lane before the split) and the node harnesses; a cold gate 35 to 120 minutes of web gate, plus 12 of `make check` |
 | A milestone merge | the merge rung, then `make host-e2e` five times, `make preamp-lab`, `nightdrive_timing.py` and the smoke's timing on a quiet machine | about 2 hours, unattended |
 | A release (a tag) | `make web-checks-cold` (the full gate with nothing reused) before the version is tagged, then the milestone rung on the export tree with its own `CARGO_TARGET_DIR`, `make repro-check`, `make packages`, `make web-shots` | about 1.5 hours plus the CI build |
 
@@ -83,7 +83,7 @@ kernel's pressure stall information, `/proc/pressure/cpu`'s `some` line, `avg10`
 quarter, under 30 % two thirds, under 60 % a half, more than that 2 (never fewer than 2 nor more
 than 12). It is not the load average, which counts tasks waiting on I/O and so reads high on idle
 CPUs. The run says which number it chose and why; `WEB_CHECKS_JOBS=N` overrides it, `1` is one by one
-(the serial lane's checks after the others). The checks run longest first (the `weight` table in
+(the serial lane's timing parts after the others). The checks run longest first (the `weight` table in
 `run-all.sh`; refresh it from a run's times when the checks change). Every check has its own daemon
 home, free ports, browser profile and output files, so any two can run side by side. A check that
 fails beside others is run once more alone: passing alone is `flaky` (counted as passed, named in
@@ -100,12 +100,50 @@ for the lock prints `waiting for the gate lock (held by another gate)`, and its 
 wait is kept out of them (`lockwait.sh`, proved by `gate_wait.sh`); the lock is not fair
 (shared holders keep arriving), so a long wait means another gate's pool is running. On both gates
 these run one at a time in the exclusive lane after the parallel part: `nightdrive_timing.py`
-(Night drive's draw cost, its draws and floor rows a second, the budget's rate rule, its phone budget and the tap under a slowed CPU), `smoke_core.py`
-and `haze.py` (draw cost and frame rate cases, not split from their logical ones, so the whole file
-is there), and `smoke_page.py`, `smoke_quick.py`, `effects_cycle.py`, `scroll.py`, `notes.py` and `sources.py`,
-which assert a frame rate or a wall-clock pace (the red zone's frames a second, the calm rate band,
-a flick's speed, the velocity after wheel steps, the 20 and 300 ms pointer pauses). A TERM or Ctrl-C stops every running check, and
-their browsers and daemons with them.
+(Night drive's draw cost, its draws and floor rows a second, the budget's rate rule, its phone budget and the tap under a slowed CPU; every case of it is a timing one), `notes.py` whole (its note cases depend on real input pace and smoke timing) and the timing part of each
+script in `split_scripts` (`run-all.sh`): `smoke_core.py`, `smoke_page.py`, `haze.py`, `effects_cycle.py`,
+`scroll.py`, `smoke_quick.py` and `sources.py`. Each of those runs twice: `--part logic` (the cases about state, geometry, dye sums and notes formed) in the
+pool like any browser check, cached, label `NAME-ENGINE`; `--part timing` (the cases that read a frame rate, a wall-clock pace or a
+frame gap) in the serial lane, cold, label `NAME_timing-ENGINE`. A script run by hand with no `--part` runs both. A timing check that fails is run once more alone at the end of the serial lane: passing is
+`flaky` (listed in the total line, never cached), failing again is `FAIL`; the lane waits for no quiet
+machine. A TERM or Ctrl-C stops every running check, and their browsers and daemons with them.
+
+#### The serial lane's timing parts
+
+`parts.py` takes `--part logic|timing|all` out of the command line (default `all`) and answers
+`part_has(kind)` and `counts(timing)`; a check's `check(..., timing=True)` is counted only in the
+timing part (and in `all`), every other case only in the logic part. No case is dropped and no limit moved:
+the two parts' counts add up to the whole file's.
+
+| Script | The timing part holds | Why it reads the clock |
+| --- | --- | --- |
+| `smoke_core.py` | the hidden-tab page: the test canvas, the calm rate band, no frames while hidden, the first frame's `dt` after showing, the loop running on; and `back from away: frames resume` (more than 5 frames in 1 s) | frame rate and frame gaps, with the hidden waits |
+| `smoke_page.py` | `calm_rhythm`'s own-handle half: the calm rate below the red zone, more than 40 frames a second in it | frames a second against a band |
+| `haze.py` | the wide page's calm rate (20 s untouched), and the stroke's pace against the recorded baseline | a rate, and dye along a stroke at set seconds |
+| `effects_cycle.py` | the calm rate after ten rounds and the draw calls per simulated frame before and after | rates over 2 s windows |
+| `scroll.py` | the `desktop` and `touch` sections: velocity after wheel steps and a pan a set time apart, the burst's peak speed, the calm rhythm after | velocity decays on the wall clock |
+| `smoke_quick.py` | the calm rate | frames a second |
+| `notes.py` (not split: the whole script is in the serial lane) | every case | notes form from real input pace and smoke timing; its "logic" cases (calm notes, thin-smoke stir, the 0.2 s amp peak, ordinary moves settling) failed in a loaded pool |
+| `sources.py` | the 4 coalesced moves 12 ms apart (3 pushes), the 300 ms pause then a 20 ms move | the page's own clock against the browser's event times (a timer 90 ms late loses a push) |
+
+Everything else of these files runs in the logic part. When unsure, a case was kept in the timing part.
+`scroll.py`'s smear section reads the dye after waiting for two smoke frames (`two_frames`), so a
+stalled frame cannot read before the scroll is applied. `smoke_page.py`'s `lost link: back, frames
+resume` (more than 5 frames in 3 s) stays in the logic part: its floor is far under the loop's rate.
+
+Cases per script and engine, passed + failed, main's whole file against the logic part + the timing part
+(measured 2026-11-17; every pair is equal):
+
+| Script | Chromium | Firefox | Timing part's seconds (Chromium / Firefox) |
+| --- | --- | --- | --- |
+| `smoke_core.py` | 79 = 70 + 9 | 77 = 68 + 9 | 33 / 36 |
+| `smoke_page.py` | 60 = 57 + 3 | 55 = 52 + 3 | 10 / 12 |
+| `haze.py` | 32 = 28 + 4 | 32 = 28 + 4 | 56 / 59 |
+| `effects_cycle.py` | 20 = 18 + 2 | 20 = 18 + 2 | 24 / 26 |
+| `scroll.py` | 24 = 10 + 14 | 20 = 10 + 10 | 20 / 16 |
+| `smoke_quick.py` (quick and task gates) | 4 = 3 + 1 | 4 = 3 + 1 | 11 / 13 |
+| `sources.py` | 45 = 43 + 2 | 41 = 39 + 2 | 6 / 8 |
+| `notes.py` (whole, serial) | 69 | 69 | 200 / 222 |
 
 ### The fake clock
 
@@ -128,11 +166,10 @@ What stays real-time, and why:
 - A draw's cost, the budget's step-down and a tap under a slowed CPU are the real work, so they are real
   and exclusive: `nightdrive_timing.py` (it now holds Night drive's phone budget too:
   `a_phone_stays_usable`, the step-down at 30x and the tap that opens the menu within a second at 6x, moved
-  there from `nightdrive_theme.py`), `smoke_core.py` and `haze.py` (the draw cost and rate cases),
-  `smoke_page.py`, `smoke_quick.py`, `effects_cycle.py`, `scroll.py` and `notes.py` (frame rates and wall-clock paces).
-- `sources.py` is in the exclusive lane whole: its coalesced-move strokes read pauses of 20 and 300 ms
-  between pointer events against the browser's own event times, which a page clock cannot move, and the
-  smoke engine under it paces by the real frame. It runs on the full gate only.
+  there from `nightdrive_theme.py`), and the timing parts of `smoke_core.py`, `haze.py`, `smoke_page.py`,
+  `smoke_quick.py`, `effects_cycle.py`, `scroll.py`, `notes.py` whole (not split) and
+  `sources.py` (the 20 and 300 ms pointer pauses against the browser's own event times, which a page
+  clock cannot move; the rest of `sources.py` is its logic part, in the pool on the full gate).
 - Still in the pool, and a failure under load there is re-run exclusive: `nightdrive_theme.py`'s waits for
   the fade and the volume bubble (a sleep of the check's against the page's timer, the check's sleeps
   are lower bounds so only a page timer more than a second late fails them), `visualizer.py` ("the chip goes
@@ -173,7 +210,7 @@ every web file. A changed file lists every check whose files include it, and bes
 - a web file lists every browser check with no record (not in the map and not in this tree's
   records: a fresh worktree, a new check); the note says how many;
 - a web file that no browser check has loaded (a new file, a stale map) lists every browser check;
-- `common.py` lists every browser check;
+- `common.py` lists every browser check; `parts.py` lists both parts of the seven split scripts;
 - a file of the gate itself (`run-all.sh`, `fingerprint.py`, `gate_cache.sh`, `lockwait.sh`,
   `gate_wait.sh`) says the full gate is needed (`make web-checks`) and lists every check;
 - another file here that no check reads and that is not a note, `touched.py` or the map prints a
@@ -210,8 +247,8 @@ The full gate runs COLD (nothing reused) when you ask (`make web-checks-cold`, o
 changed since the last full gate that passed (`run-all.sh` keeps their hash in
 `target/web-checks/cache/full-gate.state`; none yet means cold; the files are `smoke_files` plus
 `touched.py`, and the message says why). A cold run is mandatory before a version is TAGGED for a
-release build: the cache vouches for a merge, a tag takes nothing on trust. The serial lane (the pace and
-draw-cost checks, which hold the gate lock exclusive) and the node harnesses never use the cache. The
+release build: the cache vouches for a merge, a tag takes nothing on trust. The serial lane (the timing parts and
+`nightdrive_timing.py`, which hold the gate lock exclusive) and the node harnesses never use the cache. The
 cache lives in `target/web-checks/cache`, so `make clean` drops it.
 
 A pass is stored at the end of the gate, after the map refresh (so it carries the scope the next gate computes), and only when the Rust sources, tooling and browsers are still what they were after the build and the check's own files and the whole web dir are what they were when it started; never a pass that needed the alone retry (a flaky check is dropped from the cache), never when a subset env var is set (that run was not the whole check), and never when a browser's
@@ -223,12 +260,12 @@ files, not fingerprints: it is about what the quick set does not run (the smoke'
 proves the fingerprint on a throwaway tree.
 
 Every run writes `target/web-checks/timing.tsv`, one row per run of a check (the label, the engine,
-the lane `node`, `pool`, `again` or `serial`, the verdict, the wall seconds, the CPU seconds of the
+the lane `node`, `pool`, `again` (the alone retry of a pool or a serial check) or `serial`, the verdict, the wall seconds, the CPU seconds of the
 check's waited-for descendants and the peak resident memory in MB of its largest process, from GNU
 `time`), and ends with the serial lane's wall time and the 15 slowest runs.
 
 The quick and task gates refuse, with a message that names the file, says whether it is a smoke file
-or the gate's own harness (`common.py`, `run-all.sh`, `COVERAGE.md`, `fingerprint.py`, `gate_cache.sh`, `lockwait.sh`, `gate_wait.sh`) and names the rung to run
+or the gate's own harness (`common.py`, `parts.py`, `run-all.sh`, `COVERAGE.md`, `fingerprint.py`, `gate_cache.sh`, `lockwait.sh`, `gate_wait.sh`) and names the rung to run
 (`make web-checks`, the merge rung), and exit 1, when a file of the smoke or one of its own checks changed against `main`
 (`WEB_CHECKS_BASE` names another base) in the commits, the working tree or the untracked files. The
 list is `smoke_files` in `run-all.sh`: the smoke's scripts under `bins/svolderd/web/themes/ember/`,
@@ -269,7 +306,8 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   controls, power, meters, volume, tone, bands, presets, device presets, facts and playing parts,
   the whole screen and the page's shell from the page's JSON model, against
   `node/fixtures/ember-parts.json`, the golden copy of the DOM the server's templates drew for 45
-  cases (frozen: no test writes it). The same harness holds the claims the Rust tests
+  cases (frozen: no test writes it; its path models were edited by hand to the judge's keys in
+  0.37.1 task 3.8, not re-captured). The same harness holds the claims the Rust tests
   keep of the model to the markup Ember draws (the cases named like those tests). `node/html-same.mjs` is the comparison (tags read in order; the attributes htmx
   reads dropped, attribute order and entities ignored, whitespace runs one space, JSON attributes
   and JSON data blocks as JSON, drawn numbers as written: no tolerance); the harness checks that comparison
@@ -396,6 +434,11 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   the view, the keyboard, the frame tokens, a guest with no row. It lays a crossfeed view over the host model and answers
   the route in the page, so it holds with or without the daemon's route
   (`python3 crossfeed_popup.py chromium|firefox`; `WEB_CHECK_SHOTS=<folder>` writes the pictures).
+- `node/core-loudness.mjs`: the Sound popup's Loudness tab (`core/popups/loudness/`, the tabs of `core/popups/sound/` and the
+  loudness lane) on the real core over a jsdom page and a fake host (28 cases). `loudness_popup.py` is the same in a browser,
+  in every theme: the tab order, geometry at 1280 and 390 px, a real drag of the slider, the keyboard, "Use current volume"
+  and the switch, the frame tokens, reduced motion, and the daemon's own view and route
+  (`python3 loudness_popup.py chromium|firefox`; `WEB_CHECK_SHOTS=<folder>` writes the pictures).
 - `node/core-eq-library.mjs`: the EQ library popup (`core/popups/eq-library/`) on the real core over a jsdom page and
   a fake daemon: the search and its late answers, the preview, the import, the upload, the saved presets with
   *Overwrite with current…*, the computer's side (30 cases). `eq_library.py` is the same in a browser, in every theme,
@@ -405,7 +448,10 @@ repository. Outside a git checkout the gate runs and says it could not tell.
 - `contrast.py` and `phone_sweep.py`: two sweeps over every state `sweep_states.py` visits (the page, the frame's menu,
   each popup the page lists on each entry, a device's page with its forms and lists open, a dimmed device, the add
   walk's pages, the config-changed line, the EQ library's preview, a guest's and a read-only page, a page with no
-  device), in every theme and every scheme the page lists. Each theme runs in a child process of its own with its own
+  device), in every theme and every scheme the page lists; `contrast.py` also runs once in each palette a theme offers
+  (Signal's four: the first, Blueprint, keeps the tag `signal.dark`, the others are `signal.dark.<palette>`; the
+  palette is the root's `data-palette`, which `sweep_states.set_palette` sets and keeps in the browser's setting; a palette's pair is held to the default palette's baseline pair and is never written to the baseline, and the not-measurable count and the allowed gaps use the default palette's key), `phone_sweep.py` once (a palette is
+  colour alone, the geometry is the same). Each theme runs in a child process of its own with its own
   browser and daemons (`WEB_SWEEP_PAR` limits how many run at once). A visit fails when it does not reach a state it
   names. `contrast.py` reads the computed colours (the browser resolves the tokens) and computes WCAG 2.2 ratios: text
   4.5:1 (3:1 large), control edges, focus rings and graph strokes and fills 3:1; a ground that is a picture, a gradient or a
@@ -437,6 +483,12 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   real `post` over a fetch the test answers: each request's method, path and body with another
   device on show than the one named, no request when none is named, the devices answer handed
   back, every refusal as a reason, a passphrase that is in the body and nowhere else.
+- `node/core-setup.mjs`: the PipeWire config popup (`core/popups/setup/`) and each theme's config chip:
+  the draw lists the sink, the summary, all seven lines (failing ones tagged) and the limit in the daemon's
+  words, escaped, and says `config not read` for an older daemon; Ember's, Signal's and Paper's chips and
+  the listed row; and, on the real core over jsdom, the wire (it follows the `playing` part and the model
+  in either order). `setup_popup.py` is the same in a browser, wide and phone, with the fake host's passing
+  and failing config (`python3 setup_popup.py chromium|firefox`).
 - `node/core-help.mjs`: the Help popup (`core/popups/help/`): its draws as strings (a key's row,
   Here's groups, the line for a focus that is nowhere, Everywhere, About and its links), that Help
   shows the listed entries of the zones it names and no other on the four themes' real tables
@@ -744,7 +796,9 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   the shelf in two columns, a held band or loudness stepper repeating across the shelf's redraws and
   stopping on a release, a blur or a hidden page, the mode's place at 1280 px and at 390 px, the
   tab's title), a hop that leaves and a device switch giving the
-  choice back to the device, the line with no host and an amp standing alone, contrast on the
+  choice back to the device, the line with no host and an amp standing alone, the menu's Palette row
+  (four palettes by their own names, kept per browser, each recolouring the page while the hops keep their
+  meaning and the dials their glow), contrast on the
   ground; the DAC's first screen and the Now playing bar; the shelf below it (the band table with
   typed and stepped values, presets saved, renamed and deleted in place, the switches, scales and
   loudness, a Loki Max's slots asked before they are written, the facts folded and the fold kept
@@ -862,6 +916,7 @@ and a guest's taps asked of the core and posting nothing, the device's slots (a 
   button fixed at 8 px, the mountains tuned from the scene's top half (touch in Chromium, the pointer in Firefox), a 40-character
   device name, a long track and a long preset with no sideways scroll at 390, 844 and 1100 px, and a tall window (1280x1600, 2560x1440) whole.
 - `node/signal-controls.mjs`: the same on Signal's controls (`controls-wire.js`): one write in flight per scale of a device, a step after a device switch goes to the new device only.
+- `node/signal-palette.mjs`: Signal's palettes (`palette.js`, the root tokens of `style.css`): Blueprint is the default (first in the list, no attribute, the bare root's tokens), a person who never chose gets it, and a kept choice of any palette, Warm amber included, stays.
 - `node/nightdrive-controls.mjs`: the theme Night drive's controls on a stand-in page: a scale keeps one write in flight with the newest waiting, and a step asked after a device switch is written to the new device, never to the one shown before.
 - `node/nightdrive-states.mjs` and `nightdrive_states.py`: the theme Night drive's states: the page's mood in each (`ok`,
   `unreachable`, `lost`, `wait`, `nocap`), the card of a device out of reach with Try now and the seconds, a fault that leaves the controls
@@ -918,6 +973,7 @@ and a guest's taps asked of the core and posting nothing, the device's slots (a 
 - `gate_refusal.sh`: the quick gate's refusal, on a throwaway repository.
 - `fakeclock.py`: the controllable page clock (see "The fake clock").
 - `fingerprint.py` and `gate_cache.sh`: the result cache's fingerprint and its record, and the proof of both on a throwaway tree.
+- `parts.py`: the `--part logic|timing|all` selection of the seven split checks (see "The serial lane's timing parts").
 - `common.py`, `smoke_probe.py`: the shared driver (fake daemon, Chromium over CDP, Firefox over
   geckodriver) and the in-page probe; not checks. A `Daemon` takes `fleet=[(profile, name, udid)]`
   (more fake devices, each with its `[[device]]` block), reads its model (`model(name)`), writes

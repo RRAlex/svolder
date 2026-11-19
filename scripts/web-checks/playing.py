@@ -57,7 +57,9 @@ STATE = """(() => {
     knob: box(q('sv-knob')), view: box(q('.view')), barBox: box(q('.np-bar')),
     title: text('.np-title'), artist: text('.np-artist'), source: text('.np-source'),
     none: text('.np-none'), path: seen('.np-path'), verdict: seen('.np-verdict'),
-    chips: [...document.querySelectorAll('.np-path > *')].map((el) => [box(el), el.className]),
+    chips: [...document.querySelectorAll('.np-path > *')]
+      .flatMap((el) => (el.classList.contains('np-lead') ? [...el.children] : [el]))
+      .map((el) => [box(el), el.className]),
     pathClass: q('.np-path')?.className ?? null, hops: document.querySelectorAll('.np-hop').length,
     img: img ? { loaded: img.complete && img.naturalWidth > 0, src: img.getAttribute('src'),
                  hidden: img.hidden } : null,
@@ -135,7 +137,7 @@ try:
           s['sourceShown'] and s['prevShown'] and s['nextShown'] and s['timesShown']
           and s['pathShown'] and not s['foldShown'], s)
     check('the path says untouched, with its three hops, for the fake route on the fake DAC',
-          s['verdict'] == 'untouched' and s['hops'] == 3 and 'ok' in s['pathClass'].split(), s)
+          s['verdict'] == 'untouched' and s['hops'] == 3 and 'untouched' in s['pathClass'].split(), s)
     tip = b.ev("document.querySelector('.np-verdict')?.title ?? null")
     check('an untouched verdict carries the tooltip that says the player may still change the sound',
           isinstance(tip, str) and tip.startswith('untouched from the player') and
@@ -734,12 +736,17 @@ finally:
     quit_.stop()
 
 # ------------------------------------------------------------------ a changed path, in the band
-# The band is 240 px tall beside the visualizer; with it off Now playing has the whole band, 168 px
+# The band is 240 px tall beside the visualizer; with it off Now playing has the whole band, 184 px
 # below 1100 px and 188 px from there (the cover grows from 64 to 84 px), the least that holds the
 # changed path's two rows of chips with the room under them.
+# the hops the config chip pushes into the dots beside the visualizer below 1280 px (measured in both
+# engines): hiding more than these fails, so a regression that hides every hop is not accepted
+TIGHT_CUTS = {820: 1, 1100: 2}
 PATH = """(() => {
   const p = document.querySelector('#part-playing').getBoundingClientRect();
-  const kids = [...document.querySelectorAll('.np-path > *')];
+  // the verdict and its config chip are one lead: its parts are the first chips
+  const kids = [...document.querySelectorAll('.np-path > *')]
+    .flatMap((k) => (k.classList.contains('np-lead') ? [...k.children] : [k]));
   const shown = kids.filter((k) => !k.classList.contains('np-cut'));
   const r = shown.map((k) => k.getBoundingClientRect());
   return { cut: kids.length - shown.length,
@@ -751,7 +758,7 @@ PATH = """(() => {
     band: p.height }; })()"""
 for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
                        (True, 820), (True, 1100), (True, 1280)]:
-    height = 240 if not viz_off else 168 if width < 1100 else 188
+    height = 240 if not viz_off else 184 if width < 1100 else 188
     width_words = f'{width} px' + (', visualizer off' if viz_off else '')
     changed = common.Daemon(host='fake', env={'SVOLDER_FAKE_ROUTE': 'changed'})
     b = make(changed, size=(width, 900), viz_off=viz_off)
@@ -761,9 +768,11 @@ for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
               'changed' in (s['pathClass'] or '').split() and all(
                   word in s['verdict'] for word in
                   ['player volume 91 %', 'resampled 44.1 → 48 kHz', 'computer volume 54 %',
-                   'host EQ on', '2 other sounds mixing']), s['verdict'])
+                   'host EQ on', '2 other sounds mixing', 'cut to 16 bits (S32 → S16)',
+                   'dither on (triangular)']), s['verdict'])
         check('  the verdict is the first chip of the path', s['chips'][0][1] == 'np-verdict'
-              and s['hops'] == 3 and len(s['chips']) == 4, s['chips'])
+              and s['chips'][1][1].startswith('np-setup') and s['hops'] == 3
+              and len([c for c in s['chips'] if c[1] != 'np-more']) == 5, s['chips'])
         band = s['band']
         # the band clips at its padding: every chip must sit inside, with the padding to spare
         inside = all(c[0][0] >= band[0] and c[0][0] + c[0][2] <= band[0] + band[2]
@@ -775,9 +784,17 @@ for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
               band[3] == height and (not viz_off or abs(band[2] - s['wide'][2]) <= 1),
               [band, s['wide']])
         fit = b.ev(PATH)
-        check('  and no chip was cut: no dots, the row whole', fit['cut'] == 0 and fit['more'] == 0
-              and fit['first'] == 'np-verdict', fit)
-        if not viz_off and width == 1100:
+        # beside the visualizer the card is half the band (240 px tall) below 1280 px: the config chip
+        # takes room there, so a changed path may end in the dots, the verdict and the chip first
+        # and every chip inside the card; the visualizer off and the full band hold it whole
+        tight = not viz_off and width < 1280
+        check('  and no chip was cut: no dots, the row whole' if not tight else
+              '  the row is whole or ends in the dots, the verdict first, every chip inside',
+              fit['first'] == 'np-verdict' and fit['inside'] and (
+                  (fit['cut'] == 0 and fit['more'] == 0) if not tight
+                  else (fit['cut'] == 0 or (fit['more'] == 1 and fit['last'] == 'np-more'
+                                            and fit['cut'] <= TIGHT_CUTS[width]))), fit)
+        if not viz_off and width == 1280:
             # a path that does not fit: the card is made lower (what a longer verdict or a longer
             # name would do at the same height), and the row ends in a chip of three dots
             b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '220px')")
@@ -787,14 +804,15 @@ for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
                   'verdict first, every chip inside the card',
                   fit['more'] == 1 and fit['cut'] >= 1 and fit['first'] == 'np-verdict'
                   and fit['last'] == 'np-more' and fit['inside'], fit)
+            cut_220 = fit['cut']
             check('  the hops put out of sight stay in the page, and the dots name them',
                   len(fit['kept']) == fit['cut'] and fit['title'] is not None
                   and all(text in fit['title'] for text in fit['kept']), fit)
             b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '204px')")
             b.sleep(0.5)
             fit = b.ev(PATH)
-            check('  a lower card cuts more, the verdict still first', fit['more'] == 1
-                  and fit['cut'] >= 2 and fit['first'] == 'np-verdict' and fit['inside'], fit)
+            check('  a lower card cuts at least as many, ends in the dots, the verdict still first',
+                  fit['more'] == 1 and fit['cut'] >= cut_220 and fit['first'] == 'np-verdict' and fit['inside'], fit)
             # so low that the verdict alone overflows: every hop is cut and the dots say nothing
             b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '120px')")
             b.sleep(0.5)

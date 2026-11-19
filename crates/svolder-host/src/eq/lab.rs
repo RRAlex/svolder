@@ -34,8 +34,18 @@
 //! - `pw-cli` can die, and one that dies mid-line may or may not have applied the line.
 //! - A new node may be listed late (a service manager returns when the unit is active, before
 //!   the node is in the graph): until then it plays but cannot be found.
+//! - The virtual speakers' stage is in a config only with a set chosen; its mixers play the dry
+//!   sound or the two convolved paths into each ear, each path one impulse of a set scaled to
+//!   -0.1 dB in its worst case, and the rule adds what the mixers the node holds make of that.
+//! - A stream plays through the chain or not ([`Event::Playing`]): a look at whichever node is
+//!   listed says so, as the links of a playing stream follow the chain's sink.
 //! - The command line applies in the order the real one does: the config is written, the old
 //!   node is stopped, the new one is started, 300 ms pass, then the state file is written.
+//! - The loudness stage's two sections per channel are in every config, as the identity; a change
+//!   of rate, a rebuild and a restart put them back to it, as they do the slots. The computer's
+//!   volume and mute are the world's: a look reads them with the node, and a write made through
+//!   the daemon also hands the controller its reading ([`Event::Volume`]). The rule counts the
+//!   stage with the slots, and holds the stage alone to unity too.
 //!
 //! A sequence is a list of events and nothing else is random while it runs, so a failing seed
 //! reproduces and a failing sequence shrinks.
@@ -50,14 +60,16 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use svolder_profiles::tone::apo::{self, Correction, FilterKind, SourceFilter};
 
-use super::control::{CrossfeedEdit, Edit, EqControl, Keep};
+use super::control::{CrossfeedEdit, Edit, EqControl, Keep, LoudnessEdit};
 use super::crossfeed::Model as CrossfeedModel;
-use super::live::{LiveNode, SLOTS, crossfeed_params};
+use super::live::{LiveNode, NodeKey, SLOTS, crossfeed_params, loudness_params};
+use super::loudness;
 use super::manage::{
     ApplyRequest, Chain, EqFailure, Status, check_playable, checked_request, conf_text, kept_conf,
 };
 use super::session::{Link, Session};
 use super::{HostEqState, Manager, Route};
+use crate::route::SinkLevel;
 
 /// The sink's rates a sequence moves among: those of DACs up to 384 kHz.
 const RATES: [u32; 8] = [
@@ -86,11 +98,27 @@ const QUIET_MS: u64 = 3_000;
 /// live.
 const LIVE_TOLERANCE_DB: f64 = 0.05;
 
+/// How long the world is left alone before the loudness's liveness rule is asked: the EQ's quiet
+/// time, the second a look takes to read a volume changed from outside, and the longest glide
+/// (40 dB at 0.5 dB a tick of 50 ms).
+const LD_QUIET_MS: u64 = QUIET_MS + 1_000 + 4_000;
+
 /// The frequencies the liveness rule compares at: this many steps of a log grid.
 const LIVE_GRID: u32 = 96;
 
 /// The wait the command line makes after it starts the chain.
 const START_WATCH_MS: u64 = 300;
+
+/// The idle time of the lab's controllers, in ticks: short, so that a sequence sees a held level
+/// lifted and a pass-through removed.
+const IDLE_TICKS: u64 = 60;
+
+/// The virtual speakers' sets in the lab's store.
+const SETS: [&str; 2] = ["set-a", "set-b"];
+
+/// The gain of each of a set's four paths (an impulse each): a set is scaled so that its worst
+/// case, the two paths into one ear in phase, is -0.1 dB, as the catalogue's are.
+const SET_PATH_GAIN: f64 = 0.494_276_547_328_469_4;
 
 /// The ports of a `bq_raw`, in the order the config lists them.
 const PORTS: [&str; 6] = ["b0", "b1", "b2", "a0", "a1", "a2"];
@@ -157,6 +185,9 @@ struct Conf {
     /// The crossfeed stage's ports, as `dir:b0`, `sum:Gain 1`, `mix:Gain 2` (the same values on
     /// both channels).
     stage: Vec<(String, f64)>,
+    /// The loudness stage's ports, as `ld1:b0` (the same on both channels); empty in a config
+    /// that has none (a test's own), which the node holds as the identity.
+    ld: Vec<(String, f64)>,
 }
 
 /// `text`'s number after `key`.
@@ -172,6 +203,7 @@ fn parse_conf(text: &str) -> Conf {
         pre: f64::NAN,
         slots: vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]; SLOTS],
         stage: Vec::new(),
+        ld: Vec::new(),
     };
     for node in text.split("{ type = builtin").skip(1) {
         let name = node
@@ -197,9 +229,19 @@ fn parse_conf(text: &str) -> Conf {
         } else if name == "ldel" {
             let value = field(node, "\"Delay (s)\" = ").expect("a delay");
             conf.stage.push(("del:Delay (s)".to_string(), value));
+        } else if name == "lvs" {
+            for gain in ["Gain 1", "Gain 2", "Gain 3"] {
+                let value = field(node, &format!("\"{gain}\" = ")).expect("a speakers gain");
+                conf.stage.push((format!("vs:{gain}"), value));
+            }
         } else if name == "lmix" {
             let value = field(node, "\"Gain 2\" = ").expect("the mixer's gain");
             conf.stage.push(("mix:Gain 2".to_string(), value));
+        } else if name == "lld1" || name == "lld2" {
+            for port in PORTS {
+                let value = field(node, &format!(" {port} = ")).expect("a coefficient");
+                conf.ld.push((format!("{}:{port}", &name[1..]), value));
+            }
         } else if let Some(slot) = name.strip_prefix('l').and_then(|n| n.parse::<usize>().ok()) {
             for (value, port) in conf.slots[slot - 1].iter_mut().zip(PORTS) {
                 *value = field(node, &format!(" {port} = ")).expect("a coefficient");
@@ -250,7 +292,8 @@ impl Node {
         node
     }
 
-    /// Every slot and every port of the stage takes the config's values again.
+    /// Every slot and every port of the stages (crossfeed, loudness) takes the config's values
+    /// again.
     fn load_slots(&mut self) {
         // A config written without a stage (a test's own) holds the bypass.
         let bypass: Vec<(String, f64)> = crossfeed_params(&super::crossfeed::Stage::bypass())
@@ -264,6 +307,23 @@ impl Node {
         };
         for channel in ['l', 'r'] {
             for (port, value) in stage {
+                let name = format!("{channel}{port}");
+                let held = held_value(&name, *value);
+                self.ports.insert(name, held);
+            }
+        }
+        // The loudness stage: the config's, or the identity a config without it holds.
+        let identity: Vec<(String, f64)> = loudness_params(&loudness::Stage::identity().sections)
+            .into_iter()
+            .filter(|(name, _)| name.starts_with('l'))
+            .map(|(name, value)| (name[1..].to_string(), value))
+            .collect();
+        let ld = match self.started_from.ld.is_empty() {
+            true => &identity,
+            false => &self.started_from.ld,
+        };
+        for channel in ['l', 'r'] {
+            for (port, value) in ld {
                 let name = format!("{channel}{port}");
                 let held = held_value(&name, *value);
                 self.ports.insert(name, held);
@@ -299,6 +359,8 @@ struct Cli {
     /// A refusal that shows after this many more reads of the flag: the session's reader task
     /// sets it a moment after `pw-cli` prints it.
     refusal_in: Option<u8>,
+    /// When the session last started it, which keeps the next start [`RESTART_GAP_MS`] away.
+    started_ms: Option<u64>,
 }
 
 impl Cli {
@@ -364,6 +426,14 @@ struct World {
     broken: Vec<String>,
     /// What happened, when a run is traced.
     trace: Option<Vec<String>>,
+    /// A stream plays through the chain's node, whichever node that is.
+    playing: bool,
+    /// The computer's volume as the gain on the samples (1.0 full), and its mute.
+    volume: f64,
+    muted: bool,
+    /// The next reads of the node alone (the session's `pw-dump <id>` before each line) find
+    /// nothing: the read did not answer in time. The line is not written.
+    fail_key_reads: u8,
 }
 
 /// The ids the model gives new nodes.
@@ -417,11 +487,24 @@ impl World {
         )
     }
 
+    /// Whether `pw-cli` is gone and the session may not start it again yet (its restart gap).
+    fn cli_waits(&self) -> bool {
+        !self.cli.alive
+            && self
+                .cli
+                .started_ms
+                .is_some_and(|started| self.clock_ms < started + RESTART_GAP_MS)
+    }
+
     /// Whether something is armed that makes the next line fail once, or a refusal is
-    /// on its way: the controller is then not expected to have settled.
+    /// on its way, or `pw-cli` is gone and cannot be started again yet (a run of refused sends
+    /// ends it at every write, so the restart gap outlasts the refusal by up to a second): the
+    /// controller is then not expected to have settled.
     fn disturbed(&self) -> bool {
-        self.fail_next_write
+        self.cli_waits()
+            || self.fail_next_write
             || self.cli.dies_after_next_line.is_some()
+            || self.fail_key_reads > 0
             || self.cli.refused
             || self.cli.refusal_in.is_some()
             || self.refuse_sends_until_ms > self.clock_ms
@@ -468,17 +551,19 @@ impl World {
             self.unreconciled = false;
         }
         let serial = self.next_serial;
-        let pre = self
-            .node
-            .as_ref()
-            .map(|node| 20.0 * node.value("lpre:Mult").log10());
-        let peaks = self.node.as_ref().map(|node| {
-            let (sets, _) = played(node, 'l');
-            RATES.map(|rate| format!("{:.2}", dense_peak(&sets, rate)))
-        });
-        self.note(|| {
+        // The note's peaks are eight dense scans: worked out only for a traced run.
+        let node = self.node.as_ref();
+        let line = self.trace.is_some().then(|| {
+            let pre = node.map(|node| 20.0 * node.value("lpre:Mult").log10());
+            let peaks = node.map(|node| {
+                let (sets, _) = played(node, 'l');
+                RATES.map(|rate| format!("{:.2}", dense_peak(&sets, rate)))
+            });
             format!("node {id} (serial {serial}) starts from the config on disk (ours: {ours}), preamp {pre:?}, slot peaks at the rates {peaks:?}")
         });
+        if let Some(line) = line {
+            self.note(|| line);
+        }
     }
 
     fn listed(&self) -> Option<&Node> {
@@ -528,9 +613,17 @@ impl World {
             crossfeed: request.crossfeed.clone(),
             crossfeed_on: request.crossfeed.is_some(),
             flat: request.flat,
-            speakers: None,
-            speakers_on: false,
-            speakers_loaded: None,
+            speakers: request
+                .speakers
+                .as_ref()
+                .map(|speakers| speakers.id.clone()),
+            speakers_on: request.speakers.is_some(),
+            speakers_loaded: request
+                .speakers
+                .as_ref()
+                .map(|speakers| speakers.id.clone()),
+            crossfeed_loaded: None,
+            loudness: None,
         };
         Ok((state, parse_conf(&text)))
     }
@@ -575,6 +668,8 @@ impl World {
         });
         let lands = !matches!(self.cli.dies_after_next_line, Some(false));
         self.lost_line |= !lands;
+        let rate = self.sink_rate;
+        let mut part_way = Vec::new();
         match self.node.as_mut() {
             Some(node) if node.id == id => {
                 if lands {
@@ -584,9 +679,31 @@ impl World {
                     }) {
                         self.unreconciled = false;
                     }
-                    for (name, value) in params {
+                    // A node may play a line taken in part, a node of the graph at a time:
+                    // the loudness stage alone stays under unity once each of its sections has
+                    // taken what the line gives it.
+                    let section_ends: Vec<usize> = ["lld1:", "lld2:", "rld1:", "rld2:"]
+                        .iter()
+                        .filter_map(|section| {
+                            params
+                                .iter()
+                                .rposition(|(name, _)| name.starts_with(section))
+                        })
+                        .collect();
+                    for (at, (name, value)) in params.iter().enumerate() {
                         if node.ports.contains_key(name) {
                             node.ports.insert(name.clone(), held_value(name, *value));
+                        }
+                        if section_ends.contains(&at) {
+                            let channel = name.chars().next().unwrap_or('l');
+                            let sets = loudness_sets(node, channel);
+                            let peak = dense_peak(&sets, rate);
+                            if peak > TOLERANCE_DB {
+                                part_way.push(format!(
+                                    "node {} plays the loudness stage {peak:+.3} dB over unity part way through a line, after {name}, at {rate} Hz: {sets:?}",
+                                    node.id
+                                ));
+                            }
                         }
                     }
                 }
@@ -604,6 +721,7 @@ impl World {
                 }
             }
         }
+        self.broken.extend(part_way);
         if self.cli.dies_after_next_line.take().is_some() {
             self.cli.end();
             self.cli.refused = false;
@@ -633,7 +751,9 @@ impl Chain for ModelChain {
             world.fail_apply -= 1;
             return Err(failure("the apply is refused"));
         }
-        let (state, conf) = World::stage_apply(request)?;
+        let (mut state, conf) = World::stage_apply(request)?;
+        // The loudness's settings stay across an apply, as the real host keeps them.
+        state.loudness = world.state().and_then(|previous| previous.loudness);
         if world.fail_start > 0 {
             // The old chain is stopped and the new one does not start.
             world.fail_start -= 1;
@@ -701,17 +821,18 @@ type ModelParams = Session<ModelLink>;
 /// the world, its restart gap in the world's clock, and the node the world lists.
 struct ModelLink {
     world: Shared,
-    started_ms: Option<u64>,
     /// The controller dropped the node to look at the chain: the next read is that look.
     looking: bool,
+    /// The computer's volume the last read of the graph saw.
+    level: Option<SinkLevel>,
 }
 
 impl ModelLink {
     fn params(world: Shared) -> ModelParams {
         Session::new(ModelLink {
             world,
-            started_ms: None,
             looking: false,
+            level: None,
         })
     }
 }
@@ -741,15 +862,12 @@ impl Link for ModelLink {
         if world.cli.alive {
             return Some(false);
         }
-        if self
-            .started_ms
-            .is_some_and(|started| world.clock_ms < started + RESTART_GAP_MS)
-        {
+        if world.cli_waits() {
             return None;
         }
-        self.started_ms = Some(world.clock_ms);
         world.cli = Cli {
             alive: true,
+            started_ms: Some(world.clock_ms),
             ..Cli::default()
         };
         Some(true)
@@ -779,12 +897,18 @@ impl Link for ModelLink {
     async fn read_node(&mut self) -> Option<LiveNode> {
         let looking = std::mem::take(&mut self.looking);
         let mut world = world(&self.world);
+        // The dump the node is read from shows the sink's volume, whether the node is listed or
+        // not.
+        self.level = Some(SinkLevel {
+            linear: world.volume,
+            muted: world.muted,
+        });
         let found = world.listed().map(|node| LiveNode {
             id: node.id,
             serial: Some(node.serial),
             rate_hz: Some(world.sink_rate),
             sink: None,
-            playing: false,
+            playing: world.playing,
             params: node
                 .ports
                 .iter()
@@ -801,6 +925,24 @@ impl Link for ModelLink {
         let mut world = world(&self.world);
         world.looked_rate = world.sink_rate;
         Some(world.sink_rate)
+    }
+
+    fn level(&self) -> Option<SinkLevel> {
+        self.level
+    }
+
+    async fn read_key(&mut self, id: u32) -> Option<NodeKey> {
+        {
+            let mut world = world(&self.world);
+            if world.fail_key_reads > 0 {
+                world.fail_key_reads -= 1;
+                return None;
+            }
+        }
+        self.read_node()
+            .await
+            .map(|node| node.key())
+            .filter(|key| key.id == id)
     }
 }
 
@@ -836,10 +978,24 @@ fn root_angle(p0: f64, p1: f64, p2: f64) -> Option<f64> {
     (c > 0.0 && cosine.abs() < 1.0).then(|| cosine.acos())
 }
 
+/// The highest `sets` rise anywhere from 0.01 Hz to Nyquist at `rate_hz`: [`dense_scan`] of the
+/// slots that are not the identity.
+fn dense_peak(sets: &[[f64; 5]], rate_hz: u32) -> f64 {
+    // An identity slot adds exactly +0 dB at every frequency (both powers are exactly 1) and has
+    // no roots, so leaving it out changes no sum by a bit; one is kept when all are, as the sum of
+    // nothing is -0.
+    let identity = |c: &[f64; 5]| c[0] == 1.0 && c[1..].iter().all(|v| *v == 0.0);
+    let mut active: Vec<[f64; 5]> = sets.iter().filter(|c| !identity(c)).copied().collect();
+    if active.is_empty() {
+        active.extend(sets.first());
+    }
+    dense_scan(&active, rate_hz)
+}
+
 /// The highest `sets` rise anywhere from 0.01 Hz to Nyquist at `rate_hz`, DC and Nyquist
 /// included: a log grid in frequency, a second log grid in the distance from Nyquist, each
 /// biquad's own pole and zero angles, and every local maximum zoomed in on by repeated scans.
-fn dense_peak(sets: &[[f64; 5]], rate_hz: u32) -> f64 {
+fn dense_scan(sets: &[[f64; 5]], rate_hz: u32) -> f64 {
     use std::f64::consts::PI;
     let rate = f64::from(rate_hz);
     let total = |w: f64| summed_db(sets, w);
@@ -897,25 +1053,39 @@ fn stable(c: &[f64; 5]) -> bool {
     (c[0] == 1.0 && c[1] == c[3] && c[2] == c[4]) || (c[4].abs() < 1.0 && c[3].abs() < 1.0 + c[4])
 }
 
-/// What the node plays on one channel: the biquads and the preamp in dB.
+/// The biquad `[b0, b1, b2, a1, a2]` the node's `bq_raw` named `name` plays (its six ports, over
+/// `a0`).
+fn raw_set(node: &Node, name: &str) -> [f64; 5] {
+    let at = |port: &str| node.value(&format!("{name}:{port}"));
+    let a0 = at("a0");
+    [
+        at("b0") / a0,
+        at("b1") / a0,
+        at("b2") / a0,
+        at("a1") / a0,
+        at("a2") / a0,
+    ]
+}
+
+/// What the node plays on one channel: the biquads (the slots, then the loudness stage's two
+/// sections) and the preamp in dB.
 fn played(node: &Node, channel: char) -> (Vec<[f64; 5]>, f64) {
     let sets = (1..=SLOTS)
-        .map(|slot| {
-            let at = |port: &str| node.value(&format!("{channel}{slot:02}:{port}"));
-            let a0 = at("a0");
-            [
-                at("b0") / a0,
-                at("b1") / a0,
-                at("b2") / a0,
-                at("a1") / a0,
-                at("a2") / a0,
-            ]
-        })
+        .map(|slot| raw_set(node, &format!("{channel}{slot:02}")))
+        .chain(loudness_sets(node, channel))
         .collect();
     (
         sets,
         20.0 * node.value(&format!("{channel}pre:Mult")).log10(),
     )
+}
+
+/// The loudness stage's two sections the node plays on one channel.
+fn loudness_sets(node: &Node, channel: char) -> Vec<[f64; 5]> {
+    ["ld1", "ld2"]
+        .iter()
+        .map(|name| raw_set(node, &format!("{channel}{name}")))
+        .collect()
 }
 
 /// The values of the crossfeed stage's ports on one channel, in the order [`stage_gain_db`]
@@ -1056,6 +1226,36 @@ pub enum Event {
     /// The EQ's slots and the stage's ports go back to the config's values at the same node and
     /// rate, the preamp as last set (PipeWire rebuilt the slots alone).
     SlotRevert,
+    /// A stream starts or stops playing through the chain.
+    Playing(bool),
+    /// A hand changes the virtual speakers: the set at `set` of the lab's two (`set-a`, `set-b`),
+    /// and on or off, applied last.
+    Speakers {
+        on: Option<bool>,
+        set: Option<usize>,
+    },
+    /// The computer's volume goes to `pct` percent of the volume scale: through the daemon
+    /// (`daemon`), whose write hands the controller what it read back at once, or from outside,
+    /// which the next look reads.
+    Volume { pct: f64, daemon: bool },
+    /// The computer's volume moves by `delta` percent (a volume key), held to 0-100.
+    VolumeStep { delta: f64, daemon: bool },
+    /// The sink is muted or unmuted, through the daemon or from outside.
+    Mute { muted: bool, daemon: bool },
+    /// The daemon crashed and a new one takes the chain over (as [`Event::DaemonRestart`]), and
+    /// its first line does not land: the read of the node before it does not answer in time (the
+    /// line is not written, and the next one goes on the next tick), or (`lost`) a `pw-cli` takes
+    /// it and dies without applying it.
+    Takeover { lost: bool },
+    /// A hand changes the loudness: on or off, the strength, the reference as a number or the
+    /// volume now, as a drag (`done` false) or a release.
+    Loudness {
+        on: Option<bool>,
+        strength_pct: Option<f64>,
+        reference_pct: Option<f64>,
+        reference_now: bool,
+        done: bool,
+    },
 }
 
 fn filter(rng: &mut Rng, hand: bool) -> SourceFilter {
@@ -1135,10 +1335,117 @@ pub fn generate_targeted(seed: u64, len: usize) -> Vec<Event> {
         .collect()
 }
 
+/// A sequence of `len` events for `seed` from the speakers profile: [`generate`]'s mix with one
+/// event in eight a change of the virtual speakers (a set chosen, on, off, or both). A stream of
+/// its own: the seeds of the other profiles do not depend on it.
+pub fn generate_speakers(seed: u64, len: usize) -> Vec<Event> {
+    let mut rng = Rng::new(seed ^ 0x5BEA_CE25_0FF1_CE00);
+    (0..len)
+        .map(|_| match rng.chance(12) {
+            true => Event::Speakers {
+                on: match rng.below(3) {
+                    0 => None,
+                    1 => Some(true),
+                    _ => Some(false),
+                },
+                set: rng.chance(40).then(|| rng.below(2) as usize),
+            },
+            false => {
+                let roll = rng.below(100);
+                event_for(&mut rng, roll)
+            }
+        })
+        .collect()
+}
+
+/// The sink's rates the high-rate profile moves among: [`RATES`] and the two above 384 kHz, where
+/// no stage runs but a graph may be rebuilt.
+const HIGH_RATES: [u32; 10] = [
+    44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000, 705_600, 768_000,
+];
+
+/// A sequence of `len` events for `seed` from the high-rate profile: rate changes among
+/// [`HIGH_RATES`] (about a third of the draw) mixed with crossfeed changes (on, off, a model, an
+/// amount, a delay; drags in flight and their ends), ticks, drags of the points, and the rest of
+/// [`generate`]'s mix (faults, restarts, loads). A separate stream: the seeds of [`generate`] and
+/// [`generate_targeted`] do not depend on it.
+pub fn generate_highrate(seed: u64, len: usize) -> Vec<Event> {
+    let mut rng = Rng::new(seed ^ 0x4869_5261_7465_5F31);
+    (0..len)
+        .map(|_| match rng.below(100) {
+            0..=29 => Event::Rate(rng.pick(&HIGH_RATES)),
+            30..=54 => event_for(&mut rng, 16),
+            55..=69 => Event::Ticks(1 + rng.below(30) as u32),
+            70..=79 => event_for(&mut rng, 20),
+            _ => {
+                let roll = rng.below(100);
+                event_for(&mut rng, roll)
+            }
+        })
+        .collect()
+}
+
+/// A sequence of `len` events for `seed` from the loudness profile: about two events in five move
+/// the computer's volume (a key's step of 1 %, anywhere, or to 0 or 100 %; through the daemon or
+/// from outside), with mutes, crash takeovers whose first line does not land, loudness changes (on, off, strength, reference as a number or the
+/// volume now, drags and releases), rate changes among [`HIGH_RATES`], ticks, and the rest of
+/// [`generate`]'s mix. A stream of its own: the seeds of the other profiles do not depend on it.
+pub fn generate_loudness(seed: u64, len: usize) -> Vec<Event> {
+    let mut rng = Rng::new(seed ^ 0x4C6F_7564_6E65_7373);
+    (0..len)
+        .map(|_| match rng.below(100) {
+            0..=39 => {
+                let daemon = rng.chance(60);
+                match rng.below(10) {
+                    0..=4 => Event::VolumeStep {
+                        delta: if rng.chance(50) { 1.0 } else { -1.0 },
+                        daemon,
+                    },
+                    5..=7 => Event::Volume {
+                        pct: rng.range(0.0, 100.0),
+                        daemon,
+                    },
+                    8 => Event::Volume { pct: 0.0, daemon },
+                    _ => Event::Volume { pct: 100.0, daemon },
+                }
+            }
+            40..=44 => Event::Mute {
+                muted: rng.chance(50),
+                daemon: rng.chance(60),
+            },
+            45..=46 => Event::Takeover {
+                lost: rng.chance(50),
+            },
+            47..=59 => {
+                let on = rng.chance(35).then(|| rng.chance(70));
+                let strength_pct = rng.chance(30).then(|| rng.range(0.0, 100.0));
+                let reference_pct = rng.chance(20).then(|| rng.range(1.0, 100.0));
+                let reference_now = rng.chance(10);
+                // A change that names nothing is refused: every one names something.
+                let names = strength_pct.is_some() || reference_pct.is_some() || reference_now;
+                Event::Loudness {
+                    on: on.or((!names).then_some(true)),
+                    strength_pct,
+                    reference_pct,
+                    reference_now,
+                    done: rng.chance(75),
+                }
+            }
+            60..=67 => Event::Rate(rng.pick(&HIGH_RATES)),
+            68..=79 => Event::Ticks(1 + rng.below(30) as u32),
+            _ => {
+                let roll = rng.below(100);
+                event_for(&mut rng, roll)
+            }
+        })
+        .collect()
+}
+
 /// The event a `roll` of 0 to 99 stands for, with its fields drawn from `rng`.
 fn event_for(rng: &mut Rng, roll: u64) -> Event {
     match roll {
-        0..=15 => Event::Ticks(1 + rng.below(45) as u32),
+        0..=13 => Event::Ticks(1 + rng.below(45) as u32),
+        14..=15 => Event::Playing(rng.chance(50)),
         16..=19 => {
             let model = rng.chance(25).then(|| rng.below(4) as usize);
             let amount_pct = rng.chance(50).then(|| rng.range(5.0, 50.0));
@@ -1255,22 +1562,80 @@ impl Peaks {
     }
 }
 
-/// The stage gains worked out so far, by port values and rate.
+/// The stage gains worked out so far, by port values and rate. They are kept on the thread, for
+/// every sequence it runs: a stage (a model's own settings at a rate) comes back from one seed
+/// to the next, and one answer is a scan of every hertz to Nyquist.
 #[derive(Default)]
-struct StageGains(HashMap<Vec<u64>, f64>);
+struct StageGains;
 
 impl StageGains {
     fn of(&mut self, values: &[f64], rate_hz: u32) -> f64 {
+        thread_local! {
+            static KEPT: std::cell::RefCell<HashMap<Vec<u64>, f64>> =
+                std::cell::RefCell::new(HashMap::new());
+        }
         let key: Vec<u64> = std::iter::once(u64::from(rate_hz))
             .chain(values.iter().map(|v| v.to_bits()))
             .collect();
-        if self.0.len() > 2_000 {
-            self.0.clear();
+        KEPT.with_borrow_mut(|kept| {
+            if kept.len() > 2_000 {
+                kept.clear();
+            }
+            *kept
+                .entry(key)
+                .or_insert_with(|| stage_gain_db(values, rate_hz))
+        })
+    }
+}
+
+/// The lab's sets in a store at `path`: each path of a set one impulse of [`SET_PATH_GAIN`], at
+/// a place of its own in each set.
+fn put_sets(path: &std::path::Path) {
+    let store = svolder_speakers::Store::new(path);
+    for (at, id) in SETS.iter().enumerate() {
+        let mut channels = vec![vec![0.0f32; 64]; 4];
+        for (n, channel) in channels.iter_mut().enumerate() {
+            channel[at * 8 + n] = SET_PATH_GAIN as f32;
         }
-        *self
-            .0
-            .entry(key)
-            .or_insert_with(|| stage_gain_db(values, rate_hz))
+        let wav = svolder_speakers::wav::write(48_000, &channels);
+        let meta = svolder_speakers::SetMeta {
+            id: (*id).to_string(),
+            room: svolder_speakers::Room::No,
+            label: format!("Lab set {at}"),
+            licence: "CC-BY-4.0".to_string(),
+            credit: "The lab".to_string(),
+            source_url: "https://example.invalid/set".to_string(),
+            source_sha256: "0".repeat(64),
+            wav_sha256: String::new(),
+            rate: 48_000,
+            taps: 64,
+            taps_ms: 64.0 / 48.0,
+            angles: None,
+            loudness_db: -6.9,
+            scale_db: -3.0,
+            worst_gain_db: -0.1,
+            cut: false,
+            own: false,
+            added: 1,
+            used: 1,
+        };
+        store.save(meta, &wav, None).expect("a lab set is kept");
+    }
+}
+
+/// The most the virtual speakers' stage the node holds adds on `channel`, in dB: the dry input
+/// and the two paths into the ear, each at its mixer gain, added in phase (0 dB with no stage).
+fn speakers_db(node: &Node, channel: char) -> f64 {
+    let gain = |n: u8| {
+        node.ports
+            .get(&format!("{channel}vs:Gain {n}"))
+            .map(|value| f64::from(*value).abs())
+    };
+    match (gain(1), gain(2), gain(3)) {
+        (Some(dry), Some(left), Some(right)) => {
+            20.0 * (dry + (left + right) * SET_PATH_GAIN).max(1e-12).log10()
+        }
+        _ => 0.0,
     }
 }
 
@@ -1289,6 +1654,8 @@ struct Lab {
     quiet_since_ms: u64,
     /// The liveness rule has been checked since then.
     live_checked: bool,
+    /// The loudness's liveness rule has been checked since then.
+    ld_checked: bool,
 }
 
 /// Why a sequence failed.
@@ -1301,20 +1668,27 @@ pub struct Failure {
 }
 
 fn new_control(shared: &Shared) -> EqControl {
-    let path = world(shared).state_path();
-    EqControl::new(
+    let (path, sets) = {
+        let world = world(shared);
+        (world.state_path(), world.dir.join("speakers"))
+    };
+    let mut control = EqControl::new(
         Arc::new(ModelChain {
             world: shared.clone(),
         }),
         Box::new(ModelLink::params(shared.clone())),
         Keep::File(path),
     )
+    .with_speakers_dir(&sets);
+    control.set_idle_ticks(IDLE_TICKS);
+    control
 }
 
 impl Lab {
     /// A world with no chain, the sink at `rate`, and a controller over it.
     fn new(rate: u32) -> Lab {
         let dir = Dir::new();
+        put_sets(&dir.0.join("speakers"));
         let shared: Shared = Arc::new(Mutex::new(World {
             dir: dir.0.clone(),
             clock_ms: 10_000,
@@ -1343,18 +1717,23 @@ impl Lab {
             lost_line: false,
             unreconciled: false,
             trace: None,
+            playing: false,
+            volume: 1.0,
+            muted: false,
+            fail_key_reads: 0,
         }));
         let control = new_control(&shared);
         Lab {
             shared,
             control,
             peaks: Peaks::default(),
-            stages: StageGains::default(),
+            stages: StageGains,
             daemon_ticks: 0,
             _dir: dir,
             at: 0,
             quiet_since_ms: 10_000,
             live_checked: false,
+            ld_checked: false,
         }
     }
 
@@ -1369,6 +1748,8 @@ impl Lab {
                     world.sink_rate,
                     node.id,
                     ['l', 'r'].map(|channel| stage_values(node, channel)),
+                    ['l', 'r'].map(|channel| speakers_db(node, channel)),
+                    ['l', 'r'].map(|channel| loudness_sets(node, channel)),
                 )
             });
             (broken, played)
@@ -1382,11 +1763,23 @@ impl Lab {
         if let Some(broken) = broken {
             return fail(broken);
         }
-        let Some((channels, rate, id, stages)) = played else {
+        let Some((channels, rate, id, stages, speakers, loudness)) = played else {
             return Ok(());
         };
-        for ((channel, (sets, pre_db)), stage) in ['l', 'r'].into_iter().zip(&channels).zip(&stages)
+        for ((((channel, (sets, pre_db)), stage), speakers), loudness) in ['l', 'r']
+            .into_iter()
+            .zip(&channels)
+            .zip(&stages)
+            .zip(speakers)
+            .zip(&loudness)
         {
+            // The loudness stage alone is cut-only, whatever the preamp.
+            let cut = self.peaks.of(loudness, rate);
+            if cut > TOLERANCE_DB {
+                return fail(format!(
+                    "node {id} plays the loudness stage alone {cut:+.3} dB over unity at {rate} Hz on {channel}: {loudness:?}"
+                ));
+            }
             if let Some(slot) = sets.iter().position(|set| !stable(set)) {
                 return fail(format!(
                     "node {id} plays an unstable biquad in {channel}{:02}: {:?}",
@@ -1396,10 +1789,10 @@ impl Lab {
             }
             let peak = self.peaks.of(sets, rate);
             let stage = self.stages.of(stage, rate);
-            if peak + stage + pre_db > TOLERANCE_DB {
+            if peak + stage + speakers + pre_db > TOLERANCE_DB {
                 return fail(format!(
-                    "node {id} plays {:+.3} dB over unity at {rate} Hz on {channel}: the slots peak {peak:+.3} dB and the crossfeed stage adds up to {stage:+.3} dB under a preamp of {pre_db:+.3} dB",
-                    peak + stage + pre_db
+                    "node {id} plays {:+.3} dB over unity at {rate} Hz on {channel}: the slots peak {peak:+.3} dB, the crossfeed stage adds up to {stage:+.3} dB and the speakers {speakers:+.3} dB under a preamp of {pre_db:+.3} dB",
+                    peak + stage + speakers + pre_db
                 ));
             }
         }
@@ -1419,17 +1812,96 @@ impl Lab {
         Ok(())
     }
 
-    /// Run `event`, and the liveness rule once the world has been quiet long enough.
+    /// Run `event`, and the liveness rules once the world has been quiet long enough.
     async fn run(&mut self, event: &Event) -> Result<(), Failure> {
         self.run_event(event).await?;
         match event {
-            Event::Ticks(_) => self.liveness().await,
+            Event::Ticks(_) => {
+                self.liveness().await?;
+                self.ld_liveness()
+            }
             _ => {
                 self.quiet_since_ms = world(&self.shared).clock_ms;
                 self.live_checked = false;
+                self.ld_checked = false;
                 Ok(())
             }
         }
+    }
+
+    /// Whether the loudness has anything to follow or to undo: it is on, or the node holds a stage
+    /// other than the identity.
+    fn ld_in_play(&self) -> bool {
+        let identity = loudness::Stage::identity().sections;
+        let held = world(&self.shared).node.as_ref().is_some_and(|node| {
+            ['l', 'r']
+                .into_iter()
+                .any(|channel| loudness_sets(node, channel) != identity)
+        });
+        held || self.control.view().loudness.is_some_and(|ld| ld.on)
+    }
+
+    /// The loudness's liveness rule, once after [`LD_QUIET_MS`] with no event and nothing armed
+    /// to fail: when the controller says it is live, the node's stage is the one the settings
+    /// make of the world's volume (within [`LIVE_TOLERANCE_DB`] on the grid of [`LIVE_GRID`]
+    /// frequencies), the identity while loudness is off. Muted, it holds where it was.
+    fn ld_liveness(&mut self) -> Result<(), Failure> {
+        let (clock, disturbed, muted, volume, rate, node) = {
+            let world = world(&self.shared);
+            (
+                world.clock_ms,
+                world.disturbed(),
+                world.muted,
+                world.volume,
+                world.sink_rate,
+                world
+                    .node
+                    .as_ref()
+                    .map(|node| ['l', 'r'].map(|channel| loudness_sets(node, channel))),
+            )
+        };
+        if self.ld_checked || clock < self.quiet_since_ms + LD_QUIET_MS || disturbed {
+            return Ok(());
+        }
+        self.ld_checked = true;
+        let view = self.control.view();
+        let (Some(ld), Some(node), true) = (view.loudness, node, view.live) else {
+            return Ok(());
+        };
+        if muted && ld.on {
+            return Ok(());
+        }
+        let settings = loudness::LoudnessSettings {
+            on: ld.on,
+            strength_pct: ld.strength_pct,
+            reference_pct: ld.reference_pct,
+        };
+        let want = match ld.on {
+            true => loudness::quantise_db(loudness::depth_db(volume, &settings)),
+            false => 0.0,
+        };
+        let stage = loudness::stage(want, rate);
+        let top = (f64::from(rate) * 0.45).min(20_000.0);
+        for (channel, sets) in ['l', 'r'].into_iter().zip(&node) {
+            for step in 0..=LIVE_GRID {
+                let f = 20.0 * (top / 20.0).powf(f64::from(step) / f64::from(LIVE_GRID));
+                let w = 2.0 * std::f64::consts::PI * f / f64::from(rate);
+                let plays = summed_db(sets, w);
+                let wanted = stage.response_db(f, rate);
+                if (plays - wanted).abs() > LIVE_TOLERANCE_DB {
+                    return Err(Failure {
+                        event: self.at,
+                        what: format!(
+                            "the loudness says it follows the volume ({}, {:.1} dB of depth for a volume of {:.1} %), and the node's stage plays {plays:+.3} dB at {f:.0} Hz on {channel} where {want:.1} dB of depth makes {wanted:+.3} dB, at {rate} Hz",
+                            if ld.on { "on" } else { "off" },
+                            ld.depth_db,
+                            volume.max(0.0).cbrt() * 100.0
+                        ),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The end of every sequence, which no event stands for: the faults that were armed and not
@@ -1448,9 +1920,18 @@ impl Lab {
             world.refuse_sends_until_ms = 0;
             world.cli.dies_after_next_line = None;
             world.refusal_lag = 0;
+            world.fail_key_reads = 0;
         }
         self.run(&Event::Reload).await?;
         for _ in 0..TAIL_TICKS / 45 {
+            self.run(&Event::Ticks(45)).await?;
+        }
+        // The loudness's rule waits longer (a look and a whole glide): asked of a sequence that
+        // left it something to follow or undo.
+        for _ in 0..2 {
+            if self.ld_checked || !self.ld_in_play() {
+                break;
+            }
             self.run(&Event::Ticks(45)).await?;
         }
         Ok(())
@@ -1473,8 +1954,9 @@ impl Lab {
     /// The liveness rule, once after [`QUIET_MS`] with no event and nothing armed to fail: the
     /// controller must not have stopped serving. When it says it is on and live, the node plays
     /// the points it shows, at the rate the sink runs at, under the preamp it shows (within
-    /// [`LIVE_TOLERANCE_DB`] at every frequency of a grid). When it is off and its curve is
-    /// playable at the sink's rate, turning it on works.
+    /// [`LIVE_TOLERANCE_DB`] at every frequency of a grid). When it says it is live, a node with
+    /// the virtual speakers' stage plays them on or off as the view says. When it is off and its
+    /// curve is playable at the sink's rate, turning it on works.
     async fn liveness(&mut self) -> Result<(), Failure> {
         let (clock, disturbed) = {
             let world = world(&self.shared);
@@ -1511,6 +1993,23 @@ impl Lab {
                 what,
             })
         };
+        // The virtual speakers play as the view says, whenever it says it is live.
+        let wet = world(&self.shared).node.as_ref().and_then(|node| {
+            node.ports
+                .get("lvs:Gain 2")
+                .map(|gain| f64::from(*gain) > 0.0)
+        });
+        let shown = view.speakers.as_ref().is_some_and(|speakers| speakers.on);
+        if view.live
+            && let Some(wet) = wet
+            && wet != shown
+        {
+            return fail(format!(
+                "the EQ says it is live with the virtual speakers {}, and the node plays them {}",
+                if shown { "on" } else { "off" },
+                if wet { "on" } else { "off" }
+            ));
+        }
         match (view.on && view.live, node) {
             (true, Some(channels)) => {
                 let (sets, _) = super::live::played_sets(
@@ -1525,7 +2024,7 @@ impl Lab {
                     for step in 0..=LIVE_GRID {
                         let f = 20.0 * (top / 20.0).powf(f64::from(step) / f64::from(LIVE_GRID));
                         let w = 2.0 * std::f64::consts::PI * f / f64::from(rate);
-                        let plays = summed_db(node_sets, w) + pre_db;
+                        let plays = summed_db(&node_sets[..SLOTS], w) + pre_db;
                         let shown = summed_db(&sets, w) + view.preamp_db;
                         if (plays - shown).abs() > LIVE_TOLERANCE_DB {
                             return fail(format!(
@@ -1562,6 +2061,49 @@ impl Lab {
             _ => {}
         }
         Ok(())
+    }
+
+    /// The daemon restarts: a new controller over the same files and the same chain; its start
+    /// writes and sends nothing.
+    fn daemon_restart(&mut self) -> Result<(), Failure> {
+        let before = {
+            let mut world = world(&self.shared);
+            // The old daemon's `pw-cli` ends with it.
+            world.cli = Cli::default();
+            world.footprint()
+        };
+        self.control = new_control(&self.shared);
+        self.daemon_ticks = 0;
+        {
+            let mut world = world(&self.shared);
+            if world.node.is_some() {
+                world.unreconciled = true;
+            }
+        }
+        if world(&self.shared).footprint() != before {
+            return Err(Failure {
+                event: self.at,
+                what: "the daemon wrote or sent something while it started".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The computer's volume goes to `pct` percent (held to 0-100) and the mute to `muted`; a
+    /// write through the daemon hands the controller what it read back, as the daemon does.
+    fn volume_to(&mut self, pct: f64, muted: bool, daemon: bool) {
+        let pct = pct.clamp(0.0, 100.0);
+        {
+            let mut world = world(&self.shared);
+            world.volume = (pct / 100.0).powi(3);
+            world.muted = muted;
+            world.note(|| {
+                format!("the volume is {pct:.1} %, muted: {muted}, through the daemon: {daemon}")
+            });
+        }
+        if daemon {
+            self.control.level_hint().volume(pct / 100.0, muted);
+        }
     }
 
     async fn run_event(&mut self, event: &Event) -> Result<(), Failure> {
@@ -1673,9 +2215,12 @@ impl Lab {
                 };
                 // The daemon is not blocked by the command line: it ticks in the wait.
                 let staged = World::stage_apply(request);
-                if let Ok((state, conf)) = staged {
+                if let Ok((mut state, conf)) = staged {
                     {
                         let mut world = world(&self.shared);
+                        // The command line keeps the loudness's settings the state held when it
+                        // started, as the real host's apply does.
+                        state.loudness = world.state().and_then(|previous| previous.loudness);
                         world.conf = Some(conf);
                         world.start_node(false);
                     }
@@ -1730,33 +2275,67 @@ impl Lab {
             Event::ListDelay { ms } => world(&self.shared).list_delay_ms = u64::from(*ms),
             Event::FailNextWrite => world(&self.shared).fail_next_write = true,
             Event::RefusalLag(lag) => world(&self.shared).refusal_lag = *lag,
+            Event::Playing(playing) => world(&self.shared).playing = *playing,
+            Event::Speakers { on, set } => {
+                // A change that names nothing is no change.
+                if on.is_some() || set.is_some() {
+                    let _ = self
+                        .control
+                        .speakers(super::control::SpeakersEdit {
+                            on: *on,
+                            set: set.map(|at| SETS[at % SETS.len()].to_string()),
+                            done: true,
+                        })
+                        .await;
+                }
+            }
             Event::SlotRevert => {
                 if let Some(node) = world(&self.shared).node.as_mut() {
                     node.load_slots();
                 }
             }
-            Event::DaemonRestart => {
-                let before = {
-                    let mut world = world(&self.shared);
-                    // The old daemon's `pw-cli` ends with it.
-                    world.cli = Cli::default();
-                    world.footprint()
+            Event::Volume { pct, daemon } => {
+                let muted = world(&self.shared).muted;
+                self.volume_to(*pct, muted, *daemon);
+            }
+            Event::VolumeStep { delta, daemon } => {
+                let (now, muted) = {
+                    let world = world(&self.shared);
+                    (world.volume.max(0.0).cbrt() * 100.0, world.muted)
                 };
-                self.control = new_control(&self.shared);
-                self.daemon_ticks = 0;
-                {
-                    let mut world = world(&self.shared);
-                    if world.node.is_some() {
-                        world.unreconciled = true;
-                    }
-                }
-                if world(&self.shared).footprint() != before {
-                    return Err(Failure {
-                        event: self.at,
-                        what: "the daemon wrote or sent something while it started".to_string(),
-                    });
+                self.volume_to(now + delta, muted, *daemon);
+            }
+            Event::Mute { muted, daemon } => {
+                let now = world(&self.shared).volume.max(0.0).cbrt() * 100.0;
+                self.volume_to(now, *muted, *daemon);
+            }
+            Event::Loudness {
+                on,
+                strength_pct,
+                reference_pct,
+                reference_now,
+                done,
+            } => {
+                let _ = self
+                    .control
+                    .loudness(LoudnessEdit {
+                        on: *on,
+                        strength_pct: *strength_pct,
+                        reference_pct: *reference_pct,
+                        reference_now: *reference_now,
+                        done: *done,
+                    })
+                    .await;
+            }
+            Event::Takeover { lost } => {
+                self.daemon_restart()?;
+                let mut world = world(&self.shared);
+                match lost {
+                    true => world.cli.dies_after_next_line = Some(false),
+                    false => world.fail_key_reads = 1,
                 }
             }
+            Event::DaemonRestart => self.daemon_restart()?,
         }
         self.check()
     }
@@ -1839,6 +2418,29 @@ pub fn sequence_of_targeted(seed: u64) -> (u32, Vec<Event>) {
     (start_rate(seed), generate_targeted(seed, len))
 }
 
+/// The events of `seed` from the speakers profile ([`generate_speakers`]), as the lab runs them.
+pub fn sequence_of_speakers(seed: u64) -> (u32, Vec<Event>) {
+    let mut rng = Rng::new(seed ^ 0xA55A_5AA5);
+    let len = 20 + rng.below(50) as usize;
+    (start_rate(seed), generate_speakers(seed, len))
+}
+
+/// The events of `seed` from the high-rate profile ([`generate_highrate`]), on a sink that starts
+/// at one of [`HIGH_RATES`].
+pub fn sequence_of_highrate(seed: u64) -> (u32, Vec<Event>) {
+    let mut rng = Rng::new(seed ^ 0x3C3C_C3C3);
+    let len = 20 + rng.below(50) as usize;
+    let rate = rng.pick(&HIGH_RATES);
+    (rate, generate_highrate(seed, len))
+}
+
+/// The events of `seed` from the loudness profile ([`generate_loudness`]), as the lab runs them.
+pub fn sequence_of_loudness(seed: u64) -> (u32, Vec<Event>) {
+    let mut rng = Rng::new(seed ^ 0x6C6F_7564_5A5A);
+    let len = 20 + rng.below(50) as usize;
+    (start_rate(seed), generate_loudness(seed, len))
+}
+
 /// `events` with as many removed as still fail the same way: chunks first, then one by one.
 pub fn shrink(rate: u32, events: &[Event]) -> Vec<Event> {
     let mut events = events.to_vec();
@@ -1852,6 +2454,7 @@ pub fn shrink(rate: u32, events: &[Event]) -> Vec<Event> {
             "stale id",
             "while it started",
             "says it is live",
+            "says it follows",
             "turning it on",
             "reload",
             "panic",
@@ -1950,9 +2553,24 @@ pub fn run_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
     run_block(first, runs, sequence_of, ids)
 }
 
+/// [`run_seeds`] on the speakers profile ([`generate_speakers`]).
+pub fn run_speakers_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of_speakers, ids)
+}
+
 /// [`run_seeds`] on the targeted profile ([`generate_targeted`]).
 pub fn run_targeted_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
     run_block(first, runs, sequence_of_targeted, ids)
+}
+
+/// [`run_seeds`] on the high-rate profile ([`generate_highrate`]).
+pub fn run_highrate_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of_highrate, ids)
+}
+
+/// [`run_seeds`] on the loudness profile ([`generate_loudness`]).
+pub fn run_loudness_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of_loudness, ids)
 }
 
 fn run_block(

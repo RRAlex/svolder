@@ -275,74 +275,106 @@ pub fn stage_cost_db(settings: &CrossfeedSettings, rate_hz: u32) -> f64 {
         / 10.0
 }
 
-/// The sink rates a stage worked out at one rate may play at later: those of DACs up to 384 kHz.
-pub(crate) const CONFIG_STAGE_RATES: [u32; 8] = [
-    44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000,
+/// The sink rates a stage worked out at one rate may play at later: those of DACs up to 384 kHz,
+/// and 705.6 and 768 kHz. No stage runs above [`STAGE_RATE_MAX_HZ`], but a graph that holds one in
+/// its config is built again with it at whatever rate the sink moves to, and plays it until the
+/// next look turns it off: that moment is paid for too.
+pub(crate) const CONFIG_STAGE_RATES: [u32; 10] = [
+    44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000, 705_600, 768_000,
 ];
 
-/// How many answers of [`config_stage_cost_db`] are kept: a drag asks for the same settings
-/// several times an update (the view, the send, the save).
-const STAGE_COSTS_KEPT: usize = 8;
+/// The highest sink rate a stage (crossfeed or the virtual speakers) runs at: their headroom is
+/// shown up to it, so above it the stage is turned off with a note, and turning it on there is
+/// refused.
+pub const STAGE_RATE_MAX_HZ: u32 = 384_000;
+
+/// How many answers of [`config_stage_cost_db`] each thread keeps: a drag asks for the same
+/// settings several times an update (the view, the send, the save), the view asks on every tick
+/// for the stage the last line put on the node, and an adopted state asks for up to two stages at
+/// every rate a config may play at. The memo is per thread: a controller that moves between a
+/// runtime's threads fills one on each.
+const STAGE_COSTS_KEPT: usize = 2 * CONFIG_STAGE_RATES.len() + 4;
 
 /// What a stage takes off the preamp, held in a config or sent live: the stage as it was worked
 /// out for `rate_hz` plays at whatever rate the sink runs at later (a config's coefficients do not
 /// follow it, and a line sent before the controller looks again carries the old ones), so this is
 /// the most [`stage_cost_db`]-style cost over every usual rate, the delay's whole samples
 /// included. A stage with no delayed side path (every model but Meier with an added delay) plays
-/// the same at every rate, so its cost is [`stage_cost_db`]'s.
+/// the same at every rate, so its cost is [`stage_cost_db`]'s. The newest answers are kept
+/// ([`STAGE_COSTS_KEPT`]) by the whole settings and the rate, which hold everything
+/// [`fresh_stage_cost_db`] reads.
 pub fn config_stage_cost_db(settings: &CrossfeedSettings, rate_hz: u32) -> f64 {
-    let Ok(stage) = Stage::of(settings, rate_hz) else {
-        return stage_cost_db(settings, rate_hz);
-    };
-    if stage.delay_s == 0.0 || stage.s == [0.0; 5] {
-        return stage_cost_db(settings, rate_hz);
+    use std::cell::RefCell;
+    thread_local! {
+        static KEPT: RefCell<Vec<(CrossfeedSettings, u32, f64)>> = const { RefCell::new(Vec::new()) };
     }
-    static KEPT: Mutex<Vec<(CrossfeedSettings, u32, f64)>> = Mutex::new(Vec::new());
-    if let Some((_, _, cost)) = crate::locked(&KEPT)
-        .iter()
-        .find(|(held, at, _)| *at == rate_hz && held == settings)
-    {
-        return *cost;
+    if let Some(cost) = KEPT.with_borrow(|kept| {
+        kept.iter()
+            .find(|(held, at, _)| *at == rate_hz && held == settings)
+            .map(|(.., cost)| *cost)
+    }) {
+        return cost;
     }
-    let rates: Vec<u32> = CONFIG_STAGE_RATES
-        .iter()
-        .copied()
-        .chain([rate_hz])
-        .collect();
-    let cost = ((stage_worst_over_db(&stage, &rates) * 10.0 - STAGE_TOLERANCE_TENTHS)
-        .ceil()
-        .max(0.0))
-        / 10.0;
-    let mut kept = crate::locked(&KEPT);
-    if kept.len() >= STAGE_COSTS_KEPT {
-        kept.remove(0);
-    }
-    kept.push((settings.clone(), rate_hz, cost));
+    let cost = fresh_stage_cost_db(settings, rate_hz);
+    KEPT.with_borrow_mut(|kept| {
+        if kept.len() >= STAGE_COSTS_KEPT {
+            kept.remove(0);
+        }
+        kept.push((settings.clone(), rate_hz, cost));
+    });
     cost
 }
 
-/// [`response::played_peak_db_of`], remembering the newest answer: a drag asks for the same
-/// curve several times an update (the check, the view, the send, the save), and one answer
-/// costs about a millisecond for sixteen filters.
+/// [`config_stage_cost_db`] worked out, with nothing kept.
+fn fresh_stage_cost_db(settings: &CrossfeedSettings, rate_hz: u32) -> f64 {
+    match Stage::of(settings, rate_hz) {
+        Ok(stage) if stage.delay_s != 0.0 && stage.s != [0.0; 5] => {
+            let rates: Vec<u32> = CONFIG_STAGE_RATES
+                .iter()
+                .copied()
+                .chain([rate_hz])
+                .collect();
+            ((stage_worst_over_db(&stage, &rates) * 10.0 - STAGE_TOLERANCE_TENTHS)
+                .ceil()
+                .max(0.0))
+                / 10.0
+        }
+        _ => stage_cost_db(settings, rate_hz),
+    }
+}
+
+/// How many answers of [`played_peak`] each thread keeps.
+const PEAKS_KEPT: usize = 4;
+
+/// [`response::played_peak_db_of`], remembering the newest few answers: a drag asks for the same
+/// curve several times an update (the check, the view, the send, the save), a tick asks
+/// for a few curves in turn, and one answer costs about a millisecond for sixteen filters.
 fn played_peak(sets: &[[f64; 5]], centres: &[f64], rate_hz: u32) -> f64 {
     use std::cell::RefCell;
     thread_local! {
-        static NEWEST: RefCell<Option<(Vec<u64>, f64)>> = const { RefCell::new(None) };
+        static NEWEST: RefCell<Vec<(Vec<u64>, f64)>> = const { RefCell::new(Vec::new()) };
     }
-    let key: Vec<u64> = std::iter::once(u64::from(rate_hz))
+    // The count of sets keeps two splits of the same numbers into sets and centres apart.
+    let key: Vec<u64> = [u64::from(rate_hz), sets.len() as u64]
+        .into_iter()
         .chain(sets.iter().flatten().map(|c| c.to_bits()))
         .chain(centres.iter().map(|c| c.to_bits()))
         .collect();
-    if let Some(peak) = NEWEST.with(|newest| {
+    if let Some(peak) = NEWEST.with_borrow(|newest| {
         newest
-            .borrow()
-            .as_ref()
-            .and_then(|(held, peak)| (*held == key).then_some(*peak))
+            .iter()
+            .find(|(held, _)| *held == key)
+            .map(|(_, peak)| *peak)
     }) {
         return peak;
     }
     let peak = response::played_peak_db_of(sets, centres, rate_hz);
-    NEWEST.with(|newest| *newest.borrow_mut() = Some((key, peak)));
+    NEWEST.with_borrow_mut(|newest| {
+        if newest.len() >= PEAKS_KEPT {
+            newest.remove(0);
+        }
+        newest.push((key, peak));
+    });
     peak
 }
 
@@ -721,6 +753,7 @@ impl Host {
                 .clone()
                 .or_else(|| previous.as_ref().and_then(|s| s.crossfeed.clone())),
             crossfeed_on: request.crossfeed.is_some(),
+            crossfeed_loaded: request.crossfeed.clone(),
             flat: request.flat,
             // The chosen set stays across an apply; a config that holds the convolvers is one a
             // start loads the WAV from, which `speakers_on` tells the next owner to turn off.
@@ -734,6 +767,8 @@ impl Host {
                 .speakers
                 .as_ref()
                 .map(|speakers| speakers.id.clone()),
+            // The loudness's settings stay across an apply.
+            loudness: previous.as_ref().and_then(|s| s.loudness),
         };
         // The process manager keeps its pid in the runtime directory, so one that has none is
         // refused here, before anything changes.
@@ -1270,6 +1305,7 @@ impl Host {
             state.flat = false;
             state.speakers_on = false;
             state.speakers_loaded = None;
+            state.crossfeed_loaded = None;
             state
                 .save(&self.state)
                 .map_err(|e| cannot_write(&self.state, e))?;
@@ -1414,6 +1450,8 @@ pub(crate) fn checked_request(
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     });
     if request.correction.filters.len() > SLOTS {
         return Err(trouble(

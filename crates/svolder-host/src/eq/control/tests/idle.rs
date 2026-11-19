@@ -279,3 +279,79 @@ fn a_graph_that_lists_every_slot_at_0_has_not_run() {
     assert!(graph_ran(&one));
     assert!(graph_ran(&HashMap::new()), "no slot listed tells nothing");
 }
+
+/// Loudness turned on over a chain that has not run: nothing is sent to the graph until the look
+/// that finds it run, and the resend that look makes carries the stage.
+#[tokio::test]
+async fn loudness_over_a_chain_that_has_not_run_goes_with_the_run_looks_resend() {
+    let params = idle_params();
+    let zeros: Vec<(String, f64)> =
+        crate::eq::live::loudness_params(&crate::eq::loudness::Stage::identity().sections)
+            .into_iter()
+            .map(|(name, _)| (name, 0.0))
+            .collect();
+    let ports: Vec<(&str, f64)> = zeros.iter().map(|(name, v)| (name.as_str(), *v)).collect();
+    params.set_ports(&ports);
+    params.set_level(Some(crate::route::SinkLevel {
+        linear: 0.125,
+        muted: false,
+    }));
+    let mut control = controller(&params);
+    control
+        .loudness(LoudnessEdit {
+            on: Some(true),
+            done: true,
+            ..LoudnessEdit::default()
+        })
+        .await
+        .unwrap();
+    looks(&mut control, 3).await;
+    assert!(
+        params.sent().is_empty(),
+        "nothing goes to a graph that has not run"
+    );
+    let mut config = flat_config(0.0);
+    config.extend(crate::eq::live::loudness_params(
+        &crate::eq::loudness::Stage::identity().sections,
+    ));
+    runs(&params, &config);
+    looks(&mut control, 1).await;
+    let first = params
+        .sent()
+        .first()
+        .cloned()
+        .expect("the run look's resend");
+    let identity =
+        crate::eq::live::loudness_params(&crate::eq::loudness::Stage::identity().sections);
+    let carried: Vec<(String, f64)> = first
+        .iter()
+        .filter(|(name, _)| name.contains("ld"))
+        .cloned()
+        .collect();
+    assert_eq!(carried.len(), identity.len(), "the stage rides the resend");
+    assert_ne!(carried, identity, "a stage, not the identity");
+}
+
+/// A node that takes lines but never applies them, over a graph that has not run: a drag away
+/// from the starting gain and back through it sends the config's own values, which the node
+/// holds once it runs. That is no proof that a line landed, and live updates are given up.
+#[tokio::test]
+async fn values_sent_before_the_graph_ran_do_not_prove_a_dead_node_takes_live_lines() {
+    let params = idle_params();
+    let mut control = controller(&params);
+    control.set_on(true).await.unwrap();
+    looks(&mut control, 2).await;
+    for g in [3.0, 6.0, 3.0, 0.0, -3.0] {
+        control.edit(gain(0, g, g == -3.0)).await.unwrap();
+        control.tick().await;
+    }
+    looks(&mut control, 1).await;
+    runs(&params, &flat_config(0.0));
+    params.holds(false);
+    looks(&mut control, 4).await;
+    assert!(
+        !control.view().live,
+        "a node that applies nothing is given up (live: {:?})",
+        control.view().note
+    );
+}

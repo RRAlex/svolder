@@ -63,12 +63,7 @@ fn svolder(args: &[&str], home: &Path, stdin: &str, envs: &[(&str, &str)]) -> Ra
 }
 
 fn home(tag: &str) -> TempPath {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after 1970")
-        .as_nanos();
-    let dir =
-        std::env::temp_dir().join(format!("svolder-mqtt-cli-{tag}-{}-{n}", std::process::id()));
+    let dir = common::short_join(&common::short_unique(&format!("mqtt-{tag}")));
     std::fs::create_dir_all(&dir).unwrap();
     TempPath(dir)
 }

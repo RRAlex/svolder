@@ -17,6 +17,11 @@
 //!   them on turns the crossfeed off in the same update and the other way round; the daemon says
 //!   what it refuses in words, a 409). `done` as for the crossfeed; a body that names nothing is a
 //!   409. Fetching, importing and forgetting sets are routes of their own.
+//! - `api/v1/host/loudness` `{"on"?, "strength_pct"?, "reference_pct"?, "reference_now"?,
+//!   "done"?}`: change the computer's loudness (`HostEqOp::Loudness`; the daemon snaps the numbers to their
+//!   steps and holds them to the view's ranges, says what it refuses in words, a 409, and
+//!   `reference_now` takes the computer's volume as the reference). `done` as for the crossfeed; a
+//!   body that names nothing is a 409.
 //! - `api/v1/host/eq/preset` `{"name", "device"?, "confirm"?}`: a preset recalled on the
 //!   computer.
 //! - `api/v1/host/eq/points` `{"type", "f", "g", "q"}`: add a point; a value outside the hand
@@ -58,6 +63,7 @@ pub(super) fn routes() -> Router<Web> {
         .route("/api/v1/host/eq", post(mode))
         .route("/api/v1/host/crossfeed", post(crossfeed))
         .route("/api/v1/host/speakers", post(speakers))
+        .route("/api/v1/host/loudness", post(loudness))
         .route("/api/v1/host/eq/preset", post(preset))
         .route("/api/v1/host/eq/points", post(add))
         .route("/api/v1/host/eq/points/{n}", post(set))
@@ -297,6 +303,41 @@ async fn speakers(State(web): State<Web>, headers: HeaderMap, body: axum::body::
                 HostEqOp::Speakers {
                     on: asked.on,
                     set: asked.set,
+                    done: asked.done,
+                },
+            )
+            .await
+        }
+        Err(refused) => *refused,
+    }
+}
+
+/// What `loudness` takes: the fields of `HostEqOp::Loudness`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Loudness {
+    on: Option<bool>,
+    strength_pct: Option<f64>,
+    reference_pct: Option<f64>,
+    reference_now: Option<bool>,
+    #[serde(default = "done_by_default")]
+    done: bool,
+}
+
+/// Change the computer's loudness.
+async fn loudness(State(web): State<Web>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if let Err(refused) = writer(&web, &headers) {
+        return refused;
+    }
+    match parse::<Loudness>(&body) {
+        Ok(asked) => {
+            eq(
+                &web,
+                HostEqOp::Loudness {
+                    on: asked.on,
+                    strength_pct: asked.strength_pct,
+                    reference_pct: asked.reference_pct,
+                    reference_now: asked.reference_now,
                     done: asked.done,
                 },
             )

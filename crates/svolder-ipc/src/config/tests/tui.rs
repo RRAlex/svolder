@@ -20,6 +20,7 @@ fn tui_defaults_when_the_block_is_absent() {
             theme_background: true,
             mouse: true,
             tooltips: true,
+            scroll_long_lines: true,
             intro: true,
             intro_sound: false,
             intro_effect: IntroEffect::Random,
@@ -768,6 +769,33 @@ fn tooltips_default_on_and_round_trip_through_the_file() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(
         text.contains("shows a one-line tip.\ntooltips = false\n"),
+        "the switch was not written where the template shows it:\n{text}"
+    );
+    assert_eq!(Config::parse(&text).unwrap().tui, tui, "{text}");
+}
+
+/// Scrolling long lines is on while the file says nothing, one word turns it off, and the switch
+/// is written where the template shows it and reads back as itself.
+#[test]
+fn scroll_long_lines_defaults_on_and_round_trips_through_the_file() {
+    assert!(Config::parse("schema = 1\n").unwrap().tui.scroll_long_lines);
+    assert!(
+        !Config::parse("schema = 1\n[tui]\nscroll_long_lines = false\n")
+            .unwrap()
+            .tui
+            .scroll_long_lines
+    );
+    let dir = temp_dir("config-writer");
+    let path = dir.join("config.toml");
+    Config::create_from_template(&path).unwrap();
+    let tui = TuiConfig {
+        scroll_long_lines: false,
+        ..TuiConfig::default()
+    };
+    Config::update_tui(&path, |t| *t = tui.clone()).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("too long for their row.\nscroll_long_lines = false\n"),
         "the switch was not written where the template shows it:\n{text}"
     );
     assert_eq!(Config::parse(&text).unwrap().tui, tui, "{text}");

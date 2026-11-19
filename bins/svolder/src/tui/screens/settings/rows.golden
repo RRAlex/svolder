@@ -21,6 +21,7 @@ Effects	Mascot	on	Whether Ratatoskr, the squirrel, may come out. It stays hidden
 Effects	Hue drift	off	Whether the pane borders, titles, the header rule and the key hints drift along the palette's spectrum, cool to hot, glowing hotter as the level rises. The selection and every value keep the resting accent.	[tui.effects] hue_drift = false
 Effects	Rainbow scroll	off	Whether the tone curve's colours scroll slowly round the hue circle, one round trip every 20 s, rather than resting red at 20 Hz and violet at 20 kHz. On red and neon the curve's own ramp slides along its colours and back instead.	[tui.effects] spectrum_drift = false
 Effects	Transition	trace	How one screen gives way to the next: none, trace, noise or melt. Every one but none belongs to the animation layer, so Effects off plays none of them.	[tui] transition = "trace"
+Effects	Scroll long lines	on	Whether the Now playing row and the Path row, where it cannot wrap onto spare rows, scroll slowly past their room when too long. Off cuts them with … and leaves them still.	[tui] scroll_long_lines = true
 Behaviour	Mouse capture	on	Whether the TUI takes the mouse. Capture stops the terminal's own text selection and copy while it is on.	[tui] mouse = true
 Behaviour	Tooltips	on	Whether a pointer resting on a key word, a row or a control for a moment shows a tip saying what it is and how to use it. It needs mouse capture on.	[tui] tooltips = true
 Behaviour	Confirm quit	on	Whether q asks Quit svolder? [Y/n] before the TUI quits. Off quits on the one q. Ctrl-C quits at once either way.	[tui] confirm_quit = true
@@ -37,12 +38,12 @@ Connect	Web UI	no daemon	The web UI serves this screen's controls to a browser o
 Connect	MCP server	off	Whether the daemon serves the Model Context Protocol over HTTP, for AI assistants. Off, it opens no port. The change is written to the file and the daemon reloads.	[mcp] enabled
 Connect	MCP listen	loopback:8737	The address the MCP server listens on. Enter types one: loopback keeps the server on this machine.	[mcp] listen
 Connect	MCP writes	read-only	Whether the server offers the tools that change a device. Read-only offers only the tools that look.	[mcp] writes
-Connect	MCP token	…	The bearer token a client sends. v shows it for 10 s, c copies it to the clipboard (to the terminal, and to the display's tool where there is one), R replaces it after a question.	[mcp] token_file, or SVOLDER_MCP_TOKEN
+Connect	MCP token	…	The bearer token a client sends. v or Enter opens it in a box for a minute, c copies it to the clipboard (to the terminal, and to the display's tool where there is one), R replaces it after a question.	[mcp] token_file, or SVOLDER_MCP_TOKEN
 Connect	MCP status	no daemon	Where the daemon says its MCP server stands. The daemon answers.	from the daemon
-Connect	MQTT bridge	off	Whether the daemon bridges its devices to an MQTT broker, for Home Assistant. It needs a broker host.	[mqtt] enabled
+Connect	MQTT client	off	Whether the daemon connects to an MQTT broker as a client and publishes its devices, for Home Assistant. It needs a broker host: turning it on without one says so.	[mqtt] enabled
 Connect	MQTT broker host	not set	The broker's host name or address. Enter types it.	[mqtt] host
 Connect	MQTT broker port	1883	The broker's port. Enter types it.	[mqtt] port
-Connect	MQTT commands	read-only	Whether the bridge takes commands back from the broker and writes them to the devices. Read-only only reports.	[mqtt] commands
+Connect	MQTT commands	read-only	Whether the MQTT client takes commands back from the broker and writes them to the devices. Read-only only reports.	[mqtt] commands
 Connect	MQTT username	not set	The username the broker wants. Enter types it; an empty line takes it away. With no username the daemon sends no password either, and a broker that wants a login refuses it.	[mqtt] username
 Connect	MQTT password	not set	The broker's password. Enter types it, masked (Tab shows it); Delete twice on the line clears it. Never read back. SVOLDER_MQTT_PASSWORD in the daemon's environment wins.	[mqtt] password, or SVOLDER_MQTT_PASSWORD
-Connect	MQTT status	no daemon	Where the daemon says its MQTT bridge stands. The daemon answers.	from the daemon
+Connect	MQTT status	no daemon	Where the daemon says its MQTT client stands. The daemon answers.	from the daemon

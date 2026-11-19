@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The computer's EQ over MQTT: one ON/OFF switch and one read-only preset sensor, and the
-//! crossfeed's switch and preset select ([`crossfeed`]) and the virtual speakers' switch and set
-//! select ([`speakers`]), all under a Home Assistant device of
-//! their own, `This computer`. Nothing else of the computer is exposed: no volume, no mute, no
-//! points.
+//! crossfeed's switch and preset select ([`crossfeed`]), the virtual speakers' switch and set
+//! select ([`speakers`]) and the loudness's switch and strength number ([`loudness`]), all under
+//! a Home Assistant device of their own, `This computer`. Nothing else of the computer is
+//! exposed: no volume, no mute, no points.
 //!
 //! The entities live under the bridge-level unit [`UNIT`], so their topics read
-//! `<base>/computer/computer_eq/state` and `.../set`, and `<base>/computer/computer_eq_preset/state`.
+//! `<base>/computer/computer_eq/state` and `.../set`, and
+//! `<base>/computer/computer_eq_preset/state`.
 //! The switch is a `switch` while commands are on and a `binary_sensor` when they are off, as
 //! every toggle is. ON turns the EQ on with the points the daemon keeps; OFF removes it and keeps
 //! them.
@@ -20,6 +21,8 @@ use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
 pub mod crossfeed;
+pub mod loudness;
+pub mod path;
 pub mod speakers;
 
 /// The bridge-level unit the computer's topics sit under, in place of a device's unit id.
@@ -56,6 +59,8 @@ pub fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
     ];
     all.extend(crossfeed::topics_of(discovery_prefix, commands));
     all.extend(speakers::topics_of(discovery_prefix, commands));
+    all.extend(loudness::topics_of(discovery_prefix, commands));
+    all.extend(path::topics_of(discovery_prefix));
     all
 }
 
@@ -119,6 +124,39 @@ pub fn entries(
             view,
         ));
     }
+    all
+}
+
+/// Every entry the computer announces for `eq`: [`entries`] with the crossfeed's and the
+/// speakers' views the controller serves, then, when it serves loudness, the loudness switch and
+/// strength number ([`loudness`]), then the path sensor and the config problem sensor ([`path`]),
+/// which are read-only whatever `commands` says.
+pub fn entries_of(
+    base_topic: &str,
+    discovery_prefix: &str,
+    commands: bool,
+    eq: &EqView,
+) -> Vec<DiscoveryEntry> {
+    let mut all = entries(
+        base_topic,
+        discovery_prefix,
+        commands,
+        eq.crossfeed.as_ref(),
+        eq.speakers.as_ref(),
+    );
+    if let Some(view) = eq
+        .loudness
+        .as_ref()
+        .filter(|_| !discovery_prefix.is_empty())
+    {
+        all.extend(loudness::entries(
+            base_topic,
+            discovery_prefix,
+            commands,
+            view,
+        ));
+    }
+    all.extend(path::entries(base_topic, discovery_prefix));
     all
 }
 

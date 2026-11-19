@@ -84,11 +84,14 @@ ok('the_top_line_names_the_dacs_own_stage', () => {
 
 ok('the_verdict_names_the_stage_the_path_names', () => {
   const route = { host: { route: { host_eq: true } } };
-  const through = (words) => ({ playing: { path: { ...pathOf(true), words } } });
+  const through = (words) => ({ playing: { path: { ...pathOf(true), words: words.split(' · ') } } });
   const right = (words) => topLine(page(route, through(words)), 'open').right;
   assert.equal(right('crossfeed on'), 'crossfeed on · changes the sound');
   assert.equal(right('resampled 44.1 → 48 kHz · virtual speakers on'), 'virtual speakers on · changes the sound');
   assert.equal(right('host EQ on · crossfeed on'), 'host EQ on · crossfeed on · changes the sound');
+  assert.equal(right('loudness on'), 'loudness on · changes the sound');
+  assert.equal(right('host EQ on · loudness on · crossfeed on'),
+    'host EQ on · loudness on · crossfeed on · changes the sound');
   assert.equal(right('EQ pass-through'), 'EQ pass-through · changes the sound');
   assert.equal(right('computer volume 54 %'), 'host EQ on · changes the sound');
 });

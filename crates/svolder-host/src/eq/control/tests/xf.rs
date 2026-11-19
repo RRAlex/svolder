@@ -566,6 +566,8 @@ async fn the_owner_start_turns_a_crossfeed_found_on_off() {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -609,6 +611,8 @@ async fn the_owner_start_removes_a_chain_that_ran_for_crossfeed_alone() {
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     }
     .save(&dir.state())
     .unwrap();
@@ -755,6 +759,149 @@ async fn a_new_rate_sends_the_stage_again_and_is_no_reset() {
             crate::eq::live::crossfeed_params(&CrossfeedStage::of(&control.xf, 44_100).unwrap());
         assert_eq!(value(last, "ldir:b0"), value(&at_44k, "ldir:b0"));
     }
+}
+
+/// The stages run up to 384 kHz: a sink that moves above it turns crossfeed off with a note
+/// that says why, the chain plays the points under their preamp with the stage out, and turning
+/// crossfeed on there is refused in words.
+#[tokio::test]
+async fn above_384_khz_crossfeed_turns_off_and_is_refused() {
+    let (mut control, _, params) = both_on().await;
+    control.crossfeed(model("meier")).await.unwrap();
+    control.edit(gain(0, 6.0, true)).await.unwrap();
+    let sends = params.sent().len();
+    let mut node = node(1, Some(705_600));
+    node.params
+        .extend(crate::eq::live::crossfeed_params(&CrossfeedStage::bypass()));
+    params.set_node(Some(node));
+    looks(&mut control, 2).await;
+    let xf = control.view().crossfeed.unwrap();
+    assert!(!xf.on, "off above 384 kHz");
+    let note = xf.note.unwrap_or_default();
+    assert!(note.contains("384 kHz"), "{note}");
+    let sent = stage_sends(&params, sends);
+    let last_mix = sent.iter().rev().find_map(|send| mix_of(send));
+    assert_eq!(last_mix, Some(0.0), "the stage is taken out: {sent:?}");
+    let last = sent.last().expect("sent");
+    assert!(played_peak(&control) + pre_db(last).unwrap() <= 0.02);
+    let refused = control.crossfeed(on()).await.unwrap_err();
+    assert!(refused.what.contains("384 kHz"), "{refused:?}");
+    assert!(!control.view().crossfeed.unwrap().on);
+}
+
+/// A crossfeed drag in flight while the sink moves above 384 kHz: the look that sees the new rate
+/// turns crossfeed off, and no line raises the preamp while the stage worked out at 384 kHz still
+/// plays (Meier at 0.5 ms worked out at 384 kHz adds +4.49 dB at 768 kHz, against the 3.7 dB of the
+/// same settings worked out at 768 kHz).
+#[tokio::test]
+async fn a_crossfeed_drag_across_a_move_above_384_khz_never_plays_above_unity() {
+    use crate::eq::crossfeed::CrossfeedChange;
+    let (mut control, _, params) = setup(Keep::Memory);
+    params.set_output(Some(sink("a")));
+    let mut at_384k = node(1, Some(384_000));
+    at_384k
+        .params
+        .extend(crate::eq::live::crossfeed_params(&CrossfeedStage::bypass()));
+    params.set_node(Some(at_384k));
+    control.set_on(true).await.unwrap();
+    control.crossfeed(model("meier")).await.unwrap();
+    control
+        .crossfeed(CrossfeedEdit {
+            amount_pct: Some(50.0),
+            delay_ms: Some(0.5),
+            done: true,
+            ..CrossfeedEdit::default()
+        })
+        .await
+        .unwrap();
+    control.crossfeed(on()).await.unwrap();
+    looks(&mut control, 1).await;
+    // Each stage a drag line may carry (the amount, worked out at either rate), told by its
+    // direct path's b0, with the most it adds at any rate.
+    let mut stages = Vec::new();
+    for pct in [48.0, 49.0, 50.0] {
+        for rate in [384_000, 768_000] {
+            let settings = control
+                .xf
+                .change(
+                    &CrossfeedChange {
+                        amount_pct: Some(pct),
+                        ..CrossfeedChange::default()
+                    },
+                    rate,
+                )
+                .unwrap();
+            let ports =
+                crate::eq::live::crossfeed_params(&CrossfeedStage::of(&settings, rate).unwrap());
+            let b0 = value(&ports, "ldir:b0").unwrap();
+            stages.push((b0, worst_at_any_rate(&settings, rate)));
+        }
+    }
+    let worst_of = |b0: f64| {
+        stages
+            .iter()
+            .find(|(held, _)| (held - b0).abs() < 1e-12)
+            .map(|(_, worst)| *worst)
+            .expect("a stage the drag sends")
+    };
+    let from = params.sent().len();
+    let drag = |pct: f64, done: bool| CrossfeedEdit {
+        amount_pct: Some(pct),
+        done,
+        ..CrossfeedEdit::default()
+    };
+    control.crossfeed(drag(49.0, false)).await.unwrap();
+    control.tick().await;
+    params.set_rate(Some(768_000));
+    for pct in [50.0, 48.0] {
+        let _ = control.crossfeed(drag(pct, false)).await;
+        control.tick().await;
+    }
+    let _ = control.crossfeed(drag(50.0, true)).await;
+    looks(&mut control, 1).await;
+    assert!(!control.view().crossfeed.unwrap().on, "off above 384 kHz");
+    assert!(params.sent().len() > from, "the drag went live");
+    // Walked entry by entry from the drag on: the stage that plays is the last one sent.
+    let sends = params.sent();
+    let held = |name: &str| {
+        sends[..from]
+            .iter()
+            .rev()
+            .find_map(|send| value(send, name))
+    };
+    let mut pre = 20.0 * held("lpre:Mult").unwrap().log10();
+    let mut mix = held("lmix:Gain 2").unwrap();
+    let mut worst = worst_of(held("ldir:b0").unwrap());
+    for (n, send) in sends[from..].iter().enumerate() {
+        for (name, value) in send {
+            match name.as_str() {
+                "lpre:Mult" => pre = 20.0 * value.log10(),
+                "lmix:Gain 2" => mix = *value,
+                // The bypass's direct path is the identity: the stage before it stays priced
+                // until the mixer takes it off.
+                "ldir:b0" if *value != 1.0 => worst = worst_of(*value),
+                _ => continue,
+            }
+            let level = pre + if mix > 0.0 { worst } else { 0.0 };
+            assert!(
+                level <= 0.02,
+                "send {n}: after {name} {level:+.3} dB (pre {pre:+.2}, mix {mix})"
+            );
+        }
+    }
+}
+
+/// With no chain running the rate is the sink's own: crossfeed turned on there above 384 kHz is
+/// refused, and no chain is applied for it.
+#[tokio::test]
+async fn crossfeed_on_with_no_chain_above_384_khz_is_refused() {
+    let (mut control, chain, params) = setup(Keep::Memory);
+    params.set_output(Some(sink("a")));
+    params.set_node(Some(node(1, Some(768_000))));
+    let refused = control.crossfeed(on()).await.unwrap_err();
+    assert!(refused.what.contains("384 kHz"), "{refused:?}");
+    assert!(applies(&chain).is_empty(), "no chain for it");
+    assert!(!control.view().crossfeed.unwrap().on);
 }
 
 #[tokio::test]
@@ -921,6 +1068,8 @@ async fn a_container_restart_with_crossfeed_found_on_applies_the_eq_again_with_i
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     };
     state.save(&dir.state()).unwrap();
     // The container's chain died with the crash: the chain says it does not run.
@@ -1028,6 +1177,8 @@ async fn a_chain_replaced_from_outside_after_the_stage_was_sent_to_it_gets_the_s
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     });
     looks(&mut control, 1).await;
     assert!(!control.view().crossfeed.unwrap().on);
@@ -1079,6 +1230,239 @@ async fn a_config_that_holds_the_stage_keeps_holding_it_when_the_points_are_kept
     assert_eq!(kept.crossfeed, Some(control.xf.clone()));
 }
 
+/// The running chain's config holds M/S bass at 50 % while crossfeed is off (the
+/// apply that would take it out failed, and a save kept the config on disk without it), and the
+/// daemon restarts. The state file says so: the new owner pays for that stage, then applies the
+/// chain again without it, and the state says no stage is loaded any more.
+#[tokio::test]
+async fn a_stage_the_running_config_holds_with_crossfeed_off_is_paid_for_and_taken_out() {
+    let settings = CrossfeedSettings::for_model(Model::MidSide)
+        .change(
+            &crate::eq::crossfeed::CrossfeedChange {
+                amount_pct: Some(50.0),
+                ..crate::eq::crossfeed::CrossfeedChange::default()
+            },
+            48_000,
+        )
+        .unwrap();
+    let dir = Dir::new();
+    HostEqState {
+        on: true,
+        name: "Saved".into(),
+        origin: None,
+        target: "sink".into(),
+        route: crate::eq::Route::Smart,
+        manager: crate::eq::Manager::Child,
+        previous_default: None,
+        preamp_db: -2.0,
+        filters: vec![pk(1000.0, 2.0, 1.0)],
+        slots: vec![1],
+        crossfeed: Some(settings.clone()),
+        crossfeed_on: false,
+        crossfeed_loaded: Some(settings.clone()),
+        flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
+        loudness: None,
+    }
+    .save(&dir.state())
+    .unwrap();
+    let (mut control, chain, params) = setup_over(&dir.state());
+    let worst = crate::eq::manage::CONFIG_STAGE_RATES
+        .into_iter()
+        .map(|worked| worst_at_any_rate(&settings, worked))
+        .fold(0.0, f64::max);
+    let db = control.view().preamp_db;
+    let peak = played_peak(&control);
+    // The EQ's preamp and the stage's cost each forgive 0.008 dB.
+    assert!(
+        peak + db + worst <= 0.02,
+        "points {peak:+.3} dB, preamp {db:+.3} dB, the config's stage {worst:+.3} dB"
+    );
+    params.set_output(Some(sink("a")));
+    looks(&mut control, 2).await;
+    let last = applies(&chain).pop().expect("applied again");
+    assert_eq!(last.crossfeed, None, "without the stage");
+    let state = HostEqState::load(&dir.state()).unwrap().unwrap();
+    assert_eq!(state.crossfeed_loaded, None);
+    assert!(!control.view().crossfeed.unwrap().on);
+}
+
+/// A state that says its config holds the stage does not say the rate the stage was worked out
+/// at, and Meier at 0.25 ms worked out at 44.1 kHz adds 0.37 dB more than the cost taken at
+/// 48 kHz: until the owed reset takes the stage out, the preamp pays for the stage worked out
+/// at any usual rate.
+#[tokio::test]
+async fn an_adopted_config_stage_is_paid_for_at_any_rate_it_was_worked_out_at() {
+    use crate::eq::crossfeed::CrossfeedChange;
+    use crate::eq::manage::CONFIG_STAGE_RATES;
+    let settings = CrossfeedSettings::for_model(Model::Meier)
+        .change(
+            &CrossfeedChange {
+                delay_ms: Some(0.25),
+                ..CrossfeedChange::default()
+            },
+            48_000,
+        )
+        .unwrap();
+    assert!(settings.delay_ms.is_some());
+    let dir = Dir::new();
+    HostEqState {
+        on: true,
+        name: "Saved".into(),
+        origin: None,
+        target: "sink".into(),
+        route: crate::eq::Route::Smart,
+        manager: crate::eq::Manager::Child,
+        previous_default: None,
+        preamp_db: 0.0,
+        filters: vec![pk(1000.0, 0.0, 1.0)],
+        slots: vec![1],
+        crossfeed: Some(settings.clone()),
+        crossfeed_on: true,
+        flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
+    }
+    .save(&dir.state())
+    .unwrap();
+    let (control, _, _) = setup_over(&dir.state());
+    let worst = CONFIG_STAGE_RATES
+        .into_iter()
+        .map(|worked| worst_at_any_rate(&settings, worked))
+        .fold(0.0, f64::max);
+    let db = control.view().preamp_db;
+    // The stage's cost forgives 0.008 dB of rounding.
+    assert!(
+        db + worst <= 0.008 + 1e-9,
+        "preamp {db:+.3} dB, the stage {worst:+.3} dB"
+    );
+}
+
+/// A config whose stage costs more than the one sent live since holds the
+/// preamp down by the difference; once nothing has played for the idle time the chain is applied
+/// again with the stage sent live, and the level comes back up.
+#[tokio::test]
+async fn a_dearer_stage_in_the_config_is_shed_once_idle() {
+    let (mut control, chain, params) = setup(Keep::Memory);
+    // An apply starts the node again from its config, as a real chain is.
+    chain.restarts_node_of(&params);
+    params.set_output(Some(sink("a")));
+    control.set_idle_ticks(40);
+    control.set_on(true).await.unwrap();
+    control.crossfeed(model("meier")).await.unwrap();
+    control
+        .crossfeed(CrossfeedEdit {
+            delay_ms: Some(1.0),
+            done: true,
+            ..CrossfeedEdit::default()
+        })
+        .await
+        .unwrap();
+    params.takes(false);
+    control.crossfeed(on()).await.unwrap();
+    params.takes(true);
+    assert!(control.xf_conf, "the config holds the stage");
+    control
+        .crossfeed(CrossfeedEdit {
+            amount_pct: Some(7.5),
+            done: true,
+            ..CrossfeedEdit::default()
+        })
+        .await
+        .unwrap();
+    let held = control.view().preamp_db;
+    let before = applies(&chain).len();
+    looks(&mut control, 4).await;
+    let requests = applies(&chain);
+    assert!(requests.len() > before, "applied again once idle");
+    assert_eq!(
+        requests.last().unwrap().crossfeed,
+        None,
+        "the stage goes live"
+    );
+    let db = control.view().preamp_db;
+    assert!(
+        db > held + 1.0,
+        "the level comes back up: {held:+.2} -> {db:+.2}"
+    );
+    assert!(control.view().crossfeed.unwrap().on);
+}
+
+/// The peak of the slots `send` carries, in dB (never below 0): a line carries all sixteen.
+fn slots_peak_db(send: &[(String, f64)], rate: u32) -> f64 {
+    let sets: Vec<[f64; 5]> = (1..=SLOTS as u8)
+        .map(|slot| {
+            ["b0", "b1", "b2", "a1", "a2"].map(|port| {
+                let held = value(send, &format!("l{slot:02}:{port}")).expect("every slot is sent");
+                f64::from(held as f32)
+            })
+        })
+        .collect();
+    svolder_profiles::tone::response::played_peak_db_of(&sets, &[], rate).max(0.0)
+}
+
+/// The preamp lab's seed 1291: the config holds Meier with a delay (its live send was refused),
+/// the amount is turned down live, and a drag makes the curve hotter. A rate change puts the
+/// node's stage back to the config's without a word, and a line of the drag before the next look
+/// carries the slots and not the stage: its preamp pays for the config's stage too, at every
+/// usual rate.
+#[tokio::test]
+async fn a_line_of_slots_pays_for_the_stage_the_config_holds() {
+    let (mut control, chain, params) = setup(Keep::Memory);
+    params.set_output(Some(sink("a")));
+    control.set_on(true).await.unwrap();
+    control.crossfeed(model("meier")).await.unwrap();
+    control
+        .crossfeed(CrossfeedEdit {
+            delay_ms: Some(1.0),
+            done: true,
+            ..CrossfeedEdit::default()
+        })
+        .await
+        .unwrap();
+    params.takes(false);
+    control.crossfeed(on()).await.unwrap();
+    params.takes(true);
+    assert!(control.xf_conf, "the config holds the stage");
+    let conf = applies(&chain).pop().expect("applied with the stage");
+    let conf_rate = conf.rate_hz.unwrap_or(CONFIG_RATE_HZ);
+    let conf_stage = worst_at_any_rate(&conf.crossfeed.expect("the stage"), conf_rate);
+    control
+        .crossfeed(CrossfeedEdit {
+            amount_pct: Some(7.5),
+            done: true,
+            ..CrossfeedEdit::default()
+        })
+        .await
+        .unwrap();
+    let from = params.sent().len();
+    for g in [1.0, 3.0, 6.0] {
+        control.edit(gain(0, g, false)).await.unwrap();
+        control.tick().await;
+    }
+    control.edit(gain(0, 6.0, true)).await.unwrap();
+    let lines: Vec<_> = stage_sends(&params, from)
+        .into_iter()
+        .filter(|send| mix_of(send).is_none())
+        .collect();
+    assert!(!lines.is_empty(), "the drag went live");
+    for (n, send) in lines.iter().enumerate() {
+        let peak = slots_peak_db(send, conf_rate);
+        let pre = pre_db(send).expect("every line carries the preamp");
+        // The EQ's preamp and the stage's cost each forgive 0.008 dB of rounding.
+        assert!(
+            peak + pre + conf_stage <= 0.02,
+            "line {n}: slots {peak:+.3} dB, preamp {pre:+.3} dB, the config's stage \
+             {conf_stage:+.3} dB"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_state_adopted_over_a_stage_sent_to_the_node_says_the_stage_may_still_play() {
     let (mut control, _, _) = both_on().await;
@@ -1101,6 +1485,8 @@ async fn a_state_adopted_over_a_stage_sent_to_the_node_says_the_stage_may_still_
         speakers: None,
         speakers_on: false,
         speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
     });
     assert!(
         control.owed.as_ref().is_some_and(|owed| owed.plays),
@@ -1284,11 +1670,21 @@ async fn a_send_that_pw_cli_applies_three_looks_late_is_not_sent_again_as_a_reve
     control.edit(gain(0, 2.0, true)).await.unwrap();
     let after_edit = params.sent().len();
     looks(&mut control, 3).await;
-    // The edit's own repeat, a second after it, is the only other send.
+    // The edit's own repeat, a second after it, and one line more once a look a second after
+    // the line still finds it off (a rebuild before any look looks the same) are the only other
+    // sends.
     assert!(
-        params.sent().len() <= after_edit + 1,
+        params.sent().len() <= after_edit + 2,
         "{} sends after the edit's {after_edit}",
         params.sent().len() - after_edit
+    );
+    assert_eq!(control.reverts.len(), 0, "no revert was counted");
+    let settled = params.sent().len();
+    looks(&mut control, 3).await;
+    assert_eq!(
+        params.sent().len(),
+        settled,
+        "the late line is not sent again and again"
     );
     assert_eq!(control.reverts.len(), 0, "no revert was counted");
 }
@@ -1316,6 +1712,104 @@ async fn a_revert_that_a_gated_look_sees_first_is_still_counted_at_the_next_look
             .any(|(name, value)| *name == port && *value == wanted)),
         "the slot was sent again: {again:?}"
     );
+}
+
+/// The preamp port of the left channel, in dB, as the latest send left it.
+fn sent_preamp_db(control: &EqControl) -> f64 {
+    20.0 * control.last_values["lpre:Mult"].log10()
+}
+
+/// Every port of slot 1 on both channels, at the value last sent to it.
+fn slot_one(control: &EqControl) -> Vec<(String, f64)> {
+    let mut ports: Vec<_> = control
+        .last_values
+        .iter()
+        .filter(|(name, _)| name.starts_with("l01:") || name.starts_with("r01:"))
+        .map(|(name, value)| (name.clone(), *value))
+        .collect();
+    ports.sort_by(|a, b| a.0.cmp(&b.0));
+    ports
+}
+
+/// PipeWire rebuilt the graph at the same node and rate: every port of slot 1 holds `ports`.
+fn put_back(params: &FakeParams, ports: &[(String, f64)]) {
+    let ports: Vec<(&str, f64)> = ports
+        .iter()
+        .map(|(name, value)| (name.as_str(), *value))
+        .collect();
+    params.set_ports(&ports);
+}
+
+/// Whether a send since `from` carried slot 1's `b0` at `wanted`.
+fn sent_again(params: &FakeParams, from: usize, wanted: f64) -> bool {
+    stage_sends(params, from).iter().any(|send| {
+        send.iter()
+            .any(|(name, value)| name == "l01:b0" && *value == wanted)
+    })
+}
+
+#[tokio::test]
+async fn a_slot_that_goes_back_before_a_look_saw_it_is_sent_again_once_its_line_is_seen_to_land() {
+    let (mut control, _, params) = setup(Keep::Memory);
+    control.set_on(true).await.unwrap();
+    control.edit(gain(0, 2.0, true)).await.unwrap();
+    looks(&mut control, 2).await;
+    assert!(control.verified, "live updates are verified");
+    let before = slot_one(&control);
+    let preamp_before = sent_preamp_db(&control);
+    // One line moves the slot and the preamp; it lands, and the graph is rebuilt at the same
+    // node and rate before any look: every port of the slot goes back, the preamp keeps what
+    // was sent.
+    control.edit(gain(0, 8.0, true)).await.unwrap();
+    let wanted = control.last_values["l01:b0"];
+    assert!(slot_one(&control) != before && sent_preamp_db(&control) < preamp_before - 1.0);
+    put_back(&params, &before);
+    looks(&mut control, 1).await;
+    // It goes back again right after the line that put it right, before the next look.
+    put_back(&params, &before);
+    let sends = params.sent().len();
+    looks(&mut control, 2).await;
+    assert!(
+        sent_again(&params, sends, wanted),
+        "the slot was sent again"
+    );
+    assert!(
+        !control.reverts.is_empty(),
+        "the moved preamp shows a revert"
+    );
+}
+
+#[tokio::test]
+async fn a_cut_that_goes_back_twice_before_a_look_saw_it_is_sent_again() {
+    let (mut control, _, params) = setup(Keep::Memory);
+    control.set_on(true).await.unwrap();
+    control.edit(gain(0, -2.0, true)).await.unwrap();
+    looks(&mut control, 2).await;
+    assert!(control.verified, "live updates are verified");
+    while control.ticks % WATCH_EVERY != 0 {
+        control.tick().await;
+    }
+    let before = slot_one(&control);
+    let preamp_before = sent_preamp_db(&control);
+    // A deeper cut leaves the preamp where it was: no port of its line survives a rebuild.
+    control.edit(gain(0, -6.0, true)).await.unwrap();
+    let wanted = control.last_values["l01:b0"];
+    assert!(slot_one(&control) != before);
+    assert!((sent_preamp_db(&control) - preamp_before).abs() < 1e-9);
+    // The line lands and the graph is rebuilt before the next look; the repeat puts it right
+    // after that look, and a second rebuild comes before the one after.
+    put_back(&params, &before);
+    for _ in 0..WATCH_EVERY {
+        control.tick().await;
+    }
+    put_back(&params, &before);
+    let sends = params.sent().len();
+    looks(&mut control, 5).await;
+    assert!(
+        sent_again(&params, sends, wanted),
+        "the slot was sent again"
+    );
+    assert!(control.reverts.is_empty(), "nothing showed a revert");
 }
 
 #[tokio::test]

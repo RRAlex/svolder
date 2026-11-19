@@ -1064,7 +1064,7 @@ fn a_click_on_a_word_presses_its_key() {
     }
     let app = app_showing(Screen::Devices);
     let hits = frame_hits(&app, 80, 24);
-    for code in ['n', 'u', 'x', 'r'] {
+    for code in ['n', 'u', 'b', 'x', 'r'] {
         let (x, y) = word_cell(&hits, KeyCode::Char(code));
         assert_eq!(
             resolve(&hits, click(x, y), &app),

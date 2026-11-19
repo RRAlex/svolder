@@ -77,6 +77,9 @@ import { createWalk } from './walk-wire.js';
 export const segment = (name) => encodeURIComponent(name)
   .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
+/** The path verdicts that say the sound does not go through this device (the judge's keys). */
+const OTHER_SINK = new Set(['not_this_dac', 'other_input']);
+
 /** The owner of the popup's stream want, and of the one for the device walk's states. */
 export const OWNER = 'popup:devices';
 export const WALK_OWNER = 'popup:devices-walk';
@@ -182,10 +185,10 @@ export function wire({ core, frame }) {
   const fleetRow = (name) => (store.page().fleet?.devices ?? []).find((one) => one.name === name);
 
   /** Whether the sound is going through the device `model` describes: its card has a track that
-   * plays and a path that does not say the sound goes elsewhere (class `other`: another sink, or
-   * another input of the DAC). */
+   * plays and a path that does not say the sound goes elsewhere (verdict `not_this_dac` or
+   * `other_input`: another sink, or another input of the DAC). */
   const playsThrough = (model) => model?.playing?.track?.status === 'playing'
-    && model.playing.path?.class !== 'other';
+    && !OTHER_SINK.has(model.playing.path?.verdict);
 
   /** What a device's facts and readings are drawn from: when it is the same, they are not put. */
   const factsKey = (device) => (device

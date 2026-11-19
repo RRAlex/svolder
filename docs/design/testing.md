@@ -49,6 +49,11 @@ live" lists where each module's tests are.
   prints the shrunk sequence. Run it after any change to the controller, the session or the chain's
   config; a short run of 300 seeds of each profile is part of `make check`. How the model works is
   in [host-control-preamp.md](host-control-preamp.md#the-preamp-lab).
+- **`make preamp-lab-outcomes OUT=<file>`**: every seed's outcome in the lab (each profile, both models
+  of ids; `SEED`, `RUNS` (400 by default) and `THREADS`), one line each. A change that must not
+  change what the lab finds (a faster evaluator, say) runs it before and after, and the two files
+  are the same. `TRACE=1` adds each run's trace (every `set-param` the controller sends): the
+  stricter check for a change to the controller.
 - **The soak**: a long run of the smoke's frame rate, haze density and fluid size. Run it before a
   merge that touches a smoke file; it is part of neither web gate.
 
@@ -213,7 +218,7 @@ can use:
 
 - every relative Markdown link in the README and the Markdown under `docs/`, `profiles/` and
   `scripts/` reaches an existing file, and every `#anchor` an existing heading;
-- no process tag in a tracked text file (the tags the script's own source lists);
+- no process tag, and no "bit-perfect" or "bit-exact", in shipped words (see the script);
 - a code span that looks like a repo path, in a shipped Markdown file or a `//` comment of the Rust
   sources, names a tracked file or folder; the `PATH_ALLOW` list in `scripts/docs-check.py` takes a
   span that is not a repo path, each with its reason;

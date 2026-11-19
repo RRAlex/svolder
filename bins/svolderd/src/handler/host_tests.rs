@@ -102,7 +102,14 @@ async fn host_request_answers_the_view() {
     assert!(view.available);
     let playing = view.playing.expect("the fake player");
     assert_eq!(playing.status, "playing");
-    assert_eq!(view.route, None, "nobody watches, so no route is read");
+    assert_eq!(
+        daemon.host().view().route,
+        None,
+        "nobody watches, so no route is kept"
+    );
+    let now = view_of(daemon.handle(Request::Host).await);
+    assert!(now.route.is_some(), "the request reads one now");
+    assert_eq!(daemon.host().view().route, None, "and keeps none");
 }
 
 #[tokio::test(start_paused = true)]
@@ -528,7 +535,7 @@ async fn only_a_subscription_holds_the_route_reads() {
     settle().await;
     let in_process = daemon.device_events(None);
     settle().await;
-    assert_eq!(view_of(daemon.handle(Request::Host).await).route, None);
+    assert_eq!(daemon.host().view().route, None);
 
     let mut events = daemon.subscribe_with_host(None).await;
     // The route arrives on the stream as a later view.
@@ -536,11 +543,11 @@ async fn only_a_subscription_holds_the_route_reads() {
     while view.route.is_none() {
         view = next_host(&mut events).await;
     }
-    assert!(view_of(daemon.handle(Request::Host).await).route.is_some());
+    assert!(daemon.host().view().route.is_some());
 
     drop(events);
     settle().await;
-    assert_eq!(view_of(daemon.handle(Request::Host).await).route, None);
+    assert_eq!(daemon.host().view().route, None);
     drop(in_process);
 }
 
@@ -570,7 +577,7 @@ async fn a_plain_subscription_gets_no_host_events_and_holds_no_watcher() {
         "a plain stream heard {heard:?}"
     );
     assert_eq!(
-        view_of(daemon.handle(Request::Host).await).route,
+        daemon.host().view().route,
         None,
         "no route is read for a plain subscription"
     );

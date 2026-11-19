@@ -17,7 +17,7 @@ What each verb returns to the shell. Back to the [usage index](README.md).
 | 3 | Connection failed (also: no daemon for a verb that needs one, such as `eq search`) |
 | 4 | Device did not confirm the command within the timeout |
 | 5 | An active fault was reported by the device |
-| 6 | The computer's controls are unavailable (PipeWire tools or socket missing, or host audio off) |
+| 6 | The computer's controls are unavailable (PipeWire tools or socket missing, or host audio off); `host check` says 6 when the graph cannot be read |
 | 7 | The daemon does not know the request, or lacks the feature asked for (it is older than this svolder: `svolder daemon restart`); `add`, `remove`, `setup`'s walk, the device edits and the AutoEq verbs (`eq search`, `eq import`) say so with 7 |
 | 130 | `watch` was told not to wait for the release (Ctrl-C during it); `capture` was ended by Ctrl-C before its frame window; `setup` or `add` was left by Ctrl-C, SIGTERM or a closed terminal during the daemon's walk (the walk is cancelled); `eq import --autoeq` or `host speakers fetch` or `host speakers import` was left by Ctrl-C, SIGTERM or a closed terminal (the daemon's job is cancelled) |
 

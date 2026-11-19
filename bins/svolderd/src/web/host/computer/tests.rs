@@ -13,12 +13,13 @@ use crate::web::test_support::{
 };
 
 /// Every route of the computer, with a body each would accept.
-const ROUTES: [(&str, &str); 9] = [
+const ROUTES: [(&str, &str); 10] = [
     ("/api/v1/host/volume", r#"{"pct":40}"#),
     ("/api/v1/host/mute", r#"{"muted":true}"#),
     ("/api/v1/host/eq", r#"{"on":true}"#),
     ("/api/v1/host/crossfeed", r#"{"on":true}"#),
     ("/api/v1/host/speakers", r#"{"on":true}"#),
+    ("/api/v1/host/loudness", r#"{"on":true}"#),
     ("/api/v1/host/eq/preset", r#"{"name":"Warm"}"#),
     (
         "/api/v1/host/eq/points",
@@ -434,6 +435,62 @@ async fn the_crossfeed_route_changes_the_computers_crossfeed() {
     )
     .await;
     assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    daemon.stop().await;
+}
+
+/// The loudness route reaches the controller like the crossfeed's: settings snapped and held, a
+/// drag, a body that names nothing a 409 in the daemon's words, an unknown field a 400, and the
+/// volume not read yet is refused for `reference_now`.
+#[tokio::test]
+async fn the_loudness_route_changes_the_computers_loudness_settings() {
+    let daemon = fake_daemon_playing("gungnir2-v2", "dac").await;
+    let web = web_over(&daemon);
+    let loudness = |daemon: &FakeDaemon| {
+        let daemon_fleet = Arc::clone(&daemon.fleet);
+        async move {
+            match daemon_fleet.request(Request::Host).await {
+                Response::Host(view) => view.eq.expect("eq").loudness.expect("loudness"),
+                other => panic!("no host view: {other:?}"),
+            }
+        }
+    };
+    assert!(!loudness(&daemon).await.on);
+    let reply = call(
+        &web,
+        post(
+            "/api/v1/host/loudness",
+            r#"{"on":true,"strength_pct":37,"reference_pct":250}"#,
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    assert_eq!(json(&reply.body), serde_json::json!({ "ok": true }));
+    let now = loudness(&daemon).await;
+    assert!(now.on);
+    assert_eq!(now.strength_pct, 35.0, "snapped to the step");
+    assert_eq!(now.reference_pct, 100.0, "held to the range");
+    let reply = call(
+        &web,
+        post(
+            "/api/v1/host/loudness",
+            r#"{"strength_pct":60,"done":false}"#,
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, Code::OK, "{}", reply.body);
+    assert_eq!(loudness(&daemon).await.strength_pct, 60.0);
+    let reply = call(&web, post("/api/v1/host/loudness", "{}")).await;
+    assert_eq!(reply.status, Code::CONFLICT, "{}", reply.body);
+    assert!(
+        json(&reply.body)["error"]
+            .as_str()
+            .unwrap()
+            .contains("names nothing")
+    );
+    let reply = call(&web, post("/api/v1/host/loudness", r#"{"volume":1}"#)).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
+    let reply = call(&web, post("/api/v1/host/loudness", r#"{"on":"yes"}"#)).await;
+    assert_eq!(reply.status, Code::BAD_REQUEST, "{}", reply.body);
     daemon.stop().await;
 }
 

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `svolder mqtt on|off`, `svolder mqtt set host|port|username <value>` and `svolder mqtt
-//! password`: turn the daemon's MQTT bridge on or off and set the broker it logs in to, for a
-//! script and for a first run in a container, as `web` and `mcp` do for their servers.
+//! `svolder mqtt on|off`, `svolder mqtt set host|port|username <value>`, `svolder mqtt set
+//! commands on|off` and `svolder mqtt password`: turn the daemon's MQTT client on or off and set
+//! the broker it logs in to, for a script and for a first run in a container, as `web` and `mcp`
+//! do for their servers.
 //!
 //! A daemon that answers makes the change (`Request::MqttSet`): it writes the one key in the file
 //! it reads and reloads, which restarts the bridge, and the verb prints where the bridge then
@@ -29,7 +30,7 @@ use svolder_ipc::socket::daemon_version::version_within;
 use svolder_ipc::{Config, FEATURE_MQTT_SET, MqttOp, MqttStatus, Request, Response};
 
 use crate::backend::Globals;
-use crate::cli::{MqttCommand, MqttKey};
+use crate::cli::{CommandsMode, MqttCommand, MqttKey};
 use crate::commands::daemon::status::mqtt_line;
 use crate::commands::server_switch::{Done, Failed, ask_daemon, finish, places};
 
@@ -43,6 +44,21 @@ const SETTLE: Duration = Duration::from_secs(3);
 /// Carry out `mqtt` or one of its sub-commands.
 pub(crate) async fn run(g: &Globals<'_>, command: MqttCommand) -> Result<ExitCode, String> {
     let op = match command {
+        MqttCommand::Password { clear } => MqttOp::Password {
+            value: match clear {
+                true => None,
+                false => Some(read_password().await?),
+            },
+        },
+        other => op_for(other)?,
+    };
+    let (socket, own) = places(g)?;
+    finish(apply(&socket, &own, op).await)
+}
+
+/// The change a verb other than `password` asks for.
+fn op_for(command: MqttCommand) -> Result<MqttOp, String> {
+    Ok(match command {
         MqttCommand::On => MqttOp::Enabled { enabled: true },
         MqttCommand::Off => MqttOp::Enabled { enabled: false },
         MqttCommand::Set { key } => match key {
@@ -50,19 +66,15 @@ pub(crate) async fn run(g: &Globals<'_>, command: MqttCommand) -> Result<ExitCod
                 value: named(value, "the host")?,
             },
             MqttKey::Port { value } => MqttOp::Port { value },
+            MqttKey::Commands { mode } => MqttOp::Commands {
+                commands: matches!(mode, CommandsMode::On),
+            },
             MqttKey::Username { value } => MqttOp::Username {
                 value: Some(value).filter(|v| !v.trim().is_empty()),
             },
         },
-        MqttCommand::Password { clear } => MqttOp::Password {
-            value: match clear {
-                true => None,
-                false => Some(read_password().await?),
-            },
-        },
-    };
-    let (socket, own) = places(g)?;
-    finish(apply(&socket, &own, op).await)
+        MqttCommand::Password { .. } => return Err("the password is read, not parsed".into()),
+    })
 }
 
 /// `value` when it names something.
@@ -91,24 +103,29 @@ pub(crate) async fn apply(socket: &Path, own_config: &Path, op: MqttOp) -> Resul
         return Err(format!("the daemon answered {answer:?}").into());
     };
     let status = settled(socket, status).await;
-    let line = mqtt_line(&status);
+    let mut line = mqtt_line(&status);
+    if matches!(status, MqttStatus::Off) && !matches!(op, MqttOp::Enabled { .. }) {
+        line = format!("{line} (saved: {})", saved_words(&op));
+    }
     let mut notes = Vec::new();
-    let asked = match &op {
-        MqttOp::Enabled { enabled } => Some(*enabled),
-        _ => None,
-    };
-    match (asked, &status) {
-        (Some(true), MqttStatus::Off)
-        | (Some(false), MqttStatus::Connecting { .. })
-        | (Some(false), MqttStatus::Connected { .. })
-        | (Some(false), MqttStatus::Trouble { .. }) => {
-            return Err(format!(
-                "{line} (written, and the daemon has not acted on it: svolder daemon status)"
-            )
-            .into());
+    let acted = match (&op, &status) {
+        (MqttOp::Enabled { enabled: true }, MqttStatus::Off) => false,
+        (MqttOp::Enabled { enabled: false }, s) => {
+            matches!(s, MqttStatus::Off | MqttStatus::Unknown)
         }
-        (_, MqttStatus::Trouble { problem, .. }) => notes.push(problem.words().to_string()),
-        _ => {}
+        (MqttOp::Commands { commands: asked }, MqttStatus::Connected { commands, .. }) => {
+            asked == commands
+        }
+        _ => true,
+    };
+    if !acted {
+        return Err(format!(
+            "{line} (written, and the daemon has not acted on it: svolder daemon status)"
+        )
+        .into());
+    }
+    if let MqttStatus::Trouble { problem, .. } = &status {
+        notes.push(problem.words().to_string());
     }
     if tightened {
         notes.push(
@@ -168,36 +185,27 @@ async fn settled(socket: &Path, answer: MqttStatus) -> MqttStatus {
     status
 }
 
+/// What a change says in the line that confirms it: `on`, `host = H`, `password set`.
+fn saved_words(op: &MqttOp) -> String {
+    match op {
+        MqttOp::Enabled { enabled: true } => "on".to_string(),
+        MqttOp::Enabled { enabled: false } => "off".to_string(),
+        MqttOp::Commands { commands } => format!("commands = {commands}"),
+        MqttOp::Host { value } => format!("host = {value}"),
+        MqttOp::Port { value } => format!("port = {value}"),
+        MqttOp::Username { value: Some(v) } => format!("username = {v}"),
+        MqttOp::Username { value: None } => "username cleared".to_string(),
+        MqttOp::Password { value: Some(_) } => "password set".to_string(),
+        MqttOp::Password { value: None } => "password cleared".to_string(),
+    }
+}
+
 /// The change with no daemon on `socket`: the key written to `own_config` by this side. A daemon
 /// may have started since the socket was tried and read the file before this write, so a daemon
 /// that reads this file is told to reload.
 async fn alone(socket: &Path, own_config: &Path, op: &MqttOp) -> Result<Done, String> {
-    let (what, mut notes) = match op {
-        MqttOp::Enabled { enabled } => (
-            match enabled {
-                true => "on".to_string(),
-                false => "off".to_string(),
-            },
-            Vec::new(),
-        ),
-        MqttOp::Commands { commands } => (format!("commands = {commands}"), Vec::new()),
-        MqttOp::Host { value } => (format!("host = {value}"), Vec::new()),
-        MqttOp::Port { value } => (format!("port = {value}"), Vec::new()),
-        MqttOp::Username { value } => (
-            match value {
-                Some(value) => format!("username = {value}"),
-                None => "username cleared".to_string(),
-            },
-            Vec::new(),
-        ),
-        MqttOp::Password { value } => (
-            match value {
-                Some(_) => "password set".to_string(),
-                None => "password cleared".to_string(),
-            },
-            Vec::new(),
-        ),
-    };
+    let what = saved_words(op);
+    let mut notes = Vec::new();
     let op_again = op.clone();
     let op = op.clone();
     let tightened = Config::update_mqtt_noting(own_config, move |mqtt| match op {

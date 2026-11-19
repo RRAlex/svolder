@@ -348,12 +348,12 @@ def phone(b, d, theme):
     b.page("(document.getElementById('fx-button').focus(), 1)")
     opened = by_the_menu(b, POPUP)
     r0 = rects(b, POPUP)
-    strip = b.page("[...document.querySelectorAll('#popup-sound .fp-tab, #popup-sound .fp-pill')]"
+    strip = b.page("[...document.querySelectorAll('#popup-sound .fp-tabs, #popup-sound .fp-pill')]"
                    ".map((e) => e.getBoundingClientRect().right <= innerWidth)")
     page_shown = r0['page'] and r0['page']['shown'] and not r0['side']
     check(f'nothing_scrolls_sideways {tag}: on a phone the popup opens on its EQ library tab, the page '
           'shown, the tabs and the pills inside the window',
-          opened is True and page_shown and r0['over'] == [0, 0] and all(strip) and len(strip) == 6, [r0, strip])
+          opened is True and page_shown and r0['over'] == [0, 0] and all(strip) and len(strip) == 4, [r0, strip])
     press_on(b, f'#popup-sound-pill-autoeq')
     put_text(b, pid('query'), 'hd 650')
     b.press('Enter')
@@ -388,6 +388,18 @@ def computer(b, d, theme):
     check(f'the_computer_side {tag}: the preview is the correction as the computer plays it, with no fit',
           shown is True and 'as the computer plays it' in pane[0] and 'Worst miss' not in pane[0]
           and pane[1] is False, pane)
+    scale = b.page("""(() => { const s = document.querySelector('#popup-eq-library-preview .fpe-mini');
+      const n = s && s.querySelector('.fpe-mini-needle'); const t = document.getElementById('popup-eq-library-preview').textContent;
+      return { svg: !!s, needle: n && n.getAttribute('d'), ticks: s ? s.querySelectorAll('.fpe-mini-tick').length : 0,
+        db: (t.match(/Preamp\\s*(−|-)?([\\d.]+) dB/) || []).slice(1) }; })()""")
+    db = None if not scale['db'] else float(('-' if scale['db'][0] else '') + scale['db'][1])
+    want = None if db is None else f'M{74 * min(1, max(0, (db + 12) / 12)):.1f} -2v12'
+    check(f'the_computer_side {tag}: the Preamp row has its small scale, the needle where the number stands',
+          scale['svg'] and scale['ticks'] == 13 and db is not None and scale['needle'] == want, [scale, want])
+    ends = b.page("""import(new URL('assets/core/popups/eq-library/draw.js', document.baseURI)).then((m) => [
+      m.preampScale(-6.1).includes('d="M36.4 -2v12"'), m.preampScale(-30).includes('d="M0.0 -2v12"'),
+      m.preampScale(4).includes('d="M74.0 -2v12"')])""")
+    check(f'the_computer_side {tag}: the needle is at 36.4 for -6.1 dB and clamped at -12 and 0', ends == [True, True, True], ends)
     press_on(b, '#' + f'popup-sound-pill-saved')
     poll(lambda: b.page("document.querySelectorAll('.fpe-row').length") >= 1, 6.0)
     state = b.page("[...document.querySelectorAll('[data-act=overwrite]')].map((e) => e.getAttribute('aria-disabled'))")
@@ -408,9 +420,27 @@ def no_way_in(b, theme, who):
     b.page("(__core.router.open('sound'), 1)")
     time.sleep(0.5)
     posts = [p for p in b.page(POSTS) if '/autoeq/' in p[0]]
-    check(f'{tag}: the Devices row only (the read-only popup), no Sound row, no popup and no request',
-          rows == ['menu-popup-devices', 'menu-popup-help'] and b.page("!document.getElementById('popup-sound')") is True
-          and posts == [], [rows, posts])
+    check(f'{tag}: the Devices row, the read-only PipeWire config row and Help, no Sound row, no popup and no request',
+          rows == ['menu-popup-devices', 'menu-popup-setup', 'menu-popup-help']
+          and b.page("!document.getElementById('popup-sound')") is True and posts == [], [rows, posts])
+    # the read-only config popup: opens for everyone, sends nothing and offers no control but its close button
+    posts_before = len(b.page(POSTS))
+    b.page("""(window.__writes = [], (window.__fetch0 ||= window.fetch), window.fetch = (...a) => {
+      const m = String((a[1] && a[1].method) || (a[0] && a[0].method) || 'GET').toUpperCase();
+      if (m !== 'GET') window.__writes.push([String(a[0]), m]);
+      return window.__fetch0(...a); }, 1)""")
+    b.page("(__core.router.open('setup'), 1)")
+    poll(lambda: b.page("Boolean(document.getElementById('popup-setup'))"), 6.0)
+    time.sleep(0.4)
+    kinds = 'button, a, input, select, textarea, [role=button], [tabindex], [data-act]'
+    controls = b.page("[...document.querySelectorAll('" + ', '.join('#popup-setup ' + k for k in kinds.split(', '))
+                      + "')].map((e) => e.id || e.tagName)")
+    writes = b.page('window.__writes')
+    sent = b.page(POSTS)[posts_before:]
+    check(f'{tag}: the PipeWire config popup opens, sends no request and offers no control but its close button',
+          b.page("Boolean(document.getElementById('popup-setup'))") is True and sent == [] and writes == []
+          and all(c == 'popup-setup-close' for c in controls), [controls, sent, writes])
+    close_popup(b, 'setup')
 
 
 def main():

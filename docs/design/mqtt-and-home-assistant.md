@@ -162,15 +162,22 @@ one is logged once and ignored.
 ## The computer's EQ
 
 A bridge-level unit, `computer`, in place of a unit id: `svolder_mqtt::computer` builds one switch
-and one preset sensor (and, while the controller serves crossfeed, a crossfeed switch and a
-crossfeed preset select, `computer::crossfeed`, whose options are the view's model table and whose
-`Custom` is a state, not a command) under the Home Assistant device `This computer` (identifiers
-`svolder_computer`), and `mqtt_bridge/computer.rs` follows the host's view
-(`ComputerLink`), announces them while the view carries an EQ, and publishes `ON`/`OFF` and the
+and one preset sensor (and, while the controller serves loudness, a loudness switch and a strength
+number, `computer::loudness`, whose range and step come from the view; while it serves crossfeed, a
+crossfeed switch and a crossfeed preset select, `computer::crossfeed`, whose options are the view's
+model table and whose `Custom` is a state, not a command) under the Home Assistant device
+`This computer` (identifiers `svolder_computer`), and `mqtt_bridge/computer.rs` follows the host's
+view (`ComputerLink`), announces them while the view carries an EQ, and publishes `ON`/`OFF` and the
 preset name. The preset topic is cleared, not retained empty, while the EQ is off. A command goes
-through the host's own `Mode` request, never through a device's writer. ON with a flat, never
-edited curve (`computer::nothing_kept`) is not sent. A retained command is never acted on, as for
-devices. No volume, mute or point entity exists on purpose.
+through the host's own `Mode` request, never through a device's writer. ON with a flat, never edited
+curve (`computer::nothing_kept`) is not sent. A retained command is never acted on, as for devices.
+No volume, mute or point entity exists on purpose.
+
+The same device carries two read-only entities of the untouched path, the path sensor and the
+PipeWire config problem sensor, judged by `svolder-ipc` and published by `mqtt_bridge/computer.rs`
+while the broker is connected. The bridge holds a slow `Watcher` for them, which reads the route
+every 30 s and nothing else. The judging rules and the reads are in
+[host-config-check.md](host-config-check.md).
 
 ## Principles
 

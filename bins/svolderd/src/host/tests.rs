@@ -48,11 +48,17 @@ fn covers() -> CoverSource {
 struct Counting {
     reads: Arc<AtomicUsize>,
     sink: Arc<Mutex<String>>,
+    /// How long a read takes on the (paused) clock.
+    delay: Arc<Mutex<Duration>>,
 }
 
 impl Counting {
     fn reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
+    }
+
+    fn takes(&self, delay: Duration) {
+        *self.delay.lock().unwrap() = delay;
     }
 
     fn sink_is(&self, name: &str) {
@@ -64,6 +70,8 @@ impl Counting {
 impl Routes for Counting {
     async fn read(&self, player: Option<NowPlaying>) -> Option<RouteFacts> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        let delay = *self.delay.lock().unwrap();
+        tokio::time::sleep(delay).await;
         Some(RouteFacts {
             sink: Some(SinkFacts {
                 name: self.sink.lock().unwrap().clone(),
@@ -699,6 +707,7 @@ async fn the_changed_fake_route_changes_everything() {
     let route = FakeRoute {
         display: "Gungnir 2".to_string(),
         changed: true,
+        setup_fail: false,
         computer: None,
     };
     let facts = route.read(Some(track("x", None))).await.expect("a route");
@@ -718,7 +727,9 @@ async fn the_changed_fake_route_changes_everything() {
             "resampled 44.1 → 48 kHz",
             "computer volume 54 %",
             "host EQ on",
-            "2 other sounds mixing"
+            "2 other sounds mixing",
+            "cut to 16 bits (S32 → S16)",
+            "dither on (triangular)"
         ]
     );
 }
@@ -1432,4 +1443,413 @@ fn the_fake_daemons_store_is_made_fresh() {
     assert!(!dir.join("left-over.toml").exists(), "made fresh");
     assert_eq!(store.list_sidecars().len(), 2);
     let _ = std::fs::remove_dir_all(&run);
+}
+
+/// A one-shot `host` request reads the route now when none is kept, and reads nothing when a
+/// watcher keeps one.
+#[tokio::test(start_paused = true)]
+async fn view_now_reads_a_route_only_when_none_is_kept() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let routes = Counting::default();
+    routes.sink_is("dac");
+    let service = service(&players, Some(&routes), covers());
+    settle().await;
+    assert_eq!(service.view().route, None, "nobody watches");
+
+    let view = service.view_now().await;
+    assert_eq!(routes.reads(), 1, "one read for the request");
+    let route = view.route.expect("a route read now");
+    assert_eq!(route.sink.expect("a sink").name, "dac");
+    assert!(route.player.is_some(), "for the followed player");
+    assert_eq!(service.view().route, None, "nothing is kept from it");
+    service.view_now().await;
+    assert_eq!(routes.reads(), 2, "each request reads again");
+
+    let watcher = service.watching();
+    settle().await;
+    assert_eq!(routes.reads(), 3, "the watcher's own read");
+    let view = service.view_now().await;
+    assert_eq!(routes.reads(), 3, "a kept route is not read again");
+    assert!(view.route.is_some());
+    drop(watcher);
+}
+
+/// One-shot requests that arrive while a read is in flight share it: five at once run one read,
+/// a later one runs its own.
+#[tokio::test(start_paused = true)]
+async fn concurrent_one_shot_requests_share_one_read() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let routes = Counting::default();
+    routes.sink_is("dac");
+    routes.takes(Duration::from_millis(300));
+    let service = service(&players, Some(&routes), covers());
+    settle().await;
+    let views = tokio::join!(
+        service.view_now(),
+        service.view_now(),
+        service.view_now(),
+        service.view_now(),
+        service.view_now()
+    );
+    assert_eq!(routes.reads(), 1, "one read for five requests");
+    for view in [views.0, views.1, views.2, views.3, views.4] {
+        assert_eq!(
+            view.route
+                .expect("every request has the route")
+                .sink
+                .unwrap()
+                .name,
+            "dac"
+        );
+    }
+    service.view_now().await;
+    assert_eq!(routes.reads(), 2, "a request after it reads again");
+}
+
+/// A host with no route reader answers a one-shot request without a route.
+#[tokio::test(start_paused = true)]
+async fn view_now_without_a_route_reader_has_no_route() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let service = service(&players, None, covers());
+    settle().await;
+    assert_eq!(service.view_now().await.route, None);
+}
+
+/// A slow watcher alone reads the route at once and then every 30 s; a fast one joining makes
+/// the period 2 s, so a read older than that is due at once; the fast one leaving makes it 30 s
+/// again; the last one leaving ends the reads and drops the route.
+#[tokio::test(start_paused = true)]
+async fn a_slow_watcher_reads_every_30_s_and_a_fast_one_every_2_s() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let routes = Counting::default();
+    let service = service(&players, Some(&routes), covers());
+    let slow = service.watching_slow();
+    settle().await;
+    assert_eq!(routes.reads(), 1, "the first look comes at once");
+    assert!(service.view().route.is_some());
+
+    tokio::time::sleep(Duration::from_secs(29)).await;
+    assert_eq!(routes.reads(), 1, "29 s after the first read");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(routes.reads(), 2, "31 s after it");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let fast = service.watching();
+    settle().await;
+    assert_eq!(
+        routes.reads(),
+        3,
+        "a fast watcher joining reads at once when the last read is over 2 s old"
+    );
+    tokio::time::sleep(Duration::from_millis(2_100)).await;
+    assert_eq!(routes.reads(), 4, "then every 2 s");
+    tokio::time::sleep(Duration::from_millis(2_100)).await;
+    assert_eq!(routes.reads(), 5);
+
+    drop(fast);
+    settle().await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    assert_eq!(routes.reads(), 5, "10 s after: back to 30 s");
+    tokio::time::sleep(Duration::from_secs(21)).await;
+    assert_eq!(routes.reads(), 6);
+    assert!(
+        service.view().route.is_some(),
+        "the slow hold keeps the route"
+    );
+
+    drop(slow);
+    settle().await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(routes.reads(), 6, "nobody watches");
+    assert_eq!(service.view().route, None, "no stale route is kept");
+}
+
+/// A slow hold is not a fast watcher: the fast count stays 0, so the computer's volume is not
+/// followed, and two slow holds read the route once.
+#[tokio::test(start_paused = true)]
+async fn a_slow_hold_does_not_count_as_a_fast_watcher() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let routes = Counting::default();
+    let service = service(&players, Some(&routes), covers());
+    let _slow = service.watching_slow();
+    settle().await;
+    assert_eq!(service.watcher_count(), 0, "the fast count stays 0");
+    let holds = service.slow_holds();
+    let _more = holds.hold();
+    settle().await;
+    assert_eq!(service.watcher_count(), 0);
+    assert_eq!(routes.reads(), 1, "two slow holds read once");
+}
+
+/// A slow watcher alone makes no volume read: only a fast one does.
+#[tokio::test(start_paused = true)]
+async fn a_slow_watcher_reads_no_volume() {
+    let service = HostService::start(&HostConfig::default(), HostMode::Fake);
+    let slow = service.watching_slow();
+    settle().await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(service.view().route.is_some(), "the route is read");
+    assert_eq!(service.view().volume, None, "no volume is read");
+    let fast = service.watching();
+    settle().await;
+    assert!(service.view().volume.is_some(), "a fast watcher reads it");
+    drop(fast);
+    drop(slow);
+}
+
+/// The fake route's setup: every line passes by default, the changed route names the sink's
+/// width and the dither, and `SVOLDER_FAKE_CONFIG=fail` fails the rates, the forced rate and the
+/// filter.
+#[tokio::test]
+async fn the_fake_routes_setup_lines() {
+    use svolder_ipc::host::{SetupOutcome, SetupSummary, setup_check};
+    let route = |changed, setup_fail| FakeRoute {
+        display: "Gungnir 2".to_string(),
+        changed,
+        setup_fail,
+        computer: None,
+    };
+    let check = |facts: &RouteFacts| setup_check(facts);
+    let facts = route(false, false)
+        .read(Some(track("x", None)))
+        .await
+        .expect("a route");
+    let passing = check(&facts);
+    assert_eq!(passing.summary, SetupSummary::Untouched, "{passing:?}");
+    assert_eq!(passing.lines.len(), 7);
+
+    let facts = route(true, false)
+        .read(Some(track("x", None)))
+        .await
+        .expect("a route");
+    let changed = check(&facts);
+    let failing: Vec<(&str, &str)> = changed
+        .lines
+        .iter()
+        .filter(|line| line.outcome == SetupOutcome::Fail)
+        .map(|line| (line.key.as_str(), line.words.as_str()))
+        .collect();
+    assert_eq!(
+        failing,
+        [
+            ("dither", "triangular"),
+            ("format", "S16LE in use, S32LE available")
+        ]
+    );
+
+    let facts = route(false, true)
+        .read(Some(track("x", None)))
+        .await
+        .expect("a route");
+    let failed = check(&facts);
+    let failing: Vec<&str> = failed
+        .lines
+        .iter()
+        .filter(|line| line.outcome == SetupOutcome::Fail)
+        .map(|line| line.key.as_str())
+        .collect();
+    assert_eq!(failing, ["rates", "forced_rate", "filter"]);
+    assert_eq!(failed.summary, SetupSummary::Changes(3));
+}
+
+/// `SVOLDER_FAKE_CONFIG=fail` (any case, blanks around) is the failing setup; anything else is not.
+#[test]
+fn the_fake_setup_knob_reads_fail() {
+    assert!(!FakeKnobs::default().setup_fail);
+    for (value, fails) in [
+        ("fail", true),
+        (" Fail ", true),
+        ("", false),
+        ("changed", false),
+    ] {
+        let knobs = FakeKnobs::from_knobs(|name| {
+            (name == "SVOLDER_FAKE_CONFIG").then(|| value.to_string())
+        });
+        assert_eq!(knobs.setup_fail, fails, "{value:?}");
+    }
+}
+
+/// The real route read fills the ALSA hop from the card's own files after reading the graph:
+/// the sink of the fixture is on card 1, whose substream is open at S32_LE here.
+#[tokio::test]
+async fn the_real_route_read_fills_the_alsa_hop() {
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/svolder-host/tests");
+    let dir = std::env::temp_dir().join(format!("svolderd-asound-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sub = dir.join("asound/card1/pcm0p/sub0");
+    std::fs::create_dir_all(&sub).unwrap();
+    let playing = fixtures.join("fixtures/asound/playing/card3");
+    std::fs::copy(playing.join("pcm0p/sub0/hw_params"), sub.join("hw_params")).unwrap();
+    std::fs::copy(
+        fixtures.join("fixtures/asound/idle/card3/stream0"),
+        dir.join("asound/card1/stream0"),
+    )
+    .unwrap();
+    let script = dir.join("pw-dump");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ncat '{}'\n",
+            fixtures.join("fixtures/pw-dump/schiit-sink.json").display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let routes = PwRoutes {
+        dump: PwDump::new(script.clone()),
+        asound: svolder_host::Asound::new(dir.join("asound")),
+    };
+    let facts = routes.read(None).await.expect("a route");
+    let alsa = facts.setup.expect("setup").alsa.expect("an alsa sink");
+    assert!(
+        matches!(alsa.hw, svolder_host::HwState::Open(_)),
+        "{alsa:?}"
+    );
+    assert!(alsa.kernel.is_some(), "{alsa:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A route reader that never answers.
+struct Stalled;
+
+#[async_trait]
+impl Routes for Stalled {
+    async fn read(&self, _player: Option<NowPlaying>) -> Option<RouteFacts> {
+        std::future::pending().await
+    }
+}
+
+/// A one-shot request whose route read stalls gives up after a second, with the route it had
+/// (none) and the EQ view and volume the other reads gave: a stalled PipeWire costs the request
+/// its route only.
+#[tokio::test(start_paused = true)]
+async fn a_stalled_route_read_costs_a_one_shot_request_its_route_only() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let service = HostService::idle();
+    let shared: Arc<dyn Players> = Arc::new(players);
+    service.run_with(Parts {
+        connect: found(shared),
+        routes: Some(Arc::new(Stalled)),
+        covers: covers(),
+        helpers: Vec::new(),
+        frames: Err("no capture in this test".to_string()),
+        computer: Some(Arc::new(fake_computer("Gungnir 2", FakeEq::Live, 42, None))),
+    });
+    settle().await;
+    let started = Instant::now();
+    let view = service.view_now().await;
+    assert!(
+        started.elapsed() <= Duration::from_millis(1_100),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(view.route, None);
+    assert!(view.eq.is_some(), "the EQ view is still there");
+    assert_eq!(view.volume.map(|volume| volume.pct), Some(42));
+    assert!(service.eq_now().is_some());
+}
+
+/// With only a slow hold, which keeps a route up to 30 s old, a one-shot request reads anew; with
+/// a fast one it takes the kept route.
+#[tokio::test(start_paused = true)]
+async fn a_one_shot_request_reads_anew_unless_a_fast_watcher_keeps_the_route() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let routes = Counting::default();
+    routes.sink_is("old");
+    let service = service(&players, Some(&routes), covers());
+    let slow = service.watching_slow();
+    settle().await;
+    assert_eq!(routes.reads(), 1);
+    routes.sink_is("new");
+    let sink = |view: HostView| {
+        view.route
+            .and_then(|route| route.sink)
+            .map(|sink| sink.name)
+    };
+    assert_eq!(sink(service.view_now().await).as_deref(), Some("new"));
+    assert_eq!(routes.reads(), 2, "the request read once more");
+
+    let fast = service.watching();
+    settle().await;
+    let reads = routes.reads();
+    service.view_now().await;
+    assert_eq!(
+        routes.reads(),
+        reads,
+        "a fast watcher keeps the route young"
+    );
+    drop((fast, slow));
+}
+
+/// A volume write while only a slow hold is held keeps nothing in the view: the slow hold does
+/// not follow the volume.
+#[tokio::test(start_paused = true)]
+async fn a_volume_write_under_a_slow_hold_leaves_the_views_volume_empty() {
+    let service = HostService::start(&HostConfig::default(), HostMode::Fake);
+    let _slow = service.watching_slow();
+    settle().await;
+    service.host_volume(30).await.expect("the write");
+    assert_eq!(service.view().volume, None);
+    let _fast = service.watching();
+    settle().await;
+    service.host_volume(31).await.expect("the write");
+    assert_eq!(service.view().volume.map(|volume| volume.pct), Some(31));
+}
+
+/// A sink whose read takes 900 ms.
+struct SlowSink(FakeSink);
+
+#[async_trait]
+impl Sink for SlowSink {
+    async fn read(&self) -> Option<SinkState> {
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        self.0.read().await
+    }
+    async fn set_volume(&self, volume: f32) -> bool {
+        self.0.set_volume(volume).await
+    }
+    async fn toggle_mute(&self) -> bool {
+        self.0.toggle_mute().await
+    }
+    async fn set_mute(&self, muted: bool) -> bool {
+        self.0.set_mute(muted).await
+    }
+}
+
+/// A one-shot request runs the route read and the volume read together: a 900 ms volume read
+/// beside a route read that stalls (given up at 1 s) takes about 1 s in all, not 1.9 s.
+#[tokio::test(start_paused = true)]
+async fn the_route_and_volume_reads_of_a_one_shot_request_run_together() {
+    let players = FakePlayers::new(Some(track("So What", None)));
+    let sink = FakeSink::new(Some(SinkState {
+        volume: 0.42,
+        muted: false,
+        name: "Schiit".to_string(),
+        target: None,
+    }));
+    let computer = Computer::new(Ok(Arc::new(SlowSink(sink))), Err("no pw-cli".to_string()));
+    let service = HostService::idle();
+    let shared: Arc<dyn Players> = Arc::new(players);
+    service.run_with(Parts {
+        connect: found(shared),
+        routes: Some(Arc::new(Stalled)),
+        covers: covers(),
+        helpers: Vec::new(),
+        frames: Err("no capture in this test".to_string()),
+        computer: Some(Arc::new(computer)),
+    });
+    settle().await;
+    let started = Instant::now();
+    let view = service.view_now().await;
+    assert!(
+        started.elapsed() <= Duration::from_millis(1_200),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(view.route, None);
+    assert_eq!(view.volume.map(|volume| volume.pct), Some(42));
 }

@@ -415,3 +415,24 @@ fn a_pending_tooltip_keeps_the_tick_within_a_tenth_of_a_second() {
     app.tick(now + DELAY);
     assert_eq!(tick_period(&app, &off), app.tick_period());
 }
+
+/// A path row that scrolls rides the quarter-second tick the loop has anyway, which moves it
+/// four cells a second: it asks for no faster tick, with effects on or off.
+#[test]
+fn a_scrolling_path_row_asks_for_no_faster_tick() {
+    let app = App::new(
+        Registry::generic(0),
+        "fake".into(),
+        &TuiConfig::default(),
+        Vec::new(),
+    );
+    app.drawn.path_travel.set(Some(40));
+    let slow = Duration::from_millis(250);
+    for effects in [
+        Effects::new(false, &EffectsConfig::default()),
+        Effects::new(true, &EffectsConfig::default()),
+    ] {
+        assert_eq!(tick_period(&app, &effects), slow);
+    }
+    assert_eq!(crate::tui::widgets::slow_scroll::CELL, slow);
+}

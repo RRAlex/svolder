@@ -3,7 +3,7 @@
 
 //! `daemon status`: what the daemon is doing, as lines of text.
 //!
-//! The units come first, then whatever answers on the socket: its version, its MQTT bridge, its
+//! The units come first, then whatever answers on the socket: its version, its MQTT client, its
 //! MCP server, its web UI and the devices it holds, then the daemon that is not this session's and
 //! where the log is. It reports what it found and never fails over it, because a machine with
 //! nothing running is a machine it has something true to say about.
@@ -13,7 +13,9 @@ use std::path::Path;
 use svolder_ipc::checks::UnitFacts;
 use svolder_ipc::checks::processes::{RunningDaemon, running_daemons};
 use svolder_ipc::socket::daemon_version::{self, VersionReply};
-use svolder_ipc::{Client, DeviceInfo, McpStatus, MqttStatus, Request, Response, WebStatus};
+use svolder_ipc::{
+    Activity, Client, DeviceInfo, McpStatus, MqttStatus, Request, Response, WebStatus,
+};
 
 use crate::backend::{ASK_WAIT, Globals};
 use crate::recovery::Failure;
@@ -21,7 +23,7 @@ use crate::recovery::Failure;
 use super::logs::{CONTAINER_LOG, JOURNAL, LogSaid, NOT_A_FILE};
 use super::{Ctl, OWN_VERSION, SERVICE_UNIT, SOCKET_UNIT, resolved_socket, systemd_manages};
 
-/// What the daemon is doing: the units, the daemon's own version, its MQTT bridge, its MCP
+/// What the daemon is doing: the units, the daemon's own version, its MQTT client, its MCP
 /// server, and the devices it holds.
 ///
 /// This reports and never fails over what it found: a machine with no units and no daemon is a
@@ -83,7 +85,9 @@ async fn status_lines(
                 lines.extend(told.config_changed);
                 lines.extend(told.mqtt.as_ref().map(mqtt_line));
                 lines.extend(told.mcp.as_ref().map(McpStatus::line));
+                lines.extend(clients_line("mcp", told.activity.and_then(|a| a.mcp)));
                 lines.extend(told.web.as_ref().map(WebStatus::line));
+                lines.extend(clients_line("web", told.activity.and_then(|a| a.web)));
                 match tokio::time::timeout(ASK_WAIT, devices(&mut client)).await {
                     Ok(device_lines) => lines.extend(device_lines),
                     Err(_) => lines.push(format!("devices: no answer within {ASK_WAIT:?}")),
@@ -145,7 +149,7 @@ fn also_running(running: &[RunningDaemon], socket: &Path, listen: Option<&Path>)
         .collect()
 }
 
-/// What a daemon said of itself: its version, or what it said instead, where its MQTT bridge, its
+/// What a daemon said of itself: its version, or what it said instead, where its MQTT client, its
 /// MCP server and its web UI stand, where it logs, and whether its file changed since the last
 /// reload. A daemon too old to have one of them says nothing of it.
 pub(super) struct Said {
@@ -153,6 +157,8 @@ pub(super) struct Said {
     pub(super) mqtt: Option<MqttStatus>,
     pub(super) mcp: Option<McpStatus>,
     pub(super) web: Option<WebStatus>,
+    /// How many clients its MCP server and web UI have had, when it says.
+    pub(super) activity: Option<Activity>,
     pub(super) log: Option<String>,
     /// The line that says the configuration file changed, when it did.
     pub(super) config_changed: Option<String>,
@@ -167,6 +173,7 @@ pub(super) async fn version(client: &mut Client) -> Said {
             mqtt: info.mqtt,
             mcp: info.mcp,
             web: info.web,
+            activity: info.activity,
             log,
         },
         Err(why) => Said {
@@ -174,10 +181,18 @@ pub(super) async fn version(client: &mut Client) -> Said {
             mqtt: None,
             mcp: None,
             web: None,
+            activity: None,
             log: None,
             config_changed: None,
         },
     }
+}
+
+/// `mcp clients: 2 connections open; 3 clients in the past hour, 5 in the past day` for the
+/// server `name`, when the daemon reports counts for it: a daemon too old to count, and a server
+/// that is off, get no line.
+fn clients_line(name: &str, counts: Option<svolder_ipc::ServerActivity>) -> Option<String> {
+    counts.map(|counts| format!("{name} clients: {}", counts.line()))
 }
 
 /// The bridge's line: `mqtt: off`; `mqtt: connecting to HOST:PORT`, with the wait before the

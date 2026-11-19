@@ -166,7 +166,7 @@ impl Home {
     /// and a socket path may not pass 108 bytes.
     fn new() -> Home {
         static NEXT: AtomicU32 = AtomicU32::new(0);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = common::short_join(&format!(
             "svhe-cli-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
@@ -422,8 +422,9 @@ fn applying_an_imported_preset_writes_the_conf_and_the_unit_and_says_what_is_on(
         conf.contains("name = lpre label = linear control = { Mult = 0.4786"),
         "{conf}"
     );
-    // Sixteen slots a side, and the crossfeed stage's direct, cross and side paths a side.
-    assert_eq!(conf.matches("label = bq_raw").count(), 32 + 6, "{conf}");
+    // Sixteen slots a side, the crossfeed stage's direct, cross and side paths a side, and the
+    // loudness stage's two sections a side.
+    assert_eq!(conf.matches("label = bq_raw").count(), 32 + 6 + 4, "{conf}");
     let state = home.read("svolder/host-eq.toml");
     let slots = state
         .split("slots = [")
@@ -471,6 +472,29 @@ fn applying_an_imported_preset_writes_the_conf_and_the_unit_and_says_what_is_on(
     assert_eq!(json["filters"].as_array().unwrap().len(), 2);
 }
 
+/// An apply keeps the loudness settings the state file holds (so a loudness that is on stays on).
+#[test]
+fn applying_a_preset_keeps_the_loudness_the_state_holds() {
+    let home = Home::new();
+    import(&home, "My Phones");
+    let (code, out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+    assert_eq!(code, 0, "out={out} err={err}");
+    let path = home.path().join("svolder/host-eq.toml");
+    let mut state = std::fs::read_to_string(&path).unwrap();
+    assert!(!state.contains("loudness"), "{state}");
+    state.push_str("\n[loudness]\non = true\nstrength_pct = 35.0\nreference_pct = 100.0\n");
+    std::fs::write(&path, state).unwrap();
+    let (code, out, err) = home.run(&["host", "eq", "apply", "My Phones"]);
+    assert_eq!(code, 0, "out={out} err={err}");
+    let state = home.read("svolder/host-eq.toml");
+    assert!(
+        state.contains("[loudness]")
+            && state.contains("on = true")
+            && state.contains("strength_pct = 35.0"),
+        "{state}"
+    );
+}
+
 #[test]
 fn a_band_preset_applies_its_bands_as_peaking_filters_with_the_preamp_its_peak_needs() {
     let home = Home::new();
@@ -482,8 +506,9 @@ fn a_band_preset_applies_its_bands_as_peaking_filters_with_the_preamp_its_peak_n
     let (code, _out, err) = home.run(&["host", "eq", "apply", "mine"]);
     assert_eq!(code, 0, "{err}");
     let conf = home.read("svolder/host-eq.conf");
-    // Sixteen slots a side, and the crossfeed stage's direct, cross and side paths a side.
-    assert_eq!(conf.matches("label = bq_raw").count(), 32 + 6, "{conf}");
+    // Sixteen slots a side, the crossfeed stage's direct, cross and side paths a side, and the
+    // loudness stage's two sections a side.
+    assert_eq!(conf.matches("label = bq_raw").count(), 32 + 6 + 4, "{conf}");
     let mult: f64 = conf
         .lines()
         .find(|line| line.contains("name = lpre "))

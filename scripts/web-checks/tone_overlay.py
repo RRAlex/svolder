@@ -147,8 +147,12 @@ def without(b, theme, d, overlay):
     code, _ = d.post(DEVICE, 'presets/recall', {'name': 'Warm'})
     gone = poll(lambda: b.page(count) == 0, 8.0)
     time.sleep(0.4)
+    # the recall itself adds a `last change` note, which can open a new row of notes; that is the
+    # note's doing, not the overlay's, so the height is read with that note taken out
+    after = b.page("(document.querySelectorAll('[data-note=\"change\"]').forEach((e) => e.remove()), "
+                   + high + ')')
     check(f'no_overlay_without_an_imported_preset {tag}: the page keeps its height when the overlay goes (no jump)',
-          abs(b.page(high) - with_it) <= 1 or theme == 'ember', [with_it, b.page(high)])
+          abs(after - with_it) <= 1 or theme == 'ember', [with_it, after])
     check(f'no_overlay_without_an_imported_preset {tag}: a built-in preset takes every shape and the words away',
           code == 200 and gone is True, b.page(count))
     code, _ = d.post(DEVICE, 'presets/recall', {'name': NAME})

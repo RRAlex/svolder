@@ -40,6 +40,9 @@ pub struct TuiConfig {
     pub mouse: bool,
     /// Whether a pointer resting on a target shows a one-line tip.
     pub tooltips: bool,
+    /// Whether the Now playing row and the Controls pane's Path row (where it has no room to
+    /// wrap) scroll slowly when too long; off cuts them with `…` and leaves them still.
+    pub scroll_long_lines: bool,
     /// Whether the wordmark intro plays while the device opens.
     pub intro: bool,
     /// Whether a short sound plays with the wordmark intro, through PipeWire's `pw-play`.
@@ -531,6 +534,7 @@ impl Default for TuiConfig {
             theme_background: true,
             mouse: true,
             tooltips: true,
+            scroll_long_lines: true,
             intro: true,
             intro_sound: false,
             intro_effect: IntroEffect::default(),
