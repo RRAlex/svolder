@@ -22,5 +22,6 @@ pub(crate) fn device(unit_id: &str) -> Device<'_> {
         name: "Living room DAC",
         unit_id,
         firmware: Some(3),
+        computer: "reframe",
     }
 }

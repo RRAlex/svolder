@@ -386,10 +386,10 @@ async fn host_audio_off_in_tui_config_wins() {
     end.watching.close().await;
 }
 
-/// The Path row follows the transport on a DAC: the verdict first, in the daemon's words, then
-/// each hop from the player to the DAC.
+/// The Path row follows the transport on a DAC: the hops from the player to the DAC, each with
+/// the changes the judge names at it.
 #[tokio::test]
-async fn the_path_row_shows_the_verdict() {
+async fn the_path_row_shows_the_hops() {
     let daemon = stub_daemon().await;
     daemon.hosts(HostView {
         route: Some(route(|route| route.host_eq = true)),
@@ -407,7 +407,7 @@ async fn the_path_row_shows_the_verdict() {
         .flat_map(|frame| frame.lines())
         .find(|line| line.contains("Path "))
         .expect("a Path row was drawn");
-    assert!(row.contains("host EQ on · player"), "{row}");
+    assert!(row.contains("player → computer EQ"), "{row}");
     assert!(!row.to_lowercase().contains("bit-perfect"));
     end.watching.close().await;
 }

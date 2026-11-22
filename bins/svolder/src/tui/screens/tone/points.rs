@@ -18,7 +18,7 @@ use svolder_profiles::tone::response::{self, BandParams};
 
 use crate::tui::app::{App, Screen, ToneRow};
 use crate::tui::boxes::edit_line::{gain_text, q_text};
-use crate::tui::keys::Scene;
+use crate::tui::keys::KeyContext;
 use crate::tui::layout_tier::Tier;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::theme::{Role, Theme};
@@ -201,7 +201,7 @@ pub(super) fn draw_points(
         Some(&mark),
         widgets::actions::action_room(area.width, widgets::text::cells(" Points · computer ")),
         Screen::Tone,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     let mut block = tier

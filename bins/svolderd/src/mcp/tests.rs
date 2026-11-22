@@ -172,7 +172,8 @@ async fn the_right_token_gets_the_tool_list() {
             "get_state",
             "get_link_history",
             "list_presets",
-            "get_host"
+            "get_host",
+            "list_scenes"
         ],
         "{json}"
     );

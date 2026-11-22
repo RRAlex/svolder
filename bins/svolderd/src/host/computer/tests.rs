@@ -1061,3 +1061,79 @@ async fn the_bridges_loudness_write_is_kept_in_the_state_file() {
     assert!(text.contains("on = true"), "{text}");
     assert!(text.contains("strength_pct = 35"), "{text}");
 }
+
+/// The door a scene reaches the computer through: its part as it plays now, and the part put back
+/// as one change, judged by the controller's own view.
+#[tokio::test(start_paused = true)]
+async fn the_door_takes_the_computer_part_and_puts_it_back() {
+    let rig = rig();
+    settle().await;
+    assert_eq!(rig.eq(HostEqOp::Mode { on: true }).await, Ok(()));
+    assert_eq!(rig.eq(gain(3.0, true)).await, Ok(()));
+    let saved = rig.service.scene_part().await.expect("the computer's part");
+    assert!(saved.eq_on);
+    assert_eq!(saved.filters[0].g, 3.0);
+
+    assert_eq!(rig.eq(gain(-4.0, true)).await, Ok(()));
+    let view = rig.service.scene_eq().expect("the computer is there");
+    assert!(
+        !saved.matches(&view),
+        "the moved point is not the saved part"
+    );
+
+    let recalled = rig.service.scene_recall(saved.clone()).await;
+    assert_eq!(recalled.map(|r| r.notes).ok(), Some(Vec::new()));
+    let view = rig.service.scene_eq().expect("the computer is there");
+    assert!(saved.matches(&view), "recalled: {view:?}");
+}
+
+/// With no computer behind the service the door says so, and no scene counts the computer.
+#[tokio::test(start_paused = true)]
+async fn the_door_says_why_there_is_no_computer() {
+    let service = HostService::idle();
+    assert_eq!(service.scene_eq(), None);
+    let why = service.scene_part().await.unwrap_err();
+    assert!(crate::host::is_unavailable(&why), "{why}");
+    let part = svolder_host::eq::ComputerPart {
+        eq_on: false,
+        name: "custom".into(),
+        origin: None,
+        preamp_db: 0.0,
+        filters: Vec::new(),
+        loudness: None,
+        crossfeed_on: false,
+        crossfeed: None,
+        speakers_on: false,
+        speakers: None,
+    };
+    let refusal = service.scene_recall(part).await.unwrap_err();
+    assert!(
+        crate::host::is_unavailable(&refusal.words),
+        "{}",
+        refusal.words
+    );
+    assert!(!refusal.changed);
+}
+
+/// A part the controller refuses before it changes anything is refused in its words and says the
+/// computer is as it was.
+#[tokio::test(start_paused = true)]
+async fn the_door_says_a_refused_part_changed_nothing() {
+    let rig = rig();
+    settle().await;
+    let mut part = rig.service.scene_part().await.expect("the computer's part");
+    part.eq_on = true;
+    part.filters = vec![
+        SourceFilter {
+            kind: FilterKind::Peaking,
+            f: 100.0,
+            g: 2.0,
+            q: 1.0,
+        };
+        17
+    ];
+    let refusal = rig.service.scene_recall(part).await.unwrap_err();
+    assert!(refusal.words.contains("16"), "{}", refusal.words);
+    assert!(!refusal.changed, "refused before anything changed");
+    assert!(!rig.service.scene_eq().expect("the computer").on);
+}

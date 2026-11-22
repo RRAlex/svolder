@@ -81,7 +81,7 @@ pub(super) struct Published {
     /// Whether what an earlier run left retained has been cleared.
     pub(super) swept: bool,
     /// When the bridge began following the computer.
-    since: Instant,
+    pub(super) since: Instant,
 }
 
 impl Drop for Published {
@@ -107,11 +107,15 @@ impl BridgeTask {
     /// Follow the computer's EQ through `link`, from the first publish on, and take its commands
     /// when commands are on.
     pub(super) fn follow_computer(&mut self, link: ComputerLink) {
-        let watcher = tokio::spawn(watch_view(link.view.clone(), self.changes_tx.clone()));
+        let watcher = tokio::spawn(watch_view(
+            link.view.clone(),
+            self.changes_tx.clone(),
+            self.me.unit().to_string(),
+        ));
         if self.config.commands {
             self.client.subscribe(topics::command(
                 &self.config.base_topic,
-                computer::UNIT,
+                self.me.unit(),
                 "+",
             ));
         }
@@ -134,12 +138,15 @@ impl BridgeTask {
             swept: false,
             since: Instant::now(),
         });
-        self.changed(computer::UNIT);
+        let me = self.me.unit().to_string();
+        self.changed(&me);
     }
 
     /// Publish what changed for the computer: the entities, their availability and their states.
     pub(super) fn publish_computer(&mut self) {
         let base = self.config.base_topic.clone();
+        let me = self.me.clone();
+        let unit = me.unit();
         let prefix = self.config.discovery_prefix.clone();
         let commands = self.config.commands;
         let client = &self.client;
@@ -149,22 +156,20 @@ impl BridgeTask {
         published.dirty = false;
         let view = published.view.borrow().clone();
         let eq = view.eq.as_ref().filter(|_| view.available);
-        let availability = topics::device_availability(&base, computer::UNIT);
-        let state_topic = topics::diagnostic(&base, computer::UNIT, computer::EQ_KEY);
-        let preset_topic = topics::diagnostic(&base, computer::UNIT, computer::PRESET_KEY);
-        let xf_topic = topics::diagnostic(&base, computer::UNIT, computer::crossfeed::SWITCH_KEY);
-        let xf_preset_topic =
-            topics::diagnostic(&base, computer::UNIT, computer::crossfeed::PRESET_KEY);
-        let ld_topic = topics::diagnostic(&base, computer::UNIT, computer::loudness::SWITCH_KEY);
-        let ld_strength_topic =
-            topics::diagnostic(&base, computer::UNIT, computer::loudness::STRENGTH_KEY);
-        let sp_topic = topics::diagnostic(&base, computer::UNIT, computer::speakers::SWITCH_KEY);
-        let sp_set_topic = topics::diagnostic(&base, computer::UNIT, computer::speakers::SET_KEY);
-        let sp_attrs_topic = computer::speakers::attributes_topic(&base);
-        let path_topic = topics::diagnostic(&base, computer::UNIT, path::PATH_KEY);
-        let path_attrs_topic = path::path_attributes_topic(&base);
-        let config_topic = topics::diagnostic(&base, computer::UNIT, path::CONFIG_KEY);
-        let config_attrs_topic = path::config_attributes_topic(&base);
+        let availability = topics::device_availability(&base, unit);
+        let state_topic = topics::diagnostic(&base, unit, computer::EQ_KEY);
+        let preset_topic = topics::diagnostic(&base, unit, computer::PRESET_KEY);
+        let xf_topic = topics::diagnostic(&base, unit, computer::crossfeed::SWITCH_KEY);
+        let xf_preset_topic = topics::diagnostic(&base, unit, computer::crossfeed::PRESET_KEY);
+        let ld_topic = topics::diagnostic(&base, unit, computer::loudness::SWITCH_KEY);
+        let ld_strength_topic = topics::diagnostic(&base, unit, computer::loudness::STRENGTH_KEY);
+        let sp_topic = topics::diagnostic(&base, unit, computer::speakers::SWITCH_KEY);
+        let sp_set_topic = topics::diagnostic(&base, unit, computer::speakers::SET_KEY);
+        let sp_attrs_topic = computer::speakers::attributes_topic(&me, &base);
+        let path_topic = topics::diagnostic(&base, unit, path::PATH_KEY);
+        let path_attrs_topic = path::path_attributes_topic(&me, &base);
+        let config_topic = topics::diagnostic(&base, unit, path::CONFIG_KEY);
+        let config_attrs_topic = path::config_attributes_topic(&me, &base);
         let dacs = dacs_of(&self.devices);
 
         // The first publish takes down what an earlier run left retained, whichever entities it
@@ -183,14 +188,24 @@ impl BridgeTask {
         if !published.swept {
             published.swept = true;
             let wanted: Vec<String> = match eq {
-                Some(eq) => computer::entries_of(&base, &prefix, commands, eq)
+                Some(eq) => computer::entries_of(&me, &base, &prefix, commands, eq)
                     .into_iter()
                     .map(|entry| entry.topic)
                     .collect(),
                 None => Vec::new(),
             };
+            // The entities of the releases that had one computer under the unit `computer` leave
+            // Home Assistant before the named ones are announced.
             for with_commands in [true, false] {
-                for topic in computer::topics_of(&prefix, with_commands) {
+                for topic in computer::legacy_topics_of(&prefix, with_commands) {
+                    client.clear(topic);
+                }
+            }
+            for topic in computer::legacy_state_topics(&base) {
+                client.clear(topic);
+            }
+            for with_commands in [true, false] {
+                for topic in computer::topics_of(&me, &prefix, with_commands) {
                     if !wanted.contains(&topic) {
                         client.clear(topic);
                     }
@@ -247,13 +262,14 @@ impl BridgeTask {
             return;
         };
 
-        let next: BTreeMap<String, String> = computer::entries_of(&base, &prefix, commands, eq)
-            .into_iter()
-            .map(|entry| (entry.topic, entry.payload.to_string()))
-            .collect();
+        let next: BTreeMap<String, String> =
+            computer::entries_of(&me, &base, &prefix, commands, eq)
+                .into_iter()
+                .map(|entry| (entry.topic, entry.payload.to_string()))
+                .collect();
         for (topic, body) in &next {
             if published.configs.get(topic) != Some(body) {
-                client.announce(topic.clone(), body.clone());
+                client.announce_parent(topic.clone(), body.clone());
             }
         }
         for topic in published.configs.keys().filter(|t| !next.contains_key(*t)) {
@@ -372,7 +388,8 @@ impl BridgeTask {
     pub(super) fn computer_command(&mut self, key: &str, body: &[u8]) {
         let drop = |why: &str| {
             log::warn(&format!(
-                "mqtt: This computer: a command for {key} dropped: {why}"
+                "mqtt: {}: a command for {key} dropped: {why}",
+                self.me.name()
             ))
         };
         let Some(published) = self.computer.as_ref() else {
@@ -412,10 +429,11 @@ impl BridgeTask {
         if eq_key {
             let on = on.unwrap_or_default();
             if on && !eq.on && computer::nothing_kept(eq) {
-                log::info(
-                    "mqtt: This computer: ON left the EQ off: no EQ points are saved yet; set the \
+                log::info(&format!(
+                    "mqtt: {}: ON left the EQ off: no EQ points are saved yet; set the \
                      EQ up first",
-                );
+                    self.me.name()
+                ));
                 return;
             }
             let what = format!("turning the EQ {}", if on { "on" } else { "off" });
@@ -460,10 +478,11 @@ impl BridgeTask {
             }
             let (what, set) = match on {
                 Some(true) if computer::speakers::state(speakers).set.is_empty() => {
-                    log::info(
-                        "mqtt: This computer: ON left the virtual speakers off: no fetched set \
+                    log::info(&format!(
+                        "mqtt: {}: ON left the virtual speakers off: no fetched set \
                          is chosen; choose one first",
-                    );
+                        self.me.name()
+                    ));
                     return;
                 }
                 Some(on) => (
@@ -500,10 +519,11 @@ impl BridgeTask {
             None => match computer::crossfeed::parse_preset(crossfeed, text) {
                 None => return drop(&format!("{:?} is not a crossfeed preset", text.trim())),
                 Some(computer::crossfeed::Choice::Custom) => {
-                    log::info(
-                        "mqtt: This computer: Custom is a crossfeed state, not a choice; the \
+                    log::info(&format!(
+                        "mqtt: {}: Custom is a crossfeed state, not a choice; the \
                          settings stay as they are",
-                    );
+                        self.me.name()
+                    ));
                     return;
                 }
                 Some(computer::crossfeed::Choice::Preset { model, preset }) => (
@@ -520,10 +540,11 @@ impl BridgeTask {
     /// The end of a command to the computer: say so when it was refused.
     pub(super) fn computer_written(&mut self, what: &str, result: Result<(), String>) {
         if let Err(why) = result {
-            log::warn(&format!("mqtt: This computer: {what} failed: {why}"));
+            log::warn(&format!("mqtt: {}: {what} failed: {why}", self.me.name()));
         }
         // The state is whatever the view says now.
-        self.changed(computer::UNIT);
+        let me = self.me.unit().to_string();
+        self.changed(&me);
     }
 
     /// The broker was reached or lost: the route reads are held only while it is connected.
@@ -533,7 +554,8 @@ impl BridgeTask {
         };
         computer.connected = connected;
         if connected {
-            self.changed(computer::UNIT);
+            let me = self.me.unit().to_string();
+            self.changed(&me);
         } else {
             computer.keep_hold();
         }
@@ -551,7 +573,7 @@ impl BridgeTask {
             .is_some_and(|c| c.available.is_some())
         {
             self.client.retain(
-                topics::device_availability(&self.config.base_topic, computer::UNIT),
+                topics::device_availability(&self.config.base_topic, self.me.unit()),
                 payload::OFFLINE,
             );
         }
@@ -559,9 +581,13 @@ impl BridgeTask {
 }
 
 /// Tell the bridge each time the view changes, until the view or the bridge goes.
-async fn watch_view(mut view: watch::Receiver<HostView>, changes: mpsc::UnboundedSender<String>) {
+async fn watch_view(
+    mut view: watch::Receiver<HostView>,
+    changes: mpsc::UnboundedSender<String>,
+    unit: String,
+) {
     while view.changed().await.is_ok() {
-        if changes.send(computer::UNIT.to_string()).is_err() {
+        if changes.send(unit.clone()).is_err() {
             return;
         }
     }

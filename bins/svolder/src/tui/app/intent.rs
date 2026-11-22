@@ -105,6 +105,8 @@ pub enum Intent {
     /// Ask the daemon about the virtual speakers' sets: the catalogue, a fetch or an import, a
     /// forget, a cancel.
     Speakers(Box<crate::tui::boxes::speakers::SpeakersCall>),
+    /// Ask the daemon to save, recall, rename or delete a scene.
+    Scene(svolder_ipc::socket::protocol::SceneOp),
     /// Take the computer EQ off, and then load the preset of this name onto the DAC once it is.
     MoveToDac(String),
     /// Change the computer EQ: its mode or its points.

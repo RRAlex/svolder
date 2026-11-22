@@ -10,6 +10,7 @@ mod device_config;
 mod families;
 mod handshake;
 mod host_cover;
+mod scenes;
 mod server_switch;
 mod speakers;
 mod walk;

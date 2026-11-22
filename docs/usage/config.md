@@ -68,6 +68,74 @@ aside. A `device` or an `after` that names no configured device loads with a war
 device never breaks the file. `svolder hops` (see [Device verbs](cli.md#hops)) lists, adds, links,
 edits, removes and moves them.
 
+### Scenes
+
+A `[[scene]]` block is one saved scene: the sound settings of the computer and of each device that
+was connected when it was saved. The daemon writes them (`svolder scene save`, the TUI's Scenes box,
+the web page's Scenes popup, the MCP tools and the Home Assistant text all save through it), keeping
+the file's comments and other blocks, and you can read or edit one by hand (a hand edit waits for
+the reload, above). A scene the daemon saved on the fake device reads like this:
+
+```toml
+[[scene]]
+name = "Late night"
+
+[scene.computer]
+eq_on = false
+name = "custom"
+preamp = 0.0
+filter = [
+  { type = "PK", f = 1000.0, g = 0.0, q = 1.0 },
+]
+loudness = { on = false, strength_pct = 50.0, reference_pct = 100.0 }
+crossfeed_on = false
+crossfeed = { model = "bauer", preset = "bs2b default", amount = 0.373300918333268, crossover_hz = 700.0 }
+speakers_on = false
+
+[[scene.device]]
+udid = "0102030405060708"
+name = "Desk DAC"
+controls = [
+  { key = "phase", step = 0 },
+  { key = "nos", step = 0 },
+  { key = "balance", step = 64 },
+  { key = "input", step = 1 },
+]
+
+[scene.device.tone]
+name = "Custom"
+mode = "flat"
+loudness = 0
+band = [
+  { f = 40.0, g = 0.0, q = 4.3 },
+  { f = 160.0, g = 0.0, q = 4.3 },
+  { f = 632.0, g = 0.0, q = 4.3 },
+  { f = 2515.0, g = 0.0, q = 4.3 },
+  { f = 10000.0, g = 0.0, q = 4.3 },
+]
+```
+
+`[scene.computer]` is the computer's part: the EQ on or off with its curve (`filter`, the same
+inline array an imported preset uses) and stated `preamp`, `loudness`, `crossfeed` and `speakers`
+(the id of the virtual speakers set). Each `[[scene.device]]` is one device's part, by its `udid`
+(its `name` is the name it had when saved, shown for a device no longer configured): `tone` is its
+tone control as a preset (named after the preset that was on, else `Custom`), `controls` its plain
+sound settings as `{ key, step }` lists in the profile's order, and a device with built-in settings
+and no tone control (the Loki Max) holds `raw_bands` in the same list form instead of `tone`. A part
+never holds both a tone and `raw_bands`, and a key twice in one part is refused when the file loads,
+naming the scene. The volume, a gain select, a mute and a power switch are never in a scene.
+
+The rules a scene follows are the daemon's, so the same on every front end. A scene's name is
+trimmed, at most 40 characters and compared without regard to case; a scene may share a preset's
+name (the built-in ones too), but `custom` is reserved (Home Assistant's "none" option) and is
+refused on save and rename. A scene's values are a snapshot: a preset renamed, edited or deleted
+later never changes a scene. A scene with no part that counts (the computer's part absent and every
+device in it not connected) is never the scene that is on. Which scene is on is the one the daemon
+last recalled while it still matches what the computer and the connected devices read, else the
+first in file order that matches; it is unknown only while a device is still reading a setting that
+could change that answer. The scenes are listed in file order, and the daemon keeps the scene last
+recalled in its state home, so it survives a restart. See [the scenes design](../design/scenes.md).
+
 ### config show
 
 Print the loaded configuration: the file's path, then either `no config file` or a readable

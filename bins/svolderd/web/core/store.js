@@ -10,6 +10,7 @@
 //            part ({device, name, data, before})   one part of one device changed
 //            volume | level | meters | strip   a reading of a device (the data names `device`)
 //            fleet, host                  the fleet or the host's player changed
+//            scenes                       the scenes' view changed (a writer's page only)
 //            state ('open' | 'lost' | 'resting' | 'waiting')   how the stream is doing
 //            opened                       the stream opened (what a theme last read is forgotten)
 //
@@ -105,6 +106,8 @@ export function createStore(page, { fetch, signedOut = apiSignedOut }) {
       model.fleet = data;
     } else if (event === 'host') {
       model.host = data;
+    } else if (event === 'scenes') {
+      model.scenes = data;
     }
     notify(event, data);
   }

@@ -54,11 +54,10 @@ pub enum Hit {
     /// Focus the Loudness half and toggle it, off its bar; the wheel over it steps the strength
     /// instead.
     Loudness,
-    /// The Controls pane's Path row, every line it wraps to: a tooltip with the whole path.
+    /// The Controls pane's Path row, every line it wraps to, label included: a click opens the
+    /// PipeWire config box as `k` does, and a tooltip says the whole path and how many config
+    /// lines pass.
     Path,
-    /// The config chip in the Path row, drawn over the row's own [`Hit::Path`]: a click opens the
-    /// PipeWire config box as `k` does, and a tooltip says how many lines pass.
-    Config,
     /// Focus this pane.
     PaneHeader(Pane),
     /// Focus this band, 0-based.
@@ -128,10 +127,12 @@ pub enum Hit {
     /// Show this category of the Settings box, on its first row.
     SettingCategory(usize),
     /// Take this entry of the menu, an index into
-    /// [`menu::ENTRIES`](super::screens::menu::ENTRIES).
+    /// [`menu::entries`](super::screens::menu::entries).
     MenuEntry(usize),
     /// The dimmed cells around the menu, which a click closes it from.
     MenuOutside,
+    /// Pick this row of the Scenes box, an index into its scenes.
+    SceneRow(usize),
     /// Pick this row of the preset list, an index into its entries.
     PresetRow(usize),
     /// The `more ↑` (`true`) or `more ↓` (`false`) words on the preset list's border, which a
@@ -174,6 +175,8 @@ pub enum Selected {
     Settings,
     /// The preset list's rows.
     Presets,
+    /// The Scenes box's rows.
+    Scenes,
     /// The AutoEq search box's results.
     Search,
     /// The virtual speakers' set list's rows.
@@ -359,6 +362,8 @@ pub enum MouseAction {
     PresetPick(usize),
     /// Focus this row of the preset list, or the last one for a row past the end.
     PresetGo(usize),
+    /// Focus this row of the Scenes box, and on the focused row recall it, as `Enter` does.
+    ScenePick(usize),
     /// Focus this row of the virtual speakers' set list and, on a double-click of the focused
     /// row, fetch or use it.
     SetRow(usize),
@@ -551,11 +556,9 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
     if app.overlays.menu.is_some() {
         return match (event.kind, hits.hit_at(event.column, event.row)) {
             (MouseEventKind::Down(MouseButton::Left), Some(Hit::MenuEntry(entry))) => {
-                Some(MouseAction::Key(match entry {
-                    0 => KeyCode::Char('s'),
-                    1 => KeyCode::Char('h'),
-                    _ => KeyCode::Char('q'),
-                }))
+                let entries = crate::tui::screens::menu::entries(app);
+                let entry = entries.get(*entry).copied()?;
+                Some(MouseAction::Key(KeyCode::Char(entry.key())))
             }
             (MouseEventKind::Down(MouseButton::Left), Some(Hit::MenuOutside)) => {
                 Some(MouseAction::Key(KeyCode::Esc))
@@ -593,6 +596,18 @@ pub fn resolve(hits: &HitMap, event: MouseEvent, app: &App) -> Option<MouseActio
             }
             (MouseEventKind::Down(MouseButton::Left), Some(&Hit::PresetEnd(top))) => {
                 Some(MouseAction::PresetGo(if top { 0 } else { usize::MAX }))
+            }
+            (MouseEventKind::ScrollUp, _) => Some(MouseAction::Key(KeyCode::Up)),
+            (MouseEventKind::ScrollDown, _) => Some(MouseAction::Key(KeyCode::Down)),
+            _ => None,
+        };
+    }
+    // The Scenes box is clicked and scrolled while it shows its scenes: a click focuses a row, and
+    // a click on the focused row recalls it.
+    if crate::tui::boxes::scenes::choosing(app) && !app.overlays.quitting {
+        return match (event.kind, hits.hit_at(event.column, event.row)) {
+            (MouseEventKind::Down(MouseButton::Left), Some(&Hit::SceneRow(row))) => {
+                Some(MouseAction::ScenePick(row))
             }
             (MouseEventKind::ScrollUp, _) => Some(MouseAction::Key(KeyCode::Up)),
             (MouseEventKind::ScrollDown, _) => Some(MouseAction::Key(KeyCode::Down)),
@@ -773,14 +788,14 @@ fn resolve_click(hits: &HitMap, x: u16, y: u16, app: &App) -> Option<MouseAction
         Hit::Loudness => Some(MouseAction::ToggleTone(ToneRow::Loudness)),
         Hit::Curve => resolve_press(hits, (x, y), app, Gesture::Move),
         Hit::Transport(button) => Some(MouseAction::Transport(button)),
-        Hit::Config => Some(MouseAction::Key(KeyCode::Char('k'))),
+        Hit::Path => Some(MouseAction::Key(KeyCode::Char('k'))),
         Hit::Toast => Some(MouseAction::DismissToast),
         // These only say what they are to a resting pointer.
-        Hit::Connection | Hit::MouseMark | Hit::FaultMark | Hit::Vu | Hit::Path => None,
+        Hit::Connection | Hit::MouseMark | Hit::FaultMark | Hit::Vu => None,
         // The menu answers its own clicks.
         Hit::MenuEntry(_) | Hit::MenuOutside => None,
         // The preset list answers its own clicks.
-        Hit::PresetRow(_) | Hit::PresetEnd(_) | Hit::SetRow(_) => None,
+        Hit::PresetRow(_) | Hit::PresetEnd(_) | Hit::SetRow(_) | Hit::SceneRow(_) => None,
         // These are drawn by the Settings box alone, which answers its own clicks.
         Hit::SettingRow(_)
         | Hit::SettingPrev

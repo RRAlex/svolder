@@ -595,7 +595,11 @@ fn the_spectrum_row_draws_a_blocks_bands_in_the_wide_and_tall_tiers() {
         tall[at].chars().take(40).collect::<String>(),
         "│   Spectrum     ▁▂▃▃▄▅▆▆▇████████████ │"
     );
-    assert!(tall[at - 1].contains("Transport"), "{tall:#?}");
+    assert!(tall[at - 2].contains("Transport"), "{tall:#?}");
+    assert!(
+        tall[at - 1].trim_matches(['│', ' ']).is_empty(),
+        "{tall:#?}"
+    );
     assert_eq!(landed.map(|row| row.y), u16::try_from(at).ok());
 
     let (wide, landed) = spectrum_of(&spectral(), 130, 30);
@@ -1069,27 +1073,33 @@ pub(super) fn daemon_hosting(route: svolder_host::RouteFacts) -> App {
     app
 }
 
-/// The Path row sits under the Transport row, the verdict first, in the pane's width; what does
-/// not fit is cut with an ellipsis at the pane's right edge.
+/// The Path row sits under the Transport row, the hops line first and the values under it, in the
+/// pane's width: the hops line is cut with an ellipsis at the pane's right edge and the values
+/// wrap onto the lines the pane has, which take the spare row a blank line would have had.
 #[test]
-fn the_path_row_sits_under_the_transport_with_the_verdict_first() {
+fn the_path_row_sits_under_the_transport_with_the_hops_first() {
     let rows = text(&screen(&daemon_hosting(gungnir_route(|route| {
         route.host_eq = true
     }))));
-    assert_eq!(
-        rows[13],
-        "│   Transport    ◀◀  ▶  ▮▮  ▶▶         ││                                      │"
-    );
-    assert_eq!(
-        rows[14],
-        "│   Path         host EQ on · player … ││                                      │"
-    );
+    let top = rows
+        .iter()
+        .position(|row| row.contains(" Transport "))
+        .expect("a Transport row");
+    assert!(rows[top].starts_with("│   Transport    ◀◀  ▶  ▮▮  ▶▶         │"));
+    assert!(rows[top + 1].starts_with("│   Path         player → computer EQ… │"));
+    for (at, said) in ["48 kHz", "volume -6.0 dB", "tone control", "NOS filter"]
+        .into_iter()
+        .enumerate()
+    {
+        assert!(
+            rows[top + 2 + at].starts_with(&format!("│                {said}")),
+            "{:?}",
+            rows[top + 2 + at]
+        );
+    }
 
     let rows = text(&screen(&daemon_hosting(gungnir_route(|_| {}))));
-    assert_eq!(
-        rows[14],
-        "│   Path         untouched · player 4… ││                                      │"
-    );
+    assert!(rows[top + 1].starts_with("│   Path         player → computer → … │"));
 }
 
 /// A DAC listening to an input the computer does not feed has no verdict on the computer's
@@ -1105,7 +1115,10 @@ fn the_path_row_says_when_the_dac_listens_elsewhere() {
     assert_eq!(line.words_line(), "the DAC listens to Optical");
     assert!(line.hops.is_empty());
     let rows = text(&screen(&app));
-    assert!(rows[14].contains("the DAC listens to"), "{}", rows[14]);
+    assert!(
+        rows.iter().any(|row| row.contains("the DAC listens to")),
+        "{rows:#?}"
+    );
 }
 
 /// A DAC on a USB port the computer is not on has no verdict on the computer's stream, and one
@@ -1136,24 +1149,63 @@ fn the_path_row_judges_the_usb_ports() {
     assert_eq!(line.words_line(), "both USB ports connected");
 }
 
-/// With the room the row has, every hop follows the verdict: the player, the computer and the
-/// DAC, each with what is known of the signal there.
+/// The text of a line.
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+/// With the room the row has, the hops line names the player, the computer and the DAC, and the
+/// values line the rate and what the DAC does.
 #[test]
-fn the_path_row_names_every_hop_after_the_verdict() {
+fn the_path_row_names_every_hop() {
     let app = daemon_hosting(gungnir_route(|route| route.host_eq = true));
-    let line = app.host_path().expect("a path");
+    let row = app.path_row().expect("a path");
     let columns = widgets::rows::Columns::fit(160, host::PATH.len(), 0);
-    let row = path_row(&line, &Theme::new(false), columns);
-    let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
+    let lines = path_row(&row, &Theme::new(false), columns, (false, None));
+    let said: Vec<String> = lines.iter().map(line_text).collect();
     assert_eq!(
-        said.trim_end(),
-        "Path host EQ on · player 48 kHz S16LE, volume 100 % → computer 48 kHz S32LE, \
-         volume 100 % → DAC USB 1, 48 kHz, volume -6.0 dB, tone control, NOS filter"
+        said,
+        [
+            "Path player → computer EQ → DAC USB 1",
+            "     48 kHz · volume -6.0 dB · tone control · NOS filter",
+        ]
     );
 }
 
-/// A DAC volume below 0 dB is part of the path: the row's DAC hop names it in the warning colour
-/// and the verdict stays the path's own; at 0 dB the hop says nothing of it.
+/// The label `Path` is green on a path untouched end to end and yellow once the DAC changes the
+/// sound, drawn from the judge's row.
+#[test]
+fn the_path_label_is_green_untouched_and_yellow_changed() {
+    let theme = Theme::new(false);
+    let columns = widgets::rows::Columns::fit(160, host::PATH.len(), 0);
+    let mut app = daemon_hosting(gungnir_route(|_| {}));
+    hear(
+        &mut app,
+        vec![
+            vo("10", Some("volume"), json!(127), "0.0 dB"),
+            vo("11", Some("balance"), json!(64), "0"),
+            vo("4", Some("nos"), json!(0), "off"),
+            vo("12.50", None, json!(1), "1"),
+        ],
+    );
+    let label = |app: &App| {
+        let row = app.path_row().expect("a path");
+        let lines = path_row(&row, &theme, columns, (false, None));
+        lines[0].spans[0].style
+    };
+    assert_eq!(label(&app), theme.style(Role::Good));
+    hear(
+        &mut app,
+        vec![vo("10", Some("volume"), json!(117), "-3.3 dB")],
+    );
+    assert_eq!(label(&app), theme.style(Role::Warn));
+}
+
+/// A DAC volume below 0 dB is part of the path: the values line names it in the warning colour
+/// and the verdict stays the path's own; at 0 dB the line says it dim.
 #[test]
 fn the_path_row_names_the_dac_volume_below_0_db() {
     let mut app = daemon_hosting(gungnir_route(|_| {}));
@@ -1173,13 +1225,17 @@ fn the_path_row_names_the_dac_volume_below_0_db() {
         Some("the Gungnir 2 then lowers it by 3.3 dB")
     );
     let columns = widgets::rows::Columns::fit(200, host::PATH.len(), 0);
-    let row = path_row(&line, &Theme::new(false), columns);
-    let said: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
-    assert!(
-        said.trim_end()
-            .ends_with("→ DAC USB 1, 48 kHz, volume -3.3 dB"),
-        "{said}"
-    );
+    let row = app.path_row().expect("a path");
+    let lines = path_row(&row, &Theme::new(false), columns, (false, None));
+    let said: Vec<String> = lines.iter().map(line_text).collect();
+    assert_eq!(said[0].trim_end(), "Path player → computer → DAC USB 1");
+    assert_eq!(said[1].trim_end(), "     48 kHz · volume -3.3 dB");
+    let volume = &lines[1]
+        .spans
+        .iter()
+        .find(|span| span.content.contains("volume"))
+        .unwrap();
+    assert_eq!(volume.style, Theme::new(false).style(Role::Warn));
 
     hear(
         &mut app,

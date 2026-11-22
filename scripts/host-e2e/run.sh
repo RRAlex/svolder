@@ -141,12 +141,12 @@ ps -o pid,args -u "$ME" | grep -E 'pipewire|wireplumber' | grep -v -E 'grep|host
 # The proof that the level checks fail on a chain that does nothing: HOST_E2E_BYPASS=1 make host-e2e
 # (never set otherwise). The variable goes in only when it is exactly 1.
 BYPASS=0; [ "${HOST_E2E_BYPASS:-}" = 1 ] && BYPASS=1
-# HOST_E2E_ONLY=L runs the loudness phases alone while they are being worked on: it exits 3 and never prints a
-# PASS line. Said here so a variable left in the environment cannot pass for the whole check unnoticed.
+# HOST_E2E_ONLY=L runs the loudness phases alone, HOST_E2E_ONLY=S the scenes phase alone, while they are being
+# worked on: it exits 3 and never prints a PASS line. Said here so a variable left in the environment cannot pass for the whole check unnoticed.
 [ -z "${HOST_E2E_ONLY:-}" ] || echo "host-e2e: HOST_E2E_ONLY=${HOST_E2E_ONLY} is set: a dev run of some phases, it will not report a pass" >&2
 # Phases B and C (bits.py) run first: its own PASS is this script's, and analyse.py's `host-e2e: PASS`
-# stays the last word of a full run. HOST_E2E_ONLY=L (the loudness phases alone) skips it.
-if [ "${HOST_E2E_ONLY:-}" != L ]; then
+# stays the last word of a full run. HOST_E2E_ONLY=L or S (a phase alone) skips it.
+if [ "${HOST_E2E_ONLY:-}" != L ] && [ "${HOST_E2E_ONLY:-}" != S ]; then
   timeout -k 20 "${HOST_E2E_BITS_DEADLINE:-300}" python3 -I "$BITS" &
   PY=$!
   wait "$PY"

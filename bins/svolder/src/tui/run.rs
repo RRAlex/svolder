@@ -73,6 +73,7 @@ mod jobs;
 mod look;
 mod open;
 mod reopen;
+mod scenes;
 mod setup;
 mod speakers;
 #[cfg(test)]
@@ -925,7 +926,7 @@ where
             // Resting on the Path row holds its scroll; no frame is owed for that.
             watching.app.pointer.over_path = matches!(
                 turns.hits.hit_at(event.column, event.row),
-                Some(mouse::Hit::Path | mouse::Hit::Config)
+                Some(mouse::Hit::Path)
             );
             // Motion that changes nothing visible (the pointer still resting on the
             // same target) asks for no frame: a terminal reports hundreds a second.

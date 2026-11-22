@@ -17,12 +17,12 @@ Everything that is not a device reading is one JSON object per line, in both dir
 (`crates/svolder-ipc/src/socket/protocol.rs`). A front end sends a `RequestLine` (an id and a
 `Request`, tagged by `cmd`) and gets back a `Reply::Response` carrying the same id. A
 `Request::Subscribe` turns the connection into a stream of `Reply::Event`s: `Status`, `Connection`,
-`Fault`, `Error`, `Recalled`, `Climb` and `Host`; a `HostFrames` request turns its connection into a
-stream of `HostCapture` and `HostFrame` instead, and the follow op of each family of jobs into a
-stream of that family's job events (see [jobs.md](jobs.md)). The requests are the
+`Fault`, `Error`, `Recalled`, `Climb`, `Scenes` and `Host`; a `HostFrames` request turns its
+connection into a stream of `HostCapture` and `HostFrame` instead, and the follow op of each family
+of jobs into a stream of that family's job events (see [jobs.md](jobs.md)). The requests are the
 verbs: `Devices`, `State`, `Get`, `Set`, `Raw`, the `Eq*` family, `Passphrase`, `Identify`, `Scan`,
 `History`, `Readings`, `Recalled`, `WebPair`, `WebLink`, `WebLinkOpen`, `Reload`, `Version`, `Stop`,
-`Host`, `HostPress`, `HostCover`, `HostFrames` and the families `HostEq`, `Walk` and `AutoEq`.
+`Host`, `HostPress`, `HostCover`, `HostFrames` and the families `HostEq`, `Walk`, `AutoEq`, `Scene`.
 
 The host's view crosses the wire as `HostView` (`crates/svolder-ipc/src/host/views.rs`): whether the
 daemon watches the host at all, the followed player's `PlayingView` and the `RouteFacts` read out of
@@ -65,23 +65,22 @@ total past the bound). The TUI never reads a cover file: `Backend::host_cover(ha
 The verdict on the route is one pure function, `path_line`, in the same module, called by whoever
 knows the device: it takes the daemon's `RouteFacts` and the device's own readings (`DacFacts`: its
 display name, input, sample rate and, for a DAC with a reading per USB port, whether each port is
-connected) and gives the hops from the player to the DAC, a `Verdict` and
-the words that name what changes the signal. `sink_is_dac` decides first whether the computer's sink
-is the device at all (Schiit's vendor id `0x30be` and a product name that is the display name or
-holds it as whole words, not followed by a model number: `Modi` is not `Modius`, `Bifrost` is not
-`Bifrost 3`); if not, the line says where the sound goes and gives no verdict. So does a DAC
-whose input is not a USB one (`Verdict::OtherInput`: its first label word is not `USB`), since the
-computer's stream is not what it plays. On a DAC whose profile reads each USB port (`usb1_connected`
-and `usb2_connected`: the Gungnir 2 and the Yggdrasil) a `USB 1` or `USB 2` input is the computer's
-only when its own port reads connected and the other does not: with only the other port connected
-the line is `OtherInput` too (`the DAC listens to USB 1 · the computer is on USB 2`), and with both
-connected, or a reading missing, the path is `Unknown` (`both USB ports connected`, `USB ports not
-read`). A DAC with one USB port (the Bifrost 3) or no port readings keeps the rule that its USB
-input is the computer's. The verdict is `Untouched` only when every hop is known
-clean (any volume but 100 % is a change, a boost included; an assumed player is said after it),
-`Unknown` when nothing changes the signal but something could not be read (the DAC's input
-included), and the words never claim more than the rates, volumes, mixing and EQ show. Both front
-ends join the words with ` · `.
+connected) and gives the hops from the player to the DAC, a `Verdict` and the words that name what
+changes the signal. `sink_is_dac` decides first whether the computer's sink is the device at all
+(Schiit's vendor id `0x30be` and a product name that is the display name or holds it as whole words,
+not followed by a model number: `Modi` is not `Modius`, `Bifrost` is not `Bifrost 3`); if not, the
+line says where the sound goes and gives no verdict. So does a DAC whose input is not a USB one
+(`Verdict::OtherInput`: its first label word is not `USB`), since the computer's stream is not what
+it plays. On a DAC whose profile reads each USB port (`usb1_connected` and `usb2_connected`: the
+Gungnir 2 and the Yggdrasil) a `USB 1` or `USB 2` input is the computer's only when its own port
+reads connected and the other does not: with only the other port connected the line is `OtherInput`
+too (`the DAC listens to USB 1 · the computer is on USB 2`), and with both connected, or a reading
+missing, the path is `Unknown` (`both USB ports connected`, `USB ports not read`). A DAC with one
+USB port (the Bifrost 3) or no port readings keeps the rule that its USB input is the computer's.
+The verdict is `Untouched` only when every hop is known clean (any volume but 100 % is a change, a
+boost included; an assumed player is said after it), `Unknown` when nothing changes the signal but
+something could not be read (the DAC's input included), and the words never claim more than the
+rates, volumes, mixing and EQ show. Both front ends join the words with ` · `.
 
 A reading always travels as a `ValueObject`: the function id, the profile's key and label, the wire
 type and raw value, a display string, and the converted number and unit when the control has one. A
@@ -132,14 +131,15 @@ There is a small handshake in the same answer. The `version` reply lists `featur
 what the daemon supports beyond the basics (`FEATURES` in `socket/protocol.rs`, the one list; today
 `reasons`, `unknown_request_code`, `device_crud`, `server_switch` and `guest_switch`
 ([server-switch.md](server-switch.md)), `walk` ([device-walk.md](device-walk.md)), `autoeq`
-([autoeq.md](autoeq.md)), `host_cover` and `preset_write`: the TUI's and the CLI's preset writes
-(`eq save`, `import`, `rename`, `delete`), ops `save`, `update`, `rename`, `delete`, on the web
-page's writers so a name is refused in the same words). A daemon too old to list any leaves the field out, which decodes as none.
-A front end asks `DaemonInfo::supports(feature)` to decide between the daemon, the local path (no
-daemon) and "restart the daemon" (one that lacks the feature). The `identify` check for a daemon too
-old to know the request is the first: it asks whether the daemon lists `unknown_request_code` (it
-answers that with code 7), and reads serde's words only of a 0.32.x daemon that lists nothing, as
-the one-release fallback in `daemon_version::is_unknown_request`.
+([autoeq.md](autoeq.md)), `host_cover`, `preset_write` and `scenes` ([scenes.md](scenes.md))).
+`preset_write` is the TUI's and the CLI's preset writes (`eq save`, `import`, `rename`, `delete`),
+ops `save`, `update`, `rename`, `delete`, on the web page's writers so a name is refused in the same
+words. A daemon too old to list any leaves the field out, which decodes as none. A front end asks
+`DaemonInfo::supports(feature)` to decide between the daemon, the local path (no daemon) and
+"restart the daemon" (one that lacks the feature). The `identify` check for a daemon too old to know
+the request is the first: it asks whether the daemon lists `unknown_request_code` (it answers that
+with code 7), and reads serde's words only of a 0.32.x daemon that lists nothing, as the one-release
+fallback in `daemon_version::is_unknown_request`.
 
 ### Error codes and reasons
 
@@ -165,14 +165,14 @@ for one release and go after 0.33.x.
 An `Error` may also carry a `reason`, a word for why it happened that a front end matches instead of
 the message's text: `not_found_yet`, `not_connected`, `no_such_job`, `busy`, `internal`, and for a
 refused write of the configuration file `taken`, `missing`, `read_only`, `file_busy`, `bad_name` and
-`invalid`, and `stopping` for a start or a configuration write while the daemon stops, today. One
-mapping in the daemon turns every refusal of a configuration write into its reason
-(`ConfigError::reason`, `ConfigWriteError::reason`), and every socket answer built from one carries
-it.
-The field is left out when there is none, a front end that does not know it ignores it, and a reason
-this build does not know decodes as `Unknown` (`#[serde(other)]`). A daemon lists `reasons` in its
-features. `Response::error` and `.with_reason` build the answers, so a new field does not touch
-every site. The older families of requests answer without a reason.
+`invalid`, `stopping` for a start or a configuration write while the daemon stops, and
+`nothing_to_save` for a scene save, today. One mapping in the daemon turns every refusal of a
+configuration write into its reason (`ConfigError::reason`, `ConfigWriteError::reason`), and every
+socket answer built from one carries it. The field is left out when there is none, a front end that
+does not know it ignores it, and a reason this build does not know decodes as `Unknown`
+(`#[serde(other)]`). A daemon lists `reasons` in its features. `Response::error` and `.with_reason`
+build the answers, so a new field does not touch every site. The older families of requests answer
+without a reason.
 
 ### The request timeout
 
@@ -244,10 +244,10 @@ What parsing checks, and why it is strict where it is:
   daemon logs them at every load.
 
 The tables are `[daemon]` (`autospawn`), `[tui]`, `[mqtt]`, `[mcp]`, `[web]`, `[autoeq]`
-(`refresh_weeks`), `[host]` (`enabled`, on by default) and the repeated `[[device]]`, `[[preset]]`
-and `[[hop]]`. `MqttConfig` serialises its password as `***` (`redacted`), so `config show --json`
-and a debug print never leak it, and `SVOLDER_MQTT_PASSWORD` overrides it at connect time so it need
-not sit in the file.
+(`refresh_weeks`), `[host]` (`enabled`, on by default) and the repeated `[[device]]`, `[[preset]]`,
+`[[scene]]` ([scenes.md](scenes.md)) and `[[hop]]`. `MqttConfig` serialises its password as `***`
+(`redacted`), so `config show --json` and a debug print never leak it, and `SVOLDER_MQTT_PASSWORD`
+overrides it at connect time so it need not sit in the file.
 
 `[host]` has one key, `enabled`, true unless set otherwise: the daemon is the per-user service on
 the computer that plays, so following the player and reading the route is its job. `enabled =
@@ -375,15 +375,15 @@ a token. A check that altered what it checked would report on its own work.
 
 ## Where the code and tests live
 
-- Protocol, server, client, lines: `crates/svolder-ipc/src/socket/protocol.rs` (the requests in `protocol/request.rs`, the codes and
-  feature names in `codes.rs`, the subsystem statuses in `status.rs`, the deadlines in
-  `timeouts.rs`; the families in
+- Protocol, server, client, lines: `crates/svolder-ipc/src/socket/protocol.rs` (the requests in
+  `protocol/request.rs`, the codes and feature names in `codes.rs`, the subsystem statuses in
+  `status.rs`, the deadlines in `timeouts.rs`; the families in
   `crates/svolder-ipc/src/socket/protocol/walk.rs`, `autoeq.rs`, `jobs.rs`, `host_eq.rs`,
-  `host_cover.rs`, `preset_write.rs` and
-  `device_config.rs`, whose handler is `bins/svolderd/src/handler/device_config.rs`), `server.rs`
-  (binding and adopting a socket in `server/listener.rs`), `client.rs`, `lines.rs`; tests in the
-  `protocol/tests.rs` and `lines/tests.rs` beside them and in `server/tests.rs`,
-  `server/tests/streams.rs` and `server/listener/tests.rs`.
+  `host_cover.rs`, `preset_write.rs`, `scenes.rs` and `device_config.rs`, whose handler is
+  `bins/svolderd/src/handler/device_config.rs`), `server.rs` (binding and adopting a socket in
+  `server/listener.rs`), `client.rs`, `lines.rs`; tests in the `protocol/tests.rs` and
+  `lines/tests.rs` beside them and in `server/tests.rs`, `server/tests/streams.rs` and
+  `server/listener/tests.rs`.
 - The daemon's jobs: see [jobs.md](jobs.md).
 - Socket paths and adoption: `crates/svolder-ipc/src/socket/path.rs`; tests in
   `crates/svolder-ipc/tests/adoption.rs`.

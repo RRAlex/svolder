@@ -8,6 +8,195 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.38.1
+
+- **The Path row reads at a glance, in the terminal and on the web page.** The word `Path` itself
+  is green when the sound is untouched end to end and yellow when anything changes it, and the
+  DAC's own volume and tone control count: a path that is untouched up to a DAC at -24 dB, or with
+  its tone control on, is yellow. The verdict word and the check mark are gone. Under the label
+  the hops (`player → computer → DAC USB 1`) and the values they share (`48 kHz · volume 0 dB`,
+  or `44.1 → 48 kHz` when the computer resamples) sit dim, and only the words of what changes the
+  sound are yellow (`computer resampled`, `volume -24.1 dB`, `tone control`): a format that merely
+  differs, `S16LE` into `S32LE`, stays plain, and the formats stay in `svolder host check`. A
+  `config N` tag appears only when the PipeWire config check fails (and turns the label yellow),
+  and a hop with something not read shows a dim `?`. Clicking the row in the terminal (or `k`), or
+  the word `Path` on the web page, still opens the config box.
+  - **TUI**: the row is two lines, the hops and then the values, each wrapping at its own
+    separators (a wrapped line never starts with `·` or an arrow); on a narrow pane the values
+    wrap alone and the hops line scrolls, so the values and the `config N` tag stay in sight.
+    The tooltip is the label's words, the two lines and the config check's count.
+  - **Web page**: Ember draws the same row: the word `Path` (green or yellow; a button that
+    opens the PipeWire config popup when the sink is the DAC, its tooltip and screen-reader words
+    saying why), the hops as chips with the shared values dim in the last chip, and a yellow
+    border and yellow words only on a chip that changes the sound, the DAC's own volume and tone
+    control included. The `config N` chip shows only on a failing check. On a card too small for
+    the row the plain hops go into the three dots first, then the changed ones, and the DAC's chip
+    last. A chip that wraps starts bare, the arrow ending the line before it, a value (`44.1 → 48
+    kHz`, `volume -24.1 dB`) never splits, and no line starts with `·`. Signal takes the colour of
+    its Path line from the end-to-end result, and when only the DAC changes the sound it says `the
+    DAC changes the sound` in yellow instead of `untouched`, its tooltip and screen-reader text
+    leading with the label's words; Paper and Night drive keep their own words.
+  - **Machine readable**: the web model's `playing.path` gains `row` and `end_to_end`, MCP
+    `get_host` `path` and `svolder host check --json` gain `end_to_end` beside `verdict`:
+    `verdict` keeps its meaning (the path up to the DAC's input) and `end_to_end` adds the DAC's
+    own volume, tone control, balance, mute, phase and NOS filter. Home Assistant is not
+    changed and has no `end_to_end` yet (Known issues).
+  - **For contributors**: `svolder_ipc::host::path_row` builds the row once (`PathRow`, `RowHop`,
+    `RowWord`, `Tone`, `EndToEnd`) from the path line and the config check, and every front end
+    draws it; `Hop` records each change at the hop that makes it, with its short form, beside the
+    full words the CLI, MCP and Home Assistant keep unchanged. `Hop` and `PathLine` no longer
+    derive `Eq`. Ember draws `playing.path.row` in `draw/parts.js` (`pathRow`); `.np-verdict` and
+    `.np-lead` are gone.
+
+## 0.38.0
+
+- **Coming from 0.37.2?** Two things matter. Home Assistant: each computer is now its own device,
+  named by its host name, so its entities get new ids (`switch.reframe_eq`, not
+  `switch.this_computer_eq`); a dashboard, automation or script that names a `this_computer_*`
+  entity has to be pointed at the new id, and every daemon on one broker should be upgraded together
+  (below). And two safety fixes to the computer EQ's live updates, older than this release (below):
+  a line that changed the EQ's points and a crossfeed or speakers stage that costs less could play
+  up to 2 dB over unity for one torn quantum, and a stage the controller had lost track of could
+  play up to 3 dB over.
+- **Scenes**: save the sound of the whole config under a name and recall it later, from every front
+  end. A scene holds the computer's EQ (its curve and stated preamp), loudness, crossfeed and
+  virtual speakers, and, for each device that was connected when it was saved, its tone control and
+  plain sound settings (on a Bifrost 3: input, phase, NOS and balance). A recall puts every part
+  back at once, each by its own safe order (apart from PipeWire's half-applied filter under Known
+  issues), and the answer says how each part fared (set, set in part, left as it was, failed). No
+  volume, gain, mute or power is saved or recalled (a changed input or phono load can still change
+  what you hear). A scene is a snapshot of values, so a preset you rename, edit or delete later
+  never changes it. A scene recalled onto a device that is not connected leaves that device alone
+  and says so; a recall that would play one preset on a device and on the computer at once asks
+  first. The daemon keeps scenes and says which one is on, the same everywhere (the scene last
+  recalled while it still matches, else the first that matches); the scenes are `[[scene]]` blocks
+  in `config.toml` and the scene last recalled survives a restart. A scene with crossfeed or virtual
+  speakers on reads as no scene after a restart, since those never stay on. Names are trimmed, at
+  most 40 characters, and `custom` is reserved. Scenes need the daemon:
+  - **TUI**: a Scenes box, opened by `z` on every screen and by a `Scenes z` row in the Esc menu
+    (only while the daemon keeps scenes): one row per scene with a lamp for the one that is on and
+    its parts as dim words (`computer · Desk DAC · Hall (not connected)`); `Enter` recalls, `n`
+    saves the sound as it is now under a name, `u` saves over the focused scene (asks), `c` renames,
+    `x` deletes (asks). A click on a row only focuses it and a second click recalls. A recall that
+    would play one preset twice asks its question in the box's last row. The Status pane's first
+    line names the scene that is on (`Scene  Late night`, `reading…` while the daemon is still
+    reading a device). Every refusal and every part's outcome is the daemon's own words in one
+    toast. Without a daemon `z` says `scenes are kept by the daemon: svolder daemon install`.
+  - **Web**: a Scenes popup, a writer's only (a guest and a read-only page have no row), opened by
+    `Scenes…` in the menu after Sound: the list of saved scenes with a lamp and `On now` for the
+    scene that is on, the parts of each as chips (a device that is away dashed), a tap on the name
+    recalls and says how each part fared, a pencil renames and a bin deletes (each asks in place),
+    `Save current as…` saves (a taken name asks `Save over …?`), and the both-sides question is
+    asked in place. In all four themes.
+  - **CLI**: `svolder scene [list | show NAME | save NAME [--force] | load NAME [--yes] | rename OLD
+    NEW | delete NAME [--yes]] [--json]`. A recall prints one line per part and exits 3 when a part
+    is `partial` or `failed`; the both-sides question asks `[y/N]` at a terminal (`--yes` answers
+    it, with no terminal and no `--yes` it is refused with the daemon's words); delete asks the same
+    way. With no daemon running `list` and `show` read the config (no scene is marked on, no
+    connection is said); the other verbs say scenes are kept by the daemon and exit 3, and a daemon
+    without scenes exits 7.
+  - **MCP**: five tools, `list_scenes` and, with `[mcp] writes`, `load_scene`, `save_scene`,
+    `rename_scene`, `delete_scene`. A plain recall asks nothing; it asks when a scene would play one
+    preset on a device and on the computer, or sets a built-in band more than 6 dB above its lowest
+    level of the last minute (`load_scene` takes `confirm_both_sides` and `confirm` for a client
+    that cannot ask, one never answering the other). Saving over a taken name needs `replace: true`
+    (asks once); delete asks once; rename asks nothing.
+  - **Home Assistant**: the computer's device gains a scene select (`select.<host>_scene`: the
+    scenes plus `custom`; a sensor while `commands` is off) and a text (`text.<host>_scene_save`)
+    that saves the current settings under a typed name (a taken name is refused in the daemon's
+    words). The select's attributes carry the scenes with their parts, whether which scene is on is
+    known, the scene last recalled, and the last recall's and save's answers (each with a rising
+    `seq`) for the dashboard card; a recall the daemon refuses or asks about (a preset that would
+    play twice) shows as `outcome` with the daemon's words. Rename, delete and the both-sides
+    question are not on Home Assistant.
+- **Home Assistant: each computer is its own device.** Two computers on one broker no longer
+  overwrite each other: each computer's device is named by its host name
+  (`svolder_computer_<host>`), with its own topics, ids and bridge availability
+  (`svolder/bridge/<host>/availability`), and every DAC and amp is `via_device` of its computer. The
+  old `This computer` entities are cleared on the first start, so dashboards and automations must be
+  pointed at the new entity ids (`switch.reframe_eq`). A DAC that two daemons serve shows under the
+  last to announce it; an older daemon on the same broker loses its `This computer` device each time
+  a newer one starts, so upgrade every daemon on one broker together; a container without host
+  networking needs a `hostname:` or each new container is a new device (see the MQTT guide).
+- **Home Assistant: a dashboard that builds itself, and svolder's own cards.** A `custom:svolder`
+  dashboard strategy (`contrib/home-assistant/svolder.js` and `svolder/`, one JS resource, nothing
+  to install from HACS) builds one page per svolder computer from Home Assistant's registries: the
+  computer's section first, then one section per DAC or amp it serves, drawn with svolder's cards.
+  The cards are a device faceplate (volume dial with dB and raw/127, Mute and Phase invert keys,
+  readouts, input and preset chips, link strip), an EQ curve (drag a point to move a band), the
+  computer's chain (EQ, Loudness, Crossfeed, Speakers) and a scenes list with Save and the recall
+  answer; one column on a phone and two on a tablet. With `commands` off the cards show the same
+  values and move nothing. The cards write only through the entities they are handed, one write for
+  each gesture.
+- **TUI: a click anywhere on the Path row opens the PipeWire config box**, not only on the `config`
+  chip (every line the row wraps to, the label included), and the Host group of the device screen
+  leaves an empty line before its Path and Spectrum rows where the pane has rows to spare (and has
+  kept the blanks between its groups); the gaps never cut a row, so a small terminal gets fewer.
+  A Path hop wider than the pane (the DAC's) now breaks at its commas onto indented lines, five
+  lines at most, instead of cutting the whole row with `…`; a line the row breaks onto starts with
+  `→` for a hop and with no `·`. The Transport row shows the playing track's time after the
+  buttons, `2:41 / 9:22` and a thin bar, advancing once a second while playing (elapsed alone when
+  the player gives no length). The README's first terminal image shows the Path row and the time.
+- **The Path says `untouched` for players that name no channel positions.** Spotify's two
+  unpositioned channels into a stereo sink, and an `AUX0 AUX1` sink against an `FL FR` stream, read
+  `untouched` instead of `channels remapped`: PipeWire pairs channels with no names one to one. A
+  layout mixing named and unnamed positions with the same set on both sides reads unknown (`channels
+  partly unnamed`). One channel into an `FL FR` sink says `mono on both channels` only for `MONO` or
+  an unnamed position; `FC` reads `mono centre 3 dB lower on both channels` and `FL` or `FR` alone
+  `one channel silent` (both changes). The matching known issue is gone.
+- **Two safety fixes to the computer EQ's live updates (older than scenes).** (1) A live line that
+  changes the EQ's points and a crossfeed (or speakers) stage that costs less, in one torn quantum,
+  could play +0.2 to +2.0 dB over unity (for example a crossfeed drag pending when a point drag is
+  released). Such a line now sends the stage first, and when the node may hold the loaded config's
+  slots (a sink rate change put them back) it holds the preamp low for both orders, like the level
+  held for a stream: it says `level held until the music pauses` and comes up once the music has
+  paused and the chain has been idle (one apply). (2) After a command-line apply replaced the
+  chain's node, a node that already played the crossfeed stage was taken for one that played none,
+  and the next live line that changed the points was sent over a stage whose cost was unknown, up to
+  +3 dB over unity in one torn quantum (found by the preamp lab's new boundary check). Such a line
+  now first puts the stage to the bypass in a line of its own.
+- **Known issues** (all in `docs/known-issues.md`):
+  - A volume glide that waits behind a stuck write can be judged from an old volume reading: with a
+    knob turned down at the device in the same short window, the glide can jump the volume back up
+    to a level it had before the turn (never above it). Rare; the writer was the same in 0.37.2.
+    Known, not yet fixed.
+  - A scene recall rebuilds the computer EQ's chain when it needs another speakers set, a stage the
+    running chain lacks, or live updates are off, as turning that on by hand does, so a player that
+    is playing may pause briefly; the answer notes only the set's rebuild. Every other recall goes
+    live.
+  - A scene recall that changes the number of computer EQ points, or turns the EQ on or off live,
+    is one of the live updates PipeWire can play half-applied (known since 0.37.0).
+  - Home Assistant cannot answer a scene's both-sides question, and a DAC two daemons serve shows
+    under the last to announce it (above).
+- **Contributors**: scenes are `svolder-profiles` `scene.rs` (a device's part: `held_controls`,
+  capture, `plan`, `matches`; `device_presets::plan_values`), `svolder-host` `eq/scene.rs` and
+  `eq/control/scene.rs` (`ComputerPart`, `EqControl::computer_part` and `recall` as one change,
+  `ComputerPart::matches`; `EqView.stated_preamp_db`; the preamp lab's sixth profile,
+  `generate_scene`, and a boundary check on every line), `svolder-ipc` `config/scenes/`
+  (`[[scene]]`, `Config::{add,update,rename,remove}_scene`, `scenes::on`, `Scene::part_names`,
+  `ConfigError::SceneName`) and `socket/protocol/scenes.rs` (`Request::Scene`, `SceneOp`,
+  `Response::Scene`, `PartOutcome`, `Event::Scenes`, `ScenesView`, feature `scenes`, reasons
+  `nothing_to_save`), svolderd `scenes.rs` and `scenes/` (the view watch, the memory in
+  `scenes.toml` in the state home, save, recall, upkeep), `Writer::apply_values`,
+  `Writer::set_if_needed` and `Writer::busy`, the routes `api/v1/scenes*` with the page model's
+  `scenes` and a `scenes` SSE event for a writer, the five MCP tools, `mqtt_bridge/scenes.rs` and
+  `svolder-mqtt` `computer/scenes.rs` (a `text` component); `svolder-mqtt` `computer::Computer` and
+  `topics::{host_id, computer_unit}`, the bridge reading `/proc/sys/kernel/hostname` once at start
+  (`localhost` when empty); the TUI's `boxes/scenes.rs`, `app/scenes.rs`, `run/scenes.rs`,
+  `screens/scenes.rs` (`Update::Scenes`, `Intent::Scene`, `menu::entries(app)`, `When::HasScenes`);
+  the TUI's `keys::Scene` is now `KeyContext`, the intro's `demo::Scene` `demo::Planned` and the
+  stills module `screenshots::shots`; web `core/scenes.js`, `core/scenes-actions.js`,
+  `core/popups/scenes/`; `svolder` `commands/scene.rs` and `StubServer::scenes()`; the HA strategy
+  `contrib/home-assistant/svolder.js` and `svolder/` with `svolder/cards/` (plain custom elements,
+  no import of Home Assistant), checked by `scripts/web-checks/ha/` (`strategy.mjs`, `cards.mjs`,
+  `ha_cards.py`); host-e2e phase SC (`HOST_E2E_ONLY=S bash scripts/host-e2e/run.sh` runs it alone);
+  `make web-checks-affected` runs every web check that names an id, popup, menu row, note or event a
+  change adds or removes, and `make gate-fails LOG=<file>` lists the checks still red in a gate log;
+  scratch directories the repo makes in the temp dir live under one `svolder` directory (0700,
+  refused unless a real directory the user owns): `svolder_host::scratch::{scratch_base,
+  scratch_base_in}`, the preamp lab's `lab-<pid>-<n>`, the unit-test homes `unit-<pid>`, and the web
+  gate lock is `/tmp/svolder/web-gate.lock`; the design page `docs/design/scenes.md`.
+
 ## 0.37.2
 
 - **Coming from 0.36.7?** This release also carries 0.36.8 to 0.37.1, listed below it. Two items

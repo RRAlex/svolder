@@ -928,7 +928,7 @@ fn the_editor_key_line_offers_identify_and_dims_it_where_b_would_type() {
 #[test]
 fn a_short_border_drops_refresh_first_then_x_remove() {
     let theme = Theme::new(false);
-    let scene = crate::tui::keys::Scene::of(&app(daemon_rows()));
+    let context = crate::tui::keys::KeyContext::of(&app(daemon_rows()));
     let words = |width: u16| {
         let room = crate::tui::widgets::actions::action_room(width, " Devices ".chars().count());
         let (line, _) = crate::tui::widgets::actions::actions_title(
@@ -936,7 +936,7 @@ fn a_short_border_drops_refresh_first_then_x_remove() {
             None,
             room,
             Screen::Devices,
-            &scene,
+            &context,
             &theme,
         );
         line.spans

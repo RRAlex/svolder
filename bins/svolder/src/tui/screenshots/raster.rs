@@ -40,7 +40,7 @@ pub(in crate::tui::screenshots) struct Palette {
 }
 
 impl Palette {
-    /// The ground and text `theme` draws: the scenes draw with the theme background on, so a
+    /// The ground and text `theme` draws: the stills draw with the theme background on, so a
     /// ground is always there.
     pub(in crate::tui::screenshots) fn of(theme: &Theme) -> Palette {
         let rgb = |colour: Option<Color>| {
@@ -54,7 +54,7 @@ impl Palette {
 }
 
 /// `colour` as RGB: as it is, `Reset` as the palette's ground or text, a named colour through
-/// the crate's own xterm table; an indexed colour is an error, since the scenes draw at true
+/// the crate's own xterm table; an indexed colour is an error, since the stills draw at true
 /// colour.
 pub(in crate::tui::screenshots) fn resolve(
     colour: Color,
@@ -68,7 +68,7 @@ pub(in crate::tui::screenshots) fn resolve(
             Side::Bg => palette.ground,
         }),
         Color::Indexed(i) => Err(format!(
-            "an indexed colour ({i}): the scenes draw at true colour"
+            "an indexed colour ({i}): the stills draw at true colour"
         )),
         named => Ok(crate::tui::palette::rgb_of(named)),
     }

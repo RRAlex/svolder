@@ -1,20 +1,22 @@
 # SPDX-FileCopyrightText: 2026 the svolder authors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The PipeWire config popup (core/popups/setup/) and the config chip of each theme's path line, in a
-browser, wide and on a phone, against the fake host whose config passes (`config ✓`) and the one that fails
-(`SVOLDER_FAKE_CONFIG=fail`, `config N`). The logic is node's (node/core-setup.mjs); this proves what only a
-browser sees. Per theme and size:
-  the_chip_is_the_daemons_words      Ember, Signal (player screen) and Paper show the chip with the card's
-                                     `path.config.chip` words (Paper draws the tick as a stroke); Night drive
-                                     draws none
+"""The PipeWire config popup (core/popups/setup/) and the config entry of each theme's Path row
+(Ember's label button and its chip, Signal's and Paper's chips), in a browser, wide and on a phone,
+against the fake host whose config passes (Ember draws no chip; its label `Path` is the button) and
+the one that fails (`SVOLDER_FAKE_CONFIG=fail`, `config N`). The logic is node's
+(node/core-setup.mjs); this proves what only a browser sees. Per theme and size:
+  the_chip_is_the_daemons_words      Ember (only while the check fails; while it passes the label `Path` is
+                                     the button), Signal (player screen) and Paper show the chip with the
+                                     card's `path.config.chip` words (Paper draws the tick as a stroke); Night
+                                     drive draws none
   the_chip_opens_the_popup           a real click on the chip opens PipeWire config; the menu row `PipeWire
                                      config…` opens it too, in every theme, Night drive included
   the_popup_prints_the_card          the title, the sink, the summary, seven lines (the failing ones tagged,
                                      as many as the card says) and the limit; nothing scrolls sideways; the
                                      rows are at least 24 px
-  the_keyboard_opens_and_closes_it   Tab reaches the chip (by its id), Enter opens the popup, a redraw of the
-                                     card and of the host comes while it stands, Escape closes it and the
-                                     focus is on the chip again
+  the_keyboard_opens_and_closes_it   Tab reaches the button, Enter opens the popup, a redraw of the card and
+                                     of the host comes while it stands, Escape closes it and the focus is on
+                                     the button again
   signal_computer_side               (Signal) the chip under the computer's shelf opens it too
   paper_fails_in_pencil              (Paper) a failing line and the summary dot are in `--paper-pencil`
 Usage: python3 setup_popup.py chromium|firefox"""
@@ -30,6 +32,8 @@ browser = modal.browser
 
 SETUP = "__core.model.page().device?.playing?.path?.config ?? null"
 CHIPS = {'ember': '#np-config', 'signal': '#sg-config', 'paper': '#p-config'}
+# Ember draws its chip only while the check fails; while it passes the label `Path` is the button
+LABEL = '#np-label'
 SHOW = {
     # a phone's folded Ember card hides the path until a tap opens it
     'ember': "(() => { const p = document.getElementById('part-playing');"
@@ -54,9 +58,14 @@ def choose_hop(b, steps):
     time.sleep(0.6)
 
 
-def chip_text(b, theme):
-    return b.page(f"(() => {{ const c = document.querySelector({CHIPS[theme]!r}); if (!c) return null;"
-                  " const k = c.cloneNode(true); k.querySelectorAll('.p-sr, svg').forEach((n) => n.remove());"
+def button_of(theme, fail):
+    """The selector of the button that opens the popup on the path line."""
+    return LABEL if theme == 'ember' and not fail else CHIPS[theme]
+
+
+def chip_text(b, selector):
+    return b.page(f"(() => {{ const c = document.querySelector({selector!r}); if (!c) return null;"
+                  " const k = c.cloneNode(true); k.querySelectorAll('.p-sr, .np-sr, svg').forEach((n) => n.remove());"
                   " return k.textContent.trim(); })()")
 
 
@@ -65,17 +74,17 @@ REDRAW = ("(() => { const m = __core.model, p = m.page(); const playing = p.devi
           " m.emit('host', p.host); m.emit('model', p); return 1; })()")
 
 
-def by_keyboard(b, theme, tag):
-    """Tab to the chip, Enter, a redraw under the popup, Escape: the focus is on the chip again."""
-    ident = CHIPS[theme][1:]
+def by_keyboard(b, selector, tag):
+    """Tab to the button, Enter, a redraw under the popup, Escape: the focus is on the button again."""
+    ident = f'document.activeElement?.matches({selector!r})'
     b.page(modal.BODY)
     reached = False
     for _ in range(120):
         b.press('Tab')
-        if b.page('document.activeElement?.id') == ident:
+        if b.page(ident) is True:
             reached = True
             break
-    check(f'the_keyboard_opens_and_closes_it {tag}: Tab reaches the chip', reached, b.page('document.activeElement?.id'))
+    check(f'the_keyboard_opens_and_closes_it {tag}: Tab reaches the button', reached, b.page('document.activeElement?.id'))
     if not reached:
         return
     b.press('Enter')
@@ -87,9 +96,9 @@ def by_keyboard(b, theme, tag):
     b.press('Escape')
     gone = poll(lambda: b.page("!document.getElementById('popup-setup')"), 4.0)
     time.sleep(0.4)
-    focus = b.page('document.activeElement?.id')
-    check(f'the_keyboard_opens_and_closes_it {tag}: Escape closes it and the focus is on the chip',
-          gone is True and focus == ident, [gone, focus])
+    focus = b.page(ident)
+    check(f'the_keyboard_opens_and_closes_it {tag}: Escape closes it and the focus is on the button',
+          gone is True and focus is True, [gone, focus])
     # and again, as a person does: the focus is on the chip, Enter opens it a second time
     b.press('Enter')
     again = ready(b, 'setup')
@@ -129,12 +138,17 @@ def case(b, d, theme, size, fail):
               b.page("!!document.getElementById('sg-player') && !document.getElementById('sg-cfacts')") is True)
     if theme in CHIPS:
         # only Paper draws its tick as a stroke; the others print the daemon's chip as it is
+        button = button_of(theme, fail)
         want = card['chip'].replace('✓', '').strip() if theme == 'paper' else card['chip']
-        got = poll(lambda: chip_text(b, theme), 4.0)
-        check(f'the_chip_is_the_daemons_words {tag}: {card["chip"]}', got == want, [got, want])
+        if button == LABEL:
+            want = 'Path'
+            check(f'the_chip_is_the_daemons_words {tag}: a passing check draws no chip, the label is the button',
+                  b.page("!document.querySelector('.np-setup')") is True)
+        got = poll(lambda: chip_text(b, button), 4.0)
+        check(f'the_chip_is_the_daemons_words {tag}: {want}', got == want, [got, want])
         # the keyboard first, on the page as it loaded: Escape closes it as a person does
-        by_keyboard(b, theme, tag)
-        tap(b, CHIPS[theme])
+        by_keyboard(b, button, tag)
+        tap(b, button)
         opened = ready(b, 'setup')
         check(f'the_chip_opens_the_popup {tag}: a click on the chip', opened is True, opened)
     else:

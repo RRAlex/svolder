@@ -538,6 +538,8 @@ def run():
             b.press('ArrowDown')
             check('  ArrowDown reaches the Sound row', kb()['focus'] == 'menu-popup-sound', kb())
             b.press('ArrowDown')
+            check('  ArrowDown reaches the Scenes row', kb()['focus'] == 'menu-popup-scenes', kb())
+            b.press('ArrowDown')
             check('  ArrowDown reaches the PipeWire config row',
                   kb()['focus'] == 'menu-popup-setup', kb())
             b.press('ArrowDown')

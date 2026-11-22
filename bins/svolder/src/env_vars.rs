@@ -548,6 +548,15 @@ const ENV_VARS: &[EnvVar] = &[
                blocks of seeds (the short runs and `make preamp-lab`) run both models anyway.",
     },
     EnvVar {
+        name: "SVOLDER_LAB_REPAIR_LINES",
+        read_by: "svolder-host test suite",
+        dev_only: true,
+        what: "Set to anything, the preamp lab's check at every boundary between kinds of port \
+               in a live line (every profile) also looks at repair lines, the line sent after \
+               one failed, was refused or lost, which carries every port in the caller's order. \
+               They are skipped by default: they are the documented half-applied-line issue.",
+    },
+    EnvVar {
         name: "SVOLDER_LAB_OUT",
         read_by: "svolder-host test suite, make",
         dev_only: true,

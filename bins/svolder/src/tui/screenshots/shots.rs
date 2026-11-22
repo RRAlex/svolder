@@ -21,7 +21,8 @@ use crate::tui::run::drawn_turn;
 use crate::tui::screenshots::raster::{Palette, ink, mix};
 use crate::tui::screenshots::world::{
     ANIMATION_SIGNAL_AT, START_VOLUME_DB, STILL_SIGNAL_AT, STILL_VOLUME_DB, World, aegir2, block,
-    feed_host_history, feed_meter, feed_meter_history, gungnir, rise, runtime, set_volume,
+    feed_host_history, feed_meter, feed_meter_history, gungnir, on_usb_with_path, rise, runtime,
+    set_volume,
 };
 
 mod record;
@@ -146,7 +147,12 @@ pub(in crate::tui::screenshots) fn still_sized(
             feed_meter_history(&mut app, signal_start, t0);
             app
         } else {
-            gungnir(&world, t0, STILL_VOLUME_DB).await
+            let mut app = gungnir(&world, t0, STILL_VOLUME_DB).await;
+            // The README's first still shows the computer's path to the DAC.
+            if still == Still::Dac {
+                on_usb_with_path(&mut app, t0);
+            }
+            app
         };
         feed_host_history(&mut app, signal_start, t0);
         app.show(still.screen());
@@ -207,7 +213,7 @@ fn still_signal_at(n: u32) -> Duration {
     STILL_SIGNAL_AT - LEAD + FRAME * n
 }
 
-/// Every instant at which a scene reads the seeded signal for its levels: the animation's
+/// Every instant at which a still reads the seeded signal for its levels: the animation's
 /// frames and the stills' settle turns.
 pub(in crate::tui::screenshots) fn signal_instants() -> impl Iterator<Item = Duration> {
     let animation = (0..animation_turns()).map(|n| ANIMATION_SIGNAL_AT + INTRO + FRAME * n);

@@ -66,8 +66,11 @@ config lets it through untouched"), `changes` ("PipeWire config changes the soun
 fail), `unread` ("PipeWire config not fully read: N", no line fails and N are unknown), `not_read`
 ("PipeWire config not read": no sink) and `other_version` ("PipeWire config not read (svolderd's
 version differs)": a route with a sink and no config facts this build reads, from an older or a
-newer svolderd). Its chip is `config ✓`, `config N` or `config ?`. The path verdict's keys
-(`Verdict::KEYS`) are `untouched`, `changed`, `not_this_dac`, `other_input` and `unknown`; a line's
+newer svolderd). The Path row draws it as a `config N` tag only while N lines fail; a check that
+passes, is not fully read or is not read shows nothing on the row (the `k` box and the web
+popup keep every line). The path verdict's keys (`Verdict::KEYS`) are `untouched`, `changed`,
+`not_this_dac`, `other_input` and `unknown`; `end_to_end` takes the same five words and adds
+the DAC's own stage to the verdict (`PathLine::end_to_end`); a line's
 outcome keys (`SetupOutcome::KEYS`) are `pass`, `fail` and `unknown`. Every JSON surface (the web
 card, MCP, `svolder host check --json`, Home Assistant) uses these keys; `words` is an array
 everywhere, and `config.limit` carries `SETUP_LIMIT`, the sentence of what the check cannot judge:
@@ -86,14 +89,31 @@ transparent for 16- and 24-bit samples, and that each of the faults above breaks
 (`hw` hands the bytes on, `plug` converts), the USB driver or the DAC.
 
 Where it shows: `svolder host check` and `svolder doctor`'s PipeWire config row, the TUI's Path row
-chip and its `k` box, the web page's chip and popup, MCP `get_host.config`, and the Home Assistant
+tag and its `k` box, the web page's tag and popup, MCP `get_host.config`, and the Home Assistant
 `computer_config` problem sensor. The judge gives `not_read` only for a route with no sink; which
 sink is judged is each surface's choice. The CLI and MCP judge whatever sink the computer's default
 is. The web page, the TUI and Home Assistant judge it only when that sink is a configured DAC (the
 first published device of the DAC family whose name matches the sink): for an amp or another sink
-the web card and the TUI show no chip, and Home Assistant's sensor has no state. A DAC that has not
+the web card and the TUI show no tag, and Home Assistant's sensor has no state. A DAC that has not
 connected since svolderd started is not recognised as the sink's DAC until it does, so those
 surfaces judge nothing meanwhile, never a false pass.
+
+**The Path row's label.** One model, `svolder_ipc::host::path_row`, builds the row from the path
+line and the config check of its sink, and every front end draws it as it is: none re-judges,
+diffs two texts or picks a colour. The label is green (`good`) only when `end_to_end` is
+`untouched` and the config check does not fail, yellow (`warn`) when `end_to_end` is `changed` or
+the check fails, and plain for what could not be read, another sink and another input. A failing
+check outranks a path that could not be read (the label is yellow), and a known change at the
+DAC outranks something not read (`end_to_end` reads `changed`). Yellow words come from the judge's
+change list, never from comparing two texts: `S16LE` into `S32LE` stays plain. The values line
+says a resample as `player rate → sink rate` (`44.1 → 48 kHz`), and the forced rate only when the
+sink still reads the stream's rate. A row with no hops joins the words of a port mismatch with
+`; ` in its label's words. The row serializes as `{label: {tone, words}, hops: [{label, words:
+[{text, tone}]}], values: [{text, tone}], words}`, a tone being `plain`, `dim`, `good` or `warn`
+and `words` the one plain line of a row with no hops. `verdict` keeps its meaning on every JSON
+surface; `end_to_end` is beside it in the web page's model (`playing.path`, with the row as
+`playing.path.row`), MCP `get_host.path` and `svolder host check --json`. Home Assistant has no
+`end_to_end` in 0.38.1.
 
 **One rule for the path verdict of a sink that is not a DAC.** The CLI (`host check`) and MCP
 judge the computer's side for any sink: `path.dac` is null and the verdict may read `untouched`

@@ -15,6 +15,36 @@ fn from_env(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+/// The lab's scratch directories sit in the scratch base, never loose in the temporary directory.
+#[test]
+fn a_lab_scratch_directory_sits_in_the_scratch_base() {
+    let dir = Dir::new();
+    let base = crate::scratch::scratch_base().expect("the scratch base");
+    assert!(
+        dir.0.starts_with(&base),
+        "{:?} is not under {base:?}",
+        dir.0
+    );
+    assert!(dir.0.is_dir());
+}
+
+/// A killed run's directory is swept, a live run's and a foreign name are kept.
+#[test]
+fn the_sweep_removes_the_directories_of_dead_runs_only() {
+    let base = crate::scratch::scratch_base().expect("the scratch base");
+    let root = base.join(format!("sweep-test-{}", std::process::id()));
+    let dead = root.join("lab-4294967295-3");
+    let live = root.join(format!("lab-{}-3", std::process::id()));
+    let other = root.join("lab-x-1");
+    for dir in [&dead, &live, &other] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    sweep_dead_runs(&root);
+    assert!(!dead.exists());
+    assert!(live.exists() && other.exists());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn the_lab_finds_nothing_in_a_short_run() {
     let mut failures = run_seeds(SHORT_FIRST, SHORT_RUNS, Ids::Fresh);
@@ -82,6 +112,18 @@ fn the_lab_finds_nothing_in_a_short_loudness_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
+/// The short run of the scene profile ([`generate_scene`]): scene recalls with random parts, a
+/// stream that plays or not, and the ordinary faults, under both models of ids.
+const SCENE_FIRST: u64 = 1;
+const SCENE_RUNS: u64 = 300;
+
+#[test]
+fn the_lab_finds_nothing_in_a_short_scene_run() {
+    let mut failures = run_scene_seeds(SCENE_FIRST, SCENE_RUNS, Ids::Fresh);
+    failures.extend(run_scene_seeds(SCENE_FIRST, SCENE_RUNS, Ids::Reused));
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
 /// A block of seeds of one profile: the first seed, how many, the model of ids.
 type RunSeeds = fn(u64, u64, Ids) -> Vec<String>;
 
@@ -94,14 +136,15 @@ fn the_lab_finds_nothing_in_a_long_run() {
     let runs = from_env("SVOLDER_LAB_RUNS", 5_000);
     let started = std::time::Instant::now();
     let mut failures = Vec::new();
-    let profiles: [(&str, RunSeeds); 5] = [
+    let profiles: [(&str, RunSeeds); 6] = [
         ("ordinary", run_seeds),
         ("targeted", run_targeted_seeds),
         ("speakers", run_speakers_seeds),
         ("high-rate", run_highrate_seeds),
         ("loudness", run_loudness_seeds),
+        ("scene", run_scene_seeds),
     ];
-    let mut took = [std::time::Duration::ZERO; 5];
+    let mut took = [std::time::Duration::ZERO; 6];
     for ids in [Ids::Fresh, Ids::Reused] {
         for ((_, run), took) in profiles.iter().zip(&mut took) {
             let at = std::time::Instant::now();
@@ -113,7 +156,7 @@ fn the_lab_finds_nothing_in_a_long_run() {
         eprintln!("preamp lab: the {name} profile took {took:.0?}");
     }
     eprintln!(
-        "preamp lab: seeds {first}..{} ({runs} runs of each of the five profiles, fresh and reused ids) in {:.0?}, {} failed",
+        "preamp lab: seeds {first}..{} ({runs} runs of each of the six profiles, fresh and reused ids) in {:.0?}, {} failed",
         first + runs,
         started.elapsed(),
         failures.len()
@@ -127,6 +170,8 @@ fn a_seed_makes_the_same_sequence_every_time() {
     assert_ne!(sequence_of(7), sequence_of(8));
     assert_eq!(sequence_of_loudness(7), sequence_of_loudness(7));
     assert_ne!(sequence_of_loudness(7).1, sequence_of(7).1);
+    assert_eq!(sequence_of_scene(7), sequence_of_scene(7));
+    assert_ne!(sequence_of_scene(7).1, sequence_of(7).1);
 }
 
 /// The model reads the loudness stage from a config, a rate change puts it back to the config's
@@ -564,7 +609,8 @@ fn a_daemon_that_restarts_in_the_middle_of_a_drag_puts_the_saved_state_on_the_ch
 }
 
 /// The sequence of `seed` from the profile it fails in: the ordinary mix, else the targeted one,
-/// else the speakers one, else the high-rate one, else (it passes in all) the ordinary mix.
+/// else the speakers one, else the high-rate one, else the loudness one, else the scene one,
+/// else (it passes in all) the ordinary mix.
 fn chosen_sequence(seed: u64) -> (u32, Vec<Event>) {
     let ordinary = sequence_of(seed);
     if run_sequence(ordinary.0, &ordinary.1).is_err() {
@@ -583,8 +629,12 @@ fn chosen_sequence(seed: u64) -> (u32, Vec<Event>) {
         return highrate;
     }
     let loudness = sequence_of_loudness(seed);
-    match run_sequence(loudness.0, &loudness.1).is_err() {
-        true => loudness,
+    if run_sequence(loudness.0, &loudness.1).is_err() {
+        return loudness;
+    }
+    let scene = sequence_of_scene(seed);
+    match run_sequence(scene.0, &scene.1).is_err() {
+        true => scene,
         false => ordinary,
     }
 }
@@ -2340,12 +2390,13 @@ fn lab_outcomes() {
     let out = std::env::var_os("SVOLDER_LAB_OUT").expect("SVOLDER_LAB_OUT names the file");
     let traced = std::env::var_os("SVOLDER_LAB_TRACE").is_some();
     type Sequence = fn(u64) -> (u32, Vec<Event>);
-    let profiles: [(&str, Sequence); 5] = [
+    let profiles: [(&str, Sequence); 6] = [
         ("plain", sequence_of),
         ("targeted", sequence_of_targeted),
         ("speakers", sequence_of_speakers),
         ("highrate", sequence_of_highrate),
         ("loudness", sequence_of_loudness),
+        ("scene", sequence_of_scene),
     ];
     let jobs: Vec<(usize, Ids, u64)> = (0..profiles.len())
         .flat_map(|profile| {
@@ -2454,4 +2505,407 @@ fn the_dense_peak_without_identity_slots_is_the_full_scan_bit_for_bit() {
             "at {rate} Hz: {sets:?}"
         );
     }
+}
+
+/// A part that plays `filters` at `preamp_db` with the stages as given.
+fn scene(
+    filters: Vec<SourceFilter>,
+    crossfeed: Option<CrossfeedModel>,
+    speakers: Option<&str>,
+    loudness: bool,
+) -> Event {
+    Event::Scene(Box::new(ComputerPart {
+        eq_on: true,
+        name: "Scene".to_string(),
+        origin: None,
+        preamp_db: 0.0,
+        filters,
+        loudness: Some(LoudnessSettings {
+            on: loudness,
+            strength_pct: 80.0,
+            reference_pct: 90.0,
+        }),
+        crossfeed_on: crossfeed.is_some(),
+        crossfeed: crossfeed.map(CrossfeedSettings::for_model),
+        speakers_on: speakers.is_some(),
+        speakers: speakers.map(str::to_string),
+    }))
+}
+
+/// Recalls that turn the stages on and off, move among curves and run through a stream that
+/// plays and a change of rate, stay at or under unity at every step under both models of ids.
+#[test]
+fn scene_recalls_among_stages_streams_and_rates_stay_under_unity() {
+    holds_both(
+        48_000,
+        &[
+            scene(hot(), Some(CrossfeedModel::MidSide), None, true),
+            Event::Ticks(30),
+            Event::Playing(true),
+            scene(gentle(), None, Some("set-a"), true),
+            Event::Ticks(30),
+            scene(hot(), Some(CrossfeedModel::Bauer), None, false),
+            Event::Rate(192_000),
+            Event::Ticks(30),
+            scene(flat(), None, Some("set-b"), false),
+            Event::Playing(false),
+            Event::Ticks(120),
+            scene(hot(), Some(CrossfeedModel::MidSide), None, true),
+            Event::Ticks(120),
+        ],
+    );
+}
+
+/// The scene rule is asked once the world has been quiet: a part the recall took is what the
+/// controller shows and the node plays, and any other event but time drops the rule.
+#[test]
+fn the_scene_rule_is_asked_of_a_recall_once_the_world_is_quiet() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    runtime.block_on(async {
+        let mut lab = Lab::new(48_000);
+        lab.run(&scene(hot(), Some(CrossfeedModel::MidSide), None, true))
+            .await
+            .unwrap();
+        assert!(lab.scene.is_some(), "the recall was taken");
+        assert!(!lab.scene_checked);
+        for _ in 0..5 {
+            lab.run(&Event::Ticks(45)).await.unwrap();
+        }
+        assert!(lab.scene_checked, "asked after the quiet time");
+        assert!(lab.scene.is_some(), "time does not drop it");
+        lab.run(&Event::Toggle(false)).await.unwrap();
+        assert!(lab.scene.is_none(), "another event does");
+    });
+}
+
+/// A boost of +3 dB at 100 Hz.
+fn boost3() -> Vec<SourceFilter> {
+    vec![point(FilterKind::Peaking, 100.0, 3.0, 1.0)]
+}
+
+/// A recall that turns crossfeed off while the curve's boost rises is one line that changes the
+/// slots and the stage together: taken in part, it must never play the new boost under the old
+/// stage's preamp (the stage's ports go before the slots when its cost falls).
+#[test]
+fn a_recall_that_drops_the_stage_and_raises_the_boost_never_plays_over_unity_part_way() {
+    holds_both(
+        48_000,
+        &[
+            scene(flat(), Some(CrossfeedModel::MidSide), None, false),
+            Event::Ticks(30),
+            scene(boost3(), None, None, false),
+            Event::Ticks(30),
+            scene(flat(), Some(CrossfeedModel::MidSide), None, false),
+            Event::Ticks(30),
+        ],
+    );
+}
+
+/// The scene rule must not go vacuous: over the first sequences of the scene profile it is asked
+/// of a good share of the recalls the controller took.
+#[test]
+fn the_scene_rule_is_asked_of_many_recalls_in_the_scene_profile() {
+    SCENE_ASKED.with(|asked| asked.set(0));
+    let mut recalls = 0;
+    for seed in 1..=40 {
+        let (rate, events) = sequence_of_scene(seed);
+        recalls += events
+            .iter()
+            .filter(|event| matches!(event, Event::Scene(_)))
+            .count();
+        if let Err(failure) = run_sequence(rate, &events) {
+            panic!(
+                "seed {seed}: {} (event {})",
+                failure.what,
+                failure.event + 1
+            );
+        }
+    }
+    let asked = SCENE_ASKED.with(Cell::get);
+    eprintln!("the scene rule was asked {asked} times for {recalls} recalls in 40 sequences");
+    assert!(asked >= 8, "asked only {asked} times for {recalls} recalls");
+}
+
+/// A part that plays `filters` under crossfeed `settings`.
+fn scene_with(filters: Vec<SourceFilter>, settings: Option<CrossfeedSettings>) -> Event {
+    let mut event = scene(filters, None, None, false);
+    if let (Event::Scene(part), Some(settings)) = (&mut event, settings) {
+        part.crossfeed_on = true;
+        part.crossfeed = Some(settings);
+    }
+    event
+}
+
+/// The stage gets cheaper but stays on while the curve boosts more than the live one and less
+/// than the curve the chain was built with: neither order of the one live line is safe under the
+/// old preamp, so it is held low for both (the line goes stage first) and lifted after, with no
+/// prefix of the line over unity.
+#[test]
+fn a_cheaper_stage_over_a_bigger_boost_than_the_live_curve_never_plays_over_unity_part_way() {
+    for amount in [0.15, 0.25, 0.35, 0.45] {
+        let mut cheaper = CrossfeedSettings::for_model(CrossfeedModel::MidSide);
+        cheaper.amount = amount;
+        holds_both(
+            48_000,
+            &[
+                scene_with(boost3(), None),
+                Event::Ticks(30),
+                scene_with(
+                    flat(),
+                    Some(CrossfeedSettings::for_model(CrossfeedModel::MidSide)),
+                ),
+                Event::Ticks(30),
+                scene_with(
+                    vec![point(FilterKind::Peaking, 100.0, 2.0, 1.0)],
+                    Some(cheaper),
+                ),
+                Event::Ticks(30),
+            ],
+        );
+    }
+}
+
+/// The same with a stream playing: the line goes live at the held level, and comes up once the
+/// music pauses and the chain has been idle.
+#[test]
+fn a_cheaper_stage_over_a_bigger_boost_while_music_plays_is_held_and_lifted_after() {
+    let mut cheaper = CrossfeedSettings::for_model(CrossfeedModel::MidSide);
+    cheaper.amount = 0.25;
+    holds_both(
+        48_000,
+        &[
+            scene_with(boost3(), None),
+            Event::Ticks(30),
+            scene_with(
+                flat(),
+                Some(CrossfeedSettings::for_model(CrossfeedModel::MidSide)),
+            ),
+            Event::Ticks(30),
+            Event::Playing(true),
+            scene_with(
+                vec![point(FilterKind::Peaking, 100.0, 2.0, 1.0)],
+                Some(cheaper),
+            ),
+            Event::Ticks(90),
+            Event::Playing(false),
+            Event::Ticks(120),
+            Event::Ticks(120),
+        ],
+    );
+}
+
+/// A crossfeed drag left pending, then a point drag released: one line that changes the slots
+/// and a stage that costs less, with no recall in it. The preamp is held for both orders and the
+/// line goes stage first, whatever the amount the drag stopped at.
+#[test]
+fn a_pending_crossfeed_drag_and_a_released_point_drag_never_play_over_unity_part_way() {
+    for amount in [15.0, 25.0, 35.0, 45.0] {
+        for gain in [1.0, 2.0, 2.9] {
+            holds_both(
+                48_000,
+                &[
+                    scene_with(boost3(), None),
+                    Event::Ticks(30),
+                    scene_with(
+                        flat(),
+                        Some(CrossfeedSettings::for_model(CrossfeedModel::MidSide)),
+                    ),
+                    Event::Ticks(30),
+                    Event::Crossfeed {
+                        on: None,
+                        model: None,
+                        amount_pct: Some(amount),
+                        delay_ms: None,
+                        done: false,
+                    },
+                    drag(0, gain),
+                    Event::Ticks(30),
+                ],
+            );
+        }
+    }
+}
+
+/// Seed 1915, shrunk: a recall with crossfeed on, a command-line apply that starts another node
+/// (the controller forgets which stage the node plays, and the node plays the one the recall
+/// sent), a rate change, then the daemon's line, which changes the slots and takes the stage off.
+#[test]
+fn seed_1915_a_node_that_plays_a_stage_the_controller_forgot_never_plays_over_unity_part_way() {
+    holds_both(
+        192_000,
+        &[
+            load(vec![
+                point(FilterKind::Peaking, 584.7, 0.08, 2.35),
+                point(FilterKind::Peaking, 77.9, 11.16, 2.31),
+                point(FilterKind::LowShelf, 11_632.8, 1.10, 0.79),
+            ]),
+            scene_with(
+                vec![
+                    point(FilterKind::HighShelf, 9_003.6, -22.07, 2.96),
+                    point(FilterKind::LowShelf, 326.3, -27.49, 0.58),
+                ],
+                Some(CrossfeedSettings::for_model(CrossfeedModel::MidSide)),
+            ),
+            Event::Cli {
+                filters: vec![
+                    point(FilterKind::LowShelf, 27.7, 8.74, 0.14),
+                    point(FilterKind::HighShelf, 13_879.1, -11.08, 0.25),
+                ],
+                stated: 3.3,
+                gap_ticks: 2,
+            },
+            Event::Rate(384_000),
+            Event::Ticks(26),
+        ],
+    );
+}
+
+/// Whole scene-profile seeds that found shapes in the 1000-run block of `make preamp-lab`: 1203,
+/// 1764 and 1915 are the forgotten stage (red on 1e6a3eab); the others (1040, 1141, 1154, 1358,
+/// 1505, 1616, 1773, 1912) are regression seeds for the stage-first line, and passed there; 2841,
+/// 4093 and 5867 (5000-run block) are the recall of a curve the sink's rate cannot play, which the
+/// look at that rate turns off (the scene rule skips them by that name; they failed the rule at d48d1107).
+#[test]
+fn the_scene_seeds_that_found_a_forgotten_stage_hold() {
+    for seed in [
+        1040, 1141, 1154, 1203, 1358, 1505, 1616, 1764, 1773, 1912, 1915, 2841, 4093, 5867,
+    ] {
+        let (rate, events) = sequence_of_scene(seed);
+        holds_both(rate, &events);
+    }
+}
+
+/// Seed 1697 of the ordinary profile, shrunk (no scene in it): a crossfeed turned on by hand while
+/// sends are refused, a rate change, a command-line apply that starts another node under the
+/// stage, then the daemon's lines over a stage it forgot. Red on 1e6a3eab (+2.843 dB part way
+/// through a line), the shape fix 5 closes.
+#[test]
+fn seed_1697_shrunk_without_a_scene_never_plays_over_unity_part_way() {
+    holds_both(
+        352_800,
+        &[
+            Event::RefuseSends { ms: 6000 },
+            crossfeed(None, Some(2), None, true),
+            Event::Crossfeed {
+                on: Some(true),
+                model: None,
+                amount_pct: None,
+                delay_ms: Some(1.6269688632113013),
+                done: false,
+            },
+            Event::Rate(88_200),
+            Event::Cli {
+                filters: vec![
+                    point(FilterKind::HighShelf, 82.0, -9.5, 0.11),
+                    point(FilterKind::Peaking, 1125.8, 3.41, 1.98),
+                    point(FilterKind::Peaking, 6695.6, 11.67, 0.11),
+                    point(FilterKind::LowShelf, 457.4, 9.9, 4.53),
+                    point(FilterKind::Peaking, 87.6, 3.74, 0.68),
+                    point(FilterKind::LowShelf, 1014.8, -10.02, 7.54),
+                    point(FilterKind::Peaking, 48.5, -0.27, 0.13),
+                    point(FilterKind::HighShelf, 216.2, -6.98, 1.28),
+                    point(FilterKind::HighShelf, 481.9, 4.03, 1.16),
+                    point(FilterKind::HighShelf, 365.0, -0.99, 0.68),
+                    point(FilterKind::LowShelf, 1286.6, 3.56, 0.17),
+                    point(FilterKind::HighShelf, 10899.9, -9.35, 0.29),
+                    point(FilterKind::Peaking, 31.5, -1.93, 5.04),
+                ],
+                stated: 0.0,
+                gap_ticks: 4,
+            },
+        ],
+    );
+}
+
+/// A crossfeed the config holds (turned on while the sends were refused) is a stage the controller
+/// knows: a point drag after it is one line, with no bypass line that would drop it out first.
+#[test]
+fn a_stage_the_config_holds_is_not_taken_to_the_bypass_by_a_drag() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    runtime.block_on(async {
+        let mut lab = Lab::new(48_000);
+        for event in [
+            load(vec![point(FilterKind::Peaking, 100.0, 3.0, 1.0)]),
+            Event::Ticks(30),
+            Event::RefuseSends { ms: 600 },
+            crossfeed(Some(true), Some(3), None, true),
+            Event::Ticks(30),
+        ] {
+            lab.run(&event).await.unwrap();
+        }
+        assert!(
+            lab.control.view().crossfeed.unwrap().on,
+            "the stage plays from the config"
+        );
+        let mix = |lab: &Lab| {
+            world(&lab.shared)
+                .node
+                .as_ref()
+                .and_then(|node| node.ports.get("lmix:Gain 2").copied())
+        };
+        assert!(mix(&lab).is_some_and(|mix| mix > 0.0), "the node plays it");
+        let sends = world(&lab.shared).sends;
+        lab.run(&drag(0, 1.0)).await.unwrap();
+        assert_eq!(
+            world(&lab.shared).sends,
+            sends + 1,
+            "one line, no bypass first"
+        );
+        assert!(
+            mix(&lab).is_some_and(|mix| mix > 0.0),
+            "and the stage is still there"
+        );
+    });
+}
+
+/// A lone crossfeed change to a cheaper setting while loudness is on (at depth 0 too) stays at the
+/// cap, with no hold and no note.
+#[test]
+fn a_lone_crossfeed_change_with_loudness_on_is_not_held() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    runtime.block_on(async {
+        let mut lab = Lab::new(48_000);
+        for event in [
+            scene_with(boost3(), None),
+            Event::Ticks(30),
+            scene_with(
+                flat(),
+                Some(CrossfeedSettings::for_model(CrossfeedModel::MidSide)),
+            ),
+            Event::Ticks(30),
+            Event::Loudness {
+                on: Some(true),
+                strength_pct: None,
+                reference_pct: None,
+                reference_now: false,
+                done: true,
+            },
+            Event::Ticks(60),
+        ] {
+            lab.run(&event).await.unwrap();
+        }
+        let at_cap = lab.control.view().preamp_db;
+        lab.run(&Event::Crossfeed {
+            on: None,
+            model: None,
+            amount_pct: Some(25.0),
+            delay_ms: None,
+            done: true,
+        })
+        .await
+        .unwrap();
+        let view = lab.control.view();
+        assert_eq!(view.note, None, "nothing is held");
+        assert!(
+            view.preamp_db >= at_cap - 1e-9,
+            "{} under the cap {at_cap}",
+            view.preamp_db
+        );
+    });
 }

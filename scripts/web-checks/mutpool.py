@@ -6,7 +6,7 @@ survivor, None for an error) and the names that must run alone (the ones whose n
 timing). The pool:
 - runs the mutants with MUT_WORKERS workers (default: `default_workers()`, from the cores and the
   CPU pressure; 1 runs them one by one, in order, with no pool phase);
-- holds the web gate lock (/tmp/svolder-web-gate.lock) shared around every run, exclusive around a timing one;
+- holds the web gate lock (/tmp/svolder/web-gate.lock) shared around every run, exclusive around a timing one;
 - never runs a timing mutant in the pool: those run alone after it;
 - runs every mutant the pool did not KILL (survived or error) again alone: only the alone result counts
   and both are printed. A pool KILLED stands (a check the mutant names failed);
@@ -27,7 +27,8 @@ import sys
 import threading
 import time
 
-GATE = '/tmp/svolder-web-gate.lock'
+DEFAULT_GATE = '/tmp/svolder/web-gate.lock'
+GATE = DEFAULT_GATE
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import common  # noqa: E402
@@ -165,9 +166,28 @@ def lines_of(name, result, tag=''):
     return out
 
 
+def scratch_base(base):
+    """`base` made and checked by scripts/tmp_base.py's rules (0700, a real directory this user
+    owns; refused with SystemExit otherwise), the same rules run-all.sh applies to the lock's
+    directory."""
+    sys.path.insert(0, os.path.dirname(HERE))
+    import tmp_base  # noqa: E402
+    saved = os.environ.get('SVOLDER_TMP_BASE')
+    os.environ['SVOLDER_TMP_BASE'] = base
+    try:
+        tmp_base.base()
+    finally:
+        if saved is None:
+            del os.environ['SVOLDER_TMP_BASE']
+        else:
+            os.environ['SVOLDER_TMP_BASE'] = saved
+
+
 @contextlib.contextmanager
 def gate(exclusive):
     """The web gate lock: shared for a browser run, exclusive for a timing one (waits for the others)."""
+    if GATE == DEFAULT_GATE:
+        scratch_base(os.path.dirname(GATE))
     with open(GATE, 'a') as f:
         fcntl.flock(f, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
         try:

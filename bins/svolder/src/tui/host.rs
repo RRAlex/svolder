@@ -190,6 +190,32 @@ pub struct Host {
     /// The VU meter's needles and lamps, which the capture's blocks and the daemon's frames
     /// move.
     pub vu: Box<vu::Vu>,
+    /// The clock a player's position is counted on from: a reading of the clock the player's
+    /// stamps are in (the daemon's, or this machine's on a direct session) and the instant this
+    /// loop had it, so the time since a reading is counted on from the first sight of it.
+    pub clock: Option<(u64, Instant)>,
+}
+
+/// How far into its track the followed player is, and how long the track is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackTime {
+    /// The position now in microseconds: the player's own reading plus the time since it was
+    /// read at the rate it plays while it does, held where it was while it does not; never past
+    /// the length.
+    pub elapsed_us: u64,
+    /// The track's length in microseconds, `None` where the player gave none.
+    pub length_us: Option<u64>,
+}
+
+/// `us` microseconds as the time a track shows, `m:ss` or from an hour `h:mm:ss`, seconds
+/// rounded down.
+pub fn clock_words(us: u64) -> String {
+    let seconds = us / 1_000_000;
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    match hours {
+        0 => format!("{}:{seconds:02}", minutes),
+        _ => format!("{hours}:{minutes:02}:{seconds:02}"),
+    }
 }
 
 impl Host {
@@ -217,7 +243,32 @@ impl Host {
             spectrum_on_screen: false,
             computer: Box::default(),
             vu: Box::new(vu::Vu::new(now)),
+            clock: None,
         }
+    }
+
+    /// How far into its track the followed player is as of `now`, `None` with no player or one
+    /// that does not answer `Position`: the web card's rule, the position read plus the time
+    /// since it was read times the rate while the player plays.
+    pub fn track_time(&self, now: Instant) -> Option<TrackTime> {
+        let playing = self.playing.as_ref()?;
+        let progress = playing.progress?;
+        let moved = match (playing.status, self.clock) {
+            (Status::Playing, Some((ms, seen))) => {
+                let here = ms
+                    + u64::try_from(now.saturating_duration_since(seen).as_millis())
+                        .unwrap_or(u64::MAX);
+                // a millisecond at the rate in thousandths is `rate` microseconds
+                here.saturating_sub(progress.read_at_ms)
+                    .saturating_mul(u64::from(progress.rate_milli))
+            }
+            _ => 0,
+        };
+        let at = progress.position_us.saturating_add(moved);
+        Some(TrackTime {
+            elapsed_us: playing.length_us.map_or(at, |length| at.min(length)),
+            length_us: playing.length_us,
+        })
     }
 
     /// The capture stopped, or never started: nothing it read is left to draw.
@@ -354,6 +405,9 @@ impl Host {
             volume: view.volume,
             why: None,
         };
+        if self.clock.is_none_or(|(ms, _)| ms != view.now_ms) {
+            self.clock = Some((view.now_ms, now));
+        }
         self.daemon = Some(FromDaemon {
             route: view.route.map(Box::new),
         });
@@ -373,6 +427,7 @@ impl Host {
     /// The bus answered, and `playing` is what its followed player plays, if any.
     pub fn found_bus(&mut self, playing: Option<NowPlaying>, now: Instant) {
         self.bus = true;
+        self.clock = Some((svolder_host::unix_ms(), now));
         self.fold_playing(playing, now);
     }
 

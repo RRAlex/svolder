@@ -45,7 +45,7 @@ use crate::tui::terminal::no_sync;
 use crate::tui::terminal::{FrameSync, SyncEdge};
 use crate::tui::theme::{DIM_GREY, Role, Surface, Theme};
 use crate::tui::widgets;
-use demo::{Demo, Scene};
+use demo::{Demo, Planned};
 use sparks::Colours;
 
 mod demo;
@@ -188,7 +188,7 @@ where
     let length = demo.length();
     let started = Instant::now();
     let end = started + Duration::from_secs_f32(length);
-    let mut scene: Option<(Rect, Scene)> = None;
+    let mut planned: Option<(Rect, Planned)> = None;
     let mut reading = true;
     loop {
         let Ok(size) = terminal.size() else {
@@ -198,8 +198,8 @@ where
             };
         };
         let screen = Rect::new(0, 0, size.width, size.height);
-        if scene.as_ref().is_none_or(|(area, _)| *area != screen) {
-            scene = Scene::plan(demo, screen, plan.seed).map(|planned| (screen, planned));
+        if planned.as_ref().is_none_or(|(area, _)| *area != screen) {
+            planned = Planned::plan(demo, screen, plan.seed).map(|effect| (screen, effect));
         }
         let now = Instant::now();
         let t = now
@@ -208,8 +208,8 @@ where
             .min(length);
         let cost = std::time::Instant::now();
         (plan.sync)(SyncEdge::Begin);
-        let drawn = terminal.draw(|frame| match &scene {
-            Some((_, scene)) => scene.frame(t, frame.buffer_mut(), theme, &colours),
+        let drawn = terminal.draw(|frame| match &planned {
+            Some((_, planned)) => planned.frame(t, frame.buffer_mut(), theme, &colours),
             None => draw_still(frame.buffer_mut(), screen, theme),
         });
         (plan.sync)(SyncEdge::End);
@@ -221,7 +221,8 @@ where
         }
         plan.pacer.record(cost.elapsed());
         if now >= end {
-            let exit = scene.and_then(|(_, scene)| scene.exit(plan.seed, colours, plan.pacer));
+            let exit =
+                planned.and_then(|(_, planned)| planned.exit(plan.seed, colours, plan.pacer));
             return Ended {
                 end: IntroEnd::Finished,
                 exit,

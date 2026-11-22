@@ -127,3 +127,70 @@ async fn a_recall_of_a_name_that_fits_nothing_is_refused_and_sends_nothing() {
     ));
     assert!(log(&stand).is_empty());
 }
+
+/// A set that is only wanted when the device does not read it already: one that reads it and has
+/// nothing in the line sends nothing and answers at once.
+#[tokio::test]
+async fn a_set_if_needed_sends_nothing_for_what_the_device_reads() {
+    let (writer, stand) = stand_in("gungnir2-v2", &[("input", 1)]);
+    let answer = writer.set_if_needed(Origin::Web, "input".into(), 1);
+    assert!(matches!(answer.await, Ok(Outcome::Done(Response::Ack))));
+    assert!(log(&stand).is_empty(), "{:?}", log(&stand));
+    let answer = writer.set_if_needed(Origin::Web, "input".into(), 2);
+    assert!(matches!(
+        answer.await,
+        Ok(Outcome::Done(Response::Value(_)))
+    ));
+    assert_eq!(log(&stand), ["set input 2"]);
+}
+
+/// A write for the control that arrived first and has not landed makes the set go out behind it
+/// although the device reads the step now: the later ask wins, as the arrival order says.
+#[tokio::test]
+async fn a_set_if_needed_goes_out_behind_a_write_in_the_line() {
+    let (writer, stand) = stand_in("gungnir2-v2", &[("input", 1)]);
+    stand.gate.forget_permits(1000);
+    let first = writer.submit(Origin::Socket, set("input", "2"), Mode::Ordered);
+    let later = writer.set_if_needed(Origin::Web, "input".into(), 1);
+    let mut arrivals = writer.arrivals();
+    arrivals
+        .wait_for(|taken| *taken >= 2)
+        .await
+        .expect("both asks arrived");
+    stand.gate.add_permits(1000);
+    assert!(matches!(first.await, Ok(Outcome::Done(_))));
+    assert!(matches!(later.await, Ok(Outcome::Done(Response::Value(_)))));
+    assert_eq!(log(&stand), ["set input 2", "set input 1"]);
+}
+
+/// A toggle is reported as a boolean: the writer reads it as the step 0 or 1, as a scene does, so
+/// a toggle already on the step is not written again.
+#[tokio::test]
+async fn a_set_if_needed_reads_a_toggle_reported_as_a_boolean() {
+    let (writer, stand) = stand_in("bifrost3", &[("phase", 1)]);
+    let answer = writer.set_if_needed(Origin::Web, "phase".into(), 1);
+    assert!(matches!(answer.await, Ok(Outcome::Done(Response::Ack))));
+    assert!(log(&stand).is_empty(), "{:?}", log(&stand));
+    let answer = writer.set_if_needed(Origin::Web, "phase".into(), 0);
+    assert!(matches!(
+        answer.await,
+        Ok(Outcome::Done(Response::Value(_)))
+    ));
+    assert_eq!(log(&stand), ["set phase 0"]);
+}
+
+/// A write sent without waiting is answered at its `Ack`, before the feed has heard the control
+/// again: until it has (or the echo wait passes) a set that wants the step the feed still reads
+/// goes out behind it.
+#[tokio::test]
+async fn a_set_if_needed_goes_out_while_a_no_wait_echo_is_unheard() {
+    let (writer, stand) = stand_in_acking("gungnir2-v2", &[("input", 1)]);
+    let sent = writer.submit(Origin::Socket, no_wait("input", "2"), Mode::Ordered);
+    assert!(matches!(sent.await, Ok(Outcome::Done(Response::Ack))));
+    let answer = writer.set_if_needed(Origin::Web, "input".into(), 1);
+    assert!(matches!(
+        answer.await,
+        Ok(Outcome::Done(Response::Value(_)))
+    ));
+    assert_eq!(log(&stand), ["set input 2", "set input 1"]);
+}

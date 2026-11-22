@@ -25,13 +25,13 @@ use crate::tui::theme::{Role, Theme};
 /// that are not always worth pressing are answered against for itself.
 pub struct Footing {
     /// What the keys that are not always worth pressing are answered against.
-    pub scene: keys::Scene,
+    pub context: keys::KeyContext,
 }
 
 impl Footing {
-    /// A key line on a screen like `scene`.
-    pub fn resting(scene: keys::Scene) -> Footing {
-        Footing { scene }
+    /// A key line on a screen like `context`.
+    pub fn resting(context: keys::KeyContext) -> Footing {
+        Footing { context }
     }
 }
 
@@ -120,13 +120,13 @@ fn pieces(footing: &Footing, screen: Screen) -> Vec<Piece> {
         }
         cluster = Some(this);
         pieces.push(Piece {
-            text: hint.label_in(footing.scene).to_string(),
+            text: hint.label_in(footing.context).to_string(),
             role: Some(label_role(footing, hint)),
             hint: Some(index),
         });
         pieces.push(plain(" "));
         pieces.push(Piece {
-            text: hint.does_in(footing.scene).to_string(),
+            text: hint.does_in(footing.context).to_string(),
             role: Some(Role::KeyDesc),
             hint: None,
         });
@@ -137,7 +137,7 @@ fn pieces(footing: &Footing, screen: Screen) -> Vec<Piece> {
 /// How one key's label is drawn: a key that is not worth pressing now dimmed, and every other
 /// key in the accent.
 fn label_role(footing: &Footing, hint: &keys::KeyHint) -> Role {
-    match keys::available_in(hint, footing.scene) {
+    match keys::available_in(hint, footing.context) {
         true => Role::KeyHint,
         false => Role::Faint,
     }

@@ -78,6 +78,11 @@ publishes its `EqView` on a watch channel that readers take without waiting for 
   new node (a new `object.serial`, whatever its id) or a new rate marks every slot dirty and they
   are sent again at the new rate; a chain built from the config alone holds 48 kHz coefficients
   until then.
+- **Scenes.** `EqControl::computer_part` captures what the computer plays as a `ComputerPart` (the
+  EQ with its stated preamp even while the level is held, loudness, crossfeed, virtual speakers) and
+  `EqControl::recall` sets all of one as a single change: one apply, or one live line, never an
+  intermediate apply ([scenes.md](scenes.md#recall)). `ComputerPart::matches` compares what is heard
+  against the view (`EqView.stated_preamp_db` carries the stated preamp it needs).
 - **Failure.** Thirty failed sends in 5 s make the controls unavailable (`computer controls
   unavailable: <why>`, as a missing `pw-cli` or `pipewire` does). A `pw-cli` restart is ridden out.
 - **Never on its own.** Nothing applies at start; `set_on(true)` is the user's action. Only in a
@@ -239,14 +244,15 @@ The writes are listed only while `[mcp] writes` is on.
 
 ## MQTT
 
-Home Assistant gets one device, `This computer`: a switch (a binary sensor with commands off) that
-turns the computer EQ on with its kept points and off, and a sensor naming the applied preset
-(`custom`, or nothing); a loudness switch and strength number; and a crossfeed and a speakers
-switch and select. No computer volume, mute
+Home Assistant gets one device for each computer, named by its host name (`svolder_computer_<host>`,
+[mqtt-and-home-assistant.md](mqtt-and-home-assistant.md)): a switch (a binary sensor with commands
+off) that turns the computer EQ on with its kept points and off, and a sensor naming the applied
+preset (`custom`, or nothing); a loudness switch and strength number; a crossfeed and a speakers
+switch and select; and the scene select and text ([scenes.md](scenes.md)). No computer volume, mute
 or point is offered; HA's own media integrations do volume better. A retained command is never acted
 on; ON with nothing kept (the first point flat, no preset) logs that and stays off. With the
-computer not served nothing is announced and the retained entities are cleared at the bridge's
-start.
+computer not served the EQ entities are not announced and the retained ones are cleared at the
+bridge's start.
 
 ## Packages and Docker
 

@@ -270,7 +270,7 @@ fn write_preset(table: &mut Table, preset: &Preset) {
 
 /// `band` as svolder writes it: an inline array of inline tables, one band per line, with a
 /// trailing comma on the last one and the closing bracket on a line of its own.
-fn band_array(band: &[PresetBand]) -> Value {
+pub(super) fn band_array(band: &[PresetBand]) -> Value {
     let mut array = toml_edit::Array::new();
     for b in band {
         let mut inline = toml_edit::InlineTable::new();
@@ -288,7 +288,7 @@ fn band_array(band: &[PresetBand]) -> Value {
 
 /// `filter` as svolder writes it, laid out as [`band_array`] lays out `band`: `type` in upper
 /// case, then `f`, `g` and `q`.
-fn filter_array(filters: &[SourceFilter]) -> Value {
+pub(super) fn filter_array(filters: &[SourceFilter]) -> Value {
     let mut array = toml_edit::Array::new();
     for filter in filters {
         let mut inline = toml_edit::InlineTable::new();

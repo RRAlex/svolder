@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use super::scenes::read_scenes;
 use super::{
     AutoEqConfig, Config, ConfigError, DaemonConfig, DeviceConfig, HostConfig, RefreshWeeks,
 };
@@ -40,6 +41,9 @@ struct RawConfig {
     // number) or would accept outright (a `loudness` or `bands` out of range).
     #[serde(default, rename = "preset")]
     presets: Vec<toml::Value>,
+    // Raw for the same reason: `read_scenes` names the scene in every error.
+    #[serde(default, rename = "scene")]
+    scenes: Vec<toml::Value>,
     // Raw for the same reason: `parse_hop` names the hop in every error.
     #[serde(default, rename = "hop")]
     hops: Vec<toml::Value>,
@@ -147,6 +151,7 @@ impl Config {
         }
         let (devices, dropped_duplicates) = devices(raw.devices, strict)?;
         let presets = presets(&raw.presets)?;
+        let scenes = read_scenes(&raw.scenes)?;
         let hops = hops(&raw.hops)?;
         // A blank value overrides nothing: every optional key means "as if the key were
         // absent" when it is left empty, which is the value the config template shows each of
@@ -169,6 +174,7 @@ impl Config {
             socket,
             devices,
             presets,
+            scenes,
             hops,
             dropped_duplicates,
             daemon: raw.daemon,

@@ -3,19 +3,21 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
-          "topic": "svolder/computer/availability"
+          "topic": "svolder/computer_reframe/availability"
         }
       ],
       "availability_mode": "all",
-      "command_topic": "svolder/computer/computer_crossfeed_preset/set",
+      "command_topic": "svolder/computer_reframe/computer_crossfeed_preset/set",
       "device": {
         "identifiers": [
-          "svolder_computer"
+          "svolder_computer_reframe"
         ],
-        "name": "This computer"
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
       },
       "name": "Crossfeed preset",
       "options": [
@@ -32,30 +34,32 @@
         "name": "svolder",
         "sw_version": "{version}"
       },
-      "state_topic": "svolder/computer/computer_crossfeed_preset/state",
-      "unique_id": "svolder_computer_computer_crossfeed_preset"
+      "state_topic": "svolder/computer_reframe/computer_crossfeed_preset/state",
+      "unique_id": "svolder_computer_reframe_computer_crossfeed_preset"
     },
-    "topic": "homeassistant/select/svolder_computer/computer_crossfeed_preset/config"
+    "topic": "homeassistant/select/svolder_computer_reframe/computer_crossfeed_preset/config"
   },
   {
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
-          "topic": "svolder/computer/availability"
+          "topic": "svolder/computer_reframe/availability"
         }
       ],
       "availability_mode": "all",
-      "command_topic": "svolder/computer/computer_speakers_set/set",
+      "command_topic": "svolder/computer_reframe/computer_speakers_set/set",
       "device": {
         "identifiers": [
-          "svolder_computer"
+          "svolder_computer_reframe"
         ],
-        "name": "This computer"
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
       },
-      "json_attributes_topic": "svolder/computer/computer_speakers_set/attributes",
+      "json_attributes_topic": "svolder/computer_reframe/computer_speakers_set/attributes",
       "name": "Virtual speakers set",
       "options": [
         "Set A · No room · HRTF",
@@ -65,55 +69,59 @@
         "name": "svolder",
         "sw_version": "{version}"
       },
-      "state_topic": "svolder/computer/computer_speakers_set/state",
-      "unique_id": "svolder_computer_computer_speakers_set"
+      "state_topic": "svolder/computer_reframe/computer_speakers_set/state",
+      "unique_id": "svolder_computer_reframe_computer_speakers_set"
     },
-    "topic": "homeassistant/select/svolder_computer/computer_speakers_set/config"
+    "topic": "homeassistant/select/svolder_computer_reframe/computer_speakers_set/config"
   },
   {
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
-          "topic": "svolder/computer/availability"
+          "topic": "svolder/computer_reframe/availability"
         }
       ],
       "availability_mode": "all",
       "device": {
         "identifiers": [
-          "svolder_computer"
+          "svolder_computer_reframe"
         ],
-        "name": "This computer"
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
       },
       "name": "EQ preset",
       "origin": {
         "name": "svolder",
         "sw_version": "{version}"
       },
-      "state_topic": "svolder/computer/computer_eq_preset/state",
-      "unique_id": "svolder_computer_computer_eq_preset"
+      "state_topic": "svolder/computer_reframe/computer_eq_preset/state",
+      "unique_id": "svolder_computer_reframe_computer_eq_preset"
     },
-    "topic": "homeassistant/sensor/svolder_computer/computer_eq_preset/config"
+    "topic": "homeassistant/sensor/svolder_computer_reframe/computer_eq_preset/config"
   },
   {
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
-          "topic": "svolder/computer/availability"
+          "topic": "svolder/computer_reframe/availability"
         }
       ],
       "availability_mode": "all",
-      "command_topic": "svolder/computer/computer_crossfeed/set",
+      "command_topic": "svolder/computer_reframe/computer_crossfeed/set",
       "device": {
         "identifiers": [
-          "svolder_computer"
+          "svolder_computer_reframe"
         ],
-        "name": "This computer"
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
       },
       "name": "Crossfeed",
       "origin": {
@@ -122,28 +130,30 @@
       },
       "payload_off": "OFF",
       "payload_on": "ON",
-      "state_topic": "svolder/computer/computer_crossfeed/state",
-      "unique_id": "svolder_computer_computer_crossfeed"
+      "state_topic": "svolder/computer_reframe/computer_crossfeed/state",
+      "unique_id": "svolder_computer_reframe_computer_crossfeed"
     },
-    "topic": "homeassistant/switch/svolder_computer/computer_crossfeed/config"
+    "topic": "homeassistant/switch/svolder_computer_reframe/computer_crossfeed/config"
   },
   {
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
-          "topic": "svolder/computer/availability"
+          "topic": "svolder/computer_reframe/availability"
         }
       ],
       "availability_mode": "all",
-      "command_topic": "svolder/computer/computer_eq/set",
+      "command_topic": "svolder/computer_reframe/computer_eq/set",
       "device": {
         "identifiers": [
-          "svolder_computer"
+          "svolder_computer_reframe"
         ],
-        "name": "This computer"
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
       },
       "name": "EQ",
       "origin": {
@@ -152,28 +162,30 @@
       },
       "payload_off": "OFF",
       "payload_on": "ON",
-      "state_topic": "svolder/computer/computer_eq/state",
-      "unique_id": "svolder_computer_computer_eq"
+      "state_topic": "svolder/computer_reframe/computer_eq/state",
+      "unique_id": "svolder_computer_reframe_computer_eq"
     },
-    "topic": "homeassistant/switch/svolder_computer/computer_eq/config"
+    "topic": "homeassistant/switch/svolder_computer_reframe/computer_eq/config"
   },
   {
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
-          "topic": "svolder/computer/availability"
+          "topic": "svolder/computer_reframe/availability"
         }
       ],
       "availability_mode": "all",
-      "command_topic": "svolder/computer/computer_speakers/set",
+      "command_topic": "svolder/computer_reframe/computer_speakers/set",
       "device": {
         "identifiers": [
-          "svolder_computer"
+          "svolder_computer_reframe"
         ],
-        "name": "This computer"
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
       },
       "name": "Virtual speakers",
       "origin": {
@@ -182,9 +194,9 @@
       },
       "payload_off": "OFF",
       "payload_on": "ON",
-      "state_topic": "svolder/computer/computer_speakers/state",
-      "unique_id": "svolder_computer_computer_speakers"
+      "state_topic": "svolder/computer_reframe/computer_speakers/state",
+      "unique_id": "svolder_computer_reframe_computer_speakers"
     },
-    "topic": "homeassistant/switch/svolder_computer/computer_speakers/config"
+    "topic": "homeassistant/switch/svolder_computer_reframe/computer_speakers/config"
   }
 ]

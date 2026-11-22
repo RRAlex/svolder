@@ -39,11 +39,15 @@
 //! through its view ([`ComputerLink`]). Its command is never acted on when retained, and an ON
 //! with nothing kept to apply leaves the EQ off and says why in the log.
 //!
-//! The task's work is written in five children, each an `impl BridgeTask` block; this file holds
+//! The scenes are a select to recall one and a text to save the current settings, on the computer's
+//! device ([`scenes`]), followed through the daemon's view ([`ScenesLink`]).
+//!
+//! The task's work is written in six children, each an `impl BridgeTask` block; this file holds
 //! the handle ([`Bridge`]) and the types they share:
 //! - [`commands`]: a message from the broker, parsed into a write, and the end of that write.
 //! - [`computer`]: the computer's EQ switch and sensor.
 //! - [`connection`]: the task's loop and its farewell.
+//! - [`scenes`]: the scene select and text.
 //! - [`discovery`]: following the devices and presets, subscriptions, clearing a device.
 //! - [`state`]: marking devices changed and publishing availability, configs, state, meters and
 //!   diagnostics.
@@ -52,6 +56,7 @@ mod commands;
 mod computer;
 mod connection;
 mod discovery;
+mod scenes;
 mod state;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,6 +65,7 @@ use std::time::Duration;
 
 use svolder_ipc::config::MqttConfig;
 use svolder_ipc::{MqttProblem, MqttStatus};
+use svolder_mqtt::computer::Computer;
 use svolder_mqtt::{Client, Link, Settings, Trouble, topics};
 use svolder_profiles::Profile;
 use svolder_profiles::tone::preset::Preset;
@@ -97,6 +103,57 @@ pub struct ComputerLink {
     /// Makes the slow hold on the route reads the bridge keeps while the computer's entities are
     /// published (one `pw-dump` every 30 s); `None` where nothing reads a route.
     pub slow: Option<crate::host::SlowHolds>,
+    /// The daemon's scenes, when it serves them: the select and the text are announced only with
+    /// this.
+    pub scenes: Option<ScenesLink>,
+}
+
+/// What the bridge reaches the daemon's scenes through: the view as it changes, and the desk the
+/// scene requests go to.
+#[derive(Clone)]
+pub struct ScenesLink {
+    /// The scenes' view.
+    pub view: watch::Receiver<svolder_ipc::socket::protocol::ScenesView>,
+    /// Takes a scene request as the MQTT client's.
+    pub desk: Arc<dyn SceneDesk>,
+}
+
+/// Where a scene request from the bridge goes: the daemon's own request handling, as the MQTT
+/// client.
+#[async_trait::async_trait]
+pub trait SceneDesk: Send + Sync {
+    /// Answer one scene operation the way the daemon answers it for any front end.
+    async fn request(&self, op: svolder_ipc::socket::protocol::SceneOp) -> svolder_ipc::Response;
+}
+
+/// Where Linux keeps the host name.
+pub const HOSTNAME_FILE: &str = "/proc/sys/kernel/hostname";
+
+/// The host name the computer's Home Assistant device and ids are made from when the file holds
+/// none.
+const FALLBACK_HOSTNAME: &str = "localhost";
+
+/// The host name in `path`, trimmed; `localhost` (with a log line) when the file is unreadable or
+/// empty.
+pub fn read_hostname(path: &std::path::Path) -> String {
+    match std::fs::read_to_string(path) {
+        Ok(text) if !text.trim().is_empty() => text.trim().to_string(),
+        Ok(_) => {
+            log::info(&format!(
+                "mqtt: {} is empty; this computer is named {FALLBACK_HOSTNAME} in Home Assistant",
+                path.display()
+            ));
+            FALLBACK_HOSTNAME.to_string()
+        }
+        Err(why) => {
+            log::info(&format!(
+                "mqtt: cannot read {}: {why}; this computer is named {FALLBACK_HOSTNAME} in \
+                 Home Assistant",
+                path.display()
+            ));
+            FALLBACK_HOSTNAME.to_string()
+        }
+    }
 }
 
 /// The daemon's end of a running bridge.
@@ -133,18 +190,20 @@ impl Bridge {
         presets: Vec<Preset>,
         computer: Option<ComputerLink>,
         socket: &std::path::Path,
+        hostname: &str,
     ) -> Option<Bridge> {
         if !config.enabled {
             return None;
         }
         let host = config.host.clone()?;
+        let me = Computer::new(hostname);
         let settings = Settings {
             host,
             port: config.port,
             client_id: svolder_mqtt::client::client_id(config.client_id.as_deref(), socket),
             username: config.username.clone(),
             password: password(std::env::var(PASSWORD_VAR).ok(), config.password.as_deref()),
-            availability: topics::bridge_availability(&config.base_topic),
+            availability: topics::bridge_availability(&config.base_topic, me.id()),
         };
         if settings.username.is_none() && settings.password.is_some() {
             log::warn(
@@ -177,9 +236,15 @@ impl Bridge {
             retained_commands: BTreeSet::new(),
             presets,
             computer: None,
+            scenes: None,
+            me,
         };
         if let Some(link) = computer {
+            let scenes = link.scenes.clone();
             task.follow_computer(link);
+            if let Some(scenes) = scenes {
+                task.follow_scenes(scenes);
+            }
         }
         let task = tokio::spawn(task.run(events, ops_rx, changes));
         let bridge = Bridge {
@@ -320,6 +385,10 @@ struct BridgeTask {
     presets: Vec<Preset>,
     /// The computer's EQ, when the daemon hands the bridge one.
     computer: Option<computer::Published>,
+    /// The daemon's scenes, when it hands the bridge them.
+    scenes: Option<scenes::Published>,
+    /// This computer as Home Assistant sees it: the host name its topics and ids carry.
+    me: Computer,
 }
 
 /// What a write handed to a device's writer comes back as.
@@ -336,6 +405,8 @@ enum WriteOutcome {
     Replaced,
     /// A command to the computer ended: what it asked, as a phrase for the log, and how it ended.
     Computer(String, Result<(), String>),
+    /// A scene command ended: the daemon's answer to it.
+    Scene(scenes::SceneAnswer),
 }
 
 /// One control of one device: its unit id and its profile key.

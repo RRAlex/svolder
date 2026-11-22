@@ -221,6 +221,12 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme, hits: &mut HitMap) -> F
         let drawn = screens::speakers::draw(frame, body, app, theme, hits);
         stack_box(drawn, hits, &mut boxes, &mut modal);
     }
+    // The Scenes box is a box over the body in the same way.
+    if app.scenes.list.is_some() {
+        hits.deselect();
+        let drawn = screens::scenes::draw(frame, body, app, theme, hits);
+        stack_box(drawn, hits, &mut boxes, &mut modal);
+    }
     // The device's own presets are a box over the body in the same way.
     if app.presets.device_list.is_some() {
         hits.deselect();

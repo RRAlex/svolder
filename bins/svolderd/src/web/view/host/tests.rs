@@ -777,7 +777,7 @@ fn the_models_json_carries_the_config_check_or_none() {
 /// the judge's, so a renamed key fails here rather than leaving a chip unstyled.
 #[test]
 fn the_themes_spell_the_judges_keys() {
-    use svolder_ipc::host::{SetupSummary, Verdict};
+    use svolder_ipc::host::{SetupSummary, Tone, Verdict};
     let ember = include_str!("../../../../web/themes/ember/style.css");
     let signal = include_str!("../../../../web/themes/signal/style.css");
     let paper = include_str!("../../../../web/themes/paper/style.css");
@@ -799,12 +799,10 @@ fn the_themes_spell_the_judges_keys() {
             })
     };
     for key in SetupSummary::KEYS {
-        for (name, css, chip) in [
-            ("ember", ember, ".np-setup"),
-            ("signal", signal, ".sg-config"),
-        ] {
-            assert!(styled(css, chip, key), "{name} styles no `{chip}.{key}`");
-        }
+        assert!(
+            styled(signal, ".sg-config", key),
+            "signal styles no `.sg-config.{key}`"
+        );
         if key != "untouched" {
             assert!(
                 styled(paper, ".p-setup", key),
@@ -812,14 +810,17 @@ fn the_themes_spell_the_judges_keys() {
             );
         }
     }
-    // Ember colours the verdict line by the verdicts it marks.
-    for key in ["untouched", "changed"] {
-        assert!(Verdict::KEYS.contains(&key));
+    // Ember colours the label by the row's tone (`good`, `warn`) and styles the config chip it
+    // draws only while the check fails.
+    for tone in [Tone::Good, Tone::Warn] {
+        let key = serde_json::to_value(tone).expect("tone");
+        let key = key.as_str().expect("a word");
         assert!(
-            ember.contains(&format!(".np-path.{key} ")),
-            "ember `.np-path.{key}`"
+            ember.contains(&format!(".np-label.{key}")),
+            "ember `.np-label.{key}`"
         );
     }
+    assert!(ember.contains(".np-setup {"), "ember `.np-setup`");
     // The devices popup treats these verdicts as a sound that goes elsewhere.
     for key in ["not_this_dac", "other_input"] {
         assert!(Verdict::KEYS.contains(&key));
@@ -834,4 +835,95 @@ fn the_themes_spell_the_judges_keys() {
         );
     }
     assert!(signal_js.contains("=== 'untouched'") && paper_js.contains("=== 'changed'"));
+}
+
+/// The row the page draws: an untouched path and one whose DAC changes the sound, in the JSON
+/// the page reads (`playing.path.row` and `playing.path.end_to_end`), and no front end has
+/// anything left to judge.
+#[test]
+fn the_models_json_carries_the_row_and_end_to_end() {
+    use crate::web::model::PlayingModel;
+    let json_of = |card: &Playing| serde_json::to_value(PlayingModel::from(card)).expect("json");
+
+    let card = setup_card(Some(passing_setup()));
+    let json = json_of(&card);
+    assert_eq!(json["path"]["end_to_end"], "untouched");
+    assert_eq!(json["path"]["verdict"], "untouched");
+    assert_eq!(
+        json["path"]["row"],
+        serde_json::json!({
+            "label": {"tone": "good", "words": "Path: untouched end to end"},
+            "hops": [
+                {"label": "player", "words": []},
+                {"label": "computer", "words": []},
+                {"label": "DAC USB 1", "words": []},
+            ],
+            "values": [{"text": "48 kHz", "tone": "dim"}],
+            "words": null,
+        })
+    );
+
+    // The device's own volume below 0 dB: the verdict stays untouched (to the DAC's input),
+    // end to end it is changed, and the label and the values say so.
+    let view = host(Some(track_view()), Some(route("Schiit Gungnir 2")));
+    let p = profile_named("gungnir2-v2");
+    let name = info("Gungnir 2");
+    let readings = [
+        read(&p, "input", "1"),
+        read(&p, "sample_rate", "2"),
+        read(&p, "usb1_connected", "true"),
+        read(&p, "usb2_connected", "false"),
+        read(&p, "volume", "117"),
+    ];
+    let s = Snapshot {
+        host: &view,
+        access: OPEN,
+        ..shot(&name, &p, &readings)
+    };
+    let card = playing(&s, Family::Dac).expect("a card");
+    let json = json_of(&card);
+    assert_eq!(json["path"]["verdict"], "untouched");
+    assert_eq!(json["path"]["end_to_end"], "changed");
+    let row = &json["path"]["row"];
+    assert_eq!(
+        row["label"],
+        serde_json::json!({"tone": "warn", "words": "Path: the DAC changes the sound"})
+    );
+    let values = row["values"].as_array().expect("values");
+    assert!(
+        values.contains(&serde_json::json!({"text": "volume -3.3 dB", "tone": "warn"})),
+        "{values:?}"
+    );
+}
+
+/// A sound that goes elsewhere, and a route not read yet, are rows with no hops and their words.
+#[test]
+fn a_row_with_no_hops_carries_the_short_words() {
+    use crate::web::model::PlayingModel;
+    let view = host(Some(track_view()), Some(route("DELL S2721QS")));
+    let card = card_on(&view, Some("2"), OPEN).expect("a card");
+    let json = serde_json::to_value(PlayingModel::from(&card)).expect("json");
+    assert_eq!(json["path"]["end_to_end"], "not_this_dac");
+    assert_eq!(json["path"]["row"]["hops"], serde_json::json!([]));
+    assert_eq!(json["path"]["row"]["label"]["tone"], "plain");
+    assert_eq!(json["path"]["row"]["words"], "→ DELL S2721QS");
+
+    let none = host(Some(track_view()), None);
+    let card = card_on(&none, Some("2"), OPEN).expect("a card");
+    let json = serde_json::to_value(PlayingModel::from(&card)).expect("json");
+    assert_eq!(json["path"]["end_to_end"], "unknown");
+    assert_eq!(json["path"]["row"]["words"], "route not read");
+}
+
+/// What the row says is something a viewer sees, so it is in the key.
+#[test]
+fn the_key_holds_the_row() {
+    let view = host(Some(track_view()), Some(route("Schiit Gungnir 2")));
+    let mut card = card_on(&view, Some("2"), OPEN).expect("a card");
+    let first = card.key();
+    card.path.as_mut().expect("a path").row.values.clear();
+    assert_ne!(card.key(), first);
+    let mut card = card_on(&view, Some("2"), OPEN).expect("a card");
+    card.path.as_mut().expect("a path").end_to_end = "changed";
+    assert_ne!(card.key(), first);
 }

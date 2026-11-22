@@ -43,7 +43,7 @@ pub struct DacStage {
 
 impl DacStage {
     /// The volume as a drop worth naming: below 0 dB by at least what one decimal shows.
-    fn lowers(&self) -> Option<f64> {
+    pub(super) fn lowers(&self) -> Option<f64> {
         self.volume_db.filter(|db| *db < -0.05)
     }
 
@@ -52,18 +52,21 @@ impl DacStage {
         self.lowers().is_some() || self.tone || self.balance || self.muted || self.phase || self.nos
     }
 
-    /// The stage as short hop words: `volume -3.3 dB`, `tone control`, `balance off centre`.
-    fn hop_words(&self) -> Vec<String> {
-        let mut words = Vec::new();
-        if let Some(db) = self.lowers() {
-            words.push(match db.is_finite() {
-                true => format!(
-                    "volume {}",
-                    units::amount_text(units::Amount::of(db), Some("dB"))
-                ),
-                false => "volume silent".to_string(),
-            });
+    /// The volume `db` as hop words: `volume -3.3 dB`, or `volume silent` for negative infinity.
+    pub(super) fn volume_word(db: f64) -> String {
+        match db.is_finite() {
+            true => format!(
+                "volume {}",
+                units::amount_text(units::Amount::of(db), Some("dB"))
+            ),
+            false => "volume silent".to_string(),
         }
+    }
+
+    /// What the stage changes besides the volume, as short hop words: `tone control`, `balance
+    /// off centre`, `muted`, `phase inverted`, `NOS filter`.
+    pub(super) fn other_words(&self) -> Vec<String> {
+        let mut words = Vec::new();
         if self.tone {
             words.push("tone control".to_string());
         }
@@ -79,6 +82,16 @@ impl DacStage {
         if self.nos {
             words.push("NOS filter".to_string());
         }
+        words
+    }
+
+    /// The stage as short hop words: `volume -3.3 dB`, `tone control`, `balance off centre`.
+    fn hop_words(&self) -> Vec<String> {
+        let mut words = Vec::new();
+        if let Some(db) = self.lowers() {
+            words.push(Self::volume_word(db));
+        }
+        words.extend(self.other_words());
         words
     }
 
@@ -290,8 +303,27 @@ impl Verdict {
     }
 }
 
-/// One hop of the path: the player, the computer, or the DAC.
+/// One thing a hop does to the signal: its full words, as the path's words say it, and the short
+/// form the Path row shows at the hop (the hop's label is never repeated in it).
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    /// The full words, such as `resampled 44.1 → 48 kHz` or `player volume 50 %`.
+    pub words: String,
+    /// The short form, such as `resampled` or `volume 50 %`.
+    pub short: String,
+}
+
+impl Change {
+    fn new(words: impl Into<String>, short: impl Into<String>) -> Self {
+        Change {
+            words: words.into(),
+            short: short.into(),
+        }
+    }
+}
+
+/// One hop of the path: the player, the computer, or the DAC.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Hop {
     /// Which hop: `player`, `computer` or `DAC`.
     pub label: String,
@@ -301,10 +333,23 @@ pub struct Hop {
     pub changes: bool,
     /// Whether something of this hop was not read; its words are in the path's `unknown` list.
     pub unknown: bool,
+    /// What this hop changes, each change recorded at the hop that makes it, in the order the
+    /// path's words name them. Empty when `changes` is only the DAC's own stage.
+    pub changed: Vec<Change>,
+    /// The sample rate at this hop: the player's stream rate, the sink's rate, the rate the DAC
+    /// reads; `None` when not read.
+    pub rate_hz: Option<u32>,
+    /// For the computer hop when it resamples: the rate the sound ends at (the forced rate when
+    /// the clock is forced, else the sink's).
+    pub resamples_to: Option<u32>,
+    /// For the DAC hop: the input it reads, as its label.
+    pub input: Option<String>,
+    /// For the DAC hop: what the device's own stage does.
+    pub stage: Option<DacStage>,
 }
 
 /// The path from the player to the DAC, judged.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PathLine {
     /// The hops in order; empty when the verdict is [`Verdict::NotThisDac`] or
     /// [`Verdict::OtherInput`], or the sink is not known.
@@ -471,10 +516,11 @@ pub fn path_line(route: &RouteFacts, dac: &DacFacts) -> PathLine {
     }
 
     let mut side = computer_side(route, sink);
-    let device = dac_hop(sink, dac, &mut side.changes, &mut side.unknown);
-    let (verdict, words) = verdict_of(route, side.changes, side.unknown);
+    let device = dac_hop(sink, dac, &mut side.unknown);
+    let hops = vec![side.player, side.computer, device];
+    let (verdict, words) = verdict_of(route, change_words(&hops), side.unknown);
     PathLine {
-        hops: vec![side.player, side.computer, device],
+        hops,
         verdict,
         words,
         dac_stage: dac.stage.clause(&dac.display),
@@ -493,9 +539,10 @@ pub fn computer_line(route: &RouteFacts) -> PathLine {
         return elsewhere(format!("player → {other}"), other.clone(), true);
     }
     let side = computer_side(route, sink);
-    let (verdict, words) = verdict_of(route, side.changes, side.unknown);
+    let hops = vec![side.player, side.computer];
+    let (verdict, words) = verdict_of(route, change_words(&hops), side.unknown);
     PathLine {
-        hops: vec![side.player, side.computer],
+        hops,
         verdict,
         words,
         dac_stage: None,
@@ -512,24 +559,28 @@ fn sink_not_read() -> PathLine {
     }
 }
 
-/// The player's and the computer's hops with what they change and leave unknown.
+/// The player's and the computer's hops with what they leave unknown.
 struct Side {
     player: Hop,
     computer: Hop,
-    changes: Vec<String>,
     unknown: Vec<String>,
+}
+
+/// The full words of every change of `hops`, in hop order.
+fn change_words(hops: &[Hop]) -> Vec<String> {
+    hops.iter()
+        .flat_map(|hop| hop.changed.iter().map(|change| change.words.clone()))
+        .collect()
 }
 
 /// Judges the player's and the computer's hops against `sink`.
 fn computer_side(route: &RouteFacts, sink: &SinkFacts) -> Side {
-    let mut changes = Vec::new();
     let mut unknown = Vec::new();
-    let player = player_hop(route, &mut changes, &mut unknown);
-    let computer = computer_hop(route, sink, &mut changes, &mut unknown);
+    let player = player_hop(route, &mut unknown);
+    let computer = computer_hop(route, sink, &mut unknown);
     Side {
         player,
         computer,
-        changes,
         unknown,
     }
 }
@@ -584,7 +635,7 @@ fn identified_stream(route: &RouteFacts) -> Option<&StreamFacts> {
 }
 
 /// The player's hop; what it changes and what it leaves unknown go to the two lists.
-fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<String>) -> Hop {
+fn player_hop(route: &RouteFacts, unknown: &mut Vec<String>) -> Hop {
     let Some(stream) = identified_stream(route) else {
         unknown.push(match route.player_match {
             PlayerMatch::NoPlayer => "no player".to_string(),
@@ -595,6 +646,11 @@ fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<S
             detail: "not identified".to_string(),
             changes: false,
             unknown: true,
+            changed: Vec::new(),
+            rate_hz: None,
+            resamples_to: None,
+            input: None,
+            stage: None,
         };
     };
     let mut detail = signal_detail(
@@ -602,12 +658,12 @@ fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<S
         stream.format.as_deref(),
         stream.volume_milli,
     );
-    let before = changes.len();
+    let mut changed = Vec::new();
     let unknown_before = unknown.len();
     if stream.rate_hz.is_none() {
         unknown.push("player rate not read".to_string());
     }
-    stream_volume(stream, changes, unknown);
+    stream_volume(stream, &mut changed, unknown);
     if stream.muted {
         detail.push("muted".to_string());
     }
@@ -617,32 +673,37 @@ fn player_hop(route: &RouteFacts, changes: &mut Vec<String>, unknown: &mut Vec<S
     Hop {
         label: "player".to_string(),
         detail: detail.join(", "),
-        changes: changes.len() > before,
+        changes: !changed.is_empty(),
         unknown: unknown.len() > unknown_before,
+        changed,
+        rate_hz: stream.rate_hz,
+        resamples_to: None,
+        input: None,
+        stage: None,
     }
 }
 
 /// Names a stream's volume below 100 % and its mute; a volume not read is unknown.
-fn stream_volume(stream: &StreamFacts, changes: &mut Vec<String>, unknown: &mut Vec<String>) {
+fn stream_volume(stream: &StreamFacts, changes: &mut Vec<Change>, unknown: &mut Vec<String>) {
     match stream.volume_milli {
-        Some(milli) if milli != 1000 => changes.push(format!("player volume {}", percent(milli))),
+        Some(milli) if milli != 1000 => changes.push(Change::new(
+            format!("player volume {}", percent(milli)),
+            format!("volume {}", percent(milli)),
+        )),
         Some(_) => {}
         None => unknown.push("player volume not read".to_string()),
     }
     if stream.muted {
-        changes.push("player muted".to_string());
+        changes.push(Change::new("player muted", "muted"));
     }
 }
 
 /// The computer's hop: the sink's own rate and volume, the EQ and the other sounds, and, when
 /// the route carries its setup, what the sink's converter and ALSA device do to the sound.
-fn computer_hop(
-    route: &RouteFacts,
-    sink: &SinkFacts,
-    changes: &mut Vec<String>,
-    unknown: &mut Vec<String>,
-) -> Hop {
-    let before = changes.len();
+fn computer_hop(route: &RouteFacts, sink: &SinkFacts, unknown: &mut Vec<String>) -> Hop {
+    let mut changed = Vec::new();
+    let changes = &mut changed;
+    let mut resamples_to = None;
     let unknown_before = unknown.len();
     let mut detail = signal_detail(sink.rate_hz, sink.format.as_deref(), sink.volume_milli);
     let forced = route
@@ -660,17 +721,21 @@ fn computer_hop(
             } else {
                 ""
             };
-            changes.push(format!("resampled {} → {} kHz{cause}", khz(from), khz(to)));
+            changes.push(Change::new(
+                format!("resampled {} → {} kHz{cause}", khz(from), khz(to)),
+                "resampled",
+            ));
+            resamples_to = Some(to);
         }
         (Some(from), Some(_)) => {
             // The sink's Format can still read the stream's rate while the clock is forced to
             // another: the sound is resampled all the same.
             if let Some(force) = forced.filter(|force| *force != from) {
-                changes.push(format!(
-                    "resampled {} → {} kHz (rate forced)",
-                    khz(from),
-                    khz(force)
+                changes.push(Change::new(
+                    format!("resampled {} → {} kHz (rate forced)", khz(from), khz(force)),
+                    "resampled",
                 ));
+                resamples_to = Some(force);
             } else if route
                 .setup
                 .as_ref()
@@ -684,20 +749,30 @@ fn computer_hop(
         _ => {}
     }
     match sink.volume_milli {
-        Some(milli) if milli != 1000 => changes.push(format!("computer volume {}", percent(milli))),
+        Some(milli) if milli != 1000 => changes.push(Change::new(
+            format!("computer volume {}", percent(milli)),
+            format!("volume {}", percent(milli)),
+        )),
         Some(_) => {}
         None => unknown.push("computer volume not read".to_string()),
     }
     if sink.muted {
-        changes.push("computer muted".to_string());
+        changes.push(Change::new("computer muted", "muted"));
     }
     if route.host_eq {
-        changes.extend(chain_words(route.stages));
+        changes.extend(
+            chain_words(route.stages)
+                .into_iter()
+                .map(|words| Change::new(words, "EQ")),
+        );
     }
     match route.others_mixing {
         0 => {}
-        1 => changes.push("1 other sound mixing".to_string()),
-        many => changes.push(format!("{many} other sounds mixing")),
+        1 => changes.push(Change::new("1 other sound mixing", "1 other sound mixing")),
+        many => {
+            let words = format!("{many} other sounds mixing");
+            changes.push(Change::new(words.clone(), words));
+        }
     }
     if let Some(stream) = identified_stream(route) {
         width_words(stream, sink, changes, unknown);
@@ -708,8 +783,13 @@ fn computer_hop(
     Hop {
         label: "computer".to_string(),
         detail: detail.join(", "),
-        changes: changes.len() > before,
+        changes: !changed.is_empty(),
         unknown: unknown.len() > unknown_before,
+        changed,
+        rate_hz: sink.rate_hz,
+        resamples_to,
+        input: None,
+        stage: None,
     }
 }
 
@@ -722,7 +802,7 @@ fn setup_words(
     sink: &SinkFacts,
     setup: &SetupFacts,
     detail: &mut Vec<String>,
-    changes: &mut Vec<String>,
+    changes: &mut Vec<Change>,
     unknown: &mut Vec<String>,
 ) {
     let stream = identified_stream(route);
@@ -740,7 +820,7 @@ fn setup_words(
 fn width_words(
     stream: &StreamFacts,
     sink: &SinkFacts,
-    changes: &mut Vec<String>,
+    changes: &mut Vec<Change>,
     unknown: &mut Vec<String>,
 ) {
     let Some(to) = sink.format.as_deref() else {
@@ -773,10 +853,13 @@ fn width_words(
         return;
     };
     match read_from.counted_bits() {
-        Some(counted) if counted > sink_bits => changes.push(format!(
-            "cut to {sink_bits} bits ({} → {})",
-            base_name(from),
-            base_name(to)
+        Some(counted) if counted > sink_bits => changes.push(Change::new(
+            format!(
+                "cut to {sink_bits} bits ({} → {})",
+                base_name(from),
+                base_name(to)
+            ),
+            format!("cut to {sink_bits} bits"),
         )),
         None if sink_bits < 24 => {
             unknown.push(format!("float stream into a {sink_bits}-bit sink"));
@@ -791,7 +874,7 @@ fn width_words(
 fn channel_words(
     setup: &SetupFacts,
     detail: &mut Vec<String>,
-    changes: &mut Vec<String>,
+    changes: &mut Vec<Change>,
     unknown: &mut Vec<String>,
 ) {
     let (Some(from), Some(to)) = (&setup.stream_layout, &setup.sink_layout) else {
@@ -799,42 +882,126 @@ fn channel_words(
         return;
     };
     match (from.channels, to.channels) {
-        (a, b) if a == b => {
-            if !same_positions(from, to) {
-                changes.push("channels remapped".to_string());
+        (a, b) if a == b => match same_positions(from, to) {
+            Positions::Same => {}
+            Positions::Differ => {
+                changes.push(Change::new("channels remapped", "channels remapped"))
             }
-        }
-        (1, 2) => detail.push("mono on both channels".to_string()),
-        (a, b) if b < a => changes.push(format!("channels {a} → {b} (mixed)")),
-        (a, b) => changes.push(format!("channels {a} → {b} (upmixed)")),
+            Positions::PartlyUnnamed => unknown.push("channels partly unnamed".to_string()),
+        },
+        (1, 2) => one_into_two(from, to, detail, changes),
+        (a, b) if b < a => changes.push(Change::new(
+            format!("channels {a} → {b} (mixed)"),
+            "channels mixed",
+        )),
+        (a, b) => changes.push(Change::new(
+            format!("channels {a} → {b} (upmixed)"),
+            "channels upmixed",
+        )),
     }
 }
 
-/// Whether two layouts of the same count hold the same positions; layouts that name none are
-/// taken as equal.
-fn same_positions(a: &Layout, b: &Layout) -> bool {
-    if a.positions.is_empty() || b.positions.is_empty() {
-        return true;
+/// A one-channel stream into a stereo sink. PipeWire spreads a channel that names no position
+/// (`UNK`, `NA`, `AUXn`) or is `MONO` to both at full level (channelmix-ops.c, `make_matrix`:
+/// "distribute UNK", "assign MONO to STEREO (1.0)"). `FC` comes out on both at 1/sqrt(2)
+/// (-3 dB: "assign FC to STEREO", L290-294), and `FL` or `FR` alone leaves the other channel
+/// silent. The sink's positions decide first: see the body.
+fn one_into_two(from: &Layout, to: &Layout, detail: &mut Vec<String>, changes: &mut Vec<Change>) {
+    let position = from.positions.first().map_or("", String::as_str);
+    // A sink that names none, or a source that does, is distributed at full level (L221-225).
+    if names_none(to) || position.is_empty() || is_unnamed(position) {
+        detail.push("mono on both channels".to_string());
+        return;
+    }
+    let stereo = {
+        let mut sorted = to.positions.clone();
+        sorted.sort();
+        sorted == ["FL", "FR"]
+    };
+    if !stereo {
+        // MONO into a sink without FL and FR is silent ("can't assign MONO", L279-285).
+        changes.push(Change::new("channels remapped", "channels remapped"));
+        return;
+    }
+    match position {
+        "MONO" => detail.push("mono on both channels".to_string()),
+        "FC" => changes.push(Change::new(
+            "mono centre 3 dB lower on both channels",
+            "mono centre -3 dB",
+        )),
+        "FL" | "FR" => changes.push(Change::new("one channel silent", "one channel silent")),
+        _ => changes.push(Change::new("channels remapped", "channels remapped")),
+    }
+}
+
+/// How two layouts of the same count compare.
+enum Positions {
+    Same,
+    Differ,
+    /// Equal sets, but some position of a layout names none beside named ones: PipeWire does not
+    /// pair the unnamed channel, so the copy cannot be vouched for.
+    PartlyUnnamed,
+}
+
+/// Whether two layouts of the same count hold the same positions; a layout that names none
+/// (empty, only `UNK`, `NA` and `AUXn`, or `MONO` among several channels) is taken as equal to
+/// any: PipeWire then pairs the channels one to one, in its sorted position order (channelmix-ops.c
+/// L212-215 and L236-240). A layout mixing named and unnamed positions compares as sets like any
+/// other, PipeWire dropping the unnamed ones from the match, so a difference may be real and an
+/// equal set is no proof of a copy.
+fn same_positions(a: &Layout, b: &Layout) -> Positions {
+    if names_none(a) || names_none(b) {
+        return Positions::Same;
     }
     let sorted = |layout: &Layout| {
         let mut positions = layout.positions.clone();
         positions.sort();
         positions
     };
-    sorted(a) == sorted(b)
+    if sorted(a) != sorted(b) {
+        Positions::Differ
+    } else if [a, b]
+        .iter()
+        .any(|layout| layout.positions.iter().any(|p| is_unnamed(p)))
+    {
+        Positions::PartlyUnnamed
+    } else {
+        Positions::Same
+    }
+}
+
+/// Whether no position of the layout is a named one (`FL`, `FR`, ...); several channels with
+/// `MONO` among them count so too.
+fn names_none(layout: &Layout) -> bool {
+    (layout.channels > 1 && layout.positions.iter().any(|p| p == "MONO"))
+        || layout.positions.iter().all(|p| is_unnamed(p))
+}
+
+/// `UNK`, `NA` or `AUXn`: a position PipeWire maps to no channel bit.
+fn is_unnamed(position: &str) -> bool {
+    matches!(position, "UNK" | "NA")
+        || position
+            .strip_prefix("AUX")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// The sink's converter's dither: on, with noise, or not read.
-fn dither_words(setup: &SetupFacts, changes: &mut Vec<String>, unknown: &mut Vec<String>) {
+fn dither_words(setup: &SetupFacts, changes: &mut Vec<Change>, unknown: &mut Vec<String>) {
     let Some(dither) = &setup.dither else {
         unknown.push("dither not read".to_string());
         return;
     };
     if !matches!(dither.method.as_str(), "" | "none") {
-        changes.push(format!("dither on ({})", dither.method));
+        changes.push(Change::new(
+            format!("dither on ({})", dither.method),
+            "dither",
+        ));
     }
     if dither.noise != 0 {
-        changes.push(format!("dither noise {}", dither.noise));
+        changes.push(Change::new(
+            format!("dither noise {}", dither.noise),
+            "dither",
+        ));
     }
 }
 
@@ -842,15 +1009,18 @@ fn dither_words(setup: &SetupFacts, changes: &mut Vec<String>, unknown: &mut Vec
 fn filter_words(
     setup: &SetupFacts,
     stream_known: bool,
-    changes: &mut Vec<String>,
+    changes: &mut Vec<Change>,
     unknown: &mut Vec<String>,
 ) {
     let stream = stream_known.then_some(setup.stream_filter);
     if setup.sink_filter == Some(true) {
-        changes.push("a filter inside the sink".to_string());
+        changes.push(Change::new("a filter inside the sink", "sink filter"));
     }
     if stream == Some(Some(true)) {
-        changes.push("a filter on the player's stream".to_string());
+        changes.push(Change::new(
+            "a filter on the player's stream",
+            "stream filter",
+        ));
     }
     if setup.sink_filter.is_none() || stream == Some(None) {
         unknown.push("filter not read".to_string());
@@ -865,7 +1035,7 @@ fn filter_words(
 fn alsa_words(
     sink: &SinkFacts,
     setup: &SetupFacts,
-    changes: &mut Vec<String>,
+    changes: &mut Vec<Change>,
     unknown: &mut Vec<String>,
 ) {
     let Some(alsa) = &setup.alsa else {
@@ -873,13 +1043,19 @@ fn alsa_words(
     };
     let name = alsa.path.as_deref().map(|path| (path, alsa_name(path)));
     if let Some((path, AlsaName::Dmix)) = name {
-        changes.push(format!("ALSA dmix mixes ({path})"));
+        changes.push(Change::new(
+            format!("ALSA dmix mixes ({path})"),
+            "ALSA dmix",
+        ));
     }
     if let HwState::Open(hw) = &alsa.hw {
         let channels = setup.sink_layout.as_ref().map(|layout| layout.channels);
         match hw_judge(sink, channels, hw) {
             HwJudge::Differs(parts) => {
-                changes.push(format!("ALSA converts {}", parts.join(", ")));
+                changes.push(Change::new(
+                    format!("ALSA converts {}", parts.join(", ")),
+                    "ALSA converts",
+                ));
                 return;
             }
             HwJudge::Same => return,
@@ -890,7 +1066,10 @@ fn alsa_words(
     }
     match name {
         None => unknown.push("ALSA device not read".to_string()),
-        Some((path, AlsaName::Plug)) => changes.push(format!("ALSA plug converts ({path})")),
+        Some((path, AlsaName::Plug)) => changes.push(Change::new(
+            format!("ALSA plug converts ({path})"),
+            "ALSA plug",
+        )),
         Some((_, AlsaName::Dmix | AlsaName::Direct)) => {}
         Some((path, AlsaName::Other)) => unknown.push(format!("ALSA device {path} not judged")),
     }
@@ -922,13 +1101,8 @@ fn chain_words(stages: Option<svolder_host::ChainStages>) -> Vec<String> {
 }
 
 /// The DAC's hop: what the device itself reads against the sink's rate.
-fn dac_hop(
-    sink: &SinkFacts,
-    dac: &DacFacts,
-    changes: &mut Vec<String>,
-    unknown: &mut Vec<String>,
-) -> Hop {
-    let before = changes.len();
+fn dac_hop(sink: &SinkFacts, dac: &DacFacts, unknown: &mut Vec<String>) -> Hop {
+    let mut changed = Vec::new();
     let unknown_before = unknown.len();
     let mut detail = Vec::new();
     if let Some(input) = &dac.input {
@@ -946,7 +1120,10 @@ fn dac_hop(
     match (sink.rate_hz, dac.rate_hz) {
         (_, None) => unknown.push("DAC rate not read".to_string()),
         (Some(sent), Some(read)) if sent != read => {
-            changes.push(format!("DAC reads {} kHz", khz(read)));
+            changed.push(Change::new(
+                format!("DAC reads {} kHz", khz(read)),
+                format!("reads {} kHz", khz(read)),
+            ));
         }
         _ => {}
     }
@@ -954,8 +1131,13 @@ fn dac_hop(
     Hop {
         label: "DAC".to_string(),
         detail: detail.join(", "),
-        changes: changes.len() > before || dac.stage.changes(),
+        changes: !changed.is_empty() || dac.stage.changes(),
         unknown: unknown.len() > unknown_before,
+        changed,
+        rate_hz: dac.rate_hz,
+        resamples_to: None,
+        input: dac.input.clone(),
+        stage: Some(dac.stage),
     }
 }
 

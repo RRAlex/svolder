@@ -102,20 +102,23 @@ fn p_opens_the_list_on_the_preset_that_is_on() {
         lyr.presets.preset_list.is_none(),
         "a device with no tone control opened a list"
     );
-    let scene = keys::Scene::of(&lyr);
+    let context = keys::KeyContext::of(&lyr);
     for screen in [Screen::Device, Screen::Tone] {
         let p = keys::hints_for(screen)
             .into_iter()
             .find(|hint| hint.label == "p")
             .unwrap_or_else(|| panic!("{screen:?} lists no p"));
-        assert!(!keys::available_in(p, scene), "{screen:?}: p is not dimmed");
+        assert!(
+            !keys::available_in(p, context),
+            "{screen:?}: p is not dimmed"
+        );
     }
     let zero = keys::hints_for(Screen::Tone)
         .into_iter()
         .find(|hint| hint.label == "0")
         .expect("the tone screen lists 0");
     assert!(
-        !keys::available_in(zero, scene),
+        !keys::available_in(zero, context),
         "the tone screen's 0 is not dimmed"
     );
 }

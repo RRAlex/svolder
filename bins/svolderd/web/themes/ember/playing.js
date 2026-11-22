@@ -13,9 +13,9 @@
 // system for less motion does not stop it (the page's small motions ignore it); opening the line
 // does.
 //
-// The band's card has a fixed height, so a path with more to say than fits (a long verdict, a long
-// name, a narrow card) would be cut off at its foot, mid-chip. `fitPath` ends the row of chips with
-// a chip of three dots instead: the verdict stays first, the hops that do not fit stay in the page
+// The band's card has a fixed height, so a path with more to say than fits (a long label, a long
+// name, a narrow card) would be cut off at its foot, mid-chip. `fitPath` puts a chip of three dots
+// in the row instead: the label stays first, the hops that do not fit stay in the page
 // for a screen reader but out of sight, and the dots' title lists them.
 
 import { ember, mine } from './bind.js';
@@ -180,10 +180,12 @@ export function tick() {
 const CHIP_FOOT = 12;
 
 /**
- * End the path's row of chips with a chip of three dots when the row does not fit the card: the
- * hops from the end are put out of sight (kept for a screen reader) until the row, the dots
- * included, fits. The verdict, the first chip, always stays. A row that fits is left whole, and a
- * row that fits again (the card grew, the path got shorter) comes back whole.
+ * End the path's row of chips with a chip of three dots when the row does not fit the card: hops
+ * are put out of sight (kept for a screen reader) until the row, the dots included, fits. The
+ * hops that change nothing go first (the middle ones, last to first), then the changed middle
+ * ones, and the last chip, which holds the values, only when nothing else is left; the dots stand
+ * where the first cut hop was. The label, the first child, always stays. A row that fits is left
+ * whole, and a row that fits again (the card grew, the path got shorter) comes back whole.
  */
 export function fitPath() {
   const root = part();
@@ -192,29 +194,42 @@ export function fitPath() {
   path.querySelector('.np-more')?.remove();
   for (const hop of path.querySelectorAll('.np-cut')) hop.classList.remove('np-cut');
   const limit = () => root.getBoundingClientRect().bottom - CHIP_FOOT;
-  const last = () => {
-    const shown = [...path.children].filter((chip) => !chip.classList.contains('np-cut'));
-    return shown[shown.length - 1];
-  };
-  const over = () => path.getClientRects().length > 0
-    && (last()?.getBoundingClientRect().bottom ?? 0) > limit();
+  // The lowest shown child: the dots and the config chip are not always last in the row's order.
+  const lowest = () => Math.max(0, ...[...path.children]
+    .filter((chip) => !chip.classList.contains('np-cut'))
+    .map((chip) => chip.getBoundingClientRect().bottom));
+  const over = () => path.getClientRects().length > 0 && lowest() > limit();
   if (!over()) return;
   const more = document.createElement('span');
   more.className = 'np-more';
   more.setAttribute('aria-hidden', 'true');
-  more.textContent = '…';
-  path.append(more);
-  const hidden = [];
+  more.textContent = '\u2026';
   const hops = [...path.querySelectorAll('.np-hop')];
-  while (hops.length > 0 && over()) {
-    const hop = hops.pop();
+  const end = hops.pop();
+  const changes = (hop) => hop.classList.contains('changes');
+  const order = [
+    ...hops.filter((hop) => !changes(hop)).reverse(),
+    ...hops.filter(changes).reverse(),
+    ...(end ? [end] : []),
+  ];
+  // The dots go before the last chip, then after the last hop still shown once that one is cut.
+  const anchor = end ?? path.querySelector('#np-config');
+  if (anchor) anchor.before(more);
+  else path.append(more);
+  let cut = 0;
+  while (order.length > 0 && over()) {
+    const hop = order.shift();
     hop.classList.add('np-cut');
-    hidden.unshift(hop.textContent.trim());
-    more.title = hidden.join(' → ');
+    cut += 1;
+    if (hop === end) {
+      const shown = [...path.querySelectorAll('.np-hop')].filter((one) => !one.classList.contains('np-cut'));
+      (shown.length > 0 ? shown[shown.length - 1] : path.firstElementChild).after(more);
+    }
   }
+  more.title = [...path.querySelectorAll('.np-hop.np-cut')].map((hop) => hop.textContent.trim()).join(' \u2192 ');
   // The dots say nothing when no hop could be put out of sight, and when every hop is gone and the
-  // verdict alone still overflows (nothing is left to name).
-  if (hidden.length === 0 || (hops.length === 0 && over())) more.remove();
+  // label alone still overflows (nothing is left to name).
+  if (cut === 0 || (order.length === 0 && over())) more.remove();
 }
 
 /** Watches the card's size: a path is fitted again when its card is resized. */

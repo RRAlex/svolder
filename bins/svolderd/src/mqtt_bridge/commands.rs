@@ -45,7 +45,12 @@ impl BridgeTask {
             }
             Some((unit, key)) if self.config.commands => {
                 let (unit, key) = (unit.to_string(), key.to_string());
-                if unit == svolder_mqtt::computer::UNIT {
+                if unit == self.me.unit() {
+                    if key.eq_ignore_ascii_case(svolder_mqtt::computer::scenes::SELECT_KEY)
+                        || key.eq_ignore_ascii_case(svolder_mqtt::computer::scenes::SAVE_KEY)
+                    {
+                        return self.scene_command(&key, body);
+                    }
                     return self.computer_command(&key, body);
                 }
                 self.command(&unit, &key, body);
@@ -313,6 +318,7 @@ impl BridgeTask {
             }
             WriteOutcome::Replaced => {}
             WriteOutcome::Computer(what, result) => self.computer_written(&what, result),
+            WriteOutcome::Scene(answer) => self.scene_answered(answer),
             WriteOutcome::Written(control, outcome) => self.written(&control, outcome),
         }
     }

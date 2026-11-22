@@ -40,7 +40,7 @@ fn the_config_home_falls_back_to_the_passwd_home_when_home_is_unset() {
 /// under the temporary directory.
 #[test]
 fn unit_tests_resolve_scratch_homes() {
-    let scratch = std::env::temp_dir();
+    let scratch = svolder_host::scratch::scratch_base().expect("the scratch base");
     let homes = [
         crate::config::config_home(),
         crate::config::state_home(),
@@ -61,11 +61,11 @@ fn unit_tests_resolve_scratch_homes() {
 #[test]
 fn the_scratch_sweep_removes_only_finished_runs() {
     let root = std::env::temp_dir().join(format!("svolder-sweep-test-{}", std::process::id()));
-    let dead = root.join("svolder-unit-4294967295");
-    let live = root.join(format!("svolder-unit-{}", std::process::id()));
+    let dead = root.join("unit-4294967295");
+    let live = root.join(format!("unit-{}", std::process::id()));
     std::fs::create_dir_all(dead.join("state")).unwrap();
     std::fs::create_dir_all(&live).unwrap();
-    sweep_finished_scratch_homes(&root);
+    sweep_finished_scratch_homes(&root, "unit-");
     assert!(!dead.exists());
     assert!(live.exists());
     std::fs::remove_dir_all(&root).unwrap();
@@ -87,14 +87,14 @@ fn release_lock(lock: std::fs::File) {
 fn the_scratch_sweep_keeps_a_root_whose_run_holds_its_lock() {
     let temp = temp_dir("config-writer");
     // Pids no process here has, as a run in another PID namespace looks from here.
-    let (live, lock) = scratch_root(&temp, 4_294_967_294).expect("a root");
-    let (over, ended) = scratch_root(&temp, 4_294_967_293).expect("a root");
+    let (live, lock) = scratch_root(&temp, "unit-", 4_294_967_294).expect("a root");
+    let (over, ended) = scratch_root(&temp, "unit-", 4_294_967_293).expect("a root");
     release_lock(ended);
-    sweep_finished_scratch_homes(&temp);
+    sweep_finished_scratch_homes(&temp, "unit-");
     assert!(live.exists(), "a live run's root was removed");
     assert!(!over.exists(), "a finished run's root was kept");
     release_lock(lock);
-    sweep_finished_scratch_homes(&temp);
+    sweep_finished_scratch_homes(&temp, "unit-");
     assert!(!live.exists(), "a root outlived its run");
 }
 
@@ -103,10 +103,10 @@ fn the_scratch_sweep_keeps_a_root_whose_run_holds_its_lock() {
 #[test]
 fn a_copied_lock_descriptor_does_not_keep_a_finished_roots_lock() {
     let temp = temp_dir("config-writer");
-    let (root, lock) = scratch_root(&temp, 4_294_967_294).expect("a root");
+    let (root, lock) = scratch_root(&temp, "unit-", 4_294_967_294).expect("a root");
     let forked_copy = lock.try_clone().expect("a duplicate descriptor");
     release_lock(lock);
-    sweep_finished_scratch_homes(&temp);
+    sweep_finished_scratch_homes(&temp, "unit-");
     assert!(!root.exists(), "a copy of the descriptor kept the root");
     drop(forked_copy);
 }
@@ -116,10 +116,10 @@ fn a_copied_lock_descriptor_does_not_keep_a_finished_roots_lock() {
 #[test]
 fn a_scratch_root_another_run_holds_is_not_shared() {
     let temp = temp_dir("config-writer");
-    let (first, _held) = scratch_root(&temp, 7).expect("a root");
-    let (second, _also) = scratch_root(&temp, 7).expect("another root");
-    assert_eq!(first, temp.join("svolder-unit-7"));
-    assert_eq!(second, temp.join("svolder-unit-7-1"));
+    let (first, _held) = scratch_root(&temp, "unit-", 7).expect("a root");
+    let (second, _also) = scratch_root(&temp, "unit-", 7).expect("another root");
+    assert_eq!(first, temp.join("unit-7"));
+    assert_eq!(second, temp.join("unit-7-1"));
 }
 
 /// When every name for a pid is held, there is no root: a held one is never shared.
@@ -127,10 +127,13 @@ fn a_scratch_root_another_run_holds_is_not_shared() {
 fn a_scratch_root_is_none_when_every_name_is_held() {
     let temp = temp_dir("config-writer");
     let held: Vec<_> = (0..9)
-        .map(|_| scratch_root(&temp, 7).expect("a root"))
+        .map(|_| scratch_root(&temp, "unit-", 7).expect("a root"))
         .collect();
     assert_eq!(held.len(), 9);
-    assert!(scratch_root(&temp, 7).is_none(), "a held root was shared");
+    assert!(
+        scratch_root(&temp, "unit-", 7).is_none(),
+        "a held root was shared"
+    );
 }
 
 /// Roots whose lock file cannot be opened (a directory stands in its place) are skipped, and the
@@ -139,9 +142,7 @@ fn a_scratch_root_is_none_when_every_name_is_held() {
 fn a_scratch_root_whose_lock_cannot_be_opened_is_none() {
     use std::os::unix::fs::DirBuilderExt;
     let temp = temp_dir("config-writer");
-    for name in std::iter::once("svolder-unit-7".to_owned())
-        .chain((1..=8).map(|n| format!("svolder-unit-7-{n}")))
-    {
+    for name in std::iter::once("unit-7".to_owned()).chain((1..=8).map(|n| format!("unit-7-{n}"))) {
         let root = temp.join(name);
         std::fs::DirBuilder::new()
             .mode(0o700)
@@ -149,7 +150,7 @@ fn a_scratch_root_whose_lock_cannot_be_opened_is_none() {
             .unwrap();
         std::fs::create_dir(root.join("live.lock")).unwrap();
     }
-    assert!(scratch_root(&temp, 7).is_none());
+    assert!(scratch_root(&temp, "unit-", 7).is_none());
 }
 
 /// Under a directory it cannot write, no root is made and nothing panics.
@@ -161,7 +162,7 @@ fn a_scratch_root_under_a_directory_it_cannot_write_is_none() {
     }
     let temp = temp_dir("config-writer");
     std::fs::set_permissions(&*temp, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let root = scratch_root(&temp, 7);
+    let root = scratch_root(&temp, "unit-", 7);
     std::fs::set_permissions(&*temp, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(root.is_none());
 }
@@ -182,9 +183,9 @@ fn a_planted_scratch_root_is_not_taken() {
     let temp = std::env::temp_dir().join(format!("svolder-root-test-{}", std::process::id()));
     let elsewhere = temp.join("elsewhere");
     std::fs::create_dir_all(&elsewhere).unwrap();
-    std::os::unix::fs::symlink(&elsewhere, temp.join("svolder-unit-7")).unwrap();
-    let (root, _lock) = scratch_root(&temp, 7).expect("a root");
-    assert_ne!(root, temp.join("svolder-unit-7"));
+    std::os::unix::fs::symlink(&elsewhere, temp.join("unit-7")).unwrap();
+    let (root, _lock) = scratch_root(&temp, "unit-", 7).expect("a root");
+    assert_ne!(root, temp.join("unit-7"));
     let meta = std::fs::symlink_metadata(&root).unwrap();
     assert!(meta.is_dir());
     assert_eq!(meta.mode() & 0o777, 0o700);
@@ -201,4 +202,23 @@ fn only_a_strict_descendant_of_temp_is_kept() {
     assert!(!is_strictly_under(std::path::Path::new("/tmp/../x"), temp));
     assert!(!is_strictly_under(std::path::Path::new("tmp/x"), temp));
     assert!(!is_strictly_under(std::path::Path::new("/tmpx/y"), temp));
+}
+
+/// A refused scratch base (a file or a link at `<temp>/svolder`) never leaves the homes unpinned:
+/// the root goes directly in the temporary directory under the older name.
+#[test]
+fn a_refused_scratch_base_falls_back_to_the_old_names() {
+    let base = svolder_host::scratch::scratch_base().expect("the scratch base");
+    for planted in ["file", "link"] {
+        let temp = base.join(format!("fallback-{planted}-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        if planted == "file" {
+            std::fs::write(temp.join("svolder"), b"").unwrap();
+        } else {
+            std::os::unix::fs::symlink(&temp, temp.join("svolder")).unwrap();
+        }
+        let (root, _lock) = pick_root(&temp, 7).expect("a fallback root");
+        assert_eq!(root, temp.join("svolder-unit-7"));
+        std::fs::remove_dir_all(&temp).unwrap();
+    }
 }

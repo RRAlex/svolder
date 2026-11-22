@@ -15,7 +15,7 @@
 
 use serde_json::{Value as Json, json};
 
-use super::{OFF, ON, UNIT, envelope};
+use super::{Computer, OFF, ON, envelope};
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
@@ -56,55 +56,64 @@ pub const STATES: [&str; 6] = [
 
 /// The two entities' discovery topics, whatever the view holds. They are read-only, so `commands`
 /// changes nothing.
-pub(super) fn topics_of(discovery_prefix: &str) -> Vec<String> {
+pub(super) fn topics_of(computer: &Computer, discovery_prefix: &str) -> Vec<String> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
     vec![
-        topics::discovery_config(discovery_prefix, "sensor", UNIT, PATH_KEY),
-        topics::discovery_config(discovery_prefix, "binary_sensor", UNIT, CONFIG_KEY),
+        topics::discovery_config(discovery_prefix, "sensor", computer.unit(), PATH_KEY),
+        topics::discovery_config(
+            discovery_prefix,
+            "binary_sensor",
+            computer.unit(),
+            CONFIG_KEY,
+        ),
     ]
 }
 
-/// The topic of the path sensor's attributes, `<base>/computer/computer_path/attributes`.
-pub fn path_attributes_topic(base_topic: &str) -> String {
-    format!("{base_topic}/{UNIT}/{PATH_KEY}/attributes")
+/// The topic of the path sensor's attributes, `<base>/computer_<host>/computer_path/attributes`.
+pub fn path_attributes_topic(computer: &Computer, base_topic: &str) -> String {
+    format!("{base_topic}/{}/{PATH_KEY}/attributes", computer.unit())
 }
 
-/// The topic of the config sensor's attributes, `<base>/computer/computer_config/attributes`.
-pub fn config_attributes_topic(base_topic: &str) -> String {
-    format!("{base_topic}/{UNIT}/{CONFIG_KEY}/attributes")
+/// The topic of the config sensor's attributes, `<base>/computer_<host>/computer_config/attributes`.
+pub fn config_attributes_topic(computer: &Computer, base_topic: &str) -> String {
+    format!("{base_topic}/{}/{CONFIG_KEY}/attributes", computer.unit())
 }
 
 /// The two entries.
-pub(super) fn entries(base_topic: &str, discovery_prefix: &str) -> Vec<DiscoveryEntry> {
+pub(super) fn entries(
+    computer: &Computer,
+    base_topic: &str,
+    discovery_prefix: &str,
+) -> Vec<DiscoveryEntry> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
-    let mut path = envelope(base_topic, "Path", PATH_KEY);
+    let mut path = envelope(computer, base_topic, "Path", PATH_KEY);
     path.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, PATH_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), PATH_KEY).into(),
     );
     path.insert(
         "json_attributes_topic".into(),
-        path_attributes_topic(base_topic).into(),
+        path_attributes_topic(computer, base_topic).into(),
     );
     path.insert("device_class".into(), "enum".into());
     path.insert("options".into(), json!(STATES));
-    let mut config = envelope(base_topic, "PipeWire config", CONFIG_KEY);
+    let mut config = envelope(computer, base_topic, "PipeWire config", CONFIG_KEY);
     config.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, CONFIG_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), CONFIG_KEY).into(),
     );
     config.insert(
         "json_attributes_topic".into(),
-        config_attributes_topic(base_topic).into(),
+        config_attributes_topic(computer, base_topic).into(),
     );
     config.insert("device_class".into(), "problem".into());
     config.insert("payload_on".into(), ON.into());
     config.insert("payload_off".into(), OFF.into());
-    let topics = topics_of(discovery_prefix);
+    let topics = topics_of(computer, discovery_prefix);
     vec![
         DiscoveryEntry {
             topic: topics[0].clone(),

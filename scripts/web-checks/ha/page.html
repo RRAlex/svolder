@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 the svolder authors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>svolder cards</title>
+<style>
+  /* dark: the svolder theme's own values (contrib/home-assistant/themes/svolder.yaml). */
+  body.dark { --primary-background-color: #0c0c0c; --card-background-color: #141414; --primary-text-color: #f2f0ea;
+    --secondary-text-color: #7a7a7a; --disabled-text-color: #5a5a5a; --divider-color: #1e1e1e; --input-fill-color: #1e1e1e;
+    --state-active-color: #e0341c; --primary-color: #e0341c; }
+  /* light and hadark: Home Assistant's own default light and dark themes, from its frontend, release
+     20261028.6, src/resources/theme/color/color.globals.ts (colorStyles for light, darkColorStyles for
+     dark; the text colours are --rgb-primary-text-color 33,33,33 and --rgb-secondary-text-color
+     114,114,114 there). --state-active-color is --amber-color in both. */
+  body.light { --primary-background-color: #fafafa; --card-background-color: #ffffff; --primary-text-color: rgb(33, 33, 33);
+    --secondary-text-color: rgb(114, 114, 114); --disabled-text-color: #bdbdbd; --divider-color: rgba(0, 0, 0, 0.12);
+    --input-fill-color: rgb(245, 245, 245); --state-active-color: #ffc107; }
+  body.hadark { --primary-background-color: #111111; --card-background-color: #1c1c1c; --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b; --disabled-text-color: #6f6f6f; --divider-color: rgba(225, 225, 225, 0.12);
+    --input-fill-color: rgba(255, 255, 255, 0.05); --state-active-color: #ffc107; }
+  main { display: grid; gap: 12px; }
+</style>
+</head>
+<body>
+<main id="m"></main>
+<script type="module" src="./page.js"></script>
+</body>
+</html>

@@ -94,6 +94,11 @@ pub const FEATURE_SPEAKERS: &str = "speakers";
 /// user's presets through it and writes no `[[preset]]` block itself.
 pub const FEATURE_PRESET_WRITE: &str = "preset_write";
 
+/// The feature a daemon lists when it takes the `scene` requests ([`SceneOp`](super::SceneOp))
+/// and sends the `scenes` event: while it runs, it keeps the scenes of sound settings, and a front
+/// end offers scenes only while it lists this.
+pub const FEATURE_SCENES: &str = "scenes";
+
 /// Everything this build's daemon supports, as its `version` answer lists it: the one place the
 /// list is kept. A front end asks through `DaemonInfo::supports`.
 pub const FEATURES: &[&str] = &[
@@ -108,6 +113,7 @@ pub const FEATURES: &[&str] = &[
     FEATURE_HOST_COVER,
     FEATURE_PRESET_WRITE,
     FEATURE_SPEAKERS,
+    FEATURE_SCENES,
 ];
 
 /// The message of the code-3 [`Response::Error`] a daemon answers a command with while it holds no

@@ -249,6 +249,11 @@ impl<T, R> Slots<T, R> {
         self.waiting.as_ref()
     }
 
+    /// Whether a recall runs or waits to start.
+    pub fn busy(&self) -> bool {
+        self.recall_pending()
+    }
+
     fn recall_pending(&self) -> bool {
         self.running || self.waiting.is_some()
     }

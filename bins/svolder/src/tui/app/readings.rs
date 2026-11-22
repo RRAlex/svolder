@@ -129,6 +129,8 @@ impl App {
             // Another front end's recall: the header names it from now on, and the session's own
             // `loading` and `*` work on top of it as they do on one of its own.
             Update::Recalled(name) => self.presets.loaded_preset = Some(name),
+            // The scenes the daemon keeps, and which one is on.
+            Update::Scenes(view) => self.scenes_view(*view),
             // The daemon's view of the host, which `[tui] host_audio = false` overrules.
             Update::Host(view) => {
                 if self.host_shown() {

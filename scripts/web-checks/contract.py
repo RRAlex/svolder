@@ -539,9 +539,11 @@ try:
               sorted(set(keys) ^ set(EXPECTED_KEYS[name])))
     listed = b.page('__core.popups.listed().map((p) => [p.name, p.row.sees, p.stays === true])')
     check('the page lists Devices (everyone\'s, which stays through a device switch), Sound (a '
-          'writer\'s), PipeWire config (everyone\'s) and Help, in that order',
+          'writer\'s), Scenes (a writer\'s, which stays), PipeWire config (everyone\'s) and Help, in '
+          'that order',
           listed == [['devices', 'everyone', True], ['sound', 'writer', False],
-                     ['setup', 'everyone', False], ['help', 'everyone', False]], listed)
+                     ['scenes', 'writer', True], ['setup', 'everyone', False],
+                     ['help', 'everyone', False]], listed)
     check('core.words words a step of a level', b.page(
         "[__core.words.stepWords({ lo: 2, texts: ['a', 'b'] }, 3), __core.words.stepWords({ lo: 0 }, 7)]")
         == ['b', '7'])

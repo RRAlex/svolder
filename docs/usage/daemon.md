@@ -824,7 +824,10 @@ below). Under rootless Docker, use `ports:` and `[web] url` instead of host netw
 refuse that address, and the bridge ones in Docker's 172.16.0.0/12 and Podman's 10.88.0.0/16,
 and ask for `[web] url`; a bridge in any other range (Docker's address pools continue at
 192.168.0.0/20 after 172.31, and `default-address-pools` can be anywhere) is not recognised, so set
-`url` whenever the container is not on host networking.
+`url` whenever the container is not on host networking. Give such a container a `hostname:` (the
+computer's name) too: the Home Assistant device and ids come from the host name, which is
+otherwise the container's id and changes each time it is created (see "The computer's EQ" in
+[Home Assistant and MQTT](mqtt.md)).
 
 A generated token would live in the container's own writable layer and change on every recreate
 (`make docker`, then `docker compose up -d`), breaking every client, so keep the token under the
@@ -907,7 +910,7 @@ future front end other than `svolder` itself, not only for the CLI. A client sen
 `eq_show`, `eq_set` (`band` is 1-based, as the user typed it), `eq_mode`, `passphrase`, `identify`,
 `history`, `readings`, `recalled`, `web_pair`, `web_link`, `web_link_open`, `scan` (`window_ms` is
 held to 30 seconds by the daemon, which answers for the window it listened for without saying so),
-`subscribe`, `reload`, `version`, `stop`, `host`, `host_press`.
+`subscribe`, `reload`, `version`, `stop`, `host`, `host_press`, `scene`.
 
 See `crates/svolder-ipc/src/socket/protocol.rs` for every field's shape. A line the daemon cannot
 parse as a request is answered with `{"result":"error","code":1,"message":"bad request: ..."}` —
@@ -1048,6 +1051,29 @@ reads) also gets the view as a `{"event":"host",…}` event, whatever device it 
 names no device gets its error and the stream ends), once after the connection snapshot and then
 each time the player or the route changes; a daemon from before the field ignores it and sends none,
 and a client from before the event decodes it as one it does not know and skips it.
+
+`scene` is one request for the four things done to a scene, with the op inside it:
+`{"cmd":"scene","op":{"op":"save","name":"Desk","force":false}}`,
+`{"op":"recall","name":"Desk","confirm":false}`, `{"op":"rename","from":"Desk","to":"Den"}` and
+`{"op":"delete","name":"Desk"}`. A scene is the sound settings of the computer and of each connected
+device saved under a name, and the daemon keeps them (the scene design page is
+[scenes.md](../design/scenes.md)); a daemon that does so lists `scenes` among the `features` of its
+`version` answer, and a client sends no scene request to one that does not. The answer is
+`{"result":"scene","name":"Desk","outcome":[...]}`: `name` as the config spells it, and `outcome`
+one `{"who","status","notes"}` per part for a recall (`who` is `computer` or the device's name,
+`status` is `done`, `partial`, `left` or `failed`, `notes` the daemon's words for what was left out)
+and for a save the `left` parts of the configured devices that are not connected, else empty. A
+refusal is an `error` whose `reason` is `taken`, `bad_name`, `missing`, `read_only`, `file_busy`,
+`invalid`, `stopping`, `internal`, `busy` (a device is still reading or applying a change, for a
+save) or `nothing_to_save`. A recall that would play one preset on a device and on the computer at
+once changes nothing and answers `{"result":"ask",...}` with the question in `message`; sending the
+same request with `"confirm":true` recalls the scene as it was saved. Every `subscribe` stream,
+whatever device it names, also carries
+`{"event":"scenes","scenes":[{"name","parts":[{"who","present"}]}],"on","recalled","known"}`, once
+after the snapshot and then each time the view changes; a client from before the event skips it.
+`on` is absent while no scene is on or while that is not known, `recalled` is the scene last
+recalled (kept across a restart in the state home), and `known` is false while a device is still
+reading a setting that could change which scene is on.
 
 `web_pair` and `web_link` ask the web UI for a pairing code or a link code (see
 ["Signing in"](web-ui.md#signing-in) under "Web UI"):
@@ -1202,7 +1228,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.37.2 on /run/user/1000/svolder.sock
+daemon: 0.38.1 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day

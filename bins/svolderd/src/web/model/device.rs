@@ -789,6 +789,12 @@ pub(crate) struct PathModel {
     /// The judge's verdict key (`Verdict::key`): `untouched`, `changed`, `not_this_dac`,
     /// `other_input` or `unknown`.
     pub(crate) verdict: &'static str,
+    /// What the path does to the sound end to end, the DAC's own stage included
+    /// (`EndToEnd::key`): the verdict, with an untouched one whose DAC changes the sound
+    /// `changed`.
+    pub(crate) end_to_end: &'static str,
+    /// The Path row: the label's state and words, each hop's words with their tones, the values.
+    pub(crate) row: svolder_ipc::host::PathRow,
     /// The words of the verdict, one per change or thing not read.
     pub(crate) words: Vec<String>,
     /// The whole sentence behind short words, for a tooltip; empty when there is none.
@@ -853,6 +859,8 @@ impl From<&Playing> for PlayingModel {
             }),
             path: playing.path.as_ref().map(|path| PathModel {
                 verdict: path.verdict,
+                end_to_end: path.end_to_end,
+                row: path.row.clone(),
                 words: path.words.clone(),
                 title: path.title.clone(),
                 hops: path

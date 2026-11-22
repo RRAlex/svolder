@@ -21,7 +21,7 @@ use crate::backend::DeviceRow;
 use crate::format::{link_down, link_flags};
 use crate::tui::app::{App, Holding, Screen};
 use crate::tui::boxes::editor::{DeviceEditor, EDITOR_ROWS, EditorRow};
-use crate::tui::keys::Scene;
+use crate::tui::keys::KeyContext;
 use crate::tui::layout_tier::{self, Tier};
 use crate::tui::mouse::{Hit, HitMap, Selected};
 use crate::tui::render::FrameId;
@@ -219,7 +219,7 @@ pub fn draw(
         (top > 0).then_some(MORE_UP.trim()),
         widgets::actions::action_room(body.width, widgets::text::cells(TITLE)),
         Screen::Devices,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     block = block.title(words.clone().right_aligned());

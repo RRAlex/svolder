@@ -356,6 +356,13 @@ may come in either order, and a set another front end removed answers `missing`:
 the catalogue again, says so and does not retry. With `SVOLDER_HOST=fake` the daemon serves two
 synthetic sets from a store of its own in its private runtime directory, never the person's.
 
+## The Scenes popup
+
+The menu's *Scenes…* row (after *Sound…*) opens `core/popups/scenes/` (`stays`, writer only): the
+list, its lamp and chips and the in-place asks come from the daemon's view alone, through
+`core/scenes.js` and `core/scenes-actions.js` ([scenes.md](scenes.md)); a scene gone elsewhere
+answers `missing`, is said once and the list is read once, with no retry.
+
 ## The EQ library
 
 `core/popups/eq-library/` is the first tab of the Sound popup (the row *Sound…* between *Devices…* and

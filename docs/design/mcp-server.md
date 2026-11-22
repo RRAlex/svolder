@@ -45,10 +45,11 @@ a secret the owner has replaced.
 
 ## The tools
 
-`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers fifteen, listed in `TOOLS`: `list_devices`,
-`get_state`, `get_link_history`, `list_presets` and `get_host` read; `set_control`, `load_preset`,
-`mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq`, `set_host_crossfeed`,
-`set_host_loudness` and `set_host_speakers` write. `get_host`, `set_host_volume`, `host_mute`,
+`Tools` (`bins/svolderd/src/mcp/tools.rs`) offers twenty, listed in `TOOLS`: `list_devices`,
+`get_state`, `get_link_history`, `list_presets`, `get_host` and `list_scenes` read; `set_control`,
+`load_preset`, `mute`, `identify`, `set_host_volume`, `host_mute`, `set_host_eq`,
+`set_host_crossfeed`, `set_host_loudness`, `set_host_speakers`, `load_scene`, `save_scene`,
+`rename_scene` and `delete_scene` write. `get_host`, `set_host_volume`, `host_mute`,
 `set_host_eq`, `set_host_crossfeed`, `set_host_loudness` and `set_host_speakers` are the computer's
 (`bins/svolderd/src/mcp/tools/host.rs`): a percent from 0 to 100 becomes dB as `60 * log10(percent /
 100)`, the floors hold it under `host:volume`, and a rise past `MAX_RISE_DB` asks as the device's
@@ -77,6 +78,19 @@ Every tool goes through `Fleet`, the same request path the socket's clients use
 it, and every write is a write from `Origin::Mcp` through the device's writer. Results carry device
 data only: names the owner configured, profile labels and readings, never anything a third party
 writes, so a tool result is not a channel for instructions into the model.
+
+The scene tools (`bins/svolderd/src/mcp/tools/scenes.rs`, [scenes.md](scenes.md)) follow the preset
+tools' pattern and go through `Fleet` to the daemon's one `Request::Scene`, so a refusal is the
+daemon's words. Each ask is a state the client repeats with an answer: `load_scene` asks for the
+daemon's both-sides question (one preset on a device and on the computer) and, before any request,
+for a built-in band of a connected Loki-type part raised more than 6 dB over its lowest level of the
+last minute (the existing `level_guard` floors, reused; the floors reset only for a part answered
+`done`); a plain recall asks nothing. `save_scene` of a taken name is refused unless `replace:
+true`, which asks once; `delete_scene` asks once; `rename_scene` asks nothing. A client that cannot
+ask answers each question with its own argument: `confirm_both_sides` for the daemon's question and
+`confirm` for the band question, and one never answers the other. The result of `load_scene` carries
+each part's outcome (`who`, `status`, `notes`) in the daemon's words. With `writes` off only
+`list_scenes` is listed. No volume, gain, mute or power is saved or recalled.
 
 `list_presets` and `load_preset` branch on the device: one with a tone control lists and recalls its
 tone-control presets, and one with presets of its own and none of that (a Loki Max, see
@@ -167,7 +181,8 @@ the profile. Nothing a tool returns is something an outside party chose.
 ## Where the code and tests live
 
 - The server: `bins/svolderd/src/mcp.rs`, tests in `bins/svolderd/src/mcp/tests.rs`.
-- The tools: `bins/svolderd/src/mcp/tools.rs`, tests in `bins/svolderd/src/mcp/tools/tests.rs`.
+- The tools: `bins/svolderd/src/mcp/tools.rs`, tests in `bins/svolderd/src/mcp/tools/tests.rs`
+  (`tests/scenes.rs` for the scene tools).
 - The shared HTTP loop and host list: `bins/svolderd/src/http.rs`.
 - The config: `McpConfig` in `crates/svolder-ipc/src/config/net_config.rs`; tokens in
   `crates/svolder-ipc/src/token.rs`.

@@ -193,7 +193,7 @@ pub fn draw(
     widgets::footer::draw_footer(
         frame,
         footer,
-        &Footing::resting(step.scene_of(laid_out)),
+        &Footing::resting(step.context_of(laid_out)),
         theme,
         Screen::Setup,
         hits,

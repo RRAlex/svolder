@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The PipeWire config box in the real TUI: the chip on the Path row, `k` to open and close the
+//! The PipeWire config box in the real TUI: the Path row's click, `k` to open and close the
 //! box, and the box's own read of `pw-dump` where no daemon speaks for the host (a fake `pw-dump`
 //! that prints a capture of a private PipeWire instance).
 
@@ -11,7 +11,7 @@ use crate::common::TempDir;
 use crate::harness::*;
 use crate::tap::*;
 
-/// Wide and tall enough for the Path row to hold the chip.
+/// Wide and tall enough for the Path row to hold its hops.
 const SIZE: (u16, u16) = (160, 40);
 
 /// The lines of the box, by name.
@@ -29,14 +29,15 @@ fn has(tui: &Tui, needle: &str) -> bool {
     tui.screen_text().contains(needle)
 }
 
-/// The demo daemon's simulated host reads every line as a pass: the chip says so and `k` opens
-/// the box with seven passing lines; `k` and `Esc` close it.
+/// The demo daemon's simulated host reads every line as a pass: the row carries no config tag and
+/// `k` opens the box with seven passing lines; `k` and `Esc` close it.
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
 fn k_opens_the_config_box_over_the_demo_daemons_route_and_closes_it() {
     let tui = Tui::start(SIZE.0, SIZE.1, Responder::None);
     tui.wait_ready();
-    tui.wait_for_text("config ✓");
+    tui.wait_for_text("→ DAC");
+    assert!(!has(&tui, "config ✓") && !has(&tui, "config 1"));
     assert!(has(&tui, "k check"), "{}", tui.screen_text());
     tui.send_keys("k");
     tui.wait_for_text("PipeWire config lets it through untouched");
@@ -60,14 +61,14 @@ fn k_opens_the_config_box_over_the_demo_daemons_route_and_closes_it() {
     tui.quit();
 }
 
-/// A click on the chip opens the box, and a click outside it closes it.
+/// A click on the Path row opens the box, and a click outside it closes it.
 #[test]
 #[ignore = "runs the real binary in a pty: make tui-harness"]
-fn a_click_on_the_chip_opens_the_box_and_a_click_outside_closes_it() {
+fn a_click_on_the_path_row_opens_the_box_and_a_click_outside_closes_it() {
     let tui = Tui::start(SIZE.0, SIZE.1, Responder::None);
     tui.wait_ready();
-    tui.wait_for_text("config ✓");
-    let (col, row) = tui.find("config ✓");
+    tui.wait_for_text("→ DAC");
+    let (col, row) = tui.find("→ DAC");
     tui.send_mouse(Mouse::Click, col + 2, row);
     tui.wait_for_text("PipeWire config lets it through untouched");
     tui.send_mouse(Mouse::Click, 0, SIZE.1 - 1);

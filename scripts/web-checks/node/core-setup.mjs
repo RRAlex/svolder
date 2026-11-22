@@ -55,8 +55,20 @@ const UNREAD = {
 const HOSTILE = '<img src=x onerror=alert(1)> "Q" & \'co\'';
 
 /** A path with `setup` on it (none: an older daemon's card), the verdict of an untouched path. */
+const rowWith = (setup) => ({
+  label: { tone: setup?.outcome === 'changes' ? 'warn' : 'good', words: 'Path: untouched end to end' },
+  hops: [
+    { label: 'player', words: [] }, { label: 'computer', words: [] },
+    { label: 'DAC USB 1', words: [] },
+  ],
+  values: [
+    { text: '44.1 kHz', tone: 'dim' }, { text: 'volume 0 dB', tone: 'dim' },
+    ...(setup?.outcome === 'changes' ? [{ text: setup.chip, tone: 'warn' }] : []),
+  ],
+  words: null,
+});
 const pathWith = (setup) => ({
-  verdict: 'untouched', words: ['untouched'], title: '',
+  verdict: 'untouched', end_to_end: 'untouched', words: ['untouched'], title: '', row: rowWith(setup),
   hops: [
     { label: 'player', detail: '44.1 kHz S16LE, volume 100 %', changes: false, unknown: false },
     { label: 'DAC', detail: 'USB 1, 44.1 kHz', changes: false, unknown: false },
@@ -154,22 +166,32 @@ await ok('the_popup_is_listed_before_help_with_a_plain_row_for_everyone', () => 
 
 // ---- Ember
 
-await ok('ember_draws_a_chip_button_after_the_verdict_in_the_daemons_words', () => {
-  for (const setup of [PASS, TWO, UNREAD]) {
+await ok('ember_draws_the_config_chip_after_the_hops_only_when_the_values_carry_config_n', () => {
+  const html = PARTS.playing({ playing: playingWith(TWO) }, MODEL(TWO));
+  const chip = new RegExp(`<button type="button" id="np-config" class="np-setup changes" `
+    + `data-config aria-haspopup="dialog" title="${rx(TWO.summary)}" `
+    + `aria-label="${rx(TWO.chip)}, ${rx(TWO.summary)}">${rx(TWO.chip)}</button></p>`);
+  assert.match(html, chip);
+  assert.ok(html.indexOf('np-label') < html.indexOf('np-hop'));
+  assert.ok(html.lastIndexOf('np-hop') < html.indexOf('np-setup'), 'after the hops');
+  assert.ok(!html.includes('np-verdict'));
+  // `config N` leaves the last chip's values for its own chip
+  assert.equal(countOf(html, 'config 2'), 2, 'the chip and its aria-label, not the values');
+});
+
+await ok('ember_draws_no_chip_when_the_check_passes_or_was_not_read_and_the_label_still_opens_the_dialog', () => {
+  for (const setup of [PASS, UNREAD]) {
     const html = PARTS.playing({ playing: playingWith(setup) }, MODEL(setup));
-    const chip = new RegExp(`<button type="button" id="np-config" class="np-setup ${setup.outcome}" `
-      + `data-config aria-haspopup="dialog" title="${rx(setup.summary)}" `
-      + `aria-label="${rx(setup.chip)}, ${rx(setup.summary)}">${rx(setup.chip)}</button>`);
-    assert.match(html, chip);
-    assert.ok(html.indexOf('np-verdict') < html.indexOf('np-setup'));
-    assert.ok(html.indexOf('np-setup') < html.indexOf('np-hop'), 'before the hops');
+    assert.ok(!html.includes('np-setup') && !/config [0-9?\u2713]/.test(html), html);
+    assert.ok(!html.includes('\u2713'), 'no check mark');
+    assert.match(html, /<button type="button" id="np-label" class="np-label good" data-config aria-haspopup="dialog" title="Path: untouched end to end"><span aria-hidden="true">Path<\/span><span class="np-sr">Path: untouched end to end<\/span><\/button>/);
   }
 });
 
-await ok('ember_draws_no_chip_for_an_older_daemon', () => {
+await ok('with_no_config_check_the_label_is_plain_text_that_opens_nothing', () => {
   const html = PARTS.playing({ playing: playingWith(null) }, MODEL(null));
-  assert.ok(!html.includes('np-setup') && !html.includes('config'));
-  assert.ok(html.includes('np-verdict'));
+  assert.ok(!html.includes('data-config') && !html.includes('np-setup'), html);
+  assert.match(html, /<span class="np-label good" title="Path: untouched end to end"><span aria-hidden="true">Path<\/span>/);
 });
 
 // ---- Signal
@@ -199,6 +221,71 @@ await ok('signal_draws_the_chip_on_the_computers_verdict_row_too', () => {
   const withRoute = (setup) => MODEL(setup, { host: { route, path: null } });
   assert.match(computerFacts(withRoute(TWO)), /<dd class="sg-ok"[^>]*>.*sg-config changes.*config 2/s);
   assert.ok(!computerFacts(withRoute(null)).includes('sg-config'));
+});
+
+await ok('signal_colours_the_path_by_end_to_end_not_by_the_verdict_to_the_dacs_input', () => {
+  const asked = (end) => {
+    const model = MODEL(null);
+    model.device.playing.path = { ...pathWith(null), end_to_end: end };
+    model.host = { track: model.device.playing.track };
+    return playerScreen(model, 1_700_000_100_000);
+  };
+  // the verdict (to the DAC's input) is untouched in both; the DAC's own stage decides the colour
+  assert.ok(asked('untouched').includes('sg-verdict sg-ok'));
+  assert.ok(asked('changed').includes('sg-verdict sg-warn'));
+  // the computer's own row reads the same key
+  const facts = (end) => computerFacts(MODEL(null, {
+    host: { route: { sink: { words: 'Bifrost', rate_hz: 44100, format: 'S32LE' }, others_mixing: 0 },
+      path: null },
+    device: { ...MODEL(null).device, playing: { ...playingWith(null), path: { ...pathWith(null), end_to_end: end } } },
+  }));
+  assert.match(facts('untouched'), /<dd class="sg-ok"/);
+  assert.match(facts('changed'), /<dd class="sg-warn"/);
+});
+
+await ok('signal_says_the_row_labels_words_not_untouched_when_the_dac_alone_changes_the_sound', () => {
+  const asked = (end, words) => {
+    const model = MODEL(null);
+    const row = { ...rowWith(null), label: { tone: 'warn', words } };
+    model.device.playing.path = { ...pathWith(null), end_to_end: end, row };
+    model.host = { track: model.device.playing.track };
+    return playerScreen(model, 1_700_000_100_000);
+  };
+  // the verdict to the DAC's input says `untouched`; the DAC's stage changes the sound
+  const changed = asked('changed', 'Path: the DAC changes the sound');
+  assert.ok(changed.includes('sg-verdict sg-warn'));
+  assert.ok(changed.includes('>the DAC changes the sound<'), changed);
+  assert.ok(!changed.includes('>untouched<'), 'yellow never says untouched');
+  // the sentence behind the words (tooltip, screen reader) leads with the same words
+  const titled = (end) => {
+    const model = MODEL(null);
+    const row = { ...rowWith(null), label: { tone: 'warn', words: 'Path: the DAC changes the sound' } };
+    model.device.playing.path = { ...pathWith(null), end_to_end: end, title: 'untouched up to the DAC; volume -26.1 dB', row };
+    model.host = { track: model.device.playing.track };
+    return playerScreen(model, 1_700_000_100_000);
+  };
+  const sentence = 'the DAC changes the sound: untouched up to the DAC; volume -26.1 dB';
+  assert.ok(titled('changed').includes(`title="${sentence}"`), titled('changed'));
+  assert.ok(titled('changed').includes(`<span class="sg-sr">${sentence}</span>`), titled('changed'));
+  assert.ok(titled('changed').includes('<span aria-hidden="true">the DAC changes the sound</span>'));
+  // with the judge's own words the sentence is the judge's alone
+  assert.ok(titled('untouched').includes('title="untouched up to the DAC; volume -26.1 dB"'));
+  // end to end untouched: the judge's own words, as before
+  assert.ok(asked('untouched', 'Path: untouched end to end').includes('sg-ok'));
+  assert.ok(asked('untouched', 'Path: untouched end to end').includes('>untouched<'));
+  // an older model without end_to_end: the verdict's words
+  const old = MODEL(null);
+  old.device.playing.path = { ...pathWith(null), end_to_end: undefined };
+  old.host = { track: old.device.playing.track };
+  assert.ok(playerScreen(old, 1_700_000_100_000).includes('>untouched<'));
+  // the computer's own row says the same
+  const facts = computerFacts(MODEL(null, {
+    host: { route: { sink: { words: 'Bifrost', rate_hz: 44100, format: 'S32LE' }, others_mixing: 0 },
+      path: null },
+    device: { ...MODEL(null).device, playing: { ...playingWith(null),
+      path: { ...pathWith(null), end_to_end: 'changed', row: { ...rowWith(null), label: { tone: 'warn', words: 'Path: the DAC changes the sound' } } } } },
+  }));
+  assert.ok(facts.includes('>the DAC changes the sound<') && !facts.includes('>untouched<'), facts);
 });
 
 // ---- Paper

@@ -51,7 +51,7 @@ use backend::Globals;
 use cli::{Cli, Command};
 use commands::{
     capture, config, daemon, decode, demo, device, doctor, hops, host_eq, identify, mqtt, profiles,
-    token, web,
+    scene, token, web,
 };
 use recovery::Failure;
 
@@ -267,6 +267,7 @@ async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String>
             decode::run(&hex, profile.as_deref(), json).map(|()| ExitCode::SUCCESS)
         }
         Command::Profiles { command } => profiles::run(command),
+        Command::Scene { json, command } => Ok(scene::run(&g, json, command).await),
         Command::Mqtt { command } => mqtt::run(&g, command).await,
         Command::Mcp { command } => token::mcp(&g, command).await,
         Command::Web { qr, command } => web::run(&g, qr, command).await,

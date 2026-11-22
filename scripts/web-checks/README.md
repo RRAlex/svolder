@@ -64,7 +64,7 @@ of a run on a quiet machine appear in `target/web-checks/timing.tsv`.
 
 | Rung | What to run | About |
 |---|---|---|
-| A task (in the implementer's own worktree) | `make web-touched` names the checks the change affects (below); `cargo fmt` and `clippy` on the touched crates, `cargo test -p <crate>`, `make web-snippets`, the node harnesses (`node scripts/web-checks/node/NAME.mjs`, seconds each), and the browser checks the change touches by name, in Chromium: `python3 scripts/web-checks/NAME.py chromium`. For a whole web change `make web-checks-task` | 1 to 6 minutes by name; the task gate about 30 minutes |
+| A task (in the implementer's own worktree) | `make web-touched` names the checks the change affects (below), and at CODE DONE a web lane runs `make web-checks-affected` beside it (below); `cargo fmt` and `clippy` on the touched crates, `cargo test -p <crate>`, `make web-snippets`, the node harnesses (`node scripts/web-checks/node/NAME.mjs`, seconds each), and the browser checks the change touches by name, in Chromium: `python3 scripts/web-checks/NAME.py chromium`. For a whole web change `make web-checks-task` | 1 to 6 minutes by name; the task gate about 30 minutes; `make web-checks-affected` about 10 minutes for a small change, more for a change to the popup list |
 | A lane end (the review) | `make check`, `make web-checks-task`; the checks that changed, in both engines by name | 10 to 20 minutes plus the task gate |
 | A merge to main | `make check`, `make web-checks` (the full gate: every check, Firefox included; a pool check whose inputs did not change is `cached`, see the result cache), `make host-e2e` once, `make e2e` once when the Bluetooth path changed | a second gate in a row runs only the serial lane (about 12 minutes plus `nightdrive_timing`: the other serial entries took 728 s on a quiet machine, against 2100 s for the whole lane before the split) and the node harnesses; a cold gate 35 to 120 minutes of web gate, plus 12 of `make check` |
 | A milestone merge | the merge rung, then `make host-e2e` five times, `make preamp-lab`, `nightdrive_timing.py` and the smoke's timing on a quiet machine | about 2 hours, unattended |
@@ -90,7 +90,7 @@ fails beside others is run once more alone: passing alone is `flaky` (counted as
 the total line, both outputs kept in `target/web-checks/out/NAME.out` and `NAME.again.out`),
 failing again is `FAIL`.
 
-The gate lock, `/tmp/svolder-web-gate.lock` (`WEB_CHECKS_LOCK` names another file for a test of the
+The gate lock, `/tmp/svolder/web-gate.lock` (`WEB_CHECKS_LOCK` names another file for a test of the
 gate itself), is shared by every gate and lane on the machine: a browser check holds it shared
 (`flock -s`), any number at once; a check that asserts a pace holds it exclusive (`flock -x`) and so
 runs with no other browser check of any lane beside it. The re-run of a failed check holds it
@@ -219,6 +219,37 @@ every web file. A changed file lists every check whose files include it, and bes
 A diff with no file under the web dir or here (a Rust-only diff) lists only the harnesses that name
 a changed file, usually none: the daemon's Rust web code is not mapped. `make web-snippets` runs the
 tool's own self-test on a fixture tree.
+
+### Which checks name what a change touched
+
+`make web-checks-affected` (`BASE=<rev>`, default `$WEB_CHECKS_BASE`, then the newest local
+`release-X.Y.Z` branch behind HEAD, else `main`; `BASE=A TO=B` for the diff A to B alone; `LIST=1`
+prints the labels and why and runs nothing; `TIMING=1` also runs the timing parts) runs
+`scripts/web-affected.py`. It takes `web-touched`'s list and adds every
+check whose script, helper or fixture NAMES something the diff adds or removes: an element id, a
+popup's name or a menu row's words, an SSE event name, a quoted string of three words or twelve
+characters (a note, a chip), in the files of the web dir and, for Rust, the page strings of
+`src/web/` (never a test file) and the `send_json` event names. A change to a popup of
+`core/popups/listed.js` also lists the checks that pin the popup list: a check whose own script
+names two different popups of the list within 160 characters (it names the neighbours of the new
+entry, not the entry). The words of a helper count for its importers only when three checks or fewer
+import it. A label comes with its why (`token 'menu-popup-sound' in effects_menu.py`, the most
+specific one). The timing parts are listed and left out of the run (`[timing]`, "owed to the gate
+on a quiet machine"). The rest run in one `WEB_CHECKS_ONLY` run, both engines at once under the
+gate's own lock; never wrap it in flock. Time: the replay of the 0.37.1 menu change lists about 25
+labels, a 10-minute run on a quiet machine and over an hour while other lanes build; a daemon-only
+change lists none. A change to a shared file such as `frame.css` brings `web-touched`'s list, which
+is most of the gate.
+
+What it never sees: a check that asserts a count or an order without naming the id (a loop to 7, a
+length of 4), or a height, a band or a layout that moves without a name changing (0.37.1's note band
+in tone_overlay). The lane still greps `scripts/web-checks/` for the old list by hand, as the rules
+say. A token found in more than 10 check scripts is dropped as too common, and printed with its
+count, so grep for it yourself. A change to a file of the gate itself (run-all.sh) still lists and
+runs what the other files name and says the full gate is owed at merge.
+`python3 -I scripts/web-affected.py --tokens-only BASE` lists what the tokens alone find.
+`make gate-fails LOG=<gate.log>` lists every check still red at the end of a gate log with its FAIL
+lines (triage starts from it).
 
 ### The result cache
 
@@ -483,11 +514,12 @@ repository. Outside a git checkout the gate runs and says it could not tell.
   real `post` over a fetch the test answers: each request's method, path and body with another
   device on show than the one named, no request when none is named, the devices answer handed
   back, every refusal as a reason, a passphrase that is in the body and nowhere else.
-- `node/core-setup.mjs`: the PipeWire config popup (`core/popups/setup/`) and each theme's config chip:
-  the draw lists the sink, the summary, all seven lines (failing ones tagged) and the limit in the daemon's
-  words, escaped, and says `config not read` for an older daemon; Ember's, Signal's and Paper's chips and
-  the listed row; and, on the real core over jsdom, the wire (it follows the `playing` part and the model
-  in either order). `setup_popup.py` is the same in a browser, wide and phone, with the fake host's passing
+- `node/core-setup.mjs`: the PipeWire config popup (`core/popups/setup/`) and each theme's config
+  entry (Ember's label button and chip, Signal's and Paper's chips): the draw lists the sink, the
+  summary, all seven lines (failing ones tagged) and the limit in the daemon's words, escaped, and
+  says `config not read` for an older daemon; Ember's, Signal's and Paper's chips and the listed row;
+  and, on the real core over jsdom, the wire (it follows the `playing` part and the model in either
+  order). `setup_popup.py` is the same in a browser, wide and phone, with the fake host's passing
   and failing config (`python3 setup_popup.py chromium|firefox`).
 - `node/core-help.mjs`: the Help popup (`core/popups/help/`): its draws as strings (a key's row,
   Here's groups, the line for a focus that is nowhere, Everywhere, About and its links), that Help
@@ -945,7 +977,9 @@ and a guest's taps asked of the core and posting nothing, the device's slots (a 
   line), the folded line at 341, 426 and 784 px (a round play, a bare next, the arrow in the corner,
   a cut title looping slowly, its copy a gap behind it), a changed path on the fake changed route
   (`SVOLDER_FAKE_ROUTE=changed`: every chip sits inside the band's fixed box at 820, 1100 and 1280
-  px, the verdict first), an amp page, a daemon with no host.
+  px, the label first), a sweep from 240 to 420 px, one pixel apart, that no wrapped line of a chip
+  starts with a dot or an arrow and no value is split (also a no-hop row with a long sink name), an
+  amp page, a daemon with no host.
 - `reduced_motion.py`: with reduced motion emulated, the small motions all run (the glow turns and
   follows the music, the dot pulses, the knob eases, a held peak falls by steps, the tone curve
   eases and a changed value flashes) and only the first default level (Glow) follows the setting;
@@ -1009,7 +1043,7 @@ then a summary, and fails when a mutant survives. The browser runners share `mut
 daemon and browser), the mutants whose named check measures timing alone after the pool, every mutant the
 pool did not kill run again alone (only the alone result counts; a pool kill stands), a baseline that
 failed run again and not remembered, a run whose daemon lost the race for its port started again, and the
-web gate lock (`/tmp/svolder-web-gate.lock`) held shared around a run and exclusive around a timing one.
+web gate lock (`/tmp/svolder/web-gate.lock`) held shared around a run and exclusive around a timing one.
 `mutate_haze.py` and `mutate_scroll.py` run every mutant alone, and `mutate_smoke.py`, `mutate_notes.py`,
 `mutate_sources.py` and `mutate_effects.py` one at a time: their timing bounds flake side by side.
 

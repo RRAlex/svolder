@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The tools the MCP server offers: five that read (four a device, `get_host` the computer) and,
-//! with `[mcp] writes`, nine that act: three that change a device, `identify`, which asks it to
-//! show itself, and five for the computer (see [`host`]).
+//! The tools the MCP server offers: six that read (four a device, `get_host` the computer,
+//! `list_scenes` the scenes) and, with `[mcp] writes`, fourteen that act: three that change a
+//! device, `identify`, which asks it to show itself, six for the computer (see [`host`]) and four
+//! for the scenes (see [`scenes`]).
 //!
 //! Every tool goes through the daemon's own request path ([`Fleet`]), the one the socket's
 //! clients use, so a value is validated and refused exactly as `svolder set` does. Results
@@ -63,6 +64,7 @@ pub use svolder_profiles::safety::MAX_RISE_DB;
 mod describe;
 mod guard;
 mod host;
+mod scenes;
 mod schema;
 
 use describe::{db_text, describe_control, keys_of, label_words, reply};
@@ -197,6 +199,11 @@ impl Tools {
             "set_host_crossfeed" => self.set_host_crossfeed(&request).await,
             "set_host_speakers" => self.set_host_speakers(&request).await,
             "set_host_loudness" => self.set_host_loudness(&request).await,
+            "list_scenes" => self.list_scenes(&request).await,
+            "load_scene" => self.load_scene(&request, caller).await,
+            "save_scene" => self.save_scene(&request, caller).await,
+            "rename_scene" => self.rename_scene(&request).await,
+            "delete_scene" => self.delete_scene(&request, caller).await,
             _ => self.mute(&request, caller).await,
         };
         Ok(match outcome {

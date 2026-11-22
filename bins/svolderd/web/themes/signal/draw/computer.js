@@ -161,11 +161,30 @@ const formatWords = (sink) => [rateWords(sink.rate_hz), sink.format].filter(Bool
 export const plain = (words) => words.replace(/\bthe computer's\b/gi, "PipeWire's").replace(/\bthe computer\b/gi, 'PipeWire')
   .replace(/\bcomputer\b/gi, 'PipeWire');
 
-/** The verdict's words as markup: with a whole sentence behind them (`path.title`) the short words
+/** The label's words (`the DAC changes the sound`) when the DAC's own stage changes the sound on top
+ * of an untouched path (`end_to_end` differs from `verdict`), else null. */
+const labelWords = (path) => {
+  const label = path.row?.label?.words;
+  return path.end_to_end && path.end_to_end !== path.verdict && label ? label.replace(/^Path: /, '') : null;
+};
+
+/** The words Signal says for the path's end: the label's words when the DAC alone changes the
+ * sound, else the judge's words up to the DAC's input. */
+const wordsOf = (path) => { const own = labelWords(path); return own ? [own] : path.words; };
+
+/** The sentence behind the words (tooltip and screen reader): the judge's own, led by the label's
+ * words when those are what is shown. */
+export const titleOf = (path) => {
+  const own = labelWords(path);
+  return path.title && own ? `${own}: ${path.title}` : path.title;
+};
+
+/** The verdict's words as markup: with a whole sentence behind them (`titleOf`) the short words
  * are hidden from a screen reader and the sentence is read in their place. */
-export const said = (path) => (path.title
-  ? `<span aria-hidden="true">${esc(plain(path.words.join(' · ')))}</span><span class="sg-sr">${esc(plain(path.title))}</span>`
-  : esc(plain(path.words.join(' · '))));
+export const said = (path) => {
+  const words = esc(plain(wordsOf(path).join(' \u00b7 ')));
+  return titleOf(path) ? `<span aria-hidden="true">${words}</span><span class="sg-sr">${esc(plain(titleOf(path)))}</span>` : words;
+};
 
 /** The config check's chip, a button beside the verdict that opens the PipeWire config popup: the
  * daemon's short words, in the colour of its class; nothing when the daemon sent no check. */
@@ -177,8 +196,8 @@ export const configChip = (path) => (path?.config
  * words), else nothing. */
 function verdict(path) {
   if (!path?.words?.length) return '';
-  const title = path.title ? ` title="${esc(plain(path.title))}"` : '';
-  return `<dt>${esc(COMPUTER.path)}</dt><dd class="${path.verdict === 'untouched' ? 'sg-ok' : 'sg-warn'}"${title}>${said(path)}${configChip(path)}</dd>`;
+  const title = titleOf(path) ? ` title="${esc(plain(titleOf(path)))}"` : '';
+  return `<dt>${esc(COMPUTER.path)}</dt><dd class="${(path.end_to_end ?? path.verdict) === 'untouched' ? 'sg-ok' : 'sg-warn'}"${title}>${said(path)}${configChip(path)}</dd>`;
 }
 
 /** The facts of the route that are not controls: the sound card and its format, the other streams

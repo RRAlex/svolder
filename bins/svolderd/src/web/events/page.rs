@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 use axum::response::sse::Event;
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use svolder_ipc::socket::protocol::ScenesView;
 use svolder_ipc::{DeviceInfo, JobState, Request, WalkOp};
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
@@ -57,6 +58,10 @@ pub(super) struct Task {
     /// What the `fleet` event last said, and what it was made of.
     fleet_key: Option<FleetKey>,
     fleet_sent: String,
+    /// The scenes' view, for a viewer who may write: followed like the fleet, with no `needs` word.
+    scenes: Option<watch::Receiver<ScenesView>>,
+    /// What the `scenes` event last said, as JSON.
+    scenes_sent: String,
     /// The walk's states, for a page that needs them and a viewer who may write: one follow of
     /// the daemon's per page. Behind a lock so the task stays `Sync`, taken for one poll at a
     /// time.
@@ -83,6 +88,10 @@ impl Task {
             Some((card, route)) => Some(HostKey::new(&card, route, host_computer(&cx).await)),
             None => None,
         };
+        let mut scenes = may_write(&cx).then(|| cx.web.fleet.scenes()).flatten();
+        if let Some(view) = scenes.as_mut() {
+            view.borrow_and_update();
+        }
         let walk = match cx.needs.walk && may_write(&cx) {
             true => {
                 let follow = Request::Walk { op: WalkOp::Follow };
@@ -102,6 +111,8 @@ impl Task {
             fleet_changed,
             fleet_key: None,
             fleet_sent: String::new(),
+            scenes,
+            scenes_sent: String::new(),
             walk,
             running: std::collections::BTreeSet::new(),
             cx,
@@ -117,6 +128,11 @@ impl Task {
     /// Take the fleet and the hops `model` carries as what the page has.
     pub(super) fn seed(&mut self, model: &PageModel) {
         self.fleet_sent = serde_json::to_string(&model.fleet).unwrap_or_default();
+        self.scenes_sent = model
+            .scenes
+            .as_ref()
+            .and_then(|view| serde_json::to_string(view).ok())
+            .unwrap_or_default();
     }
 
     /// Send what changes until the page goes or a rotated token signs every browser out
@@ -139,6 +155,11 @@ impl Task {
                         return;
                     }
                 }
+                () = scenes_changed(&mut self.scenes) => {
+                    if !self.scenes_turn(&tx).await {
+                        return;
+                    }
+                }
                 () = host_changed(&mut self.host) => {
                     if !self.host_turn(&tx).await {
                         return;
@@ -156,6 +177,21 @@ impl Task {
                 }
             }
         }
+    }
+
+    /// Send the scenes' view when it differs from what the page has. `false` when the page has
+    /// gone.
+    async fn scenes_turn(&mut self, tx: &mpsc::Sender<Event>) -> bool {
+        let Some(watch) = self.scenes.as_mut() else {
+            return true;
+        };
+        let view = watch.borrow_and_update().clone();
+        let json = serde_json::to_string(&view).unwrap_or_default();
+        if json == self.scenes_sent {
+            return true;
+        }
+        self.scenes_sent = json;
+        send_json(tx, "scenes", &view).await.is_ok()
     }
 
     /// Send a state of the walk, `None` once its stream has ended (the daemon stopping). A walk
@@ -272,6 +308,18 @@ fn walk_wrote(
         running.insert(job.job);
         false
     }
+}
+
+/// Wait for the scenes' view to change; for ever when the page has none, or once the daemon that
+/// kept it has gone.
+async fn scenes_changed(scenes: &mut Option<watch::Receiver<ScenesView>>) {
+    if let Some(watch) = scenes.as_mut()
+        && watch.changed().await.is_ok()
+    {
+        return;
+    }
+    *scenes = None;
+    std::future::pending().await
 }
 
 /// Whether the page's viewer may write: signed in, with `[web] writes` on. Only such a viewer

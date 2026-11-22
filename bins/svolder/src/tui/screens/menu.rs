@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The menu `Esc` opens on the device screen: the small wordmark, the versions, and the three
-//! things the keys elsewhere also reach — Settings, Help and Quit.
+//! The menu `Esc` opens on the device screen: the small wordmark, the versions, and the things the
+//! keys elsewhere also reach — Settings, Scenes (while the daemon keeps scenes), Help and Quit.
 //!
 //! It is a modal box like the help overlay: everything around it is dimmed, the box is a fixed
-//! [`WIDTH`]×[`HEIGHT`] in the middle of the screen at every terminal size, and it takes every key
+//! [`WIDTH`]×[`height`] in the middle of the screen at every terminal size, and it takes every key
 //! until it closes. The cursor over its entries is
 //! [`Overlays::menu`](crate::tui::app::Overlays::menu).
 
@@ -20,13 +20,61 @@ use crate::tui::mouse::{Hit, HitMap, Selected};
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets;
 
-/// The entries, top to bottom. The first letter of each is the key that takes it.
-pub const ENTRIES: [&str; 3] = ["Settings", "Help", "Quit"];
+/// One entry of the menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entry {
+    /// The Settings box, `s`.
+    Settings,
+    /// The Scenes box, `z`: only while scenes are offered.
+    Scenes,
+    /// The help overlay, `h`.
+    Help,
+    /// Leave, `q`.
+    Quit,
+}
+
+impl Entry {
+    /// The entry's name, as the menu writes it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Entry::Settings => "Settings",
+            Entry::Scenes => "Scenes",
+            Entry::Help => "Help",
+            Entry::Quit => "Quit",
+        }
+    }
+
+    /// The key that takes the entry: its first letter, but for Scenes, whose key `z` is the one it
+    /// has on every screen.
+    pub const fn key(self) -> char {
+        match self {
+            Entry::Settings => 's',
+            Entry::Scenes => 'z',
+            Entry::Help => 'h',
+            Entry::Quit => 'q',
+        }
+    }
+}
+
+/// The entries, top to bottom: the Scenes row is there only while scenes are offered.
+pub fn entries(app: &App) -> Vec<Entry> {
+    let mut entries = vec![Entry::Settings];
+    if app.scenes_offered() {
+        entries.push(Entry::Scenes);
+    }
+    entries.extend([Entry::Help, Entry::Quit]);
+    entries
+}
 /// Columns the box takes: the small mark's thirty, two blank cells each side, and the border.
 pub const WIDTH: u16 = 36;
-/// Rows the box takes: a blank, the mark's two, the version, a blank, the three entries, a blank,
-/// and the border.
-pub const HEIGHT: u16 = 11;
+/// Rows the box takes less its entries: a blank, the mark's two, the version, a blank, a blank
+/// after the entries, and the border.
+const FRAME_ROWS: u16 = 8;
+
+/// Rows the box takes with the entries `app` has.
+pub fn height(app: &App) -> u16 {
+    FRAME_ROWS + entries(app).len() as u16
+}
 /// Blank cells the mark keeps from each side of the box's inside.
 const MARK_INDENT: usize = 2;
 /// Blank cells the version row keeps from the border on its right.
@@ -53,10 +101,26 @@ pub fn version_line(app: &App, theme: &Theme) -> Line<'static> {
 }
 
 /// One entry, centred: its first letter bold in the key-hint role and the rest in the text, or
-/// the whole of it selected under the cursor.
-fn entry_line(name: &'static str, selected: bool, theme: &Theme) -> Line<'static> {
+/// the whole of it selected under the cursor. Scenes is the word in the text with its key `z`
+/// after it in the key-hint role, since its key is not its first letter.
+fn entry_line(entry: Entry, selected: bool, theme: &Theme) -> Line<'static> {
+    let name = entry.name();
+    let key = theme
+        .style(Role::KeyHint)
+        .add_modifier(ratatui::style::Modifier::BOLD);
     if selected {
-        return Line::from(Span::styled(name, theme.style(Role::Selected))).centered();
+        let words = match entry {
+            Entry::Scenes => format!("{name} {}", entry.key()),
+            _ => name.to_string(),
+        };
+        return Line::from(Span::styled(words, theme.style(Role::Selected))).centered();
+    }
+    if entry == Entry::Scenes {
+        return Line::from(vec![
+            Span::styled(name, theme.style(Role::Text)),
+            Span::styled(format!(" {}", entry.key()), key),
+        ])
+        .centered();
     }
     let (first, rest) = name.split_at(1);
     Line::from(vec![
@@ -75,7 +139,7 @@ fn entry_line(name: &'static str, selected: bool, theme: &Theme) -> Line<'static
 /// one: it is drawn at full strength, outside the box.
 pub fn join_row(area: Rect, app: &App) -> Option<Rect> {
     let command = app.session.join_hint.as_ref()?;
-    let box_area = super::devices::boxed(area, WIDTH, HEIGHT);
+    let box_area = super::devices::boxed(area, WIDTH, height(app));
     if box_area.bottom() >= area.bottom() {
         return None;
     }
@@ -95,7 +159,7 @@ pub fn join_row(area: Rect, app: &App) -> Option<Rect> {
 /// An entry's row, from border to border, is its hit; the dimmed cells around the box are the
 /// hit that closes it.
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut HitMap) -> Rect {
-    let box_area = super::devices::boxed(area, WIDTH, HEIGHT);
+    let box_area = super::devices::boxed(area, WIDTH, height(app));
     widgets::surfaces::modal_ground(frame, box_area, theme);
 
     let indent = Span::raw(" ".repeat(MARK_INDENT));
@@ -108,8 +172,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut 
     lines.push(version_line(app, theme));
     lines.push(Line::default());
     let cursor = app.overlays.menu.unwrap_or(0);
-    for (at, name) in ENTRIES.iter().enumerate() {
-        lines.push(entry_line(name, at == cursor, theme));
+    let entries = entries(app);
+    for (at, entry) in entries.iter().enumerate() {
+        lines.push(entry_line(*entry, at == cursor, theme));
     }
     lines.push(Line::default());
 
@@ -146,7 +211,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut 
     }
     // Entries start on the inner row after the blank, the mark, the version and a blank.
     let first = box_area.y + 1 + 1 + 2 + 1 + 1;
-    for at in 0..ENTRIES.len() {
+    for at in 0..entries.len() {
         let row = Rect::new(box_area.x + 1, first + at as u16, box_area.width - 2, 1);
         hits.push(row, Hit::MenuEntry(at));
         if app.overlays.menu == Some(at) {

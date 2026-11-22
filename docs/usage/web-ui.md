@@ -240,47 +240,73 @@ does not move: it has the same size with art, without it, and with no player at 
 card is one quiet line, `No player`, with no buttons. The buttons go to the player that is
 playing; a guest, and a page with `[web] writes` off, see the card without them.
 
-The **signal path** is one line from the player to the DAC: what the hops add up to first, then each
-hop (the player's stream, the computer's sink, the DAC's own input and sample rate). It says
-`untouched` only when every hop is known to leave the signal alone: the stream and the sink at one
-rate, both at 100 % and not muted, no filter chain (EQ, loudness, crossfeed, virtual speakers) in
-the path, nothing else mixing in, the sink at least as wide as the stream, no dither, no channel
-mix or remap, no filter graph in a converter, no ALSA `plug` or `dmix` and no card that converts,
-and the rate the DAC reads equal to the one the computer sends. Otherwise it names what changes it
-(`resampled 44.1 → 48 kHz`, `resampled 44.1 → 48 kHz (rate forced)` when a forced clock rate causes
-the resample, `computer volume 54 %`, `host EQ on`, `loudness on`, `crossfeed on`,
-`virtual speakers on`, `EQ pass-through` for the flat chain kept while a stream plays,
-`cut to 16 bits (S32 → S16)`, `dither on (triangular)`, `channels 6 → 2 (mixed)`,
-`channels remapped`, `a filter inside the sink`, `ALSA plug converts (plughw:0,0)`,
-`ALSA dmix mixes (dmix:0)`, `DAC reads 44.1 kHz`) or what it could not read (`DAC rate not read`,
-`DAC input not read`, `dither not read`, `forced rate not read`, `ALSA device not read`),
-and when the computer plays to another sink it says so in short
-(`→ Speakers`, or `player → Speakers` for a player routed elsewhere; the whole sentence,
-`the computer plays to Speakers`, is the line's tooltip). Until the daemon has read the route (the
-first read is under way, or `pw-dump` is missing) the line says `route not read`. While the DAC
-listens to an input the computer does not feed (Optical, Coaxial, AES or BNC) the line says
-`the DAC listens to Optical` and gives no verdict, since the computer's stream is not what the DAC
-plays. So does a Gungnir 2 or a Yggdrasil on one USB port while the computer is on the other
-(`the DAC listens to USB 1 · the computer is on USB 2`); when both ports read connected, or a
-reading is missing, the line says `both USB ports connected` or `USB ports not read` and is never
-`untouched`. A DAC with no input choice (the Eitr 2, the Mesh Card) takes USB alone and counts as on
-USB. It never says more than the readings show: svolder cannot see the bits. `untouched` covers
-what enters the computer's audio pipeline from the player's stream, the computer and the DAC; what
-the player changes before its stream, such as loudness normalization, ReplayGain or its own EQ and
+The **signal path** is one row from the player to the DAC, the same row the terminal draws. In
+Ember it starts with the word **Path**, which is green when the sound is untouched end to end
+(the computer's path leaves it alone, the DAC is at 0 dB and its tone control, balance, mute,
+phase and NOS filter change nothing, and the PipeWire config check does not fail) and yellow when
+something changes it or the check fails; it is plain while something could not be read and when
+the sound goes elsewhere. There is no verdict word and no check mark. After the label come the
+hops as chips (`player`, `computer`, `DAC USB 1`), and the values they share sit dim in the last
+chip: the rate once (`48 kHz`, or `44.1 → 48 kHz` when the computer resamples), the DAC's volume
+(`volume 0 dB`), and the DAC's own changes. Only the words of what changes the sound are yellow,
+and a chip with a yellow word has a yellow border: that includes the last chip when its values
+carry one, since the DAC's volume below 0 dB or its tone control changes the sound. A format that
+merely differs (`S16LE` into `S32LE`) stays plain and is not on the row; the label's tooltip and
+screen-reader words say the whole (`Path: untouched end to end`, `Path: the DAC changes the
+sound`, `Path: the PipeWire config check failed`), and a hop with something not read has a dim
+`?`. The label is a button that opens the PipeWire config popup, but only when the daemon sent a
+config check (a DAC's sink); for another sink or a route not read it is plain text. Signal draws
+the same verdict as before, its colour taken from the end-to-end result; when only the DAC
+changes the sound its Path words are the label's words without `Path: ` (`the DAC changes the
+sound`), in yellow. Where a chip wraps onto a new line it starts bare and the chip before it ends
+with the arrow; a value (`44.1 → 48 kHz`, `volume -24.1 dB`) never breaks and no line starts with
+`·`. The row with no hops (`nothing playing`, `route not read`, another sink or input)
+is plain, as in the terminal. Ember's chips name each change in short (`resampled`, `volume 54 %`,
+`EQ`, `2 other sounds mixing`, `cut to 16 bits`, `dither`, `channels remapped`, `reads 44.1 kHz`);
+the judge's full words below are what Signal and Paper show and what `svolder host check` and MCP
+say. The judge says `untouched` only when every hop is known to leave the signal alone: the stream
+and the sink at one rate, both at 100 % and not muted, no filter chain (EQ, loudness, crossfeed,
+virtual speakers) in the path, nothing else mixing in, the sink at least as wide as the stream, no
+dither, no channel mix or remap, no filter graph in a converter, no ALSA `plug` or `dmix` and no
+card that converts, and the rate the DAC reads equal to the one the computer sends. Otherwise it
+names what changes it (`resampled 44.1 → 48 kHz`, `resampled 44.1 → 48 kHz (rate forced)` when a
+forced clock rate causes the resample, `computer volume 54 %`, `host EQ on`, `loudness on`,
+`crossfeed on`, `virtual speakers on`, `EQ pass-through` for the flat chain kept while a stream
+plays, `cut to 16 bits (S32 → S16)`, `dither on (triangular)`, `channels 6 → 2 (mixed)`, `channels
+remapped`, `a filter inside the sink`, `ALSA plug converts (plughw:0,0)`, `ALSA dmix mixes
+(dmix:0)`, `DAC reads 44.1 kHz`) or what it could not read (in Ember a dim `?` on the hop; `DAC rate
+not read`, `DAC input not read`, `dither not read`, `forced rate not read`, `ALSA device not read`),
+and when the computer plays to another sink it says so in short (`→ Speakers`, or `player →
+Speakers` for a player routed elsewhere; the whole sentence, `the computer plays to Speakers`, is
+the line's tooltip). Until the daemon has read the route (the first read is under way, or `pw-dump`
+is missing) the line says `route not read`. While the DAC listens to an input the computer does not
+feed (Optical, Coaxial, AES or BNC) the line says `the DAC listens to Optical` and gives no verdict,
+since the computer's stream is not what the DAC plays. So does a Gungnir 2 or a Yggdrasil on one USB
+port while the computer is on the other (`the DAC listens to USB 1 · the computer is on USB 2`);
+when both ports read connected, or a reading is missing, the line says `both USB ports connected` or
+`USB ports not read` and is never `untouched` (in Ember the DAC's chip shows a dim `?` and the label
+is plain). A DAC with no input choice (the Eitr 2, the Mesh Card) takes USB alone and counts as on
+USB. It never says more than the readings show: svolder cannot see the bits. `untouched` covers what
+enters the computer's audio pipeline from the player's stream, the computer and the DAC; what the
+player changes before its stream, such as loudness normalization, ReplayGain or its own EQ and
 volume (and whether the music is a local file or streamed), happens where svolder cannot look, and
-the verdict's tooltip says so, and that svolder judges up to 24 bits. A DAC's page has a
-path line; an amp's or a preamp's has none. On a desktop the card's height is fixed, so a path with
-more to say than fits ends in a chip of three dots (the verdict first, always; the dots' tooltip
-lists the hops left out, and a screen reader still reads them). While the DAC's own stage changes
-the sound (its volume below 0 dB, its tone control on EQ or loudness, its balance off centre) the
-DAC's hop says so (`volume -3.3 dB`), and the verdict's tooltip adds what the DAC then does
-(`the Bifrost 3 then lowers it by 3.3 dB`, `shapes it with its tone control`, `shifts the balance`).
+the untouched sentence (`svolder host check`, MCP) says so, and that svolder judges up to 24 bits. A
+DAC's page has a path line; an amp's or a preamp's has none. On a desktop the card's height is
+fixed, so a path with more to say than fits shows a chip of three dots in place of the hops it
+leaves out (the label first, always; the chips unchanged go first, then the changed ones, and the
+DAC's chip, with the values, last; the dots' tooltip lists the hops left out, and a screen reader
+still reads them). While the DAC's own stage changes the sound (its volume below 0 dB, its tone
+control on EQ or loudness, its balance off centre) the DAC's hop says so (`volume -3.3 dB`), and
+Signal's verdict tooltip, which leads with the label's words, adds what the DAC then does (`the
+Bifrost 3 then lowers it by 3.3 dB`, `shapes it with its tone control`, `shifts the balance`).
 
-**The PipeWire config chip.** Beside the verdict, a short chip says what the PipeWire config does to
-the sound, whatever plays: `config ✓` when all seven conditions pass, `config 2` when two of them
-fail (the config changes the sound), and `config ?` when a line could not be read. Ember, Signal
-(the player screen and the computer's side) and Paper draw it; Night drive has only the menu row.
-The chip is a button: a click opens the PipeWire config popup. It prints the daemon's words and
+**The PipeWire config chip.** In Ember the chip is there only when the PipeWire config check
+fails: `config 2` after the hops when two of the seven conditions fail (the config changes the
+sound, and the `Path` label turns yellow). A check that passes or is not read shows no chip; the
+`Path` label opens the popup then. Signal (the player screen and the computer's side) and Paper
+still draw a short chip beside the verdict: `config ✓` when all seven pass, `config 2` when two
+fail, `config ?` when a line could not be read; Night drive has only the menu row. A chip is a
+button: a click opens the PipeWire config popup. It prints the daemon's words and
 judges nothing. There is no chip while no route is read, on an amp's page, when the default sink is
 not the DAC, or while nothing is judged; the popup then says `config not read`.
 
@@ -541,17 +567,17 @@ pill), on every screen and for a guest too. It opens a small list: first the **T
 theme's name, with a small picture; it opens the picker), then the theme's own rows (Ember's are
 headed *Ember's effects*: the three levels below, the one that shows checked, and under them, when
 the screen has a Now playing card, a **Visualizer** switch, then **Arrange sections…**), then
-**Devices…** (the Devices popup, below; read-only for a guest and where `[web] writes` is off), **EQ
-library…** (below; not for a guest, nor where `[web] writes` is off), **PipeWire config…** (below;
-everyone's), **Help…** (the Help popup, above) and **Sign out**, or **Sign in** for a guest. Another
-device is shown from the Devices popup.
-A click or a tap picks a row and closes the list, and Escape, `q`, a click outside or the button
-again close it. By keyboard: `Tab` reaches the button first, `Enter` or `Space` opens it, the arrows
-move between the rows (round the ends, skipping any that is disabled), `Enter` or `Space` picks, and
-the focus returns to the button. The **picker** (the Theme row, or `T` from any theme) shows a card
-for each theme, the one in use marked; Escape or a click outside closes it, and a pick of another
-theme changes the page to it. Each browser keeps its own choice, and `?theme=ember` in the address
-always gets Ember back. See [the frame](../design/frame.md).
+**Devices…** (the Devices popup, below; read-only for a guest and where `[web] writes` is off),
+**Sound…** (below; not for a guest, nor where `[web] writes` is off), **Scenes…** (below; the same),
+**PipeWire config…** (below; everyone's), **Help…** (the Help popup, above) and **Sign out**, or
+**Sign in** for a guest. Another device is shown from the Devices popup. A click or a tap picks a
+row and closes the list, and Escape, `q`, a click outside or the button again close it. By keyboard:
+`Tab` reaches the button first, `Enter` or `Space` opens it, the arrows move between the rows (round
+the ends, skipping any that is disabled), `Enter` or `Space` picks, and the focus returns to the
+button. The **picker** (the Theme row, or `T` from any theme) shows a card for each theme, the one
+in use marked; Escape or a click outside closes it, and a pick of another theme changes the page to
+it. Each browser keeps its own choice, and `?theme=ember` in the address always gets Ember back. See
+[the frame](../design/frame.md).
 
 **Devices** is the menu's *Devices…* row, in every theme, for everyone. A guest and a page with
 `[web] writes` off read it: the list, the Overview, a device's state, key graphs, facts, signal and
@@ -744,6 +770,32 @@ again, or what it ended with, when you come back; only **Cancel** stops a fetch.
 Every word, number and picture is the daemon's (`eq.speakers`): `timing` is `{arrivals: {left,
 right: [{ms, db}], tail: {times_ms, left, right} | null}, decay: {times_ms, low, mid, high,
 end_ms}}`, absent from a daemon without it.
+
+**Scenes** is the menu's *Scenes…* row, in every theme, after *Sound…*, for whoever may change things
+(a guest and a page with `[web] writes` off have no row, and the page gets no scenes at all). A
+scene is the sound of the computer and of each device that was connected when it was saved, kept
+under a name: the computer's EQ, loudness, crossfeed and virtual speakers, and each device's tone
+control and plain settings (input, phase, NOS, balance and the like). A recall puts them all back
+at once. No volume, gain, mute or power is saved or recalled, and the popup says so under the save
+field; a changed input can still change what you hear. The popup has no side list and no keys of
+its own, and stays open when another device is shown.
+
+The popup lists one scene a row: the name, a lamp and `On now` on the scene that is on, and the
+parts as chips (`computer`, then each device by the name it has now; a device that is away is a
+dashed chip, `Hall · not connected`). The lamp and `On now` come from the daemon's view alone, so
+they show only once the daemon has settled which scene is on; until then a dim `reading…` shows and
+no lamp is lit. A tap on the name (or `Recall`) recalls the scene, and the line under the list says
+how each part fared, in the daemon's words: a part that was set in part, was left as it was (a
+device that is not connected, or a part refused) or could not be set is named. A pencil renames the
+scene and a bin deletes it, each asking in place in its own row (`Rename "Desk" to`, `Delete "Desk"?
+The sound now playing does not change.`). *Save current as…* is a name field and *Save*; a hint
+under it says what a save takes (`Saves the computer and Desk DAC. Hall is not connected and is left
+out.`), and a name that is taken asks `Save over "Desk"?` in place. A recall that would play one
+preset on a device and on the computer at once asks the daemon's question in the row (`Recall
+anyway`); yes recalls the scene as it was saved. `Escape` closes an open question first and the
+popup after it. A scene that was deleted or renamed elsewhere answers `That scene is gone.`, and the
+list is read again once. The popup is the same in all four themes, drawn with each theme's own popup
+look.
 
 **PipeWire config** is the menu's *PipeWire config…* row (plain, with no state text), in every
 theme, for everyone: a guest and a page with `[web] writes` off see it too, since it only shows
@@ -1254,6 +1306,11 @@ below are all there is. The table is checked against the daemon's sources and th
 | POST | `api/v1/host/press` | not listed |
 | POST | `api/v1/host/speakers` | not listed |
 | POST | `api/v1/host/volume` | not listed |
+| GET | `api/v1/scenes` | not listed |
+| POST | `api/v1/scenes/delete` | not listed |
+| POST | `api/v1/scenes/recall` | not listed |
+| POST | `api/v1/scenes/rename` | not listed |
+| POST | `api/v1/scenes/save` | not listed |
 | GET | `api/v1/session` | not listed |
 | POST | `api/v1/speakers/catalogue` | `none` |
 | POST | `api/v1/speakers/fetch` | `id` |
@@ -1284,6 +1341,31 @@ is a `409` `read_only` too, and the page shows the daemon's missing-file words i
 read-only sentence. A body that is not what a route takes is a `400` with no `reason`, whose words
 name the key at fault and never what the body held; a body over 4 KB is a `413` in plain text, which
 the page never sends.
+
+The scenes (a scene is a named set of sound settings: the computer's and each connected device's)
+are listed and changed by a signed-in viewer with writes on, and by nobody else (`401` and `403` as
+for the other writes, the list included). The daemon keeps them; the page model carries `scenes`
+for such a viewer and no other, and `api/v1/events` sends a `scenes` event, with no `needs` word,
+each time they change. Both hold the daemon's view: `scenes` (every scene with its `name` and its
+`parts`, each a `who`, the word `computer` or the device's name now, and whether it is `present`
+to be recalled), `on` (the scene that is on; absent while none is and while that is not known),
+`recalled` (the scene last recalled, which outlives a restart of the daemon) and `known` (false
+while a device is still reading a setting that could change which scene is on: the page says
+reading, never none). `GET api/v1/scenes` answers that view. `POST api/v1/scenes/save` takes
+`{"name":"…"}` (and `"force":true` to save over a scene of that name), `/recall` takes
+`{"name":"…"}` (and `"confirm":true`), `/rename` takes `{"from":"…","to":"…"}` and `/delete` takes
+`{"name":"…"}`. Rename and delete answer `{"name":"…"}`, the name as the config spells it; a save
+answers the name and an `outcome` that lists, as parts that are `left`, each configured device that
+is not connected (it is not in the scene); a recall answers `{"name":"…","outcome":[…]}`, one entry
+per part (`who`, `status` one of `done`, `partial`, `left` and `failed`, and `notes`, the words for
+what was left out), the computer's first. A recall that would play one preset on a device and on
+the computer at once changes nothing and answers `409` with
+`{"error":"…","ask":{"kind":"both_sides","name":"…","devices":[…],"question":"…"}}`: yes sends the
+same request again with `"confirm":true`, which recalls the scene as it was saved. A refusal is `{"error":"…","reason":"…"}`: `422` for `bad_name` and `taken`, `409`
+for every other reason (`missing`, `busy` while a device is still reading or applying a change,
+`nothing_to_save` when no device is connected and the computer's controls are not there,
+`read_only`, `file_busy`, `invalid`, `stopping`, `internal`).
+A scene holds no volume, gain, mute or power: no such value is saved or set.
 
 The device walk (scan, pick, name, passphrase test, write; see the design's
 [device walk](../design/device-walk.md)) is run by the daemon and driven by the same viewers only

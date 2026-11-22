@@ -1270,8 +1270,9 @@ async fn with_no_player_the_card_is_one_quiet_line() {
 }
 
 /// The path line is its verdict and then its hops, so a line too long for its box loses hop detail
-/// and never the answer (`ember-parts.mjs` holds the case `the_verdict_chip_comes_before_the_hops` for the order the page draws them
-/// in).
+/// and never the answer (`ember-parts.mjs` holds the case
+/// `the_label_comes_first_and_is_the_button_that_opens_the_config_dialog` for the order the page
+/// draws them in).
 #[tokio::test]
 async fn the_path_has_its_verdict_and_its_hops() {
     use svolder_host::{PlayerMatch, RouteFacts, SinkFacts, StreamFacts};

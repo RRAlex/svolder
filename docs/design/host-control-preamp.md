@@ -158,6 +158,28 @@ until the reset it owes takes the stage out. The lab's `stage_cost_table` (an ig
 for every model's presets with and without a delay, the most the stage adds against its cost over
 every rate it may be worked out at and played at.
 
+## A line that changes points and a stage
+
+A live line can land in torn quanta, and PipeWire plays a half-landed line, so a line that changes
+the EQ's points and also a crossfeed or speakers stage that costs less (a crossfeed turned off or
+made cheaper, crossfeed to speakers) could play over unity in between: the new points on the old,
+dearer stage's preamp. A drag released while a crossfeed drag was still pending did it, up to +2.0
+dB in the lab. So `send_dirty_once` puts the stage's ports before the slots in such a line, and
+while the node may still hold the loaded config's slots (after a sink rate change nobody has seen)
+and the new preamp would not pay for the new stage over them, it holds the preamp low for both
+orders (`stage_hold`, in `cap_at`): the line goes live at the held level with `LEVEL_HELD_NOTE` and
+the chain is applied again once nothing plays. With no stream it is one apply. A line that changes
+no slot keeps the slots-first order, which is safe in every world, with no hold and no note. Each
+recall holds for its own line only, and a recall that is refused restores the hold it found.
+
+A stage the node plays and the controller has no record of (after a command-line apply replaced the
+node under a stage) has an unknown cost, so no hold bound exists. The controller takes it to the
+bypass in a line of its own before a line that changes slots: one extra live line, rare, costing
+nothing and leaving the next line the single-kind order. It fires only for a stage the config does
+not hold, since a config-held stage is paid for by `loaded_stage_db` on every line. The same rules
+serve a scene recall ([scenes.md](scenes.md)), which is one such line; loudness does not count as a
+slot change, since it is cut-only at every boundary.
+
 ## The loudness stage
 
 The loudness stage ([loudness.md](loudness.md)) sits after the EQ's sixteenth slot and costs the
@@ -243,11 +265,11 @@ wins. A controller that says it is on and live must have a node that plays the p
 at the rate the sink runs at, under the preamp it shows, within 0.05 dB at every frequency of a
 grid. One that is off, with a curve that plays at the sink's rate, must turn on when asked.
 
-The short run is five blocks of 300 seeds. The first draws every kind of event with its usual
-weight. The second, the targeted profile, takes nearly half of its events from a command-line apply,
-a node that starts again, a refusal read late, a write that fails once and drags: the compound that
-can leave a chain replaced while a line is refused or lost. Against a copy that sends a line to a
-node other than the one it looked at, it fails 132 of 5000 seeds where the first block fails 58. The
+The short run is six blocks of 300 seeds. The first draws every kind of event with its usual weight.
+The second, the targeted profile, takes nearly half of its events from a command-line apply, a node
+that starts again, a refusal read late, a write that fails once and drags: the compound that can
+leave a chain replaced while a line is refused or lost. Against a copy that sends a line to a node
+other than the one it looked at, it fails 132 of 5000 seeds where the first block fails 58. The
 third, the speakers profile, makes one event in eight a change of the virtual speakers (a set
 chosen, on, off): the model's controller has a store of two sets, the model renders the speakers'
 stage in a config with a set and reads its mixers back, the unity rule adds what those mixers make
@@ -262,15 +284,22 @@ outside), 5 % on mutes, 13 % on loudness changes (on, off, strength, reference a
 volume now, drags and releases), 8 % on rate changes up to 768 kHz, 2 % on daemon takeovers (half of
 them with a first line that does not land) and 12 % on ticks. The model holds the loudness stage's
 ports, the unity rule counts the stage and holds the stage alone to unity, and a liveness rule asks
-that the played depth follows the volume. Each profile draws from a stream of its own, so the first
-block's seeds do not depend on the others. Every sequence ends with a quiet tail: the faults armed
-and not used are disarmed, the daemon reads the state file and the world is left alone for 90 ticks,
-so the liveness rule is asked of the state the sequence ended in. A failing seed prints the shrunk
-sequence;
-`SVOLDER_LAB_SEED=<seed> cargo test -p svolder-host --lib lab_trace -- --ignored --nocapture` prints
-what happened step by step. The short run is part of `make check`;
-`make preamp-lab SEED=<first> RUNS=<count>` runs the long one (5000 sequences of each profile by
-default).
+that the played depth follows the volume. The sixth, the scene profile (`generate_scene`, its own
+stream, so no older profile's seeds move), mixes scene recalls with random parts (the curve,
+loudness, crossfeed and speakers, playing or idle) among the faults of `event_for`, under both id
+models, and the unity rule is asked after every event and every tick. The lab also checks every line
+boundary for every profile, and the whole rule at the end of every landed line; the repair line
+(`Outbox::line`, sent after a `pw-cli` died with a line unseen) carries every port in the caller's
+order and the rest after, so its preamp placement is not the controller's and the check skips it by
+name (`repair_owed`; `SVOLDER_LAB_REPAIR_LINES=1` makes the check see it).
+
+Each profile draws from a stream of its own, so the first block's seeds do not depend on the others.
+Every sequence ends with a quiet tail: the faults armed and not used are disarmed, the daemon reads
+the state file and the world is left alone for 90 ticks, so the liveness rule is asked of the state
+the sequence ended in. A failing seed prints the shrunk sequence; `SVOLDER_LAB_SEED=<seed> cargo
+test -p svolder-host --lib lab_trace -- --ignored --nocapture` prints what happened step by step.
+The short run is part of `make check`; `make preamp-lab SEED=<first> RUNS=<count>` runs the long one
+(5000 sequences of each profile by default).
 
 ## What the lab cannot see
 

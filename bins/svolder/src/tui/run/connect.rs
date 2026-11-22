@@ -580,6 +580,9 @@ pub(super) fn daemon_answered(
             .host
             .art
             .daemon_serves(info.supports(svolder_ipc::FEATURE_HOST_COVER));
+        watching
+            .app
+            .scenes_served(info.supports(svolder_ipc::socket::protocol::FEATURE_SCENES));
         watching.app.overlays.conn.daemon_said(info, own_config);
         match (
             &watching.app.overlays.conn.config_changed,

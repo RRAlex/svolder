@@ -8,15 +8,16 @@ use std::sync::Arc;
 use rmcp::model::{CallToolRequestParams, JsonObject, Tool, ToolAnnotations};
 use serde_json::{Value, json};
 
-use super::host;
+use super::{host, scenes};
 
 /// The tool names, each with whether it changes a device.
-pub(super) const TOOLS: [(&str, bool); 15] = [
+pub(super) const TOOLS: [(&str, bool); 20] = [
     ("list_devices", false),
     ("get_state", false),
     ("get_link_history", false),
     ("list_presets", false),
     ("get_host", false),
+    ("list_scenes", false),
     ("set_control", true),
     ("load_preset", true),
     ("mute", true),
@@ -27,6 +28,10 @@ pub(super) const TOOLS: [(&str, bool); 15] = [
     ("set_host_crossfeed", true),
     ("set_host_speakers", true),
     ("set_host_loudness", true),
+    ("load_scene", true),
+    ("save_scene", true),
+    ("rename_scene", true),
+    ("delete_scene", true),
 ];
 
 /// A call's arguments, checked: a name the tool does not take is refused, and each is read
@@ -97,6 +102,9 @@ impl<'a> Args<'a> {
 
 /// A tool's definition: its name, its one-sentence description and its arguments.
 pub(super) fn definition(name: &'static str, write: bool) -> Tool {
+    if name.ends_with("_scene") || name == "list_scenes" {
+        return scenes::definition(name, write);
+    }
     if name == "set_host_crossfeed" {
         return host::crossfeed_definition();
     }

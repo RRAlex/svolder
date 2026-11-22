@@ -21,7 +21,7 @@ use serde_json::{Value as Json, json};
 use svolder_host::eq::SpeakersView;
 use svolder_host::eq::speakers::SetView;
 
-use super::{OFF, ON, UNIT, envelope};
+use super::{Computer, OFF, ON, envelope};
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
@@ -68,13 +68,17 @@ impl State {
     }
 }
 
-/// The topic of the select's attributes, `<base>/computer/computer_speakers_set/attributes`.
-pub fn attributes_topic(base_topic: &str) -> String {
-    format!("{base_topic}/{UNIT}/{SET_KEY}/attributes")
+/// The topic of the select's attributes, `<base>/computer_<host>/computer_speakers_set/attributes`.
+pub fn attributes_topic(computer: &Computer, base_topic: &str) -> String {
+    format!("{base_topic}/{}/{SET_KEY}/attributes", computer.unit())
 }
 
 /// The discovery topics of the two entities, for `commands`, whatever the view holds.
-pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
+pub(super) fn topics_of(
+    computer: &Computer,
+    discovery_prefix: &str,
+    commands: bool,
+) -> Vec<String> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
@@ -83,49 +87,50 @@ pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
         false => ("binary_sensor", "sensor"),
     };
     vec![
-        topics::discovery_config(discovery_prefix, switch, UNIT, SWITCH_KEY),
-        topics::discovery_config(discovery_prefix, set, UNIT, SET_KEY),
+        topics::discovery_config(discovery_prefix, switch, computer.unit(), SWITCH_KEY),
+        topics::discovery_config(discovery_prefix, set, computer.unit(), SET_KEY),
     ]
 }
 
 /// The two entries, for a computer whose controller serves the speakers (`view` is their view).
 pub(super) fn entries(
+    computer: &Computer,
     base_topic: &str,
     discovery_prefix: &str,
     commands: bool,
     view: &SpeakersView,
 ) -> Vec<DiscoveryEntry> {
-    let mut switch = envelope(base_topic, "Virtual speakers", SWITCH_KEY);
+    let mut switch = envelope(computer, base_topic, "Virtual speakers", SWITCH_KEY);
     switch.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, SWITCH_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), SWITCH_KEY).into(),
     );
     switch.insert("payload_on".into(), ON.into());
     switch.insert("payload_off".into(), OFF.into());
-    let mut set = envelope(base_topic, "Virtual speakers set", SET_KEY);
+    let mut set = envelope(computer, base_topic, "Virtual speakers set", SET_KEY);
     set.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, SET_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), SET_KEY).into(),
     );
     set.insert(
         "json_attributes_topic".into(),
-        attributes_topic(base_topic).into(),
+        attributes_topic(computer, base_topic).into(),
     );
     if commands {
         switch.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, SWITCH_KEY).into(),
+            topics::command(base_topic, computer.unit(), SWITCH_KEY).into(),
         );
         set.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, SET_KEY).into(),
+            topics::command(base_topic, computer.unit(), SET_KEY).into(),
         );
         set.insert(
             "options".into(),
             Json::Array(options(&view.sets).into_iter().map(Json::from).collect()),
         );
     }
-    let topics = topics_of(discovery_prefix, commands);
+    let topics = topics_of(computer, discovery_prefix, commands);
     vec![
         DiscoveryEntry {
             topic: topics[0].clone(),

@@ -485,13 +485,13 @@ fn zero_and_f_ask_for_nothing_on_a_device_without_a_balance_or_a_tone_control() 
     assert!(app.balance().is_none() && app.profile.eq.is_none());
     assert!(ch(&mut app, '0').is_empty());
     assert!(ch(&mut app, 'f').is_empty());
-    let scene = keys::Scene::of(&app);
+    let context = keys::KeyContext::of(&app);
     for label in ["0", "f"] {
         let hint = keys::hints_for(Screen::Device)
             .into_iter()
             .find(|hint| hint.label == label)
             .unwrap_or_else(|| panic!("the device screen lists {label}"));
-        assert!(!keys::available_in(hint, scene), "{label} is not dimmed");
+        assert!(!keys::available_in(hint, context), "{label} is not dimmed");
     }
 }
 
@@ -1084,4 +1084,28 @@ fn a_points_changes_carry_its_slot_not_only_its_place() {
         matches!(&sent[..], [Intent::HostEq(op)] if matches!(&**op, HostEqOp::Set { index: 1, slot: Some(7), .. })),
         "{sent:?}"
     );
+}
+
+/// `z` opens the Scenes box from every screen, and while it is open no uppercase key turns a mode
+/// of the TUI: the box takes every key.
+#[test]
+fn z_opens_the_scenes_box_and_the_box_takes_every_key() {
+    for screen in [
+        Screen::Device,
+        Screen::Tone,
+        Screen::Telemetry,
+        Screen::Devices,
+    ] {
+        let mut app = crate::tui::test_support::offering_scenes(
+            crate::tui::test_support::app_showing(screen),
+            crate::tui::test_support::mockup_scenes(),
+        );
+        assert!(ch(&mut app, 'z').is_empty(), "{screen:?}");
+        assert!(app.scenes.list.is_some(), "{screen:?}");
+        let before = app.snapshot_for_test();
+        for key in ['F', 'M', 'V', 'E', 'H', 'R'] {
+            assert!(ch(&mut app, key).is_empty(), "{key}");
+            assert!(app.snapshot_for_test() == before, "{key} on {screen:?}");
+        }
+    }
 }

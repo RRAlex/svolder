@@ -14,7 +14,7 @@ use svolder_proto::FunctionId;
 
 use crate::tui::app::{App, Screen, ToneRow};
 use crate::tui::boxes::edit_line::{self, EditLine};
-use crate::tui::keys::Scene;
+use crate::tui::keys::KeyContext;
 use crate::tui::layout_tier::Tier;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::theme::{Role, Theme};
@@ -79,7 +79,7 @@ pub(super) fn draw_bands(
         None,
         widgets::actions::action_room(area.width, widgets::text::cells(" Bands ")),
         Screen::Tone,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     let mut block = tier

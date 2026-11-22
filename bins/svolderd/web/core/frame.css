@@ -595,6 +595,8 @@
   font: 500 14px var(--frame-font); cursor: pointer;
 }
 .fi-btn.danger { border-color: var(--frame-danger); color: var(--frame-danger); }
+/* a field's placeholder reads as dim text, not as the browser's own grey */
+.fi-input::placeholder { color: var(--frame-dim); opacity: 1; }
 .fi-btn:focus-visible, .fi-input:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
 .fi-btn:disabled, .fi-btn[aria-disabled="true"] { opacity: .5; cursor: default; }
 .fi-btn[aria-pressed="true"] { border-color: var(--frame-accent); color: var(--frame-accent); }
@@ -929,6 +931,38 @@
 .fpe-mini-needle { stroke: var(--frame-accent); stroke-width: 2; stroke-linecap: round; }
 .fpe-saved-words:empty { display: none; }
 .fpe-lower { margin-top: 8px; color: var(--frame-warn); }
+/* the Scenes popup (popups/scenes/draw.js): a row for each scene, a lamp and its name, the part
+   chips under it, a pencil and a bin; the asks and the answer are in place */
+.sc-rows { margin: 6px 0 0; }
+.sc-row { padding: 0; border-bottom: 1px solid var(--frame-line); }
+.sc-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-height: var(--frame-tap); }
+.sc-main {
+  flex: 1 1 11em; display: flex; align-items: center; gap: 10px; min-width: 0;
+  min-height: var(--frame-tap); padding: 4px 6px; border: 0; border-radius: 10px; background: none;
+  color: var(--frame-ink); font: 500 14.5px var(--frame-font); text-align: left; cursor: pointer;
+}
+.sc-main:hover { background: var(--frame-hover); }
+.sc-main:focus-visible, .sc-ico:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 2px; }
+.sc-name { min-width: 0; overflow-wrap: anywhere; }
+.sc-row.on .sc-name { color: var(--frame-accent); }
+.sc-state { margin-left: auto; color: var(--frame-dim); font: 400 12.5px var(--frame-font); }
+.sc-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1 1 100%; order: 3; padding: 0 0 8px 28px; }
+.sc-off { border-style: dashed; color: var(--frame-dim); }
+.sc-ico {
+  display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0;
+  border-radius: 50%; background: none; color: var(--frame-dim); cursor: pointer;
+}
+.sc-ico:hover { color: var(--frame-ink); background: var(--frame-hover); }
+/* the words of the row's buttons are for a theme that draws words and not icons */
+.sc-recall, .sc-word { display: none; }
+.sc-ask { margin: 0 0 10px 28px; }
+.sc-ask:empty { display: none; }
+.sc-reading { margin: 6px 0 0; color: var(--frame-dim); }
+.sc-say { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--frame-line); border-radius: 10px; color: var(--frame-ink); }
+.sc-say.fp-failed { color: var(--frame-danger); }
+.sc-skip { display: inline-block; color: var(--frame-warn); }
+.sc-save { margin: 0 0 4px; }
+.sc-hint { margin: 6px 0 0; font-size: 12.5px; }
 /* a popup's header tools (a switch) and the bar under the header (tabs, pills): the bar does not
    scroll with the page */
 .fp-head-tools { display: flex; flex: none; align-items: center; }

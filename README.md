@@ -72,8 +72,10 @@ the strip with − Mute +, the input, the track, the transport and Device">
 ### Terminal
 
 <img src="docs/images/dac.webp" width="100%" alt="The device screen of a Gungnir 2: its controls
-with the volume bar's clipping-risk zone, transport and spectrum, the tone control, and the status with the link history, the level's source, Now playing So What by Miles
-Davis and the L and R VU meters with their needles on the 0 VU scale">
+with the volume bar's clipping-risk zone, transport with the track's time, the Path row with its
+hops and the DAC's volume and tone control in yellow, and spectrum, the tone control, and the
+status with the link history, the level's source, Now playing So What by Miles Davis and the L and
+R VU meters with their needles on the 0 VU scale">
 
 <img src="docs/images/tone.webp" width="100%" alt="The tone-control screen of a Gungnir 2 with the
 Sennheiser HD 800 S correction from AutoEq, measured by oratory1990, fitted to its five bands: the

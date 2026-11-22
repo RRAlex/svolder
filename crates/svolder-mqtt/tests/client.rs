@@ -54,6 +54,27 @@ async fn until_link(client: &Client, wanted: impl Fn(Link) -> bool) -> Link {
     }
 }
 
+/// A parent config (the computer's device) is put back before every other discovery config on a
+/// connect, whatever the topics sort as, so Home Assistant has it when it registers the rest.
+#[tokio::test]
+async fn a_parent_config_is_put_back_before_the_other_discovery_configs() {
+    let broker = TestBroker::start();
+    let mut watcher = Watcher::connect(broker.port, &["homeassistant/#"]).await;
+    let (client, _events) = Client::start(settings(broker.port));
+    // Asked for before the connect, the device's first and its sorting first.
+    client.announce("homeassistant/binary_sensor/svolder_0102/link/config", "{}");
+    client.announce_parent("homeassistant/switch/svolder_computer_desk/eq/config", "{}");
+    let seen = watcher.collect(Duration::from_secs(2)).await;
+    let topics: Vec<&str> = seen.iter().map(|s| s.topic.as_str()).collect();
+    assert_eq!(
+        topics,
+        [
+            "homeassistant/switch/svolder_computer_desk/eq/config",
+            "homeassistant/binary_sensor/svolder_0102/link/config"
+        ]
+    );
+}
+
 /// The next event the client reports that `wanted` accepts.
 async fn next_event(
     events: &mut mpsc::UnboundedReceiver<ClientEvent>,

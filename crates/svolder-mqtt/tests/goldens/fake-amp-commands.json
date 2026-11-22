@@ -3,7 +3,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -17,7 +17,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "device_class": "problem",
       "name": "Over-current",
@@ -37,7 +38,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -51,7 +52,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "device_class": "problem",
       "name": "Over-temperature",
@@ -71,7 +73,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         }
       ],
       "availability_mode": "all",
@@ -82,7 +84,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "device_class": "connectivity",
       "name": "Link",
@@ -101,7 +104,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -115,7 +118,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Temperature reporting",
       "origin": {
@@ -134,7 +138,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -149,7 +153,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "entity_category": "config",
       "name": "Identify",
@@ -166,7 +171,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -180,7 +185,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Meter L",
       "origin": {
@@ -199,7 +205,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -213,7 +219,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Meter R",
       "origin": {
@@ -232,7 +239,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -246,7 +253,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "device_class": "signal_strength",
       "entity_category": "diagnostic",
@@ -267,7 +275,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -282,7 +290,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Mute",
       "origin": {
@@ -301,7 +310,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -316,7 +325,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Fake amp",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Power meters",
       "origin": {

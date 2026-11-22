@@ -23,7 +23,7 @@ use svolder_proto::FunctionId;
 
 use crate::tui::app::divider::Split;
 use crate::tui::app::{App, Holding, Ld, Pane, Screen};
-use crate::tui::keys::Scene;
+use crate::tui::keys::KeyContext;
 use crate::tui::layout_tier::{self, Tier};
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::render::FrameId;
@@ -57,6 +57,7 @@ use controls::path_row;
 use controls::{Controls, controls_pane, height, room};
 use status::{
     device_drawn, faults_fit, level_from_drawn, link_drawn, now_playing_drawn, passphrase_drawn,
+    scene_drawn,
 };
 #[cfg(test)]
 use tone_pane::tone_lines;
@@ -231,12 +232,8 @@ pub fn draw(
 }
 
 /// The lines of the Path row's tooltip, each at most `width` cells.
-pub(crate) fn path_tip_lines(
-    path: &svolder_ipc::host::PathLine,
-    chip: Option<&crate::tui::app::Chip>,
-    width: usize,
-) -> Vec<String> {
-    path_line::tip_lines(&path_line::stages_with(path, chip), width)
+pub(crate) fn path_tip_lines(row: &svolder_ipc::host::PathRow, width: usize) -> Vec<String> {
+    path_line::tip_lines(&path_line::row_lines(row), width)
 }
 
 /// Draw the Controls pane into `area` and push the hits of its rows, the Host group's rows and
@@ -309,8 +306,9 @@ fn draw_controls(
         let row = pane_row(inner, *top);
         hits.push(row, Hit::Row(Pane::Controls, controls.rows.len() + offset));
     }
-    // The Path row, every line it wraps to, shows the whole path in a tooltip; a cut row that
-    // is in sight scrolls, which the tick reads off what this frame found.
+    // The Path row, every line it wraps to, label included, is one target: a click opens the
+    // config box, a rest shows the whole path in a tooltip; a cut row that is in sight scrolls,
+    // which the tick reads off what this frame found.
     if let Some(path) = controls.path {
         let area = Rect {
             x: inner.x,
@@ -322,16 +320,6 @@ fn draw_controls(
         if !area.is_empty() {
             hits.push(area, Hit::Path);
             app.drawn.path_travel.set(path.travel);
-            // The chip is a target of its own over the row's: a click opens the config box.
-            if let Some(chip) = path.chip {
-                let chip = Rect {
-                    x: inner.x + u16::try_from(widgets::CURSOR_WIDTH).unwrap_or(0) + chip.x,
-                    y: area.y.saturating_add(chip.line),
-                    width: chip.width,
-                    height: 1,
-                };
-                hits.push(chip.intersection(area), Hit::Config);
-            }
         }
     }
     let spectrum = controls
@@ -578,7 +566,7 @@ fn draw_holding(
         None,
         widgets::actions::action_room(body.width, cells(title)),
         Screen::Device,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     let block = tier
@@ -639,7 +627,8 @@ fn vu_rows(area: Rect, app: &App) -> u16 {
 /// [`rows_of`] worked out afresh.
 fn lay_out(area: Rect, app: &App) -> (Tier, [Rect; 3]) {
     let (tier, [header, body]) = layout_tier::split(area);
-    let extra_lines = u16::from(device_drawn(app))
+    let extra_lines = u16::from(scene_drawn(app))
+        + u16::from(device_drawn(app))
         + u16::from(link_drawn(app, tier))
         + u16::from(level_from_drawn(app))
         + u16::from(now_playing_drawn(app))
@@ -886,7 +875,7 @@ fn pane(
         None,
         widgets::actions::action_room(spec.area.width, cells(&name)),
         Screen::Device,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     let block = tier

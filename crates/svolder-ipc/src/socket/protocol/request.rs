@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
 use super::READINGS_SPAN_SECS;
-use super::{AutoEqOp, DeviceConfigOp, HostEqOp, MqttOp, PresetOp, Server, SpeakersOp, WalkOp};
+use super::{
+    AutoEqOp, DeviceConfigOp, HostEqOp, MqttOp, PresetOp, SceneOp, Server, SpeakersOp, WalkOp,
+};
 
 /// The `cmd` of every [`Request`] kind, in the enum's order. The server tells a kind it does not
 /// have from a malformed one of a kind it has by this list; a test reads the enum's own source
@@ -49,6 +51,7 @@ pub(crate) const REQUEST_CMDS: &[&str] = &[
     "mqtt_set",
     "preset_write",
     "host_cover",
+    "scene",
 ];
 
 /// A request from a front end. `device` selects a configured device (name, product name, or
@@ -295,6 +298,13 @@ pub enum Request {
         /// where the chunk starts in the picture; the start when left out
         #[serde(default)]
         offset: u64,
+    },
+    /// Save, recall, rename or delete one scene of sound settings; answered with `scene`
+    /// carrying the name as the file now spells it and, for a recall, how each part fared. The
+    /// daemon judges the name, writes its configuration file and reloads it.
+    Scene {
+        /// what to do
+        op: SceneOp,
     },
 }
 

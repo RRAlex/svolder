@@ -24,7 +24,14 @@ impl BridgeTask {
     /// Mark one device changed, and have it published within [`STATE_EVERY`] of the last
     /// publish.
     pub(super) fn changed(&mut self, unit: &str) {
-        if unit == svolder_mqtt::computer::UNIT {
+        if unit == super::scenes::CHANGED {
+            if let Some(scenes) = self.scenes.as_mut() {
+                scenes.dirty = true;
+                self.schedule_flush();
+            }
+            return;
+        }
+        if unit == self.me.unit() {
             if let Some(computer) = self.computer.as_mut() {
                 computer.dirty = true;
                 self.schedule_flush();
@@ -49,7 +56,7 @@ impl BridgeTask {
     }
 
     /// Have the flush run within [`STATE_EVERY`] of the last one.
-    fn schedule_flush(&mut self) {
+    pub(super) fn schedule_flush(&mut self) {
         let now = Instant::now();
         let due = self
             .last_flush
@@ -70,18 +77,26 @@ impl BridgeTask {
             .filter(|(_, published)| published.dirty)
             .map(|(unit, _)| unit.clone())
             .collect();
+        // The computer's device is announced before the devices that are `via_device` of it:
+        // Home Assistant resolves the link when it registers a device. The client replays the
+        // computer's configs first on a connect (`announce_parent`); a device's first discovery
+        // is held in `publish` while the computer still waits for its first EQ view.
+        self.publish_scenes();
+        self.publish_computer();
         for unit in units {
             if let Some(owed) = self.publish(&unit, now) {
                 self.flush_at = Some(self.flush_at.map_or(owed, |at| at.min(owed)));
             }
         }
-        self.publish_computer();
     }
 
     /// Publish what changed for one device: its availability, its discovery configs, its
     /// state and its meters. Answers with when the meters are owed, when they changed too
     /// soon after the last publish of them.
     pub(super) fn publish(&mut self, unit: &str, now: Instant) -> Option<Instant> {
+        // A device is `via_device` of the computer: its first discovery waits, bounded by the
+        // computer's own wait for its first EQ view, so the computer is announced first.
+        let computer_pending = self.computer.as_ref().is_some_and(|c| !c.swept);
         let config = &self.config;
         let client = &self.client;
         let published = self.devices.get_mut(unit)?;
@@ -108,11 +123,15 @@ impl BridgeTask {
                 && from.firmware == feed.firmware
                 && from.presets == names
         });
-        if !built {
+        if !built && computer_pending {
+            published.dirty = true;
+        }
+        if !built && !computer_pending {
             let device = discovery::Device {
                 name: &feed.name,
                 unit_id: unit,
                 firmware: feed.firmware,
+                computer: self.me.id(),
             };
             let next: BTreeMap<String, String> = svolder_mqtt::discovery_configs(
                 base,

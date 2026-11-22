@@ -3,13 +3,14 @@
 
 //! The computer's EQ over MQTT: one ON/OFF switch and one read-only preset sensor, and the
 //! crossfeed's switch and preset select ([`crossfeed`]), the virtual speakers' switch and set
-//! select ([`speakers`]) and the loudness's switch and strength number ([`loudness`]), all under
-//! a Home Assistant device of their own, `This computer`. Nothing else of the computer is
-//! exposed: no volume, no mute, no points.
+//! select ([`speakers`]), the loudness's switch and strength number ([`loudness`]) and the scenes'
+//! select and text ([`scenes`]), all under a Home Assistant device of their own, named by the
+//! computer's host name. Nothing else of the
+//! computer is exposed: no volume, no mute, no points.
 //!
-//! The entities live under the bridge-level unit [`UNIT`], so their topics read
-//! `<base>/computer/computer_eq/state` and `.../set`, and
-//! `<base>/computer/computer_eq_preset/state`.
+//! The entities live under the computer's unit ([`Computer::unit`], `computer_<host>`), so their
+//! topics read `<base>/computer_<host>/computer_eq/state` and `.../set`, and
+//! `<base>/computer_<host>/computer_eq_preset/state`; two computers on one broker share none.
 //! The switch is a `switch` while commands are on and a `binary_sensor` when they are off, as
 //! every toggle is. ON turns the EQ on with the points the daemon keeps; OFF removes it and keeps
 //! them.
@@ -23,10 +24,58 @@ use crate::topics;
 pub mod crossfeed;
 pub mod loudness;
 pub mod path;
+pub mod scenes;
 pub mod speakers;
 
-/// The bridge-level unit the computer's topics sit under, in place of a device's unit id.
-pub const UNIT: &str = "computer";
+/// The unit the computer's topics sat under before they were per computer.
+const LEGACY_UNIT: &str = "computer";
+
+/// One computer as Home Assistant sees it: the host name shown as its device name, the id-safe
+/// form every topic and id carries, and the unit those are built from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Computer {
+    name: String,
+    id: String,
+    unit: String,
+}
+
+impl Computer {
+    /// The computer of `host`, a host name as read (shown as is; ids use its
+    /// [`topics::host_id`]).
+    pub fn new(host: &str) -> Self {
+        let id = topics::host_id(host);
+        Self {
+            name: host.to_string(),
+            unit: topics::computer_unit(&id),
+            id,
+        }
+    }
+
+    /// The stand-in for the one computer of the releases before this one, whose topics sat under
+    /// the unit `computer`; only for clearing what they announced.
+    pub fn legacy() -> Self {
+        Self {
+            name: String::new(),
+            id: String::new(),
+            unit: LEGACY_UNIT.to_string(),
+        }
+    }
+
+    /// The host name as read, the Home Assistant device's name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The id-safe host name ([`topics::host_id`]).
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// `computer_<host_id>`, the unit the computer's topics and ids sit under.
+    pub fn unit(&self) -> &str {
+        &self.unit
+    }
+}
 
 /// The switch's key.
 pub const EQ_KEY: &str = "computer_eq";
@@ -34,8 +83,11 @@ pub const EQ_KEY: &str = "computer_eq";
 /// The preset sensor's key.
 pub const PRESET_KEY: &str = "computer_eq_preset";
 
-/// The name the Home Assistant device carries.
-const NAME: &str = "This computer";
+/// The manufacturer the computer's device block names.
+const MANUFACTURER: &str = "svolder";
+
+/// The model the computer's device block names.
+const MODEL: &str = "Computer";
 
 /// What the switch publishes while the EQ is on.
 const ON: &str = "ON";
@@ -48,19 +100,51 @@ pub const CUSTOM: &str = svolder_profiles::tone::preset::CUSTOM;
 
 /// Every discovery topic the computer's entities can have for `commands`, whatever the view
 /// holds, for clearing what an earlier run announced.
-pub fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
+pub fn topics_of(computer: &Computer, discovery_prefix: &str, commands: bool) -> Vec<String> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
     let component = if commands { "switch" } else { "binary_sensor" };
     let mut all = vec![
-        topics::discovery_config(discovery_prefix, component, UNIT, EQ_KEY),
-        topics::discovery_config(discovery_prefix, "sensor", UNIT, PRESET_KEY),
+        topics::discovery_config(discovery_prefix, component, computer.unit(), EQ_KEY),
+        topics::discovery_config(discovery_prefix, "sensor", computer.unit(), PRESET_KEY),
     ];
-    all.extend(crossfeed::topics_of(discovery_prefix, commands));
-    all.extend(speakers::topics_of(discovery_prefix, commands));
-    all.extend(loudness::topics_of(discovery_prefix, commands));
-    all.extend(path::topics_of(discovery_prefix));
+    all.extend(crossfeed::topics_of(computer, discovery_prefix, commands));
+    all.extend(speakers::topics_of(computer, discovery_prefix, commands));
+    all.extend(loudness::topics_of(computer, discovery_prefix, commands));
+    all.extend(path::topics_of(computer, discovery_prefix));
+    all
+}
+
+/// The discovery topics the computer's entities had before they were per computer (unit
+/// `computer`), for `commands`: cleared once when a bridge starts, so Home Assistant keeps no
+/// `This computer` device beside the named one.
+pub fn legacy_topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
+    topics_of(&Computer::legacy(), discovery_prefix, commands)
+}
+
+/// The retained availability, state and attributes topics the releases before per-computer ids
+/// kept under the unit `computer`, for clearing them next to [`legacy_topics_of`].
+pub fn legacy_state_topics(base_topic: &str) -> Vec<String> {
+    let old = Computer::legacy();
+    let unit = old.unit();
+    let keys = [
+        EQ_KEY,
+        PRESET_KEY,
+        crossfeed::SWITCH_KEY,
+        crossfeed::PRESET_KEY,
+        loudness::SWITCH_KEY,
+        loudness::STRENGTH_KEY,
+        speakers::SWITCH_KEY,
+        speakers::SET_KEY,
+        path::PATH_KEY,
+        path::CONFIG_KEY,
+    ];
+    let mut all = vec![topics::device_availability(base_topic, unit)];
+    all.extend(keys.map(|key| topics::diagnostic(base_topic, unit, key)));
+    all.push(speakers::attributes_topic(&old, base_topic));
+    all.push(path::path_attributes_topic(&old, base_topic));
+    all.push(path::config_attributes_topic(&old, base_topic));
     all
 }
 
@@ -70,6 +154,7 @@ pub fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
 /// their view), their switch and set select ([`speakers`]). An empty `discovery_prefix` turns
 /// discovery off and returns nothing.
 pub fn entries(
+    computer: &Computer,
     base_topic: &str,
     discovery_prefix: &str,
     commands: bool,
@@ -80,36 +165,42 @@ pub fn entries(
         return Vec::new();
     }
     let component = if commands { "switch" } else { "binary_sensor" };
-    let mut switch = envelope(base_topic, "EQ", EQ_KEY);
+    let mut switch = envelope(computer, base_topic, "EQ", EQ_KEY);
     switch.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, EQ_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), EQ_KEY).into(),
     );
     switch.insert("payload_on".into(), ON.into());
     switch.insert("payload_off".into(), OFF.into());
     if commands {
         switch.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, EQ_KEY).into(),
+            topics::command(base_topic, computer.unit(), EQ_KEY).into(),
         );
     }
-    let mut preset = envelope(base_topic, "EQ preset", PRESET_KEY);
+    let mut preset = envelope(computer, base_topic, "EQ preset", PRESET_KEY);
     preset.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, PRESET_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), PRESET_KEY).into(),
     );
     let mut all = vec![
         DiscoveryEntry {
-            topic: topics::discovery_config(discovery_prefix, component, UNIT, EQ_KEY),
+            topic: topics::discovery_config(discovery_prefix, component, computer.unit(), EQ_KEY),
             payload: Json::Object(switch),
         },
         DiscoveryEntry {
-            topic: topics::discovery_config(discovery_prefix, "sensor", UNIT, PRESET_KEY),
+            topic: topics::discovery_config(
+                discovery_prefix,
+                "sensor",
+                computer.unit(),
+                PRESET_KEY,
+            ),
             payload: Json::Object(preset),
         },
     ];
     if let Some(view) = crossfeed {
         all.extend(crossfeed::entries(
+            computer,
             base_topic,
             discovery_prefix,
             commands,
@@ -118,6 +209,7 @@ pub fn entries(
     }
     if let Some(view) = speakers {
         all.extend(self::speakers::entries(
+            computer,
             base_topic,
             discovery_prefix,
             commands,
@@ -132,12 +224,14 @@ pub fn entries(
 /// strength number ([`loudness`]), then the path sensor and the config problem sensor ([`path`]),
 /// which are read-only whatever `commands` says.
 pub fn entries_of(
+    computer: &Computer,
     base_topic: &str,
     discovery_prefix: &str,
     commands: bool,
     eq: &EqView,
 ) -> Vec<DiscoveryEntry> {
     let mut all = entries(
+        computer,
         base_topic,
         discovery_prefix,
         commands,
@@ -150,32 +244,41 @@ pub fn entries_of(
         .filter(|_| !discovery_prefix.is_empty())
     {
         all.extend(loudness::entries(
+            computer,
             base_topic,
             discovery_prefix,
             commands,
             view,
         ));
     }
-    all.extend(path::entries(base_topic, discovery_prefix));
+    all.extend(path::entries(computer, base_topic, discovery_prefix));
     all
 }
 
 /// The fields every entity of the computer shares.
-fn envelope(base_topic: &str, name: &str, key: &str) -> Map<String, Json> {
+fn envelope(computer: &Computer, base_topic: &str, name: &str, key: &str) -> Map<String, Json> {
     let mut m = Map::new();
     m.insert("name".into(), name.into());
-    m.insert("unique_id".into(), topics::unique_id(UNIT, key).into());
+    m.insert(
+        "unique_id".into(),
+        topics::unique_id(computer.unit(), key).into(),
+    );
     m.insert(
         "availability".into(),
         Json::Array(vec![
-            json!({"topic": topics::bridge_availability(base_topic)}),
-            json!({"topic": topics::device_availability(base_topic, UNIT)}),
+            json!({"topic": topics::bridge_availability(base_topic, computer.id())}),
+            json!({"topic": topics::device_availability(base_topic, computer.unit())}),
         ]),
     );
     m.insert("availability_mode".into(), "all".into());
     m.insert(
         "device".into(),
-        json!({"identifiers": [topics::device_id(UNIT)], "name": NAME}),
+        json!({
+            "identifiers": [topics::device_id(computer.unit())],
+            "name": computer.name(),
+            "manufacturer": MANUFACTURER,
+            "model": MODEL,
+        }),
     );
     m.insert(
         "origin".into(),

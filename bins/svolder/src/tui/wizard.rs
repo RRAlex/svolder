@@ -34,7 +34,7 @@ use crate::wizard::{Effects, Prompt, Step, Takes, Wizard};
 
 use super::app::Screen;
 use super::boxes::tooltip::{self, Tooltip};
-use super::keys::{self, Scene};
+use super::keys::{self, KeyContext};
 use super::mouse::{self, Hit, HitMap};
 use super::palette::detect_depth;
 use super::run::{self, Look, Opener};
@@ -304,9 +304,9 @@ impl ShownStep {
     /// Read one mouse event at `now` against the hits of the last frame: a pointer resting on a
     /// key of the key line asks for its tooltip, anything else hides it.
     fn hover(&mut self, hits: &HitMap, event: &MouseEvent, now: Instant) {
-        let scene = self.scene();
+        let context = self.context();
         self.tip = tooltip::hovered(self.tip, self.tips, hits, event, now, &|hit| {
-            tooltip::wizard_text(hit, scene)
+            tooltip::wizard_text(hit, context)
         });
     }
 
@@ -377,19 +377,19 @@ impl ShownStep {
     /// What the keys that are not always worth pressing are answered against here: a step that
     /// takes a typed line is one where `q` is a letter rather than a way out, and a step whose
     /// words are all on the screen is one with nothing to scroll.
-    pub(super) fn scene(&self) -> Scene {
-        self.scene_of(self.said)
+    pub(super) fn context(&self) -> KeyContext {
+        self.context_of(self.said)
     }
 
     /// The same, against the frame `said` describes: the frame being drawn right now, whose
     /// own key line has to say what that frame can do rather than what the one before it could.
-    pub(super) fn scene_of(&self, said: Said) -> Scene {
-        Scene {
+    pub(super) fn context_of(&self, said: Said) -> KeyContext {
+        KeyContext {
             typing: self.typing,
             stepping: self.code.is_some(),
             scrolls: said.lines > said.rows,
             can_go_back: self.can_go_back,
-            ..Scene::default()
+            ..KeyContext::default()
         }
     }
 
@@ -910,7 +910,7 @@ fn clicked(view: &mut ShownStep, hits: &HitMap, event: MouseEvent) -> Asked {
         }
         Some(Hit::Footer(at)) => match keys::hints_for(Screen::Setup)
             .get(*at)
-            .filter(|hint| keys::available_in(hint, view.scene()))
+            .filter(|hint| keys::available_in(hint, view.context()))
         {
             Some(hint) => press(view, KeyEvent::from(hint.code)),
             None => Asked::Nothing,
@@ -1045,9 +1045,9 @@ fn draw<B: Backend>(canvas: &mut Canvas<B>, view: &mut ShownStep) -> Result<Said
             said = screens::wizard::draw(frame, area, view, theme, hits);
             // The tooltip goes over the finished frame, and only while its key is still under
             // its cell.
-            let scene = view.scene_of(said);
+            let context = view.context_of(said);
             let standing =
-                tooltip::standing_with(tip, tips, hits, &|hit| tooltip::wizard_text(hit, scene));
+                tooltip::standing_with(tip, tips, hits, &|hit| tooltip::wizard_text(hit, context));
             stands = standing.is_some();
             if let (Some(held), Some(lines)) = (tip.filter(|held| held.shown), standing) {
                 tooltip::draw(frame, area, held.at, &lines, theme, None, hits);

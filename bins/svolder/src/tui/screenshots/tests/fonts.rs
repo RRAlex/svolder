@@ -148,11 +148,11 @@ fn the_first_cell_starts_at_the_margin() {
 
 #[test]
 fn a_still_is_painted_in_the_ground_of_the_scenes_theme() {
-    use crate::tui::screenshots::scenes::{Still, still};
-    use crate::tui::screenshots::scenes_palette;
+    use crate::tui::screenshots::shots::{Still, still};
+    use crate::tui::screenshots::shots_palette;
     use crate::tui::screenshots::world::stand_in;
     let Some(fonts) = fonts() else { return };
-    let ground = scenes_palette(&stand_in());
+    let ground = shots_palette(&stand_in());
     let mut raster = Raster::new(fonts, ground);
     for s in Still::ALL {
         let shot = still(&stand_in(), s);

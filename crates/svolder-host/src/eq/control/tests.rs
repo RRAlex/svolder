@@ -47,6 +47,7 @@ mod kept;
 mod ld;
 mod loudness_settings;
 mod passthrough;
+mod scene;
 mod vs;
 mod xf;
 

@@ -23,7 +23,7 @@ pub struct Overlays {
     /// daemon's two servers.
     pub conn: Connections,
     /// The menu `Esc` opens on the device screen, while it is open: the cursor over
-    /// [`menu::ENTRIES`](crate::tui::screens::menu::ENTRIES).
+    /// [`menu::entries`](crate::tui::screens::menu::entries).
     pub menu: Option<usize>,
     /// Whether the help overlay is open, which `?` opens and `?`, `Esc` or a click closes.
     /// While it is open every key but its own is swallowed.

@@ -280,9 +280,9 @@ host; on with it, and a fresh `Request::Host`, asked off the loop); the opener's
 opens is the session's (`Kept`), not the table the TUI started with. A press goes to the daemon as
 `Request::HostPress`, and what it refuses is said in a toast. A daemon that does not know the
 request, or says it has no host, leaves everything as in a direct session. The sink, the host EQ
-and the capture are the TUI's own in both. The Path row puts the verdict first and then the hops,
-cut at the right edge, as the web line does, so a short row keeps the answer, and it stays in the
-Host group while the daemon speaks for the host, so the group keeps its height as a track starts and
+and the capture are the TUI's own in both. The Path row is the shared `PathRow` (the label `Path`, the
+hops, the values), drawn as two lines that wrap at their separators and are cut and scroll only
+when they do not fit, as the web row does, and it stays in the Host group while the daemon speaks for the host, so the group keeps its height as a track starts and
 stops; the TUI draws no elapsed time or progress bar, which is the web card's. `[tui]
 host_audio = false` wins: nothing is asked for, and a view that arrives is dropped.
 

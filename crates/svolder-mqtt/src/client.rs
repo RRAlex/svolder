@@ -216,6 +216,9 @@ pub enum ClientEvent {
 /// Where a retained topic goes in the order a connect puts them back in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Rank {
+    /// A discovery config another config names as its parent (`via_device`), put back before
+    /// every other.
+    Parent,
     /// A discovery config, put back before anything it describes.
     Discovery,
     /// State and availability.
@@ -298,6 +301,18 @@ impl Client {
         });
     }
 
+    /// Keep a Home Assistant discovery config retained on `topic` that other configs name as
+    /// their parent (a device they are `via_device` of): like [`Client::announce`], but put back
+    /// before every other discovery config on each connect, so Home Assistant has the parent
+    /// when it registers the rest.
+    pub fn announce_parent(&self, topic: impl Into<String>, payload: impl Into<Vec<u8>>) {
+        self.send(Op::Retain {
+            topic: topic.into(),
+            payload: payload.into(),
+            rank: Rank::Parent,
+        });
+    }
+
     /// Take `topic`'s retained message off the broker with an empty retained payload, now when
     /// connected, else on the next connect, and stop putting it back.
     pub fn clear(&self, topic: impl Into<String>) {
@@ -371,6 +386,8 @@ enum Polled {
 /// Everything the client puts back on the broker on a connect.
 #[derive(Default)]
 struct Held {
+    /// Discovery configs that others are `via_device` of, by topic.
+    parents: BTreeMap<String, Vec<u8>>,
     /// Discovery configs, by topic.
     configs: BTreeMap<String, Vec<u8>>,
     /// Every other retained topic, by topic.
@@ -434,14 +451,18 @@ impl Held {
                 if let Some(client) = live {
                     retained(client, &topic, payload.clone());
                 }
-                let (keep, drop) = match rank {
-                    Rank::Discovery => (&mut self.configs, &mut self.states),
-                    Rank::State => (&mut self.states, &mut self.configs),
+                self.parents.remove(&topic);
+                self.configs.remove(&topic);
+                self.states.remove(&topic);
+                let keep = match rank {
+                    Rank::Parent => &mut self.parents,
+                    Rank::Discovery => &mut self.configs,
+                    Rank::State => &mut self.states,
                 };
-                drop.remove(&topic);
                 keep.insert(topic, payload);
             }
             Op::Clear(topic) => {
+                self.parents.remove(&topic);
                 self.configs.remove(&topic);
                 self.states.remove(&topic);
                 if let Some(client) = live {
@@ -472,11 +493,16 @@ impl Held {
         }
     }
 
-    /// Put everything back on a fresh connection: `online` first, then every discovery config,
-    /// every other retained topic and every clear, then the subscriptions.
+    /// Put everything back on a fresh connection: `online` first, then every parent config, every
+    /// other discovery config, every other retained topic and every clear, then the subscriptions.
     fn replay(&mut self, client: &AsyncClient, availability: &str) {
         retained(client, availability, ONLINE.as_bytes().to_vec());
-        for (topic, payload) in self.configs.iter().chain(self.states.iter()) {
+        let all = self
+            .parents
+            .iter()
+            .chain(self.configs.iter())
+            .chain(self.states.iter());
+        for (topic, payload) in all {
             retained(client, topic, payload.clone());
         }
         for topic in &self.clears {

@@ -103,20 +103,20 @@ type Hook = Box<dyn FnMut(&ChainCall) -> Option<EqFailure> + Send>;
 /// does them: it may do something meanwhile (a forget racing the apply) or refuse the call (the
 /// call is then not recorded by the fake).
 #[derive(Clone, Default)]
-struct HookChain {
-    inner: FakeChain,
+pub(super) struct HookChain {
+    pub(super) inner: FakeChain,
     hook: Arc<Mutex<Option<Hook>>>,
 }
 
 impl HookChain {
-    fn over(inner: FakeChain) -> HookChain {
+    pub(super) fn over(inner: FakeChain) -> HookChain {
         HookChain {
             inner,
             hook: Arc::default(),
         }
     }
 
-    fn set(&self, hook: impl FnMut(&ChainCall) -> Option<EqFailure> + Send + 'static) {
+    pub(super) fn set(&self, hook: impl FnMut(&ChainCall) -> Option<EqFailure> + Send + 'static) {
         *self.hook.lock().unwrap() = Some(Box::new(hook));
     }
 

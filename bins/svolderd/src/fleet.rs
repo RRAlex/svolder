@@ -12,6 +12,7 @@ use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 use svolder_host::cover::Cover;
 use svolder_ipc::host::HostView;
+use svolder_ipc::socket::protocol::ScenesView;
 use svolder_ipc::{Config, DeviceInfo, Event, Request, Response};
 use svolder_profiles::Profile;
 use svolder_profiles::tone::preset::{self, Preset};
@@ -133,6 +134,12 @@ pub trait Fleet: Send + Sync + 'static {
 
     /// The host's current cover when `hash` is its hash; never an earlier one.
     fn host_cover(&self, _hash: &str) -> Option<Arc<Cover>> {
+        None
+    }
+
+    /// The scenes' view as the daemon keeps it and each change of it; none for a fleet that
+    /// keeps none.
+    fn scenes(&self) -> Option<tokio::sync::watch::Receiver<ScenesView>> {
         None
     }
 
@@ -488,6 +495,10 @@ impl Fleet for DaemonFleet {
 
     fn host_cover(&self, hash: &str) -> Option<Arc<Cover>> {
         self.daemon().ok()?.host().cover(hash)
+    }
+
+    fn scenes(&self) -> Option<tokio::sync::watch::Receiver<ScenesView>> {
+        Some(self.daemon().ok()?.scenes_watch())
     }
 
     fn host_frames(&self) -> Option<FramesWatch> {

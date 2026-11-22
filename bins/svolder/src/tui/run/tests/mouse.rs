@@ -491,3 +491,60 @@ async fn a_click_on_a_preset_row_loads_it() {
     );
     end.watching.close().await;
 }
+
+/// A click on a scene's row focuses it, and a second click on the focused row recalls it: with no
+/// daemon behind the loop the recall comes back as the words `z` uses, in a toast.
+#[tokio::test(start_paused = true)]
+async fn a_click_on_a_scene_row_focuses_it_and_a_click_on_the_focused_row_recalls() {
+    let scenic = |app: App| {
+        crate::tui::test_support::offering_scenes(app, crate::tui::test_support::mockup_scenes())
+    };
+    // The cells of the Desk row, from a frame of the box open.
+    let (x, y) = {
+        let (_backend, _gate, app) = fake(SHORT_DEADLINE).await;
+        let mut app = scenic(app);
+        app.key(KeyEvent::from(crossterm::event::KeyCode::Char('z')));
+        let (x, y) = coord_of(&app, "○ Desk");
+        (x + 2, y)
+    };
+    let (backend, _gate, mut app) = fake(SHORT_DEADLINE).await;
+    app.mouse = true;
+    let app = scenic(app);
+    let (recorder, _frames) = Recorder::new(SIZE.0, SIZE.1);
+    let mut terminal = Terminal::new(recorder).expect("a test terminal opens");
+    let mut mouse = SpyMouse::default();
+    let script = stream::iter(vec![key('z'), left_click(x, y), left_click(x, y)]).chain(Box::pin(
+        stream::once(async {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            Ok(Event::Key(KeyEvent::new(
+                crossterm::event::KeyCode::Char('c'),
+                crossterm::event::KeyModifiers::CONTROL,
+            )))
+        }),
+    ));
+
+    let end = event_loop(LoopParts {
+        opener: &opener_over(never_opens()),
+        adder: &nothing_to_add(),
+        watching: watching(backend, app, None),
+        terminal: &mut terminal,
+        events: script,
+        mouse: &mut mouse,
+        title: &mut title(),
+        look: look(),
+    })
+    .await;
+
+    assert_eq!(end.code, 0, "{:?}", end.why);
+    assert_eq!(
+        end.watching.app.scenes.list.as_ref().map(|list| list.row),
+        Some(1),
+        "the first click focused Desk"
+    );
+    assert_eq!(
+        end.watching.app.toast().map(|toast| toast.text.as_str()),
+        Some(crate::tui::boxes::scenes::NEEDS_DAEMON),
+        "the second click sent the recall"
+    );
+    end.watching.close().await;
+}

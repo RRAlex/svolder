@@ -647,6 +647,8 @@ impl RemoteBackend {
                 }
                 // The host's view is the daemon's, whatever device this feed is on.
                 Event::Host(view) => return Ok(Some(Update::Host(Box::new(view)))),
+                // So are the scenes, whatever device this feed is on.
+                Event::Scenes(view) => return Ok(Some(Update::Scenes(Box::new(view)))),
                 // What is not this device's recall, status or connection: another device's
                 // event, this device's climb, or a note about the daemon.
                 Event::Status { .. }

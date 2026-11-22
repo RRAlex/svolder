@@ -3,7 +3,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         }
       ],
       "availability_mode": "all",
@@ -14,7 +14,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "device_class": "connectivity",
       "name": "Link",
@@ -33,7 +34,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -47,7 +48,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "S/PDIF locked",
       "origin": {
@@ -66,7 +68,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -80,7 +82,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "USB 1 connected",
       "origin": {
@@ -99,7 +102,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -113,7 +116,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "USB 2 connected",
       "origin": {
@@ -132,7 +136,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -147,7 +151,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "entity_category": "config",
       "name": "Identify",
@@ -164,7 +169,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -179,7 +184,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 63.0,
       "min": -63.0,
@@ -200,7 +206,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -215,7 +221,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 78.038,
       "min": 20.0,
@@ -237,7 +244,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -252,7 +259,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 6.0,
       "min": -20.0,
@@ -274,7 +282,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -289,7 +297,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 8.0,
       "min": 0.5,
@@ -310,7 +319,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -325,7 +334,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 311.957,
       "min": 81.961,
@@ -347,7 +357,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -362,7 +372,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 6.0,
       "min": -20.0,
@@ -384,7 +395,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -399,7 +410,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 8.0,
       "min": 0.5,
@@ -420,7 +432,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -435,7 +447,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 1232.228,
       "min": 320.73,
@@ -457,7 +470,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -472,7 +485,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 6.0,
       "min": -20.0,
@@ -494,7 +508,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -509,7 +523,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 8.0,
       "min": 0.5,
@@ -530,7 +545,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -545,7 +560,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 4903.566,
       "min": 1276.324,
@@ -567,7 +583,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -582,7 +598,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 6.0,
       "min": -20.0,
@@ -604,7 +621,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -619,7 +636,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 8.0,
       "min": 0.5,
@@ -640,7 +658,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -655,7 +673,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 19497.278,
       "min": 5074.85,
@@ -677,7 +696,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -692,7 +711,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 6.0,
       "min": -20.0,
@@ -714,7 +734,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -729,7 +749,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 8.0,
       "min": 0.5,
@@ -750,7 +771,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -765,7 +786,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 127.0,
       "min": 0.0,
@@ -786,7 +808,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -801,7 +823,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "max": 0.0,
       "min": -96.33,
@@ -823,7 +846,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -838,7 +861,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Tone control mode",
       "options": [
@@ -860,7 +884,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -875,7 +899,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "EQ preset",
       "options": [
@@ -900,7 +925,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -915,7 +940,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Input",
       "options": [
@@ -939,7 +965,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -953,7 +979,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "entity_category": "diagnostic",
       "name": "DSP firmware",
@@ -970,7 +997,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -984,7 +1011,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "entity_category": "diagnostic",
       "name": "Firmware",
@@ -1001,7 +1029,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -1015,7 +1043,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Sample rate",
       "origin": {
@@ -1032,7 +1061,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -1046,7 +1075,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "device_class": "signal_strength",
       "entity_category": "diagnostic",
@@ -1067,7 +1097,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -1082,7 +1112,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Mute",
       "origin": {
@@ -1101,7 +1132,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -1116,7 +1147,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "NOS filter",
       "origin": {
@@ -1135,7 +1167,7 @@
     "payload": {
       "availability": [
         {
-          "topic": "svolder/bridge/availability"
+          "topic": "svolder/bridge/reframe/availability"
         },
         {
           "topic": "svolder/0102030405060708/availability"
@@ -1150,7 +1182,8 @@
         "manufacturer": "Schiit Audio",
         "model": "Gungnir 2",
         "name": "Living room DAC",
-        "sw_version": "3"
+        "sw_version": "3",
+        "via_device": "svolder_computer_reframe"
       },
       "name": "Phase invert",
       "origin": {

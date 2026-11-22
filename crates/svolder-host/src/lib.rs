@@ -40,6 +40,7 @@ pub mod fake;
 pub mod fft;
 pub mod players;
 pub mod route;
+pub mod scratch;
 pub mod sink;
 pub mod vu;
 

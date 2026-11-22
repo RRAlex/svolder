@@ -30,6 +30,7 @@ mod about {
         "Connect to a device and print every status it reports until Ctrl-C";
     pub(super) const EQ: &str = "Inspect or change the tone control";
     pub(super) const PRESET: &str = "List or apply the device's own presets";
+    pub(super) const SCENE: &str = "List, save, load, rename or delete scenes of sound settings";
     pub(super) const HOST: &str = "Correct what the computer plays, before it reaches the DAC";
     pub(super) const DEVICES: &str = "List the configured devices and their state";
     pub(super) const ADD: &str = "Add a device to the configuration";
@@ -77,6 +78,7 @@ const GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("watch", about::WATCH),
             ("eq", about::EQ),
             ("preset", about::PRESET),
+            ("scene", about::SCENE),
             ("host", about::HOST),
         ],
     ),
@@ -283,6 +285,14 @@ pub(crate) enum Command {
     Preset {
         #[command(subcommand)]
         command: PresetCommand,
+    },
+    #[command(about = about::SCENE)]
+    Scene {
+        /// Print the answer as one JSON object instead of text
+        #[arg(long, global = true)]
+        json: bool,
+        #[command(subcommand)]
+        command: Option<SceneCommand>,
     },
     #[command(about = about::HOST)]
     Host {
@@ -513,6 +523,50 @@ pub(crate) enum EqCommand {
     },
     /// Put every band back on its centre frequency and centre Q at 0 dB
     Flatten,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SceneCommand {
+    /// List the scenes and which one is on (what no verb does)
+    List,
+    /// Show one scene: which parts it holds and which one is on
+    Show {
+        /// The scene's name, in any case
+        name: String,
+    },
+    /// Save the sound settings as they are now as a scene: the computer's and every connected
+    /// device's. No volume, gain, mute or power is saved
+    Save {
+        /// The name to save it under
+        name: String,
+        /// Save over a scene of that name
+        #[arg(long)]
+        force: bool,
+    },
+    /// Recall a scene onto the computer and every connected device that has a part in it
+    Load {
+        /// The scene's name, in any case
+        name: String,
+        /// Answer yes to the question asked when the scene plays a preset on a device and on
+        /// the computer at once
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Rename a scene, leaving what it holds as it is
+    Rename {
+        /// Its name now
+        old: String,
+        /// The name it takes
+        new: String,
+    },
+    /// Delete a scene
+    Delete {
+        /// The scene's name
+        name: String,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]

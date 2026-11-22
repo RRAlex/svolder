@@ -314,6 +314,15 @@ async fn a_subscription_with_no_devices_configured_stays_open() {
         let (mut guard, socket) = spawn_daemon("schema = 1\n");
         let client = connect(&mut guard, &socket).await;
         let mut events = client.subscribe(None).await.expect("a subscription");
+        // With no device there is no snapshot, but the scenes' view follows it: empty here.
+        let first = tokio::time::timeout(STEP_BUDGET, events.next())
+            .await
+            .expect("the scenes' view came")
+            .expect("the stream is open");
+        assert!(
+            matches!(&first, Event::Scenes(view) if view.scenes.is_empty() && view.known),
+            "got {first:?}"
+        );
         // Not [`STEP_BUDGET`]: this is how long the stream must stay silent, so every extra
         // millisecond is time a passing run spends waiting, where a step's budget is time only
         // a failing run spends. A stream that ends does so as the daemon registers it, well
@@ -532,10 +541,17 @@ async fn subscribe_yields_a_status_after_a_set() {
             })
             .await
             .unwrap();
-        let ev = tokio::time::timeout(STEP_BUDGET, events.next())
-            .await
-            .unwrap_or_else(|_| panic!("no event within {STEP_BUDGET:?}"))
-            .expect("stream open");
+        // The scenes' view follows the snapshot on every subscription; it is not what is looked
+        // for here.
+        let ev = loop {
+            let ev = tokio::time::timeout(STEP_BUDGET, events.next())
+                .await
+                .unwrap_or_else(|_| panic!("no event within {STEP_BUDGET:?}"))
+                .expect("stream open");
+            if !matches!(ev, Event::Scenes(_)) {
+                break ev;
+            }
+        };
         assert!(
             matches!(&ev, Event::Status { reading, .. } if reading.key.as_deref() == Some("mute")),
             "got {ev:?}"

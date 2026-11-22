@@ -15,7 +15,7 @@ use serde_json::Value as Json;
 use svolder_host::eq::CrossfeedView;
 use svolder_host::eq::crossfeed::ModelView;
 
-use super::{OFF, ON, UNIT, envelope};
+use super::{Computer, OFF, ON, envelope};
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
@@ -46,7 +46,11 @@ pub enum Choice {
 }
 
 /// The discovery topics of the two entities, for `commands`, whatever the view holds.
-pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
+pub(super) fn topics_of(
+    computer: &Computer,
+    discovery_prefix: &str,
+    commands: bool,
+) -> Vec<String> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
@@ -54,13 +58,13 @@ pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
         topics::discovery_config(
             discovery_prefix,
             switch_component(commands),
-            UNIT,
+            computer.unit(),
             SWITCH_KEY,
         ),
         topics::discovery_config(
             discovery_prefix,
             preset_component(commands),
-            UNIT,
+            computer.unit(),
             PRESET_KEY,
         ),
     ]
@@ -76,38 +80,39 @@ fn preset_component(commands: bool) -> &'static str {
 
 /// The two entries, for a computer whose controller serves crossfeed (`view` is its view).
 pub(super) fn entries(
+    computer: &Computer,
     base_topic: &str,
     discovery_prefix: &str,
     commands: bool,
     view: &CrossfeedView,
 ) -> Vec<DiscoveryEntry> {
-    let mut switch = envelope(base_topic, "Crossfeed", SWITCH_KEY);
+    let mut switch = envelope(computer, base_topic, "Crossfeed", SWITCH_KEY);
     switch.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, SWITCH_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), SWITCH_KEY).into(),
     );
     switch.insert("payload_on".into(), ON.into());
     switch.insert("payload_off".into(), OFF.into());
-    let mut preset = envelope(base_topic, "Crossfeed preset", PRESET_KEY);
+    let mut preset = envelope(computer, base_topic, "Crossfeed preset", PRESET_KEY);
     preset.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, PRESET_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), PRESET_KEY).into(),
     );
     if commands {
         switch.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, SWITCH_KEY).into(),
+            topics::command(base_topic, computer.unit(), SWITCH_KEY).into(),
         );
         preset.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, PRESET_KEY).into(),
+            topics::command(base_topic, computer.unit(), PRESET_KEY).into(),
         );
         preset.insert(
             "options".into(),
             Json::Array(options(&view.models).into_iter().map(Json::from).collect()),
         );
     }
-    let topics = topics_of(discovery_prefix, commands);
+    let topics = topics_of(computer, discovery_prefix, commands);
     vec![
         DiscoveryEntry {
             topic: topics[0].clone(),

@@ -530,3 +530,41 @@ async fn a_stream_opens_on_its_own_connection_and_a_refused_one_is_an_error() {
     .await
     .expect("the case finished in time");
 }
+
+/// The daemon sends the scenes on every feed, whatever device it is filtered to: `next_status`
+/// returns them as `Update::Scenes`, not skipped.
+#[tokio::test]
+async fn the_scenes_event_comes_through_a_device_feed_as_an_update() {
+    tokio::time::timeout(DEADLINE, async {
+        let daemon = stub_daemon().await;
+        let mut backend = RemoteBackend::open(&daemon.socket, None, true)
+            .await
+            .expect("the stub daemon answers");
+        backend.open_feed().await.expect("the feed opens");
+        let hello = backend.next_status().await.expect("the feed reads");
+        assert!(
+            matches!(hello, Some(Update::Connection { connected: true })),
+            "got {hello:?}"
+        );
+        let view = svolder_ipc::socket::protocol::ScenesView {
+            scenes: vec![svolder_ipc::socket::protocol::SceneRow {
+                name: "Late night".into(),
+                parts: vec![svolder_ipc::socket::protocol::PartRow {
+                    who: "computer".into(),
+                    present: true,
+                }],
+            }],
+            on: Some("Late night".into()),
+            recalled: None,
+            known: true,
+        };
+        daemon.publish(Event::Scenes(view.clone()));
+        let heard = backend.next_status().await.expect("the feed reads");
+        assert!(
+            matches!(&heard, Some(Update::Scenes(got)) if **got == view),
+            "the scenes were skipped or changed: got {heard:?}"
+        );
+    })
+    .await
+    .expect("test timed out");
+}

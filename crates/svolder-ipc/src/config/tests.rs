@@ -20,6 +20,8 @@ mod devices;
 mod hops;
 // user presets and their writers
 mod presets;
+// scenes and their writers
+mod scenes;
 // imported presets and the AutoEq table
 mod autoeq;
 // the `[tui]` block

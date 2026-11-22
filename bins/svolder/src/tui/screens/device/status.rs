@@ -45,10 +45,12 @@ pub(super) fn status_parts(
     vu: bool,
 ) -> (Vec<Line<'static>>, Option<usize>) {
     let mut vu_at = None;
-    let mut lines = vec![
-        status_line_one(app, theme, width),
-        status_line_two(app, theme, width),
-    ];
+    let mut lines = Vec::new();
+    if scene_drawn(app) {
+        lines.push(scene_line(app, theme));
+    }
+    lines.push(status_line_one(app, theme, width));
+    lines.push(status_line_two(app, theme, width));
     if device_drawn(app) {
         lines.push(device_line(app, width));
     }
@@ -69,6 +71,39 @@ pub(super) fn status_parts(
         lines.push(line);
     }
     (lines, vu_at)
+}
+
+/// What the `Scene` row opens on: the label, dim, then two blanks.
+const SCENE: &str = "Scene";
+
+/// Whether the Status pane draws the `Scene` row, its first: while scenes are offered and the
+/// daemon has at least one. With none saved there is nothing to name, and the row takes no room.
+pub(super) fn scene_drawn(app: &App) -> bool {
+    app.scenes_offered()
+        && app
+            .scenes
+            .view
+            .as_ref()
+            .is_some_and(|view| !view.scenes.is_empty())
+}
+
+/// The `Scene` row: the name of the scene that is on, as the daemon's view gives it; `reading…`,
+/// dim, while the daemon has not settled which one is on, and `none`, dim, while none is.
+fn scene_line(app: &App, theme: &Theme) -> Line<'static> {
+    let on = match app.scenes.view.as_ref() {
+        Some(view) if !view.known => Span::styled("reading…", theme.style(Role::Dim)),
+        Some(view) => match view.on.as_deref() {
+            Some(name) => Span::raw(name.to_string()),
+            None => Span::styled("none", theme.style(Role::Dim)),
+        },
+        None => Span::styled("reading…", theme.style(Role::Dim)),
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(SCENE, theme.style(Role::Dim)),
+        Span::raw("  "),
+        on,
+    ])
 }
 
 /// What the `Device` row puts between its facts.

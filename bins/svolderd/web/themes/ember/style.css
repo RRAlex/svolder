@@ -623,11 +623,22 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px;
   font-size: 12.5px; line-height: 1.3; color: var(--dim);
 }
-.np-hop, .np-verdict {
+.np-hop {
   border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
 }
-.np-hop + .np-hop::before { content: "→ "; color: var(--faint); }
-/* the whole sentence behind short verdict words, for a screen reader only */
+/* the arrow between two chips ends the chip before it (in a margin of its own), so a line of chips
+   ends with `→` and the next one starts bare; a hop put out of sight keeps its arrow (clipped with
+   it) for a screen reader, and the dots draw none when no hop stands after them */
+.np-hop:not(.np-cut):has(+ :is(.np-hop, .np-more)), .np-more:has(+ .np-hop:not(.np-cut)) {
+  position: relative; margin-inline-end: 1.2em;
+}
+.np-hop:has(+ :is(.np-hop, .np-more))::after, .np-more:has(+ .np-hop:not(.np-cut))::after {
+  content: "→"; position: absolute; inset-inline-start: calc(100% + 4px); top: 50%;
+  transform: translateY(-50%); color: var(--faint); white-space: nowrap;
+}
+/* a value is never broken across lines */
+.np-path .v { white-space: nowrap; }
+/* the whole sentence behind short label words, for a screen reader only */
 .np-sr {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
@@ -640,33 +651,30 @@ body.signin { min-height: 100vh; display: grid; align-items: center; padding: 28
   border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
   color: var(--faint);
 }
-.np-hop b { font-weight: 500; color: var(--faint); }
-.np-hop.changes {
-  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+.np-hop b { font-weight: 500; }
+/* the words of a row in their tone: yellow for what changes the sound, quiet for shared values */
+.np-path .w { color: var(--warn); }
+.np-path .d { color: var(--faint); }
+.np-hop.changes { border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+/* the label: the word `Path` coloured by the judge (green untouched end to end, yellow otherwise),
+   a button that opens the PipeWire config dialog */
+.np-label {
+  font: inherit; line-height: inherit; font-weight: 600; color: var(--dim); background: none;
+  border: 0; padding: 4px 4px 4px 0; cursor: pointer; flex: none;
 }
-.np-path.untouched .np-verdict {
-  color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent);
-}
-.np-path.untouched .np-verdict::after { content: " ✓"; }
-.np-path.changed .np-verdict {
-  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent);
-}
-/* the config check's chip: a button that opens the PipeWire config popup, the colour of its class
-   and a mark in its words (`config ✓`, `config 2`, `config ?`), dashed when nothing was read */
+span.np-label { cursor: default; }
+.np-label.good { color: var(--good); }
+.np-label.warn { color: var(--warn); }
+button.np-label:hover { text-decoration: underline; }
+/* the short words of a row with no hops (`→ Bose Speakers`), in the row's plain tone */
+.np-short { flex: 1 1 0; min-width: 0; }
+/* the config check's chip, only when the check fails: a button that opens the PipeWire config dialog */
 .np-setup {
-  font: inherit; line-height: inherit; color: var(--dim); background: none; cursor: pointer;
-  border: 1px solid var(--hair-2); border-radius: 99px; padding: 3px 10px; min-width: 0;
+  font: inherit; line-height: inherit; color: var(--warn); background: none; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--warn) 75%, transparent); border-radius: 99px;
+  padding: 3px 10px; min-width: 0; flex: none;
 }
-.np-setup.untouched { color: var(--good); border-color: color-mix(in srgb, var(--good) 75%, transparent); }
-.np-setup.changes {
-  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 75%, transparent);
-}
-.np-setup:is(.unread, .not_read, .other_version) { color: var(--faint); border-style: dashed; border-color: var(--dim); }
 .np-setup:hover { border-color: currentColor; }
-.np-setup { flex: none; }
-/* the verdict and the config chip beside it: the verdict wraps inside the lead */
-.np-lead { display: flex; align-items: center; gap: inherit; min-width: 0; max-width: 100%; }
-.np-lead .np-verdict { min-width: 0; }
 .p-playing.idle { display: flex; align-items: center; height: 72px; padding-block: 0; }
 .np-none { font: var(--t-s)/1.4 var(--f-ui); color: var(--faint); }
 
@@ -798,19 +806,20 @@ html[data-viz=off] .p-viz { display: none; }
   .p-band { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .p-playing { --cover: 84px; }
 }
-/* the band's path chips are set smaller, so a changed path (the verdict, then each hop) sits
+/* the band's path chips are set smaller, so a changed path (the label, then each hop) sits
    inside Now playing's half of the 240 px; below 1100 px, where it is narrower, so is the title */
 @container app (min-width: 820px) {
   .np { gap: 8px; }
   .p-playing .np-path { gap: 5px; font-size: 11.5px; min-height: 0; }
-  .p-playing :is(.np-hop, .np-verdict, .np-more, .np-setup) { padding: 2px 8px; }
+  .p-playing .np-label { padding-block: 3px; }
+  .p-playing :is(.np-hop, .np-more, .np-setup) { padding: 2px 8px; }
 }
 @container app (min-width: 820px) and (max-width: 1099px) {
   .p-playing .np-title { font-size: 18px; }
   .p-playing .np-head { gap: 14px; }
 }
 /* the visualizer off: Now playing alone across the whole band, at the least fixed height that
-   still holds a changed path's two rows of chips and the config chip beside its verdict (measured
+   still holds a changed path's two rows of chips and the config chip after the hops (measured
    at 820 and at 1100, where the cover grows from 64 to 84 px); playing.py checks that every chip
    stands inside it */
 @container app (min-width: 820px) {

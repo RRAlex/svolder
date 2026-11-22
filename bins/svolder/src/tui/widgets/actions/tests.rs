@@ -5,14 +5,14 @@ use ratatui::widgets::Block;
 
 use super::*;
 
-/// A scene of a device with a mute, a balance and a tone control.
-fn full_scene() -> Scene {
-    Scene {
+/// A key context of a device with a mute, a balance and a tone control.
+fn full_context() -> KeyContext {
+    KeyContext {
         has_eq: true,
         has_mute: true,
         has_balance: true,
         bands: 5,
-        ..Scene::default()
+        ..KeyContext::default()
     }
 }
 
@@ -50,7 +50,7 @@ fn the_words_draw_their_key_bold_and_the_rest_as_text() {
         None,
         40,
         Screen::Device,
-        &full_scene(),
+        &full_context(),
         &theme,
     );
     assert_eq!(line_text(&line), " mute ─ 0 centre ─ refresh ");
@@ -83,10 +83,10 @@ fn the_words_draw_their_key_bold_and_the_rest_as_text() {
 #[test]
 fn an_unavailable_word_is_faint_whole() {
     let theme = Theme::new(false);
-    let bare = Scene {
+    let bare = KeyContext {
         has_mute: false,
         has_balance: false,
-        ..full_scene()
+        ..full_context()
     };
     let (line, hits) = actions_title(
         &[MUTE, CENTRE, REFRESH],
@@ -121,7 +121,7 @@ fn the_mark_sits_right_of_the_words() {
         Some("6 functions"),
         40,
         Screen::Telemetry,
-        &full_scene(),
+        &full_context(),
         &theme,
     );
     assert_eq!(line_text(&line), " refresh ─ 6 functions ");
@@ -130,7 +130,7 @@ fn the_mark_sits_right_of_the_words() {
         Some("more ↑"),
         40,
         Screen::Devices,
-        &full_scene(),
+        &full_context(),
         &theme,
     );
     assert_eq!(line_text(&alone), " more ↑ ");
@@ -147,7 +147,7 @@ fn a_short_border_drops_words_from_the_last_back() {
             mark,
             room,
             Screen::Device,
-            &full_scene(),
+            &full_context(),
             &theme,
         );
         (line_text(&line), hits.len())
@@ -173,7 +173,7 @@ fn a_narrow_controls_border_keeps_mute_only() {
         None,
         action_room(20, " Controls ".chars().count()),
         Screen::Device,
-        &full_scene(),
+        &full_context(),
         &theme,
     );
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 3))

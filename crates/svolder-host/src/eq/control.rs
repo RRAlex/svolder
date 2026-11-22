@@ -156,6 +156,10 @@ pub struct EqView {
     pub points: Vec<PointView>,
     /// The preamp in dB, never above 0.
     pub preamp_db: f64,
+    /// The preamp the curve states, in dB: what a scene keeps, whatever level a hold plays it
+    /// at. 0 from a peer that has none.
+    #[serde(default)]
+    pub stated_preamp_db: f64,
     /// The preset the points came from, `custom` once a hand changed them.
     pub preset: Option<String>,
     /// Whether a drag is heard as it moves.
@@ -396,6 +400,11 @@ pub struct EqControl {
     /// over a chain another run left holding a lower preamp than the saved state needs). Judged
     /// only once the node has been looked at: a cap that no longer holds the preamp down drops it.
     lift: bool,
+    /// A recall that lowers the stage's cost while it changes the slots holds the preamp under
+    /// what both orders of its line need: the cost of the stage it sent, which the node must be
+    /// able to hold over the loaded config's slots. It is lifted with the level held for a stream
+    /// (`lift`), by the apply that ends it.
+    stage_hold: Option<f64>,
     /// The config on disk may hold the stage on, so a chain that starts again plays it.
     xf_conf: bool,
     /// The stage, with the preamp that goes with it, is to be sent with the next update.
@@ -571,6 +580,7 @@ impl EqControl {
                 .and_then(|text| text.parse().ok())
                 .unwrap_or(IDLE_KEEP),
             lift: false,
+            stage_hold: None,
             xf_conf: false,
             stage_dirty: false,
             xf_ports: true,
@@ -837,7 +847,7 @@ impl EqControl {
     /// Whether the level is held below what the points need for a stream that plays: the view
     /// says so.
     fn level_held(&self) -> bool {
-        self.lift && self.eq_on() && self.capped()
+        self.lift && (self.eq_on() || self.stage_hold.is_some()) && self.capped()
     }
 
     /// Apply the chain again with the points as they stand once nothing has played through it
@@ -846,7 +856,7 @@ impl EqControl {
     /// fits under the cap without the stage) is dropped once the node has been looked at.
     async fn check_lift(&mut self) {
         if !self.lift
-            || !self.eq_on()
+            || !(self.eq_on() || self.stage_hold.is_some())
             || !self.live_now()
             || self.unvouched
             || self.not_run
@@ -862,6 +872,7 @@ impl EqControl {
             let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
             if self.wanted_preamp(rate) - self.loaded_stage_db <= self.cap_at(rate) + 1e-9 {
                 self.lift = false;
+                self.stage_hold = None;
             }
             return;
         }
@@ -905,9 +916,83 @@ impl EqControl {
             true => 0.0,
             false => self.wanted_preamp(rate),
         };
-        self.conf_preamp(rate)
-            .min(self.node_cap.unwrap_or(f64::INFINITY))
-            .min(eq - self.loaded_stage_db)
+        let held = self
+            .conf_preamp(rate)
+            .min(self.node_cap.unwrap_or(f64::INFINITY));
+        // A stage sent over the slots the node may hold (the loaded config's) pays its own cost.
+        let hold = self
+            .stage_hold
+            .map_or(f64::INFINITY, |cost| held + self.loaded_stage_db - cost);
+        held.min(eq - self.loaded_stage_db).min(hold)
+    }
+
+    /// Whether a line with every slot at `rate` would change one: some slot port differs from the
+    /// value last sent to it, or none was sent yet, or it differs from what the node was read
+    /// to hold (a node another process started, or a rate change, put other slots on it).
+    fn slots_change(&self, rate: u32, node: Option<&super::live::LiveNode>) -> bool {
+        self.slot_values(rate).iter().any(|(name, value)| {
+            let sent_differs = self
+                .last_values
+                .get(name)
+                .is_none_or(|sent| (sent - value).abs() > 1e-9 * value.abs().max(1.0));
+            let node_differs = node
+                .and_then(|node| node.params.get(name))
+                .is_some_and(|held| (value - held).abs() > 1e-4 * value.abs() + 1e-6);
+            sent_differs || node_differs
+        })
+    }
+
+    /// Whether the node plays a crossfeed stage this controller has no record of sending: it
+    /// forgot it (the node was taken for another one at a look, after a line carrying the stage
+    /// had reached it), and the node's own ports say the stage is on. Its cost is unknown, so no
+    /// order of a line that changes slots is known safe over it: the stage goes to the bypass
+    /// first (see `send_dirty_once`).
+    fn stage_unknown_on(&self, node: Option<&super::live::LiveNode>) -> bool {
+        // A stage the config holds is known (the preamp pays `loaded_stage_db` on every line).
+        self.stage_sent.is_none()
+            && !self.conf_holds_stage()
+            && node
+                .and_then(|node| node.params.get("lmix:Gain 2"))
+                .is_some_and(|mix| *mix > 0.0)
+    }
+
+    /// The hold the line that sends the stage as it stands now needs, as the cost of that stage:
+    /// `Some` when the stage costs less than the one the node plays and the preamp the line would
+    /// carry is above what the node may hold under the new stage, if it holds the loaded config's
+    /// slots (or the ones it was first looked at with) instead of the slots last sent: a change of
+    /// the sink's rate puts them back unseen. Such a line goes stage first with the preamp held
+    /// low enough for both orders, as a level held for a stream is, and comes up with it.
+    pub(super) fn hold_for_stage(
+        &self,
+        rate: u32,
+        node: Option<&super::live::LiveNode>,
+    ) -> Option<f64> {
+        let node_rate = node.and_then(|node| node.rate_hz).unwrap_or(rate);
+        // With no slot changing (as far as the node was read), the slots-first order is safe and
+        // needs no hold.
+        if !self.slots_change(rate, node) {
+            return None;
+        }
+        let cost_before = self
+            .stage_sent
+            .as_ref()
+            .map_or(0.0, |(settings, at)| config_stage_cost_db(settings, *at));
+        let cost_after = match self.xf_on {
+            true => config_stage_cost_db(&self.xf, rate),
+            false => 0.0,
+        };
+        if cost_after >= cost_before - 1e-9 {
+            return None;
+        }
+        let eq = match self.flat {
+            true => 0.0,
+            false => self.wanted_preamp(rate),
+        };
+        let held = self
+            .conf_preamp(node_rate)
+            .min(self.node_cap.unwrap_or(f64::INFINITY));
+        let carried = (eq - cost_after).min(held.min(eq - self.loaded_stage_db));
+        (carried > held + self.loaded_stage_db - cost_after + 1e-9).then_some(cost_after)
     }
 
     /// The preamp the points as they stand need at `rate`.
@@ -966,6 +1051,7 @@ impl EqControl {
                 })
                 .collect(),
             preamp_db: self.preamp(),
+            stated_preamp_db: self.stated,
             preset: self.preset.clone(),
             live: self.runs && self.live_now() && !self.exit.pending(),
             note: self
@@ -1110,6 +1196,7 @@ impl EqControl {
         }
         // The chain plays the points' own preamp: nothing is held.
         self.lift = false;
+        self.stage_hold = None;
         self.stamp = stamp_of(&self.keep);
         // What an earlier refusal said no longer holds; the live-update note still does.
         if self.note.as_deref() != Some(LIVE_NOTE) {
@@ -1363,6 +1450,7 @@ impl EqControl {
         self.sent.rate = None;
         self.set_confs(None, None, 0.0);
         self.lift = false;
+        self.stage_hold = None;
         saved
     }
 
@@ -1452,26 +1540,7 @@ impl EqControl {
             )
         })?;
         check_playable(&correction, self.sent.rate.unwrap_or(CONFIG_RATE_HZ))?;
-        let held = Points::from_state(&HostEqState {
-            on: true,
-            name: String::new(),
-            origin: None,
-            target: String::new(),
-            route: super::Route::Smart,
-            manager: super::Manager::Child,
-            previous_default: None,
-            preamp_db: 0.0,
-            filters: correction.filters.clone(),
-            slots: Vec::new(),
-            crossfeed: None,
-            crossfeed_on: false,
-            flat: false,
-            speakers: None,
-            speakers_on: false,
-            speakers_loaded: None,
-            crossfeed_loaded: None,
-            loudness: None,
-        });
+        let held = points_of(correction.filters.clone());
         let before = (
             std::mem::replace(&mut self.points, held),
             self.stated,
@@ -1778,6 +1847,26 @@ impl EqControl {
             }
         }
         let rate = self.sent.rate.unwrap_or(CONFIG_RATE_HZ);
+        // A stage the node plays and this controller has no record of (a node it took for another
+        // after a line with the stage had reached it): its cost is unknown, so no order of a line
+        // that changes slots is known safe over it. The stage goes to the bypass in a line of its
+        // own first (it costs nothing: the state before is under unity without it), and the line
+        // that follows carries the stage the points want, from a stage that is known to be off.
+        if self.stage_unknown_on(Some(&node)) && self.slots_change(rate, Some(&node)) {
+            let Some(vouched) = self.sent.node else {
+                return false;
+            };
+            if !self
+                .params
+                .send(vouched, &crossfeed_params(&Stage::bypass()))
+                .await
+            {
+                return false;
+            }
+            // The kept reading of the node is stale now: the next one is a look.
+            self.params.forget_node();
+            self.stage_dirty |= self.xf_on;
+        }
         // Every slot goes with every update, not only the ones that moved: a change of the
         // sink's rate puts the chain's slots back to its config without telling anyone, and an
         // update that carried one slot would leave the rest as that config has them, under a
@@ -1791,22 +1880,48 @@ impl EqControl {
         if let Some((_, ports)) = &ld_line {
             params.extend(ports.iter().cloned());
         }
-        // The stage goes with the slots, between them and the preamp: a preamp that falls
-        // (the stage turns on) is before it, one that rises (the stage turns off) after.
+        // The stage goes with the slots. After them, under the preamp that fell before them, when
+        // it costs more than the one it replaces (it turns on, or grows). Before them when it
+        // costs less (it turns off, or shrinks), so that a line that carries a boost with it
+        // never plays the new boost under the old stage's preamp (a recall, or a drag released
+        // with a crossfeed drag pending, changes both). The node may hold the slots of the loaded
+        // config instead of the ones believed (a change of the sink's rate put them back), and
+        // the new stage over those could play over unity under a preamp that pays for the
+        // config's stage only: the preamp is then held (`hold_for_stage`) until the chain is
+        // applied again once nothing plays. The preamp falls before all of it or rises after
+        // all of it.
         let sent_stage = std::mem::take(&mut self.stage_dirty);
         // The stage the node plays once this line lands, which the preamp below pays for.
         let stage_before = self.stage_sent.clone();
+        let hold_before = (self.stage_hold, self.lift, self.played_at);
         if sent_stage {
+            if let Some(cost) = self.hold_for_stage(rate, Some(&node)) {
+                self.stage_hold = Some(cost);
+                self.lift = true;
+                self.played_at = self.ticks;
+            }
             let stage = match self.xf_on {
                 true => Stage::of(&self.xf, rate).ok(),
                 false => None,
             };
+            let cost_before = stage_before
+                .as_ref()
+                .map_or(0.0, |(settings, at)| config_stage_cost_db(settings, *at));
+            let cost_after = stage
+                .as_ref()
+                .map_or(0.0, |_| config_stage_cost_db(&self.xf, rate));
             self.stage_sent = stage.as_ref().map(|_| (self.xf.clone(), rate));
-            params.extend(crossfeed_params(&stage.unwrap_or_else(Stage::bypass)));
+            let mut ports = crossfeed_params(&stage.unwrap_or_else(Stage::bypass));
             // The virtual speakers' mixers go with it, so that one update turns one stage on
             // and the other off.
             if self.sp.ports {
-                params.extend(speakers_params(self.sp.on));
+                ports.extend(speakers_params(self.sp.on));
+            }
+            // Before the slots only when the line changes a slot too: with none changing, the
+            // order that puts them first is safe whatever the node holds, and needs no hold.
+            match cost_after < cost_before && self.slots_change(rate, Some(&node)) {
+                true => params.splice(0..0, ports).for_each(drop),
+                false => params.extend(ports),
             }
         }
         // A preamp that falls goes before the slots and one that rises after them, so an update
@@ -1836,12 +1951,14 @@ impl EqControl {
         let Some(vouched) = self.sent.node else {
             self.stage_dirty |= sent_stage;
             self.stage_sent = stage_before;
+            (self.stage_hold, self.lift, self.played_at) = hold_before;
             return false;
         };
         self.ld_writing();
         if !self.params.send(vouched, &params).await {
             self.stage_dirty |= sent_stage;
             self.stage_sent = stage_before;
+            (self.stage_hold, self.lift, self.played_at) = hold_before;
             self.ld_failed();
             return false;
         }
@@ -2480,16 +2597,42 @@ fn graph_ran(params: &HashMap<String, f64>) -> bool {
     b0.peek().is_none() || b0.any(|value| *value != 0.0)
 }
 
+/// The points a list of filters makes, in slots 1 to n.
+fn points_of(filters: Vec<SourceFilter>) -> Points {
+    Points::from_state(&HostEqState {
+        on: true,
+        name: String::new(),
+        origin: None,
+        target: String::new(),
+        route: super::Route::Smart,
+        manager: super::Manager::Child,
+        previous_default: None,
+        preamp_db: 0.0,
+        filters,
+        slots: Vec::new(),
+        crossfeed: None,
+        crossfeed_on: false,
+        flat: false,
+        speakers: None,
+        speakers_on: false,
+        speakers_loaded: None,
+        crossfeed_loaded: None,
+        loudness: None,
+    })
+}
+
 fn refuse_edit(why: String) -> EqFailure {
     refusal(why, "Edit a point that is there")
 }
 
 mod exit;
 mod ld;
+mod scene;
 mod vs;
 mod xf;
 
 pub use ld::{LevelHint, LoudnessEdit};
+pub use scene::Recalled;
 pub use vs::SpeakersEdit;
 
 #[cfg(test)]

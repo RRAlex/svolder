@@ -113,6 +113,16 @@ const FILES: &[Entry] = &[
         include_bytes!("../../web/core/computer-actions.js"),
     ),
     (
+        "core/scenes.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/scenes.js"),
+    ),
+    (
+        "core/scenes-actions.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/scenes-actions.js"),
+    ),
+    (
         "core/device-actions.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/device-actions.js"),
@@ -321,6 +331,16 @@ const FILES: &[Entry] = &[
         "core/popups/speakers/wire.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../web/core/popups/speakers/wire.js"),
+    ),
+    (
+        "core/popups/scenes/draw.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/scenes/draw.js"),
+    ),
+    (
+        "core/popups/scenes/wire.js",
+        "text/javascript; charset=utf-8",
+        include_bytes!("../../web/core/popups/scenes/wire.js"),
     ),
     (
         "core/popups/devices/draw.js",

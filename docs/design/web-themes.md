@@ -70,9 +70,8 @@ show, `null` between two themes) before the theme object; a theme that returns o
 ### The key table
 
 Every theme has one, in `themes/<id>/key-table.js`: `KEYS`, a list of entries `{ id, key, zone,
-words, … }` ([key-table.md](key-table.md) has each field), pure data with no DOM. The
-mount binds it (`core.keys.bind(table, { signal, ctx })`) and returns the bound table as `keys`.
-It must hold:
+words, … }` ([key-table.md](key-table.md) has each field), pure data with no DOM. The mount binds it
+(`core.keys.bind(table, { signal, ctx })`) and returns the bound table as `keys`. It must hold:
 
 - **every key of the whole page the theme answers to**, with zone `'page'`; the mount gives each
   its `run` (Ember seven, Night drive `↑` `↓`, Paper and Signal none, their table bound all the
@@ -202,8 +201,9 @@ goes one at a time with the newest waiting and is held to the cap.
 
 `core/actions.js` joins one file per domain: `write.js` (the turn-away and the finish every write
 shares), `device-actions.js` (the thin device writes), `volume-actions.js` (the volume's climb),
-`computer-actions.js` (`actions.computer`), `host-actions.js` (the player's buttons, the hops),
-`navigation.js` (showing a device, signing out) and `device-config-actions.js` (its settings).
+`computer-actions.js` (`actions.computer`), `scenes-actions.js` (the Scenes popup's routes),
+`host-actions.js` (the player's buttons, the hops), `navigation.js` (showing a device, signing out)
+and `device-config-actions.js` (its settings).
 
 Every action names the device it acts on. A call to a device takes a last `{ device }` (the model's
 URL segment of the device), and the page's `shown` device is only the default target: the public

@@ -6,8 +6,8 @@ DAC) and its time counting; the transport posting to api/v1/host/press and the c
 answer; a guest and a page with writes off seeing the card without buttons; the card's box
 unchanged when the cover goes and when the player goes; an amp page with the same band; with the
 visualizer off, a changed path's every chip stands inside the band at its lower fixed height (820,
-1100 and 1280 px) with the verdict first; a path that does not fit its card ends in a chip of three
-dots, the verdict first and the hops cut kept in the page, and comes back whole when the card
+1100 and 1280 px) with the label first; a path that does not fit its card ends in a chip of three
+dots, the label first and the hops cut kept in the page, and comes back whole when the card
 grows; on a phone the folded line (72 px) at 341, 426 and 784 px: a round play and a bare next, the
 fold arrow small in the bottom-right corner with the bar stopping short of it, the title never
 under the buttons, and a cut title looping slowly (30 px a second, a copy of the text a 40 px gap
@@ -56,9 +56,10 @@ STATE = """(() => {
     col: box(q('.view .col')),
     knob: box(q('sv-knob')), view: box(q('.view')), barBox: box(q('.np-bar')),
     title: text('.np-title'), artist: text('.np-artist'), source: text('.np-source'),
-    none: text('.np-none'), path: seen('.np-path'), verdict: seen('.np-verdict'),
+    none: text('.np-none'), path: seen('.np-path'),
+    label: seen('.np-label'), labelTitle: q('.np-label')?.title ?? null,
+    labelClass: q('.np-label')?.className ?? null,
     chips: [...document.querySelectorAll('.np-path > *')]
-      .flatMap((el) => (el.classList.contains('np-lead') ? [...el.children] : [el]))
       .map((el) => [box(el), el.className]),
     pathClass: q('.np-path')?.className ?? null, hops: document.querySelectorAll('.np-hop').length,
     img: img ? { loaded: img.complete && img.naturalWidth > 0, src: img.getAttribute('src'),
@@ -136,12 +137,13 @@ try:
     check('on a desktop the whole card shows: the album line, prev and next, the times, the path',
           s['sourceShown'] and s['prevShown'] and s['nextShown'] and s['timesShown']
           and s['pathShown'] and not s['foldShown'], s)
-    check('the path says untouched, with its three hops, for the fake route on the fake DAC',
-          s['verdict'] == 'untouched' and s['hops'] == 3 and 'untouched' in s['pathClass'].split(), s)
-    tip = b.ev("document.querySelector('.np-verdict')?.title ?? null")
-    check('an untouched verdict carries the tooltip that says the player may still change the sound',
-          isinstance(tip, str) and tip.startswith('untouched from the player') and
-          'loudness normalization' in tip and 'its own EQ' in tip, tip)
+    # the fake DAC sits below 0 dB, so the sound is untouched up to its input and changed at its end
+    check('the path is the yellow label `Path` and its three hops, for the fake route on the fake DAC',
+          s['label'] == 'Path' and 'warn' in s['labelClass'].split() and s['hops'] == 3
+          and 'changed' in s['pathClass'].split() and '\u2713' not in s['path']
+          and 'volume' in s['path'], s)
+    check('the label says what changes the sound as its tooltip',
+          s['labelTitle'] == 'Path: the DAC changes the sound', s['labelTitle'])
     band_playing = s['band']
     first = seconds(s['el'])
     check('the length reads 20:00 and the time reads m:ss',
@@ -225,7 +227,7 @@ try:
     check('a tap opens it into the whole card: cover, transport, times, path',
           s['open'] and s['expanded'] == 'true' and s['prevShown'] and s['nextShown']
           and s['timesShown'] and s['pathShown'] and s['sourceShown'] and s['band'][3] > 72
-          and s['verdict'] == 'untouched', s)
+          and s['label'] == 'Path' and 'warn' in s['labelClass'].split(), s)
     opened = s['band']
     check('  opened: the line grew down, its top and width stand',
           opened[1] == folded[1] and opened[2] == folded[2], [folded, opened])
@@ -739,21 +741,23 @@ finally:
 # The band is 240 px tall beside the visualizer; with it off Now playing has the whole band, 184 px
 # below 1100 px and 188 px from there (the cover grows from 64 to 84 px), the least that holds the
 # changed path's two rows of chips with the room under them.
-# the hops the config chip pushes into the dots beside the visualizer below 1280 px (measured in both
-# engines): hiding more than these fails, so a regression that hides every hop is not accepted
-TIGHT_CUTS = {820: 1, 1100: 2}
 PATH = """(() => {
   const p = document.querySelector('#part-playing').getBoundingClientRect();
-  // the verdict and its config chip are one lead: its parts are the first chips
-  const kids = [...document.querySelectorAll('.np-path > *')]
-    .flatMap((k) => (k.classList.contains('np-lead') ? [...k.children] : [k]));
+  // the label is the first child, then the hops and the config chip
+  const kids = [...document.querySelectorAll('.np-path > *')];
   const shown = kids.filter((k) => !k.classList.contains('np-cut'));
   const r = shown.map((k) => k.getBoundingClientRect());
   return { cut: kids.length - shown.length,
     more: shown.filter((k) => k.classList.contains('np-more')).length,
-    first: shown[0].className, last: shown[shown.length - 1].className,
+    first: shown[0].classList.contains('np-label') ? 'np-label' : shown[0].className, last: shown[shown.length - 1].className,
     inside: r.every((c) => c.left >= p.left && c.right <= p.right && c.bottom <= p.bottom - 12),
     title: document.querySelector('.np-more')?.title ?? null,
+    // what stands right after the dots, and the last hop still shown (the chip with the values)
+    after: document.querySelector('.np-more')?.nextElementSibling?.className ?? null,
+    lastHop: [...document.querySelectorAll('.np-hop')].filter((k) => !k.classList.contains('np-cut'))
+      .map((k) => k.textContent.trim()).pop() ?? null,
+    warnWords: document.querySelectorAll('.np-path .w').length,
+    warnShown: [...document.querySelectorAll('.np-path .w')].filter((w) => !w.closest('.np-cut')).length,
     kept: kids.filter((k) => k.classList.contains('np-cut')).map((k) => k.textContent.trim()),
     band: p.height }; })()"""
 for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
@@ -763,15 +767,15 @@ for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
     changed = common.Daemon(host='fake', env={'SVOLDER_FAKE_ROUTE': 'changed'})
     b = make(changed, size=(width, 900), viz_off=viz_off)
     try:
-        s = until(b, lambda s: s['verdict'] is not None)
-        check(f'the changed route reads changed, naming each change ({width_words})',
-              'changed' in (s['pathClass'] or '').split() and all(
-                  word in s['verdict'] for word in
-                  ['player volume 91 %', 'resampled 44.1 → 48 kHz', 'computer volume 54 %',
-                   'host EQ on', '2 other sounds mixing', 'cut to 16 bits (S32 → S16)',
-                   'dither on (triangular)']), s['verdict'])
-        check('  the verdict is the first chip of the path', s['chips'][0][1] == 'np-verdict'
-              and s['chips'][1][1].startswith('np-setup') and s['hops'] == 3
+        s = until(b, lambda s: s['label'] is not None)
+        check(f'the changed route reads changed: a yellow label and the short words of each change ({width_words})',
+              'changed' in (s['pathClass'] or '').split() and 'warn' in (s['labelClass'] or '').split()
+              and all(word in s['path'] for word in
+                      ['volume 91 %', 'resampled', 'volume 54 %', 'EQ', '2 other sounds mixing',
+                       'cut to 16 bits', 'dither']),
+              s['path'])
+        check('  the label is the first child of the path, the config chip the last', s['chips'][0][1].startswith('np-label')
+              and s['chips'][-1][1].startswith('np-setup') and s['hops'] == 3
               and len([c for c in s['chips'] if c[1] != 'np-more']) == 5, s['chips'])
         band = s['band']
         # the band clips at its padding: every chip must sit inside, with the padding to spare
@@ -784,50 +788,199 @@ for viz_off, width in [(False, 820), (False, 1100), (False, 1280),
               band[3] == height and (not viz_off or abs(band[2] - s['wide'][2]) <= 1),
               [band, s['wide']])
         fit = b.ev(PATH)
-        # beside the visualizer the card is half the band (240 px tall) below 1280 px: the config chip
-        # takes room there, so a changed path may end in the dots, the verdict and the chip first
-        # and every chip inside the card; the visualizer off and the full band hold it whole
-        tight = not viz_off and width < 1280
-        check('  and no chip was cut: no dots, the row whole' if not tight else
-              '  the row is whole or ends in the dots, the verdict first, every chip inside',
-              fit['first'] == 'np-verdict' and fit['inside'] and (
-                  (fit['cut'] == 0 and fit['more'] == 0) if not tight
-                  else (fit['cut'] == 0 or (fit['more'] == 1 and fit['last'] == 'np-more'
-                                            and fit['cut'] <= TIGHT_CUTS[width]))), fit)
+        # the row is measured whole in both engines at every width and size: a cut fails
+        check('  and no chip was cut: no dots, the row whole',
+              fit['first'] == 'np-label' and fit['inside'] and fit['cut'] == 0 and fit['more'] == 0,
+              fit)
         if not viz_off and width == 1280:
-            # a path that does not fit: the card is made lower (what a longer verdict or a longer
+            # a path that does not fit: the card is made lower (what a longer label or a longer
             # name would do at the same height), and the row ends in a chip of three dots
-            b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '220px')")
+            b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '200px')")
             b.sleep(0.5)
             fit = b.ev(PATH)
             check('a path that does not fit ends in a chip of three dots, not a cut chip: the '
-                  'verdict first, every chip inside the card',
-                  fit['more'] == 1 and fit['cut'] >= 1 and fit['first'] == 'np-verdict'
-                  and fit['last'] == 'np-more' and fit['inside'], fit)
-            cut_220 = fit['cut']
+                  'label first, every chip inside the card',
+                  fit['more'] == 1 and fit['cut'] >= 1 and fit['first'] == 'np-label'
+                  and fit['inside'], fit)
+            check('  the last chip, the one with the values, is cut only when nothing else is left: '
+                  'the dots stand before it',
+                  fit['lastHop'] is not None and fit['lastHop'].startswith('DAC')
+                  and (fit['after'] or '').startswith(('np-hop', 'np-setup')), fit)
+            cut_200 = fit['cut']
             check('  the hops put out of sight stay in the page, and the dots name them',
                   len(fit['kept']) == fit['cut'] and fit['title'] is not None
                   and all(text in fit['title'] for text in fit['kept']), fit)
-            b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '204px')")
+            b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '180px')")
             b.sleep(0.5)
             fit = b.ev(PATH)
-            check('  a lower card cuts at least as many, ends in the dots, the verdict still first',
-                  fit['more'] == 1 and fit['cut'] >= cut_220 and fit['first'] == 'np-verdict' and fit['inside'], fit)
-            # so low that the verdict alone overflows: every hop is cut and the dots say nothing
-            b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '120px')")
+            check('  a lower card cuts at least as many, ends in the dots, the label still first',
+                  fit['more'] == 1 and fit['cut'] >= cut_200 and fit['first'] == 'np-label' and fit['inside'], fit)
+            # so low that the label alone overflows: every hop is cut and the dots say nothing
+            b.ev("document.querySelector('.p-band').style.setProperty('--band-h', '160px')")
             b.sleep(0.5)
             fit = b.ev(PATH)
-            check('  a card too low even for the verdict drops the dots too: nothing is left to '
-                  'name', fit['more'] == 0 and fit['cut'] == 3 and fit['first'] == 'np-verdict',
+            check('  a card too low even for the label drops the dots too: nothing is left to '
+                  'name', fit['more'] == 0 and fit['cut'] == 3 and fit['first'] == 'np-label',
                   fit)
             b.ev("document.querySelector('.p-band').style.removeProperty('--band-h')")
             b.sleep(0.5)
             fit = b.ev(PATH)
             check('  and the row comes back whole when the card does', fit['cut'] == 0
                   and fit['more'] == 0 and fit['inside'], fit)
+            # the arrows around hops put out of sight: the dots draw none when no hop stands after
+            # them, and a hop put out of sight keeps its arrow for a screen reader (clipped)
+            arrows = b.ev("""(() => {
+              const path = document.querySelector('.np-path');
+              const hops = [...path.querySelectorAll('.np-hop')];
+              const content = (el) => getComputedStyle(el, '::after').content;
+              hops[1].classList.add('np-cut');
+              const cutHop = content(hops[1]);
+              hops.forEach((h) => h.classList.add('np-cut'));
+              const more = document.createElement('span'); more.className = 'np-more';
+              path.querySelector('.np-label').after(more);
+              const dots = content(more);
+              more.remove(); hops.forEach((h) => h.classList.remove('np-cut'));
+              return { cutHop, dots }; })()""")
+            check('  a hop put out of sight keeps its arrow, and the dots with no hop after them draw '
+                  'none', arrows['cutHop'] == '"\u2192"' and arrows['dots'] == 'none', arrows)
     finally:
         b.close()
         changed.stop()
+
+# ------------------------------------------------------------------ the yellow words stay on show
+# The fake DAC's volume is below 0 dB: the label is yellow and the DAC chip holds the one yellow
+# word that says why. The row is made narrow and the card lower until it has to cut a hop: the hops that change
+# nothing (player, computer) go, the DAC chip with the yellow word stays, whatever the width.
+for width in (820, 1100):
+    quiet = common.Daemon(host='fake')
+    b = make(quiet, size=(width, 900))
+    try:
+        s = until(b, lambda s: s['label'] is not None)
+        fit = b.ev(PATH)
+        # the row is made narrow so each chip takes a line, then the card is made lower a step at a
+        # time until the row has to cut a hop
+        b.ev("document.querySelector('.np-path').style.maxWidth = '120px'")
+        for band_h in range(240, 100, -4):
+            b.ev(f"document.querySelector('.p-band').style.setProperty('--band-h', '{band_h}px')")
+            b.sleep(0.35)
+            fit = b.ev(PATH)
+            if fit['cut'] >= 1:
+                break
+        check(f'a card too low for the narrow row cuts hops that change nothing, not the yellow words ({width} px)',
+              fit['cut'] >= 1 and fit['warnWords'] >= 1 and fit['warnShown'] == fit['warnWords']
+              and (fit['lastHop'] or '').startswith('DAC') and fit['cut'] <= 2
+              and all(text.startswith(('player', 'computer')) for text in fit['kept']), fit)
+    finally:
+        b.close()
+        quiet.stop()
+
+# ------------------------------------------------------------------ a wrapped line never starts with a separator
+# On a phone the open card's last chip is wider than a line. Each character of the chips' text is
+# measured with a Range: the first visible character of every line after the first of a chip (or of
+# the short words) must not be `·` or `→`, and no value is broken across lines. The chips take no
+# arrow of their own at their start: it ends the chip before them. The widths are a sweep, one
+# pixel apart, so some of them put a dot at a line's end.
+LINES = """(() => {
+  const bad = [];
+  let wraps = 0;
+  const lineStarts = (el) => {
+    const starts = []; let top = null;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (let i = 0; i < node.length; i++) {
+        if (/[\\s\\u00a0]/.test(node.data[i])) continue;
+        const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1);
+        const rect = range.getClientRects()[0];
+        if (!rect) continue;
+        if (top === null || rect.top > top + 3) { starts.push([node.data[i], rect.top]); top = rect.top; }
+      }
+    }
+    return starts;
+  };
+  const units = [...document.querySelectorAll('.np-path .v')].map((v) => {
+    const tops = new Set();
+    const range = document.createRange(); range.selectNodeContents(v);
+    for (const r of range.getClientRects()) tops.add(Math.round(r.top));
+    return tops.size; });
+  const chips = [...document.querySelectorAll('.np-hop:not(.np-cut), .np-more, .np-short')];
+  const label = document.querySelector('.np-label').getBoundingClientRect();
+  for (const el of chips) {
+    const starts = lineStarts(el);
+    if (starts.length > 1) wraps += 1;
+    starts.forEach(([c, top], i) => {
+      if (c !== '\u00b7' && c !== '\u2192') return;
+      // the short words start with `→` beside the label: that is not a line of its own
+      if (i === 0 && el.classList.contains('np-short') && Math.abs(top - label.top) < label.height) return;
+      bad.push([el.className, c, i]);
+    });
+  }
+  const before = chips.filter((el) => !el.classList.contains('np-short'))
+    .map((el) => getComputedStyle(el, '::before').content);
+  const path = document.querySelector('.np-path').getBoundingClientRect();
+  const arrowed = [...document.querySelectorAll('.np-hop:not(.np-cut), .np-more')]
+    .filter((el) => el.nextElementSibling?.matches('.np-hop, .np-more'));
+  const arrows = arrowed.map((el) => getComputedStyle(el, '::after').content);
+  // the arrow stands in the chip's margin: the margin box ends inside the path
+  const outside = arrowed.filter((el) => el.getBoundingClientRect().right
+    + parseFloat(getComputedStyle(el).marginInlineEnd) > path.right + 1).length;
+  const shown = [...document.querySelectorAll('.np-path .v')].filter((v) => !v.closest('.np-cut'));
+  return { bad, wraps, outside, split: units.filter((n) => n > 1).length, values: shown.length,
+    chips: chips.length, before: before.filter((c) => c !== 'none' && c !== 'normal'),
+    arrows: arrows.filter((c) => c !== '"\u2192"'), arrowCount: arrows.length }; })()"""
+sweep = common.Daemon(host='fake', env={'SVOLDER_FAKE_ROUTE': 'changed'})
+b = make(sweep, size=(390, 800))
+try:
+    x, y = common.center(b, '.np-title')
+    b.click(x, y)
+    until(b, lambda s: s['open'] and s['pathShown'])
+    worst = []
+    wrapped = 0
+    for width in range(240, 421):
+        b.resize(width, 800)
+        b.sleep(0.1)
+        got = b.ev(LINES)
+        wrapped += got['wraps'] > 0
+        if got['bad'] or got['split'] or got['before'] or got['outside']:
+            worst.append((width, got['bad'], got['split'], got['before'], got['outside']))
+    last = b.ev(LINES)
+    check('on a phone, at every width from 240 to 420 px, no line of a chip or of the short words starts with a '
+          'dot or an arrow, no value is split across lines, no chip starts with an arrow of its own, '
+          'and every arrow stands inside the row', worst == [] and last['values'] >= 4 and last['chips'] >= 3,
+          [worst[:6], last])
+    check('  and the sweep wrapped a chip at some widths (it tested something)', wrapped >= 20, wrapped)
+    check('  the chip before another ends with the arrow, drawn in its own margin',
+          last['arrowCount'] >= 2 and last['arrows'] == [], last)
+    check('no page error in the sweep of the phone widths', errors(b) == [], errors(b))
+finally:
+    b.close()
+    sweep.stop()
+
+# A row with no hops and a long sink name: the short words stay beside the label and wrap inside
+# their own box, so no line, the first included, starts a line of the row with `→` or a dot.
+SHORT = ('<p class="np-path unknown"><span class="np-label plain"><span aria-hidden="true">Path</span>'
+         '<span class="np-sr">Path: the computer plays to a long sink</span></span><span class="np-short">'
+         '\u2192 Built-in Audio Analog Stereo (HDMI 2)&nbsp;\u00b7 the computer is on USB 2 and a long name</span></p>')
+sweep = common.Daemon(host='fake')
+b = make(sweep, size=(390, 800))
+try:
+    x, y = common.center(b, '.np-title')
+    b.click(x, y)
+    until(b, lambda s: s['open'] and s['pathShown'])
+    b.ev("document.querySelector('.np-path').outerHTML = " + json.dumps(SHORT))
+    bad = []
+    wrapped = 0
+    for width in range(240, 421, 3):
+        b.resize(width, 800)
+        b.sleep(0.1)
+        got = b.ev(LINES)
+        wrapped += got['wraps'] > 0
+        if got['bad']:
+            bad.append((width, got['bad']))
+    check('a row with no hops and a long sink name: no line of the short words starts with a dot or an '
+          'arrow, and they stay beside the label (240 to 420 px)', bad == [] and wrapped >= 10, [bad[:6], wrapped])
+finally:
+    b.close()
+    sweep.stop()
 
 # ------------------------------------------------------------------ a guest, and writes off
 for label, web in [('a guest', 'guest = "read"'), ('a page with writes off',
@@ -837,7 +990,7 @@ for label, web in [('a guest', 'guest = "read"'), ('a page with writes off',
     try:
         s = until(b, lambda s: s['title'] is not None)
         check(f'{label} sees the card without buttons',
-              s['title'] == 'Test Pressing' and s['presses'] == [] and s['verdict'] == 'untouched',
+              s['title'] == 'Test Pressing' and s['presses'] == [] and s['label'] == 'Path',
               s)
         check(f'  and the card posts nothing', s['posts'] == [], s['posts'])
         # Help is theirs too, with the keys they have (v, A, T and ?), none that write

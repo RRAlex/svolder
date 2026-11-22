@@ -14,7 +14,7 @@ use svolder_profiles::{EqParam, EqSpec};
 
 use crate::tui::app::curve_drag;
 use crate::tui::app::{App, Screen, TargetView};
-use crate::tui::keys::Scene;
+use crate::tui::keys::KeyContext;
 use crate::tui::layout_tier::Tier;
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::theme::{Role, Theme};
@@ -77,7 +77,7 @@ fn push_response_title(area: Rect, app: &App, theme: &Theme, hits: &mut HitMap) 
         None,
         widgets::actions::action_room(area.width, widgets::text::cells(" Response ")),
         Screen::Tone,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     let title = Rect {

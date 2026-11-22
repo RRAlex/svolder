@@ -85,6 +85,8 @@ pub enum When {
     /// Only on a DAC's screen, or the computer's side, while host audio shows: where the PipeWire
     /// config check is on offer.
     HasSetup,
+    /// Only while the daemon keeps scenes and has sent them.
+    HasScenes,
     /// Only on a wizard step that offers choices.
     Choosing,
     /// Only on a wizard step that takes a typed line.
@@ -102,7 +104,7 @@ pub enum When {
 /// The screens take these from the [`App`] they draw; the setup wizard, which has no app behind
 /// it, says them for itself — which is what lets one key table serve both.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Scene {
+pub struct KeyContext {
     /// Whether the device being shown has a tone control.
     pub has_eq: bool,
     /// Whether it has presets to list: a tone control's, or its own.
@@ -127,11 +129,13 @@ pub struct Scene {
     pub has_space: bool,
     /// Whether the PipeWire config check is on offer.
     pub has_setup: bool,
+    /// Whether scenes are on offer: the daemon keeps them and has sent them.
+    pub has_scenes: bool,
     /// Whether it has no volume for the keys to move: a flag that reads false by default, so a
     /// screen that says nothing of it leaves the key worth pressing.
     pub no_volume: bool,
     /// Whether it has no toggle and shows no host rows for the key to press: false by default,
-    /// like [`Scene::no_volume`].
+    /// like [`KeyContext::no_volume`].
     pub no_toggle: bool,
     /// Whether its profile offers no identify cue: a flag that reads false by default, so a
     /// screen that says nothing of it leaves the key worth pressing.
@@ -154,11 +158,11 @@ pub struct Scene {
     pub on_token_row: bool,
 }
 
-impl Scene {
+impl KeyContext {
     /// What `app` answers these against. An app is always on a screen that chooses: typing is
     /// the wizard's own state.
-    pub fn of(app: &App) -> Scene {
-        Scene {
+    pub fn of(app: &App) -> KeyContext {
+        KeyContext {
             has_eq: app.profile.eq.is_some(),
             has_presets: app.profile.eq.is_some() || device_presets::offered(&app.profile),
             has_mute: app.mutes(),
@@ -171,6 +175,7 @@ impl Scene {
             has_crossfeed: app.crossfeed_shown(),
             has_space: app.space_shown(),
             has_setup: app.setup_offered(),
+            has_scenes: app.scenes_offered(),
             no_volume: app.volume().is_none(),
             no_toggle: !app.has_toggle_or_host_rows(),
             no_identify: !app.identify_offered(),
@@ -237,13 +242,13 @@ const ENTER: &str = "Enter";
 const BAND_LABELS: [&str; 9] = ["1", "1-2", "1-3", "1-4", "1-5", "1-6", "1-7", "1-8", "1-9"];
 
 impl KeyHint {
-    /// What a screen that looks like `scene` prints for this key: the table's own label, but
+    /// What a screen that looks like `context` prints for this key: the table's own label, but
     /// for the band keys, which read one to as many bands as the device has — `1-3` on a
     /// three-band tone control, `1-5` on a five-band one — and keep the table's `1-N` where
     /// there is no tone control to count.
-    pub fn label_in(&self, scene: Scene) -> &'static str {
+    pub fn label_in(&self, context: KeyContext) -> &'static str {
         match self.label {
-            BAND_KEYS => match scene.bands {
+            BAND_KEYS => match context.bands {
                 0 => BAND_KEYS,
                 bands => BAND_LABELS[bands.min(BAND_LABELS.len()) - 1],
             },
@@ -251,24 +256,24 @@ impl KeyHint {
         }
     }
 
-    /// What the help overlay says this key does on a screen that looks like `scene`: the full
+    /// What the help overlay says this key does on a screen that looks like `context`: the full
     /// word where the table has one, and otherwise what the key row says.
-    pub fn long_in(&self, scene: Scene) -> &'static str {
+    pub fn long_in(&self, context: KeyContext) -> &'static str {
         match self.long {
             // The keys the tone control's list names on itself exist only where it does.
-            Some(PRESETS_LONG) if !scene.has_eq => PRESETS,
+            Some(PRESETS_LONG) if !context.has_eq => PRESETS,
             Some(long) => long,
-            None => self.does_in(scene),
+            None => self.does_in(context),
         }
     }
 
-    /// What a screen that looks like `scene` says this key does: the table's own words, but for
+    /// What a screen that looks like `context` says this key does: the table's own words, but for
     /// `q`, which says it asks first where the settings have it ask, and for the wizard's `←→`,
     /// which cycle a row's answers where they would move along a typed line.
-    pub fn does_in(&self, scene: Scene) -> &'static str {
+    pub fn does_in(&self, context: KeyContext) -> &'static str {
         match self.does {
-            QUIT if scene.confirms_quit => QUIT_ASKS,
-            "move" if self.code == KeyCode::Right && scene.stepping => "cycle",
+            QUIT if context.confirms_quit => QUIT_ASKS,
+            "move" if self.code == KeyCode::Right && context.stepping => "cycle",
             does => does,
         }
     }
@@ -886,6 +891,18 @@ static HINTS: &[KeyHint] = &[
         toggles: None,
         long: None,
     },
+    // The scenes box opens from every screen; where the daemon keeps none, the key says why in a
+    // toast.
+    KeyHint {
+        code: KeyCode::Char('z'),
+        label: "z",
+        does: "scenes",
+        screens: EVERY_SCREEN,
+        when: When::HasScenes,
+        group: SCREENS,
+        toggles: None,
+        long: Some("scenes (↵ n u c x inside)"),
+    },
     // Global: the keys that mean the same thing everywhere. The uppercase ones turn a mode of
     // the TUI's own the other way and write it to the configuration file, which is the same
     // switch the Settings box shows for it.
@@ -1092,18 +1109,21 @@ fn shared_key(hint: &KeyHint) -> bool {
         > 1
 }
 
-/// Whether the help overlay leaves `hint` out on a screen that looks like `scene`: the keys
+/// Whether the help overlay leaves `hint` out on a screen that looks like `context`: the keys
 /// for a control a device either has or never will (phase, NOS) are not listed where it has
 /// none, where the keys that merely depend on the screen's state stay listed, dimmed.
-pub fn hidden_in(hint: &KeyHint, scene: Scene) -> bool {
+pub fn hidden_in(hint: &KeyHint, context: KeyContext) -> bool {
     match hint.when {
-        When::HasPhase | When::HasNos => !available_in(hint, scene),
+        When::HasPhase | When::HasNos => !available_in(hint, context),
         // The computer's keys are not listed where its controls are not there at all.
-        When::HasComputer | When::OnComputer => !scene.has_computer,
+        When::HasComputer | When::OnComputer => !context.has_computer,
         // Crossfeed's keys are not listed where the computer serves none.
-        When::HasLoudness => !scene.has_loudness,
-        When::HasCrossfeed => !scene.has_crossfeed,
-        When::HasSpace => !scene.has_space,
+        When::HasLoudness => !context.has_loudness,
+        When::HasCrossfeed => !context.has_crossfeed,
+        When::HasSpace => !context.has_space,
+        // The scenes key is not listed where the daemon keeps none: the key still says so in a
+        // toast, as the menu has no row.
+        When::HasScenes => !context.has_scenes,
         _ => false,
     }
 }
@@ -1112,34 +1132,35 @@ pub fn hidden_in(hint: &KeyHint, scene: Scene) -> bool {
 /// the wizard's key row and the help overlay, dimmed rather than dropped: the reason is worth
 /// knowing even where it does not hold.
 pub fn available(hint: &KeyHint, app: &App) -> bool {
-    available_in(hint, Scene::of(app))
+    available_in(hint, KeyContext::of(app))
 }
 
-/// Whether `hint` is worth pressing on a screen that looks like `scene`, which is the same
+/// Whether `hint` is worth pressing on a screen that looks like `context`, which is the same
 /// question [`available`] asks of an app and the one the wizard asks of the step it is on.
-pub fn available_in(hint: &KeyHint, scene: Scene) -> bool {
+pub fn available_in(hint: &KeyHint, context: KeyContext) -> bool {
     match hint.when {
         When::Always => true,
-        When::HasEq => scene.has_eq,
-        When::HasPresets => scene.has_presets,
-        When::HasMute => scene.has_mute,
-        When::HasPhase => scene.has_phase,
-        When::HasNos => scene.has_nos,
-        When::HasBalance => scene.has_balance,
-        When::HasVolume => !scene.no_volume,
-        When::HasToggle => !scene.no_toggle,
-        When::CanIdentify => !scene.no_identify,
-        When::HasComputer => scene.has_computer,
-        When::OnComputer => scene.on_computer,
-        When::HasLoudness => scene.has_loudness,
-        When::HasCrossfeed => scene.has_crossfeed,
-        When::HasSpace => scene.has_space,
-        When::HasSetup => scene.has_setup,
-        When::Choosing => !scene.typing,
-        When::Typing => scene.typing,
-        When::Backable => scene.can_go_back,
-        When::Scrolling => scene.scrolls,
-        When::TokenRow => scene.on_token_row,
+        When::HasEq => context.has_eq,
+        When::HasPresets => context.has_presets,
+        When::HasMute => context.has_mute,
+        When::HasPhase => context.has_phase,
+        When::HasNos => context.has_nos,
+        When::HasBalance => context.has_balance,
+        When::HasVolume => !context.no_volume,
+        When::HasToggle => !context.no_toggle,
+        When::CanIdentify => !context.no_identify,
+        When::HasComputer => context.has_computer,
+        When::OnComputer => context.on_computer,
+        When::HasLoudness => context.has_loudness,
+        When::HasCrossfeed => context.has_crossfeed,
+        When::HasSpace => context.has_space,
+        When::HasSetup => context.has_setup,
+        When::HasScenes => context.has_scenes,
+        When::Choosing => !context.typing,
+        When::Typing => context.typing,
+        When::Backable => context.can_go_back,
+        When::Scrolling => context.scrolls,
+        When::TokenRow => context.on_token_row,
     }
 }
 

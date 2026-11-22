@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The README's pictures, drawn by the TUI's own renderer on the fake devices: the scenes
-//! ([`scenes`]) in the world they are drawn in ([`world`]), cells turned into pixels
+//! The README's pictures, drawn by the TUI's own renderer on the fake devices: the stills
+//! ([`shots`]) in the world they are drawn in ([`world`]), cells turned into pixels
 //! ([`raster`]), and each picture's text twin with the guard that refuses a frame carrying a
 //! detail of this machine ([`text`]). `make screenshots` runs the `#[ignore]` test `generate`
 //! and encodes what it writes under `target/screenshots/`.
@@ -13,7 +13,7 @@ mod mascot;
 
 mod raster;
 
-mod scenes;
+mod shots;
 
 mod text;
 
@@ -29,7 +29,7 @@ use svolder_profiles::tone::apo::{self, Correction};
 
 use crate::tui::screenshots::raster::fonts;
 use crate::tui::screenshots::raster::{Palette, Raster, RawStream, write_ppm};
-use crate::tui::screenshots::scenes::{Still, animation, still, still_sized};
+use crate::tui::screenshots::shots::{Still, animation, still, still_sized};
 use crate::tui::screenshots::text::{AnimationTwin, HostDetails, guard, still_twin};
 use crate::tui::screenshots::world::{PRESET, World, measurement, stand_in};
 
@@ -70,10 +70,10 @@ pub(super) fn correction_from(
     Ok(parsed.correction)
 }
 
-/// The palette every picture is painted in: the scenes' theme.
+/// The palette every picture is painted in: the stills' theme.
 ///
 /// The theme does not depend on the correction; the world is only built for it.
-pub(in crate::tui::screenshots) fn scenes_palette(correction: &Correction) -> Palette {
+pub(in crate::tui::screenshots) fn shots_palette(correction: &Correction) -> Palette {
     Palette::of(&World::new(correction.clone()).look.theme)
 }
 
@@ -93,7 +93,7 @@ fn generate_into(out: &Path) -> Result<(), String> {
     })?;
     let fonts = fonts::load_system().map_err(|m| m.message())?;
     let host = HostDetails::of_this_machine();
-    let mut raster = Raster::new(fonts, scenes_palette(&correction));
+    let mut raster = Raster::new(fonts, shots_palette(&correction));
 
     for s in Still::ALL {
         let shot = still(&correction, s);
@@ -166,7 +166,7 @@ fn divider_shots() {
         fonts::load_system()
             .map_err(|m| m.message())
             .expect("fonts"),
-        scenes_palette(&correction),
+        shots_palette(&correction),
     );
     for (name, size, split) in [
         ("80", (80, 24), None),
@@ -199,7 +199,7 @@ fn vu_shots() {
         fonts::load_system()
             .map_err(|m| m.message())
             .expect("fonts"),
-        scenes_palette(&correction),
+        shots_palette(&correction),
     );
     for (name, size, cover) in [
         ("100x45", (100, 45), false),
@@ -235,7 +235,7 @@ fn loudness_shots() {
         fonts::load_system()
             .map_err(|m| m.message())
             .expect("fonts"),
-        scenes_palette(&correction),
+        shots_palette(&correction),
     );
     for (name, size, screen, unfolded) in [
         ("pane-80x24", (80, 24), Screen::Device, false),

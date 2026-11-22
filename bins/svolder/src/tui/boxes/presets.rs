@@ -187,6 +187,8 @@ pub enum Done {
     PresetWritten(Result<(), String>),
     /// What a call to the daemon's virtual speaker sets said or ended with.
     Speakers(Box<super::speakers::SpeakersDone>),
+    /// What the daemon said to a scene request.
+    Scene(Box<super::scenes::SceneDone>),
 }
 
 /// Fold what a job ended with into the app, and answer with the writes it asks for.
@@ -204,6 +206,7 @@ pub(crate) fn done(app: &mut App, done: Done) -> Vec<Intent> {
             Vec::new()
         }
         Done::Speakers(done) => app.speakers_done(*done),
+        Done::Scene(done) => app.scenes_done(*done),
     }
 }
 

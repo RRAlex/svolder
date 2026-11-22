@@ -45,6 +45,10 @@ export const CROSSFEED = 'crossfeed';
 /** The router's page of the Sound popup's Virtual speakers tab. */
 export const SPEAKERS = 'speakers';
 
+/** The name of the Scenes popup: the scenes saved on the daemon, recalled, saved, renamed and
+ * deleted from one list (a writer's only). */
+export const SCENES = 'scenes';
+
 /** The name of the PipeWire config popup: the check of the sink the player's stream reaches
  * (read-only, the daemon's words), opened from the chip on a theme's path line or from its row. */
 export const SETUP = 'setup';
@@ -61,7 +65,9 @@ export const devicePage = (url) => `d-${url}`;
  * which it makes itself. Sound is a writer's only (the daemon reaches the internet for the EQ
  * library, which only a writer asks, and loudness and crossfeed are writes) and closes with a
  * change of the shown device: its EQ library tab is about that device. It has no side list: its
- * tabs are the pages (sound/draw.js). PipeWire config is everyone's (it only shows what the
+ * tabs are the pages (sound/draw.js). Scenes is a writer's too (a scene is saved and recalled
+ * on the daemon, for the computer and every device) and stays through a change of the shown
+ * device: it is about all of them, not the one on show. PipeWire config is everyone's (it only shows what the
  * daemon read) and closes with a change of the shown device: it is about that card's path. */
 export const POPUPS = [
   {
@@ -77,6 +83,13 @@ export const POPUPS = [
     title: 'Sound',
     load: () => import('./sound/wire.js'),
     row: { label: 'Sound…', sees: 'writer' },
+  },
+  {
+    name: SCENES,
+    title: 'Scenes',
+    stays: true,
+    load: () => import('./scenes/wire.js'),
+    row: { label: 'Scenes…', sees: 'writer' },
   },
   {
     name: SETUP,

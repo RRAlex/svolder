@@ -22,7 +22,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
 use crate::tui::app::{App, Screen};
-use crate::tui::keys::{self, KeyHint, Scene, When};
+use crate::tui::keys::{self, KeyContext, KeyHint, When};
 use crate::tui::theme::{Role, Theme};
 use crate::tui::widgets;
 use crate::tui::widgets::scroll::{MORE_DOWN, MORE_UP};
@@ -413,7 +413,7 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
     let mut listed: Vec<(&'static str, &'static str)> = Vec::new();
     let mut everywhere = vec![Entry::Heading(EVERYWHERE)];
     for hint in keys::shared() {
-        if keys::hidden_in(hint, Scene::of(app)) {
+        if keys::hidden_in(hint, KeyContext::of(app)) {
             continue;
         }
         listed.push((hint.label, hint.does));
@@ -445,7 +445,9 @@ fn sections(app: &App) -> Vec<Vec<Entry>> {
     for screen in order {
         let mut own = vec![Entry::Heading(name(screen))];
         for hint in keys::only_on(screen) {
-            if listed.contains(&(hint.label, hint.does)) || keys::hidden_in(hint, Scene::of(app)) {
+            if listed.contains(&(hint.label, hint.does))
+                || keys::hidden_in(hint, KeyContext::of(app))
+            {
                 continue;
             }
             // The token row's keys are the Connect category's: named only while the box is open.
@@ -502,7 +504,7 @@ fn gestures(app: &App) -> Vec<Entry> {
 /// `app` now where there is one.
 fn entry(hint: &KeyHint, app: &App) -> Entry {
     Entry::Key {
-        label: hint.label_in(Scene::of(app)),
+        label: hint.label_in(KeyContext::of(app)),
         does: does(hint, app),
         reason: reason(hint, app),
     }
@@ -521,7 +523,7 @@ fn does(hint: &KeyHint, app: &App) -> String {
                 None => String::new(),
             }
         }
-        None => hint.long_in(Scene::of(app)).to_string(),
+        None => hint.long_in(KeyContext::of(app)).to_string(),
     }
 }
 
@@ -562,6 +564,8 @@ fn reason(hint: &KeyHint, app: &App) -> Option<&'static str> {
         When::HasSpace => "on the computer side, with virtual speakers",
         When::HasSetup if !app.host_shown() => "needs host",
         When::HasSetup => "needs a DAC",
+        // The key is hidden, never dimmed, where scenes are not offered.
+        When::HasScenes => return None,
         When::Choosing => "not while typing",
         When::Typing => "only while typing",
         When::Backable => "nothing to go back to",

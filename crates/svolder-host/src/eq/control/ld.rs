@@ -589,7 +589,7 @@ impl EqControl {
     }
 
     /// Whether the running chain has the stage's controls, from a fresh look.
-    async fn has_loudness_ports(&mut self) -> bool {
+    pub(super) async fn has_loudness_ports(&mut self) -> bool {
         self.params.forget_node();
         let node = self.params.node().await;
         self.ld_look(true);

@@ -256,15 +256,16 @@ fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> {
     lines.into_iter()
 }
 
-/// `{ sink, path: { verdict, words, sentence, dac }, config: { sink, outcome, summary, limit,
-/// lines } }`; the keys are svolder-ipc's, as on every JSON surface, and `words` is the list
-/// the judge made. `dac` is the matched DAC's display name, else null; the top-level `sink` is
-/// the config's, kept for scripts.
+/// `{ sink, path: { verdict, end_to_end, words, sentence, dac }, config: { sink, outcome,
+/// summary, limit, lines } }`; the keys are svolder-ipc's, as on every JSON surface, and `words`
+/// is the list the judge made. `dac` is the matched DAC's display name, else null; the top-level
+/// `sink` is the config's, kept for scripts.
 fn as_json(path: &PathLine, check: &SetupCheck, dac: Option<&DacFacts>) -> serde_json::Value {
     serde_json::json!({
         "sink": check.sink,
         "path": {
             "verdict": path.verdict.key(),
+            "end_to_end": path.end_to_end().key(),
             "words": path.words,
             "sentence": path.sentence(),
             "dac": dac.map(|dac| dac.display.as_str()),

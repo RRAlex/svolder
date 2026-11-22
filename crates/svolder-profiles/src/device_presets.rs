@@ -100,11 +100,49 @@ pub fn plan(
         name: name.to_string(),
         names: table.settings.iter().map(|s| s.name.clone()).collect(),
     })?;
+    let targets: Vec<(String, i64)> = table
+        .keys
+        .iter()
+        .cloned()
+        .zip(setting.raw.iter().copied())
+        .collect();
+    Ok(SettingPlan {
+        name: setting.name.clone(),
+        writes: plan_values(profile, &targets, raw),
+    })
+}
+
+/// The writes that put the built-in table's controls on `targets`, each a control's key and the
+/// raw step it should read, given `raw` as [`plan`] takes it; the one order [`plan`] uses, so a
+/// named setting and a stored set of values are written alike.
+///
+/// Every control going down goes first, in the order of `targets`, then every control going up.
+/// A control already on its target is left out; one that has not been read is written, with the
+/// cuts when its target is at or below the step that reads zero and with the boosts otherwise.
+/// A target whose key is not one of the table's controls is left out.
+pub fn plan_values(
+    profile: &Profile,
+    targets: &[(String, i64)],
+    raw: impl Fn(FunctionId) -> Option<i64>,
+) -> Vec<SettingWrite> {
+    let Some(table) = profile.builtin_settings.as_ref() else {
+        return Vec::new();
+    };
     let (mut down, mut up) = (Vec::new(), Vec::new());
-    for ((key, id), &target) in table.keys.iter().zip(&table.ids).zip(&setting.raw) {
+    for (key, target) in targets {
+        let Some(id) = table
+            .keys
+            .iter()
+            .zip(&table.ids)
+            .find(|(own, _)| own.eq_ignore_ascii_case(key))
+            .map(|(_, id)| *id)
+        else {
+            continue;
+        };
         let Some(control) = profile.control_by_key(key) else {
             continue;
         };
+        let target = *target;
         let current = raw(control.id);
         if current == Some(target) {
             continue;
@@ -115,16 +153,13 @@ pub fn plan(
         };
         let write = SettingWrite {
             key: control.key.clone(),
-            id: *id,
+            id,
             raw: target,
         };
         if lowers { &mut down } else { &mut up }.push(write);
     }
     down.append(&mut up);
-    Ok(SettingPlan {
-        name: setting.name.clone(),
-        writes: down,
-    })
+    down
 }
 
 /// The built-in setting every control it sets reads, the first in the table's order when two do.

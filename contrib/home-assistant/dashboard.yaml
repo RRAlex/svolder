@@ -96,11 +96,13 @@ views:
             heading: Tone control
             icon: mdi:tune-vertical
             badges:
-              # The computer's EQ, from the second device `This computer`: a badge in the heading, so
-              # the grid keeps its place, tapped to turn the EQ on or off. It shows only while that
-              # switch exists, so without the computer side the view is as it was.
+              # The computer's EQ, from the second device named by the computer's host name: write
+              # your host name in lower case, every other sign as `_` (`my-desk` is `my_desk`), for
+              # `reframe` in the two ids below. A badge in the heading, so the grid keeps its place,
+              # tapped to turn the EQ on or off. It shows only while that switch exists, so without
+              # the computer side the view is as it was.
               - type: entity
-                entity: switch.this_computer_eq
+                entity: switch.reframe_eq
                 name: Computer EQ
                 icon: mdi:equalizer
                 state_content:
@@ -110,7 +112,7 @@ views:
                   action: toggle
                 visibility:
                   - condition: state
-                    entity: switch.this_computer_eq
+                    entity: switch.reframe_eq
                     state:
                       - "on"
                       - "off"
@@ -156,6 +158,34 @@ views:
               - condition: state
                 entity: select.gungnir_tone_control_mode
                 state_not: eq
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Scenes
+            icon: mdi:palette
+          # The computer's scenes, from the same second device: write your host name in lower case,
+          # every other sign as `_` (`my-desk` is `my_desk`), for `reframe` in the two ids below.
+          # The select recalls a scene (`custom` means none is on); typing a name in the text saves
+          # the current settings under it. Rename and delete are in the TUI, the web page and
+          # `svolder scene`, not here. Without scenes (an older daemon) the entities do not exist
+          # and the cards show nothing.
+          - type: tile
+            entity: select.reframe_scene
+            name: Scene
+            icon: mdi:palette
+            color: primary
+            grid_options:
+              columns: full
+            features_position: bottom
+            features:
+              - type: select-options
+          - type: entities
+            entities:
+              - entity: text.reframe_scene_save
+                name: Save current as
+            grid_options:
+              columns: full
 
       - type: grid
         cards:

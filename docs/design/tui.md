@@ -5,14 +5,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # The terminal UI
 
 `svolder tui` (and bare `svolder`) is the terminal front end. This page is how it is built: the
-state it keeps, the screens and boxes it draws, the key table and the three rules every key
-follows, the look (roles, palettes, size tiers), and the decoration laid over the screens (the
-intro, the squirrel, the animation layer with its glow). It sits one level below
-[the map](../architecture.md), whose life of a volume change follows one key press through this
-code; what each screen shows and each key does for a user is in the [TUI guide](../usage/tui.md),
-and the words (role, tier, intent) are in the [glossary](../glossary.md). The web page's
-decoration and the effects it shares a name with are in
-[themes-and-effects.md](themes-and-effects.md).
+state it keeps, the screens and boxes it draws, the key table and the three rules every key follows,
+the look (roles, palettes, size tiers), and the decoration laid over the screens (the intro, the
+squirrel, the animation layer with its glow). It sits one level below [the map](../architecture.md),
+whose life of a volume change follows one key press through this code; what each screen shows and
+each key does for a user is in the [TUI guide](../usage/tui.md), and the words (role, tier, intent)
+are in the [glossary](../glossary.md). The web page's decoration and the effects it shares a name
+with are in [themes-and-effects.md](themes-and-effects.md).
 
 ## How it is built
 
@@ -67,10 +66,11 @@ A box is modal: it is drawn over the screen, which is dimmed round it, and it ta
 it closes, so a letter typed into a name or a number is that character and never the key it is
 elsewhere. The boxes are the quit question (`screens/quit.rs`), the menu `Esc` opens on the device
 screen (`screens/menu.rs`), the help overlay (`screens/help.rs`), the Settings box
-(`screens/settings.rs`), the preset list (`screens/presets.rs`, `boxes/presets.rs`), the device
-editor (`boxes/editor.rs`) and a band's edit line (`boxes/edit_line.rs`). The toast
-(`boxes/toast.rs`) and the tooltip (`boxes/tooltip.rs`) are not modal. `Overlays`
-(`app/overlays.rs`) holds which are open.
+(`screens/settings.rs`), the preset list (`screens/presets.rs`, `boxes/presets.rs`), the Scenes box
+(`screens/scenes.rs`, `boxes/scenes.rs`, opened by `z` or the menu's *Scenes* row while the daemon
+keeps scenes; [scenes.md](scenes.md)), the device editor (`boxes/editor.rs`) and a band's edit line
+(`boxes/edit_line.rs`). The toast (`boxes/toast.rs`) and the tooltip (`boxes/tooltip.rs`) are not
+modal. `Overlays` (`app/overlays.rs`) holds which are open.
 
 The Settings box has five categories, in tabs on its top border: Look, Effects, Behaviour, Host
 audio and Connect (`CATEGORIES` in `screens/settings.rs`). A row of the first four is one key of
@@ -157,7 +157,8 @@ Every key in the table follows one of three rules, which the help overlay opens 
 (`RULES` in `screens/help.rs`):
 
 1. **Lowercase letters act on the device, or open a screen or the Settings box.** `m` mutes, `i`
-   flips phase, `o` flips NOS, `r` refreshes; `e`, `t`, `d`, `c` change screen; `s` opens Settings.
+   flips phase, `o` flips NOS, `r` refreshes; `e`, `t`, `d`, `c` change screen; `s` opens Settings
+   and `z` the Scenes box.
 2. **Uppercase letters toggle a TUI mode and save it to the config.** `E` effects, `M` mouse, `H`
    hue drift, `R` rainbow scroll, `F` runner, `V` title meter. Each turns the row the Settings box
    shows for the same switch (`keys::setting_turned_by`), so the key and the box never give two
@@ -238,7 +239,7 @@ the letters), whose exit breaks the mark back into sparks that fly into the head
 key ends the intro early; Ctrl-C and `q` give up on the device instead of getting past the mark. A
 demo effect is a function of the time, the frame size and the seed alone
 (`decoration/intro/rng.rs`), paced at sixty frames a second and thirty where the terminal cannot
-keep up (`decoration/intro/pace.rs`). To add an effect: a variant of `Demo` and `Scene`
+keep up (`decoration/intro/pace.rs`). To add an effect: a variant of `Demo` and `Planned`
 (`decoration/intro/demo.rs`), a module beside `particles`, and a word for `intro_effect`.
 `decoration/intro_sound.rs` plays a short sound through PipeWire with it when `intro_sound` is on.
 
@@ -329,9 +330,8 @@ emphasis all live in the theme. A hard-coded colour in a screen is wrong at 16 c
 guide read `HINTS`. A key handled but not listed is invisible; a key listed but not handled
 lies, and a test fails for it.
 
-**The three key rules hold for every key.** Someone who knows them can guess a key. A lowercase
-key that toggles a mode, or an uppercase one that acts on the device, breaks that and the tests
-say so.
+**The three key rules hold for every key.** Someone who knows them can guess a key. A lowercase key
+that toggles a mode, or an uppercase one that acts on the device, breaks that and the tests say so.
 
 **A box takes every key until it closes.** Otherwise a letter typed into a preset name would also
 fire the key it is elsewhere.
@@ -363,7 +363,7 @@ token box, dropped when it closes or the token changes, and prints as `***` in a
 traced frames all come from `Tier::of` on the same area. A second computation somewhere is a click
 that lands on the wrong row at one size.
 
-**Pure brains, no clocks.** The squirrel's `Mascot`, the intro's scenes and the transitions take the
+**Pure brains, no clocks.** The squirrel's `Mascot`, the intro's effects and the transitions take the
 time as an argument, and their chance is a seed (`decoration/intro/rng.rs`) or a hash of a cell's
 place (`decoration/transition.rs`), so a test can say what a frame draws.
 
@@ -387,8 +387,8 @@ place (`decoration/transition.rs`), so a test can say what a frame draws.
   `screens/wizard.rs`; tests: `wizard/{tests,remote_tests}.rs`, `screens/wizard/tests.rs`.
 - Clicks and hovers: `mouse.rs`, the hit map each screen fills as it draws; tests in
   `mouse/tests.rs`.
-- Boxes: `boxes/` (`editor.rs`, `edit_line.rs`, `presets.rs` and `presets/`, `connections.rs`,
-  `web_box.rs`, `toast.rs`, `tooltip.rs`), each with its `tests.rs`.
+- Boxes: `boxes/` (`editor.rs`, `edit_line.rs`, `presets.rs` and `presets/`, `scenes.rs`,
+  `connections.rs`, `web_box.rs`, `toast.rs`, `tooltip.rs`), each with its `tests.rs`.
 - Decoration: `decoration/` (`effects.rs` and `effects/`, `transition.rs`, `intro.rs` and `intro/`,
   `mascot.rs` and `mascot/`, `title.rs`); tests in `decoration/effects/tests.rs`,
   `decoration/transition/tests.rs`, `decoration/mascot/tests.rs`.

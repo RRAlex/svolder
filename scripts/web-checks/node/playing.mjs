@@ -9,7 +9,7 @@ import {
   clockOffset, daemonClock, elapsedUs, fraction, timeWords,
 } from '../../../bins/svolderd/web/core/clock.js';
 import { page as domPage } from './dom.mjs';
-import { loopPlan, tick } from '../../../bins/svolderd/web/themes/ember/playing.js';
+import { fitPath, loopPlan, tick } from '../../../bins/svolderd/web/themes/ember/playing.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -120,6 +120,34 @@ ok('ember_tick_counts_on_when_the_part_is_swapped_for_one_of_the_same_reading', 
     assert.equal(document.querySelector('.np-el').textContent, '1:00', 'counted on, not back to the reading');
   } finally {
     Date.now = realNow;
+    delete globalThis.document;
+  }
+});
+
+ok('fitPath_cuts_a_plain_hop_before_a_changed_one_and_the_dots_stand_before_the_last_chip', () => {
+  const chip = (label, changes) => `<span class="np-hop${changes ? ' changes' : ''}"><b>${label}</b></span>`;
+  const { window, document } = domPage('<section id="part-playing"><p class="np-path">'
+    + `<button class="np-label">Path</button>${chip('player', false)}${chip('computer', true)}`
+    + `${chip('DAC USB 1', true)}</p></section>`);
+  // No layout in jsdom: a box is as low as 15 px per hop still shown beyond 50, the card ends at 100
+  // (its limit 88): three hops overflow, two fit.
+  const original = window.Element.prototype.getBoundingClientRect;
+  window.Element.prototype.getBoundingClientRect = function box() {
+    if (this.id === 'part-playing') return { bottom: 100 };
+    const shown = document.querySelectorAll('.np-hop:not(.np-cut)').length;
+    return { bottom: 50 + 15 * shown };
+  };
+  window.Element.prototype.getClientRects = () => [{}];
+  globalThis.document = document;
+  try {
+    fitPath();
+    const cut = [...document.querySelectorAll('.np-cut')].map((hop) => hop.textContent);
+    assert.deepEqual(cut, ['player'], 'the plain hop goes first, the changed ones stay');
+    const more = document.querySelector('.np-more');
+    assert.equal(more.nextElementSibling.textContent, 'DAC USB 1', 'the dots stand before the last chip');
+    assert.equal(more.title, 'player');
+  } finally {
+    window.Element.prototype.getBoundingClientRect = original;
     delete globalThis.document;
   }
 });

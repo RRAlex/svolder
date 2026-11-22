@@ -98,6 +98,10 @@ async fn watch_settled(broker: &TestBroker) -> Watcher {
     first
         .wait_for(&device_topic("dsp_firmware/state"), STEP, |_| true)
         .await;
+    // The device's first discovery waits for its computer's (up to the bridge's start wait).
+    first
+        .wait_for(&config_topic("binary_sensor", "link"), STEP, |_| true)
+        .await;
     watch(broker).await
 }
 
@@ -122,6 +126,9 @@ async fn watch_after(broker: &TestBroker, ready: impl Fn(&Json) -> bool) -> Watc
     let mut first = watch(broker).await;
     first
         .wait_for(&device_topic("state"), STEP, |seen| ready(&json(seen)))
+        .await;
+    first
+        .wait_for(&config_topic("binary_sensor", "link"), STEP, |_| true)
         .await;
     watch(broker).await
 }
@@ -164,7 +171,7 @@ async fn the_retained_configs_and_state_are_on_the_broker() {
                 .unwrap_or_else(|| panic!("nothing retained on {topic}; given {given:#?}"))
         };
         assert!(given.values().all(|s| s.retained), "{given:#?}");
-        assert_eq!(at("svolder/bridge/availability").payload, "online");
+        assert_eq!(at(bridge_topic()).payload, "online");
         assert_eq!(at(&device_topic("availability")).payload, "online");
         let state = json(at(&device_topic("state")));
         assert!(
@@ -217,6 +224,9 @@ async fn the_diagnostic_sensors_are_announced_and_the_firmware_reported() {
                 seen.payload
             );
         }
+        first
+            .wait_for(&config_topic("sensor", "dsp_firmware"), STEP, |_| true)
+            .await;
         let mut watcher = watch(&broker).await;
         let given = watcher.collect(Duration::from_secs(1)).await;
         let at = |leaf: &str| {
@@ -509,16 +519,10 @@ async fn the_password_in_the_environment_wins_over_the_file() {
             "username = \"svolder\"\npassword = \"wrong\"\n",
         );
         let (_child, _client) = daemon_on(&config, &[("SVOLDER_MQTT_PASSWORD", "secret")]).await;
-        let mut watcher = Watcher::connect_as(
-            broker.port,
-            &["svolder/bridge/availability"],
-            Some(("svolder", "secret")),
-        )
-        .await;
+        let mut watcher =
+            Watcher::connect_as(broker.port, &[bridge_topic()], Some(("svolder", "secret"))).await;
         watcher
-            .wait_for("svolder/bridge/availability", STEP, |s| {
-                s.payload == "online"
-            })
+            .wait_for(bridge_topic(), STEP, |s| s.payload == "online")
             .await;
     })
     .await
@@ -888,20 +892,14 @@ async fn a_killed_daemon_leaves_the_last_will() {
         let (child, _client) = daemon_on(&bridged(broker.port, ""), &[]).await;
         let mut watcher = watch_settled(&broker).await;
         watcher
-            .wait_for("svolder/bridge/availability", STEP, |s| {
-                s.payload == "online"
-            })
+            .wait_for(bridge_topic(), STEP, |s| s.payload == "online")
             .await;
         signal(&child, "KILL");
         watcher
-            .wait_for("svolder/bridge/availability", STEP, |s| {
-                s.payload == "offline"
-            })
+            .wait_for(bridge_topic(), STEP, |s| s.payload == "offline")
             .await;
-        let mut later = Watcher::connect(broker.port, &["svolder/bridge/availability"]).await;
-        let kept = later
-            .wait_for("svolder/bridge/availability", STEP, |s| s.retained)
-            .await;
+        let mut later = Watcher::connect(broker.port, &[bridge_topic()]).await;
+        let kept = later.wait_for(bridge_topic(), STEP, |s| s.retained).await;
         assert_eq!(kept.payload, "offline");
     })
     .await
@@ -933,7 +931,7 @@ async fn a_stop_says_offline_for_every_device_and_the_bridge() {
                 .wait_for_each(
                     &[
                         (&device_topic("availability"), "offline"),
-                        ("svolder/bridge/availability", "offline"),
+                        (bridge_topic(), "offline"),
                     ],
                     STEP,
                 )
@@ -973,8 +971,8 @@ async fn sighup_with_a_changed_section_restarts_the_bridge() {
         watcher
             .wait_for_each(
                 &[
-                    ("svolder/bridge/availability", "offline"),
-                    ("svolder/bridge/availability", "online"),
+                    (bridge_topic(), "offline"),
+                    (bridge_topic(), "online"),
                     (&config_topic("sensor", "volume"), ""),
                 ],
                 STEP,
@@ -1022,9 +1020,7 @@ async fn sighup_with_the_same_section_keeps_the_connection() {
         let broker = TestBroker::start();
         let (child, _client) = daemon_on(&bridged(broker.port, ""), &[]).await;
         let mut watcher = watch_settled(&broker).await;
-        watcher
-            .wait_for("svolder/bridge/availability", STEP, |s| s.retained)
-            .await;
+        watcher.wait_for(bridge_topic(), STEP, |s| s.retained).await;
 
         let second = "[[device]]\nname = \"second\"\nudid = \"0908070605040302\"\n";
         let config = bridged(broker.port, "").replacen(CONFIG, &format!("{CONFIG}{second}"), 1);
@@ -1046,9 +1042,7 @@ async fn sighup_with_the_same_section_keeps_the_connection() {
         }
         heard.extend(watcher.collect(Duration::from_millis(500)).await);
         assert!(
-            !heard
-                .iter()
-                .any(|s| s.topic == "svolder/bridge/availability"),
+            !heard.iter().any(|s| s.topic == bridge_topic()),
             "the bridge reconnected: {heard:#?}"
         );
     })
@@ -1076,7 +1070,7 @@ async fn sighup_without_the_section_stops_the_bridge() {
             .wait_for_each(
                 &[
                     (&device_topic("availability"), "offline"),
-                    ("svolder/bridge/availability", "offline"),
+                    (bridge_topic(), "offline"),
                 ],
                 STEP,
             )
@@ -1280,9 +1274,7 @@ async fn a_bridge_being_restarted_is_never_reported_off() {
         let broker = TestBroker::start();
         let (child, mut client) = daemon_on(&bridged(broker.port, ""), &[]).await;
         let mut watcher = watch_settled(&broker).await;
-        watcher
-            .wait_for("svolder/bridge/availability", STEP, |s| s.retained)
-            .await;
+        watcher.wait_for(bridge_topic(), STEP, |s| s.retained).await;
 
         std::fs::write(
             child.config_path(),
@@ -1755,8 +1747,32 @@ const FAKE_COMPUTER: [(&str, &str); 2] = [
     ("SVOLDER_SYSTEMCTL", "/bin/false"),
 ];
 
+/// The host name the daemon reads for its computer's Home Assistant device, as it reads it.
+fn host_name() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let read = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
+        match read.trim() {
+            "" => "localhost".to_string(),
+            name => name.to_string(),
+        }
+    })
+}
+
+/// The id-safe form of [`host_name`] every topic and id of the computer carries.
+fn host_id() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| svolder_mqtt::topics::host_id(host_name()))
+}
+
+/// `svolder/bridge/<host>/availability`, this computer's bridge availability and last will.
+fn bridge_topic() -> &'static str {
+    static TOPIC: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOPIC.get_or_init(|| format!("svolder/bridge/{}/availability", host_id()))
+}
+
 fn computer_topic(leaf: &str) -> String {
-    format!("svolder/computer/{leaf}")
+    format!("svolder/computer_{}/{leaf}", host_id())
 }
 
 /// What the computer's EQ is on the socket: whether it is on, and its preset.
@@ -1796,8 +1812,11 @@ async fn the_computer_switch_follows_the_eq_and_turns_it_on_and_off() {
         };
         let switch = config("switch", "computer_eq");
         assert_eq!(switch["command_topic"], computer_topic("computer_eq/set"));
-        assert_eq!(switch["device"]["name"], "This computer");
-        assert_eq!(switch["device"]["identifiers"][0], "svolder_computer");
+        assert_eq!(switch["device"]["name"], host_name());
+        assert_eq!(
+            switch["device"]["identifiers"][0],
+            format!("svolder_computer_{}", host_id())
+        );
         config("sensor", "computer_eq_preset");
 
         // A recall on the computer turns it on and names the preset.
@@ -1991,7 +2010,10 @@ async fn the_loudness_commands_reach_the_controller_over_the_broker() {
 }
 
 fn computer_config(component: &str, key: &str) -> String {
-    format!("homeassistant/{component}/svolder_computer/{key}/config")
+    format!(
+        "homeassistant/{component}/svolder_computer_{}/{key}/config",
+        host_id()
+    )
 }
 
 /// ON with no points kept, the state a fresh daemon starts in, leaves the EQ off and says why.
@@ -2095,8 +2117,11 @@ async fn a_retained_computer_command_is_never_acted_on() {
         assert!(!computer_eq(&mut client).await.0);
         let said = child.said();
         assert_eq!(
-            said.matches("ignored a retained command on svolder/computer/computer_eq/set")
-                .count(),
+            said.matches(&format!(
+                "ignored a retained command on {}",
+                computer_topic("computer_eq/set")
+            ))
+            .count(),
             1,
             "{said}"
         );
@@ -2125,6 +2150,141 @@ async fn a_start_with_host_off_clears_the_computers_retained_entities() {
         let (_child, _client) = daemon_on(&bridged(broker.port, "commands = true\n"), &[]).await;
         let wanted: Vec<(&str, &str)> = stale.iter().map(|t| (t.as_str(), "")).collect();
         watcher.wait_for_each(&wanted, STEP).await;
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// The scenes' select and text are announced on the computer's device with no host EQ at all (the
+/// default host here is off), the state follows the scene that is on, a typed name saves the
+/// current settings and a taken name is refused in the daemon's words in `saved`, and choosing a
+/// scene recalls it and leaves its answer in `outcome`.
+#[tokio::test]
+async fn the_scene_pair_works_with_no_host_eq() {
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let (_child, _client) = daemon_on(&bridged(broker.port, "commands = true\n"), &[]).await;
+        let select = computer_config("select", "scene");
+        let seen = watch(&broker).await.wait_for(&select, STEP, |_| true).await;
+        let config = json(&seen);
+        assert_eq!(config["options"], serde_json::json!(["custom"]));
+        assert_eq!(config["command_topic"], computer_topic("scene/set"));
+        assert_eq!(
+            config["device"]["identifiers"][0],
+            format!("svolder_computer_{}", host_id())
+        );
+        let text = watch(&broker)
+            .await
+            .wait_for(&computer_config("text", "scene_save"), STEP, |_| true)
+            .await;
+        assert_eq!(
+            json(&text)["command_topic"],
+            computer_topic("scene_save/set")
+        );
+        watch(&broker)
+            .await
+            .wait_for(&computer_topic("scene/state"), STEP, |s| {
+                s.payload == "custom"
+            })
+            .await;
+
+        let watcher = watch(&broker).await;
+        watcher
+            .publish(&computer_topic("scene_save/set"), "Late night")
+            .await;
+        let attributes = |seen: &Seen| json(seen);
+        watch(&broker)
+            .await
+            .wait_for(&computer_topic("scene/attributes"), STEP, |s| {
+                let a = attributes(s);
+                a["saved"]["name"] == "Late night"
+                    && a["saved"].get("error").is_none()
+                    && a["scenes"][0]["name"] == "Late night"
+            })
+            .await;
+        watch(&broker)
+            .await
+            .wait_for(&select, STEP, |s| {
+                json(s)["options"] == serde_json::json!(["Late night", "custom"])
+            })
+            .await;
+        watch(&broker)
+            .await
+            .wait_for(&computer_topic("scene/state"), STEP, |s| {
+                s.payload == "Late night"
+            })
+            .await;
+
+        watcher
+            .publish(&computer_topic("scene_save/set"), "late night")
+            .await;
+        let refused = watch(&broker)
+            .await
+            .wait_for(&computer_topic("scene/attributes"), STEP, |s| {
+                attributes(s)["saved"]["error"].is_string()
+            })
+            .await;
+        let saved = &attributes(&refused)["saved"];
+        assert_eq!(saved["name"], "late night");
+        assert!(!saved["error"].as_str().unwrap().is_empty(), "{saved}");
+
+        watcher
+            .publish(&computer_topic("scene/set"), "late night")
+            .await;
+        let recalled = watch(&broker)
+            .await
+            .wait_for(&computer_topic("scene/attributes"), STEP, |s| {
+                attributes(s).get("outcome").is_some()
+            })
+            .await;
+        let a = attributes(&recalled);
+        assert_eq!(a["outcome"]["name"], "Late night");
+        assert!(
+            a["outcome"]["parts"]
+                .as_array()
+                .is_some_and(|p| !p.is_empty()),
+            "{a}"
+        );
+        assert_eq!(a["recalled"], "Late night");
+    })
+    .await
+    .expect("test timed out");
+}
+
+/// With the fake computer the recall's answer names the computer's part too.
+#[tokio::test]
+async fn a_recall_through_the_select_names_the_computers_part() {
+    use svolder_ipc::socket::protocol::SceneOp;
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let broker = TestBroker::start();
+        let (_child, mut client) =
+            daemon_on(&bridged(broker.port, "commands = true\n"), &FAKE_COMPUTER).await;
+        let saved = client
+            .request(Request::Scene {
+                op: SceneOp::Save {
+                    name: "Desk".into(),
+                    force: false,
+                },
+            })
+            .await
+            .expect("an answer");
+        assert!(matches!(saved, Response::Scene { .. }), "{saved:?}");
+        let watcher = watch(&broker).await;
+        watcher.publish(&computer_topic("scene/set"), "Desk").await;
+        let seen = watch(&broker)
+            .await
+            .wait_for(&computer_topic("scene/attributes"), STEP, |s| {
+                json(s).get("outcome").is_some()
+            })
+            .await;
+        let parts = json(&seen)["outcome"]["parts"].clone();
+        let who: Vec<&str> = parts
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["who"].as_str().unwrap())
+            .collect();
+        assert!(who.contains(&"computer"), "{parts}");
     })
     .await
     .expect("test timed out");

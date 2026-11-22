@@ -61,16 +61,53 @@ fn wait_settled_as(tui: &Tui, before: &str) {
     });
 }
 
-/// The device screen with the fake device's values read: a snapshot taken any earlier still has
-/// rows to fill in.
+/// Whether `text` is the device screen with the fake device's values and its route read. The Path
+/// row is one line while the route is unread; once it is read the row grows and the Controls pane
+/// gives up its blank lines between groups, so every row below moves up. A cell found before that
+/// is a cell the next frame draws something else in.
+fn values_read(text: &str) -> bool {
+    ["63/127", "‹ Flat ›", "Phase invert [ ] off", "10000 Hz"]
+        .iter()
+        .all(|row| text.contains(row))
+        && !text.contains("route not read")
+}
+
+/// The device screen with the fake device's values and route read: a snapshot taken any earlier
+/// still has rows to fill in, and rows that move.
 fn wait_values_read(tui: &Tui) {
     tui.wait_ready();
     tui.wait_for("the fake device's values", WAIT, |s| {
-        let text = s.contents();
-        ["63/127", "‹ Flat ›", "Phase invert [ ] off", "10000 Hz"]
-            .iter()
-            .all(|row| text.contains(row))
+        values_read(&s.contents())
     });
+}
+
+/// Where `needle` is once the screen has kept it there for a quarter of a second: the Controls
+/// pane moves its rows when a reading changes the Path row's height, and a click at a cell found
+/// mid-move lands on the row that is there a frame later.
+fn find_steady(tui: &Tui, needle: &str) -> (u16, u16) {
+    let step = std::time::Duration::from_millis(50);
+    let deadline = std::time::Instant::now() + WAIT;
+    let (mut at, mut still) = (tui.find(needle), 0);
+    while still < 5 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{needle:?} never held still"
+        );
+        std::thread::sleep(step);
+        let now = tui.find(needle);
+        still = if now == at { still + 1 } else { 0 };
+        at = now;
+    }
+    at
+}
+
+#[test]
+fn the_values_are_not_read_while_the_route_is_not() {
+    let unread = "Volume       ██63/127░░░  -26.1 dB\nPhase invert [ ] off\n‹ Flat ›\n10000 Hz\n\
+                  Path         route not read";
+    let read = unread.replace("route not read", "player → computer vo…");
+    assert!(!values_read(unread), "a route not read is not read");
+    assert!(values_read(&read));
 }
 
 /// Wait until the Settings box and everything in it is gone.
@@ -868,11 +905,13 @@ fn the_mouse_clicks_tabs_and_marks_and_the_wheel_steps_the_volume() {
         tui.send_mouse(Mouse::Click, col + 1, row);
         tui.wait_for_text("┤ Controls ├");
 
-        // The wheel over the volume bar steps the volume one notch a click.
-        tui.wait_for_text("63/127");
-        let (col, row) = tui.find("63/127");
+        // The wheel over the volume bar steps the volume one notch a click. The Controls tab
+        // read again shows the Path row unread for a moment, and the rows move when it is read.
+        tui.wait_for("the route read again", WAIT, |s| values_read(&s.contents()));
+        let (col, row) = find_steady(&tui, "63/127");
         tui.send_mouse(Mouse::WheelUp, col, row);
         tui.wait_for_text("64/127");
+        let (col, row) = find_steady(&tui, "64/127");
         tui.send_mouse(Mouse::WheelDown, col, row);
         tui.wait_for_text("63/127");
         tui.quit();
@@ -1258,7 +1297,7 @@ fn wait_for_bar_at(tui: &Tui, controls_border: u16) {
 }
 
 /// The configuration file the demo's run reads and saves, in its private directory.
-fn demo_config(tui: &Tui) -> std::path::PathBuf {
+pub(crate) fn demo_config(tui: &Tui) -> std::path::PathBuf {
     std::fs::read_dir(tui.home())
         .expect("read the run's home")
         .filter_map(|e| e.ok())

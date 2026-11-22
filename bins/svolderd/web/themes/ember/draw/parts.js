@@ -354,26 +354,55 @@ function playing(device, page, { oob } = {}) {
   const head = `<div class="np-head"> <span class="np-cover" aria-hidden="true">${cover}</span> ${who} ${p.buttons ? `${transport(t)} ` : ''}${fold} </div>`;
   const prog = '<div class="np-prog"><span class="np-t np-el"></span><span class="np-bar"><i></i></span><span class="np-t np-len"></span></div>';
   const path = p.path;
-  // A chip keeps its words short: the DAC's volume in dB reads as the bare level, the whole words
-  // are the chip's tooltip.
-  const hopChip = (h) => {
-    const short = h.label === 'DAC' ? h.detail.replace(/volume (?=\S+ dB)/, '') : h.detail;
-    const full = short === h.detail ? '' : attr('title', `${h.label} ${h.detail}`);
-    return `<span class="np-hop${h.changes ? ' changes' : ''}"${full}><b>${esc(h.label)}</b> ${esc(short)}</span>`;
-  };
-  const hops = path ? path.hops.map(hopChip).join('') : '';
-  const verdict = path?.title
-    ? `<span aria-hidden="true">${esc(path.words.join(' · '))}</span><span class="np-sr">${esc(path.title)}</span>`
-    : (path ? esc(path.words.join(' · ')) : '');
-  // The config check's chip, in the daemon's words; no chip when it sent none (a sink that is not
-  // this DAC, or no route).
-  const cfg = path?.config;
-  const chip = cfg ? `<button type="button" id="np-config" class="np-setup ${esc(cfg.outcome)}" data-config aria-haspopup="dialog"${attr('title', cfg.summary)}${attr('aria-label', `${cfg.chip}, ${cfg.summary}`)}>${esc(cfg.chip)}</button>` : '';
-  // With a chip the verdict and the chip are one lead: a long verdict wraps inside it, so the chip
-  // stays beside the verdict and takes no row of its own.
-  const lead = `<span class="np-verdict"${attr('title', path?.title || null)}>${verdict}</span>`;
-  const words = path ? `${chip ? `<span class="np-lead">${lead}${chip}</span>` : lead}${hops}` : '';
-  return `${root} ${np} ${head} ${prog} <p class="np-path${path ? ` ${esc(path.verdict)}` : ''}">${words}</p> </div> </section>`;
+  return `${root} ${np} ${head} ${prog} ${pathRow(path)} </div> </section>`;
+}
+
+/** The class a word of the row takes: Warn is yellow, Dim is quiet, the rest is the chip's own. */
+const TONE = { warn: 'w', dim: 'd' };
+/** A word of the row as a `v` unit (never broken across lines) in its tone class. */
+const rowWord = (w) => `<span class="v${TONE[w.tone] ? ` ${TONE[w.tone]}` : ''}">${esc(w.text)}</span>`;
+/** The dot between two values: it keeps to the value before it (no-break space), so a wrapped line
+ * never starts with it, and a normal space after it is where the line may break. */
+const DOT = '<span class="d">&nbsp;&middot;</span> ';
+/** `config 2`: the words of the row's values that name a failing PipeWire config check. */
+const isConfig = (w) => /^config \d+$/.test(w.text);
+
+/**
+ * The Path row from the daemon's `path.row`: the label (a button that opens the config dialog when
+ * the daemon sent a config check, coloured by its tone), one chip per hop, the values inside the
+ * last chip, and the config chip after the hops only when the values carry `config N`. A row with
+ * no hops is the label and its short words. Nothing here judges: every tone and word comes from
+ * the row.
+ */
+function pathRow(path) {
+  const row = path?.row;
+  if (!path || !row) return '<p class="np-path"></p>';
+  const words = esc(row.label.words);
+  // The label opens the config dialog when the daemon sent a config check; without one (another
+  // sink, a route not read) there is nothing to open and it is plain text. Its name is its words;
+  // the id lets the dialog give the focus back to it after a redraw of the card.
+  const inner = `<span aria-hidden="true">Path</span><span class="np-sr">${words}</span>`;
+  const label = path.config
+    ? `<button type="button" id="np-label" class="np-label ${esc(row.label.tone)}" data-config aria-haspopup="dialog"${attr('title', row.label.words)}>${inner}</button>`
+    : `<span class="np-label ${esc(row.label.tone)}"${attr('title', row.label.words)}>${inner}</span>`;
+  const config = row.values.find(isConfig);
+  const values = row.values.filter((w) => !isConfig(w));
+  const chips = row.hops.map((hop, i) => {
+    const last = i === row.hops.length - 1;
+    const shown = last ? values : [];
+    const changes = hop.words.some((w) => w.tone === 'warn') || shown.some((w) => w.tone === 'warn');
+    const said = hop.words.map((w) => ` ${rowWord(w)}`).join('');
+    const tail = shown.map((w) => `${DOT}${rowWord(w)}`).join('');
+    return `<span class="np-hop${changes ? ' changes' : ''}"><b>${esc(hop.label)}</b>${said}${tail}</span>`;
+  }).join('');
+  const short = row.hops.length === 0 && row.words ? `<span class="np-short">${esc(row.words).replaceAll(' · ', '&nbsp;· ')}</span>` : '';
+  // The chip carries the daemon's own summary when it sent one, else the label's words.
+  const summary = path.config?.summary ?? row.label.words;
+  const chip = config
+    ? `<button type="button" id="np-config" class="np-setup changes" data-config aria-haspopup="dialog"${attr('title', summary)}${attr('aria-label', `${config.text}, ${summary}`)}>${esc(config.text)}</button>`
+    : '';
+  const key = path.end_to_end ?? path.verdict;
+  return `<p class="np-path${key ? ` ${esc(key)}` : ''}">${label}${chips}${short}${chip}</p>`;
 }
 
 /**

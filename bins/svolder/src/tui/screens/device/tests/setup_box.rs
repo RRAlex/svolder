@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The PipeWire config chip on the Path row, `k` and the box it opens: the judge's words laid
+//! The Path row's config tag, `k` and the box it opens: the judge's words laid
 //! out at 80x24 and 120x40, the keys, the click and the tooltip.
 
 use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
@@ -147,49 +147,38 @@ fn inner_all(rows: &[String], modal: Rect) -> Vec<String> {
         .collect()
 }
 
-/// The Path row's first line of a frame: what follows its label, up to the pane's border.
-fn path_words(rows: &[String]) -> String {
-    let row = rows
+/// The Path row's two lines of a frame: what follows its label (the hops), and what the line under
+/// it carries (the values), each up to the pane's border.
+fn path_lines(rows: &[String]) -> (String, String) {
+    let at = rows
         .iter()
-        .find(|row| row.contains(" Path "))
+        .position(|row| row.contains(" Path "))
         .expect("a Path row");
-    let pane = row.split('│').nth(1).unwrap_or("");
-    pane.split_once("Path").unwrap().1.trim().to_string()
+    let pane = |row: &String| row.split('\u{2502}').nth(1).unwrap_or("").to_string();
+    let first = pane(&rows[at]);
+    let hops = first.split_once("Path").unwrap().1.trim().to_string();
+    (hops, pane(&rows[at + 1]).trim().to_string())
 }
 
+/// The config check shows in the row only as `config N` among the values, only when it fails.
 #[test]
-fn the_chip_follows_the_verdict_on_the_path_row() {
+fn the_config_tag_shows_only_on_a_failing_check() {
     let app = daemon_hosting(route_with(|_| {}));
     let (rows, _, _) = drawn(&app, 200, 30);
-    assert_eq!(
-        path_words(&rows),
-        "untouched · config ✓ · player 48 kHz S16LE, volume 100 %"
-    );
+    let (hops, values) = path_lines(&rows);
+    assert_eq!(hops, "player \u{2192} computer \u{2192} DAC USB 1");
+    assert!(values.starts_with("48 kHz"), "{values}");
+    assert!(!rows.iter().any(|row| row.contains("config")), "{rows:#?}");
     let app = daemon_hosting(route_with(two_fail));
     let (rows, _, _) = drawn(&app, 200, 30);
-    assert!(
-        path_words(&rows).contains("a filter inside the sink · config 2"),
-        "{}",
-        path_words(&rows)
-    );
-    // Config facts the judge could not read are a `?`. The unread words run past 200
-    // columns, so the row is cut for the chip (scrolling off) to see it.
-    let mut app = daemon_hosting(gungnir_route(|route| {
-        route.setup = Some(SetupFacts::default())
-    }));
-    app.tui.scroll_long_lines = false;
-    let (rows, _, _) = drawn(&app, 200, 30);
-    assert!(
-        path_words(&rows).contains(" · config ?"),
-        "{}",
-        path_words(&rows)
-    );
+    let (_, values) = path_lines(&rows);
+    assert!(values.ends_with("config 2"), "{values}");
 }
 
-/// The chip follows the sink, as on the web: a player playing to another sink while the default
-/// sink is this DAC still wears the chip; a default sink that is no DAC of this screen wears none.
+/// The check follows the sink, as on the web: a player playing to another sink while the default
+/// sink is this DAC still has its check; a default sink that is no DAC of this screen has none.
 #[test]
-fn the_chip_shows_while_the_default_sink_is_the_dac_whatever_plays() {
+fn the_check_follows_the_default_sink_whatever_plays() {
     let mut app = daemon_hosting(route_with(|_| {}));
     app.host.daemon.as_mut().unwrap().route = Some(Box::new(gungnir_route(|route| {
         route.setup = Some(clean_setup());
@@ -198,59 +187,53 @@ fn the_chip_shows_while_the_default_sink_is_the_dac_whatever_plays() {
         };
     })));
     assert_eq!(
-        app.path_chip().map(|chip| chip.words).as_deref(),
-        Some("config ✓")
+        app.path_setup().map(|check| check.chip()).as_deref(),
+        Some("config \u{2713}")
     );
     app.host.daemon.as_mut().unwrap().route = Some(Box::new(gungnir_route(|route| {
         route.setup = Some(clean_setup());
         route.sink.as_mut().unwrap().usb_product = Some("Other".into());
     })));
-    assert!(app.path_chip().is_none());
+    assert!(app.path_setup().is_none());
 }
 
 #[test]
-fn an_older_daemons_route_has_no_chip() {
+fn an_older_daemons_route_has_no_check() {
     let app = daemon_hosting(gungnir_route(|_| {}));
-    let (rows, hits, _) = drawn(&app, 200, 30);
-    assert!(!path_words(&rows).contains("config"));
+    let (rows, _, _) = drawn(&app, 200, 30);
+    assert!(app.path_setup().is_none());
     assert!(!rows.iter().any(|row| row.contains("config")));
-    assert!(!(0..200).any(|x| (0..30).any(|y| hits.hit_at(x, y) == Some(&Hit::Config))));
 }
 
+/// A failing check's tag is a value of the row and stays in sight at every width the screen is
+/// used at, 80 columns included, at the scroll's start and with scrolling off.
 #[test]
-fn a_cut_row_keeps_the_chip_in_sight() {
-    let app = daemon_hosting(route_with(|_| {}));
-    for width in [80, 100, 120] {
-        let (rows, _, _) = drawn(&app, width, 24);
-        let words = path_words(&rows);
-        assert!(
-            words.starts_with("untouched · config ✓"),
-            "{width}: {words}"
-        );
-    }
-}
-
-/// A verdict of two failing lines is wider than the Controls pane at 80 and 120 columns: the
-/// verdict is cut (scrolling off) and the chip after it stays whole and clickable; with scrolling
-/// on, the row scrolls as it always did and `k` still opens the box.
-#[test]
-fn a_long_verdict_is_cut_so_that_the_chip_stays_whole_with_scrolling_off() {
+fn the_failing_tag_is_in_sight_at_every_width() {
     let mut app = daemon_hosting(route_with(two_fail));
-    app.tui.scroll_long_lines = false;
-    for width in [80, 120] {
-        let (rows, hits, _) = drawn(&app, width, 40);
-        let y = rows
-            .iter()
-            .position(|row| row.contains("… · config 2"))
-            .unwrap_or_else(|| panic!("{width}: {rows:#?}"));
-        let at = rows[y].find("config 2").unwrap();
-        let x = u16::try_from(rows[y][..at].chars().count()).unwrap();
-        assert_eq!(
-            hits.hit_at(x, u16::try_from(y).unwrap()),
-            Some(&Hit::Config),
-            "{width}"
-        );
+    for scroll in [true, false] {
+        app.tui.scroll_long_lines = scroll;
+        for width in [80, 100, 120, 160, 200] {
+            let (rows, _, _) = drawn(&app, width, 40);
+            assert!(
+                rows.iter().any(|row| row.contains("config 2")),
+                "{width} scroll {scroll}: {rows:#?}"
+            );
+        }
     }
+}
+
+/// The tag is no target of its own: a click on it is the row's, which opens the box.
+#[test]
+fn a_click_on_the_config_tag_is_the_rows() {
+    let app = daemon_hosting(route_with(two_fail));
+    let (rows, hits, _) = drawn(&app, 200, 30);
+    let y = rows
+        .iter()
+        .position(|row| row.contains("config 2"))
+        .unwrap_or_else(|| panic!("{rows:#?}"));
+    let at = rows[y].find("config 2").unwrap();
+    let x = u16::try_from(rows[y][..at].chars().count()).unwrap();
+    assert_eq!(hits.hit_at(x, u16::try_from(y).unwrap()), Some(&Hit::Path));
 }
 
 /// With `[tui] host_audio` off nothing of the host is shown or read: no `k check`, no key, no box.
@@ -270,8 +253,10 @@ fn with_host_audio_off_the_check_is_not_offered() {
     assert!(off.overlays.setup.is_none());
 }
 
+/// The chip is no target of its own: the click that opens the box is the row's, and the row's
+/// tooltip ends in how many config lines pass.
 #[test]
-fn the_chip_is_a_target_that_opens_the_box_and_says_how_many_pass() {
+fn the_row_says_how_many_config_lines_pass() {
     let mut app = daemon_hosting(route_with(two_fail));
     app.mouse = true;
     let (rows, hits, _) = drawn(&app, 200, 30);
@@ -280,64 +265,22 @@ fn the_chip_is_a_target_that_opens_the_box_and_says_how_many_pass() {
         .position(|row| row.contains("config 2"))
         .unwrap_or_else(|| panic!("{rows:#?}"));
     let chip = rows[y].find("config 2").unwrap();
-    let chip_x = u16::try_from(rows[y][..chip].chars().count()).unwrap();
-    let (x, y) = (chip_x + 2, u16::try_from(y).unwrap());
-    assert_eq!(hits.hit_at(x, y), Some(&Hit::Config));
-    assert_eq!(hits.hit_at(chip_x - 3, y), Some(&Hit::Path), "off the chip");
-    let click = |column| MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column,
-        row: y,
-        modifiers: crossterm::event::KeyModifiers::NONE,
-    };
-    assert_eq!(
-        mouse::resolve(&hits, click(x), &app),
-        Some(MouseAction::Key(KeyCode::Char('k')))
+    let (x, y) = (
+        u16::try_from(rows[y][..chip].chars().count()).unwrap() + 2,
+        u16::try_from(y).unwrap(),
     );
-    assert_eq!(mouse::resolve(&hits, click(chip_x - 3), &app), None);
+    assert_eq!(hits.hit_at(x, y), Some(&Hit::Path));
     app.pointer.tooltip = Some(tooltip::Tooltip {
-        hit: Hit::Config,
+        hit: Hit::Path,
         at: (x, y),
         since: Instant::now(),
         shown: true,
     });
+    let lines = tooltip::standing(&app, &hits).expect("a tooltip");
     assert_eq!(
-        tooltip::standing(&app, &hits).expect("a tooltip"),
-        ["config: 5 of 7 pass · k"]
+        lines.last().map(String::as_str),
+        Some("config: 5 of 7 pass · k")
     );
-}
-
-#[test]
-fn the_chip_is_found_on_a_continuation_line_and_off_a_scrolled_or_cut_row() {
-    use super::super::controls::chip_at;
-    // A row that wrapped carries the chip at the start of its second line, after the `· `.
-    let lines = vec![
-        Line::from(vec![
-            Span::raw("Path    "),
-            Span::raw("dither on (triangular)"),
-        ]),
-        Line::from(vec![
-            Span::raw("        "),
-            Span::raw("· config 1"),
-            Span::raw(" · player"),
-        ]),
-    ];
-    let at = chip_at(&lines, "config 1").expect("the chip");
-    assert_eq!((at.line, at.x, at.width), (1, 10, 8));
-    // After the verdict on the first line it starts after the ` · ` that joins it.
-    let lines = vec![Line::from(vec![
-        Span::raw("Path    "),
-        Span::raw("untouched"),
-        Span::raw(" · config ✓"),
-    ])];
-    let at = chip_at(&lines, "config ✓").expect("the chip");
-    assert_eq!((at.line, at.x, at.width), (0, 20, 8));
-    // A chip cut at the right edge or scrolled partly out is not a target.
-    let cut = vec![Line::from(vec![
-        Span::raw("Path    "),
-        Span::raw(" · config…"),
-    ])];
-    assert_eq!(chip_at(&cut, "config ✓"), None);
 }
 
 #[test]
@@ -546,17 +489,92 @@ fn an_older_daemon_is_named_in_the_box() {
     );
 }
 
+/// A row too long for the narrow pane scrolls with the setting on, and `k` still opens the box.
 #[test]
-fn with_scrolling_on_a_long_verdict_keeps_the_row_scrolling() {
+fn with_scrolling_on_a_long_row_keeps_scrolling() {
     let mut app = daemon_hosting(route_with(two_fail));
     assert!(app.tui.scroll_long_lines);
-    for width in [80, 120] {
-        let (rows, _, _) = drawn(&app, width, 40);
-        let row = rows.iter().find(|row| row.contains(" Path ")).unwrap();
-        assert!(row.contains("dither on (triangula"), "{width}: {row}");
-        assert!(!rows.iter().any(|row| row.contains("… · config 2")));
-    }
+    let (rows, _, _) = drawn(&app, 80, 40);
+    let row = rows.iter().find(|row| row.contains(" Path ")).unwrap();
+    assert!(row.contains("player \u{2192} computer"), "{row}");
     assert!(app.drawn.path_travel.get().is_some(), "the row scrolls");
     press(&mut app, KeyCode::Char('k'));
     assert!(app.overlays.setup.is_some());
+}
+
+/// A click anywhere on the Path row, the label and every line it wraps to included, opens the
+/// config box as `k` does; the line above the row and the one below it do not.
+#[test]
+fn a_click_anywhere_on_the_path_row_opens_the_box() {
+    let mut failing = daemon_hosting(route_with(two_fail));
+    let mut clean = daemon_hosting(route_with(|_| {}));
+    failing.mouse = true;
+    clean.mouse = true;
+    // The clean route at 120x45 is two lines: the hops, then the values.
+    let cases = [
+        (&failing, 80, 24, 0),
+        (&failing, 100, 45, 0),
+        (&failing, 120, 40, 0),
+        (&failing, 200, 30, 0),
+        (&clean, 120, 45, 1),
+    ];
+    for (app, width, height, lines) in cases {
+        let (rows, hits, _) = drawn(app, width, height);
+        let top = rows
+            .iter()
+            .position(|row| row.contains(" Path "))
+            .unwrap_or_else(|| panic!("{width}x{height}: {rows:#?}"));
+        let inner = rows[top].trim_start_matches('│');
+        let first = u16::try_from(rows[top].chars().count() - inner.chars().count()).unwrap();
+        // the row's lines: its own and the lines that carry on under its words, which start
+        // in or past the words' column (a hop, or a piece after a comma)
+        let pane = |row: &str| row.split('│').nth(1).unwrap_or("").to_string();
+        let column = pane(&rows[top]).find(char::is_alphabetic).map_or(0, |at| {
+            // the label, then the words after it
+            let label = pane(&rows[top]);
+            label[at..].find("  ").map_or(at, |gap| {
+                at + gap + label[at + gap..].find(|c: char| c != ' ').unwrap_or(0)
+            })
+        });
+        let mut bottom = top;
+        while rows.get(bottom + 1).is_some_and(|row| {
+            let words = pane(row);
+            !words.trim().is_empty() && words.chars().take_while(|c| *c == ' ').count() >= column
+        }) {
+            bottom += 1;
+        }
+        let click = |column, row| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+        for y in top..=bottom {
+            let y = u16::try_from(y).unwrap();
+            for x in [first + 2, first + 12, first + 30] {
+                assert_eq!(
+                    mouse::resolve(&hits, click(x, y), app),
+                    Some(MouseAction::Key(KeyCode::Char('k'))),
+                    "{width}x{height}: ({x}, {y})"
+                );
+            }
+        }
+        let above = u16::try_from(top - 1).unwrap();
+        assert_ne!(
+            hits.hit_at(first + 12, above),
+            Some(&Hit::Path),
+            "{width}x{height}: the row above"
+        );
+        let below = u16::try_from(bottom + 1).unwrap();
+        assert_ne!(
+            hits.hit_at(first + 12, below),
+            Some(&Hit::Path),
+            "{width}x{height}: the row below"
+        );
+        assert!(
+            bottom - top >= lines,
+            "{width}x{height}: the row's lines: {}",
+            bottom - top
+        );
+    }
 }

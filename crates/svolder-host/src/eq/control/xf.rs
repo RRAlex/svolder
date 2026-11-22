@@ -353,7 +353,7 @@ impl EqControl {
     }
 
     /// Whether the running chain has the stage's controls.
-    async fn has_ports(&mut self) -> bool {
+    pub(super) async fn has_ports(&mut self) -> bool {
         self.params.forget_node();
         let ports = self
             .params

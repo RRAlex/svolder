@@ -56,9 +56,9 @@ const FULL_WIDTH: u16 = 160;
 
 /// The wizard on a step that offers choices and has a step before it.
 fn choosing() -> Footing {
-    Footing::resting(keys::Scene {
+    Footing::resting(keys::KeyContext {
         can_go_back: true,
-        ..keys::Scene::default()
+        ..keys::KeyContext::default()
     })
 }
 

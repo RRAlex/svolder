@@ -13,6 +13,7 @@
 //! - `net_config`: the `[mqtt]`, `[mcp]` and `[web]` tables as the configuration holds them.
 //! - `parse`: reading `config.toml` into a checked configuration.
 //! - `presets`: the `[[preset]]` blocks: finding a preset and the writers that change one.
+//! - `scenes`: the `[[scene]]` blocks: a scene's parts, the writers that change one, which is on.
 //! - `template`: the configuration template: every key commented out at its default.
 //! - `tui`: the writer of the `[tui]` table.
 //! - `tui_config`: the `[tui]` table as the configuration holds it, and the enums it takes.
@@ -38,6 +39,7 @@ mod net_config;
 mod parse;
 mod presets;
 mod resolve;
+pub mod scenes;
 mod template;
 mod tui;
 mod tui_config;
@@ -53,6 +55,7 @@ pub use net_config::{
 };
 pub use parse::ListenDefaults;
 pub use resolve::{passphrase_from, profile_for_advert};
+pub use scenes::Scene;
 pub use template::DEFAULT_SPECTRUM;
 pub use tui_config::{
     ColorDepth, CoverArt, EffectsConfig, FamilyAccents, GraphSpan, IntroEffect, LinkSpan,
@@ -86,6 +89,8 @@ pub struct Config {
     /// built-in presets ([`svolder_profiles::tone::preset::builtins`]) are not stored here: they
     /// are not written to the file and are computed fresh from a device's profile.
     pub presets: Vec<Preset>,
+    /// The user's named sets of sound settings, one per TOML `[[scene]]` table, in file order.
+    pub scenes: Vec<Scene>,
     /// What the sound goes through after the DAC, one per TOML `[[hop]]` table, in file order.
     pub hops: Vec<Hop>,
     /// What a file that configures one unit twice was read as: the later blocks are not in
@@ -211,6 +216,7 @@ impl Default for Config {
             socket: None,
             devices: Vec::new(),
             presets: Vec::new(),
+            scenes: Vec::new(),
             hops: Vec::new(),
             dropped_duplicates: Vec::new(),
             daemon: DaemonConfig::default(),

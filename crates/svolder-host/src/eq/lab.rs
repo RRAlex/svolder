@@ -46,13 +46,16 @@
 //!   volume and mute are the world's: a look reads them with the node, and a write made through
 //!   the daemon also hands the controller its reading ([`Event::Volume`]). The rule counts the
 //!   stage with the slots, and holds the stage alone to unity too.
+//! - A scene's computer part is recalled as one change ([`Event::Scene`]): the same rules hold at
+//!   every instant, and once the world is quiet the controller's view is the part, and the node
+//!   plays its curve, its stages and its crossfeed.
 //!
 //! A sequence is a list of events and nothing else is random while it runs, so a failing seed
 //! reproduces and a failing sequence shrinks.
 
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
@@ -61,12 +64,14 @@ use async_trait::async_trait;
 use svolder_profiles::tone::apo::{self, Correction, FilterKind, SourceFilter};
 
 use super::control::{CrossfeedEdit, Edit, EqControl, Keep, LoudnessEdit};
-use super::crossfeed::Model as CrossfeedModel;
+use super::crossfeed::{CrossfeedSettings, Model as CrossfeedModel};
 use super::live::{LiveNode, NodeKey, SLOTS, crossfeed_params, loudness_params};
 use super::loudness;
+use super::loudness::LoudnessSettings;
 use super::manage::{
     ApplyRequest, Chain, EqFailure, Status, check_playable, checked_request, conf_text, kept_conf,
 };
+use super::scene::ComputerPart;
 use super::session::{Link, Session};
 use super::{HostEqState, Manager, Route};
 use crate::route::SinkLevel;
@@ -424,6 +429,14 @@ struct World {
     unreconciled: bool,
     /// A rule the model saw broken, said once.
     broken: Vec<String>,
+    /// The next line that lands is a repair line: a line before it failed, was refused or lost, or
+    /// a `pw-cli` ended, so the session's next line carries every port, the caller's first and
+    /// the rest after, whatever order the caller chose (`Outbox::line`). Such a line is the
+    /// documented half-applied-line issue's, not the controller's order: the boundary check
+    /// skips it, by this name.
+    repair_owed: bool,
+    /// The boundary check looks at repair lines too ([`REPAIR_LINES_ENV`]).
+    check_repairs: bool,
     /// What happened, when a run is traced.
     trace: Option<Vec<String>>,
     /// A stream plays through the chain's node, whichever node that is.
@@ -450,6 +463,12 @@ pub enum Ids {
 /// that no block of seeds chose one for: a single sequence (a `holds` case, `lab_trace`). The
 /// blocks of seeds (the short runs and `make preamp-lab`) run both models whatever it says.
 pub const REUSE_IDS_ENV: &str = "SVOLDER_LAB_REUSE_IDS";
+
+/// The environment variable that, set, makes the boundary check of every profile look at repair
+/// lines too (the line the session sends after one failed, was refused or lost, which carries every
+/// port in the caller's order and the rest after). They are the documented half-applied-line
+/// issue's shape and are skipped by default.
+pub const REPAIR_LINES_ENV: &str = "SVOLDER_LAB_REPAIR_LINES";
 
 thread_local! {
     /// The model of ids the labs made on this thread use.
@@ -668,6 +687,9 @@ impl World {
         });
         let lands = !matches!(self.cli.dies_after_next_line, Some(false));
         self.lost_line |= !lands;
+        // A line that lands after trouble is the repair line; one that does not leaves it owed.
+        let repair = lands && std::mem::take(&mut self.repair_owed);
+        self.repair_owed |= !lands;
         let rate = self.sink_rate;
         let mut part_way = Vec::new();
         match self.node.as_mut() {
@@ -690,9 +712,24 @@ impl World {
                                 .rposition(|(name, _)| name.starts_with(section))
                         })
                         .collect();
+                    // The kinds of port the line carries, to find the boundaries between them.
+                    let kinds: Vec<u8> = params.iter().map(|(name, _)| port_kind(name)).collect();
+                    let checked = (!repair || self.check_repairs)
+                        && kinds.contains(&PORT_SLOT)
+                        && kinds.contains(&PORT_STAGE);
                     for (at, (name, value)) in params.iter().enumerate() {
                         if node.ports.contains_key(name) {
                             node.ports.insert(name.clone(), held_value(name, *value));
+                        }
+                        let last = at + 1 == params.len();
+                        if (!repair || self.check_repairs)
+                            && (last || (checked && kinds.get(at + 1) != Some(&kinds[at])))
+                            && let Some((over, parts)) = boundary_over(node, rate)
+                        {
+                            part_way.push(format!(
+                                "node {} plays {:+.3} dB over unity part way through a line, after {name}, at {rate} Hz, {parts} (a boundary between kinds of port, or the end of a line)",
+                                node.id, over
+                            ));
                         }
                         if section_ends.contains(&at) {
                             let channel = name.chars().next().unwrap_or('l');
@@ -714,6 +751,7 @@ impl World {
                     0 => self.cli.refused = true,
                     lag => self.cli.refusal_in = Some(lag),
                 }
+                self.repair_owed = true;
                 if self.node_is_ours && self.node.is_some() {
                     self.broken
                         .push(format!("a set-param went to the stale id {id}, after the controller's own apply put node {} there",
@@ -723,6 +761,7 @@ impl World {
         }
         self.broken.extend(part_way);
         if self.cli.dies_after_next_line.take().is_some() {
+            self.repair_owed = true;
             self.cli.end();
             self.cli.refused = false;
             self.cli.refusal_in = None;
@@ -735,6 +774,55 @@ fn failure(what: &str) -> EqFailure {
         what: what.to_string(),
         next: "try again".to_string(),
     }
+}
+
+thread_local! {
+    /// How many times the scene rule was asked on this thread, so that a test can tell that it
+    /// is not vacuous.
+    static SCENE_ASKED: Cell<usize> = const { Cell::new(0) };
+}
+
+const PORT_PREAMP: u8 = 0;
+const PORT_SLOT: u8 = 1;
+const PORT_LOUDNESS: u8 = 2;
+const PORT_STAGE: u8 = 3;
+const PORT_SPEAKERS: u8 = 4;
+
+/// The kind of the port `name` (`lpre:Mult`, `l01:b0`, `lld1:b0`, `ldir:b0`, `lvs:Gain 1`).
+fn port_kind(name: &str) -> u8 {
+    match name.get(1..3) {
+        Some("pr") => PORT_PREAMP,
+        Some("ld") => PORT_LOUDNESS,
+        Some("vs") => PORT_SPEAKERS,
+        Some(digits) if digits.bytes().all(|b| b.is_ascii_digit()) => PORT_SLOT,
+        _ => PORT_STAGE,
+    }
+}
+
+/// How far over unity the node plays as it holds its ports now, on either channel, at `rate`;
+/// `None` at or under unity (the rule of [`Lab::check`]).
+fn boundary_over(node: &Node, rate: u32) -> Option<(f64, String)> {
+    thread_local! {
+        static PEAKS: std::cell::RefCell<Peaks> = std::cell::RefCell::new(Peaks::default());
+    }
+    let worst = ['l', 'r']
+        .into_iter()
+        .map(|channel| {
+            let (sets, pre_db) = played(node, channel);
+            let peak = PEAKS.with_borrow_mut(|peaks| peaks.of(&sets, rate));
+            let stage = StageGains.of(&stage_values(node, channel), rate);
+            let speakers = speakers_db(node, channel);
+            (
+                peak + stage + speakers + pre_db,
+                format!(
+                    "on {channel}: the slots and the loudness peak {peak:+.3} dB, the crossfeed stage adds up to {stage:+.3} dB and the speakers {speakers:+.3} dB under a preamp of {pre_db:+.3} dB"
+                ),
+            )
+        })
+        .fold((f64::NEG_INFINITY, String::new()), |worst, next| {
+            if next.0 > worst.0 { next } else { worst }
+        });
+    (worst.0 > TOLERANCE_DB).then_some(worst)
 }
 
 /// The controller's `Chain` over the world.
@@ -884,6 +972,7 @@ impl Link for ModelLink {
         let once = std::mem::take(&mut world.fail_next_write);
         match once || world.refuse_sends_until_ms > world.clock_ms {
             true => {
+                world.repair_owed = true;
                 world.cli.end();
                 false
             }
@@ -1256,6 +1345,9 @@ pub enum Event {
         reference_now: bool,
         done: bool,
     },
+    /// A scene's computer part is recalled: the EQ, loudness, crossfeed and the virtual speakers
+    /// set as one change.
+    Scene(Box<ComputerPart>),
 }
 
 fn filter(rng: &mut Rng, hand: bool) -> SourceFilter {
@@ -1441,6 +1533,77 @@ pub fn generate_loudness(seed: u64, len: usize) -> Vec<Event> {
         .collect()
 }
 
+/// The part a scene recall draws: the EQ on or off with a curve, loudness on or off with a
+/// strength and reference, crossfeed on or off with a model, the virtual speakers on or off with
+/// a set (never both stages on at once: a part that asks for both is refused, which the unit
+/// tests hold).
+fn scene_part(rng: &mut Rng) -> ComputerPart {
+    let (filters, preamp_db) = curve(rng);
+    let crossfeed_on = rng.chance(35);
+    let speakers_on = !crossfeed_on && rng.chance(35);
+    let loudness = rng.chance(80).then(|| LoudnessSettings {
+        on: rng.chance(50),
+        strength_pct: rng.range(0.0, 100.0),
+        reference_pct: rng.range(1.0, 100.0),
+    });
+    let crossfeed = (crossfeed_on || rng.chance(50)).then(|| {
+        let mut settings = CrossfeedSettings::for_model(CrossfeedModel::ALL[rng.below(4) as usize]);
+        if rng.chance(40) {
+            settings.amount = rng.range(0.15, 0.47);
+        }
+        settings
+    });
+    let speakers = (speakers_on || rng.chance(40)).then(|| SETS[rng.below(2) as usize].to_string());
+    ComputerPart {
+        eq_on: rng.chance(70),
+        name: "Scene".to_string(),
+        origin: None,
+        preamp_db,
+        filters,
+        loudness,
+        crossfeed_on,
+        crossfeed,
+        speakers_on,
+        speakers,
+    }
+}
+
+/// A sequence of `len` events for `seed` from the scene profile: about one event in four a scene
+/// recall with a random part (the EQ, loudness, crossfeed and the virtual speakers each on or
+/// off), one in seven a move of the computer's volume or its mute, mixed with [`generate`]'s events, faults, a stream that plays or not, restarts and rate
+/// changes among them. A stream of its own: the seeds of the other profiles do not depend on it.
+pub fn generate_scene(seed: u64, len: usize) -> Vec<Event> {
+    let mut rng = Rng::new(seed ^ 0x5CE9_E5C0_4D17_A7E1);
+    (0..len)
+        .map(|_| match rng.below(100) {
+            0..=24 => Event::Scene(Box::new(scene_part(&mut rng))),
+            // The computer's volume moves, so that loudness plays at a depth under the recalls.
+            25..=39 => {
+                let daemon = rng.chance(60);
+                match rng.below(10) {
+                    0..=3 => Event::VolumeStep {
+                        delta: if rng.chance(50) { 1.0 } else { -1.0 },
+                        daemon,
+                    },
+                    4..=7 => Event::Volume {
+                        pct: rng.range(5.0, 90.0),
+                        daemon,
+                    },
+                    8 => Event::Mute {
+                        muted: rng.chance(50),
+                        daemon,
+                    },
+                    _ => Event::Volume { pct: 100.0, daemon },
+                }
+            }
+            _ => {
+                let roll = rng.below(100);
+                event_for(&mut rng, roll)
+            }
+        })
+        .collect()
+}
+
 /// The event a `roll` of 0 to 99 stands for, with its fields drawn from `rng`.
 fn event_for(rng: &mut Rng, roll: u64) -> Event {
     match roll {
@@ -1527,13 +1690,44 @@ struct Dir(PathBuf);
 impl Dir {
     fn new() -> Dir {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "svolder-lab-{}-{}",
+        static SWEPT: std::sync::Once = std::sync::Once::new();
+        let base = crate::scratch::scratch_base().expect("the scratch base");
+        SWEPT.call_once(|| sweep_dead_runs(&base));
+        let path = base.join(format!(
+            "lab-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
         std::fs::create_dir_all(&path).expect("a scratch directory");
         Dir(path)
+    }
+}
+
+/// Removes the `lab-<pid>-<n>` directories of `base` whose run is gone (a killed run cannot take
+/// its own away). Only real directories this user owns; a link is never followed.
+fn sweep_dead_runs(base: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    let Some(uid) = std::fs::metadata("/proc/self").ok().map(|m| m.uid()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("lab-"))
+            .and_then(|rest| rest.split('-').next())
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let ours =
+            std::fs::symlink_metadata(entry.path()).is_ok_and(|m| m.is_dir() && m.uid() == uid);
+        if ours && !Path::new("/proc").join(pid.to_string()).exists() {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
     }
 }
 
@@ -1656,6 +1850,10 @@ struct Lab {
     live_checked: bool,
     /// The loudness's liveness rule has been checked since then.
     ld_checked: bool,
+    /// The part the last event recalled, while nothing else has happened since but time.
+    scene: Option<ComputerPart>,
+    /// The scene's liveness rule has been checked since then.
+    scene_checked: bool,
 }
 
 /// Why a sequence failed.
@@ -1713,6 +1911,8 @@ impl Lab {
             writes: 0,
             sends: 0,
             broken: Vec::new(),
+            repair_owed: false,
+            check_repairs: std::env::var_os(REPAIR_LINES_ENV).is_some(),
             looked_rate: rate,
             lost_line: false,
             unreconciled: false,
@@ -1734,6 +1934,8 @@ impl Lab {
             quiet_since_ms: 10_000,
             live_checked: false,
             ld_checked: false,
+            scene: None,
+            scene_checked: false,
         }
     }
 
@@ -1814,9 +2016,17 @@ impl Lab {
 
     /// Run `event`, and the liveness rules once the world has been quiet long enough.
     async fn run(&mut self, event: &Event) -> Result<(), Failure> {
+        // Anything but time going by may change what a recall set.
+        // The daemon reading the state file changes nothing a recall set.
+        if !matches!(event, Event::Ticks(_) | Event::Reload) {
+            self.scene = None;
+        }
         self.run_event(event).await?;
         match event {
             Event::Ticks(_) => {
+                // Before the liveness rule, which turns on an EQ that is off with a playable
+                // curve, as the part may have left it.
+                self.scene_liveness()?;
                 self.liveness().await?;
                 self.ld_liveness()
             }
@@ -1824,9 +2034,88 @@ impl Lab {
                 self.quiet_since_ms = world(&self.shared).clock_ms;
                 self.live_checked = false;
                 self.ld_checked = false;
+                self.scene_checked = false;
                 Ok(())
             }
         }
+    }
+
+    /// The scene's liveness rule, once after [`QUIET_MS`] with no event but time and nothing
+    /// armed to fail: a part a recall took is what the controller shows, and, when it says it is
+    /// live, the node plays its crossfeed stage as the part says (the curve, the virtual speakers
+    /// and the loudness are held to the view by the rules above).
+    fn scene_liveness(&mut self) -> Result<(), Failure> {
+        let (clock, disturbed, armed, mix) = {
+            let world = world(&self.shared);
+            (
+                world.clock_ms,
+                world.disturbed(),
+                world.fail_apply + world.fail_remove + world.fail_keep + world.fail_start > 0,
+                world
+                    .node
+                    .as_ref()
+                    .and_then(|node| node.ports.get("lmix:Gain 2").map(|mix| f64::from(*mix))),
+            )
+        };
+        let Some(part) = self.scene.clone() else {
+            return Ok(());
+        };
+        if self.scene_checked || clock < self.quiet_since_ms + QUIET_MS || disturbed || armed {
+            return Ok(());
+        }
+        self.scene_checked = true;
+        // A curve the sink's rate cannot play is turned off by the look at that rate, as a preset
+        // load's is ("an EQ turned off by a rate it cannot play"): the recall judged it at the rate
+        // the controller last looked at, so the part is not held to the rule there.
+        if part.eq_on {
+            let rate = world(&self.shared).sink_rate;
+            let curve = Correction {
+                preamp_db: part.preamp_db,
+                filters: part.filters.clone(),
+            };
+            if check_playable(&curve, rate).is_err() {
+                return Ok(());
+            }
+        }
+        SCENE_ASKED.with(|asked| asked.set(asked.get() + 1));
+        let view = self.control.view();
+        let fail = |what: String| {
+            Err(Failure {
+                event: self.at,
+                what,
+            })
+        };
+        if !part.matches(&view) {
+            return fail(format!(
+                "the recalled part is not what the controller shows: {} (the part says the EQ {}, crossfeed {}, speakers {}, loudness {:?}; the view the EQ {}, crossfeed {}, speakers {}, loudness {})",
+                describe(&Event::Scene(Box::new(part.clone()))),
+                if part.eq_on { "on" } else { "off" },
+                if part.crossfeed_on { "on" } else { "off" },
+                if part.speakers_on { "on" } else { "off" },
+                part.loudness.map(|ld| ld.on),
+                if view.on { "on" } else { "off" },
+                if view.crossfeed.as_ref().is_some_and(|xf| xf.on) {
+                    "on"
+                } else {
+                    "off"
+                },
+                if view.speakers.as_ref().is_some_and(|sp| sp.on) {
+                    "on"
+                } else {
+                    "off"
+                },
+                view.loudness.as_ref().map(|ld| ld.on).unwrap_or(false),
+            ));
+        }
+        if let (true, Some(mix)) = (view.live, mix)
+            && (mix > 0.0) != part.crossfeed_on
+        {
+            return fail(format!(
+                "the recalled part has crossfeed {}, and the node's stage mix is {mix}",
+                if part.crossfeed_on { "on" } else { "off" }
+            ));
+        }
+        Ok(())
     }
 
     /// Whether the loudness has anything to follow or to undo: it is on, or the node holds a stage
@@ -1924,6 +2213,13 @@ impl Lab {
         }
         self.run(&Event::Reload).await?;
         for _ in 0..TAIL_TICKS / 45 {
+            self.run(&Event::Ticks(45)).await?;
+        }
+        // The scene rule is asked of a recall the sequence ended on.
+        for _ in 0..4 {
+            if self.scene.is_none() || self.scene_checked {
+                break;
+            }
             self.run(&Event::Ticks(45)).await?;
         }
         // The loudness's rule waits longer (a look and a whole glide): asked of a sequence that
@@ -2253,6 +2549,7 @@ impl Lab {
                 let mut world = world(&self.shared);
                 match after_line {
                     None => {
+                        world.repair_owed = true;
                         world.cli.end();
                         world.cli.refused = false;
                     }
@@ -2326,6 +2623,18 @@ impl Lab {
                         done: *done,
                     })
                     .await;
+            }
+            Event::Scene(part) => {
+                // A recall that says a stage it turned on was turned off again (a chain that
+                // restarted under it) is not held to the rule: it said so.
+                if let Ok(recalled) = self.control.recall((**part).clone()).await
+                    && !recalled
+                        .notes
+                        .iter()
+                        .any(|note| note.contains("turned off"))
+                {
+                    self.scene = Some((**part).clone());
+                }
             }
             Event::Takeover { lost } => {
                 self.daemon_restart()?;
@@ -2441,6 +2750,13 @@ pub fn sequence_of_loudness(seed: u64) -> (u32, Vec<Event>) {
     (start_rate(seed), generate_loudness(seed, len))
 }
 
+/// The events of `seed` from the scene profile ([`generate_scene`]), as the lab runs them.
+pub fn sequence_of_scene(seed: u64) -> (u32, Vec<Event>) {
+    let mut rng = Rng::new(seed ^ 0x5CE9_0A0A_F0F0);
+    let len = 20 + rng.below(50) as usize;
+    (start_rate(seed), generate_scene(seed, len))
+}
+
 /// `events` with as many removed as still fail the same way: chunks first, then one by one.
 pub fn shrink(rate: u32, events: &[Event]) -> Vec<Event> {
     let mut events = events.to_vec();
@@ -2455,6 +2771,7 @@ pub fn shrink(rate: u32, events: &[Event]) -> Vec<Event> {
             "while it started",
             "says it is live",
             "says it follows",
+            "recalled part",
             "turning it on",
             "reload",
             "panic",
@@ -2520,6 +2837,17 @@ fn describe(event: &Event) -> String {
             words(filters)
         ),
         Event::Add(filter) => format!("Add {}", word(filter)),
+        Event::Scene(part) => format!(
+            "Scene eq {} preamp {:+.1} [{}] loudness {:?} crossfeed {} {:?} speakers {} {:?}",
+            if part.eq_on { "on" } else { "off" },
+            part.preamp_db,
+            words(&part.filters),
+            part.loudness,
+            if part.crossfeed_on { "on" } else { "off" },
+            part.crossfeed.as_ref().map(|settings| settings.model),
+            if part.speakers_on { "on" } else { "off" },
+            part.speakers,
+        ),
         other => format!("{other:?}"),
     }
 }
@@ -2571,6 +2899,11 @@ pub fn run_highrate_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
 /// [`run_seeds`] on the loudness profile ([`generate_loudness`]).
 pub fn run_loudness_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
     run_block(first, runs, sequence_of_loudness, ids)
+}
+
+/// [`run_seeds`] on the scene profile ([`generate_scene`]).
+pub fn run_scene_seeds(first: u64, runs: u64, ids: Ids) -> Vec<String> {
+    run_block(first, runs, sequence_of_scene, ids)
 }
 
 fn run_block(

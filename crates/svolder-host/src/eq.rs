@@ -17,6 +17,7 @@
 //! - `points`: [`Points`], the filters the live chain holds and the slots they sit in.
 //! - `live`: the live chain's config, and the parameters that set it while it plays.
 //! - `control`: [`EqControl`], the one controller of the computer EQ for the daemon and the TUI.
+//! - `scene`: [`ComputerPart`], the computer's part of a scene.
 //! - `session`: [`PwCliSession`], the one `pw-cli` that sends those parameters.
 //!
 //! The config follows what a live check on PipeWire 1.6 with WirePlumber 0.5 confirmed.
@@ -661,13 +662,15 @@ pub mod paths;
 pub mod points;
 mod process;
 mod pty;
+pub mod scene;
 pub mod session;
 pub mod speakers;
 mod systemd;
 
 pub use control::{
     CUSTOM, CrossfeedEdit, Edit, EqControl, EqView, Keep, LEGACY_NOTE, LEVEL_HELD_NOTE, LIVE_NOTE,
-    LevelHint, LoudnessEdit, PASSTHROUGH_NOTE, PointView, SpeakersEdit, kind_word, parse_kind,
+    LevelHint, LoudnessEdit, PASSTHROUGH_NOTE, PointView, Recalled, SpeakersEdit, kind_word,
+    parse_kind,
 };
 pub use crossfeed::{
     CrossfeedSettings, CrossfeedView, Model as CrossfeedModel, Stage as CrossfeedStage,
@@ -685,6 +688,7 @@ pub use manage::{
 };
 pub use paths::EqPaths;
 pub use points::{Change, HAND, HandRanges, Points};
+pub use scene::ComputerPart;
 pub use session::{Params, PwCliSession};
 pub use speakers::{Irs, SetInfo, SpeakersResponse, SpeakersView, speakers_response};
 pub use svolder_speakers::Store as SpeakersStore;

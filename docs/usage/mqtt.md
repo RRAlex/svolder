@@ -119,8 +119,10 @@ the MQTT client and starts the one it now describes, and a section taken out sto
 
 For a device with unit id `U` (its sixteen hex characters) and the default `base_topic`:
 
-- `svolder/bridge/availability` — `online` / `offline`, retained. `offline` is the MQTT client's
-  last will, and what a stop publishes.
+- `svolder/bridge/H/availability` — `online` / `offline`, retained, for the bridge of the computer
+  whose host name is `H` (lower case, anything but `a-z`, `0-9` and `_` turned into `_`). `offline`
+  is the MQTT client's last will, and what a stop publishes. Each computer has its own, so two
+  daemons on one broker never overwrite each other's will.
 - `svolder/U/availability` — `online` while the daemon holds the device's link, else `offline`,
   retained.
 - `svolder/U/state` — one retained JSON object with a key per control (the profile's key: `volume`,
@@ -157,7 +159,7 @@ include the MQTT client's and the device's availability and the device's state:
 
 ```
 $ mosquitto_sub -h 127.0.0.1 -t 'svolder/#' -t 'homeassistant/#' -v
-svolder/bridge/availability online
+svolder/bridge/reframe/availability online
 svolder/0102030405060708/availability online
 svolder/0102030405060708/state {"balance":0,"eq_mode":"flat","input":"USB 1","mute":"OFF","nos":"OFF","phase":"OFF","sample_rate":"48 kHz","spdif_locked":"OFF","usb1_connected":"ON","usb2_connected":"OFF","volume":-26.089}
 ```
@@ -349,8 +351,9 @@ In `loudness` mode, and before the device has reported its mode, the mode is lef
 is when the band command is refused or a preset recall follows it (the recall writes its own mode).
 A band command sent while a recall runs waits for it, and the mode the recall left decides. A mode
 command sent after a band wins over that band's switch, so a command for `flat` that comes after the
-band leaves the tone control in `flat`; a scene that sets `eq_mode: flat` together with changed band
-values sends them in no fixed order, so it can end in `eq`. `svolder eq set` leaves the mode alone.
+band leaves the tone control in `flat`; a Home Assistant scene that sets `eq_mode: flat` together
+with changed band values sends them in no fixed order, so it can end in `eq`. `svolder eq set`
+leaves the mode alone.
 
 The preset select offers the presets that fit the device, in the order the TUI's preset list shows
 them — the built-ins, then the `[[preset]]` blocks of `config.toml` with the same band count — and
@@ -407,22 +410,41 @@ not have, or of a save is logged and dropped, and so is a command on the topic o
 
 ### The computer's EQ
 
-One more Home Assistant device, `This computer`, carries the computer's EQ, loudness, crossfeed and
-virtual speakers, and two read-only sensors of what its path does to the sound (below); nothing else
-of the computer: no volume, no mute and no points.
+One more Home Assistant device per computer, named by its host name (`reframe` below, from
+`/proc/sys/kernel/hostname`, or `localhost` when that is empty), carries the computer's EQ,
+loudness, crossfeed and virtual speakers, and two read-only sensors of what its path does to the
+sound (below); nothing else of the computer: no volume, no mute and no points. Its identifier is
+`svolder_computer_H` with `H` the host name as above (lower case, every other sign `_`: `my-desk`
+is `my_desk`), its manufacturer `svolder` and its model `Computer`, and every DAC and amp a daemon
+serves is a device `via_device` of its computer's. The computer's topics start `svolder/computer_H`,
+its discovery topics `homeassistant/<component>/svolder_computer_H`, and
+its unique ids `svolder_computer_H_`, so two computers on one broker share none.
+
+The host name is the computer's identity: a container without host networking has the container's
+id for a host name, which changes each time it is created, so give it a `hostname:` (the computer's
+name) or each new container is a new Home Assistant device. After a computer is renamed, delete its
+old device in Home Assistant, which also clears what the old name left retained.
+
+**Upgrading:** the entity ids now start with the host name (`switch.reframe_eq`, not
+`switch.this_computer_eq`). On its first start a daemon clears the old `This computer` discovery
+topics with empty retained payloads, so Home Assistant keeps no second device; a dashboard,
+automation or script that names a `this_computer_*` entity has to be pointed at the new id. The
+table below uses `reframe` for the host name.
 
 | Entity | Topics | What |
 |---|---|---|
-| `switch.this_computer_eq` | `B/computer/computer_eq/state` (`ON`/`OFF`) and `.../set` | the EQ on or off; a `binary_sensor` while `commands` is off |
-| `sensor.this_computer_eq_preset` | `B/computer/computer_eq_preset/state` | the preset the points came from, `custom` after a hand edit, empty while the EQ is off |
-| `switch.this_computer_loudness` | `B/computer/computer_loudness/state` (`ON`/`OFF`) and `.../set` | [loudness](eq.md#loudness) on or off; a `binary_sensor` while `commands` is off |
-| `number.this_computer_loudness_strength` | `B/computer/computer_loudness_strength/state` and `.../set` | the loudness strength in %, with the daemon's own minimum, maximum and step (0 to 100, 5), a slider; a `sensor` while `commands` is off |
-| `switch.this_computer_crossfeed` | `B/computer/computer_crossfeed/state` (`ON`/`OFF`) and `.../set` | [crossfeed](eq.md#crossfeed) on or off; a `binary_sensor` while `commands` is off |
-| `select.this_computer_crossfeed_preset` | `B/computer/computer_crossfeed_preset/state` and `.../set` | the model and preset; a `sensor` while `commands` is off |
-| `switch.this_computer_virtual_speakers` | `B/computer/computer_speakers/state` (`ON`/`OFF`) and `.../set` | [virtual speakers](eq.md#virtual-speakers) on or off; a `binary_sensor` while `commands` is off |
-| `select.this_computer_virtual_speakers_set` | `B/computer/computer_speakers_set/state` and `.../set`, attributes on `.../attributes` | the fetched set; a `sensor` while `commands` is off |
-| `sensor.this_computer_path` | `B/computer/computer_path/state`, attributes on `.../attributes` | the path's verdict: `untouched`, `changed`, `not_this_dac`, `other_input`, `unknown`, or `not_read` while there is no route; attributes `words` (a list), `sentence` and `dac` |
-| `binary_sensor.this_computer_pipewire_config` | `B/computer/computer_config/state` (`ON`/`OFF`), attributes on `.../attributes` | a problem sensor of the PipeWire config check: `ON` while a line fails; attributes `outcome`, `summary`, `sink`, `limit` and `lines` (`key`, `outcome`, `words`) |
+| `switch.reframe_eq` | `B/computer_reframe/computer_eq/state` (`ON`/`OFF`) and `.../set` | the EQ on or off; a `binary_sensor` while `commands` is off |
+| `sensor.reframe_eq_preset` | `B/computer_reframe/computer_eq_preset/state` | the preset the points came from, `custom` after a hand edit, empty while the EQ is off |
+| `switch.reframe_loudness` | `B/computer_reframe/computer_loudness/state` (`ON`/`OFF`) and `.../set` | [loudness](eq.md#loudness) on or off; a `binary_sensor` while `commands` is off |
+| `number.reframe_loudness_strength` | `B/computer_reframe/computer_loudness_strength/state` and `.../set` | the loudness strength in %, with the daemon's own minimum, maximum and step (0 to 100, 5), a slider; a `sensor` while `commands` is off |
+| `switch.reframe_crossfeed` | `B/computer_reframe/computer_crossfeed/state` (`ON`/`OFF`) and `.../set` | [crossfeed](eq.md#crossfeed) on or off; a `binary_sensor` while `commands` is off |
+| `select.reframe_crossfeed_preset` | `B/computer_reframe/computer_crossfeed_preset/state` and `.../set` | the model and preset; a `sensor` while `commands` is off |
+| `switch.reframe_virtual_speakers` | `B/computer_reframe/computer_speakers/state` (`ON`/`OFF`) and `.../set` | [virtual speakers](eq.md#virtual-speakers) on or off; a `binary_sensor` while `commands` is off |
+| `select.reframe_virtual_speakers_set` | `B/computer_reframe/computer_speakers_set/state` and `.../set`, attributes on `.../attributes` | the fetched set; a `sensor` while `commands` is off |
+| `select.reframe_scene` | `B/computer_reframe/scene/state`, `.../set` and attributes on `.../attributes` | the svolder scene that is on, or `custom`; choosing a scene recalls it; a `sensor` while `commands` is off |
+| `text.reframe_scene_save` | `B/computer_reframe/scene_save/set` | type a name to save the sound as it is now under it; none while `commands` is off |
+| `sensor.reframe_path` | `B/computer_reframe/computer_path/state`, attributes on `.../attributes` | the path's verdict: `untouched`, `changed`, `not_this_dac`, `other_input`, `unknown`, or `not_read` while there is no route; attributes `words` (a list), `sentence` and `dac` |
+| `binary_sensor.reframe_pipewire_config` | `B/computer_reframe/computer_config/state` (`ON`/`OFF`), attributes on `.../attributes` | a problem sensor of the PipeWire config check: `ON` while a line fails; attributes `outcome`, `summary`, `sink`, `limit` and `lines` (`key`, `outcome`, `words`) |
 
 The two path entities are read-only whatever `commands` says, and are announced while host audio is
 on. The **Path** sensor says what the computer's sound does before the DAC, judged as the web page
@@ -481,6 +503,45 @@ crossfeed switch goes `OFF` when the speakers go on, and the speakers' switch go
 crossfeed turns on. A reset (a restart, a change of output, a chain restart, a graceful stop, a
 missing set) shows as the switch going `OFF`.
 
+### Scenes
+
+The computer's device also carries the scenes ([the glossary](../glossary.md) says what a scene is;
+the daemon keeps them, and the TUI, the web page, the CLI and the MCP tools use the same ones).
+These two entities are announced whenever the MQTT client runs, with or without a host EQ, so the
+computer's device always exists and every DAC is `via_device` of it. Unlike a Home Assistant scene,
+an svolder scene sets the sound of the computer and of each device at once. No volume, gain, mute or
+power is saved or recalled.
+
+The **Scene** select lists the scene names, in the order of the config, and `custom`. Its state is
+the scene that is on, or `custom` when none is; while the daemon has not yet read which scene is on
+(a device is still reading a setting), the state stays as it was last published, so a reconnect
+never flips it to `custom`. Choosing a name recalls that scene, and choosing `custom` does nothing
+(it is a state, as in the crossfeed select). While `commands` is off the select is a `sensor`. The
+**Scene save** text saves the sound as it is now under the name typed (1 to 40 characters); a name
+that is taken is refused in the daemon's words, which land in the `saved` attribute, since the save
+never replaces a scene. Rename and delete are not on Home Assistant: use the TUI, the web page, the
+CLI or the MCP tools. A name of 40 characters with blanks round it is refused by Home Assistant,
+which counts the text untrimmed, though the daemon would trim it.
+
+The select's attributes (`.../attributes`) carry `scenes` (each with its `name` and `parts`, each
+part a `who`, the word `computer` or the device's name, and whether it is `present` to be recalled),
+`known` (false while which scene is on is not settled), `recalled` (the scene last recalled, or
+null), and, once there has been one, `outcome` and `saved`. `outcome` is the last recall made
+through Home Assistant: `{name, parts, seq}` with each part's `who`, `status` (`done`, `partial`,
+`left` or `failed`) and `notes`, or `{name, error, seq}` when the daemon refused it. `saved` is the
+last save made through the text: `{name, seq}`, or `{name, error, seq}` when refused. `seq` rises
+with every answer, so a repeated answer still changes the attributes. A recall from another front
+end changes `recalled` and the state but not `outcome`, and `outcome` and `saved` are forgotten when
+the daemon restarts.
+
+A recall that would play one preset on a device and on the computer at once is a question the select
+cannot answer: nothing changes, the daemon's question is logged and goes in `outcome` as its
+`error`; recall that scene from the TUI, the web page, the CLI or the MCP tools. A retained command
+is never acted on. A scene saved with crossfeed or virtual speakers on reads as no scene (`custom`)
+after a daemon restart, since those never stay on across one. `contrib/home-assistant/README.md`
+describes a dashboard strategy that builds one page per computer, with a scenes card that reads
+these attributes (its section "One page per computer").
+
 ### The connection
 
 The daemon connects when it starts and whenever the connection drops, waiting 2 s after a failure
@@ -524,3 +585,9 @@ checkHost = broker.example
 ```
 
 and `host = "127.0.0.1"`, `port = 1884` in `config.toml`'s `[mqtt]`.
+
+### Two computers on one broker
+
+Each computer is its own Home Assistant device with its own topics and ids (above). A DAC that two
+daemons both serve has the same unit id for both, so it is one device that shows under whichever
+daemon announced it last.

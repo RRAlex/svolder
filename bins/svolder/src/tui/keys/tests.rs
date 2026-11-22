@@ -74,7 +74,7 @@ fn the_band_keys_read_one_to_the_profiles_band_count() {
             .into_iter()
             .find(|h| h.does == "band")
             .expect("the tone screen has band keys");
-        assert_eq!(band.label_in(Scene::of(&app)), wanted, "{name}");
+        assert_eq!(band.label_in(KeyContext::of(&app)), wanted, "{name}");
     }
 }
 
@@ -145,9 +145,9 @@ fn the_p_hint_is_lit_on_a_loki_max_and_dimmed_on_a_device_with_neither() {
     let lyr = app_with_profile("lyr5");
     assert!(!available(hint, &lyr), "a Lyr 5 has neither");
 
-    assert_eq!(hint.long_in(Scene::of(&loki)), "presets");
+    assert_eq!(hint.long_in(KeyContext::of(&loki)), "presets");
     assert_eq!(
-        hint.long_in(Scene::of(&app_with_profile("gungnir2-v2"))),
+        hint.long_in(KeyContext::of(&app_with_profile("gungnir2-v2"))),
         "presets (a i inside)"
     );
 
@@ -226,6 +226,13 @@ fn every_hint_on_a_screen_does_something_when_pressed() {
             if hint.when == When::HasSetup {
                 // The check is on offer where host audio shows.
                 app.host.linked = true;
+            }
+            if hint.when == When::HasScenes {
+                // The box opens where the daemon keeps scenes and has sent them.
+                app = crate::tui::test_support::offering_scenes(
+                    app,
+                    crate::tui::test_support::mockup_scenes(),
+                );
             }
             if hint.label == "< > |" {
                 // the bar's keys act on the bar the last frame drew
@@ -319,17 +326,17 @@ fn the_wizards_esc_needs_a_step_to_go_back_to() {
         .into_iter()
         .find(|hint| hint.code == KeyCode::Esc)
         .expect("the wizard lists Esc");
-    let mut scene = Scene::default();
-    assert!(!available_in(esc, scene), "the device is written");
-    scene.can_go_back = true;
-    assert!(available_in(esc, scene));
+    let mut context = KeyContext::default();
+    assert!(!available_in(esc, context), "the device is written");
+    context.can_go_back = true;
+    assert!(available_in(esc, context));
 }
 
 /// The help overlay spells out the one-word descriptions the key row abbreviates, and the key
 /// row keeps the short form.
 #[test]
 fn the_overlay_writes_abbreviated_words_in_full_and_the_key_row_does_not() {
-    let scene = Scene::default();
+    let context = KeyContext::default();
     for (short, long) in [
         ("telem", "telemetry"),
         ("devs", "devices"),
@@ -340,11 +347,11 @@ fn the_overlay_writes_abbreviated_words_in_full_and_the_key_row_does_not() {
             .iter()
             .find(|hint| hint.does == short)
             .unwrap_or_else(|| panic!("no key says {short}"));
-        assert_eq!(hint.does_in(scene), short);
-        assert_eq!(hint.long_in(scene), long);
+        assert_eq!(hint.does_in(context), short);
+        assert_eq!(hint.long_in(context), long);
     }
     let mute = all().iter().find(|hint| hint.does == "mute").unwrap();
-    assert_eq!(mute.long_in(scene), "mute");
+    assert_eq!(mute.long_in(context), "mute");
 }
 
 /// An app showing the device screen whose mascot may be seen.
@@ -449,4 +456,35 @@ fn a_key_more_than_two_seconds_after_the_last_does_not_continue_the_code() {
     app.now += std::time::Duration::from_millis(1_900);
     press_all(&mut app, &chars("qd"));
     assert!(app.mascot.god());
+}
+
+/// `z` is listed on the four screens, lit only where the daemon keeps scenes and has sent them
+/// (the help overlay hides it elsewhere).
+#[test]
+fn z_is_on_every_screen_lit_only_where_scenes_are_offered() {
+    for screen in [
+        Screen::Device,
+        Screen::Tone,
+        Screen::Telemetry,
+        Screen::Devices,
+    ] {
+        let hint = hints_for(screen)
+            .into_iter()
+            .find(|hint| hint.code == KeyCode::Char('z'))
+            .unwrap_or_else(|| panic!("z on {screen:?}"));
+        assert_eq!(hint.does, "scenes");
+        let app = pressing(screen);
+        assert!(!available(hint, &app), "{screen:?}: no daemon, no scenes");
+        let app = crate::tui::test_support::offering_scenes(
+            app,
+            crate::tui::test_support::mockup_scenes(),
+        );
+        assert!(available(hint, &app), "{screen:?}");
+    }
+    assert!(
+        !hints_for(Screen::Settings)
+            .iter()
+            .any(|hint| hint.code == KeyCode::Char('z')),
+        "the Settings box takes no z"
+    );
 }

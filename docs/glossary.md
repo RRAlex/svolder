@@ -140,6 +140,12 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
 - **Built-in setting**: one of the named band settings a device's profile lists (a Loki Max's
   Flat, Bass Boost, Treble Boost, Smiley and Loudness), written as raw steps, with no conversion.
   Unlike a **Preset** it is data of one device.
+- **Scene**: a named snapshot of the sound settings of the whole config: the computer's EQ,
+  loudness, crossfeed and virtual speakers, and the tone control and plain sound settings of each
+  device connected when it was saved, never a volume, gain, mute or power. The daemon keeps scenes
+  and says which one is on; see [scenes.md](design/scenes.md). Not a **Preset** (one tone curve), not
+  a profile (a model's TOML), not a **Device slot** (kept on the device), not a Home Assistant scene,
+  and not Night drive's **scene** (its canvases).
 - **Fit**: choosing bands so that they match a headphone correction as closely as the device's
   bands allow.
 - **APO**: Equalizer APO's parametric text, the format AutoEq writes.
@@ -197,16 +203,27 @@ where each lives. The bytes behind the protocol terms are in [protocol.md](proto
   player's stream, what else mixes into the sink and whether the Computer EQ is in front of it.
 - **Path line**: the route and the DAC's own readings turned into one line from the player to the
   DAC: its hops and a verdict, `untouched` or the hop that changes the signal, or no verdict when
-  the computer plays elsewhere. Never worded "bit-perfect". It covers what enters the system's
+  the computer plays elsewhere, and, beside the verdict, what the whole path does end to end
+  (`end_to_end`: the verdict with the DAC's own volume, tone control, balance, mute, phase and NOS
+  filter added). Never worded "bit-perfect". It covers what enters the system's
   audio pipeline from the player's stream on, and judges up to 24 bits: what a player does before
   its stream (normalization, ReplayGain, its own volume or EQ, float maths, a file or a stream as
   its source) is outside it, and the untouched sentence says so.
+- **Path row**: the Path line drawn as a row, the same on every screen that shows it: the label
+  `Path`, the hops (`player → computer → DAC USB 1`) and the values they share (`48 kHz · volume 0
+  dB`). One model builds it (`PathRow`, in `svolder-ipc`), so the terminal and the web page agree.
+  The label is green only when the sound is untouched end to end and the PipeWire config check
+  does not fail, yellow when a hop or the DAC's own stage changes the sound or the check fails
+  (a failing check wins over a path that could not be read), and plain for what could not be
+  read, another sink or another input. Only the words of what the judge named as a change are
+  yellow; there is no verdict word and no check mark. A `config N` tag appears only when the check
+  fails.
 - **PipeWire config check**: whether the PipeWire config would let a single player reach the DAC
   untouched, whatever plays: seven lines (rates, forced rate, dither, 24-bit output, no plug,
-  stereo to stereo, no filter in the sink), each pass, fail or unknown, with a summary and a chip
-  (`config ✓`, `config N`, `config ?`). Shown by `svolder host check` (not `svolder setup`, which
-  is the guided first run), the TUI's `k` box, the web popup and Home Assistant's
-  `computer_config`. It reads only; what it cannot judge it says (the limit sentence).
+  stereo to stereo, no filter in the sink), each pass, fail or unknown, with a summary. The Path
+  row shows it only as a `config N` tag, when N lines fail. Shown by `svolder host check` (not
+  `svolder setup`, which is the guided first run), the TUI's `k` box, the web popup and Home
+  Assistant's `computer_config`. It reads only; what it cannot judge it says (the limit sentence).
 - **Watcher**: a held claim on the route: while one exists the daemon reads `pw-dump` (every 2 s for
   a fast one, every 30 s for the MQTT client's slow one), and with none it reads only once for a
   one-shot `host` request. A web page of a DAC and a TUI that asked for the host hold a fast one for

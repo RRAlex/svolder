@@ -205,6 +205,10 @@ pub(super) async fn take_intent<O: Open, M: MouseCapture>(
             watching.jobs.import(socket, *variant, name, target);
         }
         Intent::Speakers(call) => start_speakers(&mut watching, *call),
+        Intent::Scene(op) => {
+            let socket = watching.backend.as_ref().and_then(Backend::daemon_socket);
+            watching.jobs.scene(socket, op);
+        }
         Intent::HostEq(op) => computer::eq(&mut watching, *op),
         Intent::MoveToDac(name) => computer::move_to_dac(&mut watching, name),
         // The computer's volume and mute: a request to the daemon when joined to one, else the
@@ -400,6 +404,26 @@ pub(super) async fn apply_action<O: Open, M: MouseCapture>(
                 screen,
             )
             .await
+        }
+        MouseAction::ScenePick(row) => {
+            let focused = watching.app.scenes.list.as_ref().map(|list| list.row);
+            match focused == Some(row) {
+                true => {
+                    take_key(
+                        KeyEvent::from(crossterm::event::KeyCode::Enter),
+                        opener,
+                        watching,
+                        mouse,
+                        look,
+                        screen,
+                    )
+                    .await
+                }
+                false => {
+                    crate::tui::boxes::scenes::focus(&mut watching.app, row);
+                    Flow::Continue(watching)
+                }
+            }
         }
         MouseAction::SetRow(row) => {
             let intents = watching.app.click_set_row(row);

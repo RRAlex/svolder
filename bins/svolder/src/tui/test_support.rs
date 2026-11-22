@@ -729,6 +729,7 @@ pub(crate) fn computer_eq(
             })
             .collect(),
         preamp_db: -6.0,
+        stated_preamp_db: 0.0,
         preset: Some("custom".to_string()),
         live: true,
         note: None,
@@ -927,4 +928,60 @@ pub(crate) fn choice_styles(
         style_at(buffer, row_has, label, label.chars().count()),
         style_of(buffer, row_has, "‹"),
     ]
+}
+
+/// A scenes view of `rows` (each a name and its parts: who, present), with `on` lit and the
+/// daemon having settled which scene is on or not (`known`).
+pub(crate) fn scenes_view(
+    rows: &[(&str, &[(&str, bool)])],
+    on: Option<&str>,
+    known: bool,
+) -> svolder_ipc::socket::protocol::ScenesView {
+    use svolder_ipc::socket::protocol::{PartRow, SceneRow, ScenesView};
+    ScenesView {
+        scenes: rows
+            .iter()
+            .map(|(name, parts)| SceneRow {
+                name: (*name).to_string(),
+                parts: parts
+                    .iter()
+                    .map(|(who, present)| PartRow {
+                        who: (*who).to_string(),
+                        present: *present,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        on: on.map(str::to_string),
+        recalled: None,
+        known,
+    }
+}
+
+/// The three scenes the mockups show: Late night (on), Desk and Movie, which has a part on a
+/// device that is not connected.
+pub(crate) fn mockup_scenes() -> svolder_ipc::socket::protocol::ScenesView {
+    scenes_view(
+        &[
+            ("Late night", &[("computer", true), ("Desk DAC", true)]),
+            ("Desk", &[("computer", true), ("Desk DAC", true)]),
+            (
+                "Movie",
+                &[("computer", true), ("Desk DAC", true), ("Hall", false)],
+            ),
+        ],
+        Some("Late night"),
+        true,
+    )
+}
+
+/// `app` on a daemon that keeps scenes and has sent `view`.
+pub(crate) fn offering_scenes(
+    mut app: App,
+    view: svolder_ipc::socket::protocol::ScenesView,
+) -> App {
+    app.session.daemon = true;
+    app.scenes_served(true);
+    app.scenes_view(view);
+    app
 }

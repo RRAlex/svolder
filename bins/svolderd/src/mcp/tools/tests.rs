@@ -29,6 +29,7 @@ mod host;
 mod identify;
 mod loudness;
 mod presets;
+mod scenes;
 mod set_control;
 mod speakers;
 
@@ -91,7 +92,20 @@ struct Scripted {
     /// A second device named `second`, with its profile and feed, listed after the first.
     second: StdMutex<Option<(Profile, tokio::sync::watch::Sender<crate::device::Feed>)>>,
     recalled_watch: tokio::sync::watch::Sender<Option<String>>,
+    /// The scenes of the config, which `config` answers.
+    scene_config: StdMutex<Vec<svolder_ipc::config::Scene>>,
+    /// The view of the scenes, which `scenes` follows.
+    scene_view: tokio::sync::watch::Sender<svolder_ipc::ScenesView>,
+    /// Every scene op the fleet was sent.
+    scene_ops: StdMutex<Vec<svolder_ipc::SceneOp>>,
+    /// What a scene op is answered with.
+    scene_reply: StdMutex<Option<SceneReply>>,
+    /// Whether the daemon is going away: no scenes, and the config says why.
+    stopping: StdMutex<bool>,
 }
+
+/// How a scene op is answered.
+type SceneReply = Box<dyn Fn(&svolder_ipc::SceneOp) -> Response + Send>;
 
 fn scripted(profile: &str, readings: &[(&str, i64)]) -> Arc<Scripted> {
     let registry = Registry::builtin().expect("the built-in profiles");
@@ -131,6 +145,17 @@ fn scripted_over(profile: Profile, readings: &[(&str, i64)]) -> Arc<Scripted> {
         feed: tokio::sync::watch::channel(Default::default()).0,
         second: StdMutex::new(None),
         recalled_watch: tokio::sync::watch::channel(None).0,
+        scene_config: StdMutex::new(Vec::new()),
+        scene_view: tokio::sync::watch::channel(svolder_ipc::ScenesView {
+            scenes: Vec::new(),
+            on: None,
+            recalled: None,
+            known: true,
+        })
+        .0,
+        scene_ops: StdMutex::new(Vec::new()),
+        scene_reply: StdMutex::new(None),
+        stopping: StdMutex::new(false),
     })
 }
 
@@ -216,6 +241,13 @@ impl Fleet for Scripted {
                     })
             }
             Request::Host => Response::Host(self.host.lock().unwrap().clone()),
+            Request::Scene { op } => {
+                self.scene_ops.lock().unwrap().push(op.clone());
+                match &*self.scene_reply.lock().unwrap() {
+                    Some(reply) => reply(&op),
+                    None => panic!("no scene reply scripted for {op:?}"),
+                }
+            }
             Request::HostEq {
                 op: HostEqOp::Preset { confirm: false, .. },
             } if self.played_twice.lock().unwrap().is_some() => {
@@ -397,9 +429,17 @@ impl Fleet for Scripted {
         }
     }
 
+    fn scenes(&self) -> Option<tokio::sync::watch::Receiver<svolder_ipc::ScenesView>> {
+        (!*self.stopping.lock().unwrap()).then(|| self.scene_view.subscribe())
+    }
+
     fn config(&self) -> Result<std::sync::Arc<Config>, String> {
+        if *self.stopping.lock().unwrap() {
+            return Err("the daemon is stopping".to_string());
+        }
         Ok(std::sync::Arc::new(Config {
             presets: self.presets.lock().unwrap().clone(),
+            scenes: self.scene_config.lock().unwrap().clone(),
             ..Config::default()
         }))
     }

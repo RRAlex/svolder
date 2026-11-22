@@ -16,7 +16,8 @@
 //!   statuses.
 //! - `timeouts`: the deadlines and bounds both sides wait by.
 //! - `autoeq`, `device_config`, `host_cover`, `host_eq`, `jobs`, `mqtt_set`, `preset_write`,
-//!   `server_switch`, `speakers`, `walk`: the request families with their own ops and answers.
+//!   `scenes`, `server_switch`, `speakers`, `walk`: the request families with their own ops and
+//!   answers.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +31,7 @@ mod jobs;
 mod mqtt_set;
 mod preset_write;
 mod request;
+mod scenes;
 mod server_switch;
 mod speakers;
 mod status;
@@ -46,9 +48,9 @@ pub(crate) use codes::FEATURE_REASONS;
 pub use codes::{
     CODE_COMPUTER_UNAVAILABLE, CODE_LINK, CODE_NOT_FOUND, CODE_TIMEOUT, CODE_UNKNOWN_REQUEST,
     CODE_USAGE, FEATURE_AUTOEQ, FEATURE_DEVICE_CRUD, FEATURE_GUEST_SWITCH, FEATURE_HOST_COVER,
-    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SERVER_SWITCH, FEATURE_SPEAKERS,
-    FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED, NOT_CONNECTED,
-    NOT_FOUND_YET, WEB_OFF, not_found_yet,
+    FEATURE_MQTT_SET, FEATURE_PRESET_WRITE, FEATURE_SCENES, FEATURE_SERVER_SWITCH,
+    FEATURE_SPEAKERS, FEATURE_UNKNOWN_REQUEST_CODE, FEATURE_WALK, FEATURES, NO_DEVICES_CONFIGURED,
+    NOT_CONNECTED, NOT_FOUND_YET, WEB_OFF, not_found_yet,
 };
 pub use device_config::{ConfiguredDevice, DeviceConfigOp, PassphraseKind, ProfileChoice};
 pub use host_cover::{COVER_CHUNK_BYTES, CoverReader, cover_chunk};
@@ -58,6 +60,7 @@ pub use mqtt_set::MqttOp;
 pub use preset_write::PresetOp;
 pub(crate) use request::REQUEST_CMDS;
 pub use request::Request;
+pub use scenes::{PartOutcome, PartRow, PartStatus, SceneOp, SceneRow, ScenesView};
 pub use server_switch::Server;
 pub use speakers::{
     SPEAKERS_OFF_PREFIX, SpeakersAngles, SpeakersCatalogue, SpeakersOp, SpeakersProgress,
@@ -241,6 +244,9 @@ pub enum Reason {
     /// AutoEq's repository could not be reached, or what it sent could not be used: the fetch
     /// failed or ran out of time, the file was too large or not text, or no index was had.
     Unreachable,
+    /// A save of a scene found nothing to save: no device is connected and the computer's
+    /// controls are not there.
+    NothingToSave,
     /// A reason a later daemon gives that this build does not know.
     #[serde(other)]
     Unknown,
@@ -365,6 +371,17 @@ pub enum Response {
     PresetWritten {
         /// the name
         name: String,
+    },
+    /// The reply to a `scene` request: the scene's name as the file now spells it (the deleted
+    /// scene's, for a delete) and how each part fared: for a recall, each part; for a save, each
+    /// configured device that is not connected, as a part `left` out; empty for rename and
+    /// delete.
+    Scene {
+        /// the name
+        name: String,
+        /// one entry per part of a recalled scene
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        outcome: Vec<PartOutcome>,
     },
     /// The reply to an `mqtt_set` request: where the bridge stands after it.
     MqttSet {
@@ -546,6 +563,10 @@ pub enum Event {
     AutoEq(JobEvent),
     /// A change in a job of the virtual speakers' sets. Only on a `speakers` follow stream.
     Speakers(JobEvent),
+    /// The scenes changed: one was saved, renamed, deleted or recalled, the file was reloaded, or
+    /// the sound settings moved so that another scene is on or none. Sent to a subscriber of a
+    /// daemon that lists [`FEATURE_SCENES`], and only to one that may change the sound.
+    Scenes(ScenesView),
     /// A kind this build does not know, from a peer newer than it.
     #[serde(other)]
     Unknown,

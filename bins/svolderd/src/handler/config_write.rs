@@ -231,6 +231,8 @@ impl Daemon {
                 config: Arc::new(config),
                 stamp,
             };
+            // The scenes' view is made of this snapshot.
+            self.scenes.poke();
         }
     }
 

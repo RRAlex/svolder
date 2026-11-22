@@ -50,6 +50,7 @@ use crate::recovery::Failure;
 
 use super::boxes::connections::Connections;
 use super::boxes::presets::PresetsBox;
+use super::boxes::scenes::ScenesBox;
 use super::boxes::speakers::SpeakersBox;
 use super::boxes::toast::{Toast, ToastKind};
 use super::decoration::effects::Effects;
@@ -81,6 +82,7 @@ mod overlays;
 mod point_line;
 mod pointer;
 mod readings;
+mod scenes;
 mod session;
 mod setup;
 mod side;
@@ -102,7 +104,6 @@ pub(crate) use pointer::Pointer;
 pub use readings::Reading;
 pub(crate) use readings::Readings;
 pub(crate) use session::Session;
-pub(crate) use setup::Chip;
 pub(crate) use side::SWITCH_ROW;
 pub use speakers::Space;
 /// What the computer's edit line calls its fields.
@@ -433,6 +434,8 @@ pub(crate) struct Moved {
     pub(crate) presets: bool,
     /// Whether the virtual speakers' set list is open.
     pub(crate) sets: bool,
+    /// Whether the Scenes box is open.
+    pub(crate) scenes: bool,
     /// Whether a band's edit line is open.
     pub(crate) edit_line: bool,
     /// Whether the quit question is open.
@@ -505,6 +508,8 @@ pub struct App {
     /// The virtual speakers' set list, the catalogue the daemon last gave and the fetch in
     /// flight.
     pub speakers_box: Box<SpeakersBox>,
+    /// The scenes the daemon keeps and the box over the screens that lists them.
+    pub scenes: ScenesBox,
     /// What the mouse is doing: the drags it holds, the climb it started, its last press and the
     /// tooltip it asks for.
     pub(crate) pointer: Pointer,
@@ -598,6 +603,7 @@ impl App {
                 confirm: None,
             },
             speakers_box: Box::default(),
+            scenes: ScenesBox::default(),
             presets: PresetsBox {
                 saved: Vec::new(),
                 preset_list: None,
@@ -928,6 +934,7 @@ impl App {
             confirming: self.devices.confirm.is_some(),
             presets: self.presets.preset_list.is_some() || self.presets.device_list.is_some(),
             sets: self.speakers_box.list.is_some(),
+            scenes: self.scenes.list.is_some(),
             edit_line: self.tone.edit_line.is_some(),
             quitting: self.overlays.quitting,
             setup: self.overlays.setup.is_some(),

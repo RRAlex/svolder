@@ -372,7 +372,7 @@ fn the_link_entity_depends_only_on_the_bridge_availability() {
     assert_eq!(link.payload["device_class"], "connectivity");
     assert_eq!(
         link.payload["availability"],
-        json!([{"topic": "svolder/bridge/availability"}])
+        json!([{"topic": "svolder/bridge/reframe/availability"}])
     );
 }
 
@@ -400,13 +400,14 @@ fn every_entity_carries_the_device_and_origin_blocks() {
             "manufacturer": "Schiit Audio",
             "model": "Gungnir 2",
             "sw_version": "3",
+            "via_device": "svolder_computer_reframe",
         })
     );
     assert_eq!(volume.payload["origin"]["name"], "svolder");
     assert_eq!(
         volume.payload["availability"],
         json!([
-            {"topic": "svolder/bridge/availability"},
+            {"topic": "svolder/bridge/reframe/availability"},
             {"topic": "svolder/0102030405060708/availability"},
         ])
     );
@@ -463,7 +464,7 @@ fn discovery_has_a_diagnostic_signal_sensor() {
         assert_eq!(
             p["availability"],
             json!([
-                {"topic": "svolder/bridge/availability"},
+                {"topic": "svolder/bridge/reframe/availability"},
                 {"topic": "svolder/0102030405060708/availability"},
             ])
         );
@@ -528,7 +529,7 @@ fn discovery_has_an_identify_button_only_with_commands() {
     assert_eq!(
         p["availability"],
         json!([
-            {"topic": "svolder/bridge/availability"},
+            {"topic": "svolder/bridge/reframe/availability"},
             {"topic": "svolder/0102030405060708/availability"},
         ])
     );
@@ -625,4 +626,28 @@ fn an_empty_prefix_offers_no_diagnostic_entity_either() {
         &[],
     );
     assert!(entries.is_empty());
+}
+
+#[test]
+fn every_entity_is_via_the_computer_and_depends_on_its_bridge() {
+    let p = profile("gungnir2-v2");
+    let entries = configs(
+        "svolder",
+        "homeassistant",
+        &p,
+        &device("0102030405060708"),
+        true,
+        &[],
+    );
+    assert!(!entries.is_empty());
+    for entry in &entries {
+        assert_eq!(
+            entry.payload["device"]["via_device"],
+            "svolder_computer_reframe"
+        );
+        assert_eq!(
+            entry.payload["availability"][0]["topic"],
+            "svolder/bridge/reframe/availability"
+        );
+    }
 }

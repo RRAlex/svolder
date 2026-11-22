@@ -3,7 +3,7 @@
 
 //! Which demo effect builds the mark, and that effect planned for a frame size.
 //!
-//! A new effect is a variant of [`Demo`] and of [`Scene`], its own module beside `particles`,
+//! A new effect is a variant of [`Demo`] and of [`Planned`], its own module beside `particles`,
 //! a word for `[tui] intro_effect`, and a preview page; `random` picks among every variant.
 
 use ratatui::buffer::Buffer;
@@ -47,30 +47,30 @@ impl Demo {
 
 /// A demo effect planned for one frame size and seed.
 #[derive(Debug)]
-pub(in crate::tui) enum Scene {
+pub(in crate::tui) enum Planned {
     /// The sparks' build of the mark.
     Particles(Build),
 }
 
-impl Scene {
+impl Planned {
     /// `demo` planned for a frame `area` from `seed`; `None` for a frame too small for it.
-    pub(in crate::tui) fn plan(demo: Demo, area: Rect, seed: u64) -> Option<Scene> {
+    pub(in crate::tui) fn plan(demo: Demo, area: Rect, seed: u64) -> Option<Planned> {
         match demo {
-            Demo::Particles => Build::new(area, seed).map(Scene::Particles),
+            Demo::Particles => Build::new(area, seed).map(Planned::Particles),
         }
     }
 
     /// Paint it `t` seconds in over `buf`, a blank frame of the size it was planned for.
     pub(in crate::tui) fn frame(&self, t: f32, buf: &mut Buffer, theme: &Theme, colours: &Colours) {
         match self {
-            Scene::Particles(build) => build.frame(t, buf, theme, colours),
+            Planned::Particles(build) => build.frame(t, buf, theme, colours),
         }
     }
 
     /// The exit this effect hands the loop, planned for the frame it finished on.
     pub(in crate::tui) fn exit(&self, seed: u64, colours: Colours, pacer: Pacer) -> Option<Reform> {
         match self {
-            Scene::Particles(build) => Some(Reform::new(build.area(), seed, colours, pacer)),
+            Planned::Particles(build) => Some(Reform::new(build.area(), seed, colours, pacer)),
         }
     }
 }
@@ -94,11 +94,11 @@ mod tests {
     fn a_scene_is_planned_for_the_size_it_is_asked_for() {
         for (w, h) in [(80, 24), (120, 40)] {
             let area = Rect::new(0, 0, w, h);
-            match Scene::plan(Demo::Particles, area, 1) {
-                Some(Scene::Particles(build)) => assert_eq!(build.area(), area),
+            match Planned::plan(Demo::Particles, area, 1) {
+                Some(Planned::Particles(build)) => assert_eq!(build.area(), area),
                 None => panic!("{w}x{h} has room for the large mark"),
             }
         }
-        assert!(Scene::plan(Demo::Particles, Rect::new(0, 0, 60, 20), 1).is_none());
+        assert!(Planned::plan(Demo::Particles, Rect::new(0, 0, 60, 20), 1).is_none());
     }
 }

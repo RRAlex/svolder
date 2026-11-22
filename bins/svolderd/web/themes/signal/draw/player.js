@@ -6,19 +6,19 @@
 
 import { fraction } from '../../../core/clock.js';
 import { PLAYER } from '../words.js';
-import { configChip, plain, said } from './computer.js';
+import { configChip, plain, said, titleOf } from './computer.js';
 import { esc } from './esc.js';
 import { coverMarkup, progressOf, timeWordsOf, transport } from './playing.js';
 import { inertPage } from './word.js';
 
-/** The path as lines: each hop's label and its words, then the verdict in the colour of its class. */
+/** The path as lines: each hop's label and its words, then the verdict in the colour of the path's end-to-end class. */
 function pathLines(path) {
   if (!path) return `<p class="sg-detail">${esc(PLAYER.noPath)}</p>`;
   const hops = (path.hops ?? []).map((hop) => `<li class="${hop.changes ? 'sg-warn' : ''}"><b>${esc(hop.label)}</b> `
     + `${esc(plain(hop.detail ?? ''))}</li>`).join('');
-  const cls = path.verdict === 'untouched' ? 'sg-ok' : 'sg-warn';
+  const cls = (path.end_to_end ?? path.verdict) === 'untouched' ? 'sg-ok' : 'sg-warn';
   return `<ul class="sg-pathlist">${hops}</ul>`
-    + `${path.words?.length ? `<p class="sg-verdict ${cls}"${path.title ? ` title="${esc(plain(path.title))}"` : ''}>${said(path)}${configChip(path)}</p>` : ''}`;
+    + `${path.words?.length ? `<p class="sg-verdict ${cls}"${titleOf(path) ? ` title="${esc(plain(titleOf(path)))}"` : ''}>${said(path)}${configChip(path)}</p>` : ''}`;
 }
 
 /** The open area of the player hop for `page` at the browser's `localMs`. */

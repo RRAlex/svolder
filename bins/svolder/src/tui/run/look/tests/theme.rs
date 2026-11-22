@@ -552,11 +552,11 @@ fn on_red_no_screen_draws_a_blue_or_cyan_cell() {
     };
     for depth in [ColorDepth::TrueColor, ColorDepth::Ansi16] {
         for transition in [Transition::Trace, Transition::Noise] {
-            let mut scenes: Vec<(&str, App)> = Vec::new();
-            scenes.push(("device", heard("gungnir2-v2")));
+            let mut views: Vec<(&str, App)> = Vec::new();
+            views.push(("device", heard("gungnir2-v2")));
             let mut app = heard("gungnir2-v2");
             app.pane = Pane::Tone;
-            scenes.push(("device, tone pane", app));
+            views.push(("device, tone pane", app));
             for (what, key) in [
                 ("tone", 'e'),
                 ("settings", 's'),
@@ -566,14 +566,14 @@ fn on_red_no_screen_draws_a_blue_or_cyan_cell() {
             ] {
                 let mut app = heard("gungnir2-v2");
                 app.key(KeyEvent::from(KeyCode::Char(key)));
-                scenes.push((what, app));
+                views.push((what, app));
             }
             let mut flat = heard("gungnir2-v2");
             flat.key(KeyEvent::from(KeyCode::Char('e')));
             flat.key(KeyEvent::from(KeyCode::Char('0')));
-            scenes.push(("tone, flattened", flat));
-            scenes.push(("amp", heard("fake-amp")));
-            for (what, mut app) in scenes {
+            views.push(("tone, flattened", flat));
+            views.push(("amp", heard("fake-amp")));
+            for (what, mut app) in views {
                 let mut look = red_look(depth, transition);
                 // The first frame is the screen as it arrives; the screen change the key
                 // asked for, if it asked for one, plays over the second.

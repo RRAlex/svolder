@@ -240,6 +240,7 @@ class Watch:
     def __init__(self, path):
         self.route = None
         self.last = None
+        self.scenes = None
         self.seen = threading.Event()
         self.s = socket.socket(socket.AF_UNIX)
         self.s.connect(path)
@@ -256,6 +257,8 @@ class Watch:
                     self.last = m
                     self.route = m.get('route')
                     self.seen.set()
+                elif isinstance(m, dict) and m.get('event') == 'scenes':
+                    self.scenes = m
         except (OSError, ValueError):
             return
 
@@ -1347,6 +1350,229 @@ def loudness_phases(daemon, conn, watch, start_daemon, sock):
     return daemon, conn, watch
 
 
+# ---- scenes (phase SC) -------------------------------------------------------------------------
+
+# Two curves that differ: a boosted one (a +6 dB peak ON the tone at 1 kHz, so the chain's preamp is about
+# -6 dB and any moment with the boost in and the preamp not yet down plays 6 dB over) and a flat one. The
+# scenes are saved from the live state through the daemon's socket.
+SC_DEEP = {'preamp_db': 0.0, 'filters': [{'kind': 'Peaking', 'f': 1000.0, 'g': 6.0, 'q': 1.0}]}
+SC_FLAT = {'preamp_db': 0.0, 'filters': [{'kind': 'Peaking', 'f': 1000.0, 'g': 0.0, 'q': 1.0}]}
+SC_VOLUME = 50
+# SC2: the 1 kHz tone may exceed the EQ-only reference by this much on any window (the 4 ms smoothing's
+# own ripple on a steady tone is under 0.02 dB; the level steps in 0.1 dB, as for the loudness phases).
+SC_OVER_TOL = 0.15
+
+
+def sc_scene(conn, op, **fields):
+    """One scene request; the answer as it came (a refusal is a failed check by the caller)."""
+    return conn.ask({'cmd': 'scene', 'op': dict(op=op, **fields)})
+
+
+def sc_level(deadline=12.0):
+    """The 1 kHz tone's level in dB full scale through a recorder of its own, once two readings in a row
+    agree within 0.05 dB."""
+    prev = None
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < deadline:
+        lv = measure(0.0, 0.8)
+        if lv is not None and prev is not None and abs(lv - prev) <= 0.05:
+            return lv
+        prev = lv
+    raise Fail('the tone\'s level did not settle within %.0f s' % deadline)
+
+
+def sc_over(x, fr, from_s, ref_db):
+    """The worst 1 kHz level above `ref_db` on the smoothed envelope (4 ms Hann, one value per ms) from
+    `from_s` into the recording to 0.1 s before its end: (excess in dB, at what second, the envelope's
+    values in that stretch)."""
+    env, ts = ld_envelope(x, fr, TONE_HZ)
+    keep = (ts >= from_s) & (ts <= len(x) / fr - 0.1)
+    e, t = env[keep], ts[keep]
+    i = int(e.argmax())
+    return float(e[i] - ref_db), float(t[i]), e
+
+
+def scene_phase(conn, watch):
+    """Phase SC: scenes saved and recalled while a pulse player plays through the chain.
+
+    SC1: one recall that changes the curve, loudness and crossfeed together leaves the chain's node and
+    process as they were, moves no stream and removes or adds no pulse sink.
+    SC2: through each recall the 1 kHz tone is never above the EQ-only reference (the tone through the
+    higher of the two curves alone, loudness and crossfeed off), measured live on a recorder's whole run
+    as a 1 ms envelope.
+    SC3: the scenes view names the scene after its recall (`on`), and a moved point clears it (`on`
+    absent, `known` true). No scene writes the sink's volume.
+    Leaves the EQ off, loudness and crossfeed off, the volume at 100 %, no scene saved and no chain."""
+    if not os.path.exists(RUN + '/tone.wav'):
+        tone_wav(RUN + '/tone.wav')
+
+    def view():
+        return conn.view()['eq']
+
+    def chain_ids():
+        return which(node(CHAIN)), _private_pids('host-eq.conf')
+
+    def scenes():
+        return watch.scenes
+
+    check(scenes() is not None or settles(lambda: scenes() is not None, 5.0),
+          'SC the daemon sends the scenes view on a subscription (FEATURE_SCENES)')
+    check(scenes()['scenes'] == [] and scenes()['known'] is True,
+          'SC no scene is saved at the start (%s)' % (scenes()['scenes'],))
+    conn.eq({'op': 'mode', 'on': False})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
+    conn.ask({'cmd': 'host_mute', 'muted': False})
+    conn.ask({'cmd': 'host_volume', 'pct': SC_VOLUME})
+    wait_until('the sink\'s volume', lambda: (ld_volume_pct() or 0) and abs(ld_volume_pct() - SC_VOLUME) <= 0.5, 8)
+    vol0 = ld_volume_pct()
+
+    # The chain gets its loudness and crossfeed stages first, once, with nothing playing (turning either on
+    # rebuilds a chain that lacks the stage); both are off again before anything is saved.
+    conn.eq({'op': 'speakers', 'on': False})
+    conn.eq({'op': 'apply', 'name': 'Flat', 'correction': SC_FLAT})
+    conn.eq({'op': 'crossfeed', 'on': True})
+    conn.eq({'op': 'loudness', 'on': True})
+    conn.eq({'op': 'mode', 'on': True})
+    wait_until('the chain\'s node', lambda: node(CHAIN), 10)
+    wait_until('the view to say on', lambda: view()['on'], 5)
+    check(settles(lambda: view()['crossfeed']['on'] and view()['loudness']['on'], 8.0),
+          'SC1 the chain runs with the loudness and crossfeed stages in it (%s, %s)'
+          % (view()['loudness'].get('note'), view()['crossfeed'].get('note')))
+    conn.eq({'op': 'crossfeed', 'on': False})
+    conn.eq({'op': 'loudness', 'on': False})
+    check(settles(lambda: not view()['crossfeed']['on'] and not view()['loudness']['on'], 8.0),
+          'SC1 loudness and crossfeed are off again before the scenes are saved')
+    stable = chain_ids()
+    time.sleep(1.0)
+    check(chain_ids() == stable, 'SC1 the chain is not being rebuilt any more (%s)' % (chain_ids(),))
+
+    pulse_events = None
+    if not os.path.exists(PULSE_SOCK):
+        pulse_server()
+    player = pulse_play(RUN + '/tone.wav')
+    try:
+        wait_until('the player to play through the chain', chain_playing, 10)
+        # the references and the two scenes, saved from the live state
+        ref_flat = sc_level()
+        say('SC EQ-only reference, flat curve at volume %d %%: %.2f dB re full scale' % (vol0, ref_flat))
+        ans = sc_scene(conn, 'save', name='Desk')
+        check(ans.get('result') == 'scene' and ans.get('name') == 'Desk', 'SC the flat state is saved as Desk (%s)' % (ans,))
+        conn.eq({'op': 'apply', 'name': 'Deep', 'correction': SC_DEEP})
+        wait_until('the view to name Deep', lambda: view()['preset'] == 'Deep', 5)
+        ref_deep = sc_level()
+        say('SC EQ-only reference, deep curve: %.2f dB re full scale' % ref_deep)
+        model = expected_db(conn.view(), RATE)
+        check(view()['preamp_db'] <= -5.9 and abs(model) <= 0.2 and abs((ref_deep - ref_flat) - model) <= 0.2,
+              'SC the boosted curve at 1 kHz plays at the model: preamp %+.2f dB, model %+.2f dB, measured %+.2f dB re the flat curve'
+              % (view()['preamp_db'], model, ref_deep - ref_flat))
+        conn.eq({'op': 'loudness', 'on': True})
+        conn.eq({'op': 'crossfeed', 'on': True})
+        check(settles(lambda: view()['loudness']['on'] and view()['crossfeed']['on'], 8.0),
+              'SC loudness and crossfeed are on for the second scene')
+        full = sc_level()
+        say('SC deep curve with loudness and crossfeed on: %.2f dB re full scale' % full)
+        ans = sc_scene(conn, 'save', name='Late night')
+        check(ans.get('result') == 'scene' and ans.get('name') == 'Late night', 'SC the state is saved as Late night (%s)' % (ans,))
+        check(settles(lambda: scenes().get('on') == 'Late night', 5.0),
+              'SC3 the view says Late night is on right after its save (on %r)' % (scenes().get('on'),))
+        ref_max = max(ref_flat, ref_deep)
+
+        pulse_events = PulseEvents()
+        time.sleep(0.5)
+        before = (chain_ids(), pulse_links(), pulse_sink_inputs())
+        say('SC1 before the recalls: chain %s, pulse stream links %s, sink inputs %s' % before)
+        t_all = time.monotonic()
+        levels = []
+        for name, other in (('Desk', 'Late night'), ('Late night', 'Desk'), ('Desk', 'Late night')):
+            rec = Recording()
+            time.sleep(0.8)
+            t_cmd = time.monotonic()
+            ans = sc_scene(conn, 'recall', name=name)
+            time.sleep(3.2)
+            x, fr = rec.finish()
+            end = len(x) / fr
+            at_cmd = end - (rec.t_stop - t_cmd)
+            pre = level_db(x, fr, at_cmd - 0.6, at_cmd - 0.1)
+            post = level_db(x, fr, end - 1.2, end - 0.2)
+            excess, when, _ = sc_over(x, fr, at_cmd - 0.3, ref_max)
+            levels.append(post)
+            parts = {o['who']: o for o in ans.get('outcome', [])}
+            comp = parts.get('computer', {})
+            say('SC recall %s: answer %s; 1 kHz %.2f dB before, %.2f dB after; highest on the 1 ms envelope %+.2f dB '
+                're the EQ-only reference %.2f dB (%.2f s after the command)' % (name, ans.get('result'), pre, post, excess, ref_max, when - at_cmd))
+            check(ans.get('result') == 'scene' and ans.get('name') == name and comp.get('status') == 'done',
+                  'SC1 recalling %s answers done for the computer part (%s)' % (name, ans))
+            check(not any('rebuilt' in n for n in comp.get('notes', [])),
+                  'SC1 recalling %s rebuilt no chain (notes %s)' % (name, comp.get('notes')))
+            check(excess <= SC_OVER_TOL,
+                  'SC2 through the recall of %s the 1 kHz tone is never above the EQ-only reference: worst %+.2f dB '
+                  'on 1 ms envelope values over %.1f s (limit %+.2f dB, the higher curve alone at volume %d %%)'
+                  % (name, excess, end - 0.1 - (at_cmd - 0.3), SC_OVER_TOL, vol0))
+            if name == 'Desk':
+                # the level glides up to the flat curve's over a few seconds: read once it has settled
+                settled = sc_level()
+                check(abs(settled - ref_flat) <= 0.1,
+                      'SC2 recalling Desk plays the flat curve at its own level once the glide is done (%.2f dB, the flat reference %.2f dB): no level held'
+                      % (settled, ref_flat))
+            if name == 'Late night':
+                check(post <= pre - 3.0,
+                      'SC2 recalling Late night brought the 1 kHz tone down (%.2f -> %.2f dB): the recall changed the sound' % (pre, post))
+            check(settles(lambda: scenes().get('on') == name, 5.0) and scenes()['known'] is True,
+                  'SC3 after the recall the view says %s is on (on %r, recalled %r, known %s)'
+                  % (name, scenes().get('on'), scenes().get('recalled'), scenes()['known']))
+            v = view()
+            if name == 'Late night':
+                check(v['loudness']['on'] and v['crossfeed']['on'] and v['preset'] == 'Deep',
+                      'SC1 Late night put the curve, loudness and crossfeed on together (%s, loudness %s, crossfeed %s)'
+                      % (v['preset'], v['loudness']['on'], v['crossfeed']['on']))
+            else:
+                check(not v['loudness']['on'] and not v['crossfeed']['on'] and v['points'][0]['g'] == 0.0,
+                      'SC1 Desk put the flat curve on with loudness and crossfeed off (loudness %s, crossfeed %s)'
+                      % (v['loudness']['on'], v['crossfeed']['on']))
+        after = (chain_ids(), pulse_links(), pulse_sink_inputs())
+        seen = pulse_events.since(t_all)
+        say('SC1 after the recalls: chain %s, pulse stream links %s, sink inputs %s; pulse events %s' % (after + (seen,)))
+        check(after[0] == before[0], 'SC1 same chain node id and process after three recalls (%s -> %s)' % (before[0], after[0]))
+        check(after[1] == before[1] and after[2] == before[2],
+              'SC1 the stream was not moved: links %s -> %s, sink inputs %s -> %s' % (before[1], after[1], before[2], after[2]))
+        sink_events = [e for e in seen if ' on sink #' in e and ("'remove'" in e or "'new'" in e)]
+        check(not sink_events, 'SC1 no pulse sink removed or added over the recalls (%s)' % sink_events)
+        check(ld_volume_pct() is not None and abs(ld_volume_pct() - vol0) <= 0.5,
+              'SC no recall wrote the sink\'s volume (%.1f %% before, %s now)' % (vol0, ld_volume_pct()))
+
+        # SC3: a moved point clears the scene that was on; recalling it puts it back
+        ans = sc_scene(conn, 'recall', name='Late night')
+        check(settles(lambda: scenes().get('on') == 'Late night', 5.0), 'SC3 Late night is on again (on %r)' % (scenes().get('on'),))
+        p = view()['points'][0]
+        conn.eq({'op': 'set', 'index': 1, 'kind': 'PK', 'f': p['f'], 'g': p['g'] - 1.0, 'q': p['q']})
+        gone = settles(lambda: 'on' not in scenes() and scenes()['known'] is True, 5.0)
+        check(gone, 'SC3 one point moved: `on` is absent and the view is known (on %r, known %s)'
+              % (scenes().get('on'), scenes()['known']))
+        check(scenes().get('recalled') == 'Late night', 'SC3 the scene last recalled is still named (%r)' % (scenes().get('recalled'),))
+        sc_scene(conn, 'recall', name='Late night')
+        check(settles(lambda: scenes().get('on') == 'Late night', 5.0), 'SC3 recalling it again puts it back on (on %r)' % (scenes().get('on'),))
+        # SC1 again over everything since `before`: the later recall, the moved point and the recall after it
+        after = (chain_ids(), pulse_links(), pulse_sink_inputs())
+        sink_events = [e for e in pulse_events.since(t_all) if ' on sink #' in e and ("'remove'" in e or "'new'" in e)]
+        check(after == before and not sink_events,
+              'SC1 after the five recalls and the moved point: same chain, stream and sink inputs, no pulse sink removed or added (%s, %s)'
+              % (after[0], sink_events))
+    finally:
+        if pulse_events is not None:
+            pulse_events.close()
+        stop(player)
+    wait_until('the player to leave', lambda: not pulse_stream(), 5)
+    for name in ('Desk', 'Late night'):
+        sc_scene(conn, 'delete', name=name)
+    conn.eq({'op': 'crossfeed', 'on': False})
+    conn.eq({'op': 'loudness', 'on': False})
+    conn.eq({'op': 'mode', 'on': False})
+    conn.ask({'cmd': 'host_volume', 'pct': 100})
+    wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 15)
+    check(scenes()['scenes'] == [], 'SC the phase leaves no scene saved')
+    say('host-e2e: scenes phase SC done')
+
+
 def cpu_seconds(pid):
     """The user plus system CPU time of a process in seconds (clock ticks, so +-0.01 s)."""
     stat = open('/proc/%d/stat' % pid).read()
@@ -1417,6 +1643,17 @@ def main():
         # A way to iterate on the loudness phases alone: a development aid that can never report a pass (it
         # exits 3 and prints no PASS line, so a gate that reads "host-e2e: PASS" cannot take it for one).
         daemon, conn, watch = loudness_phases(daemon, conn, watch, start_daemon, sock)
+        conn.ask({'cmd': 'stop'})
+        watch.close()
+        conn.close()
+        daemon.wait(10)
+        if STATE['failed']:
+            raise Fail('%d check(s) failed: %s' % (len(STATE['failed']), '; '.join(STATE['failed'])))
+        STATE['dev'] = True
+        return
+    if os.environ.get('HOST_E2E_ONLY') == 'S':
+        # The scenes phase alone while it is worked on; like the loudness one it can never report a pass.
+        scene_phase(conn, watch)
         conn.ask({'cmd': 'stop'})
         watch.close()
         conn.close()
@@ -2548,6 +2785,8 @@ def main():
     wait_until('the chain\'s node to leave', lambda: node(CHAIN) is None, 10)
     say('host-e2e: pulse recall phase R done')
 
+    scene_phase(conn, watch)
+
 
     # X4. a restart of the daemon: crossfeed is off after it, and a chain for it alone is gone
     def restart_checks(what):
@@ -2655,7 +2894,7 @@ if __name__ == '__main__':
     try:
         main()
         if STATE.get('dev'):
-            print('host-e2e: dev run (HOST_E2E_ONLY), the loudness phases alone: not a pass of host-e2e', file=sys.stderr)
+            print('host-e2e: dev run (HOST_E2E_ONLY), some phases alone: not a pass of host-e2e', file=sys.stderr)
             code = 3
     except Fail as e:
         print('host-e2e: FAIL: %s' % e, file=sys.stderr)

@@ -55,6 +55,8 @@ pub(crate) struct StubDaemon {
     events: broadcast::Sender<Event>,
     /// The selector each subscription asked for, in the order they were made.
     subscribed: Mutex<Vec<Option<String>>>,
+    /// The scenes it keeps, as a case scripted them.
+    scenes: super::scenes_script::ScenesScript,
     /// The device walk it runs, as a case scripted it.
     walk: super::walk_script::WalkScript,
     /// The AutoEq service it runs, as a case scripted it.
@@ -321,6 +323,7 @@ impl Handler for StubDaemon {
             Request::Speakers { op } => self.speakers.handle(op).await,
             Request::DeviceConfig { op } => self.device_config(op),
             Request::PresetWrite { op } => self.preset_write(op),
+            Request::Scene { op } => self.scenes.handle(op),
             Request::Reload => {
                 *self.reloads.lock().expect("reloads mutex") += 1;
                 let delay = *self.reload_delay.lock().expect("the delay");
@@ -724,6 +727,7 @@ impl StubDaemon {
         Box::pin(
             stream::once(async move { hello })
                 .chain(stream::iter(view.map(Event::Host)))
+                .chain(stream::iter(self.scenes.opening()))
                 .chain(stream::unfold(rx, |mut rx| async move {
                     rx.recv().await.ok().map(|event| (event, rx))
                 }))
@@ -822,6 +826,20 @@ impl StubServer {
     /// The `device_config` ops the daemon has been sent, in order.
     pub(crate) fn device_ops(&self) -> Vec<svolder_ipc::DeviceConfigOp> {
         self.handler.device_ops.lock().expect("the record").clone()
+    }
+
+    /// The scenes the daemon keeps, as a case scripts them: its view, which every subscription
+    /// opens with, and the answers to the `scene` requests. The daemon lists the `scenes`
+    /// feature from now on.
+    pub(crate) fn scenes(&self) -> &super::scenes_script::ScenesScript {
+        let mut features = self.handler.features.lock().expect("the features");
+        if !features
+            .iter()
+            .any(|feature| feature == svolder_ipc::FEATURE_SCENES)
+        {
+            features.push(svolder_ipc::FEATURE_SCENES.to_string());
+        }
+        &self.handler.scenes
     }
 
     /// The device walk the daemon runs, as a case scripts it.
@@ -1300,6 +1318,7 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
     let handler = Arc::new(StubDaemon {
         events: broadcast::channel(16).0,
         subscribed: Mutex::default(),
+        scenes: super::scenes_script::ScenesScript::default(),
         walk: super::walk_script::WalkScript::default(),
         autoeq: super::autoeq_script::AutoEqScript::default(),
         speakers: super::speakers_script::SpeakersScript::default(),

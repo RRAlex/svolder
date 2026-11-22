@@ -107,7 +107,7 @@ async fn list_presets_fits_an_imported_preset_off_the_runtime_thread() {
 }
 
 /// The six bands of a Loki Max as raw steps, by key.
-fn bands(raw: [i64; 6]) -> Vec<(&'static str, i64)> {
+pub(super) fn bands(raw: [i64; 6]) -> Vec<(&'static str, i64)> {
     ["band1", "band2", "band3", "band4", "band5", "band6"]
         .into_iter()
         .zip(raw)
@@ -224,7 +224,7 @@ async fn a_builtin_setting_that_raises_a_band_more_than_6_db_asks_first() {
 }
 
 /// A band's level in dB at raw step `raw`.
-fn db_of(fleet: &Arc<Scripted>, key: &str, raw: i64) -> f64 {
+pub(super) fn db_of(fleet: &Arc<Scripted>, key: &str, raw: i64) -> f64 {
     convert::raw_to_display(fleet.profile.control_by_key(key).unwrap(), raw).unwrap()
 }
 

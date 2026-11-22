@@ -41,6 +41,7 @@ port) and `scripts/host-e2e/analyse.py` drives it over the socket:
   `scripts/host-e2e/vu.py` and its self-check, `python3 -I scripts/host-e2e/vu_selftest.py` (no
   make target);
 - the computer loudness, phases L1 to L6 below (after the V phases);
+- scenes, phases SC1 to SC3 below (after phase R);
 - the volume and mute with `wpctl`, and the daemon ending with its chain.
 
 It runs phase B (below, with phase C's check of svolder's words on the same rows) first, then the
@@ -82,6 +83,30 @@ near its end, which is why the tolerance against the oracle is 0.3 dB.
 Under `HOST_E2E_BYPASS=1` (the recorder hears the tone before the chain) L2 to L6 fail; L1 is a null check against the
 baseline and cannot. `HOST_E2E_ONLY=L make host-e2e` runs the loudness phases alone while they are worked on: it exits 3
 and never prints `host-e2e: PASS`.
+
+## The scenes phases
+
+They run after phase R, under a private PipeWire with a player (`paplay` through the private
+pipewire-pulse) at 50 % volume and a chain already holding the loudness and crossfeed stages (a
+recall that needs a stage the chain lacks rebuilds it, by design). Two scenes are saved over the
+socket, Desk (a flat EQ, loudness and crossfeed off) and Late night (a +6 dB peak at 1 kHz, loudness
+and crossfeed on), and recalled Desk, Late night, Desk, then Late night, a moved point and Late
+night again.
+
+- **SC1**: the chain's node id, serial and process, the player's links and sink inputs are
+  unchanged, no sink is removed or added, the computer part is `done` with no `rebuilt` note and the
+  volume is unchanged; checked after the first three recalls and again after the last ones.
+- **SC2**: the 1 kHz tone's envelope (4 ms Hann windows, 1 ms stride) from 0.3 s before the command
+  to the end is never above the EQ-only reference (the flat curve alone) by more than 0.15 dB, which
+  is margin over unity; Late night lands at least 3 dB under it and Desk on the flat reference
+  within 0.1 dB once its glide is done.
+- **SC3**: the view's `on` names the scene after the save and after every recall (`known` true); one
+  moved point clears `on` and keeps `recalled`; recalling again puts it back.
+
+`HOST_E2E_ONLY=S bash scripts/host-e2e/run.sh` runs the phase alone while it is worked on: it exits
+3 and never prints `host-e2e: PASS`. The lines are labelled SC because S1 to S3 already name the
+suspended-chain phases. Not covered: a recall while the chain starts on a deep curve (the held level
+during a recall), which the controller's unit tests hold.
 
 ## The virtual speakers' phases
 

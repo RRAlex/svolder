@@ -184,6 +184,18 @@ impl Jobs {
 }
 
 impl Jobs {
+    /// Send a scene request to the daemon on a task of its own: what it says comes back as
+    /// [`Done::Scene`].
+    pub(super) fn scene(
+        &mut self,
+        socket: Option<PathBuf>,
+        op: svolder_ipc::socket::protocol::SceneOp,
+    ) {
+        super::scenes::run(self.done.clone(), socket, op);
+    }
+}
+
+impl Jobs {
     /// Queue a write of the preset library: the loop goes on at once, and what the write ended
     /// with comes back as [`Done::PresetWritten`], in the order the writes were queued.
     pub(super) fn write_preset(&mut self, job: PresetJob) {

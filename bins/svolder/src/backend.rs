@@ -163,6 +163,8 @@ pub enum Update {
     /// Only a feed opened with [`Backend::open_host_feed`] carries it. Boxed: it is far larger
     /// than any other update, and every wait on the feed carries one.
     Host(Box<svolder_ipc::host::HostView>),
+    /// The scenes the daemon keeps and which one is on: carried on every daemon feed.
+    Scenes(Box<svolder_ipc::socket::protocol::ScenesView>),
 }
 
 /// What [`Backend::hold`] found: the backend, the daemon's rows as they stood. The backend keeps

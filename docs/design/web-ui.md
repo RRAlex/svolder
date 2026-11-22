@@ -96,15 +96,14 @@ templates (`bins/svolderd/templates/`: `page.html`, `signin.html`) are the frame
 page only. The tests read the view models and the model directly. Words come from the core's text
 (`svolder_profiles::units`), so a value reads the same here, in the TUI and in Home Assistant.
 
-A control appears by its kind, from the profile and no further code: the volume (`roles::volume`)
-is the knob, a select with up to five values a segmented track and with more a list, a toggle a
-switch, another level a slider, a readout a label, a fault a line in the card above the screen while
-it is active (every active fault, one line each, for every family, and in no other place on the
-page). A part (`Part` in `model.rs`: `link`, `card`, `volume`, `controls`, `meters`, `power`, `tone`,
-`presets`, `device_presets`, `facts`, `playing`) is one view model and one key of the model.
-`shape` is a hash of what makes a device a different device (the card, the profile, the layout,
-which parts exist): when it changes the stream sends the whole model rather than parts that no
-longer fit.
+A control appears by its kind, from the profile and no further code: the volume (`roles::volume`) is
+the knob, a select with up to five values a segmented track and with more a list, a toggle a switch,
+another level a slider, a readout a label, a fault a line in the card above the screen while it is
+active (every active fault, one line each, for every family, and in no other place on the page). A
+part (`Part` in `model.rs`: `link`, `card`, `volume`, `controls`, `meters`, `power`, `tone`,
+`presets`, `device_presets`, `facts`, `playing`) is one view model and one key of the model. `shape`
+is a hash of what makes a device a different device (the card, the profile, the layout, which parts
+exist): when it changes the stream sends the whole model rather than parts that no longer fit.
 
 The model gives the page what a drag on the graph needs, so the page never converts a raw step or
 formats a number itself. `tone_steps` (`view::tone::steps_json`) holds every step of every band: per
@@ -138,7 +137,8 @@ and the host in `events/page.rs`). Every event but `model`, `fleet` and `host` n
   below), at most once a second (`FACTS_AFTER`);
 - `strip`: the shown device's bars of each second not sent yet; a keep-alive every 15 s;
 - `fleet`: the links, families, list or hops changed (an entry's `key` is an opaque hash of its
-  unit, kept through a rename); `host` (with `needs=host`): the player, route or controls changed.
+  unit, kept through a rename); `host` (with `needs=host`): the player, route or controls changed;
+  `scenes` (a writer's, no `needs`): the scenes view changed ([scenes.md](scenes.md)).
 
 A write answers with the parts it changed (`parts`) and the words of its toast (`toast`).
 
@@ -263,15 +263,15 @@ daemon with `SVOLDER_HOST=off` draws nothing, and an amp or a preamp gets the ca
   path of three chip rows, which holds a long changed path at 820, 1100 and 1280 px) and the
   visualizer in the band's right half has the same box, so starting it, or having no capture, moves
   nothing. The band is Now playing and the visualizer in halves from 1100 px (the cover 84 px);
-  below that Now playing takes three fifths, with a 64 px cover and a smaller title. The path line
-  puts the verdict chip first and the hops after it, so a path too long for its box can only lose
-  hop detail, never the answer; `playing.py` reads every chip inside the band at 820, 1100 and
-  1280 px on the fake changed route (`SVOLDER_FAKE_ROUTE=changed`). With no player the card is
-  the one line `No player` in the same box. On a phone the folded line is 72 px whatever it says
-  ([what it holds](web-visualizer.md#the-phones-folded-line)). A tap on the line (or its chevron)
-  opens the full card in place; `data-expanded` is kept in the module and put on each incoming card,
-  so the stream's swaps do not fold it. A card with no player has nothing to open: an open card
-  whose player quits folds to the quiet line and stays folded when a player returns.
+  below that Now playing takes three fifths, with a 64 px cover and a smaller title. The path row
+  puts the label `Path` first and the DAC's chip last The arrow belongs to the chip before it (its
+  `::after`) and the values are nowrap units with each `·` glued to the value before it, so no
+  wrapped line starts with an arrow or a dot (an arrow in `::before` breaks that). With no player
+  the card is the one line `No player` in the same box. On a phone the folded line is 72 px whatever
+  it says ([what it holds](web-visualizer.md#the-phones-folded-line)). A tap on the line (or its
+  chevron) opens the full card in place; `data-expanded` is kept in the module and put on each
+  incoming card, so the stream's swaps do not fold it. A card with no player has nothing to open: an
+  open card whose player quits folds to the quiet line and stays folded when a player returns.
 - **Where it sits.** On a desktop it is a band under the header, across both columns, with the
   volume and the tone control in their two columns below it; the visualizer
   ([web-visualizer.md](web-visualizer.md)) joins it on its right. On a phone it is a line above the

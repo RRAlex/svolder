@@ -12,7 +12,7 @@
 //! |---|---|
 //! | Conversions | [`convert`] (raw to units), [`units`] (what a person reads), [`db_tables`] (dB tables), [`codec`] (statuses to named readings, a user's words to commands), [`meter`] (a reading on its bar) |
 //! | Histories | [`history`] (series and windows) |
-//! | Device rules | [`roles`] (which control does what), [`safety`] (the output-safety rule), [`device_presets`] (a device's slots and built-in settings) |
+//! | Device rules | [`roles`] (which control does what), [`safety`] (the output-safety rule), [`device_presets`] (a device's slots and built-in settings), [`scene`] (a device's part of a scene) |
 //! | Profiles | [`model`] (resolved), [`registry`] (loading, matching), [`builtin`] (embedded), `schema` (the TOML shapes), [`error`] |
 //! | Tone control | [`tone`] (presets, response curves, correction fitting, APO text) |
 
@@ -30,6 +30,7 @@ pub mod model;
 pub mod registry;
 pub mod roles;
 pub mod safety;
+pub mod scene;
 pub(crate) mod schema;
 pub mod tone;
 pub mod units;

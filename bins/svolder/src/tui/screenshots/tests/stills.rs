@@ -3,7 +3,7 @@
 
 //! The five stills, built from a hand-written correction.
 
-use crate::tui::screenshots::scenes::{Still, still, still_sized, still_with};
+use crate::tui::screenshots::shots::{Still, still, still_sized, still_with};
 use crate::tui::screenshots::text::{HostDetails, guard};
 use crate::tui::screenshots::world::stand_in;
 use crate::tui::test_support::{text, theme_for};
@@ -69,9 +69,11 @@ fn a_toggle_row_matches_its_exact_label_only() {
 #[test]
 fn each_still_carries_its_landmarks() {
     let dac = says(Still::Dac);
-    for word in ["Gungnir", "So What", "Optical", "Link", "Level from: host"] {
+    for word in ["Gungnir", "So What", "USB 1", "Link", "Level from: host"] {
         assert!(dac.contains(word), "dac lacks {word}");
     }
+    // every device screen with the host shows the track's time, as the web does
+    assert!(says(Still::Amp).contains("2:41 / 9:22"));
     let tone = says(Still::Tone);
     assert!(
         tone.contains("Sennheiser HD 800 S") && tone.contains("oratory1990"),
@@ -250,4 +252,35 @@ fn only_the_device_still_is_drawn_tall_and_the_others_stay_120_by_40() {
         };
         assert_eq!(s.size(), want, "{}", s.name());
     }
+}
+
+/// The device still draws the Path row the way the screen draws it for a computer playing into
+/// the DAC over USB: the hops from the player to the DAC on a line, the values under it, no
+/// verdict word and no config chip.
+#[test]
+fn the_dac_still_draws_the_path_row() {
+    let dac = says(Still::Dac);
+    let at = dac
+        .lines()
+        .position(|line| line.contains(" Path "))
+        .unwrap_or_else(|| panic!("no Path row:\n{dac}"));
+    let line = dac.lines().nth(at).unwrap();
+    assert!(
+        line.contains("player → computer → DAC USB 1")
+            && !line.contains("untouched")
+            && !line.contains("config"),
+        "the Path row: {line}"
+    );
+    let values = dac.lines().nth(at + 1).unwrap();
+    assert!(values.contains("48 kHz"), "the values line: {values}");
+    // The transport above it, the Spectrum below it; nothing else lost for the row.
+    let rows: Vec<&str> = dac.lines().collect();
+    assert!(rows[..at].iter().any(|row| row.contains(" Transport ")));
+    assert!(rows[at..].iter().any(|row| row.contains(" Spectrum ")));
+    assert!(dac.contains("So What") && dac.contains("VU L"));
+    // the track's time and bar follow the transport's buttons
+    let transport = rows.iter().find(|row| row.contains(" Transport ")).unwrap();
+    assert!(transport.contains("2:41 / 9:22"), "{transport}");
+    // the whole path is on show: the last hop is the DAC's
+    assert!(dac.contains("→ DAC USB 1"), "{dac}");
 }

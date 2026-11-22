@@ -164,7 +164,7 @@
                          Free software under the GNU GPL, version 3 or later, with NO WARRANTY.
                                  Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ───────────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ─────────── mute ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                                                          │ │                                                         │
 │  ▶ Input        ‹ 3 · Optical ›                          │ │    Mode      ‹ EQ ›                                     │
 │    Phase invert [ ] off                                  │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
@@ -176,10 +176,10 @@
 │    Balance      L ──────────────┃────────────── R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
 │                                                          │ │    4   1736 Hz   +4.76 dB   0.9                         │
 │    Host                                                  │ │    5  14801 Hz   -4.29 dB   0.5                         │
-│    Transport    ◀◀  ▶  ▮▮  ▶▶                            │ │                                                         │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:39 / 9:22  ━━━────────  │ │                                                         │
 │    Spectrum     ▆▆▇▆▆▅▅▅▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃ own  │ │                                                         │
-│    host                                                  │ ▓▓        ▓▓                                              │
-│                                                          │▓▓▒       ▓▓▒                                              │
+│                                                          │ ▓▓        ▓▓                                              │
+│    host                                                  │▓▓▒       ▓▓▒                                              │
 │                             ▓▓▓▓▓▓▓   ▓▓   ▓▓   ▓▓▓▓▓▓▓  │▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▓▓▓▓▓   ▓▓▓▓▓                             │
 │                            ▓▓     ░  ▓▓▒  ▓▓▒  ▓▓   ▓▓▒  ▓▓▒░ ▓▓   ▓▓▒░ ▓▓   ▓▓▒  ▓▓▒▒▒▒░                            │
 │                            ▓▓▓▓▓▓▓░░  ▓▓░▓▓▒░  ▓▓   ▓▓▒░ ▓▓▒░ ▓▓   ▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▒░                               │
@@ -211,7 +211,7 @@
 │                                               ▒▒▒▒▒▒▒░  ▒▒░│ ▒▒▒▒▒▒▒░  ▒▒▒▒▒▒▒   ▒▒░                                 │
 │  VU L ───────────────────────────┼┄┄┄┄┄┄┄┄┄┃┄┄   +2.6  ○                                                             │
 │  VU R ───────────────────────────┼┄┄┄┄┃┄┄┄┄┄┄┄   +1.3  ○                                                             │
-│    Spectrum     ▆▆▆▆▅ ▄▄▄▃▃▂ ▂ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃ own  │ │                                                         │
+│    Spectrum     ▆▆▆▆  ▄▄ ▃▃  ▂ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃ own  │ │                                                         │
 │                                       ▓▓   ▓▓   ▓▓▓▓▓▓▓  │▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▓▓▓▓▓   ▓▓▓▓▓                             │
 │                                       ▓▒  ▓▓▒  ▓▓   ▓▓▒  ▓▓▒░ ▓▓   ▓▓▒░ ▓▓   ▓▓▒  ▓▓▒▒▒▒░                            │
 │                                           ▓▒░  ▓▓   ▓▓▒░ ▓▓▒░ ▓▓   ▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▒░                               │
@@ -220,8 +220,8 @@
 │                                                     ▒░  ▒▒░│ ▒▒▒▒▒▒▒░  ▒▒▒▒▒▒▒   ▒▒░                                 │
 │  VU L ───────────────────────────┼┄┄┄┄┄┄┄┃┄┄┄┄   +2.0  ○                                                             │
 │  VU R ───────────────────────────┼┄┄┄┄┄┃┄┄┄┄┄┄   +1.8  ○                                                             │
-│    Transport    ◀   ▶  ▮▮                                │ │                                                         │
-│    Spectru       ▆▆▅  ▄  ▃ ▂ ▂  ▂▂▂▂▂▂ ▂▂▂▂▂▂▂▂▂▃▃▃ own  │ │                                                         │
+│    Transport    ◀   ▶  ▮▮      2 39 / 9:22  ━━━────────  │ │                                                         │
+│    Spectrum      ▆   ▅    ▂▂  ▂ ▂▂ ▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃ own  │ │                                                         │
 │                                             ▓   ▓▓▓▓▓▓▓  │▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▓▓▓▓▓   ▓▓▓▓▓                             │
 │                                                ▓▓   ▓▓▒  ▓▓▒░ ▓▓   ▓▓▒░ ▓▓   ▓▓▒  ▓▓▒▒▒▒░                            │
 │                                                     ▓▓▒░ ▓▓▒░ ▓▓   ▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▒░                               │
@@ -232,8 +232,8 @@
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┄┃┄┄┄   +2.4  ○                                                             │
 │    Volume       █████████ █55/127░░░░░░┃░░░░░  -30.1 dB  │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
 │    Balance      L   ─────   ─ ──┃────────────── R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
-│    Transport    ◀       ▮                                │ │                                                         │
-│    Spectr m     ▆        ▃ ▂       ▂▂▂  ▂ ▂▂▂▂▂▃▃▃▃ own  │ │                                                         │
+│    Transport    ◀       ▮       :3  / 9:22  ━━━────────  │ │                                                         │
+│    Spectrum     ▆  ▅            ▂ ▂  ▂ ▂▂ ▂▂▂▂▂▃▃▃▃ own  │ │                                                         │
 │                                                     ▓▓▓  │▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▓▓▓▓▓   ▓▓▓▓▓                             │
 │                                                          ▓▓▒░ ▓▓   ▓▓▒░ ▓▓   ▓▓▒  ▓▓▒▒▒▒░                            │
 │                                                            ▒░ ▓▓   ▓▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▒░                               │
@@ -245,9 +245,9 @@
 │    Mute         [ ] of                                   │ │                                                         │
 │    Volume        █████ █ █ 55/127░░░░░░┃░░░░░  -30.1 dB  │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
 │    Ba ance         ────   ── ───┃── ─────────── R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
-│    Trans or                                              │ │                                                         │
-│    Spectru         ▅         ▃            ▂▂▂▂▃▃▃▃▃ own  │ │                                                         │
-│                                                           ▓▓▒       ▓▓▒                                              │
+│    Trans or                    2 3  /  :2   ━ ━─── ────  │ │                                                         │
+│    Spectrum      ▆ ▅      ▂ ▂    ▂   ▂     ▂ ▂▃     own  │ │                                                         │
+│    host                                                   ▓▓▒       ▓▓▒                                              │
 │                                                          │ │ ░ ▓▓▓▓▓▓▓▒░ ▓▓▓▓▓▓▓   ▓▓▓▓▓                             │
 │                                                            │       ▓▓▒░ ▓▓   ▓▓▒  ▓▓▒▒▒▒░                            │
 │                                                                     ▓▒░ ▓▓▓▓▓▓▓▒░ ▓▓▒░                               │
@@ -261,11 +261,11 @@
 │    Mute         [     f                                  │ │                                                         │
 │     olum         ███ ██    55/12 ░░░░░░┃░░░░░  -30.1 dB  │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
 │    Bala c            ───          ──────── ───  R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
-│    Transpo t    ◀                                                                                                    │
-│    Spectrum       ▅         ▂    ▂      ▂ ▂  ▃  ▃ ▃ own  │                                                           │
-│                                                            │                                                         │
-│    host                                                              ▓▓                                              │
-│                                                                     ▓▓▒                                              │
+│    Transpo t    ◀                      : 2     ───────                                                               │
+│                                                          │                                                           │
+│    Spectrum     ▆▆  ▅   ▃ ▂            ▂  ▂ ▂▃▃   ▃ o      │                                                         │
+│                                                                      ▓▓                                              │
+│    host                                                             ▓▓▒                                              │
 │                                                                      ▓▒░ ▓▓▓▓▓▓▓   ▓▓▓▓▓                             │
 │                                                                          ▓   ▓▓▒  ▓▓▒▒▒▒░                            │
 │                                                            │                ▓▓▓▒░ ▓▓▒░                               │
@@ -278,15 +278,14 @@
 │    Volu          ████        / 27░░  ░░ ░░░ ░  -30.1 dB  │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
 │    Ba   ce              ─ ─ ─   ┃ ─  ─ ── ───── R  0       │    3   1232 Hz   -2.24 dB   0.5                         │
 │    Host                                                  │         14801 Hz   -4.29 dB   0.5                         │
-│    Transpor      ◀     ▮                                 │ │                                                         │
-│    Spectrum     ▇  ▅   ▃ ▂    ▃         ▂  ▃          n  │ │                                                         │
+│    Transpor      ◀     ▮       2    /   22       ─ ─ ─   │ │                                                         │
+│    Spectrum     ▇▆ ▅ ▄   ▂   ▃   ▂         ▃          n    │                                                         │
 │    host                                                                                                              │
 │                                                          │                    ▓▓   ▓▓▓▓▓                             │
 │                                                            │                      ▓▓▒▒▒▒░                            │
 │                                                          │ │                         ░                               │
-│                                                          │                                                           │
 │  VU L ───────────────────────────┼┄┄┃┄┄┄┄┄┄┄┄┄   +0.9  ○                                                             │
-┌ Controls ─── ───────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ─── ─────── mute ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Inpu           3 ·  ptical ›                          │ │    Mode      ‹ EQ ›                                     │
 │    Ph s     ert      ff                                  │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NO  f l      [   o f                                  │ │    Preset    Sennheiser HD 800 S                        │
@@ -295,11 +294,11 @@
 │    Ba a ce               ──       ───      ─ ─  R  0     │ │        1232 Hz   -2.24 dB   0.5                         │
 │                                                          │      4   1736 Hz   +4.76 dB   0.9                         │
 │    Host                                                         5  14 01 Hz   -4.29 dB   0.5                         │
-│    Transport    ◀          ▶                                                                                         │
-│    Spectrum     ▇ ▅▅ ▄▃▃▂   ▂▂            ▂▃      ▃      │                                                           │
+│    Transport    ◀          ▶                         ─                                                               │
+│    Spectrum     ▇▆▅▅▅▄▃▃▂▂▂   ▃ ▂ ▂    ▂▂    ▃      o                                                                │
 │                                                          │                             ▓                             │
 │  VU L ───────────────────────────┼┄┄┄┃┄┄┄┄┄┄┄┄   +1.2  ○                                                             │
-┌ Cont  ls  ─ ── ─────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Cont  ls  ─ ── ───── mute ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    I  u             · Optica  ›                          │ │    Mode      ‹ EQ ›                                     │
 │             er        f                                  │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │          l      [    f                                   │ │    Preset    Sennheiser HD 800 S                        │
@@ -308,11 +307,12 @@
 │    Bal nce              ─    ─     ─ ─    ─ ─      0       │    3   1232 Hz   -2.24 dB   0.5                         │
 │                                                          │      4    736 Hz   +4.76 dB   0.9                         │
 │    Host                                                            1  01 Hz   -4.29 dB   0.5                         │
-│    Transport    ◀◀  ▶  ▮                                                                                             │
-│    Spectrum     ▇▆▅▅▅▄▃▃▂▂▃▃ ▃▂  ▂   ▂  ▂     ▃ ▃     n                                                              │
+│    Transport    ◀◀  ▶  ▮                        ─                                                                    │
+│    Spectrum     ▇▆▅▅▅▄▃▃▂▂▃▃▃▃ ▂ ▂  ▂▂      ▃  ▃▃ ▃        │                                                         │
+│                                                            │                                                         │
 │  VU L ───────────────────────────┼┄┄┄┄┄┃┄┄┄┄┄┄   +1.8  ○                                                             │
 ─┤ Co  ro     ─ EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌  o t     ─ ─  ── ───────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌  o t     ─ ─  ── ─── mute ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                        ptic l                            │ │    Mode      ‹ EQ ›                                     │
 │             e                                            │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │                   ]                                      │ │    Preset    Sennheiser HD 800 S                        │
@@ -323,11 +323,12 @@
 │    Balance      L   ─         ─  ─ ─         ─             │        1 3  Hz   -2.24 dB   0.5                         │
 │                                                          │ │    4    73  Hz   +4.76 dB   0.9                         │
 │    Host                                                            14    H     4.29 dB   0.5                         │
-│    Transport    ◀◀  ▶  ▮▮  ▶                                                                                         │
-│    Spectrum     ▇▆▅▅▅▄▃▂▂▂▃▃▃▃▂    ▂▂▂    ▃▃▃   ▃ ▃      │ │                                                         │
+│    Transport    ◀◀  ▶  ▮▮  ▶   2:      :2   ━  ─   ─  ─                                                              │
+│    Spectrum     ▇▆▅▅▅▄▃▂▂▂▃▃▃▃▂▂▂▂▂▂ ▂ ▂▂    ▃ ▃  ▃  w                                                               │
+│    host                                                  │                                                           │
 │  VU L ───────────────────────────┼┄┄┄┄┄┄┄┄┃┄┄┄   +2.4  ○                                                             │
 ─┤           ── EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌  o                ───  ─────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌  o                ──   te ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                       Op i    ›                          │ │    Mode      ‹ EQ ›                                     │
 │                                                          │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │     O                                                      │    Preset    Sennheiser HD 800 S                        │
@@ -338,12 +339,11 @@
 │    Balance      L ────        ─     ─  ─    ─      0       │    3   1    Hz   -2.24 dB   0.5                         │
 │                                                            │    4    7 6  z   +4.76 dB   0.9                         │
 │    Host                                                  │      5   4801      -4.29 dB   0.5                         │
-│    Transport    ◀◀  ▶  ▮▮  ▶▶                                                                                        │
-│    Spectrum     ▇▆▅▅▅▄▃▂▂▂▂▃▃▂▂▂ ▂▂ ▂ ▂ ▂▃    ▃▄▄        │                                                           │
-│    host                                                    │                                                         │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2 39    : 2  ━━━ ──  ───                                                              │
+│    Spectrum     ▇▆▅▅▅▄▃▂▂▂▂▃▃▂▂▂▂▂▂▂▂▂▂▂ ▃▃▃▃     ▃        │                                                         │
 │  VU L ───────────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┃   +3.1  ○                                                             │
 ─┤              EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌                   ─    ─   ─── mu     0 c ntre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌                   ─    t    0 cen  e ─ re resh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                                                          │ │    Mode      ‹ EQ ›                                     │
 │    P                                                     │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS                                                     │    P eset    Sennheiser HD 800 S                        │
@@ -354,10 +354,11 @@
 │    Balance      L ───   ─ ─     ┃─   ──  ─   ─             │    3   1 3  Hz   -2.24 dB   0.5                         │
 │                                                                 4   173  Hz   +4.76 dB   0.9                         │
 │    Host                                                         5  148 1 Hz   -4.29 dB   0.5                         │
-│    Spectrum     ▇▆▅▅▅▄▃▂▂▂▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▃    ▄ ▄▃▃      │ │                                                         │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:39   9:     ━━─      ─                                                              │
+│    Spectrum     ▇▆▅▅▅▄▃▂▂▂▂▃▃▂▂▂▂▂▂▂▂▂ ▂▂▃▃▃▃    ▃  ow     │                                                         │
 │    host                                                  │ │                                                         │
 ─┤              E     T  emetry ── Devi es ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌                            ─        ─ 0   nt e ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌                                           re h ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                               ›                          │ │    Mode      ‹ EQ ›                                     │
 │    Pha                                                     │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS f   er                                                   Preset    Sennheiser HD 800 S                        │
@@ -365,10 +366,11 @@
 │    Volume       ███  █ █        7░░             3    dB  │ │  ▶     31 2 Hz    +6.0 dB   0.5                         │
 │    Balance      L ──────── ─    ┃─ ─    ─    ─  R  0            3   1232 Hz   -2.24 dB   0.5                         │
 │                                                            │    4   1736 Hz   +4.76 dB   0.9                         │
-│    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃  ▄▄▄ ▃  wn  │ │                                                         │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:39 / 9:2   ━  ─ ─  ───  │ │                                                         │
+│    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▃▃▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄  ▃▃ own  │ │                                                         │
                                  Gu gnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤                     e  me       De  c s ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌                   ─       ─  ─        0   n r  ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌                   ─       ─          ─ r  r s  ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Inp                                                   │ │    Mode      ‹ EQ ›                                     │
 │    Pha e  nv r                                             │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS filte                                                    P eset    Sennheiser HD 800 S                        │
@@ -376,12 +378,12 @@
 │                                                            │  B nd   Freq      Gain      Q                           │
 │    Volume       ████ ██    5   27    ░   ░     -     d   │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
 │    Balance      L ─────────  ─ ─┃    ──  ─ ─ ── R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
-│    Transport    ◀◀  ▶  ▮▮  ▶▶                            │                                                           │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:39 / 9:22   ━━─── ────  │                                                           │
 │    Spectrum     ▇▆▅▅▅▅▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄▄▄▃▃ own  │ │                                                         │
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┃   +3.0  ○                                                             │
                                    ngnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─                                  D v  e   ──────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌                                  t  ─   c    e   r fresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌                                  t      e    h   k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ In u                                                  │ │    Mode      ‹ EQ ›                                     │
 │    Phase in er                                             │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS filter                                            │      Preset    Sennheiser HD 800 S                        │
@@ -392,7 +394,7 @@
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┄┄┃┄┄   +2.6  ○                                                             │
                                     gnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─                                   e i    ─ ─── ─────────────────────────────────────────────────── ? help ─ esc menu ─
-┌    tr                               ─ 0 c         ef esh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌    tr                                   e          c eck ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input                                                 │ │    Mode      ‹ EQ ›                                     │
 │    Phase invert      f                                   │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS filter   [ ]                                      │ │    Preset    Sennheiser HD 800 S                        │
@@ -403,7 +405,7 @@
 │  VU R ───────────────────────────┼┄┄┄┄┄┄┄┃┄┄┄┄   +2.1  ○                                                             │
                                      n   2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤                               ─ D  i     ─  ── ────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Contr                                       r  ─ r fresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Contr                                ─ r    s  ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹      p                                 │ │    Mode      ‹ EQ ›                                     │
 │    Phase invert [    f                                   │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS filter   [ ]   f                                  │ │    Preset    Sennheiser HD 800 S                        │
@@ -411,7 +413,7 @@
 │  VU R ───────────────────────────┼┄┄┄┄┃┄┄┄┄┄┄┄   +1.5  ○                                                             │
                                       ir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Co                                v        ── ─────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ──                              e t     refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ──                              f e     k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹     O                                  │ │    Mode      ‹ EQ ›                                     │
 │    Phase invert [    ff                                  │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    Volume       ███████████55/127░░░░░░┃░░░ ░  -30.1 dB  │ │  ▶ 1   31.2 Hz    +6.0 dB   0.5                         │
@@ -420,33 +422,33 @@
  █
   ▄▄                                       · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Co t                             e       ─ ────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ──   ─                       0 c n re ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ──   ─                         e r sh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹ 3 · O ti                               │ │    Mode      ‹ EQ ›                                     │
 │    Spectrum     ▇▆▆▅▅▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄ own  │ │                                                         │
 │  VU R ───────────────────────────┃┄┄┄┄┄┄┄┄┄┄┄┄   -0.1  ○                                                             │
  █▀▀▀
  ▄▄▄                                     2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Controls                            c   ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ──── ─                  t      centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ──── ─                  t   ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │  ▶ Input        ‹ 3 · O tic   ›                          │ │    Mode      ‹ EQ ›                                     │
 │    Spectrum     ▆▆▅▅▅▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▃▄▄ own  │ │                                                         │
 │  VU R ────────────────────────┃──┼┄┄┄┄┄┄┄┄┄┄┄┄   -0.8  ○                                                             │
  █▀▀▀ █    █
  ▄▄▄█  ██                                2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Controls                      ─  e  ces ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ──────────── ──       m  e ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ───────────  ut      ce  re ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Spectrum     ▆▆▅▅▄▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▃▄▄ own  │ │                                                         │
 │  VU R ──────────────────────┃────┼┄┄┄┄┄┄┄┄┄┄┄┄   -1.6  ○                                                             │
  █▀▀▀ █  █ █ ▀█
  ▄▄▄█  ██  █                         nir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Controls ├─  E                  Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ───────────  ─── ─ ──   te ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ───────────  ute ─ 0 c  tre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Spectrum     ▆▆▅▅▄▄▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▃▃▃▄ own  │ │                                                         │
 │  VU R ────────────────────┃──────┼┄┄┄┄┄┄┄┄┄┄┄┄   -2.2  ○                                                             │
  █▀▀▀ █  █ █▀▀█   ▄
  ▄▄▄█  ██  █▄▄█ █ █              G ngnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Controls ├── EQ ──  e e         Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ─────────────── ───── m te ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ─────────── mut  ─ 0 ce tre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │    Spectrum     ▅▅▅▅▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▃▃▃▄ own  │ │                                                         │
 │  VU L ───────────────────────────┼┄┄┄┄┄┄┄┃┄┄┄┄   +2.1  ○                                                             │
 │  VU R ───────────────────┃───────┼┄┄┄┄┄┄┄┄┄┄┄┄   -2.7  ○                                                             │
@@ -465,6 +467,7 @@
 │    Spectrum     ▅▅▄▄▃▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▃▃▃ own  │ │                                                         │
 │  VU L ──────────────────────────┃┼┄┄┄┄┄┄┄┄┄┄┄┄   -0.1  ○                                                             │
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:40 / 9:22  ━━━────────  │ │                                                         │
 │    Spectrum     ▅▄▄▄▃▃▂▂▃▃▃▃▂▂▂▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▃▃▃▃▃ own  │ │                                                         │
 │  VU L ────────────────────────┃──┼┄┄┄┄┄┄┄┄┄┄┄┄   -0.9  ○                                                             │
 │  VU R ──────────────────┃────────┼┄┄┄┄┄┄┄┄┄┄┄┄   -3.2  ○                                                             │
@@ -543,6 +546,7 @@
 │  VU L ─────┃─────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -11.8  ○                                                             │
 │    Spectrum     ▂▃▃▃▃▃▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄▄▅▅▄▄▄▄▄▃▃▃▃▃▃ own  │ │                                                         │
 │  VU L ────┃──────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -12.1  ○                                                             │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:41 / 9:22  ━━━────────  │ │                                                         │
 │    Spectrum     ▂▃▃▃▃▂▂▂▂▂▂▂▂▂▂▃▃▃▃▄▄▅▅▅▄▄▄▄▄▃▃▃▃▃▃ own  │ │                                                         │
 │  VU L ────┃──────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -12.3  ○                                                             │
 │  VU L ────┃──────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -12.5  ○                                                             │
@@ -599,6 +603,7 @@
 │    Spectrum     ▃▂▂▂▂▂▂▂▂▂▃▄▄▄▄▅▆▆▅▅▅▅▅▅▄▄▄▄▄▃▃▃▃▂▂ own  │ │                                                         │
 │  VU L ─────┃─────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -11.5  ○                                                             │
 │  VU L ─────┃─────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -11.6  ○                                                             │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:42 / 9:22  ━━━────────  │ │                                                         │
 │    Spectrum     ▃▂▂▂▂▂▂▂▂▂▃▄▄▃▄▅▆▅▅▅▅▅▅▅▄▄▄▄▄▃▃▃▃▂▂ own  │ │                                                         │
 │    Spectrum     ▃▂▂▂▂▂▂▂▂▃▃▃▄▃▄▅▅▅▅▅▅▅▅▅▄▄▄▄▄▃▃▃▃▂▂ own  │ │                                                         │
 │  VU R ─────┃─────────────────────┼┄┄┄┄┄┄┄┄┄┄┄┄  -11.9  ○                                                             │

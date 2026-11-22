@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The world the scenes are drawn in: a Gungnir 2 and an Aegir 2 on the fake device, one host
+//! The world the stills are drawn in: a Gungnir 2 and an Aegir 2 on the fake device, one host
 //! playing "So What", the Sennheiser HD 800 S preset on the DAC, and every clock pinned, so the
 //! same code draws the same pictures on any machine on any day.
 
@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 use svolder_autoeq::Entry;
 use svolder_fake::signal::Signal;
 use svolder_host::fft::BANDS;
-use svolder_host::{Block, NowPlaying, SinkState, Status};
+use svolder_host::{
+    AlsaFacts, Block, ClockFacts, Dither, HwState, KernelOffer, Layout, NowPlaying, PlayerMatch,
+    Rates, RouteFacts, SetupFacts, SinkFacts, SinkOffer, SinkState, Status, StreamFacts,
+};
 use svolder_ipc::{ColorDepth, TuiConfig, ValueObject};
 use svolder_profiles::convert::display_to_raw;
 use svolder_profiles::roles;
@@ -117,14 +120,14 @@ pub(in crate::tui::screenshots) fn runtime() -> tokio::runtime::Runtime {
         .expect("a runtime builds")
 }
 
-/// What the scenes share: how it looks, the preset the DAC wears, and the instant every scene
+/// What the stills share: how it looks, the preset the DAC wears, and the instant every still
 /// counts from.
 pub(in crate::tui::screenshots) struct World {
     /// The look every picture is drawn with: amber, true colour, default `[tui]`.
     pub look: Look,
     /// The preset on the DAC.
     pub preset: Preset,
-    /// The instant a scene starts at.
+    /// The instant a still starts at.
     pub base: Instant,
 }
 
@@ -185,7 +188,7 @@ fn push_key(app: &mut App, key: &str, value: Value, now: Instant) {
     push(app, id, value, now);
 }
 
-/// Give `app` what every scene's device has: the look, the pinned clock and config path, a live
+/// Give `app` what every still's device has: the look, the pinned clock and config path, a live
 /// session on the unit, the facts a daemon lists for it (its product, profile and a signal heard
 /// three minutes ago), and a link history with one dropout a few hours back.
 fn prepare(app: &mut App, world: &World) {
@@ -218,8 +221,10 @@ fn prepare(app: &mut App, world: &World) {
     ]);
 }
 
-/// The host every scene shares: linked, on the bus, capturing the sink, playing "So What".
-fn host(app: &mut App) {
+/// The host every still shares: linked, on the bus, capturing the sink, playing "So What", a
+/// track 9:22 long that was read 2:39 in, so after the two seconds a still settles for the
+/// Transport row reads 2:41 / 9:22.
+fn host(app: &mut App, now: Instant) {
     app.host.linked = true;
     app.host.bus = true;
     app.host.capturing = true;
@@ -235,8 +240,15 @@ fn host(app: &mut App) {
         artist: "Miles Davis".into(),
         identity: "mpv".into(),
         status: Status::Playing,
+        length_us: Some(562_000_000),
+        progress: Some(svolder_host::Progress {
+            position_us: 159_100_000,
+            rate_milli: 1000,
+            read_at_ms: WALL_MS,
+        }),
         ..Default::default()
     });
+    app.host.clock = Some((WALL_MS, now));
 }
 
 /// An app on the built-in profile `profile_name`, named `name`, holding what the fake device
@@ -255,8 +267,94 @@ async fn device(world: &World, profile_name: &str, name: &str, now: Instant) -> 
     let mut app = App::new(profile, name.into(), &world.look.tui, device_rows());
     app.replace_all(snapshot, now);
     prepare(&mut app, world);
-    host(&mut app);
+    host(&mut app, now);
     app
+}
+
+/// A stereo layout.
+fn stereo() -> Layout {
+    Layout {
+        channels: 2,
+        positions: vec!["FL".into(), "FR".into()],
+    }
+}
+
+/// What the daemon reads of the computer's route to the Gungnir 2: the player's stream and the
+/// sink both at 48 kHz and 100 %, the computer's EQ chain not in the way and a PipeWire config
+/// that lets the sound through untouched. The TUI judges it as it judges any route.
+fn route() -> RouteFacts {
+    let rate = Some(48_000);
+    RouteFacts {
+        sink: Some(SinkFacts {
+            name: "alsa_output.usb-Schiit_Audio_Gungnir_2-00.analog-stereo".into(),
+            description: "Gungnir 2 Analog Stereo".into(),
+            rate_hz: rate,
+            format: Some("S32LE".into()),
+            volume_milli: Some(1000),
+            muted: false,
+            usb_vendor_id: Some(0x30be),
+            usb_product: Some("Gungnir 2".into()),
+        }),
+        player: Some(StreamFacts {
+            rate_hz: rate,
+            format: Some("S16LE".into()),
+            volume_milli: Some(1000),
+            muted: false,
+        }),
+        player_match: PlayerMatch::Pid,
+        others_mixing: 0,
+        host_eq: false,
+        stages: None,
+        setup: Some(SetupFacts {
+            offer: Some(SinkOffer {
+                formats: vec!["S32LE".into(), "S16LE".into()],
+                rates: Some(Rates::Range {
+                    min: 44_100,
+                    max: 384_000,
+                }),
+                layout: Some(stereo()),
+            }),
+            forced_format: None,
+            node_rates: Vec::new(),
+            clock: Some(ClockFacts {
+                rate,
+                allowed_rates: vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+                force_rate: None,
+            }),
+            sink_layout: Some(stereo()),
+            stream_layout: Some(stereo()),
+            dither: Some(Dither {
+                method: "none".into(),
+                noise: 0,
+            }),
+            sink_filter: Some(false),
+            stream_filter: Some(false),
+            alsa: Some(AlsaFacts {
+                path: Some("hw:Audio".into()),
+                card: Some(3),
+                device: Some(0),
+                subdevice: Some(0),
+                hw: HwState::NotRead,
+                kernel: Some(KernelOffer {
+                    formats: vec!["S32_LE".into()],
+                    rates: vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+                }),
+            }),
+        }),
+    }
+}
+
+/// Put the Gungnir 2 `app` on its first USB input, the computer its only source, under a daemon
+/// that speaks for the host: the device screen's Path row then reads the route as the daemon
+/// read it, a player into the computer into the DAC.
+pub(in crate::tui::screenshots) fn on_usb_with_path(app: &mut App, now: Instant) {
+    push_key(app, "input", Value::U8(1), now);
+    push_key(app, "usb1_connected", Value::Bool(true), now);
+    push_key(app, "usb2_connected", Value::Bool(false), now);
+    push_key(app, "spdif_locked", Value::Bool(false), now);
+    app.host.daemon = Some(crate::tui::host::FromDaemon {
+        route: Some(Box::new(route())),
+    });
 }
 
 /// The Gungnir 2 on S/PDIF at `volume_db`, wearing the preset and standing on the host.

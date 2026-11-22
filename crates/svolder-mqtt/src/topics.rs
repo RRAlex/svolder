@@ -5,10 +5,28 @@
 //! discovery groups entities by. One function per name, so a change to the layout touches
 //! this file alone.
 
-/// `<base>/bridge/availability`: `online`/`offline` for the bridge itself, retained; `offline`
-/// is the last will.
-pub fn bridge_availability(base_topic: &str) -> String {
-    format!("{base_topic}/bridge/availability")
+/// `<base>/bridge/<host_id>/availability`: `online`/`offline` for one computer's bridge,
+/// retained; `offline` is its last will. Each computer has its own, so two daemons on one broker
+/// never overwrite each other's will.
+pub fn bridge_availability(base_topic: &str, host_id: &str) -> String {
+    format!("{base_topic}/bridge/{host_id}/availability")
+}
+
+/// A host name as the id part of every topic and id of its computer: lower case, every
+/// character outside `[a-z0-9_]` turned into `_`.
+pub fn host_id(host: &str) -> String {
+    host.chars()
+        .map(|c| match c.to_ascii_lowercase() {
+            c @ ('a'..='z' | '0'..='9' | '_') => c,
+            _ => '_',
+        })
+        .collect()
+}
+
+/// `computer_<host_id>`: the unit the computer's topics and ids sit under, in place of a device's
+/// unit id, so [`device_id`] reads `svolder_computer_<host_id>`.
+pub fn computer_unit(host_id: &str) -> String {
+    format!("computer_{host_id}")
 }
 
 /// `<base>/<unit_id>/availability`: `online` while the daemon holds the device's link, else
@@ -76,7 +94,10 @@ mod tests {
 
     #[test]
     fn builds_the_availability_topics() {
-        assert_eq!(bridge_availability(BASE), "svolder/bridge/availability");
+        assert_eq!(
+            bridge_availability(BASE, "desk"),
+            "svolder/bridge/desk/availability"
+        );
         assert_eq!(
             device_availability(BASE, UNIT),
             "svolder/0102030405060708/availability"
@@ -110,6 +131,18 @@ mod tests {
     }
 
     #[test]
+    fn makes_a_host_name_id_safe() {
+        assert_eq!(host_id("Reframe"), "reframe");
+        assert_eq!(host_id("my-desk.local"), "my_desk_local");
+        assert_eq!(host_id("Büro 2"), "b_ro_2");
+        assert_eq!(computer_unit("reframe"), "computer_reframe");
+        assert_eq!(
+            device_id(&computer_unit("reframe")),
+            "svolder_computer_reframe"
+        );
+    }
+
+    #[test]
     fn builds_the_device_and_unique_ids() {
         assert_eq!(device_id(UNIT), "svolder_0102030405060708");
         assert_eq!(unique_id(UNIT, "volume"), "svolder_0102030405060708_volume");
@@ -127,7 +160,7 @@ mod tests {
     /// `base_topic` or `discovery_prefix` is a caller's choice this module does not second-guess.
     #[test]
     fn takes_the_base_topic_and_prefix_as_given() {
-        assert_eq!(bridge_availability(""), "/bridge/availability");
+        assert_eq!(bridge_availability("", "desk"), "/bridge/desk/availability");
         assert_eq!(
             discovery_config("", "sensor", UNIT, "volume"),
             "/sensor/svolder_0102030405060708/volume/config"

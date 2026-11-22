@@ -593,6 +593,7 @@ pub(crate) fn status_of(reason: Option<svolder_ipc::Reason>, code: u8) -> Status
         | Reason::Busy
         | Reason::NotConnected
         | Reason::NotFoundYet
+        | Reason::NothingToSave
         | Reason::NotWaiting => StatusCode::CONFLICT,
         Reason::Stopping => StatusCode::SERVICE_UNAVAILABLE,
         Reason::Internal | Reason::Unknown => StatusCode::INTERNAL_SERVER_ERROR,

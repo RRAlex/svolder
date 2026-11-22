@@ -9,8 +9,8 @@
 
 use svolder_host::Progress;
 use svolder_ipc::host::{
-    DacFacts, DacStage, HostView, PathLine, PlayingView, ROUTE_NOT_READ, SETUP_LIMIT, SetupCheck,
-    Verdict, path_line, setup_check, sink_is_dac,
+    DacFacts, DacStage, EndToEnd, HostView, PathLine, PathRow, PlayingView, ROUTE_NOT_READ,
+    SETUP_LIMIT, SetupCheck, Verdict, path_line, path_row, setup_check, sink_is_dac,
 };
 use svolder_profiles::Family;
 
@@ -61,6 +61,13 @@ pub(crate) struct Path {
     /// What the path does to the signal, as the judge keys it (`Verdict::key`): `untouched`,
     /// `changed`, `not_this_dac`, `other_input` or `unknown`.
     pub(crate) verdict: &'static str,
+    /// What the path does to the sound end to end, the DAC's own stage included, as the judge
+    /// keys it (`EndToEnd::key`): the verdict, with an untouched one whose DAC changes the sound
+    /// `changed`.
+    pub(crate) end_to_end: &'static str,
+    /// The Path row every theme draws: the label's state and words, each hop's words with their
+    /// tones, the values.
+    pub(crate) row: PathRow,
     /// The hops, player to DAC; none when the sound goes to another sink.
     pub(crate) hops: Vec<Hop>,
     /// The words of the verdict, one per change or thing not read.
@@ -149,10 +156,12 @@ impl Playing {
         }
         if let Some(path) = &self.path {
             key.push_str(&format!(
-                "{SEP}path={}{SEP}{}{SEP}{}",
+                "{SEP}path={}{SEP}{}{SEP}{}{SEP}{}{SEP}{:?}",
                 path.verdict,
                 path.words.join(" · "),
-                path.title
+                path.title,
+                path.end_to_end,
+                path.row
             ));
             for hop in &path.hops {
                 key.push_str(&format!(
@@ -200,16 +209,18 @@ pub(crate) fn playing_of(
     let path = match (&track, &host.route, &device) {
         // Only a DAC takes sound over the computer's audio: an amp or a preamp has no path.
         (Some(_), Some(route), Some((Family::Dac, dac))) => {
-            let setup = route
+            let check = route
                 .sink
                 .as_ref()
                 .is_some_and(|sink| sink_is_dac(sink, dac))
-                .then(|| setup_view(&setup_check(route)));
-            Some(path(&path_line(route, dac), setup))
+                .then(|| setup_check(route));
+            Some(path(&path_line(route, dac), check.as_ref()))
         }
         // The first read still in flight, or no `pw-dump`: the line says so, as the TUI's does.
         (Some(_), None, Some((Family::Dac, _))) => Some(Path {
             verdict: Verdict::Unknown.key(),
+            end_to_end: EndToEnd::Unknown.key(),
+            row: PathRow::not_read(),
             hops: Vec::new(),
             words: vec![ROUTE_NOT_READ.to_string()],
             title: String::new(),
@@ -316,9 +327,11 @@ fn setup_view(check: &SetupCheck) -> SetupView {
 }
 
 /// The path line as the card shows it, with the config check of its sink when there is one.
-fn path(line: &PathLine, setup: Option<SetupView>) -> Path {
+fn path(line: &PathLine, check: Option<&SetupCheck>) -> Path {
     Path {
         verdict: line.verdict.key(),
+        end_to_end: line.end_to_end().key(),
+        row: path_row(line, check),
         hops: line
             .hops
             .iter()
@@ -331,7 +344,7 @@ fn path(line: &PathLine, setup: Option<SetupView>) -> Path {
             .collect(),
         words: line.words.clone(),
         title: line.sentence().unwrap_or_default(),
-        setup,
+        setup: check.map(setup_view),
     }
 }
 

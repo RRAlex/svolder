@@ -30,8 +30,8 @@ assistant read and set them.
 - [The MCP server](mcp.md): letting an AI assistant read and set devices, and the `mcp` verbs.
 - [The web UI](web-ui.md): the browser front end, signing in, and the `web` verbs.
 - [Device verbs](cli.md): `doctor`, `setup`, `devices`, `add`, `remove`, `hops`, `passphrase`,
-  `scan`, `inspect`, `capture`, `status`, `get`, `set`, `preset`, `watch`, `host`, `raw`, `decode`
-  and `profiles`.
+  `scan`, `inspect`, `capture`, `status`, `get`, `set`, `preset`, `scene`, `watch`, `host`, `raw`,
+  `decode` and `profiles`.
 - [Equaliser and presets](eq.md): the `eq` verbs and the preset library.
 - [The terminal UI](tui.md): every screen and key of `svolder tui`.
 - [Exit codes](exit-codes.md): what each verb returns.

@@ -19,9 +19,9 @@ use crate::tui::decoration::mascot::draw::home_box;
 use crate::tui::decoration::mascot::fx::Entrance;
 use crate::tui::run::drawn_turn;
 use crate::tui::screenshots::raster::{Raster, fonts, write_ppm};
-use crate::tui::screenshots::scenes::SIZE;
+use crate::tui::screenshots::shots::SIZE;
 use crate::tui::screenshots::world::{STILL_VOLUME_DB, World, gungnir, runtime, stand_in};
-use crate::tui::screenshots::{out_dir, scenes_palette};
+use crate::tui::screenshots::{out_dir, shots_palette};
 
 /// How far into each entrance its middle picture is taken, where the animation shows most.
 fn middle(kind: Entrance) -> f64 {
@@ -74,7 +74,7 @@ fn cropped(buffer: &Buffer, area: Rect) -> Buffer {
 fn shots_into(out: &Path) -> Result<(), String> {
     std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let fonts = fonts::load_system().map_err(|m| m.message())?;
-    let mut raster = Raster::new(fonts, scenes_palette(&stand_in()));
+    let mut raster = Raster::new(fonts, shots_palette(&stand_in()));
     for kind in Entrance::ALL {
         let frames = runtime().block_on(async {
             let world = World::new(stand_in());

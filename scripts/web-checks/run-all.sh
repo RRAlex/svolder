@@ -278,7 +278,12 @@ trap 'exit 143' TERM
 # shared (flock -s), so any number run side by side; a check that reads timing (a draw cost, a
 # frame rate) and the re-run of a failed check hold it exclusive (flock -x) and so run with no other
 # browser check of any gate on the machine. A check that waits over 10 s says so. The node harnesses do not take it.
-gate_lock=${WEB_CHECKS_LOCK:-/tmp/svolder-web-gate.lock}
+if [ -z "${WEB_CHECKS_LOCK:-}" ]; then
+    # The default lock lives in /tmp/svolder, made and checked by tmp-base.sh's rules (0700, a real
+    # directory this user owns); mutpool.py holds the same file.
+    (SVOLDER_TMP_BASE=/tmp/svolder; . "$(dirname "$(readlink -f "$0")")/../tmp-base.sh"; svtmp_base) || exit 1
+fi
+gate_lock=${WEB_CHECKS_LOCK:-/tmp/svolder/web-gate.lock}
 lock_mode=
 tsv_row() {
     local label=$1 lane=$2 verdict=$3 tfile=$4 engine=- wall u s rss
@@ -433,12 +438,12 @@ run_pool() {
 # the long browser checks are not left for the end. A check not listed counts as 60.
 declare -A weight=(
     [nightdrive_theme]=570 [signal_theme]=450 [paper]=300 [visualizer]=240 [effects_menu]=160
-    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=80 [popups]=60 [devices_popup]=120 [eq_library]=120 [loudness_popup]=90 [setup_popup]=90 [crossfeed_popup]=90 [speakers_popup]=90 [menu_theme_row]=60 [tone_overlay]=60 [contrast]=150 [phone_sweep]=175
+    [nightdrive_phone]=90 [nightdrive_states]=90 [space_key]=45 [ember_link]=15 [modal]=80 [popups]=60 [devices_popup]=120 [eq_library]=120 [loudness_popup]=90 [setup_popup]=90 [crossfeed_popup]=90 [speakers_popup]=90 [scenes_popup]=150 [menu_theme_row]=60 [tone_overlay]=60 [contrast]=150 [phone_sweep]=175
     [completeness]=100 [playing]=140 [tone_note]=120 [contract]=150 [frame_button]=140 [keys]=140
     [nightdrive_sheet]=175 [arrange]=110 [tone_drag]=80 [core_rows]=75 [computer_core]=45 [computer_ember]=170 [computer_paper]=150 [computer_signal]=170 [signal_vu]=120 [sweep]=300
     [effects_cycle]=55 [scroll]=40 [sources]=105 [smoke_page]=95 [smoke_quick]=6
     [smoke_core]=145 [haze]=190 [touch]=100 [tone_touch]=100
-    [computer_nightdrive]=200
+    [computer_nightdrive]=200 [ha_cards]=30
 )
 by_weight() {
     local e script
@@ -453,13 +458,14 @@ by_weight() {
 # approved look skip themselves in the other harnesses while it does.
 node_entries=()
 for name in effects facts model sources notes director keep tone-curve plot tone-drag playing viz vu \
-    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-old-readings core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-loudness core-crossfeed core-speakers core-help core-setup dom-skip core-keys theme-keys ember-parts ember-keys \
+    core-store core-api core-stream core-actions core-device-config core-device-settings core-device-readings core-device-facts core-device-wire core-device-walk core-computer core-words core-table core-point-drag core-prefs core-registry core-climb core-loop core-title core-old-readings core-repeat core-freeze core-names core-html core-inline-ask core-list core-driver core-clock core-volume-ask core-mounted core-menu-rows core-menu core-popups core-stay core-devices core-eq-library core-loudness core-crossfeed core-speakers core-scenes core-help core-setup dom-skip core-keys theme-keys ember-parts ember-keys \
     level-write toast frame-keys core-modal core-router switch ember-order contract \
     paper-tokens paper-words paper-live paper-ruler paper-draw paper-notes \
     signal-line signal-draw signal-vu nightdrive-scene nightdrive-sky nightdrive-hud nightdrive-tune nightdrive-draw nightdrive-ridge nightdrive-floor nightdrive-budget nightdrive-debug nightdrive-glow nightdrive-mood nightdrive-states nightdrive-controls nightdrive-eqkey nightdrive-dash-clock nightdrive-keys signal-controls signal-palette; do
     node_entries+=("node-$name|node/$name.mjs|")
 done
 node_entries+=("gate-refusal|gate_refusal.sh|" "gate-cache|gate_cache.sh|" "gate-wait|gate_wait.sh|")
+node_entries+=("ha-strategy|ha/strategy.mjs|" "ha-cards|ha/cards.mjs|")
 
 # The checks that assert a frame rate, a draw cost or a wall-clock pace (frames a second against a
 # band, a flick's speed, a velocity after wheel steps a set time apart) need the machine to
@@ -480,13 +486,13 @@ serial_scripts=(nightdrive_timing notes)
 # contrast and phone_sweep (the sweeps, minutes of wall time each) are in the full gate only
 if [ "$quick" -eq 1 ]; then
     browser_checks=(effects_menu effects_layout tone_note knob_click tone_drag playing \
-        device_presets reduced_motion visualizer arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup menu_theme_row tone_overlay ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
-        computer_nightdrive)
+        device_presets reduced_motion visualizer arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup scenes_popup menu_theme_row tone_overlay ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing smoke_quick \
+        computer_nightdrive ha_cards)
 else
     browser_checks=(smoke_core smoke_page effects_menu effects_layout sources notes sweep haze \
         scroll tone_note knob_click tone_drag playing device_presets reduced_motion visualizer \
-        arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup menu_theme_row tone_overlay contrast phone_sweep ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
-        computer_nightdrive)
+        arrange contract frame_button keys space_key modal popups devices_popup eq_library loudness_popup setup_popup crossfeed_popup speakers_popup scenes_popup menu_theme_row tone_overlay contrast phone_sweep ember_link core_rows computer_core computer_ember computer_paper computer_signal signal_vu paper signal_theme nightdrive_theme nightdrive_sheet nightdrive_phone nightdrive_states nightdrive_timing effects_cycle \
+        computer_nightdrive ha_cards)
 fi
 entries=()
 serial_entries=()

@@ -21,6 +21,8 @@
 //!   Assistant.
 //! - [`recall`]: finding and planning a tone-control preset, for the MCP server and the bridge.
 //! - [`scanner`]: the adapter's scans, shared by every actor that looks for its device.
+//! - [`scenes`]: the scenes of sound settings: their view for every front end, and save, recall,
+//!   rename and delete.
 //! - [`transport`]: building the BlueZ or fake transport.
 //! - [`web`]: the web UI.
 //! - [`writer`]: one writer per device, which orders every write in front of its actor.
@@ -46,6 +48,7 @@ mod mcp;
 mod mqtt_bridge;
 mod recall;
 mod scanner;
+mod scenes;
 mod transport;
 mod web;
 mod writer;
@@ -342,6 +345,8 @@ async fn start(
     )
     .with_config_stamp(stamp)
     .with_host_mode(host::HostMode::from_env())
+    // The scene last recalled is kept in the state home, so it ranks first after a restart.
+    .with_scenes_file(scenes::Scenes::state_path())
     // The repository and the cache, read once: `SVOLDER_AUTOEQ_URL` or AutoEq's own, and the
     // cache home's `svolder/autoeq`.
     .with_autoeq(autoeq_client(

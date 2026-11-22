@@ -26,6 +26,8 @@
 //! - [`interrupts`]: Ctrl-C, SIGTERM and SIGHUP counted, for a verb that must clean up before it
 //!   leaves.
 //! - [`profiles`]: `profiles list|show`, the device profiles.
+//! - [`scene`]: `scene list|show|save|load|rename|delete`, the scenes of sound settings, through the
+//!   daemon.
 //! - [`token`]: `mcp token` and `web token`, the bearer tokens of the daemon's servers.
 //! - [`web`]: `web` and `web pair`, the web UI's link, code and pairing.
 
@@ -46,6 +48,7 @@ pub(crate) mod identify;
 pub(crate) mod interrupts;
 pub(crate) mod mqtt;
 pub(crate) mod profiles;
+pub(crate) mod scene;
 pub(crate) mod server_switch;
 pub(crate) mod token;
 pub(crate) mod web;

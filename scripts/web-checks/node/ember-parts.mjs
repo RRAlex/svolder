@@ -833,19 +833,143 @@ ok('with_no_player_the_card_is_one_quiet_line', () => {
   }
 });
 
-ok('a_sound_elsewhere_has_short_words_and_the_whole_sentence_as_a_tooltip', () => {
+ok('a_sound_elsewhere_has_short_words_and_the_whole_sentence_as_the_labels_words', () => {
   const html = drawn('playing-guest-other-sink', 'playing');
-  assert.ok(html.includes('title="the computer plays to Bose Speakers"'), html);
-  assert.ok(html.includes('<span aria-hidden="true">\u2192 Bose Speakers</span><span class="np-sr">the computer plays to Bose Speakers</span>'), html);
-  assert.ok(!html.includes('role="img" aria-label="the computer'), html);
-  const plain = drawn('playing-changed-route', 'playing');
-  assert.ok(!plain.includes('np-verdict" title'), plain);
+  assert.ok(html.includes('title="Path: the computer plays to Bose Speakers"'), html);
+  assert.ok(html.includes('<span class="np-sr">Path: the computer plays to Bose Speakers</span></span><span class="np-short">→ Bose Speakers</span></p>'), html);
+  assert.ok(!html.includes('np-hop'), 'no hops for another sink');
+  assert.ok(!html.includes('np-verdict') && !html.includes('np-lead'), html);
+  // no config check was sent, so there is no dialog to open: the label is plain text
+  assert.ok(html.includes('<span class="np-label plain"') && !html.includes('data-config'), html);
 });
 
-ok('the_verdict_chip_comes_before_the_hops', () => {
-  const html = drawn('playing-changed-route', 'playing');
-  assert.ok(html.indexOf('np-verdict') < html.indexOf('np-hop'), html);
-  assert.ok(count(html, 'np-hop') >= 3);
+ok('the_label_comes_first_and_is_the_button_that_opens_the_config_dialog', () => {
+  const device = deviceOf('playing-changed-route');
+  const config = { outcome: 'changes', chip: 'config 2', summary: 'PipeWire config changes the sound: 2' };
+  const html = drawn('playing-changed-route', 'playing', {
+    playing: { ...device.playing, path: { ...device.playing.path, config } },
+  });
+  assert.ok(html.includes('<p class="np-path changed"><button type="button" id="np-label" class="np-label warn" data-config aria-haspopup="dialog"'), html);
+  assert.ok(html.indexOf('np-label') < html.indexOf('np-hop'), html);
+  assert.equal(count(html, 'class="np-hop'), 3);
+  assert.equal(count(html, 'np-hop changes'), 3);
+  assert.ok(!html.includes('np-verdict') && !html.includes('np-lead'), html);
+  // the visible word is hidden from a screen reader, whose name for the button is its words once
+  assert.ok(html.includes('<span aria-hidden="true">Path</span><span class="np-sr">Path: the player, the computer and the DAC change the sound</span></button>'), html);
+});
+
+/** The device of `playing` with its path replaced by `path` (the keys the daemon sends beside `row`). */
+const withPath = (path) => {
+  const device = deviceOf('playing');
+  return { playing: { ...device.playing, path } };
+};
+const BASE = deviceOf('playing').playing.path;
+const word = (text, tone) => ({ text, tone });
+const hops = (...extra) => [
+  { label: 'player', words: [] }, { label: 'computer', words: extra[0] ?? [] },
+  { label: 'DAC USB 1', words: extra[1] ?? [] },
+];
+
+ok('the_dac_at_minus_24_db_with_tone_is_a_yellow_label_and_yellow_words_in_the_last_chip', () => {
+  const row = {
+    label: { tone: 'warn', words: 'Path: the DAC changes the sound' },
+    hops: hops(),
+    values: [word('48 kHz', 'dim'), word('volume -24.1 dB', 'warn'), word('tone control', 'warn')],
+    words: null,
+  };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'changed', row }));
+  assert.ok(html.includes('class="np-path changed"'), html);
+  assert.ok(html.includes('class="np-label warn"'), html);
+  assert.ok(html.includes('<span class="np-hop"><b>computer</b></span>'), 'the computer is plain');
+  assert.ok(html.includes('<span class="np-hop changes"><b>DAC USB 1</b><span class="d">&nbsp;&middot;</span> <span class="v d">48 kHz</span><span class="d">&nbsp;&middot;</span> <span class="v w">volume -24.1 dB</span><span class="d">&nbsp;&middot;</span> <span class="v w">tone control</span></span>'), html);
+  assert.ok(!html.includes('id="np-config"'), 'no config chip while the check does not fail');
+});
+
+ok('a_resampling_computer_is_the_only_yellow_chip_and_the_rates_sit_in_the_last_one', () => {
+  const row = {
+    label: { tone: 'warn', words: 'Path: the computer changes the sound' },
+    hops: hops([word('resampled', 'warn')]),
+    values: [word('44.1 → 48 kHz', 'dim'), word('volume 0 dB', 'dim')],
+    words: null,
+  };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'changed', row }));
+  assert.equal(count(html, 'np-hop changes'), 1, html);
+  assert.ok(html.includes('<span class="np-hop changes"><b>computer</b> <span class="v w">resampled</span></span>'), html);
+  assert.ok(html.includes('<span class="np-hop"><b>DAC USB 1</b><span class="d">&nbsp;&middot;</span> <span class="v d">44.1 → 48 kHz</span>'), html);
+});
+
+ok('every_value_is_a_nowrap_unit_and_every_dot_keeps_to_what_precedes_it', () => {
+  const row = {
+    label: { tone: 'warn', words: 'Path: the DAC changes the sound' },
+    hops: hops([word('resampled', 'warn')]),
+    values: [word('44.1 → 48 kHz', 'dim'), word('volume -24.1 dB', 'warn'), word('tone control', 'warn')],
+    words: null,
+  };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'changed', row }));
+  const path = html.slice(html.indexOf('<p class="np-path'), html.indexOf('</p>', html.indexOf('<p class="np-path')));
+  // a dot is a no-break space and the middle dot, after the value it follows, never after a breakable space
+  const dots = path.match(/<span class="d">[^<]*<\/span>/g);
+  assert.equal(dots.length, 3, path);
+  assert.ok(dots.every((dot) => dot === '<span class="d">&nbsp;&middot;</span>'), dots.join());
+  assert.ok(!/\s<span class="d">/.test(path), 'no breakable space before a dot');
+  assert.ok(!path.includes(' · '), 'no dot with a breakable space on both sides');
+  // every word of the hops and every value sits in a `v` unit, the unit a stylesheet keeps whole
+  for (const text of ['resampled', '44.1 → 48 kHz', 'volume -24.1 dB', 'tone control']) {
+    assert.ok(new RegExp(`<span class="v[ a-z]*">${text}</span>`).test(path), text);
+  }
+  assert.equal(count(path, 'class="v'), 4, path);
+});
+
+ok('the_short_words_of_a_row_with_no_hops_keep_each_dot_to_the_words_before_it', () => {
+  const row = {
+    label: { tone: 'plain', words: 'Path: the DAC listens to USB 1' },
+    hops: [], values: [], words: 'the DAC listens to USB 1 · the computer is on USB 2',
+  };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'unknown', row }));
+  assert.ok(html.includes('<span class="np-short">the DAC listens to USB 1&nbsp;· the computer is on USB 2</span>'), html);
+  assert.ok(!html.includes(' · the computer'), 'no breakable space before the dot');
+});
+
+ok('the_arrow_between_chips_is_drawn_after_the_chip_before_it_never_before_the_next', () => {
+  const css = readFileSync(new URL('../../../bins/svolderd/web/themes/ember/style.css', import.meta.url), 'utf8');
+  assert.ok(!/\.np-(hop|more)[^{]*::before/.test(css), 'a chip starts bare');
+  assert.ok(/\.np-hop[^{]*::after \{[^}]*content: "→"/.test(css), 'the chip before it ends with the arrow');
+  assert.ok(/\.np-path \.v \{ white-space: nowrap; \}/.test(css), 'a value is never broken across lines');
+});
+
+ok('a_failing_config_check_is_a_yellow_label_and_a_chip_after_the_hops_only', () => {
+  const row = {
+    label: { tone: 'warn', words: 'Path: the PipeWire config check failed' },
+    hops: hops(),
+    values: [word('48 kHz', 'dim'), word('volume 0 dB', 'dim'), word('config 1', 'warn')],
+    words: null,
+  };
+  const config = { outcome: 'changes', chip: 'config 1', summary: 'PipeWire config changes the sound: 1' };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'untouched', row, config }));
+  assert.ok(html.includes('class="np-label warn"'), html);
+  assert.ok(html.includes('<button type="button" id="np-config" class="np-setup changes" data-config aria-haspopup="dialog" title="PipeWire config changes the sound: 1" aria-label="config 1, PipeWire config changes the sound: 1">config 1</button></p>'), html);
+  assert.ok(!html.includes('np-hop changes'), 'no hop changed');
+  assert.ok(html.indexOf('np-hop') < html.indexOf('np-setup'), 'after the hops');
+});
+
+ok('an_unread_hop_has_one_dim_question_mark_and_the_label_is_plain', () => {
+  const row = {
+    label: { tone: 'plain', words: 'Path: not everything could be read' },
+    hops: hops([word('?', 'dim')]), values: [], words: null,
+  };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'unknown', row }));
+  assert.ok(html.includes('class="np-label plain"'), html);
+  assert.ok(html.includes('<b>computer</b> <span class="v d">?</span>'), html);
+  assert.ok(!html.includes('np-hop changes'));
+});
+
+ok('the_daemons_words_in_the_row_are_escaped', () => {
+  const row = {
+    label: { tone: 'plain', words: 'Path: <img src=x>' },
+    hops: [{ label: '<b>DAC</b>', words: [word('<i>x</i>', 'warn')] }], values: [], words: null,
+  };
+  const html = drawn('playing', 'playing', withPath({ ...BASE, end_to_end: 'unknown', row }));
+  assert.ok(!html.includes('<img src=x') && !html.includes('<i>x') && !html.includes('<b>DAC'), html);
 });
 
 ok('a_preset_named_with_markup_is_shown_as_text', () => {

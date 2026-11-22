@@ -426,4 +426,124 @@ fn usage_md_shows_the_menu_this_build_draws() {
     let wanted = box_rows(&open());
     assert_eq!(wanted[4], format!("│{version:>33} │"));
     assert_eq!(lines[top..top + 11], wanted[..]);
+    // The four-entry menu a daemon with scenes draws is shown after it.
+    let again = lines[top + 11..]
+        .iter()
+        .position(|line| *line == "┌──────────────────────────────────┐")
+        .expect("usage/tui.md shows the four-entry menu")
+        + top
+        + 11;
+    let with_scenes = box_rows(&open_with_scenes());
+    assert_eq!(lines[again..again + 12], with_scenes[..]);
+}
+
+/// An app on the device screen whose daemon keeps scenes, with the menu open.
+fn open_with_scenes() -> App {
+    let mut app = crate::tui::test_support::offering_scenes(
+        app_showing(Screen::Device),
+        crate::tui::test_support::mockup_scenes(),
+    );
+    press(&mut app, KeyCode::Esc);
+    app
+}
+
+/// With scenes on offer the menu has a Scenes row between Settings and Help, the box one row
+/// taller, centred at 80×24 and at 120×40; Scenes is the word with its key `z` after it.
+#[test]
+fn with_scenes_the_menu_has_four_entries_and_the_box_is_one_row_taller() {
+    let app = open_with_scenes();
+    assert_eq!(
+        entries(&app),
+        [Entry::Settings, Entry::Scenes, Entry::Help, Entry::Quit]
+    );
+    for (width, height) in [(80, 24), (120, 40)] {
+        let (_, areas, _) = drawn(&app, width, height);
+        let area = areas.modal.expect("a modal box");
+        assert_eq!(
+            (area.x, area.y, area.width, area.height),
+            ((width - 36) / 2, (height - 12) / 2, 36, 12),
+            "{width}x{height}"
+        );
+    }
+    let rows = box_rows(&app);
+    assert_eq!(rows.len(), 12);
+    assert_eq!(rows[6], "│             Settings             │");
+    assert_eq!(rows[7], "│             Scenes z             │");
+    assert_eq!(rows[8], "│               Help               │");
+    assert_eq!(rows[9], "│               Quit               │");
+}
+
+/// Scenes' `z` is drawn in the key-hint role, bold, after the word in the text role.
+#[test]
+fn the_scenes_row_draws_its_key_in_the_key_hint_role() {
+    let app = open_with_scenes();
+    let theme = true_colour();
+    let (buffer, areas, _) = drawn(&app, 80, 24);
+    let area = areas.modal.expect("a modal box");
+    let y = area.y + 7;
+    let row = text(&buffer)[usize::from(y)].clone();
+    let at = row.chars().position(|c| c == 'z').expect("the key");
+    let cell = &buffer[(u16::try_from(at).unwrap(), y)];
+    assert_eq!(cell.fg, theme.style(Role::KeyHint).fg.expect("a colour"));
+    assert!(cell.modifier.contains(Modifier::BOLD));
+}
+
+/// With no scenes on offer the menu is the three entries it was.
+#[test]
+fn without_scenes_the_menu_keeps_its_three_entries_and_z_does_nothing_in_it() {
+    let mut app = open();
+    assert_eq!(entries(&app), [Entry::Settings, Entry::Help, Entry::Quit]);
+    assert!(press(&mut app, KeyCode::Char('z')).is_empty());
+    assert_eq!(app.overlays.menu, Some(0), "z is swallowed");
+}
+
+/// `z` in the menu, and `Enter` on its row, open the Scenes box and close the menu.
+#[test]
+fn z_and_enter_on_the_scenes_row_open_the_box() {
+    let mut app = open_with_scenes();
+    press(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.overlays.menu, None);
+    assert!(app.scenes.list.is_some());
+
+    let mut app = open_with_scenes();
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.overlays.menu, Some(1));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.overlays.menu, None);
+    assert!(app.scenes.list.is_some());
+}
+
+/// The cursor steps through four entries, and Help and Quit keep their keys with the row there.
+#[test]
+fn the_cursor_steps_through_four_entries_and_the_other_keys_stand() {
+    let mut app = open_with_scenes();
+    for _ in 0..5 {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.overlays.menu, Some(3));
+    press(&mut app, KeyCode::Enter);
+    assert!(app.overlays.quitting || app.overlays.menu.is_none());
+
+    let mut app = open_with_scenes();
+    press(&mut app, KeyCode::Char('h'));
+    assert!(app.overlays.help_open);
+    let mut app = open_with_scenes();
+    press(&mut app, KeyCode::Char('s'));
+    assert!(app.overlays.settings.is_some());
+}
+
+/// A click on the Scenes row presses `z`, and the rows below it keep their keys.
+#[test]
+fn a_click_on_the_scenes_row_takes_it() {
+    let app = open_with_scenes();
+    let (_, areas, hits) = drawn(&app, 80, 24);
+    let area = areas.modal.expect("a modal box");
+    for (at, key) in [(0, 's'), (1, 'z'), (2, 'h'), (3, 'q')] {
+        let (x, y) = (area.x + 18, area.y + 6 + at);
+        assert_eq!(hits.hit_at(x, y), Some(&Hit::MenuEntry(usize::from(at))));
+        assert_eq!(
+            mouse::resolve(&hits, left_click(x, y), &app),
+            Some(MouseAction::Key(KeyCode::Char(key)))
+        );
+    }
 }

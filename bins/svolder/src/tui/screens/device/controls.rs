@@ -8,11 +8,11 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use svolder_host::Button;
-use svolder_ipc::host::PathLine;
+use svolder_ipc::host::{PathRow, Tone};
 use svolder_profiles::{Control, ControlKind, Placed};
 use svolder_proto::FunctionId;
 
-use crate::tui::app::{App, Chip, Reading, Side, row_group};
+use crate::tui::app::{App, Reading, Side, row_group};
 use crate::tui::audio_level::LevelFrom;
 use crate::tui::host::{self, HostRow};
 use crate::tui::layout_tier::Tier;
@@ -60,6 +60,31 @@ pub(super) struct Controls {
     pub(super) path: Option<PathDrawn>,
     /// How many of the lines are the blanks that set the groups apart.
     pub(super) blanks: usize,
+    /// The gaps this layout could still draw in the Host group, in the order spare rows are
+    /// given to them.
+    pub(super) offered: Vec<Gap>,
+}
+
+impl Controls {
+    /// How many lines the pane takes with its Path row counted at `path` lines, whatever the
+    /// reading gives it now: the pane's lines as they are where it draws none.
+    pub(super) fn lines_reserving(&self, path: usize) -> usize {
+        let drawn = self.path.map_or(0, |drawn| usize::from(drawn.height));
+        match self.path {
+            Some(_) => self.lines.len() - drawn + path,
+            None => self.lines.len(),
+        }
+    }
+}
+
+/// An empty line the Host group's rows can be aired by, one before the row they name. Each is
+/// drawn from rows the pane has to spare only: no row is cut or squeezed for one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Gap {
+    /// Before the Path row, which no key reaches.
+    Path,
+    /// Before the Spectrum row.
+    Spectrum,
 }
 
 /// Where the Path row landed in the Controls pane and how it was laid.
@@ -67,26 +92,14 @@ pub(super) struct Controls {
 pub(super) struct PathDrawn {
     /// The interior line the row starts on.
     pub(super) top: u16,
-    /// How many lines it takes: more than one where it wrapped.
+    /// How many lines it takes: more than `base` where it wrapped.
     pub(super) height: u16,
+    /// How many lines it takes unwrapped: one, or two with a values line.
+    pub(super) base: u16,
     /// Whether it wrapped onto continuation lines.
     pub(super) wrapped: bool,
     /// How many cells it runs past its room, where it is cut and scrolls.
     pub(super) travel: Option<usize>,
-    /// Where the config chip landed, when the row wears one that is whole in sight.
-    pub(super) chip: Option<ChipAt>,
-}
-
-/// Where the config chip landed in the Path row: its line (0 is the row's first), the cell its
-/// words start on after the pane's cursor column, and their width.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ChipAt {
-    /// The line of the row it is on.
-    pub(super) line: u16,
-    /// The first cell of its words, from the line's start before the cursor column.
-    pub(super) x: u16,
-    /// Its width in cells.
-    pub(super) width: u16,
 }
 
 /// The Controls pane: one row per control a user can set, then the meters the device
@@ -94,8 +107,9 @@ pub(super) struct ChipAt {
 /// and tall tiers, drawn for a pane whose rows have `room` columns after their cursor.
 ///
 /// The pane sets its groups a blank line apart — the selects and toggles, the levels, the
-/// balance, the meters, the Host group — wherever its `height` lines hold every row and the
-/// blanks; with fewer it packs them, so no row goes out of sight. The tall tier draws a meter's
+/// balance, the meters, the Host group — wherever its `height` lines hold every row, the blanks
+/// and the Path row at the most lines it can take; with fewer it packs them, so no row goes out
+/// of sight. The tall tier draws a meter's
 /// bar on two rows, its label and reading on the first; the wide tier lets its bars run longer.
 pub(super) fn controls_pane(
     app: &App,
@@ -105,24 +119,40 @@ pub(super) fn controls_pane(
     height: usize,
 ) -> Controls {
     // The pane is built once with the groups spaced and the path wrapped; the other layouts'
-    // heights follow from it (the blanks, the path's extra lines), so only the one chosen is
-    // built, if it is another. In the order of what is given up first: the blank lines between
-    // the groups, then the wrap (the path is cut and scrolls); a row is never lost.
-    let spaced = controls_lines(app, theme, room, tier, true, true);
-    let (lines, blanks) = (spaced.lines.len(), spaced.blanks);
-    let extra = spaced.path.map_or(0, |path| usize::from(path.height) - 1);
-    let wrapped = extra > 0;
-    if lines <= height {
-        return spaced;
-    }
-    match (wrapped, lines - blanks <= height, lines - extra <= height) {
+    // heights follow from it (the blanks, the path's lines), so only the one chosen is built, if
+    // it is another. In the order of what is given up first: the blank lines between the groups,
+    // then the wrap (the path is cut and scrolls); a row is never lost. Rows still spare in a
+    // layout that keeps the group blanks go to the Host group's gaps, which the first build names.
+    // The choice counts the Path row at the most it can take in each of the two ways it is laid
+    // (wrapped, cut), never at the lines the reading gives it now: the rows above it keep their
+    // screen rows while a reading comes, goes or changes how long the row is, and what the row
+    // does not use is blank space at the pane's end.
+    let spaced = controls_lines(app, theme, room, tier, true, true, &[]);
+    let blanks = spaced.blanks;
+    let wrapped_lines = spaced.lines_reserving(path_line::MAX_LINES);
+    let cut_lines = spaced.lines_reserving(path_line::MAX_BASE_LINES);
+    let (groups, wrap, used) = match (
+        wrapped_lines <= height,
+        wrapped_lines - blanks <= height,
+        cut_lines <= height,
+    ) {
+        (true, ..) => (true, true, wrapped_lines),
         // Packed still wraps the path.
-        (true, true, _) => controls_lines(app, theme, room, tier, false, true),
+        (_, true, _) => (false, true, wrapped_lines - blanks),
         // Spaced, with the path cut.
-        (true, false, true) => controls_lines(app, theme, room, tier, true, false),
-        (true, false, false) => controls_lines(app, theme, room, tier, false, false),
-        // Nothing wrapped: packed is all there is to give up.
-        (false, _, _) => controls_lines(app, theme, room, tier, false, true),
+        (_, _, true) => (true, false, cut_lines),
+        _ => (false, false, cut_lines - blanks),
+    };
+    // Only a layout that keeps the blanks between the groups has rows to air the Host group with.
+    let spare = if groups {
+        height.saturating_sub(used)
+    } else {
+        0
+    };
+    let air: Vec<Gap> = spaced.offered.iter().copied().take(spare).collect();
+    match (groups && wrap, air.is_empty()) {
+        (true, true) => spaced,
+        _ => controls_lines(app, theme, room, tier, groups, wrap, &air),
     }
 }
 
@@ -132,8 +162,9 @@ fn spacing_group(control: &Control) -> (u8, bool) {
     (row_group(control), control.center.is_some())
 }
 
-/// The Controls pane's lines, its groups a blank line apart where `spaced`, and a Path row too
-/// long for its room wrapped onto continuation lines where `wrap` (else cut, and scrolled).
+/// The Controls pane's lines, its groups a blank line apart where `spaced`, a Path row too
+/// long for its room wrapped onto continuation lines where `wrap` (else cut, and scrolled), and
+/// a blank line before each Host group row `air` names.
 pub(super) fn controls_lines(
     app: &App,
     theme: &Theme,
@@ -141,6 +172,7 @@ pub(super) fn controls_lines(
     tier: Tier,
     spaced: bool,
     wrap: bool,
+    air: &[Gap],
 ) -> Controls {
     #[cfg(test)]
     crate::tui::test_support::work::tick("controls_lines");
@@ -151,7 +183,7 @@ pub(super) fn controls_lines(
         true => app.host_rows().iter().map(|row| row.label()).collect(),
         false => Vec::new(),
     };
-    let path = app.host_path();
+    let path = app.path_row();
     if path.is_some() {
         host_labels.push(host::PATH);
     }
@@ -168,6 +200,7 @@ pub(super) fn controls_lines(
         switch: None,
         path: None,
         blanks: 0,
+        offered: Vec::new(),
     };
     // The row index a `Row`, `ToggleOf`, `Select…` or `Level` hit is keyed by: the position
     // among the writable rows only, the same order `App::rows` lists them in.
@@ -226,9 +259,13 @@ pub(super) fn controls_lines(
             columns,
             (spaced, wrap),
             path.as_ref(),
+            air,
             &mut pane,
         );
         if spectrum {
+            if air.contains(&Gap::Spectrum) {
+                pane.lines.push(Line::default());
+            }
             let (line, dim) = spectrum_line(app, theme, columns);
             let line = widgets::rows::with_cursor(line, false, theme);
             pane.spectrum = u16::try_from(pane.lines.len()).ok();
@@ -238,6 +275,10 @@ pub(super) fn controls_lines(
         if source == Some(LevelFrom::Host) {
             host_graph(app, theme, room, &mut pane);
         }
+        pane.offered = [(pane.path.is_some(), Gap::Path), (spectrum, Gap::Spectrum)]
+            .into_iter()
+            .filter_map(|(offered, gap)| offered.then_some(gap))
+            .collect();
     }
     app.drawn
         .controls_switch
@@ -530,7 +571,8 @@ fn host_group(
     theme: &Theme,
     columns: Columns,
     (spaced, wrap): (bool, bool),
-    path: Option<&PathLine>,
+    path: Option<&PathRow>,
+    air: &[Gap],
     pane: &mut Controls,
 ) {
     if spaced {
@@ -602,15 +644,21 @@ fn host_group(
         pane.host.push(top);
         // The path is a reading under the transport it follows, which no key reaches.
         if let (HostRow::Transport, Some(path)) = (row, path) {
+            if air.contains(&Gap::Path) {
+                pane.lines.push(Line::default());
+            }
             let top = u16::try_from(pane.lines.len()).unwrap_or(u16::MAX);
-            let chip = app.path_chip();
-            let rows = path_rows(app, path, chip.as_ref(), theme, columns, wrap);
+            let scroll = app
+                .tui
+                .scroll_long_lines
+                .then_some(usize::from(app.host.path_scroll.offset));
+            let rows = path_rows(path, theme, columns, (wrap, scroll));
             pane.path = Some(PathDrawn {
                 top,
                 height: u16::try_from(rows.lines.len()).unwrap_or(1),
+                base: u16::try_from(rows.base).unwrap_or(1),
                 wrapped: rows.wrapped,
                 travel: rows.travel,
-                chip: chip.and_then(|chip| chip_at(&rows.lines, &chip.words)),
             });
             for line in rows.lines {
                 let line = widgets::rows::with_cursor(line, false, theme);
@@ -623,140 +671,156 @@ fn host_group(
 
 /// The Path row as the pane lays it out.
 struct PathRows {
-    /// The row's lines: one, or the continuation lines it wrapped onto.
+    /// The row's lines: one per line of the model, or the continuation lines it wrapped onto.
     lines: Vec<Line<'static>>,
-    /// Whether the row wrapped onto more than one line.
+    /// How many lines the row takes when it does not wrap: one, or two with a values line.
+    base: usize,
+    /// Whether the row wrapped onto more lines than that.
     wrapped: bool,
     /// How many cells the row's words run past its room, where it is cut and scrolls.
     travel: Option<usize>,
 }
 
-/// The Path row in `columns`: on one line where the words fit; else, where `wrap` allows, on
-/// the fewest lines the hop separators break them into (three at most, a stage never broken),
-/// each continuation indented under the first line's words; else cut at the right edge. A cut
-/// row scrolls slowly past its room while the `scroll_long_lines` setting is on, from the
-/// offset the app holds, and ends in `…` while it is off.
+/// The label of the Path row: its word in the label's tone, padded to the label column.
+fn path_label(row: &PathRow, theme: &Theme, columns: Columns) -> Vec<Span<'static>> {
+    let plain = widgets::rows::label(host::PATH, columns.field());
+    let style = match row.label.tone {
+        Tone::Plain => return vec![plain],
+        tone => theme.style(path_line::role(tone)),
+    };
+    let word = host::PATH.len().min(columns.field().saturating_sub(1));
+    let (word, pad) = plain.content.split_at(word);
+    vec![
+        Span::styled(word.to_string(), style),
+        Span::raw(pad.to_string()),
+    ]
+}
+
+/// The Path row in `columns`, scrolled from the offset `scroll` holds (`None` with scrolling
+/// off): its two lines (the hops, then the values) each on one line where the words fit; else,
+/// where `wrap` allows, on the fewest lines the separators break them into (five at most, a hop
+/// broken only between its words), each continuation indented under the first line's words.
+/// Where both lines do not fit five lines the values line wraps alone (it holds the DAC's changes
+/// and the config tag) and the hops line is cut or scrolled on one line; where even the values
+/// do not fit, both are cut, the config tag kept whole while scrolling is off. A cut line
+/// scrolls slowly past its room while the `scroll_long_lines` setting is on, from the offset the
+/// app holds, and ends in `…` while it is off.
 fn path_rows(
-    app: &App,
-    path: &PathLine,
-    chip: Option<&Chip>,
+    row: &PathRow,
     theme: &Theme,
     columns: Columns,
-    wrap: bool,
+    (wrap, scroll): (bool, Option<usize>),
 ) -> PathRows {
-    let stages = path_line::stages_with(path, chip);
+    let stages = path_line::row_lines(row);
     let room = columns.room().saturating_sub(columns.field());
-    let label = || widgets::rows::label(host::PATH, columns.field());
-    let one = |spans: Vec<Span<'static>>, travel| PathRows {
-        lines: vec![Line::from(
-            std::iter::once(label()).chain(spans).collect::<Vec<_>>(),
-        )],
+    let lines: Vec<&Vec<path_line::Stage>> = stages.lines().collect();
+    let base = lines.len().max(1);
+    let lead = |at: usize| match at {
+        0 => path_label(row, theme, columns),
+        _ => vec![Span::raw(" ".repeat(columns.field()))],
+    };
+    let drawn = |spans: Vec<Vec<Span<'static>>>| -> Vec<Line<'static>> {
+        let mut spans = spans;
+        if spans.is_empty() {
+            spans.push(Vec::new());
+        }
+        spans
+            .into_iter()
+            .enumerate()
+            .map(|(at, words)| Line::from(lead(at).into_iter().chain(words).collect::<Vec<_>>()))
+            .collect()
+    };
+    let width_of = |line: &Vec<path_line::Stage>| path_line::full_width(line);
+    let width = lines.iter().map(|line| width_of(line)).max().unwrap_or(0);
+    let colour = |parts: Vec<(String, Role)>| -> Vec<Span<'static>> {
+        parts
+            .into_iter()
+            .map(|(text, role)| Span::styled(text, theme.style(role)))
+            .collect()
+    };
+    // Every line cut at the right edge, the config tag of the values kept whole.
+    let cut_all = || -> Vec<Vec<Span<'static>>> {
+        lines
+            .iter()
+            .map(|line| path_line::cut_keeping_config(line, theme, room))
+            .collect()
+    };
+    let one = |travel, spans: Vec<Vec<Span<'static>>>| PathRows {
+        lines: drawn(spans),
+        base,
         wrapped: false,
         travel,
     };
-    let width = path_line::full_width(&stages);
     if width <= room {
-        return one(path_spans(&stages, theme, room), None);
+        return one(None, cut_all());
     }
-    if wrap && let Some(lines) = path_line::wrap(&stages, room, path_line::MAX_LINES) {
-        let lines = lines
-            .into_iter()
-            .enumerate()
-            .map(|(at, parts)| {
-                let lead = match at {
-                    0 => label(),
-                    _ => Span::raw(" ".repeat(columns.field())),
-                };
-                let words = parts
-                    .into_iter()
-                    .map(|(text, role)| Span::styled(text, theme.style(role)));
-                Line::from(std::iter::once(lead).chain(words).collect::<Vec<_>>())
-            })
+    // The line a cut row shows on one line: from the held offset, or cut with `…`.
+    let held = scroll.filter(|_| room > 0);
+    let show_cut = |line: &Vec<path_line::Stage>, offset: usize| match held {
+        Some(_) => path_line::window(
+            line,
+            theme,
+            offset.min(width_of(line).saturating_sub(room)),
+            room,
+        ),
+        None => path_line::cut_keeping_config(line, theme, room),
+    };
+    if wrap {
+        let each: Option<Vec<_>> = lines
+            .iter()
+            .map(|line| path_line::wrap(line, room, path_line::MAX_LINES))
             .collect();
-        return PathRows {
-            lines,
-            wrapped: true,
-            travel: None,
-        };
+        let both = each
+            .map(|all| all.into_iter().flatten().collect::<Vec<_>>())
+            .filter(|all| all.len() <= path_line::MAX_LINES);
+        if let Some(both) = both {
+            return PathRows {
+                lines: drawn(both.into_iter().map(colour).collect()),
+                base,
+                wrapped: true,
+                travel: None,
+            };
+        }
+        // The values wrap alone, the hops line on one line cut or scrolled.
+        if let [hops, values] = lines[..]
+            && let Some(wrapped) = path_line::wrap(values, room, path_line::MAX_LINES - 1)
+        {
+            let own = width_of(hops).saturating_sub(room);
+            let offset = held.unwrap_or(0).min(own);
+            let mut spans = vec![match own > 0 {
+                true => show_cut(hops, offset),
+                false => path_line::cut(hops, theme, room),
+            }];
+            spans.extend(wrapped.into_iter().map(colour));
+            return PathRows {
+                lines: drawn(spans),
+                base,
+                wrapped: true,
+                travel: held.and(Some(own)).filter(|own| *own > 0),
+            };
+        }
     }
-    if !app.tui.scroll_long_lines || room == 0 {
-        return one(path_spans(&stages, theme, room), None);
-    }
+    let Some(held) = held else {
+        return one(None, cut_all());
+    };
     let travel = width - room;
-    let offset = usize::from(app.host.path_scroll.offset).min(travel);
+    let offset = held.min(travel);
     one(
-        path_line::window(&stages, theme, offset, room),
         Some(travel),
+        lines.iter().map(|line| show_cut(line, offset)).collect(),
     )
 }
 
-/// Where the chip's `words` stand in the lines of the Path row, when a span ends in them whole:
-/// the stage is one span, so a chip cut at the right edge or scrolled partly out is not found,
-/// and a click there reaches the row as it does elsewhere.
-pub(super) fn chip_at(lines: &[Line<'static>], words: &str) -> Option<ChipAt> {
-    let wide = widgets::text::cells(words);
-    for (at, line) in lines.iter().enumerate() {
-        let mut x = 0;
-        for span in &line.spans {
-            let width = span.width();
-            if span.content.ends_with(words)
-                && width <= wide + widgets::text::cells(path_line::PATH_GAP)
-            {
-                return Some(ChipAt {
-                    line: u16::try_from(at).ok()?,
-                    x: u16::try_from(x + width - wide).ok()?,
-                    width: u16::try_from(wide).ok()?,
-                });
-            }
-            x += width;
-        }
-    }
-    None
-}
-
-/// The stages of the path as spans cut to `room` cells, the tail replaced by `…` where the
-/// words run out of room.
-fn path_spans(stages: &[path_line::Stage], theme: &Theme, mut room: usize) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    // The verdict is cut so that the chip after it stays whole.
-    let chip_width = stages.iter().find(|stage| stage.chip).map_or(0, |stage| {
-        widgets::text::cells(&format!("{}{}", stage.join, stage.words))
-    });
-    for (at, stage) in stages.iter().enumerate() {
-        let text = format!("{}{}", stage.join, stage.words);
-        let keep = match (at, chip_width) {
-            (0, width) if width > 0 && room > width => width,
-            _ => 0,
-        };
-        let shown = cut_cells(&text, room - keep);
-        if keep > 0 && shown != text {
-            spans.push(Span::styled(shown, theme.style(stage.role)));
-            let chip = &stages[1];
-            spans.push(Span::styled(
-                format!("{}{}", chip.join, chip.words),
-                theme.style(chip.role),
-            ));
-            break;
-        }
-        room = room.saturating_sub(widgets::text::cells(&shown));
-        let cut = shown != text;
-        spans.push(Span::styled(shown, theme.style(stage.role)));
-        if cut {
-            break;
-        }
-    }
-    spans
-}
-
-/// The Path row on one line, cut at its right edge, its tail replaced by `…`, wherever the words
-/// run out of room: the verdict first, in the colour of what it says, then each hop from the
-/// player to the DAC, the hop that changes the signal in the warning colour.
+/// The Path row of `row` on its lines as the tests read them: wrapped where `wrap`, and where it
+/// is cut scrolled from `scroll` (`None`: cut with `…`).
 #[cfg(test)]
-pub(super) fn path_row(path: &PathLine, theme: &Theme, columns: Columns) -> Line<'static> {
-    let room = columns.room().saturating_sub(columns.field());
-    let mut spans = vec![widgets::rows::label(host::PATH, columns.field())];
-    spans.extend(path_spans(&path_line::stages(path), theme, room));
-    Line::from(spans)
+pub(super) fn path_row(
+    row: &PathRow,
+    theme: &Theme,
+    columns: Columns,
+    (wrap, scroll): (bool, Option<usize>),
+) -> Vec<Line<'static>> {
+    path_rows(row, theme, columns, (wrap, scroll)).lines
 }
 
 /// What the computer's volume row says `muted` with, after its bar.
@@ -931,7 +995,58 @@ fn transport_line(
         ));
         at += width;
     }
+    spans.extend(track_clock(app, theme, columns.room().saturating_sub(at)));
     (Line::from(spans), buttons)
+}
+
+/// Columns between the buttons and the time, and between the time and the bar.
+const CLOCK_GAP: usize = 2;
+/// The fewest cells the track's bar is drawn in.
+const CLOCK_BAR_MIN: usize = 4;
+
+/// What follows the buttons on the Transport row in `room` cells: the time into the track and
+/// its length (`2:41 / 9:22`), then a thin bar filling what is left, its elapsed part in the bar
+/// colour over a dim track. A row too narrow for the bar goes without it, then without `/ total`,
+/// the time elapsed last; no length gives the time elapsed alone, and no position nothing.
+fn track_clock(app: &App, theme: &Theme, room: usize) -> Vec<Span<'static>> {
+    let Some(time) = app.host.track_time(app.now) else {
+        return Vec::new();
+    };
+    let elapsed = host::clock_words(time.elapsed_us);
+    let total = time.length_us.map(host::clock_words);
+    let both = total.as_ref().map(|total| format!("{elapsed} / {total}"));
+    let words = |text: &str| {
+        vec![
+            Span::raw(" ".repeat(CLOCK_GAP)),
+            Span::styled(text.to_string(), theme.style(Role::Dim)),
+        ]
+    };
+    let width = |text: &str| CLOCK_GAP + widgets::text::cells(text);
+    let Some(both) = both else {
+        return match room >= width(&elapsed) {
+            true => words(&elapsed),
+            false => Vec::new(),
+        };
+    };
+    let bar = room.saturating_sub(width(&both) + CLOCK_GAP);
+    if bar >= CLOCK_BAR_MIN {
+        let length = time.length_us.unwrap_or(0).max(1);
+        let ratio = time.elapsed_us as f64 / length as f64;
+        let filled = ((bar as f64 * ratio).round() as usize).min(bar);
+        let mut spans = words(&both);
+        spans.push(Span::raw(" ".repeat(CLOCK_GAP)));
+        spans.push(Span::styled("━".repeat(filled), theme.style(Role::Bar)));
+        spans.push(Span::styled(
+            "─".repeat(bar - filled),
+            theme.style(Role::Dim),
+        ));
+        return spans;
+    }
+    match room {
+        r if r >= width(&both) => words(&both),
+        r if r >= width(&elapsed) => words(&elapsed),
+        _ => Vec::new(),
+    }
 }
 
 /// Columns before a row's label, that its cursor (`▶` on the focused row) takes.

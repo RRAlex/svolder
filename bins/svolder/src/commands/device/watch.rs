@@ -195,7 +195,7 @@ async fn watch_loop<F: Future<Output = ()>>(
                     reading = Some(reprint(backend));
                 }
                 // Watch prints readings, not recalls, and never asks for the host's view.
-                Ok(Some(Update::Recalled(_) | Update::Host(_))) => continue,
+                Ok(Some(Update::Recalled(_) | Update::Host(_) | Update::Scenes(_))) => continue,
                 // The link is gone for good: the session spent its reconnect deadline and the
                 // grace after it, or the daemon's stream ended.
                 Ok(None) => return feed_ended(backend).await.report(),

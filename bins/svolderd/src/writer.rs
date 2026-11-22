@@ -46,8 +46,12 @@
 //! A band write may ask to switch a tone control that reads Flat to EQ once it goes through
 //! ([`Options::flat_to_eq`]).
 //!
-//! The writer keeps the device's recall memory and publishes its climb on two `watch` channels
-//! ([`Writer::recalled`], [`Writer::climb`]).
+//! A set of built-in band values ([`Writer::apply_values`], a scene's bands for a device with
+//! built-in settings and no tone control) is planned and sent like a named setting.
+//!
+//! The writer keeps the device's recall memory, publishes its climb and whether a recall or a
+//! setting runs or waits on three `watch` channels ([`Writer::recalled`], [`Writer::climb`],
+//! [`Writer::busy`]). A tone named `Custom` is never noted in the memory: no preset has that name.
 
 mod slots;
 
@@ -210,6 +214,11 @@ pub struct Writer {
     recalled: watch::Receiver<Option<String>>,
     /// The climb on, while one is.
     climb: watch::Receiver<Option<ClimbView>>,
+    /// Whether a recall or a setting runs or waits.
+    busy: watch::Receiver<bool>,
+    /// How many writes and recalls the writer has taken in, which a test waits on.
+    #[allow(dead_code, reason = "a test waits on it")]
+    arrivals: watch::Receiver<u64>,
     /// The tickets of the requests, and the newest one sent: see [`Writer::ticket`].
     tickets: Arc<Mutex<Tickets>>,
 }
@@ -255,7 +264,17 @@ enum Ask {
     Apply {
         origin: Origin,
         name: String,
+        /// The values to set (key and raw step) in place of the setting `name` names.
+        values: Option<Vec<(String, i64)>>,
         planned: oneshot::Sender<Planned>,
+        done: oneshot::Sender<Outcome>,
+    },
+    /// An ordered write of the control `key` to raw step `raw`, left unsent when the device reads
+    /// that step and nothing is in the line for the control.
+    SetIfNeeded {
+        origin: Origin,
+        key: String,
+        raw: i64,
         done: oneshot::Sender<Outcome>,
     },
     Glide {
@@ -278,11 +297,17 @@ impl Writer {
         let (asks, inbox) = mpsc::unbounded_channel();
         let (recalled_tx, recalled) = watch::channel(None);
         let (climb_tx, climb) = watch::channel(None);
-        tokio::spawn(Task::new(commands, feed, recalled_tx, climb_tx).run(inbox));
+        let (busy_tx, busy) = watch::channel(false);
+        let (arrivals_tx, arrivals) = watch::channel(0);
+        tokio::spawn(
+            Task::new(commands, feed, recalled_tx, climb_tx, busy_tx, arrivals_tx).run(inbox),
+        );
         Writer {
             asks,
             recalled,
             climb,
+            busy,
+            arrivals,
             tickets: Arc::default(),
         }
     }
@@ -310,10 +335,14 @@ impl Writer {
         let (asks, _) = mpsc::unbounded_channel();
         let (_, recalled) = watch::channel(None);
         let (_, climb) = watch::channel(None);
+        let (_, busy) = watch::channel(false);
+        let (_, arrivals) = watch::channel(0);
         Writer {
             asks,
             recalled,
             climb,
+            busy,
+            arrivals,
             tickets: Arc::default(),
         }
     }
@@ -333,6 +362,28 @@ impl Writer {
             origin,
             command,
             options: options.into(),
+            done,
+        });
+        answer
+    }
+
+    /// Write the control `key` to raw step `raw` for `origin`, ordered behind whatever is in the
+    /// line for it, unless the device reads `raw` and nothing is in flight, waiting, held or
+    /// awaiting its echo for that control: then nothing is sent and the answer is an
+    /// acknowledgement at once. The judgement is made as the writer takes the ask, in arrival
+    /// order, so a write that arrived before it and has not landed always makes this one go out
+    /// behind it. How a scene sets a held control without writing one that is already there.
+    pub fn set_if_needed(
+        &self,
+        origin: Origin,
+        key: String,
+        raw: i64,
+    ) -> oneshot::Receiver<Outcome> {
+        let (done, answer) = oneshot::channel();
+        self.ask(Ask::SetIfNeeded {
+            origin,
+            key,
+            raw,
             done,
         });
         answer
@@ -422,11 +473,35 @@ impl Writer {
     /// Apply the built-in setting `name` of the device as one batch (see the module's docs): the
     /// answers are those of a recall, [`Planned::Setting`] for the plan.
     pub fn apply(&self, origin: Origin, name: String) -> Recalling {
+        self.apply_asked(origin, name, None)
+    }
+
+    /// Apply `values`, each a built-in band's key and the raw step it should read, as one batch
+    /// planned from the device's readings when it starts, in the order a named setting uses
+    /// (every band going down before any goes up) and with the same holds; `name` labels the
+    /// batch in the plan and the log. The answers are those of [`Writer::apply`]; a device with
+    /// no built-in settings refuses.
+    pub fn apply_values(
+        &self,
+        origin: Origin,
+        name: String,
+        values: Vec<(String, i64)>,
+    ) -> Recalling {
+        self.apply_asked(origin, name, Some(values))
+    }
+
+    fn apply_asked(
+        &self,
+        origin: Origin,
+        name: String,
+        values: Option<Vec<(String, i64)>>,
+    ) -> Recalling {
         let (planned, plan) = oneshot::channel();
         let (done, answer) = oneshot::channel();
         self.ask(Ask::Apply {
             origin,
             name,
+            values,
             planned,
             done,
         });
@@ -434,6 +509,19 @@ impl Writer {
             planned: plan,
             done: answer,
         }
+    }
+
+    /// Whether a recall or a built-in setting runs or waits to start, published as it begins and
+    /// as its last write ends: a save of the device's settings is refused while it is.
+    pub fn busy(&self) -> watch::Receiver<bool> {
+        self.busy.clone()
+    }
+
+    /// How many writes and recalls the writer has taken in so far, published as it takes each in:
+    /// a test waits on it for the moment its own ask has arrived.
+    #[cfg(test)]
+    pub fn arrivals(&self) -> watch::Receiver<u64> {
+        self.arrivals.clone()
     }
 
     /// What the writer holds once every ask before this one is taken in.
@@ -607,15 +695,19 @@ struct Starting {
 enum Recipe {
     /// The tone-control preset `name` among `fitting`, the presets that fit the device.
     Preset { name: String, fitting: Vec<Preset> },
-    /// The device's built-in setting `name`.
-    Setting { name: String },
+    /// The device's built-in setting `name`, or, with `values`, the built-in bands set to those
+    /// values (`name` then only labels the batch).
+    Setting {
+        name: String,
+        values: Option<Vec<(String, i64)>>,
+    },
 }
 
 impl Recipe {
     /// The name asked for.
     fn name(&self) -> &str {
         match self {
-            Recipe::Preset { name, .. } | Recipe::Setting { name } => name,
+            Recipe::Preset { name, .. } | Recipe::Setting { name, .. } => name,
         }
     }
 }
@@ -756,6 +848,18 @@ struct Task {
     recalled: watch::Sender<Option<String>>,
     /// The climb as last published, which [`Writer::climb`] watches.
     shown_climb: watch::Sender<Option<ClimbView>>,
+    /// Whether a recall or a setting runs or waits, which [`Writer::busy`] watches.
+    shown_busy: watch::Sender<bool>,
+    /// The controls a write sent without waiting went to, each with when the feed last heard it as
+    /// the write went out and when that was: until the feed hears the control again, or
+    /// [`ECHO_WAIT`] passes, the reading it holds may be from before the write
+    /// ([`Task::unheard`]); the last flag is whether an earlier write's echo was still awaited when
+    /// it went out, which keeps the control unheard for the whole wait whatever the feed hears.
+    unheard: HashMap<FunctionId, (Option<u64>, Instant, bool)>,
+    /// How many asks have been taken in, which [`Writer::arrivals`] watches.
+    shown_arrivals: watch::Sender<u64>,
+    /// How many asks have been taken in.
+    taken: u64,
     /// How many writes and recalls have been submitted: the arrival number of the latest.
     arrived: u64,
     /// The arrival number of the latest mode write or recall submitted.
@@ -789,6 +893,8 @@ impl Task {
         feed: watch::Receiver<Feed>,
         recalled: watch::Sender<Option<String>>,
         shown_climb: watch::Sender<Option<ClimbView>>,
+        shown_busy: watch::Sender<bool>,
+        shown_arrivals: watch::Sender<u64>,
     ) -> Task {
         let profile = feed.borrow().profile.clone();
         Task {
@@ -808,6 +914,10 @@ impl Task {
             feed_open: true,
             recalled,
             shown_climb,
+            shown_busy,
+            unheard: HashMap::new(),
+            shown_arrivals,
+            taken: 0,
             arrived: 0,
             mode_or_recall: 0,
             after_recall: Vec::new(),
@@ -832,6 +942,16 @@ impl Task {
         });
     }
 
+    /// Publish whether a recall or a setting runs or waits to start; only a change is sent.
+    fn show_busy(&self) {
+        let busy = self.slots.busy();
+        self.shown_busy.send_if_modified(|shown| {
+            let changed = *shown != busy;
+            *shown = busy;
+            changed
+        });
+    }
+
     /// Take the asks in order and carry them out, until every [`Writer`] is dropped; then answer
     /// every write and recall still waiting.
     async fn run(mut self, mut inbox: mpsc::UnboundedReceiver<Ask>) {
@@ -839,7 +959,11 @@ impl Task {
             let echo_due = self.echo_due();
             tokio::select! {
                 ask = inbox.recv() => match ask {
-                    Some(ask) => self.ask(ask).await,
+                    Some(ask) => {
+                        self.ask(ask).await;
+                        self.taken += 1;
+                        self.shown_arrivals.send_replace(self.taken);
+                    }
                     None => break,
                 },
                 Some((id, asked, answer, response, switch, echo)) = self.replies.next(),
@@ -874,9 +998,11 @@ impl Task {
                 }
             }
             self.show_climb();
+            self.show_busy();
         }
         self.end_climb("the device's writer stopped");
         self.show_climb();
+        self.show_busy();
         let (writes, picks) = self.slots.drain();
         for pending in writes {
             pending.answer.send(Outcome::Cancelled(STOPPED));
@@ -911,6 +1037,46 @@ impl Task {
                     switch,
                 };
                 self.submit(pending, options.mode).await;
+            }
+            Ask::SetIfNeeded {
+                origin,
+                key,
+                raw,
+                done,
+            } => {
+                let command = set_to(&key, raw);
+                let needed = {
+                    let feed = self.feed.borrow();
+                    match feed
+                        .profile
+                        .as_deref()
+                        .and_then(|profile| key_of(profile, &command))
+                    {
+                        Some((id, _)) => {
+                            // Read as a scene reads: a toggle's boolean is the step 0 or 1.
+                            svolder_profiles::scene::raw_of(&feed.readings)(id) != Some(raw)
+                                || self.slots.pending(id)
+                                || self.slots.holds(id)
+                                || self.echoing.contains_key(&id)
+                                || self.unheard(id, feed.heard_at.get(&id).copied())
+                        }
+                        None => true,
+                    }
+                };
+                match needed {
+                    true => {
+                        let ask = Ask::Submit {
+                            origin,
+                            command,
+                            options: Mode::Ordered.into(),
+                            done,
+                        };
+                        Box::pin(self.ask(ask)).await;
+                    }
+                    false => {
+                        let _ = done.send(Outcome::Done(Response::Ack));
+                    }
+                }
             }
             Ask::Glide {
                 origin,
@@ -967,23 +1133,36 @@ impl Task {
             Ask::Apply {
                 origin,
                 name,
+                values,
                 planned,
                 done,
             } => {
                 self.arrived += 1;
                 let profile = self.feed.borrow().profile.clone();
                 let said = name.clone();
+                let values_given = values.clone();
                 let pick = Pick {
                     origin,
-                    recipe: Recipe::Setting { name },
+                    recipe: Recipe::Setting { name, values },
                     planned,
                     done,
                 };
-                // A setting rewrites its own bands alone: every other write held is kept.
+                // A setting rewrites its own bands alone: every other write held is kept, and a
+                // set of values rewrites only the bands it is given.
+                let given: Option<Vec<FunctionId>> = match (&values_given, profile.as_deref()) {
+                    (Some(values), Some(profile)) => Some(value_ids(profile, values)),
+                    _ => None,
+                };
                 let actions = self.slots.pick(pick, |id| {
-                    profile
-                        .as_deref()
-                        .is_some_and(|profile| !device_presets::rewrites(profile, id))
+                    let Some(profile) = profile.as_deref() else {
+                        return false;
+                    };
+                    match &given {
+                        Some(ids) => !ids
+                            .iter()
+                            .any(|own| *own == id || profile.read_as(id) == *own),
+                        None => !device_presets::rewrites(profile, id),
+                    }
                 });
                 let dropped = actions
                     .iter()
@@ -1825,6 +2004,14 @@ impl Task {
             &command,
             Command::Set { no_wait: true, .. } | Command::Raw { no_wait: true, .. }
         );
+        if let (Some(id), true) = (id, no_wait) {
+            let heard = self.feed.borrow().heard_at.get(&id).copied();
+            // A write sent while an earlier one's echo is still awaited cannot tell the first echo
+            // from the second, as a band's `repeated` cannot: the control stays unheard for the
+            // whole echo wait.
+            let repeated = self.unheard(id, heard);
+            self.unheard.insert(id, (heard, Instant::now(), repeated));
+        }
         let echo = id.and_then(|id| {
             let repeated = self.outstanding(id)?;
             Some(Echo {
@@ -1873,6 +2060,15 @@ impl Task {
         feed.profile
             .as_deref()
             .is_some_and(|profile| changed_by_recall(profile, id))
+    }
+
+    /// Whether a write sent without waiting went to `id` less than [`ECHO_WAIT`] ago and the feed
+    /// has not heard the control since (`heard` is when it last did): its reading may be from
+    /// before the write, so it says nothing of where the control is going.
+    fn unheard(&self, id: FunctionId, heard: Option<u64>) -> bool {
+        self.unheard.get(&id).is_some_and(|(then, at, repeated)| {
+            (*repeated || *then == heard) && at.elapsed() < ECHO_WAIT
+        })
     }
 
     /// For a write to function `id` going out, when it is a band a recall of a device slot
@@ -2058,17 +2254,24 @@ impl Task {
                     reading_of(&feed.readings, id)
                 })
                 .map(|recalled| {
-                    self.recalled
-                        .send_replace(Some(recalled.preset.name.clone()));
+                    // No preset can be named `Custom` (the name stands for a curve no preset
+                    // is): a scene's tone of that name clears the memory rather than noting a
+                    // preset that does not exist.
+                    let noted = (!preset::same_name(&recalled.preset.name, preset::CUSTOM))
+                        .then(|| recalled.preset.name.clone());
+                    self.recalled.send_replace(noted);
                     let steps = recalled.recall.commands.iter().map(recall::command);
                     (steps.collect::<Vec<Command>>(), Planned::Plan(recalled))
                 })
             }
-            (Recipe::Setting { name }, Some(profile)) => {
+            (Recipe::Setting { name, values }, Some(profile)) => {
                 // A band that has not reported since a recall of a slot is planned as unread.
-                recall::plan_setting(&feed.name, profile, &name, |id| {
-                    reading_of(&feed.readings, id).filter(|_| !self.unreported(&feed, id))
-                })
+                let raw =
+                    |id| reading_of(&feed.readings, id).filter(|_| !self.unreported(&feed, id));
+                match values {
+                    Some(values) => recall::plan_values(&feed.name, profile, &name, &values, raw),
+                    None => recall::plan_setting(&feed.name, profile, &name, raw),
+                }
                 .map(|applied| {
                     let steps = applied.writes.iter().map(recall::setting_command);
                     (steps.collect::<Vec<Command>>(), Planned::Setting(applied))
@@ -2176,6 +2379,27 @@ fn changed_by_recall(profile: &Profile, id: FunctionId) -> bool {
                     .iter()
                     .any(|entry| id.as_slice().starts_with(entry.as_slice()))
         })
+}
+
+/// The functions a set of built-in band `values` writes: each band's control and the id the
+/// built-in table writes it to.
+fn value_ids(profile: &Profile, values: &[(String, i64)]) -> Vec<FunctionId> {
+    let Some(table) = profile.builtin_settings.as_ref() else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .flat_map(|(key, _)| {
+            let written = table
+                .keys
+                .iter()
+                .zip(&table.ids)
+                .find(|(own, _)| own.eq_ignore_ascii_case(key))
+                .map(|(_, id)| *id);
+            let control = profile.control_by_key(key).map(|control| control.id);
+            written.into_iter().chain(control)
+        })
+        .collect()
 }
 
 /// A waited `set` of `key` to raw step `raw`.

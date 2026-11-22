@@ -29,6 +29,9 @@ const POWER = ['json', 'key', 'on', 'readouts', 'toggles', 'warming', 'word'];
 const pageOf = (device, viewer, followed = {}) => ({
   v: 1, viewer, fleet: { devices: [], hops: [] }, shown: device.url, device, followed,
   card: null, host: null, strip: null,
+  // a writer's model has the scenes' view; a guest's and a read-only page's have no such key
+  ...(viewer?.guest || viewer?.writes === false
+    ? {} : { scenes: { scenes: [], on: null, recalled: null, known: true } }),
 });
 
 /** Everything the actions touch, faked: the posts they make, the toasts they say. */

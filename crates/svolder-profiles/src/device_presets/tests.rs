@@ -231,3 +231,26 @@ fn no_builtin_setting_or_action_of_the_loki_max_writes_the_mode() {
         }
     }
 }
+
+#[test]
+fn values_plan_in_the_named_plans_order() {
+    let named = plan(&loki(), "Bass Boost", read(SMILEY)).unwrap();
+    let targets: Vec<(String, i64)> = [28, 21, 17, 15, 15, 15]
+        .iter()
+        .enumerate()
+        .map(|(band, raw)| (format!("band{}", band + 1), *raw))
+        .collect();
+    assert_eq!(plan_values(&loki(), &targets, read(SMILEY)), named.writes);
+}
+
+#[test]
+fn values_leave_an_unknown_key_out_and_send_an_unread_cut_with_the_cuts() {
+    let targets = [
+        ("band1".to_string(), 28),
+        ("band9".to_string(), 3),
+        ("band2".to_string(), 15),
+    ];
+    let writes = plan_values(&loki(), &targets, reading([None; 6]));
+    let order: Vec<(&str, i64)> = writes.iter().map(|w| (w.key.as_str(), w.raw)).collect();
+    assert_eq!(order, [("band2", 15), ("band1", 28)]);
+}

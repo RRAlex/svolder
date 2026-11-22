@@ -152,7 +152,7 @@ fn not_rebuilt_note(label: &str, failure: &EqFailure) -> String {
 }
 
 /// Why a set cannot be used, as a refusal.
-fn unusable(id: &str, error: &StoreError) -> EqFailure {
+pub(super) fn unusable(id: &str, error: &StoreError) -> EqFailure {
     refusal(
         match error {
             StoreError::Damaged { reason, .. } => {

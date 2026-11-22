@@ -70,6 +70,9 @@ pub struct Device<'a> {
     pub unit_id: &'a str,
     /// Its firmware build, when the daemon has read one; fills `device.sw_version`.
     pub firmware: Option<u16>,
+    /// The id of the computer serving it ([`topics::host_id`] of the host name): names the
+    /// bridge availability its entities depend on and the HA device it is `via_device` of.
+    pub computer: &'a str,
 }
 
 /// Every discovery config for one device: the link, then one entry per exposed control (the
@@ -368,7 +371,7 @@ fn link_entry(
     payload.insert(
         "availability".into(),
         Json::Array(vec![
-            json!({"topic": topics::bridge_availability(base_topic)}),
+            json!({"topic": topics::bridge_availability(base_topic, device.computer)}),
         ]),
     );
     DiscoveryEntry {
@@ -397,7 +400,7 @@ pub(crate) fn entity_envelope(
     m.insert(
         "availability".into(),
         Json::Array(vec![
-            json!({"topic": topics::bridge_availability(base_topic)}),
+            json!({"topic": topics::bridge_availability(base_topic, device.computer)}),
             json!({"topic": topics::device_availability(base_topic, device.unit_id)}),
         ]),
     );
@@ -420,6 +423,10 @@ fn device_json(profile: &Profile, device: &Device<'_>) -> Json {
     if let Some(firmware) = device.firmware {
         m.insert("sw_version".into(), firmware.to_string().into());
     }
+    m.insert(
+        "via_device".into(),
+        topics::device_id(&topics::computer_unit(device.computer)).into(),
+    );
     Json::Object(m)
 }
 

@@ -61,8 +61,8 @@ live" lists where each module's tests are.
 soak: they need browsers, two controllers, a PipeWire install or an hour, and a machine without
 them must still be able to run the ordinary gate. The quick web gate refuses (exit 1, naming the
 file) when a smoke file or one of the smoke's checks changed since `main`, so it cannot stand in
-for the full one. `make web-touched` (`BASE=<rev>`) names the checks a diff touches, and a tag
-needs `make web-checks-cold`. The lists are in
+for the full one. `make web-touched` names the checks a diff touches, `make web-checks-affected`
+also those that name what it changes (a lane's CODE DONE); a tag needs `make web-checks-cold`. See
 [scripts/web-checks/README.md](../../scripts/web-checks/README.md).
 
 ### What `make test` does

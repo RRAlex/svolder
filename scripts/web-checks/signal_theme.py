@@ -2451,7 +2451,10 @@ def the_player(b, d):
       verdict: [...(document.querySelector('#sg-player .sg-verdict')?.childNodes ?? [])]
         .filter((n) => !n.classList?.contains('sg-sr') && !n.classList?.contains('sg-config'))
         .map((n) => n.textContent).join(''),
-      want: __core.model.device().playing.path.words.join(' · ') })""")
+      want: (() => { const p = __core.model.device().playing.path;
+        // the DAC's own stage changing the sound is said in the row label's words
+        return p.end_to_end && p.end_to_end !== p.verdict ? p.row.label.words.replace(/^Path: /, '')
+          : p.words.join(' \u00b7 '); })() })""")
     check('  it names the track and puts the path in words with its verdict',
           got['title'] == headline and got['path'] == ['player', 'computer', 'DAC'] and got['verdict'] == got['want'], got)
     check('  previous, pause and next are its buttons', b.page(PLAYER_BUTTONS) == ['previous', 'pause', 'next'])

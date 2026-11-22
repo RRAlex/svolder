@@ -23,6 +23,7 @@ pub mod help;
 pub mod menu;
 pub mod presets;
 pub mod quit;
+pub mod scenes;
 pub mod settings;
 pub mod setup;
 pub mod speakers;

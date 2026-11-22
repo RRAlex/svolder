@@ -30,8 +30,9 @@ touches a `Session`.
 
 For a device with unit id `U` (sixteen hex characters) and base topic `B` (`topics.rs`):
 
-- `B/bridge/availability`: `online` or `offline`, retained, with `offline` as the connection's last
-  will.
+- `B/bridge/H/availability`: `online` or `offline`, retained, with `offline` as the connection's
+  last will. `H` is the computer's host name made safe for ids (below), so two computers on one
+  broker share no availability topic.
 - `B/U/availability`: `online` while the daemon holds the device's link, retained.
 - `B/U/state`: one retained JSON object with a key per exposed control (`payload::state`), in the
   units every other front end shows: volume in dB, toggles `ON` or `OFF`, selects and readouts by
@@ -161,17 +162,58 @@ one is logged once and ignored.
 
 ## The computer's EQ
 
-A bridge-level unit, `computer`, in place of a unit id: `svolder_mqtt::computer` builds one switch
-and one preset sensor (and, while the controller serves loudness, a loudness switch and a strength
-number, `computer::loudness`, whose range and step come from the view; while it serves crossfeed, a
+Each computer is its own Home Assistant device, so two daemons on one broker share no topic and no
+id. The host name is read once at bridge start from `/proc/sys/kernel/hostname` (trimmed; empty or
+unreadable is `localhost`, with a log line; the reading is injected, so no test reads the real file)
+and made safe for ids by `topics::host_id` (lower case, anything outside `[a-z0-9_]` becomes `_`, so
+`Desk` and `desk` share one id). The bridge-level unit is `computer_H` (`topics::computer_unit`) in
+place of a unit id, and `svolder_mqtt::computer::Computer` carries the name as read, the id and the
+unit into every entry and topic function. `svolder_mqtt::computer` builds one switch and one preset
+sensor (and, while the controller serves loudness, a loudness switch and a strength number,
+`computer::loudness`, whose range and step come from the view; while it serves crossfeed, a
 crossfeed switch and a crossfeed preset select, `computer::crossfeed`, whose options are the view's
 model table and whose `Custom` is a state, not a command) under the Home Assistant device
-`This computer` (identifiers `svolder_computer`), and `mqtt_bridge/computer.rs` follows the host's
-view (`ComputerLink`), announces them while the view carries an EQ, and publishes `ON`/`OFF` and the
-preset name. The preset topic is cleared, not retained empty, while the EQ is off. A command goes
-through the host's own `Mode` request, never through a device's writer. ON with a flat, never edited
-curve (`computer::nothing_kept`) is not sent. A retained command is never acted on, as for devices.
-No volume, mute or point entity exists on purpose.
+`{identifiers: [svolder_computer_H], name: <host name as read>, manufacturer: svolder, model:
+Computer}`. Every DAC or amp device the daemon announces carries `via_device: svolder_computer_H`;
+Home Assistant resolves that link when a device registers, so the computer is announced first
+(`announce_parent`, the computer's rank, which a reconnect replays before any device's discovery).
+`mqtt_bridge/computer.rs` follows the host's view (`ComputerLink`), announces the entities while the
+view carries an EQ, and publishes `ON`/`OFF` and the preset name. The preset topic is cleared, not
+retained empty, while the EQ is off. A command goes through the host's own `Mode` request, never
+through a device's writer. ON with a flat, never edited curve (`computer::nothing_kept`) is not
+sent. A retained command is never acted on, as for devices. No volume, mute or point entity exists
+on purpose.
+
+The first publish of each bridge start clears what an older daemon announced: the `This computer`
+discovery topics (unit `computer`, both component kinds, as `computer::legacy_topics_of` lists them)
+and the old state, availability and attributes topics under the old `computer` unit, with empty
+retained payloads, before the new ones are announced. The old `B/bridge/availability` is left,
+because an older daemon on the same broker still uses it. The clear is replayed on every reconnect,
+so an older daemon on a broker with a newer one loses its `This computer` device each time: every
+daemon on one broker is upgraded together. A DAC that two daemons both serve has one unit id and
+shows under the last daemon to announce it.
+
+### The scenes pair
+
+The computer's device also carries the scene pair ([scenes.md](scenes.md)), announced whether or not
+the host has an EQ, so the computer's device exists whenever the bridge runs and a DAC's
+`via_device` never points at nothing. A `select` `scene` has the scene names plus `custom` as
+options (a scene cannot be named `custom`, so the option is never ambiguous). Its state is the scene
+that is on, else `custom`, and it stays as last published while the daemon has not read which scene
+is on, so a reconnect never flips it. A `text` `scene_save` (`min` 1, `max` 40, no pattern: the
+daemon's name rule fits none) saves the current settings under the name typed, without force, so a
+taken name is refused in the daemon's words. With commands off the select is a `sensor` and there is
+no text. Rename and delete are not on Home Assistant. The select's `json_attributes_topic` carries
+`scenes` (names with their parts and whether each is present), `known`, `recalled`, `outcome` (the
+last recall made through Home Assistant: `{name, parts, seq}`, or `{name, error, seq}` when the
+daemon refused or asked) and `saved` (`{name, seq}` or `{name, error, seq}`). `seq` rises with every
+answer (a millisecond clock seeds it), so a repeated answer still changes the attributes and a card
+can tell it is new. `outcome` and `saved` are the bridge's, so they are lost on a daemon restart and
+a recall from another front end changes `recalled` and the state but not `outcome`. A recall the
+daemon asks about (one preset on a device and on the computer) is a question a select cannot answer,
+so the bridge logs it, changes nothing and puts the words in `outcome.error`. The code is
+`computer/scenes.rs` in the library (pure: entries, options, state, parsing, attributes) and
+`mqtt_bridge/scenes.rs` (`ScenesLink`, and `SceneDesk`, the daemon's door through `Origin::Mqtt`).
 
 The same device carries two read-only entities of the untouched path, the path sensor and the
 PipeWire config problem sensor, judged by `svolder-ipc` and published by `mqtt_bridge/computer.rs`
@@ -222,8 +264,9 @@ client.
 - Topics, payloads, discovery, commands, tone-control entities: `crates/svolder-mqtt/src/topics.rs`,
   `payload.rs`, `discovery.rs`, `command.rs`, `eq.rs`; tests beside them (`discovery/tests.rs`,
   `eq/tests.rs`) and in `crates/svolder-mqtt/tests/discovery_goldens.rs`.
-- The computer's EQ: `crates/svolder-mqtt/src/computer.rs` (tests in `computer/tests.rs`, goldens
-  `computer-commands.json` and `computer-read-only.json`) and `bins/svolderd/src/mqtt_bridge/computer.rs`.
+- The computer's EQ and scenes: `crates/svolder-mqtt/src/computer.rs` (tests in `computer/tests.rs`,
+  goldens `computer-commands.json`, `computer-read-only.json`, `scenes-commands.json` and
+  `scenes-read-only.json`) and `bins/svolderd/src/mqtt_bridge/computer.rs`.
 - The connection: `crates/svolder-mqtt/src/client.rs`, tests in `client/tests.rs` and
   `crates/svolder-mqtt/tests/client.rs`.
 - The bridge: `bins/svolderd/src/mqtt_bridge.rs` and its children in `mqtt_bridge/`, tests in

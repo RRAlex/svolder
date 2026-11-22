@@ -1,0 +1,29 @@
+[
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "json_attributes_topic": "svolder/computer_reframe/scene/attributes",
+      "name": "Scene",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/computer_reframe/scene/state",
+      "unique_id": "svolder_computer_reframe_scene"
+    },
+    "topic": "homeassistant/sensor/svolder_computer_reframe/scene/config"
+  }
+]

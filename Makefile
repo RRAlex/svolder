@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall help-check
 
 ##@ Start
 demo-knobs-check: ## Fail if the env line the demos start with does not run
@@ -395,8 +395,9 @@ audit: ## Fail on an advisory in Cargo.lock (needs network)
 # and without SVOLDER_MCP_TOKEN and SVOLDER_WEB_TOKEN, so a test that reaches for the user's real
 # files (the MCP token under $XDG_STATE_HOME, say) finds a scratch copy instead, whatever the
 # test does. The homes are not under TMPDIR, so each unit-test binary pins its own under it
-# (svolder-unit-*). HOME stays as it is: cargo finds its registry through it. The run fails
-# naming whatever a test left in TMPDIR, apart from those pinned homes. The scratch directory
+# (svolder/unit-*). HOME stays as it is: cargo finds its registry through it. The run fails
+# naming whatever a test left in TMPDIR, apart from the `svolder` directory, and in that directory
+# apart from those pinned homes. The scratch directory
 # has a short fixed prefix so the longest test socket path stays under the 108 bytes a socket
 # address holds.
 ##@ Start
@@ -414,7 +415,8 @@ test: deps-build ## Run all tests
 	  XDG_DATA_HOME="$$scratch/data" XDG_CACHE_HOME="$$scratch/cache" SVOLDER_WIREPLUMBER="$$scratch/no-wireplumber" \
 	  SVOLDER_AUTOEQ_URL=http://127.0.0.1:9/ SVOLDER_SPEAKERS_URL=http://127.0.0.1:9/ $(if $(T),,SVOLDER_TEST_PREBUILT=1) $(CARGO) test $(or $(T),--workspace --all-features) \
 	  || exit $$?; \
-	left=$$(find "$$scratch/t" -mindepth 1 -maxdepth 1 ! -name 'svolder-unit-*' -exec basename {} \;); \
+	left=$$( { find "$$scratch/t" -mindepth 1 -maxdepth 1 ! \( -name svolder -type d \) -exec basename {} \;; \
+	  find "$$scratch/t/svolder" -mindepth 1 -maxdepth 1 ! -name 'unit-*' -exec basename {} \; 2>/dev/null; } ); \
 	if [ -n "$$left" ]; then \
 	  echo 'make test: tests left these in their temporary directory:' >&2; \
 	  echo "$$left" | sed 's/^/  /' >&2; \
@@ -633,6 +635,8 @@ web-snippets: ## Fail on a moved mutant snippet or an unlisted node harness
 	@python3 -I scripts/web-checks/node-list.py --self-test
 	@python3 -I scripts/web-checks/node-list.py
 	@python3 -I scripts/web-checks/touched.py --self-test
+	@python3 -I scripts/web-affected.py --self-test
+	@bash scripts/gate-fails.sh --self-test
 
 ##@ Long checks (not part of check)
 #: The node harnesses and the browser checks, headless; a failure is re-run alone. Never takes a
@@ -669,6 +673,25 @@ web-checks-task: deps-build ## The task web gate (quick, logic checks in Chromiu
 #: TO=<rev>     with BASE, the diff BASE..TO alone (the working tree is left out)
 web-touched: ## Which web checks a change touches
 	@python3 -I scripts/web-checks/touched.py $(if $(TO),$(or $(BASE),main) $(TO),$(BASE))
+
+#: Every web check that names what a change adds or removes (an element id, a popup, a menu row,
+#: a note's words, an SSE event) or loads what it changes (web-touched's list), run in one go, both
+#: engines at once, under the gate's own lock. A web lane runs it at CODE DONE. The timing parts are
+#: listed, not run (they are owed to the gate on a quiet machine). Needs python3 and git; a run needs
+#: the browsers and geckodriver, as web-checks (which builds svolderd itself).
+#: BASE=<rev>   the revision to compare against (default $$WEB_CHECKS_BASE, else the newest
+#:              release-X.Y.Z branch behind HEAD, else main; with TO and no BASE: main, as web-touched)
+#: TO=<rev>     with BASE, the diff BASE..TO alone (the working tree is left out)
+#: LIST=1       print the labels and why, run nothing
+#: TIMING=1     run the timing parts too (a quiet machine only)
+web-checks-affected: deps-build ## The web checks that name what a change touched, both engines
+	@python3 -I scripts/web-affected.py $(if $(LIST),--list) $(if $(TIMING),--timing) $(if $(TO),$(or $(BASE),main) $(TO),$(BASE))
+
+#: The checks still red at the end of a web gate log, each with its FAIL lines; exit 1 when any is.
+#: LOG=<file>   the gate's log (the output of make web-checks)
+gate-fails: ## Every check still red in a web gate log
+	@test -n "$(LOG)" || { echo "gate-fails: set LOG=<file>" >&2; exit 1; }
+	@bash scripts/gate-fails.sh "$(LOG)"
 
 #: Needs two extended-advertising controllers.
 e2e: deps-build ## End to end over BlueZ

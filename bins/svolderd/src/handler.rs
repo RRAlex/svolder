@@ -20,7 +20,7 @@ use svolder_ipc::{
 use svolder_profiles::Registry;
 use svolder_profiles::tone::preset::Preset;
 use tokio::sync::oneshot;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
 use self::autoeq::AutoEqService;
 use self::speakers::SpeakersService;
@@ -119,6 +119,8 @@ pub struct Daemon {
     /// This daemon as a shared handle, which the MCP server's tools reach it through; set by
     /// [`Daemon::shared`], and weak so the server never keeps the daemon alive.
     me: std::sync::OnceLock<std::sync::Weak<Daemon>>,
+    /// The scenes: their view, and the scene last recalled.
+    scenes: crate::scenes::Scenes,
 }
 
 /// The MQTT client the daemon runs, the section the next one is started from while the one
@@ -206,6 +208,7 @@ impl Daemon {
             web_codes: Arc::default(),
             mcp_floors: Arc::default(),
             me: std::sync::OnceLock::new(),
+            scenes: crate::scenes::Scenes::new(),
             socket,
         }
     }
@@ -287,6 +290,8 @@ impl Daemon {
             log::warn(&warning);
         }
         let devices = self.reconcile(&config).await;
+        // The scenes' view follows the config and the device set the reload settled.
+        self.scenes.poke();
         self.bridge_to(&config.mqtt, &config.presets).await;
         self.servers_to(&config.mcp, &config.web).await;
         self.host_to(&config.host);
@@ -341,6 +346,7 @@ impl Daemon {
             view: self.host.changes(),
             switch: self.host.eq_switch(),
             slow: Some(self.host.slow_holds()),
+            scenes: self.scenes_link(),
         };
         slot.running = Bridge::start(
             mqtt,
@@ -348,6 +354,9 @@ impl Daemon {
             presets.to_vec(),
             Some(computer),
             &self.socket,
+            &crate::mqtt_bridge::read_hostname(std::path::Path::new(
+                crate::mqtt_bridge::HOSTNAME_FILE,
+            )),
         );
     }
 
@@ -630,6 +639,8 @@ impl Daemon {
         // Marked before anything else: a reload from here on starts no actor, and one in flight
         // does not publish the actors it started (see [`Daemon::reconcile`]).
         written(&self.devices).stopping = true;
+        // The scenes' task sees the mark and ends.
+        self.scenes.poke();
         // The jobs go first: they may hold the transport or a request of a front end, and no
         // server or actor below should be waited on behind them.
         let (walk, autoeq, speakers) = futures::join!(
@@ -1073,6 +1084,7 @@ impl Daemon {
             Request::MqttSet { op } => self.mqtt_set(op).await,
             Request::PresetWrite { op } => self.preset_write(op).await,
             Request::HostCover { hash, offset } => self.host_cover(&hash, offset),
+            Request::Scene { op } => self.scene(origin, op).await,
             // The server answers `Subscribe` through `stream`, never here.
             Request::Subscribe { .. } => Response::error(
                 CODE_USAGE,
@@ -1149,7 +1161,7 @@ impl Handler for Daemon {
     }
 
     async fn subscribe(&self, device: Option<String>) -> BoxStream<'static, Event> {
-        self.events_of_devices(device, false)
+        self.events_of_devices(device, false, true)
     }
 
     async fn stream(&self, request: Request) -> Result<BoxStream<'static, Event>, Box<Response>> {
@@ -1179,7 +1191,7 @@ impl Daemon {
         &self,
         device: Option<String>,
     ) -> BoxStream<'static, Event> {
-        self.events_of_devices(device, true)
+        self.events_of_devices(device, true, true)
     }
 
     /// The stream of a `HostFrames` request: the daemon's capture state and its analysed
@@ -1206,19 +1218,22 @@ impl Daemon {
     /// the web UI's device streams) and a plain `Subscribe` read, none of which hold the route
     /// reads open.
     pub(crate) fn device_events(&self, device: Option<String>) -> BoxStream<'static, Event> {
-        self.events_of_devices(device, false)
+        self.events_of_devices(device, false, false)
     }
 
     /// The snapshot and the live events of the devices `device` selects. With `with_host` (a
     /// `Subscribe` that asked for it) the host's view follows the snapshot, once and then on
     /// each change, whatever the device filter: the view belongs to the daemon and not to a
     /// device. The stream then holds a watcher, so the route is read for as long as the
-    /// connection is open. A selector that
-    /// names no device is the one error and the end of the stream, with no host.
+    /// connection is open. With `with_scenes` (every `Subscribe`) the scenes' view follows the
+    /// snapshot, once and then each time it differs, whatever the device filter: the view belongs
+    /// to the daemon and not to a device. A selector that
+    /// names no device is the one error and the end of the stream, with no host and no scenes.
     fn events_of_devices(
         &self,
         device: Option<String>,
         with_host: bool,
+        with_scenes: bool,
     ) -> BoxStream<'static, Event> {
         let chosen: Vec<Arc<DeviceHandle>> = match device.as_deref() {
             None => self.devices(),
@@ -1243,6 +1258,14 @@ impl Daemon {
         // rather than respawning it, so `events_of`'s broadcast channel stays the one this
         // subscription already reads from.
         let live = live.chain(stream::pending());
+        let live = match with_scenes {
+            true => stream::select(
+                live,
+                WatchStream::new(self.scenes_watch()).map(Event::Scenes),
+            )
+            .boxed(),
+            false => live.boxed(),
+        };
         match with_host {
             true => snapshot
                 .chain(stream::select(live, self.host.events()))
@@ -1281,6 +1304,7 @@ mod jobs;
 mod mqtt_set;
 mod preset_write;
 mod probe;
+mod scenes;
 mod server_switch;
 mod speakers;
 mod walk;

@@ -110,14 +110,15 @@ fn dechunk(mut rest: &str) -> String {
     out
 }
 
-const READ_TOOLS: [&str; 5] = [
+const READ_TOOLS: [&str; 6] = [
     "list_devices",
     "get_state",
     "get_link_history",
     "list_presets",
     "get_host",
+    "list_scenes",
 ];
-const WRITE_TOOLS: [&str; 10] = [
+const WRITE_TOOLS: [&str; 14] = [
     "set_control",
     "load_preset",
     "mute",
@@ -128,6 +129,10 @@ const WRITE_TOOLS: [&str; 10] = [
     "set_host_crossfeed",
     "set_host_speakers",
     "set_host_loudness",
+    "load_scene",
+    "save_scene",
+    "rename_scene",
+    "delete_scene",
 ];
 
 #[tokio::test]

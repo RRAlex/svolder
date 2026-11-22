@@ -5,6 +5,7 @@
 //! scratch homes unit tests run in.
 
 use std::ffi::OsString;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 /// `$XDG_CONFIG_HOME`, else `$HOME/.config`, else the account's home directory (from the
@@ -22,14 +23,16 @@ pub fn config_home() -> PathBuf {
 /// were started.
 ///
 /// The scratch root is a private directory (mode 0700, owned by this user) named
-/// `svolder-unit-<pid>` under the temporary directory, holding `config`, `state`, `data`,
+/// `unit-<pid>` in the `svolder` directory of the temporary directory (see
+/// `svolder_host::scratch::scratch_base`), holding `config`, `state`, `data`,
 /// `cache` and `run`. A value of `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME`,
 /// `XDG_CACHE_HOME` or `XDG_RUNTIME_DIR` that is already a strict descendant of the temporary
 /// directory is kept; any other value, or none, becomes the root's directory of that name.
 /// `make test` points `TMPDIR` at a directory of its own and the homes beside it, so each test
-/// binary pins its own homes under that `TMPDIR`. When no safe root can be made, the homes are
-/// left as they are. `SVOLDER_MCP_TOKEN`, `SVOLDER_WEB_TOKEN` and the web and MCP switch, listen
-/// and URL variables are removed, and
+/// binary pins its own homes under that `TMPDIR`. When the scratch base is refused, the roots go
+/// directly in the temporary directory as `svolder-unit-<pid>` (see `pick_root`). When no safe root
+/// can be made at all, the homes are left as they are. `SVOLDER_MCP_TOKEN`, `SVOLDER_WEB_TOKEN`
+/// and the web and MCP switch, listen and URL variables are removed, and
 /// `SVOLDER_WIREPLUMBER` and `SVOLDER_AUTOEQ_URL` get the values `make test` gives them when
 /// unset. The scratch roots of runs whose lock nobody holds are removed first.
 ///
@@ -43,8 +46,7 @@ pub fn config_home() -> PathBuf {
 #[doc(hidden)]
 pub unsafe fn pin_scratch_homes() {
     let temp = std::env::temp_dir();
-    sweep_finished_scratch_homes(&temp);
-    if let Some((root, lock)) = scratch_root(&temp, std::process::id()) {
+    if let Some((root, lock)) = pick_root(&temp, std::process::id()) {
         // The lock is held until the process ends: its descriptor is never closed.
         std::mem::forget(lock);
         for (name, leaf) in [
@@ -94,6 +96,30 @@ pub unsafe fn pin_scratch_homes() {
     }
 }
 
+/// The scratch root for process `pid` and the lock on it: in the `svolder` scratch base of
+/// `temp` (`unit-<pid>`), or, when that base is refused (a link, a file or another user's
+/// directory), directly in `temp` under the older name `svolder-unit-<pid>` with the same
+/// protections, after one warning line on stderr. The finished roots of the place used are swept
+/// first. `None` only when no candidate in that place is safe.
+pub(crate) fn pick_root(temp: &Path, pid: u32) -> Option<(PathBuf, std::fs::File)> {
+    match svolder_host::scratch::scratch_base_in(temp) {
+        Ok(base) => {
+            sweep_finished_scratch_homes(&base, "unit-");
+            scratch_root(&base, "unit-", pid)
+        }
+        Err(err) => {
+            // before `main`, so no `eprintln!` (it panics when stderr is gone)
+            let _ = writeln!(
+                std::io::stderr(),
+                "svolder tests: {err}; using {} instead",
+                temp.display()
+            );
+            sweep_finished_scratch_homes(temp, "svolder-unit-");
+            scratch_root(temp, "svolder-unit-", pid)
+        }
+    }
+}
+
 /// Whether `dir` is absolute, has no `..` component and lies strictly below `temp`.
 pub(crate) fn is_strictly_under(dir: &Path, temp: &Path) -> bool {
     dir.is_absolute()
@@ -135,16 +161,20 @@ fn is_file_at(open: &std::fs::File, path: &Path) -> bool {
 }
 
 /// A private scratch root for process `pid` under `temp` and the lock on it this run holds:
-/// `svolder-unit-<pid>`, else `svolder-unit-<pid>-<n>`. A new one is created with mode 0700; an
+/// `<prefix><pid>`, else `<prefix><pid>-<n>`. A new one is created with mode 0700; an
 /// existing one is taken only when it is a real directory (not a symlink) owned by this user with
 /// mode 0700 whose lock nobody holds, so a run with the same pid in another PID namespace keeps
 /// its own. `None` when no candidate is safe.
-pub(crate) fn scratch_root(temp: &Path, pid: u32) -> Option<(PathBuf, std::fs::File)> {
+pub(crate) fn scratch_root(
+    temp: &Path,
+    prefix: &str,
+    pid: u32,
+) -> Option<(PathBuf, std::fs::File)> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 
     let uid = std::fs::metadata("/proc/self").ok()?.uid();
-    let candidates = std::iter::once(format!("svolder-unit-{pid}"))
-        .chain((1..=8).map(|n| format!("svolder-unit-{pid}-{n}")));
+    let candidates = std::iter::once(format!("{prefix}{pid}"))
+        .chain((1..=8).map(|n| format!("{prefix}{pid}-{n}")));
     for name in candidates {
         let root = temp.join(name);
         let made = std::fs::DirBuilder::new().mode(0o700).create(&root).is_ok();
@@ -172,10 +202,10 @@ pub(crate) fn scratch_root(temp: &Path, pid: u32) -> Option<(PathBuf, std::fs::F
     None
 }
 
-/// Removes the `svolder-unit-<pid>` and `svolder-unit-<pid>-<n>` directories of `root` whose run
+/// Removes the `<prefix><pid>` and `<prefix><pid>-<n>` directories of `root` whose run
 /// no longer holds its lock. A symlink is never followed, and a directory another user owns is
 /// left alone.
-pub(crate) fn sweep_finished_scratch_homes(root: &Path) {
+pub(crate) fn sweep_finished_scratch_homes(root: &Path, prefix: &str) {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -188,7 +218,7 @@ pub(crate) fn sweep_finished_scratch_homes(root: &Path) {
         let name = entry.file_name();
         let Some(pid) = name
             .to_str()
-            .and_then(|name| name.strip_prefix("svolder-unit-"))
+            .and_then(|name| name.strip_prefix(prefix))
             .and_then(|rest| rest.split('-').next())
             .and_then(|pid| pid.parse::<u32>().ok())
         else {

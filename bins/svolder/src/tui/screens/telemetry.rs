@@ -22,7 +22,7 @@ use svolder_profiles::{ControlKind, EqParam};
 use svolder_proto::FunctionId;
 
 use crate::tui::app::{App, Reading, Screen};
-use crate::tui::keys::Scene;
+use crate::tui::keys::KeyContext;
 use crate::tui::layout_tier::{self, Tier};
 use crate::tui::mouse::{Hit, HitMap, Selected};
 use crate::tui::render::FrameId;
@@ -102,7 +102,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, hits: &mut 
         Some(&format!("{} functions", rows.len())),
         widgets::actions::action_room(body.width, widgets::text::cells(TITLE)),
         Screen::Telemetry,
-        &Scene::of(app),
+        &KeyContext::of(app),
         theme,
     );
     let block = tier

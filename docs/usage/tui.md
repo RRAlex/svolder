@@ -197,6 +197,7 @@ These keys work on every screen:
 - `d` open the device list — where a device is added, changed and removed as well as switched to, so
   it is worth reaching whatever is configured
 - `s` open the Settings box over the screen (see "Settings box" below)
+- `z` open the Scenes box over the screen, while the daemon keeps scenes (see "Scenes box" below)
 - `M` toggle mouse capture (see "Mouse" below); a terminal that refuses leaves it as it was and says
   so in a toast
 - `E` toggle the animation layer, `H` toggle hue drift, `R` toggle the rainbow scroll, `F` toggle
@@ -485,13 +486,14 @@ neither draws its bare number.
   Shift-Tab (`⇧Tab`) cycles the other way. The Status pane has no rows for a key to move through and
   is never focused: its `a` works from any pane
 
-The Status pane's first line writes the readouts, then, on a device whose profile has a fault
-control (an amp or preamp, not a DAC), `Faults:` and the active faults. A boolean readout is written
-in both states, in the words the web page uses: its label while it reads true, and while it reads
-false the label with `not connected` (a key ending `_connected`: `USB not connected`), `unlocked`
-(`_locked`: `S/PDIF unlocked`) or `no` after it, dim. A pane too narrow to leave room for any fault
-text writes neither the word nor the fault-presence pulse there; the header's fault mark carries the
-faults.
+The Status pane's readouts line (its first line, or its second under the `Scene` line while the
+daemon has scenes: see "Scenes box") writes the readouts, then, on a device whose profile has a
+fault control (an amp or preamp, not a DAC), `Faults:` and the active faults. A boolean readout is
+written in both states, in the words the web page uses: its label while it reads true, and while it
+reads false the label with `not connected` (a key ending `_connected`: `USB not connected`),
+`unlocked` (`_locked`: `S/PDIF unlocked`) or `no` after it, dim. A pane too narrow to leave room for
+any fault text writes neither the word nor the fault-presence pulse there; the header's fault mark
+carries the faults.
 
 Under its two lines the pane has a `Device` row once the backend has listed the device, in every
 tier (the mockups in this guide are drawn with no backend behind them, so they have none; the
@@ -674,69 +676,93 @@ mockup above shows all but the spectrum, which the 80×24 layout leaves out.
     take the selected style and the other buttons are dim, as on the Target switch, and a click
     presses the one clicked. `▶` is drawn in the accent, bold, while the player plays, and `▮▮`
     while it is paused. With no player the row is dim, and a press sends nothing and says `no
-    player` in a toast.
+    player` in a toast. After the buttons the row says how far into the track the player is and how
+    long the track is, `2:41 / 9:22` (`h:mm:ss` from an hour), then a thin bar filling the rest of
+    the row, its elapsed part in the accent over a dim track. The time counts on once a second while
+    the player plays and holds where it was while it is paused or stopped. A player that gives no
+    length has the elapsed time alone, with no bar, and one that gives no position has nothing after
+    its buttons. A narrow row drops the bar first (it needs about 120 columns beside the buttons),
+    then `/ total`, and keeps the elapsed time last. The bar is not a target: it seeks nowhere.
   - `Path`, on a DAC joined to a daemon that speaks for the host, under `Transport`: where the sound
-    goes from the player to the DAC, which no key or click reaches. The row is there for as long as
-    the daemon speaks for the host, so the group does not change height as playback starts and
-    stops: with no player it reads `nothing playing`, and with a player the daemon has not read the
-    route for yet, `route not read`, both dim. `untouched` covers what enters the computer's audio
-    pipeline from the player's stream, the computer and the DAC; what the player does before its
-    stream, such as loudness normalization, ReplayGain or its own EQ and volume (and whether the
-    music is a local file or streamed), happens inside the player, where svolder cannot look, and
-    svolder judges up to 24 bits. The DAC's own stage is named on its hop in the warning colour
-    while it changes the sound: `volume -3.3 dB` below 0 dB, `tone control` on EQ or loudness,
-    `balance off centre`; the verdict stays what the path up to the DAC says. The verdict comes
-    first in its own colour — `untouched` (green), what changes the sound (amber: `resampled 44.1 →
-    48 kHz`, `resampled 44.1 → 48 kHz (rate forced)`, `computer volume 54 %`, `player muted`, `host
-    EQ on`, `crossfeed on`, `virtual speakers on`, `EQ pass-through`, `cut to 16 bits (S32 → S16)`,
-    `dither on (triangular)`, `channels 6 → 2 (mixed)`, `channels remapped`, `a filter inside the
-    sink`, `ALSA plug converts (…)`, `ALSA dmix mixes (…)`, `2 other sounds mixing`, `DAC reads 44.1
-    kHz`), or, dim, `→ NAME` when the default sink is not this DAC (`player → NAME` for a player
-    routed elsewhere), `the DAC listens to Optical` when the DAC is on an input the computer does
-    not feed (`the DAC listens to USB 1 · the computer is on USB 2` for a DAC on one USB port while
-    the computer is on the other), or what could not be read (`DAC input not read`, `both USB ports
-    connected`); several words are joined by ` · `, as on the web page — then each hop from the
-    player to the DAC with what is known of the signal there (`player 44.1 kHz S16LE, volume 100 % →
-    computer 48 kHz … → DAC USB 1, 48 kHz`), a hop that changes the sound in amber. The row is as
-    wide as the pane. A path longer than that wraps, where the pane has rows to spare, onto
-    continuation lines under the first line's words (three lines at most): the break falls only at a
-    separator, which starts the next line (`→ computer 48 kHz …`), and never inside a hop, so the
-    rows below move down. A pane short of rows gives up the blank lines between its groups before
-    the wrap. Where there is no room for the wrap even then, or a hop is wider than the pane, the
-    line is cut with `…` and scrolls slowly: it holds 2 s on its start, glides left about four cells
-    a second until its end shows, holds 2 s there, jumps back and goes again, with `…` marking each
-    cut edge. It moves only while it is cut and in sight, and stands still while the pointer rests
-    on the row or the Controls cursor is on the Transport row. It costs no redraw beyond the TUI's
-    own quarter-second tick. The Settings box's **Scroll long lines** row (`[tui]
-    scroll_long_lines`, on by default) turns the scroll off, for this row and the `Now playing` row
-    alike: the line is then cut with `…` and stays still. The row is in the Effects category but not
-    under the animation layer: Effects off does not stop the scroll. A pointer resting on the row
-    shows the whole path in a tooltip. svolder cannot see the bits, so it never says more than the
-    rates, volumes, mixing and EQ show. An amp or a preamp has no row. The daemon reads the route
-    (`pw-dump`) every 2 s while a TUI or a web page that shows it is joined (and see
-    [host-config-check.md](../design/host-config-check.md#reads) for the other reads). After the
-    verdict the row wears a **config chip**, `config ✓` when the PipeWire config lets the sound
-    through untouched, `config 2` when two of its seven conditions fail, and `config ?` when a line
-    is not read. There is no chip without a daemon's route (direct mode, or a route not yet read),
-    from a daemon whose route carries no config facts, or while the default sink is not this DAC (it
-    shows while the default sink is this DAC, whatever plays). With `scroll_long_lines` off the
-    verdict is cut with `…` so that the chip stays whole; with it on (the default) the chip scrolls
-    with the rest of the row and is in sight only part of the time. A pointer resting on it shows
-    `config: 5 of 7 pass · k`, and a click on it, or `k` on the Device screen of a DAC or of the
-    computer's side (with `host_audio` on; the Controls border says `k check`), opens the **PipeWire
-    config** box. It is a box over the screen like the quit question: the sink the check judges, the
-    seven lines (`rates`, `forced rate`, `dither`, `24-bit output`, `no plug`, `stereo to stereo`,
-    `no filter in the sink`) each with `✓`, `✗` or `?` and the daemon's words (a failing line in the
-    warning colour), the summary (`PipeWire config lets it through untouched`, `PipeWire config
-    changes the sound: 2`, `PipeWire config not fully read: 1`, `PipeWire config not read`) and,
-    dim, the limit: svolder judges the config from the player's stream on, cannot see inside a
-    player nor past the sink's converter, judges at most 24 bits, and only reads. `k` or `Esc`
-    closes it, and every other key is swallowed while it is open. With a daemon the box shows the
-    daemon's route; with no daemon the TUI reads `pw-dump` itself, once when the box opens and every
-    2 s while it is open (`reading the PipeWire graph…` until the first answer, `svolder could not
-    read the PipeWire graph (pw-dump)` when a read fails: every line then reads not read and the
-    summary `PipeWire config not read`, never the last read's marks), and never with `host_audio`
-    off. The same check is `svolder host check` ([cli](cli.md#host-check)).
+    goes from the player to the DAC, which no key reaches. The row is there for as long as the
+    daemon speaks for the host, so the group does not change height as playback starts and stops:
+    with no player it reads `nothing playing`, and with a player the daemon has not read the route
+    for yet, `route not read`, both plain. The row is two lines under the label `Path`. The first
+    line is the hops, `player → computer → DAC USB 1`, the DAC with the input it listens to. The
+    second is the values the hops share, dim: the rate once (`48 kHz`, or `44.1 → 48 kHz` when the
+    computer resamples), then the DAC's volume (`volume 0 dB`), then, in the warning colour, what
+    the DAC's own stage does to the sound (`tone control`, `balance off centre`, `muted`, `phase
+    inverted`, `NOS filter`). There is no verdict word and no check mark: the label says it.
+    **`Path` is green when the sound is untouched end to end**, that is, the computer's path leaves
+    it untouched, the DAC is at 0 dB and its tone control, balance, mute, phase and NOS filter
+    change nothing, and the PipeWire config check does not fail; **it is yellow when something
+    changes the sound**, the DAC's volume below 0 dB and its tone control included, or when the
+    config check fails. It is plain while something could not be read and while the sound goes
+    elsewhere. The warning colour marks only the words of the hop that changes the sound (`computer
+    resampled`, `computer volume 54 %`, `player muted`, `computer EQ` (the computer EQ, loudness,
+    crossfeed and virtual speakers all read `EQ`), `computer cut to 16 bits`, `computer dither`,
+    `computer channels remapped`, `computer sink filter`, `computer ALSA plug`, `computer 2 other
+    sounds mixing`, `DAC reads 44.1 kHz`) and the values of the DAC's stage (`volume -24.1 dB`,
+    `tone control`); a rate or a format that merely differs from the one before it, `S16LE` into
+    `S32LE`, stays plain, and the formats are not on the row at all (`svolder host check` has them).
+    A hop with something not read has one dim `?` after its name (`computer ?`) and the label stays
+    plain. When the sound goes to another sink the row is one plain line, `Path` and `→ NAME`
+    (`player → NAME` for a player routed elsewhere); when the DAC is on an input the computer does
+    not feed, `the DAC listens to Optical` (`the DAC listens to USB 1 · the computer is on USB 2`);
+    while something could not be read, its hop shows a dim `?` (the tooltip and `svolder host check`
+    name it); a row with no hops says `DAC input not read` when the input is not read at all. A
+    `config N` tag (N lines of the PipeWire config check fail) ends the values line in the warning
+    colour, and only then: a check that passes or is not read shows nothing. `untouched` covers what
+    enters the computer's audio pipeline from the player's stream, the computer and the DAC; what
+    the player does before its stream, such as loudness normalization, ReplayGain or its own EQ and
+    volume (and whether the music is a local file or streamed), happens inside the player, where
+    svolder cannot look, and svolder judges up to 24 bits. The row is as wide as the pane. The
+    Controls pane lays out for the row's longest height, five lines wrapped or two cut, whatever the
+    row is now, so the rows above it keep their place when the route is read, muted or longer; lines
+    the row does not use stay blank at the end of the pane, and at 80×24 this costs the group its
+    blank lines even for a short path. Each line wraps at its own separators where the pane has rows
+    to spare (five lines at most): the hops line breaks after an arrow (a hop followed by another
+    ends its line with ` →`, and the next line starts with the next hop's words), and a hop's own
+    words (`computer resampled`) break at their blanks; the values line breaks before a `·`, and the
+    short words of a row with no hops break between their stages, never at the `·`; and a value
+    (`44.1 → 48 kHz`) never breaks; a wrapped line never starts with a separator, `·` or `→`. When
+    the two lines do not fit in five lines together, the values line wraps alone and the hops line
+    is cut with `…` and scrolls on its one line; when even the values do not fit, both are cut, and
+    with `scroll_long_lines` off the `config N` tag is kept whole while the rest is cut. Cut lines
+    scroll slowly: a line holds 2 s on its start, glides left about four cells a second until its
+    end shows, holds 2 s there, jumps back and goes again, with `…` marking each cut edge. It moves
+    only while it is cut and in sight, and stands still while the pointer rests on the row or the
+    Controls cursor is on the Transport row. It costs no redraw beyond the TUI's own quarter-second
+    tick. The Settings box's **Scroll long lines** row (`[tui] scroll_long_lines`, on by default)
+    turns the scroll off, for this row and the `Now playing` row alike: the line is then cut with
+    `…` and stays still. The row is in the Effects category but not under the animation layer:
+    Effects off does not stop the scroll. A pointer resting on the row shows a tooltip: the label's
+    words (`Path: untouched end to end`, `Path: the DAC changes the sound`, `Path: the computer and
+    the DAC change the sound`, `Path: the PipeWire config check failed`), the two lines whole, and,
+    under a config check, `config: 5 of 7 pass · k`. An empty line sets the row apart from the
+    Transport above it, and another sits before the Spectrum row, wherever the pane has rows to
+    spare after its group blanks; a pane short of rows draws no gap and cuts no row for one. svolder
+    cannot see the bits, so it never says more than the rates, volumes, mixing and EQ show. An amp
+    or a preamp has no row. The daemon reads the route (`pw-dump`) every 2 s while a TUI or a web
+    page that shows it is joined (and see
+    [host-config-check.md](../design/host-config-check.md#reads) for the other reads). The `config
+    N` tag shows while the default sink is this DAC and a route with the config facts is read, and
+    never in direct mode or for a daemon whose route carries none. A click anywhere on the row, the
+    label and every line it wraps to, opens the PipeWire config box, as does `k` on the Device
+    screen of a DAC or of the computer's side (with `host_audio` on; the Controls border says `k
+    check`), opens the **PipeWire config** box. It is a box over the screen like the quit question:
+    the sink the check judges, the seven lines (`rates`, `forced rate`, `dither`, `24-bit output`,
+    `no plug`, `stereo to stereo`, `no filter in the sink`) each with `✓`, `✗` or `?` and the
+    daemon's words (a failing line in the warning colour), the summary (`PipeWire config lets it
+    through untouched`, `PipeWire config changes the sound: 2`, `PipeWire config not fully read: 1`,
+    `PipeWire config not read`) and, dim, the limit: svolder judges the config from the player's
+    stream on, cannot see inside a player nor past the sink's converter, judges at most 24 bits, and
+    only reads. `k` or `Esc` closes it, and every other key is swallowed while it is open. With a
+    daemon the box shows the daemon's route; with no daemon the TUI reads `pw-dump` itself, once
+    when the box opens and every 2 s while it is open (`reading the PipeWire graph…` until the first
+    answer, `svolder could not read the PipeWire graph (pw-dump)` when a read fails: every line then
+    reads not read and the summary `PipeWire config not read`, never the last read's marks), and
+    never with `host_audio` off. The same check is `svolder host check` ([cli](cli.md#host-check)).
   - `Spectrum`, in the wide and tall tiers only and while `visualizer` is on: what the default sink
     plays, in its sixteen bands from 40 Hz to 16 kHz spread over the pane's width to the edge the
     Volume row reaches (between neighbouring bands, on the same log axis; a pane with no more room
@@ -1768,21 +1794,42 @@ list while a device is still on screen.
 ### Menu (`Esc`)
 
 `Esc` goes up one level. With a box or a line open (the quit question, the help overlay, the menu,
-the Settings box, the preset list, the device editor, the removal question, a band's edit line) it
-closes that; during a curve drag it ends the drag. On the tone-control, telemetry and devices
-screens it goes back to the device screen. On the device screen with nothing open it opens the menu:
-a box over the dimmed screen, drawn the way the help overlay is, 36 columns by 11 rows in the middle
-of the terminal at every size. It holds the small wordmark in the accent gradient, the version, and
-three entries:
+the Settings box, the Scenes box, the preset list, the device editor, the removal question, a band's
+edit line) it closes that; during a curve drag it ends the drag. On the tone-control, telemetry and
+devices screens it goes back to the device screen. On the device screen with nothing open it opens
+the menu: a box over the dimmed screen, drawn the way the help overlay is, 36 columns by 11 rows in
+the middle of the terminal at every size. It holds the small wordmark in the accent gradient, the
+version, and three entries (four while the daemon keeps scenes, below):
 
 ```
 ┌──────────────────────────────────┐
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.37.2 │
+│                          v0.38.1 │
 │                                  │
 │             Settings             │
+│               Help               │
+│               Quit               │
+│                                  │
+└──────────────────────────────────┘
+```
+
+While the daemon keeps scenes the menu has a fourth entry, `Scenes z`, between Settings and Help, and
+the box is one row taller (36 columns by 12, still centred); the `z` after the word is the key that
+opens the same box from any screen. `z` or `Enter` on the row opens the Scenes box and closes the
+menu. A direct session and a daemon without scenes keep the three entries above, and `z` does
+nothing in the menu there.
+
+```
+┌──────────────────────────────────┐
+│                                  │
+│  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
+│  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
+│                          v0.38.1 │
+│                                  │
+│             Settings             │
+│             Scenes z             │
 │               Help               │
 │               Quit               │
 │                                  │
@@ -1829,6 +1876,73 @@ overlay, and Quit asks first unless `confirm_quit` is off, as `q` does. `Esc` cl
 `m`, `i` and `o` do not flip and `r` does not refresh. A left click on an entry takes it, and a
 click anywhere outside the box closes it. Shrinking the terminal below 80×24 shows the too-small
 notice and growing it back shows the menu again, still open.
+
+### Scenes box (`z`)
+
+A scene is the sound of the whole config saved under a name: the computer's EQ, loudness, crossfeed
+and virtual speakers, and the tone control and plain settings (input, phase, NOS, balance and the
+like) of each device that was connected when it was saved. A recall puts them all back at once. No
+volume, gain, mute or power is saved or recalled; a changed input or a phono load can still change
+what you hear. The daemon keeps
+scenes ([scenes](../design/scenes.md) is the design), so the box is offered only on a session that
+has one with scenes; with no daemon `z` says `scenes are kept by the daemon: svolder daemon install`,
+with an older daemon `this svolderd keeps no scenes`, and until the daemon's list arrives
+`scenes: reading…`.
+
+`z` opens the box over any screen, and so does the menu's `Scenes z` row. It lists one scene a row:
+a lamp (`●` for the scene that is on, `○` for the others; no lamp is lit while the daemon has not yet
+read which scene is on), the name, and the parts in dim words: `computer`, then each device by the
+name it has now, with `(not connected)` after a device that is away. The key words sit on the top
+border, ending in a `─` so the corner stays. At 80×24, with three scenes, the cursor on Desk:
+
+```
+┌ Scenes ─── ↵ recall ─ n new ─ u update ─ c rename ─ x delete ─┐
+│                                                               │
+│   ● Late night  computer · Desk DAC                           │
+│ ▶ ○ Desk        computer · Desk DAC                           │
+│   ○ Movie       computer · Desk DAC · Hall (not connected)    │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+```
+
+- `↑`, `↓` move the cursor; `Enter` recalls the scene under it. A click on a row only moves the
+  cursor to it; a second click on the focused row recalls (a recall changes the sound, so no single
+  click does it, unlike the preset list).
+- `n` saves the sound as it is now under a new name. The last row becomes a name line that offers
+  the focused scene's name numbered (`Desk 2`; `Scene 1` when there is none): a suggestion only,
+  since the daemon judges every name (taken, empty, `custom`) and its words come back in a toast.
+  `Enter` saves, `Esc` goes back to the list.
+- `u` saves the sound as it is now over the focused scene, after asking `[y/N]`. `c` renames it
+  (the name line says `Rename Desk to:`). `x` deletes it after `Delete Desk? It is removed for every
+  device. [y/N]`.
+- A recall that would play one preset on a device and on the computer at once asks the daemon's
+  question in the last row, over as many rows as it needs, with `[y/N]`: `y` recalls the scene as it
+  was saved, anything else changes nothing.
+- While a request is out the last row says so (`Recalling Desk…`) and only `Esc` is taken, so one
+  press is one request.
+
+```
+┌ Scenes ─── ↵ recall ─ n new ─ u update ─ c rename ─ x delete ─┐
+│                                                               │
+│   ● Late night  computer · Desk DAC                           │
+│ ▶ ○ Desk        computer · Desk DAC                           │
+│   ○ Movie       computer · Desk DAC · Hall (not connected)    │
+│ Save current as: Desk 2                   ↵ save · esc cancel │
+└───────────────────────────────────────────────────────────────┘
+```
+
+A save takes every device that is connected and the computer; it names a device that is configured
+but not connected in the toast (`Hall is not connected: it is not in the scene`), and the daemon
+refuses it in words while a device is still reading its settings. A recall says how each part
+fared in one toast, in the daemon's own words: `Desk recalled.` and then a note for a part that was
+set in part, left as it is (`Hall is not connected: its part was left as it is`) or refused, and
+`Desk was not recalled.` when nothing was set. A refusal is shown as the daemon words it.
+
+The Status pane's first line names the scene that is on, dim (`Scene  Late night`). It reads `Scene
+none` once the daemon has settled that no scene matches, and `Scene  reading…` while it is still
+reading a device whose settings could change the answer. There is no such line where scenes are not
+offered, or while none is saved. A scene with crossfeed or virtual speakers on reads `none` after
+the daemon restarts, because those never stay on across a restart.
 
 ### Settings box (`s`)
 
@@ -2502,6 +2616,8 @@ the tone-control screen, which has no clock. With capture on:
   (above 75 % of the Volume's range no faster than the glide, as the keys) — a band's gain one of
   the device's own steps, as `←→` do, and in Flat mode switching the tone control to EQ, as the keys
   do; on the computer's side the wheel over the Volume row steps the computer's volume 1 %, as `←→` there do
+- on the device screen's Path row, click anywhere on it, every line it wraps to included, to open
+  the PipeWire config box, as `k` does
 - on the device screen's Transport row, click a button — its glyphs or the cell either side of them
   — to press it on the host's player, focusing the row on it, as `Enter` there would
 - the preset list, while it shows its presets, takes the mouse itself: click a row to load it, turn

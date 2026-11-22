@@ -480,6 +480,8 @@ async fn get_host_names_the_path_and_the_config_from_the_route() {
     fleet.host.lock().unwrap().route = Some(route_to("Speakers", false, Some(passing_setup())));
     let reply = structured(&run(&fleet, None, call("get_host", json!({})), false).await);
     assert_eq!(reply["path"]["verdict"], "untouched");
+    // No DAC stage on the computer's own line: end to end is the verdict.
+    assert_eq!(reply["path"]["end_to_end"], "untouched");
     assert_eq!(reply["path"]["words"], json!(["untouched"]));
     let sentence = reply["path"]["sentence"].as_str().expect("a sentence");
     assert!(sentence.contains("untouched"), "{sentence}");
@@ -515,6 +517,7 @@ async fn get_host_names_the_path_and_the_config_from_the_route() {
     fleet.host.lock().unwrap().route = Some(route_to("Speakers", false, Some(changed)));
     let reply = structured(&run(&fleet, None, call("get_host", json!({})), false).await);
     assert_eq!(reply["path"]["verdict"], "changed");
+    assert_eq!(reply["path"]["end_to_end"], "changed");
     assert_eq!(
         reply["config"]["summary"],
         "PipeWire config changes the sound: 1"
@@ -616,6 +619,8 @@ async fn the_path_is_judged_with_the_dac_the_sink_is_among_several_devices() {
     let reply = structured(&run(&fleet, None, call("get_host", json!({})), false).await);
     assert_eq!(reply["path"]["dac"], "Gungnir 2", "{}", reply["path"]);
     assert_eq!(reply["path"]["verdict"], "untouched", "{}", reply["path"]);
+    // The DAC's own volume below 0 dB: end to end the sound is changed.
+    assert_eq!(reply["path"]["end_to_end"], "changed", "{}", reply["path"]);
     let sentence = reply["path"]["sentence"].as_str().expect("a sentence");
     assert!(
         sentence.contains("the Gungnir 2 then lowers it by 3.3 dB"),
@@ -639,6 +644,7 @@ async fn a_dacs_readings_and_link_decide_what_the_path_claims() {
     fleet.feed.send_replace(gungnir_feed(&profile, true));
     let up = path(&fleet).await;
     assert_eq!(up["verdict"], "untouched", "{up}");
+    assert_eq!(up["end_to_end"], "changed", "{up}");
     assert!(
         up["sentence"]
             .as_str()
@@ -649,6 +655,7 @@ async fn a_dacs_readings_and_link_decide_what_the_path_claims() {
     // A link that is down claims nothing of the device's own stage.
     fleet.feed.send_replace(gungnir_feed(&profile, false));
     let down = path(&fleet).await;
+    assert_eq!(down["end_to_end"], "untouched", "{down}");
     assert!(
         !down["sentence"].as_str().unwrap_or("").contains("then"),
         "{down}"

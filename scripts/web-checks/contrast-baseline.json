@@ -233,6 +233,18 @@
   "ratio": 1.738,
   "need": 3.0
  },
+ "ember.dark|scenes|button#popup-scenes-close|edge": {
+  "ratio": 1.31,
+  "need": 3.0
+ },
+ "ember.dark|scenes|button.fi-btn|edge": {
+  "ratio": 2.864,
+  "need": 3.0
+ },
+ "ember.dark|scenes|input#popup-scenes-name|edge": {
+  "ratio": 1.749,
+  "need": 3.0
+ },
  "ember.dark|setup|button#popup-setup-close|edge": {
   "ratio": 1.31,
   "need": 3.0
@@ -355,6 +367,10 @@
  },
  "nightdrive.dark|page|text|text-large": {
   "ratio": 1.003,
+  "need": 3.0
+ },
+ "nightdrive.dark|scenes|button.fi-btn|edge": {
+  "ratio": 2.792,
   "need": 3.0
  },
  "nightdrive.dark|sound|button.fi-btn|edge": {
@@ -543,6 +559,10 @@
  },
  "paper.light|page|button#p-pt-5|edge": {
   "ratio": 2.483,
+  "need": 3.0
+ },
+ "paper.light|scenes|button.fi-btn|edge": {
+  "ratio": 2.409,
   "need": 3.0
  },
  "paper.light|sound|button.fi-btn|edge": {

@@ -60,7 +60,14 @@ mod art;
 mod host_group;
 // the Path row where it is too long for its room
 mod path_scroll;
-// the PipeWire config chip and its box
+
+// the empty lines that air the Host group
+mod gaps;
+// the track's time on the Transport row
+mod transport_time;
+// the Path row as the row model draws it
+mod path_row;
+// the PipeWire config check on the Path row and its box
 mod setup_box;
 // meter rows
 mod meters;

@@ -1095,6 +1095,46 @@ span.sg-prm { border-color: transparent; cursor: default; }
 :root[data-theme="signal"] .fpe-where { color: var(--sg-dim); }
 :root[data-theme="signal"] .fpe-row.on .fpe-where { color: var(--sg-accent); }
 
+/* the scenes: terminals on a bus, the scene that is on a lit lamp; a part that is away is an etched
+   chip with a broken edge; the row's actions are words, Recall, Rename… and Delete… */
+:root[data-theme="signal"] .sc-rows { position: relative; margin: 6px 0 0; padding: 0 0 0 22px; }
+:root[data-theme="signal"] .sc-rows::before {
+  content: ""; position: absolute; left: 5px; top: 14px; bottom: 14px; width: 1px; background: var(--sg-thin);
+}
+:root[data-theme="signal"] .sc-row { position: relative; padding: 10px 0 10px 6px; border-bottom: 0; }
+:root[data-theme="signal"] .sc-row + .sc-row { border-top: 1px solid var(--sg-hair); }
+:root[data-theme="signal"] .sc-row::before {
+  content: ""; position: absolute; left: -22px; top: 17px; width: 11px; height: 11px; box-sizing: border-box;
+  border-radius: 50%; background: var(--sg-panel); border: 2px solid var(--sg-thin);
+}
+:root[data-theme="signal"] .sc-row::after { content: ""; position: absolute; left: -11px; top: 22px; width: 17px; height: 1px; background: var(--sg-thin); }
+:root[data-theme="signal"] .sc-row.on::before {
+  border: 0;
+  background: radial-gradient(circle at 40% 35%, var(--sg-lamp-core) 0 18%, var(--sg-lamp-hot) 55%, var(--sg-lamp-edge) 100%);
+  box-shadow: 0 0 6px 1px var(--sg-lamp-hot), 0 0 14px 3px var(--sg-lamp-glow);
+}
+:root[data-theme="signal"] .sc-main .fp-dot { display: none; }
+:root[data-theme="signal"] .sc-main { padding-left: 0; }
+:root[data-theme="signal"] .sc-main:hover { background: none; }
+:root[data-theme="signal"] .sc-name { font-weight: 500; color: var(--sg-mid); }
+:root[data-theme="signal"] .sc-row.on .sc-name { color: var(--sg-ink); }
+:root[data-theme="signal"] .sc-state {
+  color: var(--sg-accent); font: 400 10.5px var(--sg-font); letter-spacing: .14em; text-transform: uppercase;
+}
+:root[data-theme="signal"] .sc-chips { padding-left: 0; }
+:root[data-theme="signal"] .sc-off { border-style: dashed; color: var(--sg-dim); }
+:root[data-theme="signal"] .sc-recall, :root[data-theme="signal"] .sc-ico {
+  order: 4; display: inline-flex; align-items: center; width: auto; height: auto; min-height: var(--frame-tap);
+  padding: 0 14px; border-radius: 6px; border: 1px solid var(--sg-control);
+  background: linear-gradient(180deg, var(--sg-hover), var(--sg-panel));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); color: var(--sg-ink); font: 500 13px var(--sg-font);
+}
+:root[data-theme="signal"] .sc-recall:hover, :root[data-theme="signal"] .sc-ico:hover { border-color: var(--sg-mid); background: linear-gradient(180deg, var(--sg-hover), var(--sg-panel)); }
+:root[data-theme="signal"] .sc-ico svg { display: none; }
+:root[data-theme="signal"] .sc-word { display: inline; }
+:root[data-theme="signal"] .sc-ask { margin-left: 0; }
+:root[data-theme="signal"] .sc-say { border-color: var(--sg-accent); border-radius: 6px; background: var(--sg-hover); }
+
 /* keys, fields and the groups of the popups */
 :root[data-theme="signal"] :is(.fp, .ask) :is(.fi-btn, .ask-button) {
   border-radius: 6px; border: 1px solid var(--sg-control);

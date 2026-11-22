@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::Shared;
-use svolder_host::eq::{EqControl, EqView, Keep, LevelHint, PwCliSession};
+use svolder_host::eq::{ComputerPart, EqControl, EqView, Keep, LevelHint, PwCliSession, Recalled};
 use svolder_host::{Sink, SinkState};
 use svolder_ipc::HostEqOp;
 use svolder_ipc::host::{HostVolume, run_eq_op};
@@ -95,6 +95,16 @@ impl std::fmt::Display for EqRefusal {
             ),
         }
     }
+}
+
+/// Why a scene's computer part was not put on the computer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SceneRefusal {
+    /// The reason in words.
+    pub(crate) words: String,
+    /// Whether the computer's part differs from what it was before the recall began: the recall
+    /// failed after it changed something that was not put back.
+    pub(crate) changed: bool,
 }
 
 /// The most points the EQ view says there can be when no controller runs.
@@ -383,6 +393,32 @@ impl Computer {
                     .await
                     .map_err(|e| e.to_string())?)
             }
+        }
+    }
+
+    /// The computer's part of a scene as it plays now (what the controller states, never the
+    /// level a hold keeps the chain at), taken under the controller's lock.
+    pub(super) async fn scene_part(&self) -> Result<ComputerPart, String> {
+        Ok(self.control()?.lock().await.computer_part())
+    }
+
+    /// Put a scene's computer part on the computer as one change, under the controller's lock.
+    /// A refusal is the controller's words, and says whether the computer's part is nevertheless
+    /// not what it was before (a recall that failed after it began to change things and could not
+    /// put everything back): the part is read under the same lock, before and after.
+    pub(super) async fn scene_recall(&self, part: ComputerPart) -> Result<Recalled, SceneRefusal> {
+        let words = |why: String| SceneRefusal {
+            words: why,
+            changed: false,
+        };
+        let mut control = self.control().map_err(words)?.lock().await;
+        let before = control.computer_part();
+        match control.recall(part).await {
+            Ok(recalled) => Ok(recalled),
+            Err(failure) => Err(SceneRefusal {
+                words: failure.to_string(),
+                changed: control.computer_part() != before,
+            }),
         }
     }
 

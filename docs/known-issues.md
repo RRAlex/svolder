@@ -277,13 +277,13 @@ that branch rather than listed here.
   sign-on cannot validate tokens yet: `McpAuth` is the seam a later `auth = "oidc"` would fill
   (`bins/svolderd/src/mcp.rs`).
 - [trade-off] **A mode and a band sent together can leave the band unheard.** A band command from
-  Home Assistant or the web page, answered while the tone control reads `flat`, switches it to
-  `eq` unless a mode command arrived after the band. When a `flat` sent before the band is still
-  on its way to the device as the band is answered — the two held during a preset recall and
-  released together, or published back to back by a script or a scene — the switch is skipped:
+  Home Assistant or the web page, answered while the tone control reads `flat`, switches it to `eq`
+  unless a mode command arrived after the band. When a `flat` sent before the band is still on its
+  way to the device as the band is answered — the two held during a preset recall and released
+  together, or published back to back by a script or a Home Assistant scene — the switch is skipped:
   the device ends in that `flat`, with the band written but not heard. Queuing the switch behind
-  that mode write would close this; it is left because this way round never overrides a mode
-  asked for later (`bins/svolderd/src/writer.rs`, `bins/svolderd/src/web/writes/tone.rs`).
+  that mode write would close this; it is left because this way round never overrides a mode asked
+  for later (`bins/svolderd/src/writer.rs`, `bins/svolderd/src/web/writes/tone.rs`).
 - [trade-off, 0.28.0] **A player that rewrites one cover file for every track keeps the first
   picture.** The daemon reads a cover once for each `mpris:artUrl` and keeps it while the address
   stays the same, so a player that writes every track's art to the same path shows the first
@@ -395,10 +395,6 @@ that branch rather than listed here.
   bits below the top 24, a float stream's bits beyond the sink, or anything past the sink's
   converter (ALSA `hw`, the USB driver, the DAC). The words say so
   (`crates/svolder-ipc/src/host/path.rs`, `setup.rs`).
-- [limit] **A pro-audio sink's AUX channels against a stereo stream read `channels remapped`.** An
-  `AUX0 AUX1` sink fed an `FL FR` stream is called changed, though PipeWire may copy the channels
-  one to one; it is to be settled with a capture (`crates/svolder-ipc/src/host/path.rs`,
-  `channel_words`).
 - [limit] **A stream rate missing from `clock.allowed-rates`, into a sink fixed at the stream's
   rate, may hide a resample.** The path line does not name it; the config check's `rates` line fails
   it (`crates/svolder-ipc/src/host/path.rs`, `computer_hop`).
@@ -421,10 +417,48 @@ that branch rather than listed here.
   web page and Home Assistant read `not_this_dac` for such a sink
   (`crates/svolder-ipc/src/host/setup.rs`, `crates/svolder-ipc/src/host/path.rs`,
   [host-config-check.md](design/host-config-check.md)).
+- [limit] **Home Assistant's path sensor does not add the DAC's own stage.** Its state is the
+  path up to the DAC's input (`verdict`), so it reads `untouched` while the DAC is at -3 dB or has
+  its tone control on, where the terminal and the web page colour the Path label yellow from
+  `end_to_end`; the key is in MCP, `svolder host check --json` and the web model only
+  (`bins/svolderd/src/mqtt_bridge/computer.rs`).
 - [limit] **A DAC that has not connected since svolderd started is not recognised as the sink's
   DAC.** Its profile comes with its first connection, so the Home Assistant path sensor reads
   `not_this_dac` and the PipeWire config sensor reads unknown until it connects: never a false OK
   (`bins/svolderd/src/mqtt_bridge/computer.rs`).
+- [limit] **A DAC that two daemons both serve shows under the last to announce it.** Two computers
+  on one broker each have their own Home Assistant device, but a DAC has one unit id, so when both
+  daemons serve it there is one device, shown under whichever daemon announced it last; svolder does
+  nothing special for it (`bins/svolderd/src/mqtt_bridge/computer.rs`).
+- [limit] **An older daemon loses its `This computer` device whenever a newer one starts or
+  reconnects.** The newer daemon clears the old `This computer` discovery topics each time it
+  connects, so an older daemon on the same broker has its computer device removed again; upgrade
+  every daemon on one broker together (`bins/svolderd/src/mqtt_bridge/computer.rs`).
+- [limit] **Two host names that differ only in case or punctuation share one Home Assistant id.**
+  `Desk` and `desk`, or `my-desk` and `my_desk`, make the same `svolder_computer_` id and so one
+  device (`crates/svolder-mqtt/src/topics.rs`, `host_id`).
+- [limit] **`dashboard.yaml` names the computer `reframe`.** A static dashboard file cannot know the
+  host name, so `switch.reframe_eq` there is a placeholder to replace; the `custom:svolder` strategy
+  finds the computer by itself (`contrib/home-assistant/dashboard.yaml`).
+- [limit] **Home Assistant cannot answer the both-sides question of a scene recall.** A recall that
+  would play one preset on a DAC and on the computer at once is a question the scene select cannot
+  answer: the bridge logs it, puts the daemon's words in the select's `outcome` and changes nothing;
+  recall that scene from the TUI, the web page, the CLI or MCP. The `outcome` and `saved` attributes
+  are the last answers made through Home Assistant and are lost on a daemon restart
+  (`bins/svolderd/src/mqtt_bridge/scenes.rs`).
+- [limit] **A scene recall rebuilds the chain when it needs another speakers set or a stage the
+  running chain lacks.** Live updates being off, a crossfeed, speakers or loudness stage the running
+  chain lacks, a config-held crossfeed or speakers stage going off, and another virtual speakers set
+  all make the recall one apply, as turning that on by hand does, so a player that is playing may
+  pause briefly; every other recall goes live. Only the set's rebuild adds a note to the recall's
+  answer (`crates/svolder-host/src/eq/control/scene.rs`, `recall_needs_rebuild`).
+- [limit] **The Home Assistant cards draw a few things from less than the device has.** The
+  faceplate's link strip has no signal sparkline (the cards read only `hass.states`, which holds no
+  history); the EQ card draws every band as a peaking filter, so a device whose end bands are
+  shelves has a slightly different real curve, and reads the preamp from an `eq_preamp` or `preamp`
+  number only if the strategy finds one (svolder announces none); the chain card's Crossfeed level
+  is the preset select, since svolder announces no numeric crossfeed level
+  (`contrib/home-assistant/svolder/cards/faceplate.js`, `eq.js`, `chain.js`).
 - [observed] **PipeWire can play a half-applied filter for one quantum after a live update.**
   PipeWire's filter chain applies a live control update one value at a time, and nothing stops the
   audio thread from playing in between. Rarely (measured about 1 in 6,000 risky updates on PipeWire
@@ -435,8 +469,8 @@ that branch rather than listed here.
     computer's side, or loudness turned off, while loudness plays at a depth: +31 to +43 dB in the
     bass measured, up to +50 dB worked out;
   - the end of a loudness glide back to flat: +29 dB in the bass measured;
-  - adding or removing a computer EQ point, a live preset recall that changes the number of points,
-    the EQ turned on or off live: an unstable filter or full scale measured;
+  - adding or removing a computer EQ point, a live preset recall or a scene recall that changes the
+    number of points, the EQ turned on or off live: an unstable filter or full scale measured;
   - dragging an existing point: up to about +17 dB worked out, not measured;
   - switching the virtual speakers or crossfeed: up to about 6 dB worked out.
 
@@ -444,8 +478,13 @@ that branch rather than listed here.
   since they began (0.35), so v0.36.7 has it. svolder cannot close it without giving up live updates
   or a much larger redesign; the fix belongs in PipeWire. The order in which svolder sends a stage's
   values keeps every whole section quiet, and the preamp lab proves that; it cannot see a tear
-  inside one section (`crates/svolder-host/src/eq/control/ld.rs`, `ld_line`;
-  `crates/svolder-host/src/eq/live.rs`).
+  inside one section. A line that changes points and a stage that costs less goes stage first, and
+  while the node may hold the loaded config's slots the preamp is held low for both orders, so a
+  lone crossfeed change keeps the slots-first order. The repair line a dying `pw-cli` leaves
+  (`Outbox::line`) carries every port in the caller's order and the rest after, so its preamp
+  placement is not the controller's, and the lab skips it by name
+  (`crates/svolder-host/src/eq/control/ld.rs`, `ld_line`; `crates/svolder-host/src/eq/live.rs`,
+  `crates/svolder-host/src/eq/control.rs`, `send_dirty_once`).
 - [trade-off] **With no identified player the computer's hop skips the width, channel and
   stream-filter words.** The player hop already says unknown, so the later words would only repeat
   it (`crates/svolder-ipc/src/host/path.rs`, `computer_hop`).
@@ -457,6 +496,13 @@ that branch rather than listed here.
   not the stream's, on every surface, so a 16-bit stream through an S16LE sink that is exact still
   reads `PipeWire config changes the sound: 1` while the path says `untouched`
   (`crates/svolder-ipc/src/host/setup.rs`, `format_line`).
+- [trade-off] **A scene of crossfeed or virtual speakers alone, recalled over a hotter chain while a
+  stream plays, keeps the held level.** With the EQ off in the scene, the chain's preamp stays at
+  the level held for the stream until the next apply, with no `LEVEL_HELD_NOTE`; the lift is the
+  EQ's, as when the EQ is turned off by hand (`crates/svolder-host/src/eq/control/scene.rs`).
+- [trade-off] **A scene with crossfeed or virtual speakers on reads as no scene after a daemon
+  restart.** Those stages never stay on across a restart, so the computer part no longer matches
+  until the scene is recalled again (`crates/svolder-ipc/src/config/scenes/on.rs`).
 
 ### CLI
 
@@ -546,6 +592,21 @@ that branch rather than listed here.
   rows and a device's own edits write `config.toml` in the TUI's own process and then ask the
   daemon to reload (`bins/svolder/src/tui/run/connect.rs:227`,
   `bins/svolder/src/tui/run/look.rs:267`, `bins/svolder/src/tui/run/devices.rs:206`).
+- [bug] **On an amp in the tall tier the Controls rows can re-space when the level graphs
+  change.** The graphs sit above or below the Host group by whether the meters stream, so when the
+  meters stall and nothing is captured the pane can lay out differently, and a mouse wheel resting
+  on Volume then lands on Balance. On a DAC the host graph (capture starting or stopping) changes
+  the height by three rows and can do the same on a tight terminal height. Only the wheel is
+  affected, not the keys (`bins/svolder/src/tui/screens/device/controls.rs`, `graph_source`,
+  `meter_graphs`).
+- [bug] **A cover takes the blank line before the Path row at 100x45 and larger.** A track with
+  cover art takes the spare rows, so the Path row moves up one line, and a pointer resting on its
+  last line then sits on the Spectrum row after the next track, which has no cover
+  (`bins/svolder/src/tui/screens/device/art.rs`, `controls.rs` `Gap::Path`).
+- [bug] **The Path row's room is reserved only while the daemon has sent a host view.** After a
+  link drop or a daemon restart the pane is laid out without it, and when the first host view
+  arrives the pane can re-pack at 80x24, so a wheel on Volume moves to Balance for one notch
+  (`bins/svolder/src/tui/screens/device/controls.rs`, `lines_reserving`).
 - [limit] **A key pressed in the instant the terminal is resized can be lost.** The first key
   after the window is grown or shrunk, or after a run of Esc presses closes boxes, such as a `q` or
   Ctrl-C, can go unread until the next input (a second press reads both), and a frame at the old
@@ -662,12 +723,15 @@ that branch rather than listed here.
   it as the whole configuration, dropping every device (`bins/svolder/src/tui/run/`).
 
 - [limit] **The path line counts the DAC's tone control as shaping whenever it is on.** A tone mode
-  of EQ or loudness is named as the DAC shaping the sound even with every band at 0 dB, and the
-  verdict stays `untouched` while the DAC lowers the volume: the DAC's stage is its own clause after
-  the verdict (`crates/svolder-ipc/src/host/path.rs`, `DacStage`).
-- [trade-off] **A long Path row scrolls its config chip with it.** With `scroll_long_lines` on (the
-  default) a Path row wider than its room scrolls and the chip is in sight only part of the time;
-  with scrolling off the verdict is cut with `…` so the chip stays whole. `k` always opens the box
+  of EQ or loudness is named as the DAC shaping the sound even with every band at 0 dB, so the
+  Path row's label is yellow and `end_to_end` reads `changed`; the `verdict` stays `untouched`
+  while the DAC lowers the volume: the DAC's stage is its own clause after the verdict
+  (`crates/svolder-ipc/src/host/path.rs`, `DacStage`).
+- [trade-off] **On a very narrow pane the Path row's `config N` tag can scroll out of sight.** Each
+  line wraps first, and the values line, which holds the tag, wraps alone before it is cut; only
+  when even the values do not fit in the pane's rows, with `scroll_long_lines` on (the default),
+  both lines scroll and the tag is in sight only part of the time. With scrolling off the tag is
+  kept whole and the rest is cut with `…`, and `k` always opens the box
   (`bins/svolder/src/tui/screens/device/controls.rs`, `path_rows`).
 
 ### Web UI
@@ -766,10 +830,6 @@ that branch rather than listed here.
   input chips beside the key, an amp's gauges beside it and a phone held sideways (landscape) with
   the key have been measured by the checks only, never looked at
   (`bins/svolderd/web/themes/nightdrive/draw/dash.js`).
-- [limit] **Below 1280 px with the visualizer on, the config chip pushes the last hops of a changed
-  path into the dots chip.** One of three hops at 820 px and two at 1100 px move there; the hops
-  stay in the verdict's words and the dots chip's tooltip, and `playing.py` pins the counts
-  (`bins/svolderd/web/themes/ember`, `signal`).
 - [limit] **On a phone Paper's moved notes stand outside `#p-notes`, and a redraw while the config
   chip has focus drops the focus.** The popup's Escape returns to the chip by its id, `p-config`
   (`bins/svolderd/web/themes/paper`).
@@ -815,6 +875,17 @@ that branch rather than listed here.
 
 ### Daemon and IPC
 
+- [bug] **A volume glide that waits can be judged from an old volume reading.** A glide to 99 and a
+  relative step wait behind a write that is stuck, after the volume was last read at 111; if the
+  knob on the device is turned down to 51 just before the next command goes out, the glide still
+  counts the volume as 111, so 99 looks like a lowering and is sent at once, and the device, now at
+  54, jumps to 99. The rule (above three quarters of the range, at most 3 steps over the level since
+  the last answer) allows 57 there. The volume never goes above the level it had before the knob
+  turn (111 here), but it can come back up from what the knob was turned to. It needs a knob turn at
+  the device in the same short window as a waiting glide, so it is rare, and the writer was the same
+  before scenes; the writer lab's seed 838 of its scenes variant draws it, 10 of 10 runs. Judging a
+  waiting glide again from the readings when it is sent would close it
+  (`bins/svolderd/src/writer.rs`, `glide`).
 - [bug] **A probe dropped unfinished starts no actor until the next reload.** A probe future dropped
   by a runtime shutdown frees the slot but does not start the device's actor; one whose `Shutdown`
   is not answered within `SHUTDOWN_DEADLINE` also leaves the slot, so the walk's writes go on and
@@ -1361,3 +1432,8 @@ that branch rather than listed here.
 - [test] **`doctor`'s PipeWire config row has no test of its wiring.** `config_row` and `route_on`
   are tested; the call in `outcomes_over` that feeds the row from the probed daemon is not
   (`bins/svolder/src/commands/doctor.rs`).
+- [test] **The held-level case of a scene recall is not in host-e2e.** Phase SC recalls scenes on a
+  live chain under a player, but not a recall while the chain starts on a deep curve (the held level
+  of a recall, with `LEVEL_HELD_NOTE`); the controller's unit tests hold it, and the optional
+  no-answer and no-volume checks of its second recall are not made (`scripts/host-e2e/analyse.py`,
+  `scripts/host-e2e/run.sh`).

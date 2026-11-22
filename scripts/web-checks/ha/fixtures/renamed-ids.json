@@ -1,0 +1,470 @@
+{
+ "licence_1": "SPDX-FileCopyrightText: 2026 the svolder authors",
+ "licence_2": "SPDX-License-Identifier: GPL-3.0-or-later",
+ "hass": {
+  "devices": {
+   "c1": {
+    "id": "c1",
+    "identifiers": [
+     [
+      "mqtt",
+      "svolder_computer_reframe"
+     ]
+    ],
+    "name": "reframe",
+    "name_by_user": null,
+    "via_device_id": null,
+    "manufacturer": "svolder"
+   },
+   "d1": {
+    "id": "d1",
+    "identifiers": [
+     [
+      "mqtt",
+      "svolder_0102030405060708"
+     ]
+    ],
+    "name": "Bifrost 3",
+    "name_by_user": null,
+    "via_device_id": "c1",
+    "manufacturer": "svolder"
+   }
+  },
+  "entities": {
+   "switch.renamed_32": {
+    "entity_id": "switch.renamed_32",
+    "name": "EQ",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "sensor.renamed_26": {
+    "entity_id": "sensor.renamed_26",
+    "name": "EQ preset",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "switch.renamed_33": {
+    "entity_id": "switch.renamed_33",
+    "name": "Loudness",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_17": {
+    "entity_id": "number.renamed_17",
+    "name": "Loudness strength",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "switch.renamed_31": {
+    "entity_id": "switch.renamed_31",
+    "name": "Crossfeed",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "select.renamed_21": {
+    "entity_id": "select.renamed_21",
+    "name": "Crossfeed preset",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "switch.renamed_34": {
+    "entity_id": "switch.renamed_34",
+    "name": "Virtual speakers",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "select.renamed_23": {
+    "entity_id": "select.renamed_23",
+    "name": "Virtual speakers set",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "sensor.renamed_27": {
+    "entity_id": "sensor.renamed_27",
+    "name": "Path",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "binary_sensor.renamed_4": {
+    "entity_id": "binary_sensor.renamed_4",
+    "name": "PipeWire config",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "select.renamed_22": {
+    "entity_id": "select.renamed_22",
+    "name": "Scene",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "text.renamed_35": {
+    "entity_id": "text.renamed_35",
+    "name": "Scene save",
+    "device_id": "c1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_16": {
+    "entity_id": "number.renamed_16",
+    "name": "Volume",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_5": {
+    "entity_id": "number.renamed_5",
+    "name": "Balance",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "select.renamed_19": {
+    "entity_id": "select.renamed_19",
+    "name": "Input",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "select.renamed_20": {
+    "entity_id": "select.renamed_20",
+    "name": "Tone control mode",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "select.renamed_18": {
+    "entity_id": "select.renamed_18",
+    "name": "EQ preset",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_15": {
+    "entity_id": "number.renamed_15",
+    "name": "Loudness strength",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "switch.renamed_28": {
+    "entity_id": "switch.renamed_28",
+    "name": "Mute",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "switch.renamed_29": {
+    "entity_id": "switch.renamed_29",
+    "name": "NOS filter",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "switch.renamed_30": {
+    "entity_id": "switch.renamed_30",
+    "name": "Phase invert",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "binary_sensor.renamed_2": {
+    "entity_id": "binary_sensor.renamed_2",
+    "name": "USB 1 connected",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "binary_sensor.renamed_3": {
+    "entity_id": "binary_sensor.renamed_3",
+    "name": "USB 2 connected",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "binary_sensor.renamed_1": {
+    "entity_id": "binary_sensor.renamed_1",
+    "name": "S/PDIF locked",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "binary_sensor.renamed_0": {
+    "entity_id": "binary_sensor.renamed_0",
+    "name": "Link",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "sensor.renamed_25": {
+    "entity_id": "sensor.renamed_25",
+    "name": "Sample rate",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_7": {
+    "entity_id": "number.renamed_7",
+    "name": "Band 1 gain",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_6": {
+    "entity_id": "number.renamed_6",
+    "name": "Band 1 frequency",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_8": {
+    "entity_id": "number.renamed_8",
+    "name": "Band 1 q",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_10": {
+    "entity_id": "number.renamed_10",
+    "name": "Band 2 gain",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_9": {
+    "entity_id": "number.renamed_9",
+    "name": "Band 2 frequency",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_11": {
+    "entity_id": "number.renamed_11",
+    "name": "Band 2 q",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_13": {
+    "entity_id": "number.renamed_13",
+    "name": "Band 3 gain",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_12": {
+    "entity_id": "number.renamed_12",
+    "name": "Band 3 frequency",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "number.renamed_14": {
+    "entity_id": "number.renamed_14",
+    "name": "Band 3 q",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": null,
+    "hidden": false
+   },
+   "sensor.renamed_24": {
+    "entity_id": "sensor.renamed_24",
+    "name": "Firmware",
+    "device_id": "d1",
+    "platform": "mqtt",
+    "entity_category": "diagnostic",
+    "hidden": false
+   }
+  },
+  "states": {
+   "switch.renamed_32": {
+    "entity_id": "switch.renamed_32",
+    "state": "on"
+   },
+   "sensor.renamed_26": {
+    "entity_id": "sensor.renamed_26",
+    "state": "on"
+   },
+   "switch.renamed_33": {
+    "entity_id": "switch.renamed_33",
+    "state": "on"
+   },
+   "number.renamed_17": {
+    "entity_id": "number.renamed_17",
+    "state": "on"
+   },
+   "switch.renamed_31": {
+    "entity_id": "switch.renamed_31",
+    "state": "on"
+   },
+   "select.renamed_21": {
+    "entity_id": "select.renamed_21",
+    "state": "on"
+   },
+   "switch.renamed_34": {
+    "entity_id": "switch.renamed_34",
+    "state": "on"
+   },
+   "select.renamed_23": {
+    "entity_id": "select.renamed_23",
+    "state": "on"
+   },
+   "sensor.renamed_27": {
+    "entity_id": "sensor.renamed_27",
+    "state": "on"
+   },
+   "binary_sensor.renamed_4": {
+    "entity_id": "binary_sensor.renamed_4",
+    "state": "on"
+   },
+   "select.renamed_22": {
+    "entity_id": "select.renamed_22",
+    "state": "on"
+   },
+   "text.renamed_35": {
+    "entity_id": "text.renamed_35",
+    "state": "on"
+   },
+   "number.renamed_16": {
+    "entity_id": "number.renamed_16",
+    "state": "on"
+   },
+   "number.renamed_5": {
+    "entity_id": "number.renamed_5",
+    "state": "on"
+   },
+   "select.renamed_19": {
+    "entity_id": "select.renamed_19",
+    "state": "on"
+   },
+   "select.renamed_20": {
+    "entity_id": "select.renamed_20",
+    "state": "on"
+   },
+   "select.renamed_18": {
+    "entity_id": "select.renamed_18",
+    "state": "on"
+   },
+   "number.renamed_15": {
+    "entity_id": "number.renamed_15",
+    "state": "on"
+   },
+   "switch.renamed_28": {
+    "entity_id": "switch.renamed_28",
+    "state": "on"
+   },
+   "switch.renamed_29": {
+    "entity_id": "switch.renamed_29",
+    "state": "on"
+   },
+   "switch.renamed_30": {
+    "entity_id": "switch.renamed_30",
+    "state": "on"
+   },
+   "binary_sensor.renamed_2": {
+    "entity_id": "binary_sensor.renamed_2",
+    "state": "on"
+   },
+   "binary_sensor.renamed_3": {
+    "entity_id": "binary_sensor.renamed_3",
+    "state": "on"
+   },
+   "binary_sensor.renamed_1": {
+    "entity_id": "binary_sensor.renamed_1",
+    "state": "on"
+   },
+   "binary_sensor.renamed_0": {
+    "entity_id": "binary_sensor.renamed_0",
+    "state": "on"
+   },
+   "sensor.renamed_25": {
+    "entity_id": "sensor.renamed_25",
+    "state": "on"
+   },
+   "number.renamed_7": {
+    "entity_id": "number.renamed_7",
+    "state": "on"
+   },
+   "number.renamed_6": {
+    "entity_id": "number.renamed_6",
+    "state": "on"
+   },
+   "number.renamed_8": {
+    "entity_id": "number.renamed_8",
+    "state": "on"
+   },
+   "number.renamed_10": {
+    "entity_id": "number.renamed_10",
+    "state": "on"
+   },
+   "number.renamed_9": {
+    "entity_id": "number.renamed_9",
+    "state": "on"
+   },
+   "number.renamed_11": {
+    "entity_id": "number.renamed_11",
+    "state": "on"
+   },
+   "number.renamed_13": {
+    "entity_id": "number.renamed_13",
+    "state": "on"
+   },
+   "number.renamed_12": {
+    "entity_id": "number.renamed_12",
+    "state": "on"
+   },
+   "number.renamed_14": {
+    "entity_id": "number.renamed_14",
+    "state": "on"
+   },
+   "sensor.renamed_24": {
+    "entity_id": "sensor.renamed_24",
+    "state": "on"
+   }
+  }
+ }
+}

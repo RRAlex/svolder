@@ -6,8 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Device verbs
 
 The device verbs: `doctor`, `setup`, `devices`, `add`, `remove`, `hops`, `passphrase`, `scan`,
-`inspect`, `status`, `get`, `set`, `preset`, `watch`, `host`, `raw`, `decode` and `profiles`. Back
-to the [usage index](README.md).
+`inspect`, `status`, `get`, `set`, `preset`, `scene`, `watch`, `host`, `raw`, `decode` and
+`profiles`. Back to the [usage index](README.md).
 
 ## doctor
 
@@ -963,6 +963,272 @@ svolder: no built-in setting named Nope; the settings are: Flat, Bass Boost, Tre
 
 A device already on the setting sends nothing and says `svolder: Flat is already on`.
 
+## scene
+
+Save, recall, list, rename and delete scenes: the sound settings of the whole config under a name.
+A scene holds the computer's EQ, loudness, crossfeed and virtual speakers and, for each device that
+was connected when it was saved, its tone control and plain sound settings (input, phase, NOS,
+balance and the like). No volume, gain, mute or power is saved or recalled. The daemon keeps scenes
+([the design](../design/scenes.md)), so every verb but `list` and `show` needs a running daemon.
+`svolder scene` with no verb is `scene list`.
+
+```
+List, save, load, rename or delete scenes of sound settings
+
+Usage: svolder scene [OPTIONS] [COMMAND]
+
+Commands:
+  list    List the scenes and which one is on (what no verb does)
+  show    Show one scene: which parts it holds and which one is on
+  save    Save the sound settings as they are now as a scene: the computer's and every connected device's. No volume, gain, mute or power is saved
+  load    Recall a scene onto the computer and every connected device that has a part in it
+  rename  Rename a scene, leaving what it holds as it is
+  delete  Delete a scene
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the answer as one JSON object instead of text
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+An old daemon that does not know scenes exits 7 with a line that says so (no request is sent to it).
+
+### scene list
+
+List the scenes, one line each: a `*` marks the one that is on, and the parts follow, `computer` and
+each device by its configured name, with `(not connected)` after a device that is away. With
+`--json` the answer is one object, `{"scenes":[{"name","parts":[{"who","present"}]}],"on","recalled",
+"known"}`: `on` is absent while no scene is on or while that is not known yet, `recalled` is the scene
+last recalled, and `known` is false while a device is still reading a setting that could change
+which scene is on.
+
+```
+List the scenes and which one is on (what no verb does)
+
+Usage: svolder scene list [OPTIONS]
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the answer as one JSON object instead of text
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example, over the fake device:
+
+```
+$ svolder scene list
+* Late night  computer · Desk DAC
+  Desk  computer · Desk DAC
+```
+
+With no daemon running, `list` and `show` read the config instead, and say so on stderr: the parts
+are named as the daemon names them, no scene is marked on, no `(not connected)` is said (nothing is
+connected), and `--json` gives `{"scenes":[{"name","parts":[{"who"}]}],"known":false}`:
+
+```
+$ svolder scene list
+Late night  computer · Desk DAC
+svolder: read from the config, with no daemon running: which scene is on is not known
+```
+
+### scene show
+
+Show one scene by name, without regard to case: the parts it holds, and `(on)` after the name while
+it is the scene that is on. A line says so while which scene is on is not known yet. With `--json`
+the answer is the scene's row plus `on` and `known` (the bare row, with neither, when read from the
+config with no daemon), which is also how one scene is read out for a script.
+
+```
+Show one scene: which parts it holds and which one is on
+
+Usage: svolder scene show [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The scene's name, in any case
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the answer as one JSON object instead of text
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example:
+
+```
+$ svolder scene show "late night"
+Late night (on)
+  computer
+  Desk DAC
+```
+
+### scene save
+
+Save the sound settings as they are now, the computer's and those of every connected device. A name
+the config already has is refused (exit 1, `a scene named "Desk" is already configured`) unless
+`--force`, which saves over that scene. The names follow the preset rule: trimmed, at most 40
+characters, compared without regard to case, and `custom` is reserved. A device that is configured
+but not connected is not in the scene, and the answer names it as a note
+(`Hall is not connected: it is not in the scene`). The daemon refuses a save in words while a
+device is still reading its settings or applying a change.
+
+```
+Save the sound settings as they are now as a scene: the computer's and every connected device's. No volume, gain, mute or power is saved
+
+Usage: svolder scene save [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The name to save it under
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --force                  Save over a scene of that name
+      --json                   Print the answer as one JSON object instead of text
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example:
+
+```
+$ svolder scene save "Late night"
+Saved "Late night".
+$ svolder scene save "Late night"
+svolder: config: a scene named "Late night" is already configured. See `svolder --help`
+$ svolder scene save "Late night" --force
+Saved "Late night".
+```
+
+### scene load
+
+Recall a scene by name: the computer's part and each connected device's, at once, each in its own
+safe order. A recall prints one line per part, `who: status`, with the daemon's notes under it, and
+the statuses are `done` (every setting was set), `partial` (some were not: the notes name them),
+`left` (a device that is not connected keeps what it has, or a part was refused before anything
+changed) and `failed` (it started and did not finish). Nothing is rolled back. The exit code is 0
+when every part is `done` or `left`, and 3 when any part is `partial` or `failed`.
+
+A scene that would play one preset on a device and on the computer at once asks first. At a terminal
+the question is printed and answered `[y/N]`; `--yes` answers it and prints the question as a note;
+with no terminal and no `--yes` the recall is refused with the question and `Pass --yes`, and a no
+says `nothing changed` and exits 0. Yes recalls the scene as it was saved.
+
+```
+Recall a scene onto the computer and every connected device that has a part in it
+
+Usage: svolder scene load [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The scene's name, in any case
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the answer as one JSON object instead of text
+      --yes                    Answer yes to the question asked when the scene plays a preset on a device and on the computer at once
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example:
+
+```
+$ svolder scene load "late night"
+Recalled "Late night".
+computer: done
+Desk DAC: done
+$ svolder scene load Nope
+svolder: no scene named "Nope". See `svolder --help`
+```
+
+### scene rename
+
+Rename a scene, leaving what it holds as it is. The new name follows the same rule as a save's, and
+a name another scene has is refused. If the scene is the one last recalled, the daemon's memory of it
+follows the new name.
+
+```
+Rename a scene, leaving what it holds as it is
+
+Usage: svolder scene rename [OPTIONS] <OLD> <NEW>
+
+Arguments:
+  <OLD>  Its name now
+  <NEW>  The name it takes
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the answer as one JSON object instead of text
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example:
+
+```
+$ svolder scene rename Desk Work
+Renamed "Desk" to "Work".
+```
+
+### scene delete
+
+Delete a scene. The name is looked up first, then at a terminal it asks `Delete scene "Movie"? [y/N]`
+and a no exits 1. `--yes` skips the question; with no terminal and no `--yes` it refuses (exit 1,
+`refusing to delete a scene without confirmation; pass --yes`).
+
+```
+Delete a scene
+
+Usage: svolder scene delete [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The scene's name
+
+Options:
+  -d, --device <DEVICE>        Device selector: a unit-id prefix or a product name. Optional with one device
+      --json                   Print the answer as one JSON object instead of text
+      --yes                    Skip the confirmation prompt
+      --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
+      --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
+      --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+  -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
+  -h, --help                   Print help
+```
+
+Example:
+
+```
+$ svolder scene delete Work
+svolder: refusing to delete a scene without confirmation; pass --yes
+$ svolder scene delete Work --yes
+Deleted "Work".
+```
+
+The exit codes of the scene verbs are the device verbs' ([exit-codes.md](exit-codes.md)): 1 for a
+refusal (a taken or missing name, a bad name, no confirmation), 3 for a daemon that is not running
+(``scenes are kept by the daemon, and none is running. Start it with `svolder daemon install`, then
+try again``) and for a recall with a `partial` or `failed` part, 7 for a daemon without scenes.
+
 ## watch
 
 Connect to a device, print the refresh snapshot, then print every status the device reports as it
@@ -1338,16 +1604,21 @@ codes](exit-codes.md)); with a daemon's route printed the exit is 0.
 
 ```
 {"sink":"Bifrost 3",
- "path":{"verdict":"untouched","words":["untouched"],"sentence":"...","dac":"Bifrost 3"},
+ "path":{"verdict":"untouched","end_to_end":"untouched","words":["untouched"],"sentence":"...",
+         "dac":"Bifrost 3"},
  "config":{"sink":"Bifrost 3","outcome":"untouched",
            "summary":"PipeWire config lets it through untouched",
            "limit":"...","lines":[{"key":"rates","outcome":"pass","words":"..."}, ...]}}
 ```
 
-The keys are the same on every JSON surface of svolder (the web card, MCP, Home Assistant; the
-top-level `sink` is kept for scripts, and `path.dac` is null when only the computer's side was
-judged, see above): the path `verdict` is `untouched`, `changed`, `not_this_dac`, `other_input` or
-`unknown`; `words` is a list; the config `outcome` is `untouched`, `changes`, `unread`, `not_read`
+The keys are the same on every JSON surface of svolder but Home Assistant, which has no
+`end_to_end` in 0.38.1 (the web card, MCP; the top-level `sink` is kept for scripts, and `path.dac`
+is null when only the computer's side was judged, see above): the path `verdict` is `untouched`,
+`changed`, `not_this_dac`, `other_input` or `unknown`, and judges the path up to the DAC's input,
+as it always did; `end_to_end` takes the same five words and adds the DAC's own stage to the
+verdict, so a path that is `untouched` up to a DAC at -3 dB or with its tone control on reads
+`changed` end to end, and one that could not be read but has a known change at the DAC reads
+`changed` too; it is what the Path row's label is coloured from; `words` is a list; the config `outcome` is `untouched`, `changes`, `unread`, `not_read`
 or `other_version`; the lines' `key` is `rates`, `forced_rate`, `dither`, `format`, `plug`, `stereo`
 or `filter`, and each line's `outcome` is `pass`, `fail` or `unknown`. `limit` is the sentence of
 what the check cannot judge. `svolder doctor` shows the same check as a `PipeWire config` row, only
@@ -1667,7 +1938,7 @@ svolder: recording every frame for 2 s; press the device's buttons now (Ctrl-C e
 capture.txt
 $ head -4 capture.txt
 svolder capture
-svolder 0.37.2
+svolder 0.38.1
 taken 2026-10-23 07:33:02 UTC, frame window 2 s
 unit ids, passphrase bytes, the home directory and Bluetooth addresses are scrubbed (--keep-ids keeps them)
 $ grep -A5 '== adverts' capture.txt

@@ -300,6 +300,8 @@ async fn published_stand_at(profile_name: &str, port: u16) -> (BridgeTask, Stand
         retained_commands: BTreeSet::new(),
         presets: Vec::new(),
         computer: None,
+        scenes: None,
+        me: Computer::new("Reframe"),
     };
     let (handle, stand) = stand_device_on(profile_name, UNIT, "fake");
     task.track(UNIT.into(), &handle);
@@ -1503,6 +1505,7 @@ async fn with_computer_at(
         view: rx,
         switch: switch.clone(),
         slow: None,
+        scenes: None,
     });
     (task, tx, switch)
 }
@@ -1515,17 +1518,21 @@ fn computer_calls(switch: &RecordingSwitch) -> Vec<bool> {
 async fn on_applies_the_kept_points_and_off_removes() {
     let (mut task, _tx, switch) =
         with_computer(computer_view(false, Some("Warm"), -3.0), Ok(())).await;
-    task.message("svolder/computer/computer_eq/set", b"ON", false);
+    task.message("svolder/computer_reframe/computer_eq/set", b"ON", false);
     settle(&mut task).await;
     assert_eq!(computer_calls(&switch), [true]);
-    task.message("svolder/computer/computer_eq/set", b" off ", false);
+    task.message("svolder/computer_reframe/computer_eq/set", b" off ", false);
     settle(&mut task).await;
     assert_eq!(computer_calls(&switch), [true, false]);
     // Anything else, and any other key, is dropped.
-    task.message("svolder/computer/computer_eq/set", b"toggle", false);
-    task.message("svolder/computer/computer_eq/set", &[0xff], false);
-    task.message("svolder/computer/volume/set", b"50", false);
-    task.message("svolder/computer/computer_eq_preset/set", b"Warm", false);
+    task.message("svolder/computer_reframe/computer_eq/set", b"toggle", false);
+    task.message("svolder/computer_reframe/computer_eq/set", &[0xff], false);
+    task.message("svolder/computer_reframe/volume/set", b"50", false);
+    task.message(
+        "svolder/computer_reframe/computer_eq_preset/set",
+        b"Warm",
+        false,
+    );
     settle(&mut task).await;
     assert_eq!(computer_calls(&switch), [true, false]);
 }
@@ -1533,11 +1540,11 @@ async fn on_applies_the_kept_points_and_off_removes() {
 #[tokio::test]
 async fn on_with_nothing_kept_stays_off() {
     let (mut task, _tx, switch) = with_computer(computer_view(false, None, 0.0), Ok(())).await;
-    task.message("svolder/computer/computer_eq/set", b"ON", false);
+    task.message("svolder/computer_reframe/computer_eq/set", b"ON", false);
     settle(&mut task).await;
     assert!(computer_calls(&switch).is_empty());
     // OFF is still sent: it removes a chain the view does not know of.
-    task.message("svolder/computer/computer_eq/set", b"OFF", false);
+    task.message("svolder/computer_reframe/computer_eq/set", b"OFF", false);
     settle(&mut task).await;
     assert_eq!(computer_calls(&switch), [false]);
 }
@@ -1548,11 +1555,11 @@ async fn a_command_with_the_computer_unavailable_or_without_commands_does_nothin
     view.eq.as_mut().unwrap().unavailable =
         Some("computer controls unavailable: no pw-cli on this computer".into());
     let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
-    task.message("svolder/computer/computer_eq/set", b"ON", false);
+    task.message("svolder/computer_reframe/computer_eq/set", b"ON", false);
     let (mut off, _tx2, switch2) =
         with_computer(computer_view(false, Some("Warm"), -3.0), Ok(())).await;
     off.config.commands = false;
-    off.message("svolder/computer/computer_eq/set", b"ON", false);
+    off.message("svolder/computer_reframe/computer_eq/set", b"ON", false);
     settle(&mut task).await;
     settle(&mut off).await;
     assert!(computer_calls(&switch).is_empty());
@@ -1563,12 +1570,12 @@ async fn a_command_with_the_computer_unavailable_or_without_commands_does_nothin
 async fn a_retained_computer_command_is_not_acted_on() {
     let (mut task, _tx, switch) =
         with_computer(computer_view(false, Some("Warm"), -3.0), Ok(())).await;
-    task.message("svolder/computer/computer_eq/set", b"ON", true);
+    task.message("svolder/computer_reframe/computer_eq/set", b"ON", true);
     settle(&mut task).await;
     assert!(computer_calls(&switch).is_empty());
     assert!(
         task.retained_commands
-            .contains("svolder/computer/computer_eq/set")
+            .contains("svolder/computer_reframe/computer_eq/set")
     );
 }
 
@@ -1583,7 +1590,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
     assert_eq!(published.configs.len(), 4);
 
     tx.send_replace(computer_view(true, Some("custom"), -3.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(
         task.computer.as_ref().unwrap().state,
@@ -1591,7 +1598,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
     );
 
     tx.send_replace(computer_view(false, Some("custom"), -3.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(
         task.computer.as_ref().unwrap().state,
@@ -1602,7 +1609,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
     let mut view = computer_view(false, None, 0.0);
     view.eq.as_mut().unwrap().unavailable = Some("computer controls unavailable: x".into());
     tx.send_replace(view);
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.available, Some(false));
@@ -1610,7 +1617,7 @@ async fn the_computer_publishes_its_state_and_preset_and_follows_the_view() {
 
     // Host off: everything is taken down.
     tx.send_replace(svolder_ipc::host::HostView::default());
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert!(published.configs.is_empty() && published.available.is_none());
@@ -1649,18 +1656,16 @@ async fn the_crossfeed_is_announced_and_its_states_follow_the_view() {
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.configs.len(), 6);
-    assert!(
-        published
-            .configs
-            .contains_key("homeassistant/select/svolder_computer/computer_crossfeed_preset/config")
-    );
+    assert!(published.configs.contains_key(
+        "homeassistant/select/svolder_computer_reframe/computer_crossfeed_preset/config"
+    ));
     assert_eq!(
         published.crossfeed_state,
         Some(("ON", "Bauer · Chu Moy".to_string()))
     );
 
     tx.send_replace(crossfeed_computer_view(false, "meier", None));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(
         task.computer.as_ref().unwrap().crossfeed_state,
@@ -1669,7 +1674,7 @@ async fn the_crossfeed_is_announced_and_its_states_follow_the_view() {
 
     // A controller that no longer serves crossfeed takes its entities down, not the EQ's.
     tx.send_replace(computer_view(false, None, 0.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.configs.len(), 4);
@@ -1683,7 +1688,7 @@ async fn host_audio_off_clears_the_crossfeed_with_the_computer() {
     task.publish_computer();
     assert!(task.computer.as_ref().unwrap().crossfeed_state.is_some());
     tx.send_replace(svolder_ipc::host::HostView::default());
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert!(published.configs.is_empty() && published.crossfeed_state.is_none());
@@ -1696,15 +1701,23 @@ async fn crossfeed_commands_reach_the_controller_as_one_change_each() {
         Ok(()),
     )
     .await;
-    task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
-    task.message("svolder/computer/computer_crossfeed/set", b" off ", false);
     task.message(
-        "svolder/computer/computer_crossfeed_preset/set",
+        "svolder/computer_reframe/computer_crossfeed/set",
+        b"ON",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_crossfeed/set",
+        b" off ",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_crossfeed_preset/set",
         "Bauer · Chu Moy".as_bytes(),
         false,
     );
     task.message(
-        "svolder/computer/computer_crossfeed_preset/set",
+        "svolder/computer_reframe/computer_crossfeed_preset/set",
         b"Linkwitz",
         false,
     );
@@ -1740,12 +1753,16 @@ async fn custom_and_unknown_crossfeed_commands_change_nothing() {
     .await;
     for body in [&b"Custom"[..], b"custom", b"Bauer", b"nonsense", &[0xff]] {
         task.message(
-            "svolder/computer/computer_crossfeed_preset/set",
+            "svolder/computer_reframe/computer_crossfeed_preset/set",
             body,
             false,
         );
     }
-    task.message("svolder/computer/computer_crossfeed/set", b"toggle", false);
+    task.message(
+        "svolder/computer_reframe/computer_crossfeed/set",
+        b"toggle",
+        false,
+    );
     settle(&mut task).await;
     assert!(crossfeed_calls(&switch).is_empty());
 }
@@ -1769,9 +1786,13 @@ async fn a_crossfeed_command_the_host_cannot_take_does_nothing() {
         svolder_ipc::host::HostView::default(),
     ] {
         let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
-        task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
         task.message(
-            "svolder/computer/computer_crossfeed_preset/set",
+            "svolder/computer_reframe/computer_crossfeed/set",
+            b"ON",
+            false,
+        );
+        task.message(
+            "svolder/computer_reframe/computer_crossfeed_preset/set",
             b"Linkwitz",
             false,
         );
@@ -1780,9 +1801,17 @@ async fn a_crossfeed_command_the_host_cannot_take_does_nothing() {
     }
     let (mut task, _tx, switch) =
         with_computer(crossfeed_computer_view(false, "bauer", None), Ok(())).await;
-    task.message("svolder/computer/computer_crossfeed/set", b"ON", true);
+    task.message(
+        "svolder/computer_reframe/computer_crossfeed/set",
+        b"ON",
+        true,
+    );
     task.config.commands = false;
-    task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
+    task.message(
+        "svolder/computer_reframe/computer_crossfeed/set",
+        b"ON",
+        false,
+    );
     settle(&mut task).await;
     assert!(crossfeed_calls(&switch).is_empty());
 }
@@ -1795,7 +1824,11 @@ async fn a_refused_crossfeed_command_is_followed_by_the_views_state() {
     )
     .await;
     task.publish_computer();
-    task.message("svolder/computer/computer_crossfeed/set", b"ON", false);
+    task.message(
+        "svolder/computer_reframe/computer_crossfeed/set",
+        b"ON",
+        false,
+    );
     settle(&mut task).await;
     assert_eq!(crossfeed_calls(&switch), [(Some(true), None)]);
     // The refusal marks the computer for a publish, and the state stays the view's.
@@ -1812,12 +1845,12 @@ async fn a_refused_crossfeed_command_is_followed_by_the_views_state() {
 #[cfg(feature = "broker-tests")]
 fn left_over() -> [String; 4] {
     [
-        "homeassistant/switch/svolder_computer/computer_eq/config".to_string(),
-        "homeassistant/sensor/svolder_computer/computer_eq_preset/config".to_string(),
+        "homeassistant/switch/svolder_computer_reframe/computer_eq/config".to_string(),
+        "homeassistant/sensor/svolder_computer_reframe/computer_eq_preset/config".to_string(),
         // Announced only by a bridge that does not take commands: this one clears it.
-        "homeassistant/binary_sensor/svolder_computer/computer_eq/config".to_string(),
+        "homeassistant/binary_sensor/svolder_computer_reframe/computer_eq/config".to_string(),
         // The crossfeed's, which a view without a crossfeed does not announce: cleared too.
-        "homeassistant/switch/svolder_computer/computer_crossfeed/config".to_string(),
+        "homeassistant/switch/svolder_computer_reframe/computer_crossfeed/config".to_string(),
     ]
 }
 
@@ -1844,7 +1877,7 @@ async fn a_computer_not_yet_reported_is_not_swept_before_it_is() {
     );
 
     tx.send_replace(computer_view(true, Some("Warm"), -3.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert!(published.swept);
@@ -1907,7 +1940,7 @@ async fn read_only_the_computer_announces_a_binary_sensor_and_subscribes_to_noth
         with_computer(computer_view(true, Some("Warm"), -3.0), Ok(())).await;
     task.config.commands = false;
     task.config.discovery_prefix = "homeassistant".into();
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let topics: Vec<String> = task
         .computer
@@ -1920,7 +1953,7 @@ async fn read_only_the_computer_announces_a_binary_sensor_and_subscribes_to_noth
     assert!(
         topics
             .iter()
-            .any(|t| t.contains("/binary_sensor/svolder_computer/")),
+            .any(|t| t.contains("/binary_sensor/svolder_computer_reframe/")),
         "{topics:?}"
     );
     assert!(topics.iter().all(|t| !t.contains("/switch/")));
@@ -2025,11 +2058,9 @@ async fn the_speakers_are_announced_and_their_states_follow_the_view() {
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.configs.len(), 6);
-    assert!(
-        published
-            .configs
-            .contains_key("homeassistant/select/svolder_computer/computer_speakers_set/config")
-    );
+    assert!(published.configs.contains_key(
+        "homeassistant/select/svolder_computer_reframe/computer_speakers_set/config"
+    ));
     let state = published.speakers_state.clone().unwrap();
     assert_eq!(
         (state.on, state.set.as_str()),
@@ -2038,7 +2069,7 @@ async fn the_speakers_are_announced_and_their_states_follow_the_view() {
     assert!(state.attributes.contains("CC-BY-4.0"));
 
     tx.send_replace(speakers_computer_view(false, Some("b")));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let state = task
         .computer
@@ -2054,7 +2085,7 @@ async fn the_speakers_are_announced_and_their_states_follow_the_view() {
 
     // A controller that no longer serves the speakers takes its entities down, not the EQ's.
     tx.send_replace(computer_view(false, None, 0.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.configs.len(), 4);
@@ -2065,10 +2096,18 @@ async fn the_speakers_are_announced_and_their_states_follow_the_view() {
 async fn speakers_commands_reach_the_controller_as_one_change_each() {
     let (mut task, _tx, switch) =
         with_computer(speakers_computer_view(false, Some("a")), Ok(())).await;
-    task.message("svolder/computer/computer_speakers/set", b"ON", false);
-    task.message("svolder/computer/computer_speakers/set", b" off ", false);
     task.message(
-        "svolder/computer/computer_speakers_set/set",
+        "svolder/computer_reframe/computer_speakers/set",
+        b"ON",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_speakers/set",
+        b" off ",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_speakers_set/set",
         " set b \u{b7} with room \u{b7} brir ".as_bytes(),
         false,
     );
@@ -2090,10 +2129,22 @@ async fn speakers_commands_the_host_cannot_take_do_nothing() {
     // ON with no set chosen, an unknown set, a payload that is no text or no switch word, a
     // controller without speakers, one whose speakers are unavailable, host audio off.
     let (mut task, _tx, switch) = with_computer(speakers_computer_view(false, None), Ok(())).await;
-    task.message("svolder/computer/computer_speakers/set", b"ON", false);
-    task.message("svolder/computer/computer_speakers/set", b"toggle", false);
+    task.message(
+        "svolder/computer_reframe/computer_speakers/set",
+        b"ON",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_speakers/set",
+        b"toggle",
+        false,
+    );
     for body in [&b"nonsense"[..], b"Set A", &[0xff]] {
-        task.message("svolder/computer/computer_speakers_set/set", body, false);
+        task.message(
+            "svolder/computer_reframe/computer_speakers_set/set",
+            body,
+            false,
+        );
     }
     settle(&mut task).await;
     assert!(speakers_calls(&switch).is_empty());
@@ -2112,9 +2163,13 @@ async fn speakers_commands_the_host_cannot_take_do_nothing() {
         svolder_ipc::host::HostView::default(),
     ] {
         let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
-        task.message("svolder/computer/computer_speakers/set", b"OFF", false);
         task.message(
-            "svolder/computer/computer_speakers_set/set",
+            "svolder/computer_reframe/computer_speakers/set",
+            b"OFF",
+            false,
+        );
+        task.message(
+            "svolder/computer_reframe/computer_speakers_set/set",
             "Set A \u{b7} No room \u{b7} HRTF".as_bytes(),
             false,
         );
@@ -2161,7 +2216,7 @@ async fn a_set_that_goes_leaves_the_select_unknown_and_the_attributes_empty() {
         .sets
         .remove(0);
     tx.send_replace(view);
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let state = task
         .computer
@@ -2180,7 +2235,7 @@ async fn a_set_that_goes_leaves_the_select_unknown_and_the_attributes_empty() {
 async fn the_set_list_changing_announces_the_select_again_with_the_new_options() {
     let (mut task, tx, _switch) = with_computer(speakers_computer_view(false, None), Ok(())).await;
     task.publish_computer();
-    let topic = "homeassistant/select/svolder_computer/computer_speakers_set/config";
+    let topic = "homeassistant/select/svolder_computer_reframe/computer_speakers_set/config";
     let before = task.computer.as_ref().unwrap().configs[topic].clone();
     assert!(!before.contains("Set C"));
     let mut view = speakers_computer_view(false, None);
@@ -2189,7 +2244,7 @@ async fn the_set_list_changing_announces_the_select_again_with_the_new_options()
     (third.id, third.label) = ("c".into(), "Set C".into());
     speakers.sets.push(third);
     tx.send_replace(view);
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let after = task.computer.as_ref().unwrap().configs[topic].clone();
     assert!(after.contains("Set C · No room · HRTF"), "{after}");
@@ -2204,7 +2259,7 @@ async fn the_speakers_going_on_shows_the_crossfeed_switch_off_in_the_same_pass()
     assert_eq!(published.crossfeed_state.as_ref().map(|s| s.0), Some("ON"));
     assert_eq!(published.speakers_state.as_ref().map(|s| s.on), Some("OFF"));
     tx.send_replace(both_computer_view(false, true, Some("a")));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.crossfeed_state.as_ref().map(|s| s.0), Some("OFF"));
@@ -2216,7 +2271,11 @@ async fn a_refused_speakers_command_is_followed_by_the_views_state() {
     let (mut task, _tx, switch) =
         with_computer(speakers_computer_view(false, Some("a")), Err("no".into())).await;
     task.publish_computer();
-    task.message("svolder/computer/computer_speakers/set", b"ON", false);
+    task.message(
+        "svolder/computer_reframe/computer_speakers/set",
+        b"ON",
+        false,
+    );
     settle(&mut task).await;
     assert_eq!(speakers_calls(&switch), [(Some(true), None)]);
     assert!(task.computer.as_ref().unwrap().dirty);
@@ -2236,14 +2295,22 @@ async fn a_refused_speakers_command_is_followed_by_the_views_state() {
 async fn a_retained_speakers_command_and_one_with_commands_off_do_nothing() {
     let (mut task, _tx, switch) =
         with_computer(speakers_computer_view(false, Some("a")), Ok(())).await;
-    task.message("svolder/computer/computer_speakers/set", b"ON", true);
     task.message(
-        "svolder/computer/computer_speakers_set/set",
+        "svolder/computer_reframe/computer_speakers/set",
+        b"ON",
+        true,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_speakers_set/set",
         "Set B \u{b7} With room \u{b7} BRIR".as_bytes(),
         true,
     );
     task.config.commands = false;
-    task.message("svolder/computer/computer_speakers/set", b"ON", false);
+    task.message(
+        "svolder/computer_reframe/computer_speakers/set",
+        b"ON",
+        false,
+    );
     settle(&mut task).await;
     assert!(speakers_calls(&switch).is_empty());
 }
@@ -2272,17 +2339,15 @@ async fn the_loudness_is_announced_and_its_states_follow_the_view() {
     assert!(
         published
             .configs
-            .contains_key("homeassistant/switch/svolder_computer/computer_loudness/config")
+            .contains_key("homeassistant/switch/svolder_computer_reframe/computer_loudness/config")
     );
-    assert!(
-        published.configs.contains_key(
-            "homeassistant/number/svolder_computer/computer_loudness_strength/config"
-        )
-    );
+    assert!(published.configs.contains_key(
+        "homeassistant/number/svolder_computer_reframe/computer_loudness_strength/config"
+    ));
     assert_eq!(published.loudness_state, Some(("ON", "35".to_string())));
 
     tx.send_replace(loudness_computer_view(false, 50.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(
         task.computer.as_ref().unwrap().loudness_state,
@@ -2291,7 +2356,7 @@ async fn the_loudness_is_announced_and_its_states_follow_the_view() {
 
     // A view without loudness takes its entities down, not the EQ's.
     tx.send_replace(computer_view(false, None, 0.0));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert_eq!(published.configs.len(), 4);
@@ -2304,7 +2369,7 @@ async fn host_audio_off_clears_the_loudness_with_the_computer() {
     task.publish_computer();
     assert!(task.computer.as_ref().unwrap().loudness_state.is_some());
     tx.send_replace(svolder_ipc::host::HostView::default());
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert!(published.configs.is_empty() && published.loudness_state.is_none());
@@ -2313,15 +2378,23 @@ async fn host_audio_off_clears_the_loudness_with_the_computer() {
 #[tokio::test]
 async fn loudness_commands_reach_the_controller_as_one_change_each() {
     let (mut task, _tx, switch) = with_computer(loudness_computer_view(false, 50.0), Ok(())).await;
-    task.message("svolder/computer/computer_loudness/set", b"ON", false);
-    task.message("svolder/computer/computer_loudness/set", b" off ", false);
     task.message(
-        "svolder/computer/computer_loudness_strength/set",
+        "svolder/computer_reframe/computer_loudness/set",
+        b"ON",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_loudness/set",
+        b" off ",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_loudness_strength/set",
         b"35",
         false,
     );
     task.message(
-        "svolder/computer/computer_loudness_strength/set",
+        "svolder/computer_reframe/computer_loudness_strength/set",
         b" 37.0 ",
         false,
     );
@@ -2345,12 +2418,16 @@ async fn bad_loudness_commands_change_nothing() {
     let (mut task, _tx, switch) = with_computer(loudness_computer_view(true, 35.0), Ok(())).await;
     for body in [&b"loud"[..], b"", b"NaN", &[0xff]] {
         task.message(
-            "svolder/computer/computer_loudness_strength/set",
+            "svolder/computer_reframe/computer_loudness_strength/set",
             body,
             false,
         );
     }
-    task.message("svolder/computer/computer_loudness/set", b"toggle", false);
+    task.message(
+        "svolder/computer_reframe/computer_loudness/set",
+        b"toggle",
+        false,
+    );
     settle(&mut task).await;
     assert!(loudness_calls(&switch).is_empty());
 }
@@ -2366,9 +2443,13 @@ async fn a_loudness_command_while_loudness_cannot_follow_the_volume_still_reache
         .unwrap()
         .unavailable = Some("computer controls unavailable: x".into());
     let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
-    task.message("svolder/computer/computer_loudness/set", b"OFF", false);
     task.message(
-        "svolder/computer/computer_loudness_strength/set",
+        "svolder/computer_reframe/computer_loudness/set",
+        b"OFF",
+        false,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_loudness_strength/set",
         b"35",
         false,
     );
@@ -2388,9 +2469,13 @@ async fn a_loudness_command_the_host_cannot_take_does_nothing() {
         svolder_ipc::host::HostView::default(),
     ] {
         let (mut task, _tx, switch) = with_computer(view, Ok(())).await;
-        task.message("svolder/computer/computer_loudness/set", b"ON", false);
         task.message(
-            "svolder/computer/computer_loudness_strength/set",
+            "svolder/computer_reframe/computer_loudness/set",
+            b"ON",
+            false,
+        );
+        task.message(
+            "svolder/computer_reframe/computer_loudness_strength/set",
             b"35",
             false,
         );
@@ -2398,19 +2483,27 @@ async fn a_loudness_command_the_host_cannot_take_does_nothing() {
         assert!(loudness_calls(&switch).is_empty());
     }
     let (mut task, _tx, switch) = with_computer(loudness_computer_view(false, 50.0), Ok(())).await;
-    task.message("svolder/computer/computer_loudness/set", b"ON", true);
     task.message(
-        "svolder/computer/computer_loudness_strength/set",
+        "svolder/computer_reframe/computer_loudness/set",
+        b"ON",
+        true,
+    );
+    task.message(
+        "svolder/computer_reframe/computer_loudness_strength/set",
         b"35",
         true,
     );
     task.config.commands = false;
-    task.message("svolder/computer/computer_loudness/set", b"ON", false);
+    task.message(
+        "svolder/computer_reframe/computer_loudness/set",
+        b"ON",
+        false,
+    );
     settle(&mut task).await;
     assert!(loudness_calls(&switch).is_empty());
     assert!(
         task.retained_commands
-            .contains("svolder/computer/computer_loudness_strength/set")
+            .contains("svolder/computer_reframe/computer_loudness_strength/set")
     );
 }
 
@@ -2419,7 +2512,11 @@ async fn a_refused_loudness_command_is_followed_by_the_views_state() {
     let (mut task, _tx, switch) =
         with_computer(loudness_computer_view(false, 50.0), Err("no".into())).await;
     task.publish_computer();
-    task.message("svolder/computer/computer_loudness/set", b"ON", false);
+    task.message(
+        "svolder/computer_reframe/computer_loudness/set",
+        b"ON",
+        false,
+    );
     settle(&mut task).await;
     assert_eq!(loudness_calls(&switch), [(Some(true), None)]);
     task.publish_computer();
@@ -2560,6 +2657,7 @@ async fn with_dac_computer_at(
         view: rx,
         switch,
         slow,
+        scenes: None,
     });
     (task, tx, stand)
 }
@@ -2609,13 +2707,11 @@ async fn an_untouched_path_to_the_dac_reads_untouched_with_a_config_that_is_off(
     assert!(
         published
             .configs
-            .contains_key("homeassistant/sensor/svolder_computer/computer_path/config")
+            .contains_key("homeassistant/sensor/svolder_computer_reframe/computer_path/config")
     );
-    assert!(
-        published
-            .configs
-            .contains_key("homeassistant/binary_sensor/svolder_computer/computer_config/config")
-    );
+    assert!(published.configs.contains_key(
+        "homeassistant/binary_sensor/svolder_computer_reframe/computer_config/config"
+    ));
 }
 
 #[tokio::test]
@@ -2680,7 +2776,7 @@ async fn an_unread_route_or_config_is_unknown_never_clean() {
         48_000,
         None,
     ))));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(path_said(&task).0, "untouched");
     let (problem, attributes) = config_said(&task);
@@ -2724,7 +2820,7 @@ async fn the_path_follows_the_route_and_the_dac_and_goes_with_the_computer() {
 
     // Host audio off: both entities and their states are taken down with the computer.
     tx.send_replace(svolder_ipc::host::HostView::default());
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let published = task.computer.as_ref().unwrap();
     assert!(published.path_state.is_none() && published.config_state.is_none());
@@ -2749,7 +2845,7 @@ async fn the_slow_hold_is_kept_while_connected_and_published_and_dropped_otherwi
     task.computer_link(true);
     task.publish_computer();
     assert_eq!(service.slow_count(), 1, "connected and published");
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(
         service.slow_count(),
@@ -2764,7 +2860,7 @@ async fn the_slow_hold_is_kept_while_connected_and_published_and_dropped_otherwi
     assert_eq!(service.slow_count(), 1);
 
     tx.send_replace(svolder_ipc::host::HostView::default());
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(service.slow_count(), 0, "nothing published, nothing held");
 
@@ -2774,7 +2870,7 @@ async fn the_slow_hold_is_kept_while_connected_and_published_and_dropped_otherwi
         48_000,
         None,
     ))));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     assert_eq!(service.slow_count(), 1);
     task.computer_farewell();
@@ -2787,12 +2883,12 @@ async fn the_slow_hold_is_kept_while_connected_and_published_and_dropped_otherwi
 #[tokio::test]
 async fn a_config_that_stops_being_judged_sends_the_unknown_payload() {
     let broker = broker::TestBroker::start();
-    let mut watcher = broker::Watcher::connect(broker.port, &["svolder/computer/#"]).await;
+    let mut watcher = broker::Watcher::connect(broker.port, &["svolder/computer_reframe/#"]).await;
     let route = path_route("Schiit Gungnir 2", true, 48_000, Some(path_setup(false)));
     let (mut task, tx, _stand) =
         with_dac_computer_at(broker.port, path_view(Some(route)), None).await;
     task.publish_computer();
-    let topic = "svolder/computer/computer_config/state";
+    let topic = "svolder/computer_reframe/computer_config/state";
     watcher
         .wait_for_each(&[(topic, "OFF")], Duration::from_secs(5))
         .await;
@@ -2803,7 +2899,7 @@ async fn a_config_that_stops_being_judged_sends_the_unknown_payload() {
         48_000,
         Some(path_setup(false)),
     ))));
-    task.changed("computer");
+    task.changed("computer_reframe");
     task.publish_computer();
     let seen = watcher
         .wait_for_each(&[(topic, "None")], Duration::from_secs(5))
@@ -2847,4 +2943,554 @@ async fn forgetting_the_dac_marks_the_computer_for_a_new_judgement() {
     let (state, attributes) = path_said(&task);
     assert_eq!(state, "not_this_dac");
     assert!(attributes["dac"].is_null());
+}
+
+/// Every discovery topic the releases before per-computer ids announced for the computer, both
+/// component kinds, written out from their code (unit `computer`).
+#[cfg(feature = "broker-tests")]
+fn old_computer_topics() -> Vec<String> {
+    let at = |component: &str, key: &str| {
+        format!("homeassistant/{component}/svolder_computer/{key}/config")
+    };
+    vec![
+        at("switch", "computer_eq"),
+        at("binary_sensor", "computer_eq"),
+        at("sensor", "computer_eq_preset"),
+        at("switch", "computer_crossfeed"),
+        at("binary_sensor", "computer_crossfeed"),
+        at("select", "computer_crossfeed_preset"),
+        at("sensor", "computer_crossfeed_preset"),
+        at("switch", "computer_speakers"),
+        at("binary_sensor", "computer_speakers"),
+        at("select", "computer_speakers_set"),
+        at("sensor", "computer_speakers_set"),
+        at("switch", "computer_loudness"),
+        at("binary_sensor", "computer_loudness"),
+        at("number", "computer_loudness_strength"),
+        at("sensor", "computer_loudness_strength"),
+        at("sensor", "computer_path"),
+        at("binary_sensor", "computer_config"),
+    ]
+}
+
+/// The retained availability, state and attributes topics the earlier releases kept under the
+/// unit `computer`, written out from their code.
+#[cfg(feature = "broker-tests")]
+fn old_computer_state_topics() -> Vec<String> {
+    [
+        "availability",
+        "computer_eq/state",
+        "computer_eq_preset/state",
+        "computer_crossfeed/state",
+        "computer_crossfeed_preset/state",
+        "computer_loudness/state",
+        "computer_loudness_strength/state",
+        "computer_speakers/state",
+        "computer_speakers_set/state",
+        "computer_path/state",
+        "computer_config/state",
+        "computer_speakers_set/attributes",
+        "computer_path/attributes",
+        "computer_config/attributes",
+    ]
+    .iter()
+    .map(|leaf| format!("svolder/computer/{leaf}"))
+    .collect()
+}
+
+/// A device's first discovery waits while its computer still waits for its first EQ view (bounded
+/// by that wait), so the computer's device is announced first.
+#[tokio::test]
+async fn a_devices_first_discovery_waits_for_the_computer_to_report() {
+    let (mut task, tx, _switch) =
+        with_computer(svolder_ipc::host::HostView::default(), Ok(())).await;
+    task.config.discovery_prefix = "homeassistant".into();
+    task.flush();
+    assert!(!task.computer.as_ref().unwrap().swept);
+    assert!(
+        task.devices[UNIT].configs.is_empty(),
+        "the device was announced before its computer"
+    );
+    tx.send_replace(computer_view(true, Some("Warm"), -3.0));
+    task.changed("computer_reframe");
+    task.flush();
+    assert!(task.computer.as_ref().unwrap().swept);
+    assert!(!task.computer.as_ref().unwrap().configs.is_empty());
+    assert!(!task.devices[UNIT].configs.is_empty());
+}
+
+/// A computer that never reports an EQ (host audio off) holds its devices' first discovery for
+/// the start wait only: a flush is owed at its end, and the devices are announced then.
+#[tokio::test(start_paused = true)]
+async fn a_device_is_announced_after_the_wait_when_the_computer_never_reports() {
+    let (mut task, _tx, _switch) =
+        with_computer(svolder_ipc::host::HostView::default(), Ok(())).await;
+    task.config.discovery_prefix = "homeassistant".into();
+    let due = task.computer.as_ref().unwrap().since + super::computer::START_SETTLES;
+    task.flush();
+    assert!(task.devices[UNIT].configs.is_empty());
+    assert_eq!(
+        task.flush_at,
+        Some(due),
+        "a flush is owed at the end of the wait"
+    );
+    tokio::time::advance(super::computer::START_SETTLES).await;
+    task.flush();
+    assert!(task.computer.as_ref().unwrap().swept);
+    assert!(!task.devices[UNIT].configs.is_empty());
+}
+
+/// The first publish of a bridge clears the old `This computer` discovery topics, exactly the
+/// list the earlier releases announced, and none of the named computer's own.
+#[cfg(feature = "broker-tests")]
+#[tokio::test]
+async fn the_first_start_clears_the_old_this_computer_topics() {
+    let broker = broker::TestBroker::start();
+    let mut watcher =
+        broker::Watcher::connect(broker.port, &["homeassistant/#", "svolder/#"]).await;
+    let mut old = old_computer_topics();
+    old.extend(old_computer_state_topics());
+    for topic in &old {
+        watcher.retain(topic, "{\"name\":\"This computer\"}").await;
+    }
+    // An older daemon's bridge availability is not this bridge's to clear.
+    watcher
+        .retain("svolder/bridge/availability", "online")
+        .await;
+    let (mut task, _tx, _switch) =
+        with_computer_at(broker.port, computer_view(true, Some("Warm"), -3.0), Ok(())).await;
+    task.publish_computer();
+    let cleared = watcher
+        .wait_for_each(
+            &old.iter().map(|t| (t.as_str(), "")).collect::<Vec<_>>(),
+            Duration::from_secs(5),
+        )
+        .await;
+    assert_eq!(cleared.len(), old.len());
+    let seen = watcher.collect(Duration::from_millis(500)).await;
+    assert!(
+        seen.iter()
+            .all(|s| s.topic != "svolder/bridge/availability" || !s.payload.is_empty()),
+        "the old bridge availability was cleared: {seen:#?}"
+    );
+    assert!(
+        seen.iter()
+            .filter(|s| {
+                s.topic == "homeassistant/switch/svolder_computer_reframe/computer_eq/config"
+            })
+            .all(|s| !s.payload.is_empty()),
+        "the announced EQ switch was cleared: {seen:#?}"
+    );
+}
+
+fn hostname_file(tag: &str, text: Option<&str>) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("svolder-hostname-{tag}-{}", std::process::id()));
+    match text {
+        Some(text) => std::fs::write(&path, text).unwrap(),
+        None => drop(std::fs::remove_file(&path)),
+    }
+    path
+}
+
+#[test]
+fn the_host_name_is_read_trimmed_and_falls_back_to_localhost() {
+    let named = hostname_file("named", Some("  Reframe\n"));
+    assert_eq!(read_hostname(&named), "Reframe");
+    let empty = hostname_file("empty", Some("\n"));
+    assert_eq!(read_hostname(&empty), "localhost");
+    let missing = hostname_file("missing", None);
+    assert_eq!(read_hostname(&missing), "localhost");
+    for path in [named, empty] {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+/// A desk that records the scene operations it was given and answers each with `answer`.
+struct RecordingDesk {
+    ops: std::sync::Mutex<Vec<svolder_ipc::socket::protocol::SceneOp>>,
+    answer: std::sync::Mutex<Response>,
+}
+
+#[async_trait::async_trait]
+impl SceneDesk for RecordingDesk {
+    async fn request(&self, op: svolder_ipc::socket::protocol::SceneOp) -> Response {
+        self.ops.lock().unwrap().push(op);
+        self.answer.lock().unwrap().clone()
+    }
+}
+
+fn scene_row(name: &str) -> svolder_ipc::socket::protocol::SceneRow {
+    svolder_ipc::socket::protocol::SceneRow {
+        name: name.into(),
+        parts: vec![svolder_ipc::socket::protocol::PartRow {
+            who: "computer".into(),
+            present: true,
+        }],
+    }
+}
+
+fn scenes_view(
+    names: &[&str],
+    on: Option<&str>,
+    known: bool,
+) -> svolder_ipc::socket::protocol::ScenesView {
+    svolder_ipc::socket::protocol::ScenesView {
+        scenes: names.iter().map(|n| scene_row(n)).collect(),
+        on: on.map(str::to_string),
+        recalled: on.map(str::to_string),
+        known,
+    }
+}
+
+fn scene_done(name: &str, status: svolder_ipc::socket::protocol::PartStatus) -> Response {
+    Response::Scene {
+        name: name.into(),
+        outcome: vec![svolder_ipc::socket::protocol::PartOutcome {
+            who: "computer".into(),
+            status,
+            notes: Vec::new(),
+        }],
+    }
+}
+
+/// A task following a computer whose host reports no EQ and the scenes of `view`, with commands as
+/// `commands` says and discovery on.
+async fn with_scenes(
+    commands: bool,
+    view: svolder_ipc::socket::protocol::ScenesView,
+) -> (
+    BridgeTask,
+    watch::Sender<svolder_ipc::socket::protocol::ScenesView>,
+    Arc<RecordingDesk>,
+    Arc<RecordingSwitch>,
+) {
+    let (mut task, _tx, switch) =
+        with_computer(svolder_ipc::host::HostView::default(), Ok(())).await;
+    task.config.commands = commands;
+    task.config.discovery_prefix = "homeassistant".into();
+    let (tx, rx) = watch::channel(view);
+    let desk = Arc::new(RecordingDesk {
+        ops: std::sync::Mutex::new(Vec::new()),
+        answer: std::sync::Mutex::new(Response::Unknown),
+    });
+    task.follow_scenes(ScenesLink {
+        view: rx,
+        desk: desk.clone(),
+    });
+    task.flush();
+    (task, tx, desk, switch)
+}
+
+fn scene_ops(desk: &RecordingDesk) -> Vec<svolder_ipc::socket::protocol::SceneOp> {
+    desk.ops.lock().unwrap().clone()
+}
+
+/// `answer` without its `seq`, after checking it has one.
+fn without_seq(answer: &serde_json::Value) -> serde_json::Value {
+    assert!(answer["seq"].is_u64(), "{answer}");
+    let mut answer = answer.clone();
+    answer.as_object_mut().unwrap().remove("seq");
+    answer
+}
+
+fn attributes_of(task: &BridgeTask) -> serde_json::Value {
+    serde_json::from_str(task.scenes.as_ref().unwrap().attributes.as_ref().unwrap()).unwrap()
+}
+
+const SCENE_SELECT: &str = "homeassistant/select/svolder_computer_reframe/scene/config";
+const SCENE_TEXT: &str = "homeassistant/text/svolder_computer_reframe/scene_save/config";
+
+#[tokio::test]
+async fn the_pair_is_announced_with_no_host_eq_and_before_the_computer_has_reported() {
+    let (task, _tx, _desk, _switch) =
+        with_scenes(true, scenes_view(&["Late night", "Desk"], None, true)).await;
+    assert!(
+        !task.computer.as_ref().unwrap().swept,
+        "the host has not reported"
+    );
+    let configs = &task.scenes.as_ref().unwrap().configs;
+    assert_eq!(
+        configs.keys().map(String::as_str).collect::<Vec<_>>(),
+        [SCENE_SELECT, SCENE_TEXT]
+    );
+    let select: serde_json::Value = serde_json::from_str(&configs[SCENE_SELECT]).unwrap();
+    assert_eq!(
+        select["options"],
+        serde_json::json!(["Late night", "Desk", "custom"])
+    );
+    assert_eq!(
+        select["device"]["identifiers"][0],
+        "svolder_computer_reframe"
+    );
+}
+
+#[tokio::test]
+async fn commands_off_announce_a_sensor_and_no_text_and_take_no_command() {
+    let (mut task, _tx, desk, _switch) =
+        with_scenes(false, scenes_view(&["Desk"], Some("Desk"), true)).await;
+    let keys: Vec<_> = task
+        .scenes
+        .as_ref()
+        .unwrap()
+        .configs
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(
+        keys,
+        ["homeassistant/sensor/svolder_computer_reframe/scene/config"]
+    );
+    task.message("svolder/computer_reframe/scene/set", b"Desk", false);
+    task.message("svolder/computer_reframe/scene_save/set", b"Quiet", false);
+    settle(&mut task).await;
+    assert!(scene_ops(&desk).is_empty());
+}
+
+#[tokio::test]
+async fn the_state_is_the_scene_on_else_custom_and_an_unknown_view_leaves_it_as_it_was() {
+    let (mut task, tx, _desk, _switch) =
+        with_scenes(true, scenes_view(&["Desk", "Movie"], None, false)).await;
+    assert_eq!(
+        task.scenes.as_ref().unwrap().state,
+        None,
+        "nothing is said while it is not known"
+    );
+    tx.send_replace(scenes_view(&["Desk", "Movie"], Some("Desk"), true));
+    task.changed("scenes");
+    task.flush();
+    assert_eq!(task.scenes.as_ref().unwrap().state.as_deref(), Some("Desk"));
+    // A reconnect read: not known, no scene on. The state stays.
+    tx.send_replace(scenes_view(&["Desk", "Movie"], None, false));
+    task.changed("scenes");
+    task.flush();
+    assert_eq!(task.scenes.as_ref().unwrap().state.as_deref(), Some("Desk"));
+    assert_eq!(attributes_of(&task)["known"], false);
+    // Known, and none is on: custom.
+    tx.send_replace(scenes_view(&["Desk", "Movie"], None, true));
+    task.changed("scenes");
+    task.flush();
+    assert_eq!(
+        task.scenes.as_ref().unwrap().state.as_deref(),
+        Some("custom")
+    );
+}
+
+#[tokio::test]
+async fn the_attributes_carry_the_scenes_known_recalled_and_no_outcome_before_one() {
+    let (task, _tx, _desk, _switch) =
+        with_scenes(true, scenes_view(&["Desk"], Some("Desk"), true)).await;
+    assert_eq!(
+        attributes_of(&task),
+        serde_json::json!({
+            "scenes": [{"name": "Desk", "parts": [{"who": "computer", "present": true}]}],
+            "known": true,
+            "recalled": "Desk",
+        })
+    );
+}
+
+#[tokio::test]
+async fn the_options_follow_a_rename_once_the_view_changes() {
+    let (mut task, tx, _desk, _switch) =
+        with_scenes(true, scenes_view(&["Desk", "Movie"], None, true)).await;
+    tx.send_replace(scenes_view(&["Desk", "Cinema"], None, true));
+    task.changed("scenes");
+    task.flush();
+    let select: serde_json::Value =
+        serde_json::from_str(&task.scenes.as_ref().unwrap().configs[SCENE_SELECT]).unwrap();
+    assert_eq!(
+        select["options"],
+        serde_json::json!(["Desk", "Cinema", "custom"])
+    );
+}
+
+#[tokio::test]
+async fn choosing_a_scene_recalls_it_once_and_keeps_the_answer_as_the_outcome() {
+    use svolder_ipc::socket::protocol::{PartStatus, SceneOp};
+    let (mut task, _tx, desk, switch) =
+        with_scenes(true, scenes_view(&["Late night", "Movie"], None, true)).await;
+    *desk.answer.lock().unwrap() = scene_done("Movie", PartStatus::Partial);
+    task.message("svolder/computer_reframe/scene/set", b" movie ", false);
+    settle(&mut task).await;
+    task.flush();
+    assert_eq!(
+        scene_ops(&desk),
+        [SceneOp::Recall {
+            name: "Movie".into(),
+            confirm: false
+        }]
+    );
+    assert_eq!(
+        without_seq(&attributes_of(&task)["outcome"]),
+        serde_json::json!({"name": "Movie", "parts": [{"who": "computer", "status": "partial"}]})
+    );
+    // The scene pair writes nothing of its own: no switch call, no write to the device.
+    assert!(computer_calls(&switch).is_empty());
+    assert!(switch.crossfeeds.lock().unwrap().is_empty());
+    assert!(switch.speakers.lock().unwrap().is_empty());
+    assert!(switch.loudnesses.lock().unwrap().is_empty());
+    assert!(view(&task).await.in_flight.is_empty());
+}
+
+#[tokio::test]
+async fn custom_an_unknown_name_a_bad_payload_and_a_retained_command_recall_nothing() {
+    let (mut task, _tx, desk, _switch) =
+        with_scenes(true, scenes_view(&["Movie"], None, true)).await;
+    task.message("svolder/computer_reframe/scene/set", b"custom", false);
+    task.message("svolder/computer_reframe/scene/set", b"Party", false);
+    task.message("svolder/computer_reframe/scene/set", &[0xff], false);
+    task.message("svolder/computer_reframe/scene/set", b"Movie", true);
+    task.message("svolder/computer_reframe/scene_save/set", b"Quiet", true);
+    task.message("svolder/computer_reframe/scene_save/set", b"   ", false);
+    settle(&mut task).await;
+    assert!(scene_ops(&desk).is_empty(), "{:?}", scene_ops(&desk));
+}
+
+#[tokio::test]
+async fn a_typed_name_saves_without_force_and_a_refusal_goes_in_saved_in_the_daemons_words() {
+    use svolder_ipc::socket::protocol::{Reason, SceneOp};
+    let (mut task, _tx, desk, _switch) =
+        with_scenes(true, scenes_view(&["Movie"], None, true)).await;
+    *desk.answer.lock().unwrap() = Response::Scene {
+        name: "Quiet".into(),
+        outcome: Vec::new(),
+    };
+    task.message(
+        "svolder/computer_reframe/scene_save/set",
+        b"  Quiet ",
+        false,
+    );
+    settle(&mut task).await;
+    task.flush();
+    assert_eq!(
+        without_seq(&attributes_of(&task)["saved"]),
+        serde_json::json!({"name": "Quiet"})
+    );
+    *desk.answer.lock().unwrap() = Response::Error {
+        code: 1,
+        message: "a scene named Movie exists".into(),
+        reason: Some(Reason::Taken),
+    };
+    task.message("svolder/computer_reframe/scene_save/set", b"Movie", false);
+    settle(&mut task).await;
+    task.flush();
+    assert_eq!(
+        without_seq(&attributes_of(&task)["saved"]),
+        serde_json::json!({"name": "Movie", "error": "a scene named Movie exists"})
+    );
+    assert_eq!(
+        scene_ops(&desk),
+        [
+            SceneOp::Save {
+                name: "Quiet".into(),
+                force: false
+            },
+            SceneOp::Save {
+                name: "Movie".into(),
+                force: false
+            },
+        ]
+    );
+    assert!(attributes_of(&task).get("outcome").is_none());
+}
+
+#[tokio::test]
+async fn a_recall_the_daemon_asks_about_or_refuses_is_an_outcome_with_its_words_and_no_parts() {
+    use svolder_ipc::socket::protocol::Reason;
+    let (mut task, _tx, desk, _switch) =
+        with_scenes(true, scenes_view(&["Movie"], None, true)).await;
+    *desk.answer.lock().unwrap() = Response::Ask {
+        message: "Movie plays twice. Recall it anyway?".into(),
+        name: "Movie".into(),
+        devices: vec!["Desk".into()],
+    };
+    task.message("svolder/computer_reframe/scene/set", b"Movie", false);
+    settle(&mut task).await;
+    task.flush();
+    assert_eq!(
+        without_seq(&attributes_of(&task)["outcome"]),
+        serde_json::json!({"name": "Movie", "error": "Movie plays twice. Recall it anyway?"})
+    );
+    *desk.answer.lock().unwrap() = Response::Error {
+        code: 1,
+        message: "busy".into(),
+        reason: Some(Reason::Busy),
+    };
+    task.message("svolder/computer_reframe/scene/set", b"Movie", false);
+    settle(&mut task).await;
+    task.flush();
+    assert_eq!(scene_ops(&desk).len(), 2);
+    assert_eq!(
+        without_seq(&attributes_of(&task)["outcome"]),
+        serde_json::json!({"name": "Movie", "error": "busy"})
+    );
+}
+
+/// Two identical answers (the same recall, the same refusal) are two different attribute payloads,
+/// each `seq` above the one before.
+#[tokio::test]
+async fn a_repeated_answer_is_a_new_payload_with_a_higher_seq() {
+    use svolder_ipc::socket::protocol::{PartStatus, Reason};
+    let (mut task, _tx, desk, _switch) =
+        with_scenes(true, scenes_view(&["Movie"], None, true)).await;
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        *desk.answer.lock().unwrap() = scene_done("Movie", PartStatus::Done);
+        task.message("svolder/computer_reframe/scene/set", b"Movie", false);
+        settle(&mut task).await;
+        task.flush();
+        let a = attributes_of(&task);
+        seen.push((a.to_string(), a["outcome"]["seq"].as_u64().unwrap()));
+    }
+    assert_ne!(seen[0].0, seen[1].0);
+    assert!(seen[1].1 > seen[0].1, "{seen:?}");
+    let mut saves = Vec::new();
+    for _ in 0..2 {
+        *desk.answer.lock().unwrap() = Response::Error {
+            code: 1,
+            message: "a scene named Movie exists".into(),
+            reason: Some(Reason::Taken),
+        };
+        task.message("svolder/computer_reframe/scene_save/set", b"Movie", false);
+        settle(&mut task).await;
+        task.flush();
+        let a = attributes_of(&task);
+        saves.push((a.to_string(), a["saved"]["seq"].as_u64().unwrap()));
+    }
+    assert_ne!(saves[0].0, saves[1].0);
+    assert!(saves[1].1 > saves[0].1, "{saves:?}");
+}
+
+/// The scene select's config reaches the broker before any device's, whatever the topics sort as:
+/// both are owed in the first flush, held until the connect, and the client replays the parent
+/// rank (the computer's) first. A DAC's `binary_sensor` link config sorts before a `select`.
+#[cfg(feature = "broker-tests")]
+#[tokio::test]
+async fn the_scene_configs_are_put_back_before_a_devices() {
+    let broker = broker::TestBroker::start();
+    let mut watcher = broker::Watcher::connect(broker.port, &["homeassistant/#"]).await;
+    let (mut task, _tx, _switch) =
+        with_computer_at(broker.port, computer_view(true, Some("Warm"), -3.0), Ok(())).await;
+    task.config.discovery_prefix = "homeassistant".into();
+    task.config.commands = true;
+    let (_scenes_tx, rx) = watch::channel(scenes_view(&["Desk"], None, true));
+    task.follow_scenes(ScenesLink {
+        view: rx,
+        desk: Arc::new(RecordingDesk {
+            ops: std::sync::Mutex::new(Vec::new()),
+            answer: std::sync::Mutex::new(Response::Unknown),
+        }),
+    });
+    task.flush();
+    let seen = watcher.collect(Duration::from_secs(2)).await;
+    let topics: Vec<&str> = seen.iter().map(|s| s.topic.as_str()).collect();
+    let select = topics
+        .iter()
+        .position(|t| *t == SCENE_SELECT)
+        .unwrap_or_else(|| panic!("no scene select: {topics:#?}"));
+    let device = topics
+        .iter()
+        .position(|t| t.contains(&format!("svolder_{UNIT}/")))
+        .unwrap_or_else(|| panic!("no device config: {topics:#?}"));
+    assert!(select < device, "the device came first: {topics:#?}");
 }

@@ -14,7 +14,7 @@
 use serde_json::{Value as Json, json};
 use svolder_host::eq::LoudnessView;
 
-use super::{OFF, ON, UNIT, envelope};
+use super::{Computer, OFF, ON, envelope};
 use crate::discovery::DiscoveryEntry;
 use crate::topics;
 
@@ -25,7 +25,11 @@ pub const SWITCH_KEY: &str = "computer_loudness";
 pub const STRENGTH_KEY: &str = "computer_loudness_strength";
 
 /// The discovery topics of the two entities, for `commands`, whatever the view holds.
-pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
+pub(super) fn topics_of(
+    computer: &Computer,
+    discovery_prefix: &str,
+    commands: bool,
+) -> Vec<String> {
     if discovery_prefix.is_empty() {
         return Vec::new();
     }
@@ -33,13 +37,13 @@ pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
         topics::discovery_config(
             discovery_prefix,
             if commands { "switch" } else { "binary_sensor" },
-            UNIT,
+            computer.unit(),
             SWITCH_KEY,
         ),
         topics::discovery_config(
             discovery_prefix,
             if commands { "number" } else { "sensor" },
-            UNIT,
+            computer.unit(),
             STRENGTH_KEY,
         ),
     ]
@@ -47,32 +51,33 @@ pub(super) fn topics_of(discovery_prefix: &str, commands: bool) -> Vec<String> {
 
 /// The two entries, for a computer whose controller serves loudness (`view` is its view).
 pub(super) fn entries(
+    computer: &Computer,
     base_topic: &str,
     discovery_prefix: &str,
     commands: bool,
     view: &LoudnessView,
 ) -> Vec<DiscoveryEntry> {
-    let mut switch = envelope(base_topic, "Loudness", SWITCH_KEY);
+    let mut switch = envelope(computer, base_topic, "Loudness", SWITCH_KEY);
     switch.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, SWITCH_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), SWITCH_KEY).into(),
     );
     switch.insert("payload_on".into(), ON.into());
     switch.insert("payload_off".into(), OFF.into());
-    let mut strength = envelope(base_topic, "Loudness strength", STRENGTH_KEY);
+    let mut strength = envelope(computer, base_topic, "Loudness strength", STRENGTH_KEY);
     strength.insert(
         "state_topic".into(),
-        topics::diagnostic(base_topic, UNIT, STRENGTH_KEY).into(),
+        topics::diagnostic(base_topic, computer.unit(), STRENGTH_KEY).into(),
     );
     strength.insert("unit_of_measurement".into(), "%".into());
     if commands {
         switch.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, SWITCH_KEY).into(),
+            topics::command(base_topic, computer.unit(), SWITCH_KEY).into(),
         );
         strength.insert(
             "command_topic".into(),
-            topics::command(base_topic, UNIT, STRENGTH_KEY).into(),
+            topics::command(base_topic, computer.unit(), STRENGTH_KEY).into(),
         );
         let range = view.ranges.strength_pct;
         strength.insert("min".into(), number(range.min));
@@ -80,7 +85,7 @@ pub(super) fn entries(
         strength.insert("step".into(), number(range.step));
         strength.insert("mode".into(), "slider".into());
     }
-    let topics = topics_of(discovery_prefix, commands);
+    let topics = topics_of(computer, discovery_prefix, commands);
     vec![
         DiscoveryEntry {
             topic: topics[0].clone(),

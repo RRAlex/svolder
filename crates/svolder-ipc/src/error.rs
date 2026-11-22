@@ -102,10 +102,14 @@ pub enum ConfigError {
     /// core's own ([`NameRefusal`]'s), so a front end tells the two apart without reading them.
     #[error("config: {0}")]
     Name(NameRefusal),
+    /// A scene writer refused a scene's name: blank, too long, a control character, or
+    /// `custom`. The words say scene where [`ConfigError::Name`]'s say preset.
+    #[error("config: {}", scene_name_words(.0))]
+    SceneName(NameRefusal),
     /// A writer found a block of this `kind` already carrying `name`.
     #[error("config: a {kind} named {name:?} is already configured")]
     Taken {
-        /// What the block configures: `device`, `hop` or `preset`.
+        /// What the block configures: `device`, `hop`, `preset` or `scene`.
         kind: &'static str,
         /// The name as the file spells it.
         name: String,
@@ -113,7 +117,7 @@ pub enum ConfigError {
     /// A writer found no block of this `kind` carrying `name`.
     #[error("config: no {kind} named {name:?} is configured")]
     Missing {
-        /// What the block configures: `device`, `hop` or `preset`.
+        /// What the block configures: `device`, `hop`, `preset` or `scene`.
         kind: &'static str,
         /// The name that was asked for.
         name: String,
@@ -121,7 +125,7 @@ pub enum ConfigError {
     /// A block a writer had just found was no longer in the document it was editing.
     #[error("config: {kind} {name:?} went missing")]
     Vanished {
-        /// What the block configures: `device`, `hop` or `preset`.
+        /// What the block configures: `device`, `hop`, `preset` or `scene`.
         kind: &'static str,
         /// The name that was being edited.
         name: String,
@@ -151,7 +155,7 @@ impl ConfigError {
         use crate::socket::protocol::Reason;
         match self {
             ConfigError::Taken { .. } | ConfigError::Name(NameRefusal::Taken(_)) => Reason::Taken,
-            ConfigError::Name(_) => Reason::BadName,
+            ConfigError::Name(_) | ConfigError::SceneName(_) => Reason::BadName,
             ConfigError::Missing { .. } => Reason::Missing,
             ConfigError::ReadOnly(_) | ConfigError::Gone(_) => Reason::ReadOnly,
             ConfigError::Busy(_) => Reason::FileBusy,
@@ -160,6 +164,19 @@ impl ConfigError {
             }
             ConfigError::Io(..) | ConfigError::Vanished { .. } => Reason::Internal,
         }
+    }
+}
+
+/// A name refusal in a scene's words: the core's own words say preset, and a scene is none.
+pub(crate) fn scene_name_words(refusal: &NameRefusal) -> String {
+    match refusal {
+        NameRefusal::Reserved(name) => {
+            format!("{name:?} stands for no scene at all, so no scene can take it")
+        }
+        other => other
+            .to_string()
+            .replace("a preset's", "a scene's")
+            .replace("a preset", "a scene"),
     }
 }
 

@@ -8,6 +8,7 @@
 //! not a passing test.
 
 use serde_json::json;
+use svolder_mqtt::computer::Computer;
 use svolder_mqtt::discovery::{Device, configs};
 use svolder_profiles::Registry;
 
@@ -37,6 +38,7 @@ fn device() -> Device<'static> {
         name: "Living room DAC",
         unit_id: "0102030405060708",
         firmware: Some(3),
+        computer: "reframe",
     }
 }
 
@@ -158,6 +160,7 @@ fn speakers_view() -> svolder_host::eq::SpeakersView {
 fn the_computer_has_the_eq_crossfeed_and_speakers_entities() {
     assert_golden(
         sorted_json(svolder_mqtt::computer::entries(
+            &Computer::new("Reframe"),
             "svolder",
             "homeassistant",
             true,
@@ -168,6 +171,7 @@ fn the_computer_has_the_eq_crossfeed_and_speakers_entities() {
     );
     assert_golden(
         sorted_json(svolder_mqtt::computer::entries(
+            &Computer::new("Reframe"),
             "svolder",
             "homeassistant",
             false,
@@ -178,8 +182,29 @@ fn the_computer_has_the_eq_crossfeed_and_speakers_entities() {
     );
 }
 
-/// The computer's entities are not part of any device's configs: a device's discovery says what
-/// it said before the computer existed.
+/// The scenes' select and text (a sensor alone with commands off) on the computer's device.
+#[test]
+fn the_computer_has_the_scene_select_and_text() {
+    let names = ["Late night", "Desk", "Movie"];
+    for (commands, golden) in [
+        (true, "scenes-commands.json"),
+        (false, "scenes-read-only.json"),
+    ] {
+        assert_golden(
+            sorted_json(svolder_mqtt::computer::scenes::entries(
+                &Computer::new("Reframe"),
+                "svolder",
+                "homeassistant",
+                commands,
+                &names,
+            )),
+            golden,
+        );
+    }
+}
+
+/// The computer's entities are not part of any device's configs: a device's discovery names its
+/// computer only through `via_device` and the bridge availability topic.
 #[test]
 fn the_device_goldens_are_unchanged() {
     let profile = profile("gungnir2-v2");

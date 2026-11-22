@@ -19,6 +19,7 @@
 //! - `devices`: the configured devices from the page: list, add, edit, remove, make default.
 //! - `hops`: the hops after the DAC from the page: add, edit, remove and move.
 //! - `presets`: the user's presets from the page: save, rename and delete.
+//! - `scenes`: the scenes from the page: the list, save, recall, rename and delete.
 //! - `speakers`: virtual speakers' sets from the page: list, fetch, import and forget, through the
 //!   daemon.
 //! - `tone`: the tone control from the page: the mode, a band, the loudness and a preset's recall.
@@ -30,6 +31,7 @@ mod device_presets;
 mod devices;
 mod hops;
 mod presets;
+mod scenes;
 mod speakers;
 mod tone;
 mod walk;
@@ -71,6 +73,7 @@ pub(crate) fn routes() -> Router<Web> {
         .merge(speakers::routes())
         .merge(device_presets::routes())
         .merge(presets::routes())
+        .merge(scenes::routes())
         .merge(hops::routes())
         .merge(devices::routes())
         .merge(walk::routes())

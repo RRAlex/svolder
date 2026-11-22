@@ -76,6 +76,48 @@ pub fn plan_setting(
         })
 }
 
+/// Put the built-in bands on `values`, each a band's key and the raw step it should read, from
+/// the raw readings `raw` gives: the writes in the order [`plan_setting`] uses, none for a band
+/// already there, and `name` as the batch's label. The error is the sentence a front end reports:
+/// the device has no built-in settings.
+pub fn plan_values(
+    device: &str,
+    profile: &Profile,
+    name: &str,
+    values: &[(String, i64)],
+    raw: impl Fn(FunctionId) -> Option<i64>,
+) -> Result<Applied, String> {
+    if profile.builtin_settings.is_none() {
+        return Err(ProfileError::NoDevicePresets {
+            device: device.to_string(),
+            tone_control: profile.eq.is_some(),
+        }
+        .to_string());
+    }
+    for (key, step) in values {
+        let range = profile
+            .control_by_key(key)
+            .filter(|_| {
+                profile
+                    .builtin_settings
+                    .as_ref()
+                    .is_some_and(|table| table.keys.iter().any(|own| own.eq_ignore_ascii_case(key)))
+            })
+            .and_then(|control| control.range);
+        if let Some((low, high)) = range
+            && !(low..=high).contains(step)
+        {
+            return Err(format!(
+                "{key}: {step} is outside its range {low} to {high}"
+            ));
+        }
+    }
+    Ok(Applied {
+        name: name.to_string(),
+        writes: device_presets::plan_values(profile, values, raw),
+    })
+}
+
 /// A recall that cannot be made, in a front end's words.
 fn refusal(device: &str, why: &RecallError) -> String {
     match why {

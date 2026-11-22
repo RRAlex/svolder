@@ -353,15 +353,18 @@ fn lines(parts: &[&str]) -> Option<Vec<String>> {
     )
 }
 
-/// The Path row's tooltip: the whole path, broken at its separators into lines of at most
-/// [`MAX_WIDTH`] cells.
+/// The Path row's tooltip: the label's words, the row's hops and values broken at their
+/// separators into lines of at most [`MAX_WIDTH`] cells, and under a config check the line that
+/// says how many config lines pass.
 fn path_tip(app: &App) -> Option<Vec<String>> {
-    let path = app.host_path()?;
-    Some(crate::tui::screens::device::path_tip_lines(
-        &path,
-        app.path_chip().as_ref(),
-        MAX_WIDTH,
-    ))
+    let row = app.path_row()?;
+    let mut lines = widgets::text::wrap(&row.label.words, MAX_WIDTH);
+    lines.extend(crate::tui::screens::device::path_tip_lines(&row, MAX_WIDTH));
+    // the click opens the config box: the line says how many of its lines pass
+    if let Some(tip) = app.path_setup_tip() {
+        lines.push(widgets::text::cut_to_cells(&tip, MAX_WIDTH));
+    }
+    Some(lines)
 }
 
 /// What a tooltip on `hit` says, or `None` for a hit with no tooltip: menu entries, the Settings
@@ -380,7 +383,6 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         | Hit::SelectPrev(row)
         | Hit::SelectNext(row) => control_row(app, row),
         Hit::Path => path_tip(app),
-        Hit::Config => app.path_chip().and_then(|chip| lines(&[&chip.tip])),
         Hit::Row(..) | Hit::PaneHeader(_) => None,
         Hit::Mode | Hit::ModePrev | Hit::ModeNext => {
             lines(&["Mode", "a click toggles · ‹ › steps it"])
@@ -481,6 +483,7 @@ fn text(hit: Hit, app: &App) -> Option<Vec<String>> {
         | Hit::MenuEntry(_)
         | Hit::MenuOutside
         | Hit::PresetRow(_)
+        | Hit::SceneRow(_)
         | Hit::SetRow(_)
         | Hit::PresetEnd(_)
         | Hit::Mascot
@@ -514,16 +517,16 @@ fn hint_tip(hint: &keys::KeyHint) -> Option<Vec<String>> {
 }
 
 /// What a tooltip on `hit` says in the setup wizard, whose only targets with one are the keys
-/// of its footer: the words the key line itself draws for `scene` (a key's words can change
+/// of its footer: the words the key line itself draws for `context` (a key's words can change
 /// with the step), in the form the same key says on a pane's border.
-pub(crate) fn wizard_text(hit: Hit, scene: keys::Scene) -> Option<Vec<String>> {
+pub(crate) fn wizard_text(hit: Hit, context: keys::KeyContext) -> Option<Vec<String>> {
     match hit {
         Hit::Footer(at) => {
             let hint = *keys::hints_for(Screen::Setup).get(at)?;
             lines(&[&format!(
                 "{} · {}",
-                hint.does_in(scene),
-                hint.label_in(scene)
+                hint.does_in(context),
+                hint.label_in(context)
             )])
         }
         _ => None,

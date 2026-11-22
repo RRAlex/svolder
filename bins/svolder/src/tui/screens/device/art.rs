@@ -21,6 +21,7 @@ use crate::tui::layout_tier::Tier;
 use crate::tui::theme::Theme;
 
 use super::controls::{controls_lines, room};
+use super::path_line;
 use super::status::now_playing_drawn;
 use super::tone_pane::tone_lines_in;
 use super::{panes_of, rows_of};
@@ -73,9 +74,8 @@ fn panes_need(app: &App, tier: Tier, panes: Rect, spaced: bool) -> u16 {
         app.drawn.controls_switch.get(),
         app.drawn.controls_pending.get(),
     );
-    let lines = controls_lines(app, &theme, room(controls, tier), tier, spaced, true)
-        .lines
-        .len();
+    let lines = controls_lines(app, &theme, room(controls, tier), tier, spaced, true, &[])
+        .lines_reserving(path_line::MAX_LINES);
     app.drawn.controls_switch.set(kept.0);
     app.drawn.controls_pending.set(kept.1);
     let tone = match (app.profile.eq.as_ref(), tone) {

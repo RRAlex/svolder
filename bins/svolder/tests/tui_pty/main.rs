@@ -15,5 +15,6 @@ mod cases;
 mod config_box;
 mod crossfeed;
 mod loudness;
+mod scenes;
 mod speakers;
 mod vu;

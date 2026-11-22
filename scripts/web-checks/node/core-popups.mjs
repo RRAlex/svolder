@@ -920,9 +920,9 @@ function loader() {
 
 await ok('a_page_has_the_listed_popups_until_one_is_added_and_a_name_is_added_once', async () => {
   const r = rig({ sample: false });
-  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'setup', HELP], 'the page\'s own list and no other');
+  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'scenes', 'setup', HELP], 'the page\'s own list and no other');
   r.core.popups.add('sample', { title: TITLE, load: async () => ({ wire }) });
-  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'setup', HELP, 'sample']);
+  assert.deepEqual(r.core.popups.names(), ['devices', 'sound', 'scenes', 'setup', HELP, 'sample']);
   assert.throws(() => r.core.popups.add('sample', { title: TITLE, load: async () => ({ wire }) }),
     /sample is added already/);
   assert.throws(() => r.core.popups.add('other', { title: 'T' }), /loader/);

@@ -88,10 +88,11 @@ config error.
 
 ### Writes and the volume rule
 
-With `writes = false` the server offers five read tools (`get_host` reads the computer) and nothing
-can change. `writes = true` adds ten more: three that change a device, `identify`, which only asks
-the unit to show itself, and six for the computer's volume, mute, EQ, loudness, crossfeed and
-virtual speakers. The rule below stands between a model and your amplifier. Set `max_volume_db` too:
+With `writes = false` the server offers six read tools (`get_host` reads the computer, `list_scenes`
+the scenes) and nothing can change. `writes = true` adds fourteen more: three that change a device,
+`identify`, which only asks the unit to show itself, six for the computer's volume, mute, EQ,
+loudness, crossfeed and virtual speakers, and four for scenes.
+The rule below stands between a model and your amplifier. Set `max_volume_db` too:
 `svolder doctor` warns when writes are on without it.
 
 - A volume change is measured against the lowest level the daemon saw for that control in the last
@@ -132,6 +133,13 @@ retries only with your yes. A decline or cancel ends the call with an error, and
 asked again. A client that cannot ask — an older one, or one with no form support — gets a tool
 error that tells the model to ask you and repeat the call with `"confirm": true`; that flag is
 honoured only for such a client, and never replaces the question for one that can ask.
+
+Scenes ask in four places and nowhere else. `load_scene` asks when the scene would play one preset
+on a device and on the computer at once (the daemon's own question) and when it would set a built-in
+band (a Loki Max's) more than 6 dB above the lowest level the daemon saw for it in the last minute,
+the same floor rule as above; a plain recall asks nothing. `save_scene` over a name that is taken
+needs `replace: true` and asks once, and `delete_scene` asks once. `rename_scene` never asks. No
+scene holds or writes a volume, a gain select, a mute or a power switch.
 
 What is never exposed, whatever the settings: raw frames and raw writes, the passphrase, firmware
 and anything in the update family, the factory reset, scanning, adding and removing devices, edits
@@ -253,7 +261,9 @@ when one device is configured. Results are structured JSON.
   `licence`, `credit`, `source_url`) a call can choose from. The four curves and `timing` are left
   out. It is null while the computer EQ cannot be used or the daemon has no virtual speakers. `path`
   is what the computer's path does to the sound, from the player the daemon follows: `verdict`
-  (`untouched`, `changed`, `not_this_dac`, `other_input` or `unknown`), `words` (a list, one entry
+  (`untouched`, `changed`, `not_this_dac`, `other_input` or `unknown`: the path up to the DAC's
+  input), `end_to_end` (the same five words, with the DAC's own volume, tone control, balance,
+  mute, phase and NOS filter added to the verdict), `words` (a list, one entry
   per change or thing not read), `sentence` (the whole sentence, null when there is none) and `dac`,
   the name of the configured DAC it was judged with (the DAC the computer's sink is; null when only
   the computer's side was judged: MCP and `svolder host check` judge the computer's side for any
@@ -301,6 +311,27 @@ when one device is configured. Results are structured JSON.
   speakers`, the TUI or the web UI; a set that is not among `speakers.sets` is refused with the
   fetched ids listed. It never asks. Answers `{"crossfeed": {…}, "speakers": {…}}`, the objects
   `get_host` carries, so crossfeed's note shows when it went off.
+- `list_scenes` — no arguments; the scenes the daemon keeps, each with its `name` and its `parts` (a
+  `who`, the word `computer` or the device's name, and whether it is `present`, that is, can be
+  recalled now), `on` (the scene that is on; absent while none is and while that is not known),
+  `recalled` (the scene last recalled) and `known` (false while a device is still reading a setting
+  that could change which scene is on). A scene is the sound of the computer and of each device that
+  was connected when it was saved; see [the scenes design](../design/scenes.md).
+- `load_scene` (writes) — `name`, optional `confirm` and `confirm_both_sides`; recalls a scene onto
+  the computer and every connected device that has a part in it. The answer carries the outcome of
+  each part: `who`, `status` (`done`, `partial`, `left` or `failed`) and `notes`, the daemon's words
+  for what was left out. It asks only where the section above says. A client that can ask is sent
+  each question in turn; one that cannot gets the question as a tool error and repeats the call with
+  the flag for it: `confirm_both_sides` answers the daemon's question that a preset would play
+  twice, `confirm` answers the question about a band raised over 6 dB, and one never answers the
+  other. A scene that is not found, or a device that is not connected, is named in the daemon's
+  words.
+- `save_scene` (writes) — `name`, optional `replace` and `confirm`; saves the sound settings as they
+  are now, the computer's and every connected device's, under the name. A name that is taken is
+  refused unless `replace` is `true`, which asks once. The answer names each configured device that
+  was not connected and so is not in the scene.
+- `rename_scene` (writes) — `from`, `to`; renames a scene and asks nothing.
+- `delete_scene` (writes) — `name`, optional `confirm`; deletes a scene, after asking once.
 
 ## mcp
 

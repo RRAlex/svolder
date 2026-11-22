@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 
 use crate::tui::screenshots::raster::{Palette, Side, resolve};
-use crate::tui::screenshots::scenes::{Animation, animation};
+use crate::tui::screenshots::shots::{Animation, animation};
 use crate::tui::screenshots::text::{HostDetails, guard};
 use crate::tui::screenshots::world::stand_in;
 use crate::tui::test_support::text;

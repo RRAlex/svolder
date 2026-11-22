@@ -1,9 +1,9 @@
  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀
  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    Gungnir 2 · fw 3 · 0102030405060708  ● connected                         mouse:on 14:02
 ─┤ Controls ├── EQ ── Telemetry ── Devices ───────────────────────────────────────────────────────── ? help ─ esc menu ─
-┌ Controls ───────────────────── mute ─ 0 centre ─ refresh ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
+┌ Controls ─────────── mute ─ 0 centre ─ refresh ─ k check ┐ ┌ Tone control ─────────────────────────── flat ─ presets ┐
 │                                                          │ │                                                         │
-│  ▶ Input        ‹ 3 · Optical ›                          │ │    Mode      ‹ EQ ›                                     │
+│  ▶ Input        ‹ 1 · USB 1 ›                            │ │    Mode      ‹ EQ ›                                     │
 │    Phase invert [ ] off                                  │ │    Loudness  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0   │
 │    NOS filter   [ ] off                                  │ │    Preset    Sennheiser HD 800 S                        │
 │    Mute         [ ] off                                  │ │                                                         │
@@ -13,7 +13,11 @@
 │    Balance      L ──────────────┃────────────── R  0     │ │    3   1232 Hz   -2.24 dB   0.5                         │
 │                                                          │ │    4   1736 Hz   +4.76 dB   0.9                         │
 │    Host                                                  │ │    5  14801 Hz   -4.29 dB   0.5                         │
-│    Transport    ◀◀  ▶  ▮▮  ▶▶                            │ │                                                         │
+│    Transport    ◀◀  ▶  ▮▮  ▶▶  2:41 / 9:22  ━━━────────  │ │                                                         │
+│                                                          │ │                                                         │
+│    Path         player → computer → DAC USB 1            │ │                                                         │
+│                 48 kHz · volume -24.1 dB · tone control  │ │                                                         │
+│                                                          │ │                                                         │
 │    Spectrum     ▃▃▄▄▄▅▆▇▆▆▆▆▆▆▆▅▅▅▅▅▄▄▄▄▃▂▂▂▂▂▂▂▁▁▁ own  │ │                                                         │
 │                                                          │ │                                                         │
 │    host ⣰⣷⣿⣆⣾⣼⣾⣆⣶⣷⣷⣠⣷⣿⣿⣸⣾⣾⣄⣸⣷⣷⣇⣷⣷⣿⣠⣿⣾⣴⣸⣿⣷⣇⣶⣷⣷⣆⣾⣼⣼⣶⣶⣷⣧⣰⣧  │ │                                                         │
@@ -25,15 +29,11 @@
 │                                                          │ │                                                         │
 │                                                          │ │                                                         │
 │                                                          │ │                                                         │
-│                                                          │ │                                                         │
-│                                                          │ │                                                         │
-│                                                          │ │                                                         │
-│                                                          │ │                                                         │
 └──────────────────────────────────────────────────────────┘ └─────────────────────────────────────────────────────────┘
 
 ┌ Status ────────────────────────────────────────────────────────────────────────────────────────────────────── advice ┐
 │                                                                                                                      │
-│  Sample rate 48 kHz   USB 1 connected   USB 2 not connected   S/PDIF locked   fw 3   DSP 3                           │
+│  Sample rate 48 kHz   USB 1 connected   USB 2 not connected   S/PDIF unlocked   fw 3   DSP 3                         │
 │  Raw: none                                                                                                           │
 │  Gungnir 2 (product 2) · profile gungnir2-v2 · −58 dBm advert, 3 min ago                                             │
 │  Link  ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⢁⡈⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉  12 h  │

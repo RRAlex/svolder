@@ -565,10 +565,10 @@ alone.
   (72 px on a phone), with no buttons and no stale title or art. Proved by `playing.py` "the card's
   box and the cover's box are exactly where they were", "the space is given back to the
   background" and "with the player gone the card is one quiet line ...".
-- A changed path stays inside Now playing's half of the band: the verdict chip is first, every chip
+- A changed path stays inside Now playing's half of the band: the label is first, every chip
   sits inside its box at 820, 1100 and 1280 px, and the band is the same height as for an untouched
   path.
-  Proved by `playing.py` "the changed route reads changed ...", "the verdict is the first chip ..."
+  Proved by `playing.py` "the changed route reads changed ...", "the label is the first child of the path ..."
   and "every chip of the path sits inside the band's box" (the fake route
   `SVOLDER_FAKE_ROUTE=changed`: the player at 91 % and 44.1 kHz, the sink at 48 kHz and 54 %, the
   host EQ, two other sounds).
@@ -579,10 +579,10 @@ alone.
   band above its columns"; a daemon with no host draws no card by "with no host the page has no
   card at all".
 - With the visualizer off a changed path's every chip stands inside the band at its lower fixed
-  height (168 px below 1100 px, 188 from there), the verdict first, at 820, 1100 and 1280 px; a path
-  that does not fit its card ends in a chip of three dots, the verdict first, the hops cut kept in
+  height (168 px below 1100 px, 188 from there), the label first, at 820, 1100 and 1280 px; a path
+  that does not fit its card puts a chip of three dots before the last chip, the label first, the hops cut (plain middle hops first, the last chip only when nothing else is left) kept in
   the page and named by the dots, and comes back whole when the card grows, and a card too low even
-  for the verdict drops the dots too. Help leaves out the `v` row on a page with no card.
+  for the label drops the dots too. Help leaves out the `v` row on a page with no card.
   `node/viz.mjs` ties the head script's storage key to the card's. Proved by `playing.py` "the band
   is 168 px tall" / "188 px tall", "every chip of the path sits inside the band's box (...
   visualizer off)", "a path that does not fit ends in a chip of three dots ...", "the hops put out
@@ -1136,6 +1136,22 @@ drawn. Each is proved in node, on fakes for the stream, the clock, storage and t
   the wide and narrow layouts (container queries), the chip kept, a press -> a request -> the view,
   geometry at 1280 and
   390 px, the frame tokens (`WEB_CHECK_SHOTS=<folder>` writes `<theme>-speakers-*.png`).
+  The Scenes popup (`core/popups/scenes/`, `core/scenes.js`, `core/scenes-actions.js`, the store's `scenes` key and
+  the stream's `scenes` event), in `core-scenes.mjs` (45 cases on the real core over a jsdom page and a fake daemon
+  that answers the contract's routes): the view and its words (the lamp only while the view is settled, the chips with
+  the dashed one for a part that is away, what a save takes, how a recall went), the actions on fakes (the bodies, the
+  refusals by reason, the both-sides question, a scene gone by 404 or `missing` read once with no retry, a guest and a
+  read-only page sending nothing, `stopping`, `nothing_to_save`, `internal`), the stream handing the event over with
+  the events URL unchanged, and the popup: a recall's answer and the event in either order with the row never going
+  back, the asks in place (name taken, rename, delete, both sides) with the focus given back, a tap taking its scene
+  from its row while an ask freezes the list, a second ask after the view moved, a writer page with no view. In a
+  browser, `scenes_popup.py` (156 checks per engine over the four themes, wide and 390 px, against the real daemon with
+  a configured device that is never on the air and a second daemon whose device is taken off the air): the model, the
+  row after Sound, geometry and 44 px buttons, the list and the line under the field, a real click recalling, the
+  lamp following another front end, a save with the daemon's note for the device left out, Save over, the keyboard
+  and the focus after every ask, a scene deleted elsewhere under an open question, the away chip and the reading
+  line at 4.5:1, a guest's and a writes-off page's missing row and model key (`WEB_CHECK_SHOTS=<folder>` writes
+  `<theme>-scenes-<wide|phone>[-away].png`).
   The EQ library popup (`core/popups/eq-library/`, `core/autoeq-actions.js`), in `core-eq-library.mjs` (30 cases, each
   on the real core over a jsdom page and a fake daemon, with a device on show that has neighbours): the row (a
   writer's, between Devices and Help), the title naming the side in every draw, a guest and a read-only page with no

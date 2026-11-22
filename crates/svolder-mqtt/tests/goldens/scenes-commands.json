@@ -1,0 +1,65 @@
+[
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/computer_reframe/scene/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "json_attributes_topic": "svolder/computer_reframe/scene/attributes",
+      "name": "Scene",
+      "options": [
+        "Late night",
+        "Desk",
+        "Movie",
+        "custom"
+      ],
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "state_topic": "svolder/computer_reframe/scene/state",
+      "unique_id": "svolder_computer_reframe_scene"
+    },
+    "topic": "homeassistant/select/svolder_computer_reframe/scene/config"
+  },
+  {
+    "payload": {
+      "availability": [
+        {
+          "topic": "svolder/bridge/reframe/availability"
+        }
+      ],
+      "availability_mode": "all",
+      "command_topic": "svolder/computer_reframe/scene_save/set",
+      "device": {
+        "identifiers": [
+          "svolder_computer_reframe"
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Reframe"
+      },
+      "max": 40,
+      "min": 1,
+      "mode": "text",
+      "name": "Scene save",
+      "origin": {
+        "name": "svolder",
+        "sw_version": "{version}"
+      },
+      "unique_id": "svolder_computer_reframe_scene_save"
+    },
+    "topic": "homeassistant/text/svolder_computer_reframe/scene_save/config"
+  }
+]

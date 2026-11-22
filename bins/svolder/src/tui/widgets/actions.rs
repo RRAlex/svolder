@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 
 use super::text::cells;
 use crate::tui::app::Screen;
-use crate::tui::keys::{self, Scene};
+use crate::tui::keys::{self, KeyContext};
 use crate::tui::mouse::{Hit, HitMap};
 use crate::tui::theme::{Role, Theme};
 
@@ -50,13 +50,13 @@ pub(crate) fn action_room(width: u16, title: usize) -> u16 {
 /// and its key.
 ///
 /// A word is drawn in the key and text roles, or whole in the faint role where its key is not
-/// worth pressing on `scene` (`keys::available_in` on `screen`'s own hint for it).
+/// worth pressing on `context` (`keys::available_in` on `screen`'s own hint for it).
 pub(crate) fn actions_title(
     actions: &[Action],
     mark: Option<&str>,
     room: u16,
     screen: Screen,
-    scene: &Scene,
+    context: &KeyContext,
     theme: &Theme,
 ) -> (Line<'static>, Vec<(u16, u16, KeyCode)>) {
     let join = cells(ACTION_JOIN);
@@ -92,7 +92,7 @@ pub(crate) fn actions_title(
         let available = keys::hints_for(screen)
             .into_iter()
             .find(|hint| hint.code == action.code)
-            .is_some_and(|hint| keys::available_in(hint, *scene));
+            .is_some_and(|hint| keys::available_in(hint, *context));
         match available {
             true => {
                 let (first, rest) = action

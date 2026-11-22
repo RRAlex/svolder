@@ -1213,6 +1213,100 @@ fn channel_positions_compare_as_sets() {
 }
 
 #[test]
+fn positions_that_name_none_are_no_remap() {
+    let stream_unk = |sink: &[&str]| {
+        judged(|_, setup| {
+            setup.stream_layout = Some(layout(&["UNK", "UNK"]));
+            setup.sink_layout = Some(layout(sink));
+        })
+    };
+    // Spotify's real shape: two unpositioned channels into a stereo sink.
+    assert_eq!(
+        judge(&stream_unk(&["FL", "FR"])),
+        (Verdict::Untouched, words(&["untouched"]))
+    );
+    assert_eq!(judge(&stream_unk(&["UNK", "UNK"])).0, Verdict::Untouched);
+    // PipeWire pairs channels one to one when either side names none: NA and AUXn too.
+    assert_eq!(judge(&stream_unk(&["AUX0", "AUX1"])).0, Verdict::Untouched);
+    let aux = judged(|_, setup| setup.sink_layout = Some(layout(&["AUX0", "AUX1"])));
+    assert_eq!(judge(&aux).0, Verdict::Untouched);
+    let na = judged(|_, setup| setup.sink_layout = Some(layout(&["NA", "NA"])));
+    assert_eq!(judge(&na).0, Verdict::Untouched);
+    // One unpositioned channel is a mono source: it goes to both.
+    let mono = judged(|_, setup| setup.stream_layout = Some(layout(&["UNK"])));
+    assert_eq!(judge(&mono).0, Verdict::Untouched);
+    // Named positions still compare as sets, and a real difference is still a remap or a mix.
+    let swapped = judged(|_, setup| setup.sink_layout = Some(layout(&["FR", "FL"])));
+    assert_eq!(judge(&swapped).0, Verdict::Untouched);
+    let rear = judged(|_, setup| setup.sink_layout = Some(layout(&["RL", "RR"])));
+    assert_eq!(judge(&rear).1, words(&["channels remapped"]));
+    let up = stream_unk(&["FL", "FR", "FC", "LFE", "RL", "RR"]);
+    assert_eq!(judge(&up).1, words(&["channels 2 → 6 (upmixed)"]));
+    // A layout mixing named and unnamed positions keeps the set comparison.
+    let mixed = judged(|_, setup| setup.stream_layout = Some(layout(&["FL", "UNK"])));
+    assert_eq!(judge(&mixed).1, words(&["channels remapped"]));
+    // Equal sets of a mix are no proof of a copy: unknown.
+    let same_mix = judged(|_, setup| {
+        setup.stream_layout = Some(layout(&["FL", "UNK"]));
+        setup.sink_layout = Some(layout(&["UNK", "FL"]));
+    });
+    assert_eq!(
+        judge(&same_mix),
+        (Verdict::Unknown, words(&["channels partly unnamed"]))
+    );
+}
+
+#[test]
+fn mono_among_several_channels_names_none() {
+    // channelmix-ops.c L212-215.
+    for stream in [&["MONO", "MONO"], &["FL", "MONO"]] {
+        let route = judged(|_, setup| setup.stream_layout = Some(layout(stream)));
+        assert_eq!(judge(&route).0, Verdict::Untouched);
+    }
+}
+
+#[test]
+fn one_channel_into_stereo_says_what_pipewire_does() {
+    let one = |position: &str| judged(|_, setup| setup.stream_layout = Some(layout(&[position])));
+    for position in ["MONO", "UNK", "NA", "AUX0"] {
+        assert_eq!(judge(&one(position)).0, Verdict::Untouched, "{position}");
+    }
+    assert_eq!(
+        judge(&one("FC")),
+        (
+            Verdict::Changed,
+            words(&["mono centre 3 dB lower on both channels"])
+        )
+    );
+    for position in ["FL", "FR"] {
+        assert_eq!(
+            judge(&one(position)).1,
+            words(&["one channel silent"]),
+            "{position}"
+        );
+    }
+    assert_eq!(judge(&one("LFE")).1, words(&["channels remapped"]));
+    // The sink's positions decide first.
+    let into = |position: &str, sink: &[&str]| {
+        judged(|_, setup| {
+            setup.stream_layout = Some(layout(&[position]));
+            setup.sink_layout = Some(layout(sink));
+        })
+    };
+    for position in ["FC", "FL", "MONO"] {
+        assert_eq!(
+            judge(&into(position, &["AUX0", "AUX1"])).0,
+            Verdict::Untouched,
+            "{position}"
+        );
+    }
+    assert_eq!(
+        judge(&into("MONO", &["RL", "RR"])).1,
+        words(&["channels remapped"])
+    );
+}
+
+#[test]
 fn mono_into_stereo_is_no_change_and_the_detail_says_so() {
     let route = judged(|_, setup| setup.stream_layout = Some(layout(&["MONO"])));
     let line = path_line(&route, &dac());
@@ -1836,4 +1930,175 @@ fn the_verdict_keys_are_pinned() {
         all.iter().map(|(_, key)| *key).collect::<Vec<_>>(),
         Verdict::KEYS
     );
+}
+
+/// What `hop` of `route`'s path records as changes: each one's full words and short form.
+fn recorded(route: &RouteFacts, hop: usize) -> Vec<(String, String)> {
+    path_line(route, &dac()).hops[hop]
+        .changed
+        .iter()
+        .map(|change| (change.words.clone(), change.short.clone()))
+        .collect()
+}
+
+/// A recorded change as a pair of strs, for comparing.
+fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+    list.iter()
+        .map(|(words, short)| (words.to_string(), short.to_string()))
+        .collect()
+}
+
+#[test]
+fn the_player_records_its_own_volume_and_mute() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().volume_milli = Some(500);
+    route.player.as_mut().unwrap().muted = true;
+    assert_eq!(
+        recorded(&route, 0),
+        pairs(&[
+            ("player volume 50 %", "volume 50 %"),
+            ("player muted", "muted")
+        ])
+    );
+    assert!(recorded(&route, 1).is_empty() && recorded(&route, 2).is_empty());
+}
+
+#[test]
+fn the_computer_records_resampling_volume_eq_and_mixing() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().rate_hz = Some(44_100);
+    route.sink.as_mut().unwrap().volume_milli = Some(800);
+    route.sink.as_mut().unwrap().muted = true;
+    route.others_mixing = 3;
+    route.host_eq = true;
+    route.stages = Some(ChainStages {
+        eq: true,
+        loudness: true,
+        crossfeed: true,
+        speakers: true,
+    });
+    let line = path_line(&route, &dac());
+    assert_eq!(
+        recorded(&route, 1),
+        pairs(&[
+            ("resampled 44.1 → 48 kHz", "resampled"),
+            ("computer volume 80 %", "volume 80 %"),
+            ("computer muted", "muted"),
+            ("host EQ on", "EQ"),
+            ("loudness on", "EQ"),
+            ("crossfeed on", "EQ"),
+            ("virtual speakers on", "EQ"),
+            ("3 other sounds mixing", "3 other sounds mixing"),
+        ])
+    );
+    // The path's words are the hops' full words in hop order, as before.
+    assert_eq!(line.words.len(), 8);
+    assert_eq!(line.words[0], "resampled 44.1 → 48 kHz");
+    route.others_mixing = 1;
+    assert_eq!(
+        recorded(&route, 1).last().unwrap(),
+        &(
+            "1 other sound mixing".to_string(),
+            "1 other sound mixing".to_string()
+        )
+    );
+}
+
+#[test]
+fn the_hops_carry_the_rates_the_judge_read() {
+    let mut route = clean();
+    route.player.as_mut().unwrap().rate_hz = Some(44_100);
+    let line = path_line(&route, &dac());
+    assert_eq!(line.hops[0].rate_hz, Some(44_100));
+    assert_eq!(line.hops[1].rate_hz, Some(48_000));
+    assert_eq!(line.hops[1].resamples_to, Some(48_000));
+    assert_eq!(line.hops[2].rate_hz, Some(48_000));
+    let clean_line = path_line(&clean(), &dac());
+    assert_eq!(clean_line.hops[1].resamples_to, None);
+    // The resample ends at the rate the words print: the sink's, whatever the clock is forced to.
+    let forced = judged(|route, setup| {
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(96_000);
+    });
+    let line = path_line(&forced, &dac());
+    assert_eq!(line.hops[1].resamples_to, Some(48_000));
+    assert_eq!(
+        line.words,
+        vec!["resampled 44.1 → 48 kHz (rate forced)".to_string()]
+    );
+    // While the sink still reads the stream's rate under a forced clock, the words say
+    // `→ forced`, and so does the row.
+    let reads_stream = judged(|route, setup| {
+        route.sink.as_mut().unwrap().rate_hz = Some(44_100);
+        route.player.as_mut().unwrap().rate_hz = Some(44_100);
+        setup.clock.as_mut().unwrap().force_rate = Some(96_000);
+    });
+    let line = path_line(&reads_stream, &dac());
+    assert_eq!(line.hops[1].resamples_to, Some(96_000));
+    assert_eq!(line.words[0], "resampled 44.1 → 96 kHz (rate forced)");
+}
+
+#[test]
+fn the_setup_changes_have_short_forms() {
+    let short = |route: &RouteFacts| {
+        recorded(route, 1)
+            .into_iter()
+            .map(|(_, short)| short)
+            .collect::<Vec<_>>()
+    };
+    let cut = judged(|route, _| {
+        route.player.as_mut().unwrap().format = Some("S32LE".into());
+        route.sink.as_mut().unwrap().format = Some("S16LE".into());
+    });
+    assert_eq!(short(&cut), ["cut to 16 bits"]);
+    let mixed = judged(|_, setup| setup.sink_layout = Some(layout(&["MONO"])));
+    assert_eq!(short(&mixed), ["channels mixed"]);
+    let up = judged(|_, setup| {
+        setup.sink_layout = Some(layout(&["FL", "FR", "FC", "LFE", "RL", "RR"]));
+    });
+    assert_eq!(short(&up), ["channels upmixed"]);
+    let remap = judged(|_, setup| setup.sink_layout = Some(layout(&["FL", "FC"])));
+    assert_eq!(short(&remap), ["channels remapped"]);
+    let centre = judged(|_, setup| setup.stream_layout = Some(layout(&["FC"])));
+    assert_eq!(short(&centre), ["mono centre -3 dB"]);
+    let silent = judged(|_, setup| setup.stream_layout = Some(layout(&["FL"])));
+    assert_eq!(short(&silent), ["one channel silent"]);
+    let dither = judged(|_, setup| {
+        setup.dither = Some(Dither {
+            method: "triangular".into(),
+            noise: 3,
+        })
+    });
+    assert_eq!(short(&dither), ["dither", "dither"]);
+    let sink = judged(|_, setup| setup.sink_filter = Some(true));
+    assert_eq!(short(&sink), ["sink filter"]);
+    let stream = judged(|_, setup| setup.stream_filter = Some(true));
+    assert_eq!(short(&stream), ["stream filter"]);
+    let dmix = with_alsa(Some("dmix:0"), open("S32_LE", 48_000, 2));
+    assert_eq!(short(&dmix), ["ALSA dmix"]);
+    let converts = with_alsa(Some("hw:Audio"), open("S16_LE", 48_000, 2));
+    assert_eq!(short(&converts), ["ALSA converts"]);
+    let plug = with_alsa(Some("plughw:1"), HwState::Closed);
+    assert_eq!(short(&plug), ["ALSA plug"]);
+}
+
+#[test]
+fn the_dac_records_the_rate_it_reads_and_its_stage_rides_on_the_hop() {
+    let mut device = dac();
+    device.rate_hz = Some(44_100);
+    device.input = Some("USB 1".into());
+    device.stage.volume_db = Some(-24.1);
+    let line = path_line(&clean(), &device);
+    let hop = &line.hops[2];
+    assert_eq!(
+        hop.changed,
+        vec![Change {
+            words: "DAC reads 44.1 kHz".into(),
+            short: "reads 44.1 kHz".into()
+        }]
+    );
+    assert_eq!(hop.input.as_deref(), Some("USB 1"));
+    assert_eq!(hop.stage, Some(device.stage));
+    assert_eq!(hop.rate_hz, Some(44_100));
+    assert!(line.hops[0].stage.is_none() && line.hops[1].stage.is_none());
 }

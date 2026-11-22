@@ -68,7 +68,7 @@ mod computer;
 pub(crate) mod fake_speakers;
 mod synthetic;
 
-pub(crate) use computer::{Computer, EqRefusal, is_unavailable};
+pub(crate) use computer::{Computer, EqRefusal, SceneRefusal, is_unavailable};
 
 /// How long after the bus went away it is looked for again, and after each look that found
 /// none.
@@ -1333,6 +1333,30 @@ impl HostService {
         Fut: std::future::Future<Output = Result<(), String>>,
     {
         self.computer()?.eq_op(op, presets, holders, flatten).await
+    }
+
+    /// The computer's part of a scene as it plays now ([`Computer::scene_part`]).
+    pub(crate) async fn scene_part(&self) -> Result<svolder_host::eq::ComputerPart, String> {
+        self.computer()?.scene_part().await
+    }
+
+    /// Put a scene's computer part on the computer as one change ([`Computer::scene_recall`]).
+    pub(crate) async fn scene_recall(
+        &self,
+        part: svolder_host::eq::ComputerPart,
+    ) -> Result<svolder_host::eq::Recalled, SceneRefusal> {
+        let computer = self.computer().map_err(|words| SceneRefusal {
+            words,
+            changed: false,
+        })?;
+        computer.scene_recall(part).await
+    }
+
+    /// The computer's EQ as it is this moment while its controls can be used (a computer is
+    /// there and the view is not the unavailable one): what a scene's computer part is judged
+    /// against. `None` otherwise, which leaves the computer out of every scene.
+    pub(crate) fn scene_eq(&self) -> Option<svolder_host::eq::EqView> {
+        self.eq_now().filter(|view| view.unavailable.is_none())
     }
 
     /// The switch of the computer EQ, which follows the controller the service holds when it is

@@ -284,6 +284,7 @@ export function createStream({
       }
     });
     on('host', (data) => store.emit('host', data));
+    on('scenes', (data) => store.emit('scenes', data));
     on('walk', (data) => store.emit('walk', data));
   }
 

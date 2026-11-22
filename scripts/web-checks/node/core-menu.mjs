@@ -103,14 +103,14 @@ await ok('the_arrows_go_round_the_ends_past_a_disabled_and_a_hidden_row', async 
   const r = await rig();
   r.core.frame.openMenu();
   const seen = [r.at()];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 9; i++) {
     r.press('ArrowDown');
     seen.push(r.at());
   }
-  // Off is disabled, Gone is hidden: neither is reached; Devices, Sound, PipeWire config and Help
-  // are the page's popup rows
+  // Off is disabled, Gone is hidden: neither is reached; Devices, Sound, Scenes, PipeWire config
+  // and Help are the page's popup rows (a writer's page)
   assert.deepEqual(seen, ['On', 'row-act', 'menu-popup-devices', 'menu-popup-sound',
-    'menu-popup-setup', 'menu-popup-help',
+    'menu-popup-scenes', 'menu-popup-setup', 'menu-popup-help',
     'menu-sign-out', 'menu-theme', 'On']);
   r.press('ArrowUp');
   assert.equal(r.at(), 'menu-theme');
@@ -187,8 +187,9 @@ await ok('a_listed_popups_row_is_in_the_menu_and_opens_its_popup', async () => {
   const plain = await rig();
   plain.core.frame.openMenu();
   assert.deepEqual([...plain.pop.querySelectorAll('[id^="menu-popup-"]')].map((el) => el.id),
-    ['menu-popup-devices', 'menu-popup-sound', 'menu-popup-setup', 'menu-popup-help'],
-    'the page as shipped has the rows of Devices, Sound, PipeWire config and Help and no other');
+    ['menu-popup-devices', 'menu-popup-sound', 'menu-popup-scenes', 'menu-popup-setup',
+      'menu-popup-help'],
+    'the page as shipped has the rows of Devices, Sound, Scenes, PipeWire config and Help and no other');
   plain.window.close();
 });
 

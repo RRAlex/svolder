@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The PipeWire config box: the seven lines of the config check over the device screen, `k` or a
-//! click on the Path row's chip opens it, `k` or `Esc` closes it.
+//! click on the Path row opens it, `k` or `Esc` closes it.
 //!
 //! Every word in it is the judge's ([`setup_check`](svolder_ipc::host::setup_check)): this module
 //! only picks the route the judge is given and holds what the box needs between frames. With a

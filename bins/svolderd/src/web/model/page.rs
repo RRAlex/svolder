@@ -11,6 +11,7 @@ use serde::Serialize;
 use svolder_host::eq::HostEqState;
 use svolder_host::{RouteFacts, SinkFacts};
 use svolder_ipc::config::{HopKind, HopWhat};
+use svolder_ipc::socket::protocol::ScenesView;
 use svolder_ipc::{Config, DeviceInfo};
 use svolder_profiles::Family;
 use svolder_profiles::tone::preset::same_name;
@@ -39,6 +40,10 @@ pub(crate) struct PageModel {
     /// The computer's player, when the daemon watches it.
     pub(crate) host: Option<HostModel>,
     pub(crate) strip: Option<view::Strip>,
+    /// The scenes and which one is on, for a viewer who may write; absent for a guest and for a
+    /// page that is read-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) scenes: Option<ScenesView>,
 }
 
 /// Who is looking and what they may do.
@@ -319,6 +324,14 @@ pub(crate) async fn host_model(
     ))
 }
 
+/// The scenes' view for a viewer with `access`: only a writer has one.
+pub(crate) fn scenes_model(web: &Web, access: Access) -> Option<ScenesView> {
+    match access.writes {
+        true => web.fleet.scenes().map(|view| view.borrow().clone()),
+        false => None,
+    }
+}
+
 /// The page for `viewer` showing `shown`, read as `loaded`: the first snapshot, with the strip
 /// the page's first paint carries.
 pub(crate) async fn page_model(
@@ -346,5 +359,6 @@ pub(crate) async fn page_model(
         card: card.as_ref().map(Into::into),
         host: host_model(web, access, shown).await,
         strip,
+        scenes: scenes_model(web, access),
     }
 }

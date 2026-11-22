@@ -130,7 +130,7 @@ fn each_screen_section_holds_only_that_screens_own_keys() {
             let hint = keys::all()
                 .iter()
                 .find(|hint| {
-                    hint.label_in(Scene::of(&app)) == label
+                    hint.label_in(KeyContext::of(&app)) == label
                         && (hint.does == does || hint.long == Some(does))
                 })
                 .unwrap_or_else(|| panic!("{name} lists {label}, which no key table names"));
@@ -632,8 +632,8 @@ fn the_phase_and_nos_keys_are_listed_only_where_the_device_has_them() {
         .iter()
         .filter(|hint| matches!(hint.when, When::HasPhase | When::HasNos))
     {
-        assert!(keys::hidden_in(hint, Scene::of(&amp)));
-        assert!(!keys::hidden_in(hint, Scene::of(&dac)));
+        assert!(keys::hidden_in(hint, KeyContext::of(&amp)));
+        assert!(!keys::hidden_in(hint, KeyContext::of(&dac)));
     }
 }
 
@@ -925,4 +925,35 @@ fn the_help_lists_c_a_x_and_no_h() {
         !bare.contains("toggle computer") && !bare.contains("add point"),
         "{bare}"
     );
+}
+
+/// The scenes key is listed only where the daemon keeps scenes and has sent them, with the keys
+/// the box names on itself; without them the overlay is what it was.
+#[test]
+fn the_scenes_key_is_listed_only_where_scenes_are_offered() {
+    let mut plain = app_showing(Screen::Device);
+    plain.overlays.help_open = true;
+    let rows = text(&frame(&plain, 140, 60));
+    assert!(
+        !shows(&rows, "scenes"),
+        "a daemon-less app lists z:\n{rows:#?}"
+    );
+
+    let mut scenic = crate::tui::test_support::offering_scenes(
+        app_showing(Screen::Device),
+        crate::tui::test_support::mockup_scenes(),
+    );
+    scenic.overlays.help_open = true;
+    let rows = text(&frame(&scenic, 140, 60));
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("z ") && row.contains("scenes (↵ n u c x inside)")),
+        "z is not listed:\n{rows:#?}"
+    );
+    let hint = keys::all()
+        .iter()
+        .find(|hint| hint.code == KeyCode::Char('z'))
+        .expect("the table names z");
+    assert!(keys::hidden_in(hint, KeyContext::of(&plain)));
+    assert!(!keys::hidden_in(hint, KeyContext::of(&scenic)));
 }

@@ -278,3 +278,114 @@ async fn a_setting_right_after_a_slot_recall_writes_every_band() {
     assert!(matches!(done.await, Ok(Outcome::Done(Response::Ack))));
     assert_eq!(log(&stand).last().map(String::as_str), Some("raw 6.1 15"));
 }
+
+/// A set of values asks for the bands going down first, then those going up, as one batch, the
+/// order the named form uses.
+#[tokio::test]
+async fn a_set_of_values_writes_the_cuts_first_as_one_batch() {
+    let (writer, stand) = loki([15, 15, 15, 20, 15, 15]);
+    let values = vec![("band1".to_string(), 28), ("band4".to_string(), 15)];
+    let Recalling { planned, done } = writer.apply_values(Origin::Web, "Late night".into(), values);
+    let Ok(Planned::Setting(applied)) = planned.await else {
+        panic!("the values are planned");
+    };
+    assert_eq!(applied.name, "Late night");
+    assert_eq!(applied.writes.len(), 2);
+    assert!(matches!(done.await, Ok(Outcome::Done(Response::Ack))));
+    assert_eq!(log(&stand), ["raw 6.4 15", "raw 6.1 28"]);
+    assert_eq!(bands(&stand), Some([28, 15, 15, 15, 15, 15]));
+}
+
+/// Values the bands already read, and a key the device has no band for, plan no write.
+#[tokio::test]
+async fn a_set_of_values_leaves_out_what_the_device_already_reads() {
+    let (writer, stand) = loki([28, 21, 15, 15, 15, 15]);
+    let values = vec![
+        ("band1".to_string(), 28),
+        ("band2".to_string(), 21),
+        ("nonesuch".to_string(), 3),
+    ];
+    let Recalling { planned, done } = writer.apply_values(Origin::Web, "Same".into(), values);
+    assert!(matches!(planned.await, Ok(Planned::Setting(ref a)) if a.writes.is_empty()));
+    assert!(matches!(done.await, Ok(Outcome::Done(Response::Ack))));
+    assert!(log(&stand).is_empty());
+}
+
+/// A band write that arrives while a set of values runs waits for it, as it waits for a named
+/// setting.
+#[tokio::test]
+async fn a_band_write_arriving_during_a_set_of_values_waits_for_it() {
+    let (writer, stand) = loki([15; 6]);
+    stand.gate.forget_permits(1000);
+    let values = vec![("band1".to_string(), 28), ("band2".to_string(), 21)];
+    let Recalling { planned, done } = writer.apply_values(Origin::Web, "Late night".into(), values);
+    let band = writer.submit(Origin::Socket, set("band2", "3"), Mode::Ordered);
+    assert_eq!(writer.view().await.held, 1);
+    stand.gate.add_permits(1000);
+    assert!(matches!(planned.await, Ok(Planned::Setting(_))));
+    assert!(matches!(done.await, Ok(Outcome::Done(Response::Ack))));
+    assert!(matches!(band.await, Ok(Outcome::Done(Response::Value(_)))));
+    assert_eq!(log(&stand), ["raw 6.1 28", "raw 6.2 21", "set band2 3"]);
+}
+
+/// A device with no built-in settings refuses a set of values in words, and writes nothing.
+#[tokio::test]
+async fn a_set_of_values_on_a_device_with_no_built_in_settings_is_refused() {
+    let (writer, stand) = stand_in("gungnir2-v2", &[]);
+    let values = vec![("band1".to_string(), 28)];
+    let Recalling { planned, done } = writer.apply_values(Origin::Web, "Late night".into(), values);
+    assert!(matches!(planned.await, Ok(Planned::Refused(_))));
+    assert!(matches!(
+        done.await,
+        Ok(Outcome::Done(Response::Error { .. }))
+    ));
+    assert!(log(&stand).is_empty());
+}
+
+/// A value outside the band's range is refused in words and nothing is written, whoever asks.
+#[tokio::test]
+async fn a_set_of_values_refuses_a_step_outside_the_range() {
+    let (writer, stand) = loki([15; 6]);
+    let values = vec![("band1".to_string(), 28), ("band2".to_string(), 400)];
+    let Recalling { planned, done } = writer.apply_values(Origin::Web, "Late night".into(), values);
+    let Ok(Planned::Refused(why)) = planned.await else {
+        panic!("refused");
+    };
+    assert!(
+        why.contains("band2") && why.contains("outside its range"),
+        "{why}"
+    );
+    assert!(matches!(
+        done.await,
+        Ok(Outcome::Done(Response::Error { .. }))
+    ));
+    assert!(log(&stand).is_empty());
+}
+
+/// A set of values rewrites only the bands it is given: a held write to another built-in band
+/// survives a later set of values and goes out after it, where a named setting would drop it.
+#[tokio::test]
+async fn a_later_set_of_values_keeps_a_held_write_to_a_band_it_leaves_out() {
+    let (writer, stand) = loki([15; 6]);
+    stand.gate.forget_permits(1000);
+    let first = writer.apply_values(Origin::Web, "One".into(), vec![("band1".into(), 28)]);
+    let held = writer.submit(Origin::Socket, set("band5", "3"), Mode::Latest);
+    let second = writer.apply_values(Origin::Web, "Two".into(), vec![("band2".into(), 21)]);
+    let mut arrivals = writer.arrivals();
+    arrivals
+        .wait_for(|taken| *taken >= 3)
+        .await
+        .expect("all three arrived");
+    assert_eq!(
+        writer.view().await.held,
+        1,
+        "the write to band5 is held, not dropped"
+    );
+    stand.gate.add_permits(1000);
+    assert!(matches!(first.done.await, Ok(Outcome::Done(Response::Ack))));
+    assert!(matches!(
+        second.done.await,
+        Ok(Outcome::Done(Response::Ack))
+    ));
+    assert!(matches!(held.await, Ok(Outcome::Done(Response::Value(_)))));
+}

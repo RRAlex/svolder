@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The world the scenes are drawn in.
+//! The world the stills are drawn in.
 
 use svolder_profiles::convert::raw_to_display;
 use svolder_profiles::roles;
@@ -162,7 +162,7 @@ fn the_preset_is_made_through_the_import_path() {
 
 #[test]
 fn the_signal_is_loud_at_every_instant_a_scene_reads() {
-    for t in crate::tui::screenshots::scenes::signal_instants() {
+    for t in crate::tui::screenshots::shots::signal_instants() {
         assert!(level(t, 0) > 0.1 && level(t, 1) > 0.1, "{t:?}");
     }
 }
@@ -195,7 +195,7 @@ fn the_volume_moves_from_the_animations_start_to_the_stills() {
                 .fold(0.0, f64::max);
             gap / 2.0 + 1e-9
         };
-        // The scene constants themselves rise by the 6.0 dB the animation shows
+        // The still constants themselves rise by the 6.0 dB the animation shows
         // (`-30.1 dB` to `-24.1 dB`), which reading back a value just set cannot check.
         assert!(
             (STILL_VOLUME_DB - START_VOLUME_DB - 6.0).abs() < 1e-9,
@@ -267,4 +267,26 @@ fn the_snapshot_drops_meters_and_readings_with_no_function_id() {
     assert!(!kept_in_snapshot(&profile, &reading(&meter.to_string())));
     assert!(kept_in_snapshot(&profile, &reading(&power.to_string())));
     assert!(!kept_in_snapshot(&profile, &reading("not an id")));
+}
+
+#[test]
+fn the_dac_still_puts_the_gungnir_on_usb_with_a_route_to_judge() {
+    runtime().block_on(async {
+        let world = World::new(stand_in());
+        let mut app = gungnir(&world, world.base, STILL_VOLUME_DB).await;
+        assert!(
+            app.host.daemon.is_none(),
+            "the other pictures have no route"
+        );
+        on_usb_with_path(&mut app, world.base);
+        assert_eq!(key_raw(&app, "input"), Some(1));
+        assert!(reads_on(&app, "usb1_connected"));
+        assert!(!reads_on(&app, "usb2_connected"));
+        let path = app.host_path().expect("a path");
+        assert_eq!(path.words_line(), "untouched");
+        assert_eq!(
+            app.path_setup().map(|check| check.chip()).as_deref(),
+            Some("config ✓")
+        );
+    });
 }

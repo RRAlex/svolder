@@ -94,7 +94,7 @@ impl HostDetails {
     }
 }
 
-/// Refuse `buffer`, drawn for `place` (a scene, and a frame where there are several), when a
+/// Refuse `buffer`, drawn for `place` (a still, and a frame where there are several), when a
 /// line of it carries a detail of this machine; the error names the place, the line and why.
 pub(super) fn guard(buffer: &Buffer, host: &HostDetails, place: &str) -> Result<(), String> {
     for (y, row) in text(buffer).iter().enumerate() {

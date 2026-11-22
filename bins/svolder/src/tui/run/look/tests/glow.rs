@@ -197,7 +197,7 @@ async fn the_hosts_capture_carries_the_glow_onto_the_pane_contours() {
 /// Golden: the runner mid-lap on `amber`, true colour, with no level streaming — pinned as
 /// the exact colours the code draws today, next to
 /// [`the_light_stands_out_against_the_contour_it_runs_over`]'s relational check of the same
-/// scene rather than in place of it. The band is `amber`'s resting accent (`#e0a030`)
+/// view rather than in place of it. The band is `amber`'s resting accent (`#e0a030`)
 /// lifted toward white, and a cell of the contour the band has not reached yet is that
 /// same accent, unlifted.
 #[test]

@@ -123,7 +123,8 @@ impl BridgeTask {
         };
         published.watcher.abort();
         // The computer's path is judged against the DACs that are published.
-        self.changed(svolder_mqtt::computer::UNIT);
+        let me = self.me.unit().to_string();
+        self.changed(&me);
         for topic in published
             .configs
             .keys()

@@ -148,8 +148,8 @@ async fn through_the_daemon_it_prints_the_path_and_the_seven_lines() {
     }
 }
 
-/// `--json` is `{ sink, path: {verdict, words, sentence, dac}, config: {sink, outcome, summary,
-/// limit, lines} }`.
+/// `--json` is `{ sink, path: {verdict, end_to_end, words, sentence, dac}, config: {sink,
+/// outcome, summary, limit, lines} }`.
 #[tokio::test]
 async fn json_has_the_sink_the_path_and_the_config() {
     let said = through_daemon(Some(route_of("schiit-sink.json")), true)
@@ -166,6 +166,8 @@ async fn json_has_the_sink_the_path_and_the_config() {
     assert_eq!(value["config"]["sink"], value["sink"]);
     assert!(value["path"]["dac"].is_string(), "{value}");
     assert!(value["path"]["verdict"].is_string());
+    // `end_to_end` sits beside the verdict and is one of the same keys.
+    assert!(Verdict::KEYS.contains(&value["path"]["end_to_end"].as_str().unwrap()));
     assert!(value["path"]["words"].is_array());
     assert!(value["path"].as_object().unwrap().contains_key("sentence"));
     assert!(value["config"]["summary"].is_string());
@@ -197,6 +199,44 @@ fn json_names_the_dac_the_path_is_judged_against() {
     let out = lines(&route, &[], true);
     let value: serde_json::Value = serde_json::from_str(&out[0]).unwrap();
     assert!(value["path"]["dac"].is_null(), "{value}");
+}
+
+/// `end_to_end` is the verdict with the DAC's own stage added: the same route through a DAC
+/// whose volume is below 0 dB keeps its verdict and reads `changed` end to end.
+#[test]
+fn json_end_to_end_adds_the_dacs_own_stage_to_the_verdict() {
+    // The fixture's own streams and volumes make its verdict `changed`; a route with the pw-cat
+    // stream as the player at full volume, the sink at full volume and nothing else mixing is
+    // untouched, so the DAC's stage is the only difference.
+    let mut route = route(&fixture("schiit-sink.json"), Some(1_790_719), "").expect("a dump");
+    let rate = route.sink.as_ref().and_then(|sink| sink.rate_hz);
+    let stream = route.player.as_mut().expect("a player");
+    (stream.rate_hz, stream.volume_milli, stream.muted) = (rate, Some(1000), false);
+    let sink = route.sink.as_mut().expect("a sink");
+    (sink.volume_milli, sink.muted) = (Some(1000), false);
+    route.others_mixing = 0;
+    let mut dac = DacFacts {
+        display: "Gungnir 2".to_string(),
+        input: Some("USB".to_string()),
+        rate_hz: route.sink.as_ref().and_then(|sink| sink.rate_hz),
+        ..DacFacts::default()
+    };
+    let said = |dac: &DacFacts| -> serde_json::Value {
+        serde_json::from_str(&lines(&route, std::slice::from_ref(dac), true)[0]).unwrap()
+    };
+    let flat = said(&dac);
+    assert_ne!(flat["path"]["verdict"], "changed", "{flat}");
+    assert_eq!(
+        flat["path"]["end_to_end"], flat["path"]["verdict"],
+        "{flat}"
+    );
+    dac.stage.volume_db = Some(-3.0);
+    let lowered = said(&dac);
+    assert_eq!(
+        lowered["path"]["verdict"], flat["path"]["verdict"],
+        "{lowered}"
+    );
+    assert_eq!(lowered["path"]["end_to_end"], "changed", "{lowered}");
 }
 
 /// The text always names the sink the config judged (also with no hops) and ends on the limit.

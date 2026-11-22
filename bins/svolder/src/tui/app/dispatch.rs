@@ -124,6 +124,9 @@ impl App {
         if self.speakers_box.list.is_some() {
             return self.sets_key(key.code);
         }
+        if self.scenes.list.is_some() {
+            return crate::tui::boxes::scenes::key(self, key.code);
+        }
         if self.tone.edit_line.is_some() {
             return edit_line::key(self, key.code);
         }
@@ -246,6 +249,7 @@ impl App {
             self.overlays.menu = None;
             return Vec::new();
         }
+        let entries = menu::entries(self);
         let entry = match code {
             KeyCode::Esc => {
                 self.overlays.menu = None;
@@ -254,31 +258,37 @@ impl App {
             }
             KeyCode::Char('q') if mid_code => return Vec::new(),
             KeyCode::Up => {
-                self.overlays.menu = Some(stepped(at, -1, menu::ENTRIES.len()));
+                self.overlays.menu = Some(stepped(at, -1, entries.len()));
                 return Vec::new();
             }
             KeyCode::Down => {
-                self.overlays.menu = Some(stepped(at, 1, menu::ENTRIES.len()));
+                self.overlays.menu = Some(stepped(at, 1, entries.len()));
                 return Vec::new();
             }
-            KeyCode::Enter => at,
-            KeyCode::Char('s') => 0,
-            KeyCode::Char('h' | '?') => 1,
-            KeyCode::Char('q') => 2,
+            KeyCode::Enter => match entries.get(at) {
+                Some(entry) => *entry,
+                None => return Vec::new(),
+            },
+            KeyCode::Char('?') => menu::Entry::Help,
+            KeyCode::Char(letter) => match entries.iter().find(|entry| entry.key() == letter) {
+                Some(entry) => *entry,
+                None => return Vec::new(),
+            },
             _ => return Vec::new(),
         };
         self.overlays.menu = None;
         self.mascot.codes.clear();
         match entry {
-            0 => {
+            menu::Entry::Settings => {
                 self.open_settings();
                 Vec::new()
             }
-            1 => {
+            menu::Entry::Scenes => self.open_scenes(),
+            menu::Entry::Help => {
                 self.open_help();
                 Vec::new()
             }
-            _ => self.quit(),
+            menu::Entry::Quit => self.quit(),
         }
     }
 
@@ -355,6 +365,7 @@ impl App {
             KeyCode::Char('o') => self.flip_key("nos"),
             KeyCode::Char('X') if self.crossfeed_shown() => self.jump_to_crossfeed(),
             KeyCode::Char('S') if self.space_shown() => self.open_sets(),
+            KeyCode::Char('z') => self.open_scenes(),
             KeyCode::Char('k') if self.screen == Screen::Device && self.setup_offered() => {
                 self.open_setup();
                 Vec::new()
@@ -541,6 +552,7 @@ impl App {
             || self.presets.preset_list.is_some()
             || self.presets.device_list.is_some()
             || self.speakers_box.list.is_some()
+            || self.scenes.list.is_some()
             || self.tone.edit_line.is_some()
             || self.tone.point_line.is_some()
             || self.tone.xf_line.is_some()
