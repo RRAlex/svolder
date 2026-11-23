@@ -8,6 +8,23 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.38.2
+
+- **The svolder Home Assistant dashboard shows every DAC and amp again.** The `custom:svolder`
+  dashboard showed only the computer: every DAC and amp section was missing, because it only
+  recognised unit ids written in lower case and the daemon publishes them in upper case. Each
+  device now gets its faceplate, EQ curve and the rest under its computer.
+- **Tone control mode and balance sit where they act.** The tone control mode (flat, EQ,
+  loudness) is a row of chips on the EQ card under a "Mode" label, and the balance is a slider on
+  the faceplate (a plain readout when the device gives no range or `commands` is off); neither is
+  in the "other" section any more.
+- **Smaller fixes.** The scenes card's "No scenes saved yet." no longer wraps one word per line,
+  and under the `svolder` theme Home Assistant's own select fields are dark with readable text and
+  name (copy the new `themes/svolder.yaml` into your Home Assistant to get this one).
+- **Contributors**: the Home Assistant check fixtures carry the daemon's real identifier forms
+  (upper-case unit ids, a computer id with underscores); new cases in `cards.mjs`,
+  `strategy.mjs` and `ha_cards.py`.
+
 ## 0.38.1
 
 - **The Path row reads at a glance, in the terminal and on the web page.** The word `Path` itself

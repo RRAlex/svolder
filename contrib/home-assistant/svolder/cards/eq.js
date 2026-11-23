@@ -58,7 +58,7 @@ const CSS = `
   color: var(--sv-dim); background: transparent; display: block; line-height: 1.35; min-width: 0; }
 .band b { display: block; color: var(--sv-text); font-weight: 500; font-size: 11.5px; }
 .band[aria-pressed=true] { border-color: var(--sv-on); }
-.presets { margin: 0 0 8px; }
+.presets, .modes { margin: 0 0 8px; }
 `;
 
 export class SvolderEqCard extends SvolderCard {
@@ -94,7 +94,7 @@ export class SvolderEqCard extends SvolderCard {
     const pre = numberOf(h, E.preamp, { min: -24, max: 0, step: 0.1 });
     return {
       name: this._cfg.name || 'EQ', bands, preset: selectOf(h, E.preset),
-      modeWord: mode && mode.state !== 'eq' && mode.state !== 'unavailable' ? mode.state : '',
+      mode, modeWord: mode && mode.state !== 'eq' && mode.state !== 'unavailable' ? mode.state : '',
       loud: strength && Number.isFinite(strength.value)
         ? (strength.value > 0 ? `${Math.round((strength.value / (strength.max || 127)) * 100)}%` : 'off') : null,
       pre: pre && Number.isFinite(pre.value) ? `${fmt(pre.value)} dB` : null,
@@ -134,6 +134,8 @@ export class SvolderEqCard extends SvolderCard {
     const root = this.draw(`
       <div class="eqh"><span class="nm">${esc(m.name)}</span>${m.preset ? `<span class="sub">${esc(m.preset.state)}</span>` : ''}<span class="sp"></span>${
         flat ? key('Flat', `data-flat="${esc(flat)}"`) : ''}${opts.length ? key('Preset…', `data-open aria-expanded="${m.open}"`) : ''}</div>
+      ${m.mode ? `<div class="modes"><div class="leg">Mode</div><div class="chips" data-group="mode">${(m.mode.options.length ? m.mode.options : [m.mode.state]).map((o) => `<button type="button" class="chip" data-mode="${esc(o)}" aria-pressed="${
+        o === m.mode.state}"${m.mode.writable ? '' : ' disabled'}>${esc(o)}</button>`).join('')}</div></div>` : ''}
       ${m.open && opts.length ? `<div class="chips presets">${opts.map((o) => `<button type="button" class="chip" data-preset="${esc(o)}" aria-pressed="${
         o === m.preset.state}"${m.preset.writable ? '' : ' disabled'}>${esc(o)}</button>`).join('')}</div>` : ''}
       <svg class="plot${m.modeWord ? ' off' : ''}${writable ? '' : ' ro'}" viewBox="0 0 ${this.W} ${H}" role="img" aria-label="EQ curve"></svg>
@@ -147,6 +149,12 @@ export class SvolderEqCard extends SvolderCard {
     this.bindKeys(root);
     for (const b of root.querySelectorAll('[data-flat]')) b.addEventListener('click', () => this.pick(b.dataset.flat));
     for (const b of root.querySelectorAll('[data-preset]')) b.addEventListener('click', () => this.pick(b.dataset.preset));
+    for (const b of root.querySelectorAll('[data-mode]')) {
+      b.addEventListener('click', () => {
+        const md = this._m.mode;
+        if (md && md.writable && b.dataset.mode !== md.state) this.call('select', 'select_option', { entity_id: md.id, option: b.dataset.mode });
+      });
+    }
     const open = root.querySelector('[data-open]');
     if (open) open.addEventListener('click', () => { this._open = !this._open; this.stale(); this.refresh(); });
   }

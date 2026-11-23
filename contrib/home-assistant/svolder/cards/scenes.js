@@ -100,7 +100,7 @@ export class SvolderScenesCard extends SvolderCard {
     const root = this.draw(`
       <div class="head"><span class="nm">Scenes</span><span class="sub">computer + devices</span></div>
       ${m.reading ? '<div class="none">reading…</div>' : ''}
-      <div class="rows">${rows.length ? rows.join('') : (m.reading ? '' : '<div class="none">No scenes saved yet.</div>')}</div>
+      ${rows.length ? `<div class="rows">${rows.join('')}</div>` : (m.reading ? '' : '<div class="none">No scenes saved yet.</div>')}
       ${m.canSave ? `<div class="saver"><input type="text" placeholder="Save current as…" aria-label="Scene name" maxlength="40" value="${esc(this._draft || '')}"><button type="button" class="key" data-save>Save</button></div>` : ''}
       <p class="say" aria-live="polite">${say}</p>`, CSS);
     const E = this._cfg.entities;

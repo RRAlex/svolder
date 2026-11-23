@@ -18,6 +18,7 @@ const raw = {
   'sensor.desk_sample_rate': ['48', { unit_of_measurement: 'kHz' }],
   'binary_sensor.desk_s_pdif_locked': ['on'], 'binary_sensor.desk_usb_1_connected': ['on'], 'binary_sensor.desk_usb_2_connected': ['off'],
   'binary_sensor.desk_link': ['on'], 'sensor.desk_signal': ['-58', { unit_of_measurement: 'dBm' }], 'sensor.desk_firmware': ['3'],
+  'number.desk_balance': ['0', { min: -127, max: 127, step: 1 }],
   'select.desk_tone_control_mode': ['eq', { options: ['flat', 'eq', 'loudness'] }],
   'number.desk_loudness_strength': ['0', { min: 0, max: 127, step: 1 }],
   'switch.pc_eq': ['on'], 'sensor.pc_eq_preset': ['open ref'],
@@ -63,7 +64,7 @@ const cards = {
       volume: e('number.desk_volume'), mute: e('switch.desk_mute'), phase: e('switch.desk_phase_invert'), input: e('select.desk_input'),
       preset: e('select.desk_eq_preset'), sample_rate: 'sensor.desk_sample_rate', spdif: 'binary_sensor.desk_s_pdif_locked',
       usb1: 'binary_sensor.desk_usb_1_connected', usb2: 'binary_sensor.desk_usb_2_connected', link: 'binary_sensor.desk_link',
-      signal: 'sensor.desk_signal', firmware: 'sensor.desk_firmware',
+      balance: e('number.desk_balance'), signal: 'sensor.desk_signal', firmware: 'sensor.desk_firmware',
     },
   },
   'svolder-eq-card': {

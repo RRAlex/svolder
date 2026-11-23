@@ -16,7 +16,7 @@ const dm = (dom) => [dom, { number: 'sensor', select: 'sensor', switch: 'binary_
 /** Like `take`, but the entity stays in the pool (a card shows it AND the entities card keeps it). */
 const peek = (pool, domains, slugs, owner) => take(pool.slice(), domains, slugs, owner);
 
-/** The computer's own sections: the chain, then the scenes. `entities` is its entries. */
+/** The computer's own sections: the scenes, then the chain. `entities` is its entries. */
 export function computerSection(title, entities) {
   const pool = entities.slice();
   const get = (dom, slugs) => take(pool, dom, slugs, title);
@@ -36,15 +36,16 @@ export function computerSection(title, entities) {
   const scene = get(dm('select'), 'scene');
   const sceneSave = get('text', 'scene_save');
 
+  // the scenes first, then the computer's chain, as the approved layout draws the right column
   const sections = [];
-  if (Object.keys(chain).length) {
-    sections.push(grid([heading(title, 'mdi:laptop'), custom('chain', { name: title, entities: chain })], { column_span: 2 }));
-  }
   if (scene) {
     sections.push(grid([
       heading('Scenes', 'mdi:palette'),
       custom('scenes', { entities: ids({ scene, save: sceneSave }) }),
     ]));
+  }
+  if (Object.keys(chain).length) {
+    sections.push(grid([heading(title, 'mdi:laptop'), custom('chain', { name: title, entities: chain })]));
   }
   const rest = pool.filter((e) => e.entity_category !== 'diagnostic');
   const diag = pool.filter((e) => e.entity_category === 'diagnostic');
@@ -68,6 +69,7 @@ export function deviceSections(title, entities) {
     usb1: get('binary_sensor', 'usb_1_connected'),
     usb2: get('binary_sensor', 'usb_2_connected'),
     link: get('binary_sensor', 'link'),
+    balance: get(dm('number'), 'balance'),
     signal: get('sensor', 'signal'),
     firmware: peek(pool, 'sensor', 'firmware', title),
   });
@@ -83,6 +85,9 @@ export function deviceSections(title, entities) {
     };
     if (b.gain || b.frequency || b.q) bands.push({ n, ...ids(b) });
   }
+
+  // the EQ card shows the mode as chips, so the entities card drops it when that card exists
+  if (bands.length && mode) pool.splice(pool.indexOf(mode), 1);
 
   const sections = [];
   if (Object.keys(faceplate).length) {

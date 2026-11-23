@@ -7,7 +7,8 @@
 // websocket.
 
 const COMPUTER = /^svolder_computer(?:_([a-z0-9_]+))?$/;
-const DEVICE = /^svolder_[0-9a-f]{16}$/;
+// The unit id is the sixteen UPPER-case hex digits svolderd publishes; the computer id is a lower-case host id.
+const DEVICE = /^svolder_[0-9A-Fa-f]{16}$/;
 
 /** The MQTT identifier strings of one registry device. */
 function mqttIds(device) {

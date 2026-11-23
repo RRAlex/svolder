@@ -1,30 +1,39 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The dashboard svolder builds: one view per computer, the computer's section first, then one
-// section per device that computer serves. Pure: it reads `hass` and returns a config, and never
+// The dashboard svolder builds: one view per computer, each device it serves first (faceplate and
+// EQ card), then the scenes and the computer's chain, then the rest. Pure: it reads `hass` and returns a config, and never
 // calls a service.
 import { findComputers, slug } from './find.js';
 import { computerSection, deviceSections, entitiesSection } from './layout.js';
 
-/** One computer's view config. */
+/** One section from the cards of several: a column the page lays out as one stack. */
+const stack = (sections) => (sections.length
+  ? [{ type: 'grid', cards: sections.flatMap((x) => x.cards) }] : []);
+
+/**
+ * One computer's view config, in the approved layout's order: each device (name order) as one
+ * stack of its faceplate and EQ card, then the scenes and the computer's chain as one stack (the
+ * second column beside a single device), then what the layout does not draw: the "other" entities
+ * and the diagnostics.
+ */
 export function buildView(computer, theme) {
   const sections = [];
-  if (computer.device) {
-    const c = computerSection(computer.title, computer.entities);
-    sections.push(...c.sections);
-    for (const extra of [
-      entitiesSection('Other', 'mdi:dots-horizontal', c.rest),
-      entitiesSection('Diagnostics', 'mdi:stethoscope', c.diag),
-    ]) if (extra) sections.push(extra);
-  }
+  const others = [];
+  const diags = [];
+  const push = (list, section) => { if (section) list.push(section); };
   for (const dev of computer.devices) {
     const d = deviceSections(dev.title, dev.entities);
-    sections.push(...d.sections);
-    for (const extra of [
-      entitiesSection(`${dev.title}: other`, 'mdi:dots-horizontal', d.rest),
-      entitiesSection(`${dev.title}: diagnostics`, 'mdi:stethoscope', d.diag),
-    ]) if (extra) sections.push(extra);
+    sections.push(...stack(d.sections));
+    push(others, entitiesSection(`${dev.title}: other`, 'mdi:dots-horizontal', d.rest));
+    push(diags, entitiesSection(`${dev.title}: diagnostics`, 'mdi:stethoscope', d.diag));
   }
+  if (computer.device) {
+    const c = computerSection(computer.title, computer.entities);
+    sections.push(...stack(c.sections));
+    others.unshift(...[entitiesSection('Other', 'mdi:dots-horizontal', c.rest)].filter(Boolean));
+    diags.unshift(...[entitiesSection('Diagnostics', 'mdi:stethoscope', c.diag)].filter(Boolean));
+  }
+  sections.push(...others, ...diags);
   const view = {
     title: computer.title,
     path: slug(computer.title) || 'computer',

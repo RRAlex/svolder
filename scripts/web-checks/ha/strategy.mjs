@@ -66,7 +66,7 @@ test('a: two computers, a view each, each device under its own computer', () => 
   assert.ok(headings(studio).includes('Gungnir') && !headings(studio).includes('Bifrost 3'));
   assert.ok(headings(reframe).includes('Bifrost 3') && !headings(reframe).includes('Gungnir'));
   assert.deepEqual([...new Set(dash.views.map((v) => v.path))].length, 2);
-  for (const view of dash.views) assert.ok(view.sections.length >= 5);
+  for (const view of dash.views) assert.ok(view.sections.length >= 3);
 });
 
 test('a: the scene pair and the loudness tiles are on the computer section', () => {
@@ -141,20 +141,40 @@ test('f: generate writes nothing', () => {
   assert.ok(!/callService|callWS|callApi|fetch\(/.test(src));
 });
 
-const SEQ = ['Bifrost 3', 'Bifrost 3: EQ', 'Bifrost 3: other', 'Bifrost 3: diagnostics'];
+test('a: balance is on the faceplate and the tone control mode on the EQ card, neither in "other"', () => {
+  const dash = buildDashboard(load('two-computers').hass);
+  const view = dash.views.find((v) => v.title === 'reframe');
+  const face = cardsOf(view, 'custom:svolder-faceplate-card').find((c) => c.name === 'Bifrost 3');
+  const eq = cardsOf(view, 'custom:svolder-eq-card').find((c) => c.entities.mode === 'select.bifrost_3_tone_control_mode');
+  assert.equal(face.entities.balance, 'number.bifrost_3_balance');
+  assert.ok(eq, 'the EQ card is handed the mode select');
+  const other = view.sections.find((s) => s.cards[0].heading === 'Bifrost 3: other');
+  const listed = entityIds(other);
+  assert.ok(!listed.has('number.bifrost_3_balance') && !listed.has('select.bifrost_3_tone_control_mode'), [...listed].join());
+});
+
+const SEQ = ['Bifrost 3', 'Scenes', 'Bifrost 3: other', 'Bifrost 3: diagnostics'];
 const shape = (view) => view.sections.map((s) => s.cards.filter((c) => c.type === 'heading')[0].heading);
+
+test('a: the approved layout order: device faceplate and EQ, scenes then chain, the rest after', () => {
+  const view = buildDashboard(load('two-computers').hass).views[0];
+  const names = (section) => section.cards.map((c) => c.heading || c.type.replace('custom:svolder-', ''));
+  assert.deepEqual(names(view.sections[0]), ['Bifrost 3', 'faceplate-card', 'Bifrost 3: EQ', 'eq-card']);
+  assert.deepEqual(names(view.sections[1]), ['Scenes', 'scenes-card', 'reframe', 'chain-card']);
+  assert.deepEqual(view.sections.slice(2).map((s) => s.cards[0].heading), ['Bifrost 3: other', 'Bifrost 3: diagnostics']);
+});
 
 test('a: view paths and section order are pinned', () => {
   const dash = buildDashboard(load('two-computers').hass);
   assert.deepEqual(dash.views.map((v) => v.path), ['reframe', 'studio']);
-  assert.deepEqual(shape(dash.views[0]), ['reframe', 'Scenes', ...SEQ]);
-  assert.deepEqual(shape(dash.views[1]).slice(0, 3), ['studio', 'Scenes', 'Gungnir']);
+  assert.deepEqual(shape(dash.views[0]), SEQ);
+  assert.deepEqual(shape(dash.views[1]).slice(0, 2), ['Gungnir', 'Scenes']);
 });
 
 test('F1: commands off (sensors only): the same sections, no write controls', () => {
   const { hass } = load('read-only');
   const dash = buildDashboard(hass);
-  assert.deepEqual(shape(dash.views[0]), ['reframe', 'Scenes', ...SEQ]);
+  assert.deepEqual(shape(dash.views[0]), SEQ);
   const shown = entityIds(dash);
   for (const id of Object.keys(hass.entities)) assert.ok(shown.has(id) || hass.entities[id].hidden, id);
   for (const name of ['faceplate', 'eq', 'chain', 'scenes']) {

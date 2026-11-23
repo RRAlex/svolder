@@ -147,6 +147,76 @@ test('faceplate: the keys toggle and the chips select, one call each', () => {
   ]);
 });
 
+const BAL = { 'number.dac_balance': ['0', { min: -127, max: 127, step: 1 }] };
+const BAL_CFG = { ...FACE_CFG, entities: { ...FACE_CFG.entities, balance: 'number.dac_balance' } };
+const change = (el, value) => { el.value = String(value); el.dispatchEvent(new window.Event('input', { bubbles: true })); el.dispatchEvent(new window.Event('change', { bubbles: true })); };
+
+test('faceplate: the balance slider shows the entity range and writes once, when let go', () => {
+  const hass = mock({ ...FACE, ...BAL });
+  const el = mount('svolder-faceplate-card', BAL_CFG, hass);
+  const r = $(el, '.bal input');
+  assert.deepEqual([r.min, r.max, r.step, r.value, r.disabled], ['-127', '127', '1', '0', false]);
+  change(r, -12);
+  assert.deepEqual(hass.calls, [['number', 'set_value', { entity_id: 'number.dac_balance', value: -12 }]]);
+  assert.equal($$(el, '.rw').filter((x) => !x.classList.contains('bal')).length, 4, 'the readout rows are unchanged');
+});
+
+test('faceplate: balance with commands off and no range is a readout line, no slider', () => {
+  const hass = mock(readOnly({ ...FACE, 'number.dac_balance': ['63'] }));
+  const el = mount('svolder-faceplate-card', roCfg(BAL_CFG), hass);
+  assert.equal($(el, '.bal input'), null);
+  assert.ok($$(el, '.rw').some((r) => /^Balance\s*63$/.test(r.textContent.replace(/\s+/g, ' ').trim())));
+  assert.deepEqual(hass.calls, []);
+});
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('faceplate: input alone writes nothing; the one write comes on change', async () => {
+  const hass = mock({ ...FACE, ...BAL });
+  const el = mount('svolder-faceplate-card', BAL_CFG, hass);
+  const r = $(el, '.bal input');
+  r.value = '10'; r.dispatchEvent(new window.Event('input', { bubbles: true }));
+  r.value = '20'; r.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.deepEqual(hass.calls, []);
+  r.dispatchEvent(new window.Event('pointerup', { bubbles: true }));
+  r.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await tick();
+  assert.deepEqual(hass.calls, [['number', 'set_value', { entity_id: 'number.dac_balance', value: 20 }]]);
+});
+
+test('faceplate: a drag that ends where it began releases the hold, the dial follows the next state', async () => {
+  const hass = mock({ ...FACE, ...BAL });
+  const el = mount('svolder-faceplate-card', BAL_CFG, hass);
+  const r = $(el, '.bal input');
+  r.value = '5'; r.dispatchEvent(new window.Event('input', { bubbles: true }));
+  r.value = '0'; r.dispatchEvent(new window.Event('input', { bubbles: true }));
+  r.dispatchEvent(new window.Event('pointerup', { bubbles: true })); // no change event: the value did not move
+  await tick();
+  assert.deepEqual(hass.calls, []);
+  el.hass = mock({ ...FACE, ...BAL, 'number.dac_volume': ['-20', { min: -96.33, max: 0, step: 0.334 }] });
+  assert.equal(text(el, '.dial .db'), '−20.0 dB');
+});
+
+test('eq: the tone control mode is a row of chips, the on one marked; a chip selects it', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  assert.deepEqual($$(el, '.modes .chip').map((c) => [c.dataset.mode, c.getAttribute('aria-pressed')]),
+    [['flat', 'false'], ['eq', 'true'], ['loudness', 'false']]);
+  assert.equal(text(el, '.modes .leg'), 'Mode');
+  click($$(el, '.modes .chip')[0]);
+  click($$(el, '.modes .chip')[1]);
+  assert.deepEqual(hass.calls, [['select', 'select_option', { entity_id: 'select.dac_tone_control_mode', option: 'flat' }]]);
+});
+
+test('eq: mode chips with commands off show the value and move nothing', () => {
+  const hass = mock(readOnly(bandStates()));
+  const el = eqMount(hass, roCfg(eqCfg()));
+  assert.deepEqual($$(el, '.modes .chip').map((c) => [c.dataset.mode, c.getAttribute('aria-pressed')]), [['eq', 'true']]);
+  assert.ok($$(el, '.modes .chip').every((c) => c.disabled));
+  for (const c of $$(el, '.modes .chip')) click(c);
+  assert.deepEqual(hass.calls, []);
+});
+
 test('faceplate: commands off, every control is a sensor and nothing writes', () => {
   const hass = mock(readOnly(FACE));
   const el = mount('svolder-faceplate-card', roCfg(FACE_CFG), hass);
@@ -534,6 +604,14 @@ test('scenes: commands off, the scene is a sensor: rows without a tap, no save f
   assert.deepEqual(hass.calls, []);
 });
 
+test('scenes: the empty text is not a cell of the rows grid, so it wraps at the card width', () => {
+  const hass = sceneHass({ scenes: [], known: true }, 'custom');
+  const el = mount('svolder-scenes-card', SCFG, hass);
+  const none = $(el, '.none');
+  assert.equal(none.textContent, 'No scenes saved yet.');
+  assert.equal(none.closest('.rows'), null, 'the 14px lamp column of .rows would hold the text one word per line');
+});
+
 test('scenes: a scene still being read says so, never "none"', () => {
   const hass = sceneHass({ known: false }, 'custom');
   const el = mount('svolder-scenes-card', SCFG, hass);
@@ -741,7 +819,7 @@ test('accent: a theme or mode switch in hass.themes works the accent out again, 
 
 let failed = 0;
 for (const [name, fn] of cases) {
-  try { fn(); console.log(`ok   ${name}`); } catch (e) { failed += 1; console.log(`FAIL ${name}\n     ${e.message}`); }
+  try { await fn(); console.log(`ok   ${name}`); } catch (e) { failed += 1; console.log(`FAIL ${name}\n     ${e.message}`); }
 }
 if (failed) process.exit(1);
 console.log(`${cases.length} cases passed`);

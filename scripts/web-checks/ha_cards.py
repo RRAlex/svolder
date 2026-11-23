@@ -7,6 +7,8 @@ served from the worktree by a loopback server on a free port. Numbers, not pixel
   touch_targets                   keys, chips, rows and band boxes are at least 30 px high
   faceplate_bands                 the input and preset chips are one column at 400 and two at 800; a dial
   chain_columns                   the four modules are two across at 400, four at 800, all numbered
+  tone_mode_chips                 the EQ card's mode chips (flat, eq, loudness) sit above the plot, "eq" marked
+  balance_row                     the faceplate's balance slider is under the readouts, wider than 60 px
   eq_one_line                     a short plot and the five band boxes on ONE line
   scenes_column                   the common chips start at one x in every row; the extra chip is under its row, in that column
   one_write_per_gesture           a dial drag is one number.set_value; an EQ point drag is one per moved value
@@ -80,14 +82,19 @@ FACE = """(() => { const root = document.getElementById('svolder-faceplate-card'
   const r = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, b: b.bottom, w: b.width, h: b.height }; };
   const groups = [...root.querySelectorAll('.chips[data-group]')].map((g) => r(g));
   return { groups, dial: r(root.querySelector('.dial')), keys: [...root.querySelectorAll('.key')].map(r),
-    rows: root.querySelectorAll('.rw').length, strip: !!root.querySelector('.strip') }; })()"""
+    rows: root.querySelectorAll('.rw:not(.bal)').length, strip: !!root.querySelector('.strip') }; })()"""
 CHAIN = """(() => { const root = document.getElementById('svolder-chain-card').shadowRoot;
   return [...root.querySelectorAll('.mod')].map((m) => { const b = m.getBoundingClientRect();
     return { l: b.left, t: b.top, no: m.querySelector('.no').textContent }; }); })()"""
 EQ = """(() => { const root = document.getElementById('svolder-eq-card').shadowRoot;
   const r = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, b: b.bottom, w: b.width, h: b.height }; };
   return { plot: r(root.querySelector('.plot')), bands: [...root.querySelectorAll('.band')].map(r),
-    head: r(root.querySelector('.eqh')), read: root.querySelector('.read').textContent }; })()"""
+    head: r(root.querySelector('.eqh')), modes: [...root.querySelectorAll('.modes .chip')].map(r),
+    on: [...root.querySelectorAll('.modes .chip[aria-pressed=true]')].map((c) => c.textContent), read: root.querySelector('.read').textContent }; })()"""
+BALANCE = """(() => { const root = document.getElementById('svolder-faceplate-card').shadowRoot;
+  const r = (e) => { const b = e.getBoundingClientRect(); return { r: b.right, t: b.top, b: b.bottom, w: b.width }; };
+  const rows = [...root.querySelectorAll('.rw:not(.bal)')];
+  return { range: r(root.querySelector('.bal input')), lastRow: r(rows[rows.length - 1]), card: r(root.querySelector('.card')) }; })()"""
 SCENES = """(() => { const root = document.getElementById('svolder-scenes-card').shadowRoot;
   const r = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, b: b.bottom }; };
   return [...root.querySelectorAll('.row')].map((row) => ({ name: row.querySelector('.name').textContent, row: r(row),
@@ -159,6 +166,11 @@ for width in (400, 800):
             bt = {round(x['t']) for x in q['bands']}
             check(f'eq_one_line: {tag}: five band boxes on one line under a short plot',
                   len(q['bands']) == 5 and len(bt) == 1 and q['plot']['h'] < 140 and q['bands'][0]['t'] > q['plot']['b'] - 1, q)
+            check(f'tone_mode_chips: {tag}: three chips above the plot, eq marked',
+                  len(q['modes']) == 3 and q['on'] == ['eq'] and q['modes'][0]['b'] <= q['plot']['t'] + 1, q)
+            bal = b.page(BALANCE)
+            check(f'balance_row: {tag}: the slider is under the last readout and wider than 60 px',
+                  bal['range']['w'] > 60 and bal['range']['t'] >= bal['lastRow']['b'] - 1 and bal['range']['r'] <= bal['card']['r'] + 1, bal)
             s = b.page(SCENES)
             first = {round(r['chips'][0]['l']) for r in s}
             second = {round(r['chips'][1]['l']) for r in s}

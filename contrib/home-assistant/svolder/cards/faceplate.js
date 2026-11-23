@@ -35,6 +35,9 @@ const CSS = `
 .rw b.bad { color: var(--sv-warn); }
 .pr { display: grid; gap: 8px; margin: 0 0 10px; grid-template-columns: 1fr; }
 @container (min-width: 460px) { .pr { grid-template-columns: auto 1fr; gap: 18px; } }
+.bal { align-items: center; display: grid; grid-template-columns: auto minmax(0, 1fr) 3.5em; gap: 8px; }
+.bal input { width: 100%; min-width: 0; accent-color: var(--sv-on); margin: 0; }
+.bal b { text-align: right; }
 .strip { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--sv-line); padding-top: 8px;
   color: var(--sv-dim); font-size: 11.5px; }
 .strip b { color: var(--sv-text); font-weight: 500; }
@@ -78,6 +81,7 @@ export class SvolderFaceplateCard extends SvolderCard {
       vol: vol && { ...vol, value: Number.isFinite(vol.value) ? vol.value : null },
       mute: switchOf(h, E.mute), phase: switchOf(h, E.phase),
       spdif: switchOf(h, E.spdif), usb1: switchOf(h, E.usb1), usb2: switchOf(h, E.usb2),
+      balance: numberOf(h, E.balance, { min: -127, max: 127, step: 1 }),
       input: selectOf(h, E.input), preset: selectOf(h, E.preset),
       sig: sig ? { text: withUnit(sig), age: ageWord(sig) } : null,
     };
@@ -107,10 +111,19 @@ export class SvolderFaceplateCard extends SvolderCard {
       <div class="head"><span class="nm">${esc(m.name)}</span><span class="sub">${esc(sub)}</span>${m.link ? `<span class="link sp"><i class="lamp ${
         m.linkOn ? 'ok' : 'warn'}"></i>${esc(m.link)}</span>` : ''}</div>
       <div class="fp">${dial}<div class="ctl"><div class="keys">${key('Mute', m.mute, 'mute')}${key('Phase invert', m.phase, 'phase')}</div>${
-        rows.map(([k, v]) => `<div class="rw"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div></div>
+        rows.map(([k, v]) => `<div class="rw"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}${this.balanceRow(m.balance)}</div></div>
       ${m.input || m.preset ? `<div class="pr">${chips('Input', m.input, 'input')}${chips('Preset', m.preset, 'preset')}</div>` : ''}
       ${m.sig ? `<div class="strip"><span>Link <b>${esc(m.sig.text)}</b></span><span class="sp age">${esc(m.sig.age)}</span></div>` : ''}`, CSS);
     this.bind(root, m);
+  }
+
+  balanceRow(b) {
+    if (!b) return '';
+    const have = Number.isFinite(b.value);
+    // a sensor, or an entity naming no range, has no honest thumb position: a readout line instead
+    if (!b.writable || !b.bounded) return `<div class="rw"><span>Balance</span><b>${have ? esc(fmt(b.value, 0).replace('−', '-')) : '—'}</b></div>`;
+    return `<div class="rw bal"><span>Balance</span><input type="range" data-balance aria-label="Balance" min="${b.min}" max="${b.max}" step="${b.step}" value="${
+      have ? b.value : (b.min + b.max) / 2}"${b.writable && have ? '' : ' disabled'}><b>${have ? esc(fmt(b.value, 0).replace('−', '-')) : '—'}</b></div>`;
   }
 
   dialSvg(v) {
@@ -142,8 +155,30 @@ export class SvolderFaceplateCard extends SvolderCard {
         if (sel.writable && b.dataset.option !== sel.state) this.call('select', 'select_option', { entity_id: sel.id, option: b.dataset.option });
       });
     }
+    const bal = root.querySelector('[data-balance]');
+    if (bal && m.balance && m.balance.writable) {
+      this.bindBalance(bal, m.balance);
+    }
     const dial = root.querySelector('.dial');
     if (dial && m.vol && m.vol.writable && m.vol.value !== null) this.bindDial(dial, m.vol);
+  }
+
+  /** The slider previews while it moves and writes ONE value when it is let go. */
+  bindBalance(input, bal) {
+    const readout = input.parentElement.querySelector('b');
+    let held = false;
+    // the hold ends one tick after the gesture does, so a `change` that follows pointerup still writes first
+    const end = () => setTimeout(() => { if (held) { held = false; this.release(); } }, 0);
+    input.addEventListener('input', () => {
+      if (!held) { held = true; this.hold(); }
+      readout.textContent = String(Math.round(Number(input.value)));
+    });
+    input.addEventListener('change', () => {
+      const value = Number(input.value);
+      if (value !== bal.value) { this.stale(); this.call('number', 'set_value', { entity_id: bal.id, value }); }
+      end();
+    });
+    for (const type of ['pointerup', 'pointercancel', 'keyup', 'blur']) input.addEventListener(type, end);
   }
 
   /** Drag turns the dial relative to where the pointer went down (a tap changes nothing); the one write comes on release. */
