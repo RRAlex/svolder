@@ -8,6 +8,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.38.3
+
+- **The Home Assistant dashboard leaves no gap.** Each device's "other" list (USB connected,
+  Identify, loudness strength, the NOS filter and the like) now sits in the right-hand column under
+  Scenes and the computer's chain, instead of on a row of its own under the EQ card; the
+  diagnostics follow.
+
 ## 0.38.2
 
 - **The svolder Home Assistant dashboard shows every DAC and amp again.** The `custom:svolder`

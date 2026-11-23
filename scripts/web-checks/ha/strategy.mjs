@@ -148,20 +148,21 @@ test('a: balance is on the faceplate and the tone control mode on the EQ card, n
   const eq = cardsOf(view, 'custom:svolder-eq-card').find((c) => c.entities.mode === 'select.bifrost_3_tone_control_mode');
   assert.equal(face.entities.balance, 'number.bifrost_3_balance');
   assert.ok(eq, 'the EQ card is handed the mode select');
-  const other = view.sections.find((s) => s.cards[0].heading === 'Bifrost 3: other');
-  const listed = entityIds(other);
+  const other = view.sections.find((s) => s.cards.some((c) => c.heading === 'Bifrost 3: other'));
+  assert.ok(other, 'the other list exists');
+  const listed = entityIds(other.cards.filter((c) => c.type === 'entities'));
   assert.ok(!listed.has('number.bifrost_3_balance') && !listed.has('select.bifrost_3_tone_control_mode'), [...listed].join());
 });
 
-const SEQ = ['Bifrost 3', 'Scenes', 'Bifrost 3: other', 'Bifrost 3: diagnostics'];
+const SEQ = ['Bifrost 3', 'Scenes', 'Bifrost 3: diagnostics'];
 const shape = (view) => view.sections.map((s) => s.cards.filter((c) => c.type === 'heading')[0].heading);
 
-test('a: the approved layout order: device faceplate and EQ, scenes then chain, the rest after', () => {
+test('a: the approved layout order: device faceplate and EQ, scenes then chain, other under the chain, diagnostics last', () => {
   const view = buildDashboard(load('two-computers').hass).views[0];
   const names = (section) => section.cards.map((c) => c.heading || c.type.replace('custom:svolder-', ''));
   assert.deepEqual(names(view.sections[0]), ['Bifrost 3', 'faceplate-card', 'Bifrost 3: EQ', 'eq-card']);
-  assert.deepEqual(names(view.sections[1]), ['Scenes', 'scenes-card', 'reframe', 'chain-card']);
-  assert.deepEqual(view.sections.slice(2).map((s) => s.cards[0].heading), ['Bifrost 3: other', 'Bifrost 3: diagnostics']);
+  assert.deepEqual(names(view.sections[1]), ['Scenes', 'scenes-card', 'reframe', 'chain-card', 'Bifrost 3: other', 'entities']);
+  assert.deepEqual(view.sections.slice(2).map((s) => s.cards[0].heading), ['Bifrost 3: diagnostics']);
 });
 
 test('a: view paths and section order are pinned', () => {

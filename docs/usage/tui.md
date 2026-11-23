@@ -1806,7 +1806,7 @@ version, and three entries (four while the daemon keeps scenes, below):
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.38.2 │
+│                          v0.38.3 │
 │                                  │
 │             Settings             │
 │               Help               │
@@ -1826,7 +1826,7 @@ nothing in the menu there.
 │                                  │
 │  █▀▀▀ █  █ █▀▀█ █ ▄▄▄█ ████ █▀▀  │
 │  ▄▄▄█  ██  █▄▄█ █ █▄▄█ █▄▄▄ █    │
-│                          v0.38.2 │
+│                          v0.38.3 │
 │                                  │
 │             Settings             │
 │             Scenes z             │

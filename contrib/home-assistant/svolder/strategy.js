@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 the svolder authors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The dashboard svolder builds: one view per computer, each device it serves first (faceplate and
-// EQ card), then the scenes and the computer's chain, then the rest. Pure: it reads `hass` and returns a config, and never
+// EQ card), then the scenes, the computer's chain and the "other" lists, then the diagnostics. Pure: it reads `hass` and returns a config, and never
 // calls a service.
 import { findComputers, slug } from './find.js';
 import { computerSection, deviceSections, entitiesSection } from './layout.js';
@@ -12,9 +12,8 @@ const stack = (sections) => (sections.length
 
 /**
  * One computer's view config, in the approved layout's order: each device (name order) as one
- * stack of its faceplate and EQ card, then the scenes and the computer's chain as one stack (the
- * second column beside a single device), then what the layout does not draw: the "other" entities
- * and the diagnostics.
+ * stack of its faceplate and EQ card, then the scenes, the computer's chain and the "other" entities
+ * as one stack (the second column beside a single device), then the diagnostics.
  */
 export function buildView(computer, theme) {
   const sections = [];
@@ -27,13 +26,15 @@ export function buildView(computer, theme) {
     push(others, entitiesSection(`${dev.title}: other`, 'mdi:dots-horizontal', d.rest));
     push(diags, entitiesSection(`${dev.title}: diagnostics`, 'mdi:stethoscope', d.diag));
   }
+  let right = [];
   if (computer.device) {
     const c = computerSection(computer.title, computer.entities);
-    sections.push(...stack(c.sections));
+    right = c.sections;
     others.unshift(...[entitiesSection('Other', 'mdi:dots-horizontal', c.rest)].filter(Boolean));
     diags.unshift(...[entitiesSection('Diagnostics', 'mdi:stethoscope', c.diag)].filter(Boolean));
   }
-  sections.push(...others, ...diags);
+  // the scenes, the chain and every "other" list share one column, so the short chain leaves no gap
+  sections.push(...stack([...right, ...others]), ...diags);
   const view = {
     title: computer.title,
     path: slug(computer.title) || 'computer',

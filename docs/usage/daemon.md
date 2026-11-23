@@ -1228,7 +1228,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.38.2 on /run/user/1000/svolder.sock
+daemon: 0.38.3 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day
