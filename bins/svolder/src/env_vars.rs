@@ -35,6 +35,15 @@ const ENV_VARS: &[EnvVar] = &[
                for `svolderd`.",
     },
     EnvVar {
+        name: "SVOLDER_NO_START",
+        read_by: "svolder",
+        dev_only: false,
+        what: "`1` or `true` is `--no-start` (`0` or `false` is not): use only a daemon that \
+               already answers on the socket, and start no socket unit, no daemon and no direct \
+               BlueZ session; exit 3 when none answers. Overrides `--transport`. The GNOME \
+               indicator's clicks run with it. Unset by default.",
+    },
+    EnvVar {
         name: "SVOLDER_ADAPTER",
         read_by: "svolder, svolderd",
         dev_only: false,
@@ -92,6 +101,15 @@ const ENV_VARS: &[EnvVar] = &[
         dev_only: false,
         what: "`1` seeds every `Fault` control the chosen profile has as active. Unset by \
                default.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_READINGS",
+        read_by: "svolder, svolderd",
+        dev_only: false,
+        what: "Readings the in-process fake device starts with, `key=value` pairs separated by \
+               commas: a flag readout by its profile key (`usb_connected=1`, `spdif_locked=1`) \
+               and `loudness_strength=<0 to 127>`. An unknown key or a bad value is refused, \
+               naming it. Unset by default: every flag readout is off and the loudness strength 0.",
     },
     EnvVar {
         name: "SVOLDER_FAKE_SIGNAL",
@@ -508,6 +526,83 @@ const ENV_VARS: &[EnvVar] = &[
         what: "`1` tells the daemon-spawning test helper that `make test`/`make check` already \
                built every workspace binary, so it runs the one on disk. Unset, the helper builds \
                the daemon into `target/test-daemon`, apart from `target/debug`.",
+    },
+    EnvVar {
+        name: "SVOLDER_BLESS",
+        read_by: "svolder-ipc test suite",
+        dev_only: true,
+        what: "`1` makes the panel model's golden-file test write the files under \
+               `contrib/gnome-shell/tests/fixtures/` instead of comparing with them. Unset, a \
+               drift from the files fails the test.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_EXIT",
+        read_by: "the extension tests' fake svolder",
+        dev_only: true,
+        what: "The exit code the GNOME extension tests' fake `svolder` ends its `panel --json` stream with, after \
+               printing the fixture. Unset, the fake stays alive like the real stream.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_FIXTURE",
+        read_by: "the extension tests' fake svolder",
+        dev_only: true,
+        what: "The fixture file whose lines the extension tests' fake `svolder` prints on `panel --json`.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_LOG",
+        read_by: "the extension tests' fake svolder",
+        dev_only: true,
+        what: "The file the extension tests' fake `svolder` appends each call's arguments to, one line a \
+               call.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_PIDFILE",
+        read_by: "the extension tests' fake svolder",
+        dev_only: true,
+        what: "The file the extension tests' fake `svolder` writes its process id to, so a test can check \
+               that `disable()` left no child.",
+    },
+    EnvVar {
+        name: "SVOLDER_FAKE_STDERR",
+        read_by: "the extension tests' fake svolder",
+        dev_only: true,
+        what: "The line the extension tests' fake `svolder` prints on stderr before it exits with \
+               `SVOLDER_FAKE_EXIT`.",
+    },
+    EnvVar {
+        name: "SVOLDER_FIXTURES_DIR",
+        read_by: "make gnome-extension-check, the extension tests",
+        dev_only: true,
+        what: "The folder of panel fixture files the extension's tests read; default \
+               `contrib/gnome-shell/tests/fixtures`.",
+    },
+    EnvVar {
+        name: "SVOLDER_HEADLESS_MODE",
+        read_by: "the extension's headless load",
+        dev_only: true,
+        what: "Which case the extension's headless load runs: `ok` (a stream that stays up, the default), \
+               `exit3` or `exit0` (a stream that ends).",
+    },
+    EnvVar {
+        name: "SVOLDER_HEADLESS_RESULT",
+        read_by: "the extension's headless load",
+        dev_only: true,
+        what: "The file the extension's headless load writes one line per check to.",
+    },
+    EnvVar {
+        name: "SVOLDER_HEADLESS_SHOTS",
+        read_by: "the extension's headless load",
+        dev_only: true,
+        what: "When set, a path prefix: the headless load saves `<prefix>-bar.png` and \
+               `<prefix>-menu.png` of the panel and the open menu.",
+    },
+    EnvVar {
+        name: "SVOLDER_HEADLESS_SCALE",
+        read_by: "make, scripts",
+        dev_only: true,
+        what: "`N` makes `make gnome-extension-check` load the GNOME Shell extension on a \
+               3840x2160 virtual monitor at scale N, for the pictures of the indicator. Unset by \
+               default.",
     },
     EnvVar {
         name: "SVOLDER_TMP_BASE",

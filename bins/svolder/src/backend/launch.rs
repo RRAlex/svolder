@@ -196,6 +196,9 @@ async fn reach_on(
     if svolder_ipc::is_running(&path).await {
         return Ok(Reached::Daemon(path));
     }
+    if g.transport == super::config::RUNNING {
+        return Err(no_daemon(&path));
+    }
 
     let failed = |what: String| AutospawnFailed {
         what,
@@ -406,3 +409,14 @@ fn open_log(log: &Path) -> std::io::Result<std::fs::File> {
 
 #[cfg(test)]
 mod tests;
+
+/// The refusal of a command that may use only a running daemon, when none answers on `path`.
+pub(crate) fn no_daemon(path: &std::path::Path) -> Failure {
+    Failure {
+        code: Kind::NoDaemon.code(),
+        what: format!("no daemon answers on {}", path.display()),
+        next: "Start it with `svolder daemon restart`, or `svolder daemon install` once"
+            .to_string(),
+        reason: None,
+    }
+}

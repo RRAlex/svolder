@@ -142,6 +142,11 @@ impl FakeDevice {
         self.state.insert(id, value);
     }
 
+    /// The raw value a control holds now (test seam, as [`FakeDevice::set_raw`] is).
+    pub fn reading(&self, id: FunctionId) -> Option<Value> {
+        self.state.get(&id).cloned()
+    }
+
     /// Decode one TX frame and return the notifications a real device would send back.
     pub fn handle(&mut self, tx_frame: &[u8]) -> Vec<Vec<u8>> {
         self.seen += 1;
@@ -338,6 +343,33 @@ impl FakeDevice {
         };
         let id = control.id;
         Ok(self.report_reading(id, value))
+    }
+
+    /// Seed one reading the device holds from the start, as a unit already in that state would:
+    /// `loudness_strength` (the tone control's strength, raw 0 to 127, which the profile must
+    /// have) or a flag readout by its profile key (`usb_connected`, `spdif_locked`), `0` or `1`,
+    /// set the way [`FakeDevice::set_flag`] sets it. An error names the key and what it takes.
+    pub fn seed_reading(&mut self, key: &str, value: u8) -> Result<(), String> {
+        if key == "loudness_strength" {
+            let eq = self.profile.eq.as_ref().ok_or_else(|| {
+                format!(
+                    "loudness_strength: profile {} has no tone control",
+                    self.profile.name
+                )
+            })?;
+            if value > svolder_profiles::tone::preset::LOUDNESS_MAX {
+                return Err(format!(
+                    "loudness_strength={value} is outside 0 to {}",
+                    svolder_profiles::tone::preset::LOUDNESS_MAX
+                ));
+            }
+            self.state.insert(eq.loudness_id(), Value::U8(value));
+            return Ok(());
+        }
+        if value > 1 {
+            return Err(format!("{key}={value}: a flag reading is 0 or 1"));
+        }
+        self.set_flag(key, value == 1).map(|_| ())
     }
 
     /// Set the sample rate the device reads, in hertz, and give back the Status frame it pushes:
@@ -614,6 +646,30 @@ mod tests {
             3,
             Passphrase::NONE,
         )
+    }
+
+    /// A seeded reading is what a refresh reports from the start; a bad key or value is refused
+    /// naming it.
+    #[test]
+    fn a_seeded_reading_is_what_the_device_holds() {
+        let mut d = fake_of("bifrost3");
+        d.seed_reading("usb_connected", 1).unwrap();
+        d.seed_reading("loudness_strength", 60).unwrap();
+        assert_eq!(d.state.get(&FunctionId::one(7)), Some(&Value::Bool(true)));
+        let eq = d.profile.eq.clone().unwrap();
+        assert_eq!(d.state.get(&eq.loudness_id()), Some(&Value::U8(60)));
+        let err = d.seed_reading("volume_level", 1).unwrap_err();
+        assert!(err.contains("volume_level"), "got {err}");
+        assert!(
+            d.seed_reading("usb_connected", 2)
+                .unwrap_err()
+                .contains("0 or 1")
+        );
+        assert!(
+            d.seed_reading("loudness_strength", 128)
+                .unwrap_err()
+                .contains("128")
+        );
     }
 
     /// Setting a readout flag changes what a refresh reports and gives back one Status frame for

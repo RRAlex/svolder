@@ -277,19 +277,23 @@ broker by address or DNS name.
 
 The .deb and the .rpm carry the three binaries in `/usr/bin`, the user units in
 `/usr/lib/systemd/user` (filled in for `/usr/bin` and the session's runtime directory, as a root
-`svolder daemon install` writes them), the docs, `LICENSE`, `AUTHORS` and `THIRD-PARTY-LICENSES`,
-and depend on `bluez` and `dbus`. Installed with `sudo apt install ./svolder_<version>_amd64.deb`
+`svolder daemon install` writes them), the GNOME top-bar indicator in
+`/usr/share/gnome-shell/extensions/svolder-indicator@rralex.github.io/` (off by default: enable it
+with `gnome-extensions enable svolder-indicator@rralex.github.io` or in the Extensions app, see [the
+GNOME indicator](gnome-shell.md)), the docs, `LICENSE`, `AUTHORS` and `THIRD-PARTY-LICENSES`, and
+depend on `bluez` and `dbus`. Installed with `sudo apt install ./svolder_<version>_amd64.deb`
 (`_arm64.deb` on arm64, the Raspberry Pi OS 64-bit package) or
 `sudo dnf install ./svolder-<version>-1.x86_64.rpm` (there is no arm64 .rpm), a package enables
 nothing: each user turns the daemon on with
 `systemctl --user enable --now svolderd.socket svolderd.service`.
 
 The binary tarballs, `svolder-<version>-x86_64-linux.tar.gz` and
-`svolder-<version>-aarch64-linux.tar.gz`, hold the binaries, the docs, the licences and the unit
-templates; with the binaries on `PATH`, `svolder daemon install` writes and enables units for
-wherever they are. `PKGBUILD` is a `svolder-bin` package for both architectures around those
-tarballs, which it downloads from the release page (`releases/download/v<version>/`), their
-checksums filled in; the AUR package needs `.SRCINFO` too, from `makepkg --printsrcinfo > .SRCINFO`.
+`svolder-<version>-aarch64-linux.tar.gz`, hold the binaries, the docs, the licences, the GNOME
+indicator and the unit templates; with the binaries on `PATH`, `svolder daemon install` writes and
+enables units for wherever they are. `PKGBUILD` is a `svolder-bin` package for both architectures
+around those tarballs, which it downloads from the release page (`releases/download/v<version>/`),
+their checksums filled in; the AUR package needs `.SRCINFO` too, from
+`makepkg --printsrcinfo > .SRCINFO`.
 
 The release assets, all in `target/dist`:
 
@@ -1123,6 +1127,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1207,6 +1212,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1228,7 +1234,7 @@ $ svolder daemon status
 svolderd.socket: installed, enabled, active
 svolderd.socket listens on /run/user/1000/svolder.sock
 svolderd.service: installed, enabled, active
-daemon: 0.38.3 on /run/user/1000/svolder.sock
+daemon: 0.39.0 on /run/user/1000/svolder.sock
 mqtt: connected to 192.168.1.10:1883 (read-only)
 mcp: listening on 127.0.0.1:8737 (token, read-only)
 mcp clients: 0 connections open; 2 clients in the past hour, 3 in the past day
@@ -1311,6 +1317,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1352,6 +1359,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1383,6 +1391,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1409,6 +1418,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1447,6 +1457,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```
@@ -1490,6 +1501,7 @@ Options:
       --transport <TRANSPORT>  Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon` (the daemon, failing when none can be reached), `ble` (direct BlueZ), or `fake` (in-process) [env: SVOLDER_TRANSPORT=] [default: auto]
       --adapter <ADAPTER>      Bluetooth adapter for a direct BlueZ session (e.g. hci0). Defaults to the configured `adapter`, else the first one [env: SVOLDER_ADAPTER=]
       --socket <SOCKET>        Daemon socket to use. Defaults to the runtime directory's `svolder.sock` [env: SVOLDER_SOCKET=]
+      --no-start               Use only a daemon that already answers on the socket: start no socket unit, no daemon and no direct BlueZ session, and exit 3 when none answers. Overrides `--transport` [env: SVOLDER_NO_START=]
   -v, --verbose                Print the backend choice — a daemon, or a direct transport — to stderr
   -h, --help                   Print help
 ```

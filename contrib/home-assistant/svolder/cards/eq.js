@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // `svolder-eq-card`: a short plot of the device's EQ curve, a one-line header (name, preset, Flat,
 // Preset...), the band boxes on one line under it (frequency over gain) and a readout line with the
-// selected band's Q. Dragging a point previews it and, on release, writes the band's frequency and
-// gain number entities once each (only the one that moved).
+// selected band's Hz, dB and Q as typed number fields. Dragging a point previews it and, on release,
+// writes the band's frequency and gain number entities once each (only the one that moved); a typed
+// field writes its own entity once, on Enter, a stepper or leaving the field.
 import {
   SvolderCard, esc, fmt, snap, numberOf, selectOf, firstId, register,
 } from './shared.js';
@@ -50,9 +51,15 @@ const CSS = `
 .plot .pt.sel { stroke: var(--sv-on); fill: var(--sv-on); }
 .plot .hit { fill: transparent; cursor: grab; }
 .plot.ro .hit { cursor: default; }
-.read { margin: 6px 0 0; color: var(--sv-dim); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.read { margin: 6px 0 0; color: var(--sv-dim); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .read b { color: var(--sv-text); font-weight: 500; }
-.read .key { min-height: 30px; padding: 0 10px; }
+.read .fld, .read .grp { display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
+.read .grp { gap: 6px; }
+.read input { width: 8.4ch; min-height: 30px; padding: 0 6px; border: 1px solid var(--sv-line); border-radius: 4px;
+  background: var(--sv-field); color: var(--sv-text); text-align: right; min-width: 0; appearance: textfield; -moz-appearance: textfield; }
+.read input[data-fld=q] { width: 7.6ch; }
+.read input::-webkit-inner-spin-button, .read input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.read .key.sm { padding: 0 8px; min-width: 30px; justify-content: center; }
 .bands { display: grid; gap: 4px; margin: 8px 0 0; }
 .band { border: 1px solid var(--sv-line); border-radius: 4px; padding: 5px 2px; font-size: 10.5px; text-align: center;
   color: var(--sv-dim); background: transparent; display: block; line-height: 1.35; min-width: 0; }
@@ -114,6 +121,7 @@ export class SvolderEqCard extends SvolderCard {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._kb = null;
+    this._edit = null;
     if (this._ro) this._ro.disconnect();
   }
 
@@ -168,6 +176,8 @@ export class SvolderEqCard extends SvolderCard {
   drawPlot() {
     this._redrawing = true;
     try { this.keepFocus(() => this.plotMarkup()); } finally { this._redrawing = false; }
+    const at = this.shadowRoot.activeElement;
+    if (this._edit && !(at && at.dataset && at.dataset.fld)) this.endEdit();
   }
 
   plotMarkup() {
@@ -193,8 +203,17 @@ export class SvolderEqCard extends SvolderCard {
       esc(hz(this.live[i].f))}, ${esc(db(this.live[i].g))}"><b>${esc(hz(this.live[i].f))}</b>${esc(db(this.live[i].g))}</button>`).join('');
     const b = m.bands[m.sel];
     const q = b && b.q;
-    root.querySelector('.read').innerHTML = b ? `<span>Band ${esc(b.n)}: <b>${esc(hz(this.live[m.sel].f))}</b> <b>${esc(db(this.live[m.sel].g))}</b></span>${
-      q && Number.isFinite(q.value) ? `<span>Q <b>${q.value.toFixed(2)}</b></span>${q.writable ? `<button type="button" class="key sm" data-q="-1" aria-label="Lower Q">−</button><button type="button" class="key sm" data-q="1" aria-label="Raise Q">+</button>` : ''}` : ''}${
+    const live = this.live[m.sel];
+    // a writable value is a number field with its unit after it; one that is not (commands off) is text
+    const field = (key, ent, value, shown, unit, text) => (ent && ent.writable && Number.isFinite(value)
+      ? `<label class="fld"><input type="number" data-fld="${key}" data-i="${m.sel}" min="${ent.min}" max="${ent.max}" step="${
+        key === 'q' ? 'any' : ent.step}" value="${shown}" aria-label="${unit} of band ${esc(b.n)}">${unit}</label>`
+      : `<span><b>${Number.isFinite(value) ? esc(text) : '—'}</b></span>`);
+    root.querySelector('.read').innerHTML = b ? `<span>Band ${esc(b.n)}:</span> ${
+      field('f', b.f, live.f, this.shown('f', live.f), 'Hz', hz(live.f))} ${
+      field('g', b.g, live.g, this.shown('g', live.g), 'dB', db(live.g))} ${
+      q && Number.isFinite(q.value) ? `<span class="grp">${field('q', q, q.value, this.shown('q', q.value), 'Q', `Q ${q.value.toFixed(2)}`)} ${
+        q.writable ? `<button type="button" class="key sm" data-q="-1" aria-label="Lower Q">−</button> <button type="button" class="key sm" data-q="1" aria-label="Raise Q">+</button>` : ''}</span>` : ''} ${
       m.modeWord ? `<span class="skip">Bands apply in eq mode (now ${esc(m.modeWord)}).</span>` : ''}` : '';
     for (const el of root.querySelectorAll('.band')) {
       el.addEventListener('click', () => { this._sel = Number(el.dataset.i); this.stale(); this.refresh(); });
@@ -202,15 +221,118 @@ export class SvolderEqCard extends SvolderCard {
     }
     for (const el of root.querySelectorAll('[data-q]')) {
       el.addEventListener('click', () => {
-        const qq = m.bands[m.sel].q;
+        const qq = this._m.bands[this._m.sel].q;
         if (!qq.writable) return;
-        // the next Q the device has: a step of at least 12 %, since the entity's own step (0.01) is
-        // finer than the device's (one raw step is about 0.11 above the centre)
-        const dir = Number(el.dataset.q);
-        const v = snap(dir > 0 ? qq.value * 1.12 : qq.value / 1.12, qq.min, qq.max, qq.step);
+        const v = this.stepOf('q', qq, Number(el.dataset.q), NaN);
         if (v !== qq.value) this.call('number', 'set_value', { entity_id: qq.id, value: v });
       });
     }
+    for (const el of root.querySelectorAll('input[data-fld]')) this.bindField(el);
+  }
+
+  /** `n` as the entity takes it: Hz to the step counted from 0 (the entity's minimum may be fractional),
+   * the rest counted from the minimum, all held to min..max. */
+  entityValue(key, ent, n) {
+    if (key !== 'f') return snap(n, ent.min, ent.max, ent.step);
+    return Math.min(ent.max, Math.max(ent.min, Math.round(n / ent.step) * ent.step));
+  }
+
+  /** The value one arrow step from `from` (NaN: the entity's own value). Q moves by at least 12 %, since
+   * the entity's own step (0.01) is finer than the device's (one raw step is about 0.11 above the
+   * centre); Hz by 3 % as the band boxes do; dB by the entity step. */
+  stepOf(key, ent, dir, from) {
+    const base = Number.isFinite(from) ? from : ent.value;
+    if (key === 'q') return snap(dir > 0 ? base * 1.12 : base / 1.12, ent.min, ent.max, ent.step);
+    if (key === 'f') return this.entityValue('f', ent, base + dir * Math.max(ent.step, Math.round(base * 0.03)));
+    return snap(base + dir * ent.step, ent.min, ent.max, ent.step);
+  }
+
+  /** One typed field: focus holds the card (an incoming state does not repaint it). Enter or leaving
+   * the field writes a changed value once; the arrow keys step the field and write once on key up (a
+   * held key is one write). Escape and an empty entry put the last value back with no write. */
+  bindField(el) {
+    const settle = () => {
+      if (this._redrawing || !el.isConnected) return;
+      this.commitField(el);
+      this.endEdit();
+    };
+    el.addEventListener('focus', () => {
+      if (this._edit) return;
+      this._edit = { sent: {} };
+      this.hold();
+    });
+    el.addEventListener('change', () => { if (!this._arrow) this.commitField(el); });
+    el.addEventListener('blur', settle);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        settle();
+        el.blur();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        el.value = el.defaultValue;
+        settle();
+        el.blur();
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const ent = this.fresh(el);
+        if (!ent) return;
+        const key = el.dataset.fld;
+        const raw = el.value.trim();
+        const v = this.stepOf(key, ent, e.key === 'ArrowUp' ? 1 : -1, raw === '' ? NaN : Number(raw));
+        el.value = this.shown(key, v);
+        this._arrow = true;
+      }
+    });
+    el.addEventListener('keyup', (e) => {
+      if (this._arrow && /^Arrow(Up|Down)$/.test(e.key)) {
+        this._arrow = false;
+        this.commitField(el);
+      }
+    });
+  }
+
+  /** The text a field shows for `v`: whole Hz, dB with one decimal, Q with two. */
+  shown(key, v) {
+    return key === 'q' ? v.toFixed(2) : key === 'g' ? v.toFixed(1) : String(Math.round(v));
+  }
+
+  /** The field's entity as the state has it now (not as it was when the card last painted), or null. */
+  fresh(el) {
+    const b = this._m.bands[Number(el.dataset.i)];
+    const ent = b && b[el.dataset.fld];
+    if (!ent || !ent.writable) return null;
+    const now = numberOf(this._hass, ent.id, ent);
+    return now && Number.isFinite(now.value) ? now : null;
+  }
+
+  /** Writes the field's entity when its text was changed and the value it makes differs from the last
+   * one written during this focus (else the state's). */
+  commitField(el) {
+    if (el.value === el.defaultValue) return;
+    const ent = this.fresh(el);
+    const raw = el.value.trim();
+    const typed = raw === '' ? NaN : Number(raw);
+    if (!ent || !Number.isFinite(typed)) { el.value = el.defaultValue; return; }
+    const key = el.dataset.fld;
+    const v = this.entityValue(key, ent, typed);
+    const sent = this._edit ? this._edit.sent : {};
+    if (v !== (ent.id in sent ? sent[ent.id] : ent.value)) {
+      sent[ent.id] = v;
+      this.call('number', 'set_value', { entity_id: ent.id, value: v });
+      // the device may round it back: the next state paints what it has
+      this.stale();
+    }
+    el.value = this.shown(key, v);
+    el.defaultValue = el.value;
+  }
+
+  /** The field is left: the card paints again (a state that came meanwhile shows now). */
+  endEdit() {
+    if (!this._edit) return;
+    this._edit = null;
+    this._arrow = false;
+    this.release();
   }
 
   /** Sends what moved of band `i` (frequency and gain, each only if it changed) and ends the gesture. */
@@ -264,7 +386,11 @@ export class SvolderEqCard extends SvolderCard {
       if (drag || !el.classList || !el.classList.contains('hit')) return;
       const i = Number(el.dataset.i);
       if (!m.bands[i].f.writable || !m.bands[i].g.writable) return;
+      // the drag holds the card first, so leaving a typed field (which writes its text) cannot
+      // repaint the plot under the pointer
       this.hold();
+      const typing = this.shadowRoot.activeElement;
+      if (typing && typing.dataset && typing.dataset.fld) typing.blur();
       this._sel = i;
       const [px, py] = at(e);
       drag = { i, start: { ...this.live[i] }, dx: px - xOf(this.live[i].f, this.W), dy: py - this.scale.yOf(this.live[i].g) };

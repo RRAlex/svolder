@@ -13,6 +13,7 @@ url='https://github.com/RRAlex/svolder'
 license=('GPL-3.0-or-later')
 depends=('bluez' 'dbus' 'ca-certificates')
 optdepends=("pipewire: the computer's sound level and spectrum (pw-record), the live computer EQ (pw-cli, pw-dump, pipewire), the intro sound (pw-play)"
+            "gnome-shell: the top-bar indicator (GNOME Shell 50 and 51)"
             "wireplumber: the computer's volume and the EQ's route (wpctl, wireplumber)")
 provides=('svolder')
 conflicts=('svolder')
@@ -31,6 +32,10 @@ package() {
     sed -e 's|__BINDIR__|/usr/bin|g' -e 's|__SOCKET__|%t/svolder.sock|g' \
       "systemd/$unit" > "$pkgdir/usr/lib/systemd/user/$unit"
     chmod 644 "$pkgdir/usr/lib/systemd/user/$unit"
+  done
+  # The GNOME Shell indicator: installed, not enabled.
+  (cd gnome-shell && find svolder-indicator@rralex.github.io -type f) | while read -r file; do
+    install -Dm644 "gnome-shell/$file" "$pkgdir/usr/share/gnome-shell/extensions/$file"
   done
   install -Dm644 README.md LEGAL.md AUTHORS -t "$pkgdir/usr/share/doc/svolder/"
   install -Dm644 usage/*.md -t "$pkgdir/usr/share/doc/svolder/usage/"

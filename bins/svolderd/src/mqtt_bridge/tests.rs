@@ -13,6 +13,8 @@ use svolder_ipc::Response;
 use svolder_profiles::{EqMode, tone::preset};
 use svolder_proto::Value;
 
+mod ha_fixtures;
+
 /// A broker in this process and a client that watches it, for the tests that look at what the
 /// bridge's client sends rather than at what the task holds.
 #[cfg(feature = "broker-tests")]

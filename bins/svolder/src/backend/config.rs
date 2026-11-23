@@ -78,6 +78,11 @@ pub(crate) fn registry() -> Result<svolder_profiles::Registry, Failure> {
     crate::registry().map_err(|e| Failure::of(Kind::UnknownProduct, e))
 }
 
+/// The transport `--no-start` stands for: a daemon already answering on the socket, and nothing
+/// else. `--no-start` sets it; `main` refuses it as a `--transport` value, so it is an
+/// internal name.
+pub const RUNNING: &str = "running";
+
 /// Whether `--transport` names somewhere this build can run.
 ///
 /// This is the one list of them: [`Backend::open`] and [`Backend::devices_if_running`] ask it
@@ -85,7 +90,7 @@ pub(crate) fn registry() -> Result<svolder_profiles::Registry, Failure> {
 /// so an unusable value is refused in the same words whichever caller was given it.
 pub fn known_transport(name: &str) -> Result<(), Failure> {
     match name {
-        "auto" | "daemon" | "ble" | "fake" => Ok(()),
+        "auto" | "daemon" | "ble" | "fake" | RUNNING => Ok(()),
         other => Err(unknown_transport(other)),
     }
 }
@@ -93,12 +98,12 @@ pub fn known_transport(name: &str) -> Result<(), Failure> {
 /// Whether `--transport` lets a verb consult a running daemon: `auto` and `daemon` do, `ble`
 /// and `fake` run without one.
 pub fn asks_a_daemon(transport: &str) -> bool {
-    matches!(transport, "auto" | "daemon")
+    matches!(transport, "auto" | "daemon" | RUNNING)
 }
 
 /// A `--transport` value that names nowhere to run, in the one wording every caller of it
 /// uses.
-fn unknown_transport(name: &str) -> Failure {
+pub(crate) fn unknown_transport(name: &str) -> Failure {
     usage(format!(
         "unknown transport {name:?}; use auto, daemon, ble, or fake"
     ))

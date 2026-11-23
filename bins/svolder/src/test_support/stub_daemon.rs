@@ -55,6 +55,8 @@ pub(crate) struct StubDaemon {
     events: broadcast::Sender<Event>,
     /// The selector each subscription asked for, in the order they were made.
     subscribed: Mutex<Vec<Option<String>>>,
+    /// Woken whenever a subscription is made.
+    subscribed_wake: tokio::sync::Notify,
     /// The scenes it keeps, as a case scripted them.
     scenes: super::scenes_script::ScenesScript,
     /// The device walk it runs, as a case scripted it.
@@ -155,6 +157,11 @@ pub(crate) struct StubDaemon {
     host_volume_ops: Mutex<Vec<String>>,
     /// What a `host_eq` request is refused with, when a case sets it.
     host_eq_refusal: Mutex<Option<String>>,
+    /// Whether a preset request that does not carry `confirm` is answered with the question a
+    /// preset a device plays too asks.
+    host_eq_asks: Mutex<bool>,
+    /// Whether it asks even a preset request that carries `confirm`.
+    host_eq_asks_always: Mutex<bool>,
     /// The server and state of each `server_switch` request, in the order they arrived.
     switches: Mutex<Vec<(svolder_ipc::Server, bool)>>,
     /// The state of each `guest_switch` request, in the order they arrived.
@@ -202,6 +209,11 @@ impl Handler for StubDaemon {
             futures::future::pending::<()>().await;
         }
         match request {
+            Request::Devices if self.empty.load(std::sync::atomic::Ordering::SeqCst) => {
+                Response::Devices {
+                    devices: Vec::new(),
+                }
+            }
             Request::State { .. } if self.empty.load(std::sync::atomic::Ordering::SeqCst) => {
                 Response::error(CODE_NOT_FOUND, svolder_ipc::NO_DEVICES_CONFIGURED)
             }
@@ -417,7 +429,22 @@ impl Handler for StubDaemon {
                 Response::Ack
             }
             Request::HostEq { op } => {
+                let asked = match &op {
+                    svolder_ipc::HostEqOp::Preset { confirm, .. } => {
+                        *self.host_eq_asks.lock().expect("the question")
+                            && (!confirm || *self.host_eq_asks_always.lock().expect("the question"))
+                    }
+                    _ => false,
+                };
                 self.host_eq_ops.lock().expect("the record").push(op);
+                if asked {
+                    return Response::Ask {
+                        message: "Warm is on the Bifrost 3 too: the correction would play twice"
+                            .to_string(),
+                        name: "Warm".to_string(),
+                        devices: vec!["Bifrost 3".to_string()],
+                    };
+                }
                 match self.host_eq_refusal.lock().expect("the refusal").clone() {
                     Some(message) => Response::error(CODE_USAGE, message),
                     None => Response::Ack,
@@ -713,6 +740,7 @@ impl StubDaemon {
             .lock()
             .expect("subscribed mutex")
             .push(device);
+        self.subscribed_wake.notify_waiters();
         self.host_asked.lock().expect("the record").push(host);
         let rx = self.events.subscribe();
         let mut hung_up = self.hangup.subscribe();
@@ -1043,6 +1071,21 @@ impl StubServer {
             .clone()
     }
 
+    /// Answer a `host_eq` preset request that has no `confirm` with the question a preset that a
+    /// device plays too asks, from now on.
+    pub(crate) fn asks_before_a_preset(&self) {
+        *self.handler.host_eq_asks.lock().expect("the question") = true;
+    }
+
+    /// Ask even after a yes: a daemon that answers the same question again.
+    pub(crate) fn asks_after_a_yes_too(&self) {
+        *self
+            .handler
+            .host_eq_asks_always
+            .lock()
+            .expect("the question") = true;
+    }
+
     /// Refuse every `host_eq` request from now on with `message`.
     pub(crate) fn refuses_eq(&self, message: &str) {
         *self.handler.host_eq_refusal.lock().expect("the refusal") = Some(message.to_string());
@@ -1257,6 +1300,19 @@ impl StubServer {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Wait until a subscription has been made.
+    pub(crate) async fn wait_subscribed(&self) {
+        loop {
+            let woken = self.handler.subscribed_wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            if !self.subscribed().is_empty() {
+                return;
+            }
+            woken.await;
+        }
+    }
+
     /// The selector every subscription made so far asked for.
     pub(crate) fn subscribed(&self) -> Vec<Option<String>> {
         self.handler
@@ -1318,6 +1374,7 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
     let handler = Arc::new(StubDaemon {
         events: broadcast::channel(16).0,
         subscribed: Mutex::default(),
+        subscribed_wake: tokio::sync::Notify::new(),
         scenes: super::scenes_script::ScenesScript::default(),
         walk: super::walk_script::WalkScript::default(),
         autoeq: super::autoeq_script::AutoEqScript::default(),
@@ -1361,6 +1418,8 @@ pub(crate) async fn stub_daemon_at(socket: PathBuf) -> StubServer {
         host_eq_ops: Mutex::default(),
         host_volume_ops: Mutex::default(),
         host_eq_refusal: Mutex::new(None),
+        host_eq_asks: Mutex::new(false),
+        host_eq_asks_always: Mutex::new(false),
         switches: Mutex::default(),
         guest_switches: Mutex::default(),
         switch_refusal: Mutex::new(None),

@@ -10,6 +10,8 @@ served from the worktree by a loopback server on a free port. Numbers, not pixel
   tone_mode_chips                 the EQ card's mode chips (flat, eq, loudness) sit above the plot, "eq" marked
   balance_row                     the faceplate's balance slider is under the readouts, wider than 60 px
   eq_one_line                     a short plot and the five band boxes on ONE line
+  eq_fields                       the selected band's Hz, dB and Q are three number fields inside the card, >= 30 px high, readable;
+                                  typing a value and pressing Enter writes that entity once; commands off shows no fields
   scenes_column                   the common chips start at one x in every row; the extra chip is under its row, in that column
   one_write_per_gesture           a dial drag is one number.set_value; an EQ point drag is one per moved value
   commands_off                    the same cards over sensors: no write controls move anything, 0 calls
@@ -74,7 +76,7 @@ MEASURE = """(() => {
       nm: nm ? cs(nm).color : null, dim: dim ? cs(dim).color : null,
       acc: ACC[tag] ? ((e) => (e ? cs(e)[ACC[tag][1]] : null))(root.querySelector(ACC[tag][0])) : null,
       off: (() => { const e = root.querySelector('.part.off'); return e ? cs(e).color : null; })(),
-      targets: qa('.key, .chip, button.row, .band, .mod .key, .mod .set').map((e) => ({ h: r(e).h, w: r(e).w, c: e.className })),
+      targets: qa('.key, .chip, button.row, .band, .mod .key, .mod .set, .read input').map((e) => ({ h: r(e).h, w: r(e).w, c: e.className })),
     };
   }
   return out; })()""" % str(TAGS)
@@ -91,6 +93,13 @@ EQ = """(() => { const root = document.getElementById('svolder-eq-card').shadowR
   return { plot: r(root.querySelector('.plot')), bands: [...root.querySelectorAll('.band')].map(r),
     head: r(root.querySelector('.eqh')), modes: [...root.querySelectorAll('.modes .chip')].map(r),
     on: [...root.querySelectorAll('.modes .chip[aria-pressed=true]')].map((c) => c.textContent), read: root.querySelector('.read').textContent }; })()"""
+FIELDS = """(() => { const root = document.getElementById('svolder-eq-card').shadowRoot;
+  const cardEl = root.querySelector('.card');
+  const card = cardEl.getBoundingClientRect();
+  const read = root.querySelector('.read');
+  return { card: { l: card.left, r: card.right, bg: getComputedStyle(cardEl).backgroundColor }, scrollW: read.scrollWidth, clientW: read.clientWidth,
+    inputs: [...root.querySelectorAll('.read input')].map((e) => { const b = e.getBoundingClientRect(); const c = getComputedStyle(e);
+      return { fld: e.dataset.fld, type: e.type, l: b.left, r: b.right, h: b.height, color: c.color, bg: c.backgroundColor }; }) }; })()"""
 BALANCE = """(() => { const root = document.getElementById('svolder-faceplate-card').shadowRoot;
   const r = (e) => { const b = e.getBoundingClientRect(); return { r: b.right, t: b.top, b: b.bottom, w: b.width }; };
   const rows = [...root.querySelectorAll('.rw:not(.bal)')];
@@ -105,6 +114,12 @@ SCENES = """(() => { const root = document.getElementById('svolder-scenes-card')
 def rgb(css):
     nums = css[css.index('(') + 1:css.index(')')].replace('/', ',').split(',') if ',' in css else css[css.index('(') + 1:css.index(')')].split()
     return [float(x) for x in nums[:3]], (float(nums[3]) if len(nums) > 3 else 1.0)
+
+
+def over(top, bottom):
+    """`top` (a css colour that may be translucent) painted over the opaque `bottom`, as a css colour."""
+    (tc, ta), (bc, _) = rgb(top), rgb(bottom)
+    return 'rgb(%s)' % ','.join(str(ta * a + (1 - ta) * b) for a, b in zip(tc, bc))
 
 
 def lum(c):
@@ -168,6 +183,14 @@ for width in (400, 800):
                   len(q['bands']) == 5 and len(bt) == 1 and q['plot']['h'] < 140 and q['bands'][0]['t'] > q['plot']['b'] - 1, q)
             check(f'tone_mode_chips: {tag}: three chips above the plot, eq marked',
                   len(q['modes']) == 3 and q['on'] == ['eq'] and q['modes'][0]['b'] <= q['plot']['t'] + 1, q)
+            fl = b.page(FIELDS)
+            ins = fl['inputs']
+            check(f'eq_fields: {tag}: Hz, dB and Q are number fields, inside the card, no sideways scroll, >= 30 px high',
+                  [i['fld'] for i in ins] == ['f', 'g', 'q'] and all(i['type'] == 'number' and i['h'] >= 30 for i in ins)
+                  and all(i['l'] >= fl['card']['l'] - 0.5 and i['r'] <= fl['card']['r'] + 0.5 for i in ins)
+                  and fl['scrollW'] <= fl['clientW'] + 1, fl)
+            check(f'  {tag}: the field text is >= 4.5:1 against the field', all(
+                  contrast(i['color'], over(i['bg'], fl['card']['bg'])) >= 4.5 for i in ins), ins)
             bal = b.page(BALANCE)
             check(f'balance_row: {tag}: the slider is under the last readout and wider than 60 px',
                   bal['range']['w'] > 60 and bal['range']['t'] >= bal['lastRow']['b'] - 1 and bal['range']['r'] <= bal['card']['r'] + 1, bal)
@@ -184,6 +207,12 @@ for width in (400, 800):
                 os.makedirs(shots, exist_ok=True)
                 with open(f'{shots}/ha-cards-{browser}-{mode}-{width}.png', 'wb') as out:
                     out.write(b.shot())
+        # the fields never clip: the widest real values in band 1
+        load(b, 'dark', '&wide=1')
+        clip = b.page("""(() => [...document.getElementById('svolder-eq-card').shadowRoot.querySelectorAll('.read input')]
+          .map((e) => ({ fld: e.dataset.fld, value: e.value, sw: e.scrollWidth, cw: e.clientWidth })))()""")
+        check(f'eq_fields: {width} px: 19497 Hz, -20.0 dB and Q 10.00 fit their fields (scrollWidth <= clientWidth)',
+              [c['value'] for c in clip] == ['19497', '-20.0', '10.00'] and all(c['sw'] <= c['cw'] for c in clip), clip)
         # one write per gesture, in dark at this width
         load(b, 'dark')
         dial = b.page("(() => { const r = document.getElementById('svolder-faceplate-card').shadowRoot.querySelector('.dial')"
@@ -203,6 +232,30 @@ for width in (400, 800):
         check('  an EQ point drag writes the band\'s frequency and gain once each',
               ids == ['number.desk_band_2_frequency', 'number.desk_band_2_gain'], calls)
         b.page('window.__calls.length = 0')
+        SET = ("(() => { const i = document.getElementById('svolder-eq-card').shadowRoot.querySelector('.read input[data-fld=%s]');"
+               " i.focus(); i.select(); i.value = '%s'; i.dispatchEvent(new Event('input', { bubbles: true })); return !!i; })()")
+        b.page(SET % ('g', '3.25'))
+        check('eq_fields: typing a gain writes nothing before Enter', b.page('window.__calls.length') == 0, b.page('window.__calls'))
+        b.press('Enter')
+        calls = b.page('window.__calls')
+        check(f'  {width} px: Enter writes the typed gain once, snapped to the entity step',
+              len(calls) == 1 and calls[0][1] == 'set_value' and calls[0][2]['entity_id'] == 'number.desk_band_2_gain'
+              and abs(calls[0][2]['value'] - 3.3) < 1e-6, calls)
+        b.page('window.__calls.length = 0')
+        b.page(SET % ('f', '77'))
+        b.page("document.getElementById('svolder-eq-card').shadowRoot.querySelector('.read input[data-fld=f]').blur()")
+        b.sleep(0.2)
+        calls = b.page('window.__calls')
+        check('  leaving the frequency field writes it once', [c[2]['entity_id'] for c in calls] == ['number.desk_band_2_frequency']
+              and calls[0][2]['value'] == 77, calls)
+        b.page('window.__calls.length = 0')
+        GAIN = "document.getElementById('svolder-eq-card').shadowRoot.querySelector('.read input[data-fld=g]').value"
+        before = b.page(GAIN)
+        b.page(SET % ('g', '9'))
+        b.press('Escape')
+        check('  Escape writes nothing and puts the gain back', b.page('window.__calls.length') == 0 and b.page(GAIN) == before,
+              [before, b.page(GAIN), b.page('window.__calls')])
+        b.page('window.__calls.length = 0')
         b.click(cx, cy)
         check('  a click on the dial writes nothing', b.page('window.__calls.length') == 0, b.page('window.__calls'))
         errs = b.errors if browser == 'chromium' else b.collect_errors()
@@ -221,6 +274,8 @@ for width in (400, 800):
                     "document.getElementById('svolder-scenes-card').shadowRoot.querySelectorAll('.row')"):
             n = b.page(f'[...{sel}].map((e) => e.click()).length')
         check('  dragging and clicking every control makes no service call', b.page('window.__calls.length') == 0, b.page('window.__calls'))
+        check('  the EQ card has no number field to type in', b.page(
+            "document.getElementById('svolder-eq-card').shadowRoot.querySelectorAll('.read input').length") == 0)
         check('  no text field and no switch to press', b.page(
             "document.getElementById('svolder-scenes-card').shadowRoot.querySelectorAll('.saver, button').length") == 0)
     finally:

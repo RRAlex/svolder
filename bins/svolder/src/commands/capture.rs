@@ -127,6 +127,10 @@ fn wire_for(transport: &str) -> Result<Wire, Failure> {
             Kind::Usage,
             "capture talks to the device directly, so it cannot run with --transport daemon",
         )),
+        crate::backend::RUNNING => Err(Failure::of(
+            Kind::Usage,
+            "capture talks to the device directly, so it cannot run with --no-start",
+        )),
         "fake" => Ok(Wire::Fake),
         _ => Ok(Wire::Ble),
     }

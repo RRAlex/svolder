@@ -23,7 +23,7 @@ use crate::which;
 mod verbs;
 
 pub(super) use verbs::move_to_dac;
-use verbs::{host_apply, host_remove, host_status};
+use verbs::{host_apply, host_mode, host_preset, host_remove, host_status};
 
 /// Carry out one of the `host` sub-commands.
 pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
@@ -37,6 +37,15 @@ pub(crate) async fn run(g: &Globals<'_>, command: HostCommand) -> ExitCode {
         HostCommand::Eq {
             command: HostEqCommand::Status { json },
         } => host_status(g, json).await,
+        HostCommand::Eq {
+            command: HostEqCommand::On { json },
+        } => host_mode(g, true, json).await,
+        HostCommand::Eq {
+            command: HostEqCommand::Off { json },
+        } => host_mode(g, false, json).await,
+        HostCommand::Eq {
+            command: HostEqCommand::Preset { name, yes, json },
+        } => host_preset(g, &name, yes, json).await,
         HostCommand::Check { json, player } => super::host_check::run(g, json, player).await,
         HostCommand::Crossfeed { json, command } => {
             super::host_crossfeed::run(g, json, command).await

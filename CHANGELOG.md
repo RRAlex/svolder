@@ -8,6 +8,56 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Each version below becomes the top of its release notes. 0.25.4 is the first version with
 downloads; the versions before it were source only.
 
+## 0.39.0
+
+- **A GNOME top-bar indicator** (GNOME Shell 50 and 51; off until you enable it). The DAC sits in
+  the bar as a box whose light is the Path row's colour (green when the sound is untouched end to
+  end, yellow when something changes it, a hollow ring when the DAC is away or the Path has no
+  verdict), its outline tinted by the sample rate (eight rates, one colour each; any other rate
+  stays plain), the four-bar Bluetooth signal (yellow when weak, dim when the reading is old) and
+  the volume in dB. A muted DAC shows a muted-speaker glyph instead of the figure (and, since a mute
+  changes the sound, a yellow light). Scrolling on it changes the volume. Click it for a popup: the
+  header (name, rate, signal in dBm), mute, a volume slider that writes once when you let go, input,
+  DAC preset, computer EQ (switch and preset), the Path as three green, yellow or grey segments with
+  the words only for what is off, scenes, and Open svolder (the TUI in a terminal). It needs
+  `svolder` on the `PATH` GNOME Shell was started with (a copy only in `~/.cargo/bin` is not found)
+  and a running daemon. Its own calls start none (the stream only connects to the socket, and clicks
+  run with `--no-start`, and only while the stream is live); with `svolderd.socket` installed
+  systemd starts the daemon when the stream connects, and Open svolder runs `svolder tui`, which
+  follows the normal launcher chain. It never confirms anything for you: a call that needs a
+  confirmation says so and points you at the TUI. A DAC that is away, or no device at all, draws the
+  away state instead of failing; with several devices it follows `-d`, else `default_device`, else
+  the only device. When something is wrong the popup says it in one line (`svolder is not on PATH`,
+  `the svolder daemon is not running`, and so on) and the stream starts again by itself.
+  - **Install**: the `.deb`, the `.rpm`, the Arch `PKGBUILD` and the binary tarball carry the
+    extension (in `/usr/share/gnome-shell/extensions/svolder-indicator@rralex.github.io/` for the
+    packages); from a checkout, `make install-gnome-extension`. Enable it in the Extensions app or
+    with `gnome-extensions enable svolder-indicator@rralex.github.io`; on Wayland a new extension
+    shows after you log out and in. [The usage page](docs/usage/gnome-shell.md) has the legend for
+    the sample-rate colours and the signal rule.
+  - **Signal**: the bars are 4 at -55 dBm or stronger, 3 at -67, 2 at -80 and 1 (weak) below. While
+    a Bluetooth LE link is up BlueZ reports no strength, so the figure is the last advertisement
+    before connecting and the bars go dim two minutes after connecting.
+- **`svolder panel --json`** prints what the indicator draws: one JSON object per line, the first
+  as soon as the state is known and then one per change (at most four a second, never the same line
+  twice), ending with exit 3 when the daemon stops. It never starts a daemon, and a DAC that is
+  away or no device at all is streamed as such, not refused. The shape and the arguments of every
+  action are in [the CLI page](docs/usage/cli.md#panel).
+- **`--no-start`** (and `SVOLDER_NO_START`), a new global flag: use only a daemon that already
+  answers on the socket, and start no socket unit, no daemon and no direct Bluetooth session; exit
+  3 when none answers. See [environment variables](docs/usage/environment.md).
+- **`svolder host eq on`, `host eq off` and `host eq preset NAME [--yes]`** switch the computer EQ
+  and put a preset on it from the command line (the TUI, the web page, MCP and Home Assistant
+  already could); `--json` prints the state.
+- **For contributors**: `PanelView` in `svolder-ipc` is the one model the extension draws (the Path
+  judge's tones and words, one signal rule next to `LIVE_FRESH_SECS`, every choice with the CLI
+  arguments that select it); its golden JSON Lines files in `contrib/gnome-shell/tests/fixtures/`
+  are written by a Rust test (`SVOLDER_BLESS=1` rewrites them) and read by the extension's gjs
+  tests. `make gnome-extension-check` runs the gjs tests, packs the zip and loads the extension in
+  a headless GNOME Shell with a fake `svolder`; `make install-gnome-extension` and
+  `make uninstall-gnome-extension` handle a source install. The design is in
+  [the design note](docs/design/gnome-indicator.md).
+
 ## 0.38.3
 
 - **The Home Assistant dashboard leaves no gap.** Each device's "other" list (USB connected,

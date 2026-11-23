@@ -55,7 +55,33 @@ pub const SIGNAL_MINUS: char = '\u{2212}';
 /// How long a live signal still counts as current, in seconds; one older says how old it is.
 const LIVE_FRESH_SECS: u64 = 30;
 
+/// How old a reading may be, in seconds, before the panel draws it dim: while a BLE link is up
+/// BlueZ reports no strength, so the reading is the last advertisement before the link.
+pub const SIGNAL_OLD_SECS: u64 = 120;
+
 impl Signal {
+    /// How many of the four bars the strength fills: 4 at -55 dBm and above, 3 from -67, 2 from
+    /// -80, and 1 below that.
+    pub fn bars(&self) -> u8 {
+        match self.dbm {
+            -55.. => 4,
+            -67.. => 3,
+            -80.. => 2,
+            _ => 1,
+        }
+    }
+
+    /// Whether the signal is weak: one bar, below -80 dBm.
+    pub fn weak(&self) -> bool {
+        self.bars() == 1
+    }
+
+    /// Whether the reading is older than [`SIGNAL_OLD_SECS`] at `now_ms`. A stamp after `now_ms`
+    /// reads as no age.
+    pub fn old(&self, now_ms: u64) -> bool {
+        now_ms.saturating_sub(self.heard_at_ms) > SIGNAL_OLD_SECS * 1000
+    }
+
     /// The signal in words: `-58 dBm live`, or `-62 dBm advert, 3 min ago`.
     ///
     /// An advert's age always shows; a live signal's shows once it is older than half a minute.

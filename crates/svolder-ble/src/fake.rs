@@ -113,6 +113,23 @@ pub struct FakeTransport {
     air: Arc<Air>,
 }
 
+/// The `key=value` pairs of `SVOLDER_FAKE_READINGS`, separated by commas, in order: the key is
+/// a profile key or `loudness_strength`, the value a whole number from 0 to 255. An empty text is
+/// no pair; an entry that is not `key=value` is an error naming it.
+pub fn parse_readings(text: &str) -> Result<Vec<(String, u8)>, String> {
+    let mut pairs = Vec::new();
+    for entry in text.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let (key, value) = entry
+            .split_once('=')
+            .ok_or_else(|| format!("bad SVOLDER_FAKE_READINGS: {entry:?} is not key=value"))?;
+        let value = value.trim().parse::<u8>().map_err(|_| {
+            format!("bad SVOLDER_FAKE_READINGS: {entry:?} has no whole number from 0 to 255")
+        })?;
+        pairs.push((key.trim().to_string(), value));
+    }
+    Ok(pairs)
+}
+
 impl FakeTransport {
     /// Wrap a freshly seeded fake device for one product.
     pub fn from_profile(
@@ -178,6 +195,9 @@ impl FakeTransport {
     /// - `SVOLDER_FAKE_PASSPHRASE`, the code (`1234` by default, `none` for no passphrase, or
     ///   another 4-digit string);
     /// - `SVOLDER_FAKE_FAULTS`, `1` to seed every `Fault` control of the profile as active;
+    /// - `SVOLDER_FAKE_READINGS`, readings the device starts with, `key=value` pairs separated by
+    ///   commas (see [`parse_readings`]): a flag readout by its profile key, `usb_connected=1`,
+    ///   and `loudness_strength=60`; an unknown key is an error;
     /// - `SVOLDER_FAKE_SIGNAL`, `1` to play a signal on the meters, which needs a profile whose
     ///   meters have a scale, such as `fake-amp`, and a Tokio runtime;
     /// - `SVOLDER_FAKE_LOKI_REPORTS`, `full` (the default) to report a Loki Max band on its own
@@ -229,10 +249,17 @@ impl FakeTransport {
         };
         let silent_recall = knob("SVOLDER_FAKE_SILENT_RECALL").as_deref() == Some("1");
         let quiet_same = knob("SVOLDER_FAKE_QUIET_SAME").as_deref() == Some("1");
-        let device = FakeDevice::from_profile(&profile, unit, firmware, passphrase)
+        let mut device = FakeDevice::from_profile(&profile, unit, firmware, passphrase)
             .report_aliases(report_aliases)
             .silent_recall(silent_recall)
             .quiet_same(quiet_same);
+        if let Some(text) = knob("SVOLDER_FAKE_READINGS") {
+            for (key, value) in parse_readings(&text)? {
+                device
+                    .seed_reading(&key, value)
+                    .map_err(|e| format!("bad SVOLDER_FAKE_READINGS: {e}"))?;
+            }
+        }
         let transport = Self::from_device(device, unit);
         if knob("SVOLDER_FAKE_FAULTS").as_deref() == Some("1") {
             let mut device = transport.device.lock().expect("device mutex");
@@ -968,6 +995,65 @@ mod tests {
         assert!(t.current.lock().unwrap().is_none(), "the link was not cut");
         assert!(t.connect(unit).await.is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `SVOLDER_FAKE_READINGS` text is `key=value` pairs; anything else is refused naming it.
+    #[test]
+    fn readings_parse_as_pairs() {
+        assert_eq!(
+            parse_readings("usb_connected=1, loudness_strength=60").unwrap(),
+            vec![
+                ("usb_connected".to_string(), 1),
+                ("loudness_strength".to_string(), 60)
+            ]
+        );
+        assert_eq!(parse_readings("").unwrap(), vec![]);
+        for bad in ["usb_connected", "usb_connected=yes", "usb_connected=256"] {
+            let err = parse_readings(bad).unwrap_err();
+            assert!(
+                err.contains("SVOLDER_FAKE_READINGS") && err.contains(bad),
+                "got {err}"
+            );
+        }
+    }
+
+    /// The knob seeds what the fake device reports, and an unknown key is refused naming it.
+    #[test]
+    fn the_readings_knob_seeds_the_device() {
+        let reg = Registry::builtin().unwrap();
+        let knobs = |n: &str| match n {
+            "SVOLDER_FAKE_PROFILE" => Some("bifrost3".to_string()),
+            "SVOLDER_FAKE_READINGS" => Some("usb_connected=1,loudness_strength=60".to_string()),
+            _ => None,
+        };
+        let transport = FakeTransport::from_knobs(&reg, knobs).expect("the readings seed");
+        let device = transport.device();
+        let device = device.lock().unwrap();
+        let eq = Registry::builtin()
+            .unwrap()
+            .get("bifrost3")
+            .unwrap()
+            .eq
+            .clone()
+            .unwrap();
+        assert_eq!(
+            device.reading(svolder_proto::FunctionId::one(7)),
+            Some(svolder_proto::Value::Bool(true))
+        );
+        assert_eq!(
+            device.reading(eq.loudness_id()),
+            Some(svolder_proto::Value::U8(60))
+        );
+        let err = FakeTransport::from_knobs(&reg, |n| match n {
+            "SVOLDER_FAKE_READINGS" => Some("no_such_key=1".to_string()),
+            _ => None,
+        })
+        .err()
+        .expect("an unknown key is refused");
+        assert!(
+            err.contains("SVOLDER_FAKE_READINGS") && err.contains("no_such_key"),
+            "got {err}"
+        );
     }
 
     /// A knob that does not parse is refused in words that name its variable, and an unset one

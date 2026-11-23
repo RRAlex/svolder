@@ -47,6 +47,11 @@ fn config_home() -> TempPath {
 /// a verb that installs the units — the fix `doctor --yes` applies among the rest — writes
 /// where the test can see it and asks the machine's own systemd for nothing.
 fn svolder_in(args: &[&str], xdg: &Path) -> Run {
+    svolder_in_env(args, xdg, &[])
+}
+
+/// [`svolder_in`] with more environment entries.
+fn svolder_in_env(args: &[&str], xdg: &Path, more: &[(&str, &str)]) -> Run {
     let out = Command::new(env!("CARGO_BIN_EXE_svolder"))
         .env("SVOLDER_HOST", "off")
         .env("SVOLDER_TRANSPORT", "fake")
@@ -58,6 +63,7 @@ fn svolder_in(args: &[&str], xdg: &Path) -> Run {
         .env("SVOLDER_UNITDIR", xdg.join("units"))
         .env("XDG_CONFIG_HOME", xdg)
         .env("XDG_STATE_HOME", xdg)
+        .envs(more.iter().copied())
         .args(args)
         .output()
         .expect("the binary runs");
@@ -220,6 +226,145 @@ fn bare_svolder_off_a_terminal_prints_the_summary_and_exits_zero() {
     let none = svolder_with_config(&[], "schema = 1\n");
     assert_eq!(none.code, 0, "err={}", none.stderr);
     assert!(none.stdout.contains("svolder setup"), "{}", none.stdout);
+}
+
+/// `--no-start` uses a daemon that already answers and nothing else: with none on the socket every
+/// verb that can reach one exits 3 with the one step, and never falls back on the in-process
+/// transport the environment names, a socket unit or a daemon of its own.
+#[test]
+fn no_start_exits_3_for_every_verb_that_reaches_a_daemon() {
+    let config = "schema = 1\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+    for verb in [
+        &["set", "volume", "up"][..],
+        &["eq", "load", "Warm"],
+        &["preset", "apply", "Warm"],
+        &["scene", "load", "Desk"],
+        &["host", "eq", "on"],
+        &["panel", "--json"],
+    ] {
+        let mut args = vec!["--no-start"];
+        args.extend_from_slice(verb);
+        let run = svolder_with_config(&args, config);
+        assert_eq!(
+            run.code, 3,
+            "{verb:?}: out={} err={}",
+            run.stdout, run.stderr
+        );
+        assert!(
+            !run.stderr.contains("drop `--transport"),
+            "{verb:?}: {}",
+            run.stderr
+        );
+        assert!(
+            !run.stderr.contains("svolderd.log"),
+            "{verb:?}: {}",
+            run.stderr
+        );
+        // The refusal is the guard's, not a direct session failing: a verb that went on to open
+        // BlueZ (or started a daemon) would not say this.
+        if matches!(verb[0], "set" | "eq" | "preset") {
+            assert!(
+                run.stderr.contains("no daemon answers on"),
+                "{verb:?}: {}",
+                run.stderr
+            );
+        }
+    }
+}
+
+/// `capture` talks to the device directly, so `--no-start` refuses it rather than open BlueZ.
+#[test]
+fn no_start_refuses_capture() {
+    let run = svolder_with_config(
+        &["--no-start", "capture"],
+        "schema = 1\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n",
+    );
+    assert_eq!(run.code, 1, "err={}", run.stderr);
+    assert!(run.stderr.contains("--no-start"), "{}", run.stderr);
+}
+
+/// `doctor` under `--no-start`, with a device configured and no daemon, opens no session of its
+/// own: it reports the host and leaves out the device rows instead of looking for the device.
+#[test]
+fn no_start_doctor_leaves_out_the_device_rows() {
+    let config = "schema = 1\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n";
+    let with = svolder_with_config(&["doctor", "--json"], config);
+    let without = svolder_with_config(&["--no-start", "doctor", "--json"], config);
+    assert!(!without.stdout.contains("\"amp\""), "{}", without.stdout);
+    assert!(!without.stdout.is_empty(), "err={}", without.stderr);
+    assert!(with.stdout.contains("amp"), "{}", with.stdout);
+}
+
+/// `running` is the name `--no-start` sets for itself: a person cannot give it as a transport,
+/// on the command line or in the environment.
+#[test]
+fn running_is_not_a_transport_a_person_can_name() {
+    let flag = svolder(&["--transport", "running", "status"]);
+    assert_eq!(flag.code, 1, "err={}", flag.stderr);
+    assert!(
+        flag.stderr.contains("unknown transport \"running\""),
+        "{}",
+        flag.stderr
+    );
+    let home = config_home();
+    let env = svolder_in_env(&["status"], &home.0, &[("SVOLDER_TRANSPORT", "running")]);
+    assert_eq!(env.code, 1, "err={}", env.stderr);
+    assert!(
+        env.stderr.contains("unknown transport \"running\""),
+        "{}",
+        env.stderr
+    );
+}
+
+/// The guided first run is exempt from `--no-start`, by every door that is not a terminal's
+/// prompts: `setup` and the bare `svolder` print their summary and exit 0 instead of 3.
+#[test]
+fn no_start_leaves_the_wizard_doors_alone() {
+    for args in [&["--no-start", "setup"][..], &["--no-start"]] {
+        let run = svolder_with_config(args, "schema = 1\n");
+        assert_eq!(run.code, 0, "{args:?}: err={}", run.stderr);
+        assert!(!run.stdout.is_empty(), "{args:?}: nothing printed");
+        assert!(
+            !run.stderr.contains("no daemon answers"),
+            "{args:?}: {}",
+            run.stderr
+        );
+    }
+}
+
+/// The environment twin takes the values a person writes: `1` and `true` mean it, `0` and `false`
+/// mean not (the verb then runs over the in-process transport the environment names).
+#[test]
+fn no_start_reads_the_environment_as_a_boolean() {
+    let home = config_home();
+    let dir = home.0.join("svolder");
+    std::fs::create_dir_all(&dir).expect("the config directory is made");
+    std::fs::write(
+        dir.join("config.toml"),
+        "schema = 1\n[[device]]\nname = \"amp\"\nudid = \"0102030405060708\"\n",
+    )
+    .expect("the config file is written");
+    for value in ["1", "true"] {
+        let run = svolder_in_env(
+            &["set", "volume", "up"],
+            &home.0,
+            &[("SVOLDER_NO_START", value)],
+        );
+        assert_eq!(run.code, 3, "{value}: err={}", run.stderr);
+        assert!(
+            run.stderr.contains("no daemon answers on"),
+            "{}",
+            run.stderr
+        );
+    }
+    for value in ["0", "false"] {
+        let run = svolder_in_env(
+            &["set", "volume", "up"],
+            &home.0,
+            &[("SVOLDER_NO_START", value)],
+        );
+        assert_eq!(run.code, 0, "{value}: err={}", run.stderr);
+    }
 }
 
 #[test]

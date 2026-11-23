@@ -142,3 +142,35 @@ fn every_source_has_its_one_word() {
         );
     }
 }
+
+/// The bars step at -55, -67 and -80 dBm, each boundary on the stronger side; one bar is weak.
+#[test]
+fn bars_step_at_the_boundaries() {
+    let at = |dbm| Signal {
+        dbm,
+        source: SignalSource::Advert,
+        heard_at_ms: NOW,
+    };
+    let bars: Vec<u8> = [-30, -55, -56, -67, -68, -80, -81, -100]
+        .into_iter()
+        .map(|dbm| at(dbm).bars())
+        .collect();
+    assert_eq!(bars, [4, 4, 3, 3, 2, 2, 1, 1]);
+    assert!(at(-81).weak());
+    assert!(!at(-80).weak());
+}
+
+/// A reading is old after 120 s, not at 120 s; a stamp in the future is never old.
+#[test]
+fn old_after_two_minutes() {
+    assert!(!advert_aged(120).old(NOW));
+    assert!(advert_aged(121).old(NOW));
+    assert!(!advert_aged(0).old(NOW - 5_000));
+    // To the millisecond: the instant a stream's timer waits for is the first one that is old.
+    let at = |ms: u64| Signal {
+        heard_at_ms: NOW - ms,
+        ..advert_aged(0)
+    };
+    assert!(!at(120_000).old(NOW));
+    assert!(at(120_001).old(NOW));
+}

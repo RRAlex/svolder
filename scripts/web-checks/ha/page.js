@@ -43,6 +43,13 @@ const raw = {
   raw[`number.desk_band_${n}_q`] = [String(qq), { min: 0.1, max: 10, step: 0.1 }];
 });
 
+// ?wide=1: the widest values a real device has in band 1 (5-digit fractional Hz, gain down to -20, Q 10)
+if (q.get('wide') === '1') {
+  raw['number.desk_band_1_frequency'] = ['19497.4', { min: 19.686, max: 19497.4, step: 1 }];
+  raw['number.desk_band_1_gain'] = ['-20', { min: -20, max: 6, step: 0.204 }];
+  raw['number.desk_band_1_q'] = ['10', { min: 0.1, max: 10, step: 0.01 }];
+}
+
 const sensorId = (id) => (off ? id.replace(/^(number|select)\./, 'sensor.').replace(/^(switch|text)\./, 'binary_sensor.') : id);
 const states = {};
 for (const [id, [state, attrs = {}]] of Object.entries(raw)) {

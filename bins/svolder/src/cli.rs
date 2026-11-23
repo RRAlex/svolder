@@ -28,6 +28,8 @@ mod about {
     pub(super) const SET: &str = "Set one control's value, or recall or save a preset";
     pub(super) const WATCH: &str =
         "Connect to a device and print every status it reports until Ctrl-C";
+    pub(super) const PANEL: &str =
+        "Print what the GNOME top-bar indicator shows, one JSON line per change";
     pub(super) const EQ: &str = "Inspect or change the tone control";
     pub(super) const PRESET: &str = "List or apply the device's own presets";
     pub(super) const SCENE: &str = "List, save, load, rename or delete scenes of sound settings";
@@ -76,6 +78,7 @@ const GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("get", about::GET),
             ("set", about::SET),
             ("watch", about::WATCH),
+            ("panel", about::PANEL),
             ("eq", about::EQ),
             ("preset", about::PRESET),
             ("scene", about::SCENE),
@@ -177,6 +180,15 @@ pub(crate) struct Cli {
     /// Daemon socket to use. Defaults to the runtime directory's `svolder.sock`.
     #[arg(long, global = true, env = "SVOLDER_SOCKET")]
     pub(crate) socket: Option<String>,
+    /// Use only a daemon that already answers on the socket: start no socket unit, no daemon and
+    /// no direct BlueZ session, and exit 3 when none answers. Overrides `--transport`.
+    #[arg(
+        long,
+        global = true,
+        env = "SVOLDER_NO_START",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub(crate) no_start: bool,
     /// Print the backend choice — a daemon, or a direct transport — to stderr
     #[arg(short = 'v', long, global = true)]
     pub(crate) verbose: bool,
@@ -273,6 +285,12 @@ pub(crate) enum Command {
     #[command(about = about::WATCH)]
     Watch {
         /// Print one JSON object per reading instead of text
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(about = about::PANEL)]
+    Panel {
+        /// Print one JSON object per line (the only form: the verb is for programs)
         #[arg(long)]
         json: bool,
     },
@@ -851,6 +869,29 @@ pub(crate) enum HostEqCommand {
     },
     /// Stop the computer EQ and delete what was written for it
     Remove,
+    /// Turn the computer EQ on, with the points it has, through the daemon
+    On {
+        /// Print the computer EQ's state as one JSON object
+        #[arg(long)]
+        json: bool,
+    },
+    /// Turn the computer EQ off and keep its points, through the daemon
+    Off {
+        /// Print the computer EQ's state as one JSON object
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put a preset on the computer, through the daemon
+    Preset {
+        /// The preset's name: a saved one, or a built-in
+        name: String,
+        /// Answer yes to the question asked when a device plays the preset too
+        #[arg(long)]
+        yes: bool,
+        /// Print the computer EQ's state as one JSON object
+        #[arg(long)]
+        json: bool,
+    },
     /// Print what is applied and whether it runs
     Status {
         /// Print one JSON object instead of text

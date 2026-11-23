@@ -18,8 +18,8 @@ live" lists where each module's tests are.
   network boundary, the build-deps self-test and every test. Run it before every commit meant to
   stay and before a merge.
 - **`make test`**: the workspace's tests alone, in a scratch environment; run it while iterating.
-- **`make safety-tests`**: every test the safety list names still exists. Run it after touching a
-  listed test file; it is part of `make check`.
+- **`make safety-tests`**: every test on the safety list still exists; run it after touching one.
+- **`make gnome-extension-check`**: the indicator's [gjs tests, zip and headless load](gnome-indicator.md).
 - **`make docs-check`**: links, anchors, process tags, code spans that name repo paths and page
   sizes (below). Run it after editing any Markdown; it is part of `make check`.
 - **`make tui-harness`**: the real `svolder tui --demo` in a pseudo-terminal, read through a screen

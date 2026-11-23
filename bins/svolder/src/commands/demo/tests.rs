@@ -154,13 +154,14 @@ fn the_demo_environment_has_no_host_and_its_own_homes() {
     assert_eq!(get("SVOLDER_UNITDIR"), Some(dir.join("units")));
 }
 
-/// The fake device's profile, faults and meter signal reach the demo daemon, so `--demo` can
-/// try an amplifier with its meters playing.
+/// The fake device's profile, faults, start readings and meter signal reach the demo daemon, so
+/// `--demo` can try an amplifier with its meters playing, or a DAC with its USB plugged in.
 #[test]
 fn the_fake_devices_profile_faults_and_signal_reach_the_demo_daemon() {
     for knob in [
         "SVOLDER_FAKE_PROFILE",
         "SVOLDER_FAKE_FAULTS",
+        "SVOLDER_FAKE_READINGS",
         "SVOLDER_FAKE_SIGNAL",
     ] {
         assert!(PASSED_ON.contains(&knob), "{knob}");

@@ -37,7 +37,9 @@ Two more targets draw the documentation's pictures. `make screenshots` (the READ
 needs ffmpeg and the `fonts-ubuntu` and `fonts-dejavu-core` packages. `make web-shots` (the web
 UI's pictures, with the README's two, shot with the fake host so Now playing and the visualizer
 show) needs headless Chromium and Firefox, ffmpeg, `python3-websockets` and one `make screenshots`
-first.
+first. `make ha-shots` (the two Home Assistant pictures) needs a Home Assistant of your own, named
+by `HA_URL`, `HA_TOKEN_FILE` and `HA_MQTT_PASSWORD_FILE` (`make help T=ha-shots`), headless
+Chromium, `mosquitto-clients`, `bubblewrap`, ffmpeg and `python3-websockets`.
 
 ## Try a change without a device
 
@@ -217,7 +219,7 @@ tree:
     docs/                     protocol reference, usage guide, design notes, map, glossary, known
                               issues
     docs/images/              the README's pictures and their text twins; `make screenshots` and
-                              `make web-shots` draw them
+                              `make web-shots` and `make ha-shots` draw them
     scripts/                  checks and tools: `e2e.sh`, `docs-check.py`, `safety-tests.list`,
                               the licence and header checks, `screenshots.sh`, `docker.sh`
     scripts/web-checks/       the web UI's node and browser checks, tuning aids and mutation

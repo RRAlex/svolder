@@ -162,8 +162,18 @@ async fn outcomes_over(g: &Globals<'_>, dev: bool, connect: bool, path: &Path) -
     }
     let looking = looking_only(g, daemon.is_some());
     let looking = looking.borrow();
-    let grade = grade_row_for(&looking, &config, &adapters).await;
-    let devices = device_rows(&looking, loaded.as_ref()).await;
+    // `--no-start` opens no session of this process's own: with no daemon answering there is
+    // no device to look at, and the rows that need one are left out.
+    let (grade, devices) = match (g.transport == crate::backend::RUNNING, daemon.is_some()) {
+        // No adapter is graded by a scan of this process's own, and with no daemon there is no
+        // device to look at.
+        (true, false) => (None, Vec::new()),
+        (true, true) => (None, device_rows(&looking, loaded.as_ref()).await),
+        _ => (
+            grade_row_for(&looking, &config, &adapters).await,
+            device_rows(&looking, loaded.as_ref()).await,
+        ),
+    };
     let mut outcomes = rows(&snapshot, &socket, &path, dev, grade, devices);
     // Only a daemon the probe found answering is asked: a connect to a socket unit that is
     // listening would start the service, and a verb that bypasses the daemon has none to grade.

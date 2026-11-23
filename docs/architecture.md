@@ -69,7 +69,7 @@ Each says how a part works now and the principles behind it.
   parametric EQ model, recall, which preset is on, fitting a headphone correction.
 - [MQTT and Home Assistant](design/mqtt-and-home-assistant.md): the client, discovery, commands.
 - [Scenes](design/scenes.md): the sound of the whole config saved, recalled and judged "on".
-- [The MCP server](design/mcp-server.md): the HTTP server, the tools, the volume rules for a model.
+- [The MCP server](design/mcp-server.md): the HTTP server, the tools, the volume rules for a model; [the GNOME indicator](design/gnome-indicator.md).
 - [Host audio](design/host-audio.md): the computer's sink, players and capture, and the computer EQ; [the config check](design/host-config-check.md).
 - [The daemon's capture](design/host-capture.md): holds, shared capture, frames to web and socket.
 - [The VU meter](design/vu-meter.md): the scale, the reference, the needle's ballistics, the over

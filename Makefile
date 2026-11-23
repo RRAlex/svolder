@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall help-check
+.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots ha-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall install-gnome-extension uninstall-gnome-extension gnome-extension-check help-check
 
 ##@ Start
 demo-knobs-check: ## Fail if the env line the demos start with does not run
@@ -300,9 +300,15 @@ repro-check: ## Build the release twice; fail if any file differs
 	@echo "repro-check: every artifact is the same on a second build"
 
 ##@ Check
+#: The indicator's gjs tests, then the zip, then one real GNOME Shell load of it in a headless shell
+#: with its own HOME and a fake svolder. Skips the load, with a line saying so, when
+#: gnome-shell-test-tool is missing; skips everything when gjs is.
+gnome-extension-check: ## Test the GNOME indicator: gjs tests, pack, headless load
+	@sh scripts/gnome-extension.sh check
+
 spdx-check: deps-check ## Fail if a source file lacks its SPDX header
 	@files=$$(git ls-files) || { echo "spdx-check: git ls-files failed; this check needs a git checkout"; exit 1; }; \
-	files=$$(echo "$$files" | grep -E '\.rs$$|\.toml$$|\.ya?ml$$|^Dockerfile|^scripts/|^systemd/|^packaging/|^Makefile$$|^flake\.nix$$|^bins/svolderd/templates/.*\.html$$|^bins/svolderd/web/.*\.(css|js|svg)$$' | grep -v '^bins/svolderd/web/themes/ember/htmx\.min\.js$$'); \
+	files=$$(echo "$$files" | grep -E '\.rs$$|\.toml$$|\.ya?ml$$|^Dockerfile|^scripts/|^systemd/|^packaging/|^Makefile$$|^flake\.nix$$|^contrib/gnome-shell/.*\.(js|css)$$|^contrib/gnome-shell/tests/fake-svolder$$|^bins/svolderd/templates/.*\.html$$|^bins/svolderd/web/.*\.(css|js|svg)$$' | grep -v '^bins/svolderd/web/themes/ember/htmx\.min\.js$$'); \
 	if [ -z "$$files" ]; then echo "spdx-check: no source files found; this check needs a git checkout"; exit 1; fi; \
 	echo "$$files" | tr '\n' '\0' | xargs -0 sh scripts/spdx-check.sh || exit 1; \
 	echo "spdx-check: $$(echo "$$files" | wc -l) files carry the SPDX headers"
@@ -612,6 +618,21 @@ rate-check: ## By hand: does the capture leave the rate to the player?
 web-shots: ## Web UI stills in Firefox and Chromium, README pictures
 	@bash scripts/web-shots.sh
 
+#: The README's two Home Assistant pictures, docs/images/ha-dashboard.webp and ha-phone.webp, from
+#: the custom:svolder page of YOUR Home Assistant: a private fake svolderd (a Bifrost 3 named
+#: "Bifrost 3", a computer named "Desk") publishes to its broker, headless Chromium draws this
+#: checkout's cards on that page and shoots its content area. Home Assistant is only read; the
+#: rig's retained topics are cleared and checked gone, and a run that was killed is cleaned up by the
+#: next one. Needs chromium, mosquitto-clients, bwrap, ffmpeg and python3-websockets. Three variables
+#: have no default and must be in the environment: HA_URL (your Home Assistant, e.g.
+#: http://homeassistant.local:8123), HA_TOKEN_FILE (a file with a long-lived access token) and
+#: HA_MQTT_PASSWORD_FILE (a file with the broker login's password).
+#: HA_MQTT_HOST=<host>   the broker's host (default: HA_URL's host)
+#: HA_MQTT_USER=<name>   the broker login (default svolder)
+#: HA_SHOTS_DASHBOARD=<path>   url path of a dashboard on the custom:svolder strategy (default svolder-auto)
+ha-shots: ## Home Assistant pictures from your HA's svolder page
+	@bash scripts/ha-shots.sh
+
 #: Chromium: DAC and amp, desktop and phone, light and dark.
 paper-shots: deps-build ## Paper's stills into target/web-shots/paper
 	@$(CARGO) build -q -p svolderd
@@ -779,3 +800,13 @@ uninstall: ## Remove the installed binaries and the user units
 	SVOLDER_UNITDIR=$(UNITDIR) SVOLDER_SYSTEMCTL=$(SYSTEMCTL) \
 	  $(BINDIR)/svolder daemon uninstall || true
 	rm -f $(BINDIR)/svolder $(BINDIR)/svolderd $(BINDIR)/svolder-sim
+
+#: Packs contrib/gnome-shell/svolder-indicator@rralex.github.io with gnome-extensions and installs the zip into
+#: ~/.local/share/gnome-shell/extensions/. It does not enable it: on Wayland log out and in, then
+#: `gnome-extensions enable svolder-indicator@rralex.github.io`.
+install-gnome-extension: ## Pack and install the GNOME top-bar indicator
+	@sh scripts/gnome-extension.sh install
+
+#: Removes the extension from ~/.local/share/gnome-shell/extensions/.
+uninstall-gnome-extension: ## Remove the installed GNOME top-bar indicator
+	@sh scripts/gnome-extension.sh uninstall

@@ -1,0 +1,7 @@
+{
+  "uuid": "svolder-indicator@rralex.github.io",
+  "name": "svolder",
+  "description": "Shows the svolder DAC in the top bar: the Path verdict, the radio signal and the volume, with a popup for the controls. Needs the svolder command on PATH and a running svolder daemon.",
+  "shell-version": ["50", "51"],
+  "url": "https://github.com/RRAlex/svolder"
+}

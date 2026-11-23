@@ -49,7 +49,7 @@ use device_presets::{preset_apply, preset_list};
 pub(crate) use devices::found_lines;
 pub use devices::{add, devices, remove, scan};
 use eq::{eq_flatten, eq_mode, eq_set, eq_show};
-pub(crate) use moves::{confirm, flatten as flatten_holders, holders, nothing_changed};
+pub(crate) use moves::{confirm, decide, flatten as flatten_holders, holders, nothing_changed};
 use passphrase::passphrase_set;
 use presets::{eq_delete, eq_import, eq_list, eq_load, eq_rename, eq_save};
 pub(crate) use presets::{no_such_preset, read_correction, saved_line};

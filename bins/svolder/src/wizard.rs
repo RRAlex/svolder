@@ -54,12 +54,26 @@ pub use svolder_walk::{Given, Prompt, Step, Takes};
 const HOME_ASSISTANT_LINE: &str =
     "For Home Assistant: `svolder mqtt` or Settings, Connect in the TUI.";
 
+/// The guided first run starts the daemon and opens BlueZ itself, so `--no-start` does not apply
+/// to it, whichever door it is entered by (`setup`, `add` on a terminal, the bare `svolder` with
+/// no configuration): it runs as `auto` would.
+fn exempt<'a>(g: &Globals<'a>) -> Globals<'a> {
+    Globals {
+        transport: match g.transport == crate::backend::RUNNING {
+            true => "auto",
+            false => g.transport,
+        },
+        ..*g
+    }
+}
+
 /// What `svolder setup` does, and what bare `svolder` does with nothing configured.
 ///
 /// On a terminal it walks the wizard; off one it prints the summary, because a run whose output
 /// is being read has no one to ask. Both need stdin as well as stdout: a run whose answers
 /// would come from a file is one that would answer every question with the end of that file.
 pub async fn setup(g: &Globals<'_>, note: Option<String>) -> ExitCode {
+    let g = &exempt(g);
     if !on_a_terminal() {
         let effects = match live::LiveEffects::live(g, &Config::path()).await {
             Ok(effects) => effects,
@@ -82,6 +96,7 @@ pub async fn setup(g: &Globals<'_>, note: Option<String>) -> ExitCode {
 /// The wizard from its scan on, for the callers that have already shown what the host looks
 /// like: `svolder add` with no unit id, and the `svolder setup` fix `doctor` offers.
 pub async fn adding(g: &Globals<'_>, given: Given) -> ExitCode {
+    let g = &exempt(g);
     let effects = match live::LiveEffects::live(&quietly(g), &Config::path()).await {
         Ok(effects) => effects,
         Err(failure) => return failure.report(),

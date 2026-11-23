@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use crate::host::EndToEnd;
 use crate::host::HostView;
 use svolder_host::route::ChainStages;
 use svolder_host::{
@@ -1015,6 +1016,26 @@ fn the_dac_names_its_mute_phase_and_nos_filter() {
         line.hops[2].detail,
         "USB, 48 kHz, muted, phase inverted, NOS filter"
     );
+}
+
+/// Each of the DAC's own mute, balance, phase invert and NOS filter alone makes the end-to-end
+/// verdict `Changed` while the path itself stays untouched (the DAC at 0 dB).
+#[test]
+fn mute_balance_phase_and_nos_each_alone_change_the_verdict() {
+    type Set = fn(&mut DacStage);
+    let cases: [(&str, Set); 4] = [
+        ("mute", |stage| stage.muted = true),
+        ("balance", |stage| stage.balance = true),
+        ("phase", |stage| stage.phase = true),
+        ("nos", |stage| stage.nos = true),
+    ];
+    for (name, set) in cases {
+        let mut facts = bifrost_reading(127, 1, 64);
+        set(&mut facts.stage);
+        let line = path_line(&bifrost_route(), &facts);
+        assert_eq!(line.verdict, Verdict::Untouched, "{name}");
+        assert_eq!(line.end_to_end(), EndToEnd::Changed, "{name}");
+    }
 }
 
 #[test]

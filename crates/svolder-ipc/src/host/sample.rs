@@ -150,7 +150,7 @@ pub(super) fn unreadable_words(name: &str) -> String {
 }
 
 /// A rate in kilohertz: `44.1`, `48`, `176.4`; a decimal only when the rate needs one.
-pub(super) fn khz(rate_hz: u32) -> String {
+pub(crate) fn khz(rate_hz: u32) -> String {
     let (whole, rest) = (rate_hz / 1000, rate_hz % 1000);
     if rest == 0 {
         return whole.to_string();

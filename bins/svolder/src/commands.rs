@@ -25,6 +25,7 @@
 //! - [`identify`]: `identify`, a device asked to show itself.
 //! - [`interrupts`]: Ctrl-C, SIGTERM and SIGHUP counted, for a verb that must clean up before it
 //!   leaves.
+//! - [`panel`]: `panel --json`, the model the GNOME indicator draws, as a stream of JSON lines.
 //! - [`profiles`]: `profiles list|show`, the device profiles.
 //! - [`scene`]: `scene list|show|save|load|rename|delete`, the scenes of sound settings, through the
 //!   daemon.
@@ -47,6 +48,7 @@ pub(crate) mod host_speakers;
 pub(crate) mod identify;
 pub(crate) mod interrupts;
 pub(crate) mod mqtt;
+pub(crate) mod panel;
 pub(crate) mod profiles;
 pub(crate) mod scene;
 pub(crate) mod server_switch;

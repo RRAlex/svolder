@@ -5,6 +5,8 @@
 // commands off (sensors, no write control moves anything), the scenes card's rows, chips and answer,
 // and an older daemon. Run: node cards.mjs
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { page } from '../node/dom.mjs';
 
 const { window } = page('');
@@ -14,6 +16,7 @@ Object.assign(globalThis, {
 const root = '../../../contrib/home-assistant/svolder/cards/';
 await import(`${root}index.js`);
 const { ageWord } = await import(`${root}shared.js`);
+const { buildDashboard } = await import('../../../contrib/home-assistant/svolder/strategy.js');
 
 /** A `hass` over `states` (`{ id: [state, attributes] }`) that records every service call. */
 function mock(states, now = '2026-11-19T10:00:00Z') {
@@ -299,11 +302,12 @@ test('eq: header, five band boxes on one line, Q in the readout line, preamp and
   const boxes = $$(el, '.band').map((b) => b.textContent);
   assert.deepEqual(boxes, ['31 Hz+6.0 dB', '213 Hz−2.6 dB', '1.23 kHz−2.2 dB', '1.74 kHz+4.8 dB', '14.8 kHz−4.3 dB']);
   assert.match($(el, '.bands').getAttribute('style'), /repeat\(5/);
-  assert.match(text(el, '.read'), /Band 1: 31 Hz \+6\.0 dB\s?Q 0\.5/);
+  assert.match(text(el, '.read'), /^Band 1: Hz dB Q/);
+  assert.deepEqual($$(el, '.read input').map((i) => [i.dataset.fld, i.value]), [['f', '31'], ['g', '6.0'], ['q', '0.50']]);
   assert.equal($$(el, '.pt').length, 5);
   assert.match(text(el, '.foot'), /Loudness off/);
   click($$(el, '.band')[1]);
-  assert.match(text(el, '.read'), /Band 2: 213 Hz −2\.6 dB\s?Q 1\.0/);
+  assert.deepEqual($$(el, '.read input').map((i) => i.value), ['213', '-2.6', '1.00']);
 });
 
 test('eq: a diagonal drag is two writes on release, a vertical drag one, never per move', () => {
@@ -358,6 +362,286 @@ test('eq: commands off, the curve is drawn and nothing can be dragged or written
   assert.equal($$(el, '[data-q]').length, 0);
   assert.deepEqual(hass.calls, []);
   assert.equal($$(el, '.band').length, 5);
+  assert.equal($$(el, '.read input').length, 0, 'plain text values, no fields');
+  assert.equal(text(el, '.read'), 'Band 1: 31 Hz +6.0 dB Q 0.50');
+});
+
+// ---- the EQ card's typed fields ----
+const fld = (el, k) => $(el, `.read input[data-fld=${k}]`);
+const typeIn = (input, value) => {
+  input.focus();
+  input.value = value;
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+};
+const key = (input, k) => input.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const leave = (input) => { input.dispatchEvent(new window.Event('change', { bubbles: true })); input.blur(); };
+const wrote = (hass) => hass.calls.map((c) => [c[2].entity_id, c[2].value]);
+
+test('eq fields: a typed gain and Enter writes once, snapped to the entity step, no write per keystroke', () => {
+  const s = bandStates();
+  s['number.dac_band_1_gain'] = ['6', { min: -20, max: 6, step: 0.204 }];
+  const hass = mock(s);
+  const el = eqMount(hass);
+  const g = fld(el, 'g');
+  assert.equal(g.type, 'number');
+  typeIn(g, '-');
+  typeIn(g, '-3');
+  typeIn(g, '-3.1');
+  assert.deepEqual(hass.calls, [], 'nothing per keystroke');
+  key(g, 'Enter');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_gain', -3.068]]);
+  assert.equal(el.shadowRoot.activeElement, null, 'Enter leaves the field');
+  assert.equal(hass.calls.length, 1, 'leaving after Enter writes nothing more');
+});
+
+test('eq fields: frequency and Q write their own entity; Q snaps to the entity step; the device takes the nearest it has', () => {
+  const s = bandStates();
+  s['number.dac_band_1_q'] = ['2', { min: 0.5, max: 8, step: 0.01 }];
+  const hass = mock(s);
+  const el = eqMount(hass);
+  typeIn(fld(el, 'f'), '62.4');
+  key(fld(el, 'f'), 'Enter');
+  typeIn(fld(el, 'q'), '3.456');
+  key(fld(el, 'q'), 'Enter');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_frequency', 62], ['number.dac_band_1_q', 3.46]]);
+});
+
+test('eq fields: leaving the field writes (change then blur is one write); an unchanged field writes nothing', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '2.5');
+  leave(fld(el, 'g'));
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_gain', 2.5]]);
+  const f = fld(el, 'f');
+  f.focus();
+  leave(f);
+  typeIn(fld(el, 'q'), '0.5');
+  leave(fld(el, 'q'));
+  assert.equal(hass.calls.length, 1, 'same as the state: nothing');
+});
+
+test('eq fields: Escape puts the state back and writes nothing', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '9');
+  key(fld(el, 'g'), 'Escape');
+  assert.equal(fld(el, 'g').value, '6.0');
+  assert.deepEqual(hass.calls, []);
+  assert.equal(el._held, 0);
+});
+
+test('eq fields: an empty entry reverts, an out-of-range entry is clamped to the entity range', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '');
+  key(fld(el, 'g'), 'Enter');
+  assert.equal(fld(el, 'g').value, '6.0');
+  assert.deepEqual(hass.calls, []);
+  typeIn(fld(el, 'g'), '-40');
+  key(fld(el, 'g'), 'Enter');
+  typeIn(fld(el, 'f'), '99999');
+  key(fld(el, 'f'), 'Enter');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_gain', -12], ['number.dac_band_1_frequency', 20000]]);
+});
+
+const arrow = (input, k, ev = 'keydown') => input.dispatchEvent(new window.KeyboardEvent(ev, { key: k, bubbles: true, cancelable: true }));
+const press = (input, k) => { arrow(input, k); arrow(input, k, 'keyup'); };
+const changed = (input) => input.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+test('eq fields: arrow keys step the field and write ONCE on key up, a held key too; the net value is written', () => {
+  const s = bandStates();
+  s['number.dac_band_1_q'] = ['2', { min: 0.5, max: 8, step: 0.01 }];
+  const hass = mock(s);
+  const el = eqMount(hass);
+  const q = fld(el, 'q');
+  arrow(q, 'ArrowUp');
+  arrow(q, 'ArrowUp');
+  arrow(q, 'ArrowDown');
+  assert.deepEqual(hass.calls, [], 'nothing per press or auto-repeat');
+  assert.equal(q.value, '2.24');
+  arrow(q, 'ArrowDown', 'keyup');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_q', 2.24]]);
+  const f = fld(el, 'f');
+  for (let i = 0; i < 5; i += 1) arrow(f, 'ArrowUp');
+  assert.equal(hass.calls.length, 1, 'a held Hz key writes nothing yet');
+  arrow(f, 'ArrowUp', 'keyup');
+  assert.equal(hass.calls.length, 2);
+  assert.equal(hass.calls[1][2].entity_id, 'number.dac_band_1_frequency');
+  press(fld(el, 'g'), 'ArrowDown');
+  assert.deepEqual(wrote(hass).slice(2), [['number.dac_band_1_gain', 5.9]]);
+  assert.equal($$(el, '[data-q]').length, 2, 'the Q buttons stay');
+});
+
+test('eq fields: within one focus a step back writes (compared with the last value written, not the state)', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  const g = fld(el, 'g');
+  g.focus();
+  press(g, 'ArrowDown');
+  press(g, 'ArrowUp');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_gain', 5.9], ['number.dac_band_1_gain', 6]]);
+  const q = fld(el, 'q');
+  q.focus();
+  press(q, 'ArrowUp');
+  press(q, 'ArrowDown');
+  assert.deepEqual(wrote(hass).filter((w) => /_q$/.test(w[0])).map((w) => w[1]), [0.6, 0.5]);
+  typeIn(g, '4');
+  changed(g);
+  typeIn(g, '6');
+  changed(g);
+  assert.deepEqual(wrote(hass).filter((w) => /_gain$/.test(w[0])).map((w) => w[1]).slice(-2), [4, 6]);
+});
+
+test('eq fields: an emptied Q field and ArrowUp steps from the state, not from zero', () => {
+  const s = bandStates();
+  s['number.dac_band_1_q'] = ['2', { min: 0.5, max: 8, step: 0.01 }];
+  const hass = mock(s);
+  const el = eqMount(hass);
+  typeIn(fld(el, 'q'), '');
+  press(fld(el, 'q'), 'ArrowUp');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_q', 2.24]]);
+});
+
+test('eq fields: a typed value the device rounds back is shown again on the next state', () => {
+  const s = bandStates();
+  s['number.dac_band_1_q'] = ['2', { min: 0.5, max: 8, step: 0.01 }];
+  const hass = mock(s);
+  const el = eqMount(hass);
+  typeIn(fld(el, 'q'), '2.03');
+  key(fld(el, 'q'), 'Enter');
+  assert.equal(hass.calls.length, 1);
+  el.hass = hass;
+  assert.equal(fld(el, 'q').value, '2.00', 'the card paints what the device has');
+});
+
+test('eq fields: whole Hz is shown and typed; a fractional minimum does not make a fractional write', () => {
+  const s = bandStates();
+  s['number.dac_band_1_frequency'] = ['1232.46', { min: 19.686, max: 19497.4, step: 1 }];
+  const hass = mock(s);
+  const el = eqMount(hass);
+  assert.equal(fld(el, 'f').value, '1232');
+  typeIn(fld(el, 'f'), '62');
+  key(fld(el, 'f'), 'Enter');
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_frequency', 62]]);
+});
+
+test('eq fields: a field left after its entity went unavailable writes nothing', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '3.3');
+  hass.put('number.dac_band_1_gain', ['unavailable', { min: -12, max: 12, step: 0.1 }]);
+  el.hass = hass;
+  key(fld(el, 'g'), 'Enter');
+  assert.deepEqual(hass.calls, []);
+  assert.equal(el._held, 0);
+});
+
+test('eq fields: a redraw that removes the focused field releases the hold (the card keeps updating)', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '3.3');
+  assert.equal(el._held, 1);
+  el._m.sel = 2;
+  el._sel = 2;
+  el.drawPlot();
+  assert.equal(el._held, 0, 'the removed field let go');
+  hass.put('number.dac_band_3_gain', ['1.5', { min: -12, max: 12, step: 0.1 }]);
+  el.hass = hass;
+  assert.equal(fld(el, 'g').value, '1.5', 'the next state paints');
+});
+
+test('eq fields: a drag of another band while a field is typed in writes the typed value, ends the hold, drags', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '3.3');
+  ptr($$(el, '.hit')[2], 'pointerdown', 150, 40);
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_gain', 3.3]]);
+  ptr($(el, '.plot'), 'pointermove', 150, 20);
+  ptr($(el, '.plot'), 'pointerup', 150, 20);
+  assert.equal(el._held, 0);
+  assert.deepEqual(wrote(hass).map((w) => w[0]), ['number.dac_band_1_gain', 'number.dac_band_3_gain']);
+});
+
+test('eq fields: a field typed in, a state waiting, then a drag: the plot is not repainted under the pointer', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '3.3');
+  hass.put('number.dac_band_5_gain', ['-1', { min: -12, max: 12, step: 0.1 }]);
+  el.hass = hass;
+  const hit = $$(el, '.hit')[2];
+  ptr(hit, 'pointerdown', 150, 40);
+  assert.equal($$(el, '.hit')[2], hit, 'the point under the pointer is the same element');
+  ptr($(el, '.plot'), 'pointermove', 150, 20);
+  ptr($(el, '.plot'), 'pointerup', 150, 20);
+  assert.deepEqual(wrote(hass).map((w) => w[0]), ['number.dac_band_1_gain', 'number.dac_band_3_gain']);
+  assert.equal(el._held, 0);
+  assert.match(text(el, '.band[data-i="4"]'), /−1\.0 dB/, 'the waiting state shows after the drag');
+});
+
+test('eq fields: the blur a browser sends for a removed field does not write the typed text; detach lets go', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  const old = fld(el, 'g');
+  typeIn(old, '3.3');
+  el._m.sel = 2;
+  el._sel = 2;
+  el.drawPlot();
+  old.dispatchEvent(new window.Event('blur'));
+  assert.deepEqual(hass.calls, []);
+  const el2 = eqMount(mock(bandStates()));
+  typeIn(fld(el2, 'g'), '3.3');
+  el2.parentNode.removeChild(el2);
+  assert.equal(el2._held, 0);
+  document.body.appendChild(el2);
+  typeIn(fld(el2, 'g'), '4.4');
+  el2.hass.put('number.dac_band_1_gain', ['1', { min: -12, max: 12, step: 0.1 }]);
+  el2.hass = el2.hass;
+  assert.equal(fld(el2, 'g').value, '4.4', 'a new focus holds again');
+});
+
+test('eq fields: a state update while a field has focus does not clobber it; every release path repaints', () => {
+  const paths = {
+    Enter: (i) => key(i, 'Enter'),
+    Escape: (i) => key(i, 'Escape'),
+    blur: (i) => i.blur(),
+    change: (i) => leave(i),
+  };
+  for (const [name, release] of Object.entries(paths)) {
+    const hass = mock(bandStates());
+    const el = eqMount(hass);
+    typeIn(fld(el, 'g'), '3.3');
+    assert.equal(el._held, 1, `${name}: held while typing`);
+    hass.put('number.dac_band_1_gain', ['1.5', { min: -12, max: 12, step: 0.1 }]);
+    el.hass = hass;
+    assert.equal(fld(el, 'g').value, '3.3', `${name}: the typed text stays`);
+    assert.equal(text(el, '.band[data-i="0"]'), '31 Hz+6.0 dB', `${name}: nothing repainted`);
+    const input = fld(el, 'g');
+    release(input);
+    assert.equal(el._held, 0, `${name}: the hold is released`);
+    assert.equal(fld(el, 'g').value, '1.5', `${name}: the state shows after the release`);
+    assert.equal(text(el, '.band[data-i="0"]'), '31 Hz+1.5 dB', name);
+  }
+});
+
+test('eq fields: choosing another band while a field is typed in releases the hold and writes that band', () => {
+  const hass = mock(bandStates());
+  const el = eqMount(hass);
+  typeIn(fld(el, 'g'), '2');
+  $$(el, '.band')[1].focus();
+  click($$(el, '.band')[1]);
+  assert.equal(el._held, 0);
+  assert.deepEqual(wrote(hass), [['number.dac_band_1_gain', 2]]);
+  assert.equal(fld(el, 'g').dataset.i, '1');
+});
+
+test('eq fields: a mix (gain a sensor) makes fields only where it can write', () => {
+  const s = bandStates();
+  s['sensor.dac_band_1_gain'] = s['number.dac_band_1_gain'];
+  const cfg = eqCfg();
+  cfg.entities.bands[0].gain = 'sensor.dac_band_1_gain';
+  const el = eqMount(mock(s), cfg);
+  assert.deepEqual($$(el, '.read input').map((i) => i.dataset.fld), ['f', 'q']);
+  assert.match(text(el, '.read'), /\+6\.0 dB/);
 });
 
 test('eq: the bands say they wait for eq mode when the mode is another', () => {
@@ -732,7 +1016,7 @@ test('eq: Q steps by the device (real Band Q: 0.5 to 8, step 0.01), two decimals
   s['number.dac_band_1_frequency'] = ['31', { min: 20, max: 78.038, step: 1 }];
   const hass = mock(s);
   const el = eqMount(hass);
-  assert.match(text(el, '.read'), /Q 2\.00/);
+  assert.equal($(el, '.read input[data-fld=q]').value, '2.00');
   click($(el, '[data-q="1"]'));
   click($(el, '[data-q="-1"]'));
   const [up, down] = hass.calls.map((c) => c[2].value);
@@ -815,6 +1099,48 @@ test('accent: a theme or mode switch in hass.themes works the accent out again, 
     assert.equal($(el, '.card'), card, 'not repainted');
     assert.equal(card.style.getPropertyValue('--sv-on'), '', 'amber on near-black needs no blend');
   } finally { globalThis.getComputedStyle = real; }
+});
+
+// ---- the cards over what the daemon's own discovery makes (fixtures/generated/, bins/svolderd tests) ----
+const generatedCards = (name) => {
+  const url = new URL(`./fixtures/generated/${name}.json`, import.meta.url);
+  const hass = JSON.parse(readFileSync(fileURLToPath(url), 'utf8')).hass;
+  const view = buildDashboard(hass).views.find((v) => v.title === 'reframe');
+  const find = (node, type, out = []) => {
+    if (Array.isArray(node)) node.forEach((n) => find(n, type, out));
+    else if (node && typeof node === 'object') {
+      if (node.type === type) out.push(node);
+      Object.values(node).forEach((v) => find(v, type, out));
+    }
+    return out;
+  };
+  // The fixture holds no values (the daemon announced configs only): give each entity one the card can draw.
+  const valueOf = (id, a) => (a.options ? a.options[0] : /^(?:number|sensor)\./.test(id) && a.min !== undefined ? String(Math.min(Math.max(0, a.min), a.max)) : 'on');
+  const states = Object.fromEntries(Object.entries(hass.states).map(([id, st]) => [id, [valueOf(id, st.attributes), st.attributes]]));
+  return { cfg: (type) => find(view, type)[0], mock: () => mock(states) };
+};
+
+test('generated: the EQ card draws the three mode chips and the faceplate the balance slider, commands on', () => {
+  const g = generatedCards('commands-on');
+  const hass = g.mock();
+  const eq = eqMount(hass, g.cfg('custom:svolder-eq-card'));
+  assert.deepEqual($$(eq, '.modes .chip').map((c) => c.dataset.mode), ['flat', 'eq', 'loudness']);
+  const face = mount('svolder-faceplate-card', g.cfg('custom:svolder-faceplate-card'), hass);
+  const r = $(face, '.bal input');
+  assert.ok(r && !r.disabled, 'the balance slider');
+  assert.ok($$(face, '.rw').some((x) => /^USB\s*(?:not )?connected$/.test(x.textContent.replace(/\s+/g, ' ').trim())), 'one USB readout');
+  assert.deepEqual(hass.calls, []);
+});
+
+test('generated: commands off, the same cards draw from sensors and move nothing', () => {
+  const g = generatedCards('commands-off');
+  const hass = g.mock();
+  const eq = eqMount(hass, g.cfg('custom:svolder-eq-card'));
+  for (const c of $$(eq, '.modes .chip')) click(c);
+  assert.ok($$(eq, '.modes .chip').every((c) => c.disabled));
+  const face = mount('svolder-faceplate-card', g.cfg('custom:svolder-faceplate-card'), hass);
+  assert.equal($(face, '.bal input'), null);
+  assert.deepEqual(hass.calls, []);
 });
 
 let failed = 0;

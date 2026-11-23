@@ -718,7 +718,7 @@ fn own_of(
 /// The device `selector` names, by the daemon's own order of resolving one: the configured name,
 /// then the one device whose product name it is, then the one whose unit id it starts, in any
 /// case.
-fn resolve(infos: &[DeviceInfo], selector: &str) -> Option<DeviceInfo> {
+pub(super) fn resolve(infos: &[DeviceInfo], selector: &str) -> Option<DeviceInfo> {
     if selector.is_empty() {
         return None;
     }

@@ -154,8 +154,15 @@ fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String> {
+    // `running` is the name `--no-start` sets for itself, not one a person can give.
+    if cli.transport == backend::RUNNING {
+        return Ok(backend::unknown_transport(&cli.transport).report());
+    }
     let g = Globals {
-        transport: &cli.transport,
+        transport: match cli.no_start {
+            true => backend::RUNNING,
+            false => &cli.transport,
+        },
         adapter: cli.adapter.as_deref(),
         socket: cli.socket.as_deref(),
         device: cli.device.as_deref(),
@@ -218,6 +225,7 @@ async fn run(cli: Cli, demo_socket: Option<PathBuf>) -> Result<ExitCode, String>
             json,
         } => device::set(&g, &key, &value, step, (no_wait, yes), json).await,
         Command::Watch { json } => device::watch(&g, json).await,
+        Command::Panel { json } => Ok(commands::panel::run(&g, json).await),
         Command::Eq { command } => device::eq(&g, command).await,
         Command::Preset { command } => device::preset(&g, command).await,
         Command::Host { command } => Ok(host_eq::run(&g, command).await),

@@ -107,8 +107,9 @@ check outranks a path that could not be read (the label is yellow), and a known 
 DAC outranks something not read (`end_to_end` reads `changed`). Yellow words come from the judge's
 change list, never from comparing two texts: `S16LE` into `S32LE` stays plain. The values line
 says a resample as `player rate → sink rate` (`44.1 → 48 kHz`), and the forced rate only when the
-sink still reads the stream's rate. A row with no hops joins the words of a port mismatch with
-`; ` in its label's words. The row serializes as `{label: {tone, words}, hops: [{label, words:
+sink still reads the stream's rate. A mute counts as a change at every hop (the player's, the
+computer's and the DAC's own), so a muted DAC turns the label yellow in every front end. A row
+with no hops joins the words of a port mismatch with `; ` in its label's words. The row serializes as `{label: {tone, words}, hops: [{label, words:
 [{text, tone}]}], values: [{text, tone}], words}`, a tone being `plain`, `dim`, `good` or `warn`
 and `words` the one plain line of a row with no hops. `verdict` keeps its meaning on every JSON
 surface; `end_to_end` is beside it in the web page's model (`playing.path`, with the row as

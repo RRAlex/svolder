@@ -317,6 +317,54 @@ async fn an_installed_socket_unit_is_started_rather_than_a_daemon_of_this_proces
     );
 }
 
+/// `--no-start` (the transport `running`) uses a daemon that answers and nothing else: with none,
+/// the socket unit is not started, no daemon is spawned, no direct session is offered, and the
+/// failure is the NoDaemon one without the hint about `--transport`.
+#[tokio::test]
+async fn running_starts_no_socket_unit_and_no_daemon() {
+    let root = short_dir("launch-running");
+    let socket = root.0.join("svolder.sock");
+    let at = socket.to_string_lossy().into_owned();
+    let unit = TestHost::with_socket_unit(
+        &root.0,
+        UnitFacts {
+            installed: true,
+            enabled: true,
+            active: false,
+            running: false,
+        },
+        Some(socket.clone()),
+    );
+    let failed = reach_on(
+        &unit,
+        &globals(crate::backend::RUNNING, &at),
+        &Config::default(),
+    )
+    .await
+    .expect_err("no daemon answers");
+    assert_eq!(failed.code, 3);
+    assert!(
+        failed.what.starts_with("no daemon answers on"),
+        "{}",
+        failed.what
+    );
+    assert!(!failed.next.contains("--transport"), "{}", failed.next);
+    assert!(unit.starts().is_empty(), "the socket unit was started");
+
+    if let Some(binary) = prebuilt_daemon() {
+        let plain = TestHost::without_systemd(&root.0, Some(binary));
+        let failed = reach_on(
+            &plain,
+            &globals(crate::backend::RUNNING, &at),
+            &Config::default(),
+        )
+        .await
+        .expect_err("no daemon answers");
+        assert_eq!(failed.code, 3);
+        assert!(daemons_on(&socket).is_empty(), "a daemon was spawned");
+    }
+}
+
 /// A socket unit that is installed and active but answers somewhere else is still
 /// systemd's: nothing of this process's own takes the path it owns, and the verb runs in a
 /// session of its own instead.

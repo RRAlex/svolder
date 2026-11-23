@@ -66,6 +66,7 @@ export function deviceSections(title, entities) {
     preset: eqPreset || preset,
     sample_rate: get('sensor', 'sample_rate'),
     spdif: get('binary_sensor', 's_pdif_locked'),
+    usb: get('binary_sensor', 'usb_connected'),
     usb1: get('binary_sensor', 'usb_1_connected'),
     usb2: get('binary_sensor', 'usb_2_connected'),
     link: get('binary_sensor', 'link'),

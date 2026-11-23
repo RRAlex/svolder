@@ -37,7 +37,8 @@ pack() { # <directory under $work> <output>
 
 # The installed tree every package carries: the binaries, the user units filled in for
 # /usr/bin and the session's runtime directory (what `svolder daemon install` writes as root),
-# and the documentation.
+# the GNOME Shell indicator (off until the user enables it) and the documentation.
+ext=svolder-indicator@rralex.github.io
 root=$work/root
 for bin in svolder svolderd svolder-sim; do
   install -Dm755 "$bins/$bin" "$root/usr/bin/$bin"
@@ -47,6 +48,9 @@ for unit in svolderd.service svolderd.socket; do
   sed -e 's|__BINDIR__|/usr/bin|g' -e 's|__SOCKET__|%t/svolder.sock|g' \
     "systemd/$unit" > "$root/usr/lib/systemd/user/$unit"
   chmod 644 "$root/usr/lib/systemd/user/$unit"
+done
+(cd "contrib/gnome-shell/$ext" && find . -type f) | while read -r file; do
+  install -Dm644 "contrib/gnome-shell/$ext/$file" "$root/usr/share/gnome-shell/extensions/$ext/$file"
 done
 doc=$root/usr/share/doc/$name
 install -Dm644 README.md "$doc/README.md"
@@ -107,6 +111,9 @@ tardir=$work/$tarname
 mkdir -p "$tardir/systemd"
 cp "$bins/svolder" "$bins/svolderd" "$bins/svolder-sim" LICENSE AUTHORS README.md LEGAL.md \
   "$dist/THIRD-PARTY-LICENSES" "$tardir/"
+mkdir -p "$tardir/gnome-shell"
+cp -r "contrib/gnome-shell/$ext" "$tardir/gnome-shell/"
+chmod -R u=rwX,go=rX "$tardir/gnome-shell"
 mkdir -p "$tardir/usage"
 cp docs/usage/*.md "$tardir/usage/"
 cp systemd/svolderd.service systemd/svolderd.socket "$tardir/systemd/"
@@ -151,6 +158,9 @@ cp $rpmtop/licenses/LICENSE $rpmtop/licenses/THIRD-PARTY-LICENSES %{buildroot}/u
 /usr/bin/svolder-sim
 /usr/lib/systemd/user/svolderd.service
 /usr/lib/systemd/user/svolderd.socket
+%dir /usr/share/gnome-shell
+%dir /usr/share/gnome-shell/extensions
+/usr/share/gnome-shell/extensions/$ext
 %dir /usr/share/doc/$name
 %doc /usr/share/doc/$name/README.md
 %doc /usr/share/doc/$name/usage

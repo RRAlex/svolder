@@ -29,6 +29,8 @@ assistant read and set them.
 - [MQTT and Home Assistant](mqtt.md): publishing the daemon's devices to a broker.
 - [The MCP server](mcp.md): letting an AI assistant read and set devices, and the `mcp` verbs.
 - [The web UI](web-ui.md): the browser front end, signing in, and the `web` verbs.
+- [The GNOME indicator](gnome-shell.md): the top-bar extension for GNOME Shell 50 and 51, what its
+  glyphs mean and how to install it.
 - [Device verbs](cli.md): `doctor`, `setup`, `devices`, `add`, `remove`, `hops`, `passphrase`,
   `scan`, `inspect`, `capture`, `status`, `get`, `set`, `preset`, `scene`, `watch`, `host`, `raw`,
   `decode` and `profiles`.

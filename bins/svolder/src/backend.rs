@@ -43,7 +43,8 @@ use svolder_profiles::units;
 use svolder_profiles::{Control, ControlKind, Profile};
 use svolder_proto::FunctionId;
 
-pub use config::{asks_a_daemon, known_transport};
+pub(crate) use config::unknown_transport;
+pub use config::{RUNNING, asks_a_daemon, known_transport};
 use config::{config_error, load_config, usage};
 pub(crate) use config::{daemon_note, print_warnings, registry, rows_from_config};
 use direct::DirectBackend;
@@ -436,6 +437,48 @@ impl Backend {
             backend: Backend::Remote(Box::new(remote)),
             rows,
         })
+    }
+
+    /// A backend on the daemon listening on `path` for the device a panel shows, present or not:
+    /// the device `selector` names, else the daemon's only one, else (several, none chosen) the
+    /// refusal that lists them. A device the daemon holds but has not found is opened all the
+    /// same, on no readings; a daemon with no device is opened on none. Nothing is started and
+    /// nothing is waited for.
+    pub async fn open_watching(
+        path: &Path,
+        selector: Option<&str>,
+    ) -> Result<(Backend, Option<svolder_ipc::DeviceInfo>), Failure> {
+        let infos = remote::device_infos(path).await?;
+        let chosen = match (selector, infos.as_slice()) {
+            (Some(selector), _) => Some(remote::resolve(&infos, selector).ok_or_else(|| {
+                let names: Vec<&str> = infos.iter().map(|i| i.name.as_str()).collect();
+                Failure {
+                    code: Kind::NothingInRange.code(),
+                    what: format!(
+                        "no device named {selector:?} (the daemon has: {})",
+                        names.join(", ")
+                    ),
+                    next: "`svolder devices` lists them".to_string(),
+                    reason: None,
+                }
+            })?),
+            (None, []) => None,
+            (None, [only]) => Some(only.clone()),
+            (None, several) => {
+                let names: Vec<&str> = several.iter().map(|i| i.name.as_str()).collect();
+                return Err(Failure::of(
+                    Kind::AmbiguousDevice,
+                    format!("{} devices: {}", several.len(), names.join(", ")),
+                ));
+            }
+        };
+        let remote = RemoteBackend::open(
+            path,
+            chosen.as_ref().map(|info| info.name.as_str()),
+            chosen.as_ref().is_some_and(|info| info.connected),
+        )
+        .await?;
+        Ok((Backend::Remote(Box::new(remote)), chosen))
     }
 
     /// Open a session of this process's own over `wire`.

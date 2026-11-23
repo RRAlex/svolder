@@ -1,0 +1,35 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 the svolder authors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Stands in for `svolder` in the indicator's tests. Every call appends its arguments (tab
+# separated) as one line to $SVOLDER_FAKE_LOG. `panel --json` prints the lines of
+# $SVOLDER_FAKE_FIXTURE and then either exits with $SVOLDER_FAKE_EXIT (after printing
+# $SVOLDER_FAKE_STDERR on stderr) or, when that is unset, stays alive like the real stream and
+# writes its PID to $SVOLDER_FAKE_PIDFILE first. Any other call exits with
+# $SVOLDER_FAKE_CLICK_EXIT, 0 when unset. The time of every call (ns since the epoch) goes to
+# $SVOLDER_FAKE_LOG.times.
+
+set -eu
+
+log=${SVOLDER_FAKE_LOG:?SVOLDER_FAKE_LOG is not set}
+for a in "$@"; do printf '%s\t' "$a"; done >> "$log"
+printf '\n' >> "$log"
+date +%s%N >> "$log.times"
+
+panel=0
+for a in "$@"; do
+    [ "$a" = panel ] && panel=1
+done
+
+if [ "$panel" = 0 ]; then
+    exit "${SVOLDER_FAKE_CLICK_EXIT:-0}"
+fi
+
+[ -z "${SVOLDER_FAKE_PIDFILE:-}" ] || echo $$ > "$SVOLDER_FAKE_PIDFILE"
+cat "${SVOLDER_FAKE_FIXTURE:?SVOLDER_FAKE_FIXTURE is not set}"
+if [ -n "${SVOLDER_FAKE_EXIT:-}" ]; then
+    [ -z "${SVOLDER_FAKE_STDERR:-}" ] || echo "$SVOLDER_FAKE_STDERR" >&2
+    exit "$SVOLDER_FAKE_EXIT"
+fi
+exec sleep 300

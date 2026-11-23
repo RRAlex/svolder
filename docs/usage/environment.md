@@ -19,6 +19,7 @@ fails naming that target when the two have drifted.
 | Variable | Read by | What it does |
 |----------|---------|---------------|
 | `SVOLDER_TRANSPORT` | svolder, svolderd | Where a device verb runs: `auto` (the daemon when it is running, else a direct BlueZ session), `daemon`, `ble`, or `fake`. Default `auto` for `svolder`, `ble` for `svolderd`. |
+| `SVOLDER_NO_START` | svolder | `1` or `true` is `--no-start` (`0` or `false` is not): use only a daemon that already answers on the socket, and start no socket unit, no daemon and no direct BlueZ session; exit 3 when none answers. Overrides `--transport`. The GNOME indicator's clicks run with it. Unset by default. |
 | `SVOLDER_ADAPTER` | svolder, svolderd | Bluetooth adapter for a direct BlueZ session, e.g. `hci0`. Defaults to the configured `adapter`, else the first adapter BlueZ reports. |
 | `SVOLDER_SOCKET` | svolder, svolderd | Unix socket path to serve or connect to. Defaults to `$XDG_RUNTIME_DIR/svolder.sock`, then `/run/user/<uid>/svolder.sock`, then `/tmp/svolder-<uid>/svolder.sock`. |
 | `SVOLDER_FAKE_PROFILE` | svolder, svolderd | Profile the in-process fake device (`--transport fake`) uses. Default `gungnir2-v2`. |
@@ -26,6 +27,7 @@ fails naming that target when the two have drifted.
 | `SVOLDER_FAKE_FIRMWARE` | svolder, svolderd | Firmware version the fake device reports. Default `3`. |
 | `SVOLDER_FAKE_PASSPHRASE` | svolder, svolderd | Passphrase the fake device requires: four digits, or `none` for no passphrase. Default `1234`. |
 | `SVOLDER_FAKE_FAULTS` | svolder, svolderd | `1` seeds every `Fault` control the chosen profile has as active. Unset by default. |
+| `SVOLDER_FAKE_READINGS` | svolder, svolderd | Readings the in-process fake device starts with, `key=value` pairs separated by commas: a flag readout by its profile key (`usb_connected=1`, `spdif_locked=1`) and `loudness_strength=<0 to 127>`. An unknown key or a bad value is refused, naming it. Unset by default: every flag readout is off and the loudness strength 0. |
 | `SVOLDER_FAKE_SIGNAL` | svolder, svolderd | `1` plays a signal on the meters; needs a profile whose meters have a scale, such as `fake-amp`. Unset by default. |
 | `SVOLDER_FAKE_LOKI_REPORTS` | svolder, svolderd | Which id the fake Loki Max reports a band on: `full` (the default) is its three-id form, `6.<band>.3`, and `short` the two-id form, `6.<band>`, which a front end reads as the same band. Any other value is refused. |
 | `SVOLDER_FAKE_SILENT_RECALL` | svolder, svolderd | `1` makes the fake Loki Max set its bands on a device-slot recall without reporting them, as a unit that pushes nothing after a recall would. Unset by default: a recall reports the bands it changed. |
@@ -80,6 +82,17 @@ fails naming that target when the two have drifted.
 | `SVOLDER_PW_CLI` | svolder, svolderd | The `pw-cli` binary that carries the live computer EQ's `set-param` updates, one process held open while the EQ is on; it is only ever given `set-param` lines for the EQ's own node. Default `pw-cli` on `PATH`. |
 | `SVOLDER_UNITDIR` | svolder, make | Where `daemon install` writes and `daemon uninstall` removes the systemd user units. Default `$XDG_CONFIG_HOME/systemd/user`, else `~/.config/systemd/user`; as root, `/etc/systemd/user`. |
 | `SVOLDER_TEST_PREBUILT` | svolder test suite, make | `1` tells the daemon-spawning test helper that `make test`/`make check` already built every workspace binary, so it runs the one on disk. Unset, the helper builds the daemon into `target/test-daemon`, apart from `target/debug`. |
+| `SVOLDER_BLESS` | svolder-ipc test suite | `1` makes the panel model's golden-file test write the files under `contrib/gnome-shell/tests/fixtures/` instead of comparing with them. Unset, a drift from the files fails the test. |
+| `SVOLDER_FAKE_EXIT` | the extension tests' fake svolder | The exit code the GNOME extension tests' fake `svolder` ends its `panel --json` stream with, after printing the fixture. Unset, the fake stays alive like the real stream. |
+| `SVOLDER_FAKE_FIXTURE` | the extension tests' fake svolder | The fixture file whose lines the extension tests' fake `svolder` prints on `panel --json`. |
+| `SVOLDER_FAKE_LOG` | the extension tests' fake svolder | The file the extension tests' fake `svolder` appends each call's arguments to, one line a call. |
+| `SVOLDER_FAKE_PIDFILE` | the extension tests' fake svolder | The file the extension tests' fake `svolder` writes its process id to, so a test can check that `disable()` left no child. |
+| `SVOLDER_FAKE_STDERR` | the extension tests' fake svolder | The line the extension tests' fake `svolder` prints on stderr before it exits with `SVOLDER_FAKE_EXIT`. |
+| `SVOLDER_FIXTURES_DIR` | make gnome-extension-check, the extension tests | The folder of panel fixture files the extension's tests read; default `contrib/gnome-shell/tests/fixtures`. |
+| `SVOLDER_HEADLESS_MODE` | the extension's headless load | Which case the extension's headless load runs: `ok` (a stream that stays up, the default), `exit3` or `exit0` (a stream that ends). |
+| `SVOLDER_HEADLESS_RESULT` | the extension's headless load | The file the extension's headless load writes one line per check to. |
+| `SVOLDER_HEADLESS_SHOTS` | the extension's headless load | When set, a path prefix: the headless load saves `<prefix>-bar.png` and `<prefix>-menu.png` of the panel and the open menu. |
+| `SVOLDER_HEADLESS_SCALE` | make, scripts | `N` makes `make gnome-extension-check` load the GNOME Shell extension on a 3840x2160 virtual monitor at scale N, for the pictures of the indicator. Unset by default. |
 | `SVOLDER_TMP_BASE` | make, scripts | The directory the make targets and scripts make their temporary files under; only the helper's self-test and `make host-e2e` (pinned to the default) set it. Default `/tmp/svolder`, which the helper makes 0700 and refuses unless it is a real directory of yours. |
 | `SVOLDER_TMP_LOG` | make, scripts | A file the temporary-directory helper appends each path it makes to; `make check` sets it to its manifest, which its last step reads. |
 | `SVOLDER_LAB_SEED` | svolder-host test suite, make | The first seed of `make preamp-lab`, the long run of the computer EQ's preamp lab. Default 1000 (`SEED=` on the make line). |

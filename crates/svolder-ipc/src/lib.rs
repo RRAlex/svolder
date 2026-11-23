@@ -11,6 +11,7 @@
 //! | [`config`] | The `config.toml` model, its parser, template and writers |
 //! | [`checks`] | The environment checks behind `svolder doctor` |
 //! | [`host`] | The host's player and route as the daemon reports them, and the path verdict |
+//! | [`panel`] | The one model the GNOME top-bar indicator draws |
 //! | [`clock`] | Local wall-clock time |
 //! | `error` | The crate's error types |
 //! | `passphrase_note` | The note for a passphrase that does not match its advertisement |
@@ -24,6 +25,7 @@ pub mod clock;
 pub mod config;
 pub(crate) mod error;
 pub mod host;
+pub mod panel;
 pub(crate) mod passphrase_note;
 pub mod socket;
 #[cfg(test)]
@@ -66,7 +68,7 @@ pub use socket::protocol::{
 };
 pub use socket::server::{Bound, Handler, bind, listen_fds, serve, serve_bound, serve_on};
 pub use socket::signal::{
-    SIGNAL_MINUS, Signal, SignalSource, describe_signal, describe_signal_short,
+    SIGNAL_MINUS, SIGNAL_OLD_SECS, Signal, SignalSource, describe_signal, describe_signal_short,
 };
 
 /// Unit tests run with scratch homes, as `make test` gives them, so none reads or writes the

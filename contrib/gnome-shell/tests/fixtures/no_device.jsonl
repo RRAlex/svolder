@@ -1,0 +1,1 @@
+{"v":1,"device":null,"computer_eq":null,"path":null,"scenes":{"on":null,"choices":[]},"actions":{"volume_up":["set","volume","up"],"volume_down":["set","volume","down"],"mute_on":["set","mute","on"],"mute_off":["set","mute","off"],"volume_set":["set","volume","{db}dB"],"eq_on":["host","eq","on"],"eq_off":["host","eq","off"]}}

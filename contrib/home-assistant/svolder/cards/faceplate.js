@@ -80,7 +80,7 @@ export class SvolderFaceplateCard extends SvolderCard {
       linkOn: !!(link && link.on),
       vol: vol && { ...vol, value: Number.isFinite(vol.value) ? vol.value : null },
       mute: switchOf(h, E.mute), phase: switchOf(h, E.phase),
-      spdif: switchOf(h, E.spdif), usb1: switchOf(h, E.usb1), usb2: switchOf(h, E.usb2),
+      spdif: switchOf(h, E.spdif), usb: switchOf(h, E.usb), usb1: switchOf(h, E.usb1), usb2: switchOf(h, E.usb2),
       balance: numberOf(h, E.balance, { min: -127, max: 127, step: 1 }),
       input: selectOf(h, E.input), preset: selectOf(h, E.preset),
       sig: sig ? { text: withUnit(sig), age: ageWord(sig) } : null,
@@ -98,7 +98,7 @@ export class SvolderFaceplateCard extends SvolderCard {
   paint(m) {
     const word = (sw, yes, no) => (sw ? (sw.known ? (sw.on ? yes : no) : '—') : null);
     const rows = [['Sample rate', m.rate || null], ['S/PDIF', word(m.spdif, 'locked', 'unlocked')],
-      ['USB 1', word(m.usb1, 'connected', 'not connected')], ['USB 2', word(m.usb2, 'connected', 'not connected')]]
+      ['USB', word(m.usb, 'connected', 'not connected')], ['USB 1', word(m.usb1, 'connected', 'not connected')], ['USB 2', word(m.usb2, 'connected', 'not connected')]]
       .filter(([, v]) => v);
     const key = (label, sw, field) => (sw ? `<button type="button" class="key" data-key="${field}" aria-pressed="${sw.on}"${
       sw.writable && sw.known ? '' : ' disabled'}>${esc(label)}</button>` : '');

@@ -33,5 +33,6 @@ pub use path::{
     computer_line, path_line, rate_hz, sink_is_dac,
 };
 pub use row::{EndToEnd, PathRow, RowHop, RowLabel, RowWord, Tone, path_row};
+pub(crate) use sample::khz;
 pub use setup::{SETUP_LIMIT, SetupCheck, SetupLine, SetupOutcome, SetupSummary, setup_check};
 pub use views::{CaptureKind, CaptureView, FrameView, HostView, HostVolume, PlayingView};

@@ -104,15 +104,16 @@ const WATCH_EVERY: Duration = Duration::from_secs(1);
 const STALE_AFTER: Duration = Duration::from_secs(60);
 
 /// What a demo daemon inherits of this process's environment, and nothing besides: the fake
-/// device's profile, faults, meter signal, Loki Max report form and silent recall, where the EQ
-/// library reads AutoEq from, the files that cue the fake player's cover to go or to change with
-/// the track, and the locale.
-const PASSED_ON: [&str; 11] = [
+/// device's profile, faults, start readings, meter signal, Loki Max report form and silent recall,
+/// where the EQ library reads AutoEq from, the files that cue the fake player's cover to go or to
+/// change with the track, and the locale.
+const PASSED_ON: [&str; 12] = [
     "PATH",
     "LANG",
     "LC_ALL",
     "SVOLDER_FAKE_PROFILE",
     "SVOLDER_FAKE_FAULTS",
+    "SVOLDER_FAKE_READINGS",
     "SVOLDER_FAKE_SIGNAL",
     "SVOLDER_FAKE_LOKI_REPORTS",
     "SVOLDER_FAKE_SILENT_RECALL",

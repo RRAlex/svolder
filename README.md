@@ -148,10 +148,12 @@ With the MQTT integration on the same broker, each device appears with its contr
 dashboard to paste in, and [MQTT and Home Assistant](docs/usage/mqtt.md) has every entity and topic.
 
 <img src="docs/images/ha-dashboard.webp" width="78%" alt="The svolder dashboard in Home Assistant
-for a Gungnir 2, in the svolder theme: the volume slider, the input with its balance gauge, the tone
-control on the Warm preset, the input readouts and output switches, and the five bands' gain,
-frequency and Q"> <img src="docs/images/ha-phone.webp" width="20%" alt="The same dashboard on a
-phone: the volume, the source, the tone control, the inputs and the output switches in one column">
+for a Bifrost 3 on a computer called Desk, in the svolder theme: the faceplate with the volume dial,
+the input and the tone preset, and the EQ card with its curve, the five bands and the typed Hz, dB
+and Q fields of the selected band on the left; the scenes, the computer's EQ, loudness, crossfeed
+and speakers, and the device's other controls on the right"> <img src="docs/images/ha-phone.webp"
+width="19%" alt="The same dashboard on a phone: the faceplate, the EQ card with its typed Hz, dB and
+Q fields, the scenes and the computer's chain in one column">
 
 ### AI assistants (MCP)
 
@@ -169,44 +171,14 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
 
 [The MCP server](docs/usage/mcp.md) covers other clients, the volume rule and the tools.
 
-## How it fits together
+### GNOME top bar
 
-```text
-      svolder CLI / TUI      web page        MCP clients     Home Assistant
-            │ unix socket       │ HTTP + events   │ MCP          │ MQTT
-            └──────────┬────────┴────────┬────────┴──────┬───────┘
-                       ▼                 ▼               ▼
-              ┌──────────────────── servers (thin) ─────────────────┐
-              │  IPC server · web server · MCP server · MQTT client │
-              └──────────────────────────┬──────────────────────────┘
-                                         ▼
-              ┌──────────── core: one model, one set of ops ────────┐
-              │  the view (state every surface draws) + event feed  │
-              │  device ops → each device's writer; computer ops →  │
-              │  the EQ controller (EQ, crossfeed, virtual          │
-              │  speakers, preamp)                                  │
-              │  saved truth: config.toml + host-eq.toml (EQ state) │
-              └───────────────┬────────────────────────┬────────────┘
-                              ▼                        ▼
-                 devices (the fleet)          the computer ("host")
-                 BLE via BlueZ / fake         PipeWire: sink + route look,
-                 one writer per device:       capture → spectrum/tempo,
-                 volume rule, glides,         EQ filter chain (systemd unit,
-                 readings back                detached process or child),
-                                              live sends, crossfeed and
-                                              virtual-speakers stages,
-                                              preamp rule
-```
-
-- **One writer per thing.** Each device has one writer that orders its writes and applies the volume
-  rule, and the computer's sound has one EQ controller; a front end never writes behind a running
-  daemon, and with none running the TUI or the CLI runs the same core itself.
-- **One view, many surfaces.** The words and ranges every screen shows come from the core, so the
-  TUI, the web page, MCP and Home Assistant agree.
-- **The saved files are the truth.** Live state is rebuilt from `config.toml` (devices, presets,
-  servers) and the computer EQ's `host-eq.toml`, and anything that could surprise starts off.
-
-[The architecture](docs/architecture.md) says where each part lives.
+On GNOME Shell 50 or 51 an optional extension puts the DAC in the top bar: a box whose light is the
+Path verdict, the Bluetooth signal and the volume, with a popup for the volume, input, presets,
+computer EQ and scenes. The packages ship it switched off (`gnome-extensions enable
+svolder-indicator@rralex.github.io`); from a checkout, `make install-gnome-extension`. On Wayland it
+shows after you log out and in. [The GNOME indicator](docs/usage/gnome-shell.md) has the install
+steps and what each glyph means.
 
 ## Where the details live
 
@@ -217,6 +189,7 @@ Run `svolder daemon restart`, then register it with Claude Code, pasting the tok
 - [The web UI](docs/usage/web-ui.md): turning it on, signing in, a phone, its limits, its themes
   (Ember, Paper, Signal and Night drive), the theme menu and Arrange.
 - [MQTT and Home Assistant](docs/usage/mqtt.md) and [The MCP server](docs/usage/mcp.md).
+- [The GNOME indicator](docs/usage/gnome-shell.md): the top-bar extension, its glyphs and install.
 - [The daemon](docs/usage/daemon.md), [the configuration file](docs/usage/config.md) and
   [Transports and Bluetooth](docs/usage/bluetooth.md): the packages, containers, the simulator.
 - [Exit codes](docs/usage/exit-codes.md) and [environment variables](docs/usage/environment.md).

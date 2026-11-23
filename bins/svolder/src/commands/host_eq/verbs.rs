@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use svolder_host::eq::{ApplyRequest, HostEqState, Route, Status, lowered_note};
-use svolder_ipc::{Config, HostEqOp};
+use svolder_ipc::{Client, Config, HostEqOp, Request, Response};
 use svolder_profiles::tone::apo::Correction;
 use svolder_profiles::tone::preset::{self, BothSides, Preset};
 use svolder_profiles::{EqSpec, Registry};
@@ -286,4 +286,141 @@ pub async fn move_to_dac(g: &Globals<'_>, preset: &Preset, yes: bool) -> Result<
     }
     .map_err(Failure::report)?;
     Ok(true)
+}
+
+/// The socket of the daemon that serves the computer EQ, or the refusal that says why none does:
+/// these verbs change the computer's EQ through the daemon alone, which keeps the chain.
+async fn serving_daemon(g: &Globals<'_>) -> Result<std::path::PathBuf, Failure> {
+    use crate::commands::host_crossfeed::{Reach, reach};
+    let config = Config::load().map_err(|e| Failure::of(Kind::ConfigUnreadable, e.to_string()))?;
+    match reach(g, Some(&config)).await {
+        Reach::Serving(socket, _) => Ok(socket),
+        Reach::NoComputer => Err(Failure {
+            code: svolder_ipc::CODE_COMPUTER_UNAVAILABLE,
+            what: "the daemon serves no computer EQ (host audio is off for it)".to_string(),
+            next: "Restart it without SVOLDER_HOST=off, then try again".to_string(),
+            reason: None,
+        }),
+        Reach::Silent => Err(Failure::of(
+            Kind::DaemonError,
+            "the daemon did not answer in time",
+        )),
+        Reach::NoDaemon => Err(Failure {
+            code: Kind::NoDaemon.code(),
+            what: "the computer EQ needs a running svolderd".to_string(),
+            next: "Start it with `svolder daemon install`, then try again".to_string(),
+            reason: None,
+        }),
+    }
+}
+
+/// What a change prints: the computer EQ as the daemon shows it now, as one JSON object with
+/// `--json`, else one line on standard error.
+async fn say_state(socket: &Path, json: bool, line: impl FnOnce(bool, Option<&str>) -> String) {
+    let now = super::eq_view(socket).await;
+    let (on, preset) = now
+        .as_ref()
+        .map_or((None, None), |eq| (Some(eq.on), eq.preset.as_deref()));
+    match json {
+        true => println!(
+            "{}",
+            serde_json::json!({"on": on, "preset": preset, "ok": true})
+        ),
+        false => eprintln!("svolder: {}", line(on.unwrap_or(false), preset)),
+    }
+}
+
+/// `svolder host eq on|off [--json]`: the computer EQ's switch, through the daemon.
+pub async fn host_mode(g: &Globals<'_>, on: bool, json: bool) -> ExitCode {
+    let socket = match serving_daemon(g).await {
+        Ok(socket) => socket,
+        Err(failure) => return failure.report(),
+    };
+    if let Err(failure) = eq_op(&socket, HostEqOp::Mode { on }).await {
+        return failure.report();
+    }
+    say_state(&socket, json, |_, preset| match (on, preset) {
+        (true, Some(preset)) => format!("host EQ: {preset} \u{b7} on"),
+        (true, None) => "host EQ on".to_string(),
+        (false, _) => "host EQ off".to_string(),
+    })
+    .await;
+    ExitCode::SUCCESS
+}
+
+/// `svolder host eq preset NAME [--yes] [--json]`: a saved or built-in preset on the computer,
+/// through the daemon. A preset a connected device plays too is asked about first, and `--yes`
+/// answers it: that device is flattened, so the correction never plays twice.
+pub async fn host_preset(g: &Globals<'_>, name: &str, yes: bool, json: bool) -> ExitCode {
+    use std::io::IsTerminal;
+    preset_on(g, name, (yes, std::io::stdin().is_terminal()), json).await
+}
+
+/// [`host_preset`] with whether a terminal can be asked given, for the tests.
+pub(super) async fn preset_on(
+    g: &Globals<'_>,
+    name: &str,
+    (yes, terminal): (bool, bool),
+    json: bool,
+) -> ExitCode {
+    let socket = match serving_daemon(g).await {
+        Ok(socket) => socket,
+        Err(failure) => return failure.report(),
+    };
+    let mut confirm = false;
+    loop {
+        let op = HostEqOp::Preset {
+            name: name.to_string(),
+            device: g.device.map(str::to_string),
+            confirm,
+        };
+        match preset_request(&socket, op).await {
+            Ok(None) => break,
+            // A question that comes back after it was answered yes is the daemon's fault, not
+            // another question to ask.
+            Ok(Some(question)) if confirm => {
+                return Failure::of(
+                    Kind::DaemonError,
+                    format!("the daemon asked again after a yes: {question}"),
+                )
+                .report();
+            }
+            Ok(Some(question)) => {
+                let ask = format!("{question}. Move it to the computer? [y/N]");
+                match device::decide(&ask, yes, terminal, device::ask) {
+                    Ok(true) => confirm = true,
+                    Ok(false) => return device::nothing_changed(),
+                    Err(failure) => return failure.report(),
+                }
+            }
+            Err(failure) => return failure.report(),
+        }
+    }
+    say_state(&socket, json, |_, preset| {
+        format!("host EQ: {} \u{b7} on", preset.unwrap_or(name))
+    })
+    .await;
+    ExitCode::SUCCESS
+}
+
+/// Send a preset request: `Ok(None)` when it was done, `Ok(Some(question))` when the daemon asks
+/// first, in its words, and the refusal otherwise.
+async fn preset_request(socket: &Path, op: HostEqOp) -> Result<Option<String>, Failure> {
+    let mut client = Client::connect(socket)
+        .await
+        .map_err(|e| Failure::of(Kind::NoDaemon, e.to_string()))?;
+    match client.request(Request::HostEq { op }).await {
+        Ok(Response::Ack) => Ok(None),
+        Ok(Response::Ask { message, .. }) => Ok(Some(message)),
+        Ok(Response::Error {
+            code,
+            message,
+            reason,
+        }) => Err(Failure::from_daemon_on(socket, code, message, reason)),
+        Ok(other) => Err(Failure::of(
+            Kind::DaemonError,
+            format!("the daemon answered {other:?}"),
+        )),
+        Err(e) => Err(Failure::from_ipc(&e)),
+    }
 }

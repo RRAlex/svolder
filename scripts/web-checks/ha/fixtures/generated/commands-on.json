@@ -1,0 +1,2006 @@
+{
+  "licence_1": "SPDX-FileCopyrightText: 2026 the svolder authors",
+  "licence_2": "SPDX-License-Identifier: GPL-3.0-or-later",
+  "hass": {
+    "devices": {
+      "c1": {
+        "id": "c1",
+        "identifiers": [
+          [
+            "mqtt",
+            "svolder_computer_reframe"
+          ]
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "reframe",
+        "name_by_user": null,
+        "sw_version": null,
+        "via_device_id": null
+      },
+      "c2": {
+        "id": "c2",
+        "identifiers": [
+          [
+            "mqtt",
+            "svolder_computer_living_room"
+          ]
+        ],
+        "manufacturer": "svolder",
+        "model": "Computer",
+        "name": "Living-Room",
+        "name_by_user": null,
+        "sw_version": null,
+        "via_device_id": null
+      },
+      "d1": {
+        "id": "d1",
+        "identifiers": [
+          [
+            "mqtt",
+            "svolder_0A1B2C3D4E5F6071"
+          ]
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Bifrost 3",
+        "name": "Bifrost 3",
+        "name_by_user": null,
+        "sw_version": null,
+        "via_device_id": "c1"
+      },
+      "d2": {
+        "id": "d2",
+        "identifiers": [
+          [
+            "mqtt",
+            "svolder_1B2C3D4E5F6071A0"
+          ]
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Lyr 5",
+        "name": "Lyr 5",
+        "name_by_user": null,
+        "sw_version": null,
+        "via_device_id": "c2"
+      },
+      "d3": {
+        "id": "d3",
+        "identifiers": [
+          [
+            "mqtt",
+            "svolder_2C3D4E5F6071A0B1"
+          ]
+        ],
+        "manufacturer": "Schiit Audio",
+        "model": "Gungnir 2",
+        "name": "Gungnir",
+        "name_by_user": null,
+        "sw_version": null,
+        "via_device_id": "c2"
+      }
+    },
+    "entities": {
+      "binary_sensor.bifrost_3_link": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "binary_sensor.bifrost_3_link",
+        "hidden": false,
+        "name": "Link",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_link"
+      },
+      "binary_sensor.bifrost_3_s_pdif_locked": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "binary_sensor.bifrost_3_s_pdif_locked",
+        "hidden": false,
+        "name": "S/PDIF locked",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_spdif_locked"
+      },
+      "binary_sensor.bifrost_3_usb_connected": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "binary_sensor.bifrost_3_usb_connected",
+        "hidden": false,
+        "name": "USB connected",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_usb_connected"
+      },
+      "binary_sensor.gungnir_link": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "binary_sensor.gungnir_link",
+        "hidden": false,
+        "name": "Link",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_link"
+      },
+      "binary_sensor.gungnir_s_pdif_locked": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "binary_sensor.gungnir_s_pdif_locked",
+        "hidden": false,
+        "name": "S/PDIF locked",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_spdif_locked"
+      },
+      "binary_sensor.gungnir_usb_1_connected": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "binary_sensor.gungnir_usb_1_connected",
+        "hidden": false,
+        "name": "USB 1 connected",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_usb1_connected"
+      },
+      "binary_sensor.gungnir_usb_2_connected": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "binary_sensor.gungnir_usb_2_connected",
+        "hidden": false,
+        "name": "USB 2 connected",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_usb2_connected"
+      },
+      "binary_sensor.living_room_pipewire_config": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "binary_sensor.living_room_pipewire_config",
+        "hidden": false,
+        "name": "PipeWire config",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_config"
+      },
+      "binary_sensor.lyr_5_headphone_fault": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "binary_sensor.lyr_5_headphone_fault",
+        "hidden": false,
+        "name": "Headphone fault",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_fault_headphone"
+      },
+      "binary_sensor.lyr_5_link": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "binary_sensor.lyr_5_link",
+        "hidden": false,
+        "name": "Link",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_link"
+      },
+      "binary_sensor.lyr_5_over_current": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "binary_sensor.lyr_5_over_current",
+        "hidden": false,
+        "name": "Over-current",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_fault_overcurrent"
+      },
+      "binary_sensor.reframe_pipewire_config": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "binary_sensor.reframe_pipewire_config",
+        "hidden": false,
+        "name": "PipeWire config",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_config"
+      },
+      "button.bifrost_3_identify": {
+        "device_id": "d1",
+        "entity_category": "config",
+        "entity_id": "button.bifrost_3_identify",
+        "hidden": false,
+        "name": "Identify",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_identify"
+      },
+      "button.gungnir_identify": {
+        "device_id": "d3",
+        "entity_category": "config",
+        "entity_id": "button.gungnir_identify",
+        "hidden": false,
+        "name": "Identify",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_identify"
+      },
+      "button.lyr_5_identify": {
+        "device_id": "d2",
+        "entity_category": "config",
+        "entity_id": "button.lyr_5_identify",
+        "hidden": false,
+        "name": "Identify",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_identify"
+      },
+      "number.bifrost_3_balance": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_balance",
+        "hidden": false,
+        "name": "Balance",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_balance"
+      },
+      "number.bifrost_3_band_1_frequency": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_1_frequency",
+        "hidden": false,
+        "name": "Band 1 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_1_frequency"
+      },
+      "number.bifrost_3_band_1_gain": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_1_gain",
+        "hidden": false,
+        "name": "Band 1 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_1_gain"
+      },
+      "number.bifrost_3_band_1_q": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_1_q",
+        "hidden": false,
+        "name": "Band 1 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_1_q"
+      },
+      "number.bifrost_3_band_2_frequency": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_2_frequency",
+        "hidden": false,
+        "name": "Band 2 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_2_frequency"
+      },
+      "number.bifrost_3_band_2_gain": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_2_gain",
+        "hidden": false,
+        "name": "Band 2 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_2_gain"
+      },
+      "number.bifrost_3_band_2_q": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_2_q",
+        "hidden": false,
+        "name": "Band 2 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_2_q"
+      },
+      "number.bifrost_3_band_3_frequency": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_3_frequency",
+        "hidden": false,
+        "name": "Band 3 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_3_frequency"
+      },
+      "number.bifrost_3_band_3_gain": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_3_gain",
+        "hidden": false,
+        "name": "Band 3 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_3_gain"
+      },
+      "number.bifrost_3_band_3_q": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_3_q",
+        "hidden": false,
+        "name": "Band 3 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_3_q"
+      },
+      "number.bifrost_3_band_4_frequency": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_4_frequency",
+        "hidden": false,
+        "name": "Band 4 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_4_frequency"
+      },
+      "number.bifrost_3_band_4_gain": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_4_gain",
+        "hidden": false,
+        "name": "Band 4 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_4_gain"
+      },
+      "number.bifrost_3_band_4_q": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_4_q",
+        "hidden": false,
+        "name": "Band 4 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_4_q"
+      },
+      "number.bifrost_3_band_5_frequency": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_5_frequency",
+        "hidden": false,
+        "name": "Band 5 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_5_frequency"
+      },
+      "number.bifrost_3_band_5_gain": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_5_gain",
+        "hidden": false,
+        "name": "Band 5 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_5_gain"
+      },
+      "number.bifrost_3_band_5_q": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_band_5_q",
+        "hidden": false,
+        "name": "Band 5 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_band_5_q"
+      },
+      "number.bifrost_3_loudness_strength": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_loudness_strength",
+        "hidden": false,
+        "name": "Loudness strength",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_loudness"
+      },
+      "number.bifrost_3_volume": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "number.bifrost_3_volume",
+        "hidden": false,
+        "name": "Volume",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_volume"
+      },
+      "number.gungnir_balance": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_balance",
+        "hidden": false,
+        "name": "Balance",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_balance"
+      },
+      "number.gungnir_band_1_frequency": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_1_frequency",
+        "hidden": false,
+        "name": "Band 1 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_1_frequency"
+      },
+      "number.gungnir_band_1_gain": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_1_gain",
+        "hidden": false,
+        "name": "Band 1 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_1_gain"
+      },
+      "number.gungnir_band_1_q": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_1_q",
+        "hidden": false,
+        "name": "Band 1 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_1_q"
+      },
+      "number.gungnir_band_2_frequency": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_2_frequency",
+        "hidden": false,
+        "name": "Band 2 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_2_frequency"
+      },
+      "number.gungnir_band_2_gain": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_2_gain",
+        "hidden": false,
+        "name": "Band 2 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_2_gain"
+      },
+      "number.gungnir_band_2_q": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_2_q",
+        "hidden": false,
+        "name": "Band 2 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_2_q"
+      },
+      "number.gungnir_band_3_frequency": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_3_frequency",
+        "hidden": false,
+        "name": "Band 3 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_3_frequency"
+      },
+      "number.gungnir_band_3_gain": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_3_gain",
+        "hidden": false,
+        "name": "Band 3 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_3_gain"
+      },
+      "number.gungnir_band_3_q": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_3_q",
+        "hidden": false,
+        "name": "Band 3 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_3_q"
+      },
+      "number.gungnir_band_4_frequency": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_4_frequency",
+        "hidden": false,
+        "name": "Band 4 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_4_frequency"
+      },
+      "number.gungnir_band_4_gain": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_4_gain",
+        "hidden": false,
+        "name": "Band 4 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_4_gain"
+      },
+      "number.gungnir_band_4_q": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_4_q",
+        "hidden": false,
+        "name": "Band 4 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_4_q"
+      },
+      "number.gungnir_band_5_frequency": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_5_frequency",
+        "hidden": false,
+        "name": "Band 5 frequency",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_5_frequency"
+      },
+      "number.gungnir_band_5_gain": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_5_gain",
+        "hidden": false,
+        "name": "Band 5 gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_5_gain"
+      },
+      "number.gungnir_band_5_q": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_band_5_q",
+        "hidden": false,
+        "name": "Band 5 Q",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_band_5_q"
+      },
+      "number.gungnir_loudness_strength": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_loudness_strength",
+        "hidden": false,
+        "name": "Loudness strength",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_loudness"
+      },
+      "number.gungnir_volume": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "number.gungnir_volume",
+        "hidden": false,
+        "name": "Volume",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_volume"
+      },
+      "number.living_room_loudness_strength": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "number.living_room_loudness_strength",
+        "hidden": false,
+        "name": "Loudness strength",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_loudness_strength"
+      },
+      "number.lyr_5_volume": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "number.lyr_5_volume",
+        "hidden": false,
+        "name": "Volume",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_volume"
+      },
+      "number.reframe_loudness_strength": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "number.reframe_loudness_strength",
+        "hidden": false,
+        "name": "Loudness strength",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_loudness_strength"
+      },
+      "select.bifrost_3_eq_preset": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "select.bifrost_3_eq_preset",
+        "hidden": false,
+        "name": "EQ preset",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_preset"
+      },
+      "select.bifrost_3_input": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "select.bifrost_3_input",
+        "hidden": false,
+        "name": "Input",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_input"
+      },
+      "select.bifrost_3_tone_control_mode": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "select.bifrost_3_tone_control_mode",
+        "hidden": false,
+        "name": "Tone control mode",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_eq_mode"
+      },
+      "select.gungnir_eq_preset": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "select.gungnir_eq_preset",
+        "hidden": false,
+        "name": "EQ preset",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_preset"
+      },
+      "select.gungnir_input": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "select.gungnir_input",
+        "hidden": false,
+        "name": "Input",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_input"
+      },
+      "select.gungnir_tone_control_mode": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "select.gungnir_tone_control_mode",
+        "hidden": false,
+        "name": "Tone control mode",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_eq_mode"
+      },
+      "select.living_room_crossfeed_preset": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "select.living_room_crossfeed_preset",
+        "hidden": false,
+        "name": "Crossfeed preset",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_crossfeed_preset"
+      },
+      "select.living_room_scene": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "select.living_room_scene",
+        "hidden": false,
+        "name": "Scene",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_scene"
+      },
+      "select.living_room_virtual_speakers_set": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "select.living_room_virtual_speakers_set",
+        "hidden": false,
+        "name": "Virtual speakers set",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_speakers_set"
+      },
+      "select.lyr_5_gain": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "select.lyr_5_gain",
+        "hidden": false,
+        "name": "Gain",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_gain"
+      },
+      "select.lyr_5_input": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "select.lyr_5_input",
+        "hidden": false,
+        "name": "Input",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_input"
+      },
+      "select.lyr_5_mode": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "select.lyr_5_mode",
+        "hidden": false,
+        "name": "Mode",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_mode"
+      },
+      "select.reframe_crossfeed_preset": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "select.reframe_crossfeed_preset",
+        "hidden": false,
+        "name": "Crossfeed preset",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_crossfeed_preset"
+      },
+      "select.reframe_scene": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "select.reframe_scene",
+        "hidden": false,
+        "name": "Scene",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_scene"
+      },
+      "select.reframe_virtual_speakers_set": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "select.reframe_virtual_speakers_set",
+        "hidden": false,
+        "name": "Virtual speakers set",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_speakers_set"
+      },
+      "sensor.bifrost_3_dsp_firmware": {
+        "device_id": "d1",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.bifrost_3_dsp_firmware",
+        "hidden": false,
+        "name": "DSP firmware",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_dsp_firmware"
+      },
+      "sensor.bifrost_3_firmware": {
+        "device_id": "d1",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.bifrost_3_firmware",
+        "hidden": false,
+        "name": "Firmware",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_firmware"
+      },
+      "sensor.bifrost_3_sample_rate": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "sensor.bifrost_3_sample_rate",
+        "hidden": false,
+        "name": "Sample rate",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_sample_rate"
+      },
+      "sensor.bifrost_3_signal": {
+        "device_id": "d1",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.bifrost_3_signal",
+        "hidden": false,
+        "name": "Signal",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_signal"
+      },
+      "sensor.gungnir_dsp_firmware": {
+        "device_id": "d3",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.gungnir_dsp_firmware",
+        "hidden": false,
+        "name": "DSP firmware",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_dsp_firmware"
+      },
+      "sensor.gungnir_firmware": {
+        "device_id": "d3",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.gungnir_firmware",
+        "hidden": false,
+        "name": "Firmware",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_firmware"
+      },
+      "sensor.gungnir_sample_rate": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "sensor.gungnir_sample_rate",
+        "hidden": false,
+        "name": "Sample rate",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_sample_rate"
+      },
+      "sensor.gungnir_signal": {
+        "device_id": "d3",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.gungnir_signal",
+        "hidden": false,
+        "name": "Signal",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_signal"
+      },
+      "sensor.living_room_eq_preset": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "sensor.living_room_eq_preset",
+        "hidden": false,
+        "name": "EQ preset",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_eq_preset"
+      },
+      "sensor.living_room_path": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "sensor.living_room_path",
+        "hidden": false,
+        "name": "Path",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_path"
+      },
+      "sensor.lyr_5_class_state": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "sensor.lyr_5_class_state",
+        "hidden": false,
+        "name": "Class state",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_class_state"
+      },
+      "sensor.lyr_5_signal": {
+        "device_id": "d2",
+        "entity_category": "diagnostic",
+        "entity_id": "sensor.lyr_5_signal",
+        "hidden": false,
+        "name": "Signal",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_signal"
+      },
+      "sensor.reframe_eq_preset": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "sensor.reframe_eq_preset",
+        "hidden": false,
+        "name": "EQ preset",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_eq_preset"
+      },
+      "sensor.reframe_path": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "sensor.reframe_path",
+        "hidden": false,
+        "name": "Path",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_path"
+      },
+      "switch.bifrost_3_mute": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "switch.bifrost_3_mute",
+        "hidden": false,
+        "name": "Mute",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_mute"
+      },
+      "switch.bifrost_3_nos_filter": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "switch.bifrost_3_nos_filter",
+        "hidden": false,
+        "name": "NOS filter",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_nos"
+      },
+      "switch.bifrost_3_phase_invert": {
+        "device_id": "d1",
+        "entity_category": null,
+        "entity_id": "switch.bifrost_3_phase_invert",
+        "hidden": false,
+        "name": "Phase invert",
+        "platform": "mqtt",
+        "unique_id": "svolder_0A1B2C3D4E5F6071_phase"
+      },
+      "switch.gungnir_mute": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "switch.gungnir_mute",
+        "hidden": false,
+        "name": "Mute",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_mute"
+      },
+      "switch.gungnir_nos_filter": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "switch.gungnir_nos_filter",
+        "hidden": false,
+        "name": "NOS filter",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_nos"
+      },
+      "switch.gungnir_phase_invert": {
+        "device_id": "d3",
+        "entity_category": null,
+        "entity_id": "switch.gungnir_phase_invert",
+        "hidden": false,
+        "name": "Phase invert",
+        "platform": "mqtt",
+        "unique_id": "svolder_2C3D4E5F6071A0B1_phase"
+      },
+      "switch.living_room_crossfeed": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "switch.living_room_crossfeed",
+        "hidden": false,
+        "name": "Crossfeed",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_crossfeed"
+      },
+      "switch.living_room_eq": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "switch.living_room_eq",
+        "hidden": false,
+        "name": "EQ",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_eq"
+      },
+      "switch.living_room_loudness": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "switch.living_room_loudness",
+        "hidden": false,
+        "name": "Loudness",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_loudness"
+      },
+      "switch.living_room_virtual_speakers": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "switch.living_room_virtual_speakers",
+        "hidden": false,
+        "name": "Virtual speakers",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_computer_speakers"
+      },
+      "switch.lyr_5_headphone_mute": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "switch.lyr_5_headphone_mute",
+        "hidden": false,
+        "name": "Headphone mute",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_headphone_mute"
+      },
+      "switch.lyr_5_pre_out": {
+        "device_id": "d2",
+        "entity_category": null,
+        "entity_id": "switch.lyr_5_pre_out",
+        "hidden": false,
+        "name": "Pre-out",
+        "platform": "mqtt",
+        "unique_id": "svolder_1B2C3D4E5F6071A0_preout"
+      },
+      "switch.reframe_crossfeed": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "switch.reframe_crossfeed",
+        "hidden": false,
+        "name": "Crossfeed",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_crossfeed"
+      },
+      "switch.reframe_eq": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "switch.reframe_eq",
+        "hidden": false,
+        "name": "EQ",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_eq"
+      },
+      "switch.reframe_loudness": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "switch.reframe_loudness",
+        "hidden": false,
+        "name": "Loudness",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_loudness"
+      },
+      "switch.reframe_virtual_speakers": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "switch.reframe_virtual_speakers",
+        "hidden": false,
+        "name": "Virtual speakers",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_computer_speakers"
+      },
+      "text.living_room_scene_save": {
+        "device_id": "c2",
+        "entity_category": null,
+        "entity_id": "text.living_room_scene_save",
+        "hidden": false,
+        "name": "Scene save",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_living_room_scene_save"
+      },
+      "text.reframe_scene_save": {
+        "device_id": "c1",
+        "entity_category": null,
+        "entity_id": "text.reframe_scene_save",
+        "hidden": false,
+        "name": "Scene save",
+        "platform": "mqtt",
+        "unique_id": "svolder_computer_reframe_scene_save"
+      }
+    },
+    "states": {
+      "binary_sensor.bifrost_3_link": {
+        "attributes": {
+          "device_class": "connectivity",
+          "friendly_name": "Bifrost 3 Link"
+        },
+        "entity_id": "binary_sensor.bifrost_3_link",
+        "state": "unknown"
+      },
+      "binary_sensor.bifrost_3_s_pdif_locked": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 S/PDIF locked"
+        },
+        "entity_id": "binary_sensor.bifrost_3_s_pdif_locked",
+        "state": "unknown"
+      },
+      "binary_sensor.bifrost_3_usb_connected": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 USB connected"
+        },
+        "entity_id": "binary_sensor.bifrost_3_usb_connected",
+        "state": "unknown"
+      },
+      "binary_sensor.gungnir_link": {
+        "attributes": {
+          "device_class": "connectivity",
+          "friendly_name": "Gungnir Link"
+        },
+        "entity_id": "binary_sensor.gungnir_link",
+        "state": "unknown"
+      },
+      "binary_sensor.gungnir_s_pdif_locked": {
+        "attributes": {
+          "friendly_name": "Gungnir S/PDIF locked"
+        },
+        "entity_id": "binary_sensor.gungnir_s_pdif_locked",
+        "state": "unknown"
+      },
+      "binary_sensor.gungnir_usb_1_connected": {
+        "attributes": {
+          "friendly_name": "Gungnir USB 1 connected"
+        },
+        "entity_id": "binary_sensor.gungnir_usb_1_connected",
+        "state": "unknown"
+      },
+      "binary_sensor.gungnir_usb_2_connected": {
+        "attributes": {
+          "friendly_name": "Gungnir USB 2 connected"
+        },
+        "entity_id": "binary_sensor.gungnir_usb_2_connected",
+        "state": "unknown"
+      },
+      "binary_sensor.living_room_pipewire_config": {
+        "attributes": {
+          "device_class": "problem",
+          "friendly_name": "Living-Room PipeWire config"
+        },
+        "entity_id": "binary_sensor.living_room_pipewire_config",
+        "state": "unknown"
+      },
+      "binary_sensor.lyr_5_headphone_fault": {
+        "attributes": {
+          "device_class": "problem",
+          "friendly_name": "Lyr 5 Headphone fault"
+        },
+        "entity_id": "binary_sensor.lyr_5_headphone_fault",
+        "state": "unknown"
+      },
+      "binary_sensor.lyr_5_link": {
+        "attributes": {
+          "device_class": "connectivity",
+          "friendly_name": "Lyr 5 Link"
+        },
+        "entity_id": "binary_sensor.lyr_5_link",
+        "state": "unknown"
+      },
+      "binary_sensor.lyr_5_over_current": {
+        "attributes": {
+          "device_class": "problem",
+          "friendly_name": "Lyr 5 Over-current"
+        },
+        "entity_id": "binary_sensor.lyr_5_over_current",
+        "state": "unknown"
+      },
+      "binary_sensor.reframe_pipewire_config": {
+        "attributes": {
+          "device_class": "problem",
+          "friendly_name": "reframe PipeWire config"
+        },
+        "entity_id": "binary_sensor.reframe_pipewire_config",
+        "state": "unknown"
+      },
+      "button.bifrost_3_identify": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Identify"
+        },
+        "entity_id": "button.bifrost_3_identify",
+        "state": "unknown"
+      },
+      "button.gungnir_identify": {
+        "attributes": {
+          "friendly_name": "Gungnir Identify"
+        },
+        "entity_id": "button.gungnir_identify",
+        "state": "unknown"
+      },
+      "button.lyr_5_identify": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Identify"
+        },
+        "entity_id": "button.lyr_5_identify",
+        "state": "unknown"
+      },
+      "number.bifrost_3_balance": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Balance",
+          "max": 63.0,
+          "min": -63.0,
+          "mode": "slider",
+          "step": 1.0
+        },
+        "entity_id": "number.bifrost_3_balance",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_1_frequency": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 1 frequency",
+          "max": 78.038,
+          "min": 20.0,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.bifrost_3_band_1_frequency",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_1_gain": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 1 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.bifrost_3_band_1_gain",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_1_q": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 1 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.bifrost_3_band_1_q",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_2_frequency": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 2 frequency",
+          "max": 311.957,
+          "min": 81.961,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.bifrost_3_band_2_frequency",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_2_gain": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 2 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.bifrost_3_band_2_gain",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_2_q": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 2 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.bifrost_3_band_2_q",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_3_frequency": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 3 frequency",
+          "max": 1232.228,
+          "min": 320.73,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.bifrost_3_band_3_frequency",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_3_gain": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 3 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.bifrost_3_band_3_gain",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_3_q": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 3 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.bifrost_3_band_3_q",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_4_frequency": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 4 frequency",
+          "max": 4903.566,
+          "min": 1276.324,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.bifrost_3_band_4_frequency",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_4_gain": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 4 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.bifrost_3_band_4_gain",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_4_q": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 4 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.bifrost_3_band_4_q",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_5_frequency": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 5 frequency",
+          "max": 19497.278,
+          "min": 5074.85,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.bifrost_3_band_5_frequency",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_5_gain": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 5 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.bifrost_3_band_5_gain",
+        "state": "unknown"
+      },
+      "number.bifrost_3_band_5_q": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Band 5 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.bifrost_3_band_5_q",
+        "state": "unknown"
+      },
+      "number.bifrost_3_loudness_strength": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Loudness strength",
+          "max": 127.0,
+          "min": 0.0,
+          "mode": "slider",
+          "step": 1.0
+        },
+        "entity_id": "number.bifrost_3_loudness_strength",
+        "state": "unknown"
+      },
+      "number.bifrost_3_volume": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Volume",
+          "max": 0.0,
+          "min": -96.33,
+          "mode": "slider",
+          "step": 0.334,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.bifrost_3_volume",
+        "state": "unknown"
+      },
+      "number.gungnir_balance": {
+        "attributes": {
+          "friendly_name": "Gungnir Balance",
+          "max": 63.0,
+          "min": -63.0,
+          "mode": "slider",
+          "step": 1.0
+        },
+        "entity_id": "number.gungnir_balance",
+        "state": "unknown"
+      },
+      "number.gungnir_band_1_frequency": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 1 frequency",
+          "max": 78.038,
+          "min": 20.0,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.gungnir_band_1_frequency",
+        "state": "unknown"
+      },
+      "number.gungnir_band_1_gain": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 1 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.gungnir_band_1_gain",
+        "state": "unknown"
+      },
+      "number.gungnir_band_1_q": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 1 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.gungnir_band_1_q",
+        "state": "unknown"
+      },
+      "number.gungnir_band_2_frequency": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 2 frequency",
+          "max": 311.957,
+          "min": 81.961,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.gungnir_band_2_frequency",
+        "state": "unknown"
+      },
+      "number.gungnir_band_2_gain": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 2 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.gungnir_band_2_gain",
+        "state": "unknown"
+      },
+      "number.gungnir_band_2_q": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 2 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.gungnir_band_2_q",
+        "state": "unknown"
+      },
+      "number.gungnir_band_3_frequency": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 3 frequency",
+          "max": 1232.228,
+          "min": 320.73,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.gungnir_band_3_frequency",
+        "state": "unknown"
+      },
+      "number.gungnir_band_3_gain": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 3 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.gungnir_band_3_gain",
+        "state": "unknown"
+      },
+      "number.gungnir_band_3_q": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 3 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.gungnir_band_3_q",
+        "state": "unknown"
+      },
+      "number.gungnir_band_4_frequency": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 4 frequency",
+          "max": 4903.566,
+          "min": 1276.324,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.gungnir_band_4_frequency",
+        "state": "unknown"
+      },
+      "number.gungnir_band_4_gain": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 4 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.gungnir_band_4_gain",
+        "state": "unknown"
+      },
+      "number.gungnir_band_4_q": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 4 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.gungnir_band_4_q",
+        "state": "unknown"
+      },
+      "number.gungnir_band_5_frequency": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 5 frequency",
+          "max": 19497.278,
+          "min": 5074.85,
+          "mode": "box",
+          "step": 1.0,
+          "unit_of_measurement": "Hz"
+        },
+        "entity_id": "number.gungnir_band_5_frequency",
+        "state": "unknown"
+      },
+      "number.gungnir_band_5_gain": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 5 gain",
+          "max": 6.0,
+          "min": -20.0,
+          "mode": "slider",
+          "step": 0.204,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.gungnir_band_5_gain",
+        "state": "unknown"
+      },
+      "number.gungnir_band_5_q": {
+        "attributes": {
+          "friendly_name": "Gungnir Band 5 Q",
+          "max": 8.0,
+          "min": 0.5,
+          "mode": "box",
+          "step": 0.01
+        },
+        "entity_id": "number.gungnir_band_5_q",
+        "state": "unknown"
+      },
+      "number.gungnir_loudness_strength": {
+        "attributes": {
+          "friendly_name": "Gungnir Loudness strength",
+          "max": 127.0,
+          "min": 0.0,
+          "mode": "slider",
+          "step": 1.0
+        },
+        "entity_id": "number.gungnir_loudness_strength",
+        "state": "unknown"
+      },
+      "number.gungnir_volume": {
+        "attributes": {
+          "friendly_name": "Gungnir Volume",
+          "max": 0.0,
+          "min": -96.33,
+          "mode": "slider",
+          "step": 0.334,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.gungnir_volume",
+        "state": "unknown"
+      },
+      "number.living_room_loudness_strength": {
+        "attributes": {
+          "friendly_name": "Living-Room Loudness strength",
+          "max": 100,
+          "min": 0,
+          "mode": "slider",
+          "step": 5,
+          "unit_of_measurement": "%"
+        },
+        "entity_id": "number.living_room_loudness_strength",
+        "state": "unknown"
+      },
+      "number.lyr_5_volume": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Volume",
+          "max": 0.0,
+          "min": -64.0,
+          "mode": "slider",
+          "step": 1.016,
+          "unit_of_measurement": "dB"
+        },
+        "entity_id": "number.lyr_5_volume",
+        "state": "unknown"
+      },
+      "number.reframe_loudness_strength": {
+        "attributes": {
+          "friendly_name": "reframe Loudness strength",
+          "max": 100,
+          "min": 0,
+          "mode": "slider",
+          "step": 5,
+          "unit_of_measurement": "%"
+        },
+        "entity_id": "number.reframe_loudness_strength",
+        "state": "unknown"
+      },
+      "select.bifrost_3_eq_preset": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 EQ preset",
+          "options": [
+            "Flat",
+            "Warm",
+            "Bass",
+            "Presence",
+            "custom"
+          ]
+        },
+        "entity_id": "select.bifrost_3_eq_preset",
+        "state": "unknown"
+      },
+      "select.bifrost_3_input": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Input",
+          "options": [
+            "USB",
+            "Optical",
+            "Coaxial"
+          ]
+        },
+        "entity_id": "select.bifrost_3_input",
+        "state": "unknown"
+      },
+      "select.bifrost_3_tone_control_mode": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Tone control mode",
+          "options": [
+            "flat",
+            "eq",
+            "loudness"
+          ]
+        },
+        "entity_id": "select.bifrost_3_tone_control_mode",
+        "state": "unknown"
+      },
+      "select.gungnir_eq_preset": {
+        "attributes": {
+          "friendly_name": "Gungnir EQ preset",
+          "options": [
+            "Flat",
+            "Warm",
+            "Bass",
+            "Presence",
+            "custom"
+          ]
+        },
+        "entity_id": "select.gungnir_eq_preset",
+        "state": "unknown"
+      },
+      "select.gungnir_input": {
+        "attributes": {
+          "friendly_name": "Gungnir Input",
+          "options": [
+            "USB 1",
+            "USB 2",
+            "Optical",
+            "Coaxial",
+            "AES"
+          ]
+        },
+        "entity_id": "select.gungnir_input",
+        "state": "unknown"
+      },
+      "select.gungnir_tone_control_mode": {
+        "attributes": {
+          "friendly_name": "Gungnir Tone control mode",
+          "options": [
+            "flat",
+            "eq",
+            "loudness"
+          ]
+        },
+        "entity_id": "select.gungnir_tone_control_mode",
+        "state": "unknown"
+      },
+      "select.living_room_crossfeed_preset": {
+        "attributes": {
+          "friendly_name": "Living-Room Crossfeed preset",
+          "options": [
+            "Bauer · Jan Meier",
+            "Bauer · Chu Moy",
+            "Bauer · bs2b default",
+            "Linkwitz",
+            "Meier · Default",
+            "Meier · Rockbox",
+            "Mid/Side bass",
+            "Custom"
+          ]
+        },
+        "entity_id": "select.living_room_crossfeed_preset",
+        "state": "unknown"
+      },
+      "select.living_room_scene": {
+        "attributes": {
+          "friendly_name": "Living-Room Scene",
+          "options": [
+            "Movie",
+            "custom"
+          ]
+        },
+        "entity_id": "select.living_room_scene",
+        "state": "unknown"
+      },
+      "select.living_room_virtual_speakers_set": {
+        "attributes": {
+          "friendly_name": "Living-Room Virtual speakers set",
+          "options": [
+            "Set A · No room · HRTF",
+            "Set B · With room · BRIR"
+          ]
+        },
+        "entity_id": "select.living_room_virtual_speakers_set",
+        "state": "unknown"
+      },
+      "select.lyr_5_gain": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Gain",
+          "options": [
+            "Low Gain (1x)",
+            "High Gain (7x)"
+          ]
+        },
+        "entity_id": "select.lyr_5_gain",
+        "state": "unknown"
+      },
+      "select.lyr_5_input": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Input",
+          "options": [
+            "RCA 1",
+            "RCA 2"
+          ]
+        },
+        "entity_id": "select.lyr_5_input",
+        "state": "unknown"
+      },
+      "select.lyr_5_mode": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Mode",
+          "options": [
+            "Solid State",
+            "Tube"
+          ]
+        },
+        "entity_id": "select.lyr_5_mode",
+        "state": "unknown"
+      },
+      "select.reframe_crossfeed_preset": {
+        "attributes": {
+          "friendly_name": "reframe Crossfeed preset",
+          "options": [
+            "Bauer · Jan Meier",
+            "Bauer · Chu Moy",
+            "Bauer · bs2b default",
+            "Linkwitz",
+            "Meier · Default",
+            "Meier · Rockbox",
+            "Mid/Side bass",
+            "Custom"
+          ]
+        },
+        "entity_id": "select.reframe_crossfeed_preset",
+        "state": "unknown"
+      },
+      "select.reframe_scene": {
+        "attributes": {
+          "friendly_name": "reframe Scene",
+          "options": [
+            "Late night",
+            "Desk",
+            "custom"
+          ]
+        },
+        "entity_id": "select.reframe_scene",
+        "state": "unknown"
+      },
+      "select.reframe_virtual_speakers_set": {
+        "attributes": {
+          "friendly_name": "reframe Virtual speakers set",
+          "options": [
+            "Set A · No room · HRTF",
+            "Set B · With room · BRIR"
+          ]
+        },
+        "entity_id": "select.reframe_virtual_speakers_set",
+        "state": "unknown"
+      },
+      "sensor.bifrost_3_dsp_firmware": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 DSP firmware"
+        },
+        "entity_id": "sensor.bifrost_3_dsp_firmware",
+        "state": "unknown"
+      },
+      "sensor.bifrost_3_firmware": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Firmware"
+        },
+        "entity_id": "sensor.bifrost_3_firmware",
+        "state": "unknown"
+      },
+      "sensor.bifrost_3_sample_rate": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Sample rate"
+        },
+        "entity_id": "sensor.bifrost_3_sample_rate",
+        "state": "unknown"
+      },
+      "sensor.bifrost_3_signal": {
+        "attributes": {
+          "device_class": "signal_strength",
+          "friendly_name": "Bifrost 3 Signal",
+          "unit_of_measurement": "dBm"
+        },
+        "entity_id": "sensor.bifrost_3_signal",
+        "state": "unknown"
+      },
+      "sensor.gungnir_dsp_firmware": {
+        "attributes": {
+          "friendly_name": "Gungnir DSP firmware"
+        },
+        "entity_id": "sensor.gungnir_dsp_firmware",
+        "state": "unknown"
+      },
+      "sensor.gungnir_firmware": {
+        "attributes": {
+          "friendly_name": "Gungnir Firmware"
+        },
+        "entity_id": "sensor.gungnir_firmware",
+        "state": "unknown"
+      },
+      "sensor.gungnir_sample_rate": {
+        "attributes": {
+          "friendly_name": "Gungnir Sample rate"
+        },
+        "entity_id": "sensor.gungnir_sample_rate",
+        "state": "unknown"
+      },
+      "sensor.gungnir_signal": {
+        "attributes": {
+          "device_class": "signal_strength",
+          "friendly_name": "Gungnir Signal",
+          "unit_of_measurement": "dBm"
+        },
+        "entity_id": "sensor.gungnir_signal",
+        "state": "unknown"
+      },
+      "sensor.living_room_eq_preset": {
+        "attributes": {
+          "friendly_name": "Living-Room EQ preset"
+        },
+        "entity_id": "sensor.living_room_eq_preset",
+        "state": "unknown"
+      },
+      "sensor.living_room_path": {
+        "attributes": {
+          "device_class": "enum",
+          "friendly_name": "Living-Room Path",
+          "options": [
+            "untouched",
+            "changed",
+            "not_this_dac",
+            "other_input",
+            "unknown",
+            "not_read"
+          ]
+        },
+        "entity_id": "sensor.living_room_path",
+        "state": "unknown"
+      },
+      "sensor.lyr_5_class_state": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Class state"
+        },
+        "entity_id": "sensor.lyr_5_class_state",
+        "state": "unknown"
+      },
+      "sensor.lyr_5_signal": {
+        "attributes": {
+          "device_class": "signal_strength",
+          "friendly_name": "Lyr 5 Signal",
+          "unit_of_measurement": "dBm"
+        },
+        "entity_id": "sensor.lyr_5_signal",
+        "state": "unknown"
+      },
+      "sensor.reframe_eq_preset": {
+        "attributes": {
+          "friendly_name": "reframe EQ preset"
+        },
+        "entity_id": "sensor.reframe_eq_preset",
+        "state": "unknown"
+      },
+      "sensor.reframe_path": {
+        "attributes": {
+          "device_class": "enum",
+          "friendly_name": "reframe Path",
+          "options": [
+            "untouched",
+            "changed",
+            "not_this_dac",
+            "other_input",
+            "unknown",
+            "not_read"
+          ]
+        },
+        "entity_id": "sensor.reframe_path",
+        "state": "unknown"
+      },
+      "switch.bifrost_3_mute": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Mute"
+        },
+        "entity_id": "switch.bifrost_3_mute",
+        "state": "unknown"
+      },
+      "switch.bifrost_3_nos_filter": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 NOS filter"
+        },
+        "entity_id": "switch.bifrost_3_nos_filter",
+        "state": "unknown"
+      },
+      "switch.bifrost_3_phase_invert": {
+        "attributes": {
+          "friendly_name": "Bifrost 3 Phase invert"
+        },
+        "entity_id": "switch.bifrost_3_phase_invert",
+        "state": "unknown"
+      },
+      "switch.gungnir_mute": {
+        "attributes": {
+          "friendly_name": "Gungnir Mute"
+        },
+        "entity_id": "switch.gungnir_mute",
+        "state": "unknown"
+      },
+      "switch.gungnir_nos_filter": {
+        "attributes": {
+          "friendly_name": "Gungnir NOS filter"
+        },
+        "entity_id": "switch.gungnir_nos_filter",
+        "state": "unknown"
+      },
+      "switch.gungnir_phase_invert": {
+        "attributes": {
+          "friendly_name": "Gungnir Phase invert"
+        },
+        "entity_id": "switch.gungnir_phase_invert",
+        "state": "unknown"
+      },
+      "switch.living_room_crossfeed": {
+        "attributes": {
+          "friendly_name": "Living-Room Crossfeed"
+        },
+        "entity_id": "switch.living_room_crossfeed",
+        "state": "unknown"
+      },
+      "switch.living_room_eq": {
+        "attributes": {
+          "friendly_name": "Living-Room EQ"
+        },
+        "entity_id": "switch.living_room_eq",
+        "state": "unknown"
+      },
+      "switch.living_room_loudness": {
+        "attributes": {
+          "friendly_name": "Living-Room Loudness"
+        },
+        "entity_id": "switch.living_room_loudness",
+        "state": "unknown"
+      },
+      "switch.living_room_virtual_speakers": {
+        "attributes": {
+          "friendly_name": "Living-Room Virtual speakers"
+        },
+        "entity_id": "switch.living_room_virtual_speakers",
+        "state": "unknown"
+      },
+      "switch.lyr_5_headphone_mute": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Headphone mute"
+        },
+        "entity_id": "switch.lyr_5_headphone_mute",
+        "state": "unknown"
+      },
+      "switch.lyr_5_pre_out": {
+        "attributes": {
+          "friendly_name": "Lyr 5 Pre-out"
+        },
+        "entity_id": "switch.lyr_5_pre_out",
+        "state": "unknown"
+      },
+      "switch.reframe_crossfeed": {
+        "attributes": {
+          "friendly_name": "reframe Crossfeed"
+        },
+        "entity_id": "switch.reframe_crossfeed",
+        "state": "unknown"
+      },
+      "switch.reframe_eq": {
+        "attributes": {
+          "friendly_name": "reframe EQ"
+        },
+        "entity_id": "switch.reframe_eq",
+        "state": "unknown"
+      },
+      "switch.reframe_loudness": {
+        "attributes": {
+          "friendly_name": "reframe Loudness"
+        },
+        "entity_id": "switch.reframe_loudness",
+        "state": "unknown"
+      },
+      "switch.reframe_virtual_speakers": {
+        "attributes": {
+          "friendly_name": "reframe Virtual speakers"
+        },
+        "entity_id": "switch.reframe_virtual_speakers",
+        "state": "unknown"
+      },
+      "text.living_room_scene_save": {
+        "attributes": {
+          "friendly_name": "Living-Room Scene save",
+          "max": 40,
+          "min": 1,
+          "mode": "text"
+        },
+        "entity_id": "text.living_room_scene_save",
+        "state": "unknown"
+      },
+      "text.reframe_scene_save": {
+        "attributes": {
+          "friendly_name": "reframe Scene save",
+          "max": 40,
+          "min": 1,
+          "mode": "text"
+        },
+        "entity_id": "text.reframe_scene_save",
+        "state": "unknown"
+      }
+    }
+  }
+}

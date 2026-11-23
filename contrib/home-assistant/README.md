@@ -8,7 +8,15 @@ svolder's own colours, and notes from running it against Home Assistant 2026.9 a
 `custom:svolder` strategy (section 5) draws its pages with svolder's own cards, which come in the
 same resource file.
 
-<img src="../../docs/images/ha-dashboard.webp" width="78%" alt="The svolder dashboard in Home Assistant for a Gungnir 2, in the svolder theme: the volume slider, the input with its balance gauge, the tone control on the Warm preset, the input readouts and output switches, and the five bands' gain, frequency and Q"> <img src="../../docs/images/ha-phone.webp" width="20%" alt="The same dashboard on a phone: the volume, the source, the tone control, the inputs and the output switches in one column">
+<img src="../../docs/images/ha-dashboard.webp" width="78%" alt="The svolder dashboard in Home Assistant for a Bifrost 3 on a computer called Desk, in the svolder theme: the faceplate with the volume dial, the input and the tone preset, and the EQ card with its curve, the five bands and the typed Hz, dB and Q fields of the selected band on the left; the scenes, the computer's EQ, loudness, crossfeed and speakers, and the device's other controls on the right"> <img src="../../docs/images/ha-phone.webp" width="19%" alt="The same dashboard on a phone: the faceplate, the EQ card with its typed Hz, dB and Q fields, the scenes and the computer's chain in one column">
+
+The two pictures come from `make ha-shots`, which draws them from this folder's cards on a Home
+Assistant of your own (contributors only): it needs `HA_URL`, `HA_TOKEN_FILE` (a long-lived access
+token) and `HA_MQTT_PASSWORD_FILE` (the broker login's password), and optionally `HA_MQTT_HOST`,
+`HA_MQTT_USER` and `HA_SHOTS_DASHBOARD` (a dashboard on the `custom:svolder` strategy; default
+`svolder-auto`); `make help T=ha-shots` lists them. A private fake daemon publishes a Bifrost 3 and
+a computer called Desk to the broker for a minute; Home Assistant is only read, and the topics the
+run created are cleared and checked gone before it ends.
 
 ## 1. A broker Home Assistant uses
 
@@ -59,7 +67,7 @@ punctuation. For a Gungnir 2 named `gungnir`:
 | `number.gungnir_band_1_q` … `_band_5_q` | each band's Q |
 | `switch.gungnir_nos_filter`, `switch.gungnir_phase_invert` | the filter and phase switches |
 | `sensor.gungnir_sample_rate` | the incoming sample rate, `—` while there is none |
-| `binary_sensor.gungnir_usb_1_connected`, `…_usb_2_connected`, `…_s_pdif_locked` | the input readouts |
+| `binary_sensor.gungnir_usb_1_connected`, `…_usb_2_connected`, `…_s_pdif_locked` | the input readouts (a device with one USB input has `…_usb_connected` instead) |
 | `binary_sensor.gungnir_link` | whether svolderd holds the device's link |
 | `sensor.gungnir_signal` | the signal strength in dBm, with where and when it was heard as attributes (diagnostic) |
 | `sensor.gungnir_firmware`, `sensor.gungnir_dsp_firmware` | the main and the DSP firmware build the device reports (diagnostic) |

@@ -155,3 +155,109 @@ async fn an_operation_reaches_the_daemon_and_its_refusal_comes_back_in_its_words
         "{refused}"
     );
 }
+
+/// A stub daemon that serves the computer EQ, with the EQ on or off.
+async fn serving_daemon(on: bool) -> crate::test_support::stub_daemon::StubServer {
+    use crate::test_support::stub_daemon::stub_daemon;
+    let daemon = stub_daemon().await;
+    daemon.hosts(svolder_ipc::host::HostView {
+        available: true,
+        eq: Some(EqView {
+            on,
+            ..EqView::default()
+        }),
+        ..svolder_ipc::host::HostView::default()
+    });
+    daemon
+}
+
+fn code_is(code: ExitCode, expected: u8) {
+    assert_eq!(
+        format!("{code:?}"),
+        format!("{:?}", ExitCode::from(expected))
+    );
+}
+
+/// `host eq on` and `host eq off` each send the one switch request, and nothing else.
+#[tokio::test]
+async fn on_and_off_send_the_switch() {
+    let daemon = serving_daemon(false).await;
+    let socket = daemon.socket.display().to_string();
+    code_is(verbs::host_mode(&globals(&socket), true, true).await, 0);
+    code_is(verbs::host_mode(&globals(&socket), false, false).await, 0);
+    assert_eq!(
+        daemon.host_eq_ops(),
+        [HostEqOp::Mode { on: true }, HostEqOp::Mode { on: false }]
+    );
+}
+
+/// A preset goes as a `preset` request; a preset a device plays too is asked about, and only
+/// `--yes` repeats the request with `confirm`.
+#[tokio::test]
+async fn a_preset_asks_before_it_moves_a_device_s_preset_and_yes_confirms() {
+    let daemon = serving_daemon(false).await;
+    let socket = daemon.socket.display().to_string();
+    let preset = |confirm| HostEqOp::Preset {
+        name: "Warm".to_string(),
+        device: None,
+        confirm,
+    };
+    code_is(
+        verbs::preset_on(&globals(&socket), "Warm", (false, false), false).await,
+        0,
+    );
+    assert_eq!(daemon.host_eq_ops(), [preset(false)]);
+
+    daemon.asks_before_a_preset();
+    // No terminal and no --yes: the question is refused with the flag that answers it.
+    code_is(
+        verbs::preset_on(&globals(&socket), "Warm", (false, false), false).await,
+        1,
+    );
+    assert_eq!(daemon.host_eq_ops().len(), 2, "no confirm was sent");
+    code_is(
+        verbs::preset_on(&globals(&socket), "Warm", (true, false), false).await,
+        0,
+    );
+    assert_eq!(daemon.host_eq_ops()[2..], [preset(false), preset(true)]);
+}
+
+/// With no daemon the verbs change nothing and exit 3; a daemon whose host is off exits 6.
+#[tokio::test]
+async fn without_a_serving_daemon_the_verbs_refuse() {
+    use crate::test_support::stub_daemon::{SocketFile, fresh_socket, stub_daemon};
+    let none = SocketFile(fresh_socket());
+    let nowhere = none.0.display().to_string();
+    code_is(verbs::host_mode(&globals(&nowhere), true, false).await, 3);
+    code_is(
+        verbs::preset_on(&globals(&nowhere), "Warm", (true, false), false).await,
+        3,
+    );
+
+    let daemon = stub_daemon().await;
+    daemon.hosts(svolder_ipc::host::HostView {
+        available: true,
+        ..svolder_ipc::host::HostView::default()
+    });
+    let socket = daemon.socket.display().to_string();
+    code_is(verbs::host_mode(&globals(&socket), true, false).await, 6);
+    assert!(daemon.host_eq_ops().is_empty());
+}
+
+/// A daemon that asks again after a yes ends the verb with an error, not another question.
+#[tokio::test]
+async fn a_question_asked_again_after_a_yes_is_an_error() {
+    let daemon = serving_daemon(false).await;
+    let socket = daemon.socket.display().to_string();
+    daemon.asks_before_a_preset();
+    daemon.asks_after_a_yes_too();
+    code_is(
+        verbs::preset_on(&globals(&socket), "Warm", (true, false), false).await,
+        3,
+    );
+    assert_eq!(
+        daemon.host_eq_ops().len(),
+        2,
+        "one question, one yes, no more"
+    );
+}
