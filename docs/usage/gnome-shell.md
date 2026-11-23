@@ -10,6 +10,9 @@ the sound's Path, the Bluetooth signal, and the volume. Click it for a popup wit
 reach for most. It is a thin front end: it reads one stream from `svolder panel --json` and runs
 one `svolder` call per click, so everything it does the CLI, the TUI and the web page do too.
 
+<img src="../images/gnome-indicator-untouched.webp" width="49%" alt="The GNOME top bar with the svolder indicator and its open popup, the sound untouched end to end: a box with a green light, full signal bars and 0 dB, and the popup for a Bifrost 3 at 44.1 kHz with the volume slider, input, DAC preset, computer EQ, a green-green-green Path strip, scenes and Open svolder"> <img
+src="../images/gnome-indicator-changed.webp" width="49%" alt="The same indicator when the DAC changes the sound: the box has a yellow light and the bar reads -24 dB; the popup shows the Path strip green, green, yellow with the line DAC: volume -24.1 dB, tone control">
+
 ## What it needs
 
 - GNOME Shell 50 or 51.

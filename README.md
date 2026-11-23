@@ -180,6 +180,9 @@ svolder-indicator@rralex.github.io`); from a checkout, `make install-gnome-exten
 shows after you log out and in. [The GNOME indicator](docs/usage/gnome-shell.md) has the install
 steps and what each glyph means.
 
+<img src="docs/images/gnome-indicator-untouched.webp" width="49%" alt="The GNOME top bar with the svolder indicator and its open popup, the sound untouched end to end: a box with a green light, full signal bars and 0 dB, and the popup for a Bifrost 3 at 44.1 kHz with the volume slider, input, DAC preset, computer EQ, a green-green-green Path strip, scenes and Open svolder"> <img
+src="docs/images/gnome-indicator-changed.webp" width="49%" alt="The same indicator when the DAC changes the sound: the box has a yellow light and the bar reads -24 dB; the popup shows the Path strip green, green, yellow with the line DAC: volume -24.1 dB, tone control">
+
 ## Where the details live
 
 - [Usage index](docs/usage/README.md): every page below, with the transports in one paragraph.

@@ -69,7 +69,7 @@ ASSETS = svolder_$(VERSION)_amd64.deb svolder_$(VERSION)_arm64.deb svolder-$(VER
 ARTIFACTS = svolder svolderd svolder-sim aarch64/svolder aarch64/svolderd aarch64/svolder-sim \
   $(ASSETS) RELEASE-NOTES.md
 
-.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots ha-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall install-gnome-extension uninstall-gnome-extension gnome-extension-check help-check
+.PHONY: gate gate-test vu-golden vu-golden-check speakers-fixtures speakers-catalogue-check tmp-snapshot tmp-leak-check tmp-base-test demo-knobs-check help deps deps-build deps-lint deps-check deps-test build docs-env check license-check build-image release-tree 3rdpartylicenses static packages release-files repro-check spdx-check network-check network-check-test unit-check workflow-check audit test safety-tests docs-check docs-check-merge routes-doc-check fmt fmt-check clippy clean clean-all clean-rust demo demo-safe demo-dac demo-amp demo-computer demo-computer-amp screenshots mascot-shots vu-shots web-icons rate-check rate-check-test release-notes-test release-dry-run web-shots ha-shots gnome-shots web-snippets tests-check theme-css-check tui-hangup-check tui-harness web-checks web-checks-cold web-checks-quick web-checks-task web-touched web-checks-affected gate-fails paper-shots signal-shots nightdrive-shots e2e host-e2e host-e2e-bits preamp-lab preamp-lab-outcomes loudness-fit sim-app sim-app-test docker install install-service uninstall install-gnome-extension uninstall-gnome-extension gnome-extension-check help-check
 
 ##@ Start
 demo-knobs-check: ## Fail if the env line the demos start with does not run
@@ -632,6 +632,15 @@ web-shots: ## Web UI stills in Firefox and Chromium, README pictures
 #: HA_SHOTS_DASHBOARD=<path>   url path of a dashboard on the custom:svolder strategy (default svolder-auto)
 ha-shots: ## Home Assistant pictures from your HA's svolder page
 	@bash scripts/ha-shots.sh
+
+#: The README's two GNOME indicator pictures, docs/images/gnome-indicator-untouched.webp and
+#: gnome-indicator-changed.webp: the headless GNOME Shell of gnome-extension-check at scale 3 (a fake
+#: svolder, the blessed fixtures, scratch homes; never your session) shoots the "untouched end to
+#: end" and the "DAC changes the sound" states, each as the top-bar item above its open popup,
+#: composed with python3-pil into lossless WebP. Needs gnome-shell, dbus-run-session and
+#: python3-pil.
+gnome-shots: ## GNOME indicator pictures from a headless GNOME Shell
+	@sh scripts/gnome-shots.sh
 
 #: Chromium: DAC and amp, desktop and phone, light and dark.
 paper-shots: deps-build ## Paper's stills into target/web-shots/paper
